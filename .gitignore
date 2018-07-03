@@ -11,19 +11,6 @@
 *.diff
 .tags*
 
-/install/
-/bindings/java/build/
-/deps/
-/logs/
-/docs/doxygen/
-/docs/epydoc/
-/obj/
-/obj.*/
-/src/config.h
-/private/
-/scripts/localconfig.py
-TAGS
-tags
 
 # Ignore IDE files
 /.idea/
