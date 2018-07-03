@@ -1,0 +1,11 @@
+#!/bin/sh
+# Repeatedly invoke sendHoma (see if the system hangs because of
+# sk_buff exhaustion?)
+
+count=1
+while :
+do
+    ./homaSend rc71 "Test message #$count"
+    echo "Sent message #$count"
+    count=$((count+1))
+done

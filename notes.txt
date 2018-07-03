@@ -1,0 +1,55 @@
+Notes for Homa implementation in Linux:
+---------------------------------------
+
+* Things to do:
+  * Figure out socket locking disciplines.
+  * Many unimplemented interface functions.
+  * Learn about CONFIG_COMPAT and whether it needs to be supported in
+    struct proto and struct proto_ops.
+  * Learn about security stuff, and functions that need to be called for this.
+  * Learn about memory management for sk_buffs: how many is it OK to have?
+
+* Miscellaneous information:
+  * For raw sockets: "man 7 raw"
+
+* What happens when a socket is closed?
+  * socket.c:sock_close
+    * socket.c:sock_release
+      * proto_ops.release -> af_inet.c:inet_release)
+      * af_inet.c:inet_release doesn't appear to do anything relevant to Homa
+        * proto.close -> sock.c:sk_common_release?)
+          * proto.unhash
+          * sock_orphan
+          * sock_put (decrements ref count, frees)
+
+* What happens in a connect syscall (UDP)?
+  * socket.c:sys_connect
+    * proto_ops.connect -> af_inet.c:inet_dgram_connect
+      * proto.connect -> datagram.c:ip4_datagram_connect
+        * datagram.c: __ip4_datagram_connect
+
+* What happens in a bind syscall (UDP)?
+  * socket.c:sys_bind
+    * proto_ops.bind -> afinet.c:inet_bind
+      * proto.bind -> (not defined for UDP)
+      * If no proto.bind handler, then a bunch of obscure -looking stuff
+        happens.
+
+* What happens in a sendmsg syscall (UDP)?
+  * socket.c:sys_sendmsg
+    * socket.c:__sys_sendmsg
+      * socket.c:___sys_sendmsg
+        * Copy to msghdr and control info to kernel space
+        * socket.c:sock_sendmsg
+          * socket.c:sock_sendmsg_nosec
+          * proto_ops.sendmsg -> afinet.c:inet_sendmsg
+            * Auto-bind socket, if not bound
+            * proto.sendmsg -> udp.c:udp_sendmsg
+              * Long method ...
+              * ip_output.c:ip_make_skb
+                * Seems to collect data for the datagram?
+                * __ip_append_data
+              * udp.c:udp_send_skb
+                * Creates UDP header
+                * ip_output.c:ip_send_skb
+                  * ip_local_out
