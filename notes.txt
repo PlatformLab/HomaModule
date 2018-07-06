@@ -9,8 +9,49 @@ Notes for Homa implementation in Linux:
   * Learn about security stuff, and functions that need to be called for this.
   * Learn about memory management for sk_buffs: how many is it OK to have?
 
+* C++ data structures used in HomaTransport:
+  * MessageAccumulator: std::vector of received packets, Buffer of
+    assembled message
+  * HomaTransport:
+    * vectors of packets and messages
+    * hash of outgoing RPCs
+    * list of outgoing RPCs that haven't yet been transmitted
+    * hash of incoming RPCs
+    * list of RPCs that require timer attention
+
 * Miscellaneous information:
   * For raw sockets: "man 7 raw"
+  * Per-cpu data structures: linux/percpu.h, percpu-defs.h
+
+* API for applications
+  * Ideally, sends are asynchronous:
+    * The send returns before the message has been sent
+    * Data has been copied out of application-level buffers, so
+      buffers can be reused
+  * Must associate requests and responses:
+    * A response is different from a request.
+    * Kernel may need to keep track of open requests, so that it
+      can handle RESEND packets appropriately; what if application
+      doesn't respond, and an infinite backlog of open requests
+      builds up? Must limit the kernel state that accumulates.
+    * Maybe application must be involved in RESENDs?
+  * On receive, application must provide space for largest possible message
+    * Or, receives must take 2 system calls, one to get the size and
+      one to get the message.
+  * Support a polling API for incoming messages?
+    * Client provides buffer space in advance
+    * Kernel fills in data as packets arrive
+    * Client can poll memory to see when new messages arrive
+    * This would minimize sk_buff usage in the kernel
+    * Is there a way for the kernel to access client memory when
+      the process isn't active?
+    * Can buffer space get fragmented? For example, the first part of
+      a long message arrives, but the rest doesn't; meanwhile, buffers
+      fill up and wrap around.
+  * On receive, avoid copies of large message bodies? E.g., deliver only
+    header to the application, then it can come back later and request
+    that the body be copied to a particular spot.
+  * Provide a batching mechanism to avoid a kernel call for each message?
 
 * What happens when a socket is closed?
   * socket.c:sock_close

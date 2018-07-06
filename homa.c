@@ -1,3 +1,8 @@
+/* This file consists mostly of "glue" that hooks Homa into the rest of
+ * the Linux kernel. The guts of the protocol are in other files.
+ */
+
+#include "homa_impl.h"
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -5,7 +10,7 @@
 #include <linux/socket.h>
 #include <net/ip.h>
 #include <net/protocol.h>
-#include <net/sock.h>
+#include <net/inet_common.h>
 #include <net/inet_common.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
@@ -22,42 +27,6 @@ long sysctl_homa_mem[3] __read_mostly;
 int sysctl_homa_rmem_min __read_mostly;
 int sysctl_homa_wmem_min __read_mostly;
 atomic_long_t homa_memory_allocated;
-
-// Forward declarations:
-extern void homa_close(struct sock *sk, long timeout);
-extern int homa_diag_destroy(struct sock *sk, int err);
-extern int homa_disconnect(struct sock *sk, int flags);
-extern void homa_err_handler(struct sk_buff *skb, u32 info);
-extern int homa_get_port(struct sock *sk, unsigned short snum);
-extern int homa_getsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, int __user *option);
-extern int homa_handler(struct sk_buff *skb);
-extern int homa_hash(struct sock *sk);
-extern int homa_setsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, unsigned int optlen);
-extern int homa_init_sock(struct sock *sk);
-extern int homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern __poll_t homa_poll(struct file *file, struct socket *sock,
-		struct poll_table_struct *wait);
-extern int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		int noblock, int flags, int *addr_len);
-extern void homa_rehash(struct sock *sk);
-extern int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
-extern int homa_sendpage(struct sock *sk, struct page *page, int offset,
-		size_t size, int flags);
-extern void homa_unhash(struct sock *sk);
-extern int homa_v4_early_demux(struct sk_buff *skb);
-extern int homa_v4_early_demux_handler(struct sk_buff *skb);
-
-/* Information about an open socket that uses Homa.
- */
-struct homa_sock {
-	// The first part of the structure consists of generic socket data.
-	// This must be the first field.
-	struct inet_sock inet;
-	
-	// Everything after here is information specific to Homa sockets.
-};
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -289,6 +258,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 				err);
 		goto out;
 	}
+	printk(KERN_NOTICE "protocol memory allocated %lu\n",
+			atomic_long_read(homa_prot.memory_allocated));
 	
 	skb_dst_set(skb, &rt->dst);
 	err = ip_queue_xmit(sk, skb, flowi4_to_flowi(&fl4));
@@ -390,8 +361,11 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * @return: Always 0?
  */
 int homa_handler(struct sk_buff *skb) {
-	printk(KERN_NOTICE "incoming Homa packet: len %u, data \"%.*s\"\n",
-		skb->len, skb->len, skb->data);
+	printk(KERN_NOTICE "incoming Homa packet: len %u, data_len %u, data \"%.*s\"\n",
+			skb->len, skb->data_len, skb->len, skb->data);
+	printk(KERN_NOTICE "network header size %lu, memory allocated %lu\n",
+			skb->data - skb_network_header(skb),
+			atomic_long_read(homa_prot.memory_allocated));
 	return 0;
 }
 

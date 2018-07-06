@@ -2,7 +2,8 @@
 
 CFLAGS := -Wall -g
 
-BINS := getTimeTrace homaSend receiveRaw sendRaw testTimeTrace
+BINS := bufferClient bufferServer getTimeTrace homaSend \
+        receiveRaw sendRaw testTimeTrace useMemory
 
 all: $(BINS)
 	
@@ -11,3 +12,9 @@ all: $(BINS)
 
 clean:
 	rm -f $(BINS)
+
+# The following target is useful for debugging Makefiles; it
+# prints the value of a make variable.
+print-%:
+	@echo $* = $($*)
+	

@@ -7,3 +7,9 @@ all:
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	
+# The following target is useful for debugging Makefiles; it
+# prints the value of a make variable.
+print-%:
+	@echo $* = $($*)
+	

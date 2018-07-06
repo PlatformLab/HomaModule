@@ -1,4 +1,4 @@
 #!/bin/
 # The script is copies modified information from this directory
 # on my laptop to rcmaster.
-rsync -rtv ./ ouster@rcmaster.scs.stanford.edu:remote/homaModule/
+rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@rcmaster.scs.stanford.edu:remote/homaModule/

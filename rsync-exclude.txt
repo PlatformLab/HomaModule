@@ -1,0 +1,6 @@
+# This file lists directories and files that should not be copied
+# to rcmaster by rsync.
+.git
+nbproject
+private
+*.pyc
