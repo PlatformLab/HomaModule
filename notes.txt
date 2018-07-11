@@ -8,6 +8,55 @@ Notes for Homa implementation in Linux:
     struct proto and struct proto_ops.
   * Learn about security stuff, and functions that need to be called for this.
   * Learn about memory management for sk_buffs: how many is it OK to have?
+  * Initially using simple lists for all tables; will need to replace with
+    something more efficient.
+  * Eventually initialize homa.next_client_port to something random
+  * homa_message_out_init: compute unscheduled bites and priority better.
+  * Routes: what is the lifetime of these? How long can I retain a pointer?
+
+* Port numbers:
+  * Shouldn't be visible to clients; only needed for servers.
+  * Bind is only needed to receive requests.
+  * What if port space is partitioned?
+    * 32 bits total
+    * Low-order 16 bits: server ports (bound)
+    * Others: client ports
+      * Pick a random starting position on reboot
+      * Allocate ports sequentially to mazimize time between reuse.
+      * Or, just pick ports at random always (no predictability,
+        better for security)?
+    * Are FROM_CLIENT and FROM_SERVER needed still? Can deduce from
+      the port numbers.
+    * A server will have 2 port numbers: one used for to receive requests
+      and another to send requests.
+
+* On send:
+  * Immediately copy message into sk_buffs.
+  * Client assigns message id; it's the first 8 bytes of the message data.
+  * Return before sending entire message.
+  * Homa keeps track of outstanding requests (some limit per socket?).
+  * If message fails, kernel must fabricate a response. Perhaps all
+    responses start with an id and a status?
+
+* Tables needed:
+  * All Homa sockets
+    * Used to assign new port numbers
+    * Used to dispatch incoming packets
+    * Need RCU or some other kind of locking?
+  * Outgoing RPCs (for a socket?)
+    * Used to find state for incoming packets
+    * Used for cleanup operations (socket closure, cancellation, etc.)
+    * Used for detecting timeouts
+    * No locks needed: use existing socket lock
+    * Or, have one table for all sockets?
+  * Outgoing requests that haven't yet been transmitted:
+    * For scheduling outbound traffic
+    * Must be global?
+  * Outgoing responses that haven't yet been transmitted:
+    * For scheduling outbound traffic
+    * Must be global?
+  * Incoming RPCs:
+    * Use to find state for incoming packets
 
 * C++ data structures used in HomaTransport:
   * MessageAccumulator: std::vector of received packets, Buffer of

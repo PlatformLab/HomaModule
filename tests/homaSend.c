@@ -23,14 +23,25 @@ int main(int argc, char** argv) {
 //	char *sockType;
 //	struct addrinfo  *rp;
 //	int count;
-	char *message;
+#define MAX_MESSAGE_LENGTH 100000
+	char buffer[MAX_MESSAGE_LENGTH];
+	int length;
 	
 	if (argc < 3) {
-		printf("Usage: %s hostName message\n", argv[0]);
+		printf("Usage: %s hostName msgLength\n", argv[0]);
 		exit(1);
 	}
 	host = argv[1];
-	message = argv[2];
+	length = strtol(argv[2], NULL, 10);
+	if (length == 0) {
+		printf("Bad message length %s; must be positive integer\n",
+				argv[2]);
+		exit(1);
+	}
+	if (length > MAX_MESSAGE_LENGTH) {
+		length = MAX_MESSAGE_LENGTH;
+		printf("Reducing message length to %d", length);
+	}
 	
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
@@ -65,7 +76,7 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 	
-	status = sendto(fd, message, strlen(message), 0, result->ai_addr,
+	status = sendto(fd, buffer, length, 0, result->ai_addr,
 			result->ai_addrlen);
 	if (status < 0) {
 		printf("Error in sendto: %s\n", strerror(errno));

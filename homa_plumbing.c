@@ -3,30 +3,25 @@
  */
 
 #include "homa_impl.h"
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/skbuff.h>
-#include <linux/socket.h>
-#include <net/ip.h>
-#include <net/protocol.h>
-#include <net/inet_common.h>
-#include <net/inet_common.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("John Ousterhout");
 MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
 
-// Homa's protocol number within the IP protocol space (this is not an
-// officially allocated slot).
+/* Homa's protocol number within the IP protocol space (this is not an
+ * officially allocated slot).
+ */
 #define IPPROTO_HOMA 140
 
-// Not yet sure what these variables are for.
+/* Not yet sure what these variables are for */
 long sysctl_homa_mem[3] __read_mostly;
 int sysctl_homa_rmem_min __read_mostly;
 int sysctl_homa_wmem_min __read_mostly;
 atomic_long_t homa_memory_allocated;
+
+/* Global data for Homa. */
+struct homa homa;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -69,7 +64,7 @@ struct proto homa_prot = {
 	.connect	   = ip4_datagram_connect,
 	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
-	.init		   = homa_init_sock,
+	.init		   = homa_sock_init,
 	.destroy	   = 0,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
@@ -114,7 +109,7 @@ static struct net_protocol homa_protocol = {
  */
 static int __init homa_init(void) {
 	int status;
-	printk(KERN_INFO "Homa module loading\n");
+	printk(KERN_NOTICE "Homa module loading\n");
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed in homa_init: %d\n",
@@ -128,6 +123,10 @@ static int __init homa_init(void) {
 		    status);
 		goto out_unregister;
 	}
+	
+	homa.next_client_port = 0x10000;
+	INIT_LIST_HEAD(&homa.sockets);
+	
 	return 0;
 	
 out_unregister:
@@ -141,7 +140,7 @@ out:
  * homa_exit(): invoked when this module is unloaded from the Linux kernel.
  */
 static void __exit homa_exit(void) {
-	printk(KERN_INFO "Homa module unloading\n");
+	printk(KERN_NOTICE "Homa module unloading\n");
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
@@ -154,6 +153,16 @@ module_exit(homa_exit);
  * homa_close(): invoked when close system call is invoked on a Homa socket.
  */
 void homa_close(struct sock *sk, long timeout) {
+	struct homa_sock *hsk = homa_sk(sk);
+	struct list_head *pos;
+	
+	list_del(&hsk->socket_links);
+	list_for_each(pos, &hsk->client_rpcs) {
+		struct homa_client_rpc *crpc = list_entry(pos,
+				struct homa_client_rpc, client_rpcs_links);
+		homa_client_rpc_destroy(crpc);
+		kfree(crpc);
+	}
 	sk_common_release(sk);
 }
 
@@ -177,11 +186,19 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 }
 
 /**
- * homa_init_sock(): invoked to initialize a new Homa socket.
- * @return: always 0 (success)
+ * homa_sock_init() - Initialize a new Homa socket.  Invoked by the
+ * socket(2) system call.
+ * 
+ * Return: always 0 (success).
  */
-int homa_init_sock(struct sock *sk) {
-	printk(KERN_NOTICE "Homa socket opened\n");
+int homa_sock_init(struct sock *sk) {
+	struct homa_sock *hsk = homa_sk(sk);
+	hsk->client_port = homa.next_client_port;
+	hsk->next_outgoing_id = 1;
+	hsk->server_port = 0;
+	homa.next_client_port++;
+	list_add(&hsk->socket_links, &homa.sockets);
+	INIT_LIST_HEAD(&hsk->client_rpcs);
 	return 0;
 }
 
@@ -216,12 +233,13 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	struct inet_sock *inet = inet_sk(sk);
-	struct sk_buff *skb;
+	struct homa_sock *hsk = homa_sk(sk);
 	__be32 saddr, daddr;
 	__be16 dport, sport;
 	struct flowi4 fl4;
 	struct rtable *rt = NULL;
 	int err = 0;
+	struct homa_client_rpc *crpc = NULL;
 	
 	DECLARE_SOCKADDR(struct sockaddr_in *, dest_in, msg->msg_name);
 	if (msg->msg_namelen < sizeof(*dest_in))
@@ -242,36 +260,39 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	rt = ip_route_output_flow(sock_net(sk), &fl4, sk);
 	if (IS_ERR(rt)) {
 		err = PTR_ERR(rt);
-		goto out;
+		goto error;
 	}
 	
-	skb = alloc_skb(1500, GFP_KERNEL);
-	if (!skb) {
-		printk(KERN_NOTICE "Couldn't allocate sk_buff\n");
+	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
+	if (unlikely(!crpc)) {
 		return -ENOMEM;
 	}
-	skb_reserve(skb, 200);
-	err = skb_add_data_nocache(sk, skb, &msg->msg_iter,
-		msg_data_left(msg));
-	if (err != 0) {
-		printk(KERN_NOTICE "Couldn't add data to sk_buff: %d\n",
-				err);
-		goto out;
-	}
-	printk(KERN_NOTICE "protocol memory allocated %lu\n",
-			atomic_long_read(homa_prot.memory_allocated));
-	
-	skb_dst_set(skb, &rt->dst);
-	err = ip_queue_xmit(sk, skb, flowi4_to_flowi(&fl4));
-	
-out:
-	if (rt) {
-		ip_rt_put(rt);
-	}
-	if (err) {
-		return err;
+	crpc->id.sequence = hsk->next_outgoing_id;
+	hsk->next_outgoing_id++;
+	list_add(&crpc->client_rpcs_links, &hsk->client_rpcs);
+	err = homa_message_out_init(&crpc->request, sk, crpc->id,
+			FROM_CLIENT, msg, len, &rt->dst);
+        if (unlikely(err != 0)) {
+		goto error;
 	}
 	return len;
+	// err = ip_queue_xmit(sk, skb, flowi4_to_flowi(&fl4));
+	// ip_rt_put(rt);
+	
+error:
+	if (crpc) {
+		homa_client_rpc_destroy(crpc);
+	}
+	return err;
+}
+
+/**
+ * homa_client_rpc_destroy() - Destructor for homa_client_rpc.
+ * @crpc:  Structure to clean up.
+ */
+void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
+	__list_del_entry(&crpc->client_rpcs_links);
+	homa_message_out_destroy(&crpc->request);
 }
 
 /**
