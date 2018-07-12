@@ -29,6 +29,8 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 	hmo->unscheduled_bytes = 7*HOMA_MAX_DATA_PER_PACKET;
 	hmo->limit = hmo->unscheduled_bytes;
 	hmo->priority = 0;
+	printk(KERN_NOTICE "dst: %p ref count: %d (before)\n", dst,
+		dst->__refcnt.counter);
 	
 	/* Copy message data from user space and form packet buffers. */
 	if (likely(len <= HOMA_MAX_DATA_PER_PACKET)) {
@@ -49,6 +51,7 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 		if (err != 0) {
 			return err;
 		}
+		dst_hold(dst);
 		skb_dst_set(skb, dst);
 		__skb_queue_tail(&hmo->packets, skb);
 	} else if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
@@ -78,9 +81,12 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 		if (unlikely(err != 0)) {
 			return err;
 		}
+		dst_hold(dst);
 		skb_dst_set(skb, dst);
 		__skb_queue_tail(&hmo->packets, skb);
 	}
+	printk(KERN_NOTICE "dst: %p ref count: %d (after)\n", dst,
+		dst->__refcnt.counter);
 	return 0;
 }
 

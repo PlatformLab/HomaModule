@@ -156,6 +156,7 @@ void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct list_head *pos;
 	
+	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
 	list_del(&hsk->socket_links);
 	list_for_each(pos, &hsk->client_rpcs) {
 		struct homa_client_rpc *crpc = list_entry(pos,
@@ -267,11 +268,13 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	if (unlikely(!crpc)) {
 		return -ENOMEM;
 	}
+	crpc->id.port = hsk->client_port;
 	crpc->id.sequence = hsk->next_outgoing_id;
+	crpc->dst = &rt->dst;
 	hsk->next_outgoing_id++;
 	list_add(&crpc->client_rpcs_links, &hsk->client_rpcs);
 	err = homa_message_out_init(&crpc->request, sk, crpc->id,
-			FROM_CLIENT, msg, len, &rt->dst);
+			FROM_CLIENT, msg, len, crpc->dst);
         if (unlikely(err != 0)) {
 		goto error;
 	}
@@ -291,6 +294,7 @@ error:
  * @crpc:  Structure to clean up.
  */
 void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
+	dst_release(crpc->dst);
 	__list_del_entry(&crpc->client_rpcs_links);
 	homa_message_out_destroy(&crpc->request);
 }

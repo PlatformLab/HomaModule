@@ -286,6 +286,12 @@ struct homa_client_rpc {
 	struct rpc_id id;
 	
 	/**
+	 * @dst: Used to route packets to the server; must eventually
+	 * reference count on this.
+	 */
+	struct dst_entry *dst;
+	
+	/**
 	 * @client_rpcs_links: For linking this object into
 	 * &homa_sock.client_rpcs.
 	 */
