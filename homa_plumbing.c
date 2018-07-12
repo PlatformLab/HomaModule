@@ -33,7 +33,7 @@ const struct proto_ops homa_proto_ops = {
 	.family		   = PF_INET,
 	.owner		   = THIS_MODULE,
 	.release	   = inet_release,
-	.bind		   = inet_bind,
+	.bind		   = homa_bind,
 	.connect	   = inet_dgram_connect,
 	.socketpair	   = sock_no_socketpair,
 	.accept		   = sock_no_accept,
@@ -150,7 +150,44 @@ module_init(homa_init);
 module_exit(homa_exit);
 
 /**
- * homa_close(): invoked when close system call is invoked on a Homa socket.
+ * homa_bind() - Implements the bind system call for Homa sockets: associates
+ * a well-known service port with a socket. Unlike other AF_INET protocols,
+ * there is no need to invoke this system call for sockets that are only
+ * used as clients.
+ * @sock:     Socket on which the system call was invoked.
+ * @uaddr:    Contains the desired port number.
+ * @addr_len: Number of bytes in uaddr.
+ * Return:    0 on success, otherwise a negative errno.
+ */
+int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
+{
+	struct homa_sock *hsk = homa_sk(sock->sk);
+	struct homa_sock *owner;
+	struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
+	__u32 port;
+	
+	if (addr_len < sizeof(*addr_in)) {
+		return -EINVAL;
+	}
+	if (addr_in->sin_family != AF_INET) {
+		return -EAFNOSUPPORT;
+	}
+	port = ntohs(addr_in->sin_port);
+	if (port == 0) {
+		return -EINVAL;
+	}
+	owner = homa_find_socket(&homa, port);
+	if ((owner != NULL) && (owner != hsk)) {
+		return -EADDRINUSE;
+	}
+	hsk->server_port = port;
+	return 0;
+}
+
+/**
+ * homa_close() - Invoked when close system call is invoked on a Homa socket.
+ * @sk:      Socket being closed
+ * @timeout: ??
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
@@ -168,9 +205,12 @@ void homa_close(struct sock *sk, long timeout) {
 }
 
 /**
- * homa_disconnect(): invoked when disconnect system call is invoked on a
+ * homa_disconnect() - Invoked when disconnect system call is invoked on a
  * Homa socket.
- * @return: 0 on success, otherwise a negative errno.
+ * @sk:    Socket to disconnect
+ * @flags: ??
+ * 
+ * Return: 0 on success, otherwise a negative errno.
  */
 int homa_disconnect(struct sock *sk, int flags) {
 	printk(KERN_WARNING "unimplemented disconnect invoked on Homa socket\n");
@@ -178,8 +218,12 @@ int homa_disconnect(struct sock *sk, int flags) {
 }
 
 /**
- * homa_ioctl(): implements the ioctl system call for Homa sockets.
- * @return: 0 on success, otherwise a negative errno.
+ * homa_ioctl() - Implements the ioctl system call for Homa sockets.
+ * @sk:    Socket on which the system call was invoked.
+ * @cmd:   ??
+ * @arg:   ??
+ * 
+ * Return: 0 on success, otherwise a negative errno.
  */
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	printk(KERN_WARNING "unimplemented ioctl invoked on Homa socket\n");
@@ -189,6 +233,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 /**
  * homa_sock_init() - Initialize a new Homa socket.  Invoked by the
  * socket(2) system call.
+ * @sk:    Socket on which the system call was invoked.
  * 
  * Return: always 0 (success).
  */
@@ -204,8 +249,13 @@ int homa_sock_init(struct sock *sk) {
 }
 
 /**
- * homa_setsockopt(): implements the getsockopt system call for Homa sockets.
- * @return: 0 on success, otherwise a negative errno.
+ * homa_setsockopt() - Implements the getsockopt system call for Homa sockets.
+ * @sk:      Socket on which the system call was invoked.
+ * @level:   ??
+ * @optname: Identifies a particular setsockopt operation.
+ * @optval:  Address in user space of the the new value for the option.
+ * @optlen:  Number of bytes of data at @optval.
+ * Return:   0 on success, otherwise a negative errno.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
     char __user *optval, unsigned int optlen) {
@@ -217,8 +267,13 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 }
 
 /**
- * homa_getsockopt(): implements the getsockopt system call for Homa sockets.
- * @return: 0 on success, otherwise a negative errno.
+ * homa_getsockopt() - Implements the getsockopt system call for Homa sockets.
+ * @sk:      Socket on which the system call was invoked.
+ * @level:   ??
+ * @optname: Identifies a particular setsockopt operation.
+ * @optval:  Address in user space where the option's value should be stored.
+ * @option:  ??.
+ * Return:   0 on success, otherwise a negative errno.
  */
 int homa_getsockopt(struct sock *sk, int level, int optname,
     char __user *optval, int __user *option) {
@@ -229,8 +284,11 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 }
 
 /**
- * homa_sendmsg(): send a message on a Homa socket.
- * @return: 0 on success, otherwise a negative errno.
+ * homa_sendmsg() - Send a message on a Homa socket.
+ * @sk:    Socket on which the system call was invoked.
+ * @msg:   Structure describing the message to send.
+ * @len:   Number of bytes of the message.
+ * Return: 0 on success, otherwise a negative errno.
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	struct inet_sock *inet = inet_sk(sk);
@@ -295,7 +353,10 @@ void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
 }
 
 /**
- * homa_recvmsg(): receive a message from a Homa socket.
+ * homa_recvmsg() - Receive a message from a Homa socket.
+ * @sk:    Socket on which the system call was invoked.
+ * @msg:   ??
+ * @len:   ??
  * @return: 0 on success, otherwise a negative errno.
  */
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
@@ -305,8 +366,13 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 }
 
 /**
- * homa_sendpage(): ??.
- * @return: 0 on success, otherwise a negative errno.
+ * homa_sendpage() - ??.
+ * @sk:     Socket for the operation
+ * @page:   ??
+ * @offset: ??
+ * @size:   ??
+ * @flags:  ??
+ * Return:  0 on success, otherwise a negative errno.
  */
 int homa_sendpage(struct sock *sk, struct page *page, int offset,
 		  size_t size, int flags) {
@@ -315,8 +381,9 @@ int homa_sendpage(struct sock *sk, struct page *page, int offset,
 }
 
 /**
- * homa_hash(): ??.
- * @return: ??
+ * homa_hash() - ??.
+ * @sk:    Socket for the operation
+ * Return: ??
  */
 int homa_hash(struct sock *sk) {
 	printk(KERN_WARNING "unimplemented hash invoked on Homa socket\n");
@@ -324,24 +391,22 @@ int homa_hash(struct sock *sk) {
 }
 
 /**
- * homa_unhash(): ??.
- * @return: ??
+ * homa_unhash() - ??.
  */
 void homa_unhash(struct sock *sk) {
 	printk(KERN_WARNING "unimplemented unhash invoked on Homa socket\n");
 }
 
 /**
- * homa_rehash(): ??.
- * @return: ??
+ * homa_rehash() - ??.
  */
 void homa_rehash(struct sock *sk) {
 	printk(KERN_WARNING "unimplemented rehash invoked on Homa socket\n");
 }
 
 /**
- * homa_get_port(): ??.
- * @return: ??
+ * homa_get_port() - ??.
+ * Return: ??
  */
 int homa_get_port(struct sock *sk, unsigned short snum) {
 	printk(KERN_WARNING "unimplemented get_port invoked on Homa socket\n");
@@ -349,8 +414,8 @@ int homa_get_port(struct sock *sk, unsigned short snum) {
 }
 
 /**
- * homa_diag_destroy(): ??.
- * @return: ??
+ * homa_diag_destroy() - ??.
+ * Return: ??
  */
 int homa_diag_destroy(struct sock *sk, int err) {
 	printk(KERN_WARNING "unimplemented diag_destroy invoked on Homa socket\n");
@@ -359,8 +424,8 @@ int homa_diag_destroy(struct sock *sk, int err) {
 }
 
 /**
- * homa_v4_early_demux(): invoked by IP for ??.
- * @return: Always 0?
+ * homa_v4_early_demux() - Invoked by IP for ??.
+ * Return: Always 0?
  */
 int homa_v4_early_demux(struct sk_buff *skb) {
 	printk(KERN_WARNING "unimplemented early_demux invoked on Homa socket\n");
@@ -377,8 +442,10 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
 }
 
 /**
- * homa_handler(): invoked by IP to handle an incoming Homa packet.
- * @return: Always 0?
+ * homa_handler() - Top-level input packet handler; invoked by IP when a
+ * Homa packet arrives.
+ * @skb:   The incoming packet.
+ * Return: Always 0?
  */
 int homa_handler(struct sk_buff *skb) {
 	char buffer[200];
@@ -388,17 +455,19 @@ int homa_handler(struct sk_buff *skb) {
 }
 
 /**
- * homa_v4_early_demux_handler(): invoked by IP to handle an incoming error
+ * homa_err_handler() -Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
- * @return: Always 0?
+ * @skb:   The incoming packet.
+ * @info:  Information about the error that occurred?
+ * Return: Always 0?
  */
 void homa_err_handler(struct sk_buff *skb, u32 info) {
 	printk(KERN_WARNING "unimplemented err_handler invoked on Homa socket\n");
 }
 
 /**
- * homa_poll(): invoked to implement the poll system call.
- * @return: ??
+ * homa_poll() - Invoked to implement the poll system call.
+ * Return: ??
  */
 __poll_t homa_poll(struct file *file, struct socket *sock,
 	       struct poll_table_struct *wait) {

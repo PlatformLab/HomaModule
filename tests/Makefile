@@ -3,7 +3,7 @@
 CFLAGS := -Wall -g
 
 BINS := bufferClient bufferServer getTimeTrace homaSend \
-        receiveRaw scratch sendRaw testTimeTrace useMemory
+        homaServer receiveRaw scratch sendRaw testTimeTrace useMemory
 
 all: $(BINS)
 	

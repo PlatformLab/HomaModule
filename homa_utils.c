@@ -2,36 +2,24 @@
 
 #include "homa_impl.h"
 
-
-
 /**
- * homa_symbol_for_type() - Returns a printable string describing a packet type.
- * @type:  A value from those defined by &homa_packet_type.
+ * homa_find_socket() - Returns the socket associated with a given port.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @port:    The port of interest; may be either a &homa_sock.client_port
+ *           or a &homa_sock.server_port. Must not be 0.
+ * Return:   The socket that owns @port, or NULL if none. 
  */
-char *homa_symbol_for_type(uint8_t type)
+struct homa_sock *homa_find_socket(struct homa *homa, __u32 port)
 {
-	static char buffer[20];
-	switch (type) {
-	case FULL_MESSAGE:
-		return "FULL_MESSAGE";
-	case MESSAGE_FRAG:
-		return "DATA";
-	case GRANT:
-		return "GRANT";
-	case RESEND:
-		return "RESEND";
-	case BUSY:
-		return "BUSY";
+	struct list_head *pos;
+	list_for_each(pos, &homa->sockets) {
+		struct homa_sock *hsk = list_entry(pos, struct homa_sock,
+				socket_links);
+		if ((hsk->client_port == port) || (hsk->server_port == port)) {
+			return hsk;
+		}
 	}
-	
-	/* Using a static buffer can produce garbled text under concurrency,
-	 * but (a) it's unlikely (this code only executes if the opcode is
-	 * bogus), (b) this is mostly for testing and debugging, and (c) the
-	 * code below ensures that the string cannot run past the end of the
-	 * buffer, so the code is safe. */
-	snprintf(buffer, sizeof(buffer)-1, "UNKNOWN(%u)", type);
-	buffer[sizeof(buffer)-1] = 0;
-	return buffer;
+	return NULL;
 }
 
 /**
@@ -40,7 +28,6 @@ char *homa_symbol_for_type(uint8_t type)
  * @packet:  Address of the first byte of the packet header.
  * @buffer:  Buffer in which to print string.
  * @length:  Number of bytes available at @buffer.
- * 
  * Return:   @buffer
  */
 char *homa_print_header(char *packet, char *buffer, int length)
@@ -97,5 +84,35 @@ char *homa_print_header(char *packet, char *buffer, int length)
 		break;
 	}
 	buffer[length-1] = 0;
+	return buffer;
+}
+
+/**
+ * homa_symbol_for_type() - Returns a printable string describing a packet type.
+ * @type:  A value from those defined by &homa_packet_type.
+ */
+char *homa_symbol_for_type(uint8_t type)
+{
+	static char buffer[20];
+	switch (type) {
+	case FULL_MESSAGE:
+		return "FULL_MESSAGE";
+	case MESSAGE_FRAG:
+		return "DATA";
+	case GRANT:
+		return "GRANT";
+	case RESEND:
+		return "RESEND";
+	case BUSY:
+		return "BUSY";
+	}
+	
+	/* Using a static buffer can produce garbled text under concurrency,
+	 * but (a) it's unlikely (this code only executes if the opcode is
+	 * bogus), (b) this is mostly for testing and debugging, and (c) the
+	 * code below ensures that the string cannot run past the end of the
+	 * buffer, so the code is safe. */
+	snprintf(buffer, sizeof(buffer)-1, "UNKNOWN(%u)", type);
+	buffer[sizeof(buffer)-1] = 0;
 	return buffer;
 }

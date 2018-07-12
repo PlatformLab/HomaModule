@@ -16,8 +16,9 @@
 #define IPPROTO_HOMA 140
 
 int main(int argc, char** argv) {
-	int fd, status;
+	int fd, status, port;
 	struct addrinfo *result;
+	struct sockaddr_in *addr_in;
 	struct addrinfo hints;
 	char *host;
 //	char *sockType;
@@ -27,15 +28,21 @@ int main(int argc, char** argv) {
 	char buffer[MAX_MESSAGE_LENGTH];
 	int length;
 	
-	if (argc < 3) {
-		printf("Usage: %s hostName msgLength\n", argv[0]);
+	if (argc < 4) {
+		printf("Usage: %s hostName port msgLength\n", argv[0]);
 		exit(1);
 	}
 	host = argv[1];
-	length = strtol(argv[2], NULL, 10);
+	port = strtol(argv[2], NULL, 10);
+	if (port == 0) {
+		printf("Bad port number %s; must be positive integer\n",
+				argv[2]);
+		exit(1);
+	}
+	length = strtol(argv[3], NULL, 10);
 	if (length == 0) {
 		printf("Bad message length %s; must be positive integer\n",
-				argv[2]);
+				argv[3]);
 		exit(1);
 	}
 	if (length > MAX_MESSAGE_LENGTH) {
@@ -76,6 +83,8 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 	
+	addr_in = (struct sockaddr_in *) result->ai_addr;
+	addr_in->sin_port = htons(port);
 	status = sendto(fd, buffer, length, 0, result->ai_addr,
 			result->ai_addrlen);
 	if (status < 0) {
