@@ -52,8 +52,7 @@ enum homa_packet_type {
     GRANT                  = 22,
     RESEND                 = 23,
     BUSY                   = 24,
-    ABORT                  = 25,
-    BOGUS                  = 26,      /* Used only in unit tests. */
+    BOGUS                  = 25,      /* Used only in unit tests. */
     /* If you add a new type here, you must also do the following:
      * 1. Change BOGUS so it is the highest opcode
      * 2. Add support for the new opcode in op_symbol and header_to_string
@@ -83,10 +82,27 @@ _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
 #define HOMA_SKB_RESERVE (HOMA_MAX_IPV4_HEADER + 20)
 
 /**
- * Total allocated size of all Homa packet buffers.
+ * Total allocated size of all Homa packet buffers. The "sizeof(void*)"
+ * is for the pointer used by homa_next_skb.
  */
 #define HOMA_SKB_SIZE (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_HEADER \
-				+ HOMA_SKB_RESERVE)
+				+ HOMA_SKB_RESERVE + sizeof(void*))
+
+/**
+ * homa_next_skb() - Compute address of Homa's private link field in @skb.
+ * @skb        Socket buffer containing private link field.
+ * 
+ * Homa needs to keep a list of buffers in a message, but it can't use the
+ * links built into sk_buffs because Homa wants to retain its list even
+ * after sending the packet, and the built-in links get used during sending.
+ * Thus we allocate extra space at the very end of the packet's data
+ * area to hold a forward pointer for a list.
+ */
+static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
+{
+	return (struct sk_buff **) (skb->head + HOMA_MAX_DATA_PER_PACKET
+			+ HOMA_MAX_HEADER + HOMA_SKB_RESERVE);
+}
 
 /**
  * struct common_header - Wire format for the first bytes in every Homa
@@ -245,16 +261,15 @@ _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
  */
 struct homa_message_out {
 	/** @length: Total bytes in message (excluding headers). */
-	__u32 length;
+	int length;
 	
 	/**
-	 * @packets: Message contents, packaged into sk_buffs that are ready
-	 * for transmission. The list is in order of offset in the message
+	 * @packets: singly-linked list of all packets in message, linked
+	 * using homa_next_skb. The list is in order of offset in the message
 	 * (offset 0 first); each packet (except possibly the last) contains
-	 * exactly HOMA_MAX_DATA_PER_PACKET of payload. Note: we don't use
-	 * the lock here.
+	 * exactly HOMA_MAX_DATA_PER_PACKET of payload.
 	 */
-	struct sk_buff_head packets;
+	struct sk_buff *packets;
 	
 	/**
 	 * @next_packet: Pointer within @request of the next packet to transmit.
@@ -264,14 +279,20 @@ struct homa_message_out {
 	 */
 	struct sk_buff *next_packet;
 	
+	/*
+	 * @offset: Offset within message of first byte in next_packet. If
+	 * all packets have been sent, will be >= @length.
+	 */
+	int next_offset;
+	
 	/**
 	 * @unscheduled_bytes: Initial bytes of message that we'll send
 	 * without waiting for grants.
 	 */
-	__u32 unscheduled_bytes;
+	int unscheduled_bytes;
 	
 	/** @limit: Need grant before sending offsets >= this. */
-	__u32 limit;
+	int limit;
 	
 	/** @priority: Packet priority to use for future transmissions. */
 	__u8 priority;
@@ -285,9 +306,12 @@ struct homa_client_rpc {
 	/** @id: Unique identifier for the RPC. */
 	struct rpc_id id;
 	
+	/** @fl: Addressing info needed to send packets. */
+	struct flowi fl;
+	
 	/**
-	 * @dst: Used to route packets to the server; must eventually
-	 * reference count on this.
+	 * @dst: Used to route packets to the server; we own a reference
+	 * to this, which we must eventually release.
 	 */
 	struct dst_entry *dst;
 	
@@ -368,6 +392,7 @@ extern int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 		size_t len, struct dst_entry *dst);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
 		struct poll_table_struct *wait);
+extern char *homa_print_header(char *packet, char *buffer, int length);
 extern int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		int noblock, int flags, int *addr_len);
 extern void homa_rehash(struct sock *sk);
@@ -378,3 +403,5 @@ extern int homa_sock_init(struct sock *sk);
 extern void homa_unhash(struct sock *sk);
 extern int homa_v4_early_demux(struct sk_buff *skb);
 extern int homa_v4_early_demux_handler(struct sk_buff *skb);
+extern void homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
+		struct flowi *fl);

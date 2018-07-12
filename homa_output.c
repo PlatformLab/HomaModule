@@ -25,7 +25,11 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 	int err;
 	
 	hmo->length = len;
-	__skb_queue_head_init(&hmo->packets);
+	hmo->packets = NULL;
+	hmo->next_packet = NULL;
+	hmo->next_offset = 0;
+	
+	/* This is a temporary guess; must handle better in the future. */
 	hmo->unscheduled_bytes = 7*HOMA_MAX_DATA_PER_PACKET;
 	hmo->limit = hmo->unscheduled_bytes;
 	hmo->priority = 0;
@@ -53,40 +57,47 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 		}
 		dst_hold(dst);
 		skb_dst_set(skb, dst);
-		__skb_queue_tail(&hmo->packets, skb);
+		*homa_next_skb(skb) = NULL;
+		hmo->packets = skb;
 	} else if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
 		return -EINVAL;
-	} else for (bytes_left = len; bytes_left > 0;
-			bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
-		struct message_frag_header *h;
-		__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
-		if (unlikely(cur_size > bytes_left)) {
-			cur_size = bytes_left;
+	} else {
+		struct sk_buff **last_link = &hmo->packets;
+		for (bytes_left = len; bytes_left > 0;
+				bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
+			struct message_frag_header *h;
+			__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
+			if (unlikely(cur_size > bytes_left)) {
+				cur_size = bytes_left;
+			}
+			skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
+			if (unlikely(!skb)) {
+				return -ENOMEM;
+			}
+			skb_reserve(skb, HOMA_SKB_RESERVE);
+			skb_reset_transport_header(skb);
+			h = (struct message_frag_header *) skb_put(skb,
+					sizeof(*h));
+			h->common.rpc_id = id;
+			h->common.type = MESSAGE_FRAG;
+			h->common.direction = direction;
+			h->message_length = htonl(hmo->length);
+			h->offset = htonl(hmo->length - bytes_left);
+			h->unscheduled_bytes = htonl(hmo->unscheduled_bytes);
+			h->retransmit = 0;
+			err = skb_add_data_nocache(sk, skb, &msg->msg_iter,
+					cur_size);
+			if (unlikely(err != 0)) {
+				return err;
+			}
+			dst_hold(dst);
+			skb_dst_set(skb, dst);
+			*last_link = skb;
+			last_link = homa_next_skb(skb);
+			*last_link = NULL;
 		}
-		skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
-		if (unlikely(!skb)) {
-			return -ENOMEM;
-		}
-		skb_reserve(skb, HOMA_SKB_RESERVE);
-		skb_reset_transport_header(skb);
-		h = (struct message_frag_header *) skb_put(skb, sizeof(*h));
-		h->common.rpc_id = id;
-		h->common.type = MESSAGE_FRAG;
-		h->common.direction = direction;
-		h->message_length = htons(hmo->length);
-		h->offset = hmo->length - bytes_left;
-		h->unscheduled_bytes = hmo->unscheduled_bytes;
-		h->retransmit = 0;
-		err = skb_add_data_nocache(sk, skb, &msg->msg_iter, cur_size);
-		if (unlikely(err != 0)) {
-			return err;
-		}
-		dst_hold(dst);
-		skb_dst_set(skb, dst);
-		__skb_queue_tail(&hmo->packets, skb);
 	}
-	printk(KERN_NOTICE "dst: %p ref count: %d (after)\n", dst,
-		dst->__refcnt.counter);
+	hmo->next_packet = hmo->packets;
 	return 0;
 }
 
@@ -97,8 +108,34 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
  */
 void homa_message_out_destroy(struct homa_message_out *hmo)
 {
-	struct sk_buff *skb;
-	skb_queue_walk(&hmo->packets, skb) {
+	struct sk_buff *skb, *next;
+	for (skb = hmo->packets; skb !=  NULL; skb = next) {
+		next = *homa_next_skb(skb);
 		kfree_skb(skb);
+	}
+}
+
+/**
+ * homa_xmit_packets(): If a message has data packets that are permitted
+ * to be transmitted according to the scheduling mechanism, arrange for
+ * them to be sent.
+ * @hmo:    Message to check for transmittable packets.
+ * @sk:     Socket to use for transmission.
+ * @fl4:    Addressing information needed by IP.
+ */
+void homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
+		struct flowi *fl)
+{
+	while ((hmo->next_offset < hmo->limit) && hmo->next_packet) {
+		int err;
+		skb_get(hmo->next_packet);
+		err = ip_queue_xmit(sk, hmo->next_packet, fl);
+		if (err) {
+			printk(KERN_WARNING 
+				"ip_queue_xmit failed in homa_xmit_packets: %d",
+				err);
+		}
+		hmo->next_packet = *homa_next_skb(hmo->next_packet);
+		hmo->next_offset += HOMA_MAX_DATA_PER_PACKET; 
 	}
 }

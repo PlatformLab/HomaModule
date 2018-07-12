@@ -235,10 +235,7 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	struct inet_sock *inet = inet_sk(sk);
 	struct homa_sock *hsk = homa_sk(sk);
-	__be32 saddr, daddr;
-	__be16 dport, sport;
-	struct flowi4 fl4;
-	struct rtable *rt = NULL;
+	struct rtable *rt;
 	int err = 0;
 	struct homa_client_rpc *crpc = NULL;
 	
@@ -248,21 +245,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	if (dest_in->sin_family != AF_INET) {
 		return -EAFNOSUPPORT;
 	}
-	daddr = dest_in->sin_addr.s_addr;
-	saddr = inet->inet_saddr;
-	dport = 99;
-	sport = 99;
-	
-	flowi4_init_output(&fl4, sk->sk_bound_dev_if, sk->sk_mark, inet->tos,
-			RT_SCOPE_UNIVERSE, sk->sk_protocol,
-			0, daddr, saddr, dport, inet->inet_sport,
-			sk->sk_uid);
-	security_sk_classify_flow(sk, flowi4_to_flowi(&fl4));
-	rt = ip_route_output_flow(sock_net(sk), &fl4, sk);
-	if (IS_ERR(rt)) {
-		err = PTR_ERR(rt);
-		goto error;
-	}
 	
 	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc)) {
@@ -270,17 +252,30 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	}
 	crpc->id.port = hsk->client_port;
 	crpc->id.sequence = hsk->next_outgoing_id;
-	crpc->dst = &rt->dst;
+	crpc->dst = NULL;
 	hsk->next_outgoing_id++;
 	list_add(&crpc->client_rpcs_links, &hsk->client_rpcs);
+	
+	flowi4_init_output(&crpc->fl.u.ip4, sk->sk_bound_dev_if, sk->sk_mark,
+			inet->tos, RT_SCOPE_UNIVERSE, sk->sk_protocol,
+			0, dest_in->sin_addr.s_addr, inet->inet_saddr,
+			dest_in->sin_port, htonl(hsk->client_port),
+			sk->sk_uid);
+	security_sk_classify_flow(sk, &crpc->fl);
+	rt = ip_route_output_flow(sock_net(sk), &crpc->fl.u.ip4, sk);
+	if (IS_ERR(rt)) {
+		err = PTR_ERR(rt);
+		goto error;
+	}
+	crpc->dst = &rt->dst;
+	
 	err = homa_message_out_init(&crpc->request, sk, crpc->id,
 			FROM_CLIENT, msg, len, crpc->dst);
         if (unlikely(err != 0)) {
 		goto error;
 	}
+	homa_xmit_packets(&crpc->request, sk, &crpc->fl);
 	return len;
-	// err = ip_queue_xmit(sk, skb, flowi4_to_flowi(&fl4));
-	// ip_rt_put(rt);
 	
 error:
 	if (crpc) {
@@ -386,11 +381,9 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * @return: Always 0?
  */
 int homa_handler(struct sk_buff *skb) {
-	printk(KERN_NOTICE "incoming Homa packet: len %u, data_len %u, data \"%.*s\"\n",
-			skb->len, skb->data_len, skb->len, skb->data);
-	printk(KERN_NOTICE "network header size %lu, memory allocated %lu\n",
-			skb->data - skb_network_header(skb),
-			atomic_long_read(homa_prot.memory_allocated));
+	char buffer[200];
+	printk(KERN_NOTICE "incoming Homa packet: %s\n",
+			homa_print_header(skb->data, buffer, sizeof(buffer)));
 	return 0;
 }
 
