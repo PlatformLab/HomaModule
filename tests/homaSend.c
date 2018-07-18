@@ -1,7 +1,7 @@
 // This is a test program to exercise Homa from the sender side.
 //
 // Usage:
-// homaSend hostName message
+// homaSend hostName port msgLength
 
 #include <errno.h>
 #include <netdb.h>

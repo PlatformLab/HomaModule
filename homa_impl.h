@@ -26,20 +26,29 @@ extern struct homa homa;
 #define HOMA_MAX_MESSAGE_LENGTH 1000000
 
 /**
- * struct rpc_id - Unique identifier for RPC (within client).
- * 
- * Must be unique among all RPCs from a given client that are active
- * at any given instant (including delayed packets floating around in
- * the network). The server adds in the client's network address to
- * produce a globally unique identifier.
+ * struct homa_addr - Collects in one place the information needed to send
+ * packets to a Homa peer.
  */
-struct rpc_id {
-	/** @port: &homa_socket.client_port from which RPC was issued. */
-	__u32 port;
+struct homa_addr {
+	/** @daddr: IP address for the destination machine. */
+	__be32 daddr;
 	
-	/** @sequence: Distinguishes RPCs from @socket. */
-	__u64 sequence;
-} __attribute__((packed));
+	/**
+	 * @dport: Port number on the destination machine that will
+	 * handle packets.
+	 */
+	__u16 dport;
+	
+	/** @fl: Addressing info needed to send packets. */
+	struct flowi flow;
+	
+	/**
+	 * @dst: Used to route packets to the destination; we own a reference
+	 * to this, which we must eventually release.
+	 */
+	struct dst_entry *dst;
+	
+};
 
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
@@ -47,12 +56,11 @@ struct rpc_id {
  * See the xxx_header structs below for more information about each type.
  */
 enum homa_packet_type {
-    FULL_MESSAGE           = 20,
-    MESSAGE_FRAG           = 21,
-    GRANT                  = 22,
-    RESEND                 = 23,
-    BUSY                   = 24,
-    BOGUS                  = 25,      /* Used only in unit tests. */
+    DATA               = 20,
+    GRANT              = 21,
+    RESEND             = 22,
+    BUSY               = 23,
+    BOGUS              = 24,      /* Used only in unit tests. */
     /* If you add a new type here, you must also do the following:
      * 1. Change BOGUS so it is the highest opcode
      * 2. Add support for the new opcode in op_symbol and header_to_string
@@ -82,11 +90,20 @@ _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
 #define HOMA_SKB_RESERVE (HOMA_MAX_IPV4_HEADER + 20)
 
 /**
- * Total allocated size of all Homa packet buffers. The "sizeof(void*)"
- * is for the pointer used by homa_next_skb.
+ * define HOMA_SKB_SIZE - Total allocated size for Homa packet buffers
+ * (we always allocate this size, even for small packets). The
+ * "sizeof(void*)" is for the pointer used by homa_next_skb.
  */
 #define HOMA_SKB_SIZE (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_HEADER \
 				+ HOMA_SKB_RESERVE + sizeof(void*))
+
+/**
+ * define HOMA_MIN_CLIENT_PORT - The 16-bit port space is divided into
+ * two nonoverlapping regions. Ports 1-32767 are reserved exclusively
+ * for well-defined server ports. The remaining ports are used for client
+ * ports; these are allocated automatically by Homa. Port 0 is reserved.
+ */
+#define HOMA_MIN_CLIENT_PORT 0x8000
 
 /**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
@@ -109,39 +126,29 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
  * packet.
  */
 struct common_header {
-	struct rpc_id rpc_id;
+	/** @sport: Port on source machine from which packet was sent. */
+	__be16 sport;
+	
+	/** @dport: Port on destination that is to receive packet. */
+	__be16 dport;
+	
+	/**
+	 * @id: Identifier for the RPC associated with this packet; must
+	 * be unique among all those issued from the client port.
+	 */
+	__be64 id;
 
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
-	
-	/** @direction: Who sent the packet: FROM_CLIENT or FROM_SERVER. */
-	__u8 direction;
 } __attribute__((packed));
-static const __u8 FROM_CLIENT = 1;
-static const __u8 FROM_SERVER = 2;
 
 /**
- * struct full_message_header - Wire format for a FULL_MESSAGE packet, which
- * contains an entire request or response message.
+ * struct data_header - Wire format for a DATA packet, which contains a
+ * contiguous range of bytes from a request or response message. The
+ * amount of data in the packet is either all the remaining data in
+ * the message or HOMA_MAX_DATA_PER_PACKET, whichever is smaller.
  */
-struct full_message_header {
-	struct common_header common;
-	
-	/** @message_length: Total # bytes of data following this header. */
-	__be16 message_length; 
-
-	/* The remaining packet bytes after the header constitute the
-	 * entire request or response message.
-	 */
-} __attribute__((packed));
-_Static_assert(sizeof(struct full_message_header) <= HOMA_MAX_HEADER,
-		"full_message_header too large");
-
-/**
- * struct message_frag_header - Wire format for a MESSAGE_FRAG packet, which
- * contains a contiguous range of bytes from a request or response message.
- */
-struct message_frag_header {
+struct data_header {
 	struct common_header common;
 	
 	/** @message_length: Total #bytes in the *message* */
@@ -154,11 +161,11 @@ struct message_frag_header {
 	__be32 offset;
 	
 	/**
-	 * @unscheduled_bytes: The number of initial bytes in the message
-	 * that the sender will transmit without grants; bytes after these
+	 * @unscheduled: The number of initial bytes in the message that
+	 * the sender will transmit without grants; bytes after these
 	 * will be sent only in response to GRANT packets.
 	 */
-	__be32 unscheduled_bytes;
+	__be32 unscheduled;
 
 	/**
 	 * @retransmit: 1 means this packet was sent in response to a RESEND
@@ -170,8 +177,8 @@ struct message_frag_header {
 	 * data starting at the given offset.
 	 */
 } __attribute__((packed));
-_Static_assert(sizeof(struct message_frag_header) <= HOMA_MAX_HEADER,
-		"message_frag_header too large");
+_Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
+		"data_header too large");
 
 /**
  * struct grant_header - Wire format for GRANT packets, which are sent by
@@ -286,10 +293,10 @@ struct homa_message_out {
 	int next_offset;
 	
 	/**
-	 * @unscheduled_bytes: Initial bytes of message that we'll send
+	 * @unscheduled: Initial bytes of message that we'll send
 	 * without waiting for grants.
 	 */
-	int unscheduled_bytes;
+	int unscheduled;
 	
 	/** @limit: Need grant before sending offsets >= this. */
 	int limit;
@@ -302,29 +309,82 @@ struct homa_message_out {
  * struct homa_client_rpc - One of these structures exists for each active
  * RPC initiated from this machine.
  */
-struct homa_client_rpc {
-	/** @id: Unique identifier for the RPC. */
-	struct rpc_id id;
-	
-	/** @fl: Addressing info needed to send packets. */
-	struct flowi fl;
-	
+struct homa_client_rpc {	
 	/**
-	 * @dst: Used to route packets to the server; we own a reference
-	 * to this, which we must eventually release.
-	 */
-	struct dst_entry *dst;
+	 * @id: Unique identifier for the RPC among all those issued
+	 * from its port. */
+	__u64 id;
+	
+	/** @dest: Address information for server. */
+	struct homa_addr dest;
 	
 	/**
 	 * @client_rpcs_links: For linking this object into
 	 * &homa_sock.client_rpcs.
 	 */
-	struct list_head client_rpcs_links;
+	struct list_head client_rpc_links;
+	
+	/** @request: Information about the request message. */
+	struct homa_message_out request;
+};
+
+/**
+ * struct homa_message_in - Holds the state of a message received by
+ * this machine; used for both requests and responses.
+ */
+struct homa_message_in {
+	/**
+	 * @packets: Packets received for this message so far. The list
+	 * is sorted in order of offset (head is lowest offset), but
+	 * packets can be received out of order, so there may be times
+	 * when there are holes in the list.
+	 */
+	struct sk_buff_head packets;
+	
+	/** @total_length: Size of the entire message, in bytes. */
+	int total_length;
 	
 	/**
-	 * @request: Information about the request message.
+	 * @bytes_remaining: Amount of data for this message that has
+	 * not yet been received; will determine the message's priority.
 	 */
-	struct homa_message_out request;
+	int bytes_remaining;
+
+        /**
+	 * @granted: Total # of bytes sender has been authorized to transmit
+	 * (including unscheduled bytes).
+	 */
+        int granted;
+	
+	/** @priority: Priority level to include in future GRANTS. */
+	int priority;
+};
+
+/**
+ * struct homa_server_rpc - One of these structures exists for each active
+ * RPC for which this machine is the server. 
+ */
+struct homa_server_rpc {
+	/** @saddr: IP address of the client (source). */
+	__be32 saddr;
+	
+	/** @sport: Port from which RPC was sent on saddr. */
+	__u16 sport;
+	
+	/** @id: Identifier for the RPC (unique from saddr/sport). */
+	__u64 id;
+	
+	/** @request: Information about the request message. */
+	struct homa_message_in request;
+	
+	/** @response: Information about the response message. */
+	struct homa_message_out response;
+	
+	/**
+	 * @server_rpcs_links: For linking this object into
+	 * &homa_sock.server_rpcs.
+	 */
+	struct list_head server_rpc_links;
 };
 
 /**
@@ -334,23 +394,26 @@ struct homa_sock {
 	/** @inet: Generic socket data; must be the first field. */
 	struct inet_sock inet;
 	
-	/** @client_port: Port number to use for outgoing RPC requests. */
-	__u32 client_port;
-	
-	/** @next_outgoing_id: Id to use for next outgoing RPC request. */
-	__u64 next_outgoing_id;
-	
 	/**
 	 * @server_port: Port number for receiving incoming RPC requests.
 	 * Must be assigned explicitly with bind; 0 means not bound yet.
 	 */
-	__u32 server_port;
+	__u16 server_port;
+	
+	/** @client_port: Port number to use for outgoing RPC requests. */
+	__u16 client_port;
+	
+	/** @next_outgoing_id: Id to use for next outgoing RPC request. */
+	__u64 next_outgoing_id;
 	
 	/** @socket_links: For linking this socket into &homa.sockets. */
 	struct list_head socket_links;
 	
 	/** @client_rpcs: List of active RPCs originating from this socket. */
 	struct list_head client_rpcs;
+	
+	/** @client_rpcs: List of active RPCs sent to this socket. */
+	struct list_head server_rpcs;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -365,48 +428,63 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
  */
 struct homa {
 	/**
-	 * @next_client_report: Use this as the client port number for the
-	 * next Homa socket; increments monotonically. */
-	__u32 next_client_port;
+	 * @next_client_report: A client port number to consider for the
+	 * next Homa socket; increments monotonically. Current value may
+	 * be in the range allocated for servers; must check before using.
+	 * This port may also be in use already; must check.
+	 */
+	__u16 next_client_port;
 	
 	/** @sockets: All existing sockets. */
 	struct list_head sockets;
 };
 
+extern void   homa_addr_destroy(struct homa_addr *addr);
+extern int    homa_addr_init(struct homa_addr *addr, struct sock *sk,
+		__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
 extern int    homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void   homa_client_rpc_destroy(struct homa_client_rpc *crpc);
 extern void   homa_close(struct sock *sock, long timeout);
+extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
+		struct homa_sock *hsk, struct homa_server_rpc *srpc);
 extern int    homa_diag_destroy(struct sock *sk, int err);
 extern int    homa_disconnect(struct sock *sk, int flags);
 extern void   homa_err_handler(struct sk_buff *skb, u32 info);
+extern struct homa_server_rpc *homa_find_server_rpc(struct homa_sock *hsk,
+		__be32 saddr, __u16 sport, __u64 id);
 extern struct homa_sock *
-	      homa_find_socket(struct homa *homa, __u32 port);
+	      homa_find_socket(struct homa *homa, __u16 port);
 extern int    homa_get_port(struct sock *sk, unsigned short snum);
 extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
 extern int    homa_handler(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
+extern void   homa_message_in_destroy(struct homa_message_in *hmi);
+extern void   homa_message_out_destroy(struct homa_message_out *hmo);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
 extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
+extern void   homa_message_in_init(struct homa_message_in *hmi, int length,
+		int unscheduled);
 extern void   homa_message_out_destroy(struct homa_message_out *hmo);
 extern int    homa_message_out_init(struct homa_message_out *hmo,
-		struct sock *sk, struct rpc_id id, __u8 direction,
-		struct msghdr *msg, size_t len, struct dst_entry *dst);
+		struct sock *sk, struct msghdr *msg, size_t len,
+		struct homa_addr *dest, __u16 sport, __u64 id);
 extern __poll_t
 	      homa_poll(struct file *file, struct socket *sock,
 		struct poll_table_struct *wait);
-extern char  *homa_print_header(char *packet, char *buffer, int length);
+extern char  *homa_print_header(struct sk_buff *skb, char *buffer, int length);
 extern int    homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		int noblock, int flags, int *addr_len);
 extern void   homa_rehash(struct sock *sk);
 extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
+extern void   homa_server_rpc_destroy(struct homa_server_rpc *srpc);
 extern int    homa_sock_init(struct sock *sk);
 extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);
 extern int    homa_v4_early_demux(struct sk_buff *skb);
 extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void   homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
-		struct flowi *fl);
+		struct homa_addr *dest);

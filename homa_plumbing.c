@@ -124,7 +124,7 @@ static int __init homa_init(void) {
 		goto out_unregister;
 	}
 	
-	homa.next_client_port = 0x10000;
+	homa.next_client_port = HOMA_MIN_CLIENT_PORT;
 	INIT_LIST_HEAD(&homa.sockets);
 	
 	return 0;
@@ -173,7 +173,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 		return -EAFNOSUPPORT;
 	}
 	port = ntohs(addr_in->sin_port);
-	if (port == 0) {
+	if ((port == 0) || (port >= HOMA_MIN_CLIENT_PORT)) {
 		return -EINVAL;
 	}
 	owner = homa_find_socket(&homa, port);
@@ -197,9 +197,15 @@ void homa_close(struct sock *sk, long timeout) {
 	list_del(&hsk->socket_links);
 	list_for_each(pos, &hsk->client_rpcs) {
 		struct homa_client_rpc *crpc = list_entry(pos,
-				struct homa_client_rpc, client_rpcs_links);
+				struct homa_client_rpc, client_rpc_links);
 		homa_client_rpc_destroy(crpc);
 		kfree(crpc);
+	}
+	list_for_each(pos, &hsk->server_rpcs) {
+		struct homa_server_rpc *srpc = list_entry(pos,
+				struct homa_server_rpc, server_rpc_links);
+		homa_server_rpc_destroy(srpc);
+		kfree(srpc);
 	}
 	sk_common_release(sk);
 }
@@ -239,12 +245,23 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
  */
 int homa_sock_init(struct sock *sk) {
 	struct homa_sock *hsk = homa_sk(sk);
-	hsk->client_port = homa.next_client_port;
-	hsk->next_outgoing_id = 1;
 	hsk->server_port = 0;
+	while (1) {
+		if (homa.next_client_port < HOMA_MIN_CLIENT_PORT) {
+			homa.next_client_port = HOMA_MIN_CLIENT_PORT;
+		}
+		if (!homa_find_socket(&homa, homa.next_client_port)) {
+			break;
+		}
+		homa.next_client_port++;
+	}
+	hsk->client_port = homa.next_client_port;
 	homa.next_client_port++;
+	hsk->next_outgoing_id = 1;
 	list_add(&hsk->socket_links, &homa.sockets);
 	INIT_LIST_HEAD(&hsk->client_rpcs);
+	INIT_LIST_HEAD(&hsk->server_rpcs);
+	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
 	return 0;
 }
 
@@ -293,7 +310,6 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	struct inet_sock *inet = inet_sk(sk);
 	struct homa_sock *hsk = homa_sk(sk);
-	struct rtable *rt;
 	int err = 0;
 	struct homa_client_rpc *crpc = NULL;
 	
@@ -308,31 +324,23 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 	if (unlikely(!crpc)) {
 		return -ENOMEM;
 	}
-	crpc->id.port = hsk->client_port;
-	crpc->id.sequence = hsk->next_outgoing_id;
-	crpc->dst = NULL;
+	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
-	list_add(&crpc->client_rpcs_links, &hsk->client_rpcs);
+	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
 	
-	flowi4_init_output(&crpc->fl.u.ip4, sk->sk_bound_dev_if, sk->sk_mark,
-			inet->tos, RT_SCOPE_UNIVERSE, sk->sk_protocol,
-			0, dest_in->sin_addr.s_addr, inet->inet_saddr,
-			dest_in->sin_port, htonl(hsk->client_port),
-			sk->sk_uid);
-	security_sk_classify_flow(sk, &crpc->fl);
-	rt = ip_route_output_flow(sock_net(sk), &crpc->fl.u.ip4, sk);
-	if (IS_ERR(rt)) {
-		err = PTR_ERR(rt);
+	err = homa_addr_init(&crpc->dest, sk, inet->inet_saddr,
+			hsk->client_port, dest_in->sin_addr.s_addr,
+			ntohs(dest_in->sin_port));
+	if (unlikely(err != 0)) {
 		goto error;
 	}
-	crpc->dst = &rt->dst;
 	
-	err = homa_message_out_init(&crpc->request, sk, crpc->id,
-			FROM_CLIENT, msg, len, crpc->dst);
+	err = homa_message_out_init(&crpc->request, sk, msg, len,
+			&crpc->dest, hsk->client_port, crpc->id);
         if (unlikely(err != 0)) {
 		goto error;
 	}
-	homa_xmit_packets(&crpc->request, sk, &crpc->fl);
+	homa_xmit_packets(&crpc->request, sk, &crpc->dest);
 	return len;
 	
 error:
@@ -340,16 +348,6 @@ error:
 		homa_client_rpc_destroy(crpc);
 	}
 	return err;
-}
-
-/**
- * homa_client_rpc_destroy() - Destructor for homa_client_rpc.
- * @crpc:  Structure to clean up.
- */
-void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
-	dst_release(crpc->dst);
-	__list_del_entry(&crpc->client_rpcs_links);
-	homa_message_out_destroy(&crpc->request);
 }
 
 /**
@@ -449,13 +447,55 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  */
 int homa_handler(struct sk_buff *skb) {
 	char buffer[200];
+	__be32 saddr = ip_hdr(skb)->saddr;
+	int length = skb->len;
+	struct common_header *h = (struct common_header *) skb->data;
+	struct homa_server_rpc *srpc;
+	struct homa_sock *hsk;
+	__u16 dport;
+	
+	if (length < HOMA_MAX_HEADER) {
+		printk(KERN_WARNING "Homa packet from %pI4 too short: "
+				"%d bytes\n", &saddr, length);
+		goto discard;
+	}
 	printk(KERN_NOTICE "incoming Homa packet: %s\n",
-			homa_print_header(skb->data, buffer, sizeof(buffer)));
+			homa_print_header(skb, buffer, sizeof(buffer)));
+	
+	dport = htons(h->dport);
+	hsk = homa_find_socket(&homa, dport);
+	if (!hsk) {
+		/* Eventually should return an error result to sender if
+		 * it is a client.
+		 */
+		printk(KERN_WARNING "Homa packet from %pI4 sent to "
+			"unknown port %u\n", &saddr, dport);
+		goto discard;
+	}
+	if (dport < HOMA_MIN_CLIENT_PORT) {
+		/* We are the server for this RPC. */
+		srpc = homa_find_server_rpc(hsk, saddr, ntohs(h->sport), h->id);
+		switch (h->type) {
+		case DATA:
+			homa_data_from_client(&homa, skb, hsk, srpc);
+			break;
+		case GRANT:
+			goto discard;
+		case RESEND:
+			goto discard;
+		case BUSY:
+			goto discard;
+		}
+	}
+	return 0;
+	
+    discard:
+	kfree_skb(skb);
 	return 0;
 }
 
 /**
- * homa_err_handler() -Invoked by IP to handle an incoming error
+ * homa_err_handler() - Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?

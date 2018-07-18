@@ -8,21 +8,22 @@
  * message data from user space into sk_buffs.
  * @hmo:       Struct to initialize; current contents are assumed to be garbage.
  * @sk:        Socket from which message will be sent.
- * @id:        Unique identifier for the message.
- * @direction: FROM_CLIENT or FROM_SERVER.
  * @msg:       Describes the message contents in user space.
  * @len:       Total length of the message.
- * @dst:       Where to send the packets of the message.
+ * @dest:      Describes the destination to which the RPC will be sent.
+ * @sport:     Port of the client (source).
+ * @id:        Unique identifier for the message's RPC (relative to sport).
  * 
  * Return:   Either 0 (for success) or a negative errno value.
  */
 int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
-		struct rpc_id id, __u8 direction, struct msghdr *msg,
-		size_t len, struct dst_entry *dst)
+		struct msghdr *msg, size_t len, struct homa_addr *dest,
+		__u16 sport, __u64 id)
 {
 	int bytes_left;
 	struct sk_buff *skb;
 	int err;
+	struct sk_buff **last_link = &hmo->packets;
 	
 	hmo->length = len;
 	hmo->packets = NULL;
@@ -30,72 +31,46 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 	hmo->next_offset = 0;
 	
 	/* This is a temporary guess; must handle better in the future. */
-	hmo->unscheduled_bytes = 7*HOMA_MAX_DATA_PER_PACKET;
-	hmo->limit = hmo->unscheduled_bytes;
+	hmo->unscheduled = 7*HOMA_MAX_DATA_PER_PACKET;
+	hmo->limit = hmo->unscheduled;
 	hmo->priority = 0;
-	printk(KERN_NOTICE "dst: %p ref count: %d (before)\n", dst,
-		dst->__refcnt.counter);
 	
 	/* Copy message data from user space and form packet buffers. */
-	if (likely(len <= HOMA_MAX_DATA_PER_PACKET)) {
-		struct full_message_header *h;
+	if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
+		return -EINVAL;
+	}
+	for (bytes_left = len, last_link = &hmo->packets; bytes_left > 0;
+			bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
+		struct data_header *h;
+		__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
+		if (likely(cur_size > bytes_left)) {
+			cur_size = bytes_left;
+		}
 		skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
 		if (unlikely(!skb)) {
 			return -ENOMEM;
 		}
 		skb_reserve(skb, HOMA_SKB_RESERVE);
 		skb_reset_transport_header(skb);
-		h = (struct full_message_header *) skb_put(skb, sizeof(*h));
-		h->common.rpc_id = id;
-		h->common.type = FULL_MESSAGE;
-		h->common.direction = direction;
-		h->message_length = htons(hmo->length);
+		h = (struct data_header *) skb_put(skb, sizeof(*h));
+		h->common.sport = htons(sport);
+		h->common.dport = htons(dest->dport);
+		h->common.id = id;
+		h->common.type = DATA;
+		h->message_length = htonl(hmo->length);
+		h->offset = htonl(hmo->length - bytes_left);
+		h->unscheduled = htonl(hmo->unscheduled);
+		h->retransmit = 0;
 		err = skb_add_data_nocache(sk, skb, &msg->msg_iter,
-				hmo->length);
-		if (err != 0) {
+				cur_size);
+		if (unlikely(err != 0)) {
 			return err;
 		}
-		dst_hold(dst);
-		skb_dst_set(skb, dst);
-		*homa_next_skb(skb) = NULL;
-		hmo->packets = skb;
-	} else if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
-		return -EINVAL;
-	} else {
-		struct sk_buff **last_link = &hmo->packets;
-		for (bytes_left = len; bytes_left > 0;
-				bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
-			struct message_frag_header *h;
-			__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
-			if (unlikely(cur_size > bytes_left)) {
-				cur_size = bytes_left;
-			}
-			skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
-			if (unlikely(!skb)) {
-				return -ENOMEM;
-			}
-			skb_reserve(skb, HOMA_SKB_RESERVE);
-			skb_reset_transport_header(skb);
-			h = (struct message_frag_header *) skb_put(skb,
-					sizeof(*h));
-			h->common.rpc_id = id;
-			h->common.type = MESSAGE_FRAG;
-			h->common.direction = direction;
-			h->message_length = htonl(hmo->length);
-			h->offset = htonl(hmo->length - bytes_left);
-			h->unscheduled_bytes = htonl(hmo->unscheduled_bytes);
-			h->retransmit = 0;
-			err = skb_add_data_nocache(sk, skb, &msg->msg_iter,
-					cur_size);
-			if (unlikely(err != 0)) {
-				return err;
-			}
-			dst_hold(dst);
-			skb_dst_set(skb, dst);
-			*last_link = skb;
-			last_link = homa_next_skb(skb);
-			*last_link = NULL;
-		}
+		dst_hold(dest->dst);
+		skb_dst_set(skb, dest->dst);
+		*last_link = skb;
+		last_link = homa_next_skb(skb);
+		*last_link = NULL;
 	}
 	hmo->next_packet = hmo->packets;
 	return 0;
@@ -104,7 +79,6 @@ int homa_message_out_init(struct homa_message_out *hmo, struct sock *sk,
 /**
  * homa_message_out_destroy() - Destructor for homa_message_out.
  * @hmo:       Structure to clean up.
- * @hsk:       Associated socket.
  */
 void homa_message_out_destroy(struct homa_message_out *hmo)
 {
@@ -121,15 +95,15 @@ void homa_message_out_destroy(struct homa_message_out *hmo)
  * them to be sent.
  * @hmo:    Message to check for transmittable packets.
  * @sk:     Socket to use for transmission.
- * @fl4:    Addressing information needed by IP.
+ * @dest:   Addressing information about the destination.
  */
 void homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
-		struct flowi *fl)
+		struct homa_addr *dest)
 {
 	while ((hmo->next_offset < hmo->limit) && hmo->next_packet) {
 		int err;
 		skb_get(hmo->next_packet);
-		err = ip_queue_xmit(sk, hmo->next_packet, fl);
+		err = ip_queue_xmit(sk, hmo->next_packet, &dest->flow);
 		if (err) {
 			printk(KERN_WARNING 
 				"ip_queue_xmit failed in homa_xmit_packets: %d",

@@ -13,6 +13,15 @@ Notes for Homa implementation in Linux:
   * Eventually initialize homa.next_client_port to something random
   * homa_message_out_init: compute unscheduled bites and priority better.
   * Routes: what is the lifetime of these? How long can I retain a pointer?
+    Can they get stale?
+  * Define a standard mechanism for returning errors:
+    * Socket not supported on server (or server process ends while
+      processing request).
+    * Server timeout
+    * Homa protocol not supported by server
+  * Figure out what to do with byte order for 64-bit entities like RPC ids.
+    There is no htonll, for some reason.
+  * Is it safe to use non-locking skb queue functions?
 
 * Port numbers:
   * Shouldn't be visible to clients; only needed for servers.
