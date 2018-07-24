@@ -261,6 +261,7 @@ int homa_sock_init(struct sock *sk) {
 	list_add(&hsk->socket_links, &homa.sockets);
 	INIT_LIST_HEAD(&hsk->client_rpcs);
 	INIT_LIST_HEAD(&hsk->server_rpcs);
+	INIT_LIST_HEAD(&hsk->ready_server_rpcs);
 	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
 	return 0;
 }
@@ -320,9 +321,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 		return -EAFNOSUPPORT;
 	}
 	
+	lock_sock(sk);
 	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc)) {
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto error;
 	}
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
@@ -341,26 +344,62 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 		goto error;
 	}
 	homa_xmit_packets(&crpc->request, sk, &crpc->dest);
+	release_sock(sk);
 	return len;
 	
 error:
 	if (crpc) {
 		homa_client_rpc_destroy(crpc);
 	}
+	release_sock(sk);
 	return err;
 }
 
 /**
  * homa_recvmsg() - Receive a message from a Homa socket.
- * @sk:    Socket on which the system call was invoked.
- * @msg:   ??
- * @len:   ??
- * @return: 0 on success, otherwise a negative errno.
+ * @sk:       Socket on which the system call was invoked.
+ * @msg:      Describes where to copy the message data.
+ * @len:      Bytes of space still left at msg.
+ * @noblock:  Non-zero means MSG_DONTWAIT was specified
+ * @flags:    Flags from system call, not including MSG_DONTWAIT
+ * @addr_len: Store the length of the caller address here.
+ * Return:    0 on success, otherwise a negative errno.
  */
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		 int noblock, int flags, int *addr_len) {
-	printk(KERN_WARNING "unimplemented recvmsg invoked on Homa socket\n");
-	return -ENOSYS;
+	DECLARE_SOCKADDR(struct sockaddr_in *, sin, msg->msg_name);
+	struct homa_sock *hsk = homa_sk(sk);
+	struct homa_message_in *msgin;
+	int count;
+	
+	printk(KERN_NOTICE "Entering homa_recvmsg\n");
+	while (1) {
+		if (!list_empty(&hsk->ready_server_rpcs)) {
+			struct homa_server_rpc *srpc;
+			srpc = list_first_entry(&hsk->ready_server_rpcs,
+				struct homa_server_rpc, ready_links);
+			printk(KERN_NOTICE "srpc: %p\n", srpc);
+			printk(KERN_NOTICE "srpc->next: %p, srpc->prev: %p\n",
+				srpc->ready_links.next, srpc->ready_links.prev);
+			list_del(&srpc->ready_links);
+			srpc->state = IN_SERVICE;
+			msgin = &srpc->request;
+			if (sin) {
+				sin->sin_family = AF_INET;
+				sin->sin_port = htons(srpc->sport);
+				sin->sin_addr.s_addr = srpc->saddr;
+				memset(sin->sin_zero, 0, sizeof(sin->sin_zero));
+				*addr_len = sizeof(*sin);
+			}
+			break;
+		}
+		printk(KERN_NOTICE "Leaving homa_recvmsg with EAGAIN\n");
+		return -EAGAIN;
+	}
+	
+	count =  homa_message_in_copy_data(msgin, msg, len);
+	printk(KERN_NOTICE "Leaving homa_recvmsg normally\n");
+	return count;
 }
 
 /**

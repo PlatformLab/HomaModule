@@ -22,22 +22,29 @@ Notes for Homa implementation in Linux:
   * Figure out what to do with byte order for 64-bit entities like RPC ids.
     There is no htonll, for some reason.
   * Is it safe to use non-locking skb queue functions?
+  * Can a packet input handler be invoked multiple times concurrently?
+  * How do waiting processes wake up when a socket is closed?
 
-* Port numbers:
-  * Shouldn't be visible to clients; only needed for servers.
-  * Bind is only needed to receive requests.
-  * What if port space is partitioned?
-    * 32 bits total
-    * Low-order 16 bits: server ports (bound)
-    * Others: client ports
-      * Pick a random starting position on reboot
-      * Allocate ports sequentially to mazimize time between reuse.
-      * Or, just pick ports at random always (no predictability,
-        better for security)?
-    * Are FROM_CLIENT and FROM_SERVER needed still? Can deduce from
-      the port numbers.
-    * A server will have 2 port numbers: one used for to receive requests
-      and another to send requests.
+* Waiting for input in TCP:
+  * tcp_recvmsg (tcp.c) -> sk_wait_data (sock.c)
+    * Waits for a packet to arrive in sk->sk_receive_queue (loops)
+  * tcp_v4_rcv (tcp_ipv4.c) -> tcp_v4_do_rcv
+    -> tcp_rcv_established  (tcp_input.c) -> sk->sk_data_ready
+    -> sock_def_readable (sock.c)
+    * Wakes up sk->sk_wq
+
+* Waiting for input in UDP:
+  * udp_recvmsg -> __skb_recv_udp -> __skb_wait_for_more_packets (datagram.c)
+    * Sleeps process with no loop
+  * udp_rcv -> __udp4_lib_rcv -> udp_queue_rcv_skb -> __udp_queue_rcv_skb
+    -> __udp_enqueue_schedule_skb -> sk->sk_data_ready
+    -> sock_def_readable (sock.c)
+    * Wakes up sk->sk_wq
+
+* Notes on waiting:
+  * sk_data_ready function looks like it will do most of the work for waking
+    up a sleeping process. sock_def_readable is the default implementation.
+  * 
 
 * On send:
   * Immediately copy message into sk_buffs.
@@ -152,3 +159,4 @@ Notes for Homa implementation in Linux:
                 * Creates UDP header
                 * ip_output.c:ip_send_skb
                   * ip_local_out
+

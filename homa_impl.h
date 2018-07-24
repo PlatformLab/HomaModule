@@ -39,7 +39,7 @@ struct homa_addr {
 	 */
 	__u16 dport;
 	
-	/** @fl: Addressing info needed to send packets. */
+	/** @flow: Addressing info needed to send packets. */
 	struct flowi flow;
 	
 	/**
@@ -47,7 +47,6 @@ struct homa_addr {
 	 * to this, which we must eventually release.
 	 */
 	struct dst_entry *dst;
-	
 };
 
 /**
@@ -56,15 +55,15 @@ struct homa_addr {
  * See the xxx_header structs below for more information about each type.
  */
 enum homa_packet_type {
-    DATA               = 20,
-    GRANT              = 21,
-    RESEND             = 22,
-    BUSY               = 23,
-    BOGUS              = 24,      /* Used only in unit tests. */
-    /* If you add a new type here, you must also do the following:
-     * 1. Change BOGUS so it is the highest opcode
-     * 2. Add support for the new opcode in op_symbol and header_to_string
-     */
+	DATA               = 20,
+	GRANT              = 21,
+	RESEND             = 22,
+	BUSY               = 23,
+	BOGUS              = 24,      /* Used only in unit tests. */
+	/* If you add a new type here, you must also do the following:
+	 * 1. Change BOGUS so it is the highest opcode
+	 * 2. Add support for the new opcode in op_symbol and header_to_string
+	 */
 };
 
 /**
@@ -107,7 +106,7 @@ _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
 
 /**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
- * @skb        Socket buffer containing private link field.
+ * @skb:     Socket buffer containing private link field.
  * 
  * Homa needs to keep a list of buffers in a message, but it can't use the
  * links built into sk_buffs because Homa wants to retain its list even
@@ -149,6 +148,7 @@ struct common_header {
  * the message or HOMA_MAX_DATA_PER_PACKET, whichever is smaller.
  */
 struct data_header {
+	/** @common: Fields common to all packet types. */
 	struct common_header common;
 	
 	/** @message_length: Total #bytes in the *message* */
@@ -186,6 +186,7 @@ _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
  * additional bytes in the message.
  */
 struct grant_header {
+	/** @common: Fields common to all packet types. */
 	struct common_header common;
 	
 	/**
@@ -215,6 +216,7 @@ _Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
  * message, even if it already sent it previously.
  */
 struct resend_header {
+	/** @common: Fields common to all packet types. */
 	struct common_header common;
 	
 	/**
@@ -257,6 +259,7 @@ _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
  * it isn't sending data expected by the recipient).
  */
 struct busy_header {
+	/** @common: Fields common to all packet types. */
 	struct common_header common;
 } __attribute__((packed));
 _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
@@ -286,9 +289,9 @@ struct homa_message_out {
 	 */
 	struct sk_buff *next_packet;
 	
-	/*
-	 * @offset: Offset within message of first byte in next_packet. If
-	 * all packets have been sent, will be >= @length.
+	/**
+	 * @next_offset: Offset within message of first byte in next_packet.
+	 * If all packets have been sent, will be >= @length.
 	 */
 	int next_offset;
 	
@@ -319,7 +322,7 @@ struct homa_client_rpc {
 	struct homa_addr dest;
 	
 	/**
-	 * @client_rpcs_links: For linking this object into
+	 * @client_rpc_links: For linking this object into
 	 * &homa_sock.client_rpcs.
 	 */
 	struct list_head client_rpc_links;
@@ -334,7 +337,7 @@ struct homa_client_rpc {
  */
 struct homa_message_in {
 	/**
-	 * @packets: Packets received for this message so far. The list
+	 * @packets: DATA packets received for this message so far. The list
 	 * is sorted in order of offset (head is lowest offset), but
 	 * packets can be received out of order, so there may be times
 	 * when there are holes in the list.
@@ -381,10 +384,32 @@ struct homa_server_rpc {
 	struct homa_message_out response;
 	
 	/**
-	 * @server_rpcs_links: For linking this object into
+	 * @state: The current state of processing of this RPC.
+	 * @INCOMING:    The request message has been partially received.
+	 * @READY:       The request message is complete but it has not
+	 *               yet been read from the socket.
+	 * @IN_SERVICE:  The request message has been read, but the response
+	 *               message has not yet been presented to the kernel.
+	 * @RESPONSE:    The response message is being transmitted. 
+	 */
+	enum {
+		INCOMING           = 5,
+		READY              = 6,
+		IN_SERVICE         = 7,
+		RESPONSE           = 8
+	} state;
+	
+	/**
+	 * @server_rpc_links: For linking this object into
 	 * &homa_sock.server_rpcs.
 	 */
 	struct list_head server_rpc_links;
+	
+	/**
+	 * @ready_links: Iff state == READY, this is used to link this object
+	 * into &homa_sock.ready_server_rpcs.
+	 */
+	struct list_head ready_links;
 };
 
 /**
@@ -412,8 +437,11 @@ struct homa_sock {
 	/** @client_rpcs: List of active RPCs originating from this socket. */
 	struct list_head client_rpcs;
 	
-	/** @client_rpcs: List of active RPCs sent to this socket. */
+	/** @server_rpcs: Contains all active RPCs sent to this socket. */
 	struct list_head server_rpcs;
+	
+	/** @ready_server_rpcs: Contains all server RPCs in READY state. */
+	struct list_head ready_server_rpcs;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -428,7 +456,7 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
  */
 struct homa {
 	/**
-	 * @next_client_report: A client port number to consider for the
+	 * @next_client_port: A client port number to consider for the
 	 * next Homa socket; increments monotonically. Current value may
 	 * be in the range allocated for servers; must check before using.
 	 * This port may also be in use already; must check.
@@ -459,11 +487,10 @@ extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
 extern int    homa_handler(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
-extern void   homa_message_in_destroy(struct homa_message_in *hmi);
-extern void   homa_message_out_destroy(struct homa_message_out *hmo);
-extern int    homa_setsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, unsigned int optlen);
 extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
+extern int    homa_message_in_copy_data(struct homa_message_in *hmi,
+		struct msghdr *msg, int max_bytes);
+extern void   homa_message_in_destroy(struct homa_message_in *hmi);
 extern void   homa_message_in_init(struct homa_message_in *hmi, int length,
 		int unscheduled);
 extern void   homa_message_out_destroy(struct homa_message_out *hmo);
@@ -481,6 +508,8 @@ extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
 extern void   homa_server_rpc_destroy(struct homa_server_rpc *srpc);
+extern int    homa_setsockopt(struct sock *sk, int level, int optname,
+		char __user *optval, unsigned int optlen);
 extern int    homa_sock_init(struct sock *sk);
 extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);

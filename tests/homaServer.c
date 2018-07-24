@@ -20,6 +20,11 @@ int main(int argc, char** argv) {
 	int fd;
 	int port;
 	struct sockaddr_in addr_in;
+	struct msghdr msg;
+	struct iovec iovec;
+	int message[100000];
+	struct sockaddr_in source;
+	int length;
 	
 	if (argc < 2) {
 		printf("Usage: %s port\n", argv[0]);
@@ -48,6 +53,33 @@ int main(int argc, char** argv) {
 	}
 	printf("Successfully bound to Homa port %d\n", port);
 	while (1) {
-		sleep(1000);
+		iovec.iov_base = message;
+		iovec.iov_len = sizeof(message);
+		msg.msg_name = &source;
+		msg.msg_namelen = sizeof(source);
+		msg.msg_iov = &iovec;
+		msg.msg_iovlen = 1;
+		msg.msg_control = NULL;
+		msg.msg_controllen = 0;
+		msg.msg_flags = 0;
+		length = recvmsg(fd, &msg, 0);
+		if (length > 0) {
+			int seed = message[0];
+			int limit = (length + sizeof(int) - 1)/sizeof(int);
+			int i;
+			printf ("Received message with %d bytes, seed %d\n",
+				length, seed);
+			for (i = 0; i < limit; i++) {
+				if (message[i] != seed + i) {
+					printf("Bad value at index %d in "
+						"message; expected %d, got %d\n",
+						i, seed+i, message[i]);
+					break;
+				}
+			}
+		} else {
+			printf("Recvmsg failed: %s\n", strerror(errno));
+		}
+		sleep(1);
 	}
 }

@@ -1,7 +1,9 @@
 // This is a test program to exercise Homa from the sender side.
 //
 // Usage:
-// homaSend hostName port msgLength
+// homaSend hostName port msgLength [seed]
+// seed is a value that is used to generate message contents that
+// can be checked upon receipt.
 
 #include <errno.h>
 #include <netdb.h>
@@ -21,15 +23,17 @@ int main(int argc, char** argv) {
 	struct sockaddr_in *addr_in;
 	struct addrinfo hints;
 	char *host;
+	int seed = 0;
 //	char *sockType;
 //	struct addrinfo  *rp;
 //	int count;
 #define MAX_MESSAGE_LENGTH 100000
-	char buffer[MAX_MESSAGE_LENGTH];
-	int length;
+#define INTS_IN_BUFFER ((MAX_MESSAGE_LENGTH + sizeof(int) - 1)/sizeof(int))
+	int buffer[INTS_IN_BUFFER];
+	int length, i;
 	
 	if (argc < 4) {
-		printf("Usage: %s hostName port msgLength\n", argv[0]);
+		printf("Usage: %s hostName port msgLength [seed]\n", argv[0]);
 		exit(1);
 	}
 	host = argv[1];
@@ -48,6 +52,14 @@ int main(int argc, char** argv) {
 	if (length > MAX_MESSAGE_LENGTH) {
 		length = MAX_MESSAGE_LENGTH;
 		printf("Reducing message length to %d", length);
+	}
+	if (argc >= 5) {
+		seed = strtol(argv[4], NULL, 10);
+		if (seed == 0) {
+			printf("Bad seed %s; must be positive integer\n",
+					argv[4]);
+			exit(1);
+		}
 	}
 	
 	memset(&hints, 0, sizeof(struct addrinfo));
@@ -85,6 +97,9 @@ int main(int argc, char** argv) {
 	
 	addr_in = (struct sockaddr_in *) result->ai_addr;
 	addr_in->sin_port = htons(port);
+	for (i = 0; i < INTS_IN_BUFFER; i++) {
+		buffer[i] = seed + i;
+	}
 	status = sendto(fd, buffer, length, 0, result->ai_addr,
 			result->ai_addrlen);
 	if (status < 0) {
