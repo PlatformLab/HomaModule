@@ -371,6 +371,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_message_in *msgin;
 	int count;
+	long timeo;
 	
 	printk(KERN_NOTICE "Entering homa_recvmsg\n");
 	while (1) {
@@ -378,9 +379,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			struct homa_server_rpc *srpc;
 			srpc = list_first_entry(&hsk->ready_server_rpcs,
 				struct homa_server_rpc, ready_links);
-			printk(KERN_NOTICE "srpc: %p\n", srpc);
-			printk(KERN_NOTICE "srpc->next: %p, srpc->prev: %p\n",
-				srpc->ready_links.next, srpc->ready_links.prev);
 			list_del(&srpc->ready_links);
 			srpc->state = IN_SERVICE;
 			msgin = &srpc->request;
@@ -393,13 +391,44 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			}
 			break;
 		}
-		printk(KERN_NOTICE "Leaving homa_recvmsg with EAGAIN\n");
-		return -EAGAIN;
+		if (noblock) {
+			return -EAGAIN;
+		}
+		timeo = sock_rcvtimeo(sk, noblock);
+		timeo = homa_wait_ready_msg(sk, &timeo);
+		if (signal_pending(current)) {
+			printk("Aborting recvmsg because of errno %d\n",
+				-sock_intr_errno(timeo));
+			return sock_intr_errno(timeo);
+		}
+		printk(KERN_NOTICE "Woke up, trying again\n");
 	}
 	
 	count =  homa_message_in_copy_data(msgin, msg, len);
 	printk(KERN_NOTICE "Leaving homa_recvmsg normally\n");
 	return count;
+}
+
+/**
+ * homa_wait_ready_msg() - Wait until there exists at least one complete
+ * message that is ready for service.
+ * @sk:      Homa socket on which the message will arrive.
+ * @timeo:   Maximum time to wait; modified before return to hold the wait
+ *           time remaining.
+ * Return:   Zero or a negative errno value to return to app.
+ */
+int homa_wait_ready_msg(struct sock *sk, long *timeo)
+{
+	DEFINE_WAIT_FUNC(wait, woken_wake_function);
+	int rc;
+
+	add_wait_queue(sk_sleep(sk), &wait);
+	sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+	rc = sk_wait_event(sk, timeo,
+			!list_empty(&homa_sk(sk)->ready_server_rpcs), &wait);
+	sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
+	remove_wait_queue(sk_sleep(sk), &wait);
+	return rc;
 }
 
 /**

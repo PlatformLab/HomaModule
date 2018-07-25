@@ -87,9 +87,11 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 	}
 	homa_add_packet(&srpc->request, skb);
 	if (srpc->request.bytes_remaining == 0) {
+		struct sock *sk = (struct sock *) hsk;
 		printk(KERN_NOTICE "Incoming RPC is READY\n");
 		srpc->state = READY;
 		list_add(&srpc->ready_links, &hsk->ready_server_rpcs);
+		sk->sk_data_ready(sk);
 	}
 }
 

@@ -16,6 +16,25 @@
 // Homa's protocol number within the IP protocol space.
 #define IPPROTO_HOMA 140
 
+/**
+ * printAddress() - Generate a human-readable description of an inet address.
+ * @addr:    The address to print
+ * @buffer:  Where to store the human readable description.
+ * @size:    Number of bytes available in buffer.
+ * Return:   The address of the human-readable string (buffer).
+ */
+char *printAddress(struct sockaddr_in *addr, char *buffer, int size)
+{
+	if (addr->sin_family != AF_INET) {
+		snprintf(buffer, size, "Unknown family %d", addr->sin_family);
+		return buffer;
+	}
+	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
+	snprintf(buffer, size, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
+		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
+	return buffer;
+}
+
 int main(int argc, char** argv) {
 	int fd;
 	int port;
@@ -23,6 +42,7 @@ int main(int argc, char** argv) {
 	struct msghdr msg;
 	struct iovec iovec;
 	int message[100000];
+	char sourceAddress[1000];
 	struct sockaddr_in source;
 	int length;
 	
@@ -67,8 +87,9 @@ int main(int argc, char** argv) {
 			int seed = message[0];
 			int limit = (length + sizeof(int) - 1)/sizeof(int);
 			int i;
-			printf ("Received message with %d bytes, seed %d\n",
-				length, seed);
+			printf("Received message from %s with %d bytes, seed %d\n",
+				printAddress(&source, sourceAddress,
+				sizeof(sourceAddress)),length, seed);
 			for (i = 0; i < limit; i++) {
 				if (message[i] != seed + i) {
 					printf("Bad value at index %d in "
@@ -80,6 +101,6 @@ int main(int argc, char** argv) {
 		} else {
 			printf("Recvmsg failed: %s\n", strerror(errno));
 		}
-		sleep(1);
+		// sleep(1);
 	}
 }

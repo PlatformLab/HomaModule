@@ -5,11 +5,11 @@
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/sched/signal.h>
 #include <linux/skbuff.h>
 #include <linux/socket.h>
 #include <net/ip.h>
 #include <net/protocol.h>
-#include <net/inet_common.h>
 #include <net/inet_common.h>
 
 extern struct homa homa;
@@ -515,5 +515,6 @@ extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);
 extern int    homa_v4_early_demux(struct sk_buff *skb);
 extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
+extern int    homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern void   homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
 		struct homa_addr *dest);
