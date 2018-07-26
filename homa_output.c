@@ -8,7 +8,7 @@
  * message data from user space into sk_buffs.
  * @msgout:    Struct to initialize; current contents are assumed to be garbage.
  * @sk:        Socket from which message will be sent.
- * @msg:       Describes the message contents in user space.
+ * @iter:      Info about the request buffer in user space.
  * @len:       Total length of the message.
  * @dest:      Describes the destination to which the RPC will be sent.
  * @sport:     Port of the client (source).
@@ -17,7 +17,7 @@
  * Return:   Either 0 (for success) or a negative errno value.
  */
 int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
-		struct msghdr *msg, size_t len, struct homa_addr *dest,
+		struct iov_iter *iter, size_t len, struct homa_addr *dest,
 		__u16 sport, __u64 id)
 {
 	int bytes_left;
@@ -61,8 +61,7 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 		h->offset = htonl(msgout->length - bytes_left);
 		h->unscheduled = htonl(msgout->unscheduled);
 		h->retransmit = 0;
-		err = skb_add_data_nocache(sk, skb, &msg->msg_iter,
-				cur_size);
+		err = skb_add_data_nocache(sk, skb, iter, cur_size);
 		if (unlikely(err != 0)) {
 			return err;
 		}

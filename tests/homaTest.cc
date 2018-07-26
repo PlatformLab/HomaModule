@@ -18,8 +18,7 @@
 
 #include <thread>
 
-// Homa's protocol number within the IP protocol space.
-#define IPPROTO_HOMA 140
+#include "homa.h"
 
 /**
  * get_int() - Parse an integer from a string, and exit if the parse fails.
@@ -192,12 +191,15 @@ int main(int argc, char** argv) {
 					strerror(errno));
 			}
 		} else if (strcmp(argv[nextArg], "send") == 0) {
+			uint64_t id;
 			/* Send a single message to the server. */
-			status = sendto(fd, buffer, length, 0, result->ai_addr,
-					result->ai_addrlen);
+			status = homa_send(fd, buffer, length, result->ai_addr,
+					result->ai_addrlen, &id);
 			if (status < 0) {
-				printf("Error in sendto: %s\n",
+				printf("Error in homa_send: %s\n",
 					strerror(errno));
+			} else {
+				printf("Homa_send succeeded, id %lu\n", id);
 			}
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			/* Test what happens if a UDP socket is closed while a

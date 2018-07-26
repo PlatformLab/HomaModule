@@ -23,7 +23,39 @@ Notes for Homa implementation in Linux:
     There is no htonll, for some reason.
   * Is it safe to use non-locking skb queue functions?
   * Can a packet input handler be invoked multiple times concurrently?
-  * How do waiting processes wake up when a socket is closed?
+  * What is audit_sockaddr? Do I need to invoke it when I read sockaddrs
+    from user space?
+
+* How to pair requests and responses?
+  * Choice #1: extend addresses to include an RPC id:
+    * On client send, destination address has an id of 0; kernel fills in
+      correct id.
+    * On receive, the source address includes the RPC id (both client and server)
+    * On server send, destination address has a non-zero id (the one from
+      the receive): this is used to pair the response with a particular request.
+    Analysis:
+    * The RPC ID doesn't exactly fit as part of addresses, though it is close.
+    * Doesn't require a change in API.
+    * Can the kernel modify the address passed to sendmsg? What if the
+      application invokes write instead of sendmsg?
+  * Choice #2: perform sends and receives with an ioctl that can be used
+    to pass RPC ids.
+    Analysis:
+    * Results in what is effectively a new interface.
+  * Choice #3: put the RPC Id in the message at the beginning. The client
+    selects the id, not the kernel, but the kernel will interpret these
+    ids both on sends and receives.
+    Analysis:
+    * Awkward interaction between client and kernel, with the kernel
+      now interpreting what used to be just an uninterpreted blob of data.
+    * Will probably result in more application code to read and write
+      the ids; unclear that this can be hidden from app.
+  * Choice #4: define a new higher-level application API; it won't matter
+    what the underlying kernel calls are:
+    homa_send(fd, address, msg) -> id
+    homa_recv(fd, buffer) -> id, length, sender_address, is_request
+    homa_invoke(fd, address, request, response) -> response_length
+    homa_reply(fd, address, id, msg)
 
 * Waiting for input in TCP:
   * tcp_recvmsg (tcp.c) -> sk_wait_data (sock.c)
@@ -44,7 +76,6 @@ Notes for Homa implementation in Linux:
 * Notes on waiting:
   * sk_data_ready function looks like it will do most of the work for waking
     up a sleeping process. sock_def_readable is the default implementation.
-  * 
 
 * On send:
   * Immediately copy message into sk_buffs.

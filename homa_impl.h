@@ -2,6 +2,7 @@
  * that implement Homa for Linux.
  */
 
+#include <linux/audit.h>
 #include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -12,18 +13,9 @@
 #include <net/protocol.h>
 #include <net/inet_common.h>
 
+#include "homa.h"
+
 extern struct homa homa;
-
-/* Homa's protocol number within the IP protocol space (this is not an
- * officially allocated slot).
- */
-#define IPPROTO_HOMA 140
-
-/**
- * define HOMA_MAX_MESSAGE_LENGTH - Maximum bytes of payload in a Homa
- * request or response message.
- */
-#define HOMA_MAX_MESSAGE_LENGTH 1000000
 
 /**
  * struct homa_addr - Collects in one place the information needed to send
@@ -95,14 +87,6 @@ _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
  */
 #define HOMA_SKB_SIZE (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_HEADER \
 				+ HOMA_SKB_RESERVE + sizeof(void*))
-
-/**
- * define HOMA_MIN_CLIENT_PORT - The 16-bit port space is divided into
- * two nonoverlapping regions. Ports 1-32767 are reserved exclusively
- * for well-defined server ports. The remaining ports are used for client
- * ports; these are allocated automatically by Homa. Port 0 is reserved.
- */
-#define HOMA_MIN_CLIENT_PORT 0x8000
 
 /**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
@@ -333,7 +317,7 @@ struct homa_client_rpc {
 
 /**
  * struct homa_message_in - Holds the state of a message received by
- * this machine; used for both requests and responses.
+ * this machine; used for both requests and responses. 
  */
 struct homa_message_in {
 	/**
@@ -440,7 +424,10 @@ struct homa_sock {
 	/** @server_rpcs: Contains all active RPCs sent to this socket. */
 	struct list_head server_rpcs;
 	
-	/** @ready_server_rpcs: Contains all server RPCs in READY state. */
+	/**
+	 * @ready_server_rpcs: Contains all server RPCs in READY state (head
+	 * is oldest, i.e. next to return).
+	 */
 	struct list_head ready_server_rpcs;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
@@ -487,15 +474,16 @@ extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
 extern int    homa_handler(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
+extern int    homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern int    homa_message_in_copy_data(struct homa_message_in *hmi,
-		struct msghdr *msg, int max_bytes);
+		struct iov_iter *iter, int max_bytes);
 extern void   homa_message_in_destroy(struct homa_message_in *hmi);
 extern void   homa_message_in_init(struct homa_message_in *hmi, int length,
 		int unscheduled);
 extern void   homa_message_out_destroy(struct homa_message_out *hmo);
 extern int    homa_message_out_init(struct homa_message_out *hmo,
-		struct sock *sk, struct msghdr *msg, size_t len,
+		struct sock *sk, struct iov_iter *iter, size_t len,
 		struct homa_addr *dest, __u16 sport, __u64 id);
 extern __poll_t
 	      homa_poll(struct file *file, struct socket *sock,

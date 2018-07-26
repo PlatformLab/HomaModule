@@ -13,6 +13,8 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include "homa.h"
+
 // Homa's protocol number within the IP protocol space.
 #define IPPROTO_HOMA 140
 
@@ -39,8 +41,6 @@ int main(int argc, char** argv) {
 	int fd;
 	int port;
 	struct sockaddr_in addr_in;
-	struct msghdr msg;
-	struct iovec iovec;
 	int message[100000];
 	char sourceAddress[1000];
 	struct sockaddr_in source;
@@ -73,23 +73,17 @@ int main(int argc, char** argv) {
 	}
 	printf("Successfully bound to Homa port %d\n", port);
 	while (1) {
-		iovec.iov_base = message;
-		iovec.iov_len = sizeof(message);
-		msg.msg_name = &source;
-		msg.msg_namelen = sizeof(source);
-		msg.msg_iov = &iovec;
-		msg.msg_iovlen = 1;
-		msg.msg_control = NULL;
-		msg.msg_controllen = 0;
-		msg.msg_flags = 0;
-		length = recvmsg(fd, &msg, 0);
+		uint64_t id;
+		length = homa_recv(fd, message, sizeof(message),
+			(struct sockaddr *) &source, sizeof(source), &id);
 		if (length > 0) {
 			int seed = message[0];
 			int limit = (length + sizeof(int) - 1)/sizeof(int);
 			int i;
-			printf("Received message from %s with %d bytes, seed %d\n",
+			printf("Received message from %s with %d bytes, "
+				"seed %d, id %lu\n",
 				printAddress(&source, sourceAddress,
-				sizeof(sourceAddress)),length, seed);
+				sizeof(sourceAddress)),length, seed, id);
 			for (i = 0; i < limit; i++) {
 				if (message[i] != seed + i) {
 					printf("Bad value at index %d in "

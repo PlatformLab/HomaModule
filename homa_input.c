@@ -90,7 +90,7 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct sock *sk = (struct sock *) hsk;
 		printk(KERN_NOTICE "Incoming RPC is READY\n");
 		srpc->state = READY;
-		list_add(&srpc->ready_links, &hsk->ready_server_rpcs);
+		list_add_tail(&srpc->ready_links, &hsk->ready_server_rpcs);
 		sk->sk_data_ready(sk);
 	}
 }
@@ -99,12 +99,14 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
  * homa_message_in_copy_data() - Extract the data from an incoming message
  * and copy it to buffer(s) in user space.
  * @msgin:      The message whose data should be extracted.
- * @dest:       Where to copy the data.
- * @max_bytes   Total amount of space available at dest.
+ * @iter:       Describes the available buffer space at user-level; message
+ *              data gets copied here.
+ * @max_bytes   Total amount of space available via iter.
+ * 
  * Return:      The number of bytes copied, or a negative errno.
  */
 int homa_message_in_copy_data(struct homa_message_in *msgin,
-		struct msghdr *msg, int max_bytes)
+		struct iov_iter *iter, int max_bytes)
 {
 	struct sk_buff *skb;
 	int offset;
@@ -128,9 +130,9 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 		if (this_size > remaining) {
 			this_size =  remaining;
 		}
-		err = skb_copy_datagram_msg(skb,
+		err = skb_copy_datagram_iter(skb,
 				sizeof(*h) + (offset - this_offset),
-				msg, this_size);
+				iter, this_size);
 		if (err) {
 			return err;
 		}
@@ -154,6 +156,7 @@ void homa_message_in_destroy(struct homa_message_in *msgin)
 	skb_queue_walk_safe(&msgin->packets, skb, next) {
 		kfree_skb(skb);
 	}
+	__skb_queue_head_init(&msgin->packets);
 }
 
 /**
