@@ -3,7 +3,7 @@
 // how other parts of the system react when memory runs low.
 //
 // Usage:
-// useMemory gbytes
+// use_memory gbytes
 
 #include <stdio.h>
 #include <stdlib.h>

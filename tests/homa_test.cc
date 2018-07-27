@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "homa.h"
+#include "test_utils.h"
 
 /**
  * get_int() - Parse an integer from a string, and exit if the parse fails.
@@ -64,40 +65,143 @@ void print_help(const char *name)
 		"selects a particular test to run (see the code for available\n"
 		"tests). The following options are supported:\n\n"
 		"--length     Size of messages, in bytes (default: 100)\n"
-		"--seed       Used to compute message contents (default: 0)\n",
+		"--seed       Used to compute message contents (default: 12345)\n",
 		name);
 }
 
 /**
- * printAddress() - Generate a human-readable description of an inet address.
- * @addr:    The address to print
- * @buffer:  Where to store the human readable description.
- * @size:    Number of bytes available in buffer.
- * Return:   The address of the human-readable string (buffer).
+ * test_close() - Close a Homa socket while a thread is waiting on it.
  */
-char *print_address(struct sockaddr_in *addr, char *buffer, int size)
+void test_close()
 {
-	if (addr->sin_family != AF_INET) {
-		snprintf(buffer, size, "Unknown family %d", addr->sin_family);
-		return buffer;
+	int result, fd;
+	int message[100000];
+	struct sockaddr source;
+	uint64_t id;
+
+	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n",
+			strerror(errno));
+		exit(1);
 	}
-	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
-	snprintf(buffer, size, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
-		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
-	return buffer;
+	std::thread thread(close_fd, fd);
+	result = homa_recv(fd, message, sizeof(message), &source,
+			sizeof(source), &id);
+	if (result > 0) {
+		printf("Received %d bytes\n", result);
+	} else {
+		printf("Error in recvmsg: %s\n",
+			strerror(errno));
+	}
 }
 
-int main(int argc, char** argv) {
+/**
+ * test_invoke() - Send a request and wait for response.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request
+ * @request:  Request message.
+ * @length:   Number of bytes in @request.
+ */
+void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
+{
+	uint64_t id;
+	char response[100000];
+	struct sockaddr_in server_addr;
+	int status;
+	size_t resp_length;
+
+	status = homa_send(fd, request, length, dest,
+			sizeof(*dest), &id);
+	if (status < 0) {
+		printf("Error in homa_send: %s\n",
+			strerror(errno));
+	} else {
+		printf("Homa_send succeeded, id %lu\n", id);
+	}
+	resp_length = homa_recv(fd, response, sizeof(response),
+		(struct sockaddr *) &server_addr,
+		sizeof(server_addr), &id);
+	if (resp_length < 0) {
+		printf("Error in homa_recv: %s\n",
+			strerror(errno));
+		return;
+	}
+	int seed = check_buffer(response, resp_length);
+	printf("Received message from %s with %lu bytes, "
+		"seed %d, id %lu\n",
+		print_address(&server_addr), resp_length, seed, id);
+}
+
+/**
+ * test_send() - Send a request; don't wait for response.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request
+ * @request:  Request message.
+ * @length:   Number of bytes in @request.
+ */
+void test_send(int fd, struct sockaddr *dest, char *request, int length)
+{
+	uint64_t id;
+	int status;
+
+	status = homa_send(fd, request, length, dest,
+			sizeof(*dest), &id);
+	if (status < 0) {
+		printf("Error in homa_send: %s\n",
+			strerror(errno));
+	} else {
+		printf("Homa_send succeeded, id %lu\n", id);
+	}
+}
+
+/**
+ * test_udpclose() - Close a UDP socket while a thread is waiting on it.
+ */
+void test_udpclose()
+{
+	/* Test what happens if a UDP socket is closed while a
+	 * thread is waiting on it. */
+	struct sockaddr_in address;
+	char buffer[1000];
+
+	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0) {
+		printf("Couldn't open UDP socket: %s\n",
+			strerror(errno));
+		exit(1);
+	}
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_ANY);
+	address.sin_port = 0;
+	int result = bind(fd,
+		reinterpret_cast<struct sockaddr*>(&address),
+		sizeof(address));
+	if (result < 0) {
+		printf("Couldn't bind UDP socket: %s\n",
+			strerror(errno));
+		exit(1);
+	}
+	std::thread thread(close_fd, fd);
+	result = read(fd, buffer, sizeof(buffer));
+	if (result >= 0) {
+		printf("UDP read returned %d bytes\n", result);
+	} else {
+		printf("UDP read returned error: %s\n",
+			strerror(errno));
+	}
+}
+
+int main(int argc, char** argv)
+{
 	int fd, status, port, nextArg;
-        unsigned int i;
 	struct addrinfo *matching_addresses;
-	struct sockaddr_in *dest;
+	struct sockaddr *dest;
 	struct addrinfo hints;
 	char *host, *port_name;
-	int seed = 0;
+	int seed = 12345;
 #define MAX_MESSAGE_LENGTH 100000
-#define INTS_IN_BUFFER ((MAX_MESSAGE_LENGTH + sizeof(int) - 1)/sizeof(int))
-	int buffer[INTS_IN_BUFFER];
+	char buffer[MAX_MESSAGE_LENGTH];
 	int length = 100;
 	
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
@@ -163,11 +267,9 @@ int main(int argc, char** argv) {
 				host, gai_strerror(status));
 		exit(1);
 	}
-	dest = (struct sockaddr_in *) matching_addresses->ai_addr;
-	dest->sin_port = htons(port);
-	for (i = 0; i < INTS_IN_BUFFER; i++) {
-		buffer[i] = seed + i;
-	}
+	dest = matching_addresses->ai_addr;
+	((struct sockaddr_in *) dest)->sin_port = htons(port);
+	seed_buffer(buffer, sizeof(buffer), seed);
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -177,111 +279,13 @@ int main(int argc, char** argv) {
 	
 	for ( ; nextArg < argc; nextArg++) {
 		if (strcmp(argv[nextArg], "close") == 0) {
-			/* Test what happens if a socket is closed while a
-			 * thread is waiting on it. */
-			int result, fd2;
-			struct msghdr msg;
-			struct iovec iovec;
-			int message[100000];
-			struct sockaddr_in source;
-			
-			iovec.iov_base = message;
-			iovec.iov_len = sizeof(message);
-			msg.msg_name = &source;
-			msg.msg_namelen = sizeof(source);
-			msg.msg_iov = &iovec;
-			msg.msg_iovlen = 1;
-			msg.msg_control = NULL;
-			msg.msg_controllen = 0;
-			msg.msg_flags = 0;
-			
-			fd2 = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-			if (fd2 < 0) {
-				printf("Couldn't open Homa socket: %s\n",
-					strerror(errno));
-				exit(1);
-			}
-			std::thread thread(close_fd, fd2);
-			result = recvmsg(fd2, &msg, 0);
-			if (result > 0) {
-				printf("Received %d bytes\n", result);
-			} else {
-				printf("Error in recvmsg: %s\n",
-					strerror(errno));
-			}
+			test_close();
 		} else if (strcmp(argv[nextArg], "invoke") == 0) {
-			/* Send a single message and wait for response. */
-			
-			uint64_t id;
-			char response[10000];
-			size_t result;
-			char addrString[100];
-			struct sockaddr_in server_addr;
-			
-			status = homa_send(fd, buffer, length,
-					(struct sockaddr *) dest,
-					sizeof(*dest), &id);
-			if (status < 0) {
-				printf("Error in homa_send: %s\n",
-					strerror(errno));
-			} else {
-				printf("Homa_send succeeded, id %lu\n", id);
-			}
-			result = homa_recv(fd, response, sizeof(response),
-				(struct sockaddr *) &server_addr,
-				sizeof(server_addr), &id);
-			if (length < 0) {
-				printf("Error in homa_recv: %s\n",
-					strerror(errno));
-			} else {
-				printf("Received message from %s with %lu bytes, "
-					"seed %d, id %lu\n",
-					print_address(&server_addr, addrString,
-					sizeof(addrString)), result, 0, id);
-			}
+			test_invoke(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
-			uint64_t id;
-			/* Send a single message to the server. */
-			status = homa_send(fd, buffer, length,
-					(struct sockaddr *) dest,
-					sizeof(*dest), &id);
-			if (status < 0) {
-				printf("Error in homa_send: %s\n",
-					strerror(errno));
-			} else {
-				printf("Homa_send succeeded, id %lu\n", id);
-			}
+			test_send(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
-			/* Test what happens if a UDP socket is closed while a
-			 * thread is waiting on it. */
-			struct sockaddr_in address;
-			char buffer[1000];
-			
-			int fd2 = socket(AF_INET, SOCK_DGRAM, 0);
-			if (fd2 < 0) {
-				printf("Couldn't open UDP socket: %s\n",
-					strerror(errno));
-				exit(1);
-			}
-			address.sin_family = AF_INET;
-			address.sin_addr.s_addr = htonl(INADDR_ANY);
-			address.sin_port = 0;
-			int result = bind(fd2,
-				reinterpret_cast<struct sockaddr*>(&address),
-				sizeof(address));
-			if (result < 0) {
-				printf("Couldn't bind UDP socket: %s\n",
-					strerror(errno));
-				exit(1);
-			}
-			std::thread thread(close_fd, fd2);
-			result = read(fd2, buffer, sizeof(buffer));
-			if (result >= 0) {
-				printf("UDP read returned %d bytes\n", result);
-			} else {
-				printf("UDP read returned error: %s\n",
-					strerror(errno));
-			}
+			test_udpclose();
 		} else {
 			printf("Unknown operation '%s'\n", argv[nextArg]);
 			exit(1);

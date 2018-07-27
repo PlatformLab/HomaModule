@@ -1,4 +1,4 @@
-// This is a test program used together with bufferServer.c to learn about
+// This is a test program used together with buffer_server.c to learn about
 // how TCP handles buffer exhaustion. This program opens an infinite series
 // of sockets to a single port and writes as much data to each socket as
 // if can before the socket backs up (it assumes that the server application
@@ -6,7 +6,7 @@
 // to the next socket.
 //
 // Usage:
-// bufferClient hostName port
+// buffer_client hostName port
 
 #include <errno.h>
 #include <netdb.h>

@@ -2,10 +2,15 @@
 
 CFLAGS := -Wall -Werror -g -I..
 
-BINS := bufferClient bufferServer getTimeTrace homaTest \
-        homaServer receiveRaw scratch sendRaw testTimeTrace useMemory
+BINS := buffer_client buffer_server get_time_trace homa_test \
+        homa_server receive_raw scratch send_raw test_time_trace use_memory
 
 OBJS := $(patsubst %,%.o,$(BINS))
+	
+LIB_SRCS := homa_api.c test_utils.c
+LIB_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(LIB_SRCS)))
+	
+.SECONDARY: $(OBJS) $(LIB_OBJS)
 
 all: $(BINS)
 
@@ -13,20 +18,20 @@ all: $(BINS)
 # for %:%.c and %:%.cc.
 .SUFFIXES:
 	
-%: %.o homa_api.o
+%: %.o $(LIB_OBJS)
 	g++ $(CFLAGS) $^ -lpthread -o $@
 	
-%.o: %.cc
+%.o: %.cc test_utils.h ../homa.h
 	g++ -c $(CFLAGS) -std=c++11 $< -o $@
 	
-%.o: %.c
+%.o: %.c test_utils.h ../homa.h
 	cc -c $(CFLAGS) $< -o $@
 	
 homa_api.o: ../homa_api.c
 	cc -c $(CFLAGS) $< -o $@
 
 clean:
-	rm -f $(BINS) $(OBJS) homa_api.o
+	rm -f $(BINS) $(OBJS) $(LIB_OBJS)
 
 # The following target is useful for debugging Makefiles; it
 # prints the value of a make variable.

@@ -1,7 +1,7 @@
 // This is a test program that will send a packet to a given
 // IP protocol, with given contents.
 //
-// Usage: sendRaw hostName contents [protocol]
+// Usage: send_raw hostName contents [protocol]
 
 #include <errno.h>
 #include <netdb.h>
@@ -12,8 +12,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-// Homa's protocol number within the IP protocol space.
-#define IPPROTO_HOMA 140
+#include "../homa.h"
 
 int main(int argc, char** argv) {
 	int fd, status;

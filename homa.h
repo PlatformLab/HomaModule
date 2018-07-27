@@ -2,6 +2,9 @@
  * transport protocol.
  */
 
+#ifndef _HOMA_H
+#define _HOMA_H
+
 #include <linux/types.h>
 #ifndef __KERNEL__
 #include <netinet/in.h>
@@ -106,3 +109,5 @@ struct homa_args_reply_ipv4 {
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* _HOMA_H */

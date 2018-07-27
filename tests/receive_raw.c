@@ -1,7 +1,7 @@
 // This is a test program that uses a raw socket to receive packets
 // on a given protocol and print their contents.
 //
-// Usage: receiveRaw [protocol]
+// Usage: receive_raw [protocol]
 
 #include <errno.h>
 #include <netdb.h>
@@ -13,8 +13,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-// Homa's protocol number within the IP protocol space.
-#define IPPROTO_HOMA 140
+#include "../homa.h"
 
 int main(int argc, char** argv) {
 	int fd;

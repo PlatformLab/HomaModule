@@ -14,35 +14,13 @@
 #include <sys/socket.h>
 
 #include "homa.h"
-
-// Homa's protocol number within the IP protocol space.
-#define IPPROTO_HOMA 140
-
-/**
- * printAddress() - Generate a human-readable description of an inet address.
- * @addr:    The address to print
- * @buffer:  Where to store the human readable description.
- * @size:    Number of bytes available in buffer.
- * Return:   The address of the human-readable string (buffer).
- */
-char *print_address(struct sockaddr_in *addr, char *buffer, int size)
-{
-	if (addr->sin_family != AF_INET) {
-		snprintf(buffer, size, "Unknown family %d", addr->sin_family);
-		return buffer;
-	}
-	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
-	snprintf(buffer, size, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
-		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
-	return buffer;
-}
+#include "test_utils.h"
 
 int main(int argc, char** argv) {
 	int fd;
 	int port;
 	struct sockaddr_in addr_in;
 	int message[100000];
-	char sourceAddress[1000];
 	struct sockaddr_in source;
 	int length;
 	
@@ -75,8 +53,7 @@ int main(int argc, char** argv) {
 	while (1) {
 		uint64_t id;
 		int seed;
-		int limit;
-		int i, result;
+		int result;
 		
 		length = homa_recv(fd, message, sizeof(message),
 			(struct sockaddr *) &source, sizeof(source), &id);
@@ -84,20 +61,10 @@ int main(int argc, char** argv) {
 			printf("Recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
-		seed = message[0];
-		limit = (length + sizeof(int) - 1)/sizeof(int);
+		seed = check_buffer(message, length);
 		printf("Received message from %s with %d bytes, "
 			"seed %d, id %lu\n",
-			print_address(&source, sourceAddress,
-			sizeof(sourceAddress)),length, seed, id);
-		for (i = 0; i < limit; i++) {
-			if (message[i] != seed + i) {
-				printf("Bad value at index %d in "
-					"message; expected %d, got %d\n",
-					i, seed+i, message[i]);
-				break;
-			}
-		}
+			print_address(&source),length, seed, id);
 		result = homa_reply(fd, message, length,
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {

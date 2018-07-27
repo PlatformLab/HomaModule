@@ -19,6 +19,7 @@ void homa_addr_destroy(struct homa_addr *addr)
  * @sport:    Port on this machine from which packets will be sent.
  * @daddr:    IP address of destination machine.
  * @dport:    Report of the destination that will handle incoming packets.
+ * 
  * Return:   0 for success, otherwise negative errno.
  */
 int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
@@ -36,18 +37,18 @@ int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
 	security_sk_classify_flow(sk, &addr->flow);
 	rt = ip_route_output_flow(sock_net(sk), &addr->flow.u.ip4, sk);
 	if (IS_ERR(rt)) {
-		return PTR_ERR(rt);
+		return -EHOSTUNREACH;
 	}
 	addr->dst = &rt->dst;
 	return 0;
 }
 
 /**
- * homa_client_rpc_destroy() - Destructor for homa_client_rpc; also frees the
+ * homa_client_rpc_free() - Destructor for homa_client_rpc; also frees the
  * memory for the structure.
  * @crpc:  Structure to clean up.
  */
-void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
+void homa_client_rpc_free(struct homa_client_rpc *crpc) {
 	homa_addr_destroy(&crpc->dest);
 	__list_del_entry(&crpc->client_rpc_links);
 	homa_message_out_destroy(&crpc->request);
@@ -60,11 +61,54 @@ void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
 }
 
 /**
+ * homa_client_rpc_new() - Allocate and construct a homa_client_rpc.
+ * @hsk:      Socket to which the RPC belongs.
+ * @dest:     Address of host to which the RPC will be sent.
+ * @length:   Size of the request message.
+ * @iter:     Data for the message.
+ * @err:      A negative errno will be stored here after errors.
+ * 
+ * Return:    A printer to the newly allocated object. If an error occurs, NULL
+ *            is returned and additional information is available via @err. 
+ */
+struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
+		struct sockaddr_in *dest, size_t length, struct iov_iter *iter,
+		int *err)
+{
+	struct homa_client_rpc *crpc;
+	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
+	if (unlikely(!crpc)) {
+		*err = -ENOMEM;
+		return NULL;
+	}
+	crpc->id = hsk->next_outgoing_id;
+	hsk->next_outgoing_id++;
+	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
+	*err = homa_addr_init(&crpc->dest, (struct sock *) hsk,
+			hsk->inet.inet_saddr, hsk->client_port,
+			dest->sin_addr.s_addr, ntohs(dest->sin_port));
+	if (unlikely(*err != 0))
+		goto error;
+	*err = homa_message_out_init(&crpc->request, (struct sock *) hsk, iter,
+			length, &crpc->dest, hsk->client_port, crpc->id);
+        if (unlikely(*err != 0))
+		goto error;
+	crpc->state = CRPC_WAITING;
+	return crpc;
+	
+    error:
+	homa_addr_destroy(&crpc->dest);
+	kfree(crpc);
+	return NULL;
+}
+
+/**
  * homa_find_client_rpc() - Locate client-side information about the RPC that
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
  * @port:     Port from which the packet was sent.
  * @id:       Unique identifier for the RPC.
+ * 
  * Return:    A pointer to the homa_client_rpc for this id, or NULL if none.
  */
 struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
@@ -88,6 +132,7 @@ struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
  * @saddr:    Address from which the packet was sent.
  * @port:     Port at @saddr from which the packet was sent.
  * @id:       Unique identifier for the RPC.
+ * 
  * Return:    A pointer to the homa_server_rpc for this saddr-id combination,
  *            or NULL if none.
  */
@@ -133,6 +178,7 @@ struct homa_sock *homa_find_socket(struct homa *homa, __u16 port)
  * @skb:     Packet whose header information should be printed.
  * @buffer:  Buffer in which to print string.
  * @length:  Number of bytes available at @buffer.
+ * 
  * Return:   @buffer
  */
 char *homa_print_header(struct sk_buff *skb, char *buffer, int length)
@@ -188,7 +234,8 @@ char *homa_print_header(struct sk_buff *skb, char *buffer, int length)
  * the memory for the structure.
  * @crpc:  Structure to clean up.
  */
-void homa_server_rpc_destroy(struct homa_server_rpc *srpc) {
+void homa_server_rpc_free(struct homa_server_rpc *srpc)
+{
 	homa_addr_destroy(&srpc->client);
 	homa_message_in_destroy(&srpc->request);
 	if (srpc->state == SRPC_RESPONSE)
@@ -197,6 +244,41 @@ void homa_server_rpc_destroy(struct homa_server_rpc *srpc) {
 	if (srpc->state == SRPC_READY)
 		__list_del_entry(&srpc->ready_links);
 	kfree(srpc);
+}
+
+/**
+ * homa_server_rpc_new() - Allocate and construct a homa_server_rpc object.
+ * @hsk:    Socket that owns this RPC.
+ * @source: IP address (network byte order) of the RPC's client.
+ * @h:      Data packet header; used to initialize the RPC.
+ * @err:    Error information (a negative errno) is returned here after errors.
+ * 
+ * Return:  A pointer to the new object. If an error occurred, the result
+ *          is NULL and additional information is available via @err.
+ */
+struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
+		__be32 source, struct data_header *h, int *err)
+{
+	struct homa_server_rpc *srpc;
+	srpc = (struct homa_server_rpc *) kmalloc(sizeof(*srpc),
+			GFP_KERNEL);
+	if (!srpc) {
+		*err = -ENOMEM;
+		return NULL;
+	}
+	*err = homa_addr_init(&srpc->client, (struct sock *) hsk,
+			hsk->inet.inet_saddr, hsk->client_port, source,
+			ntohs(h->common.sport));
+	if (*err) {
+		kfree(srpc);
+		return NULL;
+	}
+	srpc->id = h->common.id;
+	homa_message_in_init(&srpc->request, ntohl(h->message_length),
+			ntohl(h->unscheduled));
+	srpc->state = SRPC_INCOMING;
+	list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
+	return srpc;
 }
 
 /**

@@ -2,6 +2,9 @@
  * that implement Homa for Linux.
  */
 
+#ifndef _HOMA_IMPL_H
+#define _HOMA_IMPL_H
+
 #include <linux/audit.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -336,14 +339,14 @@ struct homa_client_rpc {
 	 * from its port. */
 	__u64 id;
 	
-	/** @dest: Address information for server. */
-	struct homa_addr dest;
-	
 	/**
 	 * @client_rpc_links: For linking this object into
 	 * &homa_sock.client_rpcs.
 	 */
 	struct list_head client_rpc_links;
+	
+	/** @dest: Address information for server. */
+	struct homa_addr dest;
 	
 	/** @request: Information about the request message. */
 	struct homa_message_out request;
@@ -493,7 +496,10 @@ extern void   homa_addr_destroy(struct homa_addr *addr);
 extern int    homa_addr_init(struct homa_addr *addr, struct sock *sk,
 		__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
 extern int    homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
-extern void   homa_client_rpc_destroy(struct homa_client_rpc *crpc);
+extern void   homa_client_rpc_free(struct homa_client_rpc *crpc);
+extern struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
+		struct sockaddr_in *dest, size_t length,
+		struct iov_iter *iter, int *err);
 extern void   homa_close(struct sock *sock, long timeout);
 extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc);
@@ -536,7 +542,9 @@ extern void   homa_rehash(struct sock *sk);
 extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
-extern void   homa_server_rpc_destroy(struct homa_server_rpc *srpc);
+extern void   homa_server_rpc_free(struct homa_server_rpc *srpc);
+extern struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
+		__be32 source, struct data_header *h, int *err);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
 extern int    homa_sock_init(struct sock *sk);
@@ -547,3 +555,5 @@ extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int    homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern void   homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
 		struct homa_addr *dest);
+
+#endif /* _HOMA_IMPL_H */

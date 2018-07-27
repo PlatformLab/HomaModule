@@ -74,26 +74,13 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 	int err;
 	
 	if (!srpc) {
-		srpc = (struct homa_server_rpc *) kmalloc(sizeof(*srpc),
-				GFP_KERNEL);
-		
-		err = homa_addr_init(&srpc->client, (struct sock *) hsk,
-				hsk->inet.inet_saddr,
-				hsk->client_port, ip_hdr(skb)->saddr,
-				ntohs(h->common.sport));
-		if (err) {
-			printk(KERN_WARNING "Couldn't create homa_addr_for "
-				"%pI4:%u, error %d", &ip_hdr(skb)->saddr,
-				ntohs(h->common.sport), err);
-			kfree(srpc);
+		srpc = homa_server_rpc_new(hsk, ip_hdr(skb)->saddr, h, &err);
+		if (!srpc) {
+			printk(KERN_WARNING "homa_data_from_client couldn't "
+					"create server rpc: error %d", -err);
 			kfree_skb(skb);
 			return;
 		}
-		srpc->id = h->common.id;
-		homa_message_in_init(&srpc->request, ntohl(h->message_length),
-				ntohl(h->unscheduled));
-		srpc->state = SRPC_INCOMING;
-		list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
 	} else if (unlikely(srpc->state != SRPC_INCOMING)) {
 		kfree_skb(skb);
 		return;

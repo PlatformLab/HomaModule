@@ -1,10 +1,10 @@
-// This is a test program used together with bufferClient.c to learn about
+// This is a test program used together with buffer_client.c to learn about
 // how TCP handles buffer exhaustion. This program opens accepts connections
 // on a given port, but it never reads any incoming data, so buffers will
 // pile up in the kernel.
 //
 // Usage:
-// bufferServer port
+// buffer_server port
 
 #include <errno.h>
 #include <netdb.h>

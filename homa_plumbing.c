@@ -198,12 +198,12 @@ void homa_close(struct sock *sk, long timeout) {
 	list_for_each_safe(pos, next, &hsk->client_rpcs) {
 		struct homa_client_rpc *crpc = list_entry(pos,
 				struct homa_client_rpc, client_rpc_links);
-		homa_client_rpc_destroy(crpc);
+		homa_client_rpc_free(crpc);
 	}
 	list_for_each_safe(pos, next, &hsk->server_rpcs) {
 		struct homa_server_rpc *srpc = list_entry(pos,
 				struct homa_server_rpc, server_rpc_links);
-		homa_server_rpc_destroy(srpc);
+		homa_server_rpc_free(srpc);
 	}
 	sk_common_release(sk);
 }
@@ -287,7 +287,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	homa_message_in_copy_data(msgin, &iter, args.len);
 	result = msgin->total_length;
 	if (crpc) {
-		homa_client_rpc_destroy(crpc);
+		homa_client_rpc_free(crpc);
 	}
 	homa_message_in_destroy(msgin);
 	if (unlikely(copy_to_user(
@@ -352,7 +352,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 error:
 	printk(KERN_NOTICE "Error %d in homa_ioc_reply, deleting rpc\n", err);
 	list_del(&srpc->server_rpc_links);
-	homa_server_rpc_destroy(srpc);
+	homa_server_rpc_free(srpc);
 	//release_sock(sk);
 	return err;
 }
@@ -378,8 +378,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	printk(KERN_NOTICE "args.request: %p, args.reqlen: %lu\n", args.request,
-			args.reqlen);
 	err = import_single_range(WRITE, args.request, args.reqlen, &iov,
 		&iter);
 	if (unlikely(err))
@@ -389,39 +387,23 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
-	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
-	if (unlikely(!crpc)) {
-		err = -ENOMEM;
+	crpc = homa_client_rpc_new(hsk, &args.dest_addr, args.reqlen, &iter,
+			&err);
+	if (unlikely(!crpc))
 		goto error;
-	}
-	crpc->id = hsk->next_outgoing_id;
-	hsk->next_outgoing_id++;
-	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
-	err = homa_addr_init(&crpc->dest, sk, hsk->inet.inet_saddr,
-			hsk->client_port, args.dest_addr.sin_addr.s_addr,
-			ntohs(args.dest_addr.sin_port));
-	if (unlikely(err != 0)) {
-		goto error;
-	}
-	err = homa_message_out_init(&crpc->request, sk, &iter, args.reqlen,
-			&crpc->dest, hsk->client_port, crpc->id);
-        if (unlikely(err != 0)) {
-		goto error;
-	}
-	crpc->state = CRPC_WAITING;
 	
 	homa_xmit_packets(&crpc->request, sk, &crpc->dest);
-	printk(KERN_NOTICE "Packet xmitted up to offset %d\n",
-			crpc->request.next_offset);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
-			&crpc->id, sizeof(crpc->id))))
-		return -EFAULT;
+			&crpc->id, sizeof(crpc->id)))) {
+		err = -EFAULT;
+		goto error;
+	}
 	release_sock(sk);
 	return 0;
 
-error:
+    error:
 	if (crpc)
-		homa_client_rpc_destroy(crpc);
+		homa_client_rpc_free(crpc);
 	release_sock(sk);
 	return err;
 }
