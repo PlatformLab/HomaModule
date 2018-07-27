@@ -53,7 +53,7 @@ extern size_t homa_recv(int sockfd, void *buf, size_t len,
 extern size_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			void *response, size_t resplen);
-extern int    homa_reply(int sockfd, const void *response, size_t resplen,
+extern size_t homa_reply(int sockfd, const void *response, size_t resplen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			uint64_t id);
 extern int    homa_abort(int sockfd, uint64_t id);
@@ -97,9 +97,9 @@ struct homa_args_invoke_ipv4 {
  * betweeen homa_reply and the HOMAIOCREPLY ioctl. Assumes IPV4 addresses.
  */
 struct homa_args_reply_ipv4 {
-	const void *buf;
-	size_t len;
-	const struct sockaddr_in dest_addr;
+	void *response;
+	size_t resplen;
+	struct sockaddr_in dest_addr;
 	__u64 id;
 };
 

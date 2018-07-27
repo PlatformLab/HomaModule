@@ -68,11 +68,30 @@ void print_help(const char *name)
 		name);
 }
 
+/**
+ * printAddress() - Generate a human-readable description of an inet address.
+ * @addr:    The address to print
+ * @buffer:  Where to store the human readable description.
+ * @size:    Number of bytes available in buffer.
+ * Return:   The address of the human-readable string (buffer).
+ */
+char *print_address(struct sockaddr_in *addr, char *buffer, int size)
+{
+	if (addr->sin_family != AF_INET) {
+		snprintf(buffer, size, "Unknown family %d", addr->sin_family);
+		return buffer;
+	}
+	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
+	snprintf(buffer, size, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
+		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
+	return buffer;
+}
+
 int main(int argc, char** argv) {
 	int fd, status, port, nextArg;
         unsigned int i;
-	struct addrinfo *result;
-	struct sockaddr_in *addr_in;
+	struct addrinfo *matching_addresses;
+	struct sockaddr_in *dest;
 	struct addrinfo hints;
 	char *host, *port_name;
 	int seed = 0;
@@ -138,14 +157,14 @@ int main(int argc, char** argv) {
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
-	status = getaddrinfo(host, "80", &hints, &result);
+	status = getaddrinfo(host, "80", &hints, &matching_addresses);
 	if (status != 0) {
 		printf("Couldn't look up address for %s: %s\n",
 				host, gai_strerror(status));
 		exit(1);
 	}
-	addr_in = (struct sockaddr_in *) result->ai_addr;
-	addr_in->sin_port = htons(port);
+	dest = (struct sockaddr_in *) matching_addresses->ai_addr;
+	dest->sin_port = htons(port);
 	for (i = 0; i < INTS_IN_BUFFER; i++) {
 		buffer[i] = seed + i;
 	}
@@ -190,11 +209,42 @@ int main(int argc, char** argv) {
 				printf("Error in recvmsg: %s\n",
 					strerror(errno));
 			}
+		} else if (strcmp(argv[nextArg], "invoke") == 0) {
+			/* Send a single message and wait for response. */
+			
+			uint64_t id;
+			char response[10000];
+			size_t result;
+			char addrString[100];
+			struct sockaddr_in server_addr;
+			
+			status = homa_send(fd, buffer, length,
+					(struct sockaddr *) dest,
+					sizeof(*dest), &id);
+			if (status < 0) {
+				printf("Error in homa_send: %s\n",
+					strerror(errno));
+			} else {
+				printf("Homa_send succeeded, id %lu\n", id);
+			}
+			result = homa_recv(fd, response, sizeof(response),
+				(struct sockaddr *) &server_addr,
+				sizeof(server_addr), &id);
+			if (length < 0) {
+				printf("Error in homa_recv: %s\n",
+					strerror(errno));
+			} else {
+				printf("Received message from %s with %lu bytes, "
+					"seed %d, id %lu\n",
+					print_address(&server_addr, addrString,
+					sizeof(addrString)), result, 0, id);
+			}
 		} else if (strcmp(argv[nextArg], "send") == 0) {
 			uint64_t id;
 			/* Send a single message to the server. */
-			status = homa_send(fd, buffer, length, result->ai_addr,
-					result->ai_addrlen, &id);
+			status = homa_send(fd, buffer, length,
+					(struct sockaddr *) dest,
+					sizeof(*dest), &id);
 			if (status < 0) {
 				printf("Error in homa_send: %s\n",
 					strerror(errno));

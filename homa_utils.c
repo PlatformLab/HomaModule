@@ -43,13 +43,42 @@ int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
 }
 
 /**
- * homa_client_rpc_destroy() - Destructor for homa_client_rpc.
+ * homa_client_rpc_destroy() - Destructor for homa_client_rpc; also frees the
+ * memory for the structure.
  * @crpc:  Structure to clean up.
  */
 void homa_client_rpc_destroy(struct homa_client_rpc *crpc) {
 	homa_addr_destroy(&crpc->dest);
 	__list_del_entry(&crpc->client_rpc_links);
 	homa_message_out_destroy(&crpc->request);
+	if (crpc->state >= CRPC_INCOMING) {
+		homa_message_in_destroy(&crpc->response);
+		if (crpc->state == CRPC_READY)
+			__list_del_entry(&crpc->ready_links);
+	}
+	kfree(crpc);
+}
+
+/**
+ * homa_find_client_rpc() - Locate client-side information about the RPC that
+ * a packet belongs to, if there is any.
+ * @hsk:      Socket via which packet was received.
+ * @port:     Port from which the packet was sent.
+ * @id:       Unique identifier for the RPC.
+ * Return:    A pointer to the homa_client_rpc for this id, or NULL if none.
+ */
+struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
+		__u16 sport, __u64 id)
+{
+	struct list_head *pos;
+	list_for_each(pos, &hsk->client_rpcs) {
+		struct homa_client_rpc *crpc = list_entry(pos,
+				struct homa_client_rpc, client_rpc_links);
+		if (crpc->id == id) {
+			return crpc;
+		}
+	}
+	return NULL;
 }
 
 /**
@@ -70,8 +99,8 @@ struct homa_server_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		struct homa_server_rpc *srpc = list_entry(pos,
 				struct homa_server_rpc, server_rpc_links);
 		if ((srpc->id == id) &&
-				(srpc->sport == sport) &&
-				(srpc->saddr == saddr)) {
+				(srpc->client.dport == sport) &&
+				(srpc->client.daddr == saddr)) {
 			return srpc;
 		}
 	}
@@ -155,11 +184,19 @@ char *homa_print_header(struct sk_buff *skb, char *buffer, int length)
 }
 
 /**
- * homa_server_rpc_destroy() - Destructor for homa_server_rpc.
+ * homa_server_rpc_destroy() - Destructor for homa_server_rpc; also frees
+ * the memory for the structure.
  * @crpc:  Structure to clean up.
  */
 void homa_server_rpc_destroy(struct homa_server_rpc *srpc) {
+	homa_addr_destroy(&srpc->client);
 	homa_message_in_destroy(&srpc->request);
+	if (srpc->state == SRPC_RESPONSE)
+		homa_message_out_destroy(&srpc->response);
+	list_del(&srpc->server_rpc_links);
+	if (srpc->state == SRPC_READY)
+		__list_del_entry(&srpc->ready_links);
+	kfree(srpc);
 }
 
 /**

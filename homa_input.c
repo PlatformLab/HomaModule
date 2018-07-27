@@ -55,6 +55,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	__skb_insert(skb, skb2, skb2->next, &msgin->packets);
 	msgin->bytes_remaining -= (ceiling - floor);
 }
+
 /**
  * homa_data_from_client() - Server-side handler for incoming DATA packets
  * @homa:    Overall data about the Homa protocol implementation.
@@ -64,33 +65,79 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
  * @srpc:    Information about the RPC corresponding to this packet, or NULL
  *           if no such data currently exists.
  * 
- * This method may change the RPC's state to READY.
+ * This method may change the RPC's state to SRPC_READY.
  */
 void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc)
 {
 	struct data_header *h = (struct data_header *) skb->data;
+	int err;
 	
 	if (!srpc) {
 		srpc = (struct homa_server_rpc *) kmalloc(sizeof(*srpc),
 				GFP_KERNEL);
-		srpc->saddr = ip_hdr(skb)->saddr;
-		srpc->sport = ntohs(h->common.sport);
+		
+		err = homa_addr_init(&srpc->client, (struct sock *) hsk,
+				hsk->inet.inet_saddr,
+				hsk->client_port, ip_hdr(skb)->saddr,
+				ntohs(h->common.sport));
+		if (err) {
+			printk(KERN_WARNING "Couldn't create homa_addr_for "
+				"%pI4:%u, error %d", &ip_hdr(skb)->saddr,
+				ntohs(h->common.sport), err);
+			kfree(srpc);
+			kfree_skb(skb);
+			return;
+		}
 		srpc->id = h->common.id;
 		homa_message_in_init(&srpc->request, ntohl(h->message_length),
 				ntohl(h->unscheduled));
-		srpc->state = INCOMING;
+		srpc->state = SRPC_INCOMING;
 		list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
-	} else if (unlikely(srpc->state != INCOMING)) {
+	} else if (unlikely(srpc->state != SRPC_INCOMING)) {
 		kfree_skb(skb);
 		return;
 	}
 	homa_add_packet(&srpc->request, skb);
 	if (srpc->request.bytes_remaining == 0) {
 		struct sock *sk = (struct sock *) hsk;
-		printk(KERN_NOTICE "Incoming RPC is READY\n");
-		srpc->state = READY;
+		printk(KERN_NOTICE "Incoming request is complete\n");
+		srpc->state = SRPC_READY;
 		list_add_tail(&srpc->ready_links, &hsk->ready_server_rpcs);
+		sk->sk_data_ready(sk);
+	}
+}
+
+/**
+ * homa_data_from_server() - Client-side handler for incoming DATA packets
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @skb:     Incoming packet; size known to be large enough for the header.
+ *           This function now owns the packet.
+ * @hsk:     Socket for which the packet was received.
+ * @crpc:    Information about the RPC corresponding to this packet.
+ * 
+ * This method may change the RPC's state.
+ */
+void homa_data_from_server(struct homa *homa, struct sk_buff *skb,
+		struct homa_sock *hsk, struct homa_client_rpc *crpc)
+{
+	struct data_header *h = (struct data_header *) skb->data;
+	
+	if (crpc->state != CRPC_INCOMING) {
+		if (unlikely(crpc->state != CRPC_WAITING)) {
+			kfree_skb(skb);
+			return;			
+		}
+		homa_message_in_init(&crpc->response, ntohl(h->message_length),
+				ntohl(h->unscheduled));
+		crpc->state = CRPC_INCOMING;
+	}
+	homa_add_packet(&crpc->response, skb);
+	if (crpc->response.bytes_remaining == 0) {
+		struct sock *sk = (struct sock *) hsk;
+		printk(KERN_NOTICE "Incoming response is complete\n");
+		crpc->state = CRPC_READY;
+		list_add_tail(&crpc->ready_links, &hsk->ready_client_rpcs);
 		sk->sk_data_ready(sk);
 	}
 }

@@ -293,6 +293,40 @@ struct homa_message_out {
 };
 
 /**
+ * struct homa_message_in - Holds the state of a message received by
+ * this machine; used for both requests and responses. 
+ */
+struct homa_message_in {
+	/**
+	 * @packets: DATA packets received for this message so far. The list
+	 * is sorted in order of offset (head is lowest offset), but
+	 * packets can be received out of order, so there may be times
+	 * when there are holes in the list.
+	 */
+	struct sk_buff_head packets;
+	
+	/**
+	 * @total_length: Size of the entire message, in bytes.
+	 */
+	int total_length;
+	
+	/**
+	 * @bytes_remaining: Amount of data for this message that has
+	 * not yet been received; will determine the message's priority.
+	 */
+	int bytes_remaining;
+
+        /**
+	 * @granted: Total # of bytes sender has been authorized to transmit
+	 * (including unscheduled bytes).
+	 */
+        int granted;
+	
+	/** @priority: Priority level to include in future GRANTS. */
+	int priority;
+};
+
+/**
  * struct homa_client_rpc - One of these structures exists for each active
  * RPC initiated from this machine.
  */
@@ -313,38 +347,32 @@ struct homa_client_rpc {
 	
 	/** @request: Information about the request message. */
 	struct homa_message_out request;
-};
-
-/**
- * struct homa_message_in - Holds the state of a message received by
- * this machine; used for both requests and responses. 
- */
-struct homa_message_in {
-	/**
-	 * @packets: DATA packets received for this message so far. The list
-	 * is sorted in order of offset (head is lowest offset), but
-	 * packets can be received out of order, so there may be times
-	 * when there are holes in the list.
-	 */
-	struct sk_buff_head packets;
 	
-	/** @total_length: Size of the entire message, in bytes. */
-	int total_length;
+	/** 
+	 * @response: Information about the response message. Uninitialized
+	 * until CRPC_INCOMING state.
+	 */
+	struct homa_message_in response;
 	
 	/**
-	 * @bytes_remaining: Amount of data for this message that has
-	 * not yet been received; will determine the message's priority.
+	 * @state: Each RPC passes through the following states, in order:
+	 * @CRPC_WAITING:     No response packets have been received yet
+	 *                    (request may or may not be completely sent).
+	 * @CRPC_INCOMING:    Response message has been partially received.
+	 * @CRPC_READY:       The response message is complete but it has not
+	 *                    yet been read from the socket. 
 	 */
-	int bytes_remaining;
-
-        /**
-	 * @granted: Total # of bytes sender has been authorized to transmit
-	 * (including unscheduled bytes).
-	 */
-        int granted;
+	enum {
+		CRPC_WAITING            = 11,
+		CRPC_INCOMING           = 12,
+		CRPC_READY              = 13
+	} state;
 	
-	/** @priority: Priority level to include in future GRANTS. */
-	int priority;
+	/**
+	 * @ready_links: Iff state == READY, this is used to link this object
+	 * into &homa_sock.ready_client_rpcs.
+	 */
+	struct list_head ready_links;
 };
 
 /**
@@ -352,11 +380,8 @@ struct homa_message_in {
  * RPC for which this machine is the server. 
  */
 struct homa_server_rpc {
-	/** @saddr: IP address of the client (source). */
-	__be32 saddr;
-	
-	/** @sport: Port from which RPC was sent on saddr. */
-	__u16 sport;
+	/** @dest: Address information for the client that issued the RPC. */
+	struct homa_addr client;
 	
 	/** @id: Identifier for the RPC (unique from saddr/sport). */
 	__u64 id;
@@ -364,23 +389,27 @@ struct homa_server_rpc {
 	/** @request: Information about the request message. */
 	struct homa_message_in request;
 	
-	/** @response: Information about the response message. */
+	/**
+	 * @response: Information about the response message. Uninitialized
+	 * except in SRPC_RESPONSE state.
+	 */
 	struct homa_message_out response;
 	
 	/**
-	 * @state: The current state of processing of this RPC.
-	 * @INCOMING:    The request message has been partially received.
-	 * @READY:       The request message is complete but it has not
-	 *               yet been read from the socket.
-	 * @IN_SERVICE:  The request message has been read, but the response
-	 *               message has not yet been presented to the kernel.
-	 * @RESPONSE:    The response message is being transmitted. 
+	 * @state: Each RPC passes through the following states, in order:
+	 * @SRPC_INCOMING:    The request message has been partially received.
+	 * @SRPC_READY:       The request message is complete but it has not
+	 *                    yet been read from the socket.
+	 * @SRPC_IN_SERVICE:  The request message has been read, but the
+	 *                    response message has not yet been presented
+	 *                    to the kernel.
+	 * @SRPC_RESPONSE:    The response message is being transmitted. 
 	 */
 	enum {
-		INCOMING           = 5,
-		READY              = 6,
-		IN_SERVICE         = 7,
-		RESPONSE           = 8
+		SRPC_INCOMING           = 5,
+		SRPC_READY              = 6,
+		SRPC_IN_SERVICE         = 7,
+		SRPC_RESPONSE           = 8
 	} state;
 	
 	/**
@@ -429,6 +458,12 @@ struct homa_sock {
 	 * is oldest, i.e. next to return).
 	 */
 	struct list_head ready_server_rpcs;
+	
+	/**
+	 * @ready_client_rpcs: Contains all client RPCs in READY state (head
+	 * is oldest, i.e. next to return).
+	 */
+	struct list_head ready_client_rpcs;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -462,9 +497,13 @@ extern void   homa_client_rpc_destroy(struct homa_client_rpc *crpc);
 extern void   homa_close(struct sock *sock, long timeout);
 extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc);
+extern void   homa_data_from_server(struct homa *homa, struct sk_buff *skb,
+		struct homa_sock *hsk, struct homa_client_rpc *crpc);
 extern int    homa_diag_destroy(struct sock *sk, int err);
 extern int    homa_disconnect(struct sock *sk, int flags);
 extern void   homa_err_handler(struct sk_buff *skb, u32 info);
+extern struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
+		__u16 sport, __u64 id);
 extern struct homa_server_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		__be32 saddr, __u16 sport, __u64 id);
 extern struct homa_sock *
@@ -474,6 +513,8 @@ extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
 extern int    homa_handler(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
+extern int    homa_ioc_recv(struct sock *sk, unsigned long arg);
+extern int    homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int    homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern int    homa_message_in_copy_data(struct homa_message_in *hmi,

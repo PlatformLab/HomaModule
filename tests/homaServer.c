@@ -25,7 +25,7 @@
  * @size:    Number of bytes available in buffer.
  * Return:   The address of the human-readable string (buffer).
  */
-char *printAddress(struct sockaddr_in *addr, char *buffer, int size)
+char *print_address(struct sockaddr_in *addr, char *buffer, int size)
 {
 	if (addr->sin_family != AF_INET) {
 		snprintf(buffer, size, "Unknown family %d", addr->sin_family);
@@ -74,27 +74,34 @@ int main(int argc, char** argv) {
 	printf("Successfully bound to Homa port %d\n", port);
 	while (1) {
 		uint64_t id;
+		int seed;
+		int limit;
+		int i, result;
+		
 		length = homa_recv(fd, message, sizeof(message),
 			(struct sockaddr *) &source, sizeof(source), &id);
-		if (length > 0) {
-			int seed = message[0];
-			int limit = (length + sizeof(int) - 1)/sizeof(int);
-			int i;
-			printf("Received message from %s with %d bytes, "
-				"seed %d, id %lu\n",
-				printAddress(&source, sourceAddress,
-				sizeof(sourceAddress)),length, seed, id);
-			for (i = 0; i < limit; i++) {
-				if (message[i] != seed + i) {
-					printf("Bad value at index %d in "
-						"message; expected %d, got %d\n",
-						i, seed+i, message[i]);
-					break;
-				}
-			}
-		} else {
+		if (length < 0) {
 			printf("Recvmsg failed: %s\n", strerror(errno));
+			continue;
 		}
-		// sleep(1);
+		seed = message[0];
+		limit = (length + sizeof(int) - 1)/sizeof(int);
+		printf("Received message from %s with %d bytes, "
+			"seed %d, id %lu\n",
+			print_address(&source, sourceAddress,
+			sizeof(sourceAddress)),length, seed, id);
+		for (i = 0; i < limit; i++) {
+			if (message[i] != seed + i) {
+				printf("Bad value at index %d in "
+					"message; expected %d, got %d\n",
+					i, seed+i, message[i]);
+				break;
+			}
+		}
+		result = homa_reply(fd, message, length,
+			(struct sockaddr *) &source, sizeof(source), id);
+		if (result < 0) {
+			printf("Homa_reply failed: %s\n", strerror(errno));
+		}
 	}
 }
