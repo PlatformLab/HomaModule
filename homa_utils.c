@@ -240,7 +240,7 @@ void homa_server_rpc_free(struct homa_server_rpc *srpc)
 	homa_message_in_destroy(&srpc->request);
 	if (srpc->state == SRPC_RESPONSE)
 		homa_message_out_destroy(&srpc->response);
-	list_del(&srpc->server_rpc_links);
+	__list_del_entry(&srpc->server_rpc_links);
 	if (srpc->state == SRPC_READY)
 		__list_del_entry(&srpc->ready_links);
 	kfree(srpc);

@@ -88,7 +88,6 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 	homa_add_packet(&srpc->request, skb);
 	if (srpc->request.bytes_remaining == 0) {
 		struct sock *sk = (struct sock *) hsk;
-		printk(KERN_NOTICE "Incoming request is complete\n");
 		srpc->state = SRPC_READY;
 		list_add_tail(&srpc->ready_links, &hsk->ready_server_rpcs);
 		sk->sk_data_ready(sk);
@@ -122,7 +121,6 @@ void homa_data_from_server(struct homa *homa, struct sk_buff *skb,
 	homa_add_packet(&crpc->response, skb);
 	if (crpc->response.bytes_remaining == 0) {
 		struct sock *sk = (struct sock *) hsk;
-		printk(KERN_NOTICE "Incoming response is complete\n");
 		crpc->state = CRPC_READY;
 		list_add_tail(&crpc->ready_links, &hsk->ready_client_rpcs);
 		sk->sk_data_ready(sk);

@@ -138,3 +138,16 @@ char *print_address(struct sockaddr_in *addr)
 		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
 	return buffer;
 }
+
+
+/**
+ * to_seconds() - Given an elapsed time measured in cycles, return a
+ * floating-point number giving the corresponding time in seconds.
+ * @cycles:    Difference between the results of two calls to rdtsc.
+ * 
+ * Return:     The time in seconds corresponding to cycles.
+ */
+double to_seconds(uint64_t cycles)
+{
+    return ((double) (cycles))/get_cycles_per_sec();
+}

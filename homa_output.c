@@ -86,6 +86,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 		next = *homa_next_skb(skb);
 		kfree_skb(skb);
 	}
+	msgout->packets = NULL;
 }
 
 /**

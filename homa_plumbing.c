@@ -95,8 +95,8 @@ struct inet_protosw homa_protosw = {
 
 /* This structure is used by IP to deliver incoming Homa packets to us. */
 static struct net_protocol homa_protocol = {
-	.early_demux =	homa_v4_early_demux,
-	.early_demux_handler =	homa_v4_early_demux_handler,
+	.early_demux =	NULL, /*homa_v4_early_demux */
+	.early_demux_handler =	NULL, /* homa_v4_early_demux_handler */
 	.handler =	homa_handler,
 	.err_handler =	homa_err_handler,
 	.no_policy =	1,
@@ -192,6 +192,8 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct list_head *pos, *next;
+	int crpcs = 0;
+	int srpcs = 0;
 
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
 	list_del(&hsk->socket_links);
@@ -199,12 +201,16 @@ void homa_close(struct sock *sk, long timeout) {
 		struct homa_client_rpc *crpc = list_entry(pos,
 				struct homa_client_rpc, client_rpc_links);
 		homa_client_rpc_free(crpc);
+		crpcs++;
 	}
 	list_for_each_safe(pos, next, &hsk->server_rpcs) {
 		struct homa_server_rpc *srpc = list_entry(pos,
 				struct homa_server_rpc, server_rpc_links);
 		homa_server_rpc_free(srpc);
+		srpcs++;
 	}
+	printk(KERN_NOTICE "closed socket %d with %d client RPCs, "
+			"%d server RPCs\n", hsk->client_port, crpcs, srpcs);
 	sk_common_release(sk);
 }
 
@@ -222,7 +228,7 @@ int homa_disconnect(struct sock *sk, int flags) {
 }
 
 /**
- * homa_ioc_recv () - The top-level function for the ioctl that implements
+ * homa_ioc_recv() - The top-level function for the ioctl that implements
  * the homa_recv user-level API.
  * @sk:       Socket for this request.
  * @arg:      Used to pass information from/to user space.
@@ -250,6 +256,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	if (unlikely(err))
 		return err;
 
+	lock_sock(sk);
 	while (1) {
 		if (!list_empty(&hsk->ready_server_rpcs)) {
 			struct homa_server_rpc *srpc;
@@ -270,13 +277,16 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			args.id = crpc->id;
 			break;
 		}
-		if (noblock)
-			return -EAGAIN;
+		if (noblock) {
+			err = -EAGAIN;
+			goto error;
+		}
 		timeo = sock_rcvtimeo(sk, noblock);
 		timeo = homa_wait_ready_msg(sk, &timeo);
-		if (signal_pending(current))
-			return sock_intr_errno(timeo);
-		printk(KERN_NOTICE "Woke up, trying again\n");
+		if (signal_pending(current)) {
+			err = sock_intr_errno(timeo);
+			goto error;
+		}
 	}
 
 	args.source_addr.sin_family = AF_INET;
@@ -290,17 +300,21 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		homa_client_rpc_free(crpc);
 	}
 	homa_message_in_destroy(msgin);
+	release_sock(sk);
 	if (unlikely(copy_to_user(
 			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
 			&args.source_addr, sizeof(args) -
 			offsetof(struct homa_args_recv_ipv4, source_addr))))
 		return -EFAULT;
-	printk(KERN_NOTICE "Leaving homa_recvmsg normally\n");
 	return result;
+	
+error:
+	release_sock(sk);
+	return err;
 }
 
 /**
- * homa_ioc_reply () - The top-level function for the ioctl that implements
+ * homa_ioc_reply() - The top-level function for the ioctl that implements
  * the homa_reply user-level API.
  * @sk:       Socket for this request.
  * @arg:      Used to pass information from/to user space.
@@ -312,10 +326,9 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_args_reply_ipv4 args;
 	struct iovec iov;
 	struct iov_iter iter;
-	int err;
+	int err = 0;
 	struct homa_server_rpc *srpc;
 
-	printk(KERN_NOTICE "Starting homa_ioc_reply\n");
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
@@ -329,36 +342,34 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
 
-	printk(KERN_NOTICE "Calling lock_sock\n");
-	//lock_sock(sk);
-	printk(KERN_NOTICE "Calling homa_find_server_rpc\n");
+	lock_sock(sk);
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
-	if (!srpc || (srpc->state != SRPC_IN_SERVICE)) {
-		//release_sock(sk);
-		return 0;
-	}
+	if (!srpc || (srpc->state != SRPC_IN_SERVICE))
+		goto done;
 	srpc->state = SRPC_RESPONSE;
-	printk(KERN_NOTICE "Found server rpc for reply\n");
 
 	err = homa_message_out_init(&srpc->response, sk, &iter, args.resplen,
 			&srpc->client, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;
 	homa_xmit_packets(&srpc->response, sk, &srpc->client);
-	//release_sock(sk);
+	if (srpc->response.next_offset >= srpc->response.length) {
+		homa_server_rpc_free(srpc);
+	}
+done:
+	release_sock(sk);
 	return err;
 
 error:
-	printk(KERN_NOTICE "Error %d in homa_ioc_reply, deleting rpc\n", err);
 	list_del(&srpc->server_rpc_links);
 	homa_server_rpc_free(srpc);
-	//release_sock(sk);
+	release_sock(sk);
 	return err;
 }
 
 /**
- * homa_ioc_send () - The top-level function for the ioctl that implements
+ * homa_ioc_send() - The top-level function for the ioctl that implements
  * the homa_send user-level API.
  * @sk:       Socket for this request.
  * @arg:      Used to pass information from/to user space.
@@ -641,11 +652,11 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0?
  */
 int homa_handler(struct sk_buff *skb) {
-	char buffer[200];
+//	char buffer[200];
 	__be32 saddr = ip_hdr(skb)->saddr;
 	int length = skb->len;
 	struct common_header *h = (struct common_header *) skb->data;
-	struct homa_sock *hsk;
+	struct homa_sock *hsk = NULL;
 	__u16 dport;
 
 	if (length < HOMA_MAX_HEADER) {
@@ -653,8 +664,8 @@ int homa_handler(struct sk_buff *skb) {
 				"%d bytes\n", &saddr, length);
 		goto discard;
 	}
-	printk(KERN_NOTICE "incoming Homa packet: %s\n",
-			homa_print_header(skb, buffer, sizeof(buffer)));
+//	printk(KERN_NOTICE "incoming Homa packet: %s\n",
+//			homa_print_header(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
 	hsk = homa_find_socket(&homa, dport);

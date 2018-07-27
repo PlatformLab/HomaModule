@@ -134,6 +134,46 @@ void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 }
 
 /**
+ * test_rtt() - Measure round-trip time for an RPC.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request
+ * @request:  Request message.
+ * @length:   Number of bytes in @request.
+ * @count:    Number of RPCs to issue.
+ */
+void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
+		int count)
+{
+	uint64_t id;
+	char response[100000];
+	struct sockaddr_in server_addr;
+	int status;
+	size_t resp_length;
+	uint64_t start;
+
+	start = rdtsc();
+	for (int i = 0; i < count; i++) {
+		status = homa_send(fd, request, length, dest,
+				sizeof(*dest), &id);
+		if (status < 0) {
+			printf("Error in homa_send: %s\n",
+				strerror(errno));
+			return;
+		}
+		resp_length = homa_recv(fd, response, sizeof(response),
+			(struct sockaddr *) &server_addr,
+			sizeof(server_addr), &id);
+		if (resp_length < 0) {
+			printf("Error in homa_recv: %s\n",
+				strerror(errno));
+			return;
+		}
+	}
+	double avg_secs = to_seconds(rdtsc() - start)/count;
+	printf("Time per RPC: %.1f us\n", avg_secs*1e6);
+}
+
+/**
  * test_send() - Send a request; don't wait for response.
  * @fd:       Homa socket.
  * @dest:     Where to send the request
@@ -203,6 +243,7 @@ int main(int argc, char** argv)
 #define MAX_MESSAGE_LENGTH 100000
 	char buffer[MAX_MESSAGE_LENGTH];
 	int length = 100;
+	int count = 1000;
 	
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
@@ -228,6 +269,15 @@ int main(int argc, char** argv)
 		if (strcmp(argv[nextArg], "--help") == 0) {
 			print_help(argv[0]);
 			exit(0);
+		} else if (strcmp(argv[nextArg], "--count") == 0) {
+			if (nextArg == (argc-1)) {
+				printf("No value provided for %s option\n",
+					argv[nextArg]);
+				exit(1);
+			}
+			nextArg++;
+			count = get_int(argv[nextArg],
+					"Bad count %s; must be positive integer\n");
 		} else if (strcmp(argv[nextArg], "--length") == 0) {
 			if (nextArg == (argc-1)) {
 				printf("No value provided for %s option\n",
@@ -252,7 +302,7 @@ int main(int argc, char** argv)
 			seed = get_int(argv[nextArg],
 				"Bad seed %s; must be positive integer\n");
 		} else {
-			printf("Unknown option %s; type '%s -help' for help\n",
+			printf("Unknown option %s; type '%s --help' for help\n",
 				argv[nextArg], argv[0]);
 			exit(1);
 		}
@@ -284,6 +334,8 @@ int main(int argc, char** argv)
 			test_invoke(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
 			test_send(fd, dest, buffer, length);
+		} else if (strcmp(argv[nextArg], "rtt") == 0) {
+			test_rtt(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			test_udpclose();
 		} else {

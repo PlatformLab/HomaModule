@@ -1,7 +1,9 @@
 // This is a test program that opens a Homa socket and responds to
 // requests.
 //
-// Usage: homaServer port
+// Usage: homaServer port [-q]
+//
+// -q means "quiet": don't print messages or check for errors
 
 #include <errno.h>
 #include <netdb.h>
@@ -23,9 +25,10 @@ int main(int argc, char** argv) {
 	int message[100000];
 	struct sockaddr_in source;
 	int length;
+	int quiet = 0;
 	
 	if (argc < 2) {
-		printf("Usage: %s port\n", argv[0]);
+		printf("Usage: %s port [-q]\n", argv[0]);
 		exit(1);
 	}
 	port = strtol(argv[1], NULL, 10);
@@ -34,6 +37,8 @@ int main(int argc, char** argv) {
 				argv[1]);
 		exit(1);
 	}
+	if ((argc >= 3) && (strcmp(argv[2], "-q") == 0))
+		quiet = 1;
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -61,10 +66,12 @@ int main(int argc, char** argv) {
 			printf("Recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
-		seed = check_buffer(message, length);
-		printf("Received message from %s with %d bytes, "
-			"seed %d, id %lu\n",
-			print_address(&source),length, seed, id);
+		if (!quiet) {
+			seed = check_buffer(message, length);
+			printf("Received message from %s with %d bytes, "
+				"seed %d, id %lu\n",
+				print_address(&source),length, seed, id);
+		}
 		result = homa_reply(fd, message, length,
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {
