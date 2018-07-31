@@ -629,15 +629,16 @@ static int __constructor_order;
 static int __verbose = 0;
 static char * __helpMessage =
 	"This program runs unit tests written in the Linux kernel kselftest "
-	"style.\n\n"
-	"Usage: %s options test_name test_name ...\n\n"
-	"The following options are supported:\n\n"
-	"--verbose or -v   Print the names of all tests as they run "
+	"style.\n"
+	"    Usage: %s options test_name test_name ...\n"
+	"The following options are supported:\n"
+	"    --verbose or -v   Print the names of all tests as they run "
 	"(default:\n"
-	"print only tests that fail)\n"
-	"--help or -h      Print this message\n\n"
+	"                      print only tests that fail)\n"
+	"    --help or -h      Print this message\n"
 	"If one or more test_name arguments are provided, then only those "
-	"tests are run; if no test names are provided, then all tests are run.\n";
+	"tests are\n"
+	"run; if no test names are provided, then all tests are run.\n";
 
 #define _CONSTRUCTOR_ORDER_FORWARD   1
 #define _CONSTRUCTOR_ORDER_BACKWARD -1
@@ -778,6 +779,15 @@ static int test_harness_run(int __attribute__((unused)) argc,
 	printf("[==========] Running %u tests from %u test cases.\n",
 	       __test_count, __fixture_count + 1);
 	for (t = __test_list; t; t = t->next) {
+		if (argi < argc) {
+			int i;
+			for (i = argi; i < argc; i++) {
+				if (strcmp(argv[i], t->name) == 0)
+					break;
+			}
+			if (i >= argc)
+				continue;
+		}
 		count++;
 		__run_test(t);
 		if (t->passed)
