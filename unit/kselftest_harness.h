@@ -577,7 +577,7 @@
 	/* Avoid multiple evaluation of the cases */ \
 	__typeof__(_expected) __exp = (_expected); \
 	__typeof__(_seen) __seen = (_seen); \
-	if (1) __INC_STEP(_metadata); \
+	__INC_STEP(_metadata); \
 	if (!(__exp _t __seen)) { \
 		unsigned long long __exp_print = (uintptr_t)__exp; \
 		unsigned long long __seen_print = (uintptr_t)__seen; \
@@ -593,7 +593,7 @@
 #define __EXPECT_STR(_expected, _seen, _t, _assert) do { \
 	const char *__exp = (_expected); \
 	const char *__seen = (_seen); \
-	if (_assert) __INC_STEP(_metadata); \
+	__INC_STEP(_metadata); \
 	if (!(strcmp(__exp, __seen) _t 0))  { \
 		__TH_LOG("Expected '%s' %s '%s'.", __exp, #_t, __seen); \
 		_metadata->passed = 0; \
@@ -679,7 +679,6 @@ void __run_test(struct __test_metadata *t)
 	} else if (child_pid == 0) {
 		t->fn(t);
 		/* return the step that failed or 0 */
-		printf("passed: %d, step: %d\n", t->passed, t->step);
 		_exit(t->passed ? 0 : t->step);
 	} else {
 		/* TODO(wad) add timeout support. */
@@ -720,7 +719,6 @@ void __run_test(struct __test_metadata *t)
 				status);
 		}
 	}
-	printf("t->passed: %d\n", t->passed);
 	printf("[     %4s ] %s\n", (t->passed ? "OK" : "FAIL"), t->name);
 }
 
