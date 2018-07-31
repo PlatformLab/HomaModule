@@ -50,17 +50,27 @@
 #ifndef __KSELFTEST_HARNESS_H
 #define __KSELFTEST_HARNESS_H
 
-#define _GNU_SOURCE
-#include <asm/types.h>
-#include <errno.h>
-#include <stdbool.h>
-#include <stdint.h>
+/* This file has been modified considerably from the original version
+ * in kernel/tools/testing/selftests in order to allow kernel unit tests
+ * to run in user space (by extracting a collection of kernel source files
+ * and compiling them into a normal Linux executable along with the
+ * unit tests). This creates potential problems with conflicts between
+ * kernel header files and user-level header files. To avoid these conflicts,
+ * this file must be very careful about what headers it includes.
+ * This file also contains several other changes, such as:
+ *   - All tests run in a single process, rather than forging a child process
+ *     for each test.
+ *   - Several unit test files can be compiled separately but linked together
+ *     into a single test suite (see SELFTEST_NOT_MAIN #define).
+ */
+
+//#include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
+//#include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
+
+extern void abort(void);
+extern void _exit(int status);
 
 
 /* Utilities exposed to the test definitions */
@@ -557,8 +567,6 @@
 #define EXPECT_STRNE(expected, seen) \
 	__EXPECT_STR(expected, seen, !=, 0)
 
-#define ARRAY_SIZE(a)	(sizeof(a) / sizeof(a[0]))
-
 /* Support an optional handler after and ASSERT_* or EXPECT_*.  The approach is
  * not thread-safe, but it should be fine in most sane test scenarios.
  *
@@ -608,8 +616,8 @@ struct __test_metadata {
 	int termsig;
 	int passed;
 	int trigger; /* extra handler after the evaluation */
-	__u8 step;
-	bool no_print; /* manual trigger when TH_LOG_STREAM is not available */
+	unsigned char step;
+	int no_print; /* manual trigger when TH_LOG_STREAM is not available */
 	struct __test_metadata *prev, *next;
 };
 
@@ -618,6 +626,18 @@ static struct __test_metadata *__test_list;
 static unsigned int __test_count;
 static unsigned int __fixture_count;
 static int __constructor_order;
+static int __verbose = 0;
+static char * __helpMessage =
+	"This program runs unit tests written in the Linux kernel kselftest "
+	"style.\n\n"
+	"Usage: %s options test_name test_name ...\n\n"
+	"The following options are supported:\n\n"
+	"--verbose or -v   Print the names of all tests as they run "
+	"(default:\n"
+	"print only tests that fail)\n"
+	"--help or -h      Print this message\n\n"
+	"If one or more test_name arguments are provided, then only those "
+	"tests are run; if no test names are provided, then all tests are run.\n";
 
 #define _CONSTRUCTOR_ORDER_FORWARD   1
 #define _CONSTRUCTOR_ORDER_BACKWARD -1
@@ -654,7 +674,7 @@ static inline void __register_test(struct __test_metadata *t)
 	}
 }
 
-static inline int __bail(int for_realz, bool no_print, __u8 step)
+static inline int __bail(int for_realz, int no_print, unsigned char step)
 {
 	if (for_realz) {
 		if (no_print)
@@ -666,12 +686,12 @@ static inline int __bail(int for_realz, bool no_print, __u8 step)
 
 void __run_test(struct __test_metadata *t)
 {
-	pid_t child_pid;
-	int status;
-
 	t->passed = 1;
 	t->trigger = 0;
-	printf("[ RUN      ] %s\n", t->name);
+	if (__verbose)
+		printf("[ RUN      ] %s\n", t->name);
+	t->fn(t);
+#if 0
 	child_pid = fork();
 	if (child_pid < 0) {
 		printf("ERROR SPAWNING TEST CHILD\n");
@@ -719,7 +739,13 @@ void __run_test(struct __test_metadata *t)
 				status);
 		}
 	}
-	printf("[     %4s ] %s\n", (t->passed ? "OK" : "FAIL"), t->name);
+#endif
+	if (!t->passed)
+		fprintf(TH_LOG_STREAM, "%s: Test failed at step #%d\n",
+			t->name, t->step);
+	if (!t->passed || __verbose)
+		printf("[     %4s ] %s\n", (t->passed ? "OK" : "FAIL"),
+			t->name);
 }
 
 static int test_harness_run(int __attribute__((unused)) argc,
@@ -729,6 +755,24 @@ static int test_harness_run(int __attribute__((unused)) argc,
 	int ret = 0;
 	unsigned int count = 0;
 	unsigned int pass_count = 0;
+	int argi = 1;
+	
+	for (argi = 1; argi < argc; argi++) {
+		if ((strcmp(argv[argi], "-v") == 0) ||
+			(strcmp(argv[argi], "--verbose") == 0)) {
+			__verbose = 1;
+		} else if ((strcmp(argv[argi], "-h") == 0) ||
+			(strcmp(argv[argi], "--help") == 0)) {
+			printf(__helpMessage, argv[0]);
+			return 0;
+		} else if (argv[argi][0] == '-') {
+			printf("Unknown option %s; type '%s --help' for help\n",
+				argv[argi], argv[0]);
+			return 1;
+		} else {
+			break;
+		}
+	}
 
 	/* TODO(wad) add optional arguments similar to gtest. */
 	printf("[==========] Running %u tests from %u test cases.\n",
