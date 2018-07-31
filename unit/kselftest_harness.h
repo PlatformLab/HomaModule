@@ -61,7 +61,7 @@
  *   - All tests run in a single process, rather than forging a child process
  *     for each test.
  *   - Several unit test files can be compiled separately but linked together
- *     into a single test suite (see SELFTEST_NOT_MAIN #define).
+ *     into a single test suite (see KSELFTEST_NOT_MAIN #define).
  */
 
 //#include <stdint.h>
@@ -313,12 +313,6 @@ extern void _exit(int status);
  * Use once to append a main() to the test file.
  */
 #define TEST_HARNESS_MAIN \
-	static void __attribute__((constructor)) \
-	__constructor_order_last(void) \
-	{ \
-		if (!__constructor_order) \
-			__constructor_order = _CONSTRUCTOR_ORDER_BACKWARD; \
-	} \
 	int main(int argc, char **argv) { \
 		return test_harness_run(argc, argv); \
 	}
@@ -567,6 +561,7 @@ extern void _exit(int status);
 #define EXPECT_STRNE(expected, seen) \
 	__EXPECT_STR(expected, seen, !=, 0)
 
+#if 0
 /* Support an optional handler after and ASSERT_* or EXPECT_*.  The approach is
  * not thread-safe, but it should be fine in most sane test scenarios.
  *
@@ -576,6 +571,7 @@ extern void _exit(int status);
 #define OPTIONAL_HANDLER(_assert) \
 	for (; _metadata->trigger; _metadata->trigger = \
 			__bail(_assert, _metadata->no_print, _metadata->step))
+#endif
 
 #define __INC_STEP(_metadata) \
 	if (_metadata->passed && _metadata->step < 255) \
@@ -587,8 +583,8 @@ extern void _exit(int status);
 	__typeof__(_seen) __seen = (_seen); \
 	__INC_STEP(_metadata); \
 	if (!(__exp _t __seen)) { \
-		unsigned long long __exp_print = (uintptr_t)__exp; \
-		unsigned long long __seen_print = (uintptr_t)__seen; \
+		unsigned long long __exp_print = (long long)__exp; \
+		unsigned long long __seen_print = (long long)__seen; \
 		__TH_LOG("Expected %s (%llu) %s %s (%llu)", \
 			 #_expected, __exp_print, #_t, \
 			 #_seen, __seen_print); \
@@ -596,7 +592,7 @@ extern void _exit(int status);
 		/* Ensure the optional handler is triggered */ \
 		_metadata->trigger = 1; \
 	} \
-} while (0); OPTIONAL_HANDLER(_assert)
+} while (0); /* OPTIONAL_HANDLER(_assert) */
 
 #define __EXPECT_STR(_expected, _seen, _t, _assert) do { \
 	const char *__exp = (_expected); \
@@ -607,7 +603,7 @@ extern void _exit(int status);
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
 	} \
-} while (0); OPTIONAL_HANDLER(_assert)
+} while (0); /* OPTIONAL_HANDLER(_assert) */
 
 /* Contains all the information for test execution and status checking. */
 struct __test_metadata {
@@ -621,24 +617,10 @@ struct __test_metadata {
 	struct __test_metadata *prev, *next;
 };
 
-/* Storage for the (global) tests to be run. */
-static struct __test_metadata *__test_list;
-static unsigned int __test_count;
-static unsigned int __fixture_count;
-static int __constructor_order;
-static int __verbose = 0;
-static char * __helpMessage =
-	"This program runs unit tests written in the Linux kernel kselftest "
-	"style.\n"
-	"    Usage: %s options test_name test_name ...\n"
-	"The following options are supported:\n"
-	"    --verbose or -v   Print the names of all tests as they run "
-	"(default:\n"
-	"                      print only tests that fail)\n"
-	"    --help or -h      Print this message\n"
-	"If one or more test_name arguments are provided, then only those "
-	"tests are\n"
-	"run; if no test names are provided, then all tests are run.\n";
+
+extern struct __test_metadata *__test_list;
+extern unsigned int __test_count;
+extern int __constructor_order;
 
 #define _CONSTRUCTOR_ORDER_FORWARD   1
 #define _CONSTRUCTOR_ORDER_BACKWARD -1
@@ -675,6 +657,7 @@ static inline void __register_test(struct __test_metadata *t)
 	}
 }
 
+#if 0
 static inline int __bail(int for_realz, int no_print, unsigned char step)
 {
 	if (for_realz) {
@@ -684,6 +667,28 @@ static inline int __bail(int for_realz, int no_print, unsigned char step)
 	}
 	return 0;
 }
+#endif
+
+#ifndef KSELFTEST_NOT_MAIN
+
+/* Storage for the (global) tests to be run. */
+struct __test_metadata *__test_list;
+unsigned int __test_count;
+unsigned int __fixture_count;
+int __constructor_order;
+static int __verbose = 0;
+static char * __helpMessage =
+	"This program runs unit tests written in the Linux kernel kselftest "
+	"style.\n"
+	"    Usage: %s options test_name test_name ...\n"
+	"The following options are supported:\n"
+	"    --verbose or -v   Print the names of all tests as they run "
+	"(default:\n"
+	"                      print only tests that fail)\n"
+	"    --help or -h      Print this message\n"
+	"If one or more test_name arguments are provided, then only those "
+	"tests are\n"
+	"run; if no test names are provided, then all tests are run.\n";
 
 void __run_test(struct __test_metadata *t)
 {
@@ -799,11 +804,18 @@ static int test_harness_run(int __attribute__((unused)) argc,
 	printf("[  %s  ]\n", (ret ? "FAILED" : "PASSED"));
 	return ret;
 }
+#endif  /* KSELFTEST_NOT_MAIN */
 
 static void __attribute__((constructor)) __constructor_order_first(void)
 {
 	if (!__constructor_order)
 		__constructor_order = _CONSTRUCTOR_ORDER_FORWARD;
+}
+
+static void __attribute__((constructor)) __constructor_order_second(void)
+{
+	if (!__constructor_order)
+		__constructor_order = _CONSTRUCTOR_ORDER_BACKWARD;
 }
 
 #endif  /* __KSELFTEST_HARNESS_H */
