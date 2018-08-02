@@ -6,8 +6,8 @@
 #include <stdio.h>
 
 #include "homa_impl.h"
-#include "unit_ccutils.h"
-#include "unit_mock.h"
+#include "ccutils.h"
+#include "mock.h"
 
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"

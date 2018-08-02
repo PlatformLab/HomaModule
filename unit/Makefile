@@ -33,10 +33,10 @@ HOMA_SRCS :=  homa_input.c \
 	      homa_utils.c
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
 	
-OTHER_SRCS := unit_ccutils.cc \
-	      unit_main.c \
-	      unit_mock.c \
-	      unit_utils.c
+OTHER_SRCS := ccutils.cc \
+	      main.c \
+	      mock.c \
+	      utils.c
 	      
 OTHER_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(OTHER_SRCS)))
 	
