@@ -14,9 +14,14 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
 	int offset = ntohl(h->offset);
-	int ceiling = msgin->total_length;
-	int floor = 0;
 	struct sk_buff *skb2;
+	
+	/* Any data from the packet with offset less than this is
+	 * of no value.*/
+	int floor = 0;
+	
+	/* Any data with offset >= this is useless. */
+	int ceiling = msgin->total_length;
 	
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
@@ -48,7 +53,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 		/* This packet is redundant. */
 		char buffer[100];
 		printk(KERN_NOTICE "redundant Homa packet: %s\n",
-			homa_print_header(skb, buffer, sizeof(buffer)));
+			homa_print_packet(skb, buffer, sizeof(buffer)));
 		kfree_skb(skb);
 		return;
 	}

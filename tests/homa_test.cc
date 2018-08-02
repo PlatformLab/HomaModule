@@ -64,6 +64,7 @@ void print_help(const char *name)
 		"host:port describes a server to communicate with, and each op\n"
 		"selects a particular test to run (see the code for available\n"
 		"tests). The following options are supported:\n\n"
+		"--count      Number of times to repeat a test (default: 1000)\n"
 		"--length     Size of messages, in bytes (default: 100)\n"
 		"--seed       Used to compute message contents (default: 12345)\n",
 		name);

@@ -10,8 +10,11 @@
 *.patch
 *.diff
 .tags*
+.deps
 
 
 # Ignore IDE files
 /.idea/
 /nbproject/
+
+unit/unit_main.gtest

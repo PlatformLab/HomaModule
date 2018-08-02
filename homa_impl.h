@@ -58,6 +58,7 @@ enum homa_packet_type {
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in op_symbol and header_to_string
+	 * 3. Add support in new_buff in unit/unit_utils.cc
 	 */
 };
 
@@ -492,6 +493,8 @@ struct homa {
 	struct list_head sockets;
 };
 
+extern void   homa_add_packet(struct homa_message_in *msgin,
+		struct sk_buff *skb);
 extern void   homa_addr_destroy(struct homa_addr *addr);
 extern int    homa_addr_init(struct homa_addr *addr, struct sock *sk,
 		__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
@@ -505,6 +508,7 @@ extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc);
 extern void   homa_data_from_server(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_client_rpc *crpc);
+extern void   homa_destroy(struct homa *homa);
 extern int    homa_diag_destroy(struct sock *sk, int err);
 extern int    homa_disconnect(struct sock *sk, int flags);
 extern void   homa_err_handler(struct sk_buff *skb, u32 info);
@@ -519,6 +523,7 @@ extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
 extern int    homa_handler(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
+extern void   homa_init(struct homa *homa);
 extern int    homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int    homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int    homa_ioc_send(struct sock *sk, unsigned long arg);
@@ -535,7 +540,10 @@ extern int    homa_message_out_init(struct homa_message_out *hmo,
 extern __poll_t
 	      homa_poll(struct file *file, struct socket *sock,
 		struct poll_table_struct *wait);
-extern char  *homa_print_header(struct sk_buff *skb, char *buffer, int length);
+extern char  *homa_print_ipv4_addr(__be32 addr, char *buffer);
+extern char  *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
+extern char  *homa_print_packet_short(struct sk_buff *skb, char *buffer,
+		int length);
 extern int    homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		int noblock, int flags, int *addr_len);
 extern void   homa_rehash(struct sock *sk);
@@ -547,7 +555,9 @@ extern struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 		__be32 source, struct data_header *h, int *err);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
-extern int    homa_sock_init(struct sock *sk);
+extern void   homa_sock_destroy(struct homa_sock *hsk);
+extern void   homa_sock_init(struct homa_sock *hsk);
+extern int    homa_socket(struct sock *sk);
 extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);
 extern int    homa_v4_early_demux(struct sk_buff *skb);

@@ -64,7 +64,7 @@ struct proto homa_prot = {
 	.connect	   = ip4_datagram_connect,
 	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
-	.init		   = homa_sock_init,
+	.init		   = homa_socket,
 	.destroy	   = 0,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
@@ -104,10 +104,10 @@ static struct net_protocol homa_protocol = {
 };
 
 /**
- * homa_init(): invoked when this module is loaded into the Linux kernel
+ * homa_load(): invoked when this module is loaded into the Linux kernel
  * @return: 0 on success, otherwise a negative errno.
  */
-static int __init homa_init(void) {
+static int __init homa_load(void) {
 	int status;
 	printk(KERN_NOTICE "Homa module loading\n");
 	status = proto_register(&homa_prot, 1);
@@ -124,8 +124,7 @@ static int __init homa_init(void) {
 		goto out_unregister;
 	}
 
-	homa.next_client_port = HOMA_MIN_CLIENT_PORT;
-	INIT_LIST_HEAD(&homa.sockets);
+	homa_init(&homa);
 
 	return 0;
 
@@ -137,17 +136,18 @@ out:
 }
 
 /**
- * homa_exit(): invoked when this module is unloaded from the Linux kernel.
+ * homa_unload(): invoked when this module is unloaded from the Linux kernel.
  */
-static void __exit homa_exit(void) {
+static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
+	homa_destroy(&homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 }
 
-module_init(homa_init);
-module_exit(homa_exit);
+module_init(homa_load);
+module_exit(homa_unload);
 
 /**
  * homa_bind() - Implements the bind system call for Homa sockets: associates
@@ -191,26 +191,8 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct list_head *pos, *next;
-	int crpcs = 0;
-	int srpcs = 0;
-
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
-	list_del(&hsk->socket_links);
-	list_for_each_safe(pos, next, &hsk->client_rpcs) {
-		struct homa_client_rpc *crpc = list_entry(pos,
-				struct homa_client_rpc, client_rpc_links);
-		homa_client_rpc_free(crpc);
-		crpcs++;
-	}
-	list_for_each_safe(pos, next, &hsk->server_rpcs) {
-		struct homa_server_rpc *srpc = list_entry(pos,
-				struct homa_server_rpc, server_rpc_links);
-		homa_server_rpc_free(srpc);
-		srpcs++;
-	}
-	printk(KERN_NOTICE "closed socket %d with %d client RPCs, "
-			"%d server RPCs\n", hsk->client_port, crpcs, srpcs);
+	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 }
 
@@ -449,32 +431,16 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 }
 
 /**
- * homa_sock_init() - Initialize a new Homa socket.  Invoked by the
- * socket(2) system call.
- * @sk:    Socket on which the system call was invoked.
+ * homa_socket() - Implements the socket(2) system call for sockets.
+ * @sk:    Socket on which the system call was invoked. The non-Homa
+ *         parts have already been initialized.
  *
  * Return: always 0 (success).
  */
-int homa_sock_init(struct sock *sk) {
+int homa_socket(struct sock *sk)
+{
 	struct homa_sock *hsk = homa_sk(sk);
-	hsk->server_port = 0;
-	while (1) {
-		if (homa.next_client_port < HOMA_MIN_CLIENT_PORT) {
-			homa.next_client_port = HOMA_MIN_CLIENT_PORT;
-		}
-		if (!homa_find_socket(&homa, homa.next_client_port)) {
-			break;
-		}
-		homa.next_client_port++;
-	}
-	hsk->client_port = homa.next_client_port;
-	homa.next_client_port++;
-	hsk->next_outgoing_id = 1;
-	list_add(&hsk->socket_links, &homa.sockets);
-	INIT_LIST_HEAD(&hsk->client_rpcs);
-	INIT_LIST_HEAD(&hsk->server_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_server_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_client_rpcs);
+	homa_sock_init(hsk);
 	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
 	return 0;
 }
@@ -652,20 +618,21 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0?
  */
 int homa_handler(struct sk_buff *skb) {
-//	char buffer[200];
 	__be32 saddr = ip_hdr(skb)->saddr;
 	int length = skb->len;
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_sock *hsk = NULL;
 	__u16 dport;
+	char buffer[200];
 
 	if (length < HOMA_MAX_HEADER) {
-		printk(KERN_WARNING "Homa packet from %pI4 too short: "
-				"%d bytes\n", &saddr, length);
+		printk(KERN_WARNING "Homa packet from %s too short: "
+				"%d bytes\n",
+				homa_print_ipv4_addr(saddr, buffer), length);
 		goto discard;
 	}
-//	printk(KERN_NOTICE "incoming Homa packet: %s\n",
-//			homa_print_header(skb, buffer, sizeof(buffer)));
+	printk(KERN_NOTICE "incoming Homa packet: %s\n",
+			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
 	hsk = homa_find_socket(&homa, dport);
@@ -673,8 +640,9 @@ int homa_handler(struct sk_buff *skb) {
 		/* Eventually should return an error result to sender if
 		 * it is a client.
 		 */
-		printk(KERN_WARNING "Homa packet from %pI4 sent to "
-			"unknown port %u\n", &saddr, dport);
+		printk(KERN_WARNING "Homa packet from %s sent to "
+			"unknown port %u\n",
+			homa_print_ipv4_addr(saddr, buffer), dport);
 		goto discard;
 	}
 	if (dport < HOMA_MIN_CLIENT_PORT) {

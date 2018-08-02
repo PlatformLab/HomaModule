@@ -126,6 +126,15 @@ struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
 }
 
 /**
+ * homa_destroy() -  Destructor for homa objects.
+ * @homa:      Object to destroy.
+ */
+void homa_destroy(struct homa *homa)
+{
+	/* Currently nothing to do here. */
+}
+
+/**
  * homa_find_server_rpc() - Locate server-side information about the RPC that
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
@@ -173,23 +182,57 @@ struct homa_sock *homa_find_socket(struct homa *homa, __u16 port)
 }
 
 /**
- * homa_print_header() - Print a human-readable string describing the
- * information a Homa packet header.
- * @skb:     Packet whose header information should be printed.
- * @buffer:  Buffer in which to print string.
+ * homa_init() - Constructor for homa objects.
+ * @homa:   Object to initialize.
+ */
+void homa_init(struct homa *homa)
+{
+	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
+	INIT_LIST_HEAD(&homa->sockets);
+}
+
+/**
+ * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
+ * representation.
+ * @addr:    Address to convert, in network byte order.
+ * @buffer:  Where to store the converted value; must have room for
+ *           "255.255.255.255" plus a terminating NULL character.
+ * 
+ * Return:   The converted value (@buffer).
+ * 
+ * Note: Homa uses this function, rather than the %pI4 format specifier
+ * for snprintf et al., because the kernel's version of snprintf isn't
+ * available in Homa's unit test environment.
+ */
+char *homa_print_ipv4_addr(__be32 addr, char *buffer)
+{
+	__u32 a2 = ntohl(addr);
+	sprintf(buffer, "%u.%u.%u.%u", (a2 >> 24) & 0xff, (a2 >> 16) & 0xff,
+			(a2 >> 8) & 0xff, a2 & 0xff);
+	return buffer;
+}
+
+/**
+ * homa_print_packet() - Print a human-readable string describing the
+ * information in a Homa packet.
+ * @skb:     Packet whose information should be printed.
+ * @buffer:  Buffer in which to generate the string.
  * @length:  Number of bytes available at @buffer.
  * 
  * Return:   @buffer
  */
-char *homa_print_header(struct sk_buff *skb, char *buffer, int length)
+char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 {
 	char *pos = buffer;
 	int space_left = length;
+	char addr_buf[20];
 	struct common_header *common = (struct common_header *) skb->data;
 	
-	int result = snprintf(pos, space_left, "%s from %pI4:%u, id %llu",
-		homa_symbol_for_type(common->type), &ip_hdr(skb)->saddr,
-		ntohs(common->sport), common->id);
+	int result = snprintf(pos, space_left,
+		"%s from %s:%u, id %llu, length %u, ",
+		homa_symbol_for_type(common->type),
+		homa_print_ipv4_addr(ip_hdr(skb)->saddr, addr_buf),
+		ntohs(common->sport), common->id, skb->len);
 	if ((result == length) || (result < 0)) {
 		buffer[length-1] = 0;
 		return buffer;
@@ -226,6 +269,51 @@ char *homa_print_header(struct sk_buff *skb, char *buffer, int length)
 		break;
 	}
 	buffer[length-1] = 0;
+	return buffer;
+}
+
+/**
+ * homa_print_packet() - Print a human-readable string describing the
+ * information in a Homa packet. This function generates a more
+ * abbreviated description than home_print_packet.
+ * @skb:     Packet whose information should be printed.
+ * @buffer:  Buffer in which to generate the string.
+ * @length:  Number of bytes available at @buffer.
+ * 
+ * Return:   @buffer
+ */
+char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
+{
+	struct common_header *common = (struct common_header *) skb->data;
+	switch (common->type) {
+	case DATA: {
+		struct data_header *h = (struct data_header *) skb->data;
+		snprintf(buffer, length, "DATA%s %d/%d",
+				h->retransmit ? " retrans" : "",
+				ntohl(h->offset), ntohl(h->message_length));
+		break;
+	}
+	case GRANT: {
+		struct grant_header *h = (struct grant_header *) skb->data;
+		snprintf(buffer, length, "GRANT %d@%d", ntohl(h->offset),
+				h->priority);
+		break;
+	}
+	case RESEND: {
+		struct resend_header *h = (struct resend_header *) skb->data;
+		snprintf(buffer, length, "RESEND %d-%d@%d", ntohl(h->offset),
+				ntohl(h->offset) + ntohl(h->length) - 1,
+				h->priority);
+		break;
+	}
+	case BUSY:
+		snprintf(buffer, length, "BUSY");
+		break;
+	default:
+		snprintf(buffer, length, "unknown packet type %d",
+				common->type);
+		break;
+	}
 	return buffer;
 }
 
@@ -279,6 +367,57 @@ struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 	srpc->state = SRPC_INCOMING;
 	list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
 	return srpc;
+}
+
+/**
+ * homa_sock_destroy() - Destructor for home_sock objects. This function
+ * only cleans up the parts of the object that are owned by Homa.
+ * @hsk:     Object to destroy.
+ */
+void homa_sock_destroy(struct homa_sock *hsk)
+{
+	struct list_head *pos, *next;
+
+	list_del(&hsk->socket_links);
+	list_for_each_safe(pos, next, &hsk->client_rpcs) {
+		struct homa_client_rpc *crpc = list_entry(pos,
+				struct homa_client_rpc, client_rpc_links);
+		homa_client_rpc_free(crpc);
+	}
+	list_for_each_safe(pos, next, &hsk->server_rpcs) {
+		struct homa_server_rpc *srpc = list_entry(pos,
+				struct homa_server_rpc, server_rpc_links);
+		homa_server_rpc_free(srpc);
+	}
+}
+
+/**
+ * homa_sock_init() - Constructor for homa_sock objects. This function
+ * initializes only the parts of the socket that are owned by Homa.
+ * @hsk:    Object to initialize.
+ *
+ * Return: always 0 (success).
+ */
+void homa_sock_init(struct homa_sock *hsk)
+{
+	hsk->server_port = 0;
+	while (1) {
+		if (homa.next_client_port < HOMA_MIN_CLIENT_PORT) {
+			homa.next_client_port = HOMA_MIN_CLIENT_PORT;
+		}
+		if (!homa_find_socket(&homa, homa.next_client_port)) {
+			break;
+		}
+		homa.next_client_port++;
+	}
+	hsk->client_port = homa.next_client_port;
+	homa.next_client_port++;
+	hsk->next_outgoing_id = 1;
+	list_add(&hsk->socket_links, &homa.sockets);
+	INIT_LIST_HEAD(&hsk->client_rpcs);
+	INIT_LIST_HEAD(&hsk->server_rpcs);
+	INIT_LIST_HEAD(&hsk->ready_server_rpcs);
+	INIT_LIST_HEAD(&hsk->ready_client_rpcs);
 }
 
 /**

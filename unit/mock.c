@@ -3,7 +3,27 @@
  * kernel.
  */
 
+#include <stdio.h>
+
 #include "homa_impl.h"
+#include "unit_ccutils.h"
+#include "unit_mock.h"
+
+#define KSELFTEST_NOT_MAIN 1
+#include "kselftest_harness.h"
+
+/* It isn't safe to include some header files, such as stdlib, because
+ * they conflict with kernel header files. The explicit declarations
+ * below replace those header files.
+ */
+
+extern void       free(void *ptr);
+extern void      *malloc(size_t size);
+extern void      *memcpy(void *dest, const void *src, size_t n);
+
+/* Keeps track of all sk_buffs that are alive in the current test.
+ * Reset for each test.*/
+static struct unit_hash *buffs_in_use = NULL;
 
 struct task_struct *current_task = NULL;
 unsigned long ex_handler_refcount = 0;
@@ -123,7 +143,16 @@ void kfree(const void *block) {}
 
 void kfree_skb(struct sk_buff *skb)
 {
-	return;
+	skb->users.refs.counter--;
+	if (skb->users.refs.counter > 0)
+		return;
+	if (!buffs_in_use || unit_hash_get(buffs_in_use, skb) == NULL) {
+		printf("*** Unknown sk_buff released.\n");
+		return;
+	}
+	unit_hash_erase (buffs_in_use, skb);
+	free(skb->head);
+	free(skb);
 }
 
 void *__kmalloc(size_t size, gfp_t flags)
@@ -233,4 +262,78 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 		int sync, void *key)
 {
 	return 0;
+}
+
+/**
+ * mock_skb_teardown() - Invoked at the end of each test to check for
+ * consistency issues with sk_buffs, and to reset skb-related information.
+ */
+void mock_skb_teardown(void)
+{
+	int count = unit_hash_size(buffs_in_use);
+	if (count > 0)
+		FAIL("%u sk_buffs still in use after test", count);
+	unit_hash_free(buffs_in_use);
+	buffs_in_use = NULL;
+}
+
+/**
+ * mock_buff_new() - Allocate and return a packet buffer. The buffer is
+ * initialized as if it just arrived from the network.
+ * @saddr:        IPV4 address to use as the sender of the packet, in
+ *                network byte order.
+ * @h:            Header for the buffer; actual length and contents depend
+ *                on the type.
+ * @extra_bytes:  How much additional data to add to the buffer after
+ *                the header.
+ * @first_value:  Determines the data contents: the first __u32 will have
+ *                this value, and each successive __u32 will increment by 4.
+ * 
+ * Return:        A packet buffer containing the information described above.
+ *                The caller owns this buffer and is responsible for freeing it.
+ */
+struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
+		int extra_bytes, int first_value)
+{
+	int header_size, i, ip_size;
+	
+	switch (h->type) {
+	case DATA:
+		header_size = sizeof(struct data_header);
+		break;
+	case GRANT:
+		header_size = sizeof(struct grant_header);
+		break;
+	case RESEND:
+		header_size = sizeof(struct resend_header);
+		break;
+	case BUSY:
+		header_size = sizeof(struct busy_header);
+		break;
+	default:
+		printf("*** Unknown packet type %d in new_buff.\n", h->type);
+		header_size = sizeof(struct common_header);
+		break;
+	}
+	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	if (!buffs_in_use)
+		buffs_in_use = unit_hash_new();
+	unit_hash_set(buffs_in_use, skb, "used");
+	
+	/* Round up sizes to whole words for convenience. */
+	ip_size = (sizeof(struct iphdr) + 3) & ~3;
+	/* Round up extra data space to whole words for convenience. */
+	skb->head = malloc(ip_size + header_size + ((extra_bytes+3)&~3));
+	skb->data = skb->head + ip_size;
+	skb->network_header = ip_size - sizeof(struct iphdr);
+	skb->transport_header = ip_size;
+	skb->data = skb->head + ip_size;
+	memcpy(skb->data, h, header_size);
+	for (i = 0; i < extra_bytes; i += 4) {
+		*(int *)(skb->data + header_size + i) = first_value + i;
+	}
+	skb->len = header_size + extra_bytes;
+	skb->users.refs.counter = 1;
+	ip_hdr(skb)->saddr = saddr;
+	return skb;
 }
