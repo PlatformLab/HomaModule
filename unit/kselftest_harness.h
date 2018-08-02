@@ -114,7 +114,20 @@ extern void _exit(int status);
 /* Unconditional logger for internal use. */
 #define __TH_LOG(fmt, ...) \
 		fprintf(TH_LOG_STREAM, "%s:%d:%s:" fmt "\n", \
-			__FILE__, __LINE__, _metadata->name, ##__VA_ARGS__)
+			__FILE__, __LINE__, __current_test->name, ##__VA_ARGS__)
+
+/**
+ * FAIL(fmt, ...) - Prints an error message and marks the current test as
+ * failed.
+ *
+ * @fmt: format string
+ * @...: optional arguments
+ */
+#define FAIL(fmt, ...) do { \
+	if (TH_LOG_ENABLED) \
+		__TH_LOG(fmt, ##__VA_ARGS__); \
+	__current_test->passed = 0; \
+} while (0)
 
 /**
  * TEST(test_name) - Defines the test function and creates the registration
@@ -155,15 +168,15 @@ extern void _exit(int status);
 #define TEST_SIGNAL(test_name, signal) __TEST_IMPL(test_name, signal)
 
 #define __TEST_IMPL(test_name, _signal) \
-	static void test_name(struct __test_metadata *_metadata); \
+	static void t_##test_name(struct __test_metadata *_metadata); \
 	static struct __test_metadata _##test_name##_object = \
 		{ name: "global." #test_name, \
-		  fn: &test_name, termsig: _signal }; \
+		  fn: &t_##test_name, termsig: _signal }; \
 	static void __attribute__((constructor)) _register_##test_name(void) \
 	{ \
 		__register_test(&_##test_name##_object); \
 	} \
-	static void test_name( \
+	static void t_##test_name( \
 		struct __test_metadata __attribute__((unused)) *_metadata)
 
 /**
@@ -619,7 +632,9 @@ struct __test_metadata {
 
 
 extern struct __test_metadata *__test_list;
+extern struct __test_metadata *__current_test;
 extern unsigned int __test_count;
+extern unsigned int __fixture_count;
 extern int __constructor_order;
 
 #define _CONSTRUCTOR_ORDER_FORWARD   1
@@ -673,6 +688,7 @@ static inline int __bail(int for_realz, int no_print, unsigned char step)
 
 /* Storage for the (global) tests to be run. */
 struct __test_metadata *__test_list;
+struct __test_metadata *__current_test;
 unsigned int __test_count;
 unsigned int __fixture_count;
 int __constructor_order;
@@ -692,6 +708,7 @@ static char * __helpMessage =
 
 void __run_test(struct __test_metadata *t)
 {
+	__current_test = t;
 	t->passed = 1;
 	t->trigger = 0;
 	if (__verbose)
