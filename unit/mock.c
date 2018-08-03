@@ -21,9 +21,24 @@ extern void       free(void *ptr);
 extern void      *malloc(size_t size);
 extern void      *memcpy(void *dest, const void *src, size_t n);
 
+/* This variable can be set to a non-zero value by unit tests in order to
+ * simulate error returns from kmalloc. If bit 0 is set to 1, the next
+ * call to malloc will fail; bit 1 corresponds to the next call after
+ * that, and so on.
+ */
+int mock_malloc_errors = 0;
+
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.*/
 static struct unit_hash *buffs_in_use = NULL;
+
+/* Keeps track of all the blocks of memory that have been allocated by
+ * kmalloc but not yet freed by kfree. Reset for each test.*/
+static struct unit_hash *mallocs_in_use = NULL;
+
+/* Keeps track of all the results returned by ip_route_output_flow that
+ * have not yet been freed. Reset for each test. */
+static struct unit_hash *routes_in_use = NULL;
 
 struct task_struct *current_task = NULL;
 unsigned long ex_handler_refcount = 0;
@@ -35,33 +50,61 @@ extern void add_wait_queue(struct wait_queue_head *wq_head,
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
-	return 0;
+	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	if (!buffs_in_use)
+		buffs_in_use = unit_hash_new();
+	unit_hash_set(buffs_in_use, skb, "used");
+	skb->head = malloc(size);
+	skb->data = skb->head;
+	skb_reset_tail_pointer(skb);
+	skb->network_header = 0;
+	skb->transport_header = 0;
+	skb->data_len = size;
+	skb->len = 0;
+	skb->users.refs.counter = 1;
+	skb->_skb_refdst = 0;
+	return skb;
 }
 
 bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("_copy_from_iter_full invoked");
 	return true;
 }
 
 bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("_copy_from_iter_full_nocache invoked");
 	return true;
 }
 
 unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("_copy_to_user invoked");
 	return 0;
 }
 
 bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
 			       struct iov_iter *i)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("csum_and_copy_from_iter_full invoked");
 	return true;
 }
 
 unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("_copy_from_user invoked");
 	return 0;
 }
 
@@ -73,7 +116,18 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
 
 void ip4_datagram_release_cb(struct sock *sk) {}
 
-void dst_release(struct dst_entry *dst) {}
+void dst_release(struct dst_entry *dst)
+{
+	dst->__refcnt.counter--;
+	if (dst->__refcnt.counter > 0)
+		return;
+	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
+		FAIL("dst_release on unknown route");
+		return;
+	}
+	unit_hash_erase(routes_in_use, dst);
+	free(dst);
+}
 
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
@@ -136,28 +190,60 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		const struct sock *sk)
 {
-	return NULL;
+	struct rtable *route = malloc(sizeof(struct rtable));
+	if (!route) {
+		FAIL("malloc failed");
+		return NULL;
+	}
+	route->dst.__refcnt.counter = 1;
+	if (!routes_in_use)
+		routes_in_use = unit_hash_new();
+	unit_hash_set(routes_in_use, route, "used");
+	return route;
 }
 
-void kfree(const void *block) {}
+void kfree(const void *block)
+{
+	if (!mallocs_in_use || unit_hash_get(mallocs_in_use, block) == NULL) {
+		FAIL("kfree on unknown block");
+		return;
+	}
+	unit_hash_erase(mallocs_in_use, block);
+	free((void *) block);
+}
 
 void kfree_skb(struct sk_buff *skb)
 {
+	skb_dst_drop(skb);
 	skb->users.refs.counter--;
 	if (skb->users.refs.counter > 0)
 		return;
 	if (!buffs_in_use || unit_hash_get(buffs_in_use, skb) == NULL) {
-		printf("*** Unknown sk_buff released.\n");
+		FAIL("kfree_skb on unknown sk_buff");
 		return;
 	}
-	unit_hash_erase (buffs_in_use, skb);
+	unit_hash_erase(buffs_in_use, skb);
 	free(skb->head);
 	free(skb);
 }
 
 void *__kmalloc(size_t size, gfp_t flags)
 {
-	return NULL;
+	if (mock_malloc_errors) {
+		int fail = mock_malloc_errors & 1;
+		mock_malloc_errors >>= 1;
+		if (fail)
+			return NULL;
+	}
+	void *block = malloc(size);
+	if (!block) {
+		FAIL("malloc failed");
+		return NULL;
+	}
+	if (!mallocs_in_use)
+		mallocs_in_use = unit_hash_new();
+	unit_hash_set(mallocs_in_use, block, "used");
+	return block;
 }
 
 void lock_sock_nested(struct sock *sk, int subclass) {}
@@ -197,12 +283,19 @@ int sk_set_peek_off(struct sock *sk, int val)
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iov_iter *to, int size)
 {
+	if (!unit_log_empty())
+		unit_log_printf("; ");
+	unit_log_printf("skb_copy_datagram_iter ");
+	unit_log_data(from->data + offset, size);
 	return 0;
 }
 
 void *skb_put(struct sk_buff *skb, unsigned int len)
 {
-	return NULL;
+	unsigned char *result = skb_tail_pointer(skb);
+	skb->tail += len;
+	skb->len += len;
+	return result;
 }
 
 int sock_common_getsockopt(struct socket *sock, int level, int optname,
@@ -265,20 +358,17 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 }
 
 /**
- * mock_skb_teardown() - Invoked at the end of each test to check for
- * consistency issues with sk_buffs, and to reset skb-related information.
+ * mock_data_ready() - Invoked through sk->sk_data_ready; logs a message
+ * to indicate that it was invoked.
+ * @sk:    Associated socket; not used here.
  */
-void mock_skb_teardown(void)
+void mock_data_ready(struct sock *sk)
 {
-	int count = unit_hash_size(buffs_in_use);
-	if (count > 0)
-		FAIL("%u sk_buffs still in use after test", count);
-	unit_hash_free(buffs_in_use);
-	buffs_in_use = NULL;
+	unit_log_printf("sk->sk_data_ready invoked");
 }
 
 /**
- * mock_buff_new() - Allocate and return a packet buffer. The buffer is
+ * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPV4 address to use as the sender of the packet, in
  *                network byte order.
@@ -295,7 +385,7 @@ void mock_skb_teardown(void)
 struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
-	int header_size, i, ip_size;
+	int header_size, ip_size;
 	
 	switch (h->type) {
 	case DATA:
@@ -329,11 +419,67 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	skb->transport_header = ip_size;
 	skb->data = skb->head + ip_size;
 	memcpy(skb->data, h, header_size);
-	for (i = 0; i < extra_bytes; i += 4) {
-		*(int *)(skb->data + header_size + i) = first_value + i;
-	}
+	unit_fill_data(skb->data + header_size, extra_bytes, first_value);
 	skb->len = header_size + extra_bytes;
 	skb->users.refs.counter = 1;
 	ip_hdr(skb)->saddr = saddr;
+	skb->_skb_refdst = 0;
 	return skb;
+}
+
+/**
+ * Returns the number of sk_buffs currently in use.
+ */
+int mock_skb_count(void)
+{
+	return unit_hash_size(buffs_in_use);
+}
+
+/**
+ * mock_sock_destroy() - Destructor for sockets; cleans up the mocked-out
+ * non-Homa parts as well as the Homa parts.
+ */
+void mock_sock_destroy(struct homa_sock *hsk)
+{
+	homa_sock_destroy(hsk);
+}
+
+/**
+ * mock_sock_init() - Constructor for sockets; initializes the Homa-specific
+ * part, and mocks out the non-Homa-specific parts.
+ */
+void mock_sock_init(struct homa_sock *hsk, struct homa *homa)
+{
+	struct sock *sk = (struct sock *) hsk;
+	homa_sock_init(hsk, homa);
+	sk->sk_data_ready = mock_data_ready;
+}
+
+/**
+ * mock_teardown() - Invoked at the end of each unit test to check for
+ * consistency issues with all of the information managed by this file.
+ * This function also cleans up the mocking information, so it is ready
+ * for the next unit test.
+ */
+void mock_teardown(void)
+{
+	mock_malloc_errors = 0;
+	
+	int count = unit_hash_size(buffs_in_use);
+	if (count > 0)
+		FAIL("%u sk_buff(s)still in use after test", count);
+	unit_hash_free(buffs_in_use);
+	buffs_in_use = NULL;
+	
+	count = unit_hash_size(mallocs_in_use);
+	if (count > 0)
+		FAIL("%u memory block(s) still allocated after test", count);
+	unit_hash_free(mallocs_in_use);
+	mallocs_in_use = NULL;
+	
+	count = unit_hash_size(routes_in_use);
+	if (count > 0)
+		FAIL("%u route(s) still allocated after test", count);
+	unit_hash_free(routes_in_use);
+	routes_in_use = NULL;
 }

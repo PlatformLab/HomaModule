@@ -7,6 +7,7 @@
 
 #include <linux/audit.h>
 #include <linux/init.h>
+#include <linux/list.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/sched/signal.h>
@@ -556,7 +557,7 @@ extern struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
 extern void   homa_sock_destroy(struct homa_sock *hsk);
-extern void   homa_sock_init(struct homa_sock *hsk);
+extern void   homa_sock_init(struct homa_sock *hsk, struct homa *homa);
 extern int    homa_socket(struct sock *sk);
 extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);

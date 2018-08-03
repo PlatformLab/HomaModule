@@ -9,6 +9,7 @@
 /**
  * unit_get_in_addr - Parse a string into an IPV4 host addresss
  * @s:          IPV4 host specification such as 192.168.0.1
+ * 
  * Return:      The in_addr (in network order) corresponding to @s. IF
  *              s couldn't be parsed properly then 0 is returned.
  * 
@@ -20,6 +21,21 @@ __be32 unit_get_in_addr(char *s)
 		return htonl((a<<24) + (b<<16) + (c<<8) + d);
 	}
 	return 0;
+}
+
+/**
+ * unit_list_length() - Return the number of entries in a list (not including
+ * the list header.
+ * @head:   Header for the list (or any entry in the list, for that matter).
+ */
+int unit_list_length(struct list_head *head)
+{
+	struct list_head *pos;
+	int count = 0;
+	list_for_each(pos, head) {
+		count++;
+	}
+	return count;
 }
 
 /**
@@ -53,6 +69,6 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
  */
 void unit_teardown(void)
 {
-	mock_skb_teardown();
+	mock_teardown();
 	unit_log_clear();
 }

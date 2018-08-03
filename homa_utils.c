@@ -395,25 +395,26 @@ void homa_sock_destroy(struct homa_sock *hsk)
  * homa_sock_init() - Constructor for homa_sock objects. This function
  * initializes only the parts of the socket that are owned by Homa.
  * @hsk:    Object to initialize.
+ * @homa:   Homa implementation that will manage the socket.
  *
  * Return: always 0 (success).
  */
-void homa_sock_init(struct homa_sock *hsk)
+void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	hsk->server_port = 0;
 	while (1) {
-		if (homa.next_client_port < HOMA_MIN_CLIENT_PORT) {
-			homa.next_client_port = HOMA_MIN_CLIENT_PORT;
+		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {
+			homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 		}
-		if (!homa_find_socket(&homa, homa.next_client_port)) {
+		if (!homa_find_socket(homa, homa->next_client_port)) {
 			break;
 		}
-		homa.next_client_port++;
+		homa->next_client_port++;
 	}
-	hsk->client_port = homa.next_client_port;
-	homa.next_client_port++;
+	hsk->client_port = homa->next_client_port;
+	homa->next_client_port++;
 	hsk->next_outgoing_id = 1;
-	list_add(&hsk->socket_links, &homa.sockets);
+	list_add(&hsk->socket_links, &homa->sockets);
 	INIT_LIST_HEAD(&hsk->client_rpcs);
 	INIT_LIST_HEAD(&hsk->server_rpcs);
 	INIT_LIST_HEAD(&hsk->ready_server_rpcs);

@@ -440,7 +440,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	homa_sock_init(hsk);
+	homa_sock_init(hsk, &homa);
 	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
 	return 0;
 }
