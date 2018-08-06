@@ -24,6 +24,7 @@ CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(INCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(INCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_input.c \
+	      unit_homa_output.c \
 	      unit_homa_utils.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 	

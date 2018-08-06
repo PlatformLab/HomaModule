@@ -63,6 +63,7 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 		h->retransmit = 0;
 		err = skb_add_data_nocache(sk, skb, iter, cur_size);
 		if (unlikely(err != 0)) {
+			kfree_skb(skb);
 			return err;
 		}
 		dst_hold(dest->dst);

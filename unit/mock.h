@@ -1,7 +1,11 @@
 /* Functions for mocking that are exported to test code. */
 
+extern int         mock_alloc_skb_errors;
+extern int         mock_copy_data_errors;
 extern int         mock_malloc_errors;
+extern int         mock_route_errors;
 
+extern int         mock_check_error(int *errorMask);
 extern void        mock_data_ready(struct sock *sk);
 extern int         mock_skb_count(void);
 extern struct sk_buff *

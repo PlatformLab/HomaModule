@@ -335,7 +335,21 @@ struct homa_message_in {
  * struct homa_client_rpc - One of these structures exists for each active
  * RPC initiated from this machine.
  */
-struct homa_client_rpc {	
+struct homa_client_rpc {
+	/**
+	 * @state: Each RPC passes through the following states, in order:
+	 * @CRPC_WAITING:     No response packets have been received yet
+	 *                    (request may or may not be completely sent).
+	 * @CRPC_INCOMING:    Response message has been partially received.
+	 * @CRPC_READY:       The response message is complete but it has not
+	 *                    yet been read from the socket. 
+	 */
+	enum {
+		CRPC_WAITING            = 11,
+		CRPC_INCOMING           = 12,
+		CRPC_READY              = 13
+	} state;	
+	
 	/**
 	 * @id: Unique identifier for the RPC among all those issued
 	 * from its port. */
@@ -358,20 +372,6 @@ struct homa_client_rpc {
 	 * until CRPC_INCOMING state.
 	 */
 	struct homa_message_in response;
-	
-	/**
-	 * @state: Each RPC passes through the following states, in order:
-	 * @CRPC_WAITING:     No response packets have been received yet
-	 *                    (request may or may not be completely sent).
-	 * @CRPC_INCOMING:    Response message has been partially received.
-	 * @CRPC_READY:       The response message is complete but it has not
-	 *                    yet been read from the socket. 
-	 */
-	enum {
-		CRPC_WAITING            = 11,
-		CRPC_INCOMING           = 12,
-		CRPC_READY              = 13
-	} state;
 	
 	/**
 	 * @ready_links: Iff state == READY, this is used to link this object

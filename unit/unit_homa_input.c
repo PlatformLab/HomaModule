@@ -19,7 +19,6 @@ FIXTURE(homa_input) {
 	struct homa_client_rpc *crpc;
 	struct homa_server_rpc *srpc;
 	int starting_skb_count;
-	
 };
 FIXTURE_SETUP(homa_input)
 {

@@ -20,7 +20,8 @@ void homa_addr_destroy(struct homa_addr *addr)
  * @daddr:    IP address of destination machine.
  * @dport:    Report of the destination that will handle incoming packets.
  * 
- * Return:   0 for success, otherwise negative errno.
+ * Return:    0 for success, otherwise negative errno. Note: it is safe
+ *            to invoke homa_addr_destroyeven after an error return.
  */
 int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
 		__u16 sport, __be32 daddr, __u16 dport)
@@ -37,7 +38,7 @@ int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
 	security_sk_classify_flow(sk, &addr->flow);
 	rt = ip_route_output_flow(sock_net(sk), &addr->flow.u.ip4, sk);
 	if (IS_ERR(rt)) {
-		return -EHOSTUNREACH;
+		return PTR_ERR(rt);
 	}
 	addr->dst = &rt->dst;
 	return 0;
@@ -81,6 +82,7 @@ struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 		*err = -ENOMEM;
 		return NULL;
 	}
+	crpc->state = CRPC_WAITING;
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
 	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
@@ -93,12 +95,10 @@ struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 			length, &crpc->dest, hsk->client_port, crpc->id);
         if (unlikely(*err != 0))
 		goto error;
-	crpc->state = CRPC_WAITING;
 	return crpc;
 	
     error:
-	homa_addr_destroy(&crpc->dest);
-	kfree(crpc);
+	homa_client_rpc_free(crpc);
 	return NULL;
 }
 
@@ -229,7 +229,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	struct common_header *common = (struct common_header *) skb->data;
 	
 	int result = snprintf(pos, space_left,
-		"%s from %s:%u, id %llu, length %u, ",
+		"%s from %s:%u, id %llu, length %u",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr, addr_buf),
 		ntohs(common->sport), common->id, skb->len);

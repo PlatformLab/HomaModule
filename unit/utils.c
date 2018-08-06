@@ -39,6 +39,30 @@ int unit_list_length(struct list_head *head)
 }
 
 /**
+ * unit_log_message_out_packets() - Append to the test log a human-readable
+ * description of the packets associated with a homa_message_out.
+ * @message:     Message containing the packets.
+ * @verbose:     If non-zero, use homa_print_packet for each packet;
+ *               otherwise use homa_print_packet_short.
+ */
+void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
+{
+	struct sk_buff *skb;
+	char buffer[200];
+	
+	for (skb = message->packets; skb != NULL; skb = *homa_next_skb(skb)) {
+		if (!unit_log_empty())
+			unit_log_printf("; ");
+		if (verbose) {
+			homa_print_packet(skb, buffer, sizeof(buffer));
+		} else {
+			homa_print_packet_short(skb, buffer, sizeof(buffer));
+		}
+		unit_log_printf("%s", buffer);
+	}
+}
+
+/**
  * unit_log_skb_list() - Append to the test log a human-readable description
  * of a list of packet buffers.
  * @packets:     Header for list of sk_buffs to print.

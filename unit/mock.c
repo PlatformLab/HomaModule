@@ -21,12 +21,15 @@ extern void       free(void *ptr);
 extern void      *malloc(size_t size);
 extern void      *memcpy(void *dest, const void *src, size_t n);
 
-/* This variable can be set to a non-zero value by unit tests in order to
- * simulate error returns from kmalloc. If bit 0 is set to 1, the next
- * call to malloc will fail; bit 1 corresponds to the next call after
- * that, and so on.
+/* The variables below can be set to non-zero values by unit tests in order
+ * to simulate error returns from various functions. If bit 0 is set to 1,
+ * the next call to the function will fail; bit 1 corresponds to the next
+ * call after that, and so on.
  */
+int mock_alloc_skb_errors = 0;
+int mock_copy_data_errors = 0;
 int mock_malloc_errors = 0;
+int mock_route_errors = 0;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.*/
@@ -50,6 +53,8 @@ extern void add_wait_queue(struct wait_queue_head *wq_head,
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
+	if (mock_check_error(&mock_alloc_skb_errors))
+		return NULL;
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
 	if (!buffs_in_use)
 		buffs_in_use = unit_hash_new();
@@ -59,26 +64,31 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb_reset_tail_pointer(skb);
 	skb->network_header = 0;
 	skb->transport_header = 0;
-	skb->data_len = size;
+	skb->data_len = 0;
 	skb->len = 0;
 	skb->users.refs.counter = 1;
 	skb->_skb_refdst = 0;
+	ip_hdr(skb)->saddr = 0;
 	return skb;
 }
 
 bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
+	if (mock_check_error(&mock_copy_data_errors))
+		return false;
 	if (!unit_log_empty())
 		unit_log_printf("; ");
-	unit_log_printf("_copy_from_iter_full invoked");
+	unit_log_printf("_copy_from_iter_full copied %lu bytes", bytes);
 	return true;
 }
 
 bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
+	if (mock_check_error(&mock_copy_data_errors))
+		return false;
 	if (!unit_log_empty())
 		unit_log_printf("; ");
-	unit_log_printf("_copy_from_iter_full_nocache invoked");
+	unit_log_printf("_copy_from_iter_full_nocache copid %lu bytes", bytes);
 	return true;
 }
 
@@ -86,25 +96,29 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	if (!unit_log_empty())
 		unit_log_printf("; ");
-	unit_log_printf("_copy_to_user invoked");
+	unit_log_printf("_copy_to_user copied %lu bytes", n);
 	return 0;
 }
 
 bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
 			       struct iov_iter *i)
 {
+	if (mock_check_error(&mock_copy_data_errors))
+		return false;
 	if (!unit_log_empty())
 		unit_log_printf("; ");
-	unit_log_printf("csum_and_copy_from_iter_full invoked");
+	unit_log_printf("csum_and_copy_from_iter_full copied %lu bytes", bytes);
 	return true;
 }
 
 unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
+	if (mock_check_error(&mock_copy_data_errors))
+		return false;
 	if (!unit_log_empty())
 		unit_log_printf("; ");
-	unit_log_printf("_copy_from_user invoked");
+	unit_log_printf("_copy_from_user copyed %lu bytes", n);
 	return 0;
 }
 
@@ -118,6 +132,8 @@ void ip4_datagram_release_cb(struct sock *sk) {}
 
 void dst_release(struct dst_entry *dst)
 {
+	if (!dst)
+		return;
 	dst->__refcnt.counter--;
 	if (dst->__refcnt.counter > 0)
 		return;
@@ -190,10 +206,13 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		const struct sock *sk)
 {
-	struct rtable *route = malloc(sizeof(struct rtable));
+	struct rtable *route;
+	if (mock_check_error(&mock_route_errors))
+		return ERR_PTR(-EHOSTUNREACH);
+	route = malloc(sizeof(struct rtable));
 	if (!route) {
 		FAIL("malloc failed");
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	}
 	route->dst.__refcnt.counter = 1;
 	if (!routes_in_use)
@@ -229,12 +248,8 @@ void kfree_skb(struct sk_buff *skb)
 
 void *__kmalloc(size_t size, gfp_t flags)
 {
-	if (mock_malloc_errors) {
-		int fail = mock_malloc_errors & 1;
-		mock_malloc_errors >>= 1;
-		if (fail)
-			return NULL;
-	}
+	if (mock_check_error(&mock_malloc_errors))
+		return NULL;
 	void *block = malloc(size);
 	if (!block) {
 		FAIL("malloc failed");
@@ -358,6 +373,22 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 }
 
 /**
+ * mock_check_error() - Determines whether a method should simulate an error
+ * return.
+ * @errorMask:  Address of a variable containing a bit mask, indicating
+ *              which of the next calls should result in errors.
+ * 
+ * Return:      zero means the function should behave normally; 1 means return
+ *              an eror 
+ */
+int mock_check_error(int *errorMask)
+{
+	int result = *errorMask & 1;
+	*errorMask = *errorMask >> 1;
+	return result;
+}
+
+/**
  * mock_data_ready() - Invoked through sk->sk_data_ready; logs a message
  * to indicate that it was invoked.
  * @sk:    Associated socket; not used here.
@@ -463,7 +494,10 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa)
  */
 void mock_teardown(void)
 {
+	mock_alloc_skb_errors = 0;
+	mock_copy_data_errors = 0;
 	mock_malloc_errors = 0;
+	mock_route_errors = 0;
 	
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)
