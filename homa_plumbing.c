@@ -380,10 +380,12 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
-	crpc = homa_client_rpc_new(hsk, &args.dest_addr, args.reqlen, &iter,
-			&err);
-	if (unlikely(!crpc))
+	crpc = homa_client_rpc_new(hsk, &args.dest_addr, args.reqlen, &iter);
+	if (IS_ERR(crpc)) {
+		err = PTR_ERR(crpc);
+		crpc = NULL;
 		goto error;
+	}
 	
 	homa_xmit_packets(&crpc->request, sk, &crpc->dest);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,

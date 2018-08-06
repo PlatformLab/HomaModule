@@ -76,13 +76,13 @@ void homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc)
 {
 	struct data_header *h = (struct data_header *) skb->data;
-	int err;
 	
 	if (!srpc) {
-		srpc = homa_server_rpc_new(hsk, ip_hdr(skb)->saddr, h, &err);
-		if (!srpc) {
+		srpc = homa_server_rpc_new(hsk, ip_hdr(skb)->saddr, h);
+		if (IS_ERR(srpc)) {
 			printk(KERN_WARNING "homa_data_from_client couldn't "
-					"create server rpc: error %d", -err);
+					"create server rpc: error %lu",
+					-PTR_ERR(srpc));
 			kfree_skb(skb);
 			return;
 		}

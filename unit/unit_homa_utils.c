@@ -59,10 +59,9 @@ TEST_F(homa_utils, homa_addr_init__error)
 
 TEST_F(homa_utils, homa_client_rpc_free__state_incoming)
 {
-	int err;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 1000, NULL, &err);
-	EXPECT_EQ(0, err);
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
 	EXPECT_EQ(CRPC_WAITING, crpc->state);
 	self->data.common.id = crpc->id;
 	self->data.message_length = N(1600);
@@ -73,10 +72,9 @@ TEST_F(homa_utils, homa_client_rpc_free__state_incoming)
 }
 TEST_F(homa_utils, homa_client_rpc_free__state_ready)
 {
-	int err;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 1000, NULL, &err);
-	EXPECT_EQ(0, err);
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
 	EXPECT_EQ(CRPC_WAITING, crpc->state);
 	self->data.common.id = crpc->id;
 	self->data.message_length = N(100);
@@ -88,40 +86,36 @@ TEST_F(homa_utils, homa_client_rpc_free__state_ready)
 
 TEST_F(homa_utils, homa_client_rpc_new__normal)
 {
-	int err;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 10000, NULL, &err);
-	EXPECT_NE(NULL, crpc);
+			&self->server_addr, 10000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
 	homa_client_rpc_free(crpc);
 }
 TEST_F(homa_utils, homa_client_rpc_new__malloc_error)
 {
-	int err;
 	mock_malloc_errors = 1;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 10000, NULL, &err);
-	EXPECT_EQ(NULL, crpc);
-	EXPECT_EQ(ENOMEM, -err);
+			&self->server_addr, 10000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
 TEST_F(homa_utils, homa_client_rpc_new__route_error)
 {
-	int err;
 	mock_route_errors = 1;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 10000, NULL, &err);
-	EXPECT_EQ(NULL, crpc);
-	EXPECT_EQ(EHOSTUNREACH, -err);
+			&self->server_addr, 10000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(crpc));
 }
 
 TEST_F(homa_utils, homa_find_client_rpc)
 {
-	int err;
 	struct homa_client_rpc *crpc1 = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 1000, NULL, &err);
-	EXPECT_EQ(0, err);
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc1));
 	struct homa_client_rpc *crpc2 = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 1000, NULL, &err);
-	EXPECT_EQ(0, err);
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc2));
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk,
 			self->hsk.client_port, crpc1->id));
 	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk,
@@ -159,12 +153,11 @@ TEST_F(homa_utils, homa_print_ipv4_addr)
 
 TEST_F(homa_utils, homa_server_rpc_free__state_response)
 {
-	int err;
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
-			self->client_ip, &self->data, &err);
-	EXPECT_NE(NULL, srpc);
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc));
 	srpc->state = SRPC_RESPONSE;
-	err = homa_message_out_init(&srpc->response, (struct sock *)&self->hsk,
+	homa_message_out_init(&srpc->response, (struct sock *)&self->hsk,
 			NULL, 10000, &srpc->client, self->hsk.client_port,
 			srpc->id);
 	homa_server_rpc_free(srpc);
@@ -172,11 +165,10 @@ TEST_F(homa_utils, homa_server_rpc_free__state_response)
 }
 TEST_F(homa_utils, homa_server_rpc_free__state_ready)
 {
-	int err;
 	self->data.message_length = N(100);
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
-			self->client_ip, &self->data, &err);
-	EXPECT_NE(NULL, srpc);
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc));
 	homa_data_from_client(&self->homa, mock_skb_new(self->client_ip,
 			&self->data.common, 100, 0), &self->hsk, srpc);
 	EXPECT_EQ(SRPC_READY, srpc->state);
@@ -186,10 +178,9 @@ TEST_F(homa_utils, homa_server_rpc_free__state_ready)
 
 TEST_F(homa_utils, homa_server_rpc_new__normal)
 {
-	int err;
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
-			self->client_ip, &self->data, &err);
-	EXPECT_NE(NULL, srpc);
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc));
 	self->data.message_length = N(1600);
 	homa_data_from_client(&self->homa, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 0), &self->hsk, srpc);
@@ -199,21 +190,19 @@ TEST_F(homa_utils, homa_server_rpc_new__normal)
 }
 TEST_F(homa_utils, homa_server_rpc_new__malloc_error)
 {
-	int err;
 	mock_malloc_errors = 1;
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
-			self->client_ip, &self->data, &err);
-	EXPECT_EQ(NULL, srpc);
-	EXPECT_EQ(ENOMEM, -err);
+			self->client_ip, &self->data);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 }
 TEST_F(homa_utils, homa_server_rpc_new__addr_error)
 {
-	int err;
 	mock_route_errors = 1;
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
-			self->client_ip, &self->data, &err);
-	EXPECT_EQ(NULL, srpc);
-	EXPECT_EQ(EHOSTUNREACH, -err);
+			self->client_ip, &self->data);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
 
 TEST_F(homa_utils, soccer_init__skip_port_in_use)

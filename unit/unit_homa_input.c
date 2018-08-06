@@ -22,7 +22,6 @@ FIXTURE(homa_input) {
 };
 FIXTURE_SETUP(homa_input)
 {
-	int err;
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
@@ -36,13 +35,15 @@ FIXTURE_SETUP(homa_input)
 			.unscheduled = N(10000), .retransmit = 0};
 	homa_message_in_init(&self->message, 10000, 10000);
 	self->crpc = homa_client_rpc_new(&self->hsk, &self->server_addr,
-			1000, NULL, &err);
-	if (err)
-		FAIL("homa_client_rpc_new failed with code %d", err);
+			1000, NULL);
+	if (IS_ERR(self->crpc))
+		FAIL("homa_client_rpc_new failed with errno %lu",
+				-PTR_ERR(self->crpc));
 	self->srpc = homa_server_rpc_new(&self->hsk, self->client_ip,
-			&self->data, &err);
-	if (err)
-		FAIL("homa_server_rpc_new failed with code %d", err);
+			&self->data);
+	if (IS_ERR(self->srpc))
+		FAIL("homa_server_rpc_new failed with code %lu",
+				-PTR_ERR(self->srpc));
 	self->starting_skb_count = mock_skb_count();
 	unit_log_clear();
 }

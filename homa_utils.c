@@ -67,39 +67,36 @@ void homa_client_rpc_free(struct homa_client_rpc *crpc) {
  * @dest:     Address of host to which the RPC will be sent.
  * @length:   Size of the request message.
  * @iter:     Data for the message.
- * @err:      A negative errno will be stored here after errors.
  * 
- * Return:    A printer to the newly allocated object. If an error occurs, NULL
- *            is returned and additional information is available via @err. 
+ * Return:    A printer to the newly allocated object, or a negative
+ *            errno if an error occurred. 
  */
 struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
-		struct sockaddr_in *dest, size_t length, struct iov_iter *iter,
-		int *err)
+		struct sockaddr_in *dest, size_t length, struct iov_iter *iter)
 {
+	int err;
 	struct homa_client_rpc *crpc;
 	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
-	if (unlikely(!crpc)) {
-		*err = -ENOMEM;
-		return NULL;
-	}
+	if (unlikely(!crpc))
+		return ERR_PTR(-ENOMEM);
 	crpc->state = CRPC_WAITING;
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
 	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
-	*err = homa_addr_init(&crpc->dest, (struct sock *) hsk,
+	err = homa_addr_init(&crpc->dest, (struct sock *) hsk,
 			hsk->inet.inet_saddr, hsk->client_port,
 			dest->sin_addr.s_addr, ntohs(dest->sin_port));
-	if (unlikely(*err != 0))
+	if (unlikely(err != 0))
 		goto error;
-	*err = homa_message_out_init(&crpc->request, (struct sock *) hsk, iter,
+	err = homa_message_out_init(&crpc->request, (struct sock *) hsk, iter,
 			length, &crpc->dest, hsk->client_port, crpc->id);
-        if (unlikely(*err != 0))
+        if (unlikely(err != 0))
 		goto error;
 	return crpc;
 	
     error:
 	homa_client_rpc_free(crpc);
-	return NULL;
+	return ERR_PTR(err);
 }
 
 /**
@@ -339,27 +336,25 @@ void homa_server_rpc_free(struct homa_server_rpc *srpc)
  * @hsk:    Socket that owns this RPC.
  * @source: IP address (network byte order) of the RPC's client.
  * @h:      Data packet header; used to initialize the RPC.
- * @err:    Error information (a negative errno) is returned here after errors.
  * 
- * Return:  A pointer to the new object. If an error occurred, the result
- *          is NULL and additional information is available via @err.
+ * Return:  A pointer to the new object, or a negative errno if an error
+            occurred.
  */
 struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
-		__be32 source, struct data_header *h, int *err)
+		__be32 source, struct data_header *h)
 {
+	int err;
 	struct homa_server_rpc *srpc;
 	srpc = (struct homa_server_rpc *) kmalloc(sizeof(*srpc),
 			GFP_KERNEL);
-	if (!srpc) {
-		*err = -ENOMEM;
-		return NULL;
-	}
-	*err = homa_addr_init(&srpc->client, (struct sock *) hsk,
+	if (!srpc)
+		return ERR_PTR(-ENOMEM);
+	err = homa_addr_init(&srpc->client, (struct sock *) hsk,
 			hsk->inet.inet_saddr, hsk->client_port, source,
 			ntohs(h->common.sport));
-	if (*err) {
+	if (err) {
 		kfree(srpc);
-		return NULL;
+		return ERR_PTR(err);
 	}
 	srpc->id = h->common.id;
 	homa_message_in_init(&srpc->request, ntohl(h->message_length),

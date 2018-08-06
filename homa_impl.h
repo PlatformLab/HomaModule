@@ -503,7 +503,7 @@ extern int    homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void   homa_client_rpc_free(struct homa_client_rpc *crpc);
 extern struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 		struct sockaddr_in *dest, size_t length,
-		struct iov_iter *iter, int *err);
+		struct iov_iter *iter);
 extern void   homa_close(struct sock *sock, long timeout);
 extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
 		struct homa_sock *hsk, struct homa_server_rpc *srpc);
@@ -553,7 +553,7 @@ extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
 extern void   homa_server_rpc_free(struct homa_server_rpc *srpc);
 extern struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
-		__be32 source, struct data_header *h, int *err);
+		__be32 source, struct data_header *h);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
 extern void   homa_sock_destroy(struct homa_sock *hsk);

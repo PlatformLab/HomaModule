@@ -32,11 +32,10 @@ FIXTURE_TEARDOWN(homa_output)
 
 TEST_F(homa_output, homa_message_out_init_basics)
 {
-	int err;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 3000, NULL, &err);
+			&self->server_addr, 3000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.client_rpcs));
-	EXPECT_EQ(0, err);
 	EXPECT_STREQ("csum_and_copy_from_iter_full copied 1400 bytes; "
 		"csum_and_copy_from_iter_full copied 1400 bytes; "
 		"csum_and_copy_from_iter_full copied 200 bytes", unit_log_get());
@@ -53,22 +52,20 @@ TEST_F(homa_output, homa_message_out_init_basics)
 
 TEST_F(homa_output, homa_message_out_init__cant_alloc_skb)
 {
-	int err;
 	mock_alloc_skb_errors = 2;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 3000, NULL, &err);
+			&self->server_addr, 3000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
-	EXPECT_EQ(ENOMEM, -err);
-	EXPECT_EQ(crpc, NULL);
 }
 
 TEST_F(homa_output, homa_message_out_init__cant_copy_data)
 {
-	int err;
 	mock_copy_data_errors = 2;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
-			&self->server_addr, 3000, NULL, &err);
+			&self->server_addr, 3000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(EFAULT, -PTR_ERR(crpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
-	EXPECT_EQ(EFAULT, -err);
-	EXPECT_EQ(crpc, NULL);
 }
