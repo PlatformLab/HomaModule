@@ -128,7 +128,7 @@ struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
  */
 void homa_destroy(struct homa *homa)
 {
-	/* Currently nothing to do here. */
+	homa_socktab_destroy(&homa->port_map);
 }
 
 /**
@@ -159,33 +159,13 @@ struct homa_server_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 }
 
 /**
- * homa_find_socket() - Returns the socket associated with a given port.
- * @homa:    Overall data about the Homa protocol implementation.
- * @port:    The port of interest; may be either a &homa_sock.client_port
- *           or a &homa_sock.server_port. Must not be 0.
- * Return:   The socket that owns @port, or NULL if none. 
- */
-struct homa_sock *homa_find_socket(struct homa *homa, __u16 port)
-{
-	struct list_head *pos;
-	list_for_each(pos, &homa->sockets) {
-		struct homa_sock *hsk = list_entry(pos, struct homa_sock,
-				socket_links);
-		if ((hsk->client_port == port) || (hsk->server_port == port)) {
-			return hsk;
-		}
-	}
-	return NULL;
-}
-
-/**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
  */
 void homa_init(struct homa *homa)
 {
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
-	INIT_LIST_HEAD(&homa->sockets);
+	homa_socktab_init(&homa->port_map);
 }
 
 /**
@@ -362,58 +342,6 @@ struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 	srpc->state = SRPC_INCOMING;
 	list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
 	return srpc;
-}
-
-/**
- * homa_sock_destroy() - Destructor for home_sock objects. This function
- * only cleans up the parts of the object that are owned by Homa.
- * @hsk:     Object to destroy.
- */
-void homa_sock_destroy(struct homa_sock *hsk)
-{
-	struct list_head *pos, *next;
-
-	list_del(&hsk->socket_links);
-	list_for_each_safe(pos, next, &hsk->client_rpcs) {
-		struct homa_client_rpc *crpc = list_entry(pos,
-				struct homa_client_rpc, client_rpc_links);
-		homa_client_rpc_free(crpc);
-	}
-	list_for_each_safe(pos, next, &hsk->server_rpcs) {
-		struct homa_server_rpc *srpc = list_entry(pos,
-				struct homa_server_rpc, server_rpc_links);
-		homa_server_rpc_free(srpc);
-	}
-}
-
-/**
- * homa_sock_init() - Constructor for homa_sock objects. This function
- * initializes only the parts of the socket that are owned by Homa.
- * @hsk:    Object to initialize.
- * @homa:   Homa implementation that will manage the socket.
- *
- * Return: always 0 (success).
- */
-void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
-{
-	hsk->server_port = 0;
-	while (1) {
-		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {
-			homa->next_client_port = HOMA_MIN_CLIENT_PORT;
-		}
-		if (!homa_find_socket(homa, homa->next_client_port)) {
-			break;
-		}
-		homa->next_client_port++;
-	}
-	hsk->client_port = homa->next_client_port;
-	homa->next_client_port++;
-	hsk->next_outgoing_id = 1;
-	list_add(&hsk->socket_links, &homa->sockets);
-	INIT_LIST_HEAD(&hsk->client_rpcs);
-	INIT_LIST_HEAD(&hsk->server_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_server_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_client_rpcs);
 }
 
 /**

@@ -25,12 +25,14 @@ CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(INCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_input.c \
 	      unit_homa_output.c \
+	      unit_homa_socktab.c \
 	      unit_homa_utils.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 	
 HOMA_SRCS :=  homa_input.c \
 	      homa_output.c \
 	      homa_plumbing.c \
+	      homa_socktab.c \
 	      homa_utils.c
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
 	

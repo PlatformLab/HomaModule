@@ -19,7 +19,8 @@
 
 #include "homa.h"
 
-extern struct homa homa;
+/* Forward declarations. */
+struct homa_sock;
 
 /**
  * struct homa_addr - Collects in one place the information needed to send
@@ -431,6 +432,59 @@ struct homa_server_rpc {
 };
 
 /**
+ * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
+ * Must be a power of 2.
+ */
+#define HOMA_SOCKTAB_BUCKETS 1024
+
+/**
+ * struct homa_socktab - A hash table that maps from port numbers (either
+ * client or server) to homa_sock objects.
+ *
+ * This table is managed exclusively by homa_socktab.c, using RCU to
+ * permit efficient lookups.
+ */
+struct homa_socktab {
+	/**
+	 * @mutex: Controls all modifications to this object; not needed
+	 * for socket lookups (RCU is used instead). Also used to
+	 * synchronize port allocation.
+	 */
+	struct mutex writeLock;
+	
+	/**
+	 * @buckets: Heads of chains for hash table buckets. Chains
+	 * consist of homa_sock_link objects.
+	 */
+	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
+};
+
+/**
+ * struct homa_sock_links - Used to link homa_socks into the hash chains
+ * of a homa_socktab.
+ */
+struct homa_socktab_links {
+	struct hlist_node hash_links;
+	struct homa_sock *sock;
+};
+
+/**
+ * port_hash() - Hash function for port numbers.
+ * @port:   Port number being looked up.
+ *
+ * Return:  The index of the bucket in which this port will be found (if
+ *          it exists.
+ */
+static inline int homa_port_hash(__u16 port)
+{
+	/* We can use a really simple hash function here because client
+	 * port numbers are allocated sequentially and server port numbers
+	 * are unpredictable.
+	 */
+	return port & (HOMA_SOCKTAB_BUCKETS - 1);
+}
+
+/**
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
@@ -449,8 +503,17 @@ struct homa_sock {
 	/** @next_outgoing_id: Id to use for next outgoing RPC request. */
 	__u64 next_outgoing_id;
 	
-	/** @socket_links: For linking this socket into &homa.sockets. */
-	struct list_head socket_links;
+	/**
+	 * @client_socktab_links: Links this socket into the homa_socktab
+	 * based on client_port.
+	 */
+	struct homa_socktab_links client_links; 
+	
+	/**
+	 * @client_socktab_links: Links this socket into the homa_socktab
+	 * based on server_port. Invalid/unused if server_port is 0.
+	 */
+	struct homa_socktab_links server_links;
 	
 	/** @client_rpcs: List of active RPCs originating from this socket. */
 	struct list_head client_rpcs;
@@ -459,16 +522,16 @@ struct homa_sock {
 	struct list_head server_rpcs;
 	
 	/**
-	 * @ready_server_rpcs: Contains all server RPCs in READY state (head
-	 * is oldest, i.e. next to return).
-	 */
-	struct list_head ready_server_rpcs;
-	
-	/**
 	 * @ready_client_rpcs: Contains all client RPCs in READY state (head
 	 * is oldest, i.e. next to return).
 	 */
 	struct list_head ready_client_rpcs;
+	
+	/**
+	 * @ready_server_rpcs: Contains all server RPCs in READY state (head
+	 * is oldest, i.e. next to return).
+	 */
+	struct list_head ready_server_rpcs;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -478,8 +541,8 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 /**
  * struct homa - Overall information about the Homa protocol implementation.
  * 
- * There will typically only exist one of these at a time, except for
- * unit testing.
+ * There will typically only exist one of these at a time, except during
+ * unit tests.
  */
 struct homa {
 	/**
@@ -490,8 +553,8 @@ struct homa {
 	 */
 	__u16 next_client_port;
 	
-	/** @sockets: All existing sockets. */
-	struct list_head sockets;
+	/** @port_map: Maps from port numbers to sockets. */
+	struct homa_socktab port_map;
 };
 
 extern void   homa_add_packet(struct homa_message_in *msgin,
@@ -518,7 +581,7 @@ extern struct homa_client_rpc *homa_find_client_rpc(struct homa_sock *hsk,
 extern struct homa_server_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		__be32 saddr, __u16 sport, __u64 id);
 extern struct homa_sock *
-	      homa_find_socket(struct homa *homa, __u16 port);
+	      homa_sock_find(struct homa_socktab *socktab, __u16 port);
 extern int    homa_get_port(struct sock *sk, unsigned short snum);
 extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
@@ -556,9 +619,14 @@ extern struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 		__be32 source, struct data_header *h);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
-extern void   homa_sock_destroy(struct homa_sock *hsk);
+extern int    homa_sock_bind(struct homa_socktab *socktab,
+		struct homa_sock *hsk, __u16 port);
+extern void   homa_sock_destroy(struct homa_sock *hsk,
+		struct homa_socktab *socktab);
 extern void   homa_sock_init(struct homa_sock *hsk, struct homa *homa);
 extern int    homa_socket(struct sock *sk);
+extern void   homa_socktab_destroy(struct homa_socktab *socktab);
+extern void   homa_socktab_init(struct homa_socktab *socktab);
 extern char  *homa_symbol_for_type(uint8_t type);
 extern void   homa_unhash(struct sock *sk);
 extern int    homa_v4_early_demux(struct sk_buff *skb);

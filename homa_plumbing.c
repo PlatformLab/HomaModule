@@ -162,9 +162,7 @@ module_exit(homa_unload);
 int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
-	struct homa_sock *owner;
 	struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
-	__u32 port;
 
 	if (addr_len < sizeof(*addr_in)) {
 		return -EINVAL;
@@ -172,16 +170,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 	if (addr_in->sin_family != AF_INET) {
 		return -EAFNOSUPPORT;
 	}
-	port = ntohs(addr_in->sin_port);
-	if ((port == 0) || (port >= HOMA_MIN_CLIENT_PORT)) {
-		return -EINVAL;
-	}
-	owner = homa_find_socket(&homa, port);
-	if ((owner != NULL) && (owner != hsk)) {
-		return -EADDRINUSE;
-	}
-	hsk->server_port = port;
-	return 0;
+	return homa_sock_bind(&homa.port_map, hsk, ntohs(addr_in->sin_port));
 }
 
 /**
@@ -192,7 +181,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
-	homa_sock_destroy(hsk);
+	homa_sock_destroy(hsk, &homa.port_map);
 	sk_common_release(sk);
 }
 
@@ -637,7 +626,7 @@ int homa_handler(struct sk_buff *skb) {
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
-	hsk = homa_find_socket(&homa, dport);
+	hsk = homa_sock_find(&homa.port_map, dport);
 	if (!hsk) {
 		/* Eventually should return an error result to sender if
 		 * it is a client.

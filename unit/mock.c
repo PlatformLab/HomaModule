@@ -32,16 +32,23 @@ int mock_malloc_errors = 0;
 int mock_route_errors = 0;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
- * Reset for each test.*/
+ * Reset for each test.
+ */
 static struct unit_hash *buffs_in_use = NULL;
 
 /* Keeps track of all the blocks of memory that have been allocated by
- * kmalloc but not yet freed by kfree. Reset for each test.*/
+ * kmalloc but not yet freed by kfree. Reset for each test.
+ */
 static struct unit_hash *mallocs_in_use = NULL;
 
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test. */
 static struct unit_hash *routes_in_use = NULL;
+
+/* The number of locks that have been acquired but not yet released. 
+ * Should be 0 at the end of each test.
+ */
+static int mock_active_locks = 0;
 
 struct task_struct *current_task = NULL;
 unsigned long ex_handler_refcount = 0;
@@ -269,6 +276,22 @@ ssize_t __modver_version_show(struct module_attribute *a,
 	return 0;
 }
 
+void __mutex_init(struct mutex *lock, const char *name,
+			 struct lock_class_key *key)
+{
+	
+}
+
+void mutex_lock(struct mutex *lock)
+{
+	mock_active_locks ++;
+}
+
+void mutex_unlock(struct mutex *lock)
+{
+	mock_active_locks--;
+}
+
 int printk(const char *s, ...)
 {
 	return 0;
@@ -470,9 +493,9 @@ int mock_skb_count(void)
  * mock_sock_destroy() - Destructor for sockets; cleans up the mocked-out
  * non-Homa parts as well as the Homa parts.
  */
-void mock_sock_destroy(struct homa_sock *hsk)
+void mock_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 {
-	homa_sock_destroy(hsk);
+	homa_sock_destroy(hsk, socktab);
 }
 
 /**
@@ -516,4 +539,8 @@ void mock_teardown(void)
 		FAIL("%u route(s) still allocated after test", count);
 	unit_hash_free(routes_in_use);
 	routes_in_use = NULL;
+	
+	if (mock_active_locks > 0)
+		FAIL("%d locks still locked after test", mock_active_locks);
+	mock_active_locks = 0;
 }

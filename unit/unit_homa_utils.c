@@ -34,8 +34,8 @@ FIXTURE_SETUP(homa_utils)
 }
 FIXTURE_TEARDOWN(homa_utils)
 {
-	mock_sock_destroy(&self->hsk);
-	homa_destroy(&homa);
+	mock_sock_destroy(&self->hsk, &self->homa.port_map);
+	homa_destroy(&self->homa);
 	unit_teardown();
 }
 
@@ -126,19 +126,6 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	homa_client_rpc_free(crpc2);
 }
 
-TEST_F(homa_utils, homa_find_socket)
-{
-	struct homa_sock hsk2;
-	mock_sock_init(&hsk2, &self->homa);
-	hsk2.server_port = 100;
-	EXPECT_EQ(&self->hsk, homa_find_socket(&self->homa,
-			self->hsk.client_port));
-	EXPECT_EQ(&hsk2, homa_find_socket(&self->homa, hsk2.client_port));
-	EXPECT_EQ(&hsk2, homa_find_socket(&self->homa, hsk2.server_port));
-	EXPECT_EQ(NULL, homa_find_socket(&self->homa, hsk2.server_port + 1));
-	mock_sock_destroy(&hsk2);
-}
-
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
 	char buffer[100];
@@ -203,16 +190,4 @@ TEST_F(homa_utils, homa_server_rpc_new__addr_error)
 			self->client_ip, &self->data);
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
-}
-
-TEST_F(homa_utils, soccer_init__skip_port_in_use)
-{
-	struct homa_sock hsk2, hsk3;
-	self->homa.next_client_port = 0xffff;
-	mock_sock_init(&hsk2, &self->homa);
-	mock_sock_init(&hsk3, &self->homa);
-	EXPECT_EQ(65535, hsk2.client_port);
-	EXPECT_EQ(32769, hsk3.client_port);
-	mock_sock_destroy(&hsk2);
-	mock_sock_destroy(&hsk3);
 }
