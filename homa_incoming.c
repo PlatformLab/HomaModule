@@ -1,6 +1,23 @@
-/* This file contains functions that handle incoming Homa packets. */
+/* This file contains functions that handle incoming Homa messages, including
+ * both receiving information for those messages and sending grants. */
 
 #include "homa_impl.h"
+
+/**
+ * homa_message_in_init() - Constructor for homa_message_in.
+ * @msgin:        Structure to initialize.
+ * @length:       Total number of bytes in message.
+ * @unscheduled:  Initial bytes of message that will be sent without grants.
+ */
+void homa_message_in_init(struct homa_message_in *msgin, int length,
+	int unscheduled)
+{
+	__skb_queue_head_init(&msgin->packets);
+	msgin->total_length = length;
+	msgin->bytes_remaining = length;
+	msgin->granted = unscheduled;
+	msgin->priority = 0;
+}
 
 /**
  * homa_add_packet() - Add an incoming packet to the contents of a
@@ -59,6 +76,69 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	}
 	__skb_insert(skb, skb2, skb2->next, &msgin->packets);
 	msgin->bytes_remaining -= (ceiling - floor);
+}
+
+/**
+ * homa_message_in_copy_data() - Extract the data from an incoming message
+ * and copy it to buffer(s) in user space.
+ * @msgin:      The message whose data should be extracted.
+ * @iter:       Describes the available buffer space at user-level; message
+ *              data gets copied here.
+ * @max_bytes   Total amount of space available via iter.
+ * 
+ * Return:      The number of bytes copied, or a negative errno.
+ */
+int homa_message_in_copy_data(struct homa_message_in *msgin,
+		struct iov_iter *iter, int max_bytes)
+{
+	struct sk_buff *skb;
+	int offset;
+	int err;
+	int remaining = max_bytes;
+	
+	/* Do the right thing even if packets have overlapping ranges.
+	 * Honestly, though, this shouldn't happen.
+	 */
+	offset = 0;
+	skb_queue_walk(&msgin->packets, skb) {
+		struct data_header *h = (struct data_header *) skb->data;
+		int this_offset = ntohl(h->offset);
+		int this_size = msgin->total_length - offset;
+		if (this_size > HOMA_MAX_DATA_PER_PACKET) {
+			this_size = HOMA_MAX_DATA_PER_PACKET;
+		}
+		if (offset > this_offset) {
+			this_size -= (offset - this_offset);
+		}
+		if (this_size > remaining) {
+			this_size =  remaining;
+		}
+		err = skb_copy_datagram_iter(skb,
+				sizeof(*h) + (offset - this_offset),
+				iter, this_size);
+		if (err) {
+			return err;
+		}
+		remaining -= this_size;
+		offset += this_size;
+		if (remaining == 0) {
+			break;
+		}
+	}
+	return max_bytes - remaining;
+}
+
+/**
+ * homa_message_in_destroy() - Destructor for homa_message_in.
+ * @msgin:       Structure to clean up.
+ */
+void homa_message_in_destroy(struct homa_message_in *msgin)
+{
+	struct sk_buff *skb, *next;
+	skb_queue_walk_safe(&msgin->packets, skb, next) {
+		kfree_skb(skb);
+	}
+	__skb_queue_head_init(&msgin->packets);
 }
 
 /**
@@ -130,84 +210,4 @@ void homa_data_from_server(struct homa *homa, struct sk_buff *skb,
 		list_add_tail(&crpc->ready_links, &hsk->ready_client_rpcs);
 		sk->sk_data_ready(sk);
 	}
-}
-
-/**
- * homa_message_in_copy_data() - Extract the data from an incoming message
- * and copy it to buffer(s) in user space.
- * @msgin:      The message whose data should be extracted.
- * @iter:       Describes the available buffer space at user-level; message
- *              data gets copied here.
- * @max_bytes   Total amount of space available via iter.
- * 
- * Return:      The number of bytes copied, or a negative errno.
- */
-int homa_message_in_copy_data(struct homa_message_in *msgin,
-		struct iov_iter *iter, int max_bytes)
-{
-	struct sk_buff *skb;
-	int offset;
-	int err;
-	int remaining = max_bytes;
-	
-	/* Do the right thing even if packets have overlapping ranges.
-	 * Honestly, though, this shouldn't happen.
-	 */
-	offset = 0;
-	skb_queue_walk(&msgin->packets, skb) {
-		struct data_header *h = (struct data_header *) skb->data;
-		int this_offset = ntohl(h->offset);
-		int this_size = msgin->total_length - offset;
-		if (this_size > HOMA_MAX_DATA_PER_PACKET) {
-			this_size = HOMA_MAX_DATA_PER_PACKET;
-		}
-		if (offset > this_offset) {
-			this_size -= (offset - this_offset);
-		}
-		if (this_size > remaining) {
-			this_size =  remaining;
-		}
-		err = skb_copy_datagram_iter(skb,
-				sizeof(*h) + (offset - this_offset),
-				iter, this_size);
-		if (err) {
-			return err;
-		}
-		remaining -= this_size;
-		offset += this_size;
-		if (remaining == 0) {
-			break;
-		}
-	}
-	return max_bytes - remaining;
-}
-
-
-/**
- * homa_message_in_destroy() - Destructor for homa_message_in.
- * @msgin:       Structure to clean up.
- */
-void homa_message_in_destroy(struct homa_message_in *msgin)
-{
-	struct sk_buff *skb, *next;
-	skb_queue_walk_safe(&msgin->packets, skb, next) {
-		kfree_skb(skb);
-	}
-	__skb_queue_head_init(&msgin->packets);
-}
-
-/**
- * homa_message_in_init() - Constructor for homa_message_in.
- * @msgin:        Structure to initialize.
- * @length:       Total number of bytes in message.
- * @unscheduled:  Initial bytes of message that will be sent without grants.
- */
-void homa_message_in_init(struct homa_message_in *msgin, int length,
-	int unscheduled)
-{
-	__skb_queue_head_init(&msgin->packets);
-	msgin->total_length = length;
-	msgin->bytes_remaining = length;
-	msgin->granted = unscheduled;
-	msgin->priority = 0;
 }

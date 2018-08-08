@@ -114,6 +114,40 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 }
 
+TEST_F(homa_incoming, homa_message_in_copy_data)
+{
+	int count;
+	self->data.common.id = self->crpc->id;
+	self->data.message_length = N(4000);
+	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
+			&self->data.common, 1400, 0), &self->hsk, self->crpc);
+	self->data.offset = N(1000);
+	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
+			&self->data.common, 1400, 101000), &self->hsk,
+			self->crpc);
+	self->data.offset = N(1800);
+	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
+			&self->data.common, 1400, 201800), &self->hsk,
+			self->crpc);
+	self->data.offset = N(3200);
+	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
+			&self->data.common, 800, 303200), &self->hsk,
+			self->crpc);
+	unit_log_clear();
+	count = homa_message_in_copy_data(&self->crpc->response, NULL,
+			5000);
+	EXPECT_STREQ("skb_copy_datagram_iter 0-1399; "
+		"skb_copy_datagram_iter 101400-102399; "
+		"skb_copy_datagram_iter 202400-203199; "
+		"skb_copy_datagram_iter 303200-303999", unit_log_get());
+	EXPECT_EQ(4000, count);
+	
+	unit_log_clear();
+	count = homa_message_in_copy_data(&self->crpc->response, NULL, 200);
+	EXPECT_STREQ("skb_copy_datagram_iter 0-199", unit_log_get());
+	EXPECT_EQ(200, count);
+}
+
 TEST_F(homa_incoming, homa_data_from_client__basics)
 {
 	struct homa_server_rpc *srpc;
@@ -211,38 +245,4 @@ TEST_F(homa_incoming, homa_data_from_server__wrong_rpc_state)
 	EXPECT_EQ(600, self->crpc->response.bytes_remaining);
 	EXPECT_EQ(self->starting_skb_count+1, mock_skb_count());
 	self->crpc->state = CRPC_INCOMING;
-}
-
-TEST_F(homa_incoming, homa_message_in_copy_data)
-{
-	int count;
-	self->data.common.id = self->crpc->id;
-	self->data.message_length = N(4000);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 1400, 0), &self->hsk, self->crpc);
-	self->data.offset = N(1000);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 1400, 101000), &self->hsk,
-			self->crpc);
-	self->data.offset = N(1800);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 1400, 201800), &self->hsk,
-			self->crpc);
-	self->data.offset = N(3200);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 800, 303200), &self->hsk,
-			self->crpc);
-	unit_log_clear();
-	count = homa_message_in_copy_data(&self->crpc->response, NULL,
-			5000);
-	EXPECT_STREQ("skb_copy_datagram_iter 0-1399; "
-		"skb_copy_datagram_iter 101400-102399; "
-		"skb_copy_datagram_iter 202400-203199; "
-		"skb_copy_datagram_iter 303200-303999", unit_log_get());
-	EXPECT_EQ(4000, count);
-	
-	unit_log_clear();
-	count = homa_message_in_copy_data(&self->crpc->response, NULL, 200);
-	EXPECT_STREQ("skb_copy_datagram_iter 0-199", unit_log_get());
-	EXPECT_EQ(200, count);
 }
