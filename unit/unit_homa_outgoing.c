@@ -5,14 +5,14 @@
 #include "mock.h"
 #include "utils.h"
 
-FIXTURE(homa_output) {
+FIXTURE(homa_outgoing) {
 	struct homa homa;
 	struct homa_sock hsk;
 	__be32 client_ip;
 	__be32 server_ip;
 	struct sockaddr_in server_addr;
 };
-FIXTURE_SETUP(homa_output)
+FIXTURE_SETUP(homa_outgoing)
 {
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa);
@@ -23,14 +23,14 @@ FIXTURE_SETUP(homa_output)
 	self->server_addr.sin_port = htons(99);
 	unit_log_clear();
 }
-FIXTURE_TEARDOWN(homa_output)
+FIXTURE_TEARDOWN(homa_outgoing)
 {
 	mock_sock_destroy(&self->hsk, &self->homa.port_map);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
 
-TEST_F(homa_output, homa_message_out_init_basics)
+TEST_F(homa_outgoing, homa_message_out_init_basics)
 {
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
 			&self->server_addr, 3000, NULL);
@@ -50,7 +50,7 @@ TEST_F(homa_output, homa_message_out_init_basics)
 		     unit_log_get());
 }
 
-TEST_F(homa_output, homa_message_out_init__cant_alloc_skb)
+TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_skb)
 {
 	mock_alloc_skb_errors = 2;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
@@ -60,7 +60,7 @@ TEST_F(homa_output, homa_message_out_init__cant_alloc_skb)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
 
-TEST_F(homa_output, homa_message_out_init__cant_copy_data)
+TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 {
 	mock_copy_data_errors = 2;
 	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,

@@ -1,8 +1,8 @@
 # Makefile to build Homa as a Linux module.
 
 obj-m += homa.o
-homa-objs = homa_input.o \
-            homa_output.o \
+homa-objs = homa_incoming.o \
+            homa_outgoing.o \
             homa_plumbing.o \
             homa_socktab.o \
             homa_utils.o
