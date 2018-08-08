@@ -7,6 +7,8 @@ extern int         mock_route_errors;
 
 extern int         mock_check_error(int *errorMask);
 extern void        mock_data_ready(struct sock *sk);
+extern void        mock_spin_lock(spinlock_t *lock);
+extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);
 extern struct sk_buff *
                    mock_skb_new(__be32 saddr, struct common_header *h,

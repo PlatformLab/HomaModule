@@ -268,7 +268,11 @@ void *__kmalloc(size_t size, gfp_t flags)
 	return block;
 }
 
-void lock_sock_nested(struct sock *sk, int subclass) {}
+void lock_sock_nested(struct sock *sk, int subclass)
+{
+	mock_active_locks++;
+	sk->sk_lock.owned = 1;
+}
 
 ssize_t __modver_version_show(struct module_attribute *a,
 		struct module_kobject *b, char *c)
@@ -284,7 +288,7 @@ void __mutex_init(struct mutex *lock, const char *name,
 
 void mutex_lock(struct mutex *lock)
 {
-	mock_active_locks ++;
+	mock_active_locks++;
 }
 
 void mutex_unlock(struct mutex *lock)
@@ -304,7 +308,11 @@ int proto_register(struct proto *prot, int alloc_slab)
 
 void proto_unregister(struct proto *prot) {}
 
-void release_sock(struct sock *sk) {}
+void release_sock(struct sock *sk)
+{
+	mock_active_locks--;
+	sk->sk_lock.owned = 0;
+}
 
 void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -368,6 +376,11 @@ int sock_no_mmap(struct file *file, struct socket *sock,
 int sock_no_shutdown(struct socket *sock, int how)
 {
 	return 0;
+}
+
+void _raw_spin_lock(raw_spinlock_t *lock)
+{
+	mock_active_locks++;
 }
 
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
@@ -505,8 +518,19 @@ void mock_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 void mock_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct sock *sk = (struct sock *) hsk;
+	memset(hsk, 0, sizeof(*hsk));
 	homa_sock_init(hsk, homa);
 	sk->sk_data_ready = mock_data_ready;
+}
+
+/**
+ * mock_spin_unlock() - Called instead of spin_unlock when Homa is compiled
+ * for unit testing.
+ * @lock:   Lock to be be released (ignored).
+ */
+void mock_spin_unlock(spinlock_t *lock)
+{
+	mock_active_locks--;
 }
 
 /**

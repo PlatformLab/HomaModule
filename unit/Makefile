@@ -17,6 +17,7 @@ INCLUDES := -I. \
 	    -include $(KERNEL_DIR)/include/linux/kconfig.h
 
 DEFS :=      -D__KERNEL__ \
+	     -D__UNIT_TEST__ \
 	     -D KBUILD_MODNAME='"homa"'
 
 WARNS :=     -Wall -Werror -Wundef -Wno-trigraphs -Wno-sign-compare
@@ -25,6 +26,7 @@ CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(INCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_input.c \
 	      unit_homa_output.c \
+	      unit_homa_plumbing.c \
 	      unit_homa_socktab.c \
 	      unit_homa_utils.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))

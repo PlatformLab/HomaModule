@@ -87,15 +87,19 @@ struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 			hsk->inet.inet_saddr, hsk->client_port,
 			dest->sin_addr.s_addr, ntohs(dest->sin_port));
 	if (unlikely(err != 0))
-		goto error;
+		goto error2;
 	err = homa_message_out_init(&crpc->request, (struct sock *) hsk, iter,
 			length, &crpc->dest, hsk->client_port, crpc->id);
         if (unlikely(err != 0))
-		goto error;
+		goto error1;
 	return crpc;
 	
-    error:
-	homa_client_rpc_free(crpc);
+    error1:
+	homa_message_out_destroy(&crpc->request);
+	homa_addr_destroy(&crpc->dest);
+    error2:
+	__list_del_entry(&crpc->client_rpc_links);
+	kfree(crpc);
 	return ERR_PTR(err);
 }
 

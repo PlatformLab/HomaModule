@@ -19,6 +19,13 @@
 
 #include "homa.h"
 
+#ifdef __UNIT_TEST__
+#define spin_unlock mock_spin_unlock
+extern void mock_spin_unlock(spinlock_t *lock);
+#endif
+
+extern struct homa *homa;
+
 /* Forward declarations. */
 struct homa_sock;
 
@@ -585,7 +592,7 @@ extern struct homa_sock *
 extern int    homa_get_port(struct sock *sk, unsigned short snum);
 extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
-extern int    homa_handler(struct sk_buff *skb);
+extern int    homa_pkt_recv(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
 extern void   homa_init(struct homa *homa);
 extern int    homa_ioc_recv(struct sock *sk, unsigned long arg);
@@ -601,6 +608,7 @@ extern void   homa_message_out_destroy(struct homa_message_out *hmo);
 extern int    homa_message_out_init(struct homa_message_out *hmo,
 		struct sock *sk, struct iov_iter *iter, size_t len,
 		struct homa_addr *dest, __u16 sport, __u64 id);
+extern int    homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
 extern __poll_t
 	      homa_poll(struct file *file, struct socket *sock,
 		struct poll_table_struct *wait);

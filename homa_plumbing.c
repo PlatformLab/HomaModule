@@ -20,8 +20,10 @@ int sysctl_homa_rmem_min __read_mostly;
 int sysctl_homa_wmem_min __read_mostly;
 atomic_long_t homa_memory_allocated;
 
-/* Global data for Homa. */
-struct homa homa;
+/* Global data for Homa. Never reference homa_data directory. Always use
+ * the home of variable instead; this allows overriding during unit tests. */
+struct homa homa_data;
+struct homa *homa = &homa_data;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -71,6 +73,7 @@ struct proto homa_prot = {
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
 	.sendpage	   = homa_sendpage,
+	.backlog_rcv       = homa_pkt_dispatch,
 	.release_cb	   = ip4_datagram_release_cb,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
@@ -97,7 +100,7 @@ struct inet_protosw homa_protosw = {
 static struct net_protocol homa_protocol = {
 	.early_demux =	NULL, /*homa_v4_early_demux */
 	.early_demux_handler =	NULL, /* homa_v4_early_demux_handler */
-	.handler =	homa_handler,
+	.handler =	homa_pkt_recv,
 	.err_handler =	homa_err_handler,
 	.no_policy =	1,
 	.netns_ok =	1,
@@ -124,7 +127,7 @@ static int __init homa_load(void) {
 		goto out_unregister;
 	}
 
-	homa_init(&homa);
+	homa_init(homa);
 
 	return 0;
 
@@ -140,7 +143,7 @@ out:
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
-	homa_destroy(&homa);
+	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
@@ -170,7 +173,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 	if (addr_in->sin_family != AF_INET) {
 		return -EAFNOSUPPORT;
 	}
-	return homa_sock_bind(&homa.port_map, hsk, ntohs(addr_in->sin_port));
+	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->sin_port));
 }
 
 /**
@@ -181,7 +184,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
-	homa_sock_destroy(hsk, &homa.port_map);
+	homa_sock_destroy(hsk, &homa->port_map);
 	sk_common_release(sk);
 }
 
@@ -431,7 +434,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	homa_sock_init(hsk, &homa);
+	homa_sock_init(hsk, homa);
 	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
 	return 0;
 }
@@ -603,16 +606,16 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
 }
 
 /**
- * homa_handler() - Top-level input packet handler; invoked by IP when a
- * Homa packet arrives.
+ * homa_handler() - Top-level input packet handler; invoked by IP through
+ * homa_protocol.handler when a Homa packet arrives.
  * @skb:   The incoming packet.
- * Return: Always 0?
+ * Return: Always 0
  */
-int homa_handler(struct sk_buff *skb) {
+int homa_pkt_recv(struct sk_buff *skb) {
 	__be32 saddr = ip_hdr(skb)->saddr;
 	int length = skb->len;
 	struct common_header *h = (struct common_header *) skb->data;
-	struct homa_sock *hsk = NULL;
+	struct sock *sk = NULL;
 	__u16 dport;
 	char buffer[200];
 
@@ -626,8 +629,9 @@ int homa_handler(struct sk_buff *skb) {
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
-	hsk = homa_sock_find(&homa.port_map, dport);
-	if (!hsk) {
+	rcu_read_lock();
+	sk = (struct sock *) homa_sock_find(&homa->port_map, dport);
+	if (!sk) {
 		/* Eventually should return an error result to sender if
 		 * it is a client.
 		 */
@@ -636,13 +640,58 @@ int homa_handler(struct sk_buff *skb) {
 			homa_print_ipv4_addr(saddr, buffer), dport);
 		goto discard;
 	}
-	if (dport < HOMA_MIN_CLIENT_PORT) {
+	bh_lock_sock_nested(sk);
+	
+	/* Once we've locked the socket we can release the RCU read lock:
+	 * the socket can't go away now. */
+	rcu_read_unlock();
+	if (unlikely(sock_owned_by_user(sk))) {
+		/* Can't process packet now because the socket is locked
+		 * and we can't wait for to become unlocked. Queue the
+		 * packet with the socket; it will get processed whenever
+		 * the socket lock is released.
+		 */
+		if (unlikely(sk_add_backlog(sk, skb, 64*1024))) {
+			printk(KERN_WARNING "Couldn't add packet to "
+				"backlog; dropping\n");
+			goto discard;
+		}
+	} else {
+		homa_pkt_dispatch(sk, skb);
+	}
+	bh_unlock_sock(sk);
+	return 0;
+
+    discard:
+	if (sk)
+		bh_unlock_sock(sk);
+	kfree_skb(skb);
+	return 0;
+}
+
+/**
+ * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
+ * once its socket has been found and locked.
+ * @sk:     Homa socket that owns the packet's destination port. Caller must
+ *          own the spin lock for this.
+ * @skb:    The packet buffer. Caller must ensure that the packet is large
+ *          enough to hold a Homa header for any packet type.
+ *
+ * Return:  Always returns 0.
+ */
+int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	struct common_header *h = (struct common_header *) skb->data;
+	
+	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
 		struct homa_server_rpc *srpc;
-		srpc = homa_find_server_rpc(hsk, saddr, ntohs(h->sport), h->id);
+		srpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
+				ntohs(h->sport), h->id);
 		switch (h->type) {
 		case DATA:
-			homa_data_from_client(&homa, skb, hsk, srpc);
+			homa_data_from_client(homa, skb, hsk, srpc);
 			break;
 		case GRANT:
 			goto discard;
@@ -659,7 +708,7 @@ int homa_handler(struct sk_buff *skb) {
 			goto discard;
 		switch (h->type) {
 		case DATA:
-			homa_data_from_server(&homa, skb, hsk, crpc);
+			homa_data_from_server(homa, skb, hsk, crpc);
 			break;
 		case GRANT:
 			goto discard;
@@ -670,7 +719,7 @@ int homa_handler(struct sk_buff *skb) {
 		}
 	}
 	return 0;
-
+	
     discard:
 	kfree_skb(skb);
 	return 0;
