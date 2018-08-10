@@ -241,7 +241,7 @@ int main(int argc, char** argv)
 	struct addrinfo hints;
 	char *host, *port_name;
 	int seed = 12345;
-#define MAX_MESSAGE_LENGTH 100000
+#define MAX_MESSAGE_LENGTH 500000
 	char buffer[MAX_MESSAGE_LENGTH];
 	int length = 100;
 	int count = 1000;
@@ -291,7 +291,7 @@ int main(int argc, char** argv)
 				"integer\n");
 			if (length > MAX_MESSAGE_LENGTH) {
 				length = MAX_MESSAGE_LENGTH;
-				printf("Reducing message length to %d", length);
+				printf("Reducing message length to %d\n", length);
 			}
 		} else if (strcmp(argv[nextArg], "--seed") == 0) {
 			if (nextArg == (argc-1)) {

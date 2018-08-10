@@ -1,5 +1,6 @@
 /* This file contains functions related to the sender side of message
- * transmission. */
+ * transmission. It also contains utility functions for sending packets.
+ */
 
 #include "homa_impl.h"
 
@@ -32,12 +33,13 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 	
 	/* This is a temporary guess; must handle better in the future. */
 	msgout->unscheduled = 7*HOMA_MAX_DATA_PER_PACKET;
-	msgout->limit = msgout->unscheduled;
+	msgout->granted = msgout->unscheduled;
 	msgout->priority = 0;
 	
 	/* Copy message data from user space and form packet buffers. */
 	if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
-		return -EINVAL;
+		err = -EINVAL;
+		goto error;
 	}
 	for (bytes_left = len, last_link = &msgout->packets; bytes_left > 0;
 			bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
@@ -48,7 +50,8 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 		}
 		skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
 		if (unlikely(!skb)) {
-			return -ENOMEM;
+			err = -ENOMEM;
+			goto error;
 		}
 		skb_reserve(skb, HOMA_SKB_RESERVE);
 		skb_reset_transport_header(skb);
@@ -64,7 +67,7 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 		err = skb_add_data_nocache(sk, skb, iter, cur_size);
 		if (unlikely(err != 0)) {
 			kfree_skb(skb);
-			return err;
+			goto error;
 		}
 		dst_hold(dest->dst);
 		skb_dst_set(skb, dest->dst);
@@ -74,6 +77,10 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 	}
 	msgout->next_packet = msgout->packets;
 	return 0;
+	
+    error:
+	homa_message_out_destroy(msgout);
+	return err;
 }
 
 /**
@@ -101,7 +108,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 void homa_xmit_packets(struct homa_message_out *msgout, struct sock *sk,
 		struct homa_addr *dest)
 {
-	while ((msgout->next_offset < msgout->limit) && msgout->next_packet) {
+	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
 		int err;
 		skb_get(msgout->next_packet);
 		err = ip_queue_xmit(sk, msgout->next_packet, &dest->flow);
@@ -112,5 +119,52 @@ void homa_xmit_packets(struct homa_message_out *msgout, struct sock *sk,
 		}
 		msgout->next_packet = *homa_next_skb(msgout->next_packet);
 		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
+	}
+}
+
+/**
+ * homa_xmit_to_sender() - Send a packet to the source of a homa_message_in.
+ * @skb:      Packet buffer containing the contents of the message, including
+ *            a Homa header.
+ * @msgin:    Provides information about where to send the packet; addressing
+ *            info for the packet, including all of the fields of
+ *            common_header except type, will be set from this info.
+ */
+void homa_xmit_to_sender(struct sk_buff *skb, struct homa_message_in *msgin)
+{
+	struct homa_addr *peer;
+	struct homa_sock *hsk;
+	struct common_header *h =
+			(struct common_header *) skb_transport_header(skb);
+	int err;
+	
+	if (msgin->request) {
+		struct homa_server_rpc *srpc = container_of(msgin,
+				struct homa_server_rpc, request);
+		hsk = srpc->hsk;
+		peer = &srpc->client;
+		h->sport = htons(hsk->server_port);
+		h->dport = htons(peer->dport);
+		h->id = srpc->id;
+	} else {
+		struct homa_client_rpc *crpc = container_of(msgin,
+				struct homa_client_rpc, response);
+		hsk = crpc->hsk;
+		peer = &crpc->dest;
+		h->sport = htons(hsk->client_port);
+		h->dport = htons(peer->dport);
+		h->id = crpc->id;
+	}
+	dst_hold(peer->dst);
+	skb_dst_set(skb, peer->dst);
+	if (skb->len < HOMA_MAX_HEADER) {
+		int extra_bytes = HOMA_MAX_HEADER - skb->len;
+		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
+	}
+	err = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
+	if (err) {
+		printk(KERN_WARNING 
+			"ip_queue_xmit failed in homa_xmit_to_sender: %d",
+			err);
 	}
 }

@@ -20,7 +20,7 @@ FIXTURE(homa_utils) {
 FIXTURE_SETUP(homa_utils)
 {
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa);
+	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
 	self->server_addr.sin_family = AF_INET;
@@ -65,8 +65,8 @@ TEST_F(homa_utils, homa_client_rpc_free__state_incoming)
 	EXPECT_EQ(CRPC_WAITING, crpc->state);
 	self->data.common.id = crpc->id;
 	self->data.message_length = N(1600);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 1400, 0), &self->hsk, crpc);
+	homa_data_from_server(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 0), crpc);
 	EXPECT_EQ(CRPC_INCOMING, crpc->state);
 	homa_client_rpc_free(crpc);
 }
@@ -78,8 +78,8 @@ TEST_F(homa_utils, homa_client_rpc_free__state_ready)
 	EXPECT_EQ(CRPC_WAITING, crpc->state);
 	self->data.common.id = crpc->id;
 	self->data.message_length = N(100);
-	homa_data_from_server(&self->homa, mock_skb_new(self->server_ip,
-			&self->data.common, 100, 0), &self->hsk, crpc);
+	homa_data_from_server(mock_skb_new(self->server_ip, &self->data.common,
+			100, 0), crpc);
 	EXPECT_EQ(CRPC_READY, crpc->state);
 	homa_client_rpc_free(crpc);
 }
@@ -156,8 +156,8 @@ TEST_F(homa_utils, homa_server_rpc_free__state_ready)
 	struct homa_server_rpc *srpc = homa_server_rpc_new(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc));
-	homa_data_from_client(&self->homa, mock_skb_new(self->client_ip,
-			&self->data.common, 100, 0), &self->hsk, srpc);
+	homa_data_from_client(mock_skb_new(self->client_ip, &self->data.common,
+			100, 0), srpc, &self->hsk);
 	EXPECT_EQ(SRPC_READY, srpc->state);
 	homa_server_rpc_free(srpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
@@ -169,8 +169,8 @@ TEST_F(homa_utils, homa_server_rpc_new__normal)
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc));
 	self->data.message_length = N(1600);
-	homa_data_from_client(&self->homa, mock_skb_new(self->client_ip,
-			&self->data.common, 1400, 0), &self->hsk, srpc);
+	homa_data_from_client(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), srpc, &self->hsk);
 	EXPECT_EQ(SRPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.server_rpcs));
 	homa_server_rpc_free(srpc);

@@ -81,7 +81,10 @@ enum homa_packet_type {
 /** define HOMA_MAX_IPV4_HEADER - Size of largest IP header (V4). */
 #define HOMA_MAX_IPV4_HEADER 60
 
-/** define HOMA_MAX_HEADER - Largest allowable Homa header. */
+/**
+ * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
+ * must be at least this long.
+ */
 #define HOMA_MAX_HEADER 40
 
 _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
@@ -298,8 +301,11 @@ struct homa_message_out {
 	 */
 	int unscheduled;
 	
-	/** @limit: Need grant before sending offsets >= this. */
-	int limit;
+	/** 
+	 * @granted: Total number of bytes we are currently permitted to
+	 * send, including unscheduled bytes; must wait for grants before
+	 * sending bytes at or beyond this position. */
+	int granted;
 	
 	/** @priority: Packet priority to use for future transmissions. */
 	__u8 priority;
@@ -311,17 +317,19 @@ struct homa_message_out {
  */
 struct homa_message_in {
 	/**
+	 * @total_length: Size of the entire message, in bytes. A value
+	 * less than 0 means this structure is uninitialized and therefore
+	 * not in use.
+	 */
+	int total_length;
+	
+	/**
 	 * @packets: DATA packets received for this message so far. The list
 	 * is sorted in order of offset (head is lowest offset), but
 	 * packets can be received out of order, so there may be times
 	 * when there are holes in the list.
 	 */
 	struct sk_buff_head packets;
-	
-	/**
-	 * @total_length: Size of the entire message, in bytes.
-	 */
-	int total_length;
 	
 	/**
 	 * @bytes_remaining: Amount of data for this message that has
@@ -337,6 +345,27 @@ struct homa_message_in {
 	
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
+	
+	/**
+	 * @scheduled: Nonzero means some of the bytes of this message
+	 * must be scheduled with grants.
+	 */
+	int scheduled;
+	
+	/**
+	 * @request: Nonzero means that this is a request message (i.e.,
+	 * this structure is embedded in a homa_server_rpc). Zero means
+	 * this is a response message (the structure is embedded in a
+	 * homa_client_rpc).
+	 */
+	int request;
+	
+	/**
+	 * @grantable_links: If granted < total_length, used to link this
+	 * object into homa->grantable_msgs. Otherwise, this is an empty
+	 * list pointing to itself.
+	 */
+	struct list_head grantable_links;
 };
 
 /**
@@ -344,6 +373,17 @@ struct homa_message_in {
  * RPC initiated from this machine.
  */
 struct homa_client_rpc {
+	/** @hsk:  Socket that is sending this request. */
+	struct homa_sock *hsk;
+	
+	/** @dest: Address information for server. */
+	struct homa_addr dest;	
+	
+	/**
+	 * @id: Unique identifier for the RPC among all those issued
+	 * from its port. */
+	__u64 id;
+	
 	/**
 	 * @state: Each RPC passes through the following states, in order:
 	 * @CRPC_WAITING:     No response packets have been received yet
@@ -356,21 +396,7 @@ struct homa_client_rpc {
 		CRPC_WAITING            = 11,
 		CRPC_INCOMING           = 12,
 		CRPC_READY              = 13
-	} state;	
-	
-	/**
-	 * @id: Unique identifier for the RPC among all those issued
-	 * from its port. */
-	__u64 id;
-	
-	/**
-	 * @client_rpc_links: For linking this object into
-	 * &homa_sock.client_rpcs.
-	 */
-	struct list_head client_rpc_links;
-	
-	/** @dest: Address information for server. */
-	struct homa_addr dest;
+	} state;
 	
 	/** @request: Information about the request message. */
 	struct homa_message_out request;
@@ -380,6 +406,12 @@ struct homa_client_rpc {
 	 * until CRPC_INCOMING state.
 	 */
 	struct homa_message_in response;
+	
+	/**
+	 * @client_rpc_links: For linking this object into
+	 * &homa_sock.client_rpcs.
+	 */
+	struct list_head client_rpc_links;
 	
 	/**
 	 * @ready_links: Iff state == READY, this is used to link this object
@@ -393,20 +425,14 @@ struct homa_client_rpc {
  * RPC for which this machine is the server. 
  */
 struct homa_server_rpc {
+	/** @hsk:  Socket that will serve this request. */
+	struct homa_sock *hsk;
+	
 	/** @dest: Address information for the client that issued the RPC. */
 	struct homa_addr client;
 	
 	/** @id: Identifier for the RPC (unique from saddr/sport). */
 	__u64 id;
-	
-	/** @request: Information about the request message. */
-	struct homa_message_in request;
-	
-	/**
-	 * @response: Information about the response message. Uninitialized
-	 * except in SRPC_RESPONSE state.
-	 */
-	struct homa_message_out response;
 	
 	/**
 	 * @state: Each RPC passes through the following states, in order:
@@ -424,6 +450,15 @@ struct homa_server_rpc {
 		SRPC_IN_SERVICE         = 7,
 		SRPC_RESPONSE           = 8
 	} state;
+	
+	/** @request: Information about the request message. */
+	struct homa_message_in request;
+	
+	/**
+	 * @response: Information about the response message. Uninitialized
+	 * except in SRPC_RESPONSE state.
+	 */
+	struct homa_message_out response;
 	
 	/**
 	 * @server_rpc_links: For linking this object into
@@ -498,6 +533,9 @@ struct homa_sock {
 	/** @inet: Generic socket data; must be the first field. */
 	struct inet_sock inet;
 	
+	/** @homa: Overall state about the Homa implementation. */
+	struct homa *homa;
+	
 	/**
 	 * @server_port: Port number for receiving incoming RPC requests.
 	 * Must be assigned explicitly with bind; 0 means not bound yet.
@@ -562,6 +600,51 @@ struct homa {
 	
 	/** @port_map: Maps from port numbers to sockets. */
 	struct homa_socktab port_map;
+	
+	/**
+	 * @rtt_bytes: A conservative estimate of the amount of data that
+	 * can be sent over the wire in the time it takes to send a full-size
+	 * data packet and receive back a grant. Homa tries to ensure
+	 * that there is at least this much data in transit (or authorized
+	 * via grants) for an incoming message at all times.
+	 */
+	int rtt_bytes;
+	
+	
+	/**
+	 * @max_sched_prio: The highest priority level currently available for
+	 * scheduled messages.
+	 */
+	int max_sched_prio;
+	
+	/**
+	 * @min_sched_prio: The lowest priority level currently available for
+	 * scheduled messages.
+	 */
+	int min_sched_prio;
+	
+	/**
+	 * @max_overcommit: The maximum number of messages to which Homa will
+	 * send grants at any given point in time.
+	 */
+	int max_overcommit;
+	
+	/**
+	 * @lock: Used to synchronize access to all of the fields below,
+	 * which may be accessed concurrently by different sockets.
+	 */
+	struct spinlock lock;
+	
+	/**
+	 * @grantable_msgs: Contains all homa_message_ins (both requests
+	 * and responses) that require additional grants before they can
+	 * complete. The list is sorted in priority order (fewest
+	 * bytes_remaining first).
+	 */
+	struct list_head grantable_msgs;
+	
+	/** @num_grantable: The number of messages in grantable_msgs. */
+	int num_grantable;
 };
 
 extern void   homa_add_packet(struct homa_message_in *msgin,
@@ -575,10 +658,10 @@ extern struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 		struct sockaddr_in *dest, size_t length,
 		struct iov_iter *iter);
 extern void   homa_close(struct sock *sock, long timeout);
-extern void   homa_data_from_client(struct homa *homa, struct sk_buff *skb,
-		struct homa_sock *hsk, struct homa_server_rpc *srpc);
-extern void   homa_data_from_server(struct homa *homa, struct sk_buff *skb,
-		struct homa_sock *hsk, struct homa_client_rpc *crpc);
+extern void   homa_data_from_client(struct sk_buff *skb,
+		struct homa_server_rpc *srpc, struct homa_sock *hsk);
+extern void   homa_data_from_server(struct sk_buff *skb,
+		struct homa_client_rpc *crpc);
 extern void   homa_destroy(struct homa *homa);
 extern int    homa_diag_destroy(struct sock *sk, int err);
 extern int    homa_disconnect(struct sock *sk, int flags);
@@ -592,6 +675,10 @@ extern struct homa_sock *
 extern int    homa_get_port(struct sock *sk, unsigned short snum);
 extern int    homa_getsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, int __user *option);
+extern void   homa_grant_from_client(struct sk_buff *skb,
+		struct homa_server_rpc *srpc);
+extern void   homa_grant_from_server(struct sk_buff *skb,
+		struct homa_client_rpc *crpc);
 extern int    homa_pkt_recv(struct sk_buff *skb);
 extern int    homa_hash(struct sock *sk);
 extern void   homa_init(struct homa *homa);
@@ -599,13 +686,15 @@ extern int    homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int    homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int    homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern int    homa_message_in_copy_data(struct homa_message_in *hmi,
+extern void   homa_manage_grants(struct homa *homa,
+		struct homa_message_in *msgin);
+extern int    homa_message_in_copy_data(struct homa_message_in *msgin,
 		struct iov_iter *iter, int max_bytes);
-extern void   homa_message_in_destroy(struct homa_message_in *hmi);
-extern void   homa_message_in_init(struct homa_message_in *hmi, int length,
-		int unscheduled);
-extern void   homa_message_out_destroy(struct homa_message_out *hmo);
-extern int    homa_message_out_init(struct homa_message_out *hmo,
+extern void   homa_message_in_destroy(struct homa_message_in *msgin);
+extern void   homa_message_in_init(struct homa_message_in *msgin, int length,
+		int unscheduled, int request);
+extern void   homa_message_out_destroy(struct homa_message_out *msgout);
+extern int    homa_message_out_init(struct homa_message_out *msgout,
 		struct sock *sk, struct iov_iter *iter, size_t len,
 		struct homa_addr *dest, __u16 sport, __u64 id);
 extern int    homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
@@ -619,6 +708,8 @@ extern char  *homa_print_packet_short(struct sk_buff *skb, char *buffer,
 extern int    homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		int noblock, int flags, int *addr_len);
 extern void   homa_rehash(struct sock *sk);
+extern void   homa_remove_from_grantable(struct homa *homa,
+		struct homa_message_in *msgin);
 extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
@@ -642,5 +733,7 @@ extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int    homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern void   homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
 		struct homa_addr *dest);
+extern void   homa_xmit_to_sender(struct sk_buff *skb,
+		struct homa_message_in *msgin);
 
 #endif /* _HOMA_IMPL_H */

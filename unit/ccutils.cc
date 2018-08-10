@@ -130,6 +130,17 @@ void unit_fill_data(unsigned char *data, int length, int first_value)
 }
 
 /**
+ * unit_log_add_separator() - If the test log has data in it, append a
+ * given separator string.
+ * @sep:    Separator string.
+ */
+void unit_log_add_separator(char *sep)
+{
+	if (!log.empty())
+		log.append(sep);
+}
+
+/**
  * unit_log_data() - Log information that describes the data provided.
  * @data:      Address of first byte of data.
  * @length:    Total amount of data, in bytes.

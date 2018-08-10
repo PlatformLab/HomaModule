@@ -21,7 +21,7 @@ FIXTURE_SETUP(homa_plumbing)
 {
 	homa = &self->homa;
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa);
+	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	homa_sock_bind(&self->homa.port_map, &self->hsk, 99);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");

@@ -38,6 +38,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = &homa->port_map;
 	mutex_lock(&socktab->writeLock);
+	hsk->homa = homa;
 	hsk->server_port = 0;
 	while (1) {
 		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {

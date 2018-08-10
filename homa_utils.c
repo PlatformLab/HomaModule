@@ -21,7 +21,7 @@ void homa_addr_destroy(struct homa_addr *addr)
  * @dport:    Report of the destination that will handle incoming packets.
  * 
  * Return:    0 for success, otherwise negative errno. Note: it is safe
- *            to invoke homa_addr_destroyeven after an error return.
+ *            to invoke homa_addr_destroy even after an error return.
  */
 int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
 		__u16 sport, __be32 daddr, __u16 dport)
@@ -50,21 +50,30 @@ int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
  * @crpc:  Structure to clean up.
  */
 void homa_client_rpc_free(struct homa_client_rpc *crpc) {
-	homa_addr_destroy(&crpc->dest);
+	/* Before doing anything else, unlink the input message from
+	 * homa->grantable_msgs. This will synchronize to ensure that
+	 * homa_manage_grants doesn't access this RPC after destruction
+	 * begins. The if statement below is tricky: we'd like to avoid
+	 * calling homa_remove_from_grantable (because it requires global
+	 * synchronization), but the if statement is not synchronized,
+	 * so it must not use any information that homa_manage_grants
+	 * might be changing concurrently.
+	 */
+	if ((crpc->state == CRPC_INCOMING) && crpc->response.scheduled)
+		homa_remove_from_grantable(crpc->hsk->homa, &crpc->response);
+	homa_message_in_destroy(&crpc->response);
+	if (crpc->state == CRPC_READY)
+		__list_del_entry(&crpc->ready_links);
 	__list_del_entry(&crpc->client_rpc_links);
 	homa_message_out_destroy(&crpc->request);
-	if (crpc->state >= CRPC_INCOMING) {
-		homa_message_in_destroy(&crpc->response);
-		if (crpc->state == CRPC_READY)
-			__list_del_entry(&crpc->ready_links);
-	}
+	homa_addr_destroy(&crpc->dest);
 	kfree(crpc);
 }
 
 /**
  * homa_client_rpc_new() - Allocate and construct a homa_client_rpc.
  * @hsk:      Socket to which the RPC belongs.
- * @dest:     Address of host to which the RPC will be sent.
+ * @dest:     Address of host (ip and port) to which the RPC will be sent.
  * @length:   Size of the request message.
  * @iter:     Data for the message.
  * 
@@ -79,26 +88,26 @@ struct homa_client_rpc *homa_client_rpc_new(struct homa_sock *hsk,
 	crpc = (struct homa_client_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
 		return ERR_PTR(-ENOMEM);
-	crpc->state = CRPC_WAITING;
-	crpc->id = hsk->next_outgoing_id;
-	hsk->next_outgoing_id++;
-	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
+	crpc->hsk = hsk;
 	err = homa_addr_init(&crpc->dest, (struct sock *) hsk,
 			hsk->inet.inet_saddr, hsk->client_port,
 			dest->sin_addr.s_addr, ntohs(dest->sin_port));
 	if (unlikely(err != 0))
 		goto error2;
+	crpc->id = hsk->next_outgoing_id;
+	hsk->next_outgoing_id++;
+	crpc->state = CRPC_WAITING;
 	err = homa_message_out_init(&crpc->request, (struct sock *) hsk, iter,
 			length, &crpc->dest, hsk->client_port, crpc->id);
         if (unlikely(err != 0))
 		goto error1;
+	crpc->response.total_length = -1;
+	list_add(&crpc->client_rpc_links, &hsk->client_rpcs);
 	return crpc;
 	
     error1:
-	homa_message_out_destroy(&crpc->request);
 	homa_addr_destroy(&crpc->dest);
     error2:
-	__list_del_entry(&crpc->client_rpc_links);
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -170,6 +179,15 @@ void homa_init(struct homa *homa)
 {
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	homa_socktab_init(&homa->port_map);
+	
+	/* Wild guesses to initialize configuration values... */
+	homa->rtt_bytes = 10000;
+	homa->max_sched_prio = 3;
+	homa->min_sched_prio = 0;
+	homa->max_overcommit = 8;
+	spin_lock_init(& homa->lock);
+	INIT_LIST_HEAD(&homa->grantable_msgs);
+	homa->num_grantable = 0;
 }
 
 /**
@@ -210,10 +228,11 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	struct common_header *common = (struct common_header *) skb->data;
 	
 	int result = snprintf(pos, space_left,
-		"%s from %s:%u, id %llu, length %u",
+		"%s from %s:%u, dport %d, id %llu, length %u",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr, addr_buf),
-		ntohs(common->sport), common->id, skb->len);
+		ntohs(common->sport), ntohs(common->dport), common->id,
+		skb->len);
 	if ((result == length) || (result < 0)) {
 		buffer[length-1] = 0;
 		return buffer;
@@ -305,6 +324,17 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
  */
 void homa_server_rpc_free(struct homa_server_rpc *srpc)
 {
+	/* Before doing anything else, unlink the input message from
+	 * homa->grantable_msgs. This will synchronize to ensure that
+	 * homa_manage_grants doesn't access this RPC after destruction
+	 * begins. The if statement below is tricky: we'd like to avoid
+	 * calling homa_remove_from_grantable (because it requires global
+	 * synchronization), but the if statement is not synchronized,
+	 * so it must not use any information that homa_manage_grants
+	 * might be changing concurrently.
+	 */
+	if ((srpc->state == SRPC_INCOMING) && srpc->request.scheduled)
+		homa_remove_from_grantable(srpc->hsk->homa, &srpc->request);
 	homa_addr_destroy(&srpc->client);
 	homa_message_in_destroy(&srpc->request);
 	if (srpc->state == SRPC_RESPONSE)
@@ -333,6 +363,7 @@ struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 			GFP_KERNEL);
 	if (!srpc)
 		return ERR_PTR(-ENOMEM);
+	srpc->hsk = hsk;
 	err = homa_addr_init(&srpc->client, (struct sock *) hsk,
 			hsk->inet.inet_saddr, hsk->client_port, source,
 			ntohs(h->common.sport));
@@ -341,9 +372,9 @@ struct homa_server_rpc *homa_server_rpc_new(struct homa_sock *hsk,
 		return ERR_PTR(err);
 	}
 	srpc->id = h->common.id;
-	homa_message_in_init(&srpc->request, ntohl(h->message_length),
-			ntohl(h->unscheduled));
 	srpc->state = SRPC_INCOMING;
+	homa_message_in_init(&srpc->request, ntohl(h->message_length),
+			ntohl(h->unscheduled), 1);
 	list_add(&srpc->server_rpc_links, &hsk->server_rpcs);
 	return srpc;
 }

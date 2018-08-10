@@ -691,10 +691,13 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 				ntohs(h->sport), h->id);
 		switch (h->type) {
 		case DATA:
-			homa_data_from_client(homa, skb, hsk, srpc);
+			homa_data_from_client(skb, srpc, hsk);
 			break;
 		case GRANT:
-			goto discard;
+			if (!srpc)
+				goto discard;
+			homa_grant_from_client(skb, srpc);
+			break;
 		case RESEND:
 			goto discard;
 		case BUSY:
@@ -708,10 +711,11 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 			goto discard;
 		switch (h->type) {
 		case DATA:
-			homa_data_from_server(homa, skb, hsk, crpc);
+			homa_data_from_server(skb, crpc);
 			break;
 		case GRANT:
-			goto discard;
+			homa_grant_from_server(skb, crpc);
+			break;
 		case RESEND:
 			goto discard;
 		case BUSY:

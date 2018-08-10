@@ -2,6 +2,7 @@
 
 extern int         mock_alloc_skb_errors;
 extern int         mock_copy_data_errors;
+extern int         mock_xmit_log_verbose;
 extern int         mock_malloc_errors;
 extern int         mock_route_errors;
 
@@ -15,5 +16,6 @@ extern struct sk_buff *
 			int extra_bytes, int first_value);
 extern void        mock_sock_destroy(struct homa_sock *hsk,
 			struct homa_socktab *socktab);
-extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa);
+extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
+			int client_port, int server_port);
 extern void        mock_teardown(void);

@@ -31,6 +31,11 @@ int mock_copy_data_errors = 0;
 int mock_malloc_errors = 0;
 int mock_route_errors = 0;
 
+/* If a test sets this variable to nonzero, ip_queue_xmit will log
+ * outgoing packets using the long format rather than short.
+ *  */
+int mock_xmit_log_verbose = 0;
+
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
  */
@@ -63,6 +68,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	if (mock_check_error(&mock_alloc_skb_errors))
 		return NULL;
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	memset(skb, 0, sizeof(*skb));
 	if (!buffs_in_use)
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
@@ -83,8 +89,7 @@ bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("_copy_from_iter_full copied %lu bytes", bytes);
 	return true;
 }
@@ -93,16 +98,14 @@ bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("_copy_from_iter_full_nocache copid %lu bytes", bytes);
 	return true;
 }
 
 unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("_copy_to_user copied %lu bytes", n);
 	return 0;
 }
@@ -112,8 +115,7 @@ bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("csum_and_copy_from_iter_full copied %lu bytes", bytes);
 	return true;
 }
@@ -123,8 +125,7 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("_copy_from_user copyed %lu bytes", n);
 	return 0;
 }
@@ -207,6 +208,14 @@ void inet_unregister_protosw(struct inet_protosw *p) {}
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
+	char buffer[200];
+	if (mock_xmit_log_verbose)
+		homa_print_packet(skb, buffer, sizeof(buffer));
+	else
+		homa_print_packet_short(skb, buffer, sizeof(buffer));
+	unit_log_add_separator("; ");
+	unit_log_printf("xmit %s", buffer);
+	kfree_skb(skb);
 	return 0;
 }
 
@@ -266,6 +275,16 @@ void *__kmalloc(size_t size, gfp_t flags)
 		mallocs_in_use = unit_hash_new();
 	unit_hash_set(mallocs_in_use, block, "used");
 	return block;
+}
+
+void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
+{
+	mock_active_locks++;
+}
+
+void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
+{
+	mock_active_locks--;
 }
 
 void lock_sock_nested(struct sock *sk, int subclass)
@@ -329,8 +348,7 @@ int sk_set_peek_off(struct sock *sk, int val)
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iov_iter *to, int size)
 {
-	if (!unit_log_empty())
-		unit_log_printf("; ");
+	unit_log_add_separator("; ");
 	unit_log_printf("skb_copy_datagram_iter ");
 	unit_log_data(from->data + offset, size);
 	return 0;
@@ -435,7 +453,7 @@ void mock_data_ready(struct sock *sk)
 }
 
 /**
- * mock_skb_new() - Allocate and return a packet buffer. The buffer is
+ * pp() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPV4 address to use as the sender of the packet, in
  *                network byte order.
@@ -473,6 +491,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		break;
 	}
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	memset(skb, 0, sizeof(*skb));
 	if (!buffs_in_use)
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
@@ -514,12 +533,23 @@ void mock_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 /**
  * mock_sock_init() - Constructor for sockets; initializes the Homa-specific
  * part, and mocks out the non-Homa-specific parts.
+ * @hsk:          Storage area to be initialized.\
+ * @homa:         Overall information about the Oma protocol.
+ * @client_port:  Client-side port number to use for the socket, or 0 to
+ *                use default.
+ * @server_port:  Server-side port number to use for the socket (or 0).
  */
-void mock_sock_init(struct homa_sock *hsk, struct homa *homa)
+void mock_sock_init(struct homa_sock *hsk, struct homa *homa,
+		int client_port, int server_port)
 {
 	struct sock *sk = (struct sock *) hsk;
 	memset(hsk, 0, sizeof(*hsk));
 	homa_sock_init(hsk, homa);
+	if (client_port != 0)
+		hsk->client_port = client_port;
+	if (server_port != 0)
+		homa_sock_bind(&homa->port_map, hsk, server_port);
+	hsk->server_port = server_port;
 	sk->sk_data_ready = mock_data_ready;
 }
 
@@ -543,6 +573,7 @@ void mock_teardown(void)
 {
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
+	mock_xmit_log_verbose = 0;
 	mock_malloc_errors = 0;
 	mock_route_errors = 0;
 	
