@@ -94,7 +94,7 @@ TEST_F(homa_outgoing, homa_xmit_to_sender__server_request)
 	mock_xmit_log_verbose = 1;
 	homa_xmit_to_sender(skb, &srpc->request);
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
-			"length 18, offset 12345, priority 4",
+			"length 40, offset 12345, priority 4",
 			unit_log_get());
 }
 
@@ -118,6 +118,6 @@ TEST_F(homa_outgoing, homa_xmit_to_sender__client_response)
 	mock_xmit_log_verbose = 1;
 	homa_xmit_to_sender(skb, &crpc->response);
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1111, "
-			"length 18, offset 12345, priority 4",
+			"length 40, offset 12345, priority 4",
 			unit_log_get());
 }
