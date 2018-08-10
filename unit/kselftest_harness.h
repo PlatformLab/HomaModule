@@ -594,16 +594,16 @@ extern void _exit(int status);
 	/* Avoid multiple evaluation of the cases */ \
 	__typeof__(_expected) __exp = (_expected); \
 	__typeof__(_seen) __seen = (_seen); \
-	__INC_STEP(_metadata); \
+	__INC_STEP(__current_test); \
 	if (!(__exp _t __seen)) { \
 		unsigned long long __exp_print = (long long)__exp; \
 		unsigned long long __seen_print = (long long)__seen; \
 		__TH_LOG("Expected %s (%llu) %s %s (%llu)", \
 			 #_expected, __exp_print, #_t, \
 			 #_seen, __seen_print); \
-		_metadata->passed = 0; \
+		__current_test->passed = 0; \
 		/* Ensure the optional handler is triggered */ \
-		_metadata->trigger = 1; \
+		__current_test->trigger = 1; \
 	} \
 } while (0); /* OPTIONAL_HANDLER(_assert) */
 
