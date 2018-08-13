@@ -10,6 +10,7 @@ FIXTURE(homa_outgoing) {
 	int client_port;
 	__be32 server_ip;
 	int server_port;
+	__u64 rpcid;
 	struct homa homa;
 	struct homa_sock hsk;
 	struct sockaddr_in server_addr;
@@ -20,6 +21,7 @@ FIXTURE_SETUP(homa_outgoing)
 	self->client_port = 40000;
 	self->server_ip = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
+	self->rpcid = 12345;
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, self->client_port,
 			self->server_port);

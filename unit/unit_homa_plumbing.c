@@ -5,33 +5,38 @@
 #include "mock.h"
 #include "utils.h"
 
-#define n(x) htons(x)
-#define N(x) htonl(x)
-
 FIXTURE(homa_plumbing) {
+	__be32 client_ip;
+	int client_port;
+	__be32 server_ip;
+	int server_port;
+	__u64 rpcid;
 	struct homa homa;
 	struct homa_sock hsk;
-	__be32 client_ip;
-	__be32 server_ip;
 	struct sockaddr_in server_addr;
 	struct data_header data;
 	int starting_skb_count;
 };
 FIXTURE_SETUP(homa_plumbing)
 {
+	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_port = 40000;
+	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_port = 99;
+	self->rpcid = 12345;
+	self->server_addr.sin_family = AF_INET;
+	self->server_addr.sin_addr.s_addr = self->server_ip;
+	self->server_addr.sin_port = htons(self->server_port);
 	homa = &self->homa;
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
-	homa_sock_bind(&self->homa.port_map, &self->hsk, 99);
-	self->client_ip = unit_get_in_addr("196.168.0.1");
-	self->server_ip = unit_get_in_addr("1.2.3.4");
-	self->server_addr.sin_family = AF_INET;
-	self->server_addr.sin_addr.s_addr = self->server_ip;
-	self->server_addr.sin_port = htons(99);
-	self->data = (struct data_header){.common = {.sport = n(5),
-	                .dport = n(99), .id = 12345, .type = DATA},
-		        .message_length = N(10000), .offset = 0,
-			.unscheduled = N(10000), .retransmit = 0};
+	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
+	self->data = (struct data_header){.common = {
+			.sport = htons(self->client_port),
+	                .dport = htons(self->server_port), .id = self->rpcid,
+			.type = DATA},
+		        .message_length = htonl(10000), .offset = 0,
+			.unscheduled = htonl(10000), .retransmit = 0};
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_plumbing)

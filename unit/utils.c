@@ -262,7 +262,7 @@ struct homa_server_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			this_size = HOMA_MAX_DATA_PER_PACKET;
 		h.offset = htonl(bytes_received);
 		homa_data_from_client(mock_skb_new(client_ip, &h.common,
-				this_size , 0), NULL, hsk);
+				this_size , 0), srpc, hsk);
 	}
 	EXPECT_EQ(SRPC_READY, srpc->state);
 	if (srpc->state == state)
