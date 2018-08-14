@@ -107,8 +107,8 @@ static struct net_protocol homa_protocol = {
 };
 
 /**
- * homa_load(): invoked when this module is loaded into the Linux kernel
- * @return: 0 on success, otherwise a negative errno.
+ * homa_load() - invoked when this module is loaded into the Linux kernel
+ * Return: 0 on success, otherwise a negative errno.
  */
 static int __init homa_load(void) {
 	int status;
@@ -139,7 +139,7 @@ out:
 }
 
 /**
- * homa_unload(): invoked when this module is unloaded from the Linux kernel.
+ * homa_unload() - invoked when this module is unloaded from the Linux kernel.
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
@@ -158,7 +158,7 @@ module_exit(homa_unload);
  * there is no need to invoke this system call for sockets that are only
  * used as clients.
  * @sock:     Socket on which the system call was invoked.
- * @uaddr:    Contains the desired port number.
+ * @addr:    Contains the desired port number.
  * @addr_len: Number of bytes in uaddr.
  * Return:    0 on success, otherwise a negative errno.
  */
@@ -539,6 +539,7 @@ int homa_hash(struct sock *sk) {
 
 /**
  * homa_unhash() - ??.
+ * @sk:    Socket for the operation
  */
 void homa_unhash(struct sock *sk) {
 	printk(KERN_WARNING "unimplemented unhash invoked on Homa socket\n");
@@ -546,6 +547,7 @@ void homa_unhash(struct sock *sk) {
 
 /**
  * homa_rehash() - ??.
+ * @sk:    Socket for the operation
  */
 void homa_rehash(struct sock *sk) {
 	printk(KERN_WARNING "unimplemented rehash invoked on Homa socket\n");
@@ -553,6 +555,8 @@ void homa_rehash(struct sock *sk) {
 
 /**
  * homa_get_port() - ??.
+ * @sk:    Socket for the operation
+ * @snum:  ??
  * Return: ??
  */
 int homa_get_port(struct sock *sk, unsigned short snum) {
@@ -562,6 +566,8 @@ int homa_get_port(struct sock *sk, unsigned short snum) {
 
 /**
  * homa_diag_destroy() - ??.
+ * @sk:    Socket for the operation
+ * @err:   ??
  * Return: ??
  */
 int homa_diag_destroy(struct sock *sk, int err) {
@@ -572,6 +578,7 @@ int homa_diag_destroy(struct sock *sk, int err) {
 
 /**
  * homa_v4_early_demux() - Invoked by IP for ??.
+ * @skb:    Socket buffer.
  * Return: Always 0?
  */
 int homa_v4_early_demux(struct sk_buff *skb) {
@@ -580,7 +587,8 @@ int homa_v4_early_demux(struct sk_buff *skb) {
 }
 
 /**
- * homa_v4_early_demux_handler(): invoked by IP for ??.
+ * homa_v4_early_demux_handler() - invoked by IP for ??.
+ * @skb:    Socket buffer.
  * @return: Always 0?
  */
 int homa_v4_early_demux_handler(struct sk_buff *skb) {
@@ -665,6 +673,9 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 
 /**
  * homa_poll() - Invoked to implement the poll system call.
+ * @file:  ??
+ * @sock:  ??
+ * @wait:  ??
  * Return: ??
  */
 __poll_t homa_poll(struct file *file, struct socket *sock,

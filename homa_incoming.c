@@ -101,7 +101,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
  * @msgin:      The message whose data should be extracted.
  * @iter:       Describes the available buffer space at user-level; message
  *              data gets copied here.
- * @max_bytes   Total amount of space available via iter.
+ * @max_bytes:  Total amount of space available via iter.
  * 
  * Return:      The number of bytes copied, or a negative errno.
  */

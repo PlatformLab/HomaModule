@@ -98,7 +98,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
  *          to initialize the RPC.
  * 
  * Return:  A pointer to the new object, or a negative errno if an error
-            occurred.
+ *          occurred.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		__be32 source, struct data_header *h)
@@ -158,7 +158,7 @@ void homa_rpc_free(struct homa_rpc *rpc) {
  * homa_find_client_rpc() - Locate client-side information about the RPC that
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
- * @port:     Port from which the packet was sent.
+ * @sport:    Port from which the packet was sent.
  * @id:       Unique identifier for the RPC.
  * 
  * Return:    A pointer to the homa_rpc for this id, or NULL if none.
@@ -191,7 +191,7 @@ void homa_destroy(struct homa *homa)
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
  * @saddr:    Address from which the packet was sent.
- * @port:     Port at @saddr from which the packet was sent.
+ * @sport:    Port at @saddr from which the packet was sent.
  * @id:       Unique identifier for the RPC.
  * 
  * Return:    A pointer to the homa_rpc for this saddr-id combination,
@@ -362,6 +362,8 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
 /**
  * homa_symbol_for_type() - Returns a printable string describing a packet type.
  * @type:  A value from those defined by &homa_packet_type.
+ * 
+ * Return: A static string holding the packet type corresponding to @type.
  */
 char *homa_symbol_for_type(uint8_t type)
 {

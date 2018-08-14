@@ -100,7 +100,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 }
 
 /**
- * homa_xmit_packets(): If a message has data packets that are permitted
+ * homa_xmit_packets() - If a message has data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
  * them to be sent.
  * @msgout: Message to check for transmittable packets.
