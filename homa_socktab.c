@@ -57,8 +57,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 			&socktab->buckets[homa_port_hash(hsk->client_port)]);
 	INIT_LIST_HEAD(&hsk->client_rpcs);
 	INIT_LIST_HEAD(&hsk->server_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_client_rpcs);
-	INIT_LIST_HEAD(&hsk->ready_server_rpcs);
+	INIT_LIST_HEAD(&hsk->ready_rpcs);
 	mutex_unlock(&socktab->writeLock);
 }
 
@@ -79,14 +78,14 @@ void homa_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 	mutex_unlock(&socktab->writeLock);
 		
 	list_for_each_safe(pos, next, &hsk->client_rpcs) {
-		struct homa_client_rpc *crpc = list_entry(pos,
-				struct homa_client_rpc, client_rpc_links);
-		homa_client_rpc_free(crpc);
+		struct homa_rpc *crpc = list_entry(pos,
+				struct homa_rpc, rpc_links);
+		homa_rpc_free(crpc);
 	}
 	list_for_each_safe(pos, next, &hsk->server_rpcs) {
-		struct homa_server_rpc *srpc = list_entry(pos,
-				struct homa_server_rpc, server_rpc_links);
-		homa_server_rpc_free(srpc);
+		struct homa_rpc *srpc = list_entry(pos, struct homa_rpc,
+				rpc_links);
+		homa_rpc_free(srpc);
 	}
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 }

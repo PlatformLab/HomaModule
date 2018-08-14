@@ -90,6 +90,8 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 void homa_message_out_destroy(struct homa_message_out *msgout)
 {
 	struct sk_buff *skb, *next;
+	if (msgout->length < 0)
+		return;
 	for (skb = msgout->packets; skb !=  NULL; skb = next) {
 		next = *homa_next_skb(skb);
 		kfree_skb(skb);
@@ -123,45 +125,33 @@ void homa_xmit_packets(struct homa_message_out *msgout, struct sock *sk,
 }
 
 /**
- * homa_xmit_to_sender() - Send a packet to the source of a homa_message_in.
+ * homa_xmit_to_peer() - Send a packet to the other end of an RPC.
  * @skb:      Packet buffer containing the contents of the message, including
  *            a Homa header.
- * @msgin:    Provides information about where to send the packet; addressing
- *            info for the packet, including all of the fields of
- *            common_header except type, will be set from this info.
+ * @rpc:      The packet will go to the socket that handles the other end
+ *            of this RPC. Addressing info for the packet, including all of
+ *            the fields of common_header except type, will be set from this.
  */
-void homa_xmit_to_sender(struct sk_buff *skb, struct homa_message_in *msgin)
+void homa_xmit_to_peer(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct homa_addr *peer;
-	struct homa_sock *hsk;
 	struct common_header *h =
 			(struct common_header *) skb_transport_header(skb);
 	int err;
 	
-	if (msgin->request) {
-		struct homa_server_rpc *srpc = container_of(msgin,
-				struct homa_server_rpc, request);
-		hsk = srpc->hsk;
-		peer = &srpc->client;
-		h->sport = htons(hsk->server_port);
-		h->dport = htons(peer->dport);
-		h->id = srpc->id;
+	if (rpc->is_client) {
+		h->sport = htons(rpc->hsk->client_port);
 	} else {
-		struct homa_client_rpc *crpc = container_of(msgin,
-				struct homa_client_rpc, response);
-		hsk = crpc->hsk;
-		peer = &crpc->dest;
-		h->sport = htons(hsk->client_port);
-		h->dport = htons(peer->dport);
-		h->id = crpc->id;
+		h->sport = htons(rpc->hsk->server_port);
 	}
-	dst_hold(peer->dst);
-	skb_dst_set(skb, peer->dst);
+	h->dport = htons(rpc->peer.dport);
+	h->id = rpc->id;
+	dst_hold(rpc->peer.dst);
+	skb_dst_set(skb, rpc->peer.dst);
 	if (skb->len < HOMA_MAX_HEADER) {
 		int extra_bytes = HOMA_MAX_HEADER - skb->len;
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
 	}
-	err = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
+	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
 	if (err) {
 		printk(KERN_WARNING 
 			"ip_queue_xmit failed in homa_xmit_to_sender: %d",

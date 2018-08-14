@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
 	int fd;
 	int port;
 	struct sockaddr_in addr_in;
-	int message[100000];
+	int message[1000000];
 	struct sockaddr_in source;
 	int length;
 	int quiet = 0;

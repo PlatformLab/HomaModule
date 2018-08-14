@@ -39,7 +39,7 @@ FIXTURE_TEARDOWN(homa_outgoing)
 
 TEST_F(homa_outgoing, homa_message_out_init_basics)
 {
-	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 3000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.client_rpcs));
@@ -47,7 +47,7 @@ TEST_F(homa_outgoing, homa_message_out_init_basics)
 		"csum_and_copy_from_iter_full copied 1400 bytes; "
 		"csum_and_copy_from_iter_full copied 200 bytes", unit_log_get());
 	unit_log_clear();
-	unit_log_message_out_packets(&crpc->request, 1);
+	unit_log_message_out_packets(&crpc->msgout, 1);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, "
 			"message_length 3000, offset 0, unscheduled 9800; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, "
@@ -57,10 +57,20 @@ TEST_F(homa_outgoing, homa_message_out_init_basics)
 		     unit_log_get());
 }
 
+TEST_F(homa_outgoing, homa_message_out_init__message_too_long)
+{
+	mock_alloc_skb_errors = 2;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 2000000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(EINVAL, -PTR_ERR(crpc));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
+}
+
 TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_skb)
 {
 	mock_alloc_skb_errors = 2;
-	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 3000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
@@ -70,18 +80,18 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_skb)
 TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 {
 	mock_copy_data_errors = 2;
-	struct homa_client_rpc *crpc = homa_client_rpc_new(&self->hsk,
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 3000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EFAULT, -PTR_ERR(crpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
 
-TEST_F(homa_outgoing, homa_xmit_to_sender__server_request)
+TEST_F(homa_outgoing, homa_xmit_to_peer__server_request)
 {
-	struct homa_server_rpc *srpc;
+	struct homa_rpc *srpc;
 	
-	srpc = unit_server_rpc(&self->hsk, SRPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	EXPECT_NE(NULL, srpc);
 	
@@ -94,17 +104,17 @@ TEST_F(homa_outgoing, homa_xmit_to_sender__server_request)
 	h->offset = htonl(12345);
 	h->priority = 4;
 	mock_xmit_log_verbose = 1;
-	homa_xmit_to_sender(skb, &srpc->request);
+	homa_xmit_to_peer(skb, srpc);
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
 			"length 40, offset 12345, priority 4",
 			unit_log_get());
 }
 
-TEST_F(homa_outgoing, homa_xmit_to_sender__client_response)
+TEST_F(homa_outgoing, homa_xmit_to_peer__client_response)
 {
-	struct homa_client_rpc *crpc;
+	struct homa_rpc *crpc;
 	
-	crpc = unit_client_rpc(&self->hsk, CRPC_INCOMING, self->client_ip,
+	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->server_port, 1111, 100, 10000);
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
@@ -118,7 +128,7 @@ TEST_F(homa_outgoing, homa_xmit_to_sender__client_response)
 	h->offset = htonl(12345);
 	h->priority = 4;
 	mock_xmit_log_verbose = 1;
-	homa_xmit_to_sender(skb, &crpc->response);
+	homa_xmit_to_peer(skb, crpc);
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1111, "
 			"length 40, offset 12345, priority 4",
 			unit_log_get());

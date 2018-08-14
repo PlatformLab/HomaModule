@@ -215,12 +215,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct iovec iov;
 	struct iov_iter iter;
 	int err;
-	struct homa_message_in *msgin;
-	struct homa_addr *source;
 	long timeo;
 	int noblock = 0;
 	int result;
-	struct homa_client_rpc *crpc = NULL;
+	struct homa_rpc *rpc = NULL;
 
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			offsetof(struct homa_args_recv_ipv4, source_addr))))
@@ -231,26 +229,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		return err;
 
 	lock_sock(sk);
-	while (1) {
-		if (!list_empty(&hsk->ready_server_rpcs)) {
-			struct homa_server_rpc *srpc;
-			srpc = list_first_entry(&hsk->ready_server_rpcs,
-				struct homa_server_rpc, ready_links);
-			list_del(&srpc->ready_links);
-			srpc->state = SRPC_IN_SERVICE;
-			msgin = &srpc->request;
-			source = &srpc->client;
-			args.id = srpc->id;
-			break;
-		}
-		if (!list_empty(&hsk->ready_client_rpcs)) {
-			crpc = list_first_entry(&hsk->ready_client_rpcs,
-				struct homa_client_rpc, ready_links);
-			msgin = &crpc->response;
-			source = &crpc->dest;
-			args.id = crpc->id;
-			break;
-		}
+	while (list_empty(&hsk->ready_rpcs)) {
 		if (noblock) {
 			err = -EAGAIN;
 			goto error;
@@ -262,18 +241,24 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			goto error;
 		}
 	}
+	rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc, ready_links);
+	list_del(&rpc->ready_links);
 
+	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
-	args.source_addr.sin_port = htons(source->dport);
-	args.source_addr.sin_addr.s_addr = source->daddr;
+	args.source_addr.sin_port = htons(rpc->peer.dport);
+	args.source_addr.sin_addr.s_addr = rpc->peer.daddr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
-	homa_message_in_copy_data(msgin, &iter, args.len);
-	result = msgin->total_length;
-	if (crpc) {
-		homa_client_rpc_free(crpc);
+	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
+	result = rpc->msgin.total_length;
+	if (rpc->is_client) {
+		rpc->state = RPC_CLIENT_DONE;
+		homa_rpc_free(rpc);
+	} else {
+		rpc->state = RPC_IN_SERVICE;
+		homa_message_in_destroy(&rpc->msgin);
 	}
-	homa_message_in_destroy(msgin);
 	release_sock(sk);
 	if (unlikely(copy_to_user(
 			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
@@ -301,7 +286,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct iovec iov;
 	struct iov_iter iter;
 	int err = 0;
-	struct homa_server_rpc *srpc;
+	struct homa_rpc *srpc;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
@@ -319,25 +304,24 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	lock_sock(sk);
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
-	if (!srpc || (srpc->state != SRPC_IN_SERVICE))
+	if (!srpc || (srpc->state != RPC_IN_SERVICE))
 		goto done;
-	srpc->state = SRPC_RESPONSE;
+	srpc->state = RPC_OUTGOING;
 
-	err = homa_message_out_init(&srpc->response, sk, &iter, args.resplen,
-			&srpc->client, hsk->client_port, srpc->id);
+	err = homa_message_out_init(&srpc->msgout, sk, &iter, args.resplen,
+			&srpc->peer, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;
-	homa_xmit_packets(&srpc->response, sk, &srpc->client);
-	if (srpc->response.next_offset >= srpc->response.length) {
-		homa_server_rpc_free(srpc);
+	homa_xmit_packets(&srpc->msgout, sk, &srpc->peer);
+	if (srpc->msgout.next_offset >= srpc->msgout.length) {
+		homa_rpc_free(srpc);
 	}
 done:
 	release_sock(sk);
 	return err;
 
 error:
-	list_del(&srpc->server_rpc_links);
-	homa_server_rpc_free(srpc);
+	homa_rpc_free(srpc);
 	release_sock(sk);
 	return err;
 }
@@ -356,7 +340,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct iovec iov;
 	struct iov_iter iter;
 	int err;
-	struct homa_client_rpc *crpc = NULL;
+	struct homa_rpc *crpc = NULL;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
@@ -372,14 +356,14 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
-	crpc = homa_client_rpc_new(hsk, &args.dest_addr, args.reqlen, &iter);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;
 		goto error;
 	}
 	
-	homa_xmit_packets(&crpc->request, sk, &crpc->dest);
+	homa_xmit_packets(&crpc->msgout, sk, &crpc->peer);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;
@@ -390,7 +374,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 
     error:
 	if (crpc)
-		homa_client_rpc_free(crpc);
+		homa_rpc_free(crpc);
 	release_sock(sk);
 	return err;
 }
@@ -522,8 +506,7 @@ int homa_wait_ready_msg(struct sock *sk, long *timeo)
 	add_wait_queue(sk_sleep(sk), &wait);
 	sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
 	rc = sk_wait_event(sk, timeo,
-			!list_empty(&homa_sk(sk)->ready_server_rpcs)
-			|| !list_empty(&homa_sk(sk)->ready_client_rpcs), &wait);
+			!list_empty(&homa_sk(sk)->ready_rpcs), &wait);
 	sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
 	remove_wait_queue(sk_sleep(sk), &wait);
 	return rc;
@@ -665,66 +648,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
     discard:
 	if (sk)
 		bh_unlock_sock(sk);
-	kfree_skb(skb);
-	return 0;
-}
-
-/**
- * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
- * once its socket has been found and locked.
- * @sk:     Homa socket that owns the packet's destination port. Caller must
- *          own the spin lock for this.
- * @skb:    The packet buffer. Caller must ensure that the packet is large
- *          enough to hold a Homa header for any packet type.
- *
- * Return:  Always returns 0.
- */
-int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
-{
-	struct homa_sock *hsk = homa_sk(sk);
-	struct common_header *h = (struct common_header *) skb->data;
-	
-	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
-		/* We are the server for this RPC. */
-		struct homa_server_rpc *srpc;
-		srpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
-				ntohs(h->sport), h->id);
-		switch (h->type) {
-		case DATA:
-			homa_data_from_client(skb, srpc, hsk);
-			break;
-		case GRANT:
-			if (!srpc)
-				goto discard;
-			homa_grant_from_client(skb, srpc);
-			break;
-		case RESEND:
-			goto discard;
-		case BUSY:
-			goto discard;
-		}
-	} else {
-		/* We are the client for this RPC. */
-		struct homa_client_rpc *crpc;
-		crpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
-		if (!crpc)
-			goto discard;
-		switch (h->type) {
-		case DATA:
-			homa_data_from_server(skb, crpc);
-			break;
-		case GRANT:
-			homa_grant_from_server(skb, crpc);
-			break;
-		case RESEND:
-			goto discard;
-		case BUSY:
-			goto discard;
-		}
-	}
-	return 0;
-	
-    discard:
 	kfree_skb(skb);
 	return 0;
 }

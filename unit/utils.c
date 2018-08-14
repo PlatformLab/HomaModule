@@ -13,7 +13,7 @@
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.
- * @state:         Desired state for the RPC: CRPC_WAITING, etc.
+ * @state:         Desired state for the RPC: RPC_OUTGOING, etc.
  * @client_ip:     Client's IP address.
  * @server_ip:     Server's IP address.
  * @server_port:   Port number on the server.
@@ -22,9 +22,9 @@
  * @resp_length:   Amount of data in the response.
  * 
  * Return:         The properly initialized homa_client_rpc, or NULL if
- *                 there was an error. If state is CRPC_WAITING, then  ...
+ *                 there was an error. If state is RPC_OUTGOING, then  ...
  */
-struct homa_client_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
+struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		__be32 client_ip, __be32 server_ip, int server_port, int id,
 	        int req_length, int resp_length)
 {
@@ -34,14 +34,14 @@ struct homa_client_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = server_ip;
 	server_addr.sin_port =  htons(server_port);
-	struct homa_client_rpc *crpc = homa_client_rpc_new(hsk, &server_addr,
+	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
 			req_length, NULL);
 	if (!crpc)
 		return NULL;
 	if (id != 0)
 		crpc->id = id;
-	EXPECT_EQ(CRPC_WAITING, crpc->state);
-	if (state == CRPC_WAITING)
+	EXPECT_EQ(RPC_OUTGOING, crpc->state);
+	if (state == RPC_OUTGOING)
 		return crpc;
 
 	struct data_header h = {
@@ -59,12 +59,12 @@ struct homa_client_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	
 	int this_size = (resp_length > HOMA_MAX_DATA_PER_PACKET)
 			? HOMA_MAX_DATA_PER_PACKET : resp_length;
-	homa_data_from_server(mock_skb_new(server_ip, &h.common, this_size, 0),
+	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
 			crpc);
 	if (crpc->state == state)
 		return crpc;
-	if (state == CRPC_INCOMING)
-		/* Can't get to CRPC_INCOMING state for short responses. */
+	if (state == RPC_INCOMING)
+		/* Can't get to RPC_INCOMING state for short responses. */
 		goto error;
 	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
 			bytes_received < resp_length;
@@ -73,16 +73,16 @@ struct homa_client_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
 			this_size = HOMA_MAX_DATA_PER_PACKET;
 		h.offset = htonl(bytes_received);
-		homa_data_from_client(mock_skb_new(server_ip, &h.common,
-				this_size , 0), NULL, hsk);
+		homa_data_pkt(mock_skb_new(server_ip, &h.common,
+				this_size , 0), NULL);
 	}
-	EXPECT_EQ(CRPC_READY, crpc->state);
+	EXPECT_EQ(RPC_READY, crpc->state);
 	if (crpc->state == state)
 		return crpc;
 	
 	/* The desired state doesn't exist. */
     error:
-	homa_client_rpc_free(crpc);
+	homa_rpc_free(crpc);
 	return NULL;
 }
 
@@ -126,26 +126,16 @@ int unit_list_length(struct list_head *head)
 void unit_log_grantables(struct homa *homa)
 {
 	struct list_head *pos;
-	struct homa_message_in *msgin;
+	struct homa_rpc *rpc;
 	int count = 0;
-	list_for_each(pos, &homa->grantable_msgs) {
+	list_for_each(pos, &homa->grantable_rpcs) {
 		count++;
-		msgin = list_entry(pos, struct homa_message_in,
-				grantable_links);
+		rpc = list_entry(pos, struct homa_rpc, grantable_links);
 		unit_log_add_separator("; ");
-		if (msgin->request) {
-			struct homa_server_rpc *srpc = container_of(msgin,
-					struct homa_server_rpc, request);
-			unit_log_printf("request %lu, remaining %d",
-					(long unsigned int) srpc->id,
-					msgin->bytes_remaining);
-		} else {
-			struct homa_client_rpc *crpc = container_of(msgin,
-					struct homa_client_rpc, response);
-			unit_log_printf("response %lu, remaining %d",
-					(long unsigned int) crpc->id,
-					msgin->bytes_remaining);
-		}
+		unit_log_printf("%s %lu, remaining %d",
+				rpc->is_client ? "response" : "request",
+				(long unsigned int) rpc->id,
+				rpc->msgin.bytes_remaining);
 	}
 	if (count != homa->num_grantable) {
 		unit_log_add_separator("; ");
@@ -210,7 +200,7 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
  * unit_server_rpc() - Create a homa_server_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.
- * @state:         Desired state for the RPC: SRPC_INCOMING, etc.
+ * @state:         Desired state for the RPC: RPC_INCOMING, etc.
  * @client_ip:     Client's IP address.
  * @server_ip:     Server's IP address.
  * @client_port:   Port number that the client used.
@@ -219,12 +209,12 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
  * @resp_length:   Amount of data in the response.
  * 
  * Return:         The properly initialized homa_server_rpc, or NULL if
- *                 there was an error. If state is SRPC_INCOMING, then
+ *                 there was an error. If state is RPC_INCOMING, then
  *                 one packet of data will have been received for the RPC;
  *                 otherwise the entire RPC will have been received. If
- *                 state is SRPC_RESPONSE, no data will have been sent yet.
+ *                 state is RPC_OUTGOING, no data will have been sent yet.
  */
-struct homa_server_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
+struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		__be32 client_ip, __be32 server_ip, int client_port, int id,
 	        int req_length, int resp_length)
 {
@@ -241,18 +231,17 @@ struct homa_server_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.unscheduled = htonl(10000),
 		.retransmit = 0
 	};
-	homa_data_from_client(mock_skb_new(client_ip, &h.common,
-			(req_length > HOMA_MAX_DATA_PER_PACKET)
-			? HOMA_MAX_DATA_PER_PACKET : req_length , 0),
-			NULL, hsk);
-	struct homa_server_rpc *srpc = homa_find_server_rpc(hsk, client_ip,
-			client_port, id);
+	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	if (!srpc)
 		return NULL;
+	homa_data_pkt(mock_skb_new(client_ip, &h.common,
+			(req_length > HOMA_MAX_DATA_PER_PACKET)
+			? HOMA_MAX_DATA_PER_PACKET : req_length , 0),
+			srpc);
 	if (srpc->state == state)
 		return srpc;
-	if (state == SRPC_INCOMING)
-		/* Can't get to SRPC_INCOMING state for short messages. */
+	if (state == RPC_INCOMING)
+		/* Can't get to RPC_INCOMING state for short messages. */
 		goto error;
 	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
 			bytes_received < req_length;
@@ -261,26 +250,26 @@ struct homa_server_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
 			this_size = HOMA_MAX_DATA_PER_PACKET;
 		h.offset = htonl(bytes_received);
-		homa_data_from_client(mock_skb_new(client_ip, &h.common,
-				this_size , 0), srpc, hsk);
+		homa_data_pkt(mock_skb_new(client_ip, &h.common,
+				this_size , 0), srpc);
 	}
-	EXPECT_EQ(SRPC_READY, srpc->state);
+	EXPECT_EQ(RPC_READY, srpc->state);
 	if (srpc->state == state)
 		return srpc;
 	list_del(&srpc->ready_links);
-	srpc->state = SRPC_IN_SERVICE;
+	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	int err = homa_message_out_init(&srpc->response, (struct sock *) hsk,
-			NULL, resp_length, &srpc->client, client_port, id);
+	int err = homa_message_out_init(&srpc->msgout, (struct sock *) hsk,
+			NULL, resp_length, &srpc->peer, client_port, id);
 	EXPECT_EQ(0, err);
-	srpc->state = SRPC_RESPONSE;
+	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;
 	
 	/* The desired state doesn't exist. */
     error:
-	homa_server_rpc_free(srpc);
+	homa_rpc_free(srpc);
 	return NULL;
 }
 

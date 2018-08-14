@@ -8,11 +8,9 @@
  * @msgin:        Structure to initialize.
  * @length:       Total number of bytes in message.
  * @unscheduled:  Initial bytes of message that will be sent without grants.
- * @request:      Non-zero means this message is a request message; zero
- *                means response.
  */
 void homa_message_in_init(struct homa_message_in *msgin, int length,
-		int unscheduled, int request)
+		int unscheduled)
 {
 	msgin->total_length = length;
 	__skb_queue_head_init(&msgin->packets);
@@ -20,8 +18,6 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	msgin->granted = unscheduled;
 	msgin->priority = 0;
 	msgin->scheduled = length > unscheduled;
-	msgin->request = request;
-	INIT_LIST_HEAD(&msgin->grantable_links);
 }
 
 /**
@@ -37,15 +33,7 @@ void homa_message_in_destroy(struct homa_message_in *msgin)
 		kfree_skb(skb);
 	}
 	__skb_queue_head_init(&msgin->packets);
-	if (!list_empty(&msgin->grantable_links)) {
-		/* Shouldn't ever get here: homa_remove_from_grantable
-		 * should have been called by higher-level software in order
-		 * to synchronize properly with homa_manage_grants.
-		 */
-		printk(KERN_ERR "homa_message_in_destroy found msgin on "
-			"grantable list");
-		__list_del_entry(&msgin->grantable_links);
-	}
+	msgin->total_length = -1;
 }
 
 /**
@@ -158,116 +146,112 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 }
 
 /**
- * homa_data_from_client() - Server-side handler for incoming DATA packets
- * @skb:     Incoming packet; size known to be large enough for the header.
- *           This function now owns the packet.
- * @srpc:    Information about the RPC corresponding to this packet, or NULL
- *           if no such data currently exists.
- * @hsk:     Socket for which the packet was received.
- * 
- * This method may change the RPC's state to SRPC_READY.
+ * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
+ * once its socket has been found and locked.
+ * @sk:     Homa socket that owns the packet's destination port. Caller must
+ *          own the spin lock for this.
+ * @skb:    The incoming packet. This function takes ownership of the packet
+ *          (we'll ensure that it is eventually freed).
+ *
+ * Return:  Always returns 0.
  */
-void homa_data_from_client(struct sk_buff *skb, struct homa_server_rpc *srpc,
-		struct homa_sock *hsk)
+int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 {
-	struct data_header *h = (struct data_header *) skb->data;
+	struct homa_sock *hsk = homa_sk(sk);
+	struct common_header *h = (struct common_header *) skb->data;
+	struct homa_rpc *rpc;
 	
-	if (!srpc) {
-		srpc = homa_server_rpc_new(hsk, ip_hdr(skb)->saddr, h);
-		if (IS_ERR(srpc)) {
-			printk(KERN_WARNING "homa_data_from_client couldn't "
-					"create server rpc: error %lu",
-					-PTR_ERR(srpc));
-			kfree_skb(skb);
-			return;
+	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
+		/* We are the server for this RPC. */
+		rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
+				ntohs(h->sport), h->id);
+		if ((rpc == NULL) && (h->type == DATA)) {
+			/* New incoming RPC. */
+			rpc = homa_rpc_new_server(hsk, ip_hdr(skb)->saddr,
+					(struct data_header *) h);
+			if (IS_ERR(rpc)) {
+				printk(KERN_WARNING "homa_pkt_dispatch "
+						"couldn't create server rpc: "
+						"error %lu",
+						-PTR_ERR(rpc));
+				goto discard;
+			}
 		}
-	} else if (unlikely(srpc->state != SRPC_INCOMING)) {
-		kfree_skb(skb);
-		return;
+	} else {
+		rpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
 	}
-	homa_add_packet(&srpc->request, skb);
-	if (srpc->request.scheduled)
-		homa_manage_grants(srpc->hsk->homa, &srpc->request);
-	if (srpc->request.bytes_remaining == 0) {
-		struct sock *sk = (struct sock *) hsk;
-		srpc->state = SRPC_READY;
-		list_add_tail(&srpc->ready_links, &hsk->ready_server_rpcs);
-		sk->sk_data_ready(sk);
+	if (unlikely(rpc == NULL))
+		goto discard;
+	
+	switch (h->type) {
+	case DATA:
+		homa_data_pkt(skb, rpc);
+		break;
+	case GRANT:
+		homa_grant_pkt(skb, rpc);
+		break;
+	case RESEND:
+		goto discard;
+	case BUSY:
+		goto discard;
 	}
+	return 0;
+	
+    discard:
+	kfree_skb(skb);
+	return 0;
 }
 
 /**
- * homa_data_from_server() - Client-side handler for incoming DATA packets
+ * homa_data_pkt() - Handler for incoming DATA packets
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
- * @crpc:    Information about the RPC corresponding to this packet.
+ * @rpc:     Information about the RPC corresponding to this packet, or NULL
+ *           if no such data currently exists.
  * 
- * This method may change the RPC's state.
+ * This method may change the RPC's state to RPC_READY.
  */
-void homa_data_from_server(struct sk_buff *skb, struct homa_client_rpc *crpc)
+void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct data_header *h = (struct data_header *) skb->data;
-	
-	if (crpc->state != CRPC_INCOMING) {
-		if (unlikely(crpc->state != CRPC_WAITING)) {
+	if (rpc->state != RPC_INCOMING) {
+		if (unlikely(!rpc->is_client || (rpc->state != RPC_OUTGOING))) {
 			kfree_skb(skb);
 			return;			
 		}
-		homa_message_in_init(&crpc->response, ntohl(h->message_length),
-				ntohl(h->unscheduled), 0);
-		crpc->state = CRPC_INCOMING;
+		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
+				ntohl(h->unscheduled));
+		rpc->state = RPC_INCOMING;
 	}
-	homa_add_packet(&crpc->response, skb);
-	if (crpc->response.scheduled)
-		homa_manage_grants(crpc->hsk->homa, &crpc->response);
-	if (crpc->response.bytes_remaining == 0) {
-		struct sock *sk = (struct sock *) crpc->hsk;
-		crpc->state = CRPC_READY;
-		list_add_tail(&crpc->ready_links,
-				&crpc->hsk->ready_client_rpcs);
+	homa_add_packet(&rpc->msgin, skb);
+	if (rpc->msgin.scheduled)
+		homa_manage_grants(rpc->hsk->homa, rpc);
+	if (rpc->msgin.bytes_remaining == 0) {
+		struct sock *sk = (struct sock *) rpc->hsk;
+		rpc->state = RPC_READY;
+		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_rpcs);
 		sk->sk_data_ready(sk);
 	}
 }
 
 /**
- * homa_grant_from_client() - Server-side handler for incoming GRANT packets
+ * homa_grant_pkt() - Handler for incoming GRANT packets
  * @skb:     Incoming packet; size already verified large enough for header.
  *           This function now owns the packet.
- * @srpc:    Information about the RPC corresponding to this packet.
+ * @rpc:    Information about the RPC corresponding to this packet.
  */
-void homa_grant_from_client(struct sk_buff *skb, struct homa_server_rpc *srpc)
+void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
-	if (srpc->state == SRPC_RESPONSE) {
+	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
-		if (new_offset > srpc->response.granted)
-			srpc->response.granted = new_offset;
-		srpc->response.priority = h->priority;
-		homa_xmit_packets(&srpc->response, (struct sock *) srpc->hsk,
-				&srpc->client);
-	}
-	kfree_skb(skb);
-}
-
-/**
- * homa_grant_from_server() - Client-side handler for incoming GRANT packets
- * @skb:     Incoming packet; size already verified large enough for header.
- *           This function now owns the packet.
- * @crpc:    Information about the RPC corresponding to this packet.
- */
-void homa_grant_from_server(struct sk_buff *skb, struct homa_client_rpc *crpc)
-{
-	struct grant_header *h = (struct grant_header *) skb->data;
-	
-	if (crpc->state == CRPC_WAITING) {
-		int new_offset = ntohl(h->offset);
-		if (new_offset > crpc->request.granted)
-			crpc->request.granted = new_offset;
-		crpc->request.priority = h->priority;
-		homa_xmit_packets(&crpc->request, (struct sock *) crpc->hsk,
-				&crpc->dest);
+		if (new_offset > rpc->msgout.granted)
+			rpc->msgout.granted = new_offset;
+		rpc->msgout.priority = h->priority;
+		homa_xmit_packets(&rpc->msgout, (struct sock *) rpc->hsk,
+				&rpc->peer);
 	}
 	kfree_skb(skb);
 }
@@ -278,10 +262,10 @@ void homa_grant_from_server(struct sk_buff *skb, struct homa_client_rpc *crpc)
  * all the work of prioritizing messages for grants and actually issuing
  * grants.
  * @homa:    Overall data about the Homa protocol implementation.
- * @msgin:   The message for which a packet was received; msgin->scheduled
+ * @rpc:     The RPC whose msgin just received a packet; rpc->msgin->scheduled
  *           should be true.
  */
-void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
+void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 {
 	/* The overall goal is to grant simultaneously to up to
 	 * homa->max_overcommit messages. Ideally, each message should use
@@ -294,11 +278,12 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
 	 * instantaneous preemption).
 	 */
 	struct list_head *pos;
-	struct homa_message_in *other;
+	struct homa_rpc *other;
 	struct grant_header *h;
 	int msgs_skipped, priority;
 	struct sk_buff *skb;
 	int extra_levels;
+	struct homa_message_in *msgin = &rpc->msgin;
 	
 	spin_lock_bh(&homa->lock);
 	
@@ -307,33 +292,34 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
 	 */
 	if (msgin->granted >= msgin->total_length) {
 		/* Message fully granted; no need to track it anymore. */
-		if (!list_empty(&msgin->grantable_links)) {
+		if (!list_empty(&rpc->grantable_links)) {
 			homa->num_grantable--;
-			list_del_init(&msgin->grantable_links);
+			list_del_init(&rpc->grantable_links);
 		}
-	} else if (list_empty(&msgin->grantable_links)) {
+	} else if (list_empty(&rpc->grantable_links)) {
 		/* Message not yet tracked; add it in priority order. */
 		homa->num_grantable++;
-		list_for_each(pos, &homa->grantable_msgs) {
-			other = list_entry(pos, struct homa_message_in,
+		list_for_each(pos, &homa->grantable_rpcs) {
+			other = list_entry(pos, struct homa_rpc,
 					grantable_links);
-			if (other->bytes_remaining > msgin->bytes_remaining) {
-				list_add_tail(&msgin->grantable_links, pos);
+			if (other->msgin.bytes_remaining
+					> msgin->bytes_remaining) {
+				list_add_tail(&rpc->grantable_links, pos);
 				goto check_grant;
 			}
 		}
-		list_add_tail(&msgin->grantable_links, &homa->grantable_msgs);
-	} else while (homa->grantable_msgs.next != &msgin->grantable_links) {
+		list_add_tail(&rpc->grantable_links, &homa->grantable_rpcs);
+	} else while (homa->grantable_rpcs.next != &rpc->grantable_links) {
 		/* Message is on the list, but its priority may have
 		 * increased because of the recent packet arrival. If so,
 		 * adjust its position in the list. Note: priorities only
 		 * increase.
 		 */
-		other = list_prev_entry(msgin, grantable_links);
-		if (other->bytes_remaining <= msgin->bytes_remaining)
+		other = list_prev_entry(rpc, grantable_links);
+		if (other->msgin.bytes_remaining <= msgin->bytes_remaining)
 			goto check_grant;
 		__list_del_entry(&other->grantable_links);
-		list_add(&other->grantable_links, &msgin->grantable_links);
+		list_add(&other->grantable_links, &rpc->grantable_links);
 	}
 	
     check_grant:
@@ -341,12 +327,12 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
 	 * fewer than homa->rtt_bytes of data that have been granted but
 	 * not yet received). */
 	msgs_skipped = 0;
-	list_for_each(pos, &homa->grantable_msgs) {
-		other = list_entry(pos, struct homa_message_in,
-				grantable_links);
-		if ((other->granted - (other->total_length -
-				other->bytes_remaining)) < homa->rtt_bytes) {
-			other->granted += HOMA_MAX_DATA_PER_PACKET;
+	list_for_each(pos, &homa->grantable_rpcs) {
+		other = list_entry(pos, struct homa_rpc, grantable_links);
+		if ((other->msgin.granted - (other->msgin.total_length -
+				other->msgin.bytes_remaining))
+				< homa->rtt_bytes) {
+			other->msgin.granted += HOMA_MAX_DATA_PER_PACKET;
 			goto send_grant;
 		}
 		msgs_skipped++;
@@ -366,7 +352,7 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
 	skb_reset_transport_header(skb);
 	h = (struct grant_header *) skb_put(skb, sizeof(*h));
 	h->common.type = GRANT;
-	h->offset = htonl(other->granted);
+	h->offset = htonl(other->msgin.granted);
 	priority = homa->max_sched_prio - msgs_skipped;
 	extra_levels = (homa->max_sched_prio + 1 - homa->min_sched_prio)
 			- homa->num_grantable;
@@ -375,7 +361,7 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
 	else if (priority < homa->min_sched_prio)
 		priority = homa->min_sched_prio;
 	h->priority = priority;
-	homa_xmit_to_sender(skb, other);
+	homa_xmit_to_peer(skb, other);
 	/* It's important to hold homa->lock until here: this keeps other
 	 * from going away. */
 	
@@ -388,15 +374,14 @@ void homa_manage_grants(struct homa *homa, struct homa_message_in *msgin)
  * it makes sure that the the RPC's input message is no longer visible to
  * homa_manage_grants.
  * @homa:    Overall data about the Homa protocol implementation.
- * @msgin:   Input message that is being destroyed.
+ * @rpc:     RPC that is being destroyed..
  */
-void homa_remove_from_grantable(struct homa *homa,
-		struct homa_message_in *msgin)
+void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
 	spin_lock(&homa->lock);
-	if (!list_empty(&msgin->grantable_links)) {
+	if (!list_empty(&rpc->grantable_links)) {
 		homa->num_grantable--;
-		list_del_init(&msgin->grantable_links);
+		list_del_init(&rpc->grantable_links);
 	}
 	spin_unlock(&homa->lock);
 }

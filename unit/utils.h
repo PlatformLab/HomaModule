@@ -2,7 +2,7 @@
 
 struct unit_hash;
 
-extern struct homa_client_rpc
+extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
 			__be32 client_ip, __be32 server_ip, int server_port,
 			int id, int req_length, int resp_length);
@@ -11,7 +11,7 @@ extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_grantables(struct homa *homa);
 extern void          unit_log_message_out_packets(
 			struct homa_message_out *message, int verbose);
-extern struct homa_server_rpc
+extern struct homa_rpc
                      *unit_server_rpc(struct homa_sock *hsk, int state,
 			__be32 server_ip, __be32 client_ip, int client_port,
 			int id, int req_length, int resp_length);
