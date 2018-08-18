@@ -1,9 +1,10 @@
 # Makefile to build various testing programs for Homa.
 
-CFLAGS := -Wall -Werror -g -I..
+CFLAGS := -Wall -Werror -O3 -I..
 
 BINS := buffer_client buffer_server get_time_trace homa_test \
-        homa_server receive_raw scratch send_raw test_time_trace use_memory
+        homa_server receive_raw scratch send_raw tcp_ping \
+        test_time_trace use_memory
 
 OBJS := $(patsubst %,%.o,$(BINS))
 	
