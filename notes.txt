@@ -39,6 +39,7 @@ Notes for Homa implementation in Linux:
   * homa_server_rpc and homa_client_rpc are now almost identical!
   * Modify homa_message_out_init to get unscheduled from homa->rtt_bytes.
   * Clean up ports and ips in unit_homa_incoming.c
+  * Priority levels: isn't there something funny with the lowest two levels?
 
 * Notes on combining the RPC classes:
   * Move dispatcher to homa_incoming

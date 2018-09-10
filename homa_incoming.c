@@ -250,7 +250,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		if (new_offset > rpc->msgout.granted)
 			rpc->msgout.granted = new_offset;
 		rpc->msgout.priority = h->priority;
-		homa_xmit_packets(&rpc->msgout, (struct sock *) rpc->hsk,
+		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
 				&rpc->peer);
 	}
 	kfree_skb(skb);
@@ -279,10 +279,9 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	 */
 	struct list_head *pos;
 	struct homa_rpc *other;
-	struct grant_header *h;
 	int msgs_skipped, priority;
-	struct sk_buff *skb;
 	int extra_levels;
+	struct grant_header h;
 	struct homa_message_in *msgin = &rpc->msgin;
 	
 	spin_lock_bh(&homa->lock);
@@ -342,28 +341,21 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	/* There's no (appropriate) message to send a grant to. */
 	goto done;
 	
-    send_grant:
 	/* Finally, send a grant packet. */
-	skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
-	if (unlikely(!skb))
-		/* No buffers available, so just skip this grant. */
-		return;
-	skb_reserve(skb, HOMA_SKB_RESERVE);
-	skb_reset_transport_header(skb);
-	h = (struct grant_header *) skb_put(skb, sizeof(*h));
-	h->common.type = GRANT;
-	h->offset = htonl(other->msgin.granted);
-	priority = homa->max_sched_prio - msgs_skipped;
-	extra_levels = (homa->max_sched_prio + 1 - homa->min_sched_prio)
+    send_grant:
+	h.offset = htonl(other->msgin.granted);
+	priority = homa->min_unsched_prio - 1 - msgs_skipped;
+	extra_levels = (homa->min_unsched_prio - homa->min_prio)
 			- homa->num_grantable;
 	if (extra_levels >= 0)
 		priority -= extra_levels;
-	else if (priority < homa->min_sched_prio)
-		priority = homa->min_sched_prio;
-	h->priority = priority;
-	homa_xmit_to_peer(skb, other);
-	/* It's important to hold homa->lock until here: this keeps other
-	 * from going away. */
+	else if (priority < homa->min_prio)
+		priority = homa->min_prio;
+	h.priority = priority;
+	if (!homa_xmit_control(GRANT, &h, sizeof(h), other)) {
+		/* Don't do anything if the grant couldn't be sent; let
+		 * other retry mechanisms handle this. */
+	}
 	
     done:
 	spin_unlock_bh(&homa->lock);

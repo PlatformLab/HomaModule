@@ -100,44 +100,36 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 }
 
 /**
- * homa_xmit_packets() - If a message has data packets that are permitted
- * to be transmitted according to the scheduling mechanism, arrange for
- * them to be sent.
- * @msgout: Message to check for transmittable packets.
- * @sk:     Socket to use for transmission.
- * @dest:   Addressing information about the destination.
+ * homa_xmit_control() - Send a control packet to the other end of an RPC.
+ * @type:      Packet type, such as DATA.
+ * @contents:  Address of buffer containing the contents of the packet.
+ *             Only information after the common header must be valid;
+ *             the header will be filled in by this function.
+ * @length:    Length of @contents (including the common header).
+ * @rpc:       The packet will go to the socket that handles the other end
+ *             of this RPC. Addressing info for the packet, including all of
+ *             the fields of common_header except type, will be set from this.
+ * 
+ * Return:     Either zero (for success), or a negative errno value if there
+ *             was a problem.
  */
-void homa_xmit_packets(struct homa_message_out *msgout, struct sock *sk,
-		struct homa_addr *dest)
+int homa_xmit_control(enum homa_packet_type type, void *contents,
+	size_t length, struct homa_rpc *rpc)
 {
-	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
-		int err;
-		skb_get(msgout->next_packet);
-		err = ip_queue_xmit(sk, msgout->next_packet, &dest->flow);
-		if (err) {
-			printk(KERN_WARNING 
-				"ip_queue_xmit failed in homa_xmit_packets: %d",
-				err);
-		}
-		msgout->next_packet = *homa_next_skb(msgout->next_packet);
-		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
-	}
-}
-
-/**
- * homa_xmit_to_peer() - Send a packet to the other end of an RPC.
- * @skb:      Packet buffer containing the contents of the message, including
- *            a Homa header.
- * @rpc:      The packet will go to the socket that handles the other end
- *            of this RPC. Addressing info for the packet, including all of
- *            the fields of common_header except type, will be set from this.
- */
-void homa_xmit_to_peer(struct sk_buff *skb, struct homa_rpc *rpc)
-{
-	struct common_header *h =
-			(struct common_header *) skb_transport_header(skb);
-	int err;
-	
+	struct common_header *h;
+	int extra_bytes;
+	int result;
+	struct sk_buff *skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
+	if (unlikely(!skb))
+		return -ENOBUFS;
+	skb_reserve(skb, HOMA_SKB_RESERVE);
+	skb_reset_transport_header(skb);
+	h = (struct common_header *) skb_put(skb, length);
+	memcpy(h, contents, length);
+	extra_bytes = HOMA_MAX_HEADER - length;
+	if (extra_bytes > 0)
+		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
+	h->type = type;
 	if (rpc->is_client) {
 		h->sport = htons(rpc->hsk->client_port);
 	} else {
@@ -145,16 +137,41 @@ void homa_xmit_to_peer(struct sk_buff *skb, struct homa_rpc *rpc)
 	}
 	h->dport = htons(rpc->peer.dport);
 	h->id = rpc->id;
+	skb->vlan_proto = htons(0x8100);
+	skb->vlan_tci = (rpc->hsk->homa->max_prio << VLAN_PRIO_SHIFT)
+			| VLAN_TAG_PRESENT;
 	dst_hold(rpc->peer.dst);
 	skb_dst_set(skb, rpc->peer.dst);
-	if (skb->len < HOMA_MAX_HEADER) {
-		int extra_bytes = HOMA_MAX_HEADER - skb->len;
-		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
-	}
-	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
-	if (err) {
-		printk(KERN_WARNING 
-			"ip_queue_xmit failed in homa_xmit_to_sender: %d",
-			err);
+	result = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
+	if (unlikely(result != 0))
+		kfree_skb(skb);
+	return result;
+}
+
+/**
+ * homa_xmit_data() - If a message has data packets that are permitted
+ * to be transmitted according to the scheduling mechanism, arrange for
+ * them to be sent.
+ * @msgout: Message to check for transmittable packets.
+ * @sk:     Socket to use for transmission.
+ * @dest:   Addressing information about the destination.
+ */
+void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
+		struct homa_addr *dest)
+{
+	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
+		int err;
+		msgout->next_packet->vlan_proto = htons(0x8100);
+		msgout->next_packet->vlan_tci =
+			(msgout->priority << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT;
+		skb_get(msgout->next_packet);
+		err = ip_queue_xmit(sk, msgout->next_packet, &dest->flow);
+		if (err) {
+			printk(KERN_WARNING 
+				"ip_queue_xmit failed in homa_xmit_data: %d",
+				err);
+			}
+		msgout->next_packet = *homa_next_skb(msgout->next_packet);
+		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
 	}
 }

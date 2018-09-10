@@ -5,7 +5,7 @@ SELF_TEST_DIR := /home/ouster/remote/homaLinux/tools/testing/selftests
 PERL ?= perl
 ARCH ?= x86
 	
-INCLUDES := -I. \
+CINCLUDES := -I. \
 	    -I.. \
 	    -I$(KERNEL_DIR)/arch/x86/include \
 	    -I$(KERNEL_DIR)/arch/x86/include/generated \
@@ -15,14 +15,23 @@ INCLUDES := -I. \
 	    -I$(KERNEL_DIR)/include/uapi \
 	    -I$(KERNEL_DIR)/include/generated/uapi \
 	    -include $(KERNEL_DIR)/include/linux/kconfig.h
+CCINCLUDES := -I. \
+	    -I.. \
+	    -I$(KERNEL_DIR)/arch/x86/include \
+	    -I$(KERNEL_DIR)/arch/x86/include/generated \
+	    -I$(KERNEL_DIR)/include \
+	    -I$(KERNEL_DIR)/arch/x86/include/uapi \
+	    -I$(KERNEL_DIR)/arch/x86/include/generated/uapi \
+	    -I$(KERNEL_DIR)/include/uapi \
+	    -I$(KERNEL_DIR)/include/generated/uapi 
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
 	     -D KBUILD_MODNAME='"homa"'
 
 WARNS :=     -Wall -Werror -Wundef -Wno-trigraphs -Wno-sign-compare
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(INCLUDES) $(DEFS)
-CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(INCLUDES) $(DEFS)
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
+CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_outgoing.c \

@@ -6,6 +6,7 @@
 #define _HOMA_IMPL_H
 
 #include <linux/audit.h>
+#include <linux/if_vlan.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/module.h>
@@ -576,18 +577,23 @@ struct homa {
 	 */
 	int rtt_bytes;
 	
+	/**
+	 * @max_prio: The highest priority level available for Homa's use.
+	 */
+	int max_prio;
 	
 	/**
-	 * @max_sched_prio: The highest priority level currently available for
-	 * scheduled messages.
+	 * @min_prio: The lowest priority level available for Homa's use.
 	 */
-	int max_sched_prio;
+	int min_prio;
 	
 	/**
-	 * @min_sched_prio: The lowest priority level currently available for
-	 * scheduled messages.
+	 * @min_unsched_prio: The lowest priority level currently available for
+	 * unscheduled messages. All priority levels higher than this are also
+	 * use for unscheduled messages; prior levels lower than this are used
+	 * for scheduled messages
 	 */
-	int min_sched_prio;
+	int min_unsched_prio;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
@@ -604,8 +610,8 @@ struct homa {
 	/**
 	 * @grantable_rpcs: Contains all homa_rpcs (both requests and
 	 * responses) whose msgins require additional grants before they can
-	 * complete. The list is sorted in priority order (fewest
-	 * bytes_remaining first).
+	 * complete. The list is sorted in priority order (head has fewest
+	 * bytes_remaining).
 	 */
 	struct list_head grantable_rpcs;
 	
@@ -692,8 +698,9 @@ extern void   homa_unhash(struct sock *sk);
 extern int    homa_v4_early_demux(struct sk_buff *skb);
 extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int    homa_wait_ready_msg(struct sock *sk, long *timeo);
-extern void   homa_xmit_packets(struct homa_message_out *hmo, struct sock *sk,
+extern int    homa_xmit_control(enum homa_packet_type type, void *contents,
+		size_t length, struct homa_rpc *rpc);
+extern void   homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
 		struct homa_addr *dest);
-extern void   homa_xmit_to_peer(struct sk_buff *skb, struct homa_rpc *rpc);
 
 #endif /* _HOMA_IMPL_H */

@@ -87,49 +87,71 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
 
-TEST_F(homa_outgoing, homa_xmit_to_peer__server_request)
+TEST_F(homa_outgoing, homa_xmit_control__cant_alloc_skb)
 {
 	struct homa_rpc *srpc;
+	struct grant_header h;
 	
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	EXPECT_NE(NULL, srpc);
 	
-	struct sk_buff *skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
-	skb_reserve(skb, HOMA_SKB_RESERVE);
-	skb_reset_transport_header(skb);
-	struct grant_header *h = (struct grant_header *) skb_put(skb,
-			sizeof(*h));
-	h->common.type = GRANT;
-	h->offset = htonl(12345);
-	h->priority = 4;
+	h.offset = htonl(12345);
+	h.priority = 4;
 	mock_xmit_log_verbose = 1;
-	homa_xmit_to_peer(skb, srpc);
-	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
-			"length 40, offset 12345, priority 4",
-			unit_log_get());
+	mock_alloc_skb_errors = 1;
+	EXPECT_EQ(ENOBUFS, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("", unit_log_get());
 }
 
-TEST_F(homa_outgoing, homa_xmit_to_peer__client_response)
+TEST_F(homa_outgoing, homa_xmit_control__server_request)
+{
+	struct homa_rpc *srpc;
+	struct grant_header h;
+	
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	EXPECT_NE(NULL, srpc);
+	
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_verbose = 1;
+	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
+			"length 40 prio 7, offset 12345, grant_prio 4",
+			unit_log_get());
+}
+TEST_F(homa_outgoing, homa_xmit_control__client_response)
 {
 	struct homa_rpc *crpc;
+	struct grant_header h;
 	
 	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->server_port, 1111, 100, 10000);
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 	
-	struct sk_buff *skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
-	skb_reserve(skb, HOMA_SKB_RESERVE);
-	skb_reset_transport_header(skb);
-	struct grant_header *h = (struct grant_header *) skb_put(skb,
-			sizeof(*h));
-	h->common.type = GRANT;
-	h->offset = htonl(12345);
-	h->priority = 4;
+	h.offset = htonl(12345);
+	h.priority = 4;
 	mock_xmit_log_verbose = 1;
-	homa_xmit_to_peer(skb, crpc);
+	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), crpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1111, "
-			"length 40, offset 12345, priority 4",
+			"length 40 prio 7, offset 12345, grant_prio 4",
 			unit_log_get());
+}
+TEST_F(homa_outgoing, homa_xmit_control__ip_queue_xmit_error)
+{
+	struct homa_rpc *srpc;
+	struct grant_header h;
+	
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	EXPECT_NE(NULL, srpc);
+	
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_verbose = 1;
+	mock_ip_queue_xmit_errors = 1;
+	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("", unit_log_get());
 }

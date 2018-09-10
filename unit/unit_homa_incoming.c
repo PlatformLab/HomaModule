@@ -262,7 +262,7 @@ TEST_F(homa_incoming, homa_grant_pkt)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	homa_xmit_packets(&srpc->msgout, (struct sock *) &self->hsk,
+	homa_xmit_data(&srpc->msgout, (struct sock *) &self->hsk,
 			&srpc->peer);
 	unit_log_clear();
 	
@@ -435,7 +435,7 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	EXPECT_NE(NULL, srpc);
 	
 	/* Share lowest priority level. */
-	self->homa.min_sched_prio = 2;
+	self->homa.min_prio = 2;
 	srpc->msgin.bytes_remaining -= 1400;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);

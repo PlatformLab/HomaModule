@@ -224,8 +224,9 @@ void homa_init(struct homa *homa)
 	
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
-	homa->max_sched_prio = 3;
-	homa->min_sched_prio = 0;
+	homa->max_prio = 7;
+	homa->min_prio = 0;
+	homa->min_unsched_prio = 4;
 	homa->max_overcommit = 8;
 	spin_lock_init(& homa->lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
@@ -281,6 +282,16 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	}
 	pos += result;
 	space_left -= result;
+	if (skb->vlan_tci & VLAN_TAG_PRESENT) {
+		result = snprintf(pos, space_left, " prio %d",
+			(skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
+		if ((result == length) || (result < 0)) {
+			buffer[length-1] = 0;
+			return buffer;
+		}
+		pos += result;
+		space_left -= result;
+	}		
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
@@ -294,14 +305,14 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	}
 	case GRANT: {
 		struct grant_header *h = (struct grant_header *) skb->data;
-		snprintf(pos, space_left, ", offset %d, priority %u",
+		snprintf(pos, space_left, ", offset %d, grant_prio %u",
 				ntohl(h->offset), h->priority);
 		break;
 	}
 	case RESEND: {
 		struct resend_header *h = (struct resend_header *) skb->data;
 		snprintf(pos, space_left,
-				", offset %d, length %d, priority %u%s",
+				", offset %d, length %d, resend_prio %u%s",
 				ntohl(h->offset), ntohl(h->length),
 				h->priority, h->restart ? ", RESTART" : "");
 		break;

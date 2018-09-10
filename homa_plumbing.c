@@ -312,7 +312,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 			&srpc->peer, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;
-	homa_xmit_packets(&srpc->msgout, sk, &srpc->peer);
+	homa_xmit_data(&srpc->msgout, sk, &srpc->peer);
 	if (srpc->msgout.next_offset >= srpc->msgout.length) {
 		homa_rpc_free(srpc);
 	}
@@ -363,7 +363,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-	homa_xmit_packets(&crpc->msgout, sk, &crpc->peer);
+	homa_xmit_data(&crpc->msgout, sk, &crpc->peer);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;

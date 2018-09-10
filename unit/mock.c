@@ -28,6 +28,7 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  */
 int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
+int mock_ip_queue_xmit_errors = 0;
 int mock_malloc_errors = 0;
 int mock_route_errors = 0;
 
@@ -209,6 +210,8 @@ void inet_unregister_protosw(struct inet_protosw *p) {}
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
+	if (mock_check_error(&mock_ip_queue_xmit_errors))
+		return -ENETDOWN;
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
