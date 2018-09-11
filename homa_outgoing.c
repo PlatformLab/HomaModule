@@ -5,6 +5,34 @@
 #include "homa_impl.h"
 
 /**
+ * set_priority(): Arrange for a packet to have a VLAN header that
+ * specifies a priority for the packet.
+ * @skb:        The packet was priority should be set.
+ * @priority    Priority level for the packet, in the range 0 (for lowest
+ *              priority) to 7 ( for highest priority).
+ */
+inline static void set_priority(struct sk_buff *skb, int priority)
+{
+	/* The priority values stored in the VLAN header are weird, in that
+	 * the value 0 is not the lowest priority; this table maps from
+	 * "sensible" values as provided by the @priority argument to the
+	 * corresponding value for the VLAN header.
+	 */
+	static int tci[] = {
+		(1 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(0 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(2 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(3 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(4 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(5 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(6 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
+		(7 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT
+	};
+	skb->vlan_proto = htons(0x8100);
+	skb->vlan_tci = tci[priority];
+}
+
+/**
  * homa_message_out_init() - Initialize a homa_message_out, including copying
  * message data from user space into sk_buffs.
  * @msgout:    Struct to initialize; current contents are assumed to be garbage.
@@ -100,6 +128,18 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 }
 
 /**
+ * homa_set_priority(): Arrange for a packet to have a VLAN header that
+ * specifies a priority for the packet.
+ * @skb:        The packet was priority should be set.
+ * @priority    Priority level for the packet, in the range 0 (for lowest
+ *              priority) to 7 ( for highest priority).
+ */
+void homa_set_priority(struct sk_buff *skb, int priority)
+{
+	set_priority(skb, priority);
+}
+
+/**
  * homa_xmit_control() - Send a control packet to the other end of an RPC.
  * @type:      Packet type, such as DATA.
  * @contents:  Address of buffer containing the contents of the packet.
@@ -137,9 +177,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	}
 	h->dport = htons(rpc->peer.dport);
 	h->id = rpc->id;
-	skb->vlan_proto = htons(0x8100);
-	skb->vlan_tci = (rpc->hsk->homa->max_prio << VLAN_PRIO_SHIFT)
-			| VLAN_TAG_PRESENT;
+	set_priority(skb, rpc->hsk->homa->max_prio);
 	dst_hold(rpc->peer.dst);
 	skb_dst_set(skb, rpc->peer.dst);
 	result = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
@@ -161,9 +199,7 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
 {
 	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
 		int err;
-		msgout->next_packet->vlan_proto = htons(0x8100);
-		msgout->next_packet->vlan_tci =
-			(msgout->priority << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT;
+		set_priority(msgout->next_packet, msgout->priority);
 		skb_get(msgout->next_packet);
 		err = ip_queue_xmit(sk, msgout->next_packet, &dest->flow);
 		if (err) {

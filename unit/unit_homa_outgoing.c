@@ -87,6 +87,20 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
 
+TEST_F(homa_outgoing, homa_set_priority)
+{
+	struct sk_buff *skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
+	homa_set_priority(skb, 0);
+	EXPECT_EQ(1, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
+	
+	homa_set_priority(skb, 1);
+	EXPECT_EQ(0, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
+	
+	homa_set_priority(skb, 7);
+	EXPECT_EQ(7, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
+	kfree_skb(skb);
+}
+
 TEST_F(homa_outgoing, homa_xmit_control__cant_alloc_skb)
 {
 	struct homa_rpc *srpc;

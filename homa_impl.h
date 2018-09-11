@@ -681,6 +681,7 @@ extern struct homa_rpc
 extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
 		size_t size, int flags);
+extern void   homa_set_priority(struct sk_buff *skb, int priority);
 extern int    homa_setsockopt(struct sock *sk, int level, int optname,
 		char __user *optval, unsigned int optlen);
 extern int    homa_sock_bind(struct homa_socktab *socktab,
