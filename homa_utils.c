@@ -2,6 +2,12 @@
 
 #include "homa_impl.h"
 
+/* Separate performance counters for each core. */
+struct homa_metrics *homa_metrics[NR_CPUS];
+
+/* Points to block of memory holding all homa_metrics; used to free it. */
+char *metrics_memory;
+
 /**
  * homa_addr_init() - Constructor for homa_addr.
  * @addr:     Structure to initialize.
@@ -183,7 +189,17 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
  */
 void homa_destroy(struct homa *homa)
 {
+	int i;
 	homa_socktab_destroy(&homa->port_map);
+	if (metrics_memory) {
+		kfree(metrics_memory);
+		metrics_memory = NULL;
+		for (i = 0; i < NR_CPUS; i++) {
+			homa_metrics[i] = NULL;
+		}
+	}
+	if (homa->metrics)
+		kfree(homa->metrics);
 }
 
 /**
@@ -219,6 +235,25 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
  */
 void homa_init(struct homa *homa)
 {
+	size_t aligned_size;
+	char *first;
+	int i;
+	
+	/* Initialize Homa metrics (if no-one else has already done it),
+	 * making sure that each core has private cache lines for its metrics.
+	 */
+	if (!metrics_memory) {
+		aligned_size = (sizeof(homa_metrics) + 0x3f) & ~0x3f;
+		metrics_memory = kmalloc(0x3f + (NR_CPUS*aligned_size),
+				GFP_KERNEL);
+		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
+		for (i = 0; i < NR_CPUS; i++) {
+			homa_metrics[i] = (struct homa_metrics *)
+					(first + i*aligned_size);
+			memset(homa_metrics[i], 0, aligned_size);
+		}
+	}
+	
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	homa_socktab_init(&homa->port_map);
 	
@@ -228,9 +263,14 @@ void homa_init(struct homa *homa)
 	homa->min_prio = 0;
 	homa->min_unsched_prio = 4;
 	homa->max_overcommit = 8;
-	spin_lock_init(& homa->lock);
+	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable = 0;
+	spin_lock_init(&homa->metrics_lock);
+	homa->metrics = NULL;
+	homa->metrics_capacity = 0;
+	homa->metrics_length = 0;
+	homa->metrics_active_opens = 0;
 }
 
 /**
@@ -398,4 +438,132 @@ char *homa_symbol_for_type(uint8_t type)
 	snprintf(buffer, sizeof(buffer)-1, "UNKNOWN(%u)", type);
 	buffer[sizeof(buffer)-1] = 0;
 	return buffer;
+}
+
+/**
+ * homa_compile_metrics() - Combine all of the core-specific metrics into
+ * a single collection.
+ * @m:    Will be updated so that each entry in this structure contains
+ *        the sum of all of the values from the core-specific metrics
+ *        structures.
+ */
+void homa_compile_metrics(struct homa_metrics *m)
+{
+	int i, j;
+	memset(m, 0, sizeof(*m));
+	for (i = 0; i < NR_CPUS; i++) {
+		struct homa_metrics *cm = homa_metrics[i];
+		for (j = 0; j < HOMA_NUM_SMALL_COUNTS; j++)
+			m->small_msg_bytes[j] += cm->small_msg_bytes[j];
+		for (j = 0; j < HOMA_NUM_MEDIUM_COUNTS; j++)
+			m->medium_msg_bytes[j] += cm->medium_msg_bytes[j];
+		m->large_msg_bytes += cm->large_msg_bytes;
+		for (j = DATA; j < BOGUS;  j++) {
+			m->packets_sent[j-DATA] += cm->packets_sent[j-DATA];
+			m->packets_received[j-DATA] +=
+					cm->packets_received[j-DATA];
+		}
+	}
+}
+
+
+/**
+ * homa_append_metric() - Formats a new metric and appends it to homa->metrics.
+ * @homa:        The new data will appended to the @metrics field of
+ *               this structure.
+ * @format:      Standard printf-style format string describing the
+ *               new metric.
+ * @ap:          Additional arguments as required by @format.
+ */
+void homa_append_metric(struct homa *homa, const char* format, ...)
+{
+	char *new_buffer;
+	size_t new_chars;
+	va_list ap;
+	
+	if (!homa->metrics) {
+#ifdef __UNIT_TEST__
+		homa->metrics_capacity =  30;
+#else
+		homa->metrics_capacity =  4096;
+#endif
+		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		homa->metrics_length = 0;
+	}
+	
+	/* May have to execute this loop multiple times if we run out
+	 * of space in homa->metrics; each iteration expands the storage,
+	 * until eventually it is large enough.
+	 */
+	while (true) {
+		va_start(ap, format);
+		new_chars = vsnprintf(homa->metrics + homa->metrics_length,
+				homa->metrics_capacity - homa->metrics_length,
+				format, ap);
+		va_end(ap);
+		if ((homa->metrics_length + new_chars) < homa->metrics_capacity)
+			break;
+		
+		/* Not enough room; expand buffer capacity. */
+		homa->metrics_capacity *= 2;
+		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		memcpy(new_buffer, homa->metrics, homa->metrics_length);
+		kfree(homa->metrics);
+		homa->metrics = new_buffer;
+	}
+	homa->metrics_length += new_chars;
+}
+
+/**
+ * homa_print_metrics() - Sample all of the Homa performance metrics and
+ * generate a human-readable string describing all of them.
+ * @homa:    Overall data about the Homa protocol implementation;
+ *           the formatted string will be stored in homa->metrics.
+ * 
+ * Return:   The formatted string. 
+ */
+char *homa_print_metrics(struct homa *homa)
+{
+	struct homa_metrics m;
+	int i;
+	__u64 total_bytes = 0;
+	
+	homa_compile_metrics(&m);
+	homa->metrics_length = 0;
+	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
+		total_bytes += m.small_msg_bytes[i];
+		homa_append_metric(homa,
+			"msg_bytes_%-9d   %15llu  "
+			"Bytes in messages containing < %d bytes\n",
+			(i+1)*64, total_bytes, (i+1)*64);
+	}
+	for (i = (HOMA_NUM_SMALL_COUNTS*64)/1024; i < HOMA_NUM_MEDIUM_COUNTS;
+			i++) {
+		total_bytes += m.medium_msg_bytes[i];
+		homa_append_metric(homa,
+			"msg_bytes_%-9d   %15llu  "
+			"Bytes in messages containing < %d bytes\n",
+			(i+1)*1024, total_bytes, (i+1)*1024);
+	}
+	total_bytes += m.large_msg_bytes;
+	homa_append_metric(homa,
+			"total_msg_bytes       %15llu   "
+			"Bytes in all messages\n",
+			total_bytes);
+	for (i = DATA; i < BOGUS;  i++) {
+		char *symbol = homa_symbol_for_type(i);
+		homa_append_metric(homa,
+				"packets_sent_%-6s   %15llu   "
+				"%s packets sent\n",
+				symbol, m.packets_sent[i-DATA], symbol);
+	}
+	for (i = DATA; i < BOGUS;  i++) {
+		char *symbol = homa_symbol_for_type(i);
+		homa_append_metric(homa,
+				"packets_rcvd_%-6s   %15llu   "
+				"%s packets received\n",
+				symbol, m.packets_received[i-DATA], symbol);
+	}
+	
+	return homa->metrics;
 }

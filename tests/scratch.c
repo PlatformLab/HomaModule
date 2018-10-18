@@ -17,13 +17,9 @@ int main(int argc, char** argv) {
 //		value = 0x12345;
 //	}
 	
-	struct foo {
-		int a;
-		double b;
-	};
-	printf("sizeof ssize_t: %ld, sizeof size_t: %ld\n", sizeof(ssize_t),
-		sizeof(size_t));
-	print_type(foo);
+	uint64_t x = 0x1234500001;
+	uint64_t y = (x + 63) & ~0x3f;
+	printf("x: %lx, y: %lx\n", x, y);
 	return 0;
 }
 

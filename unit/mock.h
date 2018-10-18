@@ -1,7 +1,9 @@
 /* Functions for mocking that are exported to test code. */
 
+extern int         cpu_number;
 extern int         mock_alloc_skb_errors;
 extern int         mock_copy_data_errors;
+extern int         mock_copy_to_user_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_malloc_errors;
 extern int         mock_route_errors;

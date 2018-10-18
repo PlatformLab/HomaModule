@@ -18,6 +18,13 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	msgin->granted = unscheduled;
 	msgin->priority = 0;
 	msgin->scheduled = length > unscheduled;
+	if (length < 4096) {
+		INC_METRIC(small_msg_bytes[length >> 6], length);
+	} else if (length < 0x10000) {
+		INC_METRIC(medium_msg_bytes[length >> 10], length);
+	} else {
+		INC_METRIC(large_msg_bytes, length);
+	}
 }
 
 /**
@@ -185,14 +192,18 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 	
 	switch (h->type) {
 	case DATA:
+		INC_METRIC(packets_received[DATA - DATA], 1);
 		homa_data_pkt(skb, rpc);
 		break;
 	case GRANT:
+		INC_METRIC(packets_received[GRANT - DATA], 1);
 		homa_grant_pkt(skb, rpc);
 		break;
 	case RESEND:
+		INC_METRIC(packets_received[RESEND - DATA], 1);
 		goto discard;
 	case BUSY:
+		INC_METRIC(packets_received[BUSY - DATA], 1);
 		goto discard;
 	}
 	return 0;
@@ -284,7 +295,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	struct grant_header h;
 	struct homa_message_in *msgin = &rpc->msgin;
 	
-	spin_lock_bh(&homa->lock);
+	spin_lock_bh(&homa->grantable_lock);
 	
 	/* First, make sure this message is in the right place in (or not in)
 	 * homa->grantable_msgs.
@@ -358,7 +369,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	}
 	
     done:
-	spin_unlock_bh(&homa->lock);
+	spin_unlock_bh(&homa->grantable_lock);
 }
 
 /**
@@ -370,10 +381,10 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
  */
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
-	spin_lock(&homa->lock);
+	spin_lock_bh(&homa->grantable_lock);
 	if (!list_empty(&rpc->grantable_links)) {
 		homa->num_grantable--;
 		list_del_init(&rpc->grantable_links);
 	}
-	spin_unlock(&homa->lock);
+	spin_unlock_bh(&homa->grantable_lock);
 }

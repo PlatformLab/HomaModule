@@ -28,6 +28,7 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  */
 int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
+int mock_copy_to_user_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_malloc_errors = 0;
 int mock_route_errors = 0;
@@ -56,9 +57,13 @@ static struct unit_hash *routes_in_use = NULL;
  */
 static int mock_active_locks = 0;
 
+/* Linux's idea of the current CPU number. */
+int cpu_number = 1;
+
 struct task_struct *current_task = NULL;
 unsigned long ex_handler_refcount = 0;
 unsigned long phys_base = 0;
+struct net init_net;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -106,6 +111,8 @@ bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 
 unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
+	if (mock_check_error(&mock_copy_to_user_errors))
+		return -1;
 	unit_log_add_separator("; ");
 	unit_log_printf("_copy_to_user copied %lu bytes", n);
 	return 0;
@@ -321,6 +328,18 @@ void mutex_unlock(struct mutex *lock)
 int printk(const char *s, ...)
 {
 	return 0;
+}
+
+struct proc_dir_entry *proc_create(const char *name, umode_t mode,
+				   struct proc_dir_entry *parent,
+				   const struct file_operations *proc_fops)
+{
+	return NULL;
+}
+
+void proc_remove(struct proc_dir_entry *de)
+{
+	
 }
 
 int proto_register(struct proto *prot, int alloc_slab)
@@ -574,8 +593,10 @@ void mock_spin_unlock(spinlock_t *lock)
  */
 void mock_teardown(void)
 {
+	cpu_number = 1;
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
+	mock_copy_to_user_errors = 0;
 	mock_xmit_log_verbose = 0;
 	mock_malloc_errors = 0;
 	mock_route_errors = 0;

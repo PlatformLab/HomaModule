@@ -190,3 +190,23 @@ TEST_F(homa_utils, homa_print_ipv4_addr)
 	homa_print_ipv4_addr(addr, buffer);
 	EXPECT_STREQ("1.2.3.4", buffer);
 }
+
+TEST_F(homa_utils, homa_append_metric)
+{
+	self->homa.metrics_length = 0;
+	homa_append_metric(&self->homa,  "x: %d, y: %d", 10, 20);
+	EXPECT_EQ(12, self->homa.metrics_length);
+	EXPECT_STREQ("x: 10, y: 20", self->homa.metrics);
+	
+	homa_append_metric(&self->homa, ", z: %d", 12345);
+	EXPECT_EQ(22, self->homa.metrics_length);
+	EXPECT_STREQ("x: 10, y: 20, z: 12345", self->homa.metrics);
+	EXPECT_EQ(30, self->homa.metrics_capacity);
+	
+	homa_append_metric(&self->homa, ", q: %050d", 88);
+	EXPECT_EQ(77, self->homa.metrics_length);
+	EXPECT_STREQ("x: 10, y: 20, z: 12345, "
+			"q: 00000000000000000000000000000000000000000000000088",
+			self->homa.metrics);
+	EXPECT_EQ(120, self->homa.metrics_capacity);
+}

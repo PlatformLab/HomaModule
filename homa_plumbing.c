@@ -106,12 +106,23 @@ static struct net_protocol homa_protocol = {
 	.netns_ok =	1,
 };
 
+/* Describes file operations implemented for /proc/net/homa_metrics. */
+static const struct file_operations metrics_fops = {
+	.open		= homa_metrics_open,
+	.read		= homa_metrics_read,
+	.release	= homa_metrics_release,
+};
+
+/* Used to remove /proc/net/homa_metrics when the module is unloaded. */
+static struct proc_dir_entry *metrics_dir_entry = NULL;
+
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
  * Return: 0 on success, otherwise a negative errno.
  */
 static int __init homa_load(void) {
 	int status;
+	
 	printk(KERN_NOTICE "Homa module loading\n");
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
@@ -128,6 +139,10 @@ static int __init homa_load(void) {
 	}
 
 	homa_init(homa);
+	metrics_dir_entry = proc_create("homa_metrics", S_IRUGO,
+			init_net.proc_net, &metrics_fops);
+	if (!metrics_dir_entry)
+		printk(KERN_ERR "couldn't create /proc/net/homa_metrics\n");
 
 	return 0;
 
@@ -143,6 +158,7 @@ out:
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
+	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
@@ -681,5 +697,75 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 __poll_t homa_poll(struct file *file, struct socket *sock,
 	       struct poll_table_struct *wait) {
 	printk(KERN_WARNING "unimplemented poll invoked on Homa socket\n");
+	return 0;
+}
+
+/**
+ * metrics_open(): This function is invoked when /proc/net/homa_metrics is
+ * opened.
+ * @inode:    The inode corresponding to the file.
+ * @file:     Information about the open file.
+ * 
+ * Return: always 0.
+ */
+int homa_metrics_open(struct inode *inode, struct file *file)
+{
+	/* Collect all of the metrics when the file is opened, and save
+	 * these for use by subsequent reads (don't want the metrics to
+	 * change between reads). If there are concurrent opens on the
+	 * file, only read the metrics once, during the first open, and
+	 * use this copy for subsequent opens, until the file has been
+	 * completely closed.
+	 */
+	spin_lock(&homa->metrics_lock);
+	if (homa->metrics_active_opens == 0) {
+		homa_print_metrics(homa);
+	}
+	homa->metrics_active_opens++;
+	spin_unlock(&homa->metrics_lock);
+	return 0;
+}
+
+/**
+ * metrics_read(): This function is invoked to handle read kernel calls on
+ * /proc/net/homa_metrics.
+ * @file:    Information about the file being read.
+ * @buffer:  Address in user space of the buffer in which data from the file
+ *           should be returned.
+ * @length:  Number of bytes available at @buffer.
+ * @offset:  Current read offset within the file.
+ *
+ * Return: the number of bytes returned at @buffer. 0 means the end of the
+ * file was reached, and a negative number indicates an error (-errno).
+ */
+ssize_t homa_metrics_read(struct file *file, char __user *buffer,
+		size_t length, loff_t *offset)
+{
+	size_t copied;
+	
+	if (*offset >= homa->metrics_length)
+		return 0;
+	copied = homa->metrics_length - *offset;
+	if (copied > length)
+		copied = length;
+	if (copy_to_user(buffer, homa->metrics + *offset, copied))
+		return -EFAULT;
+	*offset += copied;
+	return copied;
+}
+
+/**
+ * metrics_release(): This function is invoked when the last reference to
+ * an open /proc/net/homa_metrics is closed.  It performs cleanup.
+ * @inode:    The inode corresponding to the file.
+ * @file:     Information about the open file.
+ * 
+ * Return: always 0. 
+ */
+int homa_metrics_release(struct inode *inode, struct file *file)
+{
+	spin_lock(&homa->metrics_lock);
+	homa->metrics_active_opens--;
+	spin_unlock(&homa->metrics_lock);
 	return 0;
 }

@@ -75,3 +75,57 @@ TEST_F(homa_plumbing, homa_pkt_recv__use_backlog)
 	kfree_skb(self->hsk.inet.sk.sk_backlog.head);
 	release_sock((struct sock *) &self->hsk);
 }
+
+TEST_F(homa_plumbing, homa_metrics_open)
+{
+	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
+	EXPECT_NE(NULL, self->homa.metrics);
+	
+	strcpy(self->homa.metrics, "12345");
+	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
+	EXPECT_EQ(5, strlen(self->homa.metrics));
+	EXPECT_EQ(2, self->homa.metrics_active_opens);
+}
+TEST_F(homa_plumbing, homa_metrics_read__basics)
+{
+	loff_t offset = 10;
+	self->homa.metrics = kmalloc(100, GFP_KERNEL);
+	self->homa.metrics_capacity = 100;
+	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
+	self->homa.metrics_length = 26;
+	EXPECT_EQ(5, homa_metrics_read(NULL, (char *) 100, 5, &offset));
+	EXPECT_STREQ("_copy_to_user copied 5 bytes",
+		     unit_log_get());
+	EXPECT_EQ(15, offset);
+	
+	unit_log_clear();
+	EXPECT_EQ(11, homa_metrics_read(NULL, (char *) 100, 1000, &offset));
+	EXPECT_STREQ("_copy_to_user copied 11 bytes",
+		     unit_log_get());
+	EXPECT_EQ(26, offset);
+	
+	unit_log_clear();
+	EXPECT_EQ(0, homa_metrics_read(NULL, (char *) 100, 1000, &offset));
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(26, offset);
+}
+TEST_F(homa_plumbing, homa_metrics_read__error_copying_to_user)
+{
+	loff_t offset = 10;
+	self->homa.metrics = kmalloc(100, GFP_KERNEL);
+	self->homa.metrics_capacity = 100;
+	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
+	self->homa.metrics_length = 26;
+	mock_copy_to_user_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_metrics_read(NULL, (char *) 100, 5, &offset));
+}
+
+TEST_F(homa_plumbing, homa_metrics_release)
+{
+	self->homa.metrics_active_opens = 2;
+	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
+	EXPECT_EQ(1, self->homa.metrics_active_opens);
+	
+	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
+	EXPECT_EQ(0, self->homa.metrics_active_opens);
+}

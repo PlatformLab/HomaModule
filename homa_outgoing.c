@@ -16,7 +16,8 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 	/* The priority values stored in the VLAN header are weird, in that
 	 * the value 0 is not the lowest priority; this table maps from
 	 * "sensible" values as provided by the @priority argument to the
-	 * corresponding value for the VLAN header.
+	 * corresponding value for the VLAN header. See the IEEE P802.1
+	 * standard for details.
 	 */
 	static int tci[] = {
 		(1 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
@@ -183,6 +184,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	result = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
 	if (unlikely(result != 0))
 		kfree_skb(skb);
+	INC_METRIC(packets_sent[type - DATA], 1);
 	return result;
 }
 
@@ -209,5 +211,6 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
 			}
 		msgout->next_packet = *homa_next_skb(msgout->next_packet);
 		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
+		INC_METRIC(packets_sent[0], 1);
 	}
 }
