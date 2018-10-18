@@ -703,97 +703,97 @@ struct homa_metrics {
 
 extern struct homa_metrics *homa_metrics[NR_CPUS];
 
-extern void   homa_add_packet(struct homa_message_in *msgin,
-		struct sk_buff *skb);
-extern void   homa_addr_destroy(struct homa_addr *addr);
-extern int    homa_addr_init(struct homa_addr *addr, struct sock *sk,
-		__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
-extern void   homa_append_metric(struct homa *homa, const char* format, ...);
-extern int    homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
-extern void   homa_close(struct sock *sock, long timeout);
-extern void   homa_data_from_server(struct sk_buff *skb,
-		struct homa_rpc *crpc);
-extern void   homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern void   homa_destroy(struct homa *homa);
-extern int    homa_diag_destroy(struct sock *sk, int err);
-extern int    homa_disconnect(struct sock *sk, int flags);
-extern void   homa_err_handler(struct sk_buff *skb, u32 info);
-extern struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
-		__u16 sport, __u64 id);
-extern struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-		__be32 saddr, __u16 sport, __u64 id);
-extern int    homa_get_port(struct sock *sk, unsigned short snum);
-extern int    homa_getsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, int __user *option);
-extern void   homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern int    homa_hash(struct sock *sk);
-extern void   homa_init(struct homa *homa);
-extern int    homa_ioc_recv(struct sock *sk, unsigned long arg);
-extern int    homa_ioc_reply(struct sock *sk, unsigned long arg);
-extern int    homa_ioc_send(struct sock *sk, unsigned long arg);
-extern int    homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern void   homa_manage_grants(struct homa *homa, struct homa_rpc *rpc);
-extern int    homa_message_in_copy_data(struct homa_message_in *msgin,
-		struct iov_iter *iter, int max_bytes);
-extern void   homa_message_in_destroy(struct homa_message_in *msgin);
-extern void   homa_message_in_init(struct homa_message_in *msgin, int length,
-		int unscheduled);
-extern void   homa_message_out_destroy(struct homa_message_out *msgout);
-extern int    homa_message_out_init(struct homa_message_out *msgout,
-		struct sock *sk, struct iov_iter *iter, size_t len,
-		struct homa_addr *dest, __u16 sport, __u64 id);
-extern int    homa_metrics_open(struct inode *inode, struct file *file);
-extern ssize_t homa_metrics_read(struct file *file, char __user *buffer,
-		size_t length, loff_t *offset);
-extern int    homa_metrics_release(struct inode *inode, struct file *file);
-extern int    homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
-extern int    homa_pkt_recv(struct sk_buff *skb);
-extern __poll_t
-		homa_poll(struct file *file, struct socket *sock,
-		struct poll_table_struct *wait);
-extern char  *homa_print_ipv4_addr(__be32 addr, char *buffer);
-extern char  *homa_print_metrics(struct homa *homa);
-extern char  *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
-extern char  *homa_print_packet_short(struct sk_buff *skb, char *buffer,
-		int length);
-extern int    homa_proc_read_metrics(char *buffer, char **start, off_t offset,
-		int count, int *eof, void *data);
-extern int    homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		int noblock, int flags, int *addr_len);
-extern void   homa_rehash(struct sock *sk);
-extern void   homa_remove_from_grantable(struct homa *homa,
-		struct homa_rpc *rpc);
-extern void   homa_rpc_free(struct homa_rpc *rpc);
+extern void     homa_add_packet(struct homa_message_in *msgin,
+			struct sk_buff *skb);
+extern void     homa_addr_destroy(struct homa_addr *addr);
+extern int      homa_addr_init(struct homa_addr *addr, struct sock *sk,
+			__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
+extern void     homa_append_metric(struct homa *homa, const char* format, ...);
+extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
+extern void     homa_close(struct sock *sock, long timeout);
+extern void     homa_data_from_server(struct sk_buff *skb,
+			struct homa_rpc *crpc);
+extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern void     homa_destroy(struct homa *homa);
+extern int      homa_diag_destroy(struct sock *sk, int err);
+extern int      homa_disconnect(struct sock *sk, int flags);
+extern void     homa_err_handler(struct sk_buff *skb, u32 info);
+extern struct   homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
+			__u16 sport, __u64 id);
+extern struct   homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
+			__be32 saddr, __u16 sport, __u64 id);
+extern int      homa_get_port(struct sock *sk, unsigned short snum);
+extern int      homa_getsockopt(struct sock *sk, int level, int optname,
+			char __user *optval, int __user *option);
+extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern int      homa_hash(struct sock *sk);
+extern void     homa_init(struct homa *homa);
+extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
+extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
+extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
+extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
+extern void     homa_manage_grants(struct homa *homa, struct homa_rpc *rpc);
+extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
+			struct iov_iter *iter, int max_bytes);
+extern void     homa_message_in_destroy(struct homa_message_in *msgin);
+extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
+			int unscheduled);
+extern void     homa_message_out_destroy(struct homa_message_out *msgout);
+extern int      homa_message_out_init(struct homa_message_out *msgout,
+			struct sock *sk, struct iov_iter *iter, size_t len,
+			struct homa_addr *dest, __u16 sport, __u64 id);
+extern int      homa_metrics_open(struct inode *inode, struct file *file);
+extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
+			size_t length, loff_t *offset);
+extern int      homa_metrics_release(struct inode *inode, struct file *file);
+extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
+extern int      homa_pkt_recv(struct sk_buff *skb);
+extern __poll_t homa_poll(struct file *file, struct socket *sock,
+			struct poll_table_struct *wait);
+extern char    *homa_print_ipv4_addr(__be32 addr, char *buffer);
+extern char    *homa_print_metrics(struct homa *homa);
+extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
+extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
+			int length);
+extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
+			int count, int *eof, void *data);
+extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+			int noblock, int flags, int *addr_len);
+extern void     homa_rehash(struct sock *sk);
+extern void     homa_remove_from_grantable(struct homa *homa,
+			struct homa_rpc *rpc);
+extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern struct homa_rpc
-             *homa_rpc_new_client(struct homa_sock *hsk,
-		struct sockaddr_in *dest, size_t length, struct iov_iter *iter);
+               *homa_rpc_new_client(struct homa_sock *hsk,
+			struct sockaddr_in *dest, size_t length,
+			struct iov_iter *iter);
 extern struct homa_rpc
-             *homa_rpc_new_server(struct homa_sock *hsk,
-		__be32 source, struct data_header *h);
-extern int    homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
-extern int    homa_sendpage(struct sock *sk, struct page *page, int offset,
-		size_t size, int flags);
-extern void   homa_set_priority(struct sk_buff *skb, int priority);
-extern int    homa_setsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, unsigned int optlen);
-extern int    homa_sock_bind(struct homa_socktab *socktab,
-		struct homa_sock *hsk, __u16 port);
-extern void   homa_sock_destroy(struct homa_sock *hsk,
-		struct homa_socktab *socktab);
+               *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
+			struct data_header *h);
+extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
+extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
+			size_t size, int flags);
+extern void     homa_set_priority(struct sk_buff *skb, int priority);
+extern int      homa_setsockopt(struct sock *sk, int level, int optname,
+			char __user *optval, unsigned int optlen);
+extern int      homa_sock_bind(struct homa_socktab *socktab,
+			struct homa_sock *hsk, __u16 port);
+extern void     homa_sock_destroy(struct homa_sock *hsk,
+			struct homa_socktab *socktab);
 extern struct homa_sock *
-	      homa_sock_find(struct homa_socktab *socktab, __u16 port);
-extern void   homa_sock_init(struct homa_sock *hsk, struct homa *homa);
-extern int    homa_socket(struct sock *sk);
-extern void   homa_socktab_destroy(struct homa_socktab *socktab);
-extern void   homa_socktab_init(struct homa_socktab *socktab);
-extern char  *homa_symbol_for_type(uint8_t type);
-extern void   homa_unhash(struct sock *sk);
-extern int    homa_v4_early_demux(struct sk_buff *skb);
-extern int    homa_v4_early_demux_handler(struct sk_buff *skb);
-extern int    homa_wait_ready_msg(struct sock *sk, long *timeo);
-extern int    homa_xmit_control(enum homa_packet_type type, void *contents,
-		size_t length, struct homa_rpc *rpc);
-extern void   homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
-		struct homa_addr *dest);
+	        homa_sock_find(struct homa_socktab *socktab, __u16 port);
+extern void     homa_sock_init(struct homa_sock *hsk, struct homa *homa);
+extern int      homa_socket(struct sock *sk);
+extern void     homa_socktab_destroy(struct homa_socktab *socktab);
+extern void     homa_socktab_init(struct homa_socktab *socktab);
+extern char    *homa_symbol_for_type(uint8_t type);
+extern void     homa_unhash(struct sock *sk);
+extern int      homa_v4_early_demux(struct sk_buff *skb);
+extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
+extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);
+extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
+			size_t length, struct homa_rpc *rpc);
+extern void     homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
+			struct homa_addr *dest);
 
 #endif /* _HOMA_IMPL_H */
