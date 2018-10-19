@@ -80,7 +80,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->state = RPC_OUTGOING;
 	crpc->is_client = true;
 	crpc->msgin.total_length = -1;
-	err = homa_message_out_init(&crpc->msgout, (struct sock *) hsk, iter,
+	err = homa_message_out_init(&crpc->msgout, hsk, iter,
 			length, &crpc->peer, hsk->client_port, crpc->id);
         if (unlikely(err != 0))
 		goto error1;

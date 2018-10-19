@@ -46,9 +46,9 @@ inline static void set_priority(struct sk_buff *skb, int priority)
  * 
  * Return:   Either 0 (for success) or a negative errno value.
  */
-int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
-		struct iov_iter *iter, size_t len, struct homa_addr *dest,
-		__u16 sport, __u64 id)
+int homa_message_out_init(struct homa_message_out *msgout,
+		struct homa_sock *hsk, struct iov_iter *iter, size_t len,
+		struct homa_addr *dest, __u16 sport, __u64 id)
 {
 	int bytes_left;
 	struct sk_buff *skb;
@@ -61,7 +61,7 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 	msgout->next_offset = 0;
 	
 	/* This is a temporary guess; must handle better in the future. */
-	msgout->unscheduled = 7*HOMA_MAX_DATA_PER_PACKET;
+	msgout->unscheduled = hsk->homa->rtt_bytes;
 	msgout->granted = msgout->unscheduled;
 	msgout->priority = 0;
 	
@@ -93,7 +93,8 @@ int homa_message_out_init(struct homa_message_out *msgout, struct sock *sk,
 		h->offset = htonl(msgout->length - bytes_left);
 		h->unscheduled = htonl(msgout->unscheduled);
 		h->retransmit = 0;
-		err = skb_add_data_nocache(sk, skb, iter, cur_size);
+		err = skb_add_data_nocache((struct sock *) hsk, skb, iter,
+				cur_size);
 		if (unlikely(err != 0)) {
 			kfree_skb(skb);
 			goto error;

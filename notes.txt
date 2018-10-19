@@ -11,7 +11,7 @@ Notes for Homa implementation in Linux:
   * Initially using simple lists for all tables; will need to replace with
     something more efficient.
   * Eventually initialize homa.next_client_port to something random
-  * homa_message_out_init: compute unscheduled bites and priority better.
+  * homa_message_out_init: compute unscheduled bytes and priority better.
   * Routes: what is the lifetime of these? How long can I retain a pointer?
     Can they get stale?
   * Define a standard mechanism for returning errors:
@@ -36,7 +36,6 @@ Notes for Homa implementation in Linux:
   * If there is an error in ip_queue_xmit, does it free the packet?
   * homa_manage_grants: can "other" go away at an inconvenient time, causing
     synchronization problems?
-  * homa_server_rpc and homa_client_rpc are now almost identical!
   * Modify homa_message_out_init to get unscheduled from homa->rtt_bytes.
   * Clean up ports and ips in unit_homa_incoming.c
   * Priority levels: isn't there something funny with the lowest two levels?
@@ -218,3 +217,6 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * Creates UDP header
                 * ip_output.c:ip_send_skb
                   * ip_local_out
+
+DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 0, unscheduled 9800; DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 1400, unscheduled 9800; DATA from 0.0.0.0:40000, dport 99, id 1, length 226, message_length 3000, offset 2800, unscheduled 9800
+DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 0, unscheduled 10000; DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 1400, unscheduled 10000; DATA from 0.0.0.0:40000, dport 99, id 1, length 226, message_length 3000, offset 2800, unscheduled 10000

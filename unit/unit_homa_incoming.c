@@ -198,7 +198,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 20000, 1600);
 	EXPECT_NE(NULL, crpc);
-	EXPECT_EQ(9800, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	
 	struct grant_header h = {{.sport = htons(self->server_port),
@@ -287,19 +287,19 @@ TEST_F(homa_incoming, homa_grant_pkt)
 	struct grant_header h = {{.sport = htons(srpc->peer.dport),
 	                .dport = htons(self->hsk.server_port),
 			.id = srpc->id, .type = GRANT},
-		        .offset = htonl(11200),
+		        .offset = htonl(12600),
 			.priority = 3};
 	homa_pkt_dispatch((struct sock *)&self->hsk,
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
-	EXPECT_EQ(11200, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 9800/20000", unit_log_get());
+	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 11200/20000", unit_log_get());
 	
 	/* Don't let grant offset go backwards. */
 	h.offset = htonl(10000);
 	unit_log_clear();
 	homa_pkt_dispatch((struct sock *)&self->hsk,
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
-	EXPECT_EQ(11200, srpc->msgout.granted);
+	EXPECT_EQ(12600, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Wrong state. */
@@ -308,7 +308,7 @@ TEST_F(homa_incoming, homa_grant_pkt)
 	unit_log_clear();
 	homa_pkt_dispatch((struct sock *)&self->hsk,
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
-	EXPECT_EQ(11200, srpc->msgout.granted);
+	EXPECT_EQ(12600, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Must restore old state to avoid potential crashes. */

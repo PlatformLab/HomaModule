@@ -324,7 +324,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	srpc->state = RPC_OUTGOING;
 
-	err = homa_message_out_init(&srpc->msgout, sk, &iter, args.resplen,
+	err = homa_message_out_init(&srpc->msgout, hsk, &iter, args.resplen,
 			&srpc->peer, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;

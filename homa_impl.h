@@ -590,9 +590,9 @@ struct homa {
 	
 	/**
 	 * @min_unsched_prio: The lowest priority level currently available for
-	 * unscheduled messages. All priority levels higher than this are also
-	 * use for unscheduled messages; prior levels lower than this are used
-	 * for scheduled messages
+	 * unscheduled packets. All priority levels higher than this are also
+	 * used for unscheduled packets; priority levels lower than this are
+	 * used for scheduled packets.
 	 */
 	int min_unsched_prio;
 	
@@ -740,8 +740,9 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 			int unscheduled);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_message_out *msgout,
-			struct sock *sk, struct iov_iter *iter, size_t len,
-			struct homa_addr *dest, __u16 sport, __u64 id);
+			struct homa_sock *hsk, struct iov_iter *iter,
+			size_t len, struct homa_addr *dest, __u16 sport,
+			__u64 id);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);

@@ -260,7 +260,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	int err = homa_message_out_init(&srpc->msgout, (struct sock *) hsk,
+	int err = homa_message_out_init(&srpc->msgout, hsk,
 			NULL, resp_length, &srpc->peer, client_port, id);
 	EXPECT_EQ(0, err);
 	srpc->state = RPC_OUTGOING;
