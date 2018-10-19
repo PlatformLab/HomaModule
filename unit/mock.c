@@ -199,6 +199,11 @@ int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 {
 	return 0;
 }
+struct ctl_table_header *register_net_sysctl(struct net *net,
+	const char *path, struct ctl_table *table)
+{
+	return NULL;
+}
 
 void inet_register_protosw(struct inet_protosw *p) {}
 
@@ -413,6 +418,12 @@ int sock_no_mmap(struct file *file, struct socket *sock,
 	return 0;
 }
 
+int proc_dointvec(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return 0;
+}
+
 int sock_no_shutdown(struct socket *sock, int how)
 {
 	return 0;
@@ -433,6 +444,8 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
 	return 0;
 }
+
+void unregister_net_sysctl_table(struct ctl_table_header *header) {}
 
 long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
 		long timeout)
