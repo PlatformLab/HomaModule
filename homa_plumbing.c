@@ -21,7 +21,8 @@ int sysctl_homa_wmem_min __read_mostly;
 atomic_long_t homa_memory_allocated;
 
 /* Global data for Homa. Never reference homa_data directory. Always use
- * the home of variable instead; this allows overriding during unit tests. */
+ * the homa variable instead; this allows overriding during unit tests.
+ */
 struct homa homa_data;
 struct homa *homa = &homa_data;
 
@@ -107,7 +108,7 @@ static struct net_protocol homa_protocol = {
 };
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
-static const struct file_operations metrics_fops = {
+static const struct file_operations homa_metrics_fops = {
 	.open		= homa_metrics_open,
 	.read		= homa_metrics_read,
 	.release	= homa_metrics_release,
@@ -115,6 +116,56 @@ static const struct file_operations metrics_fops = {
 
 /* Used to remove /proc/net/homa_metrics when the module is unloaded. */
 static struct proc_dir_entry *metrics_dir_entry = NULL;
+
+/* Used to configure sysctl access to Homa configuration parameters.*/
+static struct ctl_table homa_ctl_table[] = {
+	{
+		.procname	= "min_prio",
+		.data		= &homa_data.min_prio,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec_prio
+	},
+	{
+		.procname	= "max_prio",
+		.data		= &homa_data.max_prio,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec_prio
+	},
+	{
+		.procname	= "max_sched_prio",
+		.data		= &homa_data.max_sched_prio,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "rtt_bytes",
+		.data		= &homa_data.rtt_bytes,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "cutoff_version",
+		.data		= &homa_data.cutoff_version,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "unsched_cutoffs",
+		.data		= &homa_data.unsched_cutoffs,
+		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec_prio
+	},
+	{}
+};
+
+/* Used to remove sysctl values when the module is unloaded. */
+struct ctl_table_header *homa_ctl_header;
 
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
@@ -140,13 +191,26 @@ static int __init homa_load(void) {
 
 	homa_init(homa);
 	metrics_dir_entry = proc_create("homa_metrics", S_IRUGO,
-			init_net.proc_net, &metrics_fops);
-	if (!metrics_dir_entry)
+			init_net.proc_net, &homa_metrics_fops);
+	if (!metrics_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/net/homa_metrics\n");
+		status = -ENOMEM;
+		goto out_unregister;
+	}
+
+	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
+			homa_ctl_table);
+	if (!homa_ctl_header) {
+		printk(KERN_ERR "couldn't register Homa sysctl parameters\n");
+		status = -ENOMEM;
+		goto out_unregister;
+	}
 
 	return 0;
 
 out_unregister:
+	unregister_net_sysctl_table(homa_ctl_header);
+	proc_remove(metrics_dir_entry);
 	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 out:
@@ -158,6 +222,7 @@ out:
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
+	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
@@ -701,7 +766,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 }
 
 /**
- * metrics_open(): This function is invoked when /proc/net/homa_metrics is
+ * metrics_open() - This function is invoked when /proc/net/homa_metrics is
  * opened.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
@@ -727,7 +792,7 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 }
 
 /**
- * metrics_read(): This function is invoked to handle read kernel calls on
+ * metrics_read() - This function is invoked to handle read kernel calls on
  * /proc/net/homa_metrics.
  * @file:    Information about the file being read.
  * @buffer:  Address in user space of the buffer in which data from the file
@@ -755,7 +820,7 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 }
 
 /**
- * metrics_release(): This function is invoked when the last reference to
+ * metrics_release() - This function is invoked when the last reference to
  * an open /proc/net/homa_metrics is closed.  It performs cleanup.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
@@ -768,4 +833,26 @@ int homa_metrics_release(struct inode *inode, struct file *file)
 	homa->metrics_active_opens--;
 	spin_unlock(&homa->metrics_lock);
 	return 0;
+}
+
+/**
+ * homa_dointvec_prio() - This function is a wrapper around proc_dointvec,
+ * invoked to read and write priority values via sysctl; it invokes
+ * proc_dointvec and then calls homa_prios_changed if the value was modified.
+ * @table:    sysctl table describing value to be read or written.
+ * @write:    Nonzero means value is being written, 0 means read.
+ * @buffer:   Address in user space if the input/output data.
+ * @lenp:     Not exactly sure.
+ * @ppos:     Not exactly sure.
+ * 
+ * Return: 0 for success, nonzero for error. 
+ */
+int homa_dointvec_prio(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int result;
+	result = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (write)
+		homa_prios_changed(homa);
+	return result;
 }

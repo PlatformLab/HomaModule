@@ -355,8 +355,8 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	/* Finally, send a grant packet. */
     send_grant:
 	h.offset = htonl(other->msgin.granted);
-	priority = homa->min_unsched_prio - 1 - msgs_skipped;
-	extra_levels = (homa->min_unsched_prio - homa->min_prio)
+	priority = homa->max_sched_prio - msgs_skipped;
+	extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
 			- homa->num_grantable;
 	if (extra_levels >= 0)
 		priority -= extra_levels;

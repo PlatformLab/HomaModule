@@ -74,6 +74,11 @@ enum homa_packet_type {
 };
 
 /**
+ * define HOMA_MAX_MESSAGE_SIZE - Largest permissible message size, in bytes.
+ */
+#define HOMA_MAX_MESSAGE_SIZE 1000000
+
+/**
  * define HOMA_MAX_DATA_PER_PACKET - The maximum amount of message data
  * that a single packet can hold (not including Homa's header, IP header,
  * etc.). This assumes Ethernet packet frames.
@@ -90,7 +95,14 @@ enum homa_packet_type {
 #define HOMA_MAX_HEADER 40
 
 _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
-	+ HOMA_MAX_HEADER), "Message length constants overflow Etheret frame");
+	+ HOMA_MAX_HEADER), "Message length constants overflow Ethernet frame");
+
+/**
+ * define HOMA_MAX_PRIORITIES - The largest number of priority levels
+ * that Homa will ever use (actual number can be restricted to less than
+ * this at runtime).
+ */
+#define HOMA_MAX_PRIORITIES 8
 
 /**
  * define HOMA_SKB_RESERVE - How much space to reserve at the beginning
@@ -589,12 +601,28 @@ struct homa {
 	int min_prio;
 	
 	/**
-	 * @min_unsched_prio: The lowest priority level currently available for
-	 * unscheduled packets. All priority levels higher than this are also
-	 * used for unscheduled packets; priority levels lower than this are
-	 * used for scheduled packets.
+	 * @max_sched_prio: The highest priority level currently available for
+	 * scheduled packets. Must be no less than min_prio. Levels above this
+	 * are reserved for unscheduled packets.
 	 */
-	int min_unsched_prio;
+	int max_sched_prio;
+	
+	/**
+	 * @unsched_cutoffs: the current priority assignments for incoming
+	 * unscheduled packets. The value of entry i is the largest
+	 * message size that uses priority i (larger i is higher priority).
+	 * If entry i has a value of HOMA_MAX_MESSAGE_SIZE or greater, then
+	 * priority levels less than i will not be used for unscheduled
+	 * packets.
+	 */
+	int unsched_cutoffs[HOMA_MAX_PRIORITIES];
+	
+	/**
+	 * @cutoff_version: increments every time unsched_cutoffs is
+	 * modified. Used to determine when we need to send updates to
+	 * peers.
+	 */
+	int cutoff_version;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
@@ -710,6 +738,7 @@ extern int      homa_addr_init(struct homa_addr *addr, struct sock *sk,
 			__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
+extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
@@ -717,6 +746,8 @@ extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
+extern int      homa_dointvec_prio(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct   homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
 			__u16 sport, __u64 id);

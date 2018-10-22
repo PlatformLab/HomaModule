@@ -238,6 +238,8 @@ void homa_init(struct homa *homa)
 	size_t aligned_size;
 	char *first;
 	int i;
+	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
+			"homa_init assumes at least 8 priority levels");
 	
 	/* Initialize Homa metrics (if no-one else has already done it),
 	 * making sure that each core has private cache lines for its metrics.
@@ -259,9 +261,16 @@ void homa_init(struct homa *homa)
 	
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
-	homa->max_prio = 7;
+	homa->max_prio = HOMA_MAX_PRIORITIES - 1;
 	homa->min_prio = 0;
-	homa->min_unsched_prio = 4;
+	homa->max_sched_prio = HOMA_MAX_PRIORITIES - 5;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] =
+			2*HOMA_MAX_DATA_PER_PACKET;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-3] =
+			10*HOMA_MAX_DATA_PER_PACKET;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+	homa->cutoff_version = 1;
 	homa->max_overcommit = 8;
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
@@ -566,4 +575,45 @@ char *homa_print_metrics(struct homa *homa)
 	}
 	
 	return homa->metrics;
+}
+
+/**
+ * homa_prios_changed() - This function is called whenever configuration
+ * information related to priorities, such as @homa->unsched_cutoffs or
+ * @homa->min_prio, is modified. It adjust the cutoffs if needed to maintain
+ * consistency, and it updates other values that depend on this information.
+ * @homa: Contains the priority info to be checked and updated.
+ */
+void homa_prios_changed(struct homa *homa)
+{
+	int i;
+	
+	/* This guarantees that we will choose priority 0 if nothing else
+	 * in the cutoff array matches.
+	 */
+	homa->unsched_cutoffs[0] = INT_MAX;
+	
+	for (i = HOMA_MAX_PRIORITIES-1; ; i--) {
+		if (i > homa->max_prio) {
+			homa->unsched_cutoffs[i] = 0;
+			continue;
+		}
+		if (i == homa->min_prio) {
+			homa->unsched_cutoffs[i] = INT_MAX;
+			homa->max_sched_prio = i-1;
+			break;
+		}
+		if ((homa->unsched_cutoffs[i] >= HOMA_MAX_MESSAGE_SIZE)) {
+			homa->max_sched_prio = i-1;
+			break;
+		}
+	}
+	if (homa->max_sched_prio < homa->min_prio) {
+		/* Must have at least one priority level for scheduled
+		 * packets; will end up with min_prio shared between
+		 * scheduled and unscheduled packets.
+		 */
+		homa->max_sched_prio = homa->min_prio;
+	}
+	homa->cutoff_version++;
 }
