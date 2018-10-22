@@ -46,6 +46,32 @@ FIXTURE_TEARDOWN(homa_utils)
 	unit_teardown();
 }
 
+/**
+ * set_cutoffs() - A convenience method to allow all of the values in
+ * homa->unsched_cutoffs to be set concisely.
+ * @homa:   Contains the unsched_cutoffs to be modified.
+ * @c0:     New value for homa->unsched_cutoffs[0]
+ * @c1:     New value for homa->unsched_cutoffs[1]
+ * @c2:     New value for homa->unsched_cutoffs[2]
+ * @c3:     New value for homa->unsched_cutoffs[3]
+ * @c4:     New value for homa->unsched_cutoffs[4]
+ * @c5:     New value for homa->unsched_cutoffs[5]
+ * @c6:     New value for homa->unsched_cutoffs[6]
+ * @c7:     New value for homa->unsched_cutoffs[7]
+ */
+static void set_cutoffs(struct homa *homa, int c0, int c1, int c2, 
+		int c3, int c4, int c5, int c6, int c7)
+{
+	homa->unsched_cutoffs[0] = c0;
+	homa->unsched_cutoffs[1] = c1;
+	homa->unsched_cutoffs[2] = c2;
+	homa->unsched_cutoffs[3] = c3;
+	homa->unsched_cutoffs[4] = c4;
+	homa->unsched_cutoffs[5] = c5;
+	homa->unsched_cutoffs[6] = c6;
+	homa->unsched_cutoffs[7] = c7;
+}
+
 TEST_F(homa_utils, homa_addr_init__normal)
 {
 	struct homa_addr addr;
@@ -209,4 +235,31 @@ TEST_F(homa_utils, homa_append_metric)
 			"q: 00000000000000000000000000000000000000000000000088",
 			self->homa.metrics);
 	EXPECT_EQ(120, self->homa.metrics_capacity);
+}
+
+TEST_F(homa_utils, homa_prios_changed__basics)
+{
+	set_cutoffs(&self->homa, 100, 90, 80, 10000000, 60, 50, 40, 30);
+	self->homa.min_prio = 2;
+	self->homa.max_prio = 6;
+	homa_prios_changed(&self->homa);
+	EXPECT_EQ(0, self->homa.unsched_cutoffs[7]);
+	EXPECT_EQ(40, self->homa.unsched_cutoffs[6]);
+	EXPECT_EQ(60, self->homa.unsched_cutoffs[4]);
+	EXPECT_EQ(10000000, self->homa.unsched_cutoffs[3]);
+	EXPECT_EQ(80, self->homa.unsched_cutoffs[2]);
+	EXPECT_EQ(2, self->homa.max_sched_prio);
+	EXPECT_EQ(2, self->homa.cutoff_version);
+}
+TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
+{
+	set_cutoffs(&self->homa, 100, 90, 80, 70, 60, 50, 40, 30);
+	self->homa.min_prio = 1;
+	self->homa.max_prio = 7;
+	homa_prios_changed(&self->homa);
+	EXPECT_EQ(30, self->homa.unsched_cutoffs[7]);
+	EXPECT_EQ(80, self->homa.unsched_cutoffs[2]);
+	EXPECT_EQ(0x7fffffff, self->homa.unsched_cutoffs[1]);
+	EXPECT_EQ(0x7fffffff, self->homa.unsched_cutoffs[0]);
+	EXPECT_EQ(1, self->homa.max_sched_prio);
 }
