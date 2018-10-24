@@ -9,48 +9,6 @@ struct homa_metrics *homa_metrics[NR_CPUS];
 char *metrics_memory;
 
 /**
- * homa_addr_init() - Constructor for homa_addr.
- * @addr:     Structure to initialize.
- * @sk:       Socket where this address will be used.
- * @saddr:    IP address of source (this machine).
- * @sport:    Port on this machine from which packets will be sent.
- * @daddr:    IP address of destination machine.
- * @dport:    Report of the destination that will handle incoming packets.
- * 
- * Return:    0 for success, otherwise negative errno. Note: it is safe
- *            to invoke homa_addr_destroy even after an error return.
- */
-int homa_addr_init(struct homa_addr *addr, struct sock *sk, __be32 saddr,
-		__u16 sport, __be32 daddr, __u16 dport)
-{
-	struct rtable *rt;
-	
-	addr->daddr = daddr;
-	addr->dport = dport;
-	addr->dst = NULL;
-	flowi4_init_output(&addr->flow.u.ip4, sk->sk_bound_dev_if, sk->sk_mark,
-			inet_sk(sk)->tos, RT_SCOPE_UNIVERSE, sk->sk_protocol,
-			0, daddr, saddr, htons(dport), htons(sport),
-			sk->sk_uid);
-	security_sk_classify_flow(sk, &addr->flow);
-	rt = ip_route_output_flow(sock_net(sk), &addr->flow.u.ip4, sk);
-	if (IS_ERR(rt)) {
-		return PTR_ERR(rt);
-	}
-	addr->dst = &rt->dst;
-	return 0;
-}
-
-/**
- * homa_addr_destroy() - Destructor for homa_addr
- * @addr:     Structure to clean up.
- */
-void homa_addr_destroy(struct homa_addr *addr)
-{
-	dst_release(addr->dst);
-}
-
-/**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
  * to issue an outgoing request).
  * @hsk:      Socket to which the RPC belongs.
@@ -70,27 +28,28 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	if (unlikely(!crpc))
 		return ERR_PTR(-ENOMEM);
 	crpc->hsk = hsk;
-	err = homa_addr_init(&crpc->peer, (struct sock *) hsk,
-			hsk->inet.inet_saddr, hsk->client_port,
-			dest->sin_addr.s_addr, ntohs(dest->sin_port));
-	if (unlikely(err != 0))
-		goto error2;
+	crpc->peer = homa_peer_find(&hsk->homa->peers,
+			dest->sin_addr.s_addr, &hsk->inet);
+	if (unlikely(IS_ERR(crpc->peer))) {
+		err = PTR_ERR(crpc->peer);
+		goto error;
+	}
+	crpc->dport = ntohs(dest->sin_port);
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
 	crpc->state = RPC_OUTGOING;
 	crpc->is_client = true;
 	crpc->msgin.total_length = -1;
 	err = homa_message_out_init(&crpc->msgout, hsk, iter,
-			length, &crpc->peer, hsk->client_port, crpc->id);
+			length, crpc->peer, crpc->dport, hsk->client_port,
+			crpc->id);
         if (unlikely(err != 0))
-		goto error1;
+		goto error;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	return crpc;
 	
-    error1:
-	homa_addr_destroy(&crpc->peer);
-    error2:
+    error:
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -116,13 +75,13 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	if (!srpc)
 		return ERR_PTR(-ENOMEM);
 	srpc->hsk = hsk;
-	err = homa_addr_init(&srpc->peer, (struct sock *) hsk,
-			hsk->inet.inet_saddr, hsk->client_port, source,
-			ntohs(h->common.sport));
-	if (err) {
+	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
+	if (unlikely(IS_ERR(srpc->peer))) {
+		err = PTR_ERR(srpc->peer);
 		kfree(srpc);
 		return ERR_PTR(err);
 	}
+	srpc->dport = ntohs(h->common.sport);
 	srpc->id = h->common.id;
 	srpc->state = RPC_INCOMING;
 	srpc->is_client = false;
@@ -156,7 +115,6 @@ void homa_rpc_free(struct homa_rpc *rpc) {
 	__list_del_entry(&rpc->rpc_links);
 	homa_message_out_destroy(&rpc->msgout);
 	homa_message_in_destroy(&rpc->msgin);
-	homa_addr_destroy(&rpc->peer);
 	kfree(rpc);
 }
 
@@ -191,6 +149,7 @@ void homa_destroy(struct homa *homa)
 {
 	int i;
 	homa_socktab_destroy(&homa->port_map);
+	homa_peertab_destroy(&homa->peers);
 	if (metrics_memory) {
 		kfree(metrics_memory);
 		metrics_memory = NULL;
@@ -221,8 +180,8 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		struct homa_rpc *srpc = list_entry(pos, struct homa_rpc,
 				rpc_links);
 		if ((srpc->id == id) &&
-				(srpc->peer.dport == sport) &&
-				(srpc->peer.daddr == saddr)) {
+				(srpc->dport == sport) &&
+				(srpc->peer->addr == saddr)) {
 			return srpc;
 		}
 	}
@@ -232,13 +191,15 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
+ * 
+ * Return:  0 on success, or a negative errno if there was an error.
  */
-void homa_init(struct homa *homa)
+int homa_init(struct homa *homa)
 {
 	size_t aligned_size;
 	char *first;
-	int i;
-	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
+	int i, err;
+	_Static_assert(HOMA_NUM_PRIORITIES >= 8,
 			"homa_init assumes at least 8 priority levels");
 	
 	/* Initialize Homa metrics (if no-one else has already done it),
@@ -258,18 +219,24 @@ void homa_init(struct homa *homa)
 	
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	homa_socktab_init(&homa->port_map);
+	err = homa_peertab_init(&homa->peers);
+	if (err) {
+		printk(KERN_ERR "Couldn't initialize peer table (errno %d)\n",
+			-err);
+		return err;
+	}
 	
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
-	homa->max_prio = HOMA_MAX_PRIORITIES - 1;
+	homa->max_prio = HOMA_NUM_PRIORITIES - 1;
 	homa->min_prio = 0;
-	homa->max_sched_prio = HOMA_MAX_PRIORITIES - 5;
-	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
-	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] =
+	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 200;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] =
 			2*HOMA_MAX_DATA_PER_PACKET;
-	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-3] =
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] =
 			10*HOMA_MAX_DATA_PER_PACKET;
-	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
 	homa->cutoff_version = 1;
 	homa->max_overcommit = 8;
 	spin_lock_init(&homa->grantable_lock);
@@ -280,6 +247,7 @@ void homa_init(struct homa *homa)
 	homa->metrics_capacity = 0;
 	homa->metrics_length = 0;
 	homa->metrics_active_opens = 0;
+	return 0;
 }
 
 /**
@@ -472,6 +440,10 @@ void homa_compile_metrics(struct homa_metrics *m)
 			m->packets_received[j-DATA] +=
 					cm->packets_received[j-DATA];
 		}
+		m->peer_hash_links += cm->peer_hash_links;
+		m->peer_new_entries += cm->peer_new_entries;
+		m->peer_kmalloc_errors += cm->peer_kmalloc_errors;
+		m->peer_route_errors += cm->peer_route_errors;
 	}
 }
 
@@ -481,8 +453,8 @@ void homa_compile_metrics(struct homa_metrics *m)
  * @homa:        The new data will appended to the @metrics field of
  *               this structure.
  * @format:      Standard printf-style format string describing the
- *               new metric.
- * @ap:          Additional arguments as required by @format.
+ *               new metric. Arguments after this provide the usual
+ *               values expected for printf-like functions.
  */
 void homa_append_metric(struct homa *homa, const char* format, ...)
 {
@@ -556,23 +528,39 @@ char *homa_print_metrics(struct homa *homa)
 	}
 	total_bytes += m.large_msg_bytes;
 	homa_append_metric(homa,
-			"total_msg_bytes       %15llu   "
+			"total_msg_bytes       %15llu  "
 			"Bytes in all messages\n",
 			total_bytes);
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_sent_%-6s   %15llu   "
+				"packets_sent_%-6s   %15llu  "
 				"%s packets sent\n",
 				symbol, m.packets_sent[i-DATA], symbol);
 	}
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_rcvd_%-6s   %15llu   "
+				"packets_rcvd_%-6s   %15llu  "
 				"%s packets received\n",
 				symbol, m.packets_received[i-DATA], symbol);
 	}
+	homa_append_metric(homa,
+			"peer_hash_links       %15llu  "
+			"hash chain link traversals in peer table\n",
+			m.peer_hash_links);
+	homa_append_metric(homa,
+			"peer_new_entries      %15llu  "
+			"new entries created in peer table\n",
+			m.peer_new_entries);
+	homa_append_metric(homa,
+			"peer_kmalloc_errors   %15llu  "
+			"kmalloc failures creating peer table entries\n",
+			m.peer_kmalloc_errors);
+	homa_append_metric(homa,
+			"peer_route_errors     %15llu  "
+			"routing failures creating peer table entries\n",
+			m.peer_route_errors);
 	
 	return homa->metrics;
 }
@@ -593,7 +581,7 @@ void homa_prios_changed(struct homa *homa)
 	 */
 	homa->unsched_cutoffs[0] = INT_MAX;
 	
-	for (i = HOMA_MAX_PRIORITIES-1; ; i--) {
+	for (i = HOMA_NUM_PRIORITIES-1; ; i--) {
 		if (i > homa->max_prio) {
 			homa->unsched_cutoffs[i] = 0;
 			continue;

@@ -5,8 +5,10 @@ extern int         mock_alloc_skb_errors;
 extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_errors;
 extern int         mock_ip_queue_xmit_errors;
-extern int         mock_malloc_errors;
+extern int         mock_kmalloc_errors;
 extern int         mock_route_errors;
+extern void        (*mock_spin_lock_hook)(void);
+extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 
 extern int         mock_check_error(int *errorMask);

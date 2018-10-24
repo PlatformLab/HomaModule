@@ -32,30 +32,6 @@ extern struct homa *homa;
 struct homa_sock;
 
 /**
- * struct homa_addr - Collects in one place the information needed to send
- * packets to a Homa peer.
- */
-struct homa_addr {
-	/** @daddr: IP address for the destination machine. */
-	__be32 daddr;
-	
-	/**
-	 * @dport: Port number on the destination machine that will
-	 * handle packets.
-	 */
-	__u16 dport;
-	
-	/** @flow: Addressing info needed to send packets. */
-	struct flowi flow;
-	
-	/**
-	 * @dst: Used to route packets to the destination; we own a reference
-	 * to this, which we must eventually release.
-	 */
-	struct dst_entry *dst;
-};
-
-/**
  * enum homa_packet_type - Defines the possible types of Homa packets.
  * 
  * See the xxx_header structs below for more information about each type.
@@ -98,11 +74,10 @@ _Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
 	+ HOMA_MAX_HEADER), "Message length constants overflow Ethernet frame");
 
 /**
- * define HOMA_MAX_PRIORITIES - The largest number of priority levels
- * that Homa will ever use (actual number can be restricted to less than
- * this at runtime).
+ * define HOMA_NUM_PRIORITIES - The total number of priority levels available
+ * for Homa (the actual number can be restricted to less than this at runtime).
  */
-#define HOMA_MAX_PRIORITIES 8
+#define HOMA_NUM_PRIORITIES 8
 
 /**
  * define HOMA_SKB_RESERVE - How much space to reserve at the beginning
@@ -379,10 +354,13 @@ struct homa_rpc {
 	struct homa_sock *hsk;
 	
 	/**
-	 * @peer: Address information for the other machine (the server,
-	 * if this is a client RPC, or the client, if this is a server RPC).
+	 * @peer: Information about the other machine (the server, if
+	 * this is a client RPC, or the client, if this is a server RPC).
 	 */
-	struct homa_addr peer;	
+	struct homa_peer *peer;
+	
+	/** @dport: Port number on @peer that will handle packets. */
+	__u16 dport;
 	
 	/**
 	 * @id: Unique identifier for the RPC among all those issued
@@ -470,7 +448,7 @@ struct homa_rpc {
  * client or server) to homa_sock objects.
  *
  * This table is managed exclusively by homa_socktab.c, using RCU to
- * permit efficient lookups.
+ * minimize synchronization during lookups.
  */
 struct homa_socktab {
 	/**
@@ -478,7 +456,7 @@ struct homa_socktab {
 	 * for socket lookups (RCU is used instead). Also used to
 	 * synchronize port allocation.
 	 */
-	struct mutex writeLock;
+	struct mutex write_lock;
 	
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
@@ -564,6 +542,80 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 }
 
 /**
+ * define HOMA_PEERTAB_BUCKETS - Number of bits in the bucket index for a
+ * homa_peertab.  Should be large enough to hold an entry for every server
+ * in a datacenter without long hash chains.
+ */
+#define HOMA_PEERTAB_BUCKET_BITS 20
+
+/** define HOME_PEERTAB_BUCKETS - Number of buckets in a homa_peertab. */
+#define HOMA_PEERTAB_BUCKETS (1 << HOMA_PEERTAB_BUCKET_BITS)
+
+/**
+ * struct homa_peertab - A hash table that maps from IPV4 addresses
+ * to homa_peer objects. Entries are gradually added to this table,
+ * but they are never removed except when the entire table is deleted.
+ * We can't safely delete because results returned by homa_peer_find
+ * may be retained indefinitely.
+ *
+ * This table is managed exclusively by homa_peertab.c, using RCU to
+ * permit efficient lookups.
+ */
+struct homa_peertab {
+	/**
+	 * @write_lock: Synchronizes addition of new entries; not needed
+	 * for lookups (RCU is used instead).
+	 */
+	struct spinlock write_lock;
+	
+	/**
+	 * @buckets: Pointer to heads of chains of homa_peers for each bucket.
+	 * Malloc-ed, and must eventually be freed. NULL means this structure
+	 * has not been initialized.
+	 */
+	struct hlist_head *buckets;
+};
+
+/**
+ * struct peer - One of these objects exists for each machine that we
+ * have communicated with (either as client or server). 
+ */
+struct homa_peer {
+	/** @daddr: IPV4 address for the machine. */
+	__be32 addr;
+	
+	/** @flow: Addressing info needed to send packets. */
+	struct flowi flow;
+	
+	/**
+	 * @dst: Used to route packets to this peer; we own a reference
+	 * to this, which we must eventually release.
+	 */
+	struct dst_entry *dst;
+	
+	/**
+	 * @unsched_cutoffs: priorities to use for unscheduled packets
+	 * sent to this host, as specified in the most recent CUTOFFS
+	 * packet from that host. 0 means we haven't yet received a
+	 * CUTOFFS packet from the host. See documentation for
+	 * @homa.unsched_cutoffs for the meanings of these values.
+	 */
+	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
+	
+	/**
+	 * @cutoff_version: unique identifier associated with @unsched_cutoffs.
+	 * Used to detect when cutoffs become out of date.
+	 */
+	int cutoff_version;
+	
+	/**
+	 * @peertab_links: Links this object into a bucket of its
+	 * homa_peertab.
+	 */
+	struct hlist_node peertab_links;
+};
+
+/**
  * struct homa - Overall information about the Homa protocol implementation.
  * 
  * There will typically only exist one of these at a time, except during
@@ -578,8 +630,17 @@ struct homa {
 	 */
 	__u16 next_client_port;
 	
-	/** @port_map: Maps from port numbers to sockets. */
+	/**
+	 * @port_map: Information about all open sockets; indexed by
+	 * port number.
+	 */
 	struct homa_socktab port_map;
+	
+	/**
+	 * @peertab: Info about all the other hosts we have communicated
+	 * with; indexed by host IPV4 address.
+	 */
+	struct homa_peertab peers;
 	
 	/**
 	 * @rtt_bytes: A conservative estimate of the amount of data that
@@ -615,7 +676,7 @@ struct homa {
 	 * priority levels less than i will not be used for unscheduled
 	 * packets.
 	 */
-	int unsched_cutoffs[HOMA_MAX_PRIORITIES];
+	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
 	
 	/**
 	 * @cutoff_version: increments every time unsched_cutoffs is
@@ -724,6 +785,33 @@ struct homa_metrics {
 	 * packet type (entry 0 corresponds to DATA, and so on).
 	 */
 	__u64 packets_received[BOGUS-DATA];
+	
+	
+	/**
+	 * @peer_hash_links: total # of link traversals in homa_peer_find
+	 * (
+	 */
+	__u64 peer_hash_links;
+	
+	/**
+	 * @peer_new_entries: total # of new entries created in Homa's
+	 * peer table (this value doesn't increment if the desired peer is
+	 * found in the entry in its hash chain).
+	 */
+	__u64 peer_new_entries;
+	
+	/**
+	 * @peer_kmalloc errors: total number of times homa_peer_find
+	 * returned an error because it couldn't allocate memory for a new
+	 * peer.
+	 */
+	__u64 peer_kmalloc_errors;
+	
+	/**
+	 * @peer_route errors: total number of times homa_peer_find
+	 * returned an error because it couldn't create a route to the peer.
+	 */
+	__u64 peer_route_errors;
 };
 
 #define INC_METRIC(metric, count) \
@@ -733,13 +821,11 @@ extern struct homa_metrics *homa_metrics[NR_CPUS];
 
 extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);
-extern void     homa_addr_destroy(struct homa_addr *addr);
-extern int      homa_addr_init(struct homa_addr *addr, struct sock *sk,
-			__be32 saddr, __u16 sport, __be32 daddr, __u16 dport);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
+extern void     homa_compile_metrics(struct homa_metrics *m);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
@@ -747,18 +833,20 @@ extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern int      homa_dointvec_prio(struct ctl_table *table, int write,
-		     void __user *buffer, size_t *lenp, loff_t *ppos);
+			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
-extern struct   homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
+extern struct homa_rpc
+               *homa_find_client_rpc(struct homa_sock *hsk, __u16 sport,
+			__u64 id);
+extern struct homa_rpc
+	       *homa_find_server_rpc(struct homa_sock *hsk, __be32 saddr,
 			__u16 sport, __u64 id);
-extern struct   homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-			__be32 saddr, __u16 sport, __u64 id);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, int __user *option);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_hash(struct sock *sk);
-extern void     homa_init(struct homa *homa);
+extern int      homa_init(struct homa *homa);
 extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
@@ -772,12 +860,17 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_message_out *msgout,
 			struct homa_sock *hsk, struct iov_iter *iter,
-			size_t len, struct homa_addr *dest, __u16 sport,
-			__u64 id);
+			size_t len, struct homa_peer *dest, __u16 dport,
+			__u16 sport, __u64 id);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
+extern void     homa_peertab_destroy(struct homa_peertab *peertab);
+extern int      homa_peertab_init(struct homa_peertab *peertab);
+extern struct homa_peer
+               *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
+			struct inet_sock *inet);
 extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
 extern int      homa_pkt_recv(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
@@ -826,6 +919,6 @@ extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern void     homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
-			struct homa_addr *dest);
+			struct homa_peer *peer);
 
 #endif /* _HOMA_IMPL_H */

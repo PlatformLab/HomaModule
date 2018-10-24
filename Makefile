@@ -3,12 +3,16 @@
 obj-m += homa.o
 homa-y = homa_incoming.o \
             homa_outgoing.o \
+            homa_peertab.o \
             homa_plumbing.o \
             homa_socktab.o \
             homa_utils.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	
+check:
+	../homaLinux/scripts/kernel-doc -none *.c
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean

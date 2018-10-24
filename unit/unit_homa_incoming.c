@@ -185,7 +185,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_source)
 
 TEST_F(homa_incoming, homa_pkt_dispatch__cant_create_rpc)
 {
-	mock_malloc_errors = 1;
+	mock_kmalloc_errors = 1;
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
 			self->client_ip, &self->data.common, 1400, 0));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
@@ -281,10 +281,10 @@ TEST_F(homa_incoming, homa_grant_pkt)
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
 	homa_xmit_data(&srpc->msgout, (struct sock *) &self->hsk,
-			&srpc->peer);
+			srpc->peer);
 	unit_log_clear();
 	
-	struct grant_header h = {{.sport = htons(srpc->peer.dport),
+	struct grant_header h = {{.sport = htons(srpc->dport),
 	                .dport = htons(self->hsk.server_port),
 			.id = srpc->id, .type = GRANT},
 		        .offset = htonl(12600),

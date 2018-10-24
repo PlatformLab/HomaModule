@@ -262,7 +262,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			rpc->msgout.granted = new_offset;
 		rpc->msgout.priority = h->priority;
 		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
-				&rpc->peer);
+				rpc->peer);
 	}
 	kfree_skb(skb);
 }

@@ -157,7 +157,7 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "unsched_cutoffs",
 		.data		= &homa_data.unsched_cutoffs,
-		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
+		.maxlen		= HOMA_NUM_PRIORITIES*sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec_prio
 	},
@@ -184,18 +184,20 @@ static int __init homa_load(void) {
 	inet_register_protosw(&homa_protosw);
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
-		printk(KERN_ERR "inet_add_protocol failed in homa_init: %d\n",
+		printk(KERN_ERR "inet_add_protocol failed in homa_load: %d\n",
 		    status);
-		goto out_unregister;
+		goto out_cleanup;
 	}
 
-	homa_init(homa);
+	status = homa_init(homa);
+	if (status)
+		goto out_cleanup;
 	metrics_dir_entry = proc_create("homa_metrics", S_IRUGO,
 			init_net.proc_net, &homa_metrics_fops);
 	if (!metrics_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/net/homa_metrics\n");
 		status = -ENOMEM;
-		goto out_unregister;
+		goto out_cleanup;
 	}
 
 	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
@@ -203,14 +205,16 @@ static int __init homa_load(void) {
 	if (!homa_ctl_header) {
 		printk(KERN_ERR "couldn't register Homa sysctl parameters\n");
 		status = -ENOMEM;
-		goto out_unregister;
+		goto out_cleanup;
 	}
 
 	return 0;
 
-out_unregister:
+out_cleanup:
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
+	homa_destroy(homa);
+	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 out:
@@ -327,8 +331,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
-	args.source_addr.sin_port = htons(rpc->peer.dport);
-	args.source_addr.sin_addr.s_addr = rpc->peer.daddr;
+	args.source_addr.sin_port = htons(rpc->dport);
+	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
 	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
@@ -390,10 +394,10 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	srpc->state = RPC_OUTGOING;
 
 	err = homa_message_out_init(&srpc->msgout, hsk, &iter, args.resplen,
-			&srpc->peer, hsk->client_port, srpc->id);
+			srpc->peer, srpc->dport, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;
-	homa_xmit_data(&srpc->msgout, sk, &srpc->peer);
+	homa_xmit_data(&srpc->msgout, sk, srpc->peer);
 	if (srpc->msgout.next_offset >= srpc->msgout.length) {
 		homa_rpc_free(srpc);
 	}
@@ -444,7 +448,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-	homa_xmit_data(&crpc->msgout, sk, &crpc->peer);
+	homa_xmit_data(&crpc->msgout, sk, crpc->peer);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;

@@ -30,8 +30,14 @@ int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
 int mock_copy_to_user_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
-int mock_malloc_errors = 0;
+int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
+int mock_vmalloc_errors = 0;
+
+/* If a test since this variable to non-NULL, this function will be invoked
+ * during future calls to spin_lock or spin_lock_bh.
+ */
+void (*mock_spin_lock_hook)(void) = NULL;
 
 /* If a test sets this variable to nonzero, ip_queue_xmit will log
  * outgoing packets using the long format rather than short.
@@ -46,11 +52,16 @@ static struct unit_hash *buffs_in_use = NULL;
 /* Keeps track of all the blocks of memory that have been allocated by
  * kmalloc but not yet freed by kfree. Reset for each test.
  */
-static struct unit_hash *mallocs_in_use = NULL;
+static struct unit_hash *kmallocs_in_use = NULL;
 
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test. */
 static struct unit_hash *routes_in_use = NULL;
+
+/* Keeps track of all the blocks of memory that have been allocated by
+ * vmalloc but not yet freed by vfree. Reset for each test.
+ */
+static struct unit_hash *vmallocs_in_use = NULL;
 
 /* The number of locks that have been acquired but not yet released. 
  * Should be 0 at the end of each test.
@@ -254,11 +265,11 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 
 void kfree(const void *block)
 {
-	if (!mallocs_in_use || unit_hash_get(mallocs_in_use, block) == NULL) {
+	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
 		FAIL("kfree on unknown block");
 		return;
 	}
-	unit_hash_erase(mallocs_in_use, block);
+	unit_hash_erase(kmallocs_in_use, block);
 	free((void *) block);
 }
 
@@ -279,21 +290,24 @@ void kfree_skb(struct sk_buff *skb)
 
 void *__kmalloc(size_t size, gfp_t flags)
 {
-	if (mock_check_error(&mock_malloc_errors))
+	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	void *block = malloc(size);
 	if (!block) {
 		FAIL("malloc failed");
 		return NULL;
 	}
-	if (!mallocs_in_use)
-		mallocs_in_use = unit_hash_new();
-	unit_hash_set(mallocs_in_use, block, "used");
+	if (!kmallocs_in_use)
+		kmallocs_in_use = unit_hash_new();
+	unit_hash_set(kmallocs_in_use, block, "used");
 	return block;
 }
 
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
+	if (mock_spin_lock_hook) {
+		mock_spin_lock_hook();
+	}
 	mock_active_locks++;
 }
 
@@ -453,6 +467,31 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
 	return 0;
 }
 
+void vfree(const void *block)
+{
+	if (!vmallocs_in_use || unit_hash_get(vmallocs_in_use, block) == NULL) {
+		FAIL("vfree on unknown block");
+		return;
+	}
+	unit_hash_erase(vmallocs_in_use, block);
+	free((void *) block);
+}
+
+void *vmalloc(size_t size)
+{
+	if (mock_check_error(&mock_vmalloc_errors))
+		return NULL;
+	void *block = malloc(size);
+	if (!block) {
+		FAIL("malloc failed");
+		return NULL;
+	}
+	if (!vmallocs_in_use)
+		vmallocs_in_use = unit_hash_new();
+	unit_hash_set(vmallocs_in_use, block, "used");
+	return block;
+}
+
 void __warn_printk(const char *s, ...) {}
 
 int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
@@ -610,9 +649,11 @@ void mock_teardown(void)
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_user_errors = 0;
-	mock_xmit_log_verbose = 0;
-	mock_malloc_errors = 0;
+	mock_kmalloc_errors = 0;
 	mock_route_errors = 0;
+	mock_vmalloc_errors = 0;
+	mock_spin_lock_hook = NULL;
+	mock_xmit_log_verbose = 0;
 	
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)
@@ -620,17 +661,23 @@ void mock_teardown(void)
 	unit_hash_free(buffs_in_use);
 	buffs_in_use = NULL;
 	
-	count = unit_hash_size(mallocs_in_use);
+	count = unit_hash_size(kmallocs_in_use);
 	if (count > 0)
-		FAIL("%u memory block(s) still allocated after test", count);
-	unit_hash_free(mallocs_in_use);
-	mallocs_in_use = NULL;
+		FAIL("%u kmalloced block(s) still allocated after test", count);
+	unit_hash_free(kmallocs_in_use);
+	kmallocs_in_use = NULL;
 	
 	count = unit_hash_size(routes_in_use);
 	if (count > 0)
 		FAIL("%u route(s) still allocated after test", count);
 	unit_hash_free(routes_in_use);
 	routes_in_use = NULL;
+	
+	count = unit_hash_size(vmallocs_in_use);
+	if (count > 0)
+		FAIL("%u vmalloced block(s) still allocated after test", count);
+	unit_hash_free(vmallocs_in_use);
+	vmallocs_in_use = NULL;
 	
 	if (mock_active_locks > 0)
 		FAIL("%d locks still locked after test", mock_active_locks);

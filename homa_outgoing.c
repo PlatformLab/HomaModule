@@ -8,7 +8,7 @@
  * set_priority(): Arrange for a packet to have a VLAN header that
  * specifies a priority for the packet.
  * @skb:        The packet was priority should be set.
- * @priority    Priority level for the packet, in the range 0 (for lowest
+ * @priority:   Priority level for the packet, in the range 0 (for lowest
  *              priority) to 7 ( for highest priority).
  */
 inline static void set_priority(struct sk_buff *skb, int priority)
@@ -37,10 +37,11 @@ inline static void set_priority(struct sk_buff *skb, int priority)
  * homa_message_out_init() - Initialize a homa_message_out, including copying
  * message data from user space into sk_buffs.
  * @msgout:    Struct to initialize; current contents are assumed to be garbage.
- * @sk:        Socket from which message will be sent.
+ * @hsk:       Socket from which message will be sent.
  * @iter:      Info about the request buffer in user space.
  * @len:       Total length of the message.
- * @dest:      Describes the destination to which the RPC will be sent.
+ * @dest:      Describes the host to which the RPC will be sent.
+ * @dport:     Port on @dest where the server is listening (destination).
  * @sport:     Port of the client (source).
  * @id:        Unique identifier for the message's RPC (relative to sport).
  * 
@@ -48,7 +49,7 @@ inline static void set_priority(struct sk_buff *skb, int priority)
  */
 int homa_message_out_init(struct homa_message_out *msgout,
 		struct homa_sock *hsk, struct iov_iter *iter, size_t len,
-		struct homa_addr *dest, __u16 sport, __u64 id)
+		struct homa_peer *dest, __u16 dport, __u16 sport, __u64 id)
 {
 	int bytes_left;
 	struct sk_buff *skb;
@@ -86,7 +87,7 @@ int homa_message_out_init(struct homa_message_out *msgout,
 		skb_reset_transport_header(skb);
 		h = (struct data_header *) skb_put(skb, sizeof(*h));
 		h->common.sport = htons(sport);
-		h->common.dport = htons(dest->dport);
+		h->common.dport = htons(dport);
 		h->common.id = id;
 		h->common.type = DATA;
 		h->message_length = htonl(msgout->length);
@@ -133,7 +134,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
  * homa_set_priority(): Arrange for a packet to have a VLAN header that
  * specifies a priority for the packet.
  * @skb:        The packet was priority should be set.
- * @priority    Priority level for the packet, in the range 0 (for lowest
+ * @priority:   Priority level for the packet, in the range 0 (for lowest
  *              priority) to 7 ( for highest priority).
  */
 void homa_set_priority(struct sk_buff *skb, int priority)
@@ -177,12 +178,13 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	} else {
 		h->sport = htons(rpc->hsk->server_port);
 	}
-	h->dport = htons(rpc->peer.dport);
+	h->dport = htons(rpc->dport);
 	h->id = rpc->id;
 	set_priority(skb, rpc->hsk->homa->max_prio);
-	dst_hold(rpc->peer.dst);
-	skb_dst_set(skb, rpc->peer.dst);
-	result = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer.flow);
+	dst_hold(rpc->peer->dst);
+	skb_dst_set(skb, rpc->peer->dst);
+	result = ip_queue_xmit((struct sock *) rpc->hsk, skb,
+			&rpc->peer->flow);
 	if (unlikely(result != 0))
 		kfree_skb(skb);
 	INC_METRIC(packets_sent[type - DATA], 1);
@@ -195,16 +197,16 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
  * them to be sent.
  * @msgout: Message to check for transmittable packets.
  * @sk:     Socket to use for transmission.
- * @dest:   Addressing information about the destination.
+ * @peer:   Information about the destination.
  */
 void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
-		struct homa_addr *dest)
+		struct homa_peer *peer)
 {
 	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
 		int err;
 		set_priority(msgout->next_packet, msgout->priority);
 		skb_get(msgout->next_packet);
-		err = ip_queue_xmit(sk, msgout->next_packet, &dest->flow);
+		err = ip_queue_xmit(sk, msgout->next_packet, &peer->flow);
 		if (err) {
 			printk(KERN_WARNING 
 				"ip_queue_xmit failed in homa_xmit_data: %d",

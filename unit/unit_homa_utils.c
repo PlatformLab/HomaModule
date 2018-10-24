@@ -72,24 +72,6 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[7] = c7;
 }
 
-TEST_F(homa_utils, homa_addr_init__normal)
-{
-	struct homa_addr addr;
-	EXPECT_EQ(0, -homa_addr_init(&addr,
-			(struct sock *) &self->hsk, self->client_ip, 40000,
-			self->server_ip, 100));
-	homa_addr_destroy(&addr);
-}
-TEST_F(homa_utils, homa_addr_init__error)
-{
-	struct homa_addr addr;
-	mock_route_errors = 1;
-	EXPECT_EQ(EHOSTUNREACH, -homa_addr_init(&addr,
-			(struct sock *) &self->hsk, self->client_ip, 40000,
-			self->server_ip, 100));
-	homa_addr_destroy(&addr);
-}
-
 TEST_F(homa_utils, homa_rpc_new_client__normal)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -99,7 +81,7 @@ TEST_F(homa_utils, homa_rpc_new_client__normal)
 }
 TEST_F(homa_utils, homa_rpc_new_client__malloc_error)
 {
-	mock_malloc_errors = 1;
+	mock_kmalloc_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 10000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
@@ -128,7 +110,7 @@ TEST_F(homa_utils, homa_rpc_new_server__normal)
 }
 TEST_F(homa_utils, homa_rpc_new_server__malloc_error)
 {
-	mock_malloc_errors = 1;
+	mock_kmalloc_errors = 1;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_TRUE(IS_ERR(srpc));

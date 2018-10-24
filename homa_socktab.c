@@ -11,7 +11,7 @@
 void homa_socktab_init(struct homa_socktab *socktab)
 {
 	int i;
-	mutex_init(&socktab->writeLock);
+	mutex_init(&socktab->write_lock);
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++) {
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
 	}
@@ -37,7 +37,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = &homa->port_map;
-	mutex_lock(&socktab->writeLock);
+	mutex_lock(&socktab->write_lock);
 	hsk->homa = homa;
 	hsk->server_port = 0;
 	while (1) {
@@ -58,7 +58,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	INIT_LIST_HEAD(&hsk->client_rpcs);
 	INIT_LIST_HEAD(&hsk->server_rpcs);
 	INIT_LIST_HEAD(&hsk->ready_rpcs);
-	mutex_unlock(&socktab->writeLock);
+	mutex_unlock(&socktab->write_lock);
 }
 
 /**
@@ -71,11 +71,11 @@ void homa_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 {
 	struct list_head *pos, *next;
 
-	mutex_lock(&socktab->writeLock);
+	mutex_lock(&socktab->write_lock);
 	hlist_del_rcu(&hsk->client_links.hash_links);
 	if (hsk->server_port != 0) 
 		hlist_del_rcu(&hsk->server_links.hash_links);
-	mutex_unlock(&socktab->writeLock);
+	mutex_unlock(&socktab->write_lock);
 		
 	list_for_each_safe(pos, next, &hsk->client_rpcs) {
 		struct homa_rpc *crpc = list_entry(pos,
@@ -108,7 +108,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	if ((port == 0) || (port >= HOMA_MIN_CLIENT_PORT)) {
 		return -EINVAL;
 	}
-	mutex_lock(&socktab->writeLock);
+	mutex_lock(&socktab->write_lock);
 	owner = homa_sock_find(socktab, port);
 	if (owner != NULL) {
 		if (owner != hsk)
@@ -123,7 +123,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hlist_add_head_rcu(&hsk->server_links.hash_links,
 			&socktab->buckets[homa_port_hash(port)]);
     done:
-	mutex_unlock(&socktab->writeLock);
+	mutex_unlock(&socktab->write_lock);
 	return result;
 }
 
