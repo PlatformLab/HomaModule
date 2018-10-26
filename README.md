@@ -21,8 +21,8 @@ This repo contains an implementation of the Homa transport protocol for Linux.
 - This code has been tested against Linux v4.16.10; it probably won't work
   for any other version of Linux without some massaging.
 
-- To build the module, type "make all"; then type "insmod homa.ko" to install
-  it, and "rmmod homa" to remove an installed module.
+- To build the module, type "make all"; then type "sudo insmod homa.ko" to install
+  it, and "sudo rmmod homa" to remove an installed module.
 
 - The subdirectory "unit" contains unit tests, which you can run by typing
   "make" in that subdirectory.
