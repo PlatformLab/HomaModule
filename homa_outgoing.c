@@ -64,7 +64,7 @@ int homa_message_out_init(struct homa_message_out *msgout,
 	/* This is a temporary guess; must handle better in the future. */
 	msgout->unscheduled = hsk->homa->rtt_bytes;
 	msgout->granted = msgout->unscheduled;
-	msgout->priority = 0;
+	msgout->sched_priority = 0;
 	
 	/* Copy message data from user space and form packet buffers. */
 	if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
@@ -147,7 +147,7 @@ void homa_set_priority(struct sk_buff *skb, int priority)
  * @type:      Packet type, such as DATA.
  * @contents:  Address of buffer containing the contents of the packet.
  *             Only information after the common header must be valid;
- *             the header will be filled in by this function.
+ *             the common header will be filled in by this function.
  * @length:    Length of @contents (including the common header).
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
@@ -185,8 +185,10 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	skb_dst_set(skb, rpc->peer->dst);
 	result = ip_queue_xmit((struct sock *) rpc->hsk, skb,
 			&rpc->peer->flow);
-	if (unlikely(result != 0))
+	if (unlikely(result != 0)) {
+		INC_METRIC(control_xmit_errors, 1);
 		kfree_skb(skb);
+	}
 	INC_METRIC(packets_sent[type - DATA], 1);
 	return result;
 }
@@ -204,14 +206,19 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
 {
 	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
 		int err;
-		set_priority(msgout->next_packet, msgout->priority);
+		int priority;
+		if (msgout->next_offset < msgout->unscheduled) {
+			priority = homa_unsched_priority(peer, msgout->length);
+		} else {
+			priority = msgout->sched_priority;
+		}
+		set_priority(msgout->next_packet, priority);
 		skb_get(msgout->next_packet);
 		err = ip_queue_xmit(sk, msgout->next_packet, &peer->flow);
 		if (err) {
-			printk(KERN_WARNING 
-				"ip_queue_xmit failed in homa_xmit_data: %d",
-				err);
-			}
+			INC_METRIC(data_xmit_errors, 1);
+			kfree_skb(msgout->next_packet);
+		}
 		msgout->next_packet = *homa_next_skb(msgout->next_packet);
 		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
 		INC_METRIC(packets_sent[0], 1);

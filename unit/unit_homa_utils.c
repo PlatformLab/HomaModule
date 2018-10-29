@@ -36,7 +36,8 @@ FIXTURE_SETUP(homa_utils)
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port), .id = self->rpcid,
 			.type = DATA}, .message_length = htonl(10000), .offset = 0,
-			.unscheduled = htonl(10000), .retransmit = 0};
+			.unscheduled = htonl(10000), .cutoff_version = 0,
+		        .retransmit = 0};
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_utils)
@@ -231,7 +232,7 @@ TEST_F(homa_utils, homa_prios_changed__basics)
 	EXPECT_EQ(10000000, self->homa.unsched_cutoffs[3]);
 	EXPECT_EQ(80, self->homa.unsched_cutoffs[2]);
 	EXPECT_EQ(2, self->homa.max_sched_prio);
-	EXPECT_EQ(2, self->homa.cutoff_version);
+	EXPECT_EQ(1, self->homa.cutoff_version);
 }
 TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 {

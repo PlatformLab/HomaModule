@@ -75,6 +75,7 @@ struct task_struct *current_task = NULL;
 unsigned long ex_handler_refcount = 0;
 unsigned long phys_base = 0;
 struct net init_net;
+unsigned long volatile jiffies = 1100;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -233,14 +234,21 @@ void inet_unregister_protosw(struct inet_protosw *p) {}
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
+	int priority;
 	if (mock_check_error(&mock_ip_queue_xmit_errors))
 		return -ENETDOWN;
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
+	priority = (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT;
+	if (priority == 0) {
+		priority = 1;
+	} else if (priority == 1) {
+		priority = 0;
+	}
 	unit_log_add_separator("; ");
-	unit_log_printf("xmit %s", buffer);
+	unit_log_printf("xmit %s, P%d", buffer, priority);
 	kfree_skb(skb);
 	return 0;
 }
@@ -527,7 +535,7 @@ void mock_data_ready(struct sock *sk)
 }
 
 /**
- * pp() - Allocate and return a packet buffer. The buffer is
+ * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPV4 address to use as the sender of the packet, in
  *                network byte order.
@@ -559,8 +567,10 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	case BUSY:
 		header_size = sizeof(struct busy_header);
 		break;
+	case CUTOFFS:
+		header_size = sizeof(struct cutoffs_header);
+		break;
 	default:
-		printf("*** Unknown packet type %d in new_buff.\n", h->type);
 		header_size = sizeof(struct common_header);
 		break;
 	}

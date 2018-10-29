@@ -181,14 +181,21 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 						"couldn't create server rpc: "
 						"error %lu",
 						-PTR_ERR(rpc));
+				INC_METRIC(server_cant_create_rpc, 1);
 				goto discard;
 			}
 		}
 	} else {
 		rpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
 	}
-	if (unlikely(rpc == NULL))
+	if (unlikely(rpc == NULL)) {
+		if (h->type == CUTOFFS) {
+			homa_cutoffs_pkt(skb, hsk);
+			return 0;
+		}
+		INC_METRIC(unknown_rpc, 1);
 		goto discard;
+	}	
 	
 	switch (h->type) {
 	case DATA:
@@ -204,6 +211,13 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		goto discard;
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
+		goto discard;
+	case CUTOFFS:
+		INC_METRIC(packets_received[CUTOFFS - DATA], 1);
+		homa_cutoffs_pkt(skb, hsk);
+		break;
+	default:
+		INC_METRIC(unknown_packet_type, 1);
 		goto discard;
 	}
 	return 0;
@@ -224,6 +238,7 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
  */
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
+	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state != RPC_OUTGOING))) {
@@ -236,12 +251,34 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	}
 	homa_add_packet(&rpc->msgin, skb);
 	if (rpc->msgin.scheduled)
-		homa_manage_grants(rpc->hsk->homa, rpc);
+		homa_manage_grants(homa, rpc);
 	if (rpc->msgin.bytes_remaining == 0) {
 		struct sock *sk = (struct sock *) rpc->hsk;
 		rpc->state = RPC_READY;
 		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_rpcs);
 		sk->sk_data_ready(sk);
+	}
+	if (ntohl(h->cutoff_version) != homa->cutoff_version) {
+		/* The sender has out-of-date cutoffs. Note: we may need
+		 * to resend CUTOFFS packets if one gets lost, but we don't
+		 * want to send multiple CUTOFFS packets when a stream of
+		 * packets arrives with stale cutoff_versions. Thus, we
+		 * don't send CUTOFFS unless there is a version mismatch
+		 * *and* it is been a while since the previous CUTOFFS
+		 * packet.
+		 */
+		if (jiffies != rpc->peer->last_update_jiffies) {
+			struct cutoffs_header h2;
+			int i;
+			
+			for (i = 0; i < HOMA_NUM_PRIORITIES; i++) {
+				h2.unsched_cutoffs[i] =
+						htonl(homa->unsched_cutoffs[i]);
+			}
+			h2.cutoff_version = htons(homa->cutoff_version);
+			homa_xmit_control(CUTOFFS, &h2, sizeof(h2), rpc);
+			rpc->peer->last_update_jiffies = jiffies;
+		}
 	}
 }
 
@@ -249,7 +286,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
  * homa_grant_pkt() - Handler for incoming GRANT packets
  * @skb:     Incoming packet; size already verified large enough for header.
  *           This function now owns the packet.
- * @rpc:    Information about the RPC corresponding to this packet.
+ * @rpc:     Information about the RPC corresponding to this packet.
  */
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
@@ -260,9 +297,31 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 		if (new_offset > rpc->msgout.granted)
 			rpc->msgout.granted = new_offset;
-		rpc->msgout.priority = h->priority;
+		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
 				rpc->peer);
+	}
+	kfree_skb(skb);
+}
+
+/**
+ * homa_cutoffs_pkt() - Handler for incoming CUTOFFS packets
+ * @skb:     Incoming packet; size already verified large enough for header.
+ *           This function now owns the packet.
+ * @hsk:     Socket on which the packet was received.
+ */
+void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
+{
+	int i;
+	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
+	struct homa_peer *peer = homa_peer_find(&hsk->homa->peers,
+		ip_hdr(skb)->saddr, &hsk->inet);
+	
+	if (!IS_ERR(peer)) {
+		peer->unsched_cutoffs[0] = INT_MAX;
+		for (i = 1; i <HOMA_NUM_PRIORITIES; i++)
+			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
+		peer->cutoff_version = h->cutoff_version;
 	}
 	kfree_skb(skb);
 }

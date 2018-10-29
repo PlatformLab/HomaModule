@@ -48,11 +48,11 @@ TEST_F(homa_outgoing, homa_message_out_init_basics)
 		"csum_and_copy_from_iter_full copied 200 bytes", unit_log_get());
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, "
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, length 1428, "
 			"message_length 3000, offset 0, unscheduled 10000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, "
+		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 1428, "
 			"message_length 3000, offset 1400, unscheduled 10000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 226, "
+		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 228, "
 			"message_length 3000, offset 2800, unscheduled 10000",
 		     unit_log_get());
 }
@@ -132,7 +132,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
-			"length 40 prio 7, offset 12345, grant_prio 4",
+			"length 48 prio 7, offset 12345, grant_prio 4, P7",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_control__client_response)
@@ -150,7 +150,7 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), crpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1111, "
-			"length 40 prio 7, offset 12345, grant_prio 4",
+			"length 48 prio 7, offset 12345, grant_prio 4, P7",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_control__ip_queue_xmit_error)
@@ -168,4 +168,33 @@ TEST_F(homa_outgoing, homa_xmit_control__ip_queue_xmit_error)
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_metrics[1]->control_xmit_errors);
+}
+
+TEST_F(homa_outgoing, homa_xmit_data__basics)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 6000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
+	crpc->msgout.sched_priority = 2;
+	crpc->msgout.unscheduled = 2000;
+	crpc->msgout.granted = 5000;
+	homa_peer_set_cutoffs(crpc->peer, INT_MAX, 0, 0, 0, 0, INT_MAX,
+			7000, 0);
+	unit_log_clear();
+	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk, crpc->peer);
+	EXPECT_STREQ("xmit DATA 0/6000, P6; "
+		"xmit DATA 1400/6000, P6; "
+		"xmit DATA 2800/6000, P2; "
+		"xmit DATA 4200/6000, P2", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_xmit_data__transmit_error)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
+	unit_log_clear();
+	mock_ip_queue_xmit_errors = 1;
+	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk, crpc->peer);
+	EXPECT_EQ(1, homa_metrics[1]->data_xmit_errors);
 }

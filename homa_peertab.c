@@ -55,6 +55,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
  * @peertab:    Peer table in which to perform lookup.
  * @addr:       IPV4 address of the desired host.
  * @inet:       Socket that will be used for sending packets.
+ * 
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. The caller can retain this pointer
  *              indefinitely: peer entries are never deleted except in
@@ -113,10 +114,55 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 0;
 	peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] = INT_MAX;
 	peer->cutoff_version = 0;
+	peer->last_update_jiffies = 0;
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	INC_METRIC(peer_new_entries, 1);
 	
     done:
 	spin_unlock_bh(&peertab->write_lock);
 	return peer;
+}
+
+/**
+ * homa_peer_unsched_priority() - Returns the priority level to use for
+ * unscheduled packets of a message.
+ * @peer:     The destination of the message.
+ * @length:   Number of bytes in the message.
+ * 
+ * Return:    A priority level.
+ */
+int homa_unsched_priority(struct homa_peer *peer, int length)
+{
+	int i;
+	for (i = HOMA_NUM_PRIORITIES-1; ; i--) {
+		if (peer->unsched_cutoffs[i] >= length)
+			return i;
+	}
+	/* Can't ever get here */
+}
+
+/**
+ * homa_peer_set_cutoffs() - Set the cutoffs for unscheduled priorities in
+ * a peer object. This is a convenience function used primarily by unit tests.
+ * @peer:   Homa_peer object whose cutoffs should be set.
+ * @c0:     Largest message size that will use priority 0. 
+ * @c1:     Largest message size that will use priority 1.
+ * @c2:     Largest message size that will use priority 2.
+ * @c3:     Largest message size that will use priority 3.
+ * @c4:     Largest message size that will use priority 4.
+ * @c5:     Largest message size that will use priority 5.
+ * @c6:     Largest message size that will use priority 6.
+ * @c7:     Largest message size that will use priority 7.
+ */
+void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
+		int c3, int c4, int c5, int c6, int c7)
+{
+	peer->unsched_cutoffs[0] = c0;
+	peer->unsched_cutoffs[1] = c1;
+	peer->unsched_cutoffs[2] = c2;
+	peer->unsched_cutoffs[3] = c3;
+	peer->unsched_cutoffs[4] = c4;
+	peer->unsched_cutoffs[5] = c5;
+	peer->unsched_cutoffs[6] = c6;
+	peer->unsched_cutoffs[7] = c7;
 }

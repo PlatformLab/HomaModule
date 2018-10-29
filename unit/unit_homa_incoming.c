@@ -33,7 +33,8 @@ FIXTURE_SETUP(homa_incoming)
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port), .id = self->rpcid,
 			.type = DATA}, .message_length = htonl(10000), .offset = 0,
-			.unscheduled = htonl(10000), .retransmit = 0};
+			.unscheduled = htonl(10000), .cutoff_version = 0,
+		        .retransmit = 0};
 	homa_message_in_init(&self->message, 10000, 10000);
 	unit_log_clear();
 }
@@ -89,7 +90,6 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	EXPECT_STREQ("DATA 0/10000; DATA 1400/10000; DATA 2800/10000; "
 			"DATA 4200/10000", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 {
 	self->data.offset = htonl(1400);
@@ -100,7 +100,6 @@ TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 	unit_log_skb_list(&self->message.packets, 0);
 	EXPECT_STREQ("DATA 1400/10000", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 {
 	self->data.offset = htonl(1400);
@@ -161,7 +160,6 @@ TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.server_rpcs));
 	EXPECT_EQ(1, mock_skb_count());
 }
-
 TEST_F(homa_incoming, homa_pkt_dispatch__existing_server_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
@@ -174,7 +172,6 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_server_rpc)
 			self->client_ip, &self->data.common, 1400, 0));
 	EXPECT_EQ(7200, srpc->msgin.bytes_remaining);
 }
-
 TEST_F(homa_incoming, homa_pkt_dispatch__unknown_source)
 {
 	self->data.common.sport = htons(100);
@@ -182,7 +179,6 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_source)
 			self->client_ip, &self->data.common, 1400, 0));
 	EXPECT_EQ(1, mock_skb_count());
 }
-
 TEST_F(homa_incoming, homa_pkt_dispatch__cant_create_rpc)
 {
 	mock_kmalloc_errors = 1;
@@ -191,7 +187,35 @@ TEST_F(homa_incoming, homa_pkt_dispatch__cant_create_rpc)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
 	EXPECT_EQ(0, mock_skb_count());
 }
-
+TEST_F(homa_incoming, homa_pkt_dispatch__cutoffs_for_unknown_client_rpc)
+{
+	struct homa_peer *peer;
+	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = 99999, .type = CUTOFFS},
+		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
+			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
+			.cutoff_version = 400};
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->server_ip, &h.common, 0, 0));
+	peer = homa_peer_find(&self->homa.peers, self->server_ip,
+			&self->hsk.inet);
+	ASSERT_FALSE(IS_ERR(peer));
+	EXPECT_EQ(400, peer->cutoff_version);
+	EXPECT_EQ(9, peer->unsched_cutoffs[1]);
+	EXPECT_EQ(3, peer->unsched_cutoffs[7]);
+}
+TEST_F(homa_incoming, homa_pkt_dispatch__unknown_client_rpc)
+{
+	struct grant_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = 99999, .type = GRANT},
+		        .offset = htonl(11200),
+			.priority = 3};
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->client_ip, &h.common, 0, 0));
+	EXPECT_EQ(1, homa_metrics[1]->unknown_rpc);
+}
 TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -207,8 +231,24 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 		        .offset = htonl(11200),
 			.priority = 3};
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
-			self->client_ip, &h.common, 0, 0));
+			self->server_ip, &h.common, 0, 0));
 	EXPECT_EQ(11200, crpc->msgout.granted);
+}
+TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	EXPECT_EQ(10000, crpc->msgout.granted);
+	unit_log_clear();
+	
+	struct common_header h = {.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = self->rpcid, .type = 99};
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->client_ip, &h, 0, 0));
+	EXPECT_EQ(1, homa_metrics[1]->unknown_packet_type);
 }
 
 TEST_F(homa_incoming, homa_data_pkt__basics)
@@ -235,7 +275,6 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(0, crpc->msgin.bytes_remaining);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_data_pkt__wrong_rpc_state)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
@@ -247,7 +286,6 @@ TEST_F(homa_incoming, homa_data_pkt__wrong_rpc_state)
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(5, mock_skb_count());
 }
-
 TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -263,15 +301,44 @@ TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 	EXPECT_EQ(600, crpc->msgin.bytes_remaining);
 	crpc->state = RPC_INCOMING;
 }
-
 TEST_F(homa_incoming, homa_data_pkt__send_grant)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100000, 1000);
 	EXPECT_NE(NULL, srpc);
-	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11400@0, P7", unit_log_get());
 	EXPECT_EQ(11400, srpc->msgin.granted);
+}
+TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
+{
+	self->homa.cutoff_version = 2;
+	self->homa.unsched_cutoffs[0] = 19;
+	self->homa.unsched_cutoffs[1] = 18;
+	self->homa.unsched_cutoffs[2] = 17;
+	self->homa.unsched_cutoffs[3] = 16;
+	self->homa.unsched_cutoffs[4] = 15;
+	self->homa.unsched_cutoffs[5] = 14;
+	self->homa.unsched_cutoffs[6] = 13;
+	self->homa.unsched_cutoffs[7] = 12;
+	self->data.message_length = htonl(5000);
+	mock_xmit_log_verbose = 1;
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->client_ip, &self->data.common, 1400, 0));
+	EXPECT_STREQ("xmit CUTOFFS from 0.0.0.0:0, dport 40000, id 12345, "
+		"length 48 prio 7, cutoffs 19 18 17 16 15 14 13 12, "
+		"version 2, P7", unit_log_get());
+	
+	/* Try again, but this time no comments should be sent because
+	 * no time has elapsed since the last cutoffs were sent.
+	 */
+	unit_log_clear();
+	self->homa.cutoff_version = 3;
+	self->data.offset = 1400;
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->client_ip, &self->data.common, 1400, 0));
+	EXPECT_STREQ("", unit_log_get());
+	
 }
 
 TEST_F(homa_incoming, homa_grant_pkt)
@@ -292,7 +359,7 @@ TEST_F(homa_incoming, homa_grant_pkt)
 	homa_pkt_dispatch((struct sock *)&self->hsk,
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
 	EXPECT_EQ(12600, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 11200/20000", unit_log_get());
+	EXPECT_STREQ("xmit DATA 11200/20000, P3", unit_log_get());
 	
 	/* Don't let grant offset go backwards. */
 	h.offset = htonl(10000);
@@ -313,6 +380,46 @@ TEST_F(homa_incoming, homa_grant_pkt)
 	
 	/* Must restore old state to avoid potential crashes. */
 	srpc->state = RPC_OUTGOING;
+}
+
+TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	EXPECT_EQ(10000, crpc->msgout.granted);
+	unit_log_clear();
+	
+	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = self->rpcid, .type = CUTOFFS},
+		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
+			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
+			.cutoff_version = 400};
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->server_ip, &h.common, 0, 0));
+	EXPECT_EQ(400, crpc->peer->cutoff_version);
+	EXPECT_EQ(9, crpc->peer->unsched_cutoffs[1]);
+	EXPECT_EQ(3, crpc->peer->unsched_cutoffs[7]);
+}
+TEST_F(homa_incoming, homa_cutoffs_cant_find_peer)
+{	
+	struct homa_peer *peer;
+	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = self->rpcid, .type = CUTOFFS},
+		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
+			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
+			.cutoff_version = 400};
+	struct sk_buff *skb = mock_skb_new(self->server_ip, &h.common, 0, 0);
+	mock_kmalloc_errors = 1;
+	homa_cutoffs_pkt(skb, &self->hsk);
+	EXPECT_EQ(1, homa_metrics[1]->peer_kmalloc_errors);
+	peer = homa_peer_find(&self->homa.peers, self->server_ip,
+			&self->hsk.inet);
+	ASSERT_FALSE(IS_ERR(peer));
+	EXPECT_EQ(0, peer->cutoff_version);
 }
 
 TEST_F(homa_incoming, homa_manage_grants__stop_tracking_when_fully_granted)
@@ -433,7 +540,7 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	srpc->msgin.bytes_remaining -= 1;
 	unit_log_clear();
 	homa_manage_grants(&self-> homa, srpc);
-	EXPECT_STREQ("xmit GRANT 12800@1", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12800@1, P7", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
@@ -444,9 +551,9 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 			self->server_ip, self->client_port, 2, 30000, 100);
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 3, 20000, 100);
-	EXPECT_STREQ("xmit GRANT 11400@0; "
-			"xmit GRANT 11400@1; "
-			"xmit GRANT 11400@2", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11400@0, P7; "
+			"xmit GRANT 11400@1, P7; "
+			"xmit GRANT 11400@2, P7", unit_log_get());
 
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
@@ -457,7 +564,7 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	srpc->msgin.bytes_remaining -= 1400;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
-	EXPECT_STREQ("xmit GRANT 12800@2", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12800@2, P7", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_remove_from_grantable)

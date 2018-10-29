@@ -41,10 +41,12 @@ enum homa_packet_type {
 	GRANT              = 21,
 	RESEND             = 22,
 	BUSY               = 23,
-	BOGUS              = 24,      /* Used only in unit tests. */
+	CUTOFFS            = 24,
+	BOGUS              = 25,      /* Used only in unit tests. */
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
-	 * 2. Add support for the new opcode in op_symbol and header_to_string
+	 * 2. Add support for the new opcode in homa_print_packet,
+	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
 	 * 3. Add support in new_buff in unit/unit_utils.cc
 	 */
 };
@@ -68,14 +70,19 @@ enum homa_packet_type {
  * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
  * must be at least this long.
  */
-#define HOMA_MAX_HEADER 40
+#define HOMA_MAX_HEADER 48
 
-_Static_assert(1500 >= (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_IPV4_HEADER
-	+ HOMA_MAX_HEADER), "Message length constants overflow Ethernet frame");
+/**
+ * define ETHERNET_MAX_PAYLOAD - A maximum length of an Ethernet packet,
+ * excluding preamble, frame delimeter, VLAN header, CRC, and interpacket gap;
+ * i.e. all of this space is available for Homa.
+ */
+#define ETHERNET_MAX_PAYLOAD 1500
 
 /**
  * define HOMA_NUM_PRIORITIES - The total number of priority levels available
  * for Homa (the actual number can be restricted to less than this at runtime).
+ * Changing this value is a big deal: it will affect packet formats.
  */
 #define HOMA_NUM_PRIORITIES 8
 
@@ -155,6 +162,14 @@ struct data_header {
 	 * will be sent only in response to GRANT packets.
 	 */
 	__be32 unscheduled;
+	
+	/**
+	 * @cutoff_version: The cutoff_version from the most recent
+	 * CUTOFFS packet that the source of this packet has received
+	 * from the destination of this packet, or 0 if the source hasn't
+	 * yet received a CUTOFFS packet.
+	 */
+	__be16 cutoff_version;
 
 	/**
 	 * @retransmit: 1 means this packet was sent in response to a RESEND
@@ -168,6 +183,9 @@ struct data_header {
 } __attribute__((packed));
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
 		"data_header too large");
+_Static_assert(ETHERNET_MAX_PAYLOAD >= (HOMA_MAX_DATA_PER_PACKET
+	+ HOMA_MAX_IPV4_HEADER + sizeof(struct data_header)),
+	"Homa messages don't fit in Ethernet frames");
 
 /**
  * struct grant_header - Wire format for GRANT packets, which are sent by
@@ -255,6 +273,33 @@ _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
 		"busy_header too large");
 
 /**
+ * struct cutoffs_header - Wire format for CUTOFFS packets.
+ * 
+ * These packets tell the recipient how to assign priorities to
+ * unscheduled packets.
+ */
+struct cutoffs_header {
+	/** @common: Fields common to all packet types. */
+	struct common_header common;
+	
+	/**
+	 * @unsched_cutoffs: priorities to use for unscheduled packets
+	 * sent to the sender of this packet. See documentation for
+	 * @homa.unsched_cutoffs for the meanings of these values.
+	 */
+	__be32 unsched_cutoffs[HOMA_NUM_PRIORITIES];
+	
+	/**
+	 * @cutoff_version: unique identifier associated with @unsched_cutoffs.
+	 * Must be included in future DATA packets sent to the sender of
+	 * this packet.
+	 */
+	__be16 cutoff_version;
+} __attribute__((packed));
+_Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
+		"cutoffs_header too large");
+
+/**
  * struct homa_message_out - Describes a message (either request or response)
  * for which this machine is the sender.
  */
@@ -298,8 +343,8 @@ struct homa_message_out {
 	 * sending bytes at or beyond this position. */
 	int granted;
 	
-	/** @priority: Packet priority to use for future transmissions. */
-	__u8 priority;
+	/** @priority: Priority level to use for future scheduled packets. */
+	__u8 sched_priority;
 };
 
 /**
@@ -596,17 +641,23 @@ struct homa_peer {
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
 	 * sent to this host, as specified in the most recent CUTOFFS
-	 * packet from that host. 0 means we haven't yet received a
-	 * CUTOFFS packet from the host. See documentation for
-	 * @homa.unsched_cutoffs for the meanings of these values.
+	 * packet from that host. See documentation for @homa.unsched_cutoffs
+	 * for the meanings of these values.
 	 */
 	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
 	
 	/**
-	 * @cutoff_version: unique identifier associated with @unsched_cutoffs.
-	 * Used to detect when cutoffs become out of date.
+	 * @cutoff_version: value of cutoff_version in the most recent
+	 * CUTOFFS packet received from this peer.  0 means we haven't
+	 * yet received a CUTOFFS packet from the host.
 	 */
-	int cutoff_version;
+	__be16 cutoff_version;
+	
+	/**
+	 * last_update_jiffies: time in jiffies when we sent the most
+	 * recent CUTOFFS packet to this peer.
+	 */
+	unsigned long last_update_jiffies;
 	
 	/**
 	 * @peertab_links: Links this object into a bucket of its
@@ -674,14 +725,18 @@ struct homa {
 	 * message size that uses priority i (larger i is higher priority).
 	 * If entry i has a value of HOMA_MAX_MESSAGE_SIZE or greater, then
 	 * priority levels less than i will not be used for unscheduled
-	 * packets.
+	 * packets. At least one entry in the array must have a value of
+	 * HOMA_MAX_MESSAGE_SIZE or greater (entry 0 is usually INT_MAX).
 	 */
 	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
 	
 	/**
 	 * @cutoff_version: increments every time unsched_cutoffs is
 	 * modified. Used to determine when we need to send updates to
-	 * peers.
+	 * peers.  Note: 16 bits should be fine for this: the worst
+	 * that happens is a peer has a super-stale value that equals
+	 * our current value, so the peer uses suboptimal cutoffs until the
+	 * next version change.
 	 */
 	int cutoff_version;
 	
@@ -786,7 +841,6 @@ struct homa_metrics {
 	 */
 	__u64 packets_received[BOGUS-DATA];
 	
-	
 	/**
 	 * @peer_hash_links: total # of link traversals in homa_peer_find
 	 * (
@@ -812,6 +866,36 @@ struct homa_metrics {
 	 * returned an error because it couldn't create a route to the peer.
 	 */
 	__u64 peer_route_errors;
+	
+	/**
+	 * @control_xmit_errors errors: total number of times ip_queue_xmit
+	 * failed when transmitting a control packet.
+	 */
+	__u64 control_xmit_errors;
+	
+	/**
+	 * @data_xmit_errors errors: total number of times ip_queue_xmit
+	 * failed when transmitting a data packet.
+	 */
+	__u64 data_xmit_errors;
+	
+	/**
+	 * @unknown_rpc: total number of times a client discarded an
+	 * incoming packet because it referred to a nonexistent RPC.
+	 */
+	__u64 unknown_rpc;
+	
+	/**
+	 * @cant_create_server_rpc: total number of times a server discarded
+	 * incoming packet because it couldn't create a homa_rpc object.
+	 */
+	__u64 server_cant_create_rpc;
+	
+	/**
+	 * @unknown_packet_type: total number of times a packet was discarded
+	 * because its type wasn't one of the supported values.
+	 */
+	__u64 unknown_packet_type;
 };
 
 #define INC_METRIC(metric, count) \
@@ -826,6 +910,7 @@ extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len
 extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
 extern void     homa_compile_metrics(struct homa_metrics *m);
+extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
@@ -871,6 +956,8 @@ extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern struct homa_peer
                *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 			struct inet_sock *inet);
+extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
+			int c2, int c3, int c4, int c5, int c6, int c7);
 extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
 extern int      homa_pkt_recv(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
@@ -913,6 +1000,7 @@ extern void     homa_socktab_destroy(struct homa_socktab *socktab);
 extern void     homa_socktab_init(struct homa_socktab *socktab);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern void     homa_unhash(struct sock *sk);
+extern int      homa_unsched_priority(struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);

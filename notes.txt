@@ -2,6 +2,8 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Things to do:
+  * Throttle output to reduce queueing in the NIC.
+  * Timers and retries.
   * Figure out socket locking disciplines.
   * Many unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
@@ -12,8 +14,6 @@ Notes for Homa implementation in Linux:
     something more efficient.
   * Eventually initialize homa.next_client_port to something random
   * homa_message_out_init: compute unscheduled bytes and priority better.
-  * Routes: what is the lifetime of these? How long can I retain a pointer?
-    Can they get stale?
   * Define a standard mechanism for returning errors:
     * Socket not supported on server (or server process ends while
       processing request).
@@ -38,11 +38,8 @@ Notes for Homa implementation in Linux:
     synchronization problems?
   * Modify homa_message_out_init to get unscheduled from homa->rtt_bytes.
   * Clean up ports and ips in unit_homa_incoming.c
-  * Priority levels: isn't there something funny with the lowest two levels?
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Under some conditions, peer information will need to be invalidated.
-  * For homa_peers: can entries get created at interrupt level?  I think so?
-    Does this affect locking?
 
 * Questions for Linux experts:
   * OK to call kmalloc at interrupt level?
@@ -60,6 +57,12 @@ Notes for Homa implementation in Linux:
     * Must invoked spin_lock_bh and spin_lock_bh, which disable interrupts
       as well as acquire the lock.
   * Is there a platform-independent way to read a high-frequency clock?
+    * get_cycles appears to perform a RDTSC
+    * cpu_khz holds the clock frequency
+    * do_gettimeofday takes 750 cycles!
+    * current_kernel_time takes 120 cycles
+    * sched_clock returns ns, takes 70 cycles
+    * jiffies variable, plus HZ variable:  HZ is 250
 
 * Detailed switches from normal module builds:
 gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isystem /usr/lib/gcc/x86_64-linux-gnu/4.9/include -I./arch/x86/include -I./arch/x86/include/generated  -I./include -I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi -I./include/uapi -I./include/generated/uapi -include ./include/linux/kconfig.h -D__KERNEL__ -DCONFIG_CC_STACKPROTECTOR -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar -Werror-implicit-function-declaration -Wno-format-security -std=gnu89 -fno-PIE -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -m64 -falign-jumps=1 -falign-loops=1 -mno-80387 -mno-fp-ret-in-387 -mpreferred-stack-boundary=3 -mtune=generic -mno-red-zone -mcmodel=kernel -funit-at-a-time -DCONFIG_X86_X32_ABI -DCONFIG_AS_CFI=1 -DCONFIG_AS_CFI_SIGNAL_FRAME=1 -DCONFIG_AS_CFI_SECTIONS=1 -DCONFIG_AS_FXSAVEQ=1 -DCONFIG_AS_SSSE3=1 -DCONFIG_AS_CRC32=1 -DCONFIG_AS_AVX=1 -DCONFIG_AS_AVX2=1 -DCONFIG_AS_AVX512=1 -DCONFIG_AS_SHA1_NI=1 -DCONFIG_AS_SHA256_NI=1 -pipe -Wno-sign-compare -fno-asynchronous-unwind-tables -mindirect-branch=thunk-extern -mindirect-branch-register -DRETPOLINE -fno-delete-null-pointer-checks -O2 --param=allow-store-data-races=0 -DCC_HAVE_ASM_GOTO -Wframe-larger-than=2048 -fstack-protector -Wno-unused-but-set-variable -fno-var-tracking-assignments -g -pg -mfentry -DCC_USING_FENTRY -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow -fno-merge-all-constants -fmerge-constants -fno-stack-check -fconserve-stack -Werror=implicit-int -Werror=strict-prototypes -Werror=date-time  -DMODULE  -DKBUILD_BASENAME='"homa_plumbing"'  -DKBUILD_MODNAME='"homa"' -c -o /home/ouster/remote/homaModule/.tmp_homa_plumbing.o /home/ouster/remote/homaModule/homa_plumbing.c
@@ -100,6 +103,27 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
     homa_recv(fd, buffer) -> id, length, sender_address, is_request
     homa_invoke(fd, address, request, response) -> response_length
     homa_reply(fd, address, id, msg)
+
+* Notes on managing network buffers:
+  * tcp_sendmsg_locked (tcp.c) invokes sk_stream_alloc_skb, which returns 0
+    if memory running short.  It this happens, it invokes sk_stream_wait_memory
+  * tcp_stream_memory_free: its result indicates if there's enough memory for
+    a stream to accept more data
+  * Receiving packets (tcp_v4_rcv -> tcp_v4_do_rcv -> tcp_rcv_state_process
+    in tcp_ipv4.c)
+  * There is a variable tcp_memory_allocated, but I can't find where it
+    is increased; unclear exactly what this variable means.
+  * There is a variable tcp_memory_pressure, plus functions
+    tcp_enter_memory_pressure and tcp_leave_memory_pressure. The variable
+    appears to be modified only by those 2 functions.
+    * Couldn't find any direct calls to tcp_enter_memory_pressure, but a
+      pointer is stored in the struct proto.
+    * That pointer is invoked from sk_stream_alloc_skb and
+      sk_enter_memory_pressure.
+    * sk_enter_memory_pressure is     invoked from sk_page_frag_refill and
+      __sk_mem_raise_allocated.
+    * __sk_mem_raise_allocated is invoked from __sk_mem_schedule
+    * __sk_mem_schedule is invoked from sk_wmem_schedule and sk_rmem_schedule
 
 * Waiting for input in TCP:
   * tcp_recvmsg (tcp.c) -> sk_wait_data (sock.c)
@@ -148,16 +172,6 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
     * Must be global?
   * Incoming RPCs:
     * Use to find state for incoming packets
-
-* C++ data structures used in HomaTransport:
-  * MessageAccumulator: std::vector of received packets, Buffer of
-    assembled message
-  * HomaTransport:
-    * vectors of packets and messages
-    * hash of outgoing RPCs
-    * list of outgoing RPCs that haven't yet been transmitted
-    * hash of incoming RPCs
-    * list of RPCs that require timer attention
 
 * Miscellaneous information:
   * For raw sockets: "man 7 raw"
@@ -234,6 +248,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * Creates UDP header
                 * ip_output.c:ip_send_skb
                   * ip_local_out
-
-DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 0, unscheduled 9800; DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 1400, unscheduled 9800; DATA from 0.0.0.0:40000, dport 99, id 1, length 226, message_length 3000, offset 2800, unscheduled 9800
-DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 0, unscheduled 10000; DATA from 0.0.0.0:40000, dport 99, id 1, length 1426, message_length 3000, offset 1400, unscheduled 10000; DATA from 0.0.0.0:40000, dport 99, id 1, length 226, message_length 3000, offset 2800, unscheduled 10000

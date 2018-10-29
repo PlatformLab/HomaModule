@@ -237,7 +237,14 @@ int homa_init(struct homa *homa)
 	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] =
 			10*HOMA_MAX_DATA_PER_PACKET;
 	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+#ifdef __UNIT_TEST__
+	/* Unit tests won't send CUTOFFS messages unless the test changes
+	 * this variable.
+	 */
+	homa->cutoff_version = 0;
+#else
 	homa->cutoff_version = 1;
+#endif
 	homa->max_overcommit = 8;
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
@@ -300,8 +307,14 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	pos += result;
 	space_left -= result;
 	if (skb->vlan_tci & VLAN_TAG_PRESENT) {
-		result = snprintf(pos, space_left, " prio %d",
-			(skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
+		int priority = (skb->vlan_tci & VLAN_PRIO_MASK)
+				>> VLAN_PRIO_SHIFT;
+		if (priority == 0) {
+			priority = 1;
+		} else if (priority == 1) {
+			priority = 0;
+		}
+		result = snprintf(pos, space_left, " prio %d", priority);
 		if ((result == length) || (result < 0)) {
 			buffer[length-1] = 0;
 			return buffer;
@@ -337,7 +350,21 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	case BUSY:
 		/* Nothing to add here. */
 		break;
-	}
+	case CUTOFFS: {
+		struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
+		snprintf(pos, space_left,
+				", cutoffs %d %d %d %d %d %d %d %d, version %u",
+				ntohl(h->unsched_cutoffs[0]),
+				ntohl(h->unsched_cutoffs[1]),
+				ntohl(h->unsched_cutoffs[2]),
+				ntohl(h->unsched_cutoffs[3]),
+				ntohl(h->unsched_cutoffs[4]),
+				ntohl(h->unsched_cutoffs[5]),
+				ntohl(h->unsched_cutoffs[6]),
+				ntohl(h->unsched_cutoffs[7]),
+				ntohs(h->cutoff_version));
+		break;
+	}}
 	buffer[length-1] = 0;
 	return buffer;
 }
@@ -345,7 +372,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 /**
  * homa_print_packet() - Print a human-readable string describing the
  * information in a Homa packet. This function generates a more
- * abbreviated description than home_print_packet.
+ * abbreviated description than homa_print_packet.
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
  * @length:  Number of bytes available at @buffer.
@@ -379,6 +406,9 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
 	case BUSY:
 		snprintf(buffer, length, "BUSY");
 		break;
+	case CUTOFFS: 
+		snprintf(buffer, length, "CUTOFFS");
+		break;
 	default:
 		snprintf(buffer, length, "unknown packet type %d",
 				common->type);
@@ -405,6 +435,8 @@ char *homa_symbol_for_type(uint8_t type)
 		return "RESEND";
 	case BUSY:
 		return "BUSY";
+	case CUTOFFS:
+		return "CUTOFFS";
 	}
 	
 	/* Using a static buffer can produce garbled text under concurrency,
@@ -444,6 +476,11 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->peer_new_entries += cm->peer_new_entries;
 		m->peer_kmalloc_errors += cm->peer_kmalloc_errors;
 		m->peer_route_errors += cm->peer_route_errors;
+		m->control_xmit_errors += cm->control_xmit_errors;
+		m->data_xmit_errors += cm->data_xmit_errors;
+		m->unknown_rpc += cm->unknown_rpc;
+		m->server_cant_create_rpc += cm->server_cant_create_rpc;
+		m->unknown_packet_type += cm->unknown_packet_type;
 	}
 }
 
@@ -514,7 +551,7 @@ char *homa_print_metrics(struct homa *homa)
 	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
 		total_bytes += m.small_msg_bytes[i];
 		homa_append_metric(homa,
-			"msg_bytes_%-9d   %15llu  "
+			"msg_bytes_%-9d    %15llu  "
 			"Bytes in messages containing < %d bytes\n",
 			(i+1)*64, total_bytes, (i+1)*64);
 	}
@@ -522,44 +559,64 @@ char *homa_print_metrics(struct homa *homa)
 			i++) {
 		total_bytes += m.medium_msg_bytes[i];
 		homa_append_metric(homa,
-			"msg_bytes_%-9d   %15llu  "
+			"msg_bytes_%-9d    %15llu  "
 			"Bytes in messages containing < %d bytes\n",
 			(i+1)*1024, total_bytes, (i+1)*1024);
 	}
 	total_bytes += m.large_msg_bytes;
 	homa_append_metric(homa,
-			"total_msg_bytes       %15llu  "
+			"total_msg_bytes        %15llu  "
 			"Bytes in all messages\n",
 			total_bytes);
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_sent_%-6s   %15llu  "
+				"packets_sent_%-6s    %15llu  "
 				"%s packets sent\n",
 				symbol, m.packets_sent[i-DATA], symbol);
 	}
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_rcvd_%-6s   %15llu  "
+				"packets_rcvd_%-6s    %15llu  "
 				"%s packets received\n",
 				symbol, m.packets_received[i-DATA], symbol);
 	}
 	homa_append_metric(homa,
-			"peer_hash_links       %15llu  "
+			"peer_hash_links        %15llu  "
 			"hash chain link traversals in peer table\n",
 			m.peer_hash_links);
 	homa_append_metric(homa,
-			"peer_new_entries      %15llu  "
+			"peer_new_entries       %15llu  "
 			"new entries created in peer table\n",
 			m.peer_new_entries);
 	homa_append_metric(homa,
-			"peer_kmalloc_errors   %15llu  "
+			"peer_kmalloc_errors    %15llu  "
 			"kmalloc failures creating peer table entries\n",
 			m.peer_kmalloc_errors);
 	homa_append_metric(homa,
-			"peer_route_errors     %15llu  "
+			"peer_route_errors      %15llu  "
 			"routing failures creating peer table entries\n",
+			m.peer_route_errors);
+	homa_append_metric(homa,
+			"control_xmit_errors    %15llu  "
+			"errors sending control packets\n",
+			m.peer_route_errors);
+	homa_append_metric(homa,
+			"data_xmit_errors       %15llu  "
+			"errors sending data packets\n",
+			m.peer_route_errors);
+	homa_append_metric(homa,
+			"unknown_rpc            %15llu  "
+			"packets discarded because RPC is unknown\n",
+			m.peer_route_errors);
+	homa_append_metric(homa,
+			"server_cant_create_rpc %15llu  "
+			"packets discarded because server couldn't create RPC\n",
+			m.peer_route_errors);
+	homa_append_metric(homa,
+			"unknown_packet_type    %15llu  "
+			"packets discarded because of unsupported type\n",
 			m.peer_route_errors);
 	
 	return homa->metrics;

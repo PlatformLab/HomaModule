@@ -101,3 +101,13 @@ TEST_F(homa_peertab, homa_peer_find__route_error)
 	homa_compile_metrics(&metrics);
 	EXPECT_EQ(1, metrics.peer_route_errors);
 }
+
+TEST_F(homa_peertab, homa_unsched_priority)
+{
+	struct homa_peer peer;
+	homa_peer_set_cutoffs(&peer, INT_MAX, 0, 0, INT_MAX, 200, 100, 0, 0);
+	
+	EXPECT_EQ(5, homa_unsched_priority(&peer, 10));
+	EXPECT_EQ(4, homa_unsched_priority(&peer, 200));
+	EXPECT_EQ(3, homa_unsched_priority(&peer, 201));
+}
