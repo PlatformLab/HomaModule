@@ -7,7 +7,6 @@ This repo contains an implementation of the Homa transport protocol for Linux.
   has barely enough functionality to transmit simple RPC requests and responses
   (see the "invoke" test in tests/homa_test.c for an example), but it is still far
   from complete. Here is a partial list of functionality that is still missing:
-  - The priority mechanism is not fully implemented.
   - There are no timeouts or retransmissions when packets are lost.
   - The throttling mechanism to limit queueing in source NICs hasn't been
     implemented.
