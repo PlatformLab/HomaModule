@@ -763,13 +763,8 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
  * @wait:  ??
  * Return: ??
  */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0)
 __poll_t homa_poll(struct file *file, struct socket *sock,
 	       struct poll_table_struct *wait) {
-#else
-unsigned int homa_poll(struct file *file, struct socket *sock,
-				   struct poll_table_struct *wait) {
-#endif
 	printk(KERN_WARNING "unimplemented poll invoked on Homa socket\n");
 	return 0;
 }

@@ -22,6 +22,10 @@
 
 #include "homa.h"
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
+typedef unsigned int __poll_t;
+#endif
+
 #ifdef __UNIT_TEST__
 #define spin_unlock mock_spin_unlock
 extern void mock_spin_unlock(spinlock_t *lock);
@@ -874,13 +878,8 @@ extern struct homa_peer
 			struct inet_sock *inet);
 extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
 extern int      homa_pkt_recv(struct sk_buff *skb);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0)
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
 			struct poll_table_struct *wait);
-#else
-extern unsigned int homa_poll(struct file *file, struct socket *sock,
-                          struct poll_table_struct *wait);
-#endif
 extern char    *homa_print_ipv4_addr(__be32 addr, char *buffer);
 extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
