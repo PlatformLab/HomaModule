@@ -14,12 +14,17 @@
 #include <linux/proc_fs.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
+#include <linux/version.h>
 #include <linux/socket.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
 
 #include "homa.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
+typedef unsigned int __poll_t;
+#endif
 
 #ifdef __UNIT_TEST__
 #define spin_unlock mock_spin_unlock
