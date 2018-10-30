@@ -17,8 +17,10 @@ This repo contains an implementation of the Homa transport protocol for Linux.
     of KB?) will cause buffer exhaustion and deadlock.
   - There has been no performance analysis or tuning.
 
-- This code has been tested against Linux v4.16.10; it probably won't work
-  for any other version of Linux without some massaging.
+- Linux v4.16.10 is the primary development platform for this code. It is also
+  known to work with v4.15.0-38-generic;  other versions of Linux have not been
+  tested and may require code changes. If you get Homa working on other versions,
+  please let me know and/or submit pull requests for required code changes.
 
 - To build the module, type "make all"; then type "sudo insmod homa.ko" to install
   it, and "sudo rmmod homa" to remove an installed module.
