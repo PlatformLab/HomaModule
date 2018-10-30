@@ -27,6 +27,71 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 }
 
 /**
+ * homa_socktab_start_scan() - Begin an iteration over all of the sockets
+ * in a socktab.
+ * @socktab:   Socktab to scan.
+ * @scan:      Will hold the current state of the scan; any existing
+ *             are discarded.
+ *
+ * Return:     The first socket in the table, or NULL if the table is
+ *             empty.
+ *
+ * Each call to homa_socktab_next will return the next socket in the table.
+ * All sockets that are present in the table at the time this function is
+ * invoked will eventually be returned, as long as they are not removed
+ * from the table. It is safe to remove sockets from the table and/or
+ * delete them while the scan is in progress. If a socket is removed from
+ * the table during the scan, it may or may not be returned by
+ * homa_socktab_next. New entries added during the scan may or may not be
+ * returned. The caller should use RCU to prevent socket storage from
+ * being reclaimed during the scan.
+ */
+struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
+	struct homa_socktab_scan *scan)
+{
+	scan->socktab = socktab;
+	scan->current_bucket = -1;
+	scan->next = NULL;
+	return homa_socktab_next(scan);
+}
+
+/**
+ * homa_starttab_next() = Return the next socket in an iteration over a socktab.
+ * @scan:      Holds state of the scan.
+ *
+ * Return:     The next socket in the table, or NULL if the iteration has
+ *             returned all of the sockets in the table. Sockets are not
+ *             returned in any particular order. It's possible that the
+ *             returned socket has been destroyed.
+ */
+struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
+{
+	struct homa_sock *hsk;
+	struct homa_socktab_links *links;
+	while (1) {
+		while (scan->next == NULL) {
+			scan->current_bucket++;
+			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS)
+				return NULL;
+			scan->next = (struct homa_socktab_links *)
+				hlist_first_rcu(
+				&scan->socktab->buckets[scan->current_bucket]);
+		}
+		links = scan->next;
+		hsk = links->sock;
+		scan->next = (struct homa_socktab_links *) hlist_next_rcu(
+				&links->hash_links);
+		if (links == &hsk->client_links)
+			return hsk;
+		
+		/* The current links are for the server port. Skip
+		 * them, so we return each socket exactly once (for its
+		 * client port).
+		 */
+	}
+}
+
+/**
  * homa_sock_init() - Constructor for homa_sock objects. This function
  * initializes only the parts of the socket that are owned by Homa.
  * @hsk:    Object to initialize.
@@ -64,19 +129,21 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 /**
  * homa_sock_destroy() - Destructor for home_sock objects. This function
  * only cleans up the parts of the object that are owned by Homa.
- * @hsk:       Object to destroy.
- * @socktab:  Socktab in which @hsk has been registered.
+ * @hsk:       Socket to destroy.
  */
-void homa_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
+void homa_sock_destroy(struct homa_sock *hsk)
 {
 	struct list_head *pos, *next;
 
-	mutex_lock(&socktab->write_lock);
+	if (!hsk->homa)
+		return;
+	mutex_lock(&hsk->homa->port_map.write_lock);
 	hlist_del_rcu(&hsk->client_links.hash_links);
-	if (hsk->server_port != 0) 
+	if (hsk->server_port != 0)
 		hlist_del_rcu(&hsk->server_links.hash_links);
-	mutex_unlock(&socktab->write_lock);
-		
+	mutex_unlock(&hsk->homa->port_map.write_lock);
+	
+	lock_sock((struct sock *) hsk);
 	list_for_each_safe(pos, next, &hsk->client_rpcs) {
 		struct homa_rpc *crpc = list_entry(pos,
 				struct homa_rpc, rpc_links);
@@ -87,7 +154,9 @@ void homa_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
 				rpc_links);
 		homa_rpc_free(srpc);
 	}
+	release_sock((struct sock *) hsk);
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
+	hsk->homa = NULL;
 }
 
 /**

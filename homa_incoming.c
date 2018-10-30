@@ -156,7 +156,7 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
  * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
  * once its socket has been found and locked.
  * @sk:     Homa socket that owns the packet's destination port. Caller must
- *          own the spin lock for this.
+ *          own the spin lock for this and socket must not have been deleted.
  * @skb:    The incoming packet. This function takes ownership of the packet
  *          (we'll ensure that it is eventually freed).
  *

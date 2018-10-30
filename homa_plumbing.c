@@ -269,7 +269,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
-	homa_sock_destroy(hsk, &homa->port_map);
+	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 }
 
@@ -314,6 +314,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		return err;
 
 	lock_sock(sk);
+	if (!hsk->homa) {
+		err = -EBADF;
+		goto error;
+	}
 	while (list_empty(&hsk->ready_rpcs)) {
 		if (noblock) {
 			err = -EAGAIN;
@@ -387,6 +391,10 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
+	if (!hsk->homa) {
+		err = -EBADF;
+		goto done;
+	}
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
 	if (!srpc || (srpc->state != RPC_IN_SERVICE))
@@ -441,6 +449,10 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
+	if (!hsk->homa) {
+		err = -EBADF;
+		goto error;
+	}
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
@@ -701,8 +713,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 				homa_print_ipv4_addr(saddr, buffer), length);
 		goto discard;
 	}
-	printk(KERN_NOTICE "incoming Homa packet: %s\n",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
+//	printk(KERN_NOTICE "incoming Homa packet: %s\n",
+//			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();
@@ -717,6 +729,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		goto discard;
 	}
 	bh_lock_sock_nested(sk);
+	
 	
 	/* Once we've locked the socket we can release the RCU read lock:
 	 * the socket can't go away now. */
@@ -733,6 +746,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 			goto discard;
 		}
 	} else {
+		if (!homa_sk(sk)->homa)
+			goto discard;
 		homa_pkt_dispatch(sk, skb);
 	}
 	bh_unlock_sock(sk);

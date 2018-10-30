@@ -41,7 +41,7 @@ FIXTURE_SETUP(homa_incoming)
 FIXTURE_TEARDOWN(homa_incoming)
 {
 	homa_message_in_destroy(&self->message);
-	mock_sock_destroy(&self->hsk, &self->homa.port_map);
+	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

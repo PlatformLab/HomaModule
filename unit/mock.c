@@ -173,6 +173,23 @@ void dst_release(struct dst_entry *dst)
 	free(dst);
 }
 
+int hrtimer_cancel(struct hrtimer *timer)
+{
+	return 0;
+}
+
+u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
+		ktime_t interval)
+{
+	return 0;
+}
+
+void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
+		  enum hrtimer_mode mode) {}
+
+void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
+		u64 range_ns, const enum hrtimer_mode mode) {}
+
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {
@@ -606,19 +623,10 @@ int mock_skb_count(void)
 }
 
 /**
- * mock_sock_destroy() - Destructor for sockets; cleans up the mocked-out
- * non-Homa parts as well as the Homa parts.
- */
-void mock_sock_destroy(struct homa_sock *hsk, struct homa_socktab *socktab)
-{
-	homa_sock_destroy(hsk, socktab);
-}
-
-/**
  * mock_sock_init() - Constructor for sockets; initializes the Homa-specific
  * part, and mocks out the non-Homa-specific parts.
  * @hsk:          Storage area to be initialized.\
- * @homa:         Overall information about the Oma protocol.
+ * @homa:         Overall information about the Homa protocol.
  * @client_port:  Client-side port number to use for the socket, or 0 to
  *                use default.
  * @server_port:  Server-side port number to use for the socket (or 0).
@@ -627,13 +635,17 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa,
 		int client_port, int server_port)
 {
 	struct sock *sk = (struct sock *) hsk;
+	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
+	if (client_port != 0) {
+		saved_port = homa->next_client_port;
+		homa->next_client_port = client_port;
+	}
 	homa_sock_init(hsk, homa);
 	if (client_port != 0)
-		hsk->client_port = client_port;
+		homa->next_client_port = saved_port;
 	if (server_port != 0)
 		homa_sock_bind(&homa->port_map, hsk, server_port);
-	hsk->server_port = server_port;
 	sk->sk_data_ready = mock_data_ready;
 }
 

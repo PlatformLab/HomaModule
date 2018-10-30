@@ -515,6 +515,7 @@ struct homa_socktab {
  * of a homa_socktab.
  */
 struct homa_socktab_links {
+	/* Must be the first element of the struct! */
 	struct hlist_node hash_links;
 	struct homa_sock *sock;
 };
@@ -536,13 +537,40 @@ static inline int homa_port_hash(__u16 port)
 }
 
 /**
+ * struct homa_socktab_scan - Records the state of an iteration over all
+ * the entries in a homa_socktab, in a way that permits RCU-safe deletion
+ * of entries.
+ */
+struct homa_socktab_scan {
+	/** @socktab: The table that is being scanned. */
+	struct homa_socktab *socktab;
+	
+	/**
+	 * @current_bucket: the index of the bucket in socktab->buckets
+	 * currently being scanned. If >= HOMA_SOCKTAB_BUCKETS, the scan
+	 * is complete.
+	 */
+	int current_bucket;
+	
+	/**
+	 * @next: the next socket to return from homa_socktab_next (this
+	 * socket has not yet been returned). NULL means there are no
+	 * more sockets in the current bucket.
+	 */
+	struct homa_socktab_links *next;
+};
+
+/**
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
 	/** @inet: Generic socket data; must be the first field. */
 	struct inet_sock inet;
 	
-	/** @homa: Overall state about the Homa implementation. */
+	/**
+	 * @homa: Overall state about the Homa implementation. NULL
+	 * means this socket has been deleted.
+	 */
 	struct homa *homa;
 	
 	/**
@@ -990,15 +1018,21 @@ extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);
 extern int      homa_sock_bind(struct homa_socktab *socktab,
 			struct homa_sock *hsk, __u16 port);
-extern void     homa_sock_destroy(struct homa_sock *hsk,
-			struct homa_socktab *socktab);
+extern void     homa_sock_destroy(struct homa_sock *hsk);
 extern struct homa_sock *
 	        homa_sock_find(struct homa_socktab *socktab, __u16 port);
 extern void     homa_sock_init(struct homa_sock *hsk, struct homa *homa);
 extern int      homa_socket(struct sock *sk);
 extern void     homa_socktab_destroy(struct homa_socktab *socktab);
 extern void     homa_socktab_init(struct homa_socktab *socktab);
+extern struct homa_sock
+               *homa_socktab_next(struct homa_socktab_scan *scan);
+extern struct homa_sock
+               *homa_socktab_start_scan(struct homa_socktab *socktab,
+			struct homa_socktab_scan *scan);
 extern char    *homa_symbol_for_type(uint8_t type);
+extern enum hrtimer_restart
+		homa_timer(struct hrtimer *timer);
 extern void     homa_unhash(struct sock *sk);
 extern int      homa_unsched_priority(struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);

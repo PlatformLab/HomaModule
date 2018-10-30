@@ -41,7 +41,7 @@ FIXTURE_SETUP(homa_plumbing)
 }
 FIXTURE_TEARDOWN(homa_plumbing)
 {
-	mock_sock_destroy(&self->hsk, &self->homa.port_map);
+	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 	homa = NULL;
