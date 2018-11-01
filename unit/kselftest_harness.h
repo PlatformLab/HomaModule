@@ -457,6 +457,17 @@ extern void _exit(int status);
 	__EXPECT_STR(expected, seen, !=, 1)
 
 /**
+ * ASSERT_SUBSTR(expected, seen)
+ *
+ * @expected: value expected as a substring of @seen
+ * @seen: measured value
+ *
+ * ASSERT_SUBSTR(expected, measured): strstr(measured, expected) != NULL
+ */
+#define ASSERT_SUBSTR(expected, seen) \
+	__EXPECT_SUBSTR(expected, seen, 1)
+
+/**
  * EXPECT_EQ(expected, seen)
  *
  * @expected: expected value
@@ -574,6 +585,17 @@ extern void _exit(int status);
 #define EXPECT_STRNE(expected, seen) \
 	__EXPECT_STR(expected, seen, !=, 0)
 
+/**
+ * EXPECT_SUBSTR(expected, seen)
+ *
+ * @expected: value expected as a substring of @seen
+ * @seen: measured value
+ *
+ * EXPECT_SUBSTR(expected, measured): strstr(measured, expected) != NULL
+ */
+#define EXPECT_SUBSTR(expected, seen) \
+	__EXPECT_SUBSTR(expected, seen, 0)
+
 #if 0
 /* Support an optional handler after and ASSERT_* or EXPECT_*.  The approach is
  * not thread-safe, but it should be fine in most sane test scenarios.
@@ -613,6 +635,17 @@ extern void _exit(int status);
 	__INC_STEP(_metadata); \
 	if (!(strcmp(__exp, __seen) _t 0))  { \
 		__TH_LOG("Expected '%s' %s '%s'.", __exp, #_t, __seen); \
+		_metadata->passed = 0; \
+		_metadata->trigger = 1; \
+	} \
+} while (0); /* OPTIONAL_HANDLER(_assert) */
+
+#define __EXPECT_SUBSTR(_expected, _seen, _assert) do { \
+	const char *__exp = (_expected); \
+	const char *__seen = (_seen); \
+	__INC_STEP(_metadata); \
+	if (!strstr( __seen, __exp))  { \
+		__TH_LOG("Expected '%s' in '%s'.", __exp, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
 	} \
