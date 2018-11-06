@@ -76,6 +76,7 @@ unsigned long ex_handler_refcount = 0;
 unsigned long phys_base = 0;
 struct net init_net;
 unsigned long volatile jiffies = 1100;
+static struct hrtimer_clock_base clock_base;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -173,6 +174,11 @@ void dst_release(struct dst_entry *dst)
 	free(dst);
 }
 
+void get_random_bytes(void *buf, int nbytes)
+{
+	memset(buf, 0, nbytes);
+}
+
 int hrtimer_cancel(struct hrtimer *timer)
 {
 	return 0;
@@ -184,8 +190,17 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now,
 	return 0;
 }
 
+ktime_t hrtimer_get_time(void)
+{
+	return 0;
+}
+
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
-		  enum hrtimer_mode mode) {}
+		  enum hrtimer_mode mode)
+{
+	timer->base = &clock_base;
+	clock_base.get_time = &hrtimer_get_time;
+}
 
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode) {}
@@ -251,21 +266,14 @@ void inet_unregister_protosw(struct inet_protosw *p) {}
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
-	int priority;
 	if (mock_check_error(&mock_ip_queue_xmit_errors))
 		return -ENETDOWN;
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
-	priority = (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT;
-	if (priority == 0) {
-		priority = 1;
-	} else if (priority == 1) {
-		priority = 0;
-	}
 	unit_log_add_separator("; ");
-	unit_log_printf("xmit %s, P%d", buffer, priority);
+	unit_log_printf("xmit %s", buffer);
 	kfree_skb(skb);
 	return 0;
 }
@@ -420,6 +428,14 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 	return 0;
 }
 
+void *skb_pull(struct sk_buff *skb, unsigned int len)
+{
+	skb->len -= len;
+	if (skb->len < skb->data_len)
+		FAIL("sk_buff underflow during pull");
+	return skb->data += len;
+}
+
 void *skb_put(struct sk_buff *skb, unsigned int len)
 {
 	unsigned char *result = skb_tail_pointer(skb);
@@ -483,6 +499,13 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
 	return 0;
 }
+
+void __tasklet_hi_schedule(struct tasklet_struct *t) {}
+
+void tasklet_init(struct tasklet_struct *t,
+		void (*func)(unsigned long), unsigned long data) {}
+
+void tasklet_kill(struct tasklet_struct *t) {}
 
 void unregister_net_sysctl_table(struct ctl_table_header *header) {}
 
@@ -580,6 +603,9 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		break;
 	case RESEND:
 		header_size = sizeof(struct resend_header);
+		break;
+	case RESTART:
+		header_size = sizeof(struct restart_header);
 		break;
 	case BUSY:
 		header_size = sizeof(struct busy_header);

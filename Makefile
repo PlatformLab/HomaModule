@@ -6,6 +6,7 @@ homa-y = homa_incoming.o \
             homa_peertab.o \
             homa_plumbing.o \
             homa_socktab.o \
+            homa_timer.o \
             homa_utils.o
 
 all:

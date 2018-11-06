@@ -14,31 +14,23 @@
  * @reqlen:     Number of bytes at @request.
  * @dest_addr:  Address of server to which the request should be sent.
  * @addrlen:    Size of @dest_addr in bytes.
- * @response:    First byte of buffer containing the request message.
- * @resplen:     Number of bytes at @request.
+ * @response:   First byte of buffer containing the request message.
+ * @resplen:    Number of bytes at @request.
  * 
  * Return:      The total size of the incoming message. This may be larger
  *              than len, in which case the last bytes of the incoming message
- *              were discarded. A negative value indicates an error. 
+ *              were discarded. If an error occurred, -1 is returned and
+ *              errno is set appropriately. 
  */
-size_t homa_invoke(int sockfd, const void *request, size_t reqlen,
+ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 		const struct sockaddr *dest_addr, size_t addrlen,
 		void *response, size_t resplen)
 {
-	struct homa_args_invoke_ipv4 args;
-	int result;
+	uint64_t id;
 	
-	if (dest_addr->sa_family != AF_INET) {
-		errno = EAFNOSUPPORT;
-		return -EAFNOSUPPORT;
-	}
-	args.request = (void *) request;
-	args.reqlen = reqlen;
-	args.dest_addr = *((struct sockaddr_in *) dest_addr);
-	args.response = response;
-	args.resplen = resplen;
-	result = ioctl(sockfd, HOMAIOCSEND, &args);
-	return result;
+	if (homa_send(sockfd, request, reqlen, dest_addr, addrlen, &id) < 0)
+		return -1;
+	return homa_recv(sockfd, response, resplen, 0, 0, &id);
 }
 
 /**
@@ -47,16 +39,18 @@ size_t homa_invoke(int sockfd, const void *request, size_t reqlen,
  * @sockfd:     File descriptor for the socket on which to receive the message.
  * @buf:        First byte of buffer for the incoming message.
  * @len:        Number of bytes available at @request.
- * @src_addr:   The sender's address will be returned here.
+ * @src_addr:   The sender's IP address will be returned here. If NULL, no
+ *              address information is returned.
  * @addrlen:    Space available at @src_addr, in bytes.
  * @id:         A unique identifier for the RPC associated with the message
  *              will be returned here.
  * 
  * Return:      The total size of the incoming message. This may be larger
  *              than len, in which case the last bytes of the incoming message
- *              were discarded. A negative value indicates an error. 
+ *              were discarded. If an error occurred, -1 is returned and
+ *              errno is set appropriately. 
  */
-size_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
+ssize_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
 		size_t addrlen, uint64_t *id)
 {
 	struct homa_args_recv_ipv4 args;
@@ -69,8 +63,11 @@ size_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
 	args.buf = (void *) buf;
 	args.len = len;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
-	*((struct sockaddr_in *) src_addr) = args.source_addr;
-	*id = args.id;
+	if (result >= 0) {
+		if (src_addr)
+			*((struct sockaddr_in *) src_addr) = args.source_addr;
+		*id = args.id;
+	}
 	return result;
 }
 
@@ -90,10 +87,10 @@ size_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
  * for which no reply has yet been sent; if there is no such active request,
  * then this function does nothing.
  * 
- * Return:      0 means the response has been accepted for delivery. A
- *              negative value indicates an error. 
+ * Return:      0 means the response has been accepted for delivery. If an
+ *              error occurred, -1 is returned and errno is set appropriately.
  */
-size_t homa_reply(int sockfd, const void *response, size_t resplen,
+ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 		const struct sockaddr *dest_addr, size_t addrlen,
 		uint64_t id)
 {
@@ -120,8 +117,8 @@ size_t homa_reply(int sockfd, const void *response, size_t resplen,
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
  * 
- * Return:      0 means the request has been accepted for delivery. A
- *              negative value indicates an error. 
+ * Return:      0 means the request has been accepted for delivery. If an
+ *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *request, size_t reqlen,
 		const struct sockaddr *dest_addr, size_t addrlen,
@@ -139,6 +136,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);
-	*id = args.id;
+	if (result >= 0)
+		*id = args.id;
 	return result;
 }

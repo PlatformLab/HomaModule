@@ -47,19 +47,19 @@ extern "C"
 #define HOMAIOCREPLY  1003104
 #define HOMAIOCABORT  1003105
 
-extern int    homa_send(int sockfd, const void *request, size_t reqlen,
+extern int     homa_send(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			uint64_t *id);
-extern size_t homa_recv(int sockfd, void *buf, size_t len,
+extern ssize_t homa_recv(int sockfd, void *buf, size_t len,
 			struct sockaddr *src_addr, size_t addrlen,
 			uint64_t *id);
-extern size_t homa_invoke(int sockfd, const void *request, size_t reqlen,
+extern ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			void *response, size_t resplen);
-extern size_t homa_reply(int sockfd, const void *response, size_t resplen,
+extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			uint64_t id);
-extern int    homa_abort(int sockfd, uint64_t id);
+extern int     homa_abort(int sockfd, uint64_t id);
 
 /**
  * define homa_args_send_ipv4 - Structure that passes arguments and results

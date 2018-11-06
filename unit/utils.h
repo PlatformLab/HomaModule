@@ -7,6 +7,8 @@ extern struct homa_rpc
 			__be32 client_ip, __be32 server_ip, int server_port,
 			int id, int req_length, int resp_length);
 extern __be32        unit_get_in_addr(char *s);
+extern struct homa_metrics
+                    *unit_get_metrics(void);
 extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_grantables(struct homa *homa);
 extern void          unit_log_message_out_packets(

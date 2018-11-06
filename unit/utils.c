@@ -65,7 +65,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	if (crpc->state == state)
 		return crpc;
 	if (state == RPC_INCOMING)
-		/* Can't get to RPC_INCOMING state for short responses. */
+		/* Can't get to RPC_INCOMING state for responses that
+		 * fit in a single packet.
+		 */
 		goto error;
 	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
 			bytes_received < resp_length;
@@ -102,6 +104,22 @@ __be32 unit_get_in_addr(char *s)
 		return htonl((a<<24) + (b<<16) + (c<<8) + d);
 	}
 	return 0;
+}
+
+/**
+ * unit_get_metrics() - Compile all of the metrics and return a pointer
+ * to the result. Unit tests should use this method rather than just
+ * checking homa_metrics[1] in order to ensure that homa_compile_metrics
+ * will include the desired metric.
+ * 
+ * Result:      Compiled metrics from all cores.
+ */
+struct homa_metrics *unit_get_metrics(void)
+{
+	static struct homa_metrics compiled;
+	
+	homa_compile_metrics(&compiled);
+	return &compiled;
 }
 
 /**
@@ -243,7 +261,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	if (srpc->state == state)
 		return srpc;
 	if (state == RPC_INCOMING)
-		/* Can't get to RPC_INCOMING state for short messages. */
+		/* Can't get to RPC_INCOMING state for messages that require
+		 * only a single packet.
+		 */
 		goto error;
 	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
 			bytes_received < req_length;

@@ -120,6 +120,20 @@ static struct proc_dir_entry *metrics_dir_entry = NULL;
 /* Used to configure sysctl access to Homa configuration parameters.*/
 static struct ctl_table homa_ctl_table[] = {
 	{
+		.procname	= "abort_ticks",
+		.data		= &homa_data.abort_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "cutoff_version",
+		.data		= &homa_data.cutoff_version,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "min_prio",
 		.data		= &homa_data.min_prio,
 		.maxlen		= sizeof(int),
@@ -141,6 +155,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "resend_ticks",
+		.data		= &homa_data.resend_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "rtt_bytes",
 		.data		= &homa_data.rtt_bytes,
 		.maxlen		= sizeof(int),
@@ -148,10 +169,10 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "cutoff_version",
-		.data		= &homa_data.cutoff_version,
-		.maxlen		= sizeof(int),
-		.mode		= 0444,
+		.procname	= "temp",
+		.data		= homa_data.temp,
+		.maxlen		= sizeof(homa_data.temp),
+		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
 	{
@@ -165,7 +186,17 @@ static struct ctl_table homa_ctl_table[] = {
 };
 
 /* Used to remove sysctl values when the module is unloaded. */
-struct ctl_table_header *homa_ctl_header;
+static struct ctl_table_header *homa_ctl_header;
+
+/* Tasklet that does all of the real work for timers. Runs at SOFTIRQ level. */
+static struct tasklet_struct timer_tasklet;
+
+/* IRQ-level timer that triggers timer-based operations such as resends
+ * and aborts. Used only to schedule timer_tasklet. */
+static struct hrtimer hrtimer;
+
+/* Time between consecutive firings of hrtimer. */
+static ktime_t tick_interval;
 
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
@@ -173,6 +204,7 @@ struct ctl_table_header *homa_ctl_header;
  */
 static int __init homa_load(void) {
 	int status;
+	struct timespec ts;
 	
 	printk(KERN_NOTICE "Homa module loading\n");
 	status = proto_register(&homa_prot, 1);
@@ -208,6 +240,14 @@ static int __init homa_load(void) {
 		goto out_cleanup;
 	}
 	
+	tasklet_init(&timer_tasklet, homa_tasklet_handler, 0);
+	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer.function = &homa_hrtimer;
+	ts.tv_nsec = 1000000;                   /* 1 ms */
+	ts.tv_sec = 0;
+	tick_interval = timespec_to_ktime(ts);
+	hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
+	
 	return 0;
 
 out_cleanup:
@@ -226,6 +266,8 @@ out:
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
+	hrtimer_cancel(&hrtimer);
+	tasklet_kill(&timer_tasklet);
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
@@ -332,6 +374,13 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc, ready_links);
 	list_del(&rpc->ready_links);
+	
+	if (rpc->error) {
+		err = rpc->error;
+		rpc->state = RPC_CLIENT_DONE;
+		homa_rpc_free(rpc);
+		goto error;
+	}
 
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
@@ -706,6 +755,15 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	struct sock *sk = NULL;
 	__u16 dport;
 	char buffer[200];
+//	int discard;
+
+//	get_random_bytes(&discard, sizeof(discard));
+//	if ((discard & 0x3ff) < homa->temp[0]) {
+//		INC_METRIC(temp1, 1);
+//		printk(KERN_WARNING "Dropping packet: %s\n",
+//			homa_print_packet_short(skb, buffer, sizeof(buffer)));
+//		goto discard;
+//	}
 
 	if (length < HOMA_MAX_HEADER) {
 		printk(KERN_WARNING "Homa packet from %s too short: "
@@ -726,6 +784,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		printk(KERN_WARNING "Homa packet from %s sent to "
 			"unknown port %u\n",
 			homa_print_ipv4_addr(saddr, buffer), dport);
+		rcu_read_unlock();
 		goto discard;
 	}
 	bh_lock_sock_nested(sk);
@@ -768,7 +827,11 @@ int homa_pkt_recv(struct sk_buff *skb) {
  * Return: Always 0?
  */
 void homa_err_handler(struct sk_buff *skb, u32 info) {
-	printk(KERN_WARNING "unimplemented err_handler invoked on Homa socket\n");
+	int type = icmp_hdr(skb)->type;
+	int code = icmp_hdr(skb)->code;
+	printk(KERN_WARNING "unimplemented err_handler invoked on Homa "
+		"socket, info %x, ICMP type %d, ICMP code %d\n",
+		info, type, code);
 }
 
 /**
@@ -874,4 +937,32 @@ int homa_dointvec_prio(struct ctl_table *table, int write,
 	if (write)
 		homa_prios_changed(homa);
 	return result;
+}
+
+/**
+ * homa_hrtimer() - This function is invoked at regular intervals by the
+ * hrtimer mechanism. Runs at IRQ level.
+ * @timer:   The timer that triggered; not used.
+ * 
+ * Return:   Always HRTIMER_RESTART.
+ */
+enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
+{
+	tasklet_hi_schedule(&timer_tasklet);
+	
+	/* Don't restart here; homa_tasklet_handler will restart the timer
+	 * after it finishes its work (this guarantees a minimum interval
+	 * between invocations, even if the work takes a long time).*/
+	return HRTIMER_NORESTART;
+}
+
+/**
+ * homa_tasklet_handler() - Invoked at SOFTIRQ level to handle timing-
+ * related functions for Homa.
+ * @data:   Not used.
+ */
+void homa_tasklet_handler(unsigned long data)
+{
+	homa_timer(homa);
+	hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
 }

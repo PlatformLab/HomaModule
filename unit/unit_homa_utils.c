@@ -42,7 +42,6 @@ FIXTURE_SETUP(homa_utils)
 }
 FIXTURE_TEARDOWN(homa_utils)
 {
-	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

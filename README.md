@@ -3,19 +3,19 @@ This repo contains an implementation of the Homa transport protocol for Linux.
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
   Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
 
-- The code here is a very early-stage work in progress. As of October 2018, Homa
-  has barely enough functionality to transmit simple RPC requests and responses
-  (see the "invoke" test in tests/homa_test.c for an example), but it is still far
-  from complete. Here is a partial list of functionality that is still missing:
-  - There are no timeouts or retransmissions when packets are lost.
+- The code here is is still a work in progress. As of November 2018, Homa
+  has barely enough functionality to transmit RPC requests and responses
+  (see the "invoke" test in tests/homa_test.c for an example), and it can
+  now handle timeouts and retransmissions, but it is not yet complete.
+  Here is a partial list of functionality that is still missing:
   - The throttling mechanism to limit queueing in source NICs hasn't been
-    implemented.
+    implemented, which SRPT isn't properly implemented on senders.
   - Big chunks of Linux plumbing are still missing (e.g., Homa doesn't yet
     connect with the select or poll mechanisms).
-  - Error returns are very primitive.
-  - Socket buffer memory mangement is very primitive, so large messages (hundreds
-    of KB?) will cause buffer exhaustion and deadlock.
-  - There has been no performance analysis or tuning.
+  - Socket buffer memory management needs more work. Large
+    messages (hundreds of KB?) may cause buffer exhaustion and deadlock.
+  - There has been no performance analysis or tuning, so performance
+    measurements made now are unlikely to be meaningful.
 
 - Linux v4.16.10 is the primary development platform for this code. It is also
   known to work with v4.15.0-38-generic;  other versions of Linux have not been

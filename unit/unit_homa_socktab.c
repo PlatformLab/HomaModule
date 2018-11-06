@@ -19,7 +19,6 @@ FIXTURE_SETUP(homa_socktab)
 }
 FIXTURE_TEARDOWN(homa_socktab)
 {
-	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -151,6 +150,7 @@ TEST_F(homa_socktab, homa_sock_bind)
 			120));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 110));
 	EXPECT_EQ(&self->hsk, homa_sock_find(&self->homa.port_map, 120));
+	homa_sock_destroy(&hsk2);
 }
 
 TEST_F(homa_socktab, homa_sock_find__basics)

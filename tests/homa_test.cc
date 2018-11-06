@@ -110,7 +110,7 @@ void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 	char response[100000];
 	struct sockaddr_in server_addr;
 	int status;
-	size_t resp_length;
+	ssize_t resp_length;
 
 	status = homa_send(fd, request, length, dest,
 			sizeof(*dest), &id);
@@ -149,7 +149,7 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 	char response[100000];
 	struct sockaddr_in server_addr;
 	int status;
-	size_t resp_length;
+	ssize_t resp_length;
 	uint64_t start;
 
 	start = rdtsc();

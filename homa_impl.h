@@ -6,6 +6,7 @@
 #define _HOMA_IMPL_H
 
 #include <linux/audit.h>
+#include <linux/icmp.h>
 #include <linux/if_vlan.h>
 #include <linux/init.h>
 #include <linux/list.h>
@@ -45,9 +46,10 @@ enum homa_packet_type {
 	DATA               = 20,
 	GRANT              = 21,
 	RESEND             = 22,
-	BUSY               = 23,
-	CUTOFFS            = 24,
-	BOGUS              = 25,      /* Used only in unit tests. */
+	RESTART            = 23,
+	BUSY               = 24,
+	CUTOFFS            = 25,
+	BOGUS              = 26,      /* Used only in unit tests. */
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
@@ -239,8 +241,7 @@ struct resend_header {
 	
 	/**
 	 * @length: Number of bytes of data to retransmit; this could specify
-	 * a range longer than the total message size. Ignored if restart is
-	 * non-zero.
+	 * a range longer than the total message size.
 	 */
 	__be32 length;
 	
@@ -248,21 +249,33 @@ struct resend_header {
 	 * @priority: Packet priority to use.
 	 * 
 	 * The sender should transmit all the requested data using this
-	 * priority unless the RESTART flag is present (in which case this
-	 * field is ignored and the sender computes the priority in the
-	 * normal way for unscheduled bytes).
+	 * priority.
 	 */
 	__u8 priority;
-	
-	/**
-	 * @restart: 1 means the server has no knowledge of this request,
-	 * so the client should reset its state and restart the message
-	 * from the beginning.
-	 */
-	__u8 restart;
 } __attribute__((packed));
 _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
 		"resend_header too large");
+
+/**
+ * struct restart_header - Wire format for RESTART packets.
+ *
+ * A RESTART is sent by a server when it receives a RESEND request for
+ * an RPC that is unknown to it. This can occur in two situations. The first
+ * situation is when all of the request packets sent by the client were lost.
+ * The second situation is when the server received the entire request,
+ * processed it, transmitted the response, and discarded its RPC state, but
+ * some of the response packets were lost. A RESTART request indicates to the
+ * client that it should restart the RPC from the beginning, discarding any
+ * partial response received so far and reinitiating transmission of the
+ * request. Note that this can cause an RPC to be executed multiple times
+ * on the server; this is explicitly allowed by the Homa protocol.
+ */
+struct restart_header {
+	/** @common: Fields common to all packet types. */
+	struct common_header common;
+} __attribute__((packed));
+_Static_assert(sizeof(struct restart_header) <= HOMA_MAX_HEADER,
+		"restart_header too large");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -338,14 +351,16 @@ struct homa_message_out {
 	
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
-	 * without waiting for grants.
+	 * without waiting for grants. May be larger than @length;
 	 */
 	int unscheduled;
 	
 	/** 
 	 * @granted: Total number of bytes we are currently permitted to
 	 * send, including unscheduled bytes; must wait for grants before
-	 * sending bytes at or beyond this position. */
+	 * sending bytes at or beyond this position. Never larger than
+	 * @length.
+	 */
 	int granted;
 	
 	/** @priority: Priority level to use for future scheduled packets. */
@@ -380,7 +395,7 @@ struct homa_message_in {
 
         /**
 	 * @granted: Total # of bytes sender has been authorized to transmit
-	 * (including unscheduled bytes).
+	 * (including unscheduled bytes). Never larger than @total_length.
 	 */
         int granted;
 	
@@ -453,6 +468,13 @@ struct homa_rpc {
 	bool is_client;
 	
 	/**
+	 * @error: Only used on clients. If nonzero, then the RPC has
+	 * failed and the value is a negative errno that describes the
+	 * problem.
+	 */
+	int error;
+	
+	/**
 	 * @msgin: Information about the message we receive for this RPC
 	 * (for server RPCs this is the request, for client RPCs this is the
 	 * response).
@@ -485,6 +507,12 @@ struct homa_rpc {
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
+	
+	/**
+	 * @silent_ticks: Number of times homa_timer has been invoked
+	 * since the last time a packet was received for this RPC.
+	 */
+	int silent_ticks;
 };
 
 /**
@@ -682,7 +710,8 @@ struct homa_peer {
 	/**
 	 * @cutoff_version: value of cutoff_version in the most recent
 	 * CUTOFFS packet received from this peer.  0 means we haven't
-	 * yet received a CUTOFFS packet from the host.
+	 * yet received a CUTOFFS packet from the host. Note that this is
+	 * stored in network byte order.
 	 */
 	__be16 cutoff_version;
 	
@@ -780,6 +809,18 @@ struct homa {
 	int max_overcommit;
 	
 	/**
+	 * @retry_ticks: When an RPC's @silent_ticks reaches this value,
+	 * we start sending RESEND requests.
+	 */
+	int resend_ticks;
+	
+	/**
+	 * @abort_ticks: Abort an RPC if its @silent_ticks reaches
+	 * this value.
+	 */
+	int abort_ticks;
+	
+	/**
 	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
 	 * @num_grantable.
 	 */
@@ -824,6 +865,13 @@ struct homa {
 	 * currently exist for the metrics file in /proc.
 	 */
 	int metrics_active_opens;
+	
+	/**
+	 * @temp: the values in this array can be read and written with sysctl.
+	 * They have no officially defined purpose, and are available for
+	 * short-term use during testing.
+	 */
+	int temp[4];
 };
 
 /**
@@ -875,6 +923,28 @@ struct homa_metrics {
 	__u64 packets_received[BOGUS-DATA];
 	
 	/**
+	 * @requests_received: total number of request messages received.
+	 */
+	__u64 requests_received;
+	
+	/**
+	 * @responses_received: total number of response messages received.
+	 */
+	__u64 responses_received;
+	
+	/**
+	 * @timer_cycles: total time spent in homa_timer, as measured with
+	 * get_cycles().
+	 */
+	__u64 timer_cycles;
+
+	/**
+	 * @resent_packets: total number of data packets issued in response to
+	 * RESEND packets.
+	 */
+	__u64 resent_packets;
+	
+	/**
 	 * @peer_hash_links: total # of link traversals in homa_peer_find
 	 * (
 	 */
@@ -913,26 +983,49 @@ struct homa_metrics {
 	__u64 data_xmit_errors;
 	
 	/**
-	 * @unknown_rpc: total number of times a client discarded an
-	 * incoming packet because it referred to a nonexistent RPC.
+	 * @unknown_rpc: total number of times an incoming packet was
+	 * discarded because it referred to a nonexistent RPC.
 	 */
-	__u64 unknown_rpc;
+	__u64 unknown_rpcs;
 	
 	/**
 	 * @cant_create_server_rpc: total number of times a server discarded
 	 * incoming packet because it couldn't create a homa_rpc object.
 	 */
-	__u64 server_cant_create_rpc;
+	__u64 server_cant_create_rpcs;
 	
 	/**
 	 * @unknown_packet_type: total number of times a packet was discarded
 	 * because its type wasn't one of the supported values.
 	 */
-	__u64 unknown_packet_type;
+	__u64 unknown_packet_types;
+	
+	/**
+	 * @client_rpc_timeouts: total number of times an RPC was aborted on
+	 * the client side because of a timeout.
+	 */
+	
+	__u64 client_rpc_timeouts;
+	
+	/**
+	 * @server_rpc_timeouts: total number of times an RPC was aborted on
+	 * the server side because of a timeout.
+	 */
+	
+	__u64 server_rpc_timeouts;
+	
+	/**
+	 * @temp1: this value, and the others below it, are reserved for
+	 * temporary use during testing.
+	 */
+	__u64 temp1;
+	__u64 temp2;
+	__u64 temp3;
+	__u64 temp4;
 };
 
 #define INC_METRIC(metric, count) \
-		(homa_metrics[smp_processor_id()]->metric) += count
+		(homa_metrics[smp_processor_id()]->metric) += (count)
 
 extern struct homa_metrics *homa_metrics[NR_CPUS];
 
@@ -960,10 +1053,14 @@ extern struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk, __be32 saddr,
 			__u16 sport, __u64 id);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
+extern void     homa_get_resend_range(struct homa_message_in *msgin,
+			struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, int __user *option);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_hash(struct sock *sk);
+extern enum hrtimer_restart
+		homa_hrtimer(struct hrtimer *timer);
 extern int      homa_init(struct homa *homa);
 extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
@@ -980,6 +1077,7 @@ extern int      homa_message_out_init(struct homa_message_out *msgout,
 			struct homa_sock *hsk, struct iov_iter *iter,
 			size_t len, struct homa_peer *dest, __u16 dport,
 			__u16 sport, __u64 id);
+extern void     homa_message_out_reset(struct homa_message_out *msgout);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);
@@ -1007,6 +1105,13 @@ extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_from_grantable(struct homa *homa,
 			struct homa_rpc *rpc);
+extern void     homa_resend_data(struct homa_message_out *msgout, int start,
+			int end, struct sock *sk, struct homa_peer *peer,
+			int priority);
+extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+			struct homa_sock *hsk);
+extern void     homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
@@ -1036,8 +1141,8 @@ extern struct homa_sock
                *homa_socktab_start_scan(struct homa_socktab *socktab,
 			struct homa_socktab_scan *scan);
 extern char    *homa_symbol_for_type(uint8_t type);
-extern enum hrtimer_restart
-		homa_timer(struct hrtimer *timer);
+extern void     homa_tasklet_handler(unsigned long data);
+extern void	homa_timer(struct homa *homa);
 extern void     homa_unhash(struct sock *sk);
 extern int      homa_unsched_priority(struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
@@ -1045,7 +1150,11 @@ extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
+extern int      __homa_xmit_control(void *contents, size_t length,
+			struct homa_peer *peer, struct homa_sock *hsk);
 extern void     homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
 			struct homa_peer *peer);
+extern void     __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
+		struct homa_peer *peer);
 
 #endif /* _HOMA_IMPL_H */

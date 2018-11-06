@@ -41,7 +41,6 @@ FIXTURE_SETUP(homa_plumbing)
 }
 FIXTURE_TEARDOWN(homa_plumbing)
 {
-	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 	homa = NULL;

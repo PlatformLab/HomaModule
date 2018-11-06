@@ -23,7 +23,13 @@ void homa_socktab_init(struct homa_socktab *socktab)
  */
 void homa_socktab_destroy(struct homa_socktab *socktab)
 {
-	/* Currently don't need to do anything. */
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	
+	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk !=  NULL;
+			hsk = homa_socktab_next(&scan)) {
+		homa_sock_destroy(hsk);
+	}
 }
 
 /**
@@ -31,7 +37,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
  * in a socktab.
  * @socktab:   Socktab to scan.
  * @scan:      Will hold the current state of the scan; any existing
- *             are discarded.
+ *             contents are discarded.
  *
  * Return:     The first socket in the table, or NULL if the table is
  *             empty.
@@ -56,8 +62,8 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 }
 
 /**
- * homa_starttab_next() = Return the next socket in an iteration over a socktab.
- * @scan:      Holds state of the scan.
+ * homa_starttab_next() - Return the next socket in an iteration over a socktab.
+ * @scan:      State of the scan.
  *
  * Return:     The next socket in the table, or NULL if the iteration has
  *             returned all of the sockets in the table. Sockets are not

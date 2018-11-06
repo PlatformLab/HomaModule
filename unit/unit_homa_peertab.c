@@ -19,7 +19,6 @@ FIXTURE_SETUP(homa_peertab)
 FIXTURE_TEARDOWN(homa_peertab)
 {
 	homa_peertab_destroy(&self->peertab);
-	homa_sock_destroy(&self->hsk);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

@@ -38,6 +38,7 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_peertab.c \
 	      unit_homa_plumbing.c \
 	      unit_homa_socktab.c \
+	      unit_homa_timer.c \
 	      unit_homa_utils.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 	
@@ -46,6 +47,7 @@ HOMA_SRCS :=  homa_incoming.c \
 	      homa_peertab.c \
 	      homa_plumbing.c \
 	      homa_socktab.c \
+	      homa_timer.c \
 	      homa_utils.c
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
 	

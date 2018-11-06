@@ -16,6 +16,8 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	__skb_queue_head_init(&msgin->packets);
 	msgin->bytes_remaining = length;
 	msgin->granted = unscheduled;
+	if (msgin->granted > msgin->total_length)
+		msgin->granted = msgin->total_length;
 	msgin->priority = 0;
 	msgin->scheduled = length > unscheduled;
 	if (length < 4096) {
@@ -153,6 +155,62 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 }
 
 /**
+ * homa_get_resend_range() - Given a message for which some input data
+ * is missing, find the first range of missing data.
+ * @msgin:     Message for which not all granted data has been received.
+ * @resend:    The @offset and @length fields of this structure will be
+ *             filled in with information about the first missing range
+ *             in @msgin.
+ */
+void homa_get_resend_range(struct homa_message_in *msgin,
+		struct resend_header *resend)
+{
+	struct sk_buff *skb;
+	int missing_bytes;
+	/* This will eventually be the top of the first missing range. */
+	int end_offset;
+	
+	if (msgin->total_length < 0) {
+		/* Haven't received any data for this message; request
+		 * retransmission of just the first packet.
+		 */
+		resend->offset = 0;
+		resend->length = htonl(HOMA_MAX_DATA_PER_PACKET);
+		return;
+	}
+	
+	missing_bytes = msgin->bytes_remaining
+			- (msgin->total_length - msgin->granted);
+	end_offset = msgin->granted;
+	
+	/* Basic idea: walk backwards through the message's packets until
+	 * we have accounted for all missing bytes; this will identify
+	 * the first missing range.
+	 */
+	skb_queue_reverse_walk(&msgin->packets, skb) {
+		int offset = ntohl(((struct data_header *) skb->data)->offset);
+		int pkt_length, gap;
+		
+		pkt_length = msgin->total_length - offset;
+		if (pkt_length > HOMA_MAX_DATA_PER_PACKET) {
+			pkt_length = HOMA_MAX_DATA_PER_PACKET;
+		}
+		gap = end_offset - (offset + pkt_length);
+		missing_bytes -= gap;
+		if (missing_bytes == 0) {
+			resend->offset = htonl(offset + pkt_length);
+			resend->length = htonl(gap);
+			return;
+		}
+		end_offset = offset;
+	}
+	
+	/* The first packet(s) are missing. */
+	resend->offset = 0;
+	resend->length = htonl(missing_bytes);
+}
+
+/**
  * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
  * once its socket has been found and locked.
  * @sk:     Homa socket that owns the packet's destination port. Caller must
@@ -181,21 +239,22 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 						"couldn't create server rpc: "
 						"error %lu",
 						-PTR_ERR(rpc));
-				INC_METRIC(server_cant_create_rpc, 1);
+				INC_METRIC(server_cant_create_rpcs, 1);
 				goto discard;
 			}
+			INC_METRIC(requests_received, 1);
 		}
 	} else {
 		rpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
 	}
 	if (unlikely(rpc == NULL)) {
-		if (h->type == CUTOFFS) {
-			homa_cutoffs_pkt(skb, hsk);
-			return 0;
+		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
+			INC_METRIC(unknown_rpcs, 1);
+			goto discard;
 		}
-		INC_METRIC(unknown_rpc, 1);
-		goto discard;
-	}	
+	} else {
+		rpc->silent_ticks = 0;
+	}
 	
 	switch (h->type) {
 	case DATA:
@@ -208,16 +267,24 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		break;
 	case RESEND:
 		INC_METRIC(packets_received[RESEND - DATA], 1);
-		goto discard;
+		homa_resend_pkt(skb, rpc, hsk);
+		break;
+	case RESTART:
+		INC_METRIC(packets_received[RESTART - DATA], 1);
+		homa_restart_pkt(skb, rpc);
+		break;
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
+		/* Nothing to do for these packets except reset silent_ticks,
+		 * which happened above.
+		 */
 		goto discard;
 	case CUTOFFS:
 		INC_METRIC(packets_received[CUTOFFS - DATA], 1);
 		homa_cutoffs_pkt(skb, hsk);
 		break;
 	default:
-		INC_METRIC(unknown_packet_type, 1);
+		INC_METRIC(unknown_packet_types, 1);
 		goto discard;
 	}
 	return 0;
@@ -231,8 +298,7 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
  * homa_data_pkt() - Handler for incoming DATA packets
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
- * @rpc:     Information about the RPC corresponding to this packet, or NULL
- *           if no such data currently exists.
+ * @rpc:     Information about the RPC corresponding to this packet.
  * 
  * This method may change the RPC's state to RPC_READY.
  */
@@ -247,6 +313,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
 				ntohl(h->unscheduled));
+		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
 	}
 	homa_add_packet(&rpc->msgin, skb);
@@ -258,7 +325,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_rpcs);
 		sk->sk_data_ready(sk);
 	}
-	if (ntohl(h->cutoff_version) != homa->cutoff_version) {
+	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
 		 * to resend CUTOFFS packets if one gets lost, but we don't
 		 * want to send multiple CUTOFFS packets when a stream of
@@ -295,12 +362,87 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
-		if (new_offset > rpc->msgout.granted)
+		if (new_offset > rpc->msgout.granted) {
 			rpc->msgout.granted = new_offset;
+			if (new_offset > rpc->msgout.length)
+				rpc->msgout.granted = rpc->msgout.length;
+		}
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
 				rpc->peer);
 	}
+	kfree_skb(skb);
+}
+
+/**
+ * homa_resend_pkt() - Handler for incoming RESEND packets
+ * @skb:     Incoming packet; size already verified large enough for header.
+ *           This function now owns the packet.
+ * @rpc:     Information about the RPC corresponding to this packet; NULL
+ *           if the packet doesn't belong to an existing RPC.
+ * @hsk:     Socket on which the packet was received.
+ */
+void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+		struct homa_sock *hsk)
+{
+	struct resend_header *h = (struct resend_header *) skb->data;
+	struct busy_header busy;
+
+	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
+		/* We are the server for this RPC. */
+		if (rpc == NULL) {
+			/* Send RESTART. */
+			struct restart_header restart;
+			struct homa_peer *peer;
+			restart.common.sport = h->common.dport;
+			restart.common.dport = h->common.sport;
+			restart.common.id = h->common.id;
+			restart.common.type = RESTART;
+			peer = homa_peer_find(&hsk->homa->peers,
+					ip_hdr(skb)->saddr, &hsk->inet);
+			if (IS_ERR(peer))
+				goto done;
+			__homa_xmit_control(&restart, sizeof(restart), peer,
+					hsk);
+			goto done;
+		}
+		if (rpc->state != RPC_OUTGOING) {
+			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+			goto done;
+		}
+	} else {
+		/* We are the client for this RPC. */
+		if (rpc->state != RPC_OUTGOING)
+			goto done;
+	}
+	if (rpc->msgout.next_offset < rpc->msgout.granted) {
+		/* We have chosen not to transmit data from this message;
+		 * send BUSY instead.
+		 */
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+	} else {
+		homa_resend_data(&rpc->msgout, ntohl(h->offset),
+				ntohl(h->offset) + ntohl(h->length),
+				(struct sock *) rpc->hsk, rpc->peer,
+				h->priority);
+	}
+		
+    done:
+	kfree_skb(skb);
+}
+
+/**
+ * homa_restart_pkt() - Handler for incoming RESTART packets.
+ * @skb:     Incoming packet; size known to be large enough for the header.
+ *           This function now owns the packet.
+ * @rpc:     Information about the RPC corresponding to this packet.
+ */
+void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+{
+	homa_message_in_destroy(&rpc->msgin);
+	homa_message_out_reset(&rpc->msgout);
+	rpc->state = RPC_OUTGOING;
+	homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk, rpc->peer);
 	kfree_skb(skb);
 }
 
@@ -446,4 +588,19 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 		list_del_init(&rpc->grantable_links);
 	}
 	spin_unlock_bh(&homa->grantable_lock);
+}
+
+/**
+ * homa_rpc_abort() - Terminate an RPC and arrange for an error to be returned
+ * to the application.
+ * @crpc:    RPC to be terminated. Must be a client RPC (@is_client != 0).
+ * @error:   A negative errno value indicating the error that caused the abort.
+ */
+void homa_rpc_abort(struct homa_rpc *crpc, int error)
+{
+	struct sock *sk = (struct sock *) crpc->hsk;
+	crpc->error = error;
+	crpc->state = RPC_READY;
+	list_add_tail(&crpc->ready_links, &crpc->hsk->ready_rpcs);
+	sk->sk_data_ready(sk);
 }

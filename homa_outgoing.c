@@ -5,7 +5,7 @@
 #include "homa_impl.h"
 
 /**
- * set_priority(): Arrange for a packet to have a VLAN header that
+ * set_priority() - Arrange for a packet to have a VLAN header that
  * specifies a priority for the packet.
  * @skb:        The packet was priority should be set.
  * @priority:   Priority level for the packet, in the range 0 (for lowest
@@ -64,6 +64,8 @@ int homa_message_out_init(struct homa_message_out *msgout,
 	/* This is a temporary guess; must handle better in the future. */
 	msgout->unscheduled = hsk->homa->rtt_bytes;
 	msgout->granted = msgout->unscheduled;
+	if (msgout->granted > msgout->length)
+		msgout->granted = msgout->length;
 	msgout->sched_priority = 0;
 	
 	/* Copy message data from user space and form packet buffers. */
@@ -93,6 +95,7 @@ int homa_message_out_init(struct homa_message_out *msgout,
 		h->message_length = htonl(msgout->length);
 		h->offset = htonl(msgout->length - bytes_left);
 		h->unscheduled = htonl(msgout->unscheduled);
+		h->cutoff_version = dest->cutoff_version;
 		h->retransmit = 0;
 		err = skb_add_data_nocache((struct sock *) hsk, skb, iter,
 				cur_size);
@@ -100,8 +103,6 @@ int homa_message_out_init(struct homa_message_out *msgout,
 			kfree_skb(skb);
 			goto error;
 		}
-		dst_hold(dest->dst);
-		skb_dst_set(skb, dest->dst);
 		*last_link = skb;
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
@@ -112,6 +113,22 @@ int homa_message_out_init(struct homa_message_out *msgout,
     error:
 	homa_message_out_destroy(msgout);
 	return err;
+}
+
+/**
+ * homa_message_out_reset() - Reset a homa_message_out to its initial state,
+ * as if no packets had been sent. Data for the message is preserved.
+ * @msgout:    Struct to reset. Must have been successfully initialized in
+ *             the past, and some packets may have been transmitted since
+ *             then.
+ */
+void homa_message_out_reset(struct homa_message_out *msgout)
+{
+	msgout->next_packet = msgout->packets;
+	msgout->next_offset = 0;
+	msgout->granted = msgout->unscheduled;
+	if (msgout->granted > msgout->length)
+		msgout->granted = msgout->length;
 }
 
 /**
@@ -131,7 +148,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 }
 
 /**
- * homa_set_priority(): Arrange for a packet to have a VLAN header that
+ * homa_set_priority() - Arrange for a packet to have a VLAN header that
  * specifies a priority for the packet.
  * @skb:        The packet was priority should be set.
  * @priority:   Priority level for the packet, in the range 0 (for lowest
@@ -159,6 +176,34 @@ void homa_set_priority(struct sk_buff *skb, int priority)
 int homa_xmit_control(enum homa_packet_type type, void *contents,
 	size_t length, struct homa_rpc *rpc)
 {
+	struct common_header *h = (struct common_header *) contents;
+	h->type = type;
+	if (rpc->is_client) {
+		h->sport = htons(rpc->hsk->client_port);
+	} else {
+		h->sport = htons(rpc->hsk->server_port);
+	}
+	h->dport = htons(rpc->dport);
+	h->id = rpc->id;
+	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
+}
+
+/**
+ * __homa_xmit_control() - Lower-level version of homa_xmit_control: sends
+ * a control packet.
+ * @contents:  Address of buffer containing the contents of the packet.
+ *             The caller must have filled in all of the information,
+ *             including the common header.
+ * @length:    Length of @contents.
+ * @peer:      Destination to which the packet will be sent.
+ * @hsk:       Socket via which the packet will be sent.
+ * 
+ * Return:     Either zero (for success), or a negative errno value if there
+ *             was a problem.
+ */
+int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
+		struct homa_sock *hsk)
+{
 	struct common_header *h;
 	int extra_bytes;
 	int result;
@@ -172,24 +217,15 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	extra_bytes = HOMA_MAX_HEADER - length;
 	if (extra_bytes > 0)
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
-	h->type = type;
-	if (rpc->is_client) {
-		h->sport = htons(rpc->hsk->client_port);
-	} else {
-		h->sport = htons(rpc->hsk->server_port);
-	}
-	h->dport = htons(rpc->dport);
-	h->id = rpc->id;
-	set_priority(skb, rpc->hsk->homa->max_prio);
-	dst_hold(rpc->peer->dst);
-	skb_dst_set(skb, rpc->peer->dst);
-	result = ip_queue_xmit((struct sock *) rpc->hsk, skb,
-			&rpc->peer->flow);
+	set_priority(skb, hsk->homa->max_prio);
+	dst_hold(peer->dst);
+	skb_dst_set(skb, peer->dst);
+	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
 		kfree_skb(skb);
 	}
-	INC_METRIC(packets_sent[type - DATA], 1);
+	INC_METRIC(packets_sent[h->type - DATA], 1);
 	return result;
 }
 
@@ -205,22 +241,108 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
 		struct homa_peer *peer)
 {
 	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
-		int err;
 		int priority;
+		struct sk_buff *skb = msgout->next_packet;
+		struct data_header *h = (struct data_header *)
+				skb_transport_header(skb);
+		
+		msgout->next_packet = *homa_next_skb(skb);
 		if (msgout->next_offset < msgout->unscheduled) {
 			priority = homa_unsched_priority(peer, msgout->length);
 		} else {
 			priority = msgout->sched_priority;
 		}
-		set_priority(msgout->next_packet, priority);
-		skb_get(msgout->next_packet);
-		err = ip_queue_xmit(sk, msgout->next_packet, &peer->flow);
-		if (err) {
-			INC_METRIC(data_xmit_errors, 1);
-			kfree_skb(msgout->next_packet);
+		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET;
+		
+		if (skb_shared(skb)) {
+			/* The packet is still being transmitted due to a
+			 * previous call to this function; no need to do
+			 * anything here (and it may not be safe to retransmit
+			 * it, or modify it, in this state).
+			 */
+			continue;
 		}
-		msgout->next_packet = *homa_next_skb(msgout->next_packet);
-		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET; 
-		INC_METRIC(packets_sent[0], 1);
+		set_priority(skb, priority);
+		
+		/* Reset retransmit in case the packet was previously
+		 * retransmitted but we're now restarting from the
+		 * beginning.
+		 */
+		h->retransmit = 0;
+		
+		__homa_xmit_data(skb, sk, peer); 
+	}
+}
+
+/**
+ * __homa_xmit_data() - Handles packet transmission stuff that is common
+ * to homa_xmit_data and homa_resend_data.
+ * @skb:    Packet to be sent. Will be freed, either by the underlying
+ *          transmission code, or by this function if an error occurs.
+ * @sk:     Socket over which to send the packet.
+ * @peer:   Information about the packet's destination.
+ */
+void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
+		struct homa_peer *peer)
+{
+	int err;
+	struct data_header *h = (struct data_header *)
+			skb_transport_header(skb);
+
+	/* Update cutoff_version in case it has changed since the
+	 * message was initially created.
+	 */
+	h->cutoff_version = peer->cutoff_version;
+
+	skb_get(skb);
+	dst_hold(peer->dst);
+	skb_dst_set(skb, peer->dst);
+
+	/* Strip headers in front of the transport header (needed if
+	 * the packet is being retransmitted).
+	 */
+	if (skb_transport_offset(skb) > 0)
+		skb_pull(skb, skb_transport_offset(skb));
+	err = ip_queue_xmit(sk, skb, &peer->flow);
+	if (err) {
+		INC_METRIC(data_xmit_errors, 1);
+		kfree_skb(skb);
+	}
+	INC_METRIC(packets_sent[0], 1);
+}
+
+/**
+ * homa_resend_data() - This function is invoked as part of handling RESEND
+ * requests. It retransmits the packets containing a given range of bytes
+ * from a message.
+ * @msgout:   Message containing the packets.
+ * @start:    Offset within @msgout of the first byte to retransmit.
+ * @end:      Offset within @msgout of the byte just after the last one
+ *            to retransmit.
+ * @sk:       Socket to use for transmission.
+ * @peer:     Information about the destination.
+ * @priority: Priority level to use for the retransmitted data packets.
+ */
+void homa_resend_data(struct homa_message_out *msgout, int start, int end,
+		struct sock *sk, struct homa_peer *peer, int priority)
+{
+	struct sk_buff *skb;
+	
+	for (skb = msgout->packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
+		struct data_header *h = (struct data_header *)
+				skb_transport_header(skb);
+		int offset = ntohl(h->offset);
+		
+		if ((offset + HOMA_MAX_DATA_PER_PACKET) <= start)
+			continue;
+		if (offset >= end)
+			break;
+		/* See comments in homa_xmit_data for code below. */
+		if (skb_shared(skb))
+			continue;
+		h->retransmit = 1;
+		set_priority(skb, priority);
+		__homa_xmit_data(skb, sk, peer);
+		INC_METRIC(resent_packets, 1);
 	}
 }

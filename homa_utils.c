@@ -38,6 +38,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
 	crpc->state = RPC_OUTGOING;
+	crpc->error = 0;
 	crpc->is_client = true;
 	crpc->msgin.total_length = -1;
 	err = homa_message_out_init(&crpc->msgout, hsk, iter,
@@ -47,6 +48,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		goto error;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
 	INIT_LIST_HEAD(&crpc->grantable_links);
+	crpc->silent_ticks = 0;
 	return crpc;
 	
     error:
@@ -84,12 +86,14 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = h->common.id;
 	srpc->state = RPC_INCOMING;
+	srpc->error = 0;
 	srpc->is_client = false;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->unscheduled));
 	srpc->msgout.length = -1;
 	list_add(&srpc->rpc_links, &hsk->server_rpcs);
 	INIT_LIST_HEAD(&srpc->grantable_links);
+	srpc->silent_ticks = 0;
 	return srpc;
 }
 
@@ -246,6 +250,8 @@ int homa_init(struct homa *homa)
 	homa->cutoff_version = 1;
 #endif
 	homa->max_overcommit = 8;
+	homa->resend_ticks = 2;
+	homa->abort_ticks = 8;
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable = 0;
@@ -327,10 +333,11 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 		struct data_header *h = (struct data_header *)
 				skb->data;
 		snprintf(pos, space_left,
-				", message_length %d, offset %d, unscheduled %d%s",
+				", message_length %d, offset %d, "
+				"unscheduled %d, cutoff_version %d%s",
 				ntohl(h->message_length), ntohl(h->offset),
-				ntohl(h->unscheduled),
-				h->retransmit ? " RETRANSMIT" : "");
+				ntohl(h->unscheduled), ntohs(h->cutoff_version),
+				h->retransmit ? ", RETRANSMIT" : "");
 		break;
 	}
 	case GRANT: {
@@ -342,11 +349,14 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 	case RESEND: {
 		struct resend_header *h = (struct resend_header *) skb->data;
 		snprintf(pos, space_left,
-				", offset %d, length %d, resend_prio %u%s",
+				", offset %d, length %d, resend_prio %u",
 				ntohl(h->offset), ntohl(h->length),
-				h->priority, h->restart ? ", RESTART" : "");
+				h->priority);
 		break;
 	}
+	case RESTART:
+		/* Nothing to add here. */
+		break;
 	case BUSY:
 		/* Nothing to add here. */
 		break;
@@ -381,28 +391,39 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
  */
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
 {
-	struct common_header *common = (struct common_header *) skb->data;
+	struct common_header *common =
+			(struct common_header *) skb_transport_header(skb);
+	int priority = (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT;
+	if (priority == 0) {
+		priority = 1;
+	} else if (priority == 1) {
+		priority = 0;
+	}
 	switch (common->type) {
 	case DATA: {
-		struct data_header *h = (struct data_header *) skb->data;
-		snprintf(buffer, length, "DATA%s %d/%d",
+		struct data_header *h = (struct data_header *) common;
+		snprintf(buffer, length, "DATA%s %d/%d P%d",
 				h->retransmit ? " retrans" : "",
-				ntohl(h->offset), ntohl(h->message_length));
+				ntohl(h->offset), ntohl(h->message_length),
+				priority);
 		break;
 	}
 	case GRANT: {
-		struct grant_header *h = (struct grant_header *) skb->data;
+		struct grant_header *h = (struct grant_header *) common;
 		snprintf(buffer, length, "GRANT %d@%d", ntohl(h->offset),
 				h->priority);
 		break;
 	}
 	case RESEND: {
-		struct resend_header *h = (struct resend_header *) skb->data;
+		struct resend_header *h = (struct resend_header *) common;
 		snprintf(buffer, length, "RESEND %d-%d@%d", ntohl(h->offset),
 				ntohl(h->offset) + ntohl(h->length) - 1,
 				h->priority);
 		break;
 	}
+	case RESTART:
+		snprintf(buffer, length, "RESTART");
+		break;
 	case BUSY:
 		snprintf(buffer, length, "BUSY");
 		break;
@@ -433,6 +454,8 @@ char *homa_symbol_for_type(uint8_t type)
 		return "GRANT";
 	case RESEND:
 		return "RESEND";
+	case RESTART:
+		return "RESTART";
 	case BUSY:
 		return "BUSY";
 	case CUTOFFS:
@@ -472,15 +495,25 @@ void homa_compile_metrics(struct homa_metrics *m)
 			m->packets_received[j-DATA] +=
 					cm->packets_received[j-DATA];
 		}
+		m->requests_received += cm->requests_received;
+		m->responses_received += cm->responses_received;
+		m->timer_cycles += cm->timer_cycles;
+		m->resent_packets += cm->resent_packets;
 		m->peer_hash_links += cm->peer_hash_links;
 		m->peer_new_entries += cm->peer_new_entries;
 		m->peer_kmalloc_errors += cm->peer_kmalloc_errors;
 		m->peer_route_errors += cm->peer_route_errors;
 		m->control_xmit_errors += cm->control_xmit_errors;
 		m->data_xmit_errors += cm->data_xmit_errors;
-		m->unknown_rpc += cm->unknown_rpc;
-		m->server_cant_create_rpc += cm->server_cant_create_rpc;
-		m->unknown_packet_type += cm->unknown_packet_type;
+		m->unknown_rpcs += cm->unknown_rpcs;
+		m->server_cant_create_rpcs += cm->server_cant_create_rpcs;
+		m->unknown_packet_types += cm->unknown_packet_types;
+		m->client_rpc_timeouts += cm->client_rpc_timeouts;
+		m->server_rpc_timeouts += cm->server_rpc_timeouts;
+		m->temp1 += cm->temp1;
+		m->temp2 += cm->temp2;
+		m->temp3 += cm->temp3;
+		m->temp4 += cm->temp4;
 	}
 }
 
@@ -571,24 +604,40 @@ char *homa_print_metrics(struct homa *homa)
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_sent_%-6s    %15llu  "
+				"packets_sent_%-7s   %15llu  "
 				"%s packets sent\n",
 				symbol, m.packets_sent[i-DATA], symbol);
 	}
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,
-				"packets_rcvd_%-6s    %15llu  "
+				"packets_rcvd_%-7s   %15llu  "
 				"%s packets received\n",
 				symbol, m.packets_received[i-DATA], symbol);
 	}
 	homa_append_metric(homa,
+			"requests_received      %15llu  "
+			"Incoming request messages\n",
+			m.requests_received);
+	homa_append_metric(homa,
+			"responses_received     %15llu  "
+			"Incoming response messages\n",
+			m.responses_received);
+	homa_append_metric(homa,
+			"timer_cycles           %15llu  "
+			"Time spent in homa_timer (measured with get_cycles)\n",
+			m.timer_cycles);
+	homa_append_metric(homa,
+			"resent_packets         %15llu  "
+			"DATA packets sent in response to RESENDs\n",
+			m.resent_packets);
+	homa_append_metric(homa,
 			"peer_hash_links        %15llu  "
-			"hash chain link traversals in peer table\n",
+			"Hash chain link traversals in peer table\n",
 			m.peer_hash_links);
 	homa_append_metric(homa,
 			"peer_new_entries       %15llu  "
-			"new entries created in peer table\n",
+			"New entries created in peer table\n",
 			m.peer_new_entries);
 	homa_append_metric(homa,
 			"peer_kmalloc_errors    %15llu  "
@@ -596,28 +645,52 @@ char *homa_print_metrics(struct homa *homa)
 			m.peer_kmalloc_errors);
 	homa_append_metric(homa,
 			"peer_route_errors      %15llu  "
-			"routing failures creating peer table entries\n",
+			"Routing failures creating peer table entries\n",
 			m.peer_route_errors);
 	homa_append_metric(homa,
 			"control_xmit_errors    %15llu  "
-			"errors sending control packets\n",
-			m.peer_route_errors);
+			"Errors sending control packets\n",
+			m.control_xmit_errors);
 	homa_append_metric(homa,
 			"data_xmit_errors       %15llu  "
-			"errors sending data packets\n",
-			m.peer_route_errors);
+			"Errors sending data packets\n",
+			m.data_xmit_errors);
 	homa_append_metric(homa,
-			"unknown_rpc            %15llu  "
-			"packets discarded because RPC is unknown\n",
-			m.peer_route_errors);
+			"unknown_rpcs           %15llu  "
+			"Packets discarded because RPC is unknown\n",
+			m.unknown_rpcs);
 	homa_append_metric(homa,
-			"server_cant_create_rpc %15llu  "
-			"packets discarded because server couldn't create RPC\n",
-			m.peer_route_errors);
+			"server_cant_create_rpcs%15llu  "
+			"Packets discarded because server couldn't create RPC\n",
+			m.server_cant_create_rpcs);
 	homa_append_metric(homa,
-			"unknown_packet_type    %15llu  "
-			"packets discarded because of unsupported type\n",
-			m.peer_route_errors);
+			"unknown_packet_types   %15llu  "
+			"Packets discarded because of unsupported type\n",
+			m.unknown_packet_types);
+	homa_append_metric(homa,
+			"client_rpc_timeouts    %15llu  "
+			"RPCs aborted by client because of timeout\n",
+			m.client_rpc_timeouts);
+	homa_append_metric(homa,
+			"server_rpc_timeouts    %15llu  "
+			"RPCs aborted by server because of timeout\n",
+			m.server_rpc_timeouts);
+	homa_append_metric(homa,
+			"temp1                  %15llu  "
+			"Temporary use in testing\n",
+			m.temp1);
+	homa_append_metric(homa,
+			"temp2                  %15llu  "
+			"Temporary use in testing\n",
+			m.temp2);
+	homa_append_metric(homa,
+			"temp3                  %15llu  "
+			"Temporary use in testing\n",
+			m.temp3);
+	homa_append_metric(homa,
+			"temp4                  %15llu  "
+			"Temporary use in testing\n",
+			m.temp4);
 	
 	return homa->metrics;
 }
