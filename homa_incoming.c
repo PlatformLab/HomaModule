@@ -20,10 +20,10 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		msgin->granted = msgin->total_length;
 	msgin->priority = 0;
 	msgin->scheduled = length > unscheduled;
-	if (length < 4096) {
-		INC_METRIC(small_msg_bytes[length >> 6], length);
-	} else if (length < 0x10000) {
-		INC_METRIC(medium_msg_bytes[length >> 10], length);
+	if (length <= 4096) {
+		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
+	} else if (length <= 0x10000) {
+		INC_METRIC(medium_msg_bytes[(length-1) >> 10], length);
 	} else {
 		INC_METRIC(large_msg_bytes, length);
 	}

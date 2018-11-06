@@ -576,31 +576,29 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 char *homa_print_metrics(struct homa *homa)
 {
 	struct homa_metrics m;
-	int i;
-	__u64 total_bytes = 0;
+	int i, lower = 0;
 	
 	homa_compile_metrics(&m);
 	homa->metrics_length = 0;
 	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
-		total_bytes += m.small_msg_bytes[i];
 		homa_append_metric(homa,
 			"msg_bytes_%-9d    %15llu  "
-			"Bytes in messages containing < %d bytes\n",
-			(i+1)*64, total_bytes, (i+1)*64);
+			"Bytes in messages containing %d-%d bytes\n",
+			(i+1)*64, m.small_msg_bytes[i], lower, (i+1)*64);
+		lower = (i+1)*64 + 1;
 	}
 	for (i = (HOMA_NUM_SMALL_COUNTS*64)/1024; i < HOMA_NUM_MEDIUM_COUNTS;
 			i++) {
-		total_bytes += m.medium_msg_bytes[i];
 		homa_append_metric(homa,
 			"msg_bytes_%-9d    %15llu  "
-			"Bytes in messages containing < %d bytes\n",
-			(i+1)*1024, total_bytes, (i+1)*1024);
+			"Bytes in messages containing %d-%d bytes\n",
+			(i+1)*1024, m.medium_msg_bytes[i], lower, (i+1)*1024);
+		lower = (i+1)*1024 + 1;
 	}
-	total_bytes += m.large_msg_bytes;
 	homa_append_metric(homa,
-			"total_msg_bytes        %15llu  "
-			"Bytes in all messages\n",
-			total_bytes);
+			"large_msg_bytes        %15llu  "
+			"Bytes in messages >= %d bytes\n",
+			m.large_msg_bytes, lower);
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);
 		homa_append_metric(homa,

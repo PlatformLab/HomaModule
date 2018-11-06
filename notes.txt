@@ -51,7 +51,6 @@ Notes for Homa implementation in Linux:
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
     recently; should HomaModule do the same? Otherwise, will retransmit
     for requests whose service time is just about equal to the resend timer.
-  * Change metrics so that message size stats are density, not cumulative.
 
 * Questions for Linux experts:
   * OK to call kmalloc at interrupt level?
@@ -278,10 +277,5 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * ip_output.c:ip_send_skb
                   * ip_local_out
 
-Added timers and packet retransmission.
-* Added homa_timer.c, which implements an hrtimer.
-* Added support for RESTART, BUSY, and RESTART packet types.
-* Kernel calls can now return errors (e.g. ETIMEDOUT).
-* Various other changes, such as more metrics.
 
 

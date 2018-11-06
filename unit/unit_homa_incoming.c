@@ -48,19 +48,19 @@ FIXTURE_TEARDOWN(homa_incoming)
 TEST_F(homa_incoming, homa_message_in_init)
 {
 	struct homa_message_in msgin;
-	homa_message_in_init(&msgin, 128, 10000);
-	EXPECT_EQ(128, msgin.granted);
 	homa_message_in_init(&msgin, 127, 10000);
+	EXPECT_EQ(127, msgin.granted);
+	homa_message_in_init(&msgin, 128, 10000);
 	homa_message_in_init(&msgin, 130, 10000);
-	homa_message_in_init(&msgin, 0xfff, 10000);
+	homa_message_in_init(&msgin, 0x1000, 10000);
 	homa_message_in_init(&msgin, 0x3000, 10000);
 	homa_message_in_init(&msgin, 1000000, 10000);
 	EXPECT_EQ(10000, msgin.granted);
 	homa_message_in_init(&msgin, 2000000, 10000);
-	EXPECT_EQ(127, unit_get_metrics()->small_msg_bytes[1]);
-	EXPECT_EQ(258, unit_get_metrics()->small_msg_bytes[2]);
-	EXPECT_EQ(0xfff, unit_get_metrics()->small_msg_bytes[63]);
-	EXPECT_EQ(0x3000, unit_get_metrics()->medium_msg_bytes[12]);
+	EXPECT_EQ(255, unit_get_metrics()->small_msg_bytes[1]);
+	EXPECT_EQ(130, unit_get_metrics()->small_msg_bytes[2]);
+	EXPECT_EQ(0x1000, unit_get_metrics()->small_msg_bytes[63]);
+	EXPECT_EQ(0x3000, unit_get_metrics()->medium_msg_bytes[11]);
 	EXPECT_EQ(0, unit_get_metrics()->medium_msg_bytes[15]);
 	EXPECT_EQ(3000000, unit_get_metrics()->large_msg_bytes);
 }
