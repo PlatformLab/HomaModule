@@ -32,3 +32,12 @@ This repo contains an implementation of the Homa transport protocol for Linux.
 - The subdirectory "tests" contains an assortment of programs that may be
   useful in exercising Homa. Compile them by typing "make" in that
   subdirectory.
+  
+ - Some additional tools you might find useful:
+   - Homa collects various metrics about its behavior, such as the size
+     distribution of incoming messages. You can access these through the
+     file /proc/net/homa_metrics. The script "tests/diff_metrics.py"
+     will compare two metrics files collected at different times and
+     show only the counters that have changed.
+   - Homa exports a collection of configuration parameters through the
+     sysctl mechanism. To see what is available, type "sysctl net.homa".
