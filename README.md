@@ -9,7 +9,8 @@ This repo contains an implementation of the Homa transport protocol for Linux.
   now handle timeouts and retransmissions, but it is not yet complete.
   Here is a partial list of functionality that is still missing:
   - The throttling mechanism to limit queueing in source NICs hasn't been
-    implemented, which SRPT isn't properly implemented on senders.
+    implemented, which means SRPT isn't properly implemented on senders
+    and there can be head-of-line blocking.
   - Big chunks of Linux plumbing are still missing (e.g., Homa doesn't yet
     connect with the select or poll mechanisms).
   - Socket buffer memory management needs more work. Large
