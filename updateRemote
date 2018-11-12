@@ -1,4 +1,11 @@
-#!/bin/
+#!/bin/sh
 # The script is copies modified information from this directory
-# on my laptop to rcmaster.
-rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@rcmaster.scs.stanford.edu:remote/homaModule/
+# on my laptop to rcmaster or some other machine.
+
+if [ $# -eq 0 ]; then
+    dest=rcmaster.scs.stanford.edu
+else
+    dest=$1
+fi
+
+rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$dest:remote/homaModule/

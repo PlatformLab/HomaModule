@@ -755,6 +755,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	struct sock *sk = NULL;
 	__u16 dport;
 	char buffer[200];
+//	int *data;
+//	int i;
 //	int discard;
 
 //	get_random_bytes(&discard, sizeof(discard));
@@ -773,6 +775,15 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	}
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
+//	data = (int *) skb->data;
+//	printk(KERN_NOTICE "packet data: %x %x %x %x %x %x %x %x\n",
+//			data[0], data[1], data[2], data[3],
+//			data[4], data[5], data[6], data[7]);
+//	for (i = 0; i < length/4; i++) {
+//		if (data[i] != 0)
+//			printk(KERN_NOTICE "Found 0x%x at index %d\n",
+//				data[i], i);
+//	}
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();

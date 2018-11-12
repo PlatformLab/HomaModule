@@ -9,6 +9,10 @@ homa-y = homa_incoming.o \
             homa_timer.o \
             homa_utils.o
 
+MY_CFLAGS += -g
+ccflags-y += ${MY_CFLAGS}
+CC += ${MY_CFLAGS}
+
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 	

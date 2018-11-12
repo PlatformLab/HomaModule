@@ -44,48 +44,52 @@ int check_buffer(void *buffer, size_t length)
  */
 double get_cycles_per_sec()
 {
-    // Take parallel time readings using both rdtsc and gettimeofday.
-    // After 10ms have elapsed, take the ratio between these readings.
+	static double cps = 0;
+	if (cps != 0) {
+		return cps;
+	}
+	
+	// Take parallel time readings using both rdtsc and gettimeofday.
+	// After 10ms have elapsed, take the ratio between these readings.
 
-    struct timeval start_time, stop_time;
-    uint64_t start_cycles, stop_cycles, micros;
-    double cps, old_cps;
+	struct timeval start_time, stop_time;
+	uint64_t start_cycles, stop_cycles, micros;
+	double old_cps;
 
-    // There is one tricky aspect, which is that we could get interrupted
-    // between calling gettimeofday and reading the cycle counter, in which
-    // case we won't have corresponding readings.  To handle this (unlikely)
-    // case, compute the overall result repeatedly, and wait until we get
-    // two successive calculations that are within 0.1% of each other.
-    old_cps = 0;
-    while (1) {
-        if (gettimeofday(&start_time, NULL) != 0) {
-            printf("count_cycles_per_sec couldn't read clock: %s",
-			    strerror(errno));
-	    exit(1);
-        }
-        start_cycles = rdtsc();
-        while (1) {
-            if (gettimeofday(&stop_time, NULL) != 0) {
-                printf("count_cycles_per_sec couldn't read clock: %s",
-                        strerror(errno));
-		exit(1);
-            }
-            stop_cycles = rdtsc();
-            micros = (stop_time.tv_usec - start_time.tv_usec) +
-                    (stop_time.tv_sec - start_time.tv_sec)*1000000;
-            if (micros > 10000) {
-                cps = (double)(stop_cycles - start_cycles);
-                cps = 1000000.0*cps/(double)(micros);
-                break;
-            }
-        }
-        double delta = cps/1000.0;
-        if ((old_cps > (cps - delta)) &&
-                (old_cps < (cps + delta))) {
-            return cps;
-        }
-        old_cps = cps;
-    }
+	// There is one tricky aspect, which is that we could get interrupted
+	// between calling gettimeofday and reading the cycle counter, in which
+	// case we won't have corresponding readings.  To handle this (unlikely)
+	// case, compute the overall result repeatedly, and wait until we get
+	// two successive calculations that are within 0.1% of each other.
+	old_cps = 0;
+	while (1) {
+		if (gettimeofday(&start_time, NULL) != 0) {
+			printf("count_cycles_per_sec couldn't read clock: %s",
+					strerror(errno));
+			exit(1);
+		}
+		start_cycles = rdtsc();
+		while (1) {
+			if (gettimeofday(&stop_time, NULL) != 0) {
+				printf("count_cycles_per_sec couldn't read clock: %s",
+						strerror(errno));
+				exit(1);
+			}
+			stop_cycles = rdtsc();
+			micros = (stop_time.tv_usec - start_time.tv_usec) +
+				(stop_time.tv_sec - start_time.tv_sec)*1000000;
+			if (micros > 10000) {
+				cps = (double)(stop_cycles - start_cycles);
+				cps = 1000000.0*cps/(double)(micros);
+				break;
+			}
+		}
+		double delta = cps/1000.0;
+		if ((old_cps > (cps - delta)) && (old_cps < (cps + delta))) {
+			return cps;
+		}
+		old_cps = cps;
+	}
 }
 
 /**

@@ -155,7 +155,7 @@ void homa_destroy(struct homa *homa)
 	homa_socktab_destroy(&homa->port_map);
 	homa_peertab_destroy(&homa->peers);
 	if (metrics_memory) {
-		kfree(metrics_memory);
+		vfree(metrics_memory);
 		metrics_memory = NULL;
 		for (i = 0; i < NR_CPUS; i++) {
 			homa_metrics[i] = NULL;
@@ -211,8 +211,11 @@ int homa_init(struct homa *homa)
 	 */
 	if (!metrics_memory) {
 		aligned_size = (sizeof(homa_metrics) + 0x3f) & ~0x3f;
-		metrics_memory = kmalloc(0x3f + (NR_CPUS*aligned_size),
-				GFP_KERNEL);
+		metrics_memory = vmalloc(0x3f + (NR_CPUS*aligned_size));
+		if (!metrics_memory) {
+			printk(KERN_ERR "Homa couldn't allocate memory for metrics\n");
+			return -ENOMEM;
+		}
 		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
 		for (i = 0; i < NR_CPUS; i++) {
 			homa_metrics[i] = (struct homa_metrics *)
@@ -539,6 +542,11 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 		homa->metrics_capacity =  4096;
 #endif
 		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		if (!homa->metrics) {
+			printk(KERN_WARNING "homa_append_metric couldn't "
+				"allocate memory\n");
+			return;
+		}
 		homa->metrics_length = 0;
 	}
 	
@@ -558,6 +566,11 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 		/* Not enough room; expand buffer capacity. */
 		homa->metrics_capacity *= 2;
 		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		if (!new_buffer) {
+			printk(KERN_WARNING "homa_append_metric couldn't "
+				"allocate memory\n");
+			return;
+		}
 		memcpy(new_buffer, homa->metrics, homa->metrics_length);
 		kfree(homa->metrics);
 		homa->metrics = new_buffer;
@@ -575,7 +588,7 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
  */
 char *homa_print_metrics(struct homa *homa)
 {
-	struct homa_metrics m;
+	static struct homa_metrics m;
 	int i, lower = 0;
 	
 	homa_compile_metrics(&m);

@@ -16,6 +16,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include <algorithm>
 #include <thread>
 
 #include "homa.h"
@@ -52,6 +53,29 @@ void close_fd(int fd)
 	} else {
 		printf("Close failed: %s\n", strerror(errno));
 	}
+}
+
+/**
+ * print_dist() - Prints information on standard output about the distribution
+ * of a collection of interval measurements.
+ * @times:  An array containing interval times measured in rdtsc cycles.
+ *          This array will be modified by sorting it.
+ * @count:  The number of entries in @times.
+ */
+void print_dist(uint64_t times[], int count)
+{
+	std::sort(times, times+count);
+	printf("Min:  %.1f\n", to_seconds(times[0])*1e06);
+	for (int i = 1; i <= 9; i++) {
+		printf("P%2d:  %.1f\n", i*10,
+			to_seconds(times[(i*count)/10])*1e06);
+	}
+	printf("Max:  %.1f\n", to_seconds(times[count-1])*1e06);
+	double average = 0.0;
+	for (int i = 0; i < count; i++)
+		average += to_seconds(times[i]);
+	average /= count;
+	printf("Avg:  %.1f\n", average*1e06);
 }
 
 /**
@@ -151,9 +175,9 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 	int status;
 	ssize_t resp_length;
 	uint64_t start;
+	uint64_t times[count];
 
-	start = rdtsc();
-	for (int i = 0; i < count; i++) {
+	for (int i = -10; i < count; i++) {
 		status = homa_send(fd, request, length, dest,
 				sizeof(*dest), &id);
 		if (status < 0) {
@@ -161,17 +185,19 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 				strerror(errno));
 			return;
 		}
+		start = rdtsc();
 		resp_length = homa_recv(fd, response, sizeof(response),
 			(struct sockaddr *) &server_addr,
 			sizeof(server_addr), &id);
+		if (i >= 0)
+			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
 			printf("Error in homa_recv: %s\n",
 				strerror(errno));
 			return;
 		}
 	}
-	double avg_secs = to_seconds(rdtsc() - start)/count;
-	printf("Time per RPC: %.1f us\n", avg_secs*1e6);
+	print_dist(times, count);
 }
 
 /**
