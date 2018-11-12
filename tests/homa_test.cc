@@ -65,17 +65,17 @@ void close_fd(int fd)
 void print_dist(uint64_t times[], int count)
 {
 	std::sort(times, times+count);
-	printf("Min:  %.1f\n", to_seconds(times[0])*1e06);
+	printf("Min:  %8.1f us\n", to_seconds(times[0])*1e06);
 	for (int i = 1; i <= 9; i++) {
-		printf("P%2d:  %.1f\n", i*10,
+		printf("P%2d:  %8.1f us\n", i*10,
 			to_seconds(times[(i*count)/10])*1e06);
 	}
-	printf("Max:  %.1f\n", to_seconds(times[count-1])*1e06);
+	printf("Max:  %8.1f us\n", to_seconds(times[count-1])*1e06);
 	double average = 0.0;
 	for (int i = 0; i < count; i++)
 		average += to_seconds(times[i]);
 	average /= count;
-	printf("Avg:  %.1f\n", average*1e06);
+	printf("Avg:  %8.1f us\n", average*1e06);
 }
 
 /**
