@@ -43,6 +43,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
 	if (state == RPC_OUTGOING)
 		return crpc;
+	crpc->msgout.next_offset = req_length;
 
 	struct data_header h = {
 		.common = {

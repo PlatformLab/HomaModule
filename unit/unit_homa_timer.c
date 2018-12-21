@@ -84,6 +84,19 @@ TEST_F(homa_timer, homa_timer__server_rpc__all_granted_bytes_received)
 	EXPECT_EQ(1, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_timer, homa_timer__server_rpc__all_granted_bytes_received2)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 10000, 100);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
+	srpc->msgin.granted = 1000;
+	srpc->silent_ticks = 5;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(0, srpc->silent_ticks);
+}
 
 TEST_F(homa_timer, homa_timer__client_rpc_basics)
 {
@@ -124,7 +137,6 @@ TEST_F(homa_timer, homa_timer__all_granted_bytes_received)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 100, 5000);
 	unit_log_clear();
-	crpc->msgout.next_offset = crpc->msgout.length;
 	crpc->msgin.granted = 1400;
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, crpc->silent_ticks);
@@ -132,6 +144,18 @@ TEST_F(homa_timer, homa_timer__all_granted_bytes_received)
 	homa_timer(&self->homa);
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("xmit BUSY", unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__all_granted_bytes_received2)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 200, 10000);
+	unit_log_clear();
+	crpc->msgin.granted = 1000;
+	crpc->silent_ticks = 5;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
+	EXPECT_EQ(0, crpc->silent_ticks);
 }
 TEST_F(homa_timer, homa_timer__rpc_ready)
 {

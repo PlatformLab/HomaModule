@@ -48,9 +48,9 @@ void homa_timer(struct homa *homa)
 			if (srpc->silent_ticks < homa->resend_ticks)
 				continue;
 			if ((srpc->state == RPC_INCOMING)
-					&& (srpc->msgin.bytes_remaining
-					+ srpc->msgin.granted
-					== srpc->msgin.total_length)) {
+					&& ((srpc->msgin.total_length
+					- srpc->msgin.bytes_remaining)
+					>= srpc->msgin.granted)) {
 				/* We've received everything that we've
 				 * granted, so we shouldn't expect to hear
 				 * anything until we grant more.
@@ -90,9 +90,9 @@ void homa_timer(struct homa *homa)
 				continue;
 			}
 			if ((crpc->state == RPC_INCOMING)
-					&& (crpc->msgin.granted
-					== (crpc->msgin.total_length
-					- crpc->msgin.bytes_remaining))) {
+					&& ((crpc->msgin.total_length
+					- crpc->msgin.bytes_remaining)
+					>= crpc->msgin.granted)) {
 				/* We've received everything that we've
 				 * granted, so we shouldn't expect to hear
 				 * anything until we grant more. However,
