@@ -479,7 +479,7 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
 
-TEST_F(homa_incoming, homa_resend_pkt__unknown_client_rpc)
+TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_client)
 {
 	struct resend_header h = {{.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
@@ -492,6 +492,19 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_client_rpc)
 			self->client_ip, &h.common, 0, 0));
 	EXPECT_STREQ("xmit RESTART from 0.0.0.0:99, dport 40000, id 99999, "
 			"length 48 prio 7", unit_log_get());
+}
+TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_server)
+{
+	struct resend_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = 99999, .type = RESEND},
+		        .offset = 0,
+			.length = 0,
+			.priority = 3};
+	mock_xmit_log_verbose = 1;
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->client_ip, &h.common, 0, 0));
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__server_sends_busy)
 {

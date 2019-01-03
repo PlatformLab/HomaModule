@@ -412,7 +412,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		}
 	} else {
 		/* We are the client for this RPC. */
-		if (rpc->state != RPC_OUTGOING)
+		if ((rpc == NULL) || (rpc->state != RPC_OUTGOING))
 			goto done;
 	}
 	if (rpc->msgout.next_offset < rpc->msgout.granted) {
@@ -578,7 +578,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
  * it makes sure that the the RPC's input message is no longer visible to
  * homa_manage_grants.
  * @homa:    Overall data about the Homa protocol implementation.
- * @rpc:     RPC that is being destroyed..
+ * @rpc:     RPC that is being destroyed.
  */
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
@@ -603,4 +603,36 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 	crpc->state = RPC_READY;
 	list_add_tail(&crpc->ready_links, &crpc->hsk->ready_rpcs);
 	sk->sk_data_ready(sk);
+}
+
+/**
+ * homa_validate_grantable_list() - Scan the grantable_rpcs list to
+ * see if it has somehow gotten looped back on itself. This function
+ * is intended for debugging.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @message: Text to include in message printed if a circularity is
+ *           found. Typically identifies the caller of this function.
+ */
+void homa_validate_grantable_list(struct homa *homa, char *message) {
+	struct list_head *pos;
+	struct homa_rpc *rpc, *first;
+	int count = 0;
+	first = 0;
+	list_for_each(pos, &homa->grantable_rpcs) {
+		count++;
+		if (count == 1000000) {
+			printk(KERN_NOTICE "Grantable list has %d entries!\n",
+				count);
+			return;
+		}
+		rpc = list_entry(pos, struct homa_rpc,
+				grantable_links);
+		if (first == NULL) {
+			first = rpc;
+		} else if (rpc == first) {
+			printk(KERN_NOTICE "Circular grant list in %s\n",
+				message);
+			BUG();
+		}
+	}
 }
