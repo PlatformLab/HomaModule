@@ -1147,6 +1147,7 @@ extern void     homa_unhash(struct sock *sk);
 extern int      homa_unsched_priority(struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
+extern void     homa_validate_grantable_list(struct homa *homa, char *message);
 extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);

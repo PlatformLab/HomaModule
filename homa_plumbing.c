@@ -800,21 +800,18 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	}
 	bh_lock_sock_nested(sk);
 	
-	
 	/* Once we've locked the socket we can release the RCU read lock:
 	 * the socket can't go away now. */
 	rcu_read_unlock();
 	if (unlikely(sock_owned_by_user(sk))) {
 		/* Can't process packet now because the socket is locked
-		 * and we can't wait for to become unlocked. Queue the
+		 * and we can't wait for it to become unlocked. Queue the
 		 * packet with the socket; it will get processed whenever
 		 * the socket lock is released.
 		 */
-		if (unlikely(sk_add_backlog(sk, skb, 64*1024))) {
-			printk(KERN_WARNING "Couldn't add packet to "
-				"backlog; dropping\n");
+		int status = sk_add_backlog(sk, skb, 64*1024);
+		if (unlikely(status != 0))
 			goto discard;
-		}
 	} else {
 		if (!homa_sk(sk)->homa)
 			goto discard;

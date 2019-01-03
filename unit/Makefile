@@ -1,6 +1,7 @@
 # Makefile to run unit tests for Homa
 
-KERNEL_DIR := /lib/modules/$(shell uname -r)/build
+#KERNEL_DIR := /lib/modules/$(shell uname -r)/build
+KERNEL_DIR := /home/ouster/remote/homaLinux
 SELF_TEST_DIR := /home/ouster/remote/homaLinux/tools/testing/selftests
 PERL ?= perl
 ARCH ?= x86

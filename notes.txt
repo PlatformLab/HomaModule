@@ -1,15 +1,24 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Machine status:
+  * rc70, rc72, rc73: wedged
+  * rc69: messed up Henry's machine, rczapping
+  * rc68: up-to-date
+  * rc67: up-to-date
+  * rc66: never responsive, can't rczap
+  * rc65: up-to-date
+  * rc64: up-to-date
+
 * Things to do:
   * Throttle output to reduce queueing in the NIC.
-  * Timers and retries.
   * Figure out socket locking disciplines.
   * Many unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.
   * Learn about security stuff, and functions that need to be called for this.
   * Learn about memory management for sk_buffs: how many is it OK to have?
+    * See tcp_out_of_memory.
   * Initially using simple lists for all tables; will need to replace with
     something more efficient.
   * Eventually initialize homa.next_client_port to something random
@@ -36,7 +45,6 @@ Notes for Homa implementation in Linux:
   * If there is an error in ip_queue_xmit, does it free the packet?
   * homa_manage_grants: can "other" go away at an inconvenient time, causing
     synchronization problems?
-  * Modify homa_message_out_init to get unscheduled from homa->rtt_bytes.
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Under some conditions, peer information will need to be invalidated.
@@ -51,6 +59,10 @@ Notes for Homa implementation in Linux:
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
     recently; should HomaModule do the same? Otherwise, will retransmit
     for requests whose service time is just about equal to the resend timer.
+  * Check tcp_transmit_skb to make sure we are doing everything we need to
+    do with skbuffs (e.g., update sk_wmem_alloc?)
+  * Add support for cgroups (e.g. to manage memory allocation)
+  * Eliminate all uses of int: use s32 instead.
 
 * Questions for Linux experts:
   * OK to call kmalloc at interrupt level?
@@ -75,18 +87,61 @@ Notes for Homa implementation in Linux:
     * current_kernel_time takes 120 cycles
     * sched_clock returns ns, takes 70 cycles
     * jiffies variable, plus HZ variable:  HZ is 250
+  * What is the purpose of skbuff clones? Appears that cloning is recommended
+    to transmit packet while retaining copy for retransmission.
 
-* Issues related to timeouts:
-  * Client: don't do anything if haven't transmitted all granted bytes
-  * Client: abort after long timeout
-  * Client: send RESEND if no response bytes received
-  * Client: don't do anything if server has sent grant, but not all bytes
-    of request have been transmitted (it's up to server)
-  * Client: don't send RESEND if we have received all granted bytes
-  * Server: don't do anything if haven't transmitted all granted bytes (is
-    this needed? Yes: don't want to abort RPC)
-  * Server: abort RPC after long timeout
-  * Server: dont send RESEND if all granted bytes have been received
+* Notes on skbuff usage:
+  * skb->destructor: invoked when skbuff is freed.
+  * sk->sk_wmem_alloc:
+    * Keeps track of memory in write buffers that are being transmitted.
+    * Prevents final socket cleanup
+    * Has an extra increment of 1, set when socket allocated
+      and removed in sk_free (so cleanup won't be done until socket
+      has been freed)
+  * sk->sk_write_space: invoked to signal that write space has become available
+  * skb->truesize: total amount of memory required by this skbuff, including
+    both the data block and the skbuff header.
+  * sock_wmalloc: allocates new buffer for writing, limiting to sk->sk_sndbuf
+    and charging against sk->sk_wm_alloc
+  * sk->sk_sndbuf: Maximum about of write buffer space that this socket can
+    consume
+  * sk->sk_wmem_queued: "persistent queue size" (perhaps buffers that are
+    queued but not yet ready to transmit?)
+  * sk->sk_rmem_alloc: appears to count space in read buffers, but it isn't
+    invoked automatically in the current Homa call structure.
+  * skb_set_owner_r, sock_rfree: assist in managing sk_rmem_alloc
+  * nr_free_buffer_pages: appears to return info about total available
+    memory space, for autosizing buffer usage?
+  * sysctl_wmem_default: default write buffer space per socket.
+  * net.ipv4.tcp_mem[0]: if memory usage is below this, no pressure
+                    [1]: start applying memory pressure at this level
+                    [2]: maximum allowed memory usage
+  * net.ipv4.sysctl_tcp_wmem[0]: minimum sk_sndbuf for a socket
+                            [1]: default sk_sndbuf
+                            [2]: maximum allowable sk_sndbuf
+  * sk_memory_allocated_add, sk_memory_allocated_sub: keep track of memory
+   allocated for socket.
+
+* Leads still to follow for skbuff usage:
+  * Read sock_def_write_space, track variables used to wait for write space,
+    see how these are used.
+  * What's the meaning of SOCK_USE_WRITE_QUEUE in sock_wfree?
+  * Check out sock_alloc_send_pskb
+  * Check out skb_head_from_pool: allocate faster from processor-specific pool?
+  * Check out sk_forward_alloc
+  * Check out tcp_under_memory_pressure
+  * Check out sk_mem_charge
+
+* How buffer memory can accumulate in Homa:
+  * Incoming packets: messages not complete, or application doesn't read.
+  * Outgoing packets: receiver doesn't grant to us.
+
+* Possible remedies for memory congestion:
+  * Delete incoming messages that aren't active
+  * Delete incoming messages that application is ignoring
+  * Delete outgoing messages that aren't getting grants
+  * Stop receiving data from incoming messages (discard packets, send BUSY)
+  * Don't accept outbound data: stall in write, or reject
 
 * Notes on timers:
   * hrtimers execute at irq level, not softirq

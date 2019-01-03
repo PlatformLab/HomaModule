@@ -249,6 +249,30 @@ TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk, crpc->peer);
 	EXPECT_SUBSTR("cutoff_version 123", unit_log_get());
 }
+TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
+{
+	int old_refcount;
+	struct dst_entry *dst;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 1000, NULL);
+	EXPECT_FALSE(IS_ERR(crpc));
+	unit_log_clear();
+	dst = crpc->peer->dst;
+	old_refcount = dst->__refcnt.counter;
+	
+	/* First transmission: must fill dst. */
+	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk, crpc->peer);
+	EXPECT_STREQ("xmit DATA 0/1000 P6", unit_log_get());
+	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
+	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
+	
+	/* Second transmission: dst already set. */
+	unit_log_clear();
+	__homa_xmit_data(crpc->msgout.packets, (struct sock *) &self->hsk,
+			crpc->peer);
+	EXPECT_STREQ("xmit DATA 0/1000 P6", unit_log_get());
+	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
+}
 TEST_F(homa_outgoing, __homa_xmit_data__strip_old_headers)
 {
 	struct sk_buff *skb;

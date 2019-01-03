@@ -223,7 +223,18 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
-		kfree_skb(skb);
+		
+		/* It appears that ip_queue_xmit frees skbuffs after
+		 * errors; the following code is to raise an alert if
+		 * this isn't actually the case. Note: this test isn't
+		 * foolproof, because the packet could have been freed,
+		 * reallocated, and its reference count modified; thus
+		 * it isn't safe for us to free the skbuff. Eventually
+		 * this code should be removed.
+		 */
+		if (refcount_read(&skb->users) != 0)
+			printk(KERN_NOTICE "ip_queue_xmit didn't free "
+					"Homa control packet after error\n");
 	}
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	return result;
@@ -295,8 +306,16 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 	h->cutoff_version = peer->cutoff_version;
 
 	skb_get(skb);
-	dst_hold(peer->dst);
-	skb_dst_set(skb, peer->dst);
+	
+	/* Fill in the skb's dst if it isn't already set (for original
+	 * transmission, it's never set already; for retransmits, it
+	 * may or may not have been cleared by ip_queue_xmit, depending
+	 * on IFF_XMIT_DST_RELEASE flag).
+	 */
+	if (skb_dst(skb) == NULL) {
+		dst_hold(peer->dst);
+		skb_dst_set(skb, peer->dst);
+	}
 
 	/* Strip headers in front of the transport header (needed if
 	 * the packet is being retransmitted).
@@ -306,7 +325,16 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 	err = ip_queue_xmit(sk, skb, &peer->flow);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
-		kfree_skb(skb);
+		
+		/* It appears that ip_queue_xmit frees skbuffs after
+		 * errors; the following code raises an alert if this
+		 * isn't actually the case.
+		 */
+		if (refcount_read(&skb->users) > 1) {
+			printk(KERN_NOTICE "ip_queue_xmit didn't free "
+					"Homa data packet after error\n");
+			kfree_skb(skb);
+		}
 	}
 	INC_METRIC(packets_sent[0], 1);
 }
