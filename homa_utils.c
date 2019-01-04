@@ -9,6 +9,100 @@ struct homa_metrics *homa_metrics[NR_CPUS];
 char *metrics_memory;
 
 /**
+ * homa_init() - Constructor for homa objects.
+ * @homa:   Object to initialize.
+ * 
+ * Return:  0 on success, or a negative errno if there was an error.
+ */
+int homa_init(struct homa *homa)
+{
+	size_t aligned_size;
+	char *first;
+	int i, err;
+	_Static_assert(HOMA_NUM_PRIORITIES >= 8,
+			"homa_init assumes at least 8 priority levels");
+	
+	/* Initialize Homa metrics (if no-one else has already done it),
+	 * making sure that each core has private cache lines for its metrics.
+	 */
+	if (!metrics_memory) {
+		aligned_size = (sizeof(homa_metrics) + 0x3f) & ~0x3f;
+		metrics_memory = vmalloc(0x3f + (NR_CPUS*aligned_size));
+		if (!metrics_memory) {
+			printk(KERN_ERR "Homa couldn't allocate memory for metrics\n");
+			return -ENOMEM;
+		}
+		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
+		for (i = 0; i < NR_CPUS; i++) {
+			homa_metrics[i] = (struct homa_metrics *)
+					(first + i*aligned_size);
+			memset(homa_metrics[i], 0, aligned_size);
+		}
+	}
+	
+	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
+	homa_socktab_init(&homa->port_map);
+	err = homa_peertab_init(&homa->peers);
+	if (err) {
+		printk(KERN_ERR "Couldn't initialize peer table (errno %d)\n",
+			-err);
+		return err;
+	}
+	
+	/* Wild guesses to initialize configuration values... */
+	homa->rtt_bytes = 10000;
+	homa->max_prio = HOMA_NUM_PRIORITIES - 1;
+	homa->min_prio = 0;
+	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 200;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] =
+			2*HOMA_MAX_DATA_PER_PACKET;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] =
+			10*HOMA_MAX_DATA_PER_PACKET;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+#ifdef __UNIT_TEST__
+	/* Unit tests won't send CUTOFFS messages unless the test changes
+	 * this variable.
+	 */
+	homa->cutoff_version = 0;
+#else
+	homa->cutoff_version = 1;
+#endif
+	homa->max_overcommit = 8;
+	homa->resend_ticks = 2;
+	homa->abort_ticks = 8;
+	spin_lock_init(&homa->grantable_lock);
+	INIT_LIST_HEAD(&homa->grantable_rpcs);
+	homa->num_grantable = 0;
+	spin_lock_init(&homa->metrics_lock);
+	homa->metrics = NULL;
+	homa->metrics_capacity = 0;
+	homa->metrics_length = 0;
+	homa->metrics_active_opens = 0;
+	return 0;
+}
+
+/**
+ * homa_destroy() -  Destructor for homa objects.
+ * @homa:      Object to destroy.
+ */
+void homa_destroy(struct homa *homa)
+{
+	int i;
+	homa_socktab_destroy(&homa->port_map);
+	homa_peertab_destroy(&homa->peers);
+	if (metrics_memory) {
+		vfree(metrics_memory);
+		metrics_memory = NULL;
+		for (i = 0; i < NR_CPUS; i++) {
+			homa_metrics[i] = NULL;
+		}
+	}
+	if (homa->metrics)
+		kfree(homa->metrics);
+}
+
+/**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
  * to issue an outgoing request).
  * @hsk:      Socket to which the RPC belongs.
@@ -146,26 +240,6 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
 }
 
 /**
- * homa_destroy() -  Destructor for homa objects.
- * @homa:      Object to destroy.
- */
-void homa_destroy(struct homa *homa)
-{
-	int i;
-	homa_socktab_destroy(&homa->port_map);
-	homa_peertab_destroy(&homa->peers);
-	if (metrics_memory) {
-		vfree(metrics_memory);
-		metrics_memory = NULL;
-		for (i = 0; i < NR_CPUS; i++) {
-			homa_metrics[i] = NULL;
-		}
-	}
-	if (homa->metrics)
-		kfree(homa->metrics);
-}
-
-/**
  * homa_find_server_rpc() - Locate server-side information about the RPC that
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
@@ -190,80 +264,6 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		}
 	}
 	return NULL;
-}
-
-/**
- * homa_init() - Constructor for homa objects.
- * @homa:   Object to initialize.
- * 
- * Return:  0 on success, or a negative errno if there was an error.
- */
-int homa_init(struct homa *homa)
-{
-	size_t aligned_size;
-	char *first;
-	int i, err;
-	_Static_assert(HOMA_NUM_PRIORITIES >= 8,
-			"homa_init assumes at least 8 priority levels");
-	
-	/* Initialize Homa metrics (if no-one else has already done it),
-	 * making sure that each core has private cache lines for its metrics.
-	 */
-	if (!metrics_memory) {
-		aligned_size = (sizeof(homa_metrics) + 0x3f) & ~0x3f;
-		metrics_memory = vmalloc(0x3f + (NR_CPUS*aligned_size));
-		if (!metrics_memory) {
-			printk(KERN_ERR "Homa couldn't allocate memory for metrics\n");
-			return -ENOMEM;
-		}
-		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
-		for (i = 0; i < NR_CPUS; i++) {
-			homa_metrics[i] = (struct homa_metrics *)
-					(first + i*aligned_size);
-			memset(homa_metrics[i], 0, aligned_size);
-		}
-	}
-	
-	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
-	homa_socktab_init(&homa->port_map);
-	err = homa_peertab_init(&homa->peers);
-	if (err) {
-		printk(KERN_ERR "Couldn't initialize peer table (errno %d)\n",
-			-err);
-		return err;
-	}
-	
-	/* Wild guesses to initialize configuration values... */
-	homa->rtt_bytes = 10000;
-	homa->max_prio = HOMA_NUM_PRIORITIES - 1;
-	homa->min_prio = 0;
-	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 200;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] =
-			2*HOMA_MAX_DATA_PER_PACKET;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] =
-			10*HOMA_MAX_DATA_PER_PACKET;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
-#ifdef __UNIT_TEST__
-	/* Unit tests won't send CUTOFFS messages unless the test changes
-	 * this variable.
-	 */
-	homa->cutoff_version = 0;
-#else
-	homa->cutoff_version = 1;
-#endif
-	homa->max_overcommit = 8;
-	homa->resend_ticks = 2;
-	homa->abort_ticks = 8;
-	spin_lock_init(&homa->grantable_lock);
-	INIT_LIST_HEAD(&homa->grantable_rpcs);
-	homa->num_grantable = 0;
-	spin_lock_init(&homa->metrics_lock);
-	homa->metrics = NULL;
-	homa->metrics_capacity = 0;
-	homa->metrics_length = 0;
-	homa->metrics_active_opens = 0;
-	return 0;
 }
 
 /**
