@@ -15,8 +15,15 @@ void homa_timer(struct homa *homa)
 	struct homa_rpc *srpc, *crpc, *tmp;
 	struct resend_header resend;
 	cycles_t start, end;
+	bool print_active = false;
 
 	start = get_cycles();
+	if (homa->flags & HOMA_FLAG_LOG_ACTIVE_RPCS) {
+		print_active = true;
+		homa->flags &= ~HOMA_FLAG_LOG_ACTIVE_RPCS;
+		printk(KERN_NOTICE "Printing active RPCs\n");
+	}
+		
 
 	/* Scan all existing RPCs in all sockets. */
 	rcu_read_lock();
@@ -37,6 +44,31 @@ void homa_timer(struct homa *homa)
 		/* Server RPCs*/
 		list_for_each_entry_safe(srpc, tmp, &hsk->server_rpcs,
 				rpc_links) {
+			if (unlikely(print_active)) {
+				char addr_buffer[20];
+				int in_remaining = 0;
+				int in_granted = 0;
+				int out_sent = 0;
+				if (srpc->msgin.total_length > 0) {
+					in_remaining =
+						srpc->msgin.bytes_remaining;
+					in_granted = srpc->msgin.granted;
+				}
+				if (srpc->msgout.length >= 0)
+					out_sent =  srpc->msgout.next_offset;
+				homa_print_ipv4_addr(srpc->peer->addr,
+					addr_buffer);
+				printk(KERN_NOTICE "Active server RPC to "
+					"%s, port %u, id %llu, state %s, "
+					"silent %d, msgin remaining %d/%d "
+					"granted %d, msgout sent %d/%d\n",
+					addr_buffer, srpc->dport, srpc->id,
+					homa_symbol_for_state(srpc),
+					srpc->silent_ticks,
+					in_remaining, srpc->msgin.total_length,
+					in_granted, out_sent,
+					srpc->msgout.length);
+			}
 			if ((srpc->state == RPC_READY)
 					|| (srpc->state == RPC_IN_SERVICE)) {
 				/* Nothing to worry about while we are
@@ -77,6 +109,31 @@ void homa_timer(struct homa *homa)
 		/* Client RPCs*/
 		list_for_each_entry_safe(crpc, tmp, &hsk->client_rpcs,
 				rpc_links) {
+			if (unlikely(print_active)) {
+				char addr_buffer[20];
+				int in_remaining = 0;
+				int in_granted = 0;
+				int out_sent = 0;
+				if (srpc->msgin.total_length > 0) {
+					in_remaining =
+						srpc->msgin.bytes_remaining;
+					in_granted = srpc->msgin.granted;
+				}
+				if (srpc->msgout.length >= 0)
+					out_sent =  srpc->msgout.next_offset;
+				homa_print_ipv4_addr(crpc->peer->addr,
+					addr_buffer);
+				printk(KERN_NOTICE "Active client RPC from "
+					"%s, port %u, id %llu, state %s, "
+					"silent %d, msgin remaining %d/%d, "
+					"granted %d, msgout sent %d/%d\n\n",
+					addr_buffer, crpc->dport, crpc->id,
+					homa_symbol_for_state(crpc),
+					crpc->silent_ticks,
+					in_remaining, crpc->msgin.total_length,
+					in_granted, out_sent,
+					crpc->msgout.length);
+			}
 			crpc->silent_ticks++;
 			if (crpc->silent_ticks < homa->resend_ticks)
 				continue;

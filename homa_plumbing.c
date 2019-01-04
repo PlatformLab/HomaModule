@@ -134,6 +134,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "flags",
+		.data		= &homa_data.flags,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "min_prio",
 		.data		= &homa_data.min_prio,
 		.maxlen		= sizeof(int),

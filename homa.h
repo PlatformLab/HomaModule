@@ -106,6 +106,18 @@ struct homa_args_reply_ipv4 {
 	__u64 id;
 };
 
+/**
+ * Meanings of the bits in Homa's flag word, which can be set using
+ * "sysctl /net/homa/flags".
+ */
+
+/**
+ * The next invocation of the Homa timer will log info about active RPCs,
+ * then clear this flag; used to see if RPCs are getting "stuck" and not
+ * progressing or aborting.
+ */
+#define HOMA_FLAG_LOG_ACTIVE_RPCS 1
+
 #ifdef __cplusplus
 }
 #endif

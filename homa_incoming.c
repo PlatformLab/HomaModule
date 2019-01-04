@@ -469,13 +469,15 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 }
 
 /**
- * homa_manage_grants() - This function is invoked whenever a data packet
- * is received for a message that contains scheduled bytes. It does
- * all the work of prioritizing messages for grants and actually issuing
- * grants.
+ * homa_manage_grants() - This function is invoked to set priorities of
+ * messages for grants, determine whether grants can be sent out and, if so,
+ * send one.
  * @homa:    Overall data about the Homa protocol implementation.
- * @rpc:     The RPC whose msgin just received a packet; rpc->msgin->scheduled
- *           should be true.
+ * @rpc:     If non-null, this is an RPC whose msgin just received a packet;
+ *           rpc->msgin->scheduled should be true.  This RPC may need to
+ *           be (re-)positioned in the grant queue. NULL typically means
+ *           an RPC has just been removed from the queue, which may allow
+ *           grants to be sent for other RPCs.
  */
 void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 {
@@ -498,6 +500,9 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	
 	spin_lock_bh(&homa->grantable_lock);
 	
+	if (!rpc)
+		goto check_grant;
+	
 	/* First, make sure this message is in the right place in (or not in)
 	 * homa->grantable_msgs.
 	 */
@@ -516,6 +521,11 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			if (other->msgin.bytes_remaining
 					> msgin->bytes_remaining) {
 				list_add_tail(&rpc->grantable_links, pos);
+				printk(KERN_NOTICE "Added id %llu (%d) "
+					"before %llu (%d)\n",
+					rpc->id, msgin->bytes_remaining,
+					other->id,
+					other->msgin.bytes_remaining);
 				goto check_grant;
 			}
 		}
@@ -523,8 +533,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	} else while (homa->grantable_rpcs.next != &rpc->grantable_links) {
 		/* Message is on the list, but its priority may have
 		 * increased because of the recent packet arrival. If so,
-		 * adjust its position in the list. Note: priorities only
-		 * increase.
+		 * adjust its position in the list.
 		 */
 		other = list_prev_entry(rpc, grantable_links);
 		if (other->msgin.bytes_remaining <= msgin->bytes_remaining)
@@ -586,6 +595,9 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 	if (!list_empty(&rpc->grantable_links)) {
 		homa->num_grantable--;
 		list_del_init(&rpc->grantable_links);
+		spin_unlock_bh(&homa->grantable_lock);
+		homa_manage_grants(homa, NULL);
+		return;
 	}
 	spin_unlock_bh(&homa->grantable_lock);
 }

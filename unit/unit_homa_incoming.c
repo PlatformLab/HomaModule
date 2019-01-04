@@ -807,7 +807,7 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	EXPECT_STREQ("xmit GRANT 12800@2", unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_remove_from_grantable)
+TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
@@ -830,6 +830,27 @@ TEST_F(homa_incoming, homa_remove_from_grantable)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 };
+TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
+{
+	self->homa.max_overcommit = 1;
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 2, 30000, 100);
+
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip, self->client_port, 1);
+	EXPECT_NE(NULL, srpc);
+	unit_log_clear();
+	homa_manage_grants(&self-> homa, srpc);
+	EXPECT_STREQ("", unit_log_get());
+	
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	homa_rpc_free(srpc);
+	EXPECT_SUBSTR("xmit GRANT", unit_log_get());
+	EXPECT_SUBSTR("id 2,", unit_log_get());
+}
 
 TEST_F(homa_incoming, homa_rpc_abort)
 {

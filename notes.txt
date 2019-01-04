@@ -2,12 +2,13 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Machine status:
+  * rc70: up-to-date
   * rc70, rc72, rc73: wedged
   * rc69: messed up Henry's machine, rczapping
-  * rc68: up-to-date
-  * rc67: up-to-date
+  * rc68: out-of-date
+  * rc67: out-of-date
   * rc66: never responsive, can't rczap
-  * rc65: up-to-date
+  * rc65: out-of-date
   * rc64: up-to-date
 
 * Things to do:

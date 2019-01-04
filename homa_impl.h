@@ -867,6 +867,12 @@ struct homa {
 	int metrics_active_opens;
 	
 	/**
+	 * @flags: a collection of bits that can be set using sysctl
+	 * to trigger various behaviors.
+	 */
+	int flags;
+	
+	/**
 	 * @temp: the values in this array can be read and written with sysctl.
 	 * They have no officially defined purpose, and are available for
 	 * short-term use during testing.
@@ -1140,6 +1146,7 @@ extern struct homa_sock
 extern struct homa_sock
                *homa_socktab_start_scan(struct homa_socktab *socktab,
 			struct homa_socktab_scan *scan);
+extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
