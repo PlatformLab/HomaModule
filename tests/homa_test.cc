@@ -122,14 +122,16 @@ void test_close()
 }
 
 /**
- * test_fill_memory() - Send continuous requests to a server, but never
- * read responses; eventually, this will cause memory to fill up.
+ * test_fill_memory() - Send requests to a server, but never read responses;
+ * eventually, this will cause memory to fill up.
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
  * @length:   Number of bytes in @request.
+ * @count:    How many requests to send.
  */
-void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length)
+void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
+	int count)
 {
 	uint64_t id;
 	int status;
@@ -138,7 +140,7 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length)
 #define PRINT_INTERVAL 10000000;
 
 	print_at = PRINT_INTERVAL;
-	for (int i = 0; i < 1000000; i++) {
+	for (int i = 0; i < count; i++) {
 		status = homa_send(fd, request, length, dest,
 				sizeof(*dest), &id);
 		if (status < 0) {
@@ -148,7 +150,7 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length)
 		}
 		total += length;
 		if (total >= print_at) {
-			printf("%lu MB sent\n", total/1000000);
+			printf("%lu MB sent (%d RPCs)\n", total/1000000, i+1);
 			print_at += PRINT_INTERVAL;
 		}
 	}
@@ -390,7 +392,7 @@ int main(int argc, char** argv)
 		if (strcmp(argv[nextArg], "close") == 0) {
 			test_close();
 		} else if (strcmp(argv[nextArg], "fill_memory") == 0) {
-			test_fill_memory(fd, dest, buffer, length);
+			test_fill_memory(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "invoke") == 0) {
 			test_invoke(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
