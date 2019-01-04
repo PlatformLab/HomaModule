@@ -617,7 +617,8 @@ TEST_F(homa_incoming, homa_restart_pkt)
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
 			self->server_ip, &h.common, 0, 0));
-	EXPECT_STREQ("xmit DATA 0/2000 P6; xmit DATA 1400/2000 P6",
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+		"xmit DATA 0/2000 P6; xmit DATA 1400/2000 P6",
 		unit_log_get());
 	EXPECT_EQ(-1, crpc->msgin.total_length);
 }
@@ -668,12 +669,14 @@ TEST_F(homa_incoming, homa_manage_grants__stop_tracking_when_fully_granted)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 20000, 100);
 	EXPECT_NE(NULL, srpc);
+	EXPECT_TRUE(srpc->msgin.possibly_in_grant_queue);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("request 12345, remaining 18600", unit_log_get());
 	
 	srpc->msgin.granted = 20000;
 	homa_manage_grants(&self->homa, srpc);
+	EXPECT_FALSE(srpc->msgin.possibly_in_grant_queue);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
@@ -862,5 +865,6 @@ TEST_F(homa_incoming, homa_rpc_abort)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(EFAULT, -crpc->error);
-	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+		"sk->sk_data_ready invoked", unit_log_get());
 }

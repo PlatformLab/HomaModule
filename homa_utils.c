@@ -200,14 +200,9 @@ void homa_rpc_free(struct homa_rpc *rpc) {
 	/* Before doing anything else, unlink the input message from
 	 * homa->grantable_msgs. This will synchronize to ensure that
 	 * homa_manage_grants doesn't access this RPC after destruction
-	 * begins. The if statement below is tricky: we'd like to avoid
-	 * calling homa_remove_from_grantable (because it requires global
-	 * synchronization), but the if statement is not synchronized,
-	 * so it must not use any information that homa_manage_grants
-	 * might be changing concurrently.
+	 * begins.
 	 */
-	if ((rpc->state == RPC_INCOMING) && rpc->msgin.scheduled)
-		homa_remove_from_grantable(rpc->hsk->homa, rpc);
+	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	if (rpc->state == RPC_READY)
 		__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->rpc_links);

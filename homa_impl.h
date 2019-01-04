@@ -403,10 +403,18 @@ struct homa_message_in {
 	int priority;
 	
 	/**
-	 * @scheduled: Nonzero means some of the bytes of this message
+	 * @scheduled: True means some of the bytes of this message
 	 * must be scheduled with grants.
 	 */
-	int scheduled;
+	bool scheduled;
+	
+	/**
+	 * @possibly_in_grant_queue: True means this RPC may be linked
+	 * into homa->grantable_rpcs. Zero means it can't possibly be in
+	 * the list, so no need to check (which means acquiring a global
+	 * lock) when cleaning up the RPC.
+	 */
+	bool possibly_in_grant_queue;
 };
 
 /**
@@ -447,8 +455,9 @@ struct homa_rpc {
 	 * @RPC_IN_SERVICE:   Used only for server RPCs: the request message
 	 *                    has been read from the socket, but the response
 	 *                    message has not yet been presented to the kernel.
-	 * @RPC_CLIENT_DONE:  Used only on clients: indicates that a response
-	 *                    has been received and returned to the application.
+	 * @RPC_CLIENT_DONE:  Used only on clients: set immediately before
+	 *                    freeing an RPC; used by the homa_rpc_free to
+	 *                    determine how to clean up.
 	 * 
 	 * Client RPCs pass through states in the following order:
 	 * RPC_OUTGOING, RPC_INCOMING, RPC_READY, RPC_CLIENT_DONE.
@@ -1034,6 +1043,14 @@ struct homa_metrics {
 		(homa_metrics[smp_processor_id()]->metric) += (count)
 
 extern struct homa_metrics *homa_metrics[NR_CPUS];
+
+#ifdef __UNIT_TEST__
+extern void unit_log_printf(const char *separator, const char* format, ...)
+		__attribute__((format(printf, 2, 3)));
+#define UNIT_LOG unit_log_printf
+#else
+#define UNIT_LOG(...)
+#endif
 
 extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);

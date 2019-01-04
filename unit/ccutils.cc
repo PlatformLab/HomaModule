@@ -142,17 +142,18 @@ void unit_log_add_separator(char *sep)
 
 /**
  * unit_log_data() - Log information that describes the data provided.
+ * @separator: If non-null and the log already has information, this
+ *             string will be output before the data as a separator.
  * @data:      Address of first byte of data.
  * @length:    Total amount of data, in bytes.
  * 
  * This function assumes that the data was written by unit_fill_data.
  */
-void unit_log_data(unsigned char *data, int length)
+void unit_log_data(const char *separator, unsigned char *data, int length)
 {
 	int i, range_start, expected_next;
-	const char *separator = "";
 	if (length == 0) {
-		unit_log_printf("empty block");
+		unit_log_printf(separator, "empty block");
 		return;
 	}
 	if (length >= 4)
@@ -163,18 +164,18 @@ void unit_log_data(unsigned char *data, int length)
 	for (i = 0; i <= length-4; i += 4) {
 		int current = *reinterpret_cast<int32_t *>(data + i);
 		if (current != expected_next) {
-			unit_log_printf("%s%d-%d", separator, range_start,
+			unit_log_printf(separator, "%d-%d", range_start,
 				expected_next-1);
 			separator = " ";
 			range_start = current;
 		}
 		expected_next = current+4;
 	}
-	unit_log_printf("%s%d-%d", separator, range_start, expected_next-1);
+	unit_log_printf(separator, "%d-%d", range_start, expected_next-1);
 	separator = " ";
 	
 	for ( ; i < length; i += 1) {
-		unit_log_printf("%s%d", separator, data[i]);
+		unit_log_printf(separator, "%d", data[i]);
 		separator = " ";
 	}
 }
@@ -197,13 +198,18 @@ const char *unit_log_get(void)
 
 /**
  * unit_log_printf() - Append information to the test log.
+ * @separator:   If non-NULL, and if the log is non-empty, this string is
+ *               added to the log before the new message.
  * @format:      Standard printf-style format string.
  * @ap:          Additional arguments as required by @format.
  */
-void unit_log_printf(const char* format, ...)
+void unit_log_printf(const char *separator, const char* format, ...)
 {
 	va_list ap;
 	va_start(ap, format);
+	
+	if (!log.empty() && (separator != NULL))
+		log.append(separator);
 	    
 	// We're not really sure how big of a buffer will be necessary.
 	// Try 1K, if not the return value will tell us how much is necessary.

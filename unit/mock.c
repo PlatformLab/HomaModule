@@ -108,8 +108,7 @@ bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_add_separator("; ");
-	unit_log_printf("_copy_from_iter_full copied %lu bytes", bytes);
+	unit_log_printf("; ", "_copy_from_iter_full copied %lu bytes", bytes);
 	return true;
 }
 
@@ -117,8 +116,8 @@ bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_add_separator("; ");
-	unit_log_printf("_copy_from_iter_full_nocache copid %lu bytes", bytes);
+	unit_log_printf("; ", "_copy_from_iter_full_nocache copid %lu bytes",
+			bytes);
 	return true;
 }
 
@@ -126,8 +125,7 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	if (mock_check_error(&mock_copy_to_user_errors))
 		return -1;
-	unit_log_add_separator("; ");
-	unit_log_printf("_copy_to_user copied %lu bytes", n);
+	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
 	return 0;
 }
 
@@ -136,8 +134,8 @@ bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_add_separator("; ");
-	unit_log_printf("csum_and_copy_from_iter_full copied %lu bytes", bytes);
+	unit_log_printf("; ", "csum_and_copy_from_iter_full copied %lu bytes",
+			bytes);
 	return true;
 }
 
@@ -146,8 +144,7 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_add_separator("; ");
-	unit_log_printf("_copy_from_user copyed %lu bytes", n);
+	unit_log_printf("; ", "_copy_from_user copyed %lu bytes", n);
 	return 0;
 }
 
@@ -277,8 +274,7 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
-	unit_log_add_separator("; ");
-	unit_log_printf("xmit %s", buffer);
+	unit_log_printf("; ", "xmit %s", buffer);
 	kfree_skb(skb);
 	return 0;
 }
@@ -427,9 +423,8 @@ int sk_set_peek_off(struct sock *sk, int val)
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iov_iter *to, int size)
 {
-	unit_log_add_separator("; ");
-	unit_log_printf("skb_copy_datagram_iter ");
-	unit_log_data(from->data + offset, size);
+	unit_log_printf("; ", "skb_copy_datagram_iter ");
+	unit_log_data(NULL, from->data + offset, size);
 	return 0;
 }
 
@@ -576,7 +571,7 @@ int mock_check_error(int *errorMask)
  */
 void mock_data_ready(struct sock *sk)
 {
-	unit_log_printf("sk->sk_data_ready invoked");
+	unit_log_printf("; ", "sk->sk_data_ready invoked");
 }
 
 /**

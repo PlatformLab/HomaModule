@@ -151,15 +151,13 @@ void unit_log_grantables(struct homa *homa)
 	list_for_each(pos, &homa->grantable_rpcs) {
 		count++;
 		rpc = list_entry(pos, struct homa_rpc, grantable_links);
-		unit_log_add_separator("; ");
-		unit_log_printf("%s %lu, remaining %d",
+		unit_log_printf("; ", "%s %lu, remaining %d",
 				rpc->is_client ? "response" : "request",
 				(long unsigned int) rpc->id,
 				rpc->msgin.bytes_remaining);
 	}
 	if (count != homa->num_grantable) {
-		unit_log_add_separator("; ");
-		unit_log_printf("num_grantable error: should be %d, is %d",
+		unit_log_printf("; ", "num_grantable error: should be %d, is %d",
 			count, homa->num_grantable);
 	}
 }
@@ -181,14 +179,12 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 	char buffer[200];
 	
 	for (skb = message->packets; skb != NULL; skb = *homa_next_skb(skb)) {
-		if (!unit_log_empty())
-			unit_log_printf("; ");
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
 		} else {
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
 		}
-		unit_log_printf("%s", buffer);
+		unit_log_printf("; ", "%s", buffer);
 	}
 }
 
@@ -205,14 +201,12 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 	char buffer[200];
 	
 	skb_queue_walk(packets, skb) {
-		if (!unit_log_empty())
-			unit_log_printf("; ");
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
 		} else {
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
 		}
-		unit_log_printf("%s", buffer);
+		unit_log_printf("; ", "%s", buffer);
 	}
 }
 

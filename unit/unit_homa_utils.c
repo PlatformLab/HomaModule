@@ -132,7 +132,9 @@ TEST_F(homa_utils, homa_rpc_free__state_incoming)
 			self->server_port, self->rpcid, 1000, 20000);
 	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_rpcs));
 	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
 	homa_rpc_free(crpc);
+	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->homa.grantable_rpcs));
 }
 TEST_F(homa_utils, homa_rpc_free__state_ready)

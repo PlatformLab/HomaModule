@@ -61,7 +61,7 @@ TEST_F(homa_timer, homa_timer__server_rpc__basics)
 	homa_timer(&self->homa);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
 	EXPECT_EQ(1, unit_get_metrics()->server_rpc_timeouts);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }
 TEST_F(homa_timer, homa_timer__server_rpc__rpc_in_service)
 {
@@ -127,7 +127,8 @@ TEST_F(homa_timer, homa_timer__client_rpc_basics)
 	crpc->silent_ticks = self->homa.abort_ticks - 1;
 	homa_timer(&self->homa);
 	EXPECT_EQ(self->homa.abort_ticks, crpc->silent_ticks);
-	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+			"sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }

@@ -21,7 +21,6 @@ void homa_timer(struct homa *homa)
 	if (homa->flags & HOMA_FLAG_LOG_ACTIVE_RPCS) {
 		print_active = true;
 		homa->flags &= ~HOMA_FLAG_LOG_ACTIVE_RPCS;
-		printk(KERN_NOTICE "Printing active RPCs\n");
 	}
 		
 
@@ -169,8 +168,7 @@ void homa_timer(struct homa *homa)
 				homa_rpc_abort(crpc, -ETIMEDOUT);
 				continue;
 			}
-			if ((crpc->state == RPC_READY)
-					|| (crpc->state == RPC_CLIENT_DONE)) {
+			if (crpc->state == RPC_READY) {
 				crpc->silent_ticks = 0;
 				continue;
 			}

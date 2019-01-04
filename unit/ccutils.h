@@ -20,8 +20,10 @@ CEXTERN void          unit_hash_set(struct unit_hash *hash, const void *key,
 CEXTERN int           unit_hash_size(struct unit_hash *hash);
 CEXTERN void          unit_log_add_separator(char *sep);
 CEXTERN void          unit_log_clear(void);
-CEXTERN void          unit_log_data(unsigned char *data, int length);
+CEXTERN void          unit_log_data(const char *separator, unsigned char *data,
+				int length);
 CEXTERN int           unit_log_empty(void);
 CEXTERN const char   *unit_log_get(void);
-CEXTERN void          unit_log_printf(const char* format, ...)
-				__attribute__((format(printf, 1, 2)));
+CEXTERN void          unit_log_printf(const char *separator,
+				const char* format, ...)
+				__attribute__((format(printf, 2, 3)));

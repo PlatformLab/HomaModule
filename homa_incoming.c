@@ -20,6 +20,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		msgin->granted = msgin->total_length;
 	msgin->priority = 0;
 	msgin->scheduled = length > unscheduled;
+	msgin->possibly_in_grant_queue = msgin->scheduled;
 	if (length <= 4096) {
 		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
 	} else if (length <= 0x10000) {
@@ -307,7 +308,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
 	if (rpc->state != RPC_INCOMING) {
-		if (unlikely(!rpc->is_client || (rpc->state != RPC_OUTGOING))) {
+		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
 			return;			
 		}
@@ -439,6 +440,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
  */
 void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
+	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	homa_message_in_destroy(&rpc->msgin);
 	homa_message_out_reset(&rpc->msgout);
 	rpc->state = RPC_OUTGOING;
@@ -512,6 +514,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			homa->num_grantable--;
 			list_del_init(&rpc->grantable_links);
 		}
+		msgin->possibly_in_grant_queue = 0;
 	} else if (list_empty(&rpc->grantable_links)) {
 		/* Message not yet tracked; add it in priority order. */
 		homa->num_grantable++;
@@ -583,23 +586,27 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 }
 
 /**
- * homa_remove_from_grantable() - This method is invoked by RPC destructors;
- * it makes sure that the the RPC's input message is no longer visible to
- * homa_manage_grants.
+ * homa_remove_from_grantable() - This method ensures that an RPC
+ * is no longer linked into homa->grantable_rpcs (i.e. it won't be
+ * visible to homa_manage_grants).
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC that is being destroyed.
  */
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
-	spin_lock_bh(&homa->grantable_lock);
-	if (!list_empty(&rpc->grantable_links)) {
-		homa->num_grantable--;
-		list_del_init(&rpc->grantable_links);
+	UNIT_LOG("; ", "homa_remove_from_grantable invoked");
+	if (rpc->msgin.possibly_in_grant_queue
+			&& (rpc->msgin.total_length >= 0)) {
+		spin_lock_bh(&homa->grantable_lock);
+		if (!list_empty(&rpc->grantable_links)) {
+			homa->num_grantable--;
+			list_del_init(&rpc->grantable_links);
+			spin_unlock_bh(&homa->grantable_lock);
+			homa_manage_grants(homa, NULL);
+			return;
+		}
 		spin_unlock_bh(&homa->grantable_lock);
-		homa_manage_grants(homa, NULL);
-		return;
 	}
-	spin_unlock_bh(&homa->grantable_lock);
 }
 
 /**
@@ -611,6 +618,7 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 void homa_rpc_abort(struct homa_rpc *crpc, int error)
 {
 	struct sock *sk = (struct sock *) crpc->hsk;
+	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
 	crpc->state = RPC_READY;
 	list_add_tail(&crpc->ready_links, &crpc->hsk->ready_rpcs);
