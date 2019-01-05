@@ -681,7 +681,6 @@ TEST_F(homa_incoming, homa_manage_grants__stop_tracking_when_fully_granted)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_manage_grants__insert_in_order)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
@@ -699,7 +698,6 @@ TEST_F(homa_incoming, homa_manage_grants__insert_in_order)
 			"request 1, remaining 98600; "
 			"request 3, remaining 118600", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_manage_grants__adjust_priority_order)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
@@ -750,7 +748,6 @@ TEST_F(homa_incoming, homa_manage_grants__adjust_priority_order)
 			"request 3, remaining 28599; "
 			"request 2, remaining 28600", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
@@ -785,7 +782,6 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	homa_manage_grants(&self-> homa, srpc);
 	EXPECT_STREQ("xmit GRANT 12800@1", unit_log_get());
 }
-
 TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
@@ -808,6 +804,25 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("xmit GRANT 12800@2", unit_log_get());
+}
+TEST_F(homa_incoming, homa_manage_grants__many_messages_of_same_size)
+{
+	self->homa.max_overcommit = 2;
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	EXPECT_SUBSTR("xmit GRANT", unit_log_get());
+	unit_log_clear();
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 2, 20000, 100);
+	EXPECT_SUBSTR("xmit GRANT", unit_log_get());
+	unit_log_clear();
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 3, 20000, 100);
+	EXPECT_STREQ("", unit_log_get());
+	unit_log_clear();
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 4, 20000, 100);
+	EXPECT_STREQ("", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_remove_from_grantable__basics)
