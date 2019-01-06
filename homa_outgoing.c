@@ -220,22 +220,24 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	set_priority(skb, hsk->homa->max_prio);
 	dst_hold(peer->dst);
 	skb_dst_set(skb, peer->dst);
+	skb_get(skb);
 	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
 		
 		/* It appears that ip_queue_xmit frees skbuffs after
 		 * errors; the following code is to raise an alert if
-		 * this isn't actually the case. Note: this test isn't
-		 * foolproof, because the packet could have been freed,
-		 * reallocated, and its reference count modified; thus
-		 * it isn't safe for us to free the skbuff. Eventually
-		 * this code should be removed.
+		 * this isn't actually the case. The extra skb_get above
+		 * and kfree_skb below are needed to do the check
+		 * accurately (otherwise the buffer could be freed and
+		 * its memory used for some other purpose, resulting in
+		 * a bogus "reference count").
 		 */
-		if (refcount_read(&skb->users) != 0)
+		if (refcount_read(&skb->users) > 1)
 			printk(KERN_NOTICE "ip_queue_xmit didn't free "
 					"Homa control packet after error\n");
 	}
+	kfree_skb(skb);
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	return result;
 }

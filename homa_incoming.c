@@ -95,9 +95,9 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	}
 	if (floor >= ceiling) {
 		/* This packet is redundant. */
-		char buffer[100];
-		printk(KERN_NOTICE "redundant Homa packet: %s\n",
-			homa_print_packet(skb, buffer, sizeof(buffer)));
+//		char buffer[100];
+//		printk(KERN_NOTICE "redundant Homa packet: %s\n",
+//			homa_print_packet(skb, buffer, sizeof(buffer)));
 		kfree_skb(skb);
 		return;
 	}

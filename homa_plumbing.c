@@ -799,9 +799,9 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		/* Eventually should return an error result to sender if
 		 * it is a client.
 		 */
-		printk(KERN_WARNING "Homa packet from %s sent to "
-			"unknown port %u\n",
-			homa_print_ipv4_addr(saddr, buffer), dport);
+//		printk(KERN_WARNING "Homa packet from %s sent to "
+//			"unknown port %u\n",
+//			homa_print_ipv4_addr(saddr, buffer), dport);
 		rcu_read_unlock();
 		goto discard;
 	}
