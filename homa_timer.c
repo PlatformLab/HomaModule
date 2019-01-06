@@ -16,13 +16,13 @@ void homa_timer(struct homa *homa)
 	struct resend_header resend;
 	cycles_t start, end;
 	bool print_active = false;
+	int num_active = 0;
 
 	start = get_cycles();
 	if (homa->flags & HOMA_FLAG_LOG_ACTIVE_RPCS) {
 		print_active = true;
 		homa->flags &= ~HOMA_FLAG_LOG_ACTIVE_RPCS;
 	}
-		
 
 	/* Scan all existing RPCs in all sockets. */
 	rcu_read_lock();
@@ -67,6 +67,7 @@ void homa_timer(struct homa *homa)
 					in_remaining, srpc->msgin.total_length,
 					in_granted, out_sent,
 					srpc->msgout.length);
+				num_active++;
 			}
 			if ((srpc->state == RPC_READY)
 					|| (srpc->state == RPC_IN_SERVICE)) {
@@ -132,6 +133,7 @@ void homa_timer(struct homa *homa)
 					in_remaining, crpc->msgin.total_length,
 					in_granted, out_sent,
 					crpc->msgout.length);
+				num_active++;
 			}
 			crpc->silent_ticks++;
 			if (crpc->silent_ticks < homa->resend_ticks)
@@ -163,13 +165,13 @@ void homa_timer(struct homa *homa)
 				crpc->silent_ticks = 0;
 				continue;
 			}
+			if (crpc->state == RPC_READY) {
+				crpc->silent_ticks = 0;
+				continue;
+			}
 			if (crpc->silent_ticks >= homa->abort_ticks) {
 				INC_METRIC(client_rpc_timeouts, 1);
 				homa_rpc_abort(crpc, -ETIMEDOUT);
-				continue;
-			}
-			if (crpc->state == RPC_READY) {
-				crpc->silent_ticks = 0;
 				continue;
 			}
 			homa_get_resend_range(&crpc->msgin, &resend);
@@ -180,6 +182,9 @@ void homa_timer(struct homa *homa)
 		bh_unlock_sock((struct sock *) hsk);
 	}
 	rcu_read_unlock();
+	if (print_active) {
+		printk(KERN_NOTICE "Found %d active Homa RPCs\n", num_active);
+	}
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
 }
