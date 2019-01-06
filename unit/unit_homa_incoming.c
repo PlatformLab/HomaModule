@@ -768,7 +768,7 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	homa_manage_grants(&self-> homa, srpc);
 	EXPECT_STREQ("", unit_log_get());
 	
-	/* Messages that need grants are beyond max_overcommitted. */
+	/* Messages that need grants are beyond max_overcommit. */
 	self->homa.max_overcommit = 2;
 	srpc->msgin.bytes_remaining -= 1;
 	unit_log_clear();
@@ -780,7 +780,7 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	srpc->msgin.bytes_remaining -= 1;
 	unit_log_clear();
 	homa_manage_grants(&self-> homa, srpc);
-	EXPECT_STREQ("xmit GRANT 12800@1", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11402@1", unit_log_get());
 }
 TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 {
@@ -823,6 +823,28 @@ TEST_F(homa_incoming, homa_manage_grants__many_messages_of_same_size)
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 4, 20000, 100);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_incoming, homa_manage_grants__grant_after_rpc_deleted)
+{
+	self->homa.max_overcommit = 2;
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 3, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 4, 50000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 5, 60000, 100);
+
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip, self->client_port, 1);
+	EXPECT_NE(NULL, srpc);
+	unit_log_clear();
+	homa_rpc_free(srpc);
+	EXPECT_STREQ("homa_remove_from_grantable invoked; xmit GRANT 11400@2",
+			unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_remove_from_grantable__basics)

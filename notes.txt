@@ -64,6 +64,8 @@ Notes for Homa implementation in Linux:
     do with skbuffs (e.g., update sk_wmem_alloc?)
   * Add support for cgroups (e.g. to manage memory allocation)
   * Eliminate all uses of int: use s32 instead.
+  * Can GRANTs be batched? Right now, if a string of packets is received
+    back-to-back for a message, a separate grant gets sent for each packet.
 
 * Questions for Linux experts:
   * OK to call kmalloc at interrupt level?

@@ -473,7 +473,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 /**
  * homa_manage_grants() - This function is invoked to set priorities of
  * messages for grants, determine whether grants can be sent out and, if so,
- * send one.
+ * send them.
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     If non-null, this is an RPC whose msgin just received a packet;
  *           rpc->msgin->scheduled should be true.  This RPC may need to
@@ -494,13 +494,13 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	 * instantaneous preemption).
 	 */
 	struct list_head *pos;
-	struct homa_rpc *other;
-	int msgs_skipped, priority;
-	int extra_levels;
-	struct grant_header h;
+	struct homa_rpc *candidate;
+	int rank;
 	struct homa_message_in *msgin = &rpc->msgin;
+	static int invocation = 0;
 	
 	spin_lock_bh(&homa->grantable_lock);
+	invocation++;
 	
 	if (!rpc)
 		goto check_grant;
@@ -519,16 +519,11 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		/* Message not yet tracked; add it in priority order. */
 		homa->num_grantable++;
 		list_for_each(pos, &homa->grantable_rpcs) {
-			other = list_entry(pos, struct homa_rpc,
+			candidate = list_entry(pos, struct homa_rpc,
 					grantable_links);
-			if (other->msgin.bytes_remaining
+			if (candidate->msgin.bytes_remaining
 					> msgin->bytes_remaining) {
 				list_add_tail(&rpc->grantable_links, pos);
-				printk(KERN_NOTICE "Added id %llu (%d) "
-					"before %llu (%d)\n",
-					rpc->id, msgin->bytes_remaining,
-					other->id,
-					other->msgin.bytes_remaining);
 				goto check_grant;
 			}
 		}
@@ -538,50 +533,51 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		 * increased because of the recent packet arrival. If so,
 		 * adjust its position in the list.
 		 */
-		other = list_prev_entry(rpc, grantable_links);
-		if (other->msgin.bytes_remaining <= msgin->bytes_remaining)
+		candidate = list_prev_entry(rpc, grantable_links);
+		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
 			goto check_grant;
-		__list_del_entry(&other->grantable_links);
-		list_add(&other->grantable_links, &rpc->grantable_links);
+		__list_del_entry(&candidate->grantable_links);
+		list_add(&candidate->grantable_links, &rpc->grantable_links);
 	}
 	
     check_grant:
-	/* Next, see if there is a message that deserves a grant (it has
+	/* Next, see if there are any messages that deserve a grant (they have
 	 * fewer than homa->rtt_bytes of data that have been granted but
 	 * not yet received). */
-	msgs_skipped = 0;
+	rank = 0;
 	list_for_each(pos, &homa->grantable_rpcs) {
-		other = list_entry(pos, struct homa_rpc, grantable_links);
-		if ((other->msgin.granted - (other->msgin.total_length -
-				other->msgin.bytes_remaining))
-				< homa->rtt_bytes) {
-			other->msgin.granted += HOMA_MAX_DATA_PER_PACKET;
-			goto send_grant;
-		}
-		msgs_skipped++;
-		if (msgs_skipped >= homa->max_overcommit)
+		int extra_levels, priority;
+		int desired_grant;
+		struct grant_header h;
+		
+		rank++;
+		if (rank > homa->max_overcommit) {
 			break;
+		}
+		candidate = list_entry(pos, struct homa_rpc, grantable_links);
+		desired_grant = homa->rtt_bytes + candidate->msgin.total_length
+				- candidate->msgin.bytes_remaining;
+		if (desired_grant > candidate->msgin.total_length)
+			desired_grant = candidate->msgin.total_length;
+		if (candidate->msgin.granted >= desired_grant)
+			continue;
+		
+		/* Send a grant for this message. */
+		candidate->msgin.granted = desired_grant;
+		h.offset = htonl(candidate->msgin.granted);
+		priority = homa->max_sched_prio - (rank - 1);
+		extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
+				- homa->num_grantable;
+		if (extra_levels >= 0)
+			priority -= extra_levels;
+		else if (priority < homa->min_prio)
+			priority = homa->min_prio;
+		h.priority = priority;
+		if (!homa_xmit_control(GRANT, &h, sizeof(h), candidate)) {
+			/* Don't do anything if the grant couldn't be sent; let
+			 * other retry mechanisms handle this. */
+		}
 	}
-	/* There's no (appropriate) message to send a grant to. */
-	goto done;
-	
-	/* Finally, send a grant packet. */
-    send_grant:
-	h.offset = htonl(other->msgin.granted);
-	priority = homa->max_sched_prio - msgs_skipped;
-	extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
-			- homa->num_grantable;
-	if (extra_levels >= 0)
-		priority -= extra_levels;
-	else if (priority < homa->min_prio)
-		priority = homa->min_prio;
-	h.priority = priority;
-	if (!homa_xmit_control(GRANT, &h, sizeof(h), other)) {
-		/* Don't do anything if the grant couldn't be sent; let
-		 * other retry mechanisms handle this. */
-	}
-	
-    done:
 	spin_unlock_bh(&homa->grantable_lock);
 }
 
