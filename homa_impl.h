@@ -512,10 +512,17 @@ struct homa_rpc {
 	
 	/**
 	 * @grantable_links: Used to link this RPC into homa->grantable_rpcs.
-	 * If this RPC isn't in homa_grantable_rpcs, this is an empty
+	 * If this RPC isn't in homa->grantable_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
+	
+	/**
+	 * @throttled_links: Used to link this RPC into homa->throttled_rpcs.
+	 * If this RPC isn't in homa->throttled_rpcs, this is an empty
+	 * list pointing to itself.
+	 */
+	struct list_head throttled_links;
 	
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
@@ -774,6 +781,12 @@ struct homa {
 	int rtt_bytes;
 	
 	/**
+	 * @link_bandwidth: The raw bandwidth of the network uplink, in
+	 * units of 1e06 bits per second.
+	 */
+	int link_mbps;
+	
+	/**
 	 * @max_prio: The highest priority level available for Homa's use.
 	 */
 	int max_prio;
@@ -845,6 +858,35 @@ struct homa {
 	
 	/** @num_grantable: The number of messages in grantable_msgs. */
 	int num_grantable;
+	
+	/**
+	 * @throttle_lock: Used to synchronize access to @throttled_rpcs and
+	 * related information.
+	 */
+	struct spinlock throttle_lock;
+	
+	/**
+	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
+	 * for transmission, but which couldn't be sent without exceeding
+	 * the queue limits for transmission.
+	 */
+	struct list_head throttled_rpcs;
+	
+	/**
+	 * @link_idle_time: The time, measured by get_cycles() at which we
+	 * estimate that all of the packets we have passed to Linux for
+	 * transmission will have been transmitted. May be in the past.
+	 * This estimate assumes that only Homa is transmitting data, so
+	 * it could be a severe underestimate if there is competing traffic 
+	 * from, say, TCP. Access only with atomic ops.
+	 */
+	atomic_long_t link_idle_time;
+	
+	/**
+	 * @cycles_per_kbyte: the number of cycles, as measured by get_cycles(),
+	 * that it takes to transmit 1000 bytes on our uplink.
+	 */
+	__u32 cycles_per_kbyte;
 	
 	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
@@ -1055,6 +1097,7 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
+extern void     homa_bandwidth_changed(struct homa *homa);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -1067,6 +1110,8 @@ extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern int      homa_dointvec_prio(struct ctl_table *table, int write,
+			void __user *buffer, size_t *lenp, loff_t *ppos);
+extern int      homa_dointvec_bandwidth(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct homa_rpc

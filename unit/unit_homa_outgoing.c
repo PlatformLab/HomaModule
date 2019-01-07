@@ -335,3 +335,18 @@ TEST_F(homa_outgoing, homa_resend_data__skip_shared_skbuffs)
 			"xmit DATA retrans 4200/10000 P5", unit_log_get());
 	kfree_skb(crpc->msgout.packets);
 }
+
+TEST_F(homa_outgoing, homa_bandwidth_changed)
+{
+	homa->link_mbps = 10000;
+	homa_bandwidth_changed(homa);
+	EXPECT_EQ(800, homa->cycles_per_kbyte);
+	
+	homa->link_mbps = 1000;
+	homa_bandwidth_changed(homa);
+	EXPECT_EQ(8000, homa->cycles_per_kbyte);
+	
+	homa->link_mbps = 40000;
+	homa_bandwidth_changed(homa);
+	EXPECT_EQ(200, homa->cycles_per_kbyte);
+}

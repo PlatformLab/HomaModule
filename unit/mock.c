@@ -77,6 +77,7 @@ unsigned long phys_base = 0;
 struct net init_net;
 unsigned long volatile jiffies = 1100;
 static struct hrtimer_clock_base clock_base;
+unsigned int cpu_khz = 1000000;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}

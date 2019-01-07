@@ -51,6 +51,7 @@ int homa_init(struct homa *homa)
 	
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
+	homa->link_mbps = 10000;
 	homa->max_prio = HOMA_NUM_PRIORITIES - 1;
 	homa->min_prio = 0;
 	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
@@ -74,11 +75,16 @@ int homa_init(struct homa *homa)
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable = 0;
+	spin_lock_init(&homa->throttle_lock);
+	INIT_LIST_HEAD(&homa->throttled_rpcs);
+	atomic_long_set(&homa->link_idle_time, 0);
+	homa->cycles_per_kbyte = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
 	homa->metrics_length = 0;
 	homa->metrics_active_opens = 0;
+	homa_bandwidth_changed(homa);
 	return 0;
 }
 
@@ -142,6 +148,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		goto error;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
 	INIT_LIST_HEAD(&crpc->grantable_links);
+	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
 	return crpc;
 	
@@ -187,6 +194,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->msgout.length = -1;
 	list_add(&srpc->rpc_links, &hsk->server_rpcs);
 	INIT_LIST_HEAD(&srpc->grantable_links);
+	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
 	return srpc;
 }

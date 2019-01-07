@@ -127,6 +127,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "link_mbps",
+		.data		= &homa_data.link_mbps,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec_bandwidth
+	},
+	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -933,6 +940,28 @@ int homa_metrics_release(struct inode *inode, struct file *file)
 }
 
 /**
+ * homa_dointvec_bandwdth() - This function is a wrapper around proc_dointvec,
+ * invoked to read and write homa->link_bandwidth via sysctl; it ensures
+ * that related values are updated.
+ * @table:    sysctl table describing value to be read or written.
+ * @write:    Nonzero means value is being written, 0 means read.
+ * @buffer:   Address in user space if the input/output data.
+ * @lenp:     Not exactly sure.
+ * @ppos:     Not exactly sure.
+ * 
+ * Return: 0 for success, nonzero for error. 
+ */
+int homa_dointvec_bandwidth(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int result;
+	result = proc_dointvec(table, write, buffer, lenp, ppos);
+	if (write)
+		homa_bandwidth_changed(homa);
+	return result;
+}
+
+/**
  * homa_dointvec_prio() - This function is a wrapper around proc_dointvec,
  * invoked to read and write priority values via sysctl; it invokes
  * proc_dointvec and then calls homa_prios_changed if the value was modified.
@@ -945,7 +974,7 @@ int homa_metrics_release(struct inode *inode, struct file *file)
  * Return: 0 for success, nonzero for error. 
  */
 int homa_dointvec_prio(struct ctl_table *table, int write,
-		     void __user *buffer, size_t *lenp, loff_t *ppos)
+		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int result;
 	result = proc_dointvec(table, write, buffer, lenp, ppos);

@@ -376,3 +376,13 @@ void homa_resend_data(struct homa_message_out *msgout, int start, int end,
 		INC_METRIC(resent_packets, 1);
 	}
 }
+
+/**
+ * homa_bandwidth_changed() - Invoked whenever homa->link_mbps changes;
+ * updates other values that depend on this.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_bandwidth_changed(struct homa *homa)
+{
+	homa->cycles_per_kbyte = (8*(__u64) cpu_khz)/homa->link_mbps;
+}
