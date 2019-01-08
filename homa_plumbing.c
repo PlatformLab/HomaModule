@@ -389,19 +389,26 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc, ready_links);
 	list_del(&rpc->ready_links);
 	
-	if (rpc->error) {
-		err = rpc->error;
-		rpc->state = RPC_CLIENT_DONE;
-		homa_rpc_free(rpc);
-		goto error;
-	}
-
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
+	if (unlikely(copy_to_user(
+			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
+			&args.source_addr, sizeof(args) -
+			offsetof(struct homa_args_recv_ipv4, source_addr)))) {
+		err = -EFAULT;
+		goto error;
+	}
+	
+	if (rpc->error) {
+		err = rpc->error;
+		goto error;
+	}
+
+	printk(KERN_NOTICE "RPC id %llu succeeded\n", rpc->id);
 	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
 	result = rpc->msgin.total_length;
 	if (rpc->is_client) {
@@ -412,14 +419,13 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		homa_message_in_destroy(&rpc->msgin);
 	}
 	release_sock(sk);
-	if (unlikely(copy_to_user(
-			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
-			&args.source_addr, sizeof(args) -
-			offsetof(struct homa_args_recv_ipv4, source_addr))))
-		return -EFAULT;
 	return result;
 	
 error:
+	if (rpc != NULL) {
+		rpc->state = RPC_CLIENT_DONE;
+		homa_rpc_free(rpc);
+	}
 	release_sock(sk);
 	return err;
 }

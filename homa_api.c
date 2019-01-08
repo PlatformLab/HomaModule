@@ -63,11 +63,9 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
 	args.buf = (void *) buf;
 	args.len = len;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
-	if (result >= 0) {
-		if (src_addr)
-			*((struct sockaddr_in *) src_addr) = args.source_addr;
-		*id = args.id;
-	}
+	if (src_addr)
+		*((struct sockaddr_in *) src_addr) = args.source_addr;
+	*id = args.id;
 	return result;
 }
 
