@@ -126,13 +126,14 @@ void homa_timer(struct homa *homa)
 				printk(KERN_NOTICE "Active client RPC from "
 					"%s, port %u, id %llu, state %s, "
 					"silent %d, msgin remaining %d/%d, "
-					"granted %d, msgout sent %d/%d\n\n",
+					"granted %d, msgout sent %d/%d, "
+					"error %d\n",
 					addr_buffer, crpc->dport, crpc->id,
 					homa_symbol_for_state(crpc),
 					crpc->silent_ticks,
 					in_remaining, crpc->msgin.total_length,
 					in_granted, out_sent,
-					crpc->msgout.length);
+					crpc->msgout.length, crpc->error);
 				num_active++;
 			}
 			crpc->silent_ticks++;
@@ -178,6 +179,14 @@ void homa_timer(struct homa *homa)
 			resend.priority = homa->max_prio;
 			homa_xmit_control(RESEND, &resend, sizeof(resend),
 					crpc);
+		}
+		if (print_active) {
+			struct list_head *pos;
+			int count = 0;
+			list_for_each(pos, &hsk->ready_rpcs) {
+				count++;
+			}
+			printk(KERN_NOTICE "%d ready RPCS for socket\n", count);
 		}
 		bh_unlock_sock((struct sock *) hsk);
 	}
