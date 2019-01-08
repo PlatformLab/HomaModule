@@ -136,11 +136,12 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
 	uint64_t id;
 	int status;
 	size_t total = 0;
-	size_t print_at = 0;
-#define PRINT_INTERVAL 10000000;
+#define PRINT_INTERVAL 1000
+	char buffer[length];
+	struct sockaddr_in src_addr;
+	ssize_t received;
 
-	print_at = PRINT_INTERVAL;
-	for (int i = 0; i < count; i++) {
+	for (int i = 1; i <= count; i++) {
 		status = homa_send(fd, request, length, dest,
 				sizeof(*dest), &id);
 		if (status < 0) {
@@ -149,9 +150,24 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
 			sleep(1);
 		}
 		total += length;
-		if (total >= print_at) {
-			printf("%lu MB sent (%d RPCs)\n", total/1000000, i+1);
-			print_at += PRINT_INTERVAL;
+		if ((i % PRINT_INTERVAL) == 0) {
+			printf("%lu MB sent (%d RPCs)\n", total/1000000, i);
+		}
+	}
+	total = 0;
+	for (int i = 1; i <= count; i++) {
+		id = 0;
+		received = homa_recv(fd, buffer, length,
+				(struct sockaddr *) &src_addr, sizeof(src_addr),
+				&id);
+		if (received < 0) {
+			printf("Error in homa_recv for id %lu: %s\n",
+				id, strerror(errno));
+		} else {
+			total += received;
+		}
+		if ((i % PRINT_INTERVAL) == 0) {
+			printf("%lu MB received (%d RPCs)\n", total/1000000, i);
 		}
 	}
 }
