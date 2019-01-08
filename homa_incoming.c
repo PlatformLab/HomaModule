@@ -440,11 +440,14 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
  */
 void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	homa_remove_from_grantable(rpc->hsk->homa, rpc);
-	homa_message_in_destroy(&rpc->msgin);
-	homa_message_out_reset(&rpc->msgout);
-	rpc->state = RPC_OUTGOING;
-	homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk, rpc->peer);
+	if (rpc->state != RPC_READY) {
+		homa_remove_from_grantable(rpc->hsk->homa, rpc);
+		homa_message_in_destroy(&rpc->msgin);
+		homa_message_out_reset(&rpc->msgout);
+		rpc->state = RPC_OUTGOING;
+		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
+				rpc->peer);
+	}
 	kfree_skb(skb);
 }
 
