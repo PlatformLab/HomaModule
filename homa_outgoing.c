@@ -386,3 +386,31 @@ void homa_bandwidth_changed(struct homa *homa)
 {
 	homa->cycles_per_kbyte = (8*(__u64) cpu_khz)/homa->link_mbps;
 }
+
+/**
+ * homa_update_idle_time() - This function is invoked whenever a packet
+ * is queued for transmission; it updates homa->link_idle_time to reflect
+ * the new transmission.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @bytes:   Number of bytes in the packet that was just transmitted,
+ *           not including IP or Ethernet headers.
+ */
+void homa_update_idle_time(struct homa *homa, int bytes)
+{
+	__u64 old_idle, new_idle, clock;
+	int cycles_for_packet;
+	
+	bytes += HOMA_MAX_IPV4_HEADER + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
+	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
+	while (1) {
+		clock = get_cycles();
+		old_idle = atomic_long_read(&homa->link_idle_time);
+		if (old_idle < clock)
+			new_idle = clock + cycles_for_packet;
+		else
+			new_idle = old_idle + cycles_for_packet;
+		if (atomic_long_cmpxchg_relaxed(&homa->link_idle_time, old_idle,
+				new_idle) == old_idle)
+			break;
+	}
+}

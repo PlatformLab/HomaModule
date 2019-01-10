@@ -2,14 +2,16 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Machine status:
-  * rc71: up-to-date
-  * rc70, rc72, rc73: wedged
-  * rc69: messed up Henry's machine, rczapping
-  * rc68: up-to-date
-  * rc67: up-to-date
-  * rc66: never responsive, can't rczap
-  * rc65: out-of-date
-  * rc64: up-to-date
+  rc73: up-to-date
+  rc72: up-to-date
+  rc71: up-to-date
+  rc70: up-to-date
+  rc69: Henry's machine
+  rc68: up-to-date
+  rc67: up-to-date
+  rc66: never responsive, can't rczap
+  rc65: up-to-date
+  rc64: up-to-date
 
 * Things to do:
   * Throttle output to reduce queueing in the NIC.

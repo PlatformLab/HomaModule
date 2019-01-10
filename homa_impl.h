@@ -30,6 +30,9 @@ typedef unsigned int __poll_t;
 #ifdef __UNIT_TEST__
 #define spin_unlock mock_spin_unlock
 extern void mock_spin_unlock(spinlock_t *lock);
+
+#define get_cycles mock_get_cycles
+extern cycles_t mock_get_cycles(void);
 #endif
 
 extern struct homa *homa;
@@ -72,6 +75,15 @@ enum homa_packet_type {
 
 /** define HOMA_MAX_IPV4_HEADER - Size of largest IP header (V4). */
 #define HOMA_MAX_IPV4_HEADER 60
+
+/** define HOMA_VLAN_HEADER - Number of bytes in an Ethernet VLAN header. */
+#define HOMA_VLAN_HEADER 20
+
+/**
+ * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for CRC,
+ * preamble, and inter-packet gap.
+ */
+#define HOMA_ETH_OVERHEAD 24
 
 /**
  * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
@@ -1214,6 +1226,7 @@ extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
 extern void     homa_unhash(struct sock *sk);
 extern int      homa_unsched_priority(struct homa_peer *peer, int length);
+extern void     homa_update_idle_time(struct homa *homa, int bytes);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void     homa_validate_grantable_list(struct homa *homa, char *message);

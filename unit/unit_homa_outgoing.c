@@ -350,3 +350,17 @@ TEST_F(homa_outgoing, homa_bandwidth_changed)
 	homa_bandwidth_changed(homa);
 	EXPECT_EQ(200, homa->cycles_per_kbyte);
 }
+
+TEST_F(homa_outgoing, homa_update_idle_time)
+{
+	homa->cycles_per_kbyte = 1000;
+	atomic_long_set(&homa->link_idle_time, 10000);
+	mock_cycles = 5000;
+	homa_update_idle_time(homa, 1000);
+	EXPECT_EQ(11104, atomic_long_read(&homa->link_idle_time));
+	
+	atomic_long_set(&homa->link_idle_time, 10000);
+	mock_cycles = 20000;
+	homa_update_idle_time(homa, 200);
+	EXPECT_EQ(20304, atomic_long_read(&homa->link_idle_time));
+}

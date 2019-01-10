@@ -4,6 +4,7 @@ extern int         cpu_number;
 extern int         mock_alloc_skb_errors;
 extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_errors;
+extern cycles_t    mock_cycles;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
 extern int         mock_route_errors;
@@ -13,6 +14,7 @@ extern int         mock_xmit_log_verbose;
 
 extern int         mock_check_error(int *errorMask);
 extern void        mock_data_ready(struct sock *sk);
+extern cycles_t    mock_get_cycles(void);
 extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);

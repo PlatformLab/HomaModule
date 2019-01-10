@@ -68,6 +68,10 @@ static struct unit_hash *vmallocs_in_use = NULL;
  */
 static int mock_active_locks = 0;
 
+/* Used as the return value for calls to get_cycles.
+ */
+cycles_t mock_cycles = 0;
+
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
 
@@ -573,6 +577,15 @@ int mock_check_error(int *errorMask)
 void mock_data_ready(struct sock *sk)
 {
 	unit_log_printf("; ", "sk->sk_data_ready invoked");
+}
+
+/**
+ * mock_get_cycles() - Replacement for get_cycles; allows time to be
+ * hard-while using mock_cycles variable.
+ */
+cycles_t mock_get_cycles(void)
+{
+	return mock_cycles;
 }
 
 /**
