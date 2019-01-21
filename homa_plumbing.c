@@ -26,6 +26,11 @@ atomic_long_t homa_memory_allocated;
 struct homa homa_data;
 struct homa *homa = &homa_data;
 
+/* True means that the Homa module is in the process of unloading itself,
+ * so everyone should clean up.
+ */
+static bool exiting = false;
+
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
  * to implement top-level system calls. Many of these operations can
@@ -131,7 +136,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.data		= &homa_data.link_mbps,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= homa_dointvec_bandwidth
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "cutoff_version",
@@ -148,18 +153,25 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "min_prio",
-		.data		= &homa_data.min_prio,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec_prio
-	},
-	{
 		.procname	= "max_prio",
 		.data		= &homa_data.max_prio,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= homa_dointvec_prio
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "max_nic_queue_ns",
+		.data		= &homa_data.max_nic_queue_ns,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "min_prio",
+		.data		= &homa_data.min_prio,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_sched_prio",
@@ -190,11 +202,18 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "throttle_min",
+		.data		= &homa_data.throttle_min_bytes,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "unsched_cutoffs",
 		.data		= &homa_data.unsched_cutoffs,
 		.maxlen		= HOMA_NUM_PRIORITIES*sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= homa_dointvec_prio
+		.proc_handler	= homa_dointvec
 	},
 	{}
 };
@@ -280,8 +299,18 @@ out:
  */
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
+	exiting = true;
+	
+	/* Stopping the hrtimer and tasklet is tricky, because each
+	 * reschedules the other. This means that the timer could get
+	 * invoked again after executing tasklet_disable. So, we stop
+	 * it yet again. The exiting variable will cause it to do
+	 * nothing, in case it triggers again before we cancel it the
+	 * second time. Very tricky! 
+	 */
 	hrtimer_cancel(&hrtimer);
 	tasklet_kill(&timer_tasklet);
+	hrtimer_cancel(&hrtimer);
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
@@ -408,7 +437,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 
-	printk(KERN_NOTICE "RPC id %llu succeeded\n", rpc->id);
 	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
 	result = rpc->msgin.total_length;
 	if (rpc->is_client) {
@@ -474,7 +502,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 			srpc->peer, srpc->dport, hsk->client_port, srpc->id);
         if (unlikely(err))
 		goto error;
-	homa_xmit_data(&srpc->msgout, sk, srpc->peer);
+	homa_xmit_data(srpc);
 	if (srpc->msgout.next_offset >= srpc->msgout.length) {
 		homa_rpc_free(srpc);
 	}
@@ -529,7 +557,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-	homa_xmit_data(&crpc->msgout, sk, crpc->peer);
+	homa_xmit_data(crpc);
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;
@@ -946,9 +974,10 @@ int homa_metrics_release(struct inode *inode, struct file *file)
 }
 
 /**
- * homa_dointvec_bandwdth() - This function is a wrapper around proc_dointvec,
- * invoked to read and write homa->link_bandwidth via sysctl; it ensures
- * that related values are updated.
+ * homa_dointvec() - This function is a wrapper around proc_dointvec. It is
+ * invoked to read and write homa->link_bandwidth via sysctl, if a value
+ * is changed, updates all dependent sysctl values that might have been
+ * affected.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
  * @buffer:   Address in user space if the input/output data.
@@ -957,35 +986,18 @@ int homa_metrics_release(struct inode *inode, struct file *file)
  * 
  * Return: 0 for success, nonzero for error. 
  */
-int homa_dointvec_bandwidth(struct ctl_table *table, int write,
+int homa_dointvec(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int result;
 	result = proc_dointvec(table, write, buffer, lenp, ppos);
-	if (write)
-		homa_bandwidth_changed(homa);
-	return result;
-}
-
-/**
- * homa_dointvec_prio() - This function is a wrapper around proc_dointvec,
- * invoked to read and write priority values via sysctl; it invokes
- * proc_dointvec and then calls homa_prios_changed if the value was modified.
- * @table:    sysctl table describing value to be read or written.
- * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space if the input/output data.
- * @lenp:     Not exactly sure.
- * @ppos:     Not exactly sure.
- * 
- * Return: 0 for success, nonzero for error. 
- */
-int homa_dointvec_prio(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	int result;
-	result = proc_dointvec(table, write, buffer, lenp, ppos);
-	if (write)
+	if (write) {
+		/* Don't worry which particular value changed; update
+		 * all info that is dependent on any sysctl value.
+		 */
+		homa_outgoing_sysctl_changed(homa);
 		homa_prios_changed(homa);
+	}
 	return result;
 }
 
@@ -998,6 +1010,9 @@ int homa_dointvec_prio(struct ctl_table *table, int write,
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {
+	if (exiting) {
+		return HRTIMER_NORESTART;
+	}
 	tasklet_hi_schedule(&timer_tasklet);
 	
 	/* Don't restart here; homa_tasklet_handler will restart the timer

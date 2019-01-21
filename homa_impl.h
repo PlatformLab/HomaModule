@@ -12,6 +12,7 @@
 #include <linux/list.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
@@ -788,30 +789,33 @@ struct homa {
 	 * can be sent over the wire in the time it takes to send a full-size
 	 * data packet and receive back a grant. Homa tries to ensure
 	 * that there is at least this much data in transit (or authorized
-	 * via grants) for an incoming message at all times.
+	 * via grants) for an incoming message at all times.  Set externally
+	 * via sysctl.
 	 */
 	int rtt_bytes;
 	
 	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
-	 * units of 1e06 bits per second.
+	 * units of 1e06 bits per second.  Set externally via sysctl.
 	 */
 	int link_mbps;
 	
 	/**
 	 * @max_prio: The highest priority level available for Homa's use.
+	 * Set externally via sysctl.
 	 */
 	int max_prio;
 	
 	/**
 	 * @min_prio: The lowest priority level available for Homa's use.
+	 * Set externally via sysctl.
 	 */
 	int min_prio;
 	
 	/**
 	 * @max_sched_prio: The highest priority level currently available for
 	 * scheduled packets. Must be no less than min_prio. Levels above this
-	 * are reserved for unscheduled packets.
+	 * are reserved for unscheduled packets.  Set externally via sysctl.
 	 */
 	int max_sched_prio;
 	
@@ -823,6 +827,7 @@ struct homa {
 	 * priority levels less than i will not be used for unscheduled
 	 * packets. At least one entry in the array must have a value of
 	 * HOMA_MAX_MESSAGE_SIZE or greater (entry 0 is usually INT_MAX).
+	 *Set externally via sysctl.
 	 */
 	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
 	
@@ -832,13 +837,13 @@ struct homa {
 	 * peers.  Note: 16 bits should be fine for this: the worst
 	 * that happens is a peer has a super-stale value that equals
 	 * our current value, so the peer uses suboptimal cutoffs until the
-	 * next version change.
+	 * next version change.  Can be set externally via sysctl.
 	 */
 	int cutoff_version;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
-	 * send grants at any given point in time.
+	 * send grants at any given point in time.  Set externally via sysctl.
 	 */
 	int max_overcommit;
 	
@@ -850,7 +855,7 @@ struct homa {
 	
 	/**
 	 * @abort_ticks: Abort an RPC if its @silent_ticks reaches
-	 * this value.
+	 * this value. Set externally via sysctl.
 	 */
 	int abort_ticks;
 	
@@ -872,17 +877,44 @@ struct homa {
 	int num_grantable;
 	
 	/**
-	 * @throttle_lock: Used to synchronize access to @throttled_rpcs and
-	 * related information.
+	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
+	 * insert or remove an RPC from throttled_rpcs, must first acquire
+	 * the RPC's socket lock, then this lock.
 	 */
 	struct spinlock throttle_lock;
 	
 	/**
 	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
 	 * for transmission, but which couldn't be sent without exceeding
-	 * the queue limits for transmission.
+	 * the queue limits for transmission. Manipulate only with "_rcu"
+	 * functions.
 	 */
 	struct list_head throttled_rpcs;
+	
+	/**
+	 * @throttle_min: If a packet has fewer bytes than this, then it
+	 * bypasses the throttle mechanism and is transmitted immediately.
+	 * We have this limit because for very small packets we can't keep
+	 * up with the NIC (we're limited by CPU overheads); there's no
+	 * need for throttling and going through the throttle mechanism
+	 * adds overhead, which slows things down. At least, that's the
+	 * hypothesis (needs to be verified experimentally!). Set externally
+	 * via sysctl.
+	 */
+	int throttle_min_bytes;
+	
+	/**
+	 * @pacer_kthread: Kernel thread that transmits packets from
+	 * throttled_rpcs in a way that limits queue buildup in the
+	 * NIC.
+	 */
+	struct task_struct *pacer_kthread;
+	
+	/**
+	 * @pacer_exit: true means that the pacer thread should exit as
+	 * soon as possible.
+	 */
+	bool pacer_exit;
 	
 	/**
 	 * @link_idle_time: The time, measured by get_cycles() at which we
@@ -893,6 +925,19 @@ struct homa {
 	 * from, say, TCP. Access only with atomic ops.
 	 */
 	atomic_long_t link_idle_time;
+	
+	/**
+	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue
+	 * up a packet for transmission if link_idle_time is this many
+	 * nanoseconds in the future (or more). Set externally via sysctl.
+	 */
+	int max_nic_queue_ns;
+	
+	/**
+	 * @max_nic_queue_cycles: Same as max_nic_queue_ns, except in units
+	 * of get_cycles().
+	 */
+	int max_nic_queue_cycles;
 	
 	/**
 	 * @cycles_per_kbyte: the number of cycles, as measured by get_cycles(),
@@ -1006,6 +1051,12 @@ struct homa_metrics {
 	 * get_cycles().
 	 */
 	__u64 timer_cycles;
+	
+	/**
+	 * @pacer_cycles: total time spent executing in homa_pacer_main
+	 * (not including blocked time), as measured with get_cycles().
+	 */
+	__u64 pacer_cycles;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -1108,8 +1159,8 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 
 extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);
+extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
-extern void     homa_bandwidth_changed(struct homa *homa);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -1121,9 +1172,7 @@ extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
-extern int      homa_dointvec_prio(struct ctl_table *table, int write,
-			void __user *buffer, size_t *lenp, loff_t *ppos);
-extern int      homa_dointvec_bandwidth(struct ctl_table *table, int write,
+extern int      homa_dointvec(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct homa_rpc
@@ -1162,6 +1211,10 @@ extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
+extern void     homa_outgoing_sysctl_changed(struct homa *homa);
+extern int      homa_pacer_main(void *transportInfo);
+extern void     homa_pacer_stop(struct homa *homa);
+extern void     homa_pacer_xmit(struct homa *homa);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern struct homa_peer
@@ -1185,8 +1238,7 @@ extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_from_grantable(struct homa *homa,
 			struct homa_rpc *rpc);
-extern void     homa_resend_data(struct homa_message_out *msgout, int start,
-			int end, struct sock *sk, struct homa_peer *peer,
+extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			int priority);
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			struct homa_sock *hsk);
@@ -1235,9 +1287,7 @@ extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
 			struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_xmit_data(struct homa_message_out *hmo, struct sock *sk,
-			struct homa_peer *peer);
-extern void     __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
-		struct homa_peer *peer);
+extern void     homa_xmit_data(struct homa_rpc *rpc);
+extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 
 #endif /* _HOMA_IMPL_H */

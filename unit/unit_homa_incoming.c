@@ -28,6 +28,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_addr.sin_addr.s_addr = self->server_ip;
 	self->server_addr.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
+	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
@@ -427,8 +428,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	homa_xmit_data(&srpc->msgout, (struct sock *) &self->hsk,
-			srpc->peer);
+	homa_xmit_data(srpc);
 	unit_log_clear();
 	
 	struct grant_header h = {{.sport = htons(srpc->dport),
@@ -572,8 +572,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 100);
 	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk,
-			crpc->peer);
+	homa_xmit_data(crpc);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
@@ -592,8 +591,7 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	homa_xmit_data(&srpc->msgout, (struct sock *) &self->hsk,
-			srpc->peer);
+	homa_xmit_data(srpc);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
@@ -611,8 +609,7 @@ TEST_F(homa_incoming, homa_restart_pkt_basics)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
 	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(&crpc->msgout, (struct sock *) &self->hsk,
-			crpc->peer);
+	homa_xmit_data(crpc);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(

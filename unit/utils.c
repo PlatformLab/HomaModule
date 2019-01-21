@@ -211,6 +211,22 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 }
 
 /**
+ * unit_log_throttled() - Append to the test log information about all of
+ * the messages in homa->throttle_rpcs.
+ * @homa:     Homa's overall state.
+ */
+void unit_log_throttled(struct homa *homa)
+{
+	struct homa_rpc *rpc;
+	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
+		unit_log_printf("; ", "%s %lu, next_offset %d",
+				rpc->is_client ? "request" : "response",
+				(long unsigned int) rpc->id,
+				rpc->msgout.next_offset);
+	}
+}
+
+/**
  * unit_server_rpc() - Create a homa_server_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.

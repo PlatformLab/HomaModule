@@ -161,6 +161,11 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
 
 void ip4_datagram_release_cb(struct sock *sk) {}
 
+void do_exit(long error_code)
+{
+	while(1) {}
+}
+
 void dst_release(struct dst_entry *dst)
 {
 	if (!dst)
@@ -342,6 +347,19 @@ void *__kmalloc(size_t size, gfp_t flags)
 	return block;
 }
 
+struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
+					   void *data, int node,
+					   const char namefmt[],
+					   ...)
+{
+	return NULL;
+}
+
+int kthread_stop(struct task_struct *k)
+{
+	return 0;
+}
+
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
 	if (mock_spin_lock_hook) {
@@ -395,6 +413,12 @@ struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 	return NULL;
 }
 
+int proc_dointvec(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	return 0;
+}
+
 void proc_remove(struct proc_dir_entry *de)
 {
 	
@@ -406,6 +430,11 @@ int proto_register(struct proto *prot, int alloc_slab)
 }
 
 void proto_unregister(struct proto *prot) {}
+
+void _raw_spin_lock(raw_spinlock_t *lock)
+{
+	mock_active_locks++;
+}
 
 void release_sock(struct sock *sk)
 {
@@ -478,21 +507,12 @@ int sock_no_mmap(struct file *file, struct socket *sock,
 	return 0;
 }
 
-int proc_dointvec(struct ctl_table *table, int write,
-		     void __user *buffer, size_t *lenp, loff_t *ppos)
-{
-	return 0;
-}
-
 int sock_no_shutdown(struct socket *sock, int how)
 {
 	return 0;
 }
 
-void _raw_spin_lock(raw_spinlock_t *lock)
-{
-	mock_active_locks++;
-}
+void schedule(void) {}
 
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
 		size_t size, int flags)
@@ -504,6 +524,8 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 {
 	return 0;
 }
+
+void synchronize_sched(void) {}
 
 void __tasklet_hi_schedule(struct tasklet_struct *t) {}
 
@@ -543,6 +565,10 @@ void *vmalloc(size_t size)
 		vmallocs_in_use = unit_hash_new();
 	unit_hash_set(vmallocs_in_use, block, "used");
 	return block;
+}
+
+int wake_up_process(struct task_struct *tsk) {
+	return 0;
 }
 
 void __warn_printk(const char *s, ...) {}

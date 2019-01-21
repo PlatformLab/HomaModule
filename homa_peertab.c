@@ -12,6 +12,10 @@
  */
 int homa_peertab_init(struct homa_peertab *peertab)
 {
+	/* Note: when we return, the object must be initialized so it's
+	 * safe to call homa_peertab_destroy, even if this function returns
+	 * an error.
+	 */
 	int i;
 	spin_lock_init(&peertab->write_lock);
 	peertab->buckets = (struct hlist_head *) vmalloc(
@@ -39,7 +43,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	if (!peertab->buckets)
 		return;
 	
-	for (i = 0; i <HOMA_PEERTAB_BUCKETS; i++) {
+	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
 				peertab_links) {
 			dst_release(peer->dst);

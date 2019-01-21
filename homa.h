@@ -118,6 +118,12 @@ struct homa_args_reply_ipv4 {
  */
 #define HOMA_FLAG_LOG_ACTIVE_RPCS 1
 
+/**
+ * Disable the output throttling mechanism: always send all packets
+ * immediately.
+ */
+#define HOMA_FLAG_DONT_THROTTLE   2
+
 #ifdef __cplusplus
 }
 #endif

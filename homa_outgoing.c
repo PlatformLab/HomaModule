@@ -243,29 +243,39 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 }
 
 /**
- * homa_xmit_data() - If a message has data packets that are permitted
+ * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
- * them to be sent.
- * @msgout: Message to check for transmittable packets.
- * @sk:     Socket to use for transmission.
- * @peer:   Information about the destination.
+ * them to be sent (some may be sent immediately; others will be sent
+ * later by the pacer thread).
+ * @rpc:    RPC to check for transmittable packets.
  */
-void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
-		struct homa_peer *peer)
+void homa_xmit_data(struct homa_rpc *rpc)
 {
-	while ((msgout->next_offset < msgout->granted) && msgout->next_packet) {
+	while ((rpc->msgout.next_offset < rpc->msgout.granted)
+			&& rpc->msgout.next_packet) {
 		int priority;
-		struct sk_buff *skb = msgout->next_packet;
+		struct sk_buff *skb = rpc->msgout.next_packet;
 		struct data_header *h = (struct data_header *)
 				skb_transport_header(skb);
+		struct homa *homa = rpc->hsk->homa;
 		
-		msgout->next_packet = *homa_next_skb(skb);
-		if (msgout->next_offset < msgout->unscheduled) {
-			priority = homa_unsched_priority(peer, msgout->length);
-		} else {
-			priority = msgout->sched_priority;
+		if (((rpc->msgout.length - rpc->msgout.next_offset)
+				> homa->throttle_min_bytes)
+				&& ((get_cycles() + homa->max_nic_queue_cycles)
+				< atomic_long_read(&homa->link_idle_time))
+				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE)) {
+			homa_add_to_throttled(rpc);
+			return;
 		}
-		msgout->next_offset += HOMA_MAX_DATA_PER_PACKET;
+		
+		rpc->msgout.next_packet = *homa_next_skb(skb);
+		if (rpc->msgout.next_offset < rpc->msgout.unscheduled) {
+			priority = homa_unsched_priority(rpc->peer,
+					rpc->msgout.length);
+		} else {
+			priority = rpc->msgout.sched_priority;
+		}
+		rpc->msgout.next_offset += HOMA_MAX_DATA_PER_PACKET;
 		
 		if (skb_shared(skb)) {
 			/* The packet is still being transmitted due to a
@@ -283,7 +293,7 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
 		 */
 		h->retransmit = 0;
 		
-		__homa_xmit_data(skb, sk, peer); 
+		__homa_xmit_data(skb, rpc);
 	}
 }
 
@@ -295,8 +305,7 @@ void homa_xmit_data(struct homa_message_out *msgout, struct sock *sk,
  * @sk:     Socket over which to send the packet.
  * @peer:   Information about the packet's destination.
  */
-void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
-		struct homa_peer *peer)
+void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	int err;
 	struct data_header *h = (struct data_header *)
@@ -305,7 +314,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 	/* Update cutoff_version in case it has changed since the
 	 * message was initially created.
 	 */
-	h->cutoff_version = peer->cutoff_version;
+	h->cutoff_version = rpc->peer->cutoff_version;
 
 	skb_get(skb);
 	
@@ -315,8 +324,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 	 * on IFF_XMIT_DST_RELEASE flag).
 	 */
 	if (skb_dst(skb) == NULL) {
-		dst_hold(peer->dst);
-		skb_dst_set(skb, peer->dst);
+		dst_hold(rpc->peer->dst);
+		skb_dst_set(skb, rpc->peer->dst);
 	}
 
 	/* Strip headers in front of the transport header (needed if
@@ -324,7 +333,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 	 */
 	if (skb_transport_offset(skb) > 0)
 		skb_pull(skb, skb_transport_offset(skb));
-	err = ip_queue_xmit(sk, skb, &peer->flow);
+	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 		
@@ -338,6 +347,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
 			kfree_skb(skb);
 		}
 	}
+	homa_update_idle_time(rpc->hsk->homa,
+			skb->tail - skb->transport_header);
 	INC_METRIC(packets_sent[0], 1);
 }
 
@@ -353,12 +364,12 @@ void __homa_xmit_data(struct sk_buff *skb, struct sock *sk,
  * @peer:     Information about the destination.
  * @priority: Priority level to use for the retransmitted data packets.
  */
-void homa_resend_data(struct homa_message_out *msgout, int start, int end,
-		struct sock *sk, struct homa_peer *peer, int priority)
+void homa_resend_data(struct homa_rpc *rpc, int start, int end,
+		int priority)
 {
 	struct sk_buff *skb;
 	
-	for (skb = msgout->packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
+	for (skb = rpc->msgout.packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
 		struct data_header *h = (struct data_header *)
 				skb_transport_header(skb);
 		int offset = ntohl(h->offset);
@@ -372,19 +383,26 @@ void homa_resend_data(struct homa_message_out *msgout, int start, int end,
 			continue;
 		h->retransmit = 1;
 		set_priority(skb, priority);
-		__homa_xmit_data(skb, sk, peer);
+		__homa_xmit_data(skb, rpc);
 		INC_METRIC(resent_packets, 1);
 	}
 }
 
 /**
- * homa_bandwidth_changed() - Invoked whenever homa->link_mbps changes;
- * updates other values that depend on this.
+ * homa_outgoing_sysctl_changed() - Invoked whenever a sysctl value is changed;
+ * any output-related parameters that depend on sysctl-settable values.
  * @homa:    Overall data about the Homa protocol implementation.
  */
-void homa_bandwidth_changed(struct homa *homa)
+void homa_outgoing_sysctl_changed(struct homa *homa)
 {
+	/* Code below is written carefully to avoid integer underflow or
+	 * overflow under expected usage patterns. Be careful when changing!
+	 */
+	__u64 tmp;
 	homa->cycles_per_kbyte = (8*(__u64) cpu_khz)/homa->link_mbps;
+	tmp = homa->max_nic_queue_ns;
+	tmp = (tmp*cpu_khz)/1000000;
+	homa->max_nic_queue_cycles = tmp;
 }
 
 /**
@@ -413,4 +431,132 @@ void homa_update_idle_time(struct homa *homa, int bytes)
 				new_idle) == old_idle)
 			break;
 	}
+}
+
+/**
+ * homa_pacer_thread() - Top-level function for the pacer thread.
+ * @transportInfo:  Pointer to struct homa.
+ * @return:         Always 0.
+ */
+int homa_pacer_main(void *transportInfo)
+{
+	cycles_t start, now;
+	struct homa *homa = (struct homa *) transportInfo;
+	
+	start = get_cycles();
+	while (1) {
+		if (homa->pacer_exit) {
+			break;
+		}
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (list_first_or_null_rcu(&homa->throttled_rpcs,
+				struct homa_rpc, throttled_links) == NULL) {
+			INC_METRIC(pacer_cycles, get_cycles() - start);
+			schedule();
+			start = get_cycles();
+			continue;
+		}
+		__set_current_state(TASK_RUNNING);
+		homa_pacer_xmit(homa);
+		now = get_cycles();
+		INC_METRIC(pacer_cycles, now - start);
+		start = now;
+		
+	}
+	do_exit(0);
+	return 0;
+}
+
+/**
+ * homa_pacer_xmit() - Wait until we can send at least one packet from
+ * the throttled list, then send as many packets as possible from the
+ * highest priority message.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_pacer_xmit(struct homa *homa)
+{
+	struct homa_rpc *rpc;
+	
+	while ((get_cycles() + homa->max_nic_queue_cycles)
+			< atomic_long_read(&homa->link_idle_time)) {}
+	rcu_read_lock();
+	rpc = list_first_or_null_rcu(&homa->throttled_rpcs, struct homa_rpc,
+		throttled_links);
+	if (rpc != NULL) {
+		struct sock *sk = (struct sock *) rpc->hsk;
+		bh_lock_sock_nested(sk);
+
+		/* Once we've locked the socket we can release the RCU read
+		 * lock: the socket can't go away now. */
+		rcu_read_unlock();
+		if (unlikely(sock_owned_by_user(sk))) {
+			bh_unlock_sock(sk);
+			return;
+		}
+		homa_xmit_data(rpc);
+		if ((rpc->msgout.next_offset >= rpc->msgout.granted)
+				|| !rpc->msgout.next_packet) {
+			spin_lock_bh(&homa->throttle_lock);
+			if (!list_empty(&rpc->throttled_links)) {
+				list_del_rcu(&rpc->throttled_links);
+
+				/* Note: this reinitialization is only safe
+				 * because the pacer only looks at the first
+				 * element of the list, rather than traversing
+				 * it (and besides, we know the pacer isn't
+				 * active concurrently, since this code *is*
+				 * the pacer). It would not be safe under more
+				 * general usage patterns.
+				 */
+				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
+			}
+			spin_unlock_bh(&homa->throttle_lock);
+		}
+		bh_unlock_sock(sk);
+	} else {
+		rcu_read_unlock();
+	}
+}
+
+/**
+ * homa_pacer_stop() - Will cause the pacer thread to exit (waking it up
+ * if necessary); doesn't return until after the pacer thread has exited.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_pacer_stop(struct homa *homa)
+{
+	homa->pacer_exit = true;
+	wake_up_process(homa->pacer_kthread);
+	kthread_stop(homa->pacer_kthread);
+	homa->pacer_kthread = NULL;
+}
+
+/**
+ * homa_add_to_throttled() - Make sure that an RPC is on the throttled list
+ * and wake up the pacer thread if necessary.
+ * @rpc:     RPC with outbound packets that have been granted but can't be
+ *           sent because of NIC queue restrictions.
+ */
+void homa_add_to_throttled(struct homa_rpc *rpc)
+{
+	struct homa *homa = rpc->hsk->homa;
+	struct homa_rpc *candidate;
+
+	if (!list_empty(&rpc->throttled_links)) {
+		return;
+	}
+	spin_lock_bh(&homa->throttle_lock);
+	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
+			throttled_links) {
+		if ((candidate->msgout.length - candidate->msgout.next_offset)
+				> (rpc->msgout.length - rpc->msgout.next_offset)) {
+			list_add_tail_rcu(&rpc->throttled_links,
+					&candidate->throttled_links);
+			goto done;
+		}
+	}
+	list_add_tail_rcu(&rpc->throttled_links, &homa->throttled_rpcs);
+done:
+	spin_unlock_bh(&homa->throttle_lock);
+	wake_up_process(homa->pacer_kthread);
 }

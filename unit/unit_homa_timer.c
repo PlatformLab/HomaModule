@@ -26,6 +26,7 @@ FIXTURE_SETUP(homa_timer)
 	self->server_addr.sin_addr.s_addr = self->server_ip;
 	self->server_addr.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
+	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	unit_log_clear();
 }
@@ -115,7 +116,7 @@ TEST_F(homa_timer, homa_timer__client_rpc_basics)
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Send RESEND: granted bytes now sent. */
-	homa_xmit_data(&crpc->msgout, (struct sock *) crpc->hsk, crpc->peer);
+	homa_xmit_data(crpc);
 	unit_log_clear();
 	homa_timer(&self->homa);
 	homa_timer(&self->homa);

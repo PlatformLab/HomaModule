@@ -12,7 +12,9 @@ char *metrics_memory;
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
  * 
- * Return:  0 on success, or a negative errno if there was an error.
+ * Return:  0 on success, or a negative errno if there was an error. Even
+ *          if an error occurs, it is safe (and necessary) to call
+ *          homa_destroy at some point.
  */
 int homa_init(struct homa *homa)
 {
@@ -40,6 +42,7 @@ int homa_init(struct homa *homa)
 		}
 	}
 	
+	homa->pacer_kthread = NULL;
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	homa_socktab_init(&homa->port_map);
 	err = homa_peertab_init(&homa->peers);
@@ -76,15 +79,27 @@ int homa_init(struct homa *homa)
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable = 0;
 	spin_lock_init(&homa->throttle_lock);
-	INIT_LIST_HEAD(&homa->throttled_rpcs);
-	atomic_long_set(&homa->link_idle_time, 0);
+	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
+	homa->throttle_min_bytes = 300;
+	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
+			"homa_pacer");
+	if (IS_ERR(homa->pacer_kthread)) {
+		err = PTR_ERR(homa->pacer_kthread);
+		homa->pacer_kthread = NULL;
+		printk(KERN_ERR "couldn't create homa pacer thread: error %d\n",
+			err);
+		return err;
+	}
+	homa->pacer_exit = false;
+	atomic_long_set(&homa->link_idle_time, get_cycles());
+	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
 	homa->metrics_length = 0;
 	homa->metrics_active_opens = 0;
-	homa_bandwidth_changed(homa);
+	homa_outgoing_sysctl_changed(homa);
 	return 0;
 }
 
@@ -95,8 +110,11 @@ int homa_init(struct homa *homa)
 void homa_destroy(struct homa *homa)
 {
 	int i;
-	homa_socktab_destroy(&homa->port_map);
+	if (homa->pacer_kthread) {
+		homa_pacer_stop(homa);
+	}
 	homa_peertab_destroy(&homa->peers);
+	homa_socktab_destroy(&homa->port_map);
 	if (metrics_memory) {
 		vfree(metrics_memory);
 		metrics_memory = NULL;
@@ -204,7 +222,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
  * structure.
  * @rpc:  Structure to clean up.
  */
-void homa_rpc_free(struct homa_rpc *rpc) {
+void homa_rpc_free(struct homa_rpc *rpc)
+{
 	/* Before doing anything else, unlink the input message from
 	 * homa->grantable_msgs. This will synchronize to ensure that
 	 * homa_manage_grants doesn't access this RPC after destruction
@@ -214,6 +233,18 @@ void homa_rpc_free(struct homa_rpc *rpc) {
 	if (rpc->state == RPC_READY)
 		__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->rpc_links);
+	if (unlikely(!list_empty(&rpc->throttled_links))) {
+		spin_lock_bh(&rpc->hsk->homa->throttle_lock);
+		list_del(&rpc->throttled_links);
+		INIT_LIST_HEAD(&rpc->throttled_links);
+		spin_unlock_bh(&rpc->hsk->homa->throttle_lock);
+		
+		/* Even though we removed the rpc from the throttled list,
+		 * it's possible that the pacer thread is still accessing it.
+		 * Use the RCU mechanism to wait until the pacer is done.
+		 */
+		synchronize_rcu();
+	}
 	homa_message_out_destroy(&rpc->msgout);
 	homa_message_in_destroy(&rpc->msgin);
 	kfree(rpc);
@@ -533,6 +564,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->requests_received += cm->requests_received;
 		m->responses_received += cm->responses_received;
 		m->timer_cycles += cm->timer_cycles;
+		m->pacer_cycles += cm->pacer_cycles;
 		m->resent_packets += cm->resent_packets;
 		m->peer_hash_links += cm->peer_hash_links;
 		m->peer_new_entries += cm->peer_new_entries;
@@ -670,6 +702,10 @@ char *homa_print_metrics(struct homa *homa)
 			"timer_cycles           %15llu  "
 			"Time spent in homa_timer (measured with get_cycles)\n",
 			m.timer_cycles);
+	homa_append_metric(homa,
+			"pacer_cycles           %15llu  "
+			"Time spent in homa_pacer (measured with get_cycles)\n",
+			m.pacer_cycles);
 	homa_append_metric(homa,
 			"resent_packets         %15llu  "
 			"DATA packets sent in response to RESENDs\n",

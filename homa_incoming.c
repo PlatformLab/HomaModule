@@ -369,8 +369,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				rpc->msgout.granted = rpc->msgout.length;
 		}
 		rpc->msgout.sched_priority = h->priority;
-		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
-				rpc->peer);
+		homa_xmit_data(rpc);
 	}
 	kfree_skb(skb);
 }
@@ -422,9 +421,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 */
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
-		homa_resend_data(&rpc->msgout, ntohl(h->offset),
+		homa_resend_data(rpc, ntohl(h->offset),
 				ntohl(h->offset) + ntohl(h->length),
-				(struct sock *) rpc->hsk, rpc->peer,
 				h->priority);
 	}
 		
@@ -445,8 +443,7 @@ void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_message_in_destroy(&rpc->msgin);
 		homa_message_out_reset(&rpc->msgout);
 		rpc->state = RPC_OUTGOING;
-		homa_xmit_data(&rpc->msgout, (struct sock *) rpc->hsk,
-				rpc->peer);
+		homa_xmit_data(rpc);
 	}
 	kfree_skb(skb);
 }
