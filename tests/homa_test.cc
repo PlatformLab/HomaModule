@@ -135,11 +135,13 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
 {
 	uint64_t id;
 	int status;
+	int completed = 0;
 	size_t total = 0;
 #define PRINT_INTERVAL 1000
 	char buffer[length];
 	struct sockaddr_in src_addr;
 	ssize_t received;
+	uint64_t start = rdtsc();
 
 	for (int i = 1; i <= count; i++) {
 		status = homa_send(fd, request, length, dest,
@@ -165,11 +167,18 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
 				id, strerror(errno));
 		} else {
 			total += received;
+			completed++;
 		}
 		if ((i % PRINT_INTERVAL) == 0) {
 			printf("%lu MB received (%d RPCs)\n", total/1000000, i);
 		}
 	}
+	uint64_t end = rdtsc();
+	double tput = total;
+	tput = tput / to_seconds(end-start);
+	double timePer = to_seconds(end-start) / completed;
+	printf("%d/%d RPCs succeeded, average goodput %.1f MB/sec (%.1f us/RPC)\n",
+		completed, count, tput*1e-06, timePer*1e06);
 }
 
 /**
