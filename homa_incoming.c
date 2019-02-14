@@ -215,7 +215,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
  * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
  * once its socket has been found and locked.
  * @sk:     Homa socket that owns the packet's destination port. Caller must
- *          own the spin lock for this and socket must not have been deleted.
+ *          own the lock for this and socket must not have been deleted.
  * @skb:    The incoming packet. This function takes ownership of the packet
  *          (we'll ensure that it is eventually freed).
  *
@@ -226,7 +226,6 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 	struct homa_sock *hsk = homa_sk(sk);
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
-	
 	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
 		rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
@@ -249,6 +248,9 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		rpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
 	}
 	if (unlikely(rpc == NULL)) {
+		char buffer[200];
+		printk(KERN_NOTICE "Incoming packet for unknown RPC: %s\n",
+				homa_print_packet(skb, buffer, sizeof(buffer)));
 		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
 			INC_METRIC(unknown_rpcs, 1);
 			goto discard;
@@ -370,6 +372,13 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc);
+		if ((rpc->msgout.next_offset >= rpc->msgout.length)
+				&& (rpc->dport >= HOMA_MIN_CLIENT_PORT)) {
+			/* This is a server RPC that has been completely sent;
+			 * time to delete the RPC.
+			 */
+			homa_rpc_free(rpc);
+		}
 	}
 	kfree_skb(skb);
 }
@@ -622,33 +631,65 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
- * homa_validate_grantable_list() - Scan the grantable_rpcs list to
+ * homa_validate_grantable_list_list() - Scan the grantable_rpcs list to
  * see if it has somehow gotten looped back on itself. This function
  * is intended for debugging.
  * @homa:    Overall data about the Homa protocol implementation.
- * @message: Text to include in message printed if a circularity is
+ * @where:   Text to include in message printed if a problem is
  *           found. Typically identifies the caller of this function.
  */
-void homa_validate_grantable_list(struct homa *homa, char *message) {
+void homa_validate_grantable_list(struct homa *homa, char *where) {
 	struct list_head *pos;
-	struct homa_rpc *rpc, *first;
+	struct homa_rpc *rpc = NULL;
+	struct homa_rpc *first, *rpc2;
 	int count = 0;
 	first = 0;
 	list_for_each(pos, &homa->grantable_rpcs) {
 		count++;
-		if (count == 1000000) {
-			printk(KERN_NOTICE "Grantable list has %d entries!\n",
-				count);
-			return;
-		}
 		rpc = list_entry(pos, struct homa_rpc,
 				grantable_links);
+		if (count == 1000) {
+			printk(KERN_NOTICE "Grantable list has %d entries "
+					"at %s!\n",
+					count, where);
+			goto error;
+		}
 		if (first == NULL) {
 			first = rpc;
 		} else if (rpc == first) {
-			printk(KERN_NOTICE "Circular grant list in %s\n",
-				message);
-			BUG();
+			printk(KERN_NOTICE "Circular grant list at %s, "
+					"%d entries\n",
+					where, count-1);
+			goto error;
 		}
 	}
+	return;
+	
+	error:
+	rpc2 = list_next_entry(rpc, grantable_links);
+	while (1) {
+		printk(KERN_NOTICE "Id %llu is on the grantable list\n",
+				rpc2->id);
+		if (list_empty(&rpc2->grantable_links)) {
+			printk(KERN_NOTICE "Rpc id %llu links to itself.\n",
+				rpc2->id);
+			if (rpc2->grantable_links.prev == &rpc2->grantable_links) {
+				printk(KERN_NOTICE "Rpc id %llu is init state.\n",
+					rpc2->id);
+			}
+		}
+		if (rpc2 == rpc) {
+			break;
+		}
+	}
+	count = 0;
+	list_for_each(pos, &homa->grantable_rpcs) {
+		if (rpc == list_entry(pos, struct homa_rpc, grantable_links)) {
+			printk(KERN_NOTICE "%d entries before id %llu on "
+				"grantable list\n", count, rpc->id);
+			break;
+		}
+		count++;
+	}
+	BUG();
 }

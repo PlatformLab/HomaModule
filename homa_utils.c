@@ -191,6 +191,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 {
 	int err;
 	struct homa_rpc *srpc;
+	
 	srpc = (struct homa_rpc *) kmalloc(sizeof(*srpc),
 			GFP_KERNEL);
 	if (!srpc)
@@ -241,10 +242,25 @@ void homa_rpc_free(struct homa_rpc *rpc)
 		
 		/* Even though we removed the rpc from the throttled list,
 		 * it's possible that the pacer thread is still accessing it.
-		 * Use the RCU mechanism to wait until the pacer is done.
+		 * Use the RCU mechanism to wait until the pacer is done;
+		 * homa_rpc_free_rcu will finish the cleanup (see below).
 		 */
-		synchronize_rcu();
+		call_rcu(&rpc->rcu, homa_rpc_free_rcu);
+	} else {
+		homa_message_out_destroy(&rpc->msgout);
+		homa_message_in_destroy(&rpc->msgin);
+		kfree(rpc);
 	}
+}
+
+/**
+ * homa_rpc_free_rcu() - Invoked by the RCU mechanism to finish freeing an
+ * RPC when homa_rpc_free was blocked by RCU contention.
+ * @param rcu_head:  Identifies the RPC to clean up.
+ */
+void homa_rpc_free_rcu(struct rcu_head *rcu_head)
+{
+	struct homa_rpc *rpc = container_of(rcu_head, struct homa_rpc, rcu);
 	homa_message_out_destroy(&rpc->msgout);
 	homa_message_in_destroy(&rpc->msgin);
 	kfree(rpc);

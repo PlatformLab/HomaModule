@@ -478,6 +478,23 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
+TEST_F(homa_incoming, homa_grant_pkt__delete_server_rpc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 100, 20000);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_FALSE(list_empty(&self->hsk.server_rpcs));
+
+	struct grant_header h = {{.sport = htons(self->client_port),
+	                .dport = htons(self->server_port),
+			.id = srpc->id, .type = GRANT},
+		        .offset = htonl(25000),
+			.priority = 3};
+	homa_pkt_dispatch((struct sock *)&self->hsk,
+			mock_skb_new(self->client_ip, &h.common, 0, 0));
+	EXPECT_TRUE(list_empty(&self->hsk.server_rpcs));
+}
 
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_client)
 {

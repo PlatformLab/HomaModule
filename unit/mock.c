@@ -109,6 +109,12 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	return skb;
 }
 
+void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
+{
+	unit_log_printf("; ", "call_rcu_sched");
+	func(head);
+}
+
 bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
@@ -149,7 +155,7 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 {
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_printf("; ", "_copy_from_user copyed %lu bytes", n);
+	unit_log_printf("; ", "_copy_from_user copied %lu bytes", n);
 	return 0;
 }
 
@@ -745,7 +751,7 @@ void mock_teardown(void)
 	
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)
-		FAIL("%u sk_buff(s)still in use after test", count);
+		FAIL("%u sk_buff(s) still in use after test", count);
 	unit_hash_free(buffs_in_use);
 	buffs_in_use = NULL;
 	

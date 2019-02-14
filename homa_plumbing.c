@@ -202,7 +202,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "throttle_min",
+		.procname	= "throttle_min_bytes",
 		.data		= &homa_data.throttle_min_bytes,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
@@ -583,23 +583,31 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
  * Return: 0 on success, otherwise a negative errno.
  */
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
+	int result;
 	switch (cmd) {
 	case HOMAIOCSEND:
-		return homa_ioc_send(sk, arg);
+		result = homa_ioc_send(sk, arg);
+		break;
 	case HOMAIOCRECV:
-		return homa_ioc_recv(sk, arg);
+		result = homa_ioc_recv(sk, arg);
+		break;
 	case HOMAIOCINVOKE:
 		printk(KERN_NOTICE "HOMAIOCINVOKE not yet implemented\n");
-		return -EINVAL;
+		result = -EINVAL;
+		break;
 	case HOMAIOCREPLY:
-		return homa_ioc_reply(sk, arg);
+		result = homa_ioc_reply(sk, arg);
+		break;
 	case HOMAIOCABORT:
 		printk(KERN_NOTICE "HOMAIOCABORT not yet implemented\n");
-		return -EINVAL;
+		result = -EINVAL;
+		break;
 	default:
 		printk(KERN_NOTICE "Unknown Homa ioctl: %d\n", cmd);
-		return -EINVAL;
+		result = -EINVAL;
+		break;
 	}
+	return result;
 }
 
 /**

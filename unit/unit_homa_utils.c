@@ -146,6 +146,17 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
+TEST_F(homa_utils, homa_rpc_free__throttled)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 5000, NULL);
+	EXPECT_NE(NULL, crpc);
+	homa_add_to_throttled(crpc);
+	unit_log_clear();
+	homa_rpc_free(crpc);
+	EXPECT_STREQ("homa_remove_from_grantable invoked; call_rcu_sched",
+		unit_log_get());
+}
 
 TEST_F(homa_utils, homa_find_client_rpc)
 {

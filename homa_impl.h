@@ -537,6 +537,9 @@ struct homa_rpc {
 	 */
 	struct list_head throttled_links;
 	
+	/** @rcu: Used by the RCU mechanism if RPC freeing must be deferred. */
+	struct rcu_head rcu;
+	
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
 	 * since the last time a packet was received for this RPC.
@@ -892,7 +895,7 @@ struct homa {
 	struct list_head throttled_rpcs;
 	
 	/**
-	 * @throttle_min: If a packet has fewer bytes than this, then it
+	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
 	 * bypasses the throttle mechanism and is transmitted immediately.
 	 * We have this limit because for very small packets we can't keep
 	 * up with the NIC (we're limited by CPU overheads); there's no
@@ -1245,6 +1248,7 @@ extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 extern void     homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
+extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 			struct sockaddr_in *dest, size_t length,

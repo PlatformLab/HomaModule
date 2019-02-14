@@ -448,6 +448,8 @@ int homa_pacer_main(void *transportInfo)
 		if (homa->pacer_exit) {
 			break;
 		}
+		
+		/* Sleep this thread if the throttled list is empty. */
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links) == NULL) {
@@ -457,6 +459,7 @@ int homa_pacer_main(void *transportInfo)
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);
+		
 		homa_pacer_xmit(homa);
 		now = get_cycles();
 		INC_METRIC(pacer_cycles, now - start);
@@ -470,52 +473,70 @@ int homa_pacer_main(void *transportInfo)
 /**
  * homa_pacer_xmit() - Wait until we can send at least one packet from
  * the throttled list, then send as many packets as possible from the
- * highest priority message.
+ * highest priority message. Note: this function is only invoked from
+ * process context (never BH).
  * @homa:    Overall data about the Homa protocol implementation.
  */
 void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
+	struct sock *sk;
 	
 	while ((get_cycles() + homa->max_nic_queue_cycles)
 			< atomic_long_read(&homa->link_idle_time)) {}
 	rcu_read_lock();
-	rpc = list_first_or_null_rcu(&homa->throttled_rpcs, struct homa_rpc,
-		throttled_links);
-	if (rpc != NULL) {
-		struct sock *sk = (struct sock *) rpc->hsk;
-		bh_lock_sock_nested(sk);
-
-		/* Once we've locked the socket we can release the RCU read
-		 * lock: the socket can't go away now. */
-		rcu_read_unlock();
-		if (unlikely(sock_owned_by_user(sk))) {
-			bh_unlock_sock(sk);
+	while (1) {
+		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
+				struct homa_rpc, throttled_links);
+		if (rpc == NULL) {
+			rcu_read_unlock();
 			return;
 		}
-		homa_xmit_data(rpc);
-		if ((rpc->msgout.next_offset >= rpc->msgout.granted)
-				|| !rpc->msgout.next_packet) {
-			spin_lock_bh(&homa->throttle_lock);
-			if (!list_empty(&rpc->throttled_links)) {
-				list_del_rcu(&rpc->throttled_links);
-
-				/* Note: this reinitialization is only safe
-				 * because the pacer only looks at the first
-				 * element of the list, rather than traversing
-				 * it (and besides, we know the pacer isn't
-				 * active concurrently, since this code *is*
-				 * the pacer). It would not be safe under more
-				 * general usage patterns.
-				 */
-				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
-			}
-			spin_unlock_bh(&homa->throttle_lock);
-		}
-		bh_unlock_sock(sk);
-	} else {
-		rcu_read_unlock();
+		sk = (struct sock *) rpc->hsk;
+		lock_sock(sk);
+		if (rpc == list_first_or_null_rcu(&homa->throttled_rpcs,
+				struct homa_rpc, throttled_links))
+			break;
+			
+		/* RPC might have been deleted before we got the socket
+		 * lock; start over.
+		 */
+		release_sock(sk);
+		continue;
 	}
+
+	/* At this point we've identified the highest priority RPC and
+	 * locked its socket. We can now release the RCU read lock: the
+	 * socket can't go away now, nor can the RPC.
+	 */
+	rcu_read_unlock();
+	homa_xmit_data(rpc);
+	if ((rpc->msgout.next_offset >= rpc->msgout.granted)
+			|| !rpc->msgout.next_packet) {
+		/* Nothing more to transmit from this message (right now),
+		 * so remove it from the throttled list.
+		 */
+		spin_lock_bh(&homa->throttle_lock);
+		if (!list_empty(&rpc->throttled_links)) {
+			list_del_rcu(&rpc->throttled_links);
+
+			/* Note: this reinitialization is only safe
+			 * because the pacer only looks at the first
+			 * element of the list, rather than traversing
+			 * it (and besides, we know the pacer isn't
+			 * active concurrently, since this code *is*
+			 * the pacer). It would not be safe under more
+			 * general usage patterns.
+			 */
+			INIT_LIST_HEAD_RCU(&rpc->throttled_links);
+		}
+		spin_unlock_bh(&homa->throttle_lock);
+		if ((rpc->msgout.next_offset >= rpc->msgout.length)
+				&& (rpc->dport >= HOMA_MIN_CLIENT_PORT)) {
+			homa_rpc_free(rpc);
+		}
+	}
+	release_sock(sk);
 }
 
 /**
