@@ -983,12 +983,11 @@ int homa_metrics_release(struct inode *inode, struct file *file)
 
 /**
  * homa_dointvec() - This function is a wrapper around proc_dointvec. It is
- * invoked to read and write homa->link_bandwidth via sysctl, if a value
- * is changed, updates all dependent sysctl values that might have been
- * affected.
+ * invoked to read and write sysctl values and also update other values
+ * that depend on the modified value.
  * @table:    sysctl table describing value to be read or written.
  * @write:    Nonzero means value is being written, 0 means read.
- * @buffer:   Address in user space if the input/output data.
+ * @buffer:   Address in user space of the input/output data.
  * @lenp:     Not exactly sure.
  * @ppos:     Not exactly sure.
  * 
@@ -1004,7 +1003,14 @@ int homa_dointvec(struct ctl_table *table, int write,
 		 * all info that is dependent on any sysctl value.
 		 */
 		homa_outgoing_sysctl_changed(homa);
-		homa_prios_changed(homa);
+		
+		/* For this value, only call the method when this
+		 * particular value was written (don't want to increment
+		 * cutoff_version otherwise).
+		 */
+		if (table->data == &homa_data.unsched_cutoffs) {
+			homa_prios_changed(homa);
+		}
 	}
 	return result;
 }

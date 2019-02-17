@@ -1,0 +1,261 @@
+.TH HOMA 7 2019-02-15 "Homa" "Linux Programmer's Manual"
+.SH NAME
+homa \- Homa transport protocol
+.SH SYNOPSIS
+.nf
+.B #include <sys/socket.h>
+.B #include <netinet/in.h>
+.B #include <homa.h>
+.PP
+.B homa_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA)
+.fi
+.SH DESCRIPTION
+.PP
+Homa is a network transport protocol for communication within a datacenter.
+Its most important benefit is that if offers exceptionally low latency
+for small messages, even in the presence of high network loads.
+It also has several other advantages over TCP; for a full rationale,
+see "Homa: A Receiver-Driven Low-Latency Transport Protocol Using 
+Network Priorities,"
+.I Proceedings of ACM SIGCOMM
+.IR 2019 ,
+pp. 221\(en235 (https://dl.acm.org/citation.cfm?id=3230564).
+.PP
+Homa differs from TCP in several respects.
+First, it is message-oriented, whereas TCP is stream-oriented.
+Homa is designed for request-response communication (also known as
+remote procedure calls, or RPCs): a client sends a request message to
+a server; the server processes the request and then returns a
+response message.
+Messages can be any length, up to a
+limit of
+.B HOMA_MAX_MESSAGE_LENGTH
+bytes.
+.PP
+Homa is connectionless: once a socket has been opened, it
+may be used to communicate with any number of peers.
+The same socket may be used both for initiating requests as client
+and for receiving requests as server.
+A client may have any number of outstanding requests at the same
+time, to any number of servers; concurrent requests may complete in
+any order.
+Homa maintains state only for active requests, so it is economical
+in environments where each machine communicates
+with a large number of other machines.
+.PP
+Homa delivers messages reliably and can recover from packet drops,
+packet duplication, and other intermittent network failures.
+When a client issues a request, Homa will ensure that the request
+is received by the server and that the response is transmitted
+back to the client.
+A request fails only if Homa cannot maintain communication with the
+Homa transport module on the server.
+.PP
+Under some (rare) conditions, a Homa server may receive the same request
+multiple times.
+Homa assumes that application-level software will perform duplicate detection,
+if that is important for the application.
+.PP
+Home is intended for use between machines that are physically
+close, so round-trip latencies are at most a few tens of microseconds.
+Homa is not suitable for wide-area communication.
+.PP
+In order for Homa to achieve its low latency, network switches must be
+configured to enable priority queues in output ports and to obey the priority
+values specified as the PCP field in IEEE 802.1Q packet headers.
+Homa assumes that 8 priority levels are available, but it can be
+configured to use fewer than this.
+.SH BASIC USAGE
+.PP
+Most of the normal system calls for I/O, such as
+.BR read "(2), " write "(2), " connect "(2), " listen "(2), and " accept (2),
+are not supported by Homa.
+Instead, Homa offers a set of library methods that support
+message-oriented communication.
+.PP
+For an application to initiate requests as a client, it opens a Homa
+socket as shown in
+.B SYNOPSIS
+above, then invokes
+.BR homa_invoke (3).
+This will send a request message and wait for the response to arrive.
+Alternatively, the application can invoke
+.BR homa_send (3)
+to send a request, followed later by
+.BR homa_recv (3)
+to wait for the reply.
+Multiple requests may be initiated concurrently before waiting for any
+replies.
+The responses will not necessarily be received in the same order that the
+requests were sent.
+.PP
+To act as server, an application first opens a Homa socket and then
+invokes
+.BR bind (2)
+to associate a server port number with the socket.
+The port number must not already being used by another socket, and must
+be less than
+.B HOMA_MIN_CLIENT_PORT
+(Homa automatically assigns a separate client port to each socket, which
+is used for outgoing requests; client port numbers are greater than or
+equal to
+.BR HOMA_MIN_CLIENT_PORT ).
+Once
+.BR bind (2)
+has completed successfully, the application can receive incoming
+requests by invoking
+.BR homa_recv (3).
+For each request that it receives, the application must eventually
+invoke
+.BR homa_reply (3)
+to send a response.
+.PP
+Server sockets can also be used to send outgoing requests as described
+above for clients. If the same socket is used for both outgoing and
+incoming requests, then
+.BR homa_recv (3)
+may return either a request or a response packet.
+Requests and responses can be distinguished using the peer
+port number returned by
+.BR homa_recv (3).
+.SH SYSCTL PARAMETERS
+.PP
+Homa supports several parameters that can be set with
+.B sysctl
+to tune its behavior.
+To access a particular parameter, prepend
+.B .net.homa.
+to the value shown below.
+The parameters are also visible as files in the directory
+.IR /proc/sys/net/homa
+.TP
+.I abort_ticks
+An integer value specifying a number of "ticks"; each tick corresponds
+to one invocation of Homa's internal timer function, which runs every
+millisecond.
+Homa will abort a request with
+.B ETIMEDOUT
+if it is unable to elicit any acknowledgment from the request's target
+server for this number of ticks.
+This value should be significantly greater than
+.I resend_ticks
+in order to allow time for multiple resends before aborting.
+.TP
+.I cutoff_version
+(Read-only) The current version for unscheduled cutoffs; incremented
+automatically when unsched_cutoffs is modified.
+.TP
+.I flags
+.TP
+.IR link_mbps
+An integer value specifying the bandwidth of this machine's uplink to
+the top-of-rack switch, in units of 1e06 bits per second.
+.TP
+.IR max_nic_queue_ns
+An integer value specifying a NIC queue length in units of nanoseconds
+(how long it will take the existing packets in the queue
+to be fully transmitted).
+If the NIC queue is longer than this, Homa will wait to queue additional
+packets until the queue length drops below this value.
+This parameter is used to throttle the NIC output queue in order to
+implement SRPT more accurately for outbound messages.
+Once a packet has been queued in the NIC, Homa cannot schedule a
+higher priority back in front of it; the longer the queue, the
+longer the delay for a newly arriving high priority packet.
+Lower values for this parameter reduce preemption lag and result in
+a better approximation of SRPT, but the value must be high enough to
+queue the next packet before
+the NIC becomes idle; otherwise, output bandwidth will be lost.
+.TP
+.IR max_prio
+An integer value specifying the highest priority level that Homa will
+use. Must be between 0 and 7, inclusive; larger values indicate higher
+priority.
+.TP
+.IR max_sched_prio
+(Read-only) An integer value specifying the highest priority level that Homa
+will use for scheduled packets; priority levels larger than this
+will be used for unscheduled packets.
+This parameter is set automatically by Homa when
+.I unsched_cutoffs
+is modified.
+.TP
+.IR min_prio
+An integer value specifying the lowest priority level that Homa will
+use. Must be between 0 and 7, inclusive; larger values indicate higher
+priority.
+.TP
+.IR resend_ticks
+An integer value specifying a number of "ticks"; each tick corresponds
+to one invocation of Homa's internal timer function, which runs every
+millisecond.
+A resend request will be sent after this many ticks have elapsed without
+receiving expected data from a peer; additional resend requests
+will be sent after each additional tick.
+This value and
+.I abort_ticks
+should be chosen together.
+.TP
+.IR rtt_bytes
+An integer value specifying the worst-case round-trip latency (assuming
+unloaded servers and network) between this host and any other host with
+which it will communicate using Homa.
+The time should be that to send a maximum-sized packet and receive
+a minimum-size packet, measured end-to-end in the source kernel and
+including all software overheads on both source and destination.
+The latency is specified in terms of the number of bytes that can be
+transmitted during this time.
+Overestimates are relatively harmless (they increase buffer
+space occupancy); underestimates can result in wasted link bandwidth.
+.TP
+.IR throttle_min_bytes
+An integer value specifying the smallest packet size subject to
+output queue throttling.
+Packets smaller than this will be immediately added to the NIC
+queue without considering the queue length.
+The rationale for this is that small packets are limited by CPU
+overheads: there is no way that the CPU can generate
+small packets fast enough to build up a queue at the NIC.
+Bypassing the throttling mechanism improves efficiency.
+This value can be set to 0 to force all packets to use the throttling
+mechanism.
+.TP
+.IR unsched_cutoffs
+An array of 8 integer values. The nth element specifies the largest
+message size, in bytes, for which priority level n will be used.
+Starting with index 
+.I max_prio
+and working backwards, values should be monotonically increasing.
+An entry greater than or equal to
+.B HOMA_MAX_MESSAGE_LENGTH
+indicates the last unscheduled priority; priorities lower than
+this will be used for scheduled packets.
+.SH /PROC FILES
+.PP
+In addition to files for the configuration parameters described above,
+Homa also supports the following files under
+.IR /proc .
+.TP
+.IR /proc/net/homa_metrics
+Reading this file will return a snapshot of various counters maintained
+by Homa.
+Each line contains three fields that describe one counter: the counter's
+name, its value, and a comment explaining the meaning of the counter.
+The counters are all cumulative and monotonically increasing (they are zeroed
+when Homa starts, but never again after that).
+To compute statistics over an interval, read this file once at the beginning of
+the interval, a second time at the end of the interval, and compute the
+difference between the two readings.
+.SH IOCTLS
+.PP
+Homa supports several
+.BR ioctl (2)
+calls, which are used to implement the Homa library methods.
+These
+.BR ioctl(2)
+calls should not be invoked directly.
+.SH SEE ALSO
+.BR homa_invoke (3),
+.BR homa_recv (3),
+.BR homa_reply (3),
+.BR homa_send (3)

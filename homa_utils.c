@@ -676,7 +676,7 @@ char *homa_print_metrics(struct homa *homa)
 	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
 		homa_append_metric(homa,
 			"msg_bytes_%-9d    %15llu  "
-			"Bytes in messages containing %d-%d bytes\n",
+			"Bytes in incoming messages containing %d-%d bytes\n",
 			(i+1)*64, m.small_msg_bytes[i], lower, (i+1)*64);
 		lower = (i+1)*64 + 1;
 	}
@@ -684,13 +684,13 @@ char *homa_print_metrics(struct homa *homa)
 			i++) {
 		homa_append_metric(homa,
 			"msg_bytes_%-9d    %15llu  "
-			"Bytes in messages containing %d-%d bytes\n",
+			"Bytes in incoming messages containing %d-%d bytes\n",
 			(i+1)*1024, m.medium_msg_bytes[i], lower, (i+1)*1024);
 		lower = (i+1)*1024 + 1;
 	}
 	homa_append_metric(homa,
 			"large_msg_bytes        %15llu  "
-			"Bytes in messages >= %d bytes\n",
+			"Bytes in incoming messages >= %d bytes\n",
 			m.large_msg_bytes, lower);
 	for (i = DATA; i < BOGUS;  i++) {
 		char *symbol = homa_symbol_for_type(i);

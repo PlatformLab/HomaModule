@@ -2,19 +2,22 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Machine status:
-  rc73: up-to-date
+  rc73: one version behind, as failsafe
   rc72: up-to-date
-  rc71: experimental kernel to catch spin lock problem
-  rc70: experimental kernel to catch spin lock problem
+  rc71: up-to-date
+  rc70: up-to-date
   rc69: Henry's machine
   rc68: up-to-date
   rc67: up-to-date
-  rc66: never responsive, can't rczap
+  rc66: up-to-date
   rc65: up-to-date
   rc64: up-to-date
 
 * Things to do:
-  * Throttle output to reduce queueing in the NIC.
+  * Improve timeout mechanism to work in the face of large numbers of
+    outgoing messages:
+    * Combine timeouts for a single target server.
+    * Limit the number of simultaneous timeouts.
   * Figure out socket locking disciplines.
   * Many unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in

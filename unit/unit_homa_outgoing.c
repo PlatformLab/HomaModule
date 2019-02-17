@@ -384,15 +384,15 @@ TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
 {
 	self->homa.link_mbps = 10000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(800, self->homa.cycles_per_kbyte);
+	EXPECT_EQ(840, self->homa.cycles_per_kbyte);
 	
 	self->homa.link_mbps = 1000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(8000, self->homa.cycles_per_kbyte);
+	EXPECT_EQ(8400, self->homa.cycles_per_kbyte);
 	
 	self->homa.link_mbps = 40000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(200, self->homa.cycles_per_kbyte);
+	EXPECT_EQ(210, self->homa.cycles_per_kbyte);
 	
 	self->homa.max_nic_queue_ns = 200;
 	cpu_khz = 2000000;

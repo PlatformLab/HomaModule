@@ -1,0 +1,102 @@
+.TH HOMA_RECV 3 2019-02-15 "Homa" "Linux Programmer's Manual"
+.SH NAME
+homa_recv \- receive a Homa message
+.SH SYNOPSIS
+.nf
+.B #include <homa.h>
+.PP
+.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ,
+.BI "                  const struct sockaddr *" src_addr ", size_t " \
+*addrlen  ,
+.BI "                  uint64_t *" id );
+.fi
+.SH DESCRIPTION
+The function
+.BR homa_recv ()
+waits for the next incoming Homa message and returns it.
+The argument
+.I sockfd
+is the file descriptor of the receiving socket; this must be a Homa socket.
+The incoming message will be stored in the buffer pointed to by
+.IR buf .
+The argument
+.I len
+indicates the number of bytes available for the message; if the actual
+message is larger than
+.IR len ,
+then excess bytes will be discarded.
+The identifier for the message is returned at
+.I *id
+(unless id is NULL).
+
+If
+.I src_addr
+is not NULL, the source address for the message is placed in the buffer
+pointed to by
+.IR src_addr .
+The argument
+.I addrlen
+is a value-result argument.
+Before the call, it should be initialized to the size of the
+buffer associated with
+.IR src_addr .
+Upon return,
+.I *addrlen
+is updated to contain the actual size of the source address.
+The returned address is truncated  if  the buffer provided is too small;
+in this case,
+.I *addrlen
+will return a value greater than was supplied to the call.
+
+Depending on how
+.I sockfd
+has been configured, the incoming message may be either a request or a response.
+If it is a request, the port number stored in
+.I src_addr
+will be
+.B HOMA_MIN_CLIENT_PORT
+or greater.
+A port number less than
+.B HOMA_MIN_CLIENT_PORT
+indicates that the message is a response (it originated at a server port).
+If the message is a request, then the caller must eventually invoke
+.BR homa_reply (3)
+to respond (Homa retains state for the request until
+.BR homa_reply (3)
+is invoked).
+
+.SH RETURN VALUE
+On success, the return value is the size of the response message,
+which may be greater than
+.IR resplen .
+On error, \-1 is returned and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EBADF
+.I sockfd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+An invalid user space address was specified for an argument.
+.TP
+.B EINTR
+A signal occurred before a message was received; see
+.BR signal (7).
+.TP
+.B EINVAL
+The file descriptor
+.I fockfd
+did not refer to a Homa socket.
+.TP
+.B ENOMEM
+No memory available.
+.TP
+.B ETIMEDOUT
+The destination server did not respond to protocol requests.
+.SH SEE ALSO
+.BR homa_invoke (3),
+.BR homa_reply (3),
+.BR homa_send (3),
+.BR homa (7)

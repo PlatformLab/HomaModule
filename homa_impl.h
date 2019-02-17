@@ -944,7 +944,9 @@ struct homa {
 	
 	/**
 	 * @cycles_per_kbyte: the number of cycles, as measured by get_cycles(),
-	 * that it takes to transmit 1000 bytes on our uplink.
+	 * that it takes to transmit 1000 bytes on our uplink. This is actually
+	 * a slight overestimate of the value, to ensure that we don't
+	 * underestimate NIC queue length and queue too many packets.
 	 */
 	__u32 cycles_per_kbyte;
 	

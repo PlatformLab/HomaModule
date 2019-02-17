@@ -1,0 +1,82 @@
+.TH HOMA_INVOKE 3 2019-02-15 "Homa" "Linux Programmer's Manual"
+.SH NAME
+homa_invoke \- send a request and wait for response
+.SH SYNOPSIS
+.nf
+.B #include <homa.h>
+.PP
+.BI "ssize_t homa_invoke(int " sockfd ", const void *" request ", size_t " \
+reqlen ,
+.BI "                    const struct sockaddr *" dest_addr ", size_t " \
+addrlen  ,
+.BI "                    void *" response ", size_t " resplen );
+.fi
+.SH DESCRIPTION
+The function
+.BR homa_invoke ()
+transmits a request to another socket using Homa and waits for a response
+message to be returned.
+The argument
+.I sockfd
+is the file descriptor of the sending socket; this must be a Homa socket.
+The request message is stored in a buffer pointed to by
+.IR request ,
+and 
+.I reqlen
+gives its length in bytes. The length must not exceed
+.BR HOMA_MAX_MESSAGE_LENGTH .
+The destination socket for the request is given by
+.I dest_addr
+and
+.I addrlen .
+The response message will be stored at
+.IR response ,
+and
+.I resplen
+indicates the number of bytes available for the response.
+If the actual response is larger than
+.IR resplen ,
+then excess bytes will be discarded.
+
+.SH RETURN VALUE
+On success, the return value is the size of the response message,
+which may be greater than
+.IR resplen .
+On error, \-1 is returned and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EAFNOSUPPORT
+The address family specified by
+.I dest_addr
+is not supported by Homa.
+.TP
+.B EBADF
+.I sockfd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+An invalid user space address was specified for an argument.
+.TP
+.B EINTR
+A signal occurred after the request was queued for transmission,
+but before the response was received; see
+.BR signal (7).
+.TP
+.B EINVAL
+The size of the request exceeded
+.B HOMA_MAX_MESSAGE_LENGTH, or
+.I fockfd
+was not a Homa socket.
+.TP
+.B ENOMEM
+No memory available.
+.TP
+.B ETIMEDOUT
+The destination server did not respond to protocol requests.
+.SH SEE ALSO
+.BR homa_recv (3),
+.BR homa_reply (3),
+.BR homa_send (3),
+.BR homa (7)

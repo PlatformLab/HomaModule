@@ -1,0 +1,80 @@
+.TH HOMA_REPLY 3 2019-02-15 "Homa" "Linux Programmer's Manual"
+.SH NAME
+homa_reply \- send a Homa response message
+.SH SYNOPSIS
+.nf
+.B #include <homa.h>
+.PP
+.BI "int homa_reply(int " sockfd ", const void *" response ", size_t " \
+resplen ,
+.BI "               const struct sockaddr *" dest_addr ", size_t " \
+addrlen  ,
+.BI "               uint64_t " id );
+.fi
+.SH DESCRIPTION
+The function
+.BR homa_reply ()
+transmits a response message using the Homa transport protocol.
+The argument
+.I sockfd
+is the file descriptor of the sending socket; this must be a Homa socket.
+The response is stored in a buffer pointed to by
+.IR request .
+The argument 
+.I reqlen
+gives the length of the message in bytes, which must not exceed
+.BR HOMA_MAX_MESSAGE_LENGTH .
+The destination for the request is given by
+.I dest_addr
+and
+.I addrlen .
+The argument
+.I id
+is an identifier previously returned by 
+.BR homa_recv (3);
+along with
+.IR dest_addr ,
+it identifies the request for which this message is the response.
+If no such request is active,
+.B homa_reply
+returns (successfully) without doing anything.
+
+This function returns as soon as the response has been queued for
+transmission.
+
+.SH RETURN VALUE
+On success, the return value is 0.
+On error, \-1 is returned and
+.I errno
+is set appropriately.
+.SH ERRORS
+.TP
+.B EAFNOSUPPORT
+The address family specified by
+.I dest_addr
+is not supported by Homa.
+.TP
+.B EBADF
+.I sockfd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+An invalid user space address was specified for an argument.
+.TP
+.B EINTR
+A signal occurred before any data was transmitted; see
+.BR signal (7).
+.TP
+.B EINVAL
+The size of the response exceeded
+.B HOMA_MAX_MESSAGE_LENGTH, or
+.I fockfd
+was not a Homa socket.
+.TP
+.B ENOMEM
+No memory available.
+.SH SEE ALSO
+.BR homa_invoke (3),
+.BR homa_recv (3),
+.BR homa_send (3),
+.BR homa (7)
