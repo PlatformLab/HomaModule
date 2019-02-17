@@ -44,6 +44,7 @@ This repo contains an implementation of the Homa transport protocol for Linux.
      sysctl mechanism. To see what is available, type "sysctl net.homa".
      
 ## Significant recent improvements
+- February 16, 2019: added manual entries in the subdirectory "man".
 - February 14, 2019: output queue throttling now seems to work (i.e., senders
   implement SRPT properly).
 - November 6, 2019: timers and packet retransmission now work.
