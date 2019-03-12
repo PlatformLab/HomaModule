@@ -14,6 +14,8 @@ Notes for Homa implementation in Linux:
   rc64: up-to-date
 
 * Things to do:
+  * What if a socket is closed while a process is blocked waiting for
+    messages? Will the blocking socket access freed memory?
   * Improve timeout mechanism to work in the face of large numbers of
     outgoing messages:
     * Combine timeouts for a single target server.
@@ -73,6 +75,10 @@ Notes for Homa implementation in Linux:
     back-to-back for a message, a separate grant gets sent for each packet.
 
 * Questions for Linux experts:
+  * If an interrupt arrives after a thread has been woken up to receive an
+    incoming message, but before the kernel call returns, is it possible
+    for the kernel call to return EINTR, such that the message isn't received
+    and no one else has woken up to handle it?
   * OK to call kmalloc at interrupt level?
     Yes, but must specify GFP_ATOMIC as argument, not GFP_KERNEL; the operation
     will not sleep, which means it could fail more easily.

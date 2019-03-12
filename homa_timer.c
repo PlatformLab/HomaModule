@@ -182,11 +182,17 @@ void homa_timer(struct homa *homa)
 		}
 		if (print_active) {
 			struct list_head *pos;
-			int count = 0;
-			list_for_each(pos, &hsk->ready_rpcs) {
-				count++;
+			int requests = 0;
+			int responses = 0;
+			list_for_each(pos, &hsk->ready_requests) {
+				requests++;
 			}
-			printk(KERN_NOTICE "%d ready RPCS for socket\n", count);
+			list_for_each(pos, &hsk->ready_responses) {
+				responses++;
+			}
+			printk(KERN_NOTICE "%d ready requests, %d ready "
+					"responses for socket\n",
+					requests, responses);
 		}
 		bh_unlock_sock((struct sock *) hsk);
 	}

@@ -36,7 +36,7 @@ The identifier is unique among all requests issued on
 .IR sockfd ,
 and can be used to match the request with a response returned later by
 .BR homa_reply (3).
-
+.PP
 This function returns as soon as the message has been queued for
 transmission.
 
@@ -73,7 +73,7 @@ A signal occurred before any data was transmitted; see
 .B EINVAL
 The size of the request exceeded
 .B HOMA_MAX_MESSAGE_LENGTH, or
-.I fockfd
+.I sockfd
 was not a Homa socket.
 .TP
 .B ENOMEM

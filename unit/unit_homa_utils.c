@@ -142,9 +142,24 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 1000, 100);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	homa_rpc_free(crpc);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
+}
+TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
+{
+	struct homa_interest interest;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 100);
+	interest.rpc = NULL;
+	interest.rpc_deleted = false;
+	crpc->interest = &interest;
+	unit_log_clear();
+	homa_rpc_free(crpc);
+	EXPECT_TRUE(interest.rpc_deleted);
+	EXPECT_STREQ("homa_remove_from_grantable invoked; wake_up_process",
+		unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_free__throttled)
 {
@@ -166,12 +181,9 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 1000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc2));
-	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk,
-			self->hsk.client_port, crpc1->id));
-	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk,
-			self->hsk.client_port, crpc2->id));
-	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk,
-			self->hsk.client_port, crpc2->id+1));
+	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));
+	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk, crpc2->id));
+	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc2->id+1));
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
 }

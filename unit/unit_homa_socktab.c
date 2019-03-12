@@ -127,6 +127,19 @@ TEST_F(homa_socktab, homa_sock_destroy__basics)
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client3));
 }
 
+TEST_F(homa_socktab, homa_sock_destroy__wakeup_interests)
+{
+	struct homa_interest interest1, interest2, interest3;
+	struct homa_sock hsk2;
+	mock_sock_init(&hsk2, &self->homa, 0, 0);
+	list_add_tail(&interest1.links, &hsk2.request_interests);
+	list_add_tail(&interest2.links, &hsk2.request_interests);
+	list_add_tail(&interest3.links, &hsk2.response_interests);
+	homa_sock_destroy(&hsk2);
+	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
+		"wake_up_process", unit_log_get());
+}
+
 TEST_F(homa_socktab, homa_sock_bind)
 {
 	struct homa_sock hsk2;

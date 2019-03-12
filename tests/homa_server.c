@@ -56,12 +56,13 @@ int main(int argc, char** argv) {
 	}
 	printf("Successfully bound to Homa port %d\n", port);
 	while (1) {
-		uint64_t id;
+		uint64_t id = 0;
 		int seed;
 		int result;
 		
 		length = homa_recv(fd, message, sizeof(message),
-			(struct sockaddr *) &source, sizeof(source), &id);
+			HOMA_RECV_REQUEST, &id, (struct sockaddr *) &source,
+			sizeof(source));
 		if (length < 0) {
 			printf("Recvmsg failed: %s\n", strerror(errno));
 			continue;

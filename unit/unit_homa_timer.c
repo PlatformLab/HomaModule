@@ -128,8 +128,7 @@ TEST_F(homa_timer, homa_timer__client_rpc_basics)
 	crpc->silent_ticks = self->homa.abort_ticks - 1;
 	homa_timer(&self->homa);
 	EXPECT_EQ(self->homa.abort_ticks, crpc->silent_ticks);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }

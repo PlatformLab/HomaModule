@@ -34,6 +34,9 @@ extern void mock_spin_unlock(spinlock_t *lock);
 
 #define get_cycles mock_get_cycles
 extern cycles_t mock_get_cycles(void);
+
+#define signal_pending(xxx) mock_signal_pending
+extern int mock_signal_pending;
 #endif
 
 extern struct homa *homa;
@@ -431,6 +434,38 @@ struct homa_message_in {
 };
 
 /**
+ * struct homa_interest - Indicates that a blocked thread wishes to receive an
+ * incoming request or response message.
+ */
+struct homa_interest {
+	/**
+	 * @thread: thread that would like to receive a message. Will get
+	 * woken up when a suitable message becomes available.
+	 */
+	struct task_struct *thread;
+	
+	/**
+	 * @rpc: points to a word containing the address of a suitable RPC,
+	 * or NULL if none has been found yet. There may be multple interests
+	 * pointing to the same word.
+	 */
+	struct homa_rpc **rpc;
+	
+	/**
+	 * @rpc_deleted: this value will be set to true if an RPC is
+	 * deleted at a time when its interest field points to this
+	 * structure.
+	 */
+	bool rpc_deleted;
+	
+	/**
+	 * @links: For linking this object into a list of waiting threads,
+	 * such as &homa_sock.request_interests.
+	 */
+	struct list_head links;
+};
+
+/**
  * struct homa_rpc - One of these structures exists for each active
  * RPC. The same structure is used to manage both outgoing RPCs on
  * clients and incoming RPCs on servers.
@@ -517,9 +552,14 @@ struct homa_rpc {
 	struct list_head rpc_links;
 	
 	/**
-	 * @ready_links: If state == RPC_READY, this is used to link this
-	 * object into &homa_sock.ready_client_rpcs or
-	 * &homa_sock.ready_server_rpcs.
+	 * @interest: Describes a thread that wants to be notified when
+	 * msgin is complete, or NULL if none.
+	 */
+	struct homa_interest *interest;
+	
+	/**
+	 * @ready_links: Used to link this object into
+	 * &homa_sock.ready_requests or &homa_sock.ready_responses.
 	 */
 	struct list_head ready_links;
 	
@@ -669,10 +709,28 @@ struct homa_sock {
 	struct list_head server_rpcs;
 	
 	/**
-	 * @ready_rpcs: Contains all RPCs (both client and server) in RPC_READY
-	 * state. The head is oldest, i.e. next to return.
+	 * @ready_requests: Contains server RPCs in RPC_READY state that
+	 * have not yet been claimed. The head is oldest, i.e. next to return.
 	 */
-	struct list_head ready_rpcs;
+	struct list_head ready_requests;
+	
+	/**
+	 * @ready_responses: Contains client RPCs in RPC_READY state that
+	 * have not yet been claimed. The head is oldest, i.e. next to return.
+	 */
+	struct list_head ready_responses;
+	
+	/**
+	 * @request_interests: List of threads that want to receive incoming
+	 * request messages.
+	 */
+	struct list_head request_interests;
+	
+	/**
+	 * @response_interests: List of threads that want to receive incoming
+	 * response messages.
+	 */
+	struct list_head response_interests;
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -1181,8 +1239,7 @@ extern int      homa_dointvec(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct homa_rpc
-               *homa_find_client_rpc(struct homa_sock *hsk, __u16 sport,
-			__u64 id);
+               *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk, __be32 saddr,
 			__u16 sport, __u64 id);
@@ -1258,6 +1315,7 @@ extern struct homa_rpc
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
+extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);
@@ -1288,7 +1346,8 @@ extern void     homa_update_idle_time(struct homa *homa, int bytes);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void     homa_validate_grantable_list(struct homa *homa, char *message);
-extern int      homa_wait_ready_msg(struct sock *sk, long *timeo);
+extern int      homa_wait_for_message(struct homa_sock *hsk, int flags,
+			__u64 id, struct homa_rpc **rpc);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,

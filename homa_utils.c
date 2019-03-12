@@ -165,6 +165,8 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
         if (unlikely(err != 0))
 		goto error;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
+	crpc->interest = NULL;
+	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
@@ -212,6 +214,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 			ntohl(h->unscheduled));
 	srpc->msgout.length = -1;
 	list_add(&srpc->rpc_links, &hsk->server_rpcs);
+	srpc->interest = NULL;
+	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
@@ -231,9 +235,13 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 * begins.
 	 */
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
-	if (rpc->state == RPC_READY)
-		__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->rpc_links);
+	__list_del_entry(&rpc->ready_links);
+	if (rpc->interest != NULL) {
+		rpc->interest->rpc_deleted = true;
+		wake_up_process(rpc->interest->thread);
+		rpc->interest = NULL;
+	}
 	if (unlikely(!list_empty(&rpc->throttled_links))) {
 		spin_lock_bh(&rpc->hsk->homa->throttle_lock);
 		list_del(&rpc->throttled_links);
@@ -270,13 +278,11 @@ void homa_rpc_free_rcu(struct rcu_head *rcu_head)
  * homa_find_client_rpc() - Locate client-side information about the RPC that
  * a packet belongs to, if there is any.
  * @hsk:      Socket via which packet was received.
- * @sport:    Port from which the packet was sent.
  * @id:       Unique identifier for the RPC.
  * 
  * Return:    A pointer to the homa_rpc for this id, or NULL if none.
  */
-struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk,
-		__u16 sport, __u64 id)
+struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 {
 	struct list_head *pos;
 	list_for_each(pos, &hsk->client_rpcs) {

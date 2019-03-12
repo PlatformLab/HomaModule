@@ -289,7 +289,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	EXPECT_EQ(RPC_READY, srpc->state);
 	if (srpc->state == state)
 		return srpc;
-	list_del(&srpc->ready_links);
+	list_del_init(&srpc->ready_links);
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;

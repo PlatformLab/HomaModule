@@ -245,7 +245,7 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 			INC_METRIC(requests_received, 1);
 		}
 	} else {
-		rpc = homa_find_client_rpc(hsk, ntohs(h->sport), h->id);
+		rpc = homa_find_client_rpc(hsk, h->id);
 	}
 	if (unlikely(rpc == NULL)) {
 		char buffer[200];
@@ -322,12 +322,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	homa_add_packet(&rpc->msgin, skb);
 	if (rpc->msgin.scheduled)
 		homa_manage_grants(homa, rpc);
-	if (rpc->msgin.bytes_remaining == 0) {
-		struct sock *sk = (struct sock *) rpc->hsk;
-		rpc->state = RPC_READY;
-		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_rpcs);
-		sk->sk_data_ready(sk);
-	}
+	if (rpc->msgin.bytes_remaining == 0)
+		homa_rpc_ready(rpc);
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
 		 * to resend CUTOFFS packets if one gets lost, but we don't
@@ -622,12 +618,9 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
  */
 void homa_rpc_abort(struct homa_rpc *crpc, int error)
 {
-	struct sock *sk = (struct sock *) crpc->hsk;
 	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
-	crpc->state = RPC_READY;
-	list_add_tail(&crpc->ready_links, &crpc->hsk->ready_rpcs);
-	sk->sk_data_ready(sk);
+	homa_rpc_ready(crpc);
 }
 
 /**
@@ -692,4 +685,157 @@ void homa_validate_grantable_list(struct homa *homa, char *where) {
 		count++;
 	}
 	BUG();
+}
+
+/**
+ * @homa_wait_for_message() - Wait for an appropriate incoming message.
+ * @hsk:     Socket where messages will arrive.
+ * @flags:   Flags parameter from homa_recv; see manual entry for details.
+ * @id:      If non-zero, then a response message will not be returned
+ *           unless its RPC id matches this.
+ * @rpc:     Used to return a pointer to an RPC that matches @flags and @id
+ *           and has a complete incoming message. Only valid if the return
+ *           value is 0.
+ *
+ * Return:   0 for success, otherwise a negative errno value.
+ */
+int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
+		struct homa_rpc **rpc)
+{
+	struct homa_rpc *r = NULL;
+	struct homa_interest response_interest, request_interest;
+	
+	/* Step 1: see if there is an appropriate RPC available. */
+	if (flags & HOMA_RECV_RESPONSE) {
+		if (id != 0) {
+			r = homa_find_client_rpc(hsk, id);
+			if ((r == NULL) || (r->interest != NULL))
+				return -EINVAL;
+			if (r->state == RPC_READY) {
+				list_del_init(&r->ready_links);
+				*rpc = r;
+				return 0;
+			}
+		} else if (!list_empty(&hsk->ready_responses)) {
+			*rpc = list_first_entry(&hsk->ready_responses,
+					struct homa_rpc, ready_links);
+			list_del_init(&(*rpc)->ready_links);
+			return 0;
+		}
+	}
+	if ((flags & HOMA_RECV_REQUEST)
+			&& !list_empty(&hsk->ready_requests)) {
+		*rpc = list_first_entry(&hsk->ready_requests,
+				struct homa_rpc, ready_links);
+		list_del_init(&(*rpc)->ready_links);
+		return 0;
+	}
+	if ((flags & (HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE)) == 0)
+		return -EINVAL;
+
+	/* Step 2: no appropriate RPC is available, so register
+	 * appropriate interests and go to sleep.
+	 */
+	*rpc = NULL;
+	if (flags & HOMA_RECV_NONBLOCKING) {
+		return -EAGAIN;
+	}
+	if (flags & HOMA_RECV_RESPONSE) {
+		response_interest.thread = current;
+		response_interest.rpc = rpc;
+		response_interest.rpc_deleted = false;
+		if (id != 0)
+			r->interest = &response_interest;
+		else
+			list_add_tail(&response_interest.links,
+					&hsk->response_interests);
+	}
+	if (flags & HOMA_RECV_REQUEST) {
+		request_interest.thread = current;
+		request_interest.rpc = rpc;
+		request_interest.rpc_deleted = false;
+		list_add_tail(&request_interest.links, &hsk->request_interests);
+	}
+	set_current_state(TASK_INTERRUPTIBLE);
+	
+	release_sock((struct sock *) hsk);
+	schedule();
+	__set_current_state(TASK_RUNNING);
+	lock_sock((struct sock *) hsk);
+
+	/* Step 3: back from sleeping; cleanup interests, then see
+	 * if a match was found.
+	 */
+	if (!hsk->homa)
+		/* Socket has been closed; no need to clean up interests,
+		 * since the closer already did that.
+		 */
+		return -EBADF;
+	if (flags & HOMA_RECV_RESPONSE) {
+		if (id != 0) {
+			if (!response_interest.rpc_deleted)
+				r->interest = NULL;
+		} else {
+			list_del(&response_interest.links);
+		}
+	}
+	if (flags & HOMA_RECV_REQUEST)
+		list_del(&request_interest.links);
+	if (*rpc != NULL)
+		return 0;
+	if (signal_pending(current)) {
+		return -EINTR;
+	}
+	if ((flags & HOMA_RECV_RESPONSE) && (id != 0)
+			&& response_interest.rpc_deleted)
+		return -EINVAL;
+	
+	/* Shouldn't ever get here! */
+	printk(KERN_ERR "Unexpected behavior in homa_wait_for_message\n");
+	return -EINVAL;
+}
+
+/**
+ * @homa_rpc_ready: This function is called when the input message for
+ * an RPC becomes complete. It marks the RPC as READY and either notifies
+ * a waiting reader or queues the RPC.
+ * @rpc:  RPC that now has a complete input message.
+ */
+void homa_rpc_ready(struct homa_rpc *rpc)
+{
+	struct list_head *interest_list;
+	struct list_head *ready_list;
+	struct homa_interest *interest;
+	
+	rpc->state = RPC_READY;
+	
+	/* First, see if someone is interested in this RPC specifically. */
+	if ((rpc->interest != NULL) && (*rpc->interest->rpc == NULL)) {
+		*rpc->interest->rpc = rpc;
+		wake_up_process(rpc->interest->thread);
+		return;
+	}
+	
+	/* Second, check the interest list for this type of RPC. */
+	if (rpc->is_client) {
+		interest_list = &rpc->hsk->response_interests;
+		ready_list = &rpc->hsk->ready_responses;
+	} else {
+		interest_list = &rpc->hsk->request_interests;
+		ready_list = &rpc->hsk->ready_requests;
+	}
+	list_for_each_entry(interest, interest_list, links) {
+		if (*interest->rpc != NULL) {
+			/* This interest has already been satisfied
+			 * (perhaps the thread hasn't had a chance to wake
+			 * up and unlist itself). */
+			continue;
+		}
+		*interest->rpc = rpc;
+		wake_up_process(interest->thread);
+		return;
+	}
+	
+	/* No interest so far; just queue the RPC. */
+	list_add_tail(&rpc->ready_links, ready_list);
 }

@@ -8,7 +8,10 @@ extern cycles_t    mock_cycles;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
 extern int         mock_route_errors;
+extern void        (*mock_schedule_hook)(void);
 extern void        (*mock_spin_lock_hook)(void);
+extern struct task_struct
+		   mock_task;
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 

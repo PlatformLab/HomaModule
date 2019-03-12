@@ -34,14 +34,25 @@ int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
 int mock_vmalloc_errors = 0;
 
-/* If a test since this variable to non-NULL, this function will be invoked
+/* If a test sets this variable to non-NULL, this function will be invoked
  * during future calls to spin_lock or spin_lock_bh.
  */
 void (*mock_spin_lock_hook)(void) = NULL;
 
+/* If a test sets this variable to non-NULL, this function will be invoked
+ * during future calls to schedule.
+ */
+void (*mock_schedule_hook)(void) = NULL;
+
+/* The return value from calls to signal_pending(). */
+int mock_signal_pending = 0;
+
+/* Used as current task during tests. */
+struct task_struct mock_task;
+
 /* If a test sets this variable to nonzero, ip_queue_xmit will log
  * outgoing packets using the long format rather than short.
- *  */
+ */
 int mock_xmit_log_verbose = 0;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
@@ -75,7 +86,7 @@ cycles_t mock_cycles = 0;
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
 
-struct task_struct *current_task = NULL;
+struct task_struct *current_task = &mock_task;
 unsigned long ex_handler_refcount = 0;
 unsigned long phys_base = 0;
 struct net init_net;
@@ -451,6 +462,14 @@ void release_sock(struct sock *sk)
 void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
+void schedule(void)
+{
+	if (mock_schedule_hook)
+		mock_schedule_hook();
+	else
+		unit_log_printf("; ", "schedule");
+}
+
 void security_sk_classify_flow(struct sock *sk, struct flowi *fl) {}
 
 void sk_common_release(struct sock *sk) {}
@@ -518,8 +537,6 @@ int sock_no_shutdown(struct socket *sock, int how)
 	return 0;
 }
 
-void schedule(void) {}
-
 ssize_t sock_no_sendpage(struct socket *sock, struct page *page, int offset,
 		size_t size, int flags)
 {
@@ -541,12 +558,6 @@ void tasklet_init(struct tasklet_struct *t,
 void tasklet_kill(struct tasklet_struct *t) {}
 
 void unregister_net_sysctl_table(struct ctl_table_header *header) {}
-
-long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
-		long timeout)
-{
-	return 0;
-}
 
 void vfree(const void *block)
 {
@@ -573,7 +584,15 @@ void *vmalloc(size_t size)
 	return block;
 }
 
-int wake_up_process(struct task_struct *tsk) {
+long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
+		long timeout)
+{
+	return 0;
+}
+
+int wake_up_process(struct task_struct *tsk)
+{
+	unit_log_printf("; ", "wake_up_process");
 	return 0;
 }
 
@@ -746,6 +765,9 @@ void mock_teardown(void)
 	mock_kmalloc_errors = 0;
 	mock_route_errors = 0;
 	mock_vmalloc_errors = 0;
+	memset(&mock_task, 0, sizeof(mock_task));
+	mock_schedule_hook = NULL;
+	mock_signal_pending = 0;
 	mock_spin_lock_hook = NULL;
 	mock_xmit_log_verbose = 0;
 	

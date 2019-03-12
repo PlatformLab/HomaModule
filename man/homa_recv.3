@@ -6,14 +6,14 @@ homa_recv \- receive a Homa message
 .B #include <homa.h>
 .PP
 .BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ,
+.BI "                  int " flags ", uint64_t *" id ,
 .BI "                  const struct sockaddr *" src_addr ", size_t " \
-*addrlen  ,
-.BI "                  uint64_t *" id );
+*addrlen );
 .fi
 .SH DESCRIPTION
 The function
 .BR homa_recv ()
-waits for the next incoming Homa message and returns it.
+waits for an incoming Homa message and returns it.
 The argument
 .I sockfd
 is the file descriptor of the receiving socket; this must be a Homa socket.
@@ -25,10 +25,40 @@ indicates the number of bytes available for the message; if the actual
 message is larger than
 .IR len ,
 then excess bytes will be discarded.
-The identifier for the message is returned at
+.PP
+The arguments
+.IR flags " and " id
+select which messsage to receive and determine whether or
+not the call should block if an appropriate message isn't available.
+The argument
+.IR flags
+is an ORed combination of the following values:
+.TP
+.B HOMA_RECV_REQUEST
+A request message may be returned.
+.TP
+.B HOMA_RECV_RESPONSE
+A response message may be returned.
+.TP
+.B HOMA_RECV_NONBLOCKING
+If no appropriate message is available, the call will return immediately
+with an
+.B EAGAIN
+error, rather than blocking.
+.LP
+At least one of
+.BR HOMA_RECV_REQUEST " and " HOMA_RECV_RESPONSE
+must be set.
+If the initial value of
 .I *id
-(unless id is NULL).
-
+is nonzero then a response message will be returned only if its
+id matches this value
+.RB ( HOMA_RECV_REQUEST
+must also be set in
+.IR flags ).
+.PP
+The identifier for the message is returned at
+.IR *id .
 If
 .I src_addr
 is not NULL, the source address for the message is placed in the buffer
@@ -47,23 +77,27 @@ The returned address is truncated  if  the buffer provided is too small;
 in this case,
 .I *addrlen
 will return a value greater than was supplied to the call.
-
-Depending on how
-.I sockfd
-has been configured, the incoming message may be either a request or a response.
-If it is a request, the port number stored in
+.PP
+If both
+.BR HOMA_RECV_REQUEST " and " HOMA_RECV_RESPONSE
+are specified in
+.IR flags ,
+then the message returned may be either a request or a response.
+The port number stored in
 .I src_addr
-will be
+can be used to distinguish requests from responses.
+A port number of
 .B HOMA_MIN_CLIENT_PORT
-or greater.
-A port number less than
+or greater indicates that the message is a request;
+a port number less than
 .B HOMA_MIN_CLIENT_PORT
-indicates that the message is a response (it originated at a server port).
+indicates that the message is a response.
+.PP
 If the message is a request, then the caller must eventually invoke
 .BR homa_reply (3)
 to respond (Homa retains state for the request until
 .BR homa_reply (3)
-is invoked).
+is invoked). 
 
 .SH RETURN VALUE
 On success, the return value is the size of the response message,
@@ -73,6 +107,12 @@ On error, \-1 is returned and
 .I errno
 is set appropriately.
 .SH ERRORS
+.TP
+.B EAGAIN
+No appropriate message was available and
+.B HOMA_RECV_NONBLOCKING
+was specified in
+.IR flags .
 .TP
 .B EBADF
 .I sockfd
@@ -87,8 +127,13 @@ A signal occurred before a message was received; see
 .TP
 .B EINVAL
 The file descriptor
-.I fockfd
-did not refer to a Homa socket.
+.I sockfd
+did not refer to a Homa socket, or the argument
+.I flags
+did not contain either
+.BR HOMA_RECV_REQUEST " or " HOMA_RECV_RESPONSE ,
+or there was no outstanding request with an id matching
+.IR *id .
 .TP
 .B ENOMEM
 No memory available.

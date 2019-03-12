@@ -250,7 +250,8 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle_limit)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_xmit_data(crpc);
 	EXPECT_STREQ("xmit DATA 0/6000 P6; "
-		"xmit DATA 1400/6000 P6", unit_log_get());
+		"xmit DATA 1400/6000 P6; "
+		"wake_up_process", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());

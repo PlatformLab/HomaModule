@@ -50,9 +50,8 @@ extern "C"
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			uint64_t *id);
-extern ssize_t homa_recv(int sockfd, void *buf, size_t len,
-			struct sockaddr *src_addr, size_t addrlen,
-			uint64_t *id);
+extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
+			uint64_t *id, struct sockaddr *src_addr, size_t addrlen);
 extern ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			void *response, size_t resplen);
@@ -80,8 +79,15 @@ struct homa_args_recv_ipv4 {
 	void *buf;
 	size_t len;
 	struct sockaddr_in source_addr;
+	int flags;
 	__u64 id;
 };
+
+/* Flag bits for homa_recv (see man page for documentation): 
+ */
+#define HOMA_RECV_REQUEST       0x01
+#define HOMA_RECV_RESPONSE      0x02
+#define HOMA_RECV_NONBLOCKING   0x04
 
 /**
  * define homa_args_invoke_ipv4 - Structure that passes arguments and results

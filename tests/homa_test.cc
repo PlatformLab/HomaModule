@@ -47,8 +47,10 @@ int get_int(const char *s, const char *msg)
 void close_fd(int fd)
 {
 	sleep(1);
-	int result = close(fd);
-	if (result >= 0) {
+	if (shutdown(fd, SHUT_RD) < 0) {
+		printf("Shutdown failed on fd %d: %s\n", fd, strerror(errno));
+	}
+	if (close(fd) >= 0) {
 		printf("Closed fd %d\n", fd);
 	} else {
 		printf("Close failed: %s\n", strerror(errno));
@@ -102,7 +104,7 @@ void test_close()
 	int result, fd;
 	int message[100000];
 	struct sockaddr source;
-	uint64_t id;
+	uint64_t id = 0;
 
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -111,8 +113,8 @@ void test_close()
 		exit(1);
 	}
 	std::thread thread(close_fd, fd);
-	result = homa_recv(fd, message, sizeof(message), &source,
-			sizeof(source), &id);
+	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
+			&id, &source, sizeof(source));
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
 	} else {
@@ -159,9 +161,9 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
 	total = 0;
 	for (int i = 1; i <= count; i++) {
 		id = 0;
-		received = homa_recv(fd, buffer, length,
-				(struct sockaddr *) &src_addr, sizeof(src_addr),
-				&id);
+		received = homa_recv(fd, buffer, length, HOMA_RECV_RESPONSE,
+				&id, (struct sockaddr *) &src_addr,
+				sizeof(src_addr));
 		if (received < 0) {
 			printf("Error in homa_recv for id %lu: %s\n",
 				id, strerror(errno));
@@ -190,7 +192,7 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
  */
 void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 {
-	uint64_t id;
+	uint64_t id = 0;
 	char response[100000];
 	struct sockaddr_in server_addr;
 	int status;
@@ -205,8 +207,8 @@ void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 		printf("Homa_send succeeded, id %lu\n", id);
 	}
 	resp_length = homa_recv(fd, response, sizeof(response),
-		(struct sockaddr *) &server_addr,
-		sizeof(server_addr), &id);
+		HOMA_RECV_RESPONSE, &id, (struct sockaddr *) &server_addr,
+		sizeof(server_addr));
 	if (resp_length < 0) {
 		printf("Error in homa_recv: %s\n",
 			strerror(errno));
@@ -247,8 +249,8 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 		}
 		start = rdtsc();
 		resp_length = homa_recv(fd, response, sizeof(response),
-			(struct sockaddr *) &server_addr,
-			sizeof(server_addr), &id);
+			HOMA_RECV_RESPONSE, &id,
+			(struct sockaddr *) &server_addr, sizeof(server_addr));
 		if (i >= 0)
 			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
@@ -310,6 +312,7 @@ void test_udpclose()
 		exit(1);
 	}
 	std::thread thread(close_fd, fd);
+	thread.detach();
 	result = read(fd, buffer, sizeof(buffer));
 	if (result >= 0) {
 		printf("UDP read returned %d bytes\n", result);
@@ -431,6 +434,7 @@ int main(int argc, char** argv)
 			exit(1);
 		}
 	}
+	close(fd);
 	exit(0);
 }
 

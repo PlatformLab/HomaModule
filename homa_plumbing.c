@@ -353,7 +353,8 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
+	printk(KERN_NOTICE "closing socket %d in thread 0x%p\n",
+			hsk->client_port, current);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 }
@@ -385,13 +386,11 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct iovec iov;
 	struct iov_iter iter;
 	int err;
-	long timeo;
-	int noblock = 0;
 	int result;
 	struct homa_rpc *rpc = NULL;
 
 	if (unlikely(copy_from_user(&args, (void *) arg,
-			offsetof(struct homa_args_recv_ipv4, source_addr))))
+			sizeof(args))))
 		return -EFAULT;
 	err = import_single_range(READ, args.buf, args.len, &iov,
 		&iter);
@@ -403,20 +402,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		err = -EBADF;
 		goto error;
 	}
-	while (list_empty(&hsk->ready_rpcs)) {
-		if (noblock) {
-			err = -EAGAIN;
-			goto error;
-		}
-		timeo = sock_rcvtimeo(sk, noblock);
-		timeo = homa_wait_ready_msg(sk, &timeo);
-		if (signal_pending(current)) {
-			err = sock_intr_errno(timeo);
-			goto error;
-		}
-	}
-	rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc, ready_links);
-	list_del(&rpc->ready_links);
+	err = homa_wait_for_message(hsk, args.flags, args.id, &rpc);
+	if (err != 0)
+		goto error;
 	
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
@@ -690,28 +678,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	 * invoke operations through ioctls in order to manipulate RPC ids.
 	 */
 	return -EINVAL;
-}
-
-/**
- * homa_wait_ready_msg() - Wait until there exists at least one complete
- * message that is ready for service.
- * @sk:      Homa socket on which the message will arrive.
- * @timeo:   Maximum time to wait; modified before return to hold the wait
- *           time remaining.
- * Return:   Zero or a negative errno value to return to app.
- */
-int homa_wait_ready_msg(struct sock *sk, long *timeo)
-{
-	DEFINE_WAIT_FUNC(wait, woken_wake_function);
-	int rc;
-
-	add_wait_queue(sk_sleep(sk), &wait);
-	sk_set_bit(SOCKWQ_ASYNC_WAITDATA, sk);
-	rc = sk_wait_event(sk, timeo,
-			!list_empty(&homa_sk(sk)->ready_rpcs), &wait);
-	sk_clear_bit(SOCKWQ_ASYNC_WAITDATA, sk);
-	remove_wait_queue(sk_sleep(sk), &wait);
-	return rc;
 }
 
 /**

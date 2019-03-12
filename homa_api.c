@@ -30,7 +30,8 @@ ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 	
 	if (homa_send(sockfd, request, reqlen, dest_addr, addrlen, &id) < 0)
 		return -1;
-	return homa_recv(sockfd, response, resplen, 0, 0, &id);
+	return homa_recv(sockfd, response, resplen, HOMA_RECV_RESPONSE, &id,
+		0, 0);
 }
 
 /**
@@ -39,19 +40,25 @@ ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
  * @sockfd:     File descriptor for the socket on which to receive the message.
  * @buf:        First byte of buffer for the incoming message.
  * @len:        Number of bytes available at @request.
+ * @flags:      An ORed combination of bits such as HOMA_RECV_REQUEST and
+ *              HOMA_RECV_NONBLOCKING
+ * @id:         Points to a unique RPC identifier, which is used both as
+ *              an input and an output parameter. If the value is initially
+ *              nonzero and the HOMA_RECV_RESPONSE flag is set, then a
+ *              response will not be returned unless it matches this id.
+ *              This word is also used to return the id for the incoming
+ *              message, whether request or response.
  * @src_addr:   The sender's IP address will be returned here. If NULL, no
  *              address information is returned.
  * @addrlen:    Space available at @src_addr, in bytes.
- * @id:         A unique identifier for the RPC associated with the message
- *              will be returned here.
  * 
  * Return:      The total size of the incoming message. This may be larger
  *              than len, in which case the last bytes of the incoming message
  *              were discarded. If an error occurred, -1 is returned and
  *              errno is set appropriately. 
  */
-ssize_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
-		size_t addrlen, uint64_t *id)
+ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags, uint64_t *id,
+	        struct sockaddr *src_addr, size_t addrlen)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
@@ -62,6 +69,8 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, struct sockaddr *src_addr,
 	}
 	args.buf = (void *) buf;
 	args.len = len;
+	args.flags = flags;
+	args.id = *id;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	if (src_addr)
 		*((struct sockaddr_in *) src_addr) = args.source_addr;

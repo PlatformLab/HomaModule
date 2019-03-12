@@ -38,7 +38,7 @@ it identifies the request for which this message is the response.
 If no such request is active,
 .B homa_reply
 returns (successfully) without doing anything.
-
+.PP
 This function returns as soon as the response has been queued for
 transmission.
 
@@ -68,7 +68,7 @@ A signal occurred before any data was transmitted; see
 .B EINVAL
 The size of the response exceeded
 .B HOMA_MAX_MESSAGE_LENGTH, or
-.I fockfd
+.I sockfd
 was not a Homa socket.
 .TP
 .B ENOMEM

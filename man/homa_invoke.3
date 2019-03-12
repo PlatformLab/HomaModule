@@ -37,6 +37,10 @@ indicates the number of bytes available for the response.
 If the actual response is larger than
 .IR resplen ,
 then excess bytes will be discarded.
+.PP
+This function is thread-safe: multiple concurrent invocations of
+.BR homa_invoke ()
+may be active at a given time.
 
 .SH RETURN VALUE
 On success, the return value is the size of the response message,
@@ -67,7 +71,7 @@ but before the response was received; see
 .B EINVAL
 The size of the request exceeded
 .B HOMA_MAX_MESSAGE_LENGTH, or
-.I fockfd
+.I sockfd
 was not a Homa socket.
 .TP
 .B ENOMEM
