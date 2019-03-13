@@ -954,7 +954,8 @@ TEST_F(homa_incoming, homa_rpc_abort)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(EFAULT, -crpc->error);
-	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+			"sk->sk_data_ready invoked", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_wait_for_message__bogus_id)
@@ -1241,6 +1242,6 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_responses)
 	unit_log_clear();
 	
 	homa_rpc_ready(crpc);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 }
