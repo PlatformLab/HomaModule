@@ -766,11 +766,11 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 	/* Step 3: back from sleeping; cleanup interests, then see
 	 * if a match was found.
 	 */
-	if (!hsk->homa)
-		/* Socket has been closed; no need to clean up interests,
+	if (hsk->shutdown)
+		/* Socket has been shutdown; no need to clean up interests,
 		 * since the closer already did that.
 		 */
-		return -EBADF;
+		return -ESHUTDOWN;
 	if (flags & HOMA_RECV_RESPONSE) {
 		if (id != 0) {
 			if (!response_interest.rpc_deleted)

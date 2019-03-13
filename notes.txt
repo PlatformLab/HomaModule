@@ -14,8 +14,6 @@ Notes for Homa implementation in Linux:
   rc64: up-to-date
 
 * Things to do:
-  * What if a socket is closed while a process is blocked waiting for
-    messages? Will the blocking socket access freed memory?
   * Improve timeout mechanism to work in the face of large numbers of
     outgoing messages:
     * Combine timeouts for a single target server.
@@ -48,7 +46,7 @@ Notes for Homa implementation in Linux:
     from user space?
   * When a struct homa is destroyed, all of its sockets end up in an unsafe
     state in terms of their socktab links.
-  * Is current logging safe if a socket gets deleted while a packet is
+  * Is current locking safe if a socket gets deleted while a packet is
     being received?
   * If there is an error in ip_queue_xmit, does it free the packet?
   * homa_manage_grants: can "other" go away at an inconvenient time, causing
@@ -59,9 +57,6 @@ Notes for Homa implementation in Linux:
     Use dst->obsolete? There is also a dst_check function.
   * The client_rpcs and server_rpcs fields in struct sock are currently
     linked lists; probably too slow.
-  * ioc_recv must have an option to wait for a *specific* id. If no
-    specific id requested, then only return incoming requests.  Or, split
-    into separate ioctls?
   * Don't return any errors on sends?
   * Need to return errors to apps.
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes

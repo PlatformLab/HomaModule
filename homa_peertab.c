@@ -63,7 +63,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. The caller can retain this pointer
  *              indefinitely: peer entries are never deleted except in
- *              home_peertab_destroy.
+ *              homa_peertab_destroy.
  */
 struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	struct inet_sock *inet)

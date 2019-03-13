@@ -100,6 +100,19 @@ TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)
 	homa_sock_destroy(&hsk3);
 }
 
+TEST_F(homa_socktab, homa_sock_shutdown)
+{
+	struct homa_interest interest1, interest2, interest3;
+	EXPECT_FALSE(self->hsk.shutdown);
+	list_add_tail(&interest1.links, &self->hsk.request_interests);
+	list_add_tail(&interest2.links, &self->hsk.request_interests);
+	list_add_tail(&interest3.links, &self->hsk.response_interests);
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_TRUE(self->hsk.shutdown);
+	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
+		"wake_up_process", unit_log_get());
+}
+
 TEST_F(homa_socktab, homa_sock_destroy__basics)
 {
 	int client2, client3;
@@ -126,7 +139,6 @@ TEST_F(homa_socktab, homa_sock_destroy__basics)
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client3));
 }
-
 TEST_F(homa_socktab, homa_sock_destroy__wakeup_interests)
 {
 	struct homa_interest interest1, interest2, interest3;

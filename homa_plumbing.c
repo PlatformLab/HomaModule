@@ -49,7 +49,7 @@ const struct proto_ops homa_proto_ops = {
 	.poll		   = homa_poll,
 	.ioctl		   = inet_ioctl,
 	.listen		   = sock_no_listen,
-	.shutdown	   = sock_no_shutdown,
+	.shutdown	   = homa_shutdown,
 	.setsockopt	   = sock_common_setsockopt,
 	.getsockopt	   = sock_common_getsockopt,
 	.sendmsg	   = inet_sendmsg,
@@ -353,10 +353,26 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	printk(KERN_NOTICE "closing socket %d in thread 0x%p\n",
-			hsk->client_port, current);
+	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
+}
+
+/**
+ * homa_shutdown() - Implements the shutdown system call for Homa sockets.
+ * @sk:      Socket to shut down.
+ * @how:     Ignored: for other sockets, can independently shut down
+ *           sending and receiving, but for Homa any shutdown will
+ *           shut down everything.
+ *
+ * Return: 0 on success, otherwise a negative errno.
+ */
+int homa_shutdown(struct socket *sock, int how)
+{
+	lock_sock(sock->sk);
+	homa_sock_shutdown(homa_sk(sock->sk));
+	release_sock(sock->sk);
+	return 0;
 }
 
 /**
@@ -398,8 +414,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		return err;
 
 	lock_sock(sk);
-	if (!hsk->homa) {
-		err = -EBADF;
+	if (hsk->shutdown) {
+		err = -ESHUTDOWN;
 		goto error;
 	}
 	err = homa_wait_for_message(hsk, args.flags, args.id, &rpc);
@@ -476,8 +492,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
-	if (!hsk->homa) {
-		err = -EBADF;
+	if (hsk->shutdown) {
+		err = -ESHUTDOWN;
 		goto done;
 	}
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
@@ -534,8 +550,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		return -EAFNOSUPPORT;
 
 	lock_sock(sk);
-	if (!hsk->homa) {
-		err = -EBADF;
+	if (hsk->shutdown) {
+		err = -ESHUTDOWN;
 		goto error;
 	}
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);

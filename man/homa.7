@@ -118,6 +118,16 @@ may return either a request or a response packet.
 Requests and responses can be distinguished using the peer
 port number returned by
 .BR homa_recv (3).
+.PP
+The
+.BR shutdown (2)
+system call may be invoked on Homa sockets. It ignores the
+.I how
+argument and disables the socket,
+so that it may no longer be used for either sending or receiving messages.
+If any threads are blocked waiting on the socket, they will be unblocked
+and their current operations will return
+.BR ESHUTDOWN .
 .SH SYSCTL PARAMETERS
 .PP
 Homa supports several parameters that can be set with

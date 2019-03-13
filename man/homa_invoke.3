@@ -77,6 +77,10 @@ was not a Homa socket.
 .B ENOMEM
 No memory available.
 .TP
+.B ESHUTDOWN
+The socked has been disabled using
+.BR shutdown (2).
+.TP
 .B ETIMEDOUT
 The destination server did not respond to protocol requests.
 .SH SEE ALSO

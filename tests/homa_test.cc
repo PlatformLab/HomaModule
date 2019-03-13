@@ -47,13 +47,25 @@ int get_int(const char *s, const char *msg)
 void close_fd(int fd)
 {
 	sleep(1);
-	if (shutdown(fd, SHUT_RD) < 0) {
-		printf("Shutdown failed on fd %d: %s\n", fd, strerror(errno));
-	}
 	if (close(fd) >= 0) {
 		printf("Closed fd %d\n", fd);
 	} else {
-		printf("Close failed: %s\n", strerror(errno));
+		printf("Close failed on fd %d: %s\n", fd, strerror(errno));
+	}
+}
+
+/**
+ * shutdown_fd() - Helper method for "close" test: sleeps a while, then shuts
+ * down an fd
+ * @fd:   Open file descriptor to shut down.
+ */
+void shutdown_fd(int fd)
+{
+	sleep(1);
+	if (shutdown(fd, 0) >= 0) {
+		printf("Shutdown fd %d\n", fd);
+	} else {
+		printf("Shutdown failed on fd %d: %s\n", fd, strerror(errno));
 	}
 }
 
@@ -285,6 +297,44 @@ void test_send(int fd, struct sockaddr *dest, char *request, int length)
 }
 
 /**
+ * test_shutdown() - Shutdown a Homa socket while a thread is waiting on it.
+ */
+void test_shutdown()
+{
+	int result, fd;
+	int message[100000];
+	struct sockaddr source;
+	uint64_t id = 0;
+
+	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n",
+			strerror(errno));
+		exit(1);
+	}
+	std::thread thread(shutdown_fd, fd);
+	thread.detach();
+	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
+			&id, &source, sizeof(source));
+	if (result > 0) {
+		printf("Received %d bytes\n", result);
+	} else {
+		printf("Error in homa_recv: %s\n",
+			strerror(errno));
+	}
+	
+	/* Make sure that future reads also fail. */
+	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
+			&id, &source, sizeof(source));
+	if (result < 0) {
+		printf("Second homa_recv call also failed: %s\n",
+			strerror(errno));
+	} else {
+		printf("Second homa_recv call succeeded: %d bytes\n", result);
+	}
+}
+
+/**
  * test_udpclose() - Close a UDP socket while a thread is waiting on it.
  */
 void test_udpclose()
@@ -427,6 +477,8 @@ int main(int argc, char** argv)
 			test_send(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "rtt") == 0) {
 			test_rtt(fd, dest, buffer, length, count);
+		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
+			test_shutdown();
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			test_udpclose();
 		} else {

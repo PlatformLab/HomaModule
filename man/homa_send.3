@@ -78,6 +78,10 @@ was not a Homa socket.
 .TP
 .B ENOMEM
 No memory available.
+.TP
+.B ESHUTDOWN
+The socked has been disabled using
+.BR shutdown (2).
 .SH SEE ALSO
 .BR homa_invoke (3),
 .BR homa_recv (3),

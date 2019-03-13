@@ -678,6 +678,9 @@ struct homa_sock {
 	 */
 	struct homa *homa;
 	
+	/** @shutdown: True means the socket is no longer usable. */
+	bool shutdown;
+	
 	/**
 	 * @server_port: Port number for receiving incoming RPC requests.
 	 * Must be assigned explicitly with bind; 0 means not bound yet.
@@ -1322,12 +1325,14 @@ extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 extern void     homa_set_priority(struct sk_buff *skb, int priority);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);
+extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_sock_bind(struct homa_socktab *socktab,
 			struct homa_sock *hsk, __u16 port);
 extern void     homa_sock_destroy(struct homa_sock *hsk);
 extern struct homa_sock *
 	        homa_sock_find(struct homa_socktab *socktab, __u16 port);
 extern void     homa_sock_init(struct homa_sock *hsk, struct homa *homa);
+extern void     homa_sock_shutdown(struct homa_sock *hsk);
 extern int      homa_socket(struct sock *sk);
 extern void     homa_socktab_destroy(struct homa_socktab *socktab);
 extern void     homa_socktab_init(struct homa_socktab *socktab);

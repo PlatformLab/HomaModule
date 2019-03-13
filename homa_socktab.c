@@ -110,6 +110,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	struct homa_socktab *socktab = &homa->port_map;
 	mutex_lock(&socktab->write_lock);
 	hsk->homa = homa;
+	hsk->shutdown = false;
 	hsk->server_port = 0;
 	while (1) {
 		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {
@@ -136,14 +137,32 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 }
 
 /**
- * homa_sock_destroy() - Destructor for home_sock objects. This function
+ * homa_sock_shutdown() - Disable a socket so that it can no longer
+ * be used for either sending or receiving messages. Any system calls
+ * currently waiting to send or receive messages will be aborted.
+ * @hsk:       Socket to shut down. Must be locked by caller.
+ */
+void homa_sock_shutdown(struct homa_sock *hsk)
+{
+	struct homa_interest *interest;
+	
+	if (hsk->shutdown)
+		return;
+	hsk->shutdown = true;
+	list_for_each_entry(interest, &hsk->request_interests, links)
+		wake_up_process(interest->thread);
+	list_for_each_entry(interest, &hsk->response_interests, links)
+		wake_up_process(interest->thread);
+}
+
+/**
+ * homa_sock_destroy() - Destructor for homa_sock objects. This function
  * only cleans up the parts of the object that are owned by Homa.
  * @hsk:       Socket to destroy.
  */
 void homa_sock_destroy(struct homa_sock *hsk)
 {
 	struct list_head *pos, *next;
-	struct homa_interest *interest;
 
 	if (!hsk->homa)
 		return;
@@ -154,6 +173,7 @@ void homa_sock_destroy(struct homa_sock *hsk)
 	mutex_unlock(&hsk->homa->port_map.write_lock);
 	
 	lock_sock((struct sock *) hsk);
+	homa_sock_shutdown(hsk);
 	list_for_each_safe(pos, next, &hsk->client_rpcs) {
 		struct homa_rpc *crpc = list_entry(pos,
 				struct homa_rpc, rpc_links);
@@ -164,10 +184,6 @@ void homa_sock_destroy(struct homa_sock *hsk)
 				rpc_links);
 		homa_rpc_free(srpc);
 	}
-	list_for_each_entry(interest, &hsk->request_interests, links)
-		wake_up_process(interest->thread);
-	list_for_each_entry(interest, &hsk->response_interests, links)
-		wake_up_process(interest->thread);
 	release_sock((struct sock *) hsk);
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	hsk->homa = NULL;
