@@ -63,6 +63,9 @@ is not a valid open file descriptor.
 .B EFAULT
 An invalid user space address was specified for an argument.
 .TP
+.B EHOSTUNREACH
+No route could be found to the destination host.
+.TP
 .B EINTR
 A signal occurred after the request was queued for transmission,
 but before the response was received; see
@@ -76,6 +79,9 @@ was not a Homa socket.
 .TP
 .B ENOMEM
 No memory available.
+.TP
+.B EPROTONOSUPPORT
+The destination machine does not support the Homa protocol.
 .TP
 .B ESHUTDOWN
 The socked has been disabled using

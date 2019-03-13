@@ -958,6 +958,29 @@ TEST_F(homa_incoming, homa_rpc_abort)
 			"sk->sk_data_ready invoked", unit_log_get());
 }
 
+TEST_F(homa_incoming, homa_dest_abort)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 1600);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 1600);
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip+1,
+			self->server_port, self->rpcid, 5000, 1600);
+	EXPECT_NE(NULL, crpc1);
+	unit_log_clear();
+	homa_dest_abort(&self->homa, self->server_ip, -EPROTONOSUPPORT);
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+			"sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_responses));
+	EXPECT_EQ(RPC_READY, crpc1->state);
+	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
+	EXPECT_EQ(0, -crpc2->error);
+	EXPECT_EQ(RPC_OUTGOING, crpc3->state);
+}
+
 TEST_F(homa_incoming, homa_wait_for_message__bogus_id)
 {
 	int result;

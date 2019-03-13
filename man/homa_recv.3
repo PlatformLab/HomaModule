@@ -121,6 +121,9 @@ is not a valid open file descriptor.
 .B EFAULT
 An invalid user space address was specified for an argument.
 .TP
+.B EHOSTUNREACH
+No route could be found to the destination host.
+.TP
 .B EINTR
 A signal occurred before a message was received; see
 .BR signal (7).
@@ -134,6 +137,9 @@ did not contain either
 .BR HOMA_RECV_REQUEST " or " HOMA_RECV_RESPONSE ,
 or there was no outstanding request with an id matching
 .IR *id .
+.TP
+.B EPROTONOSUPPORT
+The destination machine does not support the Homa protocol.
 .TP
 .B ENOMEM
 No memory available.

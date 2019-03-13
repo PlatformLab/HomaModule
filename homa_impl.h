@@ -1235,6 +1235,7 @@ extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern void     homa_dest_abort(struct homa *homa, __be32 addr, int error);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);

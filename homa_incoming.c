@@ -624,6 +624,47 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
+ * homa_dest_abort() - Abort all outstanding client RPCs that were directed
+ * to a particular host
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @addr:    Address (network order) of the destination whose RPCs are
+ *           to be aborted.
+ * @error:   Negative errno value indicating the reason for the abort.
+ */
+void homa_dest_abort(struct homa *homa, __be32 addr, int error)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *crpc, *tmp;
+	
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+		/* Skip the (expensive) lock acquisition if there's no
+		 * work to do.
+		 */
+		if (list_empty(&hsk->client_rpcs))
+			continue;
+		bh_lock_sock_nested((struct sock *) hsk);
+		if (unlikely(sock_owned_by_user((struct sock *) hsk))) {
+			bh_unlock_sock((struct sock *) hsk);
+			continue;
+		}
+		list_for_each_entry_safe(crpc, tmp, &hsk->client_rpcs,
+				rpc_links) {
+			if ((crpc->peer->addr != addr) ||
+					(crpc->state == RPC_READY))
+				continue;
+			homa_remove_from_grantable(homa, crpc);
+			crpc->error = error;
+			homa_rpc_ready(crpc);
+		}
+		bh_unlock_sock((struct sock *) hsk);
+	}
+	rcu_read_unlock();
+}
+
+/**
  * homa_validate_grantable_list_list() - Scan the grantable_rpcs list to
  * see if it has somehow gotten looped back on itself. This function
  * is intended for debugging.

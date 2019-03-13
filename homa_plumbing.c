@@ -870,14 +870,24 @@ int homa_pkt_recv(struct sk_buff *skb) {
  * packet, such as ICMP UNREACHABLE.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
- * Return: Always 0?
  */
 void homa_err_handler(struct sk_buff *skb, u32 info) {
+	const struct iphdr *iph = (const struct iphdr *)skb->data;
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
-	printk(KERN_WARNING "unimplemented err_handler invoked on Homa "
-		"socket, info %x, ICMP type %d, ICMP code %d\n",
-		info, type, code);
+	
+	if (type == ICMP_DEST_UNREACH) {
+		int error;
+		if (code == ICMP_PROT_UNREACH)
+			error = -EPROTONOSUPPORT;
+		else
+			error = -EHOSTUNREACH;
+		homa_dest_abort(homa, iph->daddr, error);
+	} else { 
+		printk(KERN_NOTICE "homa_err_handler invoked with "
+			"info %x, ICMP type %d, ICMP code %d\n",
+			info, type, code);
+	}
 }
 
 /**
