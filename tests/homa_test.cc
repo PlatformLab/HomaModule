@@ -9,12 +9,15 @@
 
 #include <errno.h>
 #include <netdb.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
 
 #include <algorithm>
 #include <thread>
@@ -51,6 +54,29 @@ void close_fd(int fd)
 		printf("Closed fd %d\n", fd);
 	} else {
 		printf("Close failed on fd %d: %s\n", fd, strerror(errno));
+	}
+}
+
+/**
+ * send_fd() - Helper method for "poll" test: sleeps a while, then sends
+ * a request to a socket.
+ * @fd:      File descriptor for a Homa socket; used to send the message.
+ * @addr:    Where to send the message.
+ * @request: Request message to send.
+ * @length:  Number of bytes in @request.
+ */
+void send_fd(int fd, struct sockaddr *addr, char *request, int length)
+{
+	uint64_t id;
+	int status;
+	
+	sleep(1);
+	status = homa_send(fd, request, length, addr, sizeof(*addr), &id);
+	if (status < 0) {
+		printf("Error in homa_send: %s\n",
+			strerror(errno));
+	} else {
+		printf("Homa_send succeeded, id %lu\n", id);
 	}
 }
 
@@ -233,6 +259,56 @@ void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 }
 
 /**
+ * test_poll() - Receive a message using the poll interface.
+ * @fd:       Homa socket.
+ * @request:  Request message.
+ * @length:   Number of bytes in @request.
+ */
+void test_poll(int fd, char *request, int length)
+{
+	uint64_t id;
+	int result;
+	int message[100000];
+	struct pollfd poll_info = {
+		.fd =     fd,
+		.events = POLLIN,
+		.revents = 0
+	};
+	struct sockaddr_in source;
+	struct sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+	addr.sin_port = htons(500);
+	
+	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
+		printf("Couldn't bind socket to Homa port %d: %s\n",
+				ntohl(addr.sin_port), strerror(errno));
+		return;
+	}
+	
+	std::thread thread(send_fd, fd, (struct sockaddr *) &addr,
+			request, length);
+	thread.detach();
+	
+	result = poll(&poll_info, 1, -1);
+	if (result > 0) {
+		printf("Poll succeeded with mask 0x%x\n", poll_info.revents);
+	} else {
+		printf("Poll failed: %s\n", strerror(errno));
+		return;
+	}
+	
+	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_REQUEST,
+			&id, (struct sockaddr *) &source, sizeof(source));
+	if (result < 0) {
+		printf("homa_recv failed: %s\n", strerror(errno));
+	} else {
+		printf("homa_recv returned %d bytes from port %d\n",
+				result, ntohs(source.sin_port));
+	}
+}
+
+/**
  * test_rtt() - Measure round-trip time for an RPC.
  * @fd:       Homa socket.
  * @dest:     Where to send the request
@@ -298,20 +374,15 @@ void test_send(int fd, struct sockaddr *dest, char *request, int length)
 
 /**
  * test_shutdown() - Shutdown a Homa socket while a thread is waiting on it.
+ * @fd:   Homa socket
  */
-void test_shutdown()
+void test_shutdown(int fd)
 {
-	int result, fd;
+	int result;
 	int message[100000];
 	struct sockaddr source;
 	uint64_t id = 0;
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-	if (fd < 0) {
-		printf("Couldn't open Homa socket: %s\n",
-			strerror(errno));
-		exit(1);
-	}
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
@@ -473,12 +544,14 @@ int main(int argc, char** argv)
 			test_fill_memory(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "invoke") == 0) {
 			test_invoke(fd, dest, buffer, length);
+		} else if (strcmp(argv[nextArg], "poll") == 0) {
+			test_poll(fd, buffer, length);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
 			test_send(fd, dest, buffer, length);
 		} else if (strcmp(argv[nextArg], "rtt") == 0) {
 			test_rtt(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
-			test_shutdown();
+			test_shutdown(fd);
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			test_udpclose();
 		} else {

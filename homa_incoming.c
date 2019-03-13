@@ -806,6 +806,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	struct list_head *interest_list;
 	struct list_head *ready_list;
 	struct homa_interest *interest;
+	struct sock *sk; 
 	
 	rpc->state = RPC_READY;
 	
@@ -838,4 +839,9 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	
 	/* No interest so far; just queue the RPC. */
 	list_add_tail(&rpc->ready_links, ready_list);
+	
+	/* Notify the poll mechanism. */
+	sk = (struct sock *) rpc->hsk;
+	sk->sk_data_ready(sk);
+	printk(KERN_NOTICE "called sock_def_readable\n");
 }

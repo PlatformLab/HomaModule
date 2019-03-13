@@ -881,16 +881,34 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 }
 
 /**
- * homa_poll() - Invoked to implement the poll system call.
- * @file:  ??
- * @sock:  ??
- * @wait:  ??
- * Return: ??
+ * homa_poll() - Invoked by Linux as part of implementing select, poll,
+ * epoll, etc.
+ * @file:  Open file that is participating in a poll, select, etc.
+ * @sock:  A Homa socket, associated with @file.
+ * @wait:  This table will be registered with the socket, so that it
+ *         is notified when the socket's ready state changes.
+ * 
+ * Return: A mask of bits such as EPOLLIN, which indicate the current
+ *         state of the socket.
  */
 __poll_t homa_poll(struct file *file, struct socket *sock,
 	       struct poll_table_struct *wait) {
-	printk(KERN_WARNING "unimplemented poll invoked on Homa socket\n");
-	return 0;
+	struct sock *sk = sock->sk;
+	__poll_t mask;
+	
+	/* It seems to be standard practice for poll functions *not* to
+	 * acquire the socket lock, so we don't do it here; not sure
+	 * why...
+	 */
+	
+	sock_poll_wait(file, sk_sleep(sk), wait);
+	mask = EPOLLOUT | EPOLLWRNORM;
+	
+	if (!list_empty(&homa_sk(sk)->ready_requests) ||
+			!list_empty(&homa_sk(sk)->ready_responses))
+		mask |= EPOLLIN | EPOLLRDNORM;
+	printk(KERN_NOTICE "homa_poll returned 0x%x\n", mask);
+	return mask;
 }
 
 /**

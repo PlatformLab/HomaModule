@@ -8,8 +8,6 @@ This repo contains an implementation of the Homa transport protocol for Linux.
   the "invoke" test in tests/homa_test.c for an example), and see below in
   this document for information on recent improvements.
   Here is a partial list of functionality that is still missing:
-  - Big chunks of Linux plumbing are still missing (e.g., Homa doesn't yet
-    connect with the select or poll mechanisms).
   - Socket buffer memory management needs more work. Large
     messages (hundreds of KB?) may cause buffer exhaustion and deadlock.
   - There has been no performance analysis or tuning, so performance
@@ -44,7 +42,8 @@ This repo contains an implementation of the Homa transport protocol for Linux.
      sysctl mechanism. To see what is available, type "sysctl net.homa".
      
 ## Significant recent improvements
-- March 13, 2019: added support for shutdown kernel call.
+- March 13, 2019: added support for shutdown kernel call, plus poll, select,
+  and epoll. Homa now connects will all of the essential Linux plumbing.
 - March 11, 2019: extended homa_recv API with new arguments: flags, id.
 - February 16, 2019: added manual entries in the subdirectory "man".
 - February 14, 2019: output queue throttling now seems to work (i.e., senders
