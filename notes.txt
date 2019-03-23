@@ -19,7 +19,7 @@ Notes for Homa implementation in Linux:
     * Combine timeouts for a single target server.
     * Limit the number of simultaneous timeouts.
   * Figure out socket locking disciplines.
-  * Many unimplemented interface functions.
+  * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.
   * Learn about security stuff, and functions that need to be called for this.
@@ -27,13 +27,14 @@ Notes for Homa implementation in Linux:
     * See tcp_out_of_memory.
   * Initially using simple lists for all tables; will need to replace with
     something more efficient.
+    * homa_sock_find: now a hash table.
+    * homa_find_server_rpc: list search
+    * homa_find_client_rpc: list search
   * Eventually initialize homa.next_client_port to something random
-  * homa_message_out_init: compute unscheduled bytes and priority better.
   * Define a standard mechanism for returning errors:
     * Socket not supported on server (or server process ends while
       processing request).
     * Server timeout
-    * Homa protocol not supported by server
   * Figure out what to do with byte order for 64-bit entities like RPC ids.
     There is no htonll, for some reason.
   * Is it safe to use non-locking skb queue functions?
@@ -48,15 +49,10 @@ Notes for Homa implementation in Linux:
     state in terms of their socktab links.
   * Is current locking safe if a socket gets deleted while a packet is
     being received?
-  * If there is an error in ip_queue_xmit, does it free the packet?
-  * homa_manage_grants: can "other" go away at an inconvenient time, causing
-    synchronization problems?
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Under some conditions, peer information will need to be invalidated.
     Use dst->obsolete? There is also a dst_check function.
-  * The client_rpcs and server_rpcs fields in struct sock are currently
-    linked lists; probably too slow.
   * Don't return any errors on sends?
   * Need to return errors to apps.
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
@@ -98,6 +94,9 @@ Notes for Homa implementation in Linux:
     * jiffies variable, plus HZ variable:  HZ is 250
   * What is the purpose of skbuff clones? Appears that cloning is recommended
     to transmit packet while retaining copy for retransmission.
+  * If there is an error in ip_queue_xmit, does it free the packet?
+    * The answer appears to the "yes", and Homa contains code to check this
+      and log if not.
 
 * Notes on skbuff usage:
   * skb->destructor: invoked when skbuff is freed.
