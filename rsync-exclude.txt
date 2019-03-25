@@ -3,5 +3,5 @@
 .git
 nbproject
 private
-start_homa
+cloudlab
 *.pyc

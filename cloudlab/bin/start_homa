@@ -1,0 +1,9 @@
+#! /bin/sh
+
+# This script starts up the Homa module and configures it for the
+# local system. If Homa was previously installed, it is uninstalled.
+
+rmmod homa
+insmod homa.ko
+sysctl /net/homa/link_mbps=10000
+sysctl /net/homa/max_nic_queue_ns=5000
