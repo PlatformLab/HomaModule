@@ -884,5 +884,4 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;
 	sk->sk_data_ready(sk);
-	printk(KERN_NOTICE "called sock_def_readable\n");
 }

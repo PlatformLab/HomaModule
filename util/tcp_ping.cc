@@ -145,7 +145,7 @@ void run_client(char *server_name, int port)
 	for (i = 0; i < 10; i++)
 		ping(stream);
 	
-#define COUNT 10000
+#define COUNT 100000
 	uint64_t times[COUNT+1];
 	for (i = 0; i < COUNT; i++) {
 		times[i] = rdtsc();

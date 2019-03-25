@@ -1,11 +1,16 @@
 #!/bin/sh
-# The script is copies modified information from this directory
-# on my laptop to rcmaster or some other machine.
+# This script copies modified information from this directory to the machines
+# given by the arguments (defaults to rcmaster if no arguments).
 
 if [ $# -eq 0 ]; then
-    dest=rcmaster.scs.stanford.edu
+    targets=rcmaster.scs.stanford.edu
+    dir=remote/homaModule/
 else
-    dest=$1
+    targets=$*
+    dir=homaModule/
 fi
 
-rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$dest:remote/homaModule/
+for t in $targets; do
+    echo $t
+    rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$t:$dir
+done

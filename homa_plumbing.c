@@ -811,16 +811,22 @@ int homa_pkt_recv(struct sk_buff *skb) {
 				homa_print_ipv4_addr(saddr, buffer), length);
 		goto discard;
 	}
+	
+	/* The code below makes the header available at skb->data, even
+	 * if the packet is fragmented.
+	 */
+	if (!pskb_may_pull(skb, HOMA_MAX_HEADER)) {
+		printk(KERN_NOTICE "Homa can't handle fragmented "
+				"packet (no space for header); discarding\n");
+		goto discard;
+	}
+	
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
 //	data = (int *) skb->data;
-//	printk(KERN_NOTICE "packet data: %x %x %x %x %x %x %x %x\n",
-//			data[0], data[1], data[2], data[3],
-//			data[4], data[5], data[6], data[7]);
-//	for (i = 0; i < length/4; i++) {
-//		if (data[i] != 0)
-//			printk(KERN_NOTICE "Found 0x%x at index %d\n",
-//				data[i], i);
+//	for (i = 0; i < length/4; i += 4) {
+//		printk(KERN_NOTICE "    0x%08x 0x%08x 0x%08x 0x%08x\n",
+//			data[i], data[i+1], data[i+2], data[i+3]);
 //	}
 
 	dport = ntohs(h->dport);
@@ -912,11 +918,11 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	 */
 	
 	sock_poll_wait(file, sk_sleep(sk), wait);
-	mask = EPOLLOUT | EPOLLWRNORM;
+	mask = POLLOUT | POLLWRNORM;
 	
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
 			!list_empty(&homa_sk(sk)->ready_responses))
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	printk(KERN_NOTICE "homa_poll returned 0x%x\n", mask);
 	return mask;
 }

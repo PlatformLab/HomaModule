@@ -3,4 +3,5 @@
 .git
 nbproject
 private
+start_homa
 *.pyc

@@ -262,6 +262,11 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
+void *__pskb_pull_tail(struct sk_buff *skb, int delta)
+{
+	return NULL;
+}
+
 int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 		int flags)
 {
