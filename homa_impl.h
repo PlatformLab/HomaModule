@@ -854,7 +854,8 @@ struct homa {
 	 * data packet and receive back a grant. Homa tries to ensure
 	 * that there is at least this much data in transit (or authorized
 	 * via grants) for an incoming message at all times.  Set externally
-	 * via sysctl.
+	 * via sysctl, but Homa will always round up to an even number of
+	 * full-size packets.
 	 */
 	int rtt_bytes;
 	

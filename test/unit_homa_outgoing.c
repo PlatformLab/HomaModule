@@ -53,13 +53,13 @@ TEST_F(homa_outgoing, homa_message_out_init_basics)
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, length 1428, "
-			"message_length 3000, offset 0, unscheduled 10000, "
+			"message_length 3000, offset 0, unscheduled 11200, "
 			"cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 1428, "
-			"message_length 3000, offset 1400, unscheduled 10000, "
+			"message_length 3000, offset 1400, unscheduled 11200, "
 			"cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, length 228, "
-			"message_length 3000, offset 2800, unscheduled 10000, "
+			"message_length 3000, offset 2800, unscheduled 11200, "
 			"cutoff_version 0",
 		     unit_log_get());
 }

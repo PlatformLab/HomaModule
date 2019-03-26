@@ -340,19 +340,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * ip_output.c:ip_send_skb
                   * ip_local_out
 
-gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_peertab.o.d  -nostdinc -isystem /usr/local/bin/../lib/gcc/x86_64-pc-linux-gnu/6.4.0/include -I./arch/x86/include -I./arch/x86/include/generated  -I./include -I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi -I./include/uapi -I./include/generated/uapi -include ./include/linux/kconfig.h -D__KERNEL__ -DCONFIG_CC_STACKPROTECTOR -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar -Werror-implicit-function-declaration -Wno-format-security -std=gnu89 -fno-PIE -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -m64 -falign-jumps=1 -falign-loops=1 -mno-80387 -mno-fp-ret-in-387 -mpreferred-stack-boundary=3 -mskip-rax-setup -mtune=generic -mno-red-zone -mcmodel=kernel -funit-at-a-time -DCONFIG_X86_X32_ABI -DCONFIG_AS_CFI=1 -DCONFIG_AS_CFI_SIGNAL_FRAME=1 -DCONFIG_AS_CFI_SECTIONS=1 -DCONFIG_AS_FXSAVEQ=1 -DCONFIG_AS_SSSE3=1 -DCONFIG_AS_CRC32=1 -DCONFIG_AS_AVX=1 -DCONFIG_AS_AVX2=1 -DCONFIG_AS_AVX512=1 -DCONFIG_AS_SHA1_NI=1 -DCONFIG_AS_SHA256_NI=1 -pipe -Wno-sign-compare -fno-asynchronous-unwind-tables -fno-delete-null-pointer-checks -Wno-frame-address -O2 --param=allow-store-data-races=0 -DCC_HAVE_ASM_GOTO -Wframe-larger-than=2048 -fstack-protector -Wno-unused-but-set-variable -Wno-unused-const-variable -fno-var-tracking-assignments -g -pg -mfentry -DCC_USING_FENTRY -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow -fno-merge-all-constants -fmerge-constants -fno-stack-check -fconserve-stack -Werror=implicit-int -Werror=strict-prototypes -Werror=date-time -Werror=incompatible-pointer-types -Werror=designated-init  -DMODULE  -DKBUILD_BASENAME='"homa_peertab"'  -DKBUILD_MODNAME='"homa"' -c -o /home/ouster/remote/homaModule/.tmp_homa_peertab.o /home/ouster/remote/homaModule/homa_peertab.c
-
-packets_sent_DATA               191263  DATA packets sent
-packets_sent_GRANT               19798  GRANT packets sent
-packets_sent_RESEND             780964  RESEND packets sent
-packets_sent_RESTART                 0  RESTART packets sent
-packets_sent_BUSY                   15  BUSY packets sent
-packets_sent_CUTOFFS                 0  CUTOFFS packets sent
-packets_rcvd_DATA                22686  DATA packets received
-packets_rcvd_GRANT               19317  GRANT packets received
-packets_rcvd_RESEND              70557  RESEND packets received
-packets_rcvd_RESTART              2278  RESTART packets received
-packets_rcvd_BUSY               656751  BUSY packets received
-packets_rcvd_CUTOFFS                 1  CUTOFFS packets received
-requests_received                    0  Incoming request messages
-responses_received                 307  Incoming response messages
