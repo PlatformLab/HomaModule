@@ -22,8 +22,6 @@
 #include <net/protocol.h>
 #include <net/inet_common.h>
 
-#include "homa.h"
-
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
 typedef unsigned int __poll_t;
 #endif
@@ -38,6 +36,9 @@ extern cycles_t mock_get_cycles(void);
 #define signal_pending(xxx) mock_signal_pending
 extern int mock_signal_pending;
 #endif
+
+#include "homa.h"
+#include "timetrace.h"
 
 extern struct homa *homa;
 

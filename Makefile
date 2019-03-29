@@ -7,7 +7,8 @@ homa-y = homa_incoming.o \
             homa_plumbing.o \
             homa_socktab.o \
             homa_timer.o \
-            homa_utils.o
+            homa_utils.o \
+            timetrace.o
 
 MY_CFLAGS += -g
 ccflags-y += ${MY_CFLAGS}

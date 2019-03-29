@@ -12,6 +12,7 @@ extern void        (*mock_schedule_hook)(void);
 extern void        (*mock_spin_lock_hook)(void);
 extern struct task_struct
 		   mock_task;
+extern char        mock_user_data[];
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 

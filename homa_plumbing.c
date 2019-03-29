@@ -281,6 +281,8 @@ static int __init homa_load(void) {
 	tick_interval = timespec_to_ktime(ts);
 	hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
 	
+	tt_init("timetrace");
+	
 	return 0;
 
 out_cleanup:
@@ -300,6 +302,8 @@ out:
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
 	exiting = true;
+	
+	tt_destroy();
 	
 	/* Stopping the hrtimer and tasklet is tricky, because each
 	 * reschedules the other. This means that the timer could get
@@ -805,6 +809,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		goto discard;
 //	}
 
+	tt_record4("Received packet, type %d, dport %d, id %llu, length %d",
+			h->type, ntohs(h->dport), ntohs(h->id), length);
 	if (length < HOMA_MAX_HEADER) {
 		printk(KERN_WARNING "Homa packet from %s too short: "
 				"%d bytes\n",
@@ -862,6 +868,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		homa_pkt_dispatch(sk, skb);
 	}
 	bh_unlock_sock(sk);
+	tt_record3("Finished receiving packet, type %d, dport %d, id %llu",
+			h->type, ntohs(h->dport), ntohs(h->id));
 	return 0;
 
     discard:
@@ -928,7 +936,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 }
 
 /**
- * metrics_open() - This function is invoked when /proc/net/homa_metrics is
+ * homa_metrics_open() - This function is invoked when /proc/net/homa_metrics is
  * opened.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
@@ -954,7 +962,7 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 }
 
 /**
- * metrics_read() - This function is invoked to handle read kernel calls on
+ * homa_metrics_read() - This function is invoked to handle read kernel calls on
  * /proc/net/homa_metrics.
  * @file:    Information about the file being read.
  * @buffer:  Address in user space of the buffer in which data from the file
@@ -982,7 +990,7 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 }
 
 /**
- * metrics_release() - This function is invoked when the last reference to
+ * homa_metrics_release() - This function is invoked when the last reference to
  * an open /proc/net/homa_metrics is closed.  It performs cleanup.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.

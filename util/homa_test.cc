@@ -328,6 +328,7 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 	uint64_t times[count];
 
 	for (int i = -10; i < count; i++) {
+		start = rdtsc();
 		status = homa_send(fd, request, length, dest,
 				sizeof(*dest), &id);
 		if (status < 0) {
@@ -335,7 +336,6 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 				strerror(errno));
 			return;
 		}
-		start = rdtsc();
 		resp_length = homa_recv(fd, response, sizeof(response),
 			HOMA_RECV_RESPONSE, &id,
 			(struct sockaddr *) &server_addr, sizeof(server_addr));
