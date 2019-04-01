@@ -153,19 +153,10 @@ void run_client(char *server_name, int port)
 	}
 	times[COUNT] = rdtsc();
 	
-	uint64_t min = ~0;
-	uint64_t max = 0;
-	for (i = 1; i <= COUNT; i++) {
-		uint64_t delta = times[i] - times[i-1];
-		if (delta < min)
-			min = delta;
-		if (delta > max)
-			max = delta;
+	for (i = 0; i < COUNT; i++) {
+		times[i] = times[i+1] - times[i];
 	}
-	printf("Average %.1f us, minimum %.1f us, maximum %.1f us\n",
-		1e6*to_seconds(times[COUNT] - times[0])/COUNT,
-		1e6*to_seconds(min),
-		1e6*to_seconds(max));
+	print_dist(times, COUNT);
 	return;
 }
 

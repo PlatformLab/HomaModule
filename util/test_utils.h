@@ -10,6 +10,7 @@ extern "C"
 
 extern int     check_buffer(void *buffer, size_t length);
 extern double  get_cycles_per_sec();
+extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern char   *print_address(struct sockaddr_in *addr);
 extern double  to_seconds(uint64_t cycles);

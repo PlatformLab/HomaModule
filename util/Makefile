@@ -8,7 +8,7 @@ BINS := buffer_client buffer_server get_time_trace homa_test \
 
 OBJS := $(patsubst %,%.o,$(BINS))
 	
-LIB_SRCS := homa_api.c test_utils.c
+LIB_SRCS := homa_api.c test_utils.cc
 LIB_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(LIB_SRCS)))
 	
 .SECONDARY: $(OBJS) $(LIB_OBJS)

@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/time.h>
+
+#include <algorithm>
+
 #include "test_utils.h"
 
 /**
@@ -90,6 +93,29 @@ double get_cycles_per_sec()
 		}
 		old_cps = cps;
 	}
+}
+
+/**
+ * print_dist() - Prints information on standard output about the distribution
+ * of a collection of interval measurements.
+ * @times:  An array containing interval times measured in rdtsc cycles.
+ *          This array will be modified by sorting it.
+ * @count:  The number of entries in @times.
+ */
+void print_dist(uint64_t times[], int count)
+{
+	std::sort(times, times+count);
+	printf("Min:  %8.1f us\n", to_seconds(times[0])*1e06);
+	for (int i = 1; i <= 9; i++) {
+		printf("P%2d:  %8.1f us\n", i*10,
+			to_seconds(times[(i*count)/10])*1e06);
+	}
+	printf("Max:  %8.1f us\n", to_seconds(times[count-1])*1e06);
+	double average = 0.0;
+	for (int i = 0; i < count; i++)
+		average += to_seconds(times[i]);
+	average /= count;
+	printf("Avg:  %8.1f us\n", average*1e06);
 }
 
 /**
