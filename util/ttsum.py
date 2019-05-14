@@ -75,11 +75,11 @@ def scan(f, startingEvent):
     startTime = 0.0
     lastTime = -1.0
     for line in f:
-        match = re.match('(^|.* )([0-9.]+) ns \(\+ *([0-9.]+) ns\) (.+)', line)
+        match = re.match('(^|.* )([0-9.]+) us \(\+ *([0-9.]+) us\) (.+)', line)
         if not match:
             continue
-        thisEventTime = float(match.group(2))
-        thisEventInterval = float(match.group(3))
+        thisEventTime = float(match.group(2))*1000.0
+        thisEventInterval = float(match.group(3))*1000.0
         thisEvent = match.group(4)
         if options.noNumbers:
             thisEvent = re.sub('[0-9]+', '?', thisEvent)
@@ -167,14 +167,14 @@ if not options.startEvent:
         intervals = eventIntervals[event]
         intervals.sort()
         medianTime = intervals[len(intervals)//2]
-        message = '%-*s  %8.1f %8.1f %8.1f %8.1f %7d' % (nameLength,
+        message = '%-*s  %6.0f %6.0f %6.0f %6.0f %7d' % (nameLength,
             event, medianTime, intervals[0], intervals[-1],
             sum(intervals)/len(intervals), len(intervals))
         outputInfo.append([medianTime, message])
 
     # Pass 2: sort in order of median interval length, then print.
     outputInfo.sort(key=lambda item: item[0], reverse=True)
-    print('%-*s    Median      Min      Max  Average   Count' % (nameLength,
+    print('%-*s  Median    Min    Max    Avg   Count' % (nameLength,
             "Event"))
     print('%s---------------------------------------------' %
             ('-' * nameLength))
@@ -214,12 +214,12 @@ if options.startEvent:
             intervals.sort()
             medianInterval = intervals[len(intervals)//2]
             if options.altFormat:
-                message = '%-*s  %8.1f %8.1f %8.1f %8.1f %8.1f %7d' % (
+                message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
                     nameLength, eventName, medianTime, times[0], times[-1],
                     sum(times)/len(times), intervals[len(intervals)//2],
                     len(times))
             else:
-                message = '%-*s  %8.1f %8.1f %8.1f %8.1f %8.1f %7d' % (
+                message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
                     nameLength, eventName, medianTime, medianInterval,
                     intervals[0], intervals[-1], sum(intervals)/len(intervals),
                     len(intervals))
@@ -227,16 +227,16 @@ if options.startEvent:
 
     outputInfo.sort(key=lambda item: item[0])
     if options.altFormat:
-        print('%-*s    Median      Min      Max  Average    Delta   Count' % (nameLength,
+        print('%-*s  Median    Min    Max    Avg  Delta   Count' % (nameLength,
                 "Event"))
-        print('%s------------------------------------------------------' %
+        print('%s--------------------------------------------' %
                 ('-' * nameLength))
     else:
-        print('%-*s     Cum.    ------------------Delta------------------' %
+        print('%-*s   Cum.  ---------------Delta---------------' %
                 (nameLength, ""))
-        print('%-*s    Median   Median      Min      Max  Average   Count' %
+        print('%-*s  Median Median    Min    Max    Avg   Count' %
                 (nameLength, "Event"))
-        print('%s------------------------------------------------------' %
+        print('%s--------------------------------------------' %
                 ('-' * nameLength))
     for message in outputInfo:
         print(message[1])

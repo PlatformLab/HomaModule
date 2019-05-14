@@ -39,7 +39,7 @@ def scan(f, string):
     prevTime = 0.0
     writes = 0
     for line in f:
-        match = re.match('([0-9.]+) ns \(\+ *([0-9.]+) ns\) (.*)',
+        match = re.match(' *([0-9.]+) us \(\+ *([0-9.]+) us\) (.*)',
                 line)
         if not match:
             continue
@@ -56,8 +56,8 @@ def scan(f, string):
         if startTime == 0.0:
             startTime = time
             prevTime = time
-        print("%9.3f us (+%7.3f us) %s" % ((time)/1000.0,
-                (time - prevTime)/1000.0, event))
+        print("%9.3f us (+%8.3f us) %s" % (time,
+                time - prevTime, event))
         prevTime = time
 
 if len(sys.argv) != 3:

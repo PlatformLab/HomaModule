@@ -63,6 +63,7 @@ for line in f:
     if first_time == 0.0:
         first_time = this_time
         prev_time = this_time
-    print('%10.1f ns (+%9.1f ns) %s' % ((this_time - first_time)/cpu_ghz,
-            (this_time - prev_time)/cpu_ghz, this_event))
+    print('%9.3f us (+%8.3f us) %s' % (
+            (this_time - first_time)/(1000.0 *cpu_ghz),
+            (this_time - prev_time)/(1000.0 * cpu_ghz), this_event))
     prev_time = this_time
