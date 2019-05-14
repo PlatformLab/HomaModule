@@ -302,8 +302,9 @@ void homa_xmit_data(struct homa_rpc *rpc)
 /**
  * __homa_xmit_data() - Handles packet transmission stuff that is common
  * to homa_xmit_data and homa_resend_data.
- * @skb:      Packet to be sent. Will be freed, either by the underlying
- *            transmission code, or by this function if an error occurs.
+ * @skb:      Packet to be sent. This function has no net impact on the
+ *            reference count for the packet (i.e. the packet will not
+ *            be freed).
  * @rpc:      Information about the RPC that the packet belongs to.
  * @priority: Priority level at which to transmit the packet.
  */
