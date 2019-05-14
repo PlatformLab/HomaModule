@@ -409,6 +409,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int result;
 	struct homa_rpc *rpc = NULL;
 
+	tt_record1("homa_ioc_recv starting on core %d", smp_processor_id());
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -445,16 +446,21 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 
+	tt_record1("starting copy_data, %d bytes", rpc->msgin.total_length);
 	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
+	tt_record("finished copy_data");
 	result = rpc->msgin.total_length;
 	if (rpc->is_client) {
 		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
+		tt_record("homa_rpc_free finished");
 	} else {
 		rpc->state = RPC_IN_SERVICE;
 		homa_message_in_destroy(&rpc->msgin);
+		tt_record("request message destroyed");
 	}
 	release_sock(sk);
+	tt_record1("homa_ioc_recv finished on core %d", smp_processor_id());
 	return result;
 	
 error:
@@ -482,6 +488,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	int err = 0;
 	struct homa_rpc *srpc;
 
+	tt_record1("homa_ioc_reply starting on core %d",
+		smp_processor_id());
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
@@ -540,6 +548,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	int err;
 	struct homa_rpc *crpc = NULL;
 
+	tt_record1("homa_ioc_send starting on core %d", smp_processor_id());
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
@@ -793,7 +802,7 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
 int homa_pkt_recv(struct sk_buff *skb) {
 	__be32 saddr = ip_hdr(skb)->saddr;
 	int length = skb->len;
-	struct common_header *h = (struct common_header *) skb->data;
+	struct common_header *h;
 	struct sock *sk = NULL;
 	__u16 dport;
 	char buffer[200];
@@ -809,8 +818,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		goto discard;
 //	}
 
-	tt_record4("Received packet, type %d, dport %d, id %llu, length %d",
-			h->type, ntohs(h->dport), ntohs(h->id), length);
 	if (length < HOMA_MAX_HEADER) {
 		printk(KERN_WARNING "Homa packet from %s too short: "
 				"%d bytes\n",
@@ -826,6 +833,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 				"packet (no space for header); discarding\n");
 		goto discard;
 	}
+	h = (struct common_header *) skb->data;
 	
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
@@ -868,8 +876,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		homa_pkt_dispatch(sk, skb);
 	}
 	bh_unlock_sock(sk);
-	tt_record3("Finished receiving packet, type %d, dport %d, id %llu",
-			h->type, ntohs(h->dport), ntohs(h->id));
 	return 0;
 
     discard:

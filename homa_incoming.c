@@ -309,6 +309,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
+	tt_record2("incoming data packet, id %llu, offset %d", h->common.id,
+			ntohl(h->offset));
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
@@ -358,6 +360,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
+	tt_record3("received grant for id %llu, offset %d, state %d",
+			h->common.id, ntohl(h->offset), rpc->state);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
@@ -392,6 +396,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
+	tt_record3("resend for id %llu, offset %d, length %d",
+			(rpc != NULL) ? rpc->id : 0,
+			ntohl(h->offset), ntohl(h->length));
 
 	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
@@ -443,6 +450,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
  */
 void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
+	tt_record1("Received restart for id %llu", rpc->id);
 	if (rpc->state != RPC_READY) {
 		homa_remove_from_grantable(rpc->hsk->homa, rpc);
 		homa_message_in_destroy(&rpc->msgin);
@@ -582,6 +590,8 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			/* Don't do anything if the grant couldn't be sent; let
 			 * other retry mechanisms handle this. */
 		}
+		tt_record2("sent grant for id %llu, offset %d", candidate->id,
+				candidate->msgin.granted);
 	}
 	spin_unlock_bh(&homa->grantable_lock);
 }
@@ -802,6 +812,7 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 	release_sock((struct sock *) hsk);
 	schedule();
 	__set_current_state(TASK_RUNNING);
+	tt_record("homa_wait_for_message woke up");
 	lock_sock((struct sock *) hsk);
 
 	/* Step 3: back from sleeping; cleanup interests, then see
@@ -855,6 +866,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	if ((rpc->interest != NULL) && (*rpc->interest->rpc == NULL)) {
 		*rpc->interest->rpc = rpc;
 		wake_up_process(rpc->interest->thread);
+		tt_record("wake_up_process finished");
 		return;
 	}
 	
@@ -875,6 +887,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		}
 		*interest->rpc = rpc;
 		wake_up_process(interest->thread);
+		tt_record("wake_up_process finished");
 		return;
 	}
 	

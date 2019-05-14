@@ -29,6 +29,17 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 		(6 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
 		(7 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT
 	};
+#if 0
+	static int count = 0;
+	static int prio = 4;
+	count++;
+	if ((count & 7) == 0) {
+		/* Change priority levels every eighth packet. */
+		prio ^= 1;
+		tt_record1("Changed priority to %d", prio);
+	}
+	priority = prio;
+#endif
 	skb->vlan_proto = htons(0x8100);
 	skb->vlan_tci = tci[priority];
 }
@@ -55,6 +66,7 @@ int homa_message_out_init(struct homa_message_out *msgout,
 	struct sk_buff *skb;
 	int err;
 	struct sk_buff **last_link = &msgout->packets;
+	tt_record("Starting message_out_init");
 	
 	msgout->length = len;
 	msgout->packets = NULL;
@@ -108,6 +120,8 @@ int homa_message_out_init(struct homa_message_out *msgout,
 		*last_link = NULL;
 	}
 	msgout->next_packet = msgout->packets;
+	
+	tt_record("Output message initialized");
 	return 0;
 	
     error:
@@ -334,6 +348,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 	if (skb_transport_offset(skb) > 0)
 		skb_pull(skb, skb_transport_offset(skb));
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
+	tt_record3("Finished queuing packet: rpc id %llu, offset %d, len %d",
+			h->common.id, ntohl(h->offset), skb->len);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 		
@@ -464,6 +480,8 @@ int homa_pacer_main(void *transportInfo)
 			INC_METRIC(pacer_cycles, get_cycles() - start);
 			schedule();
 			start = get_cycles();
+			tt_record1("pacer woke up on core %d",
+					smp_processor_id());
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);
@@ -588,4 +606,5 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 done:
 	spin_unlock_bh(&homa->throttle_lock);
 	wake_up_process(homa->pacer_kthread);
+	tt_record("woke up pacer thread");
 }
