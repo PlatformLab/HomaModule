@@ -256,24 +256,21 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle_limit)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_xmit_data__skip_shared_skbuffs)
+
+TEST_F(homa_outgoing, __homa_xmit_data__skip_shared_skbuffs)
 {
 	struct sk_buff *skb;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 5000, NULL);
+	unit_log_clear();
 	EXPECT_NE(NULL, crpc);
 	skb = *homa_next_skb(crpc->msgout.packets);
 	skb_get(skb);
-	skb_get(*homa_next_skb(skb));
-	unit_log_clear();
-	homa_xmit_data(crpc);
-	EXPECT_STREQ("xmit DATA 0/5000 P6; xmit DATA 4200/5000 P6", 
-			unit_log_get());
-	EXPECT_EQ(5600, crpc->msgout.next_offset);
+	__homa_xmit_data(skb, crpc, 4);
 	kfree_skb(skb);
-	kfree_skb(*homa_next_skb(skb));
+	__homa_xmit_data(skb, crpc, 5);
+	EXPECT_STREQ("xmit DATA 1400/5000 P5", unit_log_get());
 }
-
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -282,7 +279,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 	crpc->peer->cutoff_version = htons(123);
 	mock_xmit_log_verbose = 1;
 	unit_log_clear();
-	homa_xmit_data(crpc);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
 	EXPECT_SUBSTR("cutoff_version 123", unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
@@ -297,15 +294,15 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	old_refcount = dst->__refcnt.counter;
 	
 	/* First transmission: must fill dst. */
-	homa_xmit_data(crpc);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
 	EXPECT_STREQ("xmit DATA 0/1000 P6", unit_log_get());
 	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
 	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
 	
 	/* Second transmission: dst already set. */
 	unit_log_clear();
-	__homa_xmit_data(crpc->msgout.packets, crpc);
-	EXPECT_STREQ("xmit DATA 0/1000 P6", unit_log_get());
+	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
+	EXPECT_STREQ("xmit DATA 0/1000 P5", unit_log_get());
 	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__strip_old_headers)
@@ -320,7 +317,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__strip_old_headers)
 	old_data = skb->data;
 	old_len = skb->len;
 	__skb_push(skb, 10);
-	homa_xmit_data(crpc);
+	__homa_xmit_data(skb, crpc, 5);
         EXPECT_EQ(old_data, skb->data);
 	EXPECT_EQ(old_len, skb->len);
 }
@@ -331,7 +328,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__transmit_error)
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_ip_queue_xmit_errors = 1;
-	homa_xmit_data(crpc);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
 	EXPECT_EQ(1, unit_get_metrics()->data_xmit_errors);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__update_idle_time)
@@ -344,7 +341,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__update_idle_time)
 	unit_log_clear();
 	atomic_long_set(&self->homa.link_idle_time, 9000);
 	self->homa.max_nic_queue_cycles = 100000;
-	homa_xmit_data(crpc);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
 	EXPECT_EQ(10500, atomic_long_read(&self->homa.link_idle_time));
 }
 

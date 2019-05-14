@@ -138,11 +138,17 @@ int homa_message_out_init(struct homa_message_out *msgout,
  */
 void homa_message_out_reset(struct homa_message_out *msgout)
 {
+	struct sk_buff *skb;
 	msgout->next_packet = msgout->packets;
 	msgout->next_offset = 0;
 	msgout->granted = msgout->unscheduled;
 	if (msgout->granted > msgout->length)
 		msgout->granted = msgout->length;
+	for (skb = msgout->packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
+		struct data_header *h = (struct data_header *)
+				skb_transport_header(skb);
+		h->retransmit = 0;
+	}
 }
 
 /**
@@ -269,8 +275,6 @@ void homa_xmit_data(struct homa_rpc *rpc)
 			&& rpc->msgout.next_packet) {
 		int priority;
 		struct sk_buff *skb = rpc->msgout.next_packet;
-		struct data_header *h = (struct data_header *)
-				skb_transport_header(skb);
 		struct homa *homa = rpc->hsk->homa;
 		
 		if (((rpc->msgout.length - rpc->msgout.next_offset)
@@ -291,39 +295,33 @@ void homa_xmit_data(struct homa_rpc *rpc)
 		}
 		rpc->msgout.next_offset += HOMA_MAX_DATA_PER_PACKET;
 		
-		if (skb_shared(skb)) {
-			/* The packet is still being transmitted due to a
-			 * previous call to this function; no need to do
-			 * anything here (and it may not be safe to retransmit
-			 * it, or modify it, in this state).
-			 */
-			continue;
-		}
-		set_priority(skb, priority);
-		
-		/* Reset retransmit in case the packet was previously
-		 * retransmitted but we're now restarting from the
-		 * beginning.
-		 */
-		h->retransmit = 0;
-		
-		__homa_xmit_data(skb, rpc);
+		__homa_xmit_data(skb, rpc, priority);
 	}
 }
 
 /**
  * __homa_xmit_data() - Handles packet transmission stuff that is common
  * to homa_xmit_data and homa_resend_data.
- * @skb:    Packet to be sent. Will be freed, either by the underlying
- *          transmission code, or by this function if an error occurs.
- * @sk:     Socket over which to send the packet.
- * @peer:   Information about the packet's destination.
+ * @skb:      Packet to be sent. Will be freed, either by the underlying
+ *            transmission code, or by this function if an error occurs.
+ * @rpc:      Information about the RPC that the packet belongs to.
+ * @priority: Priority level at which to transmit the packet.
  */
-void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
+void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 {
 	int err;
 	struct data_header *h = (struct data_header *)
 			skb_transport_header(skb);
+		
+	if (skb_shared(skb)) {
+		/* The packet is still being transmitted due to a
+		 * previous call to this function; no need to do
+		 * anything here (and it may not be safe to retransmit
+		 * the packet, or even modify it, in this state).
+		 */
+		return;
+	}
+	set_priority(skb, priority);
 
 	/* Update cutoff_version in case it has changed since the
 	 * message was initially created.
@@ -394,12 +392,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			continue;
 		if (offset >= end)
 			break;
-		/* See comments in homa_xmit_data for code below. */
-		if (skb_shared(skb))
-			continue;
 		h->retransmit = 1;
-		set_priority(skb, priority);
-		__homa_xmit_data(skb, rpc);
+		__homa_xmit_data(skb, rpc, priority);
 		INC_METRIC(resent_packets, 1);
 	}
 }

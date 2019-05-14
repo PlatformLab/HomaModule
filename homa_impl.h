@@ -1361,6 +1361,7 @@ extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 extern int      __homa_xmit_control(void *contents, size_t length,
 			struct homa_peer *peer, struct homa_sock *hsk);
 extern void     homa_xmit_data(struct homa_rpc *rpc);
-extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
+extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
+			int priority);
 
 #endif /* _HOMA_IMPL_H */
