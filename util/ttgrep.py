@@ -16,8 +16,7 @@
 
 """
 Scan the time trace data in a log file; find all records containing
-a given string, and output only those records, renormalized in time
-so that the first record is at time 0.
+a given string, and output only those records.
 Usage: ttgrep.py string file
 """
 
@@ -33,16 +32,14 @@ import sys
 def scan(f, string):
     """
     Scan the log file given by 'f' (handle for an open file) and output
-    all-time trace records containing string, with times renormalized
-    relative to the time of the first matching record.
+    all-time trace records containing string.
     """
 
     startTime = 0.0
     prevTime = 0.0
     writes = 0
     for line in f:
-        match = re.match('.*TimeTrace.*printInternal.* '
-                '([0-9.]+) ns \(\+ *([0-9.]+) ns\) (.*)',
+        match = re.match('([0-9.]+) ns \(\+ *([0-9.]+) ns\) (.*)',
                 line)
         if not match:
             continue
@@ -59,7 +56,7 @@ def scan(f, string):
         if startTime == 0.0:
             startTime = time
             prevTime = time
-        print("%9.3f us (+%7.3f us) %s" % ((time - startTime)/1000.0,
+        print("%9.3f us (+%7.3f us) %s" % ((time)/1000.0,
                 (time - prevTime)/1000.0, event))
         prevTime = time
 
