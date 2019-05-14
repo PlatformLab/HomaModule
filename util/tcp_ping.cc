@@ -19,6 +19,9 @@
 
 #include "test_utils.h"
 
+/* Size of messages, in bytes. */
+int length = 50000;
+
 /**
  * get_int() - Parse an integer from a string, and exit if the parse fails.
  * @s:      String to parse.
@@ -74,39 +77,61 @@ void run_server(int port)
 		setsockopt(stream, IPPROTO_TCP, TCP_NODELAY, &flag,
 				sizeof(flag));
 		while (1) {
-			char buffer[10000];
-			int num_bytes = read(stream, buffer, sizeof(buffer));
-			if (num_bytes == 0)
-				break;
-			if (num_bytes < 0)  {
-				printf("Read error on socket: %s",
-						strerror(errno));
-				exit(1);
+			char buffer[1000000];
+			int length = 0;
+			while (1) {
+				int result = read(stream, buffer + length,
+						sizeof(buffer) - length);
+				if (result < 0) {
+					printf("Read error on socket: %s",
+							strerror(errno));
+					exit(1);
+				}
+				if (result == 0)
+					goto close;
+				length += result;
+				
+				/* First word of request contains expected
+				 * length in bytes.
+				 */
+				if ((length >= static_cast<int>(sizeof(int)))
+						&& (length >=
+						*reinterpret_cast<int*>(buffer))) {
+					break;
+				}
 			}
-			if (write(stream, buffer, num_bytes) != num_bytes) {
+			if (write(stream, buffer, length) != length) {
 				printf("Socket write failed: %s\n", strerror(errno));
 				exit(1);
 			}
 		}
+		close:
+		close(stream);
 	}
 }
 
 void ping(int stream)
 {
-	char buffer[10000];
-	if (write(stream, buffer, 100) != 100) {
+	int buffer[250000];
+	int bytes_left;
+	buffer[0] = length;
+	if (write(stream, buffer, length) != length) {
 		printf("Socket write failed: %s\n", strerror(errno));
 		exit(1);
 	}
-	int num_bytes = read(stream, buffer, sizeof(buffer));
-	if (num_bytes > 0)
-		return;
-	if (num_bytes < 0) {
-		printf("Socket read failed: %s\n", strerror(errno));
-		exit(1);
+	bytes_left = length;
+	while (bytes_left > 0) {
+		int num_bytes = read(stream, buffer, sizeof(buffer));
+		if (num_bytes <= 0) {
+			if (num_bytes == 0)
+				printf("Server closed socket\n");
+			else
+				printf("Socket read failed: %s\n",
+						strerror(errno));
+			exit(1);
+		}
+		bytes_left -= num_bytes;
 	}
-	printf("Server closed socket\n");
-	exit(1);
 }
 
 void run_client(char *server_name, int port)
@@ -145,7 +170,7 @@ void run_client(char *server_name, int port)
 	for (i = 0; i < 10; i++)
 		ping(stream);
 	
-#define COUNT 100000
+#define COUNT 1000
 	uint64_t times[COUNT+1];
 	for (i = 0; i < COUNT; i++) {
 		times[i] = rdtsc();
@@ -157,6 +182,8 @@ void run_client(char *server_name, int port)
 		times[i] = times[i+1] - times[i];
 	}
 	print_dist(times, COUNT);
+	printf("Bandwidth at median: %.1f MB/sec\n",
+			2.0*((double) length)/(to_seconds(times[COUNT/2])*1e06));
 	return;
 }
 
