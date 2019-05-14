@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
 			HOMA_RECV_REQUEST, &id, (struct sockaddr *) &source,
 			sizeof(source));
 		if (length < 0) {
-			printf("Recvmsg failed: %s\n", strerror(errno));
+			printf("homa_recv failed: %s\n", strerror(errno));
 			continue;
 		}
 		if (!quiet) {
