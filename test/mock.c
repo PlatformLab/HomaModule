@@ -28,6 +28,7 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  */
 int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
+int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
@@ -142,6 +143,14 @@ void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 	func(head);
 }
 
+size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
+{
+	if (mock_check_error(&mock_copy_data_errors))
+		return false;
+	unit_log_printf("; ", "_copy_from_iter copied %lu bytes", bytes);
+	return bytes;
+}
+
 bool _copy_from_iter_full(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
@@ -157,6 +166,15 @@ bool _copy_from_iter_full_nocache(void *addr, size_t bytes, struct iov_iter *i)
 	unit_log_printf("; ", "_copy_from_iter_full_nocache copid %lu bytes",
 			bytes);
 	return true;
+}
+
+size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
+{
+	if (mock_check_error(&mock_copy_to_iter_errors))
+		return 0;
+	unit_log_printf("; ", "_copy_to_iter: %.*s", (int) bytes,
+			(char *) addr);
+	return bytes;
 }
 
 unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
@@ -325,6 +343,11 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 
 void inet_unregister_protosw(struct inet_protosw *p) {}
+
+void iov_iter_revert(struct iov_iter *i, size_t bytes)
+{
+	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
+}
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
@@ -817,6 +840,7 @@ void mock_teardown(void)
 	cpu_number = 1;
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
+	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_route_errors = 0;
