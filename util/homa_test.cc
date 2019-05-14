@@ -17,6 +17,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
 #include <sys/types.h>
 
 #include <thread>
@@ -235,6 +236,34 @@ void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
 }
 
 /**
+ * test_ioctl() - Measure round-trip time for an ioctl kernel call that
+ * does nothing but return an error.
+ * @fd:       Homa socket.
+ * @count:    Number of reads to issue.
+ */
+void test_ioctl(int fd, int count)
+{
+	char buffer[100];
+	int status;
+	uint64_t start;
+	uint64_t times[count];
+
+	for (int i = -10; i < count; i++) {
+		start = rdtsc();
+		status = ioctl(fd, 123456, buffer);
+		if ((status >= 0) || (errno != EINVAL)) {
+			printf("Unexpected return from ioctl: result %d, "
+					"errno %s\n",
+					status, strerror(errno));
+			return;
+		}
+		if (i >= 0)
+			times[i] = rdtsc() - start;
+	}
+	print_dist(times, count);
+}
+
+/**
  * test_poll() - Receive a message using the poll interface.
  * @fd:       Homa socket.
  * @request:  Request message.
@@ -285,6 +314,34 @@ void test_poll(int fd, char *request, int length)
 }
 
 /**
+ * test_read() - Measure round-trip time for a read kernel call that
+ * does nothing but return an error.
+ * @fd:       Homa socket.
+ * @count:    Number of reads to issue.
+ */
+void test_read(int fd, int count)
+{
+	char buffer[100];
+	int status;
+	uint64_t start;
+	uint64_t times[count];
+
+	for (int i = -10; i < count; i++) {
+		start = rdtsc();
+		status = read(fd, buffer, sizeof(buffer));
+		if ((status >= 0) || (errno != EINVAL)) {
+			printf("Unexpected return from read: result %d, "
+					"errno %s\n",
+					status, strerror(errno));
+			return;
+		}
+		if (i >= 0)
+			times[i] = rdtsc() - start;
+	}
+	print_dist(times, count);
+}
+
+/**
  * test_rtt() - Measure round-trip time for an RPC.
  * @fd:       Homa socket.
  * @dest:     Where to send the request
@@ -309,7 +366,7 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 				sizeof(*dest), &id);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
-				strerror(errno));
+					strerror(errno));
 			return;
 		}
 		resp_length = homa_recv(fd, response, sizeof(response),
@@ -319,11 +376,13 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
 			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
 			printf("Error in homa_recv: %s\n",
-				strerror(errno));
+					strerror(errno));
 			return;
 		}
 	}
 	print_dist(times, count);
+	printf("Bandwidth at median: %.1f MB/sec\n",
+			2.0*((double) length)/(to_seconds(times[count/2])*1e06));
 }
 
 /**
@@ -520,10 +579,14 @@ int main(int argc, char** argv)
 			test_fill_memory(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "invoke") == 0) {
 			test_invoke(fd, dest, buffer, length);
+		} else if (strcmp(argv[nextArg], "ioctl") == 0) {
+			test_ioctl(fd, count);
 		} else if (strcmp(argv[nextArg], "poll") == 0) {
 			test_poll(fd, buffer, length);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
 			test_send(fd, dest, buffer, length);
+		} else if (strcmp(argv[nextArg], "read") == 0) {
+			test_read(fd, count);
 		} else if (strcmp(argv[nextArg], "rtt") == 0) {
 			test_rtt(fd, dest, buffer, length, count);
 		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
