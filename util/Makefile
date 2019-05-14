@@ -1,6 +1,6 @@
 # Makefile to build various testing programs for Homa.
 
-CFLAGS := -Wall -Werror -O3 -I..
+CFLAGS := -Wall -Werror -fno-strict-aliasing -O3 -I..
 
 BINS := buffer_client buffer_server get_time_trace homa_test \
         homa_server receive_raw scratch send_raw tcp_ping \
