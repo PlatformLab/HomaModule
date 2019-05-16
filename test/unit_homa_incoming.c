@@ -449,7 +449,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	homa_xmit_data(srpc);
+	homa_xmit_data(srpc, true);
 	unit_log_clear();
 	
 	struct grant_header h = {{.sport = htons(srpc->dport),
@@ -610,7 +610,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 100);
 	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(crpc);
+	homa_xmit_data(crpc, true);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
@@ -629,7 +629,7 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	homa_xmit_data(srpc);
+	homa_xmit_data(srpc, true);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
@@ -647,7 +647,7 @@ TEST_F(homa_incoming, homa_restart_pkt_basics)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
 	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(crpc);
+	homa_xmit_data(crpc, true);
 	unit_log_clear();
 	
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(

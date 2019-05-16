@@ -356,7 +356,7 @@ struct homa_message_out {
 	 * @next_packet: Pointer within @request of the next packet to transmit.
 	 * 
 	 * All packets before this one have already been sent. NULL means
-	 * the entire message has been sent.
+	 * all existing packets have been sent.
 	 */
 	struct sk_buff *next_packet;
 	
@@ -1229,6 +1229,7 @@ extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
+extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void     homa_prios_changed(struct homa *homa);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -1270,10 +1271,8 @@ extern void     homa_message_in_destroy(struct homa_message_in *msgin);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 			int unscheduled);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
-extern int      homa_message_out_init(struct homa_message_out *msgout,
-			struct homa_sock *hsk, struct iov_iter *iter,
-			size_t len, struct homa_peer *dest, __u16 dport,
-			__u16 sport, __u64 id);
+extern int      homa_message_out_init(struct homa_rpc *rpc, int sport,
+			size_t len, struct iov_iter *iter, bool xmit);
 extern void     homa_message_out_reset(struct homa_message_out *msgout);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
@@ -1317,7 +1316,7 @@ extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 			struct sockaddr_in *dest, size_t length,
-			struct iov_iter *iter);
+			struct iov_iter *iter, bool xmit);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
@@ -1360,7 +1359,7 @@ extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
 			struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_xmit_data(struct homa_rpc *rpc);
+extern void     homa_xmit_data(struct homa_rpc *rpc, bool use_pacer);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			int priority);
 

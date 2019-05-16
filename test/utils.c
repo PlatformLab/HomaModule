@@ -35,7 +35,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	server_addr.sin_addr.s_addr = server_ip;
 	server_addr.sin_port =  htons(server_port);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
-			req_length, NULL);
+			req_length, NULL, false);
 	if (!crpc)
 		return NULL;
 	if (id != 0)
@@ -293,9 +293,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	int err = homa_message_out_init(&srpc->msgout, hsk,
-			NULL, resp_length, srpc->peer, hsk->server_port,
-			client_port, id);
+	int err = homa_message_out_init(srpc, hsk->server_port, resp_length,
+			NULL, false);
 	EXPECT_EQ(0, err);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)

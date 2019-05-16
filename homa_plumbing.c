@@ -79,7 +79,7 @@ struct proto homa_prot = {
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
 	.sendpage	   = homa_sendpage,
-	.backlog_rcv       = homa_pkt_dispatch,
+	.backlog_rcv       = homa_backlog_rcv,
 	.release_cb	   = ip4_datagram_release_cb,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
@@ -514,11 +514,11 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	srpc->state = RPC_OUTGOING;
 
-	err = homa_message_out_init(&srpc->msgout, hsk, &iter, args.resplen,
-			srpc->peer, srpc->dport, hsk->client_port, srpc->id);
+	err = homa_message_out_init(srpc, hsk->server_port, args.resplen,
+			&iter, true);
         if (unlikely(err))
 		goto error;
-	homa_xmit_data(srpc);
+//	homa_xmit_data(srpc, true);
 	if (srpc->msgout.next_offset >= srpc->msgout.length) {
 		homa_rpc_free(srpc);
 	}
@@ -567,14 +567,14 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -ESHUTDOWN;
 		goto error;
 	}
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter,
+			true);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;
 		goto error;
 	}
-	
-	homa_xmit_data(crpc);
+
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;
@@ -883,6 +883,23 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		bh_unlock_sock(sk);
 	kfree_skb(skb);
 	return 0;
+}
+
+/**
+ * homa_backlog_rcv() - Invoked to handle packets that arrived when the
+ * socket was locked, so homa_pkt_recv couldn't handle them at the time.
+ * This method gets invoked later, when the socket is unlocked.
+ * @sk:     Homa socket that owns the packet's destination port. Caller must
+ *          own the lock for this and socket must not have been deleted.
+ * @skb:    The incoming packet. This function takes ownership of the packet
+ *          (we'll ensure that it is eventually freed).
+ *
+ * Return:  Always returns 0.
+ */
+int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
+{
+	tt_record("homa_backlog_rcv invoked");
+	return homa_pkt_dispatch(sk, skb);
 }
 
 /**

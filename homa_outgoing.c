@@ -45,47 +45,48 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 }
 
 /**
- * homa_message_out_init() - Initialize a homa_message_out, including copying
- * message data from user space into sk_buffs.
- * @msgout:    Struct to initialize; current contents are assumed to be garbage.
- * @hsk:       Socket from which message will be sent.
- * @iter:      Info about the request buffer in user space.
- * @len:       Total length of the message.
- * @dest:      Describes the host to which the RPC will be sent.
- * @dport:     Port on @dest where the server is listening (destination).
- * @sport:     Port of the client (source).
- * @id:        Unique identifier for the message's RPC (relative to sport).
+ * homa_message_out_init() - Initializes an RPC's msgout, loads packet data
+ * from a user-space buffer, and (optionally) starts transmitting the
+ * message.
+ * @rpc:     RPC whose msgout is to be initialized; current contents are
+ *           assumed to be garbage.
+ * @sport:   Source port number to use for the message.
+ * @len:     Total length of the message.
+ * @iter:    Info about the request buffer in user space.
+ * @xmit:    True means start transmitting message data while building
+ *           packets; false means don't initiate any transmissions.
  * 
  * Return:   Either 0 (for success) or a negative errno value.
  */
-int homa_message_out_init(struct homa_message_out *msgout,
-		struct homa_sock *hsk, struct iov_iter *iter, size_t len,
-		struct homa_peer *dest, __u16 dport, __u16 sport, __u64 id)
+int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
+		struct iov_iter *iter, bool xmit)
 {
 	int bytes_left;
 	struct sk_buff *skb;
 	int err;
-	struct sk_buff **last_link = &msgout->packets;
-	tt_record("Starting message_out_init");
+	struct sk_buff **last_link;
 	
-	msgout->length = len;
-	msgout->packets = NULL;
-	msgout->next_packet = NULL;
-	msgout->next_offset = 0;
+	rpc->msgout.length = len;
+	rpc->msgout.packets = NULL;
+	rpc->msgout.next_packet = NULL;
+	rpc->msgout.next_offset = 0;
+	rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes;
+	rpc->msgout.granted = rpc->msgout.unscheduled;
+	if (rpc->msgout.granted > rpc->msgout.length)
+		rpc->msgout.granted = rpc->msgout.length;
+	rpc->msgout.sched_priority = 0;
 	
-	/* This is a temporary guess; must handle better in the future. */
-	msgout->unscheduled = hsk->homa->rtt_bytes;
-	msgout->granted = msgout->unscheduled;
-	if (msgout->granted > msgout->length)
-		msgout->granted = msgout->length;
-	msgout->sched_priority = 0;
-	
-	/* Copy message data from user space and form packet buffers. */
+	/* Do the check here so the struct is cleanly initialized after
+	 * an error.
+	 */
 	if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
 		err = -EINVAL;
 		goto error;
 	}
-	for (bytes_left = len, last_link = &msgout->packets; bytes_left > 0;
+	
+	/* Copy message data from user space and form packet buffers. */
+	for (bytes_left = len, last_link = &rpc->msgout.packets;
+			bytes_left > 0;
 			bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
 		struct data_header *h;
 		__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
@@ -101,15 +102,15 @@ int homa_message_out_init(struct homa_message_out *msgout,
 		skb_reset_transport_header(skb);
 		h = (struct data_header *) skb_put(skb, sizeof(*h));
 		h->common.sport = htons(sport);
-		h->common.dport = htons(dport);
-		h->common.id = id;
+		h->common.dport = htons(rpc->dport);
+		h->common.id = rpc->id;
 		h->common.type = DATA;
-		h->message_length = htonl(msgout->length);
-		h->offset = htonl(msgout->length - bytes_left);
-		h->unscheduled = htonl(msgout->unscheduled);
-		h->cutoff_version = dest->cutoff_version;
+		h->message_length = htonl(rpc->msgout.length);
+		h->offset = htonl(rpc->msgout.length - bytes_left);
+		h->unscheduled = htonl(rpc->msgout.unscheduled);
+		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
-		err = skb_add_data_nocache((struct sock *) hsk, skb, iter,
+		err = skb_add_data_nocache((struct sock *) rpc->hsk, skb, iter,
 				cur_size);
 		if (unlikely(err != 0)) {
 			kfree_skb(skb);
@@ -118,14 +119,28 @@ int homa_message_out_init(struct homa_message_out *msgout,
 		*last_link = skb;
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
+		if (!rpc->msgout.next_packet)
+			rpc->msgout.next_packet = skb;
+		/* The code below should improve performance by overlapping
+		 * packet transmission with packet building, but as of
+		 * 5/2019, it seems to make things much worse. For example,
+		 * on xl17 CloudLab cluster, 50us gaps appear in the middle
+		 * of all messages. Disable except in unit tests.
+		 */
+#ifdef __UNIT_TEST__
+		if (xmit)
+			homa_xmit_data(rpc, (cur_size == bytes_left));
+#endif
 	}
-	msgout->next_packet = msgout->packets;
-	
+#ifndef __UNIT_TEST__
+	homa_xmit_data(rpc, true);
+#endif
+
 	tt_record("Output message initialized");
 	return 0;
 	
     error:
-	homa_message_out_destroy(msgout);
+	homa_message_out_destroy(&rpc->msgout);
 	return err;
 }
 
@@ -265,11 +280,14 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 /**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
- * them to be sent (some may be sent immediately; others will be sent
+ * them to be sent (some may be sent immediately; others may be sent
  * later by the pacer thread).
- * @rpc:    RPC to check for transmittable packets.
+ * @rpc:       RPC to check for transmittable packets.
+ * @use_pacer: True means that we should add this RPC to the throttled
+ *             list if the NIC queue is too long for this packet right now.
+ *             False means the caller will try to send the packet again later.
  */
-void homa_xmit_data(struct homa_rpc *rpc)
+void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 {
 	while ((rpc->msgout.next_offset < rpc->msgout.granted)
 			&& rpc->msgout.next_packet) {
@@ -282,7 +300,8 @@ void homa_xmit_data(struct homa_rpc *rpc)
 				&& ((get_cycles() + homa->max_nic_queue_cycles)
 				< atomic_long_read(&homa->link_idle_time))
 				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE)) {
-			homa_add_to_throttled(rpc);
+			if (use_pacer)
+				homa_add_to_throttled(rpc);
 			return;
 		}
 		
@@ -531,7 +550,7 @@ void homa_pacer_xmit(struct homa *homa)
 	 * socket can't go away now, nor can the RPC.
 	 */
 	rcu_read_unlock();
-	homa_xmit_data(rpc);
+	homa_xmit_data(rpc, false);
 	if ((rpc->msgout.next_offset >= rpc->msgout.granted)
 			|| !rpc->msgout.next_packet) {
 		/* Nothing more to transmit from this message (right now),

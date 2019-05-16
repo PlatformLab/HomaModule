@@ -98,6 +98,12 @@ Notes for Homa implementation in Linux:
     * The answer appears to the "yes", and Homa contains code to check this
       and log if not.
 
+* Notes on IP packet transmission and reception:
+  * ip_queue_xmit -> ip_local_out -> dst_output
+  * Ultimately, output is handled by skb_dst(skb)->output(net, sk, skb),
+    which probably is ip_output
+  * ip_output -> ip_finish_output -> ip_finish_output2 -> neigh_output?
+
 * Notes on skbuff usage:
   * skb->destructor: invoked when skbuff is freed.
   * sk->sk_wmem_alloc:

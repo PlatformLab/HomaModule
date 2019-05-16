@@ -75,7 +75,7 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 TEST_F(homa_utils, homa_rpc_new_client__normal)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, 10000, NULL, false);
 	EXPECT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 }
@@ -83,7 +83,7 @@ TEST_F(homa_utils, homa_rpc_new_client__malloc_error)
 {
 	mock_kmalloc_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, 10000, NULL, false);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
@@ -91,7 +91,7 @@ TEST_F(homa_utils, homa_rpc_new_client__route_error)
 {
 	mock_route_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, 10000, NULL, false);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(crpc));
 }
@@ -164,7 +164,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 TEST_F(homa_utils, homa_rpc_free__throttled)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 5000, NULL);
+			&self->server_addr, 5000, NULL, false);
 	EXPECT_NE(NULL, crpc);
 	homa_add_to_throttled(crpc);
 	unit_log_clear();
@@ -176,10 +176,10 @@ TEST_F(homa_utils, homa_rpc_free__throttled)
 TEST_F(homa_utils, homa_find_client_rpc)
 {
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, 1000, NULL, false);
 	EXPECT_FALSE(IS_ERR(crpc1));
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, 1000, NULL, false);
 	EXPECT_FALSE(IS_ERR(crpc2));
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));
 	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk, crpc2->id));

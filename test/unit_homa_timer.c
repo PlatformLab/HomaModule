@@ -116,7 +116,7 @@ TEST_F(homa_timer, homa_timer__client_rpc_basics)
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Send RESEND: granted bytes now sent. */
-	homa_xmit_data(crpc);
+	homa_xmit_data(crpc, true);
 	unit_log_clear();
 	homa_timer(&self->homa);
 	homa_timer(&self->homa);

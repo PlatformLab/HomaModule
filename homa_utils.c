@@ -128,17 +128,19 @@ void homa_destroy(struct homa *homa)
 
 /**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
- * to issue an outgoing request).
+ * to issue an outgoing request), and (optionally) start sending its packets.
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
  * @length:   Size of the request message.
  * @iter:     Data for the message.
+ * @xmit:     True means start transmitting packets.
  * 
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. 
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		struct sockaddr_in *dest, size_t length, struct iov_iter *iter)
+		struct sockaddr_in *dest, size_t length,
+		struct iov_iter *iter, bool xmit)
 {
 	int err;
 	struct homa_rpc *crpc;
@@ -150,31 +152,32 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 			dest->sin_addr.s_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		err = PTR_ERR(crpc->peer);
-		goto error;
+		kfree(crpc);
+		return ERR_PTR(err);
 	}
 	crpc->dport = ntohs(dest->sin_port);
 	crpc->id = hsk->next_outgoing_id;
 	hsk->next_outgoing_id++;
 	crpc->state = RPC_OUTGOING;
-	crpc->error = 0;
 	crpc->is_client = true;
+	crpc->error = 0;
 	crpc->msgin.total_length = -1;
-	err = homa_message_out_init(&crpc->msgout, hsk, iter,
-			length, crpc->peer, crpc->dport, hsk->client_port,
-			crpc->id);
-        if (unlikely(err != 0))
-		goto error;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
-	return crpc;
 	
-    error:
-	kfree(crpc);
-	return ERR_PTR(err);
+	/* Initialize msgout last (it will start transmitting packets,
+	 * so the structure needs to be fully initialized).
+	 */
+	err = homa_message_out_init(crpc, hsk->client_port, length, iter, xmit);
+	if (err) {
+		homa_rpc_free(crpc);
+		return ERR_PTR(err);
+	}
+	return crpc;
 }
 
 /**

@@ -371,7 +371,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				rpc->msgout.granted = rpc->msgout.length;
 		}
 		rpc->msgout.sched_priority = h->priority;
-		homa_xmit_data(rpc);
+		homa_xmit_data(rpc, true);
 		if ((rpc->msgout.next_offset >= rpc->msgout.length)
 				&& (rpc->dport >= HOMA_MIN_CLIENT_PORT)) {
 			/* This is a server RPC that has been completely sent;
@@ -456,7 +456,7 @@ void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_message_in_destroy(&rpc->msgin);
 		homa_message_out_reset(&rpc->msgout);
 		rpc->state = RPC_OUTGOING;
-		homa_xmit_data(rpc);
+		homa_xmit_data(rpc, true);
 	}
 	kfree_skb(skb);
 }
