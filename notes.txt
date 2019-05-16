@@ -103,6 +103,13 @@ Notes for Homa implementation in Linux:
   * Ultimately, output is handled by skb_dst(skb)->output(net, sk, skb),
     which probably is ip_output
   * ip_output -> ip_finish_output -> ip_finish_output2 -> neigh_output?
+  * Incoming packets:
+    * Interrupt handlers pass packets to netif_rx
+    * It queues them in a per-CPU softnet_data structure
+    * RPS: Receive Packet Steering
+    * On the destination core, __netif_receive_skb_core is eventually invoked?
+    * ip_rcv eventually gets called to handle all incoming IP packets
+    * ip_local_deliver_finish finally calls Homa
 
 * Notes on skbuff usage:
   * skb->destructor: invoked when skbuff is freed.

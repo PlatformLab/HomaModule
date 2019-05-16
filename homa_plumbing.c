@@ -93,7 +93,7 @@ struct proto homa_prot = {
 	.diag_destroy	   = homa_diag_destroy,
 };
 
-/* Describes Homa for the */
+/* Top-level structure describing the Homa protocol. */
 struct inet_protosw homa_protosw = {
 	.type              = SOCK_DGRAM,
 	.protocol          = IPPROTO_HOMA,

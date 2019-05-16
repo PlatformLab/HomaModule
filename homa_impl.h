@@ -145,7 +145,12 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
  * packet.
  */
 struct common_header {
-	/** @sport: Port on source machine from which packet was sent. */
+	/**
+	 * @sport: Port on source machine from which packet was sent.
+	 * It's useful for this field and the next one to be the first
+	 * 2 fields in the structure, so that they match the structure
+	 * of a TCP header. This can be useful for things such as RSS.
+	 */
 	__be16 sport;
 	
 	/** @dport: Port on destination that is to receive packet. */
