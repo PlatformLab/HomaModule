@@ -96,6 +96,23 @@ double get_cycles_per_sec()
 }
 
 /**
+ * get_int() - Parse an integer from a string, and exit if the parse fails.
+ * @s:      String to parse.
+ * @msg:    Error message to print (with a single %s specifier) on errors.
+ * Return:  The integer value corresponding to @s.
+ */
+int get_int(const char *s, const char *msg)
+{
+	int value;
+	value = strtol(s, NULL, 10);
+	if (value == 0) {
+		printf(msg, s);
+		exit(1);
+	}
+	return value;
+}
+
+/**
  * print_dist() - Prints information on standard output about the distribution
  * of a collection of interval measurements.
  * @times:  An array containing interval times measured in rdtsc cycles.
@@ -134,6 +151,7 @@ void seed_buffer(void *buffer, size_t length, int seed)
 	for (i = 0; i < num_ints; i++) {
 		int_buffer[i] = seed + i;
 	}
+	int_buffer[5] = 99999;
 }
 
 /**

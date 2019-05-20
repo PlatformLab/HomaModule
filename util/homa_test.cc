@@ -9,6 +9,7 @@
 
 #include <errno.h>
 #include <netdb.h>
+#include <netinet/tcp.h>
 #include <poll.h>
 #include <stdio.h>
 #include <string.h>
@@ -25,22 +26,14 @@
 #include "homa.h"
 #include "test_utils.h"
 
-/**
- * get_int() - Parse an integer from a string, and exit if the parse fails.
- * @s:      String to parse.
- * @msg:    Error message to print (with a single %s specifier) on errors.
- * Return:  The integer value corresponding to @s.
- */
-int get_int(const char *s, const char *msg)
-{
-	int value;
-	value = strtol(s, NULL, 10);
-	if (value == 0) {
-		printf(msg, s);
-		exit(1);
-	}
-	return value;
-}
+/* Determines message size in bytes for tests. */
+int length = 100;
+
+/* How many iterations to perform for the test. */
+int count = 1000;
+
+/* Used to generate "somewhat random but predictable" contents for buffers. */
+int seed = 12345;
 
 /**
  * close_fd() - Helper method for "close" test: sleeps a while, then closes
@@ -63,9 +56,8 @@ void close_fd(int fd)
  * @fd:      File descriptor for a Homa socket; used to send the message.
  * @addr:    Where to send the message.
  * @request: Request message to send.
- * @length:  Number of bytes in @request.
  */
-void send_fd(int fd, struct sockaddr *addr, char *request, int length)
+void send_fd(int fd, struct sockaddr *addr, char *request)
 {
 	uint64_t id;
 	int status;
@@ -144,11 +136,8 @@ void test_close()
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
- * @length:   Number of bytes in @request.
- * @count:    How many requests to send.
  */
-void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
-	int count)
+void test_fill_memory(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id;
 	int status;
@@ -203,9 +192,8 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request, int length,
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
- * @length:   Number of bytes in @request.
  */
-void test_invoke(int fd, struct sockaddr *dest, char *request, int length)
+void test_invoke(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id = 0;
 	char response[100000];
@@ -267,9 +255,8 @@ void test_ioctl(int fd, int count)
  * test_poll() - Receive a message using the poll interface.
  * @fd:       Homa socket.
  * @request:  Request message.
- * @length:   Number of bytes in @request.
  */
-void test_poll(int fd, char *request, int length)
+void test_poll(int fd, char *request)
 {
 	uint64_t id;
 	int result;
@@ -291,8 +278,7 @@ void test_poll(int fd, char *request, int length)
 		return;
 	}
 	
-	std::thread thread(send_fd, fd, (struct sockaddr *) &addr,
-			request, length);
+	std::thread thread(send_fd, fd, (struct sockaddr *) &addr, request);
 	thread.detach();
 	
 	result = poll(&poll_info, 1, -1);
@@ -346,11 +332,8 @@ void test_read(int fd, int count)
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
- * @length:   Number of bytes in @request.
- * @count:    Number of RPCs to issue.
  */
-void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
-		int count)
+void test_rtt(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id;
 	char response[100000];
@@ -390,9 +373,8 @@ void test_rtt(int fd, struct sockaddr *dest, char *request, int length,
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
- * @length:   Number of bytes in @request.
  */
-void test_send(int fd, struct sockaddr *dest, char *request, int length)
+void test_send(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id;
 	int status;
@@ -441,6 +423,102 @@ void test_shutdown(int fd)
 }
 
 /**
+ * tcp_ping() - Send a request on a TCP socket and wait for the
+ * corresponding response.
+ * @fd:       File descriptor corresponding to a TCP connection.
+ * @request:  Buffer containing the request message.
+ * @length:   Length of the request message.
+ */
+void tcp_ping(int fd, void *request, int length)
+{
+	int response[250000];
+	int response_length;
+	if (write(fd, request, length) != length) {
+		printf("Socket write failed: %s\n", strerror(errno));
+		exit(1);
+	}
+	response_length = 0;
+	while (true) {
+		int num_bytes = read(fd, response, sizeof(response));
+		if (num_bytes <= 0) {
+			if (num_bytes == 0)
+				printf("Server closed socket\n");
+			else
+				printf("Socket read failed: %s\n",
+						strerror(errno));
+			exit(1);
+		}
+		response_length += num_bytes;
+		if (response_length < 2*sizeof32(int))
+			continue;
+		if (response_length < response[1])
+			continue;			
+		break;
+	}
+}
+
+/**
+ * test_tcp() - Measure round-trip time for an RPC sent via a TCP socket.
+ * @server_name:  Name of the server machine.
+ * @port:         Server port to connect to.
+ */
+void test_tcp(char *server_name, int port)
+{
+	struct addrinfo hints;
+	struct addrinfo *matching_addresses;
+	struct sockaddr *dest;
+	int status, i;
+	int buffer[250000];
+	
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
+	if (status != 0) {
+		printf("Couldn't look up address for %s: %s\n",
+				server_name, gai_strerror(status));
+		exit(1);
+	}
+	dest = matching_addresses->ai_addr;
+	((struct sockaddr_in *) dest)->sin_port = htons(port);
+	
+	int stream = socket(PF_INET, SOCK_STREAM, 0);
+	if (stream == -1) {
+		printf("Couldn't open client socket: %s\n", strerror(errno));
+		exit(1);
+	}
+	if (connect(stream, dest, sizeof(struct sockaddr_in)) == -1) {
+		printf("Couldn't connect to %s:%d: %s\n", server_name, port,
+				strerror(errno));
+		exit(1);
+	}
+	int flag = 1;
+	setsockopt(stream, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	
+	/* Warm up. */
+	buffer[0] = length;
+	buffer[1] = length;
+	seed_buffer(&buffer[2], sizeof32(buffer) - 2*sizeof32(int), seed);
+	for (i = 0; i < 10; i++)
+		tcp_ping(stream, buffer, length);
+	
+	uint64_t times[count+1];
+	for (i = 0; i < count; i++) {
+		times[i] = rdtsc();
+		tcp_ping(stream, buffer, length);
+	}
+	times[count] = rdtsc();
+	
+	for (i = 0; i < count; i++) {
+		times[i] = times[i+1] - times[i];
+	}
+	print_dist(times, count);
+	printf("Bandwidth at median: %.1f MB/sec\n",
+			2.0*((double) length)/(to_seconds(times[count/2])*1e06));
+	return;
+}
+
+/**
  * test_udpclose() - Close a UDP socket while a thread is waiting on it.
  */
 void test_udpclose()
@@ -485,10 +563,7 @@ int main(int argc, char** argv)
 	struct sockaddr *dest;
 	struct addrinfo hints;
 	char *host, *port_name;
-	int seed = 12345;
 	char buffer[HOMA_MAX_MESSAGE_LENGTH];
-	int length = 100;
-	int count = 1000;
 	
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
@@ -564,7 +639,9 @@ int main(int argc, char** argv)
 	}
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
-	seed_buffer(buffer, sizeof(buffer), seed);
+	int *ibuf = reinterpret_cast<int *>(buffer);
+	ibuf[0] = ibuf[1] = count;
+	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -576,21 +653,23 @@ int main(int argc, char** argv)
 		if (strcmp(argv[nextArg], "close") == 0) {
 			test_close();
 		} else if (strcmp(argv[nextArg], "fill_memory") == 0) {
-			test_fill_memory(fd, dest, buffer, length, count);
+			test_fill_memory(fd, dest, buffer);
 		} else if (strcmp(argv[nextArg], "invoke") == 0) {
-			test_invoke(fd, dest, buffer, length);
+			test_invoke(fd, dest, buffer);
 		} else if (strcmp(argv[nextArg], "ioctl") == 0) {
 			test_ioctl(fd, count);
 		} else if (strcmp(argv[nextArg], "poll") == 0) {
-			test_poll(fd, buffer, length);
+			test_poll(fd, buffer);
 		} else if (strcmp(argv[nextArg], "send") == 0) {
-			test_send(fd, dest, buffer, length);
+			test_send(fd, dest, buffer);
 		} else if (strcmp(argv[nextArg], "read") == 0) {
 			test_read(fd, count);
 		} else if (strcmp(argv[nextArg], "rtt") == 0) {
-			test_rtt(fd, dest, buffer, length, count);
+			test_rtt(fd, dest, buffer);
 		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
 			test_shutdown(fd);
+		} else if (strcmp(argv[nextArg], "tcp") == 0) {
+			test_tcp(host, port);
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			test_udpclose();
 		} else {
