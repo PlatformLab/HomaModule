@@ -640,7 +640,7 @@ int main(int argc, char** argv)
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
 	int *ibuf = reinterpret_cast<int *>(buffer);
-	ibuf[0] = ibuf[1] = count;
+	ibuf[0] = ibuf[1] = length;
 	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);

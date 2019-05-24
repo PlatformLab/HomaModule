@@ -132,11 +132,10 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 			homa_xmit_data(rpc, (cur_size == bytes_left));
 #endif
 	}
+	tt_record("Output message initialized");
 #ifndef __UNIT_TEST__
 	homa_xmit_data(rpc, true);
 #endif
-
-	tt_record("Output message initialized");
 	return 0;
 	
     error:
