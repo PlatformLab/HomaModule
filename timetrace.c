@@ -350,11 +350,12 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		}
 		entry_length = snprintf(pf->msg_storage + buffered, available,
 				"%lu ", (long unsigned int) event->timestamp);
-		entry_length += snprintf(
-				pf->msg_storage + buffered + entry_length,
-				available - entry_length,
-				event->format, event->arg0, event->arg1,
-				event->arg2, event->arg3);
+		if (available >= entry_length)
+			entry_length += snprintf(
+					pf->msg_storage + buffered + entry_length,
+					available - entry_length,
+					event->format, event->arg0,
+					event->arg1, event->arg2, event->arg3);
 		if (entry_length >= available) {
 			/* Not enough room for this entry. */
 			if (buffered == 0) {
