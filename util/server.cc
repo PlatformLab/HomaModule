@@ -133,6 +133,7 @@ void tcp_connection(int fd, struct sockaddr_in source)
 	char buffer[1000000];
 	int cur_length = 0;
 	
+	int *int_buffer = reinterpret_cast<int*>(buffer);
 	if (verbose)
 		printf("New TCP socket from %s\n", print_address(&source));
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -140,6 +141,8 @@ void tcp_connection(int fd, struct sockaddr_in source)
 		int result = read(fd, buffer + cur_length,
 				sizeof(buffer) - cur_length);
 		if (result < 0) {
+			if (errno == ECONNRESET)
+				break;
 			printf("Read error on socket: %s", strerror(errno));
 			exit(1);
 		}
@@ -148,21 +151,25 @@ void tcp_connection(int fd, struct sockaddr_in source)
 		cur_length += result;
 
 		/* First word of request contains expected length in bytes. */
-		int *int_buffer = reinterpret_cast<int*>(buffer);
 		if ((cur_length >= 2*sizeof32(int))
-				&& (cur_length >= buffer[0])) {
+				&& (cur_length >= int_buffer[0])) {
+			if (cur_length != int_buffer[0])
+				printf("Received %d bytes but buffer[0] = %d, "
+					"buffer[1] = %d\n",
+					cur_length, int_buffer[0],
+					int_buffer[1]);
 			if (validate) {
 				int seed = check_buffer(&int_buffer[2],
-					buffer[0] - 2*sizeof32(int));
+					int_buffer[0] - 2*sizeof32(int));
 				if (verbose)
 					printf("Received message from %s with "
 						"%d bytes, seed %d\n",
 						print_address(&source),
-						buffer[0], seed);
+						int_buffer[0], seed);
 			} else if (verbose)
 				printf("Received message from %s with %d "
 					"bytes\n",
-					print_address(&source), buffer[0]);
+					print_address(&source), int_buffer[0]);
 			if (write(fd, buffer, int_buffer[1]) != int_buffer[1]) {
 				printf("Socket write failed: %s\n",
 						strerror(errno));

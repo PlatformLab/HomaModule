@@ -431,15 +431,17 @@ void test_shutdown(int fd)
  */
 void tcp_ping(int fd, void *request, int length)
 {
-	int response[250000];
+	char response[1000000];
 	int response_length;
+	int *int_response = reinterpret_cast<int*>(response);
 	if (write(fd, request, length) != length) {
 		printf("Socket write failed: %s\n", strerror(errno));
 		exit(1);
 	}
 	response_length = 0;
 	while (true) {
-		int num_bytes = read(fd, response, sizeof(response));
+		int num_bytes = read(fd, response + response_length,
+				sizeof(response) - response_length);
 		if (num_bytes <= 0) {
 			if (num_bytes == 0)
 				printf("Server closed socket\n");
@@ -451,8 +453,16 @@ void tcp_ping(int fd, void *request, int length)
 		response_length += num_bytes;
 		if (response_length < 2*sizeof32(int))
 			continue;
-		if (response_length < response[1])
-			continue;			
+		if (response_length < int_response[1])
+			continue;
+		if (response_length != int_response[1])
+			printf("Expected %d bytes in response, got %d\n",
+					int_response[1], response_length);
+		if (response_length >= sizeof32(response)) {
+			printf("Overflowed receive buffer: response_length %d,"
+					"buffer[0] %d\n", response_length,
+					int_response[0]);
+		}
 		break;
 	}
 }
