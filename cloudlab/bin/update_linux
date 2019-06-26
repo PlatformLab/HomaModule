@@ -1,0 +1,14 @@
+#!/bin/sh
+# This script uses files on one machine to update the kernel on another
+# machine and reboot that machine.
+# Usage:
+# update_linux machine machine ...
+
+v=4.15.18+
+for t in $*; do
+    echo $t
+    ssh $t 'rm -rf tmp; mkdir tmp'
+    rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
+            /boot/vmlinuz-$v $t:tmp
+    ssh $t 'sudo cp -f tmp/* /boot; sudo reboot'
+done

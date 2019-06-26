@@ -1,5 +1,5 @@
-#ifndef TIMETRACE_H
-#define TIMETRACE_H
+#ifndef HOMA_TIMETRACE_H
+#define HOMA_TIMETRACE_H
 
 #include <asm/types.h>
 
@@ -111,6 +111,12 @@ extern bool      tt_frozen;
 extern int       tt_pf_storage;
 extern bool      tt_test_no_khz;
 
+/* Debugging variables exposed by the version of timetrace built into
+ * the kernel.
+ */
+extern int64_t    tt_debug_int64[10];
+extern void *     tt_debug_ptr[10];
+
 /**
  * tt_rdtsc(): return the current value of the fine-grain CPU cycle counter
  * (accessed via the RDTSC instruction).
@@ -177,5 +183,5 @@ static inline void tt_record(const char* format)
 #endif
 }
 
-#endif // TIMETRACE_H
+#endif // HOMA_TIMETRACE_H
 

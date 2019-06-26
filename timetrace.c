@@ -1,5 +1,17 @@
 #include "homa_impl.h"
 
+/* Uncomment the line below if the main Linux kernel has been compiled with
+ * timetrace stubs; we will then connect the timetrace mechanism here with
+ * those stubs to allow the rest of the kernel to log in our timetraces.
+ */
+#define TT_KERNEL 1
+#ifdef TT_KERNEL
+extern int        tt_linux_buffer_mask;
+extern struct tt_buffer *tt_linux_buffers[NR_CPUS];
+extern atomic_t * tt_linux_freeze_count;
+extern atomic_t   tt_linux_freeze_no_homa;
+#endif
+
 /* Separate buffers for each core: this eliminates the need for
  * synchronization in tt_record, which improves performance significantly.
  */
@@ -85,6 +97,15 @@ int tt_init(char *proc_file)
 	tt_freeze_count.counter = 0;
 	tt_frozen = false;
 	init = true;
+	
+#ifdef TT_KERNEL
+	for (i = 0; i < NR_CPUS; i++) {
+		tt_linux_buffers[i] = tt_buffers[i];
+	}
+	tt_linux_buffer_mask = TT_BUF_SIZE-1;
+	tt_linux_freeze_count = &tt_freeze_count;
+#endif
+	
 	return 0;
 	
 	error:
@@ -112,13 +133,21 @@ void tt_destroy(void)
 		tt_buffers[i] = NULL;
 	}
 	tt_freeze_count.counter = 1;
+	
+#ifdef TT_KERNEL
+	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
+	for (i = 0; i < NR_CPUS; i++) {
+		tt_linux_buffers[i] = NULL;
+	}
+#endif
+	
 	mutex_unlock(&tt_mutex);
 }
 
 /**
  * Stop recording timetrace events until the trace has been read
  * using the /proc file. When recording resumes after reading the
- * file, but buffers will be cleared.
+ * file, the buffers will be cleared.
  */
 void tt_freeze(void)
 {

@@ -646,7 +646,6 @@ int main(int argc, char** argv)
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
-		exit(1);
 	}
 	
 	for ( ; nextArg < argc; nextArg++) {

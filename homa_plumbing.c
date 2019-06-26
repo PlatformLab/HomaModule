@@ -360,6 +360,7 @@ void homa_close(struct sock *sk, long timeout) {
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
+	tt_freeze();
 }
 
 /**
@@ -842,6 +843,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		printk(KERN_NOTICE "    0x%08x 0x%08x 0x%08x 0x%08x\n",
 //			data[i], data[i+1], data[i+2], data[i+3]);
 //	}
+	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();
