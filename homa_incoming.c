@@ -322,6 +322,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->state = RPC_INCOMING;
 	}
 	homa_add_packet(&rpc->msgin, skb);
+	rpc->num_skbuffs++;
 	if (rpc->msgin.scheduled)
 		homa_manage_grants(homa, rpc);
 	if (rpc->msgin.bytes_remaining == 0)

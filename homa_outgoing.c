@@ -46,20 +46,17 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 
 /**
  * homa_message_out_init() - Initializes an RPC's msgout, loads packet data
- * from a user-space buffer, and (optionally) starts transmitting the
- * message.
+ * from a user-space buffer. Doesn't send any packets.
  * @rpc:     RPC whose msgout is to be initialized; current contents are
  *           assumed to be garbage.
  * @sport:   Source port number to use for the message.
  * @len:     Total length of the message.
  * @iter:    Info about the request buffer in user space.
- * @xmit:    True means start transmitting message data while building
- *           packets; false means don't initiate any transmissions.
  * 
  * Return:   Either 0 (for success) or a negative errno value.
  */
 int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
-		struct iov_iter *iter, bool xmit)
+		struct iov_iter *iter)
 {
 	int bytes_left;
 	struct sk_buff *skb;
@@ -121,21 +118,9 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		*last_link = NULL;
 		if (!rpc->msgout.next_packet)
 			rpc->msgout.next_packet = skb;
-		/* The code below should improve performance by overlapping
-		 * packet transmission with packet building, but as of
-		 * 5/2019, it seems to make things much worse. For example,
-		 * on xl17 CloudLab cluster, 50us gaps appear in the middle
-		 * of all messages. Disable except in unit tests.
-		 */
-#ifdef __UNIT_TEST__
-		if (xmit)
-			homa_xmit_data(rpc, (cur_size == bytes_left));
-#endif
+		rpc->num_skbuffs++;
 	}
 	tt_record("Output message initialized");
-#ifndef __UNIT_TEST__
-	homa_xmit_data(rpc, true);
-#endif
 	return 0;
 	
     error:

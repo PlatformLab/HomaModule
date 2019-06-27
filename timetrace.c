@@ -1,10 +1,12 @@
 #include "homa_impl.h"
 
+#ifndef __UNIT_TEST__
 /* Uncomment the line below if the main Linux kernel has been compiled with
  * timetrace stubs; we will then connect the timetrace mechanism here with
- * those stubs to allow the rest of the kernel to log in our timetraces.
+ * those stubs to allow the rest of the kernel to log in our buffers.
  */
-#define TT_KERNEL 1
+// #define TT_KERNEL 1
+#endif
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[NR_CPUS];
@@ -43,7 +45,7 @@ atomic_t tt_freeze_count = {.counter = 1};
  */
 bool tt_frozen;
 
-/* True means timetrace has been successful initialized. */
+/* True means timetrace has been successfully initialized. */
 static bool init;
 
 /* Used instead of TT_BUF_SIZE in places that are not performance

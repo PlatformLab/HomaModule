@@ -457,8 +457,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		tt_record("homa_rpc_free finished");
 	} else {
 		rpc->state = RPC_IN_SERVICE;
-		homa_message_in_destroy(&rpc->msgin);
-		tt_record("request message destroyed");
 	}
 	release_sock(sk);
 	tt_record1("homa_ioc_recv finished on core %d", smp_processor_id());
@@ -516,10 +514,10 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	srpc->state = RPC_OUTGOING;
 
 	err = homa_message_out_init(srpc, hsk->server_port, args.resplen,
-			&iter, true);
+			&iter);
         if (unlikely(err))
 		goto error;
-//	homa_xmit_data(srpc, true);
+	homa_xmit_data(srpc, true);
 	if (srpc->msgout.next_offset >= srpc->msgout.length) {
 		homa_rpc_free(srpc);
 	}
@@ -568,13 +566,14 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -ESHUTDOWN;
 		goto error;
 	}
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter,
-			true);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;
 		goto error;
 	}
+	homa_xmit_data(crpc, true);
+	homa_rpc_reap(hsk);
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
@@ -819,6 +818,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		goto discard;
 //	}
 
+	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 	if (length < HOMA_MAX_HEADER) {
 		printk(KERN_WARNING "Homa packet from %s too short: "
 				"%d bytes\n",
@@ -843,7 +843,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		printk(KERN_NOTICE "    0x%08x 0x%08x 0x%08x 0x%08x\n",
 //			data[i], data[i+1], data[i+2], data[i+3]);
 //	}
-	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();

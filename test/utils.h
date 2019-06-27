@@ -2,6 +2,8 @@
 
 struct unit_hash;
 
+#define sizeof32(type) ((int) (sizeof(type)));
+
 extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
 			__be32 client_ip, __be32 server_ip, int server_port,

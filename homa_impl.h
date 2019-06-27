@@ -552,8 +552,14 @@ struct homa_rpc {
 	struct homa_message_out msgout;
 	
 	/**
-	 * @rpc_links: For linking this object into &homa_sock.client_rpcs
-	 * (for a client RPC) or &homa_sock.server_rpcs (for a server RPC).
+	 * @num_skbuffs:  Total skbuffs used by msgin and msgout.
+	 */
+	int num_skbuffs;
+	
+	/**
+	 * @rpc_links: For linking this object into @hsk->client_rpcs (for
+	 * a client RPC), @hsk->server_rpcs (for a server RPC), or
+	 * @hsk->dead_rpcs.
 	 */
 	struct list_head rpc_links;
 	
@@ -716,6 +722,12 @@ struct homa_sock {
 	
 	/** @server_rpcs: Contains all active RPCs sent to this socket. */
 	struct list_head server_rpcs;
+	
+	/**
+	 * @dead_rpcs: Contains RPCs for which homa_rpc_free has been
+	 * called, but their packet buffers haven't yet been freed.
+	 */
+	struct list_head dead_rpcs;
 	
 	/**
 	 * @ready_requests: Contains server RPCs in RPC_READY state that
@@ -1277,7 +1289,7 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 			int unscheduled);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_rpc *rpc, int sport,
-			size_t len, struct iov_iter *iter, bool xmit);
+			size_t len, struct iov_iter *iter);
 extern void     homa_message_out_reset(struct homa_message_out *msgout);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
@@ -1321,11 +1333,12 @@ extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 			struct sockaddr_in *dest, size_t length,
-			struct iov_iter *iter, bool xmit);
+			struct iov_iter *iter);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
+extern void     homa_rpc_reap(struct homa_sock *hsk);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);

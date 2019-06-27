@@ -128,19 +128,18 @@ void homa_destroy(struct homa *homa)
 
 /**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
- * to issue an outgoing request), and (optionally) start sending its packets.
+ * to issue an outgoing request). Doesn't send any packets.
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
  * @length:   Size of the request message.
  * @iter:     Data for the message.
- * @xmit:     True means start transmitting packets.
  * 
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. 
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		struct sockaddr_in *dest, size_t length,
-		struct iov_iter *iter, bool xmit)
+		struct iov_iter *iter)
 {
 	int err;
 	struct homa_rpc *crpc;
@@ -162,6 +161,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->is_client = true;
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
+	crpc->num_skbuffs = 0;
 	list_add(&crpc->rpc_links, &hsk->client_rpcs);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);
@@ -172,7 +172,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	/* Initialize msgout last (it will start transmitting packets,
 	 * so the structure needs to be fully initialized).
 	 */
-	err = homa_message_out_init(crpc, hsk->client_port, length, iter, xmit);
+	err = homa_message_out_init(crpc, hsk->client_port, length, iter);
 	if (err) {
 		homa_rpc_free(crpc);
 		return ERR_PTR(err);
@@ -216,6 +216,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->unscheduled));
 	srpc->msgout.length = -1;
+	srpc->num_skbuffs = 0;
 	list_add(&srpc->rpc_links, &hsk->server_rpcs);
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
@@ -258,16 +259,26 @@ void homa_rpc_free(struct homa_rpc *rpc)
 		 */
 		call_rcu(&rpc->rcu, homa_rpc_free_rcu);
 	} else {
-		homa_message_out_destroy(&rpc->msgout);
-		homa_message_in_destroy(&rpc->msgin);
-		kfree(rpc);
+		if (rpc->is_client) {
+			/* For client RPCs, this function is invoked in the
+			 * critical path; since skbuff freeing can be expensive,
+			 * defer the cleanup until a more convenient time.
+			 * For server RPCs, this function is already invoked
+			 * at the best possible time, so no need to defer.
+			 */
+			list_add_tail(&rpc->rpc_links, &rpc->hsk->dead_rpcs);
+		} else {
+			homa_message_out_destroy(&rpc->msgout);
+			homa_message_in_destroy(&rpc->msgin);
+			kfree(rpc);
+		}
 	}
 }
 
 /**
  * homa_rpc_free_rcu() - Invoked by the RCU mechanism to finish freeing an
  * RPC when homa_rpc_free was blocked by RCU contention.
- * @param rcu_head:  Identifies the RPC to clean up.
+ * @rcu_head:  Identifies the RPC to clean up.
  */
 void homa_rpc_free_rcu(struct rcu_head *rcu_head)
 {
@@ -275,6 +286,39 @@ void homa_rpc_free_rcu(struct rcu_head *rcu_head)
 	homa_message_out_destroy(&rpc->msgout);
 	homa_message_in_destroy(&rpc->msgin);
 	kfree(rpc);
+}
+
+/**
+ * homa_rpc_reap() - Invoked to release skbuffs from one dead RPC, if there
+ * are any. This function exists because freeing skbuffs from large RPCs
+ * takes a lot of time. Rather than do it in the critical path, where it
+ * delays applications, skbuff freeing for large RPCs is deferred until a
+ * time when the application is less likely to have other useful things
+ * to do (i.e., right after sending a message). At that point, this function
+ * gets called.
+ * @hsk:  Homa socket that may contain dead RPCs.
+ */
+void homa_rpc_reap(struct homa_sock *hsk)
+{
+	/* It is possible for multiple dead RPCs to accumulate; in order
+	 * to eventually get caught up, reap two of them if the first one
+	 * is small.
+	 */
+	struct homa_rpc *rpc;
+	int skb_limit = 10;
+	
+	list_for_each_entry(rpc, &hsk->dead_rpcs, rpc_links) {
+		skb_limit -= rpc->num_skbuffs;
+		__list_del_entry(&rpc->rpc_links);
+		homa_message_out_destroy(&rpc->msgout);
+		homa_message_in_destroy(&rpc->msgin);
+		UNIT_LOG("; ", "reaped %llu", rpc->id);
+		kfree(rpc);
+		if (skb_limit <= 0)
+			break;
+		else
+			skb_limit = 0;
+	}
 }
 
 /**

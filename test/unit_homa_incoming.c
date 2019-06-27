@@ -361,6 +361,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(200, crpc->msgin.bytes_remaining);
+	EXPECT_EQ(2, crpc->num_skbuffs);
 	
 	unit_log_clear();
 	self->data.offset = htonl(1400);
@@ -369,6 +370,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(0, crpc->msgin.bytes_remaining);
+	EXPECT_EQ(3, crpc->num_skbuffs);
 }
 TEST_F(homa_incoming, homa_data_pkt__wrong_rpc_state)
 {

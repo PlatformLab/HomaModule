@@ -129,6 +129,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 			&socktab->buckets[homa_port_hash(hsk->client_port)]);
 	INIT_LIST_HEAD(&hsk->client_rpcs);
 	INIT_LIST_HEAD(&hsk->server_rpcs);
+	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	INIT_LIST_HEAD(&hsk->ready_requests);
 	INIT_LIST_HEAD(&hsk->ready_responses);
 	INIT_LIST_HEAD(&hsk->request_interests);
@@ -184,6 +185,8 @@ void homa_sock_destroy(struct homa_sock *hsk)
 				rpc_links);
 		homa_rpc_free(srpc);
 	}
+	while (!list_empty(&hsk->dead_rpcs))
+		homa_rpc_reap(hsk);
 	release_sock((struct sock *) hsk);
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	hsk->homa = NULL;
