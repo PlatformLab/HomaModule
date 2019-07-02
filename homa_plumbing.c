@@ -411,6 +411,11 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_rpc *rpc = NULL;
 
 	tt_record1("homa_ioc_recv starting on core %d", smp_processor_id());
+//	if (hsk->homa->temp[0] > 0) {
+//		hsk->homa->temp[0]--;
+//		if (hsk->homa->temp[0] == 0)
+//			tt_debug_int64[0] = 4;
+//	}
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -818,7 +823,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //		goto discard;
 //	}
 
-	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 	if (length < HOMA_MAX_HEADER) {
 		printk(KERN_WARNING "Homa packet from %s too short: "
 				"%d bytes\n",
@@ -836,6 +840,12 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	}
 	h = (struct common_header *) skb->data;
 	
+	if (h->type == GRANT)
+		tt_record2("homa_pkt_recv got grant for id %d, offset %d",
+				h->id, ntohl(((struct grant_header *) h)->offset));
+	else
+		tt_record2("homa_pkt_recv starting on core %d, type %d",
+				smp_processor_id(), h->type);
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
 //	data = (int *) skb->data;
@@ -868,7 +878,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		 * packet with the socket; it will get processed whenever
 		 * the socket lock is released.
 		 */
-		int status = sk_add_backlog(sk, skb, 64*1024);
+		int status = sk_add_backlog(sk, skb, 1000000);
 		if (unlikely(status != 0))
 			goto discard;
 	} else {

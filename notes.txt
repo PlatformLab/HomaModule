@@ -10,6 +10,9 @@ Notes for Homa implementation in Linux:
   rc69: Henry's machine
 
 * Possible performance improvements:
+  * 8 usec gap for waking up homa_backlog_rcv to process grants on client
+    in 70 KB rtt: caused by RPC reaping in homa_ioc_send.
+  * 2 ms gap on clients in 200 KB rtt.
   * Pipeline data copying to/from user space with packet transmission/reception
   * Do the pacing from the sending thread?
 
@@ -352,72 +355,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * Creates UDP header
                 * ip_output.c:ip_send_skb
                   * ip_local_out
-
-                                                     Cum.  ---------------Delta---------------
-Event                                               Median Median    Min    Max    Avg   Count
-----------------------------------------------------------------------------------------------
-homa_ioc_send starting on core ?                         0    875    808   6441    891     863
-Output message initialized                             434    434    381   2379    440     863
-ip_queue_xmit skb length ?                             507     67     53    508     70     863
-neigh_output starting                                  709    200    174   1390    207     863
-__dev_queue_xmit starting                              868    154    134    688    160     863
-__dev_queue_xmit starting (#2)                        1029    160    127   1563    164     863
-Entering mlx?e_xmit zzz                               1463    428    388   1998    438     863
-mlx?e_sq_xmit starting                                1483     20      7    120     20     863
-mlx?e_insert_vlan returned                            1523     33     27    301     42     863
-mlx?e_sq_xmit done                                    1664    140    107    702    146     863
-Finished queuing packet: rpc id ?, offset ?, len ?    2065    408    281   4684    416     863
-homa_ioc_recv starting on core ?                      2907    842    795  12742    848     863
-incoming data packet, id ?, offset ?                 20285  17392   6494  68673  17948     863
-wake_up_process finished                             20946    655    601   2492    670     863
-homa_wait_for_message woke up                        22984   2024   1911  35559   2105     863
-starting copy_data, ? bytes                          23111    127    107   4396    136     863
-finished copy_data                                   23259    147    120   5432    153     863
-homa_rpc_free finished                               23492    234    207   2459    237     863
-homa_ioc_recv finished on core ?                     23585     87     73    494     90     863
-
-                                                     Cum.  ---------------Delta---------------
-Event                                               Median Median    Min    Max    Avg   Count
-----------------------------------------------------------------------------------------------
-homa_ioc_send starting on core ?                         0    842    775   5606    873     864
-Output message initialized                             434    434    367   5385    450     864
-ip_queue_xmit skb length ?                             501     60     53    535     68     864
-neigh_output starting                                  702    207    167   1510    207     864
-__dev_queue_xmit starting                              855    147    127    802    151     864
-__dev_queue_xmit starting (#2)                        1009    160    134   1557    169     864
-Entering mlx?e_xmit zzz                               1436    421    394   2071    429     864
-mlx?e_sq_xmit starting                                1456     20      7    167     21     864
-mlx?e_insert_vlan returned                            1490     33     27    301     42     864
-mlx?e_sq_xmit done                                    1631    140    107    802    145     864
-Finished queuing packet: rpc id ?, offset ?, len ?    2032    401    134   4416    404     864
-homa_ioc_recv starting on core ?                      2840    808    762   5753    814     864
-incoming data packet, id ?, offset ?                 20145  17292  12408 322243  17862     864
-wake_up_process finished                             20786    641    575  12909    675     864
-homa_wait_for_message woke up                        22811   1978   1871  36194   2216     864
-starting copy_data, ? bytes                          22937    120     94   1376    130     864
-finished copy_data                                   23078    140    114   1249    144     864
-homa_rpc_free finished                               23312    234    180   2539    248     864
-homa_ioc_recv finished on core ?                     23399     87     73    454     87     864
-
-                                                     Cum.  ---------------Delta---------------
-Event                                               Median Median    Min    Max    Avg   Count
-----------------------------------------------------------------------------------------------
-homa_ioc_send starting on core ?                         0    882    822   3281    881     861
-Output message initialized                             387    388    334    695    393     861
-ip_queue_xmit skb length ?                             454     67     53    107     67     861
-mlx_xmit starting                                     1209    755    682   1149    763     861
-mlx nic notified                                      1383    174    147   1270    182     861
-Finished queuing packet: rpc id ?, offset ?, len ?    1644    261    214   4223    266     861
-homa_ioc_recv starting on core ?                      2493    849    795   5834    854     861
-mlx?e_napi_poll starting                             17695  15209  10498  67292  15645     861
-mlx?e_poll_rx_cq has input                           17735     47     27    147     47     861
-napi_gro_receive starting                            18010    274    241   1757    286     861
-homa_pkt_recv starting                               18778    782    722   1851    785     861
-incoming data packet, id ?, offset ?                 18865     87     67    120     85     861
-wake_up_process finished                             19380    521    481   1958    537     861
-mlx found incoming packet                            19546    160    120   2867    171     861
-homa_wait_for_message woke up                        21257   1704   1577   7658   1766     861
-starting copy_data, ? bytes                          21384    134    120    174    131     861
-finished copy_data                                   21517    127    107    227    131     861
-homa_rpc_free finished                               21724    207    180    321    213     861
-homa_ioc_recv finished on core ?                     21811     94     67    147     92     861
