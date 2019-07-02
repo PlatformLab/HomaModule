@@ -13,6 +13,5 @@ for t in $*; do
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
         cat .ssh/cloudlab_rsa.pub >> .ssh/authorized_keys
         cp .ssh/cloudlab_rsa .ssh/id_rsa
-        fi
-        sudo cpupower frequency-set -g performance'
+        fi'
 done
