@@ -1031,6 +1031,12 @@ struct homa {
 	__u32 cycles_per_kbyte;
 	
 	/**
+	 * @verbose: Nonzero enables additional logging. Set externally via
+	 * sysctl.
+	 */
+	int verbose;
+	
+	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
 	 * and updates to @metrics.
 	 */

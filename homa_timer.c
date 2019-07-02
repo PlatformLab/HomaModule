@@ -91,6 +91,15 @@ void homa_timer(struct homa *homa)
 				continue;
 			}
 			if (srpc->silent_ticks >= homa->abort_ticks) {
+				if (homa->verbose) {
+					char addr_buffer[20];
+					homa_print_ipv4_addr(srpc->peer->addr,
+						addr_buffer);
+					printk(KERN_NOTICE "Homa server RPC "
+						"timeout, client %s:%d, id %llu",
+						addr_buffer, srpc->dport,
+						srpc->id);
+				}
 				INC_METRIC(server_rpc_timeouts, 1);
 				homa_rpc_free(srpc);
 				continue;
@@ -104,6 +113,17 @@ void homa_timer(struct homa *homa)
 			homa_get_resend_range(&srpc->msgin, &resend);
 			resend.priority = homa->max_prio;
 			homa_xmit_control(RESEND, &resend, sizeof(resend), srpc);
+			if (homa->verbose) {
+				char addr_buffer[20];
+				homa_print_ipv4_addr(srpc->peer->addr,
+					addr_buffer);
+				printk(KERN_NOTICE "Homa server RESEND to "
+					"client %s:%d for id %llu, offset %d,"
+					"length %d",
+					addr_buffer, srpc->dport, srpc->id,
+					ntohl(resend.offset),
+					ntohl(resend.length));
+			}
 		}
 		
 		/* Client RPCs*/
@@ -171,6 +191,15 @@ void homa_timer(struct homa *homa)
 				continue;
 			}
 			if (crpc->silent_ticks >= homa->abort_ticks) {
+				if (homa->verbose) {
+					char addr_buffer[20];
+					homa_print_ipv4_addr(crpc->peer->addr,
+						addr_buffer);
+					printk(KERN_NOTICE "Homa client RPC "
+						"timeout, server %s:%d, id %llu",
+						addr_buffer, crpc->dport,
+						crpc->id);
+				}
 				INC_METRIC(client_rpc_timeouts, 1);
 				homa_rpc_abort(crpc, -ETIMEDOUT);
 				continue;
@@ -179,6 +208,17 @@ void homa_timer(struct homa *homa)
 			resend.priority = homa->max_prio;
 			homa_xmit_control(RESEND, &resend, sizeof(resend),
 					crpc);
+			if (homa->verbose) {
+				char addr_buffer[20];
+				homa_print_ipv4_addr(crpc->peer->addr,
+					addr_buffer);
+				printk(KERN_NOTICE "Homa client RESEND to "
+					"server %s:%d for id %llu, offset %d,"
+					"length %d",
+					addr_buffer, crpc->dport, crpc->id,
+					ntohl(resend.offset),
+					ntohl(resend.length));
+			}
 		}
 		if (print_active) {
 			struct list_head *pos;

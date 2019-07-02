@@ -94,6 +94,7 @@ int homa_init(struct homa *homa)
 	atomic_long_set(&homa->link_idle_time, get_cycles());
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
+	homa->verbose = 1;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;

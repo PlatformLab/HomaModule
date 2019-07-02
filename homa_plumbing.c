@@ -215,6 +215,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
+	{
+		.procname	= "verbose",
+		.data		= &homa_data.verbose,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
 	{}
 };
 
@@ -824,9 +831,11 @@ int homa_pkt_recv(struct sk_buff *skb) {
 //	}
 
 	if (length < HOMA_MAX_HEADER) {
-		printk(KERN_WARNING "Homa packet from %s too short: "
-				"%d bytes\n",
-				homa_print_ipv4_addr(saddr, buffer), length);
+		if (homa->verbose)
+			printk(KERN_WARNING "Homa packet from %s too short: "
+					"%d bytes\n",
+					homa_print_ipv4_addr(saddr, buffer),
+					length);
 		goto discard;
 	}
 	
@@ -834,8 +843,10 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	 * if the packet is fragmented.
 	 */
 	if (!pskb_may_pull(skb, HOMA_MAX_HEADER)) {
-		printk(KERN_NOTICE "Homa can't handle fragmented "
-				"packet (no space for header); discarding\n");
+		if (homa->verbose)
+			printk(KERN_NOTICE "Homa can't handle fragmented "
+					"packet (no space for header); "
+					"discarding\n");
 		goto discard;
 	}
 	h = (struct common_header *) skb->data;
@@ -861,9 +872,10 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		/* Eventually should return an error result to sender if
 		 * it is a client.
 		 */
-//		printk(KERN_WARNING "Homa packet from %s sent to "
-//			"unknown port %u\n",
-//			homa_print_ipv4_addr(saddr, buffer), dport);
+		if (homa->verbose)
+			printk(KERN_NOTICE "Homa packet incoming from %s "
+				"referred to unknown port %u\n",
+				homa_print_ipv4_addr(saddr, buffer), dport);
 		rcu_read_unlock();
 		goto discard;
 	}
@@ -879,11 +891,22 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		 * the socket lock is released.
 		 */
 		int status = sk_add_backlog(sk, skb, 1000000);
-		if (unlikely(status != 0))
+		if (unlikely(status != 0)) {
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa backlog overflow; "
+					"discarding packet with type %d",
+					h->type);
 			goto discard;
+		}
 	} else {
-		if (!homa_sk(sk)->homa)
+		if (!homa_sk(sk)->homa) {
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa packet incoming from "
+					"%s referred to unknown port %u\n",
+					homa_print_ipv4_addr(saddr, buffer),
+					dport);
 			goto discard;
+		}
 		homa_pkt_dispatch(sk, skb);
 	}
 	bh_unlock_sock(sk);
@@ -931,10 +954,11 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 		else
 			error = -EHOSTUNREACH;
 		homa_dest_abort(homa, iph->daddr, error);
-	} else { 
-		printk(KERN_NOTICE "homa_err_handler invoked with "
-			"info %x, ICMP type %d, ICMP code %d\n",
-			info, type, code);
+	} else {
+		if (homa->verbose)
+			printk(KERN_NOTICE "homa_err_handler invoked with "
+				"info %x, ICMP type %d, ICMP code %d\n",
+				info, type, code);
 	}
 }
 
@@ -965,7 +989,6 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
 			!list_empty(&homa_sk(sk)->ready_responses))
 		mask |= POLLIN | POLLRDNORM;
-	printk(KERN_NOTICE "homa_poll returned 0x%x\n", mask);
 	return mask;
 }
 
