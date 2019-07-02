@@ -8,7 +8,6 @@
 #include "kselftest_harness.h"
 #include "mock.h"
 
-
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
  * in a given state.

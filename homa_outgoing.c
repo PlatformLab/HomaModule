@@ -278,7 +278,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 		int priority;
 		struct sk_buff *skb = rpc->msgout.next_packet;
 		struct homa *homa = rpc->hsk->homa;
-		
+	
 		if (((rpc->msgout.length - rpc->msgout.next_offset)
 				> homa->throttle_min_bytes)
 				&& ((get_cycles() + homa->max_nic_queue_cycles)
@@ -488,7 +488,6 @@ int homa_pacer_main(void *transportInfo)
 		now = get_cycles();
 		INC_METRIC(pacer_cycles, now - start);
 		start = now;
-		
 	}
 	do_exit(0);
 	return 0;
