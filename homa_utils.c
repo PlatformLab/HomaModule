@@ -305,9 +305,10 @@ void homa_rpc_reap(struct homa_sock *hsk)
 	 * is small.
 	 */
 	struct homa_rpc *rpc;
+	struct homa_rpc *tmp;
 	int skb_limit = 10;
 	
-	list_for_each_entry(rpc, &hsk->dead_rpcs, rpc_links) {
+	list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, rpc_links) {
 		skb_limit -= rpc->num_skbuffs;
 		__list_del_entry(&rpc->rpc_links);
 		homa_message_out_destroy(&rpc->msgout);
