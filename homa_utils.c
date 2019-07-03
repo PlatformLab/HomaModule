@@ -72,6 +72,7 @@ int homa_init(struct homa *homa)
 #else
 	homa->cutoff_version = 1;
 #endif
+	homa->grant_increment = 0;
 	homa->max_overcommit = 8;
 	homa->resend_ticks = 2;
 	homa->abort_ticks = 8;

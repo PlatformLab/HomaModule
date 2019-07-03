@@ -804,19 +804,17 @@ TEST_F(homa_incoming, homa_manage_grants__adjust_priority_order)
 }
 TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 {
+	struct homa_rpc *srpc;
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 2, 30000, 100);
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 3, 40000, 100);
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 4, 50000, 100);
 	
 	/* Initially, all messages have been granted as much as possible. */
-	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
-			self->client_ip, self->client_port, 3);
-	EXPECT_NE(NULL, srpc);
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("", unit_log_get());
@@ -833,6 +831,43 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("xmit GRANT 14000@1", unit_log_get());
+}
+TEST_F(homa_incoming, homa_manage_grants__choose_grant_offset)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			1, 40000, 100);
+	
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 4000;
+	
+	/* No need for grant. */
+	srpc->msgin.bytes_remaining = 35000;
+	srpc->msgin.granted = 16000;
+	unit_log_clear();
+	homa_manage_grants(&self->homa, srpc);
+	EXPECT_STREQ("", unit_log_get());
+	
+	/* Normal grant needed. */
+	srpc->msgin.bytes_remaining = 35000;
+	srpc->msgin.granted = 14000;
+	unit_log_clear();
+	homa_manage_grants(&self->homa, srpc);
+	EXPECT_STREQ("xmit GRANT 18000@0", unit_log_get());
+	
+	/* We're behind: need larger than normal grant. */
+	srpc->msgin.bytes_remaining = 35000;
+	srpc->msgin.granted = 6000;
+	unit_log_clear();
+	homa_manage_grants(&self->homa, srpc);
+	EXPECT_STREQ("xmit GRANT 15000@0", unit_log_get());
+	
+	/* Smaller grant at end of message. */
+	srpc->msgin.bytes_remaining = 3000;
+	srpc->msgin.granted = 38000;
+	unit_log_clear();
+	homa_manage_grants(&self->homa, srpc);
+	EXPECT_STREQ("xmit GRANT 40000@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 {

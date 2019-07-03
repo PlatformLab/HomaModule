@@ -155,7 +155,27 @@ in order to allow time for multiple resends before aborting.
 (Read-only) The current version for unscheduled cutoffs; incremented
 automatically when unsched_cutoffs is modified.
 .TP
-.I flags
+.IR flags
+Individual bits can be set or cleared to control particular Homa behaviors.
+If the
+.B HOMA_FLAG_LOG_ACTIVE_RPCS
+bit is set, Homa will log information about all active RPCs in the next
+invocation of its timeout detection code. Once the information has been
+logged, the bit will be cleared.
+If the
+.B HOMA_FLAG_DONT_THROTTLE
+bit is set, Homa will not throttle output transmissions; packets will
+always be sent immediatly. This could result in long transmit queues for
+the NIC, which defeats part of Homa's SRPT scheduling mechanism.
+.TP
+.IR grant_increment
+An integer value; each grant issued by a Homa receiver will allow the sender
+to transmit at least this many additional bytes. Larger values result in
+fewer grant packets, which reduces overhead, but they also result in
+greater buffer occupancy. Reducing
+.I grant_increment
+below the amount of data in a full-size packet has no impact: Homa always
+transmits full-size packets.
 .TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to

@@ -925,6 +925,12 @@ struct homa {
 	int cutoff_version;
 	
 	/**
+	 * @grant_increment: each grant sent by a Homa receiver will allow
+	 * this many additional bytes to be sent by the receiver.
+	 */
+	int grant_increment;
+	
+	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
 	 * send grants at any given point in time.  Set externally via sysctl.
 	 */

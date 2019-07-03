@@ -153,6 +153,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "grant_increment",
+		.data		= &homa_data.grant_increment,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "max_prio",
 		.data		= &homa_data.max_prio,
 		.maxlen		= sizeof(int),
@@ -167,18 +174,18 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "min_prio",
-		.data		= &homa_data.min_prio,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "max_sched_prio",
 		.data		= &homa_data.max_sched_prio,
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
 		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "min_prio",
+		.data		= &homa_data.min_prio,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "resend_ticks",

@@ -561,7 +561,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	rank = 0;
 	list_for_each(pos, &homa->grantable_rpcs) {
 		int extra_levels, priority;
-		int desired_grant;
+		int received, incoming, new_grant;
 		struct grant_header h;
 		
 		rank++;
@@ -569,15 +569,19 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			break;
 		}
 		candidate = list_entry(pos, struct homa_rpc, grantable_links);
-		desired_grant = homa->rtt_bytes + candidate->msgin.total_length
-				- candidate->msgin.bytes_remaining;
-		if (desired_grant > candidate->msgin.total_length)
-			desired_grant = candidate->msgin.total_length;
-		if (candidate->msgin.granted >= desired_grant)
+		received = (candidate->msgin.total_length
+				- candidate->msgin.bytes_remaining);
+		incoming = candidate->msgin.granted - received;
+		if (incoming >= homa->rtt_bytes)
 			continue;
+		new_grant = candidate->msgin.granted + homa->grant_increment;
+		if ((received + homa->rtt_bytes) > new_grant)
+			new_grant = received + homa->rtt_bytes;
+		if (new_grant > candidate->msgin.total_length)
+			new_grant = candidate->msgin.total_length;
 		
 		/* Send a grant for this message. */
-		candidate->msgin.granted = desired_grant;
+		candidate->msgin.granted = new_grant;
 		h.offset = htonl(candidate->msgin.granted);
 		priority = homa->max_sched_prio - (rank - 1);
 		extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
