@@ -91,6 +91,18 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 	EXPECT_EQ(EFAULT, -PTR_ERR(crpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
+TEST_F(homa_outgoing, homa_message_out_init__xmit_packets)
+{
+	self->homa.pipeline_xmit = 1;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 2000, NULL);
+	EXPECT_EQ(2, crpc->num_skbuffs);
+	EXPECT_STREQ("csum_and_copy_from_iter_full copied 1400 bytes; "
+			"xmit DATA 0/2000 P6; "
+			"csum_and_copy_from_iter_full copied 600 bytes; "
+			"xmit DATA 1400/2000 P6",
+			unit_log_get());
+}
 
 TEST_F(homa_outgoing, homa_message_out_reset)
 {

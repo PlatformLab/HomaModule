@@ -1043,6 +1043,14 @@ struct homa {
 	int verbose;
 	
 	/**
+	 * @pipeline_xmit: Zero means completely fill an output message
+	 * before transmitting any bytes; nonzero means overlap the
+	 * transmission of packets with packet creation. Can be set
+	 * externally via sysctl.
+	 */
+	int pipeline_xmit;
+	
+	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
 	 * and updates to @metrics.
 	 */

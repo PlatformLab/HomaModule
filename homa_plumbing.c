@@ -188,6 +188,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "pipeline_xmit",
+		.data		= &homa_data.pipeline_xmit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "resend_ticks",
 		.data		= &homa_data.resend_ticks,
 		.maxlen		= sizeof(int),
@@ -592,7 +599,9 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_xmit_data(crpc, true);
+	tt_record("About to reap");
 	homa_rpc_reap(hsk);
+	tt_record("reaping finished");
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {

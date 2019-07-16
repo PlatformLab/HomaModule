@@ -46,7 +46,8 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 
 /**
  * homa_message_out_init() - Initializes an RPC's msgout, loads packet data
- * from a user-space buffer. Doesn't send any packets.
+ * from a user-space buffer. Will also start sending packets, if requested
+ * by @homa->pipeline_xmit.
  * @rpc:     RPC whose msgout is to be initialized; current contents are
  *           assumed to be garbage.
  * @sport:   Source port number to use for the message.
@@ -119,6 +120,9 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		if (!rpc->msgout.next_packet)
 			rpc->msgout.next_packet = skb;
 		rpc->num_skbuffs++;
+		
+		if (rpc->hsk->homa->pipeline_xmit)
+			homa_xmit_data(rpc, false);
 	}
 	tt_record("Output message initialized");
 	return 0;

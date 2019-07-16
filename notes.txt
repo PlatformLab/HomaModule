@@ -10,9 +10,6 @@ Notes for Homa implementation in Linux:
   rc69: Henry's machine
 
 * Possible performance improvements:
-  * 8 usec gap for waking up homa_backlog_rcv to process grants on client
-    in 70 KB rtt: caused by RPC reaping in homa_ioc_send.
-  * 2 ms gap on clients in 200 KB rtt.
   * Pipeline data copying to/from user space with packet transmission/reception
   * Do the pacing from the sending thread?
 

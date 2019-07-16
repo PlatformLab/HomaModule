@@ -96,6 +96,7 @@ int homa_init(struct homa *homa)
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 1;
+	homa->pipeline_xmit = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
