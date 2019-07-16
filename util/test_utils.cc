@@ -151,7 +151,6 @@ void seed_buffer(void *buffer, size_t length, int seed)
 	for (i = 0; i < num_ints; i++) {
 		int_buffer[i] = seed + i;
 	}
-	int_buffer[5] = 99999;
 }
 
 /**
