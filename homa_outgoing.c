@@ -110,6 +110,8 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		h->retransmit = 0;
 		err = skb_add_data_nocache((struct sock *) rpc->hsk, skb, iter,
 				cur_size);
+		if (unlikely(skb->len < HOMA_MAX_HEADER))
+			skb_put(skb, HOMA_MAX_HEADER - skb->len);
 		if (unlikely(err != 0)) {
 			kfree_skb(skb);
 			goto error;
