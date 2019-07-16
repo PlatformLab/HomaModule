@@ -1,6 +1,7 @@
 /* This file contains miscellaneous utility functions for the Homa protocol. */
 
 #include "homa_impl.h"
+#include <stdio.h>
 
 /* Separate performance counters for each core. */
 struct homa_metrics *homa_metrics[NR_CPUS];
@@ -28,7 +29,7 @@ int homa_init(struct homa *homa)
 	 * making sure that each core has private cache lines for its metrics.
 	 */
 	if (!metrics_memory) {
-		aligned_size = (sizeof(homa_metrics) + 0x3f) & ~0x3f;
+		aligned_size = (sizeof(struct homa_metrics) + 0x3f) & ~0x3f;
 		metrics_memory = vmalloc(0x3f + (NR_CPUS*aligned_size));
 		if (!metrics_memory) {
 			printk(KERN_ERR "Homa couldn't allocate memory for metrics\n");
