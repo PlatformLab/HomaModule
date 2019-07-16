@@ -217,7 +217,8 @@ void test_invoke(int fd, struct sockaddr *dest, char *request)
 			strerror(errno));
 		return;
 	}
-	int seed = check_buffer(response, resp_length);
+	int seed = check_buffer(response + 2*sizeof32(int),
+				resp_length - 2*sizeof32(int));
 	printf("Received message from %s with %lu bytes, "
 		"seed %d, id %lu\n",
 		print_address(&server_addr), resp_length, seed, id);
