@@ -377,20 +377,29 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
  * @addr:    Address to convert, in network byte order.
- * @buffer:  Where to store the converted value; must have room for
- *           "255.255.255.255" plus a terminating NULL character.
  * 
- * Return:   The converted value (@buffer).
+ * Return:   The converted value. Values are stored in static memory, so
+ *           the caller need not free. This also means that storage is
+ *           eventually reused (there are enough buffers to accommodate
+ *           multiple "active" values).
  * 
  * Note: Homa uses this function, rather than the %pI4 format specifier
  * for snprintf et al., because the kernel's version of snprintf isn't
  * available in Homa's unit test environment.
  */
-char *homa_print_ipv4_addr(__be32 addr, char *buffer)
+char *homa_print_ipv4_addr(__be32 addr)
 {
+#define NUM_BUFS 4
+#define BUF_SIZE 30
+	static char buffers[NUM_BUFS][BUF_SIZE];
+	static int next_buf = 0;
 	__u32 a2 = ntohl(addr);
-	sprintf(buffer, "%u.%u.%u.%u", (a2 >> 24) & 0xff, (a2 >> 16) & 0xff,
-			(a2 >> 8) & 0xff, a2 & 0xff);
+	char *buffer = buffers[next_buf];
+	next_buf++;
+	if (next_buf >= NUM_BUFS)
+		next_buf = 0;
+	snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
+			(a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
 	return buffer;
 }
 
@@ -407,13 +416,12 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 {
 	char *pos = buffer;
 	int space_left = length;
-	char addr_buf[20];
 	struct common_header *common = (struct common_header *) skb->data;
 	
 	int result = snprintf(pos, space_left,
 		"%s from %s:%u, dport %d, id %llu, length %u",
 		homa_symbol_for_type(common->type),
-		homa_print_ipv4_addr(ip_hdr(skb)->saddr, addr_buf),
+		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
 		ntohs(common->sport), ntohs(common->dport), common->id,
 		skb->len);
 	if ((result == length) || (result < 0)) {
@@ -648,6 +656,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->unknown_rpcs += cm->unknown_rpcs;
 		m->server_cant_create_rpcs += cm->server_cant_create_rpcs;
 		m->unknown_packet_types += cm->unknown_packet_types;
+		m->short_packets += cm->short_packets;
 		m->client_rpc_timeouts += cm->client_rpc_timeouts;
 		m->server_rpc_timeouts += cm->server_rpc_timeouts;
 		m->temp1 += cm->temp1;
@@ -819,6 +828,10 @@ char *homa_print_metrics(struct homa *homa)
 			"unknown_packet_types   %15llu  "
 			"Packets discarded because of unsupported type\n",
 			m.unknown_packet_types);
+	homa_append_metric(homa,
+			"short_packets          %15llu  "
+			"Packets discarded because too short\n",
+			m.short_packets);
 	homa_append_metric(homa,
 			"client_rpc_timeouts    %15llu  "
 			"RPCs aborted by client because of timeout\n",

@@ -833,7 +833,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	struct common_header *h;
 	struct sock *sk = NULL;
 	__u16 dport;
-	char buffer[200];
 //	int *data;
 //	int i;
 //	int discard;
@@ -850,8 +849,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		if (homa->verbose)
 			printk(KERN_WARNING "Homa packet from %s too short: "
 					"%d bytes\n",
-					homa_print_ipv4_addr(saddr, buffer),
-					length);
+					homa_print_ipv4_addr(saddr), length);
+		INC_METRIC(short_packets, 1);
 		goto discard;
 	}
 	
@@ -891,7 +890,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		if (homa->verbose)
 			printk(KERN_NOTICE "Homa packet incoming from %s "
 				"referred to unknown port %u\n",
-				homa_print_ipv4_addr(saddr, buffer), dport);
+				homa_print_ipv4_addr(saddr), dport);
 		rcu_read_unlock();
 		goto discard;
 	}
@@ -919,8 +918,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 			if (homa->verbose)
 				printk(KERN_NOTICE "Homa packet incoming from "
 					"%s referred to unknown port %u\n",
-					homa_print_ipv4_addr(saddr, buffer),
-					dport);
+					homa_print_ipv4_addr(saddr), dport);
 			goto discard;
 		}
 		homa_pkt_dispatch(sk, skb);

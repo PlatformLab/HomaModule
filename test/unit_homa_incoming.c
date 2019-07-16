@@ -104,7 +104,7 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	unit_log_skb_list(&self->message.packets, 0);
 	EXPECT_STREQ("DATA 0/10000 P1; DATA 1400/10000 P1; DATA 4200/10000 P1",
 			unit_log_get());
-	EXPECT_EQ(5800, self->message.bytes_remaining);
+	EXPECT_EQ(6400, self->message.bytes_remaining);
 	
 	unit_log_clear();
 	self->data.offset = htonl(2800);
@@ -199,21 +199,21 @@ TEST_F(homa_incoming, homa_get_resend_range__various_gaps)
 	
 	self->data.offset = htonl(8600);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
-			&self->data.common, 8600, 8600));
+			&self->data.common, 1400, 8600));
 	homa_get_resend_range(&self->message, &resend);
 	EXPECT_EQ(1400, ntohl(resend.offset));
 	EXPECT_EQ(7200, ntohl(resend.length));
 	
 	self->data.offset = htonl(6000);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
-			&self->data.common, 6000, 6000));
+			&self->data.common, 1400, 6000));
 	homa_get_resend_range(&self->message, &resend);
 	EXPECT_EQ(1400, ntohl(resend.offset));
 	EXPECT_EQ(4600, ntohl(resend.length));
 	
 	self->data.offset = htonl(4600);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
-			&self->data.common, 4600, 4600));
+			&self->data.common, 1400, 4600));
 	homa_get_resend_range(&self->message, &resend);
 	EXPECT_EQ(1400, ntohl(resend.offset));
 	EXPECT_EQ(3200, ntohl(resend.length));

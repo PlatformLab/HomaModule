@@ -288,14 +288,18 @@ TEST_F(homa_utils, homa_find_server_rpc)
 
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
-	char buffer[100];
-	__be32 addr = unit_get_in_addr("192.168.0.1");
-	homa_print_ipv4_addr(addr, buffer);
-	EXPECT_STREQ("192.168.0.1", buffer);
+	char *p1, *p2;
+	int i;
 	
-	addr = htonl((1<<24) + (2<<16) + (3<<8) + 4);
-	homa_print_ipv4_addr(addr, buffer);
-	EXPECT_STREQ("1.2.3.4", buffer);
+	p1 = homa_print_ipv4_addr(unit_get_in_addr("192.168.0.1"));
+	p2 = homa_print_ipv4_addr(htonl((1<<24) + (2<<16) + (3<<8) + 4));
+	EXPECT_STREQ("192.168.0.1", p1);
+	EXPECT_STREQ("1.2.3.4", p2);
+	
+	/* Make sure buffers eventually did reused. */
+	for (i = 0; i < 20; i++)
+		homa_print_ipv4_addr(unit_get_in_addr("5.6.7.8"));
+	EXPECT_STREQ("5.6.7.8", p1);
 }
 
 TEST_F(homa_utils, homa_append_metric)

@@ -146,6 +146,8 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
 			+ HOMA_MAX_HEADER + HOMA_SKB_RESERVE);
 }
 
+#define sizeof32(type) ((int) (sizeof(type)))
+
 /**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet.
@@ -1232,6 +1234,12 @@ struct homa_metrics {
 	__u64 unknown_packet_types;
 	
 	/**
+	 * @short_packets: total number of times a packet was discarded
+	 * because it was too short to hold all the required information.
+	 */
+	__u64 short_packets;
+	
+	/**
 	 * @client_rpc_timeouts: total number of times an RPC was aborted on
 	 * the client side because of a timeout.
 	 */
@@ -1336,7 +1344,7 @@ extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
 extern int      homa_pkt_recv(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
 			struct poll_table_struct *wait);
-extern char    *homa_print_ipv4_addr(__be32 addr, char *buffer);
+extern char    *homa_print_ipv4_addr(__be32 addr);
 extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
 extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,

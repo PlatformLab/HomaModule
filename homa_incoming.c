@@ -66,6 +66,10 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	/* Any data with offset >= this is useless. */
 	int ceiling = msgin->total_length;
 	
+	int data_bytes = skb->len - sizeof32(struct data_header);
+	
+	tt_record1("incoming data packet has %d bytes of data", data_bytes);
+	
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
 	 * always will in practice, so work backwards from the end of the
@@ -75,7 +79,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 		struct data_header *h2 = (struct data_header *) skb2->data;
 		int offset2 = ntohl(h2->offset);
 		if (offset2 < offset) {
-			floor = offset2 + HOMA_MAX_DATA_PER_PACKET;
+			floor = offset2 + data_bytes;
 			break;
 		}
 		ceiling = offset2;
@@ -89,8 +93,8 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	if (unlikely(floor < offset)) {
 		floor = offset;
 	}
-	if (ceiling > offset + HOMA_MAX_DATA_PER_PACKET) {
-		ceiling = offset + HOMA_MAX_DATA_PER_PACKET;
+	if (ceiling > offset + data_bytes) {
+		ceiling = offset + data_bytes;
 	}
 	if (floor >= ceiling) {
 		/* This packet is redundant. */
@@ -123,15 +127,18 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 	int remaining = max_bytes;
 	
 	/* Do the right thing even if packets have overlapping ranges.
-	 * Honestly, though, this shouldn't happen.
+	 * In practice, this shouldn't ever be necessary.
 	 */
 	offset = 0;
 	skb_queue_walk(&msgin->packets, skb) {
 		struct data_header *h = (struct data_header *) skb->data;
 		int this_offset = ntohl(h->offset);
+		int data_in_packet;
 		int this_size = msgin->total_length - offset;
-		if (this_size > HOMA_MAX_DATA_PER_PACKET) {
-			this_size = HOMA_MAX_DATA_PER_PACKET;
+		
+		data_in_packet = skb->len - sizeof32(struct data_header);
+		if (this_size > data_in_packet) {
+			this_size = data_in_packet;
 		}
 		if (offset > this_offset) {
 			this_size -= (offset - this_offset);
@@ -191,10 +198,9 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		int offset = ntohl(((struct data_header *) skb->data)->offset);
 		int pkt_length, gap;
 		
-		pkt_length = msgin->total_length - offset;
-		if (pkt_length > HOMA_MAX_DATA_PER_PACKET) {
-			pkt_length = HOMA_MAX_DATA_PER_PACKET;
-		}
+		pkt_length = skb->len - sizeof32(struct data_header);
+		if (pkt_length > (msgin->total_length - offset))
+			pkt_length = msgin->total_length - offset;
 		gap = end_offset - (offset + pkt_length);
 		missing_bytes -= gap;
 		if (missing_bytes == 0) {

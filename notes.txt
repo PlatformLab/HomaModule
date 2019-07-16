@@ -9,6 +9,9 @@ Notes for Homa implementation in Linux:
   rc75: up-to-date
   rc69: Henry's machine
 
+* Notes for GSO and GRO:
+  * Eventually eliminate HOMA_MAX_DATA_PER_PACKET
+
 * Possible performance improvements:
   * Pipeline data copying to/from user space with packet transmission/reception
   * Do the pacing from the sending thread?
@@ -97,6 +100,7 @@ Notes for Homa implementation in Linux:
   * If there is an error in ip_queue_xmit, does it free the packet?
     * The answer appears to the "yes", and Homa contains code to check this
       and log if not.
+  * How to compute the *real* number of CPUS (<< NR_CPUS?)
 
 * Notes on IP packet transmission and reception:
   * ip_queue_xmit -> ip_local_out -> dst_output
