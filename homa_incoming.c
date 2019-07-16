@@ -39,9 +39,8 @@ void homa_message_in_destroy(struct homa_message_in *msgin)
 	struct sk_buff *skb, *next;
 	if (msgin->total_length < 0)
 		return;
-	skb_queue_walk_safe(&msgin->packets, skb, next) {
+	skb_queue_walk_safe(&msgin->packets, skb, next)
 		kfree_skb(skb);
-	}
 	__skb_queue_head_init(&msgin->packets);
 	msgin->total_length = -1;
 }
