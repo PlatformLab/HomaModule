@@ -35,6 +35,12 @@ extern cycles_t mock_get_cycles(void);
 
 #define signal_pending(xxx) mock_signal_pending
 extern int mock_signal_pending;
+
+#undef current
+#define current current_task
+
+#undef NR_CPUS
+#define NR_CPUS 8
 #endif
 
 #include "homa.h"

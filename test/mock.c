@@ -110,6 +110,8 @@ struct net init_net;
 unsigned long volatile jiffies = 1100;
 static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
+unsigned long page_offset_base = 0;
+unsigned long vmemmap_base = 0;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -142,6 +144,8 @@ void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 	unit_log_printf("; ", "call_rcu_sched");
 	func(head);
 }
+
+void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
 {
