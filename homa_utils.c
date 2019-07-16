@@ -1,7 +1,6 @@
 /* This file contains miscellaneous utility functions for the Homa protocol. */
 
 #include "homa_impl.h"
-#include <stdio.h>
 
 /* Separate performance counters for each core. */
 struct homa_metrics *homa_metrics[NR_CPUS];
