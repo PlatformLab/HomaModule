@@ -68,8 +68,6 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	
 	int data_bytes = skb->len - sizeof32(struct data_header);
 	
-	tt_record1("incoming data packet has %d bytes of data", data_bytes);
-	
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
 	 * always will in practice, so work backwards from the end of the
@@ -78,8 +76,9 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	skb_queue_reverse_walk(&msgin->packets, skb2) {
 		struct data_header *h2 = (struct data_header *) skb2->data;
 		int offset2 = ntohl(h2->offset);
+		int data_bytes2 = skb2->len - sizeof32(struct data_header);
 		if (offset2 < offset) {
-			floor = offset2 + data_bytes;
+			floor = offset2 + data_bytes2;
 			break;
 		}
 		ceiling = offset2;
@@ -314,8 +313,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	tt_record2("incoming data packet, id %llu, offset %d", h->common.id,
-			ntohl(h->offset));
+	tt_record3("incoming data packet, id %llu, offset %d, size %d",
+			h->common.id, ntohl(h->offset), skb->len - sizeof32(*h));
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			kfree_skb(skb);

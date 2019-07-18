@@ -114,6 +114,20 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	EXPECT_STREQ("DATA 0/10000 P1; DATA 1400/10000 P1; DATA 2800/10000 P1; "
 			"DATA 4200/10000 P1", unit_log_get());
 }
+TEST_F(homa_incoming, homa_add_packet__varying_sizes)
+{
+	self->data.offset = 0;
+	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
+			&self->data.common, 4000, 0));
+	
+	self->data.offset = htonl(4000);
+	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
+			&self->data.common, 6000, 4000));
+	unit_log_skb_list(&self->message.packets, 0);
+	EXPECT_STREQ("DATA 0/10000 P1; DATA 4000/10000 P1",
+			unit_log_get());
+	EXPECT_EQ(0, self->message.bytes_remaining);
+}
 TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 {
 	self->data.offset = htonl(1400);
