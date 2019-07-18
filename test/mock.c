@@ -226,14 +226,6 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 	return 0;
 }
 
-int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
-		int addr_len)
-{
-	return 0;
-}
-
-void ip4_datagram_release_cb(struct sock *sk) {}
-
 void do_exit(long error_code)
 {
 	while(1) {}
@@ -296,7 +288,17 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
+int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
+{
+	return 0;
+}
+
 int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
+{
+	return 0;
+}
+
+int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
 	return 0;
 }
@@ -318,20 +320,10 @@ int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-void *__pskb_pull_tail(struct sk_buff *skb, int delta)
-{
-	return NULL;
-}
-
 int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 		int flags)
 {
 	return 0;
-}
-struct ctl_table_header *register_net_sysctl(struct net *net,
-	const char *path, struct ctl_table *table)
-{
-	return NULL;
 }
 
 void inet_register_protosw(struct inet_protosw *p) {}
@@ -389,6 +381,14 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	unit_hash_set(routes_in_use, route, "used");
 	return route;
 }
+
+int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
+		int addr_len)
+{
+	return 0;
+}
+
+void ip4_datagram_release_cb(struct sock *sk) {}
 
 void kfree(const void *block)
 {
@@ -531,9 +531,20 @@ int proto_register(struct proto *prot, int alloc_slab)
 
 void proto_unregister(struct proto *prot) {}
 
+void *__pskb_pull_tail(struct sk_buff *skb, int delta)
+{
+	return NULL;
+}
+
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
 	mock_active_locks++;
+}
+
+struct ctl_table_header *register_net_sysctl(struct net *net,
+	const char *path, struct ctl_table *table)
+{
+	return NULL;
 }
 
 void release_sock(struct sock *sk)
@@ -567,6 +578,19 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 {
 	unit_log_printf("; ", "skb_copy_datagram_iter ");
 	unit_log_data(NULL, from->data + offset, size);
+	return 0;
+}
+
+int skb_gro_receive(struct sk_buff **head, struct sk_buff *skb)
+{
+	struct data_header *h = (struct data_header *) skb_transport_header(skb);
+	struct data_header *h2 = (struct data_header *) skb_transport_header(*head);
+	int offset = htonl(h->offset);
+	int offset2 = htonl(h2->offset);
+	unit_log_printf(";", "skb_gro_receive appending id %llu, bytes %d-%d "
+		"to id %llu, bytes %d-%d", h->common.id, offset,
+		offset + skb_gro_len(skb), h2->common.id, offset2,
+		offset2 +skb_gro_len(*head));
 	return 0;
 }
 

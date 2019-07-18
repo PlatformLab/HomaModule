@@ -1307,6 +1307,9 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, int __user *option);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
+extern struct sk_buff
+		**homa_gro_receive(struct sk_buff **head, struct sk_buff *skb);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
 		homa_hrtimer(struct hrtimer *timer);
@@ -1329,6 +1332,8 @@ extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
+extern int      homa_offload_end(void);
+extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
 extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);

@@ -2,6 +2,7 @@
 
 obj-m += homa.o
 homa-y = homa_incoming.o \
+            homa_offload.o \
             homa_outgoing.o \
             homa_peertab.o \
             homa_plumbing.o \

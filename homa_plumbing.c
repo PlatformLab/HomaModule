@@ -294,6 +294,11 @@ static int __init homa_load(void) {
 		goto out_cleanup;
 	}
 	
+	status = homa_offload_init();
+	if (status != 0) {
+		printk(KERN_ERR "Homa couldn't init offloads\n");
+		goto out_cleanup;
+	}
 	tasklet_init(&timer_tasklet, homa_tasklet_handler, 0);
 	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer.function = &homa_hrtimer;
@@ -336,6 +341,8 @@ static void __exit homa_unload(void) {
 	hrtimer_cancel(&hrtimer);
 	tasklet_kill(&timer_tasklet);
 	hrtimer_cancel(&hrtimer);
+	if (homa_offload_end() != 0)
+		printk(KERN_ERR "Homa couldn't stop offloads\n");
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);

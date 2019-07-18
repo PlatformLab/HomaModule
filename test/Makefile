@@ -34,6 +34,7 @@ CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_incoming.c \
+	      unit_homa_offload.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peertab.c \
 	      unit_homa_plumbing.c \
@@ -44,6 +45,7 @@ TEST_SRCS :=  unit_homa_incoming.c \
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 	
 HOMA_SRCS :=  homa_incoming.c \
+	      homa_offload.c \
 	      homa_outgoing.c \
 	      homa_peertab.c \
 	      homa_plumbing.c \
