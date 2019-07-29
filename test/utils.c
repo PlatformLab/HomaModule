@@ -48,18 +48,19 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		.common = {
 			.sport = htons(server_port),
 	                .dport = htons(hsk->client_port),
-			.id = id,
-			.type = DATA
+			.type = DATA,
+			.id = id
 		},
 		.message_length = htonl(resp_length),
-		.offset = 0,
 		.unscheduled = htonl(10000),
 		.cutoff_version = 0,
-		.retransmit = 0
+		.retransmit = 0,
+		.seg = {.offset = 0}
 	};
 	
 	int this_size = (resp_length > HOMA_MAX_DATA_PER_PACKET)
 			? HOMA_MAX_DATA_PER_PACKET : resp_length;
+	h.seg.segment_length = htonl(this_size);
 	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
 			crpc);
 	if (crpc->state == state)
@@ -75,7 +76,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		this_size = resp_length - bytes_received;
 		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
 			this_size = HOMA_MAX_DATA_PER_PACKET;
-		h.offset = htonl(bytes_received);
+		h.seg.offset = htonl(bytes_received);
+		h.seg.segment_length = htonl(this_size);
 		homa_data_pkt(mock_skb_new(server_ip, &h.common,
 				this_size , 0), crpc);
 	}
@@ -135,6 +137,29 @@ int unit_list_length(struct list_head *head)
 		count++;
 	}
 	return count;
+}
+
+/**
+ * unit_log_frag_list() - Append to the test log a human-readable description
+ * of all of the packets on a given skb's frag_list.
+ * @skb:         Packet whose frag_list is of interest.
+ * @verbose:     If non-zero, use homa_print_packet for each packet;
+ *               otherwise use homa_print_packet_short.
+ */
+void unit_log_frag_list(struct sk_buff *skb, int verbose)
+{
+	struct sk_buff *frag;
+	char buffer[200];
+	
+	for (frag = skb_shinfo(skb)->frag_list; frag != NULL;
+			frag = frag->next) {
+		if (verbose) {
+			homa_print_packet(frag, buffer, sizeof(buffer));
+		} else {
+			homa_print_packet_short(frag, buffer, sizeof(buffer));
+		}
+		unit_log_printf("; ", "%s", buffer);
+	}
 }
 
 /**
@@ -252,14 +277,14 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.common = {
 			.sport = htons(client_port),
 	                .dport = htons(hsk->server_port),
-			.id = id,
-			.type = DATA
+			.type = DATA,
+			.id = id
 		},
 		.message_length = htonl(req_length),
-		.offset = 0,
 		.unscheduled = htonl(10000),
 		.cutoff_version = 0,
-		.retransmit = 0
+		.retransmit = 0,
+		.seg = {.offset = 0, .segment_length = htonl(1400)}
 	};
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	if (!srpc)
@@ -281,7 +306,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		int this_size = req_length - bytes_received;
 		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
 			this_size = HOMA_MAX_DATA_PER_PACKET;
-		h.offset = htonl(bytes_received);
+		h.seg.offset = htonl(bytes_received);
+		h.seg.segment_length = htonl(this_size);
 		homa_data_pkt(mock_skb_new(client_ip, &h.common,
 				this_size , 0), srpc);
 	}

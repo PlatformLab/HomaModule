@@ -84,8 +84,16 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_DATA_PER_PACKET 1400
 
-/** define HOMA_MAX_IPV4_HEADER - Size of largest IP header (V4). */
-#define HOMA_MAX_IPV4_HEADER 60
+/** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
+#define HOMA_IPV4_HEADER_LENGTH 20
+
+/**
+ * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
+ * beginning of each sk_buff, before the IP header. This includes room for a
+ * VLAN header and also include some extra space, "just to be safe" (not really
+ * sure if this is needed).
+ */
+#define HOMA_SKB_EXTRA 40
 
 /** define HOMA_VLAN_HEADER - Number of bytes in an Ethernet VLAN header. */
 #define HOMA_VLAN_HEADER 20
@@ -100,7 +108,7 @@ enum homa_packet_type {
  * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
  * must be at least this long.
  */
-#define HOMA_MAX_HEADER 48
+#define HOMA_MAX_HEADER 64
 
 /**
  * define ETHERNET_MAX_PAYLOAD - A maximum length of an Ethernet packet,
@@ -117,20 +125,6 @@ enum homa_packet_type {
 #define HOMA_NUM_PRIORITIES 8
 
 /**
- * define HOMA_SKB_RESERVE - How much space to reserve at the beginning
- * of sk_buffs for headers other than Homa's (IPV4, and Ethernet VLAN).
- */
-#define HOMA_SKB_RESERVE (HOMA_MAX_IPV4_HEADER + 20)
-
-/**
- * define HOMA_SKB_SIZE - Total allocated size for Homa packet buffers
- * (we always allocate this size, even for small packets). The
- * "sizeof(void*)" is for the pointer used by homa_next_skb.
- */
-#define HOMA_SKB_SIZE (HOMA_MAX_DATA_PER_PACKET + HOMA_MAX_HEADER \
-				+ HOMA_SKB_RESERVE + sizeof(void*))
-
-/**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
  * @skb:     Socket buffer containing private link field.
  * 
@@ -142,56 +136,99 @@ enum homa_packet_type {
  */
 static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
 {
-	return (struct sk_buff **) (skb->head + HOMA_MAX_DATA_PER_PACKET
-			+ HOMA_MAX_HEADER + HOMA_SKB_RESERVE);
+	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char*));
 }
 
 #define sizeof32(type) ((int) (sizeof(type)))
 
 /**
  * struct common_header - Wire format for the first bytes in every Homa
- * packet.
+ * packet. This must partially match the format of a TCP header so that
+ * Homa can piggyback on TCP segmentation offload (and possibly other
+ * features, such as RSS).
  */
 struct common_header {
 	/**
 	 * @sport: Port on source machine from which packet was sent.
-	 * It's useful for this field and the next one to be the first
-	 * 2 fields in the structure, so that they match the structure
-	 * of a TCP header. This can be useful for things such as RSS.
+	 * Must be in the same position as in a TCP header.
 	 */
 	__be16 sport;
 	
-	/** @dport: Port on destination that is to receive packet. */
+	/**
+	 * @dport: Port on destination that is to receive packet. Must be
+	 * in the same position as in a TCP header.
+	 */
 	__be16 dport;
 	
 	/**
-	 * @id: Identifier for the RPC associated with this packet; must
-	 * be unique among all those issued from the client port.
+	 * @unused1: corresponds to the sequence number field in TCP headers;
+	 * must not be used by Homa, in case it gets incremented during TCP
+	 * offload.
 	 */
-	__be64 id;
+	__be32 unused1;
+	
+	__be32 unused2;
+	
+	/**
+	 * @doff: High order 4 bits holds the number of 4-byte chunks in a
+	 * data_header (low-order bits unused). Used only for DATA packets;
+	 * must be in the same position as the data offset in a TCP header.
+	 */
+	__u8 doff;
 
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
+	
+	__be16 unused3;
+	
+	/**
+	 * @checksum: not used by Homa, but must occupy the same bytes as
+	 * the checksum in a TCP header (TSO may modify this).*/
+	__be16 checksum;
+	
+	__be16 unused4;
+	
+	/**
+	 * @id: Identifier for the RPC associated with this packet; must
+	 * be unique among all those issued from the client port. Stored
+	 * in client host byte order.
+	 */
+	__be64 id;
 } __attribute__((packed));
 
-/**
- * struct data_header - Wire format for a DATA packet, which contains a
- * contiguous range of bytes from a request or response message. The
- * amount of data in the packet is either all the remaining data in
- * the message or HOMA_MAX_DATA_PER_PACKET, whichever is smaller.
+/** 
+* struct data_segment - Wire format for a chunk of data that is part of
+ * a DATA packet. A single sk_buff can hold multiple data_segments in order
+ * to enable send and receive offload (the idea is to carry many network
+ * packets of info in a single traversal of the Linux networking stack).
+ * A DATA sk_buff contains a common_header followed by any number of
+ * data_segments.
  */
+struct data_segment {
+	/**
+	 * @offset: Offset within message of the first byte of data in
+	 * this segment. Segments within an sk_buff are not guaranteed
+	 * to be in order.
+	 */
+	__be32 offset;
+	
+	/** @segment_length: Number of bytes of data in this segment. */
+	__be32 segment_length;
+	
+	/** @data: the payload of this segment. */
+	char data[0];
+} __attribute__((packed));
+
+/* struct data_header - Overall header format for a DATA sk_buff. A single
+ * sk_buff can hold multiple data_segments in order to enable send and
+ * receive offload (the idea is to carry many network packets of info in
+ * a single traversal of the Linux networking stack). A DATA sk_buff
+ * contains a common_header followed by any number of data_segments.*/
 struct data_header {
-	/** @common: Fields common to all packet types. */
 	struct common_header common;
 	
 	/** @message_length: Total #bytes in the *message* */
 	__be32 message_length;
-	
-	/**
-	 * @offset: Offset within message of the first byte of data in
-	 * this packet
-	 */
-	__be32 offset;
 	
 	/**
 	 * @unscheduled: The number of initial bytes in the message that
@@ -213,16 +250,28 @@ struct data_header {
 	 * (it has already been sent previously).
 	 */
 	__u8 retransmit;
-
-	/* The remaining packet bytes after the header constitute message
-	 * data starting at the given offset.
-	 */
+	
+	__u8 pad;
+	
+	/** @seg: First of possibly many segments */
+	struct data_segment seg;
 } __attribute__((packed));
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
 		"data_header too large");
-_Static_assert(ETHERNET_MAX_PAYLOAD >= (HOMA_MAX_DATA_PER_PACKET
-	+ HOMA_MAX_IPV4_HEADER + sizeof(struct data_header)),
-	"Homa messages don't fit in Ethernet frames");
+
+_Static_assert(((sizeof(struct data_header) - sizeof(struct data_segment))
+		& 0x3) == 0,
+		" data_header length not a multiple of 4 bytes (required "
+		"for TCP/TSO compatibility");
+/**
+ * set_doff() - Fills in the doff TCP header field for a Homa packet.
+ * @h:   Packet header whose doff field is to be set.
+ */
+static inline void homa_set_doff(struct data_header *h)
+{
+	h->common.doff = (sizeof(struct data_header)
+			- sizeof(struct data_segment)) << 2;
+}
 
 /**
  * struct grant_header - Wire format for GRANT packets, which are sent by
@@ -360,8 +409,8 @@ struct homa_message_out {
 	/**
 	 * @packets: singly-linked list of all packets in message, linked
 	 * using homa_next_skb. The list is in order of offset in the message
-	 * (offset 0 first); each packet (except possibly the last) contains
-	 * exactly HOMA_MAX_DATA_PER_PACKET of payload.
+	 * (offset 0 first); each sk_buff can potentially contain multiple
+	 * data_segments, which will be split into separate packets by GSO.
 	 */
 	struct sk_buff *packets;
 	
@@ -413,7 +462,8 @@ struct homa_message_in {
 	 * @packets: DATA packets received for this message so far. The list
 	 * is sorted in order of offset (head is lowest offset), but
 	 * packets can be received out of order, so there may be times
-	 * when there are holes in the list.
+	 * when there are holes in the list. Packets in this list contain
+	 * exactly one data_segment.
 	 */
 	struct sk_buff_head packets;
 	
@@ -1351,9 +1401,9 @@ extern __poll_t homa_poll(struct file *file, struct socket *sock,
 			struct poll_table_struct *wait);
 extern char    *homa_print_ipv4_addr(__be32 addr);
 extern char    *homa_print_metrics(struct homa *homa);
-extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int length);
+extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
-			int length);
+			int buf_len);
 extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
 			int count, int *eof, void *data);
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
@@ -1385,6 +1435,9 @@ extern void     homa_set_priority(struct sk_buff *skb, int priority);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
+extern int      homa_snprintf(char *buffer, int size, int used,
+			const char* format, ...)
+			__attribute__((format(printf, 4, 5)));
 extern int      homa_sock_bind(struct homa_socktab *socktab,
 			struct homa_sock *hsk, __u16 port);
 extern void     homa_sock_destroy(struct homa_sock *hsk);

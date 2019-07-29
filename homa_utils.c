@@ -408,28 +408,20 @@ char *homa_print_ipv4_addr(__be32 addr)
  * information in a Homa packet.
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
- * @length:  Number of bytes available at @buffer.
+ * @buf_len: Number of bytes available at @buffer.
  * 
  * Return:   @buffer
  */
-char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
+char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
-	char *pos = buffer;
-	int space_left = length;
+	int used = 0;
 	struct common_header *common = (struct common_header *) skb->data;
 	
-	int result = snprintf(pos, space_left,
-		"%s from %s:%u, dport %d, id %llu, length %u",
+	used = homa_snprintf(buffer, buf_len, used,
+		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-		ntohs(common->sport), ntohs(common->dport), common->id,
-		skb->len);
-	if ((result == length) || (result < 0)) {
-		buffer[length-1] = 0;
-		return buffer;
-	}
-	pos += result;
-	space_left -= result;
+		ntohs(common->sport), ntohs(common->dport), common->id);
 	if (skb->vlan_tci & VLAN_TAG_PRESENT) {
 		int priority = (skb->vlan_tci & VLAN_PRIO_MASK)
 				>> VLAN_PRIO_SHIFT;
@@ -438,35 +430,50 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 		} else if (priority == 1) {
 			priority = 0;
 		}
-		result = snprintf(pos, space_left, " prio %d", priority);
-		if ((result == length) || (result < 0)) {
-			buffer[length-1] = 0;
-			return buffer;
-		}
-		pos += result;
-		space_left -= result;
+		used = homa_snprintf(buffer, buf_len, used,
+				", prio %d", priority);
 	}		
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
 				skb->data;
-		snprintf(pos, space_left,
+		struct data_segment *seg;
+		int seg_length = ntohl(h->seg.segment_length);
+		int bytes_left, i;
+		used = homa_snprintf(buffer, buf_len, used,
 				", message_length %d, offset %d, "
-				"unscheduled %d, cutoff_version %d%s",
-				ntohl(h->message_length), ntohl(h->offset),
-				ntohl(h->unscheduled), ntohs(h->cutoff_version),
+				"data_length %d, unscheduled %d, "
+				"cutoff_version %d%s",
+				ntohl(h->message_length),
+				ntohl(h->seg.offset), seg_length,
+				ntohl(h->unscheduled),
+				ntohs(h->cutoff_version),
 				h->retransmit ? ", RETRANSMIT" : "");
+		bytes_left = skb->len - sizeof32(*h) - seg_length;
+		if (skb_shinfo(skb)->gso_segs <= 1)
+			break;
+		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
+		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
+			seg = (struct data_segment *) (skb->data + skb->len
+					- bytes_left);
+			seg_length = ntohl(seg->segment_length);
+			used = homa_snprintf(buffer, buf_len, used,
+					" %d@%d", seg_length,
+					ntohl(seg->offset));
+			bytes_left -= sizeof32(*seg) + seg_length;
+		};
 		break;
 	}
 	case GRANT: {
 		struct grant_header *h = (struct grant_header *) skb->data;
-		snprintf(pos, space_left, ", offset %d, grant_prio %u",
+		used = homa_snprintf(buffer, buf_len, used,
+				", offset %d, grant_prio %u",
 				ntohl(h->offset), h->priority);
 		break;
 	}
 	case RESEND: {
 		struct resend_header *h = (struct resend_header *) skb->data;
-		snprintf(pos, space_left,
+		used = homa_snprintf(buffer, buf_len, used,
 				", offset %d, length %d, resend_prio %u",
 				ntohl(h->offset), ntohl(h->length),
 				h->priority);
@@ -480,7 +487,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 		break;
 	case CUTOFFS: {
 		struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
-		snprintf(pos, space_left,
+		used = homa_snprintf(buffer, buf_len, used,
 				", cutoffs %d %d %d %d %d %d %d %d, version %u",
 				ntohl(h->unsched_cutoffs[0]),
 				ntohl(h->unsched_cutoffs[1]),
@@ -493,7 +500,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
 				ntohs(h->cutoff_version));
 		break;
 	}}
-	buffer[length-1] = 0;
+	buffer[buf_len-1] = 0;
 	return buffer;
 }
 
@@ -503,11 +510,11 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int length)
  * abbreviated description than homa_print_packet.
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
- * @length:  Number of bytes available at @buffer.
+ * @buf_len: Number of bytes available at @buffer.
  * 
  * Return:   @buffer
  */
-char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
+char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	struct common_header *common =
 			(struct common_header *) skb_transport_header(skb);
@@ -520,40 +527,89 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int length)
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *) common;
-		snprintf(buffer, length, "DATA%s %d/%d P%d",
+		struct data_segment *seg;
+		int bytes_left, used, i;
+		int seg_length = ntohl(h->seg.segment_length);
+		
+		used = homa_snprintf(buffer, buf_len, 0, "DATA%s P%d %d@%d",
 				h->retransmit ? " retrans" : "",
-				ntohl(h->offset), ntohl(h->message_length),
-				priority);
+				priority, seg_length, ntohl(h->seg.offset));
+		bytes_left = skb->len - sizeof32(*h) - seg_length;
+		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
+			seg = (struct data_segment *) (skb->data + skb->len
+					- bytes_left);
+			seg_length = ntohl(seg->segment_length);
+			used = homa_snprintf(buffer, buf_len, used,
+					" %d@%d", seg_length,
+					ntohl(seg->offset));
+			bytes_left -= sizeof32(*seg) + seg_length;
+		}
 		break;
 	}
 	case GRANT: {
 		struct grant_header *h = (struct grant_header *) common;
-		snprintf(buffer, length, "GRANT %d@%d", ntohl(h->offset),
+		snprintf(buffer, buf_len, "GRANT %d@%d", ntohl(h->offset),
 				h->priority);
 		break;
 	}
 	case RESEND: {
 		struct resend_header *h = (struct resend_header *) common;
-		snprintf(buffer, length, "RESEND %d-%d@%d", ntohl(h->offset),
+		snprintf(buffer, buf_len, "RESEND %d-%d@%d", ntohl(h->offset),
 				ntohl(h->offset) + ntohl(h->length) - 1,
 				h->priority);
 		break;
 	}
 	case RESTART:
-		snprintf(buffer, length, "RESTART");
+		snprintf(buffer, buf_len, "RESTART");
 		break;
 	case BUSY:
-		snprintf(buffer, length, "BUSY");
+		snprintf(buffer, buf_len, "BUSY");
 		break;
 	case CUTOFFS: 
-		snprintf(buffer, length, "CUTOFFS");
+		snprintf(buffer, buf_len, "CUTOFFS");
 		break;
 	default:
-		snprintf(buffer, length, "unknown packet type %d",
+		snprintf(buffer, buf_len, "unknown packet type %d",
 				common->type);
 		break;
 	}
 	return buffer;
+}
+
+/**
+ * homa_snprintf() - This function makes it easy to use a series of calls
+ * to snprintf to gradually append information to a fixed-size buffer.
+ * If the buffer fills, the function can continue to be called, but nothing
+ * more will get added to the buffer.
+ * @buffer:   Characters accumulate here.
+ * @size:     Total space available in @buffer.
+ * @used:     Number of bytes currently occupied in the buffer, not including
+ *            a terminating null character; this is typically the result of
+ *            the previous call to this function.
+ * @format:   Format string suitable for passing to printf-like functions,
+ *            followed by values for the various substitutions requested
+ *            in @format
+ * @ ...
+ * 
+ * Return:    The number of characters now occupied in @buffer, not
+ *            including the terminating null character. 
+ */
+int homa_snprintf(char *buffer, int size, int used, const char* format, ...)
+{
+	int new_chars;
+	
+	va_list ap;
+	va_start(ap, format);
+	
+	if (used >= (size-1))
+		return used;
+	
+	new_chars = vsnprintf(buffer + used, size - used, format, ap);
+	if (new_chars < 0)
+		return used;
+	if (new_chars >= (size - used))
+		return size - 1;
+	return used + new_chars;
 }
 
 /**

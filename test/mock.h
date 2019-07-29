@@ -7,6 +7,8 @@ extern int         mock_copy_to_user_errors;
 extern cycles_t    mock_cycles;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
+extern struct net_device
+		   mock_net_device;
 extern int         mock_route_errors;
 extern void        (*mock_schedule_hook)(void);
 extern void        (*mock_spin_lock_hook)(void);
@@ -19,6 +21,8 @@ extern int         mock_xmit_log_verbose;
 extern int         mock_check_error(int *errorMask);
 extern void        mock_data_ready(struct sock *sk);
 extern cycles_t    mock_get_cycles(void);
+extern unsigned int
+		   mock_mtu(const struct dst_entry *dst);
 extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);

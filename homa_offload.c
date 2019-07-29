@@ -35,20 +35,24 @@ int homa_offload_end(void)
 
 /**
  * homa_gro_receive() - Invoked for each input packet at a very low
- * level in the stack; attempts to merge consecutive data packets into
- * a single large packet.
+ * level in the stack to perform GRO. However, this code does GRO in an
+ * unusual way: it simply aggregates all packets targeted to a particular
+ * destination port, so that the entire bundle can get through the networking
+ * stack in a single traversal.
  * @gro_list:   Pointer to pointer to first in list of packets that are being
  *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  * 
  * Return: If the return value is non-NULL, it refers to a link in
  * gro_list. The skb referred to by that link should be removed from the
- * list by the caller and passed up the stack immediately.
+ * list by the caller and passed up the stack immediately. This function
+ * always returns NULL.
  */
 struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb)
 {
 	/* This function will do one of the following things:
-	 * 1. Merge skb with a packet in gro_list by calling skb_gro_receive.
+	 * 1. Merge skb with a packet in gro_list by appending it to
+	 *    the frag_list of that packet.
 	 * 2. Set NAPI_GRO_CB(skb)->flush, indicating that skb is not a
 	 *    candidate for merging and should be passed up the networking
 	 *    stack immediately.
@@ -56,51 +60,53 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	struct data_header *h, *h2;
+	struct common_header *h_new;
 	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
 	struct sk_buff **pp;
 	
 	/* Get access to the Homa header for the packet. I don't understand
-	 * why such ornate code is needed, but it mimics what TCP does.
+	 * why such ornate code is needed, but this mimics what TCP does.
 	 */
 	hdr_offset = skb_gro_offset(skb);
-	hdr_end = hdr_offset + HOMA_MAX_HEADER;
-	h = skb_gro_header_fast(skb, hdr_offset);
+	hdr_end = hdr_offset + sizeof32(*h_new);
+	h_new = (struct common_header *) skb_gro_header_fast(skb, hdr_offset);
 	if (skb_gro_header_hard(skb, hdr_end)) {
-		h = (struct data_header *) skb_gro_header_slow(skb, hdr_end,
+		h_new = (struct common_header *) skb_gro_header_slow(skb, hdr_end,
 				hdr_offset);
-		if (unlikely(!h)) {
+		if (unlikely(!h_new)) {
 			/* Header not available in contiguous memory. */
 			UNIT_LOG(";", "no header");
 			goto flush;
 		}
 	}
 	
-	if (h->common.type != DATA)
-		goto flush;
-	
-	skb_gro_pull(skb, sizeof32(struct data_header));
-	if (htonl(h->message_length) == skb_gro_len(skb))
-		goto flush;
-	for (pp = gro_list; (held_skb = *pp); pp = &held_skb->next) {
+	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
+		struct common_header *h_held;
 		if (!NAPI_GRO_CB(held_skb)->same_flow)
 			continue;
 
-		h2 = (struct data_header *) skb_transport_header(held_skb);
+		h_held = (struct common_header *) skb_transport_header(held_skb);
 
-		if ((h->common.sport ^ h2->common.sport)
-				| (h->common.dport ^ h2->common.dport)
-				| (h->common.id ^ h2->common.id)
-				| (ntohl(h->offset) ^ (ntohl(h2->offset)
-				+ skb_gro_len(held_skb)))) {
+		if (h_new->dport != h_held->dport) {
 			NAPI_GRO_CB(held_skb)->same_flow = 0;
 			continue;
 		}
 		
-		/* skb contains data immediately following that in held_skb. */
-		skb_gro_receive(pp, skb);
-		break;
+		/* Aggregate skb into held_skb. We don't update the length of
+		 * held_skb, because we'll eventually split it up and process
+		 * each skb independently.
+		 */
+		__skb_pull(skb, skb_gro_offset(skb));
+		if (NAPI_GRO_CB(held_skb)->last == held_skb)
+			skb_shinfo(held_skb)->frag_list = skb;
+		else
+			NAPI_GRO_CB(held_skb)->last->next = skb;
+		NAPI_GRO_CB(held_skb)->last = skb;
+		skb->next = NULL;
+		NAPI_GRO_CB(skb)->same_flow = 1;
+		NAPI_GRO_CB(held_skb)->count++;
+	       break;
 	}
 	return NULL;
 	

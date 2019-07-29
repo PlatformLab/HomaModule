@@ -213,7 +213,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.data		= homa_data.temp,
 		.maxlen		= sizeof(homa_data.temp),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "throttle_min_bytes",
@@ -839,9 +839,9 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	int length = skb->len;
 	struct common_header *h;
 	struct sock *sk = NULL;
+	struct sk_buff *others;
 	__u16 dport;
-//	int *data;
-//	int i;
+//	char buffer[200];
 //	int discard;
 
 //	get_random_bytes(&discard, sizeof(discard));
@@ -877,15 +877,11 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		tt_record2("homa_pkt_recv got grant for id %d, offset %d",
 				h->id, ntohl(((struct grant_header *) h)->offset));
 	else
-		tt_record2("homa_pkt_recv starting on core %d, type %d",
-				smp_processor_id(), h->type);
+		tt_record3("homa_pkt_recv starting on core %d, type %d, "
+				"length %d",
+				smp_processor_id(), h->type, length);
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
-//	data = (int *) skb->data;
-//	for (i = 0; i < length/4; i += 4) {
-//		printk(KERN_NOTICE "    0x%08x 0x%08x 0x%08x 0x%08x\n",
-//			data[i], data[i+1], data[i+2], data[i+3]);
-//	}
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();
@@ -920,16 +916,45 @@ int homa_pkt_recv(struct sk_buff *skb) {
 					h->type);
 			goto discard;
 		}
-	} else {
-		if (!homa_sk(sk)->homa) {
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa packet incoming from "
-					"%s referred to unknown port %u\n",
-					homa_print_ipv4_addr(saddr), dport);
-			goto discard;
-		}
-		homa_pkt_dispatch(sk, skb);
+		goto done;
 	}
+	if (!homa_sk(sk)->homa) {
+		if (homa->verbose)
+			printk(KERN_NOTICE "Homa packet incoming from "
+				"%s referred to unknown port %u\n",
+				homa_print_ipv4_addr(saddr), dport);
+		goto discard;
+	}
+	
+	/* If GRO has occurred, this packet may actually be a group of
+	 * packets, consisting of the main packet plus any number of
+	 * additional packets queued on its frag_list. Process them
+	 * in order. 
+	 */
+	others = skb_shinfo(skb)->frag_list;
+	skb_shinfo(skb)->frag_list = NULL;
+	while (1) {
+		homa_pkt_dispatch(sk, skb);
+		
+		/* Find the next packet (freeing any packets whose headers
+		 * can't be made contiguous).
+		 */
+		while (1) {
+			if (others == NULL)
+				goto done;
+			skb = others;
+			others = others->next;
+			if (pskb_may_pull(skb, HOMA_MAX_HEADER))
+				break;
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa can't handle fragmented "
+						"packet (no space for header); "
+						"discarding\n");
+			kfree_skb(skb);
+		}
+	}
+
+    done:
 	bh_unlock_sock(sk);
 	return 0;
 
@@ -953,8 +978,33 @@ int homa_pkt_recv(struct sk_buff *skb) {
  */
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
+	struct sk_buff *others;
+	
 	tt_record("homa_backlog_rcv invoked");
-	return homa_pkt_dispatch(sk, skb);
+	others = skb_shinfo(skb)->frag_list;
+	skb_shinfo(skb)->frag_list = NULL;
+	while (1) {
+		homa_pkt_dispatch(sk, skb);
+		
+		/* Find the next packet (freeing any packets whose headers
+		 * can't be made contiguous).
+		 */
+		while (1) {
+			if (others == NULL)
+				goto done;
+			skb = others;
+			others = others->next;
+			if (pskb_may_pull(skb, HOMA_MAX_HEADER))
+				break;
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa can't handle fragmented "
+						"packet (no space for header); "
+						"discarding\n");
+			kfree_skb(skb);
+		}
+	}
+    done:
+	return 0;
 }
 
 /**

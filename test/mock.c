@@ -103,6 +103,17 @@ cycles_t mock_cycles = 0;
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
 
+/**
+ * define MOCK_MTU - Maximum packet size allowed by "network" (see
+ * homa_message_out_init.
+ */
+#define MOCK_MTU (1400 + HOMA_IPV4_HEADER_LENGTH + sizeof(struct data_header))
+
+struct dst_ops mock_dst_ops = {.mtu = mock_mtu};
+struct net_device mock_net_device = {
+		.gso_max_segs = 1000,
+		.gso_max_size = MOCK_MTU};
+
 struct task_struct *current_task = &mock_task;
 unsigned long ex_handler_refcount = 0;
 unsigned long phys_base = 0;
@@ -119,16 +130,25 @@ extern void add_wait_queue(struct wait_queue_head *wq_head,
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
+	int shinfo_size;
 	if (mock_check_error(&mock_alloc_skb_errors))
 		return NULL;
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	if (skb == NULL)
+		FAIL("skb malloc failed in __alloc_skb");
 	memset(skb, 0, sizeof(*skb));
 	if (!buffs_in_use)
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
-	skb->head = malloc(size);
+	size = SKB_DATA_ALIGN(size);
+	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	skb->head = malloc(size + shinfo_size);
+	memset(skb->head, 0, size + shinfo_size);
+	if (skb->head == NULL)
+		FAIL("data malloc failed in __alloc_skb");
 	skb->data = skb->head;
 	skb_reset_tail_pointer(skb);
+	skb->end = skb->tail + size;
 	skb->network_header = 0;
 	skb->transport_header = 0;
 	skb->data_len = 0;
@@ -376,6 +396,8 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		return ERR_PTR(-ENOMEM);
 	}
 	route->dst.__refcnt.counter = 1;
+	route->dst.ops = &mock_dst_ops;
+	route->dst.dev = &mock_net_device;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
@@ -413,6 +435,11 @@ void kfree_skb(struct sk_buff *skb)
 		return;
 	}
 	unit_hash_erase(buffs_in_use, skb);
+	while (skb_shinfo(skb)->frag_list) {
+		struct sk_buff *next = skb_shinfo(skb)->frag_list->next;
+		kfree_skb(skb_shinfo(skb)->frag_list);
+		skb_shinfo(skb)->frag_list = next;
+	}
 	free(skb->head);
 	free(skb);
 }
@@ -581,24 +608,11 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 	return 0;
 }
 
-int skb_gro_receive(struct sk_buff **head, struct sk_buff *skb)
-{
-	struct data_header *h = (struct data_header *) skb_transport_header(skb);
-	struct data_header *h2 = (struct data_header *) skb_transport_header(*head);
-	int offset = htonl(h->offset);
-	int offset2 = htonl(h2->offset);
-	unit_log_printf(";", "skb_gro_receive appending id %llu, bytes %d-%d "
-		"to id %llu, bytes %d-%d", h->common.id, offset,
-		offset + skb_gro_len(skb), h2->common.id, offset2,
-		offset2 +skb_gro_len(*head));
-	return 0;
-}
-
 void *skb_pull(struct sk_buff *skb, unsigned int len)
 {
-	skb->len -= len;
-	if (skb->len < skb->data_len)
+	if ((skb_tail_pointer(skb) - skb->data) < len)
 		FAIL("sk_buff underflow during pull");
+	skb->len -= len;
 	return skb->data += len;
 }
 
@@ -747,6 +761,18 @@ cycles_t mock_get_cycles(void)
 }
 
 /**
+ * This function is invoked through dst->dst_ops.mtu. It returns the
+ * maximum size of packets that can be handled by a NIC (before
+ * any fragmentation performed by the NIC).
+ * @dst_entry:   The route whose MTU is desired.
+ */
+unsigned int mock_mtu(const struct dst_entry *dst)
+{
+	/* Return an MTU that results in 1400 bytes of data per packet. */
+	return MOCK_MTU;
+}
+
+/**
  * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPV4 address to use as the sender of the packet, in
@@ -764,7 +790,8 @@ cycles_t mock_get_cycles(void)
 struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
-	int header_size, ip_size;
+	int header_size, ip_size, data_size, shinfo_size;
+	unsigned char *p;
 	
 	switch (h->type) {
 	case DATA:
@@ -795,17 +822,20 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
 	
-	/* Round up sizes to whole words for convenience. */
-	ip_size = (sizeof(struct iphdr) + 3) & ~3;
-	/* Round up extra data space to whole words for convenience. */
-	skb->head = malloc(ip_size + header_size + ((extra_bytes+3)&~3));
-	skb->data = skb->head + ip_size;
-	skb->network_header = ip_size - sizeof(struct iphdr);
-	skb->transport_header = ip_size;
-	skb->data = skb->head + ip_size;
+	ip_size = sizeof(struct iphdr);
+	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
+	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
+	skb->head = malloc(data_size + shinfo_size);
+	memset(skb->head, 0, data_size + shinfo_size);
+	skb->data = skb->head;
+	skb_reset_tail_pointer(skb);
+	skb->end = skb->tail + data_size;
+	skb_reserve(skb, ip_size);
+	skb_reset_transport_header(skb);
+	p = skb_put(skb, header_size);
 	memcpy(skb->data, h, header_size);
-	unit_fill_data(skb->data + header_size, extra_bytes, first_value);
-	skb->len = header_size + extra_bytes;
+	p = skb_put(skb, extra_bytes);
+	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
 	ip_hdr(skb)->saddr = saddr;
 	skb->_skb_refdst = 0;
@@ -880,38 +910,39 @@ void mock_teardown(void)
 	mock_xmit_log_verbose = 0;
 	mock_user_data[0] = 0;
 	user_address = 0;
+	mock_net_device.gso_max_size = MOCK_MTU;
 	
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)
-		FAIL("%u sk_buff(s) still in use after test", count);
+		FAIL(" %u sk_buff(s) still in use after test", count);
 	unit_hash_free(buffs_in_use);
 	buffs_in_use = NULL;
 	
 	count = unit_hash_size(kmallocs_in_use);
 	if (count > 0)
-		FAIL("%u kmalloced block(s) still allocated after test", count);
+		FAIL(" %u kmalloced block(s) still allocated after test", count);
 	unit_hash_free(kmallocs_in_use);
 	kmallocs_in_use = NULL;
 	
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)
-		FAIL("%u proc file(s) still allocated after test", count);
+		FAIL(" %u proc file(s) still allocated after test", count);
 	unit_hash_free(proc_files_in_use);
 	proc_files_in_use = NULL;
 	
 	count = unit_hash_size(routes_in_use);
 	if (count > 0)
-		FAIL("%u route(s) still allocated after test", count);
+		FAIL(" %u route(s) still allocated after test", count);
 	unit_hash_free(routes_in_use);
 	routes_in_use = NULL;
 	
 	count = unit_hash_size(vmallocs_in_use);
 	if (count > 0)
-		FAIL("%u vmalloced block(s) still allocated after test", count);
+		FAIL(" %u vmalloced block(s) still allocated after test", count);
 	unit_hash_free(vmallocs_in_use);
 	vmallocs_in_use = NULL;
 	
 	if (mock_active_locks > 0)
-		FAIL("%d locks still locked after test", mock_active_locks);
+		FAIL(" %d locks still locked after test", mock_active_locks);
 	mock_active_locks = 0;
 }

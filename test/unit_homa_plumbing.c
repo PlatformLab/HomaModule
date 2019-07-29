@@ -33,10 +33,11 @@ FIXTURE_SETUP(homa_plumbing)
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
-	                .dport = htons(self->server_port), .id = self->rpcid,
-			.type = DATA},
-		        .message_length = htonl(10000), .offset = 0,
-			.unscheduled = htonl(10000), .retransmit = 0};
+	                .dport = htons(self->server_port),
+			.type = DATA, .id = self->rpcid},
+			.message_length = htonl(10000),
+			.unscheduled = htonl(10000), .retransmit = 0,
+			.seg={.offset = 0}};
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_plumbing)

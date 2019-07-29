@@ -1,14 +1,14 @@
 # This script starts up the Homa module and configures it for the
 # local system. If Homa was previously installed, it is uninstalled.
 
-ip link set ens1f1 mtu 9000
-ip link set vlan279 mtu 9000
-rmmod homa
-insmod homa.ko
-sysctl /net/homa/link_mbps=25000
-sysctl /net/homa/max_nic_queue_ns=10000
-sysctl /net/homa/rtt_bytes=50000
-sysctl /net/homa/grant_increment=10000
-# sysctl /net/homa/pipeline_xmit=1
-cpupower frequency-set -g performance
-ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1
+sudo ip link set ens1f1 mtu 9000
+sudo ip link set vlan279 mtu 9000
+sudo rmmod homa
+sudo insmod homa.ko
+sudo sysctl /net/homa/link_mbps=25000
+sudo sysctl /net/homa/max_nic_queue_ns=10000
+sudo sysctl /net/homa/rtt_bytes=50000
+sudo sysctl /net/homa/grant_increment=30000
+# sudo sysctl /net/homa/pipeline_xmit=1
+sudo cpupower frequency-set -g performance
+sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1

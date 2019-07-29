@@ -108,12 +108,11 @@ void homa_timer(struct homa *homa)
 			resend.priority = homa->max_prio;
 			homa_xmit_control(RESEND, &resend, sizeof(resend), srpc);
 			if (homa->verbose) {
-				char addr_buffer[20];
-				homa_print_ipv4_addr(srpc->peer->addr);
 				printk(KERN_NOTICE "Homa server RESEND to "
 					"client %s:%d for id %llu, offset %d,"
 					"length %d",
-					addr_buffer, srpc->dport, srpc->id,
+					homa_print_ipv4_addr(srpc->peer->addr),
+					srpc->dport, srpc->id,
 					ntohl(resend.offset),
 					ntohl(resend.length));
 			}
@@ -123,7 +122,6 @@ void homa_timer(struct homa *homa)
 		list_for_each_entry_safe(crpc, tmp, &hsk->client_rpcs,
 				rpc_links) {
 			if (unlikely(print_active)) {
-				char addr_buffer[20];
 				int in_remaining = 0;
 				int in_granted = 0;
 				int out_sent = 0;
@@ -134,13 +132,13 @@ void homa_timer(struct homa *homa)
 				}
 				if (srpc->msgout.length >= 0)
 					out_sent =  srpc->msgout.next_offset;
-				homa_print_ipv4_addr(crpc->peer->addr);
 				printk(KERN_NOTICE "Active client RPC from "
 					"%s, port %u, id %llu, state %s, "
 					"silent %d, msgin remaining %d/%d, "
 					"granted %d, msgout sent %d/%d, "
 					"error %d\n",
-					addr_buffer, crpc->dport, crpc->id,
+					homa_print_ipv4_addr(crpc->peer->addr),
+					crpc->dport, crpc->id,
 					homa_symbol_for_state(crpc),
 					crpc->silent_ticks,
 					in_remaining, crpc->msgin.total_length,
@@ -222,7 +220,7 @@ void homa_timer(struct homa *homa)
 		bh_unlock_sock((struct sock *) hsk);
 	}
 	rcu_read_unlock();
-	if (print_active) {
+	if (print_active && num_active) {
 		printk(KERN_NOTICE "Found %d active Homa RPCs\n", num_active);
 	}
 	end = get_cycles();

@@ -10,13 +10,19 @@ Notes for Homa implementation in Linux:
   rc69: Henry's machine
 
 * Notes for GSO and GRO:
+  * Update homa_backlog_recv
   * Eventually eliminate HOMA_MAX_DATA_PER_PACKET
+  * Check that control packet sizes really are the same as small data packets.
+  * Reorganize common_header to pack the id into unused fields.
+  * Review and reconsider size calculation for sk_buffs.
+  * Limit GRO size for SRPT.
 
 * Possible performance improvements:
   * Pipeline data copying to/from user space with packet transmission/reception
   * Do the pacing from the sending thread?
 
 * Things to do:
+  * Don't grant to more than one message from a given sender at a time.
   * Improve timeout mechanism to work in the face of large numbers of
     outgoing messages:
     * Combine timeouts for a single target server.
@@ -356,3 +362,40 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
                 * Creates UDP header
                 * ip_output.c:ip_send_skb
                   * ip_local_out
+
+* Call stack down to driver for TCP sendmsg
+  tcp.c:             tcp_sendmsg
+  tcp.c:             tcp_sendmsg_locked
+  tcp_output.c:      tcp_push
+  tcp_output.c:      __tcp_push_pending_frames
+  tcp_output.c:      tcp_write_xmit
+  tcp_output.c:      __tcp_transmit_skb
+  ip_output.c:       ip_queue_xmit
+  ip_output.c:       ip_local_out
+  ip_output.c:       __ip_local_out
+  ip_output.c:       ip_output
+  ip_output.c:       ip_finish_output
+  ip_output.c:       ip_finish_output_gso
+  ip_output.c:       ip_finish_output2
+  neighbor.h:        neigh_output
+  neighbor.c:        neigh_resolve_output
+  dev.c:             dev_queue_xmit
+  dev.c:             __dev_queue_xmit
+  dev.c:             dev_hard_start_xmit
+  dev.c:             xmit_one
+  netdevice.h:       netdev_start_xmit
+  netdevice.h:       __netdev_start_xmit
+  vlan_dev.c:        vlan_dev_hard_start_xmit
+  dev.c:             dev_queue_xmit
+  dev.c:             __dev_queue_xmit
+  dev.c:             __dev_xmit_skb
+  sch_generic.c:     sch_direct_xmit
+  dev.c:             dev_hard_start_xmit
+  dev.c:             xmit_one
+  netdevice.h:       netdev_start_xmit
+  netdevice.h:       __netdev_start_xmit
+  en_tx.c:           mlx5e_xmit
+  
+Got TSO working in Homa
+Reworked data packets so that a single sk_buff can hold TSO data for
+multiple packets, with a separate inline header for each packet.

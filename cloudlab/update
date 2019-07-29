@@ -1,0 +1,16 @@
+#!/bin/sh
+# This script copies modified information from this directory to the
+# CloudLab machines given by the arguments (defaults are provided if no
+# arguments).
+
+if [ $# -eq 0 ]; then
+    targets="hp024.utah.cloudlab.us hp028.utah.cloudlab.us"
+else
+    targets=$*
+fi
+
+for t in $targets; do
+    echo $t
+    rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$t:homaModule/
+    rsync -rtv cloudlab/bin/start_xl170 cloudlab/bin/update_linux ouster@$t:homaModule/
+done

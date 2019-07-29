@@ -34,10 +34,12 @@ FIXTURE_SETUP(homa_utils)
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
-	                .dport = htons(self->server_port), .id = self->rpcid,
-			.type = DATA}, .message_length = htonl(10000), .offset = 0,
+	                .dport = htons(self->server_port),
+			.type = DATA, .id = self->rpcid},
+			.message_length = htonl(10000),
 			.unscheduled = htonl(10000), .cutoff_version = 0,
-		        .retransmit = 0};
+		        .retransmit = 0,
+			.seg = {.offset = 0}};
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_utils)
@@ -300,6 +302,28 @@ TEST_F(homa_utils, homa_print_ipv4_addr)
 	for (i = 0; i < 20; i++)
 		homa_print_ipv4_addr(unit_get_in_addr("5.6.7.8"));
 	EXPECT_STREQ("5.6.7.8", p1);
+}
+
+TEST_F(homa_utils, homa_snprintf)
+{
+	char buffer[50];
+	int used = 0;
+	used = homa_snprintf(buffer, sizeof32(buffer), used,
+			"Test message with values: %d and %d", 100, 1000);
+	EXPECT_EQ(38, used);
+	EXPECT_STREQ("Test message with values: 100 and 1000", buffer);
+	
+	used = homa_snprintf(buffer, sizeof32(buffer), used,
+			"; plus: %d", 123456);
+	EXPECT_EQ(49, used);
+	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
+			buffer);
+	
+	used = homa_snprintf(buffer, sizeof32(buffer), used,
+			"more text, none of which fits");
+	EXPECT_EQ(49, used);
+	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
+			buffer);
 }
 
 TEST_F(homa_utils, homa_append_metric)

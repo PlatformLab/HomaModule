@@ -56,7 +56,8 @@ void homa_message_in_destroy(struct homa_message_in *msgin)
 void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
-	int offset = ntohl(h->offset);
+	int offset = ntohl(h->seg.offset);
+	int data_bytes = ntohl(h->seg.segment_length);
 	struct sk_buff *skb2;
 	
 	/* Any data from the packet with offset less than this is
@@ -66,8 +67,6 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	/* Any data with offset >= this is useless. */
 	int ceiling = msgin->total_length;
 	
-	int data_bytes = skb->len - sizeof32(struct data_header);
-	
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
 	 * always will in practice, so work backwards from the end of the
@@ -75,7 +74,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	 */
 	skb_queue_reverse_walk(&msgin->packets, skb2) {
 		struct data_header *h2 = (struct data_header *) skb2->data;
-		int offset2 = ntohl(h2->offset);
+		int offset2 = ntohl(h2->seg.offset);
 		int data_bytes2 = skb2->len - sizeof32(struct data_header);
 		if (offset2 < offset) {
 			floor = offset2 + data_bytes2;
@@ -131,7 +130,7 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 	offset = 0;
 	skb_queue_walk(&msgin->packets, skb) {
 		struct data_header *h = (struct data_header *) skb->data;
-		int this_offset = ntohl(h->offset);
+		int this_offset = ntohl(h->seg.offset);
 		int data_in_packet;
 		int this_size = msgin->total_length - offset;
 		
@@ -194,10 +193,11 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	 * the first missing range.
 	 */
 	skb_queue_reverse_walk(&msgin->packets, skb) {
-		int offset = ntohl(((struct data_header *) skb->data)->offset);
-		int pkt_length, gap;
-		
-		pkt_length = skb->len - sizeof32(struct data_header);
+		struct data_header *h = (struct data_header *) skb->data;
+		int offset = ntohl(h->seg.offset);
+		int pkt_length = ntohl(h->seg.segment_length);
+		int gap;
+
 		if (pkt_length > (msgin->total_length - offset))
 			pkt_length = msgin->total_length - offset;
 		gap = end_offset - (offset + pkt_length);
@@ -313,8 +313,10 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	tt_record3("incoming data packet, id %llu, offset %d, size %d",
-			h->common.id, ntohl(h->offset), skb->len - sizeof32(*h));
+	tt_record3("incoming data packet, id %llu, offset %d, seg size %d",
+			h->common.id, ntohl(h->seg.offset),
+			ntohl(h->seg.segment_length));
+
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
@@ -401,7 +403,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
-	tt_record3("resend for id %llu, offset %d, length %d",
+	tt_record3("resend request for id %llu, offset %d, length %d",
 			(rpc != NULL) ? rpc->id : 0,
 			ntohl(h->offset), ntohl(h->length));
 

@@ -29,6 +29,9 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 		(6 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
 		(7 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT
 	};
+#ifndef __UNIT_TEST__
+	return;
+#endif
 #if 0
 	static int count = 0;
 	static int prio = 4;
@@ -61,7 +64,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 {
 	int bytes_left;
 	struct sk_buff *skb;
-	int err;
+	int err, mtu, max_pkt_data, gso_max;
 	struct sk_buff **last_link;
 	
 	rpc->msgout.length = len;
@@ -82,40 +85,87 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		goto error;
 	}
 	
-	/* Copy message data from user space and form packet buffers. */
+	mtu = dst_mtu(rpc->peer->dst);
+	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
+	gso_max = rpc->peer->dst->dev->gso_max_size;
+	
+	/* Copy message data from user space and form sk_buffs. Each
+	 * sk_buff may contain multiple data_segments, each of which will
+	 * turn into a separate packet, using either TSO in the NIC or
+	 * GSO in software.
+	 */
 	for (bytes_left = len, last_link = &rpc->msgout.packets;
-			bytes_left > 0;
-			bytes_left -= HOMA_MAX_DATA_PER_PACKET) {
+			bytes_left > 0; ) {
 		struct data_header *h;
-		__u32 cur_size = HOMA_MAX_DATA_PER_PACKET;
-		if (likely(cur_size > bytes_left)) {
-			cur_size = bytes_left;
-		}
-		skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
+		struct data_segment *seg;
+		int skb_size, available, last_pkt_length;
+		
+		if (likely(bytes_left <= max_pkt_data))
+			skb_size = mtu + HOMA_SKB_EXTRA;
+		else
+			skb_size = gso_max + HOMA_SKB_EXTRA;
+		
+		/* The sizeof32(void*) creates extra space for homa_next_skb. */
+		skb = alloc_skb(skb_size + sizeof32(void*), GFP_KERNEL);
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
 			goto error;
 		}
-		skb_reserve(skb, HOMA_SKB_RESERVE);
+		if (unlikely(bytes_left > max_pkt_data)) {
+			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
+					+ max_pkt_data;
+			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;
+		}
+		skb_shinfo(skb)->gso_segs = 0;
+			
+		skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
 		skb_reset_transport_header(skb);
-		h = (struct data_header *) skb_put(skb, sizeof(*h));
+		h = (struct data_header *) skb_put(skb,
+				sizeof(*h) - sizeof(struct data_segment));
 		h->common.sport = htons(sport);
 		h->common.dport = htons(rpc->dport);
-		h->common.id = rpc->id;
+		homa_set_doff(h);
 		h->common.type = DATA;
+		h->common.id = rpc->id;
 		h->message_length = htonl(rpc->msgout.length);
-		h->offset = htonl(rpc->msgout.length - bytes_left);
 		h->unscheduled = htonl(rpc->msgout.unscheduled);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
-		err = skb_add_data_nocache((struct sock *) rpc->hsk, skb, iter,
-				cur_size);
-		if (unlikely(skb->len < HOMA_MAX_HEADER))
-			skb_put(skb, HOMA_MAX_HEADER - skb->len);
-		if (unlikely(err != 0)) {
-			kfree_skb(skb);
-			goto error;
-		}
+		available = skb_size - HOMA_IPV4_HEADER_LENGTH
+			- (sizeof(*h) - sizeof(struct data_segment));
+		
+		/* Each iteration of the following loop adds one segment
+		 * to the buffer.
+		 */
+		do {
+			int seg_size;
+			seg = (struct data_segment *) skb_put(skb, sizeof(*seg));
+			seg->offset = htonl(rpc->msgout.length - bytes_left);
+			if (bytes_left <= max_pkt_data)
+				seg_size = bytes_left;
+			else
+				seg_size = max_pkt_data;
+			seg->segment_length = htonl(seg_size);
+			err = skb_add_data_nocache((struct sock *) rpc->hsk,
+					skb, iter, seg_size);
+			if (unlikely(err != 0)) {
+				kfree_skb(skb);
+				goto error;
+			}
+			bytes_left -= seg_size;
+			(skb_shinfo(skb)->gso_segs)++;
+			available -= sizeof32(*seg) + seg_size;
+		} while ((bytes_left > 0) && (((available - sizeof32(*seg))
+				>= max_pkt_data)
+				|| (available - sizeof32(*seg))
+				>= bytes_left));
+		
+		/* Make sure that the last segment won't result in a
+		 * packet that's too small.
+		 */
+		last_pkt_length = htonl(seg->segment_length) + sizeof32(*h);
+		if (unlikely(last_pkt_length < HOMA_MAX_HEADER))
+			skb_put(skb, HOMA_MAX_HEADER - last_pkt_length);
 		*last_link = skb;
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
@@ -232,10 +282,15 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	struct common_header *h;
 	int extra_bytes;
 	int result;
-	struct sk_buff *skb = alloc_skb(HOMA_SKB_SIZE, GFP_KERNEL);
+	
+	/* Allocate the same size sk_buffs as for the smallest data
+         * packets (better reuse of sk_buffs?).
+	 */
+	struct sk_buff *skb = alloc_skb(dst_mtu(peer->dst) + HOMA_SKB_EXTRA
+			+ sizeof32(void*), GFP_KERNEL);
 	if (unlikely(!skb))
 		return -ENOBUFS;
-	skb_reserve(skb, HOMA_SKB_RESERVE);
+	skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
 	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
 	memcpy(h, contents, length);
@@ -302,8 +357,10 @@ void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
-		rpc->msgout.next_offset += HOMA_MAX_DATA_PER_PACKET;
+		rpc->msgout.next_offset += skb->len
+				- sizeof32(struct data_header);
 		
+		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
 	}
 }
@@ -311,9 +368,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 /**
  * __homa_xmit_data() - Handles packet transmission stuff that is common
  * to homa_xmit_data and homa_resend_data.
- * @skb:      Packet to be sent. This function has no net impact on the
- *            reference count for the packet (i.e. the packet will not
- *            be freed).
+ * @skb:      Packet to be sent. The packet will be freed after transmission
+ *            (and also if errors prevented transmission).
  * @rpc:      Information about the RPC that the packet belongs to.
  * @priority: Priority level at which to transmit the packet.
  */
@@ -322,42 +378,25 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	int err;
 	struct data_header *h = (struct data_header *)
 			skb_transport_header(skb);
-		
-	if (skb_shared(skb)) {
-		/* The packet is still being transmitted due to a
-		 * previous call to this function; no need to do
-		 * anything here (and it may not be safe to retransmit
-		 * the packet, or even modify it, in this state).
-		 */
-		return;
-	}
+
 	set_priority(skb, priority);
 
 	/* Update cutoff_version in case it has changed since the
 	 * message was initially created.
 	 */
 	h->cutoff_version = rpc->peer->cutoff_version;
-
-	skb_get(skb);
 	
-	/* Fill in the skb's dst if it isn't already set (for original
-	 * transmission, it's never set already; for retransmits, it
-	 * may or may not have been cleared by ip_queue_xmit, depending
-	 * on IFF_XMIT_DST_RELEASE flag).
-	 */
-	if (skb_dst(skb) == NULL) {
-		dst_hold(rpc->peer->dst);
-		skb_dst_set(skb, rpc->peer->dst);
-	}
+	dst_hold(rpc->peer->dst);
+	skb_dst_set(skb, rpc->peer->dst);
+	skb->ip_summed = CHECKSUM_PARTIAL;
+	skb->csum_start = skb_transport_header(skb) - skb->head;
+	skb->csum_offset = offsetof(struct common_header, checksum);
 
-	/* Strip headers in front of the transport header (needed if
-	 * the packet is being retransmitted).
-	 */
-	if (skb_transport_offset(skb) > 0)
-		skb_pull(skb, skb_transport_offset(skb));
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
-	tt_record3("Finished queuing packet: rpc id %llu, offset %d, len %d",
-			h->common.id, ntohl(h->offset), skb->len);
+	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
+			"next_offset %d",
+			h->common.id, ntohl(h->seg.offset), skb->len,
+			rpc->msgout.next_offset);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 		
@@ -393,18 +432,63 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 {
 	struct sk_buff *skb;
 	
+	/* The nested loop below scans each data_segment in each
+	 * packet, looking for those that overlap the range of
+	 * interest.
+	 */
 	for (skb = rpc->msgout.packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
-		struct data_header *h = (struct data_header *)
-				skb_transport_header(skb);
-		int offset = ntohl(h->offset);
+		int seg_offset = (skb_transport_header(skb) - skb->head)
+				+ sizeof32(struct data_header)
+				- sizeof32(struct data_segment);
+		int offset, length, count;
+		struct data_segment *seg;
+		struct data_header *h;
 		
-		if ((offset + HOMA_MAX_DATA_PER_PACKET) <= start)
-			continue;
-		if (offset >= end)
-			break;
-		h->retransmit = 1;
-		__homa_xmit_data(skb, rpc, priority);
-		INC_METRIC(resent_packets, 1);
+		count = skb_shinfo(skb)->gso_segs;
+		if (count < 1)
+			count = 1;
+		for ( ; count > 0; count--,
+				seg_offset += sizeof32(*seg) + length) {
+			struct sk_buff *new_skb;
+			seg = (struct data_segment *) (skb->head + seg_offset);
+			offset = ntohl(seg->offset);
+			length = ntohl(seg->segment_length);
+			
+			if (end <= offset)
+				return;
+			if ((offset + length) <= start)
+				continue;
+			
+			/* This segment must be retransmitted. Copy it into
+			 * a clean sk_buff.
+			 */
+			new_skb = alloc_skb(length + sizeof(struct data_header)
+					+ HOMA_IPV4_HEADER_LENGTH
+					+ HOMA_SKB_EXTRA, GFP_KERNEL);
+			if (unlikely(!new_skb)) {
+				if (homa->verbose)
+					printk(KERN_NOTICE "homa_resend_data "
+						"couldn't allocate skb\n");
+				continue;
+			}
+			skb_reserve(new_skb, HOMA_IPV4_HEADER_LENGTH
+				+ HOMA_SKB_EXTRA);
+			skb_reset_transport_header(new_skb);
+			__skb_put_data(new_skb, skb_transport_header(skb),
+					sizeof32(struct data_header)
+					- sizeof32(struct data_segment));
+			__skb_put_data(new_skb, seg, sizeof32(*seg) + length);
+			if (unlikely(new_skb->len < HOMA_MAX_HEADER))
+					skb_put(new_skb, HOMA_MAX_HEADER
+					- new_skb->len);
+			h = ((struct data_header *) skb_transport_header(new_skb));
+			h->retransmit = 1;
+			tt_record3("retransmitting offset %d, length %d, id %d",
+					offset, length,
+					h->common.id & 0xffffffff);
+			__homa_xmit_data(new_skb, rpc, priority);
+			INC_METRIC(resent_packets, 1);
+		}
 	}
 }
 
@@ -446,7 +530,7 @@ void homa_update_idle_time(struct homa *homa, int bytes)
 	__u64 old_idle, new_idle, clock;
 	int cycles_for_packet;
 	
-	bytes += HOMA_MAX_IPV4_HEADER + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
+	bytes += HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
 	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
 	while (1) {
 		clock = get_cycles();
