@@ -264,7 +264,7 @@ TEST_F(timetrace, tt_proc_release__unfreeze)
 	EXPECT_EQ(2, tt_freeze_count.counter);
 	EXPECT_TRUE(tt_frozen);
 	EXPECT_NE(NULL, tt_buffers[1]->events[3].format);
-	EXPECT_EQ(1, tt_buffers[1]->next_index);
+	EXPECT_EQ(2, tt_buffers[1]->next_index);
 	
 	tt_proc_release(NULL, &file2);
 	EXPECT_EQ(0, tt_freeze_count.counter);

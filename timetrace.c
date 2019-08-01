@@ -153,6 +153,7 @@ void tt_destroy(void)
  */
 void tt_freeze(void)
 {
+	tt_record("timetrace frozen");
 	mutex_lock(&tt_mutex);
 	if (!tt_frozen) {
 		tt_frozen = true;
