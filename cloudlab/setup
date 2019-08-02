@@ -1,6 +1,8 @@
 #!/bin/sh
 # This script takes one or more node names as arguments, and copies various
 # files to those nodes to set them up for Homa experiments.
+# Everything in this script should now be in the update script, so this
+# file should go away (8/2019).
 
 for t in $*; do
     if [[ ! "$t" == *.* ]]; then
