@@ -14,7 +14,6 @@ Notes for Homa implementation in Linux:
   * Eventually eliminate HOMA_MAX_DATA_PER_PACKET
   * Check that control packet sizes really are the same as small data packets.
   * Reorganize common_header to pack the id into unused fields.
-  * Review and reconsider size calculation for sk_buffs.
   * Limit GRO size for SRPT.
 
 * Possible performance improvements:
@@ -396,6 +395,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   netdevice.h:       __netdev_start_xmit
   en_tx.c:           mlx5e_xmit
   
-Got TSO working in Homa
-Reworked data packets so that a single sk_buff can hold TSO data for
-multiple packets, with a separate inline header for each packet.

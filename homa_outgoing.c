@@ -565,6 +565,7 @@ int homa_pacer_main(void *transportInfo)
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links) == NULL) {
+			tt_record("pacer sleeping");
 			INC_METRIC(pacer_cycles, get_cycles() - start);
 			schedule();
 			start = get_cycles();

@@ -480,10 +480,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 
-	tt_record1("starting copy_data, %d bytes", rpc->msgin.total_length);
-	homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
-	tt_record("finished copy_data");
-	result = rpc->msgin.total_length;
+	tt_record1("starting copy_data, %d bytes in message",
+			rpc->msgin.total_length);
+	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
+	tt_record1("finished copy_data, copied %d bytes", result);
 	if (rpc->is_client) {
 		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
@@ -873,13 +873,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	}
 	h = (struct common_header *) skb->data;
 	
-	if (h->type == GRANT)
-		tt_record2("homa_pkt_recv got grant for id %d, offset %d",
-				h->id, ntohl(((struct grant_header *) h)->offset));
-	else
-		tt_record3("homa_pkt_recv starting on core %d, type %d, "
-				"length %d",
-				smp_processor_id(), h->type, length);
+	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
 
@@ -956,6 +950,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 
     done:
 	bh_unlock_sock(sk);
+        tt_record("homa_pkt_recv done");
 	return 0;
 
     discard:
@@ -1004,6 +999,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 		}
 	}
     done:
+	tt_record("homa_backlog_rcv done");
 	return 0;
 }
 
