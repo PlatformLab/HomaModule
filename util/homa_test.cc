@@ -196,7 +196,7 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request)
 void test_invoke(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id = 0;
-	char response[100000];
+	char response[1000000];
 	struct sockaddr_in server_addr;
 	int status;
 	ssize_t resp_length;
@@ -337,7 +337,7 @@ void test_read(int fd, int count)
 void test_rtt(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id;
-	char response[100000];
+	char response[1000000];
 	struct sockaddr_in server_addr;
 	int status;
 	ssize_t resp_length;
@@ -363,6 +363,9 @@ void test_rtt(int fd, struct sockaddr *dest, char *request)
 					strerror(errno));
 			return;
 		}
+		if (resp_length != length)
+			printf("Expected %d bytes in response, received %ld\n",
+					length, resp_length);
 	}
 	print_dist(times, count);
 	printf("Bandwidth at median: %.1f MB/sec\n",
