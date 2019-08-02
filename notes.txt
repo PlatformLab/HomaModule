@@ -10,14 +10,11 @@ Notes for Homa implementation in Linux:
   rc69: Henry's machine
 
 * Notes for GSO and GRO:
-  * Update homa_backlog_recv
-  * Eventually eliminate HOMA_MAX_DATA_PER_PACKET
   * Check that control packet sizes really are the same as small data packets.
   * Reorganize common_header to pack the id into unused fields.
   * Limit GRO size for SRPT.
 
 * Possible performance improvements:
-  * Pipeline data copying to/from user space with packet transmission/reception
   * Do the pacing from the sending thread?
 
 * Things to do:

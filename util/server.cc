@@ -132,6 +132,7 @@ void tcp_connection(int fd, struct sockaddr_in source)
 	int flag = 1;
 	char buffer[1000000];
 	int cur_length = 0;
+	bool streaming = false;
 	
 	int *int_buffer = reinterpret_cast<int*>(buffer);
 	if (verbose)
@@ -148,6 +149,19 @@ void tcp_connection(int fd, struct sockaddr_in source)
 		}
 		if (result == 0)
 			break;
+		
+		/* The connection can be used in two modes. If the first
+		 * word received is -1, then the connection is in streaming
+		 * mode: we just read bytes and throw them away. If the
+		 * first word isn't -1, then it's in message mode: we read
+		 * full messages and respond to them.
+		 */
+		if (streaming)
+			continue;
+		if (int_buffer[0] < 0) {
+			streaming = true;
+			continue;
+		}
 		cur_length += result;
 
 		/* First word of request contains expected length in bytes. */
@@ -170,12 +184,14 @@ void tcp_connection(int fd, struct sockaddr_in source)
 				printf("Received message from %s with %d "
 					"bytes\n",
 					print_address(&source), int_buffer[0]);
+			cur_length = 0;
+			if (int_buffer[1] <= 0)
+				continue;
 			if (write(fd, buffer, int_buffer[1]) != int_buffer[1]) {
 				printf("Socket write failed: %s\n",
 						strerror(errno));
 				exit(1);
 			};
-			cur_length = 0;
 		}
 	}
 	if (verbose)

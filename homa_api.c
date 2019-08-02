@@ -63,7 +63,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags, uint64_t *id,
 	struct homa_args_recv_ipv4 args;
 	int result;
 	
-	if (addrlen < sizeof(struct sockaddr_in)) {
+	if (src_addr && (addrlen < sizeof(struct sockaddr_in))) {
 		errno = EINVAL;
 		return -EINVAL;
 	}
