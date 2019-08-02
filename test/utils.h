@@ -2,6 +2,12 @@
 
 struct unit_hash;
 
+/**
+ * define UNIT_TEST_DATA_PER_PACKET - bytes of payload to use as the
+ * default for packets sent in unit tests.
+ */
+#define UNIT_TEST_DATA_PER_PACKET 1400
+
 extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
 			__be32 client_ip, __be32 server_ip, int server_port,

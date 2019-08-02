@@ -205,7 +205,7 @@ TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)
 	msgin.total_length = -1;
 	homa_get_resend_range(&msgin, &resend);
 	EXPECT_EQ(0, resend.offset);
-	EXPECT_EQ(HOMA_MAX_DATA_PER_PACKET, ntohl(resend.length));
+	EXPECT_EQ(100, ntohl(resend.length));
 }
 TEST_F(homa_incoming, homa_get_resend_range__various_gaps)
 {
@@ -339,7 +339,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 20000, 1600);
 	EXPECT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	
 	struct grant_header h = {{.sport = htons(self->server_port),
@@ -357,7 +357,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 20000, 1600);
 	EXPECT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	
 	struct common_header h = {.sport = htons(self->server_port),
@@ -425,8 +425,8 @@ TEST_F(homa_incoming, homa_data_pkt__send_grant)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100000, 1000);
 	EXPECT_NE(NULL, srpc);
-	EXPECT_STREQ("xmit GRANT 12600@0", unit_log_get());
-	EXPECT_EQ(12600, srpc->msgin.granted);
+	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
+	EXPECT_EQ(11400, srpc->msgin.granted);
 }
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {
@@ -703,7 +703,7 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 20000, 1600);
 	EXPECT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	
 	struct cutoffs_header h = {{.sport = htons(self->server_port),
@@ -850,7 +850,7 @@ TEST_F(homa_incoming, homa_manage_grants__pick_message_to_grant)
 	self->homa.max_overcommit = 4;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
-	EXPECT_STREQ("xmit GRANT 14000@1", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12800@1", unit_log_get());
 }
 TEST_F(homa_incoming, homa_manage_grants__choose_grant_offset)
 {
@@ -897,9 +897,9 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 			self->server_ip, self->client_port, 2, 30000, 100);
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 3, 20000, 100);
-	EXPECT_STREQ("xmit GRANT 12600@0; "
-			"xmit GRANT 12600@1; "
-			"xmit GRANT 12600@2", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11400@0; "
+			"xmit GRANT 11400@1; "
+			"xmit GRANT 11400@2", unit_log_get());
 
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
@@ -910,7 +910,7 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	srpc->msgin.bytes_remaining -= 1400;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
-	EXPECT_STREQ("xmit GRANT 14000@2", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12800@2", unit_log_get());
 }
 TEST_F(homa_incoming, homa_manage_grants__many_messages_of_same_size)
 {
@@ -950,7 +950,7 @@ TEST_F(homa_incoming, homa_manage_grants__grant_after_rpc_deleted)
 	EXPECT_NE(NULL, srpc);
 	unit_log_clear();
 	homa_rpc_free(srpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; xmit GRANT 12600@2",
+	EXPECT_STREQ("homa_remove_from_grantable invoked; xmit GRANT 11400@2",
 			unit_log_get());
 }
 

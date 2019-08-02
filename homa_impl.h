@@ -77,13 +77,6 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_MESSAGE_SIZE 1000000
 
-/**
- * define HOMA_MAX_DATA_PER_PACKET - The maximum amount of message data
- * that a single packet can hold (not including Homa's header, IP header,
- * etc.). This assumes Ethernet packet frames.
- */
-#define HOMA_MAX_DATA_PER_PACKET 1400
-
 /** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
 #define HOMA_IPV4_HEADER_LENGTH 20
 

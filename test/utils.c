@@ -7,6 +7,7 @@
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "mock.h"
+#include "utils.h"
 
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
@@ -58,8 +59,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		.seg = {.offset = 0}
 	};
 	
-	int this_size = (resp_length > HOMA_MAX_DATA_PER_PACKET)
-			? HOMA_MAX_DATA_PER_PACKET : resp_length;
+	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
+			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	h.seg.segment_length = htonl(this_size);
 	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
 			crpc);
@@ -70,12 +71,12 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		 * fit in a single packet.
 		 */
 		goto error;
-	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
+	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
 			bytes_received < resp_length;
-			bytes_received += HOMA_MAX_DATA_PER_PACKET) {
+			bytes_received += UNIT_TEST_DATA_PER_PACKET) {
 		this_size = resp_length - bytes_received;
-		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
-			this_size = HOMA_MAX_DATA_PER_PACKET;
+		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
+			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
 		homa_data_pkt(mock_skb_new(server_ip, &h.common,
@@ -284,14 +285,15 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.unscheduled = htonl(10000),
 		.cutoff_version = 0,
 		.retransmit = 0,
-		.seg = {.offset = 0, .segment_length = htonl(1400)}
+		.seg = {.offset = 0,
+		.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	if (!srpc)
 		return NULL;
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,
-			(req_length > HOMA_MAX_DATA_PER_PACKET)
-			? HOMA_MAX_DATA_PER_PACKET : req_length , 0),
+			(req_length > UNIT_TEST_DATA_PER_PACKET)
+			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
 			srpc);
 	if (srpc->state == state)
 		return srpc;
@@ -300,12 +302,12 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		 * only a single packet.
 		 */
 		goto error;
-	for (bytes_received = HOMA_MAX_DATA_PER_PACKET;
+	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
 			bytes_received < req_length;
-			bytes_received += HOMA_MAX_DATA_PER_PACKET) {
+			bytes_received += UNIT_TEST_DATA_PER_PACKET) {
 		int this_size = req_length - bytes_received;
-		if (this_size >  HOMA_MAX_DATA_PER_PACKET)
-			this_size = HOMA_MAX_DATA_PER_PACKET;
+		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
+			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
 		homa_data_pkt(mock_skb_new(client_ip, &h.common,

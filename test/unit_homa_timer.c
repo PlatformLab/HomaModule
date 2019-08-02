@@ -121,7 +121,7 @@ TEST_F(homa_timer, homa_timer__client_rpc_basics)
 	homa_timer(&self->homa);
 	homa_timer(&self->homa);
 	EXPECT_EQ(2, crpc->silent_ticks);
-	EXPECT_STREQ("xmit RESEND 0-1399@7", unit_log_get());
+	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
 	
 	/* Abort after timeout. */
 	unit_log_clear();

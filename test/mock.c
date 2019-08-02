@@ -8,6 +8,7 @@
 #include "homa_impl.h"
 #include "ccutils.h"
 #include "mock.h"
+#include "utils.h"
 
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -105,9 +106,11 @@ int cpu_number = 1;
 
 /**
  * define MOCK_MTU - Maximum packet size allowed by "network" (see
- * homa_message_out_init.
+ * homa_message_out_init; chosen so that data packets will have
+ * UNIT_TEST_DATA_PER_PACKET bytes of payload.
  */
-#define MOCK_MTU (1400 + HOMA_IPV4_HEADER_LENGTH + sizeof(struct data_header))
+#define MOCK_MTU (UNIT_TEST_DATA_PER_PACKET + HOMA_IPV4_HEADER_LENGTH \
+		+ sizeof(struct data_header))
 
 struct dst_ops mock_dst_ops = {.mtu = mock_mtu};
 struct net_device mock_net_device = {
@@ -762,13 +765,11 @@ cycles_t mock_get_cycles(void)
 
 /**
  * This function is invoked through dst->dst_ops.mtu. It returns the
- * maximum size of packets that can be handled by a NIC (before
- * any fragmentation performed by the NIC).
+ * maximum size of packets that the network can transmit.
  * @dst_entry:   The route whose MTU is desired.
  */
 unsigned int mock_mtu(const struct dst_entry *dst)
 {
-	/* Return an MTU that results in 1400 bytes of data per packet. */
 	return MOCK_MTU;
 }
 

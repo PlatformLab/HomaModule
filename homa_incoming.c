@@ -177,10 +177,12 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	
 	if (msgin->total_length < 0) {
 		/* Haven't received any data for this message; request
-		 * retransmission of just the first packet.
+		 * retransmission of just the first packet (the sender
+		 * will send at least one full packet, regardless of
+		 * the length below).
 		 */
 		resend->offset = 0;
-		resend->length = htonl(HOMA_MAX_DATA_PER_PACKET);
+		resend->length = htonl(100);
 		return;
 	}
 	

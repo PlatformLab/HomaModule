@@ -53,14 +53,14 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, "
-			"message_length 3000, offset 0, data_length 1400, unscheduled 11200, "
+			"message_length 3000, offset 0, data_length 1400, unscheduled 10000, "
 			"cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 1400, data_length 1400, "
-			"unscheduled 11200, cutoff_version 0; "
+			"unscheduled 10000, cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 2800, data_length 200, "
-			"unscheduled 11200, cutoff_version 0",
+			"unscheduled 10000, cutoff_version 0",
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->num_skbuffs);
 }
@@ -401,13 +401,13 @@ TEST_F(homa_outgoing, homa_resend_data)
 	homa_resend_data(crpc, 7000, 10000, 2);
 	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 7000, data_length 1400, "
-			"unscheduled 11200, cutoff_version 0, RETRANSMIT; "
+			"unscheduled 10000, cutoff_version 0, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 8400, data_length 1400, "
-			"unscheduled 11200, cutoff_version 0, RETRANSMIT; "
+			"unscheduled 10000, cutoff_version 0, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 9800, data_length 1400, "
-			"unscheduled 11200, cutoff_version 0, RETRANSMIT",
+			"unscheduled 10000, cutoff_version 0, RETRANSMIT",
 			unit_log_get());
 	
 	unit_log_clear();

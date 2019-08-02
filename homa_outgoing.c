@@ -500,12 +500,6 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 void homa_outgoing_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
-	
-	/* Round up rtt_bytes to the next full-size packet. */
-	int partial = homa->rtt_bytes % HOMA_MAX_DATA_PER_PACKET;
-	if (partial != 0) {
-		homa->rtt_bytes += HOMA_MAX_DATA_PER_PACKET - partial;
-	}
 		
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!

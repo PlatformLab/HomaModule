@@ -59,10 +59,8 @@ int homa_init(struct homa *homa)
 	homa->min_prio = 0;
 	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
 	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 200;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] =
-			2*HOMA_MAX_DATA_PER_PACKET;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] =
-			10*HOMA_MAX_DATA_PER_PACKET;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] = 2800;
+	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] = 15000;
 	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
 #ifdef __UNIT_TEST__
 	/* Unit tests won't send CUTOFFS messages unless the test changes
