@@ -130,7 +130,7 @@ void print_help(const char *name)
 void tcp_connection(int fd, struct sockaddr_in source)
 {
 	int flag = 1;
-	char buffer[1000000];
+	char buffer[50000];
 	int cur_length = 0;
 	bool streaming = false;
 	

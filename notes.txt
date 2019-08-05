@@ -12,12 +12,14 @@ Notes for Homa implementation in Linux:
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
   * Reorganize common_header to pack the id into unused fields.
-  * Limit GRO size for SRPT.
 
 * Possible performance improvements:
   * Do the pacing from the sending thread?
 
 * Things to do:
+  * More work related to GSO/GRO:
+    * Add configuration option to limit MTU
+    * Add new kernel call to combine send message & wait reply?
   * Don't grant to more than one message from a given sender at a time.
   * Improve timeout mechanism to work in the face of large numbers of
     outgoing messages:
@@ -317,7 +319,7 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
     that the body be copied to a particular spot.
   * Provide a batching mechanism to avoid a kernel call for each message?
 
-* What happens when a socket is closed?1G
+* What happens when a socket is closed?
   * socket.c:sock_close
     * socket.c:sock_release
       * proto_ops.release -> af_inet.c:inet_release)

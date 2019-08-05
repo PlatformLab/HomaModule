@@ -181,6 +181,11 @@ transmits full-size packets.
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.
 .TP
+.IR max_gso_size
+An integer value setting an upper limit on the size of an output packet,
+before segmentation using GSO. The Linux networking layer already imposes
+an upper limit; this configuration value can be used to reduce it further.
+.TP
 .IR max_nic_queue_ns
 An integer value specifying a NIC queue length in units of nanoseconds
 (how long it will take the existing packets in the queue

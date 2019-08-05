@@ -167,6 +167,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "max_gso_size",
+		.data		= &homa_data.max_gso_size,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "max_nic_queue_ns",
 		.data		= &homa_data.max_nic_queue_ns,
 		.maxlen		= sizeof(int),
@@ -492,7 +499,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc->state = RPC_IN_SERVICE;
 	}
 	release_sock(sk);
-	tt_record1("homa_ioc_recv finished on core %d", smp_processor_id());
+	tt_record2("homa_ioc_recv finished on core %d, id %u",
+			smp_processor_id(), rpc->id & 0xffffffff);
 	return result;
 	
 error:

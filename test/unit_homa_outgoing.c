@@ -73,6 +73,19 @@ TEST_F(homa_outgoing, homa_message_out_init__message_too_long)
 	EXPECT_EQ(EINVAL, -PTR_ERR(crpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
 }
+TEST_F(homa_outgoing, homa_message_out_init__max_gso_size_limit)
+{
+	mock_net_device.gso_max_size = 10000;
+	self->homa.max_gso_size = 3000;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 5000, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	unit_log_message_out_packets(&crpc->msgout, 0);
+	EXPECT_STREQ("DATA P1 1400@0 1400@1400; "
+			"DATA P1 1400@2800 800@4200",
+			unit_log_get());
+}
 TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_small_skb)
 {
 	mock_alloc_skb_errors = 1;

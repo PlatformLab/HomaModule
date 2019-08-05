@@ -1,8 +1,8 @@
 # This script starts up the Homa module and configures it for the
 # local system. If Homa was previously installed, it is uninstalled.
 
-sudo ip link set ens1f1 mtu 9000
-sudo ip link set vlan279 mtu 9000
+sudo ip link set ens1f1 mtu 1500
+sudo ip link set vlan279 mtu 1500
 sudo rmmod homa
 sudo insmod homa.ko
 sudo sysctl /net/homa/link_mbps=25000

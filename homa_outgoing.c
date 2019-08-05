@@ -88,6 +88,8 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 	mtu = dst_mtu(rpc->peer->dst);
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
 	gso_max = rpc->peer->dst->dev->gso_max_size;
+	if (gso_max > rpc->hsk->homa->max_gso_size)
+		gso_max = rpc->hsk->homa->max_gso_size;
 	
 	/* Copy message data from user space and form sk_buffs. Each
 	 * sk_buff may contain multiple data_segments, each of which will
@@ -176,7 +178,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		if (rpc->hsk->homa->pipeline_xmit)
 			homa_xmit_data(rpc, false);
 	}
-	tt_record("Output message initialized");
+	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
 	return 0;
 	
     error:

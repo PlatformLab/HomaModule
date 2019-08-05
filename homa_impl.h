@@ -1102,6 +1102,13 @@ struct homa {
 	int pipeline_xmit;
 	
 	/**
+	 * @max_gso_size: Maximum number of bytes that will be included
+	 * in a single output packet. Can be set externally via sysctl to
+	 * lower the limit already enforced by Linux.
+	 */
+	int max_gso_size;
+	
+	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
 	 * and updates to @metrics.
 	 */

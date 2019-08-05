@@ -825,7 +825,11 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 	release_sock((struct sock *) hsk);
 	schedule();
 	__set_current_state(TASK_RUNNING);
-	tt_record("homa_wait_for_message woke up");
+	if (*rpc != NULL)
+		tt_record1("homa_wait_for_message woke up, id %d",
+				(*rpc)->id & 0xffffffff);
+	else
+		tt_record("homa_wait_for_message woke up, rpc NULL");
 	lock_sock((struct sock *) hsk);
 
 	/* Step 3: back from sleeping; cleanup interests, then see
@@ -879,7 +883,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	if ((rpc->interest != NULL) && (*rpc->interest->rpc == NULL)) {
 		*rpc->interest->rpc = rpc;
 		wake_up_process(rpc->interest->thread);
-		tt_record("wake_up_process finished");
+		tt_record1("wake_up_process finished, id %u",
+				rpc->id & 0xfffffffff);
 		return;
 	}
 	
@@ -900,7 +905,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		}
 		*interest->rpc = rpc;
 		wake_up_process(interest->thread);
-		tt_record("wake_up_process finished");
+		tt_record1("wake_up_process finished, id %u",
+				rpc->id & 0xfffffffff);
 		return;
 	}
 	
