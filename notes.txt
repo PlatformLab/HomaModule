@@ -9,6 +9,19 @@ Notes for Homa implementation in Linux:
   rc75: up-to-date
   rc69: Henry's machine
 
+* Design notes for clusterperf:
+  * Options:
+    * Protocol: TCP or Homa
+    * # client nodes
+    * # server nodes
+    * Run clients and servers together, vs. separate nodes
+    * # client threads/node
+    * # server threads/node
+    * Request size distribution
+    * Target network bandwidth utilization at servers (or just run clients
+      flat out)
+    * Max outstanding requests per client thread
+
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
   * Reorganize common_header to pack the id into unused fields.
