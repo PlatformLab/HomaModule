@@ -2,8 +2,8 @@
 
 CFLAGS := -Wall -Werror -fno-strict-aliasing -O3 -I..
 
-BINS := buffer_client buffer_server get_time_trace homa_test \
-        receive_raw scratch send_raw server \
+BINS := buffer_client buffer_server cp_node get_time_trace \
+	homa_test receive_raw scratch send_raw server \
         test_time_trace use_memory
 
 OBJS := $(patsubst %,%.o,$(BINS))

@@ -21,6 +21,18 @@ Notes for Homa implementation in Linux:
     * Target network bandwidth utilization at servers (or just run clients
       flat out)
     * Max outstanding requests per client thread
+  * Basic client operation:
+    * One thread sends requests
+    * A separate thread waits for responses
+  * Precompute information about request sizes, servers, intervals
+  * Each server has a control connection (TCP) over which it receives commands.
+    * When the connection closes, the server exits
+    * If a connection isn't opened within a certain time interval, the
+      server exits.
+    * Commands:
+      * Start recording (everything before this is just warm-up)
+      * Dump log
+  * Do asynchronous writes for TCP to avoid head-of-line blocking?
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
