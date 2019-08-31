@@ -16,6 +16,8 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
+#include <atomic>
+#include <random>
 #include <thread>
 #include <vector>
 
@@ -23,16 +25,18 @@
 #include "test_utils.h"
 
 /* Command-line parameter values: */
-
 int client_threads = 1;
 const char *dist_file = "foo.bar";
 bool is_server = false;
 int id = -1;
-int max_requests = 50;
+uint32_t max_requests = 50;
 double net_util = 0.8;
 const char *protocol = "homa";
 int server_threads = 1;
 int server_nodes = 1000;
+
+/** @rand_gen: random number generator. */
+std::mt19937 rand_gen(12345);
 
 /**
  * struct tcp_connection - Manages state information for one incoming TCP
@@ -66,6 +70,134 @@ struct tcp_connection {
  * Entries are dynamically allocated.
  */
 std::vector<struct tcp_connection *> tcp_connections;
+
+/**
+ * @server_addrs: Internet addresses for each of the server threads available
+ * to receive a Homa RPC.
+ */
+std::vector<struct sockaddr_in> server_addrs;
+
+/**
+ * class homa_client - Holds information about a single Homa client,
+ * which consists of one thread issuing requests and one thread receiving
+ * responses. 
+ */
+class homa_client {
+    public:
+	homa_client();
+	void receiver();
+	void sender();
+	
+	/** @fd: file descriptor for Homa socket. */
+	int fd;
+	
+	/**
+	 * @request_servers: a randomly chosen collection of indexes into
+	 * server_addrs; used to select the server for each outgoing request.
+	 */
+	std::vector<int16_t> request_servers;
+
+	/**
+	 * @next_server: index into request_servers of the server to use for
+	 * the next outgoing RPC.
+	 */
+	uint32_t next_server;
+	
+	/**
+	 * @request_lengths: a randomly chosen collection of lengths to
+	 * use for outgoing RPCs. Precomputed to save time during the
+	 * actual measurements, and based on a given distribution.
+	 * Note: lengths are always at least 4 (this is needed in order
+	 * to include a 32-bit timestamp in the request).
+	 */
+	std::vector<int> request_lengths;
+
+	/**
+	 * @cnext_length: index into request_lengths of the length to use for
+	 * the next outgoing RPC.
+	 */
+	uint32_t next_length;
+	
+	/**
+	 * @request_intervals: a randomly chosen collection of inter-request
+	 * intervals, measured in rdtsc cycles. Precomputed to save time
+	 * during the actual measurements, and chosen to achieve a given
+	 * network utilization, assuming a given distribution of request
+	 * lengths.
+	 */
+	std::vector<int> request_intervals;
+
+	/**
+	 * @next_interval: index into request_lengths of the length to use for
+	 * the next outgoing RPC.
+	 */
+	uint32_t next_interval;
+	
+	/**
+	 * @actual_lengths: a circular buffer that holds the actual payload
+	 * sizes used for the most recent RPCs.
+	 */
+	std::vector<int> actual_lengths;
+	
+	/**
+	 * @actual_rtts: a circular buffer that holds the actual round trip
+	 * times (measured in rdtsc cycles) for the most recent RPCs. Entries
+	 * in this array correspond to those in @actual_lengths.
+	 */
+	std::vector<uint32_t> actual_rtts;
+	
+	/**
+	 * @next_result: index into both actual_lengths and actual_rtts
+	 * where info about the next RPC completion will be stored.
+	 */
+	uint32_t next_result;
+	
+	/** @requests: total number of RPCs issued so far. */
+	uint64_t requests;
+	
+	/** @responses: total number of responses received so far. */
+	std::atomic<uint64_t> responses;
+	
+	/**
+	 * @response_data: total number of bytes of data in responses
+	 * received so far.
+	 */
+	uint64_t response_data;
+	
+	/**
+	 * @total_rtt: sum of round-trip times (in rdtsc cycles) for
+	 * all responses received so far.
+	 */
+	uint64_t total_rtt;
+};
+
+/** @homa_clients: keeps track of all existing clients. */
+std::vector<homa_client *> homa_clients;
+
+/**
+ * @last_stats_time: time (in rdtsc cycles) when we last printed
+ * staticsics.
+ */
+uint64_t last_stats_time;
+
+/**
+ * @last_client_rpcs: total number of client RPCS completed by this
+ * application as of the last time we printed statistics.
+ */
+uint64_t last_client_rpcs;
+
+/**
+ * @last_client_rpcs: total amount of data in client RPCS completed by this
+ * application as of the last time we printed statistics.
+ */
+uint64_t last_client_data;
+
+/**
+ * @last_total_elapsed: total amount of elapsed time for all client RPCs
+ * issued by this application (in units of rdtsc cycles), as of the last
+ * time we printed statistics.
+ */
+uint64_t last_total_rtt;
 
 /**
  * print_help() - Print out usage information for this program.
@@ -380,6 +512,135 @@ void tcp_server(int port)
 	}
 }
 
+/** homa_client::homa_client() - Constructor for homa_client objects. */
+homa_client::homa_client()
+	: fd(-1)
+        , request_servers()
+        , next_server(0)
+        , request_lengths()
+        , next_length(0)
+        , request_intervals()
+	, next_interval(0)
+        , actual_lengths(500000, 0)
+        , actual_rtts(500000, 0)
+        , next_result(0)
+        , requests(0)
+        , responses(0)
+        , response_data(0)
+{
+	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n", strerror(errno));
+	}
+	
+	/* Precompute information about the requests this client will
+	 * generate. Pick a different prime number for the size of each
+	 * vector, so that they will wrap at different times, giving
+	 * different combinations of values over time.
+	 */
+#define NUM_SERVERS 4729
+#define NUM_LENGTHS 7207
+#define NUM_INTERVALS 8783
+	std::uniform_int_distribution<int> server_dist(0,
+			static_cast<int>(server_addrs.size() - 1));
+	request_servers.reserve(NUM_SERVERS);
+	for (int i = 0; i < NUM_SERVERS; i++)
+		request_servers.push_back(server_dist(rand_gen));
+	request_lengths.push_back(100);
+	request_intervals.push_back(0);
+	
+	std::thread sender(&homa_client::sender, this);
+	sender.detach();
+	std::thread receiver(&homa_client::receiver, this);
+	receiver.detach();
+}
+
+/**
+ * homa_client::sender() - Invoked as the top-level method in a thread;
+ * invokes a pseudo-random stream of RPCs continuously.
+ */
+void homa_client::sender()
+{
+	uint32_t request[1000000/sizeof(uint32_t)];
+	uint64_t next_start = 0;
+	
+	while (1) {
+		uint64_t now;
+		uint64_t id;
+		
+		/* Wait until (a) we have reached the next start time
+		 * and (b) there aren't too many requests outstanding.
+		 */
+		while (1) {
+			now = rdtsc();
+			if (now < next_start)
+				continue;
+			if ((requests - responses) < max_requests)
+				break;
+		}
+		
+		/* Store the low-order bits of the send timestamp in
+		 * the request; it will be returned in the response and
+		 * used by the receiver.
+		 */
+		request[0] = now & 0xffffffff;
+		int status = homa_send(fd, request, request_lengths[next_length],
+			reinterpret_cast<struct sockaddr *>(
+			&server_addrs[request_servers[next_server]]),
+			sizeof(server_addrs[0]), &id);
+		if (status < 0) {
+			printf("Error in homa_send: %s\n",
+				strerror(errno));
+			exit(1);
+		}
+		requests++;
+		next_server++;
+		if (next_server >= request_servers.size())
+			next_server = 0;
+		next_length++;
+		if (next_length >= request_lengths.size())
+			next_length = 0;
+		next_start = now + request_intervals[next_interval];
+		next_interval++;
+		if (next_interval >= request_intervals.size())
+			next_interval = 0;
+	}
+}
+
+/**
+ * homa_client::receiver() - Invoked as the top-level method in a thread
+ * that waits for RPC responses and then logs statistics about them.
+ */
+void homa_client::receiver()
+{
+	uint32_t response[1000000/sizeof(uint32_t)];
+	uint64_t id;
+	struct sockaddr_in server_addr;
+	
+	while (1) {
+		id = 0;
+		int length = homa_recv(fd, response, sizeof(response),
+				HOMA_RECV_RESPONSE, &id,
+				(struct sockaddr *) &server_addr,
+				sizeof(server_addr));
+		if (length < 0) {
+			printf("Error in homa_recv: %s\n",
+				strerror(errno));
+			exit(1);
+		}
+		uint32_t elapsed = rdtsc() & 0xffffffff;
+		elapsed -= response[0];
+		responses++;
+		response_data += length;
+		total_rtt += elapsed;
+		actual_lengths[next_result] = length;
+		actual_rtts[next_result] = elapsed;
+		next_result++;
+		if (next_result >= actual_lengths.size())
+			next_result = 0;
+	}
+}
+
 int main(int argc, char** argv)
 {
 	int next_arg, i;
@@ -449,7 +710,66 @@ int main(int argc, char** argv)
 			}
 		}
 	}
-	sleep(1000);
+	
+	/* Initialize server_addrs. */
+	for (int node = 1; node <= server_nodes; node++) {
+		char host[100];
+		struct addrinfo hints;
+		struct addrinfo *matching_addresses;
+		struct sockaddr_in *dest;
+
+		snprintf(host, sizeof(host), "node-%d", node);
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_DGRAM;
+		int status = getaddrinfo(host, NULL, &hints,
+				&matching_addresses);
+		if (status != 0) {
+			printf("Couldn't look up address for %s: %s\n",
+					host, gai_strerror(status));
+			exit(1);
+		}
+		dest = reinterpret_cast<struct sockaddr_in *>
+				(matching_addresses->ai_addr);
+		for (int thread = 0; thread < server_threads; thread++) {
+			dest->sin_port = htons(4000+thread);
+			server_addrs.push_back(*dest);
+		}
+	}
+	
+	/* Create clients. */
+	if (strcmp(protocol, "homa") == 0) {
+		for (i = 0; i < client_threads; i++)
+			homa_clients.push_back(new homa_client);
+	}
+	
+	/* Print a few statistics every second. */
+	while (1) {
+		sleep(1);
+		uint64_t client_rpcs = 0;
+		uint64_t client_data = 0;
+		uint64_t total_rtt = 0;
+		uint64_t now = rdtsc();
+		for (homa_client *client: homa_clients) {
+			client_rpcs += client->responses;
+			client_data += client->response_data;
+			total_rtt += client->total_rtt;
+		}
+		if ((last_stats_time != 0) && (client_data > 0)) {
+			double elapsed = to_seconds(now - last_stats_time);
+			double rpcs = (double) (client_rpcs - last_client_rpcs);
+			double data = (double) (client_data - last_client_data);
+			double rtt =  to_seconds(total_rtt - last_total_rtt)
+				/ rpcs;
+			printf("%.2f Kops/sec, %.2f MB/sec, avg. RTT %.2f usec\n",
+				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rtt*1e06);
+		}
+		last_stats_time = now;
+		last_client_rpcs = client_rpcs;
+		last_client_data = client_data;
+		last_total_rtt = total_rtt;
+	}
 	exit(0);
 }
 
