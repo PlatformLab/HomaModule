@@ -315,8 +315,11 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	tt_record3("incoming data packet, id %llu, offset %d, seg size %d",
-			h->common.id, ntohl(h->seg.offset),
+	tt_record4("incoming data packet, id %llu, port %d, offset %d, "
+			"seg size %d", h->common.id,
+			rpc->is_client ? rpc->hsk->client_port
+			: rpc->hsk->server_port,
+			ntohl(h->seg.offset),
 			ntohl(h->seg.segment_length));
 
 	if (rpc->state != RPC_INCOMING) {
@@ -408,6 +411,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	tt_record3("resend request for id %llu, offset %d, length %d",
 			(rpc != NULL) ? rpc->id : 0,
 			ntohl(h->offset), ntohl(h->length));
+	tt_freeze();
 
 	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
@@ -415,6 +419,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			/* Send RESTART. */
 			struct restart_header restart;
 			struct homa_peer *peer;
+			
+			if (hsk->homa->verbose)
+				printk(KERN_NOTICE "sending RESTART to client "
+						"%s:%d for id %llu",
+						homa_print_ipv4_addr(
+						ip_hdr(skb)->saddr),
+						h->common.sport, h->common.id);
 			restart.common.sport = h->common.dport;
 			restart.common.dport = h->common.sport;
 			restart.common.id = h->common.id;
@@ -459,13 +470,22 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
  */
 void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
+	int err;
 	tt_record1("Received restart for id %llu", rpc->id);
+	if (rpc->hsk->homa->verbose)
+		printk(KERN_NOTICE "Restarting rpc to server %s:%d, id %llu",
+				homa_print_ipv4_addr(rpc->peer->addr),
+				rpc->dport, rpc->id);
 	if (rpc->state != RPC_READY) {
 		homa_remove_from_grantable(rpc->hsk->homa, rpc);
 		homa_message_in_destroy(&rpc->msgin);
-		homa_message_out_reset(&rpc->msgout);
-		rpc->state = RPC_OUTGOING;
-		homa_xmit_data(rpc, true);
+		err = homa_message_out_reset(rpc);
+		if (err) {
+			homa_rpc_abort(rpc, err);
+		} else {
+			rpc->state = RPC_OUTGOING;
+			homa_xmit_data(rpc, true);
+		}
 	}
 	kfree_skb(skb);
 }
@@ -883,8 +903,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	if ((rpc->interest != NULL) && (*rpc->interest->rpc == NULL)) {
 		*rpc->interest->rpc = rpc;
 		wake_up_process(rpc->interest->thread);
-		tt_record1("wake_up_process finished, id %u",
-				rpc->id & 0xfffffffff);
+//		tt_record1("wake_up_process finished, id %u",
+//				rpc->id & 0xfffffffff);
 		return;
 	}
 	
@@ -905,8 +925,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		}
 		*interest->rpc = rpc;
 		wake_up_process(interest->thread);
-		tt_record1("wake_up_process finished, id %u",
-				rpc->id & 0xfffffffff);
+//		tt_record1("wake_up_process finished, id %u",
+//				rpc->id & 0xfffffffff);
 		return;
 	}
 	

@@ -4,7 +4,7 @@
 # arguments).
 
 if [ $# -eq 0 ]; then
-    targets="hp067.utah.cloudlab.us hp069.utah.cloudlab.us hp062.utah.cloudlab.us"
+    targets="hp177.utah.cloudlab.us hp163.utah.cloudlab.us hp192.utah.cloudlab.us"
 else
     targets=$*
 fi

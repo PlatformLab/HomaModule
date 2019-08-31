@@ -9,6 +9,7 @@ sudo sysctl /net/homa/link_mbps=25000
 sudo sysctl /net/homa/max_nic_queue_ns=10000
 sudo sysctl /net/homa/rtt_bytes=50000
 sudo sysctl /net/homa/grant_increment=10000
+sudo sysctl /net/homa/verbose=1
 # sudo sysctl /net/homa/pipeline_xmit=1
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1

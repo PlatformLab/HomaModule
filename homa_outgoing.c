@@ -178,7 +178,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		if (rpc->hsk->homa->pipeline_xmit)
 			homa_xmit_data(rpc, false);
 	}
-	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
+//	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
 	return 0;
 	
     error:
@@ -189,23 +189,61 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 /**
  * homa_message_out_reset() - Reset a homa_message_out to its initial state,
  * as if no packets had been sent. Data for the message is preserved.
- * @msgout:    Struct to reset. Must have been successfully initialized in
- *             the past, and some packets may have been transmitted since
- *             then.
+ * @rpc:    RPC whose msgout must be reset. Must be a client RPC that was
+ *          successfully initialized in the past, and some packets may have
+ *          been transmitted since then.
+ * 
+ * Return:  Zero for success, or a negative error status.
  */
-void homa_message_out_reset(struct homa_message_out *msgout)
+int homa_message_out_reset(struct homa_rpc *rpc)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb, *next;
+	struct sk_buff **last_link;
+	int err = 0;
+	struct homa_message_out *msgout = &rpc->msgout;
+	struct data_header *h;
+	
+	/* Copy all of the sk_buffs in the message. This is necessary because
+	 * some of the sk_buffs may already have been transmitted once;
+	 * retransmitting these is risky, because the underlying stack
+	 * layers make modifications that aren't idempotent (such as adding
+	 * additional headers).
+	 */
+	last_link = &msgout->packets;
+	for (skb = msgout->packets; skb != NULL; skb = next) {
+		struct sk_buff *new_skb;
+		int length = skb_tail_pointer(skb) - skb_transport_header(skb);
+		new_skb = alloc_skb(length + HOMA_IPV4_HEADER_LENGTH
+				+ HOMA_SKB_EXTRA, GFP_KERNEL);
+		if (unlikely(!new_skb)) {
+			err = -ENOMEM;
+			if (rpc->hsk->homa->verbose)
+				printk(KERN_NOTICE "homa_message_out_reset "
+					"couldn't allocate new skb");
+		} else {
+			skb_reserve(new_skb, HOMA_IPV4_HEADER_LENGTH
+				+ HOMA_SKB_EXTRA);
+			skb_reset_transport_header(new_skb);
+			__skb_put_data(new_skb, skb_transport_header(skb),
+					length);
+			h = ((struct data_header *)
+					skb_transport_header(new_skb));
+			h->retransmit = 0;
+			*last_link = new_skb;
+			last_link = homa_next_skb(new_skb);
+		}
+		next = *homa_next_skb(skb);
+		kfree_skb(skb);
+	}
+	*last_link = NULL;
+	
 	msgout->next_packet = msgout->packets;
 	msgout->next_offset = 0;
 	msgout->granted = msgout->unscheduled;
 	if (msgout->granted > msgout->length)
 		msgout->granted = msgout->length;
-	for (skb = msgout->packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
-		struct data_header *h = (struct data_header *)
-				skb_transport_header(skb);
-		h->retransmit = 0;
-	}
+	
+	return err;
 }
 
 /**
@@ -395,10 +433,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->csum_offset = offsetof(struct common_header, checksum);
 
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
-	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
-			"next_offset %d",
-			h->common.id, ntohl(h->seg.offset), skb->len,
-			rpc->msgout.next_offset);
+//	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
+//			"next_offset %d",
+//			h->common.id, ntohl(h->seg.offset), skb->len,
+//			rpc->msgout.next_offset);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 		
@@ -544,7 +582,8 @@ void homa_update_idle_time(struct homa *homa, int bytes)
 /**
  * homa_pacer_thread() - Top-level function for the pacer thread.
  * @transportInfo:  Pointer to struct homa.
- * @return:         Always 0.
+ *
+ * Return:         Always 0.
  */
 int homa_pacer_main(void *transportInfo)
 {
@@ -561,12 +600,12 @@ int homa_pacer_main(void *transportInfo)
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links) == NULL) {
-			tt_record("pacer sleeping");
+//			tt_record("pacer sleeping");
 			INC_METRIC(pacer_cycles, get_cycles() - start);
 			schedule();
 			start = get_cycles();
-			tt_record1("pacer woke up on core %d",
-					smp_processor_id());
+//			tt_record1("pacer woke up on core %d",
+//					smp_processor_id());
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);
@@ -690,5 +729,5 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 done:
 	spin_unlock_bh(&homa->throttle_lock);
 	wake_up_process(homa->pacer_kthread);
-	tt_record("woke up pacer thread");
+//	tt_record("woke up pacer thread");
 }

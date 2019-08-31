@@ -190,7 +190,7 @@ struct common_header {
 } __attribute__((packed));
 
 /** 
-* struct data_segment - Wire format for a chunk of data that is part of
+ * struct data_segment - Wire format for a chunk of data that is part of
  * a DATA packet. A single sk_buff can hold multiple data_segments in order
  * to enable send and receive offload (the idea is to carry many network
  * packets of info in a single traversal of the Linux networking stack).
@@ -212,11 +212,9 @@ struct data_segment {
 	char data[0];
 } __attribute__((packed));
 
-/* struct data_header - Overall header format for a DATA sk_buff. A single
- * sk_buff can hold multiple data_segments in order to enable send and
- * receive offload (the idea is to carry many network packets of info in
- * a single traversal of the Linux networking stack). A DATA sk_buff
- * contains a common_header followed by any number of data_segments.*/
+/* struct data_header - Overall header format for a DATA sk_buff, which
+ * contains this header followed by any number of data_segments.
+ */
 struct data_header {
 	struct common_header common;
 	
@@ -1377,7 +1375,7 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_rpc *rpc, int sport,
 			size_t len, struct iov_iter *iter);
-extern void     homa_message_out_reset(struct homa_message_out *msgout);
+extern int      homa_message_out_reset(struct homa_rpc *rpc);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 			size_t length, loff_t *offset);

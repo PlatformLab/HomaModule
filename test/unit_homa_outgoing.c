@@ -165,7 +165,7 @@ TEST_F(homa_outgoing, homa_message_out_init__xmit_packets)
 			unit_log_get());
 }
 
-TEST_F(homa_outgoing, homa_message_out_reset)
+TEST_F(homa_outgoing, homa_message_out_reset__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, RPC_OUTGOING,
 		self->client_ip, self->server_ip, self->server_port,
@@ -174,10 +174,27 @@ TEST_F(homa_outgoing, homa_message_out_reset)
 	homa_xmit_data(crpc, true);
 	EXPECT_EQ(3000, crpc->msgout.next_offset);
 	crpc->msgout.granted = 0;
-	homa_message_out_reset(&crpc->msgout);
-	EXPECT_EQ(0, crpc->msgout.next_offset);
+	homa_message_out_reset(crpc);
 	EXPECT_EQ(3000, crpc->msgout.granted);
 	EXPECT_EQ(crpc->msgout.packets, crpc->msgout.next_packet);
+	unit_log_clear();
+	unit_log_message_out_packets(&crpc->msgout, 0);
+	EXPECT_STREQ("DATA P1 1400@0; DATA P1 1400@1400; DATA P1 200@2800",
+			unit_log_get());
+}
+TEST_F(homa_outgoing, homa_message_out_reset__cant_allocate_skb)
+{
+	int err;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+		self->client_ip, self->server_ip, self->server_port,
+		1111, 3000, 100);
+	EXPECT_NE(NULL, crpc);
+	mock_alloc_skb_errors = 2;
+	err = homa_message_out_reset(crpc);
+	EXPECT_EQ(ENOMEM, -err);
+	unit_log_clear();
+	unit_log_message_out_packets(&crpc->msgout, 0);
+	EXPECT_STREQ("DATA P1 1400@0; DATA P1 200@2800", unit_log_get());
 }
 
 TEST_F(homa_outgoing, homa_set_priority)

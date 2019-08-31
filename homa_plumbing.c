@@ -445,7 +445,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int result;
 	struct homa_rpc *rpc = NULL;
 
-	tt_record1("homa_ioc_recv starting on core %d", smp_processor_id());
+//	tt_record1("homa_ioc_recv starting on core %d", smp_processor_id());
 //	if (hsk->homa->temp[0] > 0) {
 //		hsk->homa->temp[0]--;
 //		if (hsk->homa->temp[0] == 0)
@@ -487,20 +487,21 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 
-	tt_record1("starting copy_data, %d bytes in message",
-			rpc->msgin.total_length);
+//	tt_record1("starting copy_data, %d bytes in message",
+//			rpc->msgin.total_length);
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
-	tt_record1("finished copy_data, copied %d bytes", result);
+//	tt_record1("finished copy_data, copied %d bytes", result);
 	if (rpc->is_client) {
 		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
-		tt_record("homa_rpc_free finished");
+//		tt_record("homa_rpc_free finished");
 	} else {
 		rpc->state = RPC_IN_SERVICE;
 	}
 	release_sock(sk);
-	tt_record2("homa_ioc_recv finished on core %d, id %u",
-			smp_processor_id(), rpc->id & 0xffffffff);
+	tt_record3("homa_ioc_recv finished on core %d, id %u, port %d",
+			smp_processor_id(), rpc->id & 0xffffffff,
+			rpc->is_client ? hsk->client_port : hsk->server_port);
 	return result;
 	
 error:
@@ -528,10 +529,10 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	int err = 0;
 	struct homa_rpc *srpc;
 
-	tt_record1("homa_ioc_reply starting on core %d",
-		smp_processor_id());
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
+	tt_record3("homa_ioc_reply starting on core %d, id %llu, port %d",
+		smp_processor_id(), args.id, hsk->server_port);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -614,9 +615,9 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_xmit_data(crpc, true);
-	tt_record("About to reap");
+//	tt_record("About to reap");
 	homa_rpc_reap(hsk);
-	tt_record("reaping finished");
+//	tt_record("reaping finished");
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
@@ -881,7 +882,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	}
 	h = (struct common_header *) skb->data;
 	
-	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
+//	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
 
@@ -958,7 +959,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 
     done:
 	bh_unlock_sock(sk);
-        tt_record("homa_pkt_recv done");
+//        tt_record("homa_pkt_recv done");
 	return 0;
 
     discard:
@@ -983,7 +984,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	struct sk_buff *others;
 	
-	tt_record("homa_backlog_rcv invoked");
+//	tt_record("homa_backlog_rcv invoked");
 	others = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {
@@ -1007,7 +1008,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 		}
 	}
     done:
-	tt_record("homa_backlog_rcv done");
+//	tt_record("homa_backlog_rcv done");
 	return 0;
 }
 

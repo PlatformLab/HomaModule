@@ -5,7 +5,7 @@
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-#define TT_KERNEL 1
+// #define TT_KERNEL 1
 #endif
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;

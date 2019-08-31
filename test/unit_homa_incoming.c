@@ -660,7 +660,7 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 			"xmit DATA retrans P4 1400@1400", unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_restart_pkt_basics)
+TEST_F(homa_incoming, homa_restart_pkt__basics)
 {
 	struct restart_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
@@ -695,6 +695,24 @@ TEST_F(homa_incoming, homa_restart_pkt__rpc_ready)
 			self->server_ip, &h.common, 0, 0));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_STREQ("READY", homa_symbol_for_state(crpc));
+}
+TEST_F(homa_incoming, homa_restart_pkt__error)
+{
+	struct restart_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = self->rpcid, .type = RESTART}};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 2000, 2000);
+	EXPECT_NE(NULL, crpc);
+	homa_xmit_data(crpc, true);
+	unit_log_clear();
+	
+	mock_alloc_skb_errors = 1;
+	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
+			self->server_ip, &h.common, 0, 0));
+	EXPECT_STREQ("READY", homa_symbol_for_state(crpc));
+	EXPECT_EQ(ENOMEM, -crpc->error);
 }
 	
 TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
