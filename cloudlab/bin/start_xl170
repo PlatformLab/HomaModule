@@ -13,3 +13,4 @@ sudo sysctl /net/homa/verbose=1
 # sudo sysctl /net/homa/pipeline_xmit=1
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1
+rm -f ~/.homa_metrics
