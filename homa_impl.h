@@ -63,12 +63,12 @@ enum homa_packet_type {
 	RESTART            = 23,
 	BUSY               = 24,
 	CUTOFFS            = 25,
-	BOGUS              = 26,      /* Used only in unit tests. */
+	FREEZE             = 26,
+	BOGUS              = 27,      /* Used only in unit tests. */
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
-	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
-	 * 3. Add support in new_buff in unit/unit_utils.cc
+	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.q
 	 */
 };
 
@@ -388,6 +388,19 @@ _Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
 		"cutoffs_header too large");
 
 /**
+ * struct freeze_header - Wire format for FREEZE packets.
+ * 
+ * These packets tell the recipient to freeze its timetrace; used
+ * for debugging.
+ */
+struct freeze_header {
+	/** @common: Fields common to all packet types. */
+	struct common_header common;
+} __attribute__((packed));
+_Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
+		"freeze_header too large");
+
+/**
  * struct homa_message_out - Describes a message (either request or response)
  * for which this machine is the sender.
  */
@@ -671,13 +684,13 @@ struct homa_socktab {
 	
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
-	 * consist of homa_sock_link objects.
+	 * consist of homa_socktab_link objects.
 	 */
 	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
 };
 
 /**
- * struct homa_sock_links - Used to link homa_socks into the hash chains
+ * struct homa_socktab_links - Used to link homa_socks into the hash chains
  * of a homa_socktab.
  */
 struct homa_socktab_links {

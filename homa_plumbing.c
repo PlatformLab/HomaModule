@@ -881,6 +881,15 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		goto discard;
 	}
 	h = (struct common_header *) skb->data;
+	if (unlikely(h->type == FREEZE)) {
+		/* Check for FREEZE here, rather than in homa_incoming.c,
+		 * so it will work even for unknown RPCs and sockets.
+		 */
+		tt_record3("Received freeze request on port %d from 0x%x:%d",
+				ntohs(h->dport), saddr, ntohs(h->sport));
+		tt_freeze();
+		goto discard;
+	}
 	
 //	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
 //	printk(KERN_NOTICE "incoming Homa packet: %s\n",

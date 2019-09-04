@@ -498,15 +498,19 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 				ntohl(h->unsched_cutoffs[7]),
 				ntohs(h->cutoff_version));
 		break;
-	}}
+	}
+	case FREEZE:
+		/* Nothing to add here. */
+		break;
+	}
 	buffer[buf_len-1] = 0;
 	return buffer;
 }
 
 /**
- * homa_print_packet() - Print a human-readable string describing the
- * information in a Homa packet. This function generates a more
- * abbreviated description than homa_print_packet.
+ * homa_print_packet_short() - Print a human-readable string describing the
+ * information in a Homa packet. This function generates a shorter
+ * description than homa_print_packet.
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
  * @buf_len: Number of bytes available at @buffer.
@@ -566,6 +570,9 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	case CUTOFFS: 
 		snprintf(buffer, buf_len, "CUTOFFS");
+		break;
+	case FREEZE:
+		snprintf(buffer, buf_len, "FREEZE");
 		break;
 	default:
 		snprintf(buffer, buf_len, "unknown packet type %d",
@@ -662,6 +669,8 @@ char *homa_symbol_for_type(uint8_t type)
 		return "BUSY";
 	case CUTOFFS:
 		return "CUTOFFS";
+	case FREEZE:
+		return "FREEZE";
 	}
 	
 	/* Using a static buffer can produce garbled text under concurrency,
