@@ -4,7 +4,7 @@
 # arguments).
 
 if [ $# -eq 0 ]; then
-    targets="hp177.utah.cloudlab.us hp163.utah.cloudlab.us hp192.utah.cloudlab.us"
+    targets="hp004.utah.cloudlab.us hp032.utah.cloudlab.us hp034.utah.cloudlab.us"
 else
     targets=$*
 fi
@@ -12,6 +12,9 @@ fi
 for t in $targets; do
     echo $t
     rsync -rtv --exclude-from=rsync-exclude.txt ./ ouster@$t:homaModule/
+done
+for t in $targets; do
+    echo $t
     rsync -rtv cloudlab/bin/start_xl170 cloudlab/bin/update_linux ouster@$t:homaModule/
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then

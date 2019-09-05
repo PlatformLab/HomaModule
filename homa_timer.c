@@ -12,7 +12,7 @@ void homa_timer(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
-	struct homa_rpc *srpc, *crpc, *tmp;
+	struct homa_rpc *rpc, *tmp;
 	struct resend_header resend;
 	cycles_t start, end;
 	bool print_active = false;
@@ -31,8 +31,7 @@ void homa_timer(struct homa *homa)
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.
 		 */
-		if (list_empty(&hsk->server_rpcs)
-				&& list_empty(&hsk->client_rpcs))
+		if (list_empty(&hsk->active_rpcs))
 			continue;
 		bh_lock_sock_nested((struct sock *) hsk);
 		if (unlikely(sock_owned_by_user((struct sock *) hsk))) {
@@ -40,168 +39,149 @@ void homa_timer(struct homa *homa)
 			continue;
 		}
 		
-		/* Server RPCs*/
-		list_for_each_entry_safe(srpc, tmp, &hsk->server_rpcs,
+		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				rpc_links) {
+			const char *us, *them;
 			if (unlikely(print_active)) {
 				int in_remaining = 0;
 				int in_granted = 0;
 				int out_sent = 0;
-				if (srpc->msgin.total_length > 0) {
+				if (rpc->msgin.total_length > 0) {
 					in_remaining =
-						srpc->msgin.bytes_remaining;
-					in_granted = srpc->msgin.granted;
+						rpc->msgin.bytes_remaining;
+					in_granted = rpc->msgin.granted;
 				}
-				if (srpc->msgout.length >= 0)
-					out_sent =  srpc->msgout.next_offset;
-				printk(KERN_NOTICE "Active server RPC to "
+				if (rpc->msgout.length >= 0)
+					out_sent =  rpc->msgout.next_offset;
+				printk(KERN_NOTICE "Active %s RPC, peer "
 					"%s, port %u, id %llu, state %s, "
 					"silent %d, msgin remaining %d/%d "
-					"granted %d, msgout sent %d/%d\n",
-					homa_print_ipv4_addr(srpc->peer->addr),
-					srpc->dport, srpc->id,
-					homa_symbol_for_state(srpc),
-					srpc->silent_ticks,
-					in_remaining, srpc->msgin.total_length,
-					in_granted, out_sent,
-					srpc->msgout.length);
-				num_active++;
-			}
-			if ((srpc->state == RPC_READY)
-					|| (srpc->state == RPC_IN_SERVICE)) {
-				/* Nothing to worry about while we are
-				 * servicing the RPC.
-				 */
-				continue;
-			}
-			srpc->silent_ticks++;
-			if (srpc->silent_ticks < homa->resend_ticks)
-				continue;
-			if ((srpc->state == RPC_INCOMING)
-					&& ((srpc->msgin.total_length
-					- srpc->msgin.bytes_remaining)
-					>= srpc->msgin.granted)) {
-				/* We've received everything that we've
-				 * granted, so we shouldn't expect to hear
-				 * anything until we grant more.
-				 */
-				srpc->silent_ticks = 0;
-				continue;
-			}
-			if (srpc->silent_ticks >= homa->abort_ticks) {
-				if (homa->verbose)
-					printk(KERN_NOTICE "Homa server RPC "
-						"timeout, client %s:%d, id %llu",
-						homa_print_ipv4_addr(srpc->peer->addr),
-						srpc->dport, srpc->id);
-				INC_METRIC(server_rpc_timeouts, 1);
-				homa_rpc_free(srpc);
-				continue;
-			}
-
-			/* Don't send RESENDs in RPC_OUTGOING: it's up to
-			 * the client to handle this.
-			 */
-			if (srpc->state != RPC_INCOMING)
-				continue;
-			homa_get_resend_range(&srpc->msgin, &resend);
-			resend.priority = homa->max_prio;
-			homa_xmit_control(RESEND, &resend, sizeof(resend), srpc);
-			if (homa->verbose) {
-				printk(KERN_NOTICE "Homa server RESEND to "
-					"client %s:%d for id %llu, offset %d,"
-					"length %d",
-					homa_print_ipv4_addr(srpc->peer->addr),
-					srpc->dport, srpc->id,
-					ntohl(resend.offset),
-					ntohl(resend.length));
-			}
-		}
-		
-		/* Client RPCs*/
-		list_for_each_entry_safe(crpc, tmp, &hsk->client_rpcs,
-				rpc_links) {
-			if (unlikely(print_active)) {
-				int in_remaining = 0;
-				int in_granted = 0;
-				int out_sent = 0;
-				if (srpc->msgin.total_length > 0) {
-					in_remaining =
-						srpc->msgin.bytes_remaining;
-					in_granted = srpc->msgin.granted;
-				}
-				if (srpc->msgout.length >= 0)
-					out_sent =  srpc->msgout.next_offset;
-				printk(KERN_NOTICE "Active client RPC from "
-					"%s, port %u, id %llu, state %s, "
-					"silent %d, msgin remaining %d/%d, "
 					"granted %d, msgout sent %d/%d, "
 					"error %d\n",
-					homa_print_ipv4_addr(crpc->peer->addr),
-					crpc->dport, crpc->id,
-					homa_symbol_for_state(crpc),
-					crpc->silent_ticks,
-					in_remaining, crpc->msgin.total_length,
+					rpc->is_client ? "client" : "server",
+					homa_print_ipv4_addr(rpc->peer->addr),
+					rpc->dport, rpc->id,
+					homa_symbol_for_state(rpc),
+					rpc->silent_ticks,
+					in_remaining, rpc->msgin.total_length,
 					in_granted, out_sent,
-					crpc->msgout.length, crpc->error);
+					rpc->msgout.length, rpc->error);
 				num_active++;
 			}
-			crpc->silent_ticks++;
-			if (crpc->silent_ticks < homa->resend_ticks)
+			if ((rpc->state == RPC_READY)
+					|| (rpc->state == RPC_IN_SERVICE)) {
+				rpc->silent_ticks = 0;
 				continue;
-			if (crpc->msgout.next_offset < crpc->msgout.granted) {
-				/* We haven't transmitted all of the granted
-				 * bytes in the request, so there's no need
-				 * to be concerned about the lack of traffic
-				 * from the server.
+			}
+			rpc->silent_ticks++;
+			if (rpc->silent_ticks < homa->resend_ticks)
+				continue;
+			if (rpc->is_client) {
+				if (rpc->msgout.next_offset < rpc->msgout.granted) {
+					/* We haven't transmitted all of the
+					 * granted bytes in the request, so
+					 * there's no need to be concerned about
+					 * the lack of traffic from the server.
+					 */
+					rpc->silent_ticks = 0;
+					continue;
+				}
+				if ((rpc->state == RPC_INCOMING)
+						&& ((rpc->msgin.total_length
+						- rpc->msgin.bytes_remaining)
+						>= rpc->msgin.granted)) {
+					/* We've received everything that we've
+					 * granted, so we shouldn't expect to
+					 * hear anything until we grant more.
+					 * However, if we don't communicate with
+					 * the server, it will eventually
+					 * timeout and discard the response. To
+					 * prevent this, send a BUSY packet.
+					 */
+					struct busy_header busy;
+					homa_xmit_control(BUSY, &busy, sizeof(busy),
+							rpc);
+					rpc->silent_ticks = 0;
+					continue;
+				}
+				if (rpc->silent_ticks >= homa->abort_ticks) {
+					if (homa->verbose)
+						printk(KERN_NOTICE
+							"Homa client RPC "
+							"timeout, server %s:%d, "
+							"id %llu",
+							homa_print_ipv4_addr(
+							rpc->peer->addr),
+							rpc->dport, rpc->id);
+					tt_record2("Client RPC timeout, id "
+							"%llu, port %d",
+							rpc->id, rpc->dport);
+					INC_METRIC(client_rpc_timeouts, 1);
+					homa_rpc_abort(rpc, -ETIMEDOUT);
+					continue;
+				}
+			} else {
+				/* Server RPC */
+				if ((rpc->state == RPC_INCOMING)
+						&& ((rpc->msgin.total_length
+						- rpc->msgin.bytes_remaining)
+						>= rpc->msgin.granted)) {
+					/* We've received everything that we've
+					 * granted, so we shouldn't expect to
+					 * hear anything until we grant more.
+					 */
+					rpc->silent_ticks = 0;
+					continue;
+				}
+				if (rpc->silent_ticks >= homa->abort_ticks) {
+					if (homa->verbose)
+						printk(KERN_NOTICE
+							"Homa server RPC "
+							"timeout, client %s:%d, "
+							"id %llu",
+							homa_print_ipv4_addr(
+							rpc->peer->addr),
+							rpc->dport, rpc->id);
+					INC_METRIC(server_rpc_timeouts, 1);
+					homa_rpc_free(rpc);
+					continue;
+				}
+
+				/* Don't send RESENDs in RPC_OUTGOING: it's up
+				 * to the client to handle this.
 				 */
-				crpc->silent_ticks = 0;
-				continue;
+				if (rpc->state != RPC_INCOMING)
+					continue;
 			}
-			if ((crpc->state == RPC_INCOMING)
-					&& ((crpc->msgin.total_length
-					- crpc->msgin.bytes_remaining)
-					>= crpc->msgin.granted)) {
-				/* We've received everything that we've
-				 * granted, so we shouldn't expect to hear
-				 * anything until we grant more. However,
-				 * if we don't communicate with the server, it
-				 * will eventually timeout and discard the
-				 * response. To prevent this, send a BUSY
-				 * packet.
-				 */
-				struct busy_header busy;
-				homa_xmit_control(BUSY, &busy, sizeof(busy),
-						crpc);
-				crpc->silent_ticks = 0;
-				continue;
-			}
-			if (crpc->state == RPC_READY) {
-				crpc->silent_ticks = 0;
-				continue;
-			}
-			if (crpc->silent_ticks >= homa->abort_ticks) {
-				if (homa->verbose)
-					printk(KERN_NOTICE "Homa client RPC "
-						"timeout, server %s:%d, id %llu",
-						homa_print_ipv4_addr(crpc->peer->addr),
-						crpc->dport, crpc->id);
-				INC_METRIC(client_rpc_timeouts, 1);
-				homa_rpc_abort(crpc, -ETIMEDOUT);
-				continue;
-			}
-			homa_get_resend_range(&crpc->msgin, &resend);
+			
+			/* Must issue a RESEND. */
+			homa_get_resend_range(&rpc->msgin, &resend);
 			resend.priority = homa->max_prio;
-			homa_xmit_control(RESEND, &resend, sizeof(resend),
-					crpc);
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa client RESEND to "
-					"server %s:%d for id %llu, offset %d,"
-					"length %d",
-					homa_print_ipv4_addr(crpc->peer->addr),
-					crpc->dport, crpc->id,
+			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+			if (rpc->is_client) {
+				us = "server";
+				them = "client";
+				tt_record3("Sent RESEND for client RPC id "
+						"%llu, server 0x%x:%d",
+						rpc->id, htonl(rpc->peer->addr),
+						rpc->dport);
+			} else {
+				us = "client";
+				them = "server";
+				tt_record3("Sent RESEND for server RPC id "
+						"%llu, server 0x%x:%d",
+						rpc->id, htonl(rpc->peer->addr),
+						rpc->dport);
+			}
+			if (homa->verbose) {
+				printk(KERN_NOTICE "Homa %s RESEND to "
+					"%s %s:%d for id %llu, offset %d,"
+					"length %d", us, them,
+					homa_print_ipv4_addr(rpc->peer->addr),
+					rpc->dport, rpc->id,
 					ntohl(resend.offset),
 					ntohl(resend.length));
+			}
 		}
 		if (print_active) {
 			struct list_head *pos;

@@ -35,7 +35,7 @@ FIXTURE_TEARDOWN(homa_timer)
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
-TEST_F(homa_timer, homa_timer__server_rpc__basics)
+TEST_F(homa_timer, homa_timer__basics)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
@@ -60,11 +60,21 @@ TEST_F(homa_timer, homa_timer__server_rpc__basics)
 	unit_log_clear();
 	srpc->silent_ticks = self->homa.abort_ticks - 1;
 	homa_timer(&self->homa);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_get_metrics()->server_rpc_timeouts);
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }
-TEST_F(homa_timer, homa_timer__server_rpc__rpc_in_service)
+TEST_F(homa_timer, homa_timer__rpc_ready)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 200);
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, crpc->silent_ticks);
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__rpc_in_service)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
@@ -74,6 +84,47 @@ TEST_F(homa_timer, homa_timer__server_rpc__rpc_in_service)
 	EXPECT_EQ(0, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 	
+}
+TEST_F(homa_timer, homa_timer__client_rpc__granted_bytes_not_sent)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 200);
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(1, crpc->silent_ticks);
+	EXPECT_STREQ("", unit_log_get());
+	
+	unit_log_clear();
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, crpc->silent_ticks);
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__client_rpc__all_granted_bytes_received)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 100, 5000);
+	unit_log_clear();
+	crpc->msgin.granted = 1400;
+	homa_timer(&self->homa);
+	EXPECT_EQ(1, crpc->silent_ticks);
+	EXPECT_STREQ("", unit_log_get());
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, crpc->silent_ticks);
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
+}
+TEST_F(homa_timer, homa_timer__client_rpc__all_granted_bytes_received2)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 200, 10000);
+	unit_log_clear();
+	crpc->msgin.granted = 1000;
+	crpc->silent_ticks = 5;
+	homa_timer(&self->homa);
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
+	EXPECT_EQ(0, crpc->silent_ticks);
 }
 TEST_F(homa_timer, homa_timer__server_rpc__all_granted_bytes_received)
 {
@@ -97,77 +148,4 @@ TEST_F(homa_timer, homa_timer__server_rpc__all_granted_bytes_received2)
 	homa_timer(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, srpc->silent_ticks);
-}
-
-TEST_F(homa_timer, homa_timer__client_rpc_basics)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 5000, 200);
-	unit_log_clear();
-	homa_timer(&self->homa);
-	EXPECT_EQ(1, crpc->silent_ticks);
-	EXPECT_STREQ("", unit_log_get());
-	
-	/* Don't send RESEND: granted bytes not sent. */
-	unit_log_clear();
-	homa_timer(&self->homa);
-	EXPECT_EQ(0, crpc->silent_ticks);
-	EXPECT_STREQ("", unit_log_get());
-	
-	/* Send RESEND: granted bytes now sent. */
-	homa_xmit_data(crpc, true);
-	unit_log_clear();
-	homa_timer(&self->homa);
-	homa_timer(&self->homa);
-	EXPECT_EQ(2, crpc->silent_ticks);
-	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
-	
-	/* Abort after timeout. */
-	unit_log_clear();
-	crpc->silent_ticks = self->homa.abort_ticks - 1;
-	homa_timer(&self->homa);
-	EXPECT_EQ(self->homa.abort_ticks, crpc->silent_ticks);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"sk->sk_data_ready invoked", unit_log_get());
-	EXPECT_EQ(RPC_READY, crpc->state);
-	EXPECT_EQ(ETIMEDOUT, -crpc->error);
-}
-TEST_F(homa_timer, homa_timer__all_granted_bytes_received)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 100, 5000);
-	unit_log_clear();
-	crpc->msgin.granted = 1400;
-	homa_timer(&self->homa);
-	EXPECT_EQ(1, crpc->silent_ticks);
-	EXPECT_STREQ("", unit_log_get());
-	homa_timer(&self->homa);
-	EXPECT_EQ(0, crpc->silent_ticks);
-	EXPECT_STREQ("xmit BUSY", unit_log_get());
-}
-TEST_F(homa_timer, homa_timer__all_granted_bytes_received2)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 200, 10000);
-	unit_log_clear();
-	crpc->msgin.granted = 1000;
-	crpc->silent_ticks = 5;
-	homa_timer(&self->homa);
-	EXPECT_STREQ("xmit BUSY", unit_log_get());
-	EXPECT_EQ(0, crpc->silent_ticks);
-}
-TEST_F(homa_timer, homa_timer__rpc_ready)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 5000, 200);
-	unit_log_clear();
-	homa_timer(&self->homa);
-	EXPECT_EQ(1, crpc->silent_ticks);
-	homa_timer(&self->homa);
-	EXPECT_EQ(0, crpc->silent_ticks);
-	EXPECT_STREQ("", unit_log_get());
 }

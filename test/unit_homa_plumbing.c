@@ -53,7 +53,7 @@ TEST_F(homa_plumbing, homa_pkt_recv__packet_too_short)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	skb->len = 12;
 	homa_pkt_recv(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_pkt_recv__unknown_socket)
 {
@@ -61,7 +61,7 @@ TEST_F(homa_plumbing, homa_pkt_recv__unknown_socket)
 	self->data.common.dport = 100;
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_pkt_recv(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_pkt_recv__use_backlog)
 {
@@ -70,7 +70,7 @@ TEST_F(homa_plumbing, homa_pkt_recv__use_backlog)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	EXPECT_EQ(NULL, self->hsk.inet.sk.sk_backlog.head);
 	homa_pkt_recv(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(skb, self->hsk.inet.sk.sk_backlog.head);
 	kfree_skb(self->hsk.inet.sk.sk_backlog.head);
 	release_sock((struct sock *) &self->hsk);

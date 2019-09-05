@@ -274,7 +274,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc)
 {
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
 			self->client_ip, &self->data.common, 1400, 0));
-	EXPECT_EQ(1, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, mock_skb_count());
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__existing_server_rpc)
@@ -301,7 +301,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__cant_create_rpc)
 	mock_kmalloc_errors = 1;
 	homa_pkt_dispatch((struct sock *) &self->hsk, mock_skb_new(
 			self->client_ip, &self->data.common, 1400, 0));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.server_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(0, mock_skb_count());
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__cutoffs_for_unknown_client_rpc)
@@ -527,7 +527,7 @@ TEST_F(homa_incoming, homa_grant_pkt__delete_server_rpc)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	EXPECT_NE(NULL, srpc);
-	EXPECT_FALSE(list_empty(&self->hsk.server_rpcs));
+	EXPECT_FALSE(list_empty(&self->hsk.active_rpcs));
 
 	struct grant_header h = {{.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
@@ -536,7 +536,7 @@ TEST_F(homa_incoming, homa_grant_pkt__delete_server_rpc)
 			.priority = 3};
 	homa_pkt_dispatch((struct sock *)&self->hsk,
 			mock_skb_new(self->client_ip, &h.common, 0, 0));
-	EXPECT_TRUE(list_empty(&self->hsk.server_rpcs));
+	EXPECT_TRUE(list_empty(&self->hsk.active_rpcs));
 }
 
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_client)

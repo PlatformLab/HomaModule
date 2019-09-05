@@ -57,11 +57,6 @@ Notes for Homa implementation in Linux:
   * Learn about security stuff, and functions that need to be called for this.
   * Learn about memory management for sk_buffs: how many is it OK to have?
     * See tcp_out_of_memory.
-  * Initially using simple lists for all tables; will need to replace with
-    something more efficient.
-    * homa_sock_find: now a hash table.
-    * homa_find_server_rpc: list search
-    * homa_find_client_rpc: list search
   * Eventually initialize homa.next_client_port to something random
   * Define a standard mechanism for returning errors:
     * Socket not supported on server (or server process ends while

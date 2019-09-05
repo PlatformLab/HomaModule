@@ -46,7 +46,7 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 			&self->server_addr, 3000, NULL);
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(3000, crpc->msgout.granted);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.client_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_STREQ("csum_and_copy_from_iter_full copied 1400 bytes; "
 		"csum_and_copy_from_iter_full copied 1400 bytes; "
 		"csum_and_copy_from_iter_full copied 200 bytes", unit_log_get());
@@ -71,7 +71,7 @@ TEST_F(homa_outgoing, homa_message_out_init__message_too_long)
 			&self->server_addr, 2000000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EINVAL, -PTR_ERR(crpc));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_outgoing, homa_message_out_init__max_gso_size_limit)
 {
@@ -93,7 +93,7 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_small_skb)
 			&self->server_addr, 500, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_large_skb)
 {
@@ -103,7 +103,7 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_large_skb)
 			&self->server_addr, 5000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 {
@@ -112,7 +112,7 @@ TEST_F(homa_outgoing, homa_message_out_init__cant_copy_data)
 			&self->server_addr, 3000, NULL);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EFAULT, -PTR_ERR(crpc));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.client_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_outgoing, homa_message_out_init__multiple_segs_per_skbuff)
 {
@@ -553,7 +553,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 1000);
 	EXPECT_NE(NULL, srpc);
-	EXPECT_FALSE(list_empty(&self->hsk.server_rpcs));
+	EXPECT_FALSE(list_empty(&self->hsk.active_rpcs));
 	homa_add_to_throttled(srpc);
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
@@ -564,7 +564,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_TRUE(list_empty(&self->hsk.server_rpcs));
+	EXPECT_TRUE(list_empty(&self->hsk.active_rpcs));
 }
 
 /* Don't know how to unit test homa_pacer_stop... */

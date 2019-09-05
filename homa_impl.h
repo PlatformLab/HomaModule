@@ -619,9 +619,15 @@ struct homa_rpc {
 	int num_skbuffs;
 	
 	/**
-	 * @rpc_links: For linking this object into @hsk->client_rpcs (for
-	 * a client RPC), @hsk->server_rpcs (for a server RPC), or
-	 * @hsk->dead_rpcs.
+	 * @hash_links: Used to link this object into a hash bucket for
+	 * either @hsk->client_rpc_buckets (for a client RPC), or
+	 * @hsk->server_rpc_buckets (for a server RPC).
+	 */
+	struct hlist_node hash_links;
+	
+	/**
+	 * @rpc_links: For linking this object into @hsk->active_rpcs
+	 * or @hsk->dead_rpcs.
 	 */
 	struct list_head rpc_links;
 	
@@ -740,6 +746,18 @@ struct homa_socktab_scan {
 };
 
 /**
+ * define HOMA_CLIENT_RPC_BUCKETS - Number of buckets in hash tables for
+ * client RPCs. Must be a power of 2.
+ */
+#define HOMA_CLIENT_RPC_BUCKETS 1024
+
+/**
+ * define HOMA_SERVER_RPC_BUCKETS - Number of buckets in hash tables for
+ * server RPCs. Must be a power of 2.
+ */
+#define HOMA_SERVER_RPC_BUCKETS 1024
+
+/**
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
@@ -779,11 +797,13 @@ struct homa_sock {
 	 */
 	struct homa_socktab_links server_links;
 	
-	/** @client_rpcs: List of active RPCs originating from this socket. */
-	struct list_head client_rpcs;
-	
-	/** @server_rpcs: Contains all active RPCs sent to this socket. */
-	struct list_head server_rpcs;
+	/** @active_rpcs: List of all existing RPCs related to this socket,
+	 * including both client and server RPCs. This list isn't strictly
+	 * needed, since RPCs are already in one of the hash tables below,
+	 * but it's more efficient for homa_timer to have this list
+	 * (so it doesn't have to scan large numbers of hash buckets).
+	 */
+	struct list_head active_rpcs;
 	
 	/**
 	 * @dead_rpcs: Contains RPCs for which homa_rpc_free has been
@@ -814,10 +834,57 @@ struct homa_sock {
 	 * response messages.
 	 */
 	struct list_head response_interests;
+	
+	/**
+	 * @client_rpc_buckets: Hash table for fast lookup of client RPCs.
+	 * Each entry is a list of client RPCs.
+	 */
+	struct hlist_head client_rpc_buckets[HOMA_CLIENT_RPC_BUCKETS];
+	
+	/**
+	 * @server_rpc_buckets: Hash table for fast lookup of server RPCs.
+	 * Each entry is a list of server RPCs.
+	 */
+	struct hlist_head server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
 	return (struct homa_sock *)sk;
+}
+
+/**
+ * homa_client_rpc_bucket() - Find the bucket containing a given
+ * client RPC.
+ * @hsk:      Socket associated with the RPC.
+ * @id:       Id of the desired RPC.
+ * 
+ * Return:    The bucket in which this RPC will appear, if the RPC exists.
+ */
+static inline struct hlist_head *homa_client_rpc_bucket(struct homa_sock *hsk,
+		__u64 id)
+{
+	/* We can use a really simple hash function here because RPCs
+	 * are allocated sequentially.
+	 */
+	return &hsk->client_rpc_buckets[id & (HOMA_CLIENT_RPC_BUCKETS - 1)];
+}
+
+/**
+ * homa_server_rpc_bucket() - Find the bucket containing a given
+ * server RPC.
+ * @hsk:         Socket associated with the RPC.
+ * @id:          Id of the desired RPC.
+ * 
+ * Return:    The bucket in which this RPC will appear, if the RPC exists.
+ */
+static inline struct hlist_head *homa_server_rpc_bucket(struct homa_sock *hsk,
+		__u64 id)
+{
+	/* Each client allocates RPC ids sequentailly, so they will
+	 * naturally distribute themselves across the hash space.
+	 * Thus we can use the id directly as hash.
+	 */
+	return &hsk->server_rpc_buckets[id & (HOMA_SERVER_RPC_BUCKETS - 1)];
 }
 
 /**

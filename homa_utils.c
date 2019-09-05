@@ -164,7 +164,8 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->num_skbuffs = 0;
-	list_add(&crpc->rpc_links, &hsk->client_rpcs);
+	hlist_add_head(&crpc->hash_links, homa_client_rpc_bucket(hsk, crpc->id));
+	list_add(&crpc->rpc_links, &hsk->active_rpcs);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->grantable_links);
@@ -219,7 +220,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 			ntohl(h->unscheduled));
 	srpc->msgout.length = -1;
 	srpc->num_skbuffs = 0;
-	list_add(&srpc->rpc_links, &hsk->server_rpcs);
+	hlist_add_head(&srpc->hash_links, homa_server_rpc_bucket(hsk, srpc->id));
+	list_add(&srpc->rpc_links, &hsk->active_rpcs);
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->grantable_links);
@@ -241,6 +243,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 * begins.
 	 */
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
+	__hlist_del(&rpc->hash_links);
 	__list_del_entry(&rpc->rpc_links);
 	__list_del_entry(&rpc->ready_links);
 	if (rpc->interest != NULL) {
@@ -334,10 +337,9 @@ void homa_rpc_reap(struct homa_sock *hsk)
  */
 struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 {
-	struct list_head *pos;
-	list_for_each(pos, &hsk->client_rpcs) {
-		struct homa_rpc *crpc = list_entry(pos, struct homa_rpc,
-				rpc_links);
+	struct homa_rpc *crpc;
+	hlist_for_each_entry(crpc, homa_client_rpc_bucket(hsk, id),
+			hash_links) {
 		if (crpc->id == id) {
 			return crpc;
 		}
@@ -359,12 +361,10 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		__be32 saddr, __u16 sport, __u64 id)
 {
-	struct list_head *pos;
-	list_for_each(pos, &hsk->server_rpcs) {
-		struct homa_rpc *srpc = list_entry(pos, struct homa_rpc,
-				rpc_links);
-		if ((srpc->id == id) &&
-				(srpc->dport == sport) &&
+	struct homa_rpc *srpc;
+	hlist_for_each_entry(srpc, homa_server_rpc_bucket(hsk, id),
+			hash_links) {
+		if ((srpc->id == id) && (srpc->dport == sport) &&
 				(srpc->peer->addr == saddr)) {
 			return srpc;
 		}

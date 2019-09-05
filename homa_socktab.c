@@ -108,6 +108,8 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = &homa->port_map;
+	int i;
+	
 	mutex_lock(&socktab->write_lock);
 	hsk->homa = homa;
 	hsk->shutdown = false;
@@ -127,13 +129,16 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->client_links.sock = hsk;
 	hlist_add_head_rcu(&hsk->client_links.hash_links,
 			&socktab->buckets[homa_port_hash(hsk->client_port)]);
-	INIT_LIST_HEAD(&hsk->client_rpcs);
-	INIT_LIST_HEAD(&hsk->server_rpcs);
+	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	INIT_LIST_HEAD(&hsk->ready_requests);
 	INIT_LIST_HEAD(&hsk->ready_responses);
 	INIT_LIST_HEAD(&hsk->request_interests);
 	INIT_LIST_HEAD(&hsk->response_interests);
+	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++)
+		INIT_HLIST_HEAD(&hsk->client_rpc_buckets[i]);
+	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++)
+		INIT_HLIST_HEAD(&hsk->server_rpc_buckets[i]);
 	mutex_unlock(&socktab->write_lock);
 }
 
@@ -175,15 +180,10 @@ void homa_sock_destroy(struct homa_sock *hsk)
 	
 	lock_sock((struct sock *) hsk);
 	homa_sock_shutdown(hsk);
-	list_for_each_safe(pos, next, &hsk->client_rpcs) {
-		struct homa_rpc *crpc = list_entry(pos,
+	list_for_each_safe(pos, next, &hsk->active_rpcs) {
+		struct homa_rpc *rpc = list_entry(pos,
 				struct homa_rpc, rpc_links);
-		homa_rpc_free(crpc);
-	}
-	list_for_each_safe(pos, next, &hsk->server_rpcs) {
-		struct homa_rpc *srpc = list_entry(pos, struct homa_rpc,
-				rpc_links);
-		homa_rpc_free(srpc);
+		homa_rpc_free(rpc);
 	}
 	while (!list_empty(&hsk->dead_rpcs))
 		homa_rpc_reap(hsk);

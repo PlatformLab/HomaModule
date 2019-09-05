@@ -30,16 +30,19 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 {
 	int bytes_received;
 	struct sockaddr_in server_addr;
+	int saved_id = hsk->next_outgoing_id;
 	
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = server_ip;
 	server_addr.sin_port =  htons(server_port);
+	if (id != 0)
+		hsk->next_outgoing_id = id;
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
 			req_length, NULL);
 	if (!crpc)
 		return NULL;
 	if (id != 0)
-		crpc->id = id;
+		hsk->next_outgoing_id = saved_id;
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
 	if (state == RPC_OUTGOING)
 		return crpc;

@@ -589,7 +589,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	int err;
 	struct homa_rpc *crpc = NULL;
 
-	tt_record1("homa_ioc_send starting on core %d", smp_processor_id());
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
@@ -615,6 +614,9 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_xmit_data(crpc, true);
+	tt_record3("New client RPC for server 0x%x:%d, id %llu",
+			crpc->peer->addr,
+			crpc->dport, crpc->id);
 //	tt_record("About to reap");
 	homa_rpc_reap(hsk);
 //	tt_record("reaping finished");
@@ -881,6 +883,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		goto discard;
 	}
 	h = (struct common_header *) skb->data;
+	tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
+			saddr, ntohs(h->sport), h->id, h->type);
 	if (unlikely(h->type == FREEZE)) {
 		/* Check for FREEZE here, rather than in homa_incoming.c,
 		 * so it will work even for unknown RPCs and sockets.

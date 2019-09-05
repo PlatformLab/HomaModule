@@ -78,15 +78,40 @@ std::vector<struct tcp_connection *> tcp_connections;
 std::vector<struct sockaddr_in> server_addrs;
 
 /**
+ * class homa_server - Holds information about a single Homa server,
+ * which consists of a thread that handles requests on a given port.
+ */
+class homa_server {
+    public:
+	homa_server(int port);
+	void server(void);
+	
+	/** @fd: file descriptor for Homa socket. */
+	int fd;
+	
+	/** @requests: total number of requests handled so far. */
+	uint64_t requests;
+	
+	/**
+	 * @data: total number of bytes of data in requests handled
+	 * so far.
+	 */
+	uint64_t data;
+};
+
+/** @homa_servers: keeps track of all existing Homa clients. */
+std::vector<homa_server *> homa_servers;
+
+/**
  * class homa_client - Holds information about a single Homa client,
  * which consists of one thread issuing requests and one thread receiving
  * responses. 
  */
 class homa_client {
     public:
-	homa_client();
-	void receiver();
-	void sender();
+	homa_client(void);
+	void receiver(void);
+	void sender(void);
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
@@ -159,6 +184,12 @@ class homa_client {
 	std::atomic<uint64_t> responses;
 	
 	/**
+	 * @failures: total number of RPCs that resulted in errors
+	 * in homa_recv, so they didn't complete.
+	 **/
+	std::atomic<uint64_t> failures;
+	
+	/**
 	 * @response_data: total number of bytes of data in responses
 	 * received so far.
 	 */
@@ -171,7 +202,7 @@ class homa_client {
 	uint64_t total_rtt;
 };
 
-/** @homa_clients: keeps track of all existing clients. */
+/** @homa_clients: keeps track of all existing Homa clients. */
 std::vector<homa_client *> homa_clients;
 
 /**
@@ -187,7 +218,7 @@ uint64_t last_stats_time;
 uint64_t last_client_rpcs;
 
 /**
- * @last_client_rpcs: total amount of data in client RPCS completed by this
+ * @last_client_data: total amount of data in client RPCS completed by this
  * application as of the last time we printed statistics.
  */
 uint64_t last_client_data;
@@ -198,6 +229,24 @@ uint64_t last_client_data;
  * time we printed statistics.
  */
 uint64_t last_total_rtt;
+
+/**
+ * @last_server_rpcs: total number of server RPCS handled by this
+ * application as of the last time we printed statistics.
+ */
+uint64_t last_server_rpcs;
+
+/**
+ * @last_server_data: total amount of data in server RPCS handled by this
+ * application as of the last time we printed statistics.
+ */
+uint64_t last_server_data;
+
+/**
+ * @last_per_server_rpcs: server->requests for each individual server,
+ * as of the last time we printed statistics.
+ */
+std::vector<uint64_t> last_per_server_rpcs;
 
 /**
  * print_help() - Print out usage information for this program.
@@ -275,17 +324,15 @@ int int_arg(const char *value, const char *name)
 }
 
 /**
- * homa_server() - Opens a Homa socket and handles all requests arriving on
- * that socket. Normally invoked as top-level method in a thread.
- * @port:   Port number to use for the Homa socket.
+ * homa_server::homa_server() - Constructor for homa_server objects.
+ * @port:  Port on which to receive requests
  */
-void homa_server(int port)
+homa_server::homa_server(int port)
+	: fd(-1)
+        , requests(0)
+        , data(0)
 {
-	int fd;
 	struct sockaddr_in addr_in;
-	int message[1000000];
-	struct sockaddr_in source;
-	int length;
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -302,6 +349,20 @@ void homa_server(int port)
 		exit(1);
 	}
 	printf("Successfully bound to Homa port %d\n", port);
+	
+	std::thread server(&homa_server::server, this);
+	server.detach();
+}
+
+/**
+ * homa_server::server() - Handles incoming requests arriving on a Homa
+ * socket. Normally invoked as top-level method in a thread.
+ */
+void homa_server::server(void)
+{
+	int message[1000000];
+	struct sockaddr_in source;
+	int length;
 	while (1) {
 		uint64_t id = 0;
 		int result;
@@ -321,7 +382,10 @@ void homa_server(int port)
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {
 			printf("Homa_reply failed: %s\n", strerror(errno));
+			exit(1);
 		}
+		requests++;
+		data += length;
 	}
 }
 
@@ -526,6 +590,7 @@ homa_client::homa_client()
         , next_result(0)
         , requests(0)
         , responses(0)
+        , failures(0)
         , response_data(0)
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
@@ -575,7 +640,7 @@ void homa_client::sender()
 			now = rdtsc();
 			if (now < next_start)
 				continue;
-			if ((requests - responses) < max_requests)
+			if ((requests - responses - failures) < max_requests)
 				break;
 		}
 		
@@ -611,7 +676,7 @@ void homa_client::sender()
  * homa_client::receiver() - Invoked as the top-level method in a thread
  * that waits for RPC responses and then logs statistics about them.
  */
-void homa_client::receiver()
+void homa_client::receiver(void)
 {
 	uint32_t response[1000000/sizeof(uint32_t)];
 	uint64_t id;
@@ -624,9 +689,11 @@ void homa_client::receiver()
 				(struct sockaddr *) &server_addr,
 				sizeof(server_addr));
 		if (length < 0) {
-			printf("Error in homa_recv: %s\n",
-				strerror(errno));
-			exit(1);
+			printf("Error in homa_recv: %s (id %lu, server %s)\n",
+				strerror(errno), id,
+				print_address(&server_addr));
+			failures++;
+			continue;
 		}
 		uint32_t elapsed = rdtsc() & 0xffffffff;
 		elapsed -= response[0];
@@ -639,6 +706,75 @@ void homa_client::receiver()
 		if (next_result >= actual_lengths.size())
 			next_result = 0;
 	}
+}
+
+/**
+ * homa_server_stats() -  Prints recent statistics collected from Homa
+ * servers.
+ * @now:   Current time in rdtsc cycles (used to compute rates for
+ *         statistics).
+ */
+void homa_server_stats(uint64_t now)
+{
+	char details[10000];
+	int offset = 0;
+	int length;
+	uint64_t server_rpcs = 0;
+	uint64_t server_data = 0;
+	for (uint32_t i = 0; i < homa_servers.size(); i++) {
+		homa_server *server = homa_servers[i];
+		server_rpcs += server->requests;
+		server_data += server->data;
+		length = snprintf(details + offset, sizeof(details) - offset,
+				"%s%lu", (offset != 0) ? " " : "",
+				server->requests - last_per_server_rpcs[i]);
+		offset += length;
+		last_per_server_rpcs[i] = server->requests;
+	}
+	if ((last_stats_time != 0) && (server_data != last_server_data)) {
+		double elapsed = to_seconds(now - last_stats_time);
+		double rpcs = (double) (server_rpcs - last_server_rpcs);
+		double data = (double) (server_data - last_server_data);
+		printf("Homa servers: %.2f Kops/sec, %.2f MB/sec, "
+				"avg.length %.1f bytes\n",
+				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				data/rpcs);
+		printf("RPCs per server: %s\n", details);
+	}
+	last_server_rpcs = server_rpcs;
+	last_server_data = server_data;
+}
+
+/**
+ * homa_client_stats() -  Prints recent statistics collected from Homa
+ * clients.
+ * @now:   Current time in rdtsc cycles (used to compute rates for
+ *         statistics).
+ */
+void homa_client_stats(uint64_t now)
+{
+	uint64_t client_rpcs = 0;
+	uint64_t client_data = 0;
+	uint64_t total_rtt = 0;
+	for (homa_client *client: homa_clients) {
+		client_rpcs += client->responses;
+		client_data += client->response_data;
+		total_rtt += client->total_rtt;
+	}
+	if ((last_stats_time != 0) && (client_data != last_client_data)) {
+		double elapsed = to_seconds(now - last_stats_time);
+		double rpcs = (double) (client_rpcs - last_client_rpcs);
+		double data = (double) (client_data - last_client_data);
+		double rtt =  to_seconds(total_rtt - last_total_rtt)
+			/ rpcs;
+		printf("Homa clients: %.2f Kops/sec, %.2f MB/sec, avg. RTT %.2f "
+				"usec, avg.length %.1f bytes\n",
+				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rtt*1e06, data/rpcs);
+	}
+	last_client_rpcs = client_rpcs;
+	last_client_data = client_data;
+	last_total_rtt = total_rtt;
 }
 
 int main(int argc, char** argv)
@@ -700,8 +836,7 @@ int main(int argc, char** argv)
 	if (is_server) {
 		if (strcmp(protocol, "homa") == 0) {
 			for (i = 0; i < server_threads; i++) {
-				std::thread thread(homa_server, 4000+i);
-				thread.detach();
+				homa_servers.push_back(new homa_server(4000+i));
 			}
 		} else {
 			for (i = 0; i < server_threads; i++) {
@@ -709,6 +844,7 @@ int main(int argc, char** argv)
 				thread.detach();
 			}
 		}
+		last_per_server_rpcs.resize(server_threads, 0);
 	}
 	
 	/* Initialize server_addrs. */
@@ -746,29 +882,11 @@ int main(int argc, char** argv)
 	/* Print a few statistics every second. */
 	while (1) {
 		sleep(1);
-		uint64_t client_rpcs = 0;
-		uint64_t client_data = 0;
-		uint64_t total_rtt = 0;
 		uint64_t now = rdtsc();
-		for (homa_client *client: homa_clients) {
-			client_rpcs += client->responses;
-			client_data += client->response_data;
-			total_rtt += client->total_rtt;
-		}
-		if ((last_stats_time != 0) && (client_data > 0)) {
-			double elapsed = to_seconds(now - last_stats_time);
-			double rpcs = (double) (client_rpcs - last_client_rpcs);
-			double data = (double) (client_data - last_client_data);
-			double rtt =  to_seconds(total_rtt - last_total_rtt)
-				/ rpcs;
-			printf("%.2f Kops/sec, %.2f MB/sec, avg. RTT %.2f usec\n",
-				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
-				rtt*1e06);
-		}
+		homa_server_stats(now);
+		homa_client_stats(now);
+		
 		last_stats_time = now;
-		last_client_rpcs = client_rpcs;
-		last_client_data = client_data;
-		last_total_rtt = total_rtt;
 	}
 	exit(0);
 }

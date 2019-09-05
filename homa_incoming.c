@@ -254,9 +254,13 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		rpc = homa_find_client_rpc(hsk, h->id);
 	}
 	if (unlikely(rpc == NULL)) {
-		char buffer[200];
-		printk(KERN_NOTICE "Incoming packet for unknown RPC: %s\n",
-				homa_print_packet(skb, buffer, sizeof(buffer)));
+		if (hsk->homa->verbose) {
+			char buffer[200];
+			printk(KERN_NOTICE
+					"Incoming packet for unknown RPC: %s\n",
+					homa_print_packet(skb, buffer,
+					sizeof(buffer)));
+		}
 		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
 			INC_METRIC(unknown_rpcs, 1);
 			goto discard;
@@ -409,9 +413,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
 	tt_record3("resend request for id %llu, offset %d, length %d",
-			(rpc != NULL) ? rpc->id : 0,
-			ntohl(h->offset), ntohl(h->length));
-	tt_freeze();
+			h->common.id, ntohl(h->offset), ntohl(h->length));
 
 	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
@@ -426,6 +428,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 						homa_print_ipv4_addr(
 						ip_hdr(skb)->saddr),
 						h->common.sport, h->common.id);
+			tt_record3("sending restart to 0x%x:%d for id %llu",
+					ip_hdr(skb)->saddr, h->common.sport,
+					h->common.id);
 			restart.common.sport = h->common.dport;
 			restart.common.dport = h->common.sport;
 			restart.common.id = h->common.id;
@@ -471,7 +476,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	int err;
-	tt_record1("Received restart for id %llu", rpc->id);
+	tt_record3("Received restart for id %llu, server %x:%d", rpc->id,
+			rpc->peer->addr, rpc->dport);
 	if (rpc->hsk->homa->verbose)
 		printk(KERN_NOTICE "Restarting rpc to server %s:%d, id %llu",
 				homa_print_ipv4_addr(rpc->peer->addr),
@@ -678,7 +684,7 @@ void homa_dest_abort(struct homa *homa, __be32 addr, int error)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
-	struct homa_rpc *crpc, *tmp;
+	struct homa_rpc *rpc, *tmp;
 	
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
@@ -686,21 +692,21 @@ void homa_dest_abort(struct homa *homa, __be32 addr, int error)
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.
 		 */
-		if (list_empty(&hsk->client_rpcs))
+		if (list_empty(&hsk->active_rpcs))
 			continue;
 		bh_lock_sock_nested((struct sock *) hsk);
 		if (unlikely(sock_owned_by_user((struct sock *) hsk))) {
 			bh_unlock_sock((struct sock *) hsk);
 			continue;
 		}
-		list_for_each_entry_safe(crpc, tmp, &hsk->client_rpcs,
+		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				rpc_links) {
-			if ((crpc->peer->addr != addr) ||
-					(crpc->state == RPC_READY))
+			if (!rpc->is_client || (rpc->peer->addr != addr) ||
+					(rpc->state == RPC_READY))
 				continue;
-			homa_remove_from_grantable(homa, crpc);
-			crpc->error = error;
-			homa_rpc_ready(crpc);
+			homa_remove_from_grantable(homa, rpc);
+			rpc->error = error;
+			homa_rpc_ready(rpc);
 		}
 		bh_unlock_sock((struct sock *) hsk);
 	}
