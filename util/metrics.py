@@ -61,6 +61,7 @@ if 'f' in locals():
 
 f = open("/proc/net/homa_metrics")
 data = open(data_file, "w")
+time_delta = 0
 for line in f:
     data.write(line)
     match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
@@ -74,7 +75,13 @@ for line in f:
         old = prev[symbol]
     else:
         old = 0
-    if (old != count):
-        print("%-22s %15d %s" % (symbol, count-old, doc))
+    if (symbol == "rdtsc_cycles") and (old != 0):
+        time_delta = count - old
+    if old != count:
+        if (symbol == "timer_cycles") and (time_delta != 0):
+            print("%-22s %15d (%.2f%%) %s" % (symbol, count-old,
+                100.0*float(count-old)/float(time_delta), doc))
+        else:
+            print("%-22s %15d %s" % (symbol, count-old, doc))
 f.close()
 data.close()

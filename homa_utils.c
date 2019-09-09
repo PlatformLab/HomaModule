@@ -803,6 +803,14 @@ char *homa_print_metrics(struct homa *homa)
 	
 	homa_compile_metrics(&m);
 	homa->metrics_length = 0;
+	homa_append_metric(homa,
+			"rdtsc_cycles      %20llu  "
+			"RDTSC cycle counter when metrics were gathered\n",
+			get_cycles());
+	homa_append_metric(homa,
+			"cpu_khz                %15llu  "
+			"Clock rate for RDTSC counter, in khz\n",
+			cpu_khz);
 	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
 		homa_append_metric(homa,
 			"msg_bytes_%-9d    %15llu  "
