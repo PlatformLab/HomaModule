@@ -708,6 +708,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 		}
 		m->requests_received += cm->requests_received;
 		m->responses_received += cm->responses_received;
+		m->pkt_recv_calls += cm->pkt_recv_calls;
 		m->timer_cycles += cm->timer_cycles;
 		m->pacer_cycles += cm->pacer_cycles;
 		m->resent_packets += cm->resent_packets;
@@ -852,6 +853,10 @@ char *homa_print_metrics(struct homa *homa)
 			"responses_received     %15llu  "
 			"Incoming response messages\n",
 			m.responses_received);
+	homa_append_metric(homa,
+			"pkt_recv_calls         %15llu  "
+			"Calls to homa_pkt_recv (i.e. # GRO pkts received)\n",
+			m.pkt_recv_calls);
 	homa_append_metric(homa,
 			"timer_cycles           %15llu  "
 			"Time spent in homa_timer (measured with get_cycles)\n",

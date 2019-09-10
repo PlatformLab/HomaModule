@@ -62,6 +62,8 @@ if 'f' in locals():
 f = open("/proc/net/homa_metrics")
 data = open(data_file, "w")
 time_delta = 0
+total_packets = 0
+gro_packets = 0
 for line in f:
     data.write(line)
     match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
@@ -83,5 +85,13 @@ for line in f:
                 100.0*float(count-old)/float(time_delta), doc))
         else:
             print("%-22s %15d %s" % (symbol, count-old, doc))
+            if symbol.startswith("packets_rcvd_"):
+                total_packets += count-old
+            if symbol == "pkt_recv_calls":
+                gro_packets = count-old
+if gro_packets != 0:
+    print("%-22s          %6.2f Homa packets per GRO 'packet'" % (
+        "gro_benefit", float(total_packets)/float(gro_packets)))
+
 f.close()
 data.close()

@@ -395,6 +395,8 @@ void homa_close(struct sock *sk, long timeout) {
 	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
+	tt_record2("closed socket, client port %d, server port %d\n",
+			hsk->client_port, hsk->server_port);
 	tt_freeze();
 }
 
@@ -445,12 +447,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int result;
 	struct homa_rpc *rpc = NULL;
 
-//	tt_record1("homa_ioc_recv starting on core %d", smp_processor_id());
-//	if (hsk->homa->temp[0] > 0) {
-//		hsk->homa->temp[0]--;
-//		if (hsk->homa->temp[0] == 0)
-//			tt_debug_int64[0] = 4;
-//	}
+	tt_record2("homa_ioc_recv starting on core %d, port %d",
+			smp_processor_id(), hsk->server_port != 0 ?
+			hsk->server_port : hsk->client_port);
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -613,10 +612,10 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
-	homa_xmit_data(crpc, true);
-	tt_record3("New client RPC for server 0x%x:%d, id %llu",
+	tt_record4("New client RPC for server 0x%x:%d, id %llu, port %d",
 			crpc->peer->addr,
-			crpc->dport, crpc->id);
+			crpc->dport, crpc->id, hsk->client_port);
+	homa_xmit_data(crpc, true);
 //	tt_record("About to reap");
 	homa_rpc_reap(hsk);
 //	tt_record("reaping finished");
@@ -882,6 +881,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 					"discarding\n");
 		goto discard;
 	}
+	INC_METRIC(pkt_recv_calls, 1);
 	h = (struct common_header *) skb->data;
 	tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
 			saddr, ntohs(h->sport), h->id, h->type);
@@ -890,7 +890,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		 * so it will work even for unknown RPCs and sockets.
 		 */
 		tt_record3("Received freeze request on port %d from 0x%x:%d",
-				ntohs(h->dport), saddr, ntohs(h->sport));
+				ntohs(h->dport), ntohl(saddr), ntohs(h->sport));
 		tt_freeze();
 		goto discard;
 	}
@@ -997,7 +997,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	struct sk_buff *others;
 	
-//	tt_record("homa_backlog_rcv invoked");
+	tt_record("homa_backlog_rcv invoked");
 	others = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {

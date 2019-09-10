@@ -1288,6 +1288,13 @@ struct homa_metrics {
 	__u64 responses_received;
 	
 	/**
+	 * @pkt_recv_calls: total number of calls to homa_pkt_recv (i.e.,
+	 * total number of GRO packets processed, each of which could contain
+	 * multiple Homa packets.
+	 */
+	__u64 pkt_recv_calls;
+	
+	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
 	 * get_cycles().
 	 */
@@ -1306,8 +1313,7 @@ struct homa_metrics {
 	__u64 resent_packets;
 	
 	/**
-	 * @peer_hash_links: total # of link traversals in homa_peer_find
-	 * (
+	 * @peer_hash_links: total # of link traversals in homa_peer_find.
 	 */
 	__u64 peer_hash_links;
 	
@@ -1351,7 +1357,7 @@ struct homa_metrics {
 	
 	/**
 	 * @cant_create_server_rpc: total number of times a server discarded
-	 * incoming packet because it couldn't create a homa_rpc object.
+	 * an incoming packet because it couldn't create a homa_rpc object.
 	 */
 	__u64 server_cant_create_rpcs;
 	
