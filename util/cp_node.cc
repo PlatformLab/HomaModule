@@ -16,6 +16,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 
+#include <algorithm>
 #include <atomic>
 #include <random>
 #include <thread>
@@ -24,16 +25,18 @@
 #include "homa.h"
 #include "test_utils.h"
 
-/* Command-line parameter values: */
-int client_threads = 1;
+/* Command-line parameter values (and default values): */
+int client_threads = 0;
 const char *dist_file = "foo.bar";
+int first_port = 4000;
+int first_server = 1;
 bool is_server = false;
 int id = -1;
 uint32_t max_requests = 50;
 double net_util = 0.8;
 const char *protocol = "homa";
 int server_threads = 1;
-int server_nodes = 1000;
+int server_nodes = 1;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(12345);
@@ -117,6 +120,12 @@ class homa_client {
 	int fd;
 	
 	/**
+	 * @receiver_running: nonzero means the receiving thread has
+	 * initialized and is ready to receive responses.
+	 */
+	std::atomic<int> receiver_running;
+	
+	/**
 	 * @request_servers: a randomly chosen collection of indexes into
 	 * server_addrs; used to select the server for each outgoing request.
 	 */
@@ -156,7 +165,7 @@ class homa_client {
 	 * @next_interval: index into request_lengths of the length to use for
 	 * the next outgoing RPC.
 	 */
-	uint32_t next_interval;
+	std::atomic<uint32_t> next_interval;
 	
 	/**
 	 * @actual_lengths: a circular buffer that holds the actual payload
@@ -170,6 +179,12 @@ class homa_client {
 	 * in this array correspond to those in @actual_lengths.
 	 */
 	std::vector<uint32_t> actual_rtts;
+
+	/**
+	 * define NUM_CLENT_STATS: number of records in actual_lengths
+	 * and actual_rtts.
+	 */
+#define NUM_CLIENT_STATS 500000
 	
 	/**
 	 * @next_result: index into both actual_lengths and actual_rtts
@@ -260,6 +275,9 @@ void print_help(const char *name)
 		"                      node (default: %d)\n"
 		"--dist_file           Name of file containing request size distribution\n"
 		"                      (default: %s)\n"
+		"--first_port          First port number to use on servers (default: %d)\n"
+		"--first_server        Id of first server for clients to use (default: %d,\n"
+		"                      meaning node-%d)\n"
 		"--help                Print this message\n"
 		"--is_server           Instantiate server threads on this node\n"
 		"--max_requests        Maximum number of outstanding requests from each client\n"
@@ -271,8 +289,9 @@ void print_help(const char *name)
 		"--server_nodes        Number of nodes running server threads (default: %d)\n"
 		"--server_threads      Number of server threads/ports on each server node\n"
 		"                      (default: %d)\n",
-		name, client_threads, dist_file, max_requests, net_util,
-		protocol, server_nodes, server_threads);
+		name, client_threads, dist_file, first_port, first_server,
+		first_server, max_requests, net_util, protocol, server_nodes,
+		server_threads);
 }
 
 /**
@@ -579,14 +598,15 @@ void tcp_server(int port)
 /** homa_client::homa_client() - Constructor for homa_client objects. */
 homa_client::homa_client()
 	: fd(-1)
+        , receiver_running(0)
         , request_servers()
         , next_server(0)
         , request_lengths()
         , next_length(0)
         , request_intervals()
 	, next_interval(0)
-        , actual_lengths(500000, 0)
-        , actual_rtts(500000, 0)
+        , actual_lengths(NUM_CLIENT_STATS, 0)
+        , actual_rtts(NUM_CLIENT_STATS, 0)
         , next_result(0)
         , requests(0)
         , responses(0)
@@ -614,10 +634,16 @@ homa_client::homa_client()
 	request_lengths.push_back(100);
 	request_intervals.push_back(0);
 	
+	std::thread receiver(&homa_client::receiver, this);
+	while (!receiver_running) {
+		/* Wait for the receiver to begin execution before
+		 * starting the sender; otherwise the initial RPCs
+		 * may appear to take a long time.
+		 */
+	}
+	receiver.detach();
 	std::thread sender(&homa_client::sender, this);
 	sender.detach();
-	std::thread receiver(&homa_client::receiver, this);
-	receiver.detach();
 }
 
 /**
@@ -681,7 +707,12 @@ void homa_client::receiver(void)
 	uint32_t response[1000000/sizeof(uint32_t)];
 	uint64_t id;
 	struct sockaddr_in server_addr;
+	uint32_t slow_threshold;
+	double ticks_per_second;
 	
+        ticks_per_second = 5*1000000.0/to_seconds(1000000);
+	slow_threshold = static_cast<uint32_t>(1e-03*ticks_per_second);
+	receiver_running = 1;
 	while (1) {
 		id = 0;
 		int length = homa_recv(fd, response, sizeof(response),
@@ -697,6 +728,9 @@ void homa_client::receiver(void)
 		}
 		uint32_t elapsed = rdtsc() & 0xffffffff;
 		elapsed -= response[0];
+		if (elapsed > slow_threshold)
+			printf("Slow RTT for id %lu: %.1fms\n",
+					id, to_seconds(elapsed)*1e03);
 		responses++;
 		response_data += length;
 		total_rtt += elapsed;
@@ -736,7 +770,7 @@ void homa_server_stats(uint64_t now)
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
 		double data = (double) (server_data - last_server_data);
 		printf("Homa servers: %.2f Kops/sec, %.2f MB/sec, "
-				"avg.length %.1f bytes\n",
+				"avg. length %.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
 				data/rpcs);
 		printf("RPCs per server: %s\n", details);
@@ -753,24 +787,53 @@ void homa_server_stats(uint64_t now)
  */
 void homa_client_stats(uint64_t now)
 {
+#define CDF_VALUES 100000
 	uint64_t client_rpcs = 0;
 	uint64_t client_data = 0;
 	uint64_t total_rtt = 0;
+	uint64_t cdf_times[CDF_VALUES];
+	int times_per_client;
+	int cdf_index = 0;
+	
+	if (homa_clients.size() == 0)
+		return;
+	
+	times_per_client = CDF_VALUES/homa_clients.size();
+	if (times_per_client > NUM_CLIENT_STATS)
+		times_per_client = NUM_CLIENT_STATS;
 	for (homa_client *client: homa_clients) {
 		client_rpcs += client->responses;
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
+		for (int i = 1; i <= times_per_client; i++) {
+			/* Collect the most recent RTTs from the client for
+			 * computing a CDF.
+			 */
+			int src = client->next_result - i;
+			if (src < 0)
+				src += NUM_CLIENT_STATS;
+			if (client->actual_rtts[src] == 0) {
+				/* Client hasn't accumulated times_per_client
+				 * entries yet; just use what it has. */
+				break;
+			}
+			cdf_times[cdf_index] = client->actual_rtts[src];
+			cdf_index++;
+		}
 	}
+	std::sort(cdf_times, cdf_times + cdf_index);
 	if ((last_stats_time != 0) && (client_data != last_client_data)) {
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double data = (double) (client_data - last_client_data);
-		double rtt =  to_seconds(total_rtt - last_total_rtt)
-			/ rpcs;
-		printf("Homa clients: %.2f Kops/sec, %.2f MB/sec, avg. RTT %.2f "
-				"usec, avg.length %.1f bytes\n",
+		printf("Homa clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
+				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
+				"%.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
-				rtt*1e06, data/rpcs);
+				to_seconds(cdf_times[cdf_index/2])*1e06,
+				to_seconds(cdf_times[99*cdf_index/100])*1e06,
+				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
+			        data/rpcs);
 	}
 	last_client_rpcs = client_rpcs;
 	last_client_data = client_data;
@@ -796,6 +859,14 @@ int main(int argc, char** argv)
 				printf("No value provided for --dist_file\n");
 				exit(1);
 			}
+		} else if (strcmp(argv[next_arg], "--first_port") == 0) {
+			first_port = int_arg(argv[next_arg+1],
+					argv[next_arg]);
+			next_arg++;
+		} else if (strcmp(argv[next_arg], "--first_server") == 0) {
+			first_server = int_arg(argv[next_arg+1],
+					argv[next_arg]);
+			next_arg++;
 		} else if (strcmp(argv[next_arg], "--is_server") == 0) {
 			is_server = true;
 		} else if (strcmp(argv[next_arg], "--max_requests") == 0) {
@@ -836,11 +907,12 @@ int main(int argc, char** argv)
 	if (is_server) {
 		if (strcmp(protocol, "homa") == 0) {
 			for (i = 0; i < server_threads; i++) {
-				homa_servers.push_back(new homa_server(4000+i));
+				homa_servers.push_back(new homa_server(
+						first_port + i));
 			}
 		} else {
 			for (i = 0; i < server_threads; i++) {
-				std::thread thread(tcp_server, 4000+i);
+				std::thread thread(tcp_server, first_port + i);
 				thread.detach();
 			}
 		}
@@ -848,13 +920,13 @@ int main(int argc, char** argv)
 	}
 	
 	/* Initialize server_addrs. */
-	for (int node = 1; node <= server_nodes; node++) {
+	for (int node = 0; node < server_nodes; node++) {
 		char host[100];
 		struct addrinfo hints;
 		struct addrinfo *matching_addresses;
 		struct sockaddr_in *dest;
 
-		snprintf(host, sizeof(host), "node-%d", node);
+		snprintf(host, sizeof(host), "node-%d", node + first_server);
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = AF_INET;
 		hints.ai_socktype = SOCK_DGRAM;
@@ -868,7 +940,7 @@ int main(int argc, char** argv)
 		dest = reinterpret_cast<struct sockaddr_in *>
 				(matching_addresses->ai_addr);
 		for (int thread = 0; thread < server_threads; thread++) {
-			dest->sin_port = htons(4000+thread);
+			dest->sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
 		}
 	}
