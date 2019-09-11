@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <functional>
 #include <random>
 #include <thread>
 #include <vector>
@@ -42,183 +43,10 @@ int server_nodes = 1;
 std::mt19937 rand_gen(12345);
 
 /**
- * struct tcp_connection - Manages state information for one incoming TCP
- * connection.
- */
-struct tcp_connection {
-	/** @fd: file descriptor used to read/write connection. */
-	int fd;
-	
-	/** @client_addr: address of connecting client. */
-	struct sockaddr_in client_addr;
-	
-	/**
-	 * @bytes_received: nonzero means we have read part of an incoming
-	 * request; the value indicates how many bytes have been received
-	 * so far.
-	 */
-	int bytes_received;
-	
-	/**
-	 * @size: total number of bytes in current partially-received
-	 * request. Meaningless if @bytes_received is 0. If @bytes_received
-	 * is < sizeof(int), then only the first @bytes_received bytes of
-	 * this integer value have been filled in.
-	 */
-	int size;
-};
-
-/**
- * @tcp_connections: holds information about all open TCP connections.
- * Entries are dynamically allocated.
- */
-std::vector<struct tcp_connection *> tcp_connections;
-
-/**
  * @server_addrs: Internet addresses for each of the server threads available
  * to receive a Homa RPC.
  */
 std::vector<struct sockaddr_in> server_addrs;
-
-/**
- * class homa_server - Holds information about a single Homa server,
- * which consists of a thread that handles requests on a given port.
- */
-class homa_server {
-    public:
-	homa_server(int port);
-	void server(void);
-	
-	/** @fd: file descriptor for Homa socket. */
-	int fd;
-	
-	/** @requests: total number of requests handled so far. */
-	uint64_t requests;
-	
-	/**
-	 * @data: total number of bytes of data in requests handled
-	 * so far.
-	 */
-	uint64_t data;
-};
-
-/** @homa_servers: keeps track of all existing Homa clients. */
-std::vector<homa_server *> homa_servers;
-
-/**
- * class homa_client - Holds information about a single Homa client,
- * which consists of one thread issuing requests and one thread receiving
- * responses. 
- */
-class homa_client {
-    public:
-	homa_client(void);
-	void receiver(void);
-	void sender(void);
-	
-	/** @fd: file descriptor for Homa socket. */
-	int fd;
-	
-	/**
-	 * @receiver_running: nonzero means the receiving thread has
-	 * initialized and is ready to receive responses.
-	 */
-	std::atomic<int> receiver_running;
-	
-	/**
-	 * @request_servers: a randomly chosen collection of indexes into
-	 * server_addrs; used to select the server for each outgoing request.
-	 */
-	std::vector<int16_t> request_servers;
-
-	/**
-	 * @next_server: index into request_servers of the server to use for
-	 * the next outgoing RPC.
-	 */
-	uint32_t next_server;
-	
-	/**
-	 * @request_lengths: a randomly chosen collection of lengths to
-	 * use for outgoing RPCs. Precomputed to save time during the
-	 * actual measurements, and based on a given distribution.
-	 * Note: lengths are always at least 4 (this is needed in order
-	 * to include a 32-bit timestamp in the request).
-	 */
-	std::vector<int> request_lengths;
-
-	/**
-	 * @cnext_length: index into request_lengths of the length to use for
-	 * the next outgoing RPC.
-	 */
-	uint32_t next_length;
-	
-	/**
-	 * @request_intervals: a randomly chosen collection of inter-request
-	 * intervals, measured in rdtsc cycles. Precomputed to save time
-	 * during the actual measurements, and chosen to achieve a given
-	 * network utilization, assuming a given distribution of request
-	 * lengths.
-	 */
-	std::vector<int> request_intervals;
-
-	/**
-	 * @next_interval: index into request_lengths of the length to use for
-	 * the next outgoing RPC.
-	 */
-	std::atomic<uint32_t> next_interval;
-	
-	/**
-	 * @actual_lengths: a circular buffer that holds the actual payload
-	 * sizes used for the most recent RPCs.
-	 */
-	std::vector<int> actual_lengths;
-	
-	/**
-	 * @actual_rtts: a circular buffer that holds the actual round trip
-	 * times (measured in rdtsc cycles) for the most recent RPCs. Entries
-	 * in this array correspond to those in @actual_lengths.
-	 */
-	std::vector<uint32_t> actual_rtts;
-
-	/**
-	 * define NUM_CLENT_STATS: number of records in actual_lengths
-	 * and actual_rtts.
-	 */
-#define NUM_CLIENT_STATS 500000
-	
-	/**
-	 * @next_result: index into both actual_lengths and actual_rtts
-	 * where info about the next RPC completion will be stored.
-	 */
-	uint32_t next_result;
-	
-	/** @requests: total number of RPCs issued so far. */
-	uint64_t requests;
-	
-	/** @responses: total number of responses received so far. */
-	std::atomic<uint64_t> responses;
-	
-	/**
-	 * @failures: total number of RPCs that resulted in errors
-	 * in homa_recv, so they didn't complete.
-	 **/
-	std::atomic<uint64_t> failures;
-	
-	/**
-	 * @response_data: total number of bytes of data in responses
-	 * received so far.
-	 */
-	uint64_t response_data;
-	
-	/**
-	 * @total_rtt: sum of round-trip times (in rdtsc cycles) for
-	 * all responses received so far.
-	 */
-	uint64_t total_rtt;
-};
-
-/** @homa_clients: keeps track of all existing Homa clients. */
-std::vector<homa_client *> homa_clients;
 
 /**
  * @last_stats_time: time (in rdtsc cycles) when we last printed
@@ -343,13 +171,202 @@ int int_arg(const char *value, const char *name)
 }
 
 /**
+ * send_message() - Writes a message to a file descriptor in the
+ * standard form (size, timestamp, then arbitrary ignored padding).
+ * @fd:         File descriptor on which to write the message.
+ * @size:       Size of message to write (must be at least 8).
+ * @timestamp:  Transmitted as bytes 4-7 of the message.
+ * 
+ * Return:   Zero for success; anything else means there was an error
+ *           (check errno for details).
+ */
+int send_message(int fd, int size, uint32_t timestamp)
+{
+	int buffer[100000/sizeof(uint32_t)];
+
+	buffer[0] = size;
+	buffer[1] = timestamp;
+	for (int bytes_left = size; bytes_left > 0; ) {
+		int this_size = bytes_left;
+		if (this_size > sizeof32(buffer))
+			this_size = sizeof32(buffer);
+		if (write(fd, buffer, this_size) < 0)
+			return -1;
+		bytes_left -= this_size;
+	}
+	return 0;
+}
+
+/**
+ * struct tcp_message - Handles the reading of TCP messages; a message
+ * may arrive in several chunks spaced out in time; this class keeps track
+ * of the current state.
+ */
+class tcp_message {
+    public:
+	tcp_message(int fd, struct sockaddr_in peer);
+	int read(std::function<void (int size, int timestamp)> func);
+	
+	/** @fd: File descriptor to use for reading data. */
+	int fd;
+	
+	/**
+	 * @per: Address of the machine we're reading from; used for
+	 * messages.
+	 */
+	struct sockaddr_in peer;
+	
+	/**
+	 * @bytes_received: nonzero means we have read part of an incoming
+	 * request; the value indicates how many bytes have been received
+	 * so far.
+	 */
+	int bytes_received;
+	
+	/**
+	 * @size: this variable and @timestamp will eventually hold the
+	 * first 8 bytes of the message; if @bytes_received is less than
+	 * 8, then these values have not yet been fully read. This variable
+	 * gives the total message length in bytes (including the size).
+	 */
+	int size;
+	
+	/**
+	 * @timestamp: bytes 4-7 of the message; not valid unless
+	 * @bytes_received >= 8.
+	 */
+	int timestamp;
+} __attribute__((packed));
+
+/**
+ * tcp_message:: tcp_message() - Constructor for tcp_message objects.
+ * @fd:        File descriptor from which to read data.
+ * @peer:      Address of the machine we're reading from; used for messages.
+ */
+tcp_message::tcp_message(int fd, struct sockaddr_in peer)
+	: fd(fd)
+	, peer(peer)
+	, bytes_received(0)
+        , size(0)
+        , timestamp(0)
+{
+}
+
+/**
+ * tcp_message::read() - Reads more data from a TCP connection and calls
+ * a function to handle complete messages, if any.
+ * @func:      Function to call when there is a complete message; the arguments
+ *             to the function contain the first 8 bytes of the message. Func
+ *             may be called multiple times in a single indication of this
+ *             method.
+ * Return:     Nonzero means success; zero means the socket was closed
+ *             by the peer, or there was an error. Before returning, this
+ *             method prints an error message.
+ */
+int tcp_message::read(std::function<void (int size, int timestamp)> func)
+{
+	char buffer[100000];
+	char *next = buffer;
+	
+	int count = ::read(fd, buffer, sizeof(buffer));
+	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
+		/* Connection was closed by the client. */
+		return 1;
+	}
+	if (count < 0) {
+		printf("Error reading from TCP connection: %s\n",
+				strerror(errno));
+		return 1;
+	}
+	
+	/*
+	 * Process incoming bytes (could contains parts of multiple requests).
+	 * The first 4 bytes of each request give its length.
+	 */
+	while (count > 0) {
+		/* First, fill in the 2 words of header with incoming data
+		 * (there's no guarantee that a single read will return all
+		 * of the bytes needed for these).
+		 */
+		int header_bytes = 2*sizeof32(int) - bytes_received;
+		if (header_bytes > 0) {
+			if (count < header_bytes)
+				header_bytes = count;
+			char *header = reinterpret_cast<char *>(&size);
+			memcpy(header + bytes_received, next, header_bytes);
+			bytes_received += header_bytes;
+			next += header_bytes;
+			count -= header_bytes;
+			if (bytes_received < 2*sizeof32(int))
+				break;
+		}
+		
+		/* At this point we know the request length, so read until
+		 * we've got a full request.
+		 */
+		int needed = size - bytes_received;
+		if (count < needed) {
+			bytes_received += count;
+			break;
+		}
+		
+		/* We now have a full request. */
+		count -= needed;
+		next += needed;
+		func(size, timestamp);
+		bytes_received = 0;
+	}
+	return 0;
+}
+
+/**
+ * class server_metrics - Keeps statistics for a single server thread
+ * (i.e. all the requests arriving via one Homa port or one TCP listen
+ * socket).
+ */
+class server_metrics {
+    public:
+	/** @requests: Total number of requests handled so far. */
+	uint64_t requests;
+	
+	/**
+	 * @data: Total number of bytes of data in requests handled
+	 * so far.
+	 */
+	uint64_t data;
+	
+	server_metrics() :requests(0), data(0) {}
+};
+
+/** @metrics: keeps track of metrics for all servers (whether Homa or TCP). */
+std::vector<server_metrics *> metrics;
+
+/**
+ * class homa_server - Holds information about a single Homa server,
+ * which consists of a thread that handles requests on a given port.
+ */
+class homa_server {
+    public:
+	homa_server(int port);
+	void server(void);
+	
+	/** @fd: File descriptor for Homa socket. */
+	int fd;
+	
+	/** @metrics: Performance statistics. */
+	server_metrics metrics;
+};
+
+/** @homa_servers: keeps track of all existing Homa clients. */
+std::vector<homa_server *> homa_servers;
+
+/**
  * homa_server::homa_server() - Constructor for homa_server objects.
  * @port:  Port on which to receive requests
  */
 homa_server::homa_server(int port)
 	: fd(-1)
-        , requests(0)
-        , data(0)
+        , metrics()
 {
 	struct sockaddr_in addr_in;
 	
@@ -394,147 +411,55 @@ void homa_server::server(void)
 			continue;
 		}
 
-		/* Second word of the message indicates how large a
-		 * response to send.
-		 */
 		result = homa_reply(fd, message, length,
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {
 			printf("Homa_reply failed: %s\n", strerror(errno));
 			exit(1);
 		}
-		requests++;
-		data += length;
+		metrics.requests++;
+		metrics.data += length;
 	}
 }
 
 /**
- * tcp_accept() - Accepts a new incoming TCP connection and
- * initialize state for that connection.
- * @listen_fd:  File descriptor for the listen socket.
- * @epoll_fd:   Used to arrange for epolling on the new connection.
+ * class tcp_server - Holds information about a single TCP server,
+ * which consists of a thread that handles requests on a given port.
  */
-void tcp_accept(int listen_fd, int epoll_fd)
-{
-	struct tcp_connection *connection = new tcp_connection();
-	socklen_t addr_len = sizeof(connection->client_addr);
-	connection->fd = accept(listen_fd,
-			reinterpret_cast<sockaddr *>(&connection->client_addr),
-			&addr_len);
-	if (connection->fd < 0) {
-		printf("Couldn't accept incoming TCP connection: %s",
-			strerror(errno));
-		exit(1);
-	}
-	connection->bytes_received = 0;
-	tcp_connections.reserve(connection->fd + 1);
-	tcp_connections[connection->fd] = connection;
-	printf("Accepted TCP connection from %s on fd %d\n",
-			 print_address(&connection->client_addr),
-			 connection->fd);
+class tcp_server {
+    public:
+	tcp_server(int port);
+	void accept(int epoll_fd);
+	void read(int fd);
+	void server(void);
 	
-	struct epoll_event ev;
-	ev.events = EPOLLIN;
-	ev.data.fd = connection->fd;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, connection->fd, &ev) < 0) {
-		printf("Couldn't add new TCP connection to epoll: %s\n",
-				strerror(errno));
-		exit(1);
-	}
-}
-
-/**
- * tcp_read() - Reads available data from a TCP connection; once an entire
- * request has been read, sends an appropriate response.
- * @fd:        File descriptor for connection; tcp_connections must hold
- *             state information for this descriptor.
- */
-void tcp_read(int fd)
-{
-	char buffer[100000];
-	struct tcp_connection *connection = tcp_connections[fd];
-	char *next = buffer;
+	/** @listen_fd: File descriptor for the listen socket. */
+	int listen_fd;
 	
-	int count = read(fd, buffer, sizeof(buffer));
-	
-	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
-		/* Connection was closed by the client. */
-		if (close(fd) < 0) {
-			printf("Error closing TCP connection: %s\n",
-					strerror(errno));
-			exit(1);
-		}
-		printf("TCP connection from %s closed (fd %d)\n",
-				print_address(&connection->client_addr), fd);
-		delete tcp_connections[fd];
-		tcp_connections[fd] = NULL;
-		return;
-	}
-	
-	if (count < 0) {
-		printf("Error reading from TCP connection: %s\n",
-				strerror(errno));
-		exit(1);
-	}
-	
-	/*
-	 * Process incoming bytes (could contains parts of multiple requests).
-	 * The first 4 bytes of each request give its length.
+	/**
+	 * @connections: Entry i contains information for a client
+	 * connection on fd i.
 	 */
-	while (count > 0) {
-		/* First, fill in the length word with incoming data (there's
-		 * no guarantee that a single read will return all of the bytes
-		 * of the size word).
-		 */
-		int length_bytes = sizeof32(int) - connection->bytes_received;
-		if (length_bytes > 0) {
-			if (count < length_bytes)
-				length_bytes = count;
-			char *size_p = reinterpret_cast<char *>(&connection->size);
-			memcpy(size_p + connection->bytes_received, next,
-					length_bytes);
-			connection->bytes_received += length_bytes;
-			next += length_bytes;
-			count -= length_bytes;
-			continue;
-		}
-		
-		/* At this point we know the request length, so read until
-		 * we've got a full request.
-		 */
-		if (count < (connection->size - connection->bytes_received)) {
-			connection->bytes_received += count;
-			break;
-		}
-		
-		/* We now have a full request; send the response. */
-		count -= (connection->size - connection->bytes_received);
-		next += (connection->size - connection->bytes_received);
-		int *int_buffer = reinterpret_cast<int *>(buffer);
-		int_buffer[0] = int_buffer[1] = connection->size;
-		for (int bytes_left = connection->size; bytes_left > 0; ) {
-			int this_size = bytes_left;
-			if (this_size > sizeof32(buffer))
-				this_size = sizeof32(buffer);
-			if (write(fd, buffer, this_size) < 0) {
-				printf("Error writing TCP connection: %s\n",
-						strerror(errno));
-				exit(1);
-			}
-			bytes_left -= this_size;
-		}
-		connection->bytes_received = 0;
-	}
-}
+	std::vector<tcp_message *> connections;
+	
+	/** @metrics: Performance statistics. */
+	server_metrics metrics;
+};
+
+/** @tcp_servers: keeps track of all existing Homa clients. */
+std::vector<tcp_server *> tcp_servers;
 
 /**
- * tcp_server() - Opens a TCP socket, accepts connections on that socket
- * and processes messages on those connections.
- * @port:  Port number on which to listen.
+ * tcp_server::tcp_server() - Constructor for tcp_server objects.
+ * @port:  Port number on which this server should listen for incoming
+ *         requests.
  */
-void tcp_server(int port)
+tcp_server::tcp_server(int port)
+	: listen_fd(-1)
+        , connections()
+        , metrics()
 {
-	int listen_fd = socket(PF_INET, SOCK_STREAM, 0);
+	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		printf("Couldn't open server socket: %s\n", strerror(errno));
 		exit(1);
@@ -560,6 +485,17 @@ void tcp_server(int port)
 		exit(1);
 	}
 	
+	std::thread server(&tcp_server::server, this);
+	server.detach();
+}
+
+/**
+ * tcp_server::server() - Handles incoming TCP requests on a listen socket
+ * and all of the connections accepted via that socket. Normally invoked as
+ * top-level method in a thread
+ */
+void tcp_server::server()
+{	
 	int epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
 		printf("Couldn't create epoll instance: %s\n", strerror(errno));
@@ -576,7 +512,7 @@ void tcp_server(int port)
 	
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
-#define MAX_EVENTS 10
+#define MAX_EVENTS 20
 		struct epoll_event events[MAX_EVENTS];
 		int num_events;
 		
@@ -588,36 +524,195 @@ void tcp_server(int port)
 		for (int i = 0; i < num_events; i++) {
 			int fd = events[i].data.fd;
 			if (fd == listen_fd)
-				tcp_accept(fd, epoll_fd);
+				accept(epoll_fd);
 			else
-				tcp_read(fd);
+				read(fd);
 		}
 	}
 }
 
-/** homa_client::homa_client() - Constructor for homa_client objects. */
-homa_client::homa_client()
-	: fd(-1)
-        , receiver_running(0)
-        , request_servers()
-        , next_server(0)
-        , request_lengths()
-        , next_length(0)
-        , request_intervals()
-	, next_interval(0)
-        , actual_lengths(NUM_CLIENT_STATS, 0)
-        , actual_rtts(NUM_CLIENT_STATS, 0)
-        , next_result(0)
-        , requests(0)
-        , responses(0)
-        , failures(0)
-        , response_data(0)
+/**
+ * tcp_server::accept() - Accepts a new incoming TCP connection and
+ * initializes state for that connection.
+ * @epoll_fd:   Used to arrange for epolling on the new connection.
+ */
+void tcp_server::accept(int epoll_fd)
 {
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-	if (fd < 0) {
-		printf("Couldn't open Homa socket: %s\n", strerror(errno));
-	}
+	int fd;
+	struct sockaddr_in client_addr;
+	socklen_t addr_len = sizeof(client_addr);
 	
+	fd = ::accept(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
+			&addr_len);
+	if (fd < 0) {
+		printf("Couldn't accept incoming TCP connection: %s",
+			strerror(errno));
+		exit(1);
+	}
+	int flag = 1;
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	tcp_message *message = new tcp_message(fd, client_addr);
+	connections.resize(fd + 1);
+	connections[fd] = message;
+	
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+	ev.data.fd = fd;
+	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
+		printf("Couldn't add new TCP connection to epoll: %s\n",
+				strerror(errno));
+		exit(1);
+	}
+}
+
+/**
+ * tcp_server::read() - Reads available data from a TCP connection; once an
+ * entire request has been read, sends an appropriate response.
+ * @fd:        File descriptor for connection; connections must hold
+ *             state information for this descriptor.
+ */
+void tcp_server::read(int fd)
+{
+	int error = connections[fd]->read([this, fd](int size, int timestamp) {
+		metrics.requests++;
+		metrics.data += size;
+		if (send_message(fd, size, timestamp) != 0) {
+			printf("Error sending reply to %s: %s\n",
+					print_address(&connections[fd]->peer),
+					strerror(errno));
+			exit(1);
+		};
+	});
+	if (error) {
+		if (close(fd) < 0) {
+			printf("Error closing TCP connection to %s: %s\n",
+					print_address(&connections[fd]->peer),
+					strerror(errno));
+		}
+		delete connections[fd];
+		connections[fd] = NULL;
+	}
+}
+
+/**
+ * class client - Holds information that is common to both Homa clients
+ * and TCP clients. 
+ */
+class client {
+    public:
+	/**
+	 * @receiver_running: nonzero means the receiving thread has
+	 * initialized and is ready to receive responses.
+	 */
+	std::atomic<int> receiver_running;
+	
+	/**
+	 * @request_servers: a randomly chosen collection of indexes into
+	 * server_addrs; used to select the server for each outgoing request.
+	 */
+	std::vector<int16_t> request_servers;
+
+	/**
+	 * @next_server: index into request_servers of the server to use for
+	 * the next outgoing RPC.
+	 */
+	uint32_t next_server;
+	
+	/**
+	 * @request_lengths: a randomly chosen collection of lengths to
+	 * use for outgoing RPCs. Precomputed to save time during the
+	 * actual measurements, and based on a given distribution.
+	 * Note: lengths are always at least 4 (this is needed in order
+	 * to include a 32-bit timestamp in the request).
+	 */
+	std::vector<int> request_lengths;
+
+	/**
+	 * @cnext_length: index into request_lengths of the length to use for
+	 * the next outgoing RPC.
+	 */
+	uint32_t next_length;
+	
+	/**
+	 * @request_intervals: a randomly chosen collection of inter-request
+	 * intervals, measured in rdtsc cycles. Precomputed to save time
+	 * during the actual measurements, and chosen to achieve a given
+	 * network utilization, assuming a given distribution of request
+	 * lengths.
+	 */
+	std::vector<int> request_intervals;
+
+	/**
+	 * @next_interval: index into request_lengths of the length to use for
+	 * the next outgoing RPC.
+	 */
+	std::atomic<uint32_t> next_interval;
+	
+	/**
+	 * @actual_lengths: a circular buffer that holds the actual payload
+	 * sizes used for the most recent RPCs.
+	 */
+	std::vector<int> actual_lengths;
+	
+	/**
+	 * @actual_rtts: a circular buffer that holds the actual round trip
+	 * times (measured in rdtsc cycles) for the most recent RPCs. Entries
+	 * in this array correspond to those in @actual_lengths.
+	 */
+	std::vector<uint32_t> actual_rtts;
+
+	/**
+	 * define NUM_CLENT_STATS: number of records in actual_lengths
+	 * and actual_rtts.
+	 */
+#define NUM_CLIENT_STATS 500000
+	
+	/**
+	 * @next_result: index into both actual_lengths and actual_rtts
+	 * where info about the next RPC completion will be stored.
+	 */
+	uint32_t next_result;
+	
+	/** @requests: total number of RPCs issued so far. */
+	uint64_t requests;
+	
+	/** @responses: total number of responses received so far. */
+	std::atomic<uint64_t> responses;
+	
+	/**
+	 * @response_data: total number of bytes of data in responses
+	 * received so far.
+	 */
+	uint64_t response_data;
+	
+	/**
+	 * @total_rtt: sum of round-trip times (in rdtsc cycles) for
+	 * all responses received so far.
+	 */
+	uint64_t total_rtt;
+	
+	client();
+};
+
+/** @clients: keeps track of all existing clients. */
+std::vector<client *> clients;
+	
+/** client::client() - Constructor for client objects. */
+client::client()
+	: receiver_running(0)
+	, request_servers()
+	, next_server(0)
+	, request_lengths()
+	, next_length(0)
+	, request_intervals()
+	, next_interval(0)
+	, actual_lengths(NUM_CLIENT_STATS, 0)
+	, actual_rtts(NUM_CLIENT_STATS, 0)
+	, next_result(0)
+	, requests(0)
+	, responses(0)
+	, response_data(0)
+{
 	/* Precompute information about the requests this client will
 	 * generate. Pick a different prime number for the size of each
 	 * vector, so that they will wrap at different times, giving
@@ -628,11 +723,44 @@ homa_client::homa_client()
 #define NUM_INTERVALS 8783
 	std::uniform_int_distribution<int> server_dist(0,
 			static_cast<int>(server_addrs.size() - 1));
-	request_servers.reserve(NUM_SERVERS);
-	for (int i = 0; i < NUM_SERVERS; i++)
-		request_servers.push_back(server_dist(rand_gen));
+	for (int i = 0; i < NUM_SERVERS; i++) {
+		int server = server_dist(rand_gen);
+		request_servers.push_back(server);
+	}
 	request_lengths.push_back(100);
 	request_intervals.push_back(0);
+}
+
+/**
+ * class homa_client - Holds information about a single Homa client,
+ * which consists of one thread issuing requests and one thread receiving
+ * responses. 
+ */
+class homa_client : public client {
+    public:
+	homa_client(void);
+	void receiver(void);
+	void sender(void);
+	
+	/** @fd: file descriptor for Homa socket. */
+	int fd;
+	
+	/**
+	 * @failures: total number of RPCs that resulted in errors
+	 * in homa_recv, so they didn't complete.
+	 **/
+	std::atomic<uint64_t> failures;
+};
+
+/** homa_client::homa_client() - Constructor for homa_client objects. */
+homa_client::homa_client()
+	: fd(-1)
+        , failures(0)
+{
+	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n", strerror(errno));
+	}
 	
 	std::thread receiver(&homa_client::receiver, this);
 	while (!receiver_running) {
@@ -680,7 +808,7 @@ void homa_client::sender()
 			&server_addrs[request_servers[next_server]]),
 			sizeof(server_addrs[0]), &id);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n",
+			printf("Error in homa_client::sender: %s\n",
 				strerror(errno));
 			exit(1);
 		}
@@ -707,11 +835,7 @@ void homa_client::receiver(void)
 	uint32_t response[1000000/sizeof(uint32_t)];
 	uint64_t id;
 	struct sockaddr_in server_addr;
-	uint32_t slow_threshold;
-	double ticks_per_second;
 	
-        ticks_per_second = 5*1000000.0/to_seconds(1000000);
-	slow_threshold = static_cast<uint32_t>(1e-03*ticks_per_second);
 	receiver_running = 1;
 	while (1) {
 		id = 0;
@@ -728,9 +852,6 @@ void homa_client::receiver(void)
 		}
 		uint32_t elapsed = rdtsc() & 0xffffffff;
 		elapsed -= response[0];
-		if (elapsed > slow_threshold)
-			printf("Slow RTT for id %lu: %.1fms\n",
-					id, to_seconds(elapsed)*1e03);
 		responses++;
 		response_data += length;
 		total_rtt += elapsed;
@@ -743,20 +864,184 @@ void homa_client::receiver(void)
 }
 
 /**
- * homa_server_stats() -  Prints recent statistics collected from Homa
+ * class tcp_client - Holds information about a single TCP client,
+ * which consists of one thread issuing requests and one thread receiving
+ * responses. 
+ */
+class tcp_client : public client {
+    public:
+	tcp_client(void);
+	void receiver(void);
+	void sender(void);
+	
+	/** 
+	 * @messages: one entry for each server in server_addrs; used to
+	 * receive responses from that server.
+	 */
+	std::vector<tcp_message> messages;
+};
+
+/** tcp_client::tcp_client() - Constructor for tcp_client objects. */
+tcp_client::tcp_client()
+	: messages()
+{
+	for (uint32_t i = 0; i < server_addrs.size(); i++) {
+		int fd = socket(PF_INET, SOCK_STREAM, 0);
+		if (fd == -1) {
+			printf("Couldn't open TCP socket: %s\n",
+					strerror(errno));
+			exit(1);
+		}
+		if (connect(fd, reinterpret_cast<struct sockaddr *>(
+				&server_addrs[i]),
+				sizeof(server_addrs[i])) == -1) {
+			printf("Couldn't connect to %s:%d: %s\n",
+					print_address(&server_addrs[i]),
+					ntohs(server_addrs[i].sin_port),
+					strerror(errno));
+			exit(1);
+		}
+		int flag = 1;
+		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+		messages.emplace_back(fd, server_addrs[i]);
+	}
+	
+	std::thread receiver(&tcp_client::receiver, this);
+	while (!receiver_running) {
+		/* Wait for the receiver to begin execution before
+		 * starting the sender; otherwise the initial RPCs
+		 * may appear to take a long time.
+		 */
+	}
+	receiver.detach();
+	std::thread sender(&tcp_client::sender, this);
+	sender.detach();
+}
+
+/**
+ * tcp_client::sender() - Invoked as the top-level method in a thread;
+ * invokes a pseudo-random stream of RPCs continuously.
+ */
+void tcp_client::sender()
+{
+	uint64_t next_start = 0;
+	
+	while (1) {
+		uint64_t now;
+		int server = request_servers[next_server];
+		
+		/* Wait until (a) we have reached the next start time
+		 * and (b) there aren't too many requests outstanding.
+		 */
+		while (1) {
+			now = rdtsc();
+			if (now < next_start)
+				continue;
+			if ((requests - responses) < max_requests)
+				break;
+		}
+		
+		/* Store the low-order bits of the send timestamp in
+		 * the request; it will be returned in the response and
+		 * used by the receiver.
+		 */
+		int status = send_message(messages[server].fd,
+				request_lengths[next_length],
+				now & 0xffffffff);
+		if (status != 0) {
+			printf("Error in TCP socket write for %s: %s\n",
+				print_address(&server_addrs[server]),
+				strerror(errno));
+			exit(1);
+		}
+		requests++;
+		next_server++;
+		if (next_server >= request_servers.size())
+			next_server = 0;
+		next_length++;
+		if (next_length >= request_lengths.size())
+			next_length = 0;
+		next_start = now + request_intervals[next_interval];
+		next_interval++;
+		if (next_interval >= request_intervals.size())
+			next_interval = 0;
+	}
+}
+
+/**
+ * tcp_client::receiver() - Invoked as the top-level method in a thread
+ * that waits for RPC responses and then logs statistics about them.
+ */
+void tcp_client::receiver(void)
+{
+	int epoll_fd = epoll_create(10);
+	if (epoll_fd < 0) {
+		printf("tcp_client::receiver couldn't create epoll instance: "
+				"%s\n", strerror(errno));
+		exit(1);
+	}
+	struct epoll_event ev;
+	for (uint32_t i = 0; i < messages.size(); i++) {
+		ev.events = EPOLLIN;
+		ev.data.u32 = i;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, messages[i].fd,
+				&ev) != 0) {
+			printf("Couldn't add TCP socket %d to epoll: %s\n",
+					i, strerror(errno));
+			exit(1);
+		}
+	}
+	receiver_running = 1;
+	
+	/* Each iteration through this loop processes a batch of incoming
+	 * responses
+	 */
+	while (1) {
+#define MAX_EVENTS 20
+		struct epoll_event events[MAX_EVENTS];
+		int num_events;
+		
+		num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+		if (num_events < 0) {
+			printf("epoll_wait failed in tcp_client::receiver: %s\n",
+					strerror(errno));
+			exit(1);
+		}
+		for (int i = 0; i < num_events; i++) {
+			tcp_message *message = &messages[events[i].data.u32];
+			int error = message->read([this](int size, int timestamp) {
+				uint32_t elapsed = rdtsc() & 0xffffffff;
+				elapsed -= timestamp;
+				responses++;
+				response_data += size;
+				total_rtt += elapsed;
+				actual_lengths[next_result] = size;
+				actual_rtts[next_result] = elapsed;
+				next_result++;
+				if (next_result >= actual_lengths.size())
+					next_result = 0;
+			});
+			if (error)
+				exit(1);
+		}
+	}
+}
+
+/**
+ * server_stats() -  Prints recent statistics collected from all
  * servers.
  * @now:   Current time in rdtsc cycles (used to compute rates for
  *         statistics).
  */
-void homa_server_stats(uint64_t now)
+void server_stats(uint64_t now)
 {
 	char details[10000];
 	int offset = 0;
 	int length;
 	uint64_t server_rpcs = 0;
 	uint64_t server_data = 0;
-	for (uint32_t i = 0; i < homa_servers.size(); i++) {
-		homa_server *server = homa_servers[i];
+	for (uint32_t i = 0; i < metrics.size(); i++) {
+		server_metrics *server = metrics[i];
 		server_rpcs += server->requests;
 		server_data += server->data;
 		length = snprintf(details + offset, sizeof(details) - offset,
@@ -780,12 +1065,12 @@ void homa_server_stats(uint64_t now)
 }
 
 /**
- * homa_client_stats() -  Prints recent statistics collected from Homa
- * clients.
- * @now:   Current time in rdtsc cycles (used to compute rates for
- *         statistics).
+ * client_stats() -  Prints recent statistics collected by all existing
+ * clients (either TCP or Homa).
+ * @now:       Current time in rdtsc cycles (used to compute rates for
+ *             statistics).
  */
-void homa_client_stats(uint64_t now)
+void client_stats(uint64_t now)
 {
 #define CDF_VALUES 100000
 	uint64_t client_rpcs = 0;
@@ -795,13 +1080,13 @@ void homa_client_stats(uint64_t now)
 	int times_per_client;
 	int cdf_index = 0;
 	
-	if (homa_clients.size() == 0)
+	if (clients.size() == 0)
 		return;
 	
-	times_per_client = CDF_VALUES/homa_clients.size();
+	times_per_client = CDF_VALUES/clients.size();
 	if (times_per_client > NUM_CLIENT_STATS)
 		times_per_client = NUM_CLIENT_STATS;
-	for (homa_client *client: homa_clients) {
+	for (client *client: clients) {
 		client_rpcs += client->responses;
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
@@ -826,7 +1111,7 @@ void homa_client_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double data = (double) (client_data - last_client_data);
-		printf("Homa clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
+		printf("Clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
 				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
 				"%.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
@@ -842,7 +1127,7 @@ void homa_client_stats(uint64_t now)
 
 int main(int argc, char** argv)
 {
-	int next_arg, i;
+	int next_arg, i, homa_protocol;
 	
 	for (next_arg = 1; (next_arg < argc); next_arg += 1) {
 		if (strcmp(argv[next_arg], "--help") == 0) {
@@ -898,22 +1183,30 @@ int main(int argc, char** argv)
 			exit(1);
 		}
 	}
-	if ((strcmp(protocol, "homa") != 0) && (strcmp(protocol, "tcp") != 0)) {
+	if (strcmp(protocol, "homa") == 0)
+		homa_protocol = 1;
+	else if (strcmp(protocol, "tcp") == 0)
+	        homa_protocol = 0;
+	else {
 		printf("Unknown protocol '%s': must be homa or tcp\n", protocol);
 		exit(1);
 	}
 	
 	/* Spawn server threads. */
 	if (is_server) {
-		if (strcmp(protocol, "homa") == 0) {
+		if (homa_protocol) {
 			for (i = 0; i < server_threads; i++) {
-				homa_servers.push_back(new homa_server(
-						first_port + i));
+				homa_server *server = new homa_server(
+						first_port + i);
+				homa_servers.push_back(server);
+				metrics.push_back(&server->metrics);
 			}
 		} else {
 			for (i = 0; i < server_threads; i++) {
-				std::thread thread(tcp_server, first_port + i);
-				thread.detach();
+				tcp_server *server = new tcp_server(
+						first_port + i);
+				tcp_servers.push_back(server);
+				metrics.push_back(&server->metrics);
 			}
 		}
 		last_per_server_rpcs.resize(server_threads, 0);
@@ -946,17 +1239,19 @@ int main(int argc, char** argv)
 	}
 	
 	/* Create clients. */
-	if (strcmp(protocol, "homa") == 0) {
-		for (i = 0; i < client_threads; i++)
-			homa_clients.push_back(new homa_client);
+	for (i = 0; i < client_threads; i++) {
+		if (homa_protocol)
+			clients.push_back(new homa_client);
+		else
+			clients.push_back(new tcp_client);
 	}
 	
 	/* Print a few statistics every second. */
 	while (1) {
 		sleep(1);
 		uint64_t now = rdtsc();
-		homa_server_stats(now);
-		homa_client_stats(now);
+		server_stats(now);
+		client_stats(now);
 		
 		last_stats_time = now;
 	}
