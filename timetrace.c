@@ -355,7 +355,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	while (true) {
 		struct tt_event *event;
 		int entry_length, bytes_to_copy, available, i;
-		int current_buffer = -1;
+		int current_core = -1;
 		__u64 earliest_time = ~0;
 
 		/* Check all the traces to find the earliest available event. */
@@ -364,24 +364,26 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			event = &buffer->events[pf->pos[i]];
 			if ((pf->pos[i] != buffer->next_index)
 					&& (event->timestamp < earliest_time)) {
-			    current_buffer = i;
+			    current_core = i;
 			    earliest_time = event->timestamp;
 			}
 		}
-		if (current_buffer < 0) {
+		if (current_core < 0) {
 		    /* None of the traces have any more events to process. */
 		    goto flush;
 		}
 		
 		/* Format one event. */
-		event = &(tt_buffers[current_buffer]->events[
-				pf->pos[current_buffer]]);
+		event = &(tt_buffers[current_core]->events[
+				pf->pos[current_core]]);
 		available = tt_pf_storage - buffered;
 		if (available == 0) {
 			goto flush;
 		}
 		entry_length = snprintf(pf->msg_storage + buffered, available,
-				"%lu ", (long unsigned int) event->timestamp);
+				"%lu [core %2d] ",
+				(long unsigned int) event->timestamp,
+			        current_core);
 		if (available >= entry_length)
 			entry_length += snprintf(
 					pf->msg_storage + buffered + entry_length,
@@ -401,7 +403,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		/* Replace terminating null character with newline. */
 		pf->msg_storage[buffered + entry_length] = '\n';
 		buffered += entry_length + 1;
-		pf->pos[current_buffer] = (pf->pos[current_buffer] + 1)
+		pf->pos[current_core] = (pf->pos[current_core] + 1)
 				& (tt_buffer_size-1);
 		continue;
 		
@@ -419,7 +421,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		}
 		copied_to_user += bytes_to_copy;
 		buffered -= bytes_to_copy;
-		if ((copied_to_user == length) || (current_buffer < 0)) {
+		if ((copied_to_user == length) || (current_core < 0)) {
 			pf->num_leftover = buffered;
 			pf->leftover = pf->msg_storage + bytes_to_copy;
 			break;

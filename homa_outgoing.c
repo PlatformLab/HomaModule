@@ -604,8 +604,7 @@ int homa_pacer_main(void *transportInfo)
 			INC_METRIC(pacer_cycles, get_cycles() - start);
 			schedule();
 			start = get_cycles();
-//			tt_record1("pacer woke up on core %d",
-//					smp_processor_id());
+//			tt_record1("pacer woke up");
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);

@@ -1054,7 +1054,7 @@ void server_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
 		double data = (double) (server_data - last_server_data);
-		printf("Homa servers: %.2f Kops/sec, %.2f MB/sec, "
+		printf("Servers: %.2f Kops/sec, %.2f MB/sec, "
 				"avg. length %.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
 				data/rpcs);

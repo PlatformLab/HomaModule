@@ -447,9 +447,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int result;
 	struct homa_rpc *rpc = NULL;
 
-	tt_record2("homa_ioc_recv starting on core %d, port %d",
-			smp_processor_id(), hsk->server_port != 0 ?
-			hsk->server_port : hsk->client_port);
+	tt_record1("homa_ioc_recv starting, port %d",
+			hsk->server_port != 0 ? hsk->server_port : 
+			hsk->client_port);
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -498,8 +498,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc->state = RPC_IN_SERVICE;
 	}
 	release_sock(sk);
-	tt_record3("homa_ioc_recv finished on core %d, id %u, port %d",
-			smp_processor_id(), rpc->id & 0xffffffff,
+	tt_record2("homa_ioc_recv finished, id %u, port %d",
+			rpc->id & 0xffffffff,
 			rpc->is_client ? hsk->client_port : hsk->server_port);
 	return result;
 	
@@ -530,13 +530,13 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
-	tt_record3("homa_ioc_reply starting on core %d, id %llu, port %d",
-		smp_processor_id(), args.id, hsk->server_port);
+	tt_record2("homa_ioc_reply starting, id %llu, port %d",
+			args.id, hsk->server_port);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
 	err = import_single_range(WRITE, args.response, args.resplen, &iov,
-		&iter);
+			&iter);
 	if (unlikely(err))
 		return err;
 
@@ -851,6 +851,8 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	struct sock *sk = NULL;
 	struct sk_buff *others;
 	__u16 dport;
+	static __u64 last = 0;
+	__u64 now;
 //	char buffer[200];
 //	int discard;
 
@@ -884,7 +886,21 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	INC_METRIC(pkt_recv_calls, 1);
 	h = (struct common_header *) skb->data;
 	tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
-			saddr, ntohs(h->sport), h->id, h->type);
+			ntohl(saddr), ntohs(h->sport), h->id, h->type);
+	now = get_cycles();
+	if ((now - last) > 1000000) {
+		int scaled_ms = (int) (10*(now-last)/cpu_khz);
+		if ((scaled_ms > 0) && (scaled_ms < 10000)) {
+			tt_record3("Gap in incoming packets: %d cycles "
+					"(%d.%1d ms)",
+					(int) (now - last), scaled_ms/10,
+					scaled_ms%10);
+			printk(KERN_NOTICE "Gap in incoming packets: %llu "
+					"cycles, (%d.%1d ms)", (now - last),
+					scaled_ms/10, scaled_ms%10);
+		}
+	}
+	last = now;
 	if (unlikely(h->type == FREEZE)) {
 		/* Check for FREEZE here, rather than in homa_incoming.c,
 		 * so it will work even for unknown RPCs and sockets.
@@ -894,10 +910,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		tt_freeze();
 		goto discard;
 	}
-	
-//	tt_record1("homa_pkt_recv starting on core %d", smp_processor_id());
-//	printk(KERN_NOTICE "incoming Homa packet: %s\n",
-//			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	dport = ntohs(h->dport);
 	rcu_read_lock();

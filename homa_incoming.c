@@ -229,6 +229,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
  */
 int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 {
+//	extern int num_gaps;
 	struct homa_sock *hsk = homa_sk(sk);
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
@@ -319,12 +320,11 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	tt_record4("incoming data packet, id %llu, port %d, offset %d, "
-			"seg size %d", h->common.id,
+	tt_record3("incoming data packet, id %llu, port %d, offset %d",
+			h->common.id,
 			rpc->is_client ? rpc->hsk->client_port
 			: rpc->hsk->server_port,
-			ntohl(h->seg.offset),
-			ntohl(h->seg.segment_length));
+			ntohl(h->seg.offset));
 
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
