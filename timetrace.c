@@ -381,7 +381,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			goto flush;
 		}
 		entry_length = snprintf(pf->msg_storage + buffered, available,
-				"%lu [core %2d] ",
+				"%lu [C%02d] ",
 				(long unsigned int) event->timestamp,
 			        current_core);
 		if (available >= entry_length)
