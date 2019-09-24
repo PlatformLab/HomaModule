@@ -169,12 +169,12 @@ TEST_F(timetrace, tt_proc_read__leftovers)
 			"6666 7777", 0, 0, 0, 0);
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, (char*) 1000, 20, 0);
-	EXPECT_STREQ("1000 [C00] AAAA ", mock_user_data);
+	EXPECT_STREQ("1000 [C00] AAAA BBBB", mock_user_data);
 	tt_proc_read(&self->file, (char*) 1000, 40, 0);
-	EXPECT_STREQ("BBBB CCCC DDDD EEEE FFFF GGGG HHHH IIII ",
+	EXPECT_STREQ(" CCCC DDDD EEEE FFFF GGGG HHHH IIII JJJJ",
 			mock_user_data);
 	tt_proc_read(&self->file, (char*) 1000, 200, 0);
-	EXPECT_STREQ("JJJJ KKKK LLLL MMMM NNNN OOOO PPPP\n"
+	EXPECT_STREQ(" KKKK LLLL MMMM NNNN OOOO PPPP\n"
 			"1001 [C00] 0000 1111 2222 3333 4444 "
 			"5555 6666 7777\n", mock_user_data);
 	tt_proc_release(NULL, &self->file);
@@ -227,7 +227,7 @@ TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 			"AAAA BBBB CCCC DDDD", 0, 0, 0, 0);
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, (char*) 1000, 100, 0);
-	EXPECT_STREQ("1000 [C00] AAAA\n", mock_user_data);
+	EXPECT_STREQ("1000 [C00] AAAA BBB\n", mock_user_data);
 	tt_proc_release(NULL, &self->file);
 }
 
