@@ -46,8 +46,6 @@ extern int mock_signal_pending;
 #include "homa.h"
 #include "timetrace.h"
 
-extern struct homa *homa;
-
 /* Forward declarations. */
 struct homa_sock;
 

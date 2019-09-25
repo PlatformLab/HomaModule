@@ -5,6 +5,8 @@
 #include "mock.h"
 #include "utils.h"
 
+extern struct homa *homa;
+
 FIXTURE(homa_plumbing) {
 	__be32 client_ip;
 	int client_port;

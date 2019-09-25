@@ -46,10 +46,6 @@ Notes for Homa implementation in Linux:
     * Add configuration option to limit MTU
     * Add new kernel call to combine send message & wait reply?
   * Don't grant to more than one message from a given sender at a time.
-  * Improve timeout mechanism to work in the face of large numbers of
-    outgoing messages:
-    * Combine timeouts for a single target server.
-    * Limit the number of simultaneous timeouts.
   * Figure out socket locking disciplines.
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in

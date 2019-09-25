@@ -506,7 +506,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 					+ HOMA_IPV4_HEADER_LENGTH
 					+ HOMA_SKB_EXTRA, GFP_KERNEL);
 			if (unlikely(!new_skb)) {
-				if (homa->verbose)
+				if (rpc->hsk->homa->verbose)
 					printk(KERN_NOTICE "homa_resend_data "
 						"couldn't allocate skb\n");
 				continue;
