@@ -263,11 +263,16 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 					sizeof(buffer)));
 		}
 		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
+			tt_record4("Discarding packet for unknown RPC, id %u, "
+					"port %d, type %d, peer 0x%x",
+					h->id & 0xffffffff, ntohs(h->sport),
+					h->type, ntohl(ip_hdr(skb)->saddr));
 			INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
 	} else {
 		rpc->silent_ticks = 0;
+		rpc->num_resends = 0;
 	}
 	
 	switch (h->type) {

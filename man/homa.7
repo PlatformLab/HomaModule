@@ -139,17 +139,12 @@ to the value shown below.
 The parameters are also visible as files in the directory
 .IR /proc/sys/net/homa
 .TP
-.I abort_ticks
-An integer value specifying a number of "ticks"; each tick corresponds
-to one invocation of Homa's internal timer function, which runs every
-millisecond.
-Homa will abort a request with
-.B ETIMEDOUT
-if it is unable to elicit any acknowledgment from the request's target
-server for this number of ticks.
-This value should be significantly greater than
-.I resend_ticks
-in order to allow time for multiple resends before aborting.
+.I abort_resends
+An integer value specifying how long to wait before aborting RPCs. If
+this many resend requests have been issued for an RPC and no response
+has been received from the peer, then
+Homa will abort the RPC with
+.BR ETIMEDOUT .
 .TP
 .I cutoff_version
 (Read-only) The current version for unscheduled cutoffs; incremented
@@ -226,13 +221,29 @@ send each packet as soon as it has been initialized. Zero means no
 pipelining: Homa initializes all of the packets for an outgoing message
 before attempting to transmit any of them.
 .TP
+.IR resend_interval
+An integer value specifying how frequently resend requests can be sent
+to a given peer (regardless of how many RPCs are outstanding to that
+peer). This is in units
+of "ticks" (see 
+.I resend_ticks
+below).
+.TP
 .IR resend_ticks
-An integer value specifying a number of "ticks"; each tick corresponds
+An integer value specifying a number of "ticks", each of which corresponds
 to one invocation of Homa's internal timer function, which runs every
 millisecond.
-A resend request will be sent after this many ticks have elapsed without
-receiving expected data from a peer; additional resend requests
-will be sent after each additional tick.
+Homa will begin issuing resend requests for an RPC once this many ticks have
+elapsed without receiving expected data from a peer; the exact timing and
+spacing of those requests is determined by
+.IR resend_interval .
+The general
+idea is to send the first resend request relatively quickly, in order to
+minimize the delay caused by lost packets. However, if a peer still doesn't
+respond, it probably means that peer is overloaded; sending a lot of resends
+will just make the problem
+worse. It's unlikely that multiple packets get lost in a short time
+interval, so it's OK to pay extra time if that's what really happened.
 This value and
 .I abort_ticks
 should be chosen together.

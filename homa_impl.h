@@ -665,6 +665,12 @@ struct homa_rpc {
 	 * since the last time a packet was received for this RPC.
 	 */
 	int silent_ticks;
+	
+	/**
+	 * @num_resends: the number of RESEND requests we have sent since
+	 * the last time we received a packet for this RPC from @peer.
+	 */
+	int num_resends;
 };
 
 /**
@@ -802,6 +808,7 @@ struct homa_sock {
 	 * needed, since RPCs are already in one of the hash tables below,
 	 * but it's more efficient for homa_timer to have this list
 	 * (so it doesn't have to scan large numbers of hash buckets).
+	 * The list is sorted, with the oldest RPC first.
 	 */
 	struct list_head active_rpcs;
 	
@@ -923,7 +930,7 @@ struct homa_peertab {
 };
 
 /**
- * struct peer - One of these objects exists for each machine that we
+ * struct homa_peer - One of these objects exists for each machine that we
  * have communicated with (either as client or server). 
  */
 struct homa_peer {
@@ -960,6 +967,13 @@ struct homa_peer {
 	 * recent CUTOFFS packet to this peer.
 	 */
 	unsigned long last_update_jiffies;
+	
+	/**
+	 * last_resend_tick: value of @homa->timer_ticks when the most recent
+	 * RESEND request was sent to this peer. Manipulated only by
+	 * homa_timer, so no synchronization needed.
+	 */
+	__u32 last_resend_tick;
 	
 	/**
 	 * @peertab_links: Links this object into a bucket of its
@@ -1066,16 +1080,22 @@ struct homa {
 	int max_overcommit;
 	
 	/**
-	 * @retry_ticks: When an RPC's @silent_ticks reaches this value,
-	 * we start sending RESEND requests.
+	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,
+	 * start sending RESEND requests.
 	 */
 	int resend_ticks;
 	
 	/**
-	 * @abort_ticks: Abort an RPC if its @silent_ticks reaches
-	 * this value. Set externally via sysctl.
+	 * @resend_interval: minimum number of homa timer ticks between
+	 * RESENDs to the same peer.
 	 */
-	int abort_ticks;
+	int resend_interval;
+	
+	/**
+	 * @abort_resends: Abort an RPC if there is still no response
+	 * after this many resends.
+	 */
+	int abort_resends;
 	
 	/**
 	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
@@ -1185,6 +1205,12 @@ struct homa {
 	 * lower the limit already enforced by Linux.
 	 */
 	int max_gso_size;
+	
+	/**
+	 * @timer_ticks: number of times that homa_timer has been invoked
+	 * (may wraparound, which is safe).
+	 */
+	uint32_t timer_ticks;
 	
 	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
@@ -1512,9 +1538,11 @@ extern struct homa_rpc
 			struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern void     homa_rpc_reap(struct homa_sock *hsk);
+extern void     homa_rpc_timeout(struct homa_rpc *rpc);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);
+extern void     homa_server_crashed(struct homa *homa, struct homa_peer *peer);
 extern void     homa_set_priority(struct sk_buff *skb, int priority);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);

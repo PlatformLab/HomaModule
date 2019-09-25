@@ -73,7 +73,8 @@ int homa_init(struct homa *homa)
 	homa->grant_increment = 0;
 	homa->max_overcommit = 8;
 	homa->resend_ticks = 2;
-	homa->abort_ticks = 8;
+	homa->resend_interval = 5;
+	homa->abort_resends = 10;
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable = 0;
@@ -93,9 +94,10 @@ int homa_init(struct homa *homa)
 	atomic_long_set(&homa->link_idle_time, get_cycles());
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
-	homa->verbose = 1;
+	homa->verbose = 0;
 	homa->pipeline_xmit = 0;
 	homa->max_gso_size = 1000000;
+	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
@@ -115,8 +117,10 @@ void homa_destroy(struct homa *homa)
 	if (homa->pacer_kthread) {
 		homa_pacer_stop(homa);
 	}
-	homa_peertab_destroy(&homa->peers);
+	
+	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(&homa->port_map);
+	homa_peertab_destroy(&homa->peers);
 	if (metrics_memory) {
 		vfree(metrics_memory);
 		metrics_memory = NULL;
@@ -165,12 +169,13 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->msgin.total_length = -1;
 	crpc->num_skbuffs = 0;
 	hlist_add_head(&crpc->hash_links, homa_client_rpc_bucket(hsk, crpc->id));
-	list_add(&crpc->rpc_links, &hsk->active_rpcs);
+	list_add_tail(&crpc->rpc_links, &hsk->active_rpcs);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
+	crpc->num_resends = 0;
 	
 	/* Initialize msgout last (it will start transmitting packets,
 	 * so the structure needs to be fully initialized).
@@ -221,12 +226,13 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->msgout.length = -1;
 	srpc->num_skbuffs = 0;
 	hlist_add_head(&srpc->hash_links, homa_server_rpc_bucket(hsk, srpc->id));
-	list_add(&srpc->rpc_links, &hsk->active_rpcs);
+	list_add_tail(&srpc->rpc_links, &hsk->active_rpcs);
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
+	srpc->num_resends = 0;
 	return srpc;
 }
 

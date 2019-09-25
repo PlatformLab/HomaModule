@@ -119,6 +119,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] = INT_MAX;
 	peer->cutoff_version = 0;
 	peer->last_update_jiffies = 0;
+	peer->last_resend_tick = 0;
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	INC_METRIC(peer_new_entries, 1);
 	

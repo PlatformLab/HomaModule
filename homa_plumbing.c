@@ -125,8 +125,8 @@ static struct proc_dir_entry *metrics_dir_entry = NULL;
 /* Used to configure sysctl access to Homa configuration parameters.*/
 static struct ctl_table homa_ctl_table[] = {
 	{
-		.procname	= "abort_ticks",
-		.data		= &homa_data.abort_ticks,
+		.procname	= "abort_resends",
+		.data		= &homa_data.abort_resends,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -200,6 +200,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "resend_interval",
+		.data		= &homa_data.resend_interval,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.procname	= "resend_ticks",
@@ -890,7 +897,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	now = get_cycles();
 	if ((now - last) > 1000000) {
 		int scaled_ms = (int) (10*(now-last)/cpu_khz);
-		if ((scaled_ms > 0) && (scaled_ms < 10000)) {
+		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
 			tt_record3("Gap in incoming packets: %d cycles "
 					"(%d.%1d ms)",
 					(int) (now - last), scaled_ms/10,
@@ -905,8 +912,10 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		/* Check for FREEZE here, rather than in homa_incoming.c,
 		 * so it will work even for unknown RPCs and sockets.
 		 */
-		tt_record3("Received freeze request on port %d from 0x%x:%d",
-				ntohs(h->dport), ntohl(saddr), ntohs(h->sport));
+		tt_record4("Received freeze request on port %d from 0x%x:%d, "
+				"id %d",
+				ntohs(h->dport), ntohl(saddr), ntohs(h->sport),
+				h->id & 0xffffffff);
 		tt_freeze();
 		goto discard;
 	}
