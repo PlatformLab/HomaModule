@@ -1,4 +1,4 @@
-This repo contains an implementation of the Homa transport protocol for Linux.
+This repo contains an implementation of the Homa transport protocol as a Linux kernel module.
 
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
   Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
@@ -26,7 +26,8 @@ This repo contains an implementation of the Homa transport protocol for Linux.
 - To build the module, type "make all"; then type "sudo insmod homa.ko" to install
   it, and "sudo rmmod homa" to remove an installed module.
   
-- A collection of man pages is available in the "man" subdirectory.
+- A collection of man pages is available in the "man" subdirectory. The API for
+  Homa is quite different from TCP sockets.
 
 - The subdirectory "unit" contains unit tests, which you can run by typing
   "make" in that subdirectory.
