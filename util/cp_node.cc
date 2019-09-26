@@ -33,7 +33,7 @@ int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-uint32_t max_requests = 50;
+uint32_t max_requests = 5;
 double net_util = 0.8;
 const char *protocol = "homa";
 int server_threads = 1;
@@ -108,8 +108,8 @@ void print_help(const char *name)
 		"                      meaning node-%d)\n"
 		"--help                Print this message\n"
 		"--is_server           Instantiate server threads on this node\n"
-		"--max_requests        Maximum number of outstanding requests from each client\n"
-		"                      thread (default: %d)\n"
+		"--max_requests        Maximum number of outstanding requests from a client\n"
+		"                      to a single server thread (default: %d)\n"
 		"--net_util            Target network utilization, including headers and packet\n"
 		"                      gaps (default: %.2f)\n"
 		"--protocol            Transport protocol to use for requests: homa or tcp\n"
@@ -171,21 +171,41 @@ int int_arg(const char *value, const char *name)
 }
 
 /**
+ * struct message_header - The first few bytes of each message (request or
+ * response) have the structure defined here. The client initially specifies
+ * this information in the request, and the server returns the information
+ * in the response.
+ */
+struct message_header {
+	/**
+	 * @start_time: the time when the client initiated the request.
+	 * This is the low-order 32 bits of a rdtsc value.
+	 */
+	uint32_t start_time;
+	
+	/**
+	 * @server_id: the index in @server_addrs (on the client) of
+	 * the server for this request.
+	 */
+	int server_id;
+};
+
+/**
  * send_message() - Writes a message to a file descriptor in the
  * standard form (size, timestamp, then arbitrary ignored padding).
  * @fd:         File descriptor on which to write the message.
  * @size:       Size of message to write (must be at least 8).
- * @timestamp:  Transmitted as bytes 4-7 of the message.
+ * @header:     Transmitted as the first bytes of the message
+ *              (after the size word).
  * 
  * Return:   Zero for success; anything else means there was an error
  *           (check errno for details).
  */
-int send_message(int fd, int size, uint32_t timestamp)
+int send_message(int fd, int size, message_header *header)
 {
 	int buffer[100000/sizeof(uint32_t)];
-
 	buffer[0] = size;
-	buffer[1] = timestamp;
+	*(reinterpret_cast<message_header *>(&buffer[1])) = *header;
 	for (int bytes_left = size; bytes_left > 0; ) {
 		int this_size = bytes_left;
 		if (this_size > sizeof32(buffer))
@@ -205,7 +225,7 @@ int send_message(int fd, int size, uint32_t timestamp)
 class tcp_message {
     public:
 	tcp_message(int fd, struct sockaddr_in peer);
-	int read(std::function<void (int size, int timestamp)> func);
+	int read(std::function<void (int size, message_header *header)> func);
 	
 	/** @fd: File descriptor to use for reading data. */
 	int fd;
@@ -232,10 +252,10 @@ class tcp_message {
 	int size;
 	
 	/**
-	 * @timestamp: bytes 4-7 of the message; not valid unless
-	 * @bytes_received >= 8.
+	 * @header: first bytes of the message, starting at byte 4; not valid
+	 * unless @bytes_received >= 4+sizeof(message_header).
 	 */
-	int timestamp;
+	message_header header;
 } __attribute__((packed));
 
 /**
@@ -248,7 +268,7 @@ tcp_message::tcp_message(int fd, struct sockaddr_in peer)
 	, peer(peer)
 	, bytes_received(0)
         , size(0)
-        , timestamp(0)
+        , header()
 {
 }
 
@@ -256,17 +276,19 @@ tcp_message::tcp_message(int fd, struct sockaddr_in peer)
  * tcp_message::read() - Reads more data from a TCP connection and calls
  * a function to handle complete messages, if any.
  * @func:      Function to call when there is a complete message; the arguments
- *             to the function contain the first 8 bytes of the message. Func
+ *             to the function contain the total length of the message, plus
+ *             a pointer to the standard header from the message. Func
  *             may be called multiple times in a single indication of this
  *             method.
- * Return:     Nonzero means success; zero means the socket was closed
+ * Return:     Zero means success; nonzero means the socket was closed
  *             by the peer, or there was an error. Before returning, this
  *             method prints an error message.
  */
-int tcp_message::read(std::function<void (int size, int timestamp)> func)
+int tcp_message::read(std::function<void (int size, message_header *header)> func)
 {
 	char buffer[100000];
 	char *next = buffer;
+#define TCP_HDR_SIZE (sizeof32(int) + sizeof32(message_header))
 	
 	int count = ::read(fd, buffer, sizeof(buffer));
 	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
@@ -284,11 +306,11 @@ int tcp_message::read(std::function<void (int size, int timestamp)> func)
 	 * The first 4 bytes of each request give its length.
 	 */
 	while (count > 0) {
-		/* First, fill in the 2 words of header with incoming data
-		 * (there's no guarantee that a single read will return all
-		 * of the bytes needed for these).
+		/* First, fill in the size and message_header with incoming
+		 * data (there's no guarantee that a single read will return
+		 * all of the bytes needed for these).
 		 */
-		int header_bytes = 2*sizeof32(int) - bytes_received;
+		int header_bytes = TCP_HDR_SIZE - bytes_received;
 		if (header_bytes > 0) {
 			if (count < header_bytes)
 				header_bytes = count;
@@ -297,7 +319,7 @@ int tcp_message::read(std::function<void (int size, int timestamp)> func)
 			bytes_received += header_bytes;
 			next += header_bytes;
 			count -= header_bytes;
-			if (bytes_received < 2*sizeof32(int))
+			if (bytes_received < TCP_HDR_SIZE)
 				break;
 		}
 		
@@ -313,7 +335,7 @@ int tcp_message::read(std::function<void (int size, int timestamp)> func)
 		/* We now have a full request. */
 		count -= needed;
 		next += needed;
-		func(size, timestamp);
+		func(size, &header);
 		bytes_received = 0;
 	}
 	return 0;
@@ -573,10 +595,11 @@ void tcp_server::accept(int epoll_fd)
  */
 void tcp_server::read(int fd)
 {
-	int error = connections[fd]->read([this, fd](int size, int timestamp) {
+	int error = connections[fd]->read([this, fd](int size,
+			message_header *header) {
 		metrics.requests++;
 		metrics.data += size;
-		if (send_message(fd, size, timestamp) != 0) {
+		if (send_message(fd, size, header) != 0) {
 			printf("Error sending reply to %s: %s\n",
 					print_address(&connections[fd]->peer),
 					strerror(errno));
@@ -673,11 +696,11 @@ class client {
 	 */
 	uint32_t next_result;
 	
-	/** @requests: total number of RPCs issued so far. */
-	uint64_t requests;
+	/** @requests: total number of RPCs issued so far for each server. */
+	std::vector<uint64_t> requests;
 	
 	/** @responses: total number of responses received so far. */
-	std::atomic<uint64_t> responses;
+	std::vector<uint64_t> responses;
 	
 	/**
 	 * @response_data: total number of bytes of data in responses
@@ -709,8 +732,8 @@ client::client()
 	, actual_lengths(NUM_CLIENT_STATS, 0)
 	, actual_rtts(NUM_CLIENT_STATS, 0)
 	, next_result(0)
-	, requests(0)
-	, responses(0)
+	, requests()
+	, responses()
 	, response_data(0)
 {
 	/* Precompute information about the requests this client will
@@ -729,6 +752,8 @@ client::client()
 	}
 	request_lengths.push_back(100);
 	request_intervals.push_back(0);
+	requests.resize(server_addrs.size());
+	responses.resize(server_addrs.size());
 }
 
 /**
@@ -744,18 +769,11 @@ class homa_client : public client {
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
-	
-	/**
-	 * @failures: total number of RPCs that resulted in errors
-	 * in homa_recv, so they didn't complete.
-	 **/
-	std::atomic<uint64_t> failures;
 };
 
 /** homa_client::homa_client() - Constructor for homa_client objects. */
 homa_client::homa_client()
 	: fd(-1)
-        , failures(0)
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -780,42 +798,43 @@ homa_client::homa_client()
  */
 void homa_client::sender()
 {
-	uint32_t request[1000000/sizeof(uint32_t)];
+	char request[1000000];
+	message_header *header = reinterpret_cast<message_header *>(request);
 	uint64_t next_start = 0;
 	
 	while (1) {
 		uint64_t now;
 		uint64_t id;
+		int server;
 		
-		/* Wait until (a) we have reached the next start time
-		 * and (b) there aren't too many requests outstanding.
-		 */
-		while (1) {
+		/* Wait until we have reached the next start time. */
+		do {
 			now = rdtsc();
-			if (now < next_start)
-				continue;
-			if ((requests - responses - failures) < max_requests)
-				break;
+		} while (now < next_start);
+		
+		server = request_servers[next_server];
+		next_server++;
+		if (next_server >= request_servers.size())
+			next_server = 0;
+		if ((requests[server] - responses[server]) >= max_requests) {
+			/* This server is overloaded, so skip it (don't
+			 * let one slow server stop the whole benchmark).
+			 */
+			continue;
 		}
 		
-		/* Store the low-order bits of the send timestamp in
-		 * the request; it will be returned in the response and
-		 * used by the receiver.
-		 */
-		request[0] = now & 0xffffffff;
+		header->start_time = now & 0xffffffff;
+		header->server_id = server;
 		int status = homa_send(fd, request, request_lengths[next_length],
 			reinterpret_cast<struct sockaddr *>(
-			&server_addrs[request_servers[next_server]]),
+			&server_addrs[server]),
 			sizeof(server_addrs[0]), &id);
 		if (status < 0) {
 			printf("Error in homa_client::sender: %s\n",
 				strerror(errno));
 			exit(1);
 		}
-		requests++;
-		next_server++;
-		if (next_server >= request_servers.size())
-			next_server = 0;
+		requests[server]++;
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
@@ -832,7 +851,8 @@ void homa_client::sender()
  */
 void homa_client::receiver(void)
 {
-	uint32_t response[1000000/sizeof(uint32_t)];
+	char response[1000000];
+	message_header *header = reinterpret_cast<message_header *>(response);
 	uint64_t id;
 	struct sockaddr_in server_addr;
 	
@@ -847,12 +867,11 @@ void homa_client::receiver(void)
 			printf("Error in homa_recv: %s (id %lu, server %s)\n",
 				strerror(errno), id,
 				print_address(&server_addr));
-			failures++;
-			continue;
+			exit(1);
 		}
 		uint32_t elapsed = rdtsc() & 0xffffffff;
-		elapsed -= response[0];
-		responses++;
+		elapsed -= header->start_time;
+		responses[header->server_id]++;
 		response_data += length;
 		total_rtt += elapsed;
 		actual_lengths[next_result] = length;
@@ -925,39 +944,39 @@ tcp_client::tcp_client()
 void tcp_client::sender()
 {
 	uint64_t next_start = 0;
+	message_header header;
 	
 	while (1) {
 		uint64_t now;
-		int server = request_servers[next_server];
+		int server;
 		
-		/* Wait until (a) we have reached the next start time
-		 * and (b) there aren't too many requests outstanding.
-		 */
-		while (1) {
+		/* Wait until we have reached the next start time. */
+		do {
 			now = rdtsc();
-			if (now < next_start)
-				continue;
-			if ((requests - responses) < max_requests)
-				break;
+		} while (now < next_start);
+		
+		server = request_servers[next_server];
+		next_server++;
+		if (next_server >= request_servers.size())
+			next_server = 0;
+		if (requests[server] >= (responses[server] + max_requests)) {
+			/* This server is overloaded, so skip it (don't
+			 * let one slow server stop the whole benchmark).
+			 */
+			continue;
 		}
 		
-		/* Store the low-order bits of the send timestamp in
-		 * the request; it will be returned in the response and
-		 * used by the receiver.
-		 */
+		header.start_time = now & 0xffffffff;
+		header.server_id = server;
 		int status = send_message(messages[server].fd,
-				request_lengths[next_length],
-				now & 0xffffffff);
+				request_lengths[next_length], &header);
 		if (status != 0) {
 			printf("Error in TCP socket write for %s: %s\n",
 				print_address(&server_addrs[server]),
 				strerror(errno));
 			exit(1);
 		}
-		requests++;
-		next_server++;
-		if (next_server >= request_servers.size())
-			next_server = 0;
+		requests[server]++;
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
@@ -1001,18 +1020,23 @@ void tcp_client::receiver(void)
 		struct epoll_event events[MAX_EVENTS];
 		int num_events;
 		
-		num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-		if (num_events < 0) {
-			printf("epoll_wait failed in tcp_client::receiver: %s\n",
+		while (1) {
+			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+			if (num_events > 0)
+				break;
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			printf("epoll_wait failed in tcp_client: %s\n",
 					strerror(errno));
 			exit(1);
 		}
 		for (int i = 0; i < num_events; i++) {
 			tcp_message *message = &messages[events[i].data.u32];
-			int error = message->read([this](int size, int timestamp) {
+			int error = message->read([this](int size,
+					message_header *header) {
 				uint32_t elapsed = rdtsc() & 0xffffffff;
-				elapsed -= timestamp;
-				responses++;
+				elapsed -= header->start_time;
+				responses[header->server_id]++;
 				response_data += size;
 				total_rtt += elapsed;
 				actual_lengths[next_result] = size;
@@ -1021,8 +1045,10 @@ void tcp_client::receiver(void)
 				if (next_result >= actual_lengths.size())
 					next_result = 0;
 			});
-			if (error)
+			if (error) {
+				printf("Connection with server closed.\n");
 				exit(1);
+			}
 		}
 	}
 }
@@ -1087,7 +1113,8 @@ void client_stats(uint64_t now)
 	if (times_per_client > NUM_CLIENT_STATS)
 		times_per_client = NUM_CLIENT_STATS;
 	for (client *client: clients) {
-		client_rpcs += client->responses;
+		for (int count: client->responses)
+			client_rpcs += count;
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
 		for (int i = 1; i <= times_per_client; i++) {
