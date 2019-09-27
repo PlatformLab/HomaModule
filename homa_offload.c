@@ -94,7 +94,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		}
 		
 		/* Aggregate skb into held_skb. We don't update the length of
-		 * held_skb, because we'll eventually split it up and process
+		 * held_skb, bec--serause we'll eventually split it up and process
 		 * each skb independently.
 		 */
 		__skb_pull(skb, skb_gro_offset(skb));
@@ -108,6 +108,14 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		NAPI_GRO_CB(held_skb)->count++;
 	       break;
 	}
+	
+	/* This skb isn't being merged, but other skb's may be merged
+	 * with this later. Set the hash for the skb, which will be used
+	 * for RPS (the default hash doesn't understand Homa, so it doesn't
+	 * include port #'s).
+	 */
+	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h_new->sport,
+			h_new->dport, 0), false);
 	return NULL;
 	
 flush:
