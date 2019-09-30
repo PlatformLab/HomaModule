@@ -264,9 +264,11 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		}
 		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
 			tt_record4("Discarding packet for unknown RPC, id %u, "
-					"port %d, type %d, peer 0x%x",
-					h->id & 0xffffffff, ntohs(h->sport),
-					h->type, ntohl(ip_hdr(skb)->saddr));
+					"type %d, peer 0x%x:%d",
+					h->id & 0xffffffff, h->type,
+					ntohl(ip_hdr(skb)->saddr),
+					ntohs(h->sport));
+			tt_record1("... dport %d", ntohs(h->dport));
 			INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
@@ -325,11 +327,11 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	tt_record3("incoming data packet, id %llu, port %d, offset %d",
+	tt_record4("incoming data packet, id %llu, port %d, offset %d/%d",
 			h->common.id,
 			rpc->is_client ? rpc->hsk->client_port
 			: rpc->hsk->server_port,
-			ntohl(h->seg.offset));
+			ntohl(h->seg.offset), ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
@@ -393,8 +395,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, true);
-		if ((rpc->msgout.next_offset >= rpc->msgout.length)
-				&& (rpc->dport >= HOMA_MIN_CLIENT_PORT)) {
+		if (!rpc->msgout.next_packet && !rpc->is_client) {
 			/* This is a server RPC that has been completely sent;
 			 * time to delete the RPC.
 			 */
@@ -432,10 +433,11 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 						"%s:%d for id %llu",
 						homa_print_ipv4_addr(
 						ip_hdr(skb)->saddr),
-						h->common.sport, h->common.id);
+						ntohs(h->common.sport),
+						h->common.id);
 			tt_record3("sending restart to 0x%x:%d for id %llu",
-					ip_hdr(skb)->saddr, h->common.sport,
-					h->common.id);
+					ntohl(ip_hdr(skb)->saddr),
+					ntohs(h->common.sport), h->common.id);
 			restart.common.sport = h->common.dport;
 			restart.common.dport = h->common.sport;
 			restart.common.id = h->common.id;
@@ -457,7 +459,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		if ((rpc == NULL) || (rpc->state != RPC_OUTGOING))
 			goto done;
 	}
-	if (rpc->msgout.next_offset < rpc->msgout.granted) {
+	if (rpc->msgout.next_packet && (homa_data_offset(rpc->msgout.next_packet)
+			< rpc->msgout.granted)) {
 		/* We have chosen not to transmit data from this message;
 		 * send BUSY instead.
 		 */

@@ -42,9 +42,12 @@ Notes for Homa implementation in Linux:
   * Do the pacing from the sending thread?
 
 * Things to do:
+  * Figure out how to get the NIC to include port numbers in the
+    hash used for distributing interrupts.
   * More work related to GSO/GRO:
     * Add configuration option to limit MTU
     * Add new kernel call to combine send message & wait reply?
+    * Combine packets for different sockets in the same GRO unit?
   * Don't grant to more than one message from a given sender at a time.
   * Figure out socket locking disciplines.
   * Unimplemented interface functions.

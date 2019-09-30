@@ -1,5 +1,6 @@
-// This file contains a program that runs on one node, as part of
-// the cluster_perf test.
+/* This file contains a program that runs on one node, as part of
+ * the cluster_perf test.
+ */
 
 #include <errno.h>
 #include <netdb.h>
@@ -23,6 +24,7 @@
 #include <thread>
 #include <vector>
 
+#include "dist.h"
 #include "homa.h"
 #include "test_utils.h"
 
@@ -38,6 +40,7 @@ double net_util = 0.8;
 const char *protocol = "homa";
 int server_threads = 1;
 int server_nodes = 1;
+const char *workload = "100";
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(12345);
@@ -116,10 +119,12 @@ void print_help(const char *name)
 		"                      (default: %s)\n"
 		"--server_nodes        Number of nodes running server threads (default: %d)\n"
 		"--server_threads      Number of server threads/ports on each server node\n"
-		"                      (default: %d)\n",
+		"                      (default: %d)\n"
+		"--workload            Name of distribution for request lengths (e.g., 'w1')\n"
+		"                      or integer for fixed length (default: %s)\n",
 		name, client_threads, dist_file, first_port, first_server,
 		first_server, max_requests, net_util, protocol, server_nodes,
-		server_threads);
+		server_threads, workload);
 }
 
 /**
@@ -210,7 +215,7 @@ int send_message(int fd, int size, message_header *header)
 		int this_size = bytes_left;
 		if (this_size > sizeof32(buffer))
 			this_size = sizeof32(buffer);
-		if (write(fd, buffer, this_size) < 0)
+		if (send(fd, buffer, this_size, MSG_NOSIGNAL) < 0)
 			return -1;
 		bytes_left -= this_size;
 	}
@@ -600,10 +605,12 @@ void tcp_server::read(int fd)
 		metrics.requests++;
 		metrics.data += size;
 		if (send_message(fd, size, header) != 0) {
-			printf("Error sending reply to %s: %s\n",
-					print_address(&connections[fd]->peer),
-					strerror(errno));
-			exit(1);
+			if ((errno != EPIPE) && (errno != ECONNRESET)) {
+				printf("Error sending reply to %s: %s\n",
+						print_address(&connections[fd]->peer),
+						strerror(errno));
+				exit(1);
+			}
 		};
 	});
 	if (error) {
@@ -749,6 +756,10 @@ client::client()
 	for (int i = 0; i < NUM_SERVERS; i++) {
 		int server = server_dist(rand_gen);
 		request_servers.push_back(server);
+	}
+	if (!dist_sample(workload, &rand_gen, NUM_LENGTHS, &request_lengths)) {
+		printf("Invalid workload '%s'\n", workload);
+		exit(1);
 	}
 	request_lengths.push_back(100);
 	request_intervals.push_back(0);
@@ -1203,6 +1214,9 @@ int main(int argc, char** argv)
 		} else if (strcmp(argv[next_arg], "--server_threads") == 0) {
 			server_threads = int_arg(argv[next_arg+1],
 					argv[next_arg]);
+			next_arg++;
+		} else if (strcmp(argv[next_arg], "--workload") == 0) {
+			workload = argv[next_arg+1];
 			next_arg++;
 		} else {
 			printf("Unknown option %s; type '%s --help' for help\n",

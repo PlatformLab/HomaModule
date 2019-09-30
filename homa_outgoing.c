@@ -49,8 +49,7 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 
 /**
  * homa_message_out_init() - Initializes an RPC's msgout, loads packet data
- * from a user-space buffer. Will also start sending packets, if requested
- * by @homa->pipeline_xmit.
+ * from a user-space buffer. Doesn't actually send any packets.
  * @rpc:     RPC whose msgout is to be initialized; current contents are
  *           assumed to be garbage.
  * @sport:   Source port number to use for the message.
@@ -70,7 +69,6 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 	rpc->msgout.length = len;
 	rpc->msgout.packets = NULL;
 	rpc->msgout.next_packet = NULL;
-	rpc->msgout.next_offset = 0;
 	rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 	if (rpc->msgout.granted > rpc->msgout.length)
@@ -174,9 +172,6 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		if (!rpc->msgout.next_packet)
 			rpc->msgout.next_packet = skb;
 		rpc->num_skbuffs++;
-		
-		if (rpc->hsk->homa->pipeline_xmit)
-			homa_xmit_data(rpc, false);
 	}
 //	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
 	return 0;
@@ -226,6 +221,12 @@ int homa_message_out_reset(struct homa_rpc *rpc)
 			skb_reset_transport_header(new_skb);
 			__skb_put_data(new_skb, skb_transport_header(skb),
 					length);
+			skb_shinfo(new_skb)->gso_size =
+					skb_shinfo(skb)->gso_size;
+			skb_shinfo(new_skb)->gso_segs =
+					skb_shinfo(skb)->gso_segs;
+			skb_shinfo(new_skb)->gso_type =
+					skb_shinfo(skb)->gso_type;
 			h = ((struct data_header *)
 					skb_transport_header(new_skb));
 			h->retransmit = 0;
@@ -238,7 +239,6 @@ int homa_message_out_reset(struct homa_rpc *rpc)
 	*last_link = NULL;
 	
 	msgout->next_packet = msgout->packets;
-	msgout->next_offset = 0;
 	msgout->granted = msgout->unscheduled;
 	if (msgout->granted > msgout->length)
 		msgout->granted = msgout->length;
@@ -374,31 +374,31 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 {
-	while ((rpc->msgout.next_offset < rpc->msgout.granted)
-			&& rpc->msgout.next_packet) {
+	while (rpc->msgout.next_packet) {
 		int priority;
 		struct sk_buff *skb = rpc->msgout.next_packet;
 		struct homa *homa = rpc->hsk->homa;
+		int offset = homa_data_offset(skb);
+		
+		if (offset >= rpc->msgout.granted)
+			break;
 	
-		if (((rpc->msgout.length - rpc->msgout.next_offset)
-				> homa->throttle_min_bytes)
+		if (((rpc->msgout.length - offset) > homa->throttle_min_bytes)
 				&& ((get_cycles() + homa->max_nic_queue_cycles)
 				< atomic_long_read(&homa->link_idle_time))
 				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE)) {
 			if (use_pacer)
 				homa_add_to_throttled(rpc);
-			return;
+			break;
 		}
 		
-		rpc->msgout.next_packet = *homa_next_skb(skb);
-		if (rpc->msgout.next_offset < rpc->msgout.unscheduled) {
+		if (offset < rpc->msgout.unscheduled) {
 			priority = homa_unsched_priority(rpc->peer,
 					rpc->msgout.length);
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
-		rpc->msgout.next_offset += skb->len
-				- sizeof32(struct data_header);
+		rpc->msgout.next_packet = *homa_next_skb(skb);
 		
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
@@ -659,8 +659,9 @@ void homa_pacer_xmit(struct homa *homa)
 	 */
 	rcu_read_unlock();
 	homa_xmit_data(rpc, false);
-	if ((rpc->msgout.next_offset >= rpc->msgout.granted)
-			|| !rpc->msgout.next_packet) {
+	if (!rpc->msgout.next_packet
+			|| (homa_data_offset(rpc->msgout.next_packet)
+			>= rpc->msgout.granted)) {
 		/* Nothing more to transmit from this message (right now),
 		 * so remove it from the throttled list.
 		 */
@@ -679,8 +680,7 @@ void homa_pacer_xmit(struct homa *homa)
 			INIT_LIST_HEAD_RCU(&rpc->throttled_links);
 		}
 		spin_unlock_bh(&homa->throttle_lock);
-		if ((rpc->msgout.next_offset >= rpc->msgout.length)
-				&& (rpc->dport >= HOMA_MIN_CLIENT_PORT)) {
+		if (!rpc->msgout.next_packet && !rpc->is_client) {
 			homa_rpc_free(rpc);
 		}
 	}
@@ -717,8 +717,19 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	spin_lock_bh(&homa->throttle_lock);
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
 			throttled_links) {
-		if ((candidate->msgout.length - candidate->msgout.next_offset)
-				> (rpc->msgout.length - rpc->msgout.next_offset)) {
+		int bytes_left, bytes_left_cand;
+		bytes_left = rpc->msgout.length - homa_data_offset(
+				rpc->msgout.next_packet);
+		
+		/* Watch out: the pacer might have just transmitted the last
+		 * packet from candidate.
+		 */
+		if (!candidate->msgout.next_packet)
+			bytes_left_cand = 0;
+		else
+			bytes_left_cand = candidate->msgout.length - homa_data_offset(
+				candidate->msgout.next_packet);
+		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
 			goto done;

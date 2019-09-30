@@ -152,18 +152,6 @@ TEST_F(homa_outgoing, homa_message_out_init__expand_last_segment)
 	EXPECT_EQ(1416, crpc->msgout.packets->len - sizeof32(struct data_header)
 			- sizeof32(struct data_segment));
 }
-TEST_F(homa_outgoing, homa_message_out_init__xmit_packets)
-{
-	self->homa.pipeline_xmit = 1;
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 2000, NULL);
-	EXPECT_EQ(2, crpc->num_skbuffs);
-	EXPECT_STREQ("csum_and_copy_from_iter_full copied 1400 bytes; "
-			"xmit DATA P6 1400@0; "
-			"csum_and_copy_from_iter_full copied 600 bytes; "
-			"xmit DATA P6 600@1400",
-			unit_log_get());
-}
 
 TEST_F(homa_outgoing, homa_message_out_reset__basics)
 {
@@ -172,7 +160,7 @@ TEST_F(homa_outgoing, homa_message_out_reset__basics)
 		1111, 3000, 100);
 	EXPECT_NE(NULL, crpc);
 	homa_xmit_data(crpc, true);
-	EXPECT_EQ(3000, crpc->msgout.next_offset);
+	EXPECT_EQ(NULL, crpc->msgout.next_packet);
 	crpc->msgout.granted = 0;
 	homa_message_out_reset(crpc);
 	EXPECT_EQ(3000, crpc->msgout.granted);
@@ -314,7 +302,7 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 			"xmit DATA P6 1400@1400; "
 			"xmit DATA P2 1400@2800; "
 			"xmit DATA P2 1400@4200", unit_log_get());
-	EXPECT_EQ(5600, crpc->msgout.next_offset);
+	EXPECT_EQ(5600, homa_data_offset(crpc->msgout.next_packet));
 }
 TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 {

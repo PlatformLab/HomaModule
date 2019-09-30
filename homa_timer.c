@@ -10,14 +10,6 @@
 void homa_rpc_timeout(struct homa_rpc *rpc)
 {
 	if (rpc->is_client) {
-		if (rpc->hsk->homa->verbose)
-			printk(KERN_NOTICE
-					"Homa client RPC timeout, server %s:%d, "
-					"id %llu",
-					homa_print_ipv4_addr(rpc->peer->addr),
-					rpc->dport, rpc->id);
-		tt_record2("Client RPC timeout, id %llu, port %d",
-				rpc->id, rpc->dport);
 		INC_METRIC(client_rpc_timeouts, 1);
 		homa_rpc_abort(rpc, -ETIMEDOUT);
 	} else {
@@ -87,7 +79,7 @@ void homa_timer(struct homa *homa)
 	cycles_t start, end;
 	bool print_active = false;
 	int num_active = 0;
-
+	
 	start = get_cycles();
 	homa->timer_ticks++;
 	if (homa->flags & HOMA_FLAG_LOG_ACTIVE_RPCS) {
@@ -116,14 +108,15 @@ void homa_timer(struct homa *homa)
 			if (unlikely(print_active)) {
 				int in_remaining = 0;
 				int in_granted = 0;
-				int out_sent = 0;
+				int out_sent = rpc->msgout.length;
 				if (rpc->msgin.total_length > 0) {
 					in_remaining =
 						rpc->msgin.bytes_remaining;
 					in_granted = rpc->msgin.granted;
 				}
-				if (rpc->msgout.length >= 0)
-					out_sent =  rpc->msgout.next_offset;
+				if (rpc->msgout.next_packet)
+					out_sent = homa_data_offset(
+							rpc->msgout.next_packet);
 				printk(KERN_NOTICE "Active %s RPC, peer "
 					"%s, port %u, id %llu, state %s, "
 					"silent %d, msgin remaining %d/%d "
@@ -148,7 +141,9 @@ void homa_timer(struct homa *homa)
 			if (rpc->silent_ticks < homa->resend_ticks)
 				continue;
 			if (rpc->is_client) {
-				if (rpc->msgout.next_offset < rpc->msgout.granted) {
+				if (rpc->msgout.next_packet && (homa_data_offset(
+						rpc->msgout.next_packet)
+						< rpc->msgout.granted)) {
 					/* We haven't transmitted all of the
 					 * granted bytes in the request, so
 					 * there's no need to be concerned about
@@ -176,6 +171,21 @@ void homa_timer(struct homa *homa)
 					continue;
 				}
 				if (rpc->num_resends >= homa->abort_resends) {
+					struct freeze_header freeze;
+					if (rpc->hsk->homa->verbose)
+						printk(KERN_NOTICE
+							"Homa client RPC "
+							"timeout, server %s:%d, "
+							"id %llu",
+							homa_print_ipv4_addr(
+							rpc->peer->addr),
+							rpc->dport, rpc->id);
+					tt_record2("Client RPC timeout, id "
+							"%llu, port %d",
+							rpc->id, rpc->dport);
+					tt_freeze();
+					homa_xmit_control(FREEZE, &freeze,
+							sizeof(freeze),rpc);
 					dead_peer = rpc->peer;
 					continue;
 				}

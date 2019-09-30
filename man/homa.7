@@ -215,12 +215,6 @@ An integer value specifying the lowest priority level that Homa will
 use. Must be between 0 and 7, inclusive; larger values indicate higher
 priority.
 .TP
-.IR pipeline_xmit
-A nonzero value means that message transmission is pipelined: Homa attempts to
-send each packet as soon as it has been initialized. Zero means no
-pipelining: Homa initializes all of the packets for an outgoing message
-before attempting to transmit any of them.
-.TP
 .IR resend_interval
 An integer value specifying how frequently resend requests can be sent
 to a given peer (regardless of how many RPCs are outstanding to that

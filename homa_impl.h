@@ -174,7 +174,7 @@ struct common_header {
 	
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
-	 * the checksum in a TCP header (TSO may modify this).*/
+	 * the checksum in a TCP header (TSO may modify this?).*/
 	__be16 checksum;
 	
 	__be16 unused4;
@@ -192,7 +192,7 @@ struct common_header {
  * a DATA packet. A single sk_buff can hold multiple data_segments in order
  * to enable send and receive offload (the idea is to carry many network
  * packets of info in a single traversal of the Linux networking stack).
- * A DATA sk_buff contains a common_header followed by any number of
+ * A DATA sk_buff contains a data_header followed by any number of
  * data_segments.
  */
 struct data_segment {
@@ -253,13 +253,24 @@ _Static_assert(((sizeof(struct data_header) - sizeof(struct data_segment))
 		" data_header length not a multiple of 4 bytes (required "
 		"for TCP/TSO compatibility");
 /**
- * set_doff() - Fills in the doff TCP header field for a Homa packet.
+ * homa_set_doff() - Fills in the doff TCP header field for a Homa packet.
  * @h:   Packet header whose doff field is to be set.
  */
 static inline void homa_set_doff(struct data_header *h)
 {
 	h->common.doff = (sizeof(struct data_header)
 			- sizeof(struct data_segment)) << 2;
+}
+
+/**
+ * homa_data_offset() - Returns the offset-within-message of the first
+ * byte in a data packet.
+ * @skb:  Must contain a valid data packet.
+ */
+static inline int homa_data_offset(struct sk_buff *skb)
+{
+	return ntohl(((struct data_header *) skb_transport_header(skb))
+			->seg.offset);
 }
 
 /**
@@ -420,15 +431,9 @@ struct homa_message_out {
 	 * @next_packet: Pointer within @request of the next packet to transmit.
 	 * 
 	 * All packets before this one have already been sent. NULL means
-	 * all existing packets have been sent.
+	 * entire message has been sent.
 	 */
 	struct sk_buff *next_packet;
-	
-	/**
-	 * @next_offset: Offset within message of first byte in next_packet.
-	 * If all packets have been sent, will be >= @length.
-	 */
-	int next_offset;
 	
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
@@ -1188,14 +1193,6 @@ struct homa {
 	 * sysctl.
 	 */
 	int verbose;
-	
-	/**
-	 * @pipeline_xmit: Zero means completely fill an output message
-	 * before transmitting any bytes; nonzero means overlap the
-	 * transmission of packets with packet creation. Can be set
-	 * externally via sysctl.
-	 */
-	int pipeline_xmit;
 	
 	/**
 	 * @max_gso_size: Maximum number of bytes that will be included

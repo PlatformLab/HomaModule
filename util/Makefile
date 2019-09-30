@@ -14,6 +14,9 @@ LIB_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(LIB_SRCS)))
 .SECONDARY: $(OBJS) $(LIB_OBJS)
 
 all: $(BINS)
+	
+cp_node: cp_node.o dist.o $(LIB_OBJS)
+	g++ $(CFLAGS) $^ -lpthread -o $@
 
 # This seems to be the only way to disable the built-in implicit rules
 # for %:%.c and %:%.cc.

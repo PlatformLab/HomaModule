@@ -154,6 +154,7 @@ void tt_destroy(void)
 void tt_freeze(void)
 {
 	tt_record("timetrace frozen");
+	printk(KERN_NOTICE "freezing timetrace\n");
 	mutex_lock(&tt_mutex);
 	if (!tt_frozen) {
 		tt_frozen = true;

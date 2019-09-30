@@ -195,13 +195,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "pipeline_xmit",
-		.data		= &homa_data.pipeline_xmit,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "resend_interval",
 		.data		= &homa_data.resend_interval,
 		.maxlen		= sizeof(int),
@@ -566,7 +559,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
         if (unlikely(err))
 		goto error;
 	homa_xmit_data(srpc, true);
-	if (srpc->msgout.next_offset >= srpc->msgout.length) {
+	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
 	}
 done:
@@ -620,7 +613,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	tt_record4("New client RPC for server 0x%x:%d, id %llu, port %d",
-			crpc->peer->addr,
+			ntohl(crpc->peer->addr),
 			crpc->dport, crpc->id, hsk->client_port);
 	homa_xmit_data(crpc, true);
 //	tt_record("About to reap");
@@ -1063,6 +1056,8 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 			error = -EPROTONOSUPPORT;
 		else
 			error = -EHOSTUNREACH;
+		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
+				ntohl(iph->saddr), ntohl(iph->daddr));
 		homa_dest_abort(homa, iph->daddr, error);
 	} else {
 		if (homa->verbose)
