@@ -937,13 +937,21 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		 * and we can't wait for it to become unlocked. Queue the
 		 * packet with the socket; it will get processed whenever
 		 * the socket lock is released.
+		 * 
+		 * Note: the limit in the sk_add_backlog call is chosen to
+		 * be infinite: the limit isn't useful, because (as of 4.16.10)
+		 * the length is counted in a way that allows it to grow
+		 * without bound, even though the backlog isn't actually
+		 * growing. Also, Homa's built-in congestion control should
+		 * already throttle the backlog.
 		 */
-		int status = sk_add_backlog(sk, skb, 1000000);
+		int status = sk_add_backlog(sk, skb, ~0);
 		if (unlikely(status != 0)) {
 			if (homa->verbose)
-				printk(KERN_NOTICE "Homa backlog overflow; "
-					"discarding packet with type %d",
-					h->type);
+				printk(KERN_WARNING "Unexpected Homa backlog "
+						"overflow (port %d, %d queued "
+						"bytes)\n",
+						dport, sk->sk_backlog.len);
 			goto discard;
 		}
 		goto done;
@@ -1010,8 +1018,10 @@ int homa_pkt_recv(struct sk_buff *skb) {
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	struct sk_buff *others;
+	int dport = ntohs(((struct common_header *) skb_transport_header(skb))
+			->dport);
 	
-	tt_record("homa_backlog_rcv invoked");
+	tt_record1("homa_backlog_rcv invoked for port %d", dport);
 	others = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {
@@ -1035,7 +1045,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 		}
 	}
     done:
-//	tt_record("homa_backlog_rcv done");
+//	tt_record1("homa_backlog_rcv done, port %d", dport);
 	return 0;
 }
 
