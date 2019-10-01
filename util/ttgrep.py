@@ -16,8 +16,9 @@
 
 """
 Scan the time trace data in a log file; find all records containing
-a given string, and output only those records.
-Usage: ttgrep.py string file
+a given string, and output only those records. If the --rebase argument
+is present, times are offset so the first event is at time 0
+Usage: ttgrep.py [--rebase] string file
 """
 
 from __future__ import division, print_function
@@ -29,12 +30,14 @@ import re
 import string
 import sys
 
+rebase = False;
+
 def scan(f, string):
     """
     Scan the log file given by 'f' (handle for an open file) and output
     all-time trace records containing string.
     """
-
+    global rebase
     startTime = 0.0
     prevTime = 0.0
     writes = 0
@@ -48,17 +51,20 @@ def scan(f, string):
         event = match.group(3)
         if string not in event:
             continue
-        if time < prevTime:
-            # Time went backwards: there must be multiple time traces
-            # in the log. Restart from a new time 0.
-            startTime = time
-            prevTime = time
         if startTime == 0.0:
             startTime = time
             prevTime = time
-        print("%9.3f us (+%8.3f us) %s" % (time,
+        if rebase:
+            printTime = time - startTime
+        else:
+            printTime = time
+        print("%9.3f us (+%8.3f us) %s" % (printTime,
                 time - prevTime, event))
         prevTime = time
+
+if (len(sys.argv) > 1) and (sys.argv[1] == "--rebase"):
+    rebase = True
+    del sys.argv[1]
 
 if len(sys.argv) != 3:
     print("Usage: %s string logFile" % (sys.argv[0]))
