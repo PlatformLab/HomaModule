@@ -29,13 +29,13 @@
 #include "test_utils.h"
 
 /* Command-line parameter values (and default values): */
+uint32_t client_max = 100000;
 int client_threads = 0;
-const char *dist_file = "foo.bar";
 int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-uint32_t max_requests = 5;
+uint32_t server_max = 5;
 double net_util = 0.8;
 const char *protocol = "homa";
 int server_threads = 1;
@@ -102,28 +102,28 @@ void print_help(const char *name)
 {
 	printf("Usage: %s [options]\n\n"
 		"The following options are supported:\n\n"
+		"--client_max          Maximum number of outstanding requests from a single\n"
+		"                      client (across all servers) (default: %d)\n"
 		"--client_threads      Number of request invocation threads to run on this\n"
 		"                      node (default: %d)\n"
-		"--dist_file           Name of file containing request size distribution\n"
-		"                      (default: %s)\n"
 		"--first_port          First port number to use on servers (default: %d)\n"
 		"--first_server        Id of first server for clients to use (default: %d,\n"
 		"                      meaning node-%d)\n"
 		"--help                Print this message\n"
 		"--is_server           Instantiate server threads on this node\n"
-		"--max_requests        Maximum number of outstanding requests from a client\n"
-		"                      to a single server thread (default: %d)\n"
 		"--net_util            Target network utilization, including headers and packet\n"
 		"                      gaps (default: %.2f)\n"
 		"--protocol            Transport protocol to use for requests: homa or tcp\n"
 		"                      (default: %s)\n"
+		"--server_max          Maximum number of outstanding requests from a client\n"
+		"                      to a single server thread (default: %d)\n"
 		"--server_nodes        Number of nodes running server threads (default: %d)\n"
 		"--server_threads      Number of server threads/ports on each server node\n"
 		"                      (default: %d)\n"
 		"--workload            Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n",
-		name, client_threads, dist_file, first_port, first_server,
-		first_server, max_requests, net_util, protocol, server_nodes,
+		name, client_max, client_threads, first_port, first_server,
+		first_server, net_util, protocol, server_max, server_nodes,
 		server_threads, workload);
 }
 
@@ -604,6 +604,8 @@ void tcp_server::read(int fd)
 			message_header *header) {
 		metrics.requests++;
 		metrics.data += size;
+		if (size != 100000)
+			printf("Received message with size %d\n", size);
 		if (send_message(fd, size, header) != 0) {
 			if ((errno != EPIPE) && (errno != ECONNRESET)) {
 				printf("Error sending reply to %s: %s\n",
@@ -710,6 +712,18 @@ class client {
 	std::vector<uint64_t> responses;
 	
 	/**
+	 * @total_requests: total number of RPCs issued so far across all
+	 * servers.
+	 */
+	uint64_t total_requests;
+	
+	/**
+	 * @total_responses: total number of responses received so far from all
+	 * servers.
+	 */
+	std::atomic<uint64_t> total_responses;
+	
+	/**
 	 * @response_data: total number of bytes of data in responses
 	 * received so far.
 	 */
@@ -741,6 +755,8 @@ client::client()
 	, next_result(0)
 	, requests()
 	, responses()
+	, total_requests(0)
+	, total_responses(0)
 	, response_data(0)
 {
 	/* Precompute information about the requests this client will
@@ -818,16 +834,22 @@ void homa_client::sender()
 		uint64_t id;
 		int server;
 		
-		/* Wait until we have reached the next start time. */
-		do {
+		/* Wait until (a) we have reached the next start time
+		 * and (b) there aren't too many requests outstanding.
+		 */
+		while (1) {
 			now = rdtsc();
-		} while (now < next_start);
+			if (now < next_start)
+				continue;
+			if ((total_requests - total_responses) < client_max)
+				break;
+		}
 		
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
 			next_server = 0;
-		if ((requests[server] - responses[server]) >= max_requests) {
+		if ((requests[server] - responses[server]) >= server_max) {
 			/* This server is overloaded, so skip it (don't
 			 * let one slow server stop the whole benchmark).
 			 */
@@ -846,6 +868,7 @@ void homa_client::sender()
 			exit(1);
 		}
 		requests[server]++;
+		total_requests++;
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
@@ -883,6 +906,7 @@ void homa_client::receiver(void)
 		uint32_t elapsed = rdtsc() & 0xffffffff;
 		elapsed -= header->start_time;
 		responses[header->server_id]++;
+		total_responses++;
 		response_data += length;
 		total_rtt += elapsed;
 		actual_lengths[next_result] = length;
@@ -961,16 +985,22 @@ void tcp_client::sender()
 		uint64_t now;
 		int server;
 		
-		/* Wait until we have reached the next start time. */
-		do {
+		/* Wait until (a) we have reached the next start time
+		 * and (b) there aren't too many requests outstanding.
+		 */
+		while (1) {
 			now = rdtsc();
-		} while (now < next_start);
+			if (now < next_start)
+				continue;
+			if ((total_requests - total_responses) < client_max)
+				break;
+		}
 		
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
 			next_server = 0;
-		if (requests[server] >= (responses[server] + max_requests)) {
+		if (requests[server] >= (responses[server] + server_max)) {
 			/* This server is overloaded, so skip it (don't
 			 * let one slow server stop the whole benchmark).
 			 */
@@ -988,6 +1018,7 @@ void tcp_client::sender()
 			exit(1);
 		}
 		requests[server]++;
+		total_requests++;
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
@@ -1048,6 +1079,7 @@ void tcp_client::receiver(void)
 				uint32_t elapsed = rdtsc() & 0xffffffff;
 				elapsed -= header->start_time;
 				responses[header->server_id]++;
+				total_responses++;
 				response_data += size;
 				total_rtt += elapsed;
 				actual_lengths[next_result] = size;
@@ -1171,17 +1203,14 @@ int main(int argc, char** argv)
 		if (strcmp(argv[next_arg], "--help") == 0) {
 			print_help(argv[0]);
 			exit(0);
+		} else if (strcmp(argv[next_arg], "--client_max") == 0) {
+			client_max = int_arg(argv[next_arg+1],
+					argv[next_arg]);
+			next_arg++;
 		} else if (strcmp(argv[next_arg], "--client_threads") == 0) {
 			client_threads = int_arg(argv[next_arg+1],
 					argv[next_arg]);
 			next_arg++;
-		} else if (strcmp(argv[next_arg], "--dist_file") == 0) {
-			next_arg++;
-			dist_file = argv[next_arg];
-			if (dist_file == NULL) {
-				printf("No value provided for --dist_file\n");
-				exit(1);
-			}
 		} else if (strcmp(argv[next_arg], "--first_port") == 0) {
 			first_port = int_arg(argv[next_arg+1],
 					argv[next_arg]);
@@ -1192,10 +1221,6 @@ int main(int argc, char** argv)
 			next_arg++;
 		} else if (strcmp(argv[next_arg], "--is_server") == 0) {
 			is_server = true;
-		} else if (strcmp(argv[next_arg], "--max_requests") == 0) {
-			max_requests = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
 		} else if (strcmp(argv[next_arg], "--net_util") == 0) {
 			net_util = float_arg(argv[next_arg+1],
 					argv[next_arg]);
@@ -1207,6 +1232,10 @@ int main(int argc, char** argv)
 				printf("No value provided for --protocol\n");
 				exit(1);
 			}
+		} else if (strcmp(argv[next_arg], "--server_max") == 0) {
+			server_max = int_arg(argv[next_arg+1],
+					argv[next_arg]);
+			next_arg++;
 		} else if (strcmp(argv[next_arg], "--server_nodes") == 0) {
 			server_nodes = int_arg(argv[next_arg+1],
 					argv[next_arg]);
