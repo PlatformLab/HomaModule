@@ -81,8 +81,8 @@ enum homa_packet_type {
 /**
  * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
  * beginning of each sk_buff, before the IP header. This includes room for a
- * VLAN header and also include some extra space, "just to be safe" (not really
- * sure if this is needed).
+ * VLAN header and also includes some extra space, "just to be safe" (not
+ * really sure if this is needed).
  */
 #define HOMA_SKB_EXTRA 40
 
@@ -220,11 +220,13 @@ struct data_header {
 	__be32 message_length;
 	
 	/**
-	 * @unscheduled: The number of initial bytes in the message that
-	 * the sender will transmit without grants; bytes after these
-	 * will be sent only in response to GRANT packets.
+	 * @incoming: We can expect the sender to send all of the
+	 * bytes in the message up to at least this offset (exclusive),
+	 * even without additional grants. This includes unscheduled
+	 * bytes, granted bytes, plus any additional bytes the sender
+	 * transmits unilaterally (e.g., to send batches, such as with GSO).
 	 */
-	__be32 unscheduled;
+	__be32 incoming;
 	
 	/**
 	 * @cutoff_version: The cutoff_version from the most recent
@@ -481,10 +483,10 @@ struct homa_message_in {
 	int bytes_remaining;
 
         /**
-	 * @granted: Total # of bytes sender has been authorized to transmit
-	 * (including unscheduled bytes). Never larger than @total_length.
+	 * @incoming: Total # of bytes of the message that the sender will
+	 * transmit without additional grants. Never larger than @total_length.
 	 */
-        int granted;
+        int incoming;
 	
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
@@ -1478,7 +1480,7 @@ extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
 			struct iov_iter *iter, int max_bytes);
 extern void     homa_message_in_destroy(struct homa_message_in *msgin);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
-			int unscheduled);
+			int incoming);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_rpc *rpc, int sport,
 			size_t len, struct iov_iter *iter);

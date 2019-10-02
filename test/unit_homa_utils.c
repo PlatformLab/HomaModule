@@ -37,7 +37,7 @@ FIXTURE_SETUP(homa_utils)
 	                .dport = htons(self->server_port),
 			.type = DATA, .id = self->rpcid},
 			.message_length = htonl(10000),
-			.unscheduled = htonl(10000), .cutoff_version = 0,
+			.incoming = htonl(10000), .cutoff_version = 0,
 		        .retransmit = 0,
 			.seg = {.offset = 0}};
 	unit_log_clear();

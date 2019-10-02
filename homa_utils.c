@@ -221,7 +221,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->error = 0;
 	srpc->is_client = false;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
-			ntohl(h->unscheduled));
+			ntohl(h->incoming));
 	srpc->msgout.length = -1;
 	srpc->num_skbuffs = 0;
 	hlist_add_head(&srpc->hash_links, homa_server_rpc_bucket(hsk, srpc->id));
@@ -446,11 +446,11 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		int bytes_left, i;
 		used = homa_snprintf(buffer, buf_len, used,
 				", message_length %d, offset %d, "
-				"data_length %d, unscheduled %d, "
+				"data_length %d, incoming %d, "
 				"cutoff_version %d%s",
 				ntohl(h->message_length),
 				ntohl(h->seg.offset), seg_length,
-				ntohl(h->unscheduled),
+				ntohl(h->incoming),
 				ntohs(h->cutoff_version),
 				h->retransmit ? ", RETRANSMIT" : "");
 		bytes_left = skb->len - sizeof32(*h) - seg_length;

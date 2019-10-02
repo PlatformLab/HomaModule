@@ -18,7 +18,7 @@ FIXTURE_SETUP(homa_offload)
 			.sport = htons(40000), .dport = htons(99),
 			.type = DATA, .id = 1000},
 			.message_length = htonl(10000),
-			.unscheduled = htonl(10000), .cutoff_version = 0,
+			.incoming = htonl(10000), .cutoff_version = 0,
 			.retransmit = 0,
 			.seg = {.offset = htonl(2000),
 			.segment_length = htonl(1400)}};
@@ -95,10 +95,10 @@ TEST_F(homa_offload, homa_gro_receive__append)
 	unit_log_frag_list(self->gro_list->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
 			"message_length 10000, offset 6000, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0; "
+			"incoming 10000, cutoff_version 0; "
 			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
 			"message_length 10000, offset 6000, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0", unit_log_get());
+			"incoming 10000, cutoff_version 0", unit_log_get());
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	same_flow = NAPI_GRO_CB(skb2)->same_flow;

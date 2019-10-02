@@ -107,12 +107,12 @@ void homa_timer(struct homa *homa)
 			const char *us, *them;
 			if (unlikely(print_active)) {
 				int in_remaining = 0;
-				int in_granted = 0;
+				int incoming = 0;
 				int out_sent = rpc->msgout.length;
 				if (rpc->msgin.total_length > 0) {
 					in_remaining =
 						rpc->msgin.bytes_remaining;
-					in_granted = rpc->msgin.granted;
+					incoming = rpc->msgin.incoming;
 				}
 				if (rpc->msgout.next_packet)
 					out_sent = homa_data_offset(
@@ -120,7 +120,7 @@ void homa_timer(struct homa *homa)
 				printk(KERN_NOTICE "Active %s RPC, peer "
 					"%s, port %u, id %llu, state %s, "
 					"silent %d, msgin remaining %d/%d "
-					"granted %d, msgout sent %d/%d, "
+					"incoming %d, msgout sent %d/%d, "
 					"error %d\n",
 					rpc->is_client ? "client" : "server",
 					homa_print_ipv4_addr(rpc->peer->addr),
@@ -128,7 +128,7 @@ void homa_timer(struct homa *homa)
 					homa_symbol_for_state(rpc),
 					rpc->silent_ticks,
 					in_remaining, rpc->msgin.total_length,
-					in_granted, out_sent,
+					incoming, out_sent,
 					rpc->msgout.length, rpc->error);
 				num_active++;
 			}
@@ -155,7 +155,7 @@ void homa_timer(struct homa *homa)
 				if ((rpc->state == RPC_INCOMING)
 						&& ((rpc->msgin.total_length
 						- rpc->msgin.bytes_remaining)
-						>= rpc->msgin.granted)) {
+						>= rpc->msgin.incoming)) {
 					/* We've received everything that we've
 					 * granted, so we shouldn't expect to
 					 * hear anything until we grant more.
@@ -194,7 +194,7 @@ void homa_timer(struct homa *homa)
 				if ((rpc->state == RPC_INCOMING)
 						&& ((rpc->msgin.total_length
 						- rpc->msgin.bytes_remaining)
-						>= rpc->msgin.granted)) {
+						>= rpc->msgin.incoming)) {
 					/* We've received everything that we've
 					 * granted, so we shouldn't expect to
 					 * hear anything until we grant more.

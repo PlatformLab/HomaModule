@@ -7,19 +7,20 @@
  * homa_message_in_init() - Constructor for homa_message_in.
  * @msgin:        Structure to initialize.
  * @length:       Total number of bytes in message.
- * @unscheduled:  Initial bytes of message that will be sent without grants.
+ * @incoming:     Initial bytes of message that the sender is already
+ *                planning to transmit, even without grants.
  */
 void homa_message_in_init(struct homa_message_in *msgin, int length,
-		int unscheduled)
+		int incoming)
 {
 	msgin->total_length = length;
 	__skb_queue_head_init(&msgin->packets);
 	msgin->bytes_remaining = length;
-	msgin->granted = unscheduled;
-	if (msgin->granted > msgin->total_length)
-		msgin->granted = msgin->total_length;
+	msgin->incoming = incoming;
+	if (msgin->incoming > msgin->total_length)
+		msgin->incoming = msgin->total_length;
 	msgin->priority = 0;
-	msgin->scheduled = length > unscheduled;
+	msgin->scheduled = length > incoming;
 	msgin->possibly_in_grant_queue = msgin->scheduled;
 	if (length <= 4096) {
 		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
@@ -187,8 +188,8 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	}
 	
 	missing_bytes = msgin->bytes_remaining
-			- (msgin->total_length - msgin->granted);
-	end_offset = msgin->granted;
+			- (msgin->total_length - msgin->incoming);
+	end_offset = msgin->incoming;
 	
 	/* Basic idea: walk backwards through the message's packets until
 	 * we have accounted for all missing bytes; this will identify
@@ -327,6 +328,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
+	int incoming = ntohl(h->incoming);
+	
 	tt_record4("incoming data packet, id %llu, port %d, offset %d/%d",
 			h->common.id,
 			rpc->is_client ? rpc->hsk->client_port
@@ -339,9 +342,16 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			return;			
 		}
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
-				ntohl(h->unscheduled));
+				incoming);
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
+	} else {
+		if (incoming > rpc->msgin.incoming) {
+			if (incoming > rpc->msgin.total_length)
+				rpc->msgin.incoming = rpc->msgin.total_length;
+			else
+				rpc->msgin.incoming = incoming;
+		}
 	}
 	homa_add_packet(&rpc->msgin, skb);
 	rpc->num_skbuffs++;
@@ -564,7 +574,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	/* First, make sure this message is in the right place in (or not in)
 	 * homa->grantable_msgs.
 	 */
-	if (msgin->granted >= msgin->total_length) {
+	if (msgin->incoming >= msgin->total_length) {
 		/* Message fully granted; no need to track it anymore. */
 		if (!list_empty(&rpc->grantable_links)) {
 			homa->num_grantable--;
@@ -598,12 +608,12 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	
     check_grant:
 	/* Next, see if there are any messages that deserve a grant (they have
-	 * fewer than homa->rtt_bytes of data that have been granted but
-	 * not yet received). */
+	 * fewer than homa->rtt_bytes of data in transit).
+	 */
 	rank = 0;
 	list_for_each(pos, &homa->grantable_rpcs) {
 		int extra_levels, priority;
-		int received, incoming, new_grant;
+		int received, new_grant;
 		struct grant_header h;
 		
 		rank++;
@@ -611,20 +621,23 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			break;
 		}
 		candidate = list_entry(pos, struct homa_rpc, grantable_links);
+		
+		/* Invariant: candidate msgin's incoming < total_length
+		 * (otherwise it won't be on this list).
+		 */
 		received = (candidate->msgin.total_length
 				- candidate->msgin.bytes_remaining);
-		incoming = candidate->msgin.granted - received;
-		if (incoming >= homa->rtt_bytes)
+		if ((candidate->msgin.incoming - received) >= homa->rtt_bytes)
 			continue;
-		new_grant = candidate->msgin.granted + homa->grant_increment;
+		new_grant = candidate->msgin.incoming + homa->grant_increment;
 		if ((received + homa->rtt_bytes) > new_grant)
 			new_grant = received + homa->rtt_bytes;
 		if (new_grant > candidate->msgin.total_length)
 			new_grant = candidate->msgin.total_length;
 		
 		/* Send a grant for this message. */
-		candidate->msgin.granted = new_grant;
-		h.offset = htonl(candidate->msgin.granted);
+		candidate->msgin.incoming = new_grant;
+		h.offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
 		extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
 				- homa->num_grantable;
@@ -638,7 +651,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			 * other retry mechanisms handle this. */
 		}
 		tt_record2("sent grant for id %llu, offset %d", candidate->id,
-				candidate->msgin.granted);
+				new_grant);
 	}
 	spin_unlock_bh(&homa->grantable_lock);
 }

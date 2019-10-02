@@ -53,14 +53,14 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, "
-			"message_length 3000, offset 0, data_length 1400, unscheduled 10000, "
-			"cutoff_version 0; "
+			"message_length 3000, offset 0, data_length 1400, "
+			"incoming 10000, cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 1400, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0; "
+			"incoming 10000, cutoff_version 0; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 2800, data_length 200, "
-			"unscheduled 10000, cutoff_version 0",
+			"incoming 10000, cutoff_version 0",
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->num_skbuffs);
 }
@@ -139,6 +139,26 @@ TEST_F(homa_outgoing, homa_message_out_init__use_small_extra_space)
 	EXPECT_STREQ("DATA P1 1400@0 200@1400",
 			unit_log_get());
 	EXPECT_EQ(1, crpc->num_skbuffs);
+}
+TEST_F(homa_outgoing, homa_message_out_init__set_incoming)
+{
+	struct data_header *h;
+	mock_net_device.gso_max_size = 6000;
+	self->homa.max_gso_size = 6000;
+	self->homa.rtt_bytes = 1000;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	unit_log_message_out_packets(&crpc->msgout, 0);
+	EXPECT_STREQ("DATA P1 1400@0 1400@1400 1400@2800 1400@4200; "
+			"DATA P1 1400@5600 1400@7000 1400@8400 200@9800",
+			unit_log_get());
+	h = (struct data_header *) skb_transport_header(crpc->msgout.packets);
+	EXPECT_EQ(5600, ntohl(h->incoming));
+	h = (struct data_header *) skb_transport_header(
+			*homa_next_skb(crpc->msgout.packets));
+	EXPECT_EQ(10000, ntohl(h->incoming));
 }
 TEST_F(homa_outgoing, homa_message_out_init__expand_last_segment)
 {
@@ -419,13 +439,13 @@ TEST_F(homa_outgoing, homa_resend_data)
 	homa_resend_data(crpc, 7000, 10000, 2);
 	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 7000, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0, RETRANSMIT; "
+			"incoming 10000, cutoff_version 0, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 8400, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0, RETRANSMIT; "
+			"incoming 10000, cutoff_version 0, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
 			"message_length 16000, offset 9800, data_length 1400, "
-			"unscheduled 10000, cutoff_version 0, RETRANSMIT",
+			"incoming 11200, cutoff_version 0, RETRANSMIT",
 			unit_log_get());
 	
 	unit_log_clear();

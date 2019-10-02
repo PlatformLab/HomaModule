@@ -56,7 +56,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			.id = id
 		},
 		.message_length = htonl(resp_length),
-		.unscheduled = htonl(10000),
+		.incoming = htonl(10000),
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0}
@@ -289,7 +289,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			.id = id
 		},
 		.message_length = htonl(req_length),
-		.unscheduled = htonl(10000),
+		.incoming = htonl(10000),
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,

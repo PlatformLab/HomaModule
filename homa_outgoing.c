@@ -128,10 +128,10 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		h->common.type = DATA;
 		h->common.id = rpc->id;
 		h->message_length = htonl(rpc->msgout.length);
-		h->unscheduled = htonl(rpc->msgout.unscheduled);
+		h->incoming = htonl(rpc->msgout.unscheduled);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
-		available = skb_size - HOMA_IPV4_HEADER_LENGTH
+		available = skb_size - HOMA_IPV4_HEADER_LENGTH - HOMA_SKB_EXTRA
 			- (sizeof(*h) - sizeof(struct data_segment));
 		
 		/* Each iteration of the following loop adds one segment
@@ -159,6 +159,8 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 				>= max_pkt_data)
 				|| (available - sizeof32(*seg))
 				>= bytes_left));
+		if ((rpc->msgout.length - bytes_left) > rpc->msgout.unscheduled)
+			h->incoming = htonl(rpc->msgout.length - bytes_left);
 		
 		/* Make sure that the last segment won't result in a
 		 * packet that's too small.
@@ -523,6 +525,10 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 					- new_skb->len);
 			h = ((struct data_header *) skb_transport_header(new_skb));
 			h->retransmit = 1;
+			if ((offset + length) > end)
+				h->incoming = htonl(offset + length);
+			else
+				h->incoming = htonl(end);
 			tt_record3("retransmitting offset %d, length %d, id %d",
 					offset, length,
 					h->common.id & 0xffffffff);

@@ -57,7 +57,7 @@ FIXTURE_SETUP(homa_incoming)
 	                .dport = htons(self->server_port),
 			.type = DATA, .id = self->rpcid},
 			.message_length = htonl(10000),
-			.unscheduled = htonl(10000), .cutoff_version = 0,
+			.incoming = htonl(10000), .cutoff_version = 0,
 		        .retransmit = 0,
 			.seg = {.offset = 0, .segment_length = htonl(1400)}};
 	homa_message_in_init(&self->message, 10000, 10000);
@@ -74,13 +74,13 @@ TEST_F(homa_incoming, homa_message_in_init)
 {
 	struct homa_message_in msgin;
 	homa_message_in_init(&msgin, 127, 10000);
-	EXPECT_EQ(127, msgin.granted);
+	EXPECT_EQ(127, msgin.incoming);
 	homa_message_in_init(&msgin, 128, 10000);
 	homa_message_in_init(&msgin, 130, 10000);
 	homa_message_in_init(&msgin, 0x1000, 10000);
 	homa_message_in_init(&msgin, 0x3000, 10000);
 	homa_message_in_init(&msgin, 1000000, 10000);
-	EXPECT_EQ(10000, msgin.granted);
+	EXPECT_EQ(10000, msgin.incoming);
 	homa_message_in_init(&msgin, 2000000, 10000);
 	EXPECT_EQ(255, unit_get_metrics()->small_msg_bytes[1]);
 	EXPECT_EQ(130, unit_get_metrics()->small_msg_bytes[2]);
@@ -253,7 +253,7 @@ TEST_F(homa_incoming, homa_get_resend_range__received_past_granted)
 	self->data.seg.segment_length = htonl(1100);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1100, 0));
-	self->message.granted = 2000;
+	self->message.incoming = 2000;
 	homa_get_resend_range(&self->message, &resend);
 	EXPECT_EQ(1400, ntohl(resend.offset));
 	EXPECT_EQ(100, ntohl(resend.length));
@@ -419,6 +419,39 @@ TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 	EXPECT_EQ(600, crpc->msgin.bytes_remaining);
 	crpc->state = RPC_INCOMING;
 }
+TEST_F(homa_incoming, homa_data_pkt__update_incoming)
+{
+	self->homa.rtt_bytes = 200;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 1600);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	self->data.message_length = htonl(6000);
+	self->data.incoming = htonl(4000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 0), crpc);
+	EXPECT_EQ(RPC_INCOMING, crpc->state);
+	EXPECT_EQ(4000, crpc->msgin.incoming);
+	
+	self->data.seg.offset = htonl(1400);
+	self->data.incoming = htonl(3000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 1400), crpc);
+	EXPECT_EQ(4000, crpc->msgin.incoming);
+	
+	self->data.seg.offset = htonl(2800);
+	self->data.incoming = htonl(5000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			2800, 2800), crpc);
+	EXPECT_EQ(5000, crpc->msgin.incoming);
+	
+	self->data.seg.offset = htonl(4200);
+	self->data.incoming = htonl(8000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			4200, 4200), crpc);
+	EXPECT_EQ(6000, crpc->msgin.incoming);
+}
 TEST_F(homa_incoming, homa_data_pkt__send_grant)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
@@ -426,7 +459,7 @@ TEST_F(homa_incoming, homa_data_pkt__send_grant)
 			self->rpcid, 100000, 1000);
 	EXPECT_NE(NULL, srpc);
 	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
-	EXPECT_EQ(11400, srpc->msgin.granted);
+	EXPECT_EQ(11400, srpc->msgin.incoming);
 }
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {
@@ -766,7 +799,7 @@ TEST_F(homa_incoming, homa_manage_grants__stop_tracking_when_fully_granted)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("request 12345, remaining 18600", unit_log_get());
 	
-	srpc->msgin.granted = 20000;
+	srpc->msgin.incoming = 20000;
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_FALSE(srpc->msgin.possibly_in_grant_queue);
 	unit_log_clear();
@@ -881,28 +914,28 @@ TEST_F(homa_incoming, homa_manage_grants__choose_grant_offset)
 	
 	/* No need for grant. */
 	srpc->msgin.bytes_remaining = 35000;
-	srpc->msgin.granted = 16000;
+	srpc->msgin.incoming = 16000;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Normal grant needed. */
 	srpc->msgin.bytes_remaining = 35000;
-	srpc->msgin.granted = 14000;
+	srpc->msgin.incoming = 14000;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("xmit GRANT 18000@0", unit_log_get());
 	
 	/* We're behind: need larger than normal grant. */
 	srpc->msgin.bytes_remaining = 35000;
-	srpc->msgin.granted = 6000;
+	srpc->msgin.incoming = 6000;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("xmit GRANT 15000@0", unit_log_get());
 	
 	/* Smaller grant at end of message. */
 	srpc->msgin.bytes_remaining = 3000;
-	srpc->msgin.granted = 38000;
+	srpc->msgin.incoming = 38000;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("xmit GRANT 40000@0", unit_log_get());
