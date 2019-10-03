@@ -80,8 +80,9 @@ for line in f:
     if (symbol == "rdtsc_cycles") and (old != 0):
         time_delta = count - old
     if old != count:
-        if (symbol == "timer_cycles") and (time_delta != 0):
-            print("%-22s %15d (%.2f%%) %s" % (symbol, count-old,
+        if ((symbol == "timer_cycles") or (symbol == "pacer_cycles")) \
+                and (time_delta != 0):
+            print("%-22s %15d (%.1f%%) %s" % (symbol, count-old,
                 100.0*float(count-old)/float(time_delta), doc))
         else:
             print("%-22s %15d %s" % (symbol, count-old, doc))
