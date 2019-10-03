@@ -1,0 +1,14 @@
+This file contains various notes and lessons learned concerning performance
+of the Homa Linux kernel module.
+
+* Problem: large messages have no pipelining. For example, copying bytes
+  from user space to output buffers is not overlapped with sending packets,
+  and copying bytes from buffers to user space doesn't start until the
+  entire message has been received.
+  * Tried overlapping packet transmission with packet creation (7/2019) but
+    this made performance worse, not better. Not sure why.
+
+* Waking up a process after a message arrives is expensive (a few microseconds).
+  * Tried polling for messages (7/2019), but this made performance worse
+    because the softirq handler runs on the same CPU as the receiving user
+    process.
