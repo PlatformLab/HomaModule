@@ -82,6 +82,7 @@ def scan(f, startingEvent):
         thisEventInterval = float(match.group(3))*1000.0
         thisEvent = match.group(4)
         if options.noNumbers:
+            thisEvent = re.sub('0x[0-9a-f]+', '?', thisEvent)
             thisEvent = re.sub('[0-9]+', '?', thisEvent)
         if (thisEventTime < lastTime):
             print('Time went backwards at the following line:\n%s' % (line))
