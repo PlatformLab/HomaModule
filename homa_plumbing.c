@@ -491,9 +491,16 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
 //	tt_record1("finished copy_data, copied %d bytes", result);
 	if (rpc->is_client) {
+		if (rpc->id == hsk->homa->temp[0]) {
+			struct freeze_header freeze;
+			tt_record1("Freezing timetrace at id %d", rpc->id);
+			tt_freeze();
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		}
 		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
-//		tt_record("homa_rpc_free finished");
+		tt_record2("homa_rpc_free finished, id %u, temp %d",
+				rpc->id & 0xffffffff, hsk->homa->temp[0]);
 	} else {
 		rpc->state = RPC_IN_SERVICE;
 	}
@@ -588,11 +595,16 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	int err;
 	struct homa_rpc *crpc = NULL;
 
+			
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
+	tt_record4("homa_ioc_send starting, target 0x%x:%d, port %d, id %u",
+			ntohl(args.dest_addr.sin_addr.s_addr),
+			ntohs(args.dest_addr.sin_port),
+			hsk->client_port, hsk->next_outgoing_id & 0xffffffff);
 	err = import_single_range(WRITE, args.request, args.reqlen, &iov,
 		&iter);
 	if (unlikely(err))
@@ -612,9 +624,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
-	tt_record4("New client RPC for server 0x%x:%d, id %llu, port %d",
-			ntohl(crpc->peer->addr),
-			crpc->dport, crpc->id, hsk->client_port);
 	homa_xmit_data(crpc, true);
 //	tt_record("About to reap");
 	homa_rpc_reap(hsk);
