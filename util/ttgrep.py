@@ -67,7 +67,7 @@ if (len(sys.argv) > 1) and (sys.argv[1] == "--rebase"):
     del sys.argv[1]
 
 if len(sys.argv) != 3:
-    print("Usage: %s string logFile" % (sys.argv[0]))
+    print("Usage: %s [--rebase] string logFile" % (sys.argv[0]))
     sys.exit(1)
 
 scan(open(sys.argv[2]), sys.argv[1])
