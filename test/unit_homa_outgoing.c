@@ -179,7 +179,7 @@ TEST_F(homa_outgoing, homa_message_out_reset__basics)
 		self->client_ip, self->server_ip, self->server_port,
 		1111, 3000, 100);
 	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(crpc, true);
+	homa_xmit_data(crpc, false);
 	EXPECT_EQ(NULL, crpc->msgout.next_packet);
 	crpc->msgout.granted = 0;
 	homa_message_out_reset(crpc);
@@ -317,7 +317,7 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 	homa_peer_set_cutoffs(crpc->peer, INT_MAX, 0, 0, 0, 0, INT_MAX,
 			7000, 0);
 	unit_log_clear();
-	homa_xmit_data(crpc, true);
+	homa_xmit_data(crpc, false);
 	EXPECT_STREQ("xmit DATA P6 1400@0; "
 			"xmit DATA P6 1400@1400; "
 			"xmit DATA P2 1400@2800; "
@@ -333,44 +333,69 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 	atomic_long_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 500;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_xmit_data(crpc, true);
+	homa_xmit_data(crpc, false);
 	EXPECT_STREQ("xmit DATA P6 200@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_xmit_data__throttle_limit)
+TEST_F(homa_outgoing, homa_xmit_data__throttle)
 {
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 6000, NULL);
-	EXPECT_NE(NULL, crpc);
+	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 5000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	EXPECT_NE(NULL, crpc2);
 	unit_log_clear();
 	atomic_long_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_xmit_data(crpc, true);
+	
+	/* The first RPC throttles because the NIC queueu is too full. */
+	homa_xmit_data(crpc1, false);
 	EXPECT_STREQ("xmit DATA P6 1400@0; "
 			"xmit DATA P6 1400@1400; "
 			"wake_up_process", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_xmit_data__dont_use_pacer)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 6000, NULL);
-	EXPECT_NE(NULL, crpc);
+	
+	/* The second RPC throttles because the throttle list isn't empty. */
 	unit_log_clear();
+	self->homa.max_nic_queue_cycles = 20000;
+	homa_xmit_data(crpc2, false);
+	EXPECT_STREQ("wake_up_process", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 2800; request 2, next_offset 0",
+			unit_log_get());
+}
+TEST_F(homa_outgoing, homa_xmit_data__pacer)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 6000, NULL);
+	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 5000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	EXPECT_NE(NULL, crpc2);
+	
+	/* First, get an RPC on the throttled list. */
 	atomic_long_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_xmit_data(crpc, false);
-	EXPECT_STREQ("xmit DATA P6 1400@0; "
-			"xmit DATA P6 1400@1400", unit_log_get());
+	homa_xmit_data(crpc1, false);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
+	
+	/* Now the test RPC. */
+	unit_log_clear();
+	homa_xmit_data(crpc2, true);
 	EXPECT_STREQ("", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
 }
 
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
@@ -412,20 +437,6 @@ TEST_F(homa_outgoing, __homa_xmit_data__transmit_error)
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
 	EXPECT_EQ(1, unit_get_metrics()->data_xmit_errors);
-}
-TEST_F(homa_outgoing, __homa_xmit_data__update_idle_time)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 500 - sizeof(struct data_header)
-			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
-			- HOMA_ETH_OVERHEAD, NULL);
-	EXPECT_NE(NULL, crpc);
-	unit_log_clear();
-	atomic_long_set(&self->homa.link_idle_time, 9000);
-	self->homa.max_nic_queue_cycles = 100000;
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
-	EXPECT_EQ(10500, atomic_long_read(&self->homa.link_idle_time));
 }
 
 TEST_F(homa_outgoing, homa_resend_data)
@@ -485,17 +496,88 @@ TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
 	EXPECT_EQ(400, self->homa.max_nic_queue_cycles);
 }
 
-TEST_F(homa_outgoing, homa_update_idle_time)
+TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 {
-	atomic_long_set(&self->homa.link_idle_time, 10000);
-	mock_cycles = 5000;
-	homa_update_idle_time(&self->homa, 1000);
-	EXPECT_EQ(11064, atomic_long_read(&self->homa.link_idle_time));
-	
-	atomic_long_set(&self->homa.link_idle_time, 10000);
-	mock_cycles = 20000;
-	homa_update_idle_time(&self->homa, 200);
-	EXPECT_EQ(20264, atomic_long_read(&self->homa.link_idle_time));
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 500 - sizeof(struct data_header)
+			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
+			- HOMA_ETH_OVERHEAD, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_long_set(&self->homa.link_idle_time, 9000);
+	mock_cycles = 8000;
+	self->homa.max_nic_queue_cycles = 1000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			false));
+	EXPECT_EQ(9500, atomic_long_read(&self->homa.link_idle_time));
+}
+TEST_F(homa_outgoing, homa_check_nic_queue__multiple_packets_gso)
+{
+	mock_mtu = 500 - sizeof(struct data_header)
+			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
+			- HOMA_ETH_OVERHEAD;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 1200 - 3 *(sizeof(struct data_header)
+			+ HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER
+			+ HOMA_ETH_OVERHEAD), NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_long_set(&self->homa.link_idle_time, 9000);
+	self->homa.max_nic_queue_cycles = 100000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	mock_cycles = 0;
+	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			false));
+	EXPECT_EQ(10200, atomic_long_read(&self->homa.link_idle_time));
+}
+TEST_F(homa_outgoing, homa_check_nic_queue__queue_full)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 500 - sizeof(struct data_header)
+			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
+			- HOMA_ETH_OVERHEAD, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_long_set(&self->homa.link_idle_time, 9000);
+	mock_cycles = 7999;
+	self->homa.max_nic_queue_cycles = 1000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	EXPECT_EQ(0, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			false));
+	EXPECT_EQ(9000, atomic_long_read(&self->homa.link_idle_time));
+}
+TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 500 - sizeof(struct data_header)
+			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
+			- HOMA_ETH_OVERHEAD, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_long_set(&self->homa.link_idle_time, 9000);
+	mock_cycles = 7999;
+	self->homa.max_nic_queue_cycles = 1000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			true));
+	EXPECT_EQ(9500, atomic_long_read(&self->homa.link_idle_time));
+}
+TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 500 - sizeof(struct data_header)
+			- HOMA_IPV4_HEADER_LENGTH - HOMA_VLAN_HEADER
+			- HOMA_ETH_OVERHEAD, NULL);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_long_set(&self->homa.link_idle_time, 9000);
+	mock_cycles = 10000;
+	self->homa.max_nic_queue_cycles = 1000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			true));
+	EXPECT_EQ(10500, atomic_long_read(&self->homa.link_idle_time));
 }
 
 /* Don't know how to unit test homa_pacer_main... */

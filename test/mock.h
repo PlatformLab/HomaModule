@@ -22,7 +22,8 @@ extern int         mock_check_error(int *errorMask);
 extern void        mock_data_ready(struct sock *sk);
 extern cycles_t    mock_get_cycles(void);
 extern unsigned int
-		   mock_mtu(const struct dst_entry *dst);
+		   mock_get_mtu(const struct dst_entry *dst);
+extern int         mock_mtu;
 extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);

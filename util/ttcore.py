@@ -85,6 +85,7 @@ if len(substrings) == 0:
     substrings = ["mlx processed",
         "Incoming packet",
         "homa_ioc_recv finished",
+        "Pacer throttled",
         "tcp_v4_rcv invoked",
         "tcp_recvmsg returning"
     ]

@@ -247,6 +247,8 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 * homa_manage_grants doesn't access this RPC after destruction
 	 * begins.
 	 */
+	if (!rpc->is_client)
+		tt_record1("Freeing server RPC, id %d", rpc->id);
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	__hlist_del(&rpc->hash_links);
 	__list_del_entry(&rpc->rpc_links);
@@ -715,7 +717,8 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->responses_received += cm->responses_received;
 		m->pkt_recv_calls += cm->pkt_recv_calls;
 		m->timer_cycles += cm->timer_cycles;
-		m->pacer_cycles += cm->pacer_cycles;
+		m->pacer_cycles += cm->pacer_cycles;;
+		m->pacer_lost_cycles += cm->pacer_lost_cycles;
 		m->resent_packets += cm->resent_packets;
 		m->peer_hash_links += cm->peer_hash_links;
 		m->peer_new_entries += cm->peer_new_entries;
@@ -870,6 +873,10 @@ char *homa_print_metrics(struct homa *homa)
 			"pacer_cycles           %15llu  "
 			"Time spent in homa_pacer (measured with get_cycles)\n",
 			m.pacer_cycles);
+	homa_append_metric(homa,
+			"pacer_lost_cycles      %15llu  "
+			"Lost transmission time because pacer was slow\n",
+			m.pacer_lost_cycles);
 	homa_append_metric(homa,
 			"resent_packets         %15llu  "
 			"DATA packets sent in response to RESENDs\n",

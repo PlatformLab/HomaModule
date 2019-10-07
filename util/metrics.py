@@ -80,8 +80,11 @@ for line in f:
     if (symbol == "rdtsc_cycles") and (old != 0):
         time_delta = count - old
     if old != count:
-        if ((symbol == "timer_cycles") or (symbol == "pacer_cycles")) \
-                and (time_delta != 0):
+        if (symbol == "rdtsc_cycles") and (time_delta != 0) \
+                and "cpu_khz" in prev:
+            print("%-22s %15d (%.1fs) %s" % (symbol, count-old,
+                float(count-old)/(1000.0*prev["cpu_khz"]), doc))
+        elif symbol.endswith("_cycles") and (time_delta != 0):
             print("%-22s %15d (%.1f%%) %s" % (symbol, count-old,
                 100.0*float(count-old)/float(time_delta), doc))
         else:

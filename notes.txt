@@ -121,9 +121,11 @@ Notes for Homa implementation in Linux:
   * What is the purpose of skbuff clones? Appears that cloning is recommended
     to transmit packet while retaining copy for retransmission.
   * If there is an error in ip_queue_xmit, does it free the packet?
-    * The answer appears to the "yes", and Homa contains code to check this
+    * The answer appears to be "yes", and Homa contains code to check this
       and log if not.
   * How to compute the *real* number of CPUS (<< NR_CPUS?)
+  * Is there a better way to compute packet hashes than Homa's approach
+    in gro_complete?
 
 * Notes on IP packet transmission and reception:
   * ip_queue_xmit -> ip_local_out -> dst_output

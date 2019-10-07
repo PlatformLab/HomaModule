@@ -4,7 +4,7 @@
 # arguments).
 
 if [ $# -eq 0 ]; then
-    targets="hp121.utah.cloudlab.us hp138.utah.cloudlab.us"
+    targets="ms1227.utah.cloudlab.us ms1202.utah.cloudlab.us"
 else
     targets=$*
 fi
@@ -18,7 +18,6 @@ for t in $targets; do
     rsync -rtv cloudlab/bin/start_xl170 cloudlab/bin/update_linux ouster@$t:homaModule/
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
-        cat .ssh/cloudlab_rsa.pub >> .ssh/authorized_keys
         cp .ssh/cloudlab_rsa .ssh/id_rsa
         fi'
 done

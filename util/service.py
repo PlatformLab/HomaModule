@@ -38,214 +38,203 @@ else:
     print("Usage: %s [tt_file]" % (sys.argv[0]))
     sys.exit(1)
 
+# RPC structures have the following elements:
+# start -            Time of first record
+# id -               RPC id
+# rcv_lag -          Extra time before first call to homa_pkt_rcv
+# wakeup_lag -       Extra time before the server thread wakes up
+# recv_done -        The time when homa_ioc_recv finishes
+# recv_done_lag -    Extra time to finish homa_ioc_recv
+# first_xmit -       Time when first result packet is transmitted
+# first_xmit_lag -   Extra time between receive_done and first_xmit
+# freed -            Time when RPC is freed (last packet transmitted)
+# xmit_lag -         Extra time between first_xmit and freed
+# interrupt -        Time of most recent packet reception by interrupt handler
+# interrupt_gaps -   Total time in unexpectedly long gaps between pack
+#                    receptions by the interrupt handler
+# last_packet_lag -  Extra time before the interrupt handler received the
+#                    last packet
+# packets -          Total number of packets received for this RPC
+# total -            Total elapsed time from receiving first data packet to
+#                    transmitting last result packet
+
+# RPCs for which at least one packet has arrived, but no result
+# packets have been sent. Indexed by RPC id.
+active = {}
+
+# RPCs that appear to be complete (at least one packet has arrived, and
+# at least one result has been sent)
+complete = []
+
 min = 1000000
 min_id = ""
 max = 0
 max_id = ""
-times = []
 
-# Keys are ids, values are corresponding service start times for RPCs
-start_times = {}
+def average(dict, key):
+    sum = 0.0
+    if len(dict) == 0:
+        return 0.0
+    for record in dict:
+        sum += record[key]
+    return sum/len(dict)
 
-# For each id, extra time before first call to homa_pkt_rcv
-rcv_lag = {}
-
-# For each id, extra time before server thread wakes up
-wakeup_lag = {}
-
-# For each id, the time when homa_ioc_recv finishes
-finish = {}
-
-# For each id, extra time to finish homa_ioc_recv
-finish_lag = {}
-
-# For each id, extra time to finish homa_ioc_recv
-xmit_lag = {}
-
-# For each id, time of last packet reception by mlx interrupt handler
-interrupt = {}
-
-# For each id, sum of gaps in interrupt handler
-interrupt_lag = {}
-
-# For each id, lag in time when mlx interrupt handler received the last packet
-last_packet_lag = {}
-
-# For each id, the last time Homa received a data packet
-protocol = {}
-
-# For each id, sum of gaps in Homa packet receipt
-protocol_lag = {}
-
-# For each id, total # of packets received by mlx under that id
-packets = {}
+def collect(dict, key):
+    result = []
+    for record in dict:
+        result.append(record[key])
+    return result;
 
 for line in f:
-    match = re.match(' *([0-9.]+) us .*mlx received packet, id ([0-9]+), .* type 20,',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if not id in start_times:
-            start_times[id] = time
-        if id in interrupt:
-            if interrupt_lag[id] > 1000:
-                print("High interrupt lag for id %s at time %.3f: %.1f" % (id, time, interrupt_lag[id]))
-            lag = time - interrupt[id] - .45
+    match = re.match(' *([0-9.]+) us .* id ([0-9]+)', line)
+    if not match:
+        continue
+    time = float(match.group(1))
+    id = match.group(2)
+
+    if re.match('.*mlx received homa.* offset ', line):
+        if not id in active:
+            rpc = {}
+            rpc["start"] = time
+            rpc["id"] = id
+            rpc["packets"] = 1
+            active[id] = rpc
+        else:
+            rpc = active[id]
+            rpc["packets"] += 1
+
+        if not "interrupt" in rpc:
+            rpc["interrupt_gaps"] = -9.4
+        else:
+            lag = time - rpc["interrupt"] - .30
             if lag > 0:
-                interrupt_lag[id] += lag
-        else:
-            interrupt_lag[id] = -8.7
-        interrupt[id] = time
-        if id in packets:
-            packets[id] += 1
-        else:
-            packets[id] = 1
+                rpc["interrupt_gaps"] += lag
+        rpc["interrupt"] = time
 
-    match = re.match(' *([0-9.]+) us .*mlx5e_xmit starting, id ([0-9]+), .* type 20.',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if id in start_times:
-            elapsed = time - start_times[id]
-            if (id in finish):
-                lag = time - finish[id] - 14.8
-                # print("xmit lag for id %s: %.1f (elapsed %.1f, finish %.1f)" % (
-                    # id, lag, elapsed, finish[id]))
-                if lag < 0:
-                    lag = 0.0
-                xmit_lag[id] = lag
+    if not id in active:
+        continue
+    rpc = active[id]
 
-            total_lag = time - start_times[id] - 76.2
-            times.append(elapsed)
-            if elapsed < min:
-                min = elapsed
-                min_id = id
-                # print("New min %.1f: id %s, start %.1f, end line: %s" % (min,
-                      # min_id, start_times[id], line))
-            if elapsed > max:
-                max = elapsed
-                max_id = id
-            print("%s %.2f" % (id, elapsed))
-
-            lag = interrupt[id] - start_times[id] - 35.3
-            if lag < 0:
-                lag = 0
-            last_packet_lag[id] = lag
-
-            del start_times[id]
-            if id in interrupt:
-                del interrupt[id]
-            if id in finish:
-                del finish[id]
-            if id in protocol:
-                del protocol[id]
-
-            if (id in interrupt_lag) and (interrupt_lag[id] > 200):
-                print("High interrupt lag for id %s: %.1f, time %.3f" % (id, interrupt_lag[id], time))
-     
-
-    match = re.match(' *([0-9.]+) us .*Incoming packet .*, id ([0-9]+), type 20',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if (not id in rcv_lag) and (id in start_times):
-            lag = time - start_times[id] - 8.7
+    if re.match('.*Incoming packet .*, type 20', line):
+        if not "rcv_lag" in rpc:
+            lag = time - rpc["start"] - 4.5
             # print("receive lag for id %s: %.1f" % (id, lag))
             if lag < 0:
-                # print("homa_ioc_rcv faster than 'min': id %s, %.1f us" % (
-                #      id, lag))
                 lag = 0.0
-            rcv_lag[id] = lag
+            rpc["rcv_lag"] = lag
 
-    match = re.match(' *([0-9.]+) us .*message woke up, id ([0-9]+)',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if (not id in wakeup_lag) and (id in start_times):
-            lag = time - start_times[id] - 43.3
-            # print("wakeup lag for id %s: %.1f" % (id, lag))
-            if lag < 0:
-                lag = 0.0
-            wakeup_lag[id] = lag
+    if re.match('.*message woke up,', line):
+        lag = time - rpc["start"] - 35.2
+        # print("wakeup lag for id %s: %.1f" % (id, lag))
+        if lag < 0:
+            lag = 0.0
+        rpc["wakeup_lag"] = lag
 
-    match = re.match(' *([0-9.]+) us .*homa_ioc_recv finished, id ([0-9]+)',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if (not id in finish_lag) and (id in wakeup_lag):
-            finish[id] = time
-            lag = time - start_times[id] - 61.3 - wakeup_lag[id]
-            # print("finish lag for id %s: %.1f" % (id, lag))
-            if lag < 0:
-                lag = 0.0
-            finish_lag[id] = lag
+    if re.match('.*homa_ioc_recv finished', line):
+        rpc["recv_done"] = time
+        if not "wakeup_lag" in rpc:
+            rpc["wakeup_lag"] = 0
+        lag = time - rpc["start"] - 54.2 - rpc["wakeup_lag"]
+        # print("finish lag for id %s: %.1f" % (id, lag))
+        if lag < 0:
+            lag = 0.0
+        rpc["recv_done_lag"] = lag
 
-    match = re.match(' *([0-9.]+) us .*Incoming packet from.*, id ([0-9]+), type 20',
-            line)
-    if match:
-        id = match.group(2)
-        time = float(match.group(1))
-        if id in protocol:
-            protocol_lag[id] += time - protocol[id] - .42
-        else:
-            protocol_lag[id] = -2.9
-        protocol[id] = time
+    if re.match('.*mlx_xmit starting.* offset ', line) \
+            and not "first_xmit" in rpc:
+        if not "recv_done" in rpc:
+            print("No recv_done for id %s" % (id))
+            continue
+        rpc["first_xmit"] = time
+        lag = time - rpc["recv_done"] - 14.8
+        if lag < 0:
+            lag = 0.0
+        rpc["first_xmit_lag"] = lag
+
+        lag = rpc["interrupt"] - rpc["start"] - 34.4
+        if lag < 0:
+            lag = 0
+        rpc["last_packet_lag"] = lag
+
+    if re.match('.*Freeing server RPC', line):
+        total = time - rpc["start"]
+        rpc["total"] = total
+        lag = time - rpc["first_xmit"] - 26.0
+        if lag < 0:
+            lag = 0.0
+        rpc["xmit_lag"] = lag
+
+        complete.append(rpc)
+        del(active[id])
+
+if len(complete) == 0:
+    print("No complete RPCs were found; have trace records changed format?")
+    exit(1)
 
 # Discard data for any RPCs that haven't received the right number of packets.
-counts = packets.values()
-counts.sort()
-correct_count = counts[len (counts)//2]
-for id in packets:
-    if packets[id] != correct_count:
-        print("Discarding id %s: bad packet count %d (expected %d)" % (id,
-                packets[id], correct_count))
-        if id in rcv_lag:
-            del rcv_lag[id]
-        if id in wakeup_lag:
-            del wakeup_lag[id]
-        if id in finish_lag:
-            del finish_lag[id]
-        if id in xmit_lag:
-            del xmit_lag[id]
-        if id in interrupt_lag:
-            del interrupt_lag[id]
-        if id in last_packet_lag:
-            del last_packet_lag[id]
-        if id in protocol_lag:
-            del protocol_lag[id]
+counts = collect(complete, "packets")
+expected_count = counts[len(counts)//2]
+discards = ""
+i = 0
+while i < len(complete):
+    rpc = complete[i]
+    if rpc["packets"] != expected_count:
+        if discards != "":
+            discards += ", "
+        discards += "id %s @ %.3f (%d packets)" % (rpc["id"], rpc["start"],
+                rpc["packets"])
+        del(complete[i])
+    else:
+        i += 1
 
-average_lag = sum(times)/len(times) - min
+# Print info about each completed RPC, plus compute min/max.
+min = 1000000
+min_id = ""
+max = 0
+max_id = ""
+for rpc in complete:
+    total = rpc["total"]
+    print("%s %.2f" % (rpc["id"], total))
+    if total < min:
+        min = total
+        min_id = rpc["id"]
+        # print("New min %.1f: id %s, start %.1f, end line: %s" % (min,
+              # min_id, rpc["start"], line))
+    if total > max:
+        max = total
+        max_id = rpc["id"]
+
+if discards != "":
+    print("Discarded RPCs: %s" % (discards))
+
+average_lag = average(complete, "total") - min
 if average_lag == 0:
    average_lag = 0.00001
-average_rcv_lag = sum(rcv_lag.values())/len(rcv_lag)
-average_wakeup_lag = sum(wakeup_lag.values())/len(wakeup_lag)
-average_finish_lag = sum(finish_lag.values())/len(finish_lag)
-average_xmit_lag = sum(xmit_lag.values())/len(xmit_lag)
-average_interrupt_lag = sum(interrupt_lag.values())/len(interrupt_lag)
-average_last_packet_lag = sum(last_packet_lag.values())/len(last_packet_lag)
-average_protocol_lag = sum(protocol_lag.values())/len(protocol_lag)
+average_rcv_lag = average(complete, "rcv_lag")
+average_wakeup_lag = average(complete, "wakeup_lag")
+average_recv_done_lag = average(complete, "recv_done_lag")
+average_first_xmit_lag = average(complete, "first_xmit_lag")
+average_interrupt_gaps = average(complete, "interrupt_gaps")
+average_last_packet_lag = average(complete, "last_packet_lag")
+average_xmit_lag = average(complete, "xmit_lag")
 
+times = collect(complete, "total")
 times.sort()
 print("%d completed RPCs, min %.1f us (%s), P50 %.1f us, max %.1f us (%s)" % (
         len(times), min, min_id, times[len(times)//2], max, max_id))
 
-print("wakeup lag:              %5.1f (%4.1f%%)" % (average_wakeup_lag,
+print("wakeup lag:              %5.1f us (%4.1f%%)" % (average_wakeup_lag,
         100.0* average_wakeup_lag/average_lag))
-print("    rcv_pkt lag:         %5.1f (%4.1f%%)" % (average_rcv_lag,
+print("    homa_rcv_pkt lag:    %5.1f us (%4.1f%%)" % (average_rcv_lag,
         100.0* average_rcv_lag/average_lag))
-print("    interrupt gaps:      %5.1f (%4.1f%%)" % (average_interrupt_lag,
-        100.0* average_interrupt_lag/average_lag))
-print("    last interrupt lag:  %5.1f (%4.1f%%)" % (average_last_packet_lag,
+print("    interrupt gaps:      %5.1f us (%4.1f%%)" % (average_interrupt_gaps,
+        100.0* average_interrupt_gaps/average_lag))
+print("    last interrupt lag:  %5.1f us (%4.1f%%)" % (average_last_packet_lag,
         100.0* average_last_packet_lag/average_lag))
-print("    protocol gaps:       %5.1f (%4.1f%%)" % (average_protocol_lag,
-        100.0* average_protocol_lag/average_lag))
-print("finish lag:              %5.1f (%4.1f%%)" % (average_finish_lag,
-        100.0* average_finish_lag/average_lag))
-print("xmit lag:                %5.1f (%4.1f%%)" % (average_xmit_lag,
+print("recv_done lag:           %5.1f us (%4.1f%%)" % (average_recv_done_lag,
+        100.0* average_recv_done_lag/average_lag))
+print("first_xmit lag:          %5.1f us (%4.1f%%)" % (average_first_xmit_lag,
+        100.0* average_first_xmit_lag/average_lag))
+print("xmit lag:                %5.1f us (%4.1f%%)" % (average_xmit_lag,
         100.0* average_xmit_lag/average_lag))
-print("Average total lag:       %5.1f" % (average_lag))
+print("Average total lag:       %5.1f us" % (average_lag))

@@ -565,7 +565,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 			&iter);
         if (unlikely(err))
 		goto error;
-	homa_xmit_data(srpc, true);
+	homa_xmit_data(srpc, false);
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
 	}
@@ -624,7 +624,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
-	homa_xmit_data(crpc, true);
+	homa_xmit_data(crpc, false);
 //	tt_record("About to reap");
 	homa_rpc_reap(hsk);
 //	tt_record("reaping finished");

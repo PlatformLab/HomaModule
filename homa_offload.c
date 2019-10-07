@@ -108,14 +108,6 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		NAPI_GRO_CB(held_skb)->count++;
 	       break;
 	}
-	
-	/* This skb isn't being merged, but other skb's may be merged
-	 * with this later. Set the hash for the skb, which will be used
-	 * for RPS (the default hash doesn't understand Homa, so it doesn't
-	 * include port #'s).
-	 */
-	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h_new->sport,
-			h_new->dport, 0), false);
 	return NULL;
 	
 flush:
@@ -127,8 +119,7 @@ flush:
 /**
  * homa_gro_complete() - This function is invoked just before a packet that
  * was held for GRO processing is passed up the network stack, in case the
- * protocol needs to do some cleanup on the merged packet (we don't need to
- * do anything)
+ * protocol needs to do some cleanup on the merged packet.
  * @skb:     The packet for which GRO processing is now finished.
  * @hoffset: Offset within the packet of the transport header.
  *
@@ -136,5 +127,14 @@ flush:
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
+	struct common_header *h;
+	h = (struct common_header *) skb_transport_header(skb);
+	
+	/* Set the hash for the skb, which will be used for RPS (the default
+	 * hash doesn't understand Homa, so it doesn't include port #'s,
+	 * which results in worse load-balancing).
+	 */
+	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h->sport,
+			h->dport, 0), false);
 	return 0;
 }

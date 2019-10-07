@@ -10,7 +10,7 @@
 #include "mock.h"
 #include "utils.h"
 
-#define KSELFTEST_NOT_MAIN 1
+#define KSELFTEST_NOT_MAIN 1m
 #include "kselftest_harness.h"
 
 /* It isn't safe to include some header files, such as stdlib, because
@@ -104,15 +104,15 @@ cycles_t mock_cycles = 0;
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
 
-/**
- * define MOCK_MTU - Maximum packet size allowed by "network" (see
- * homa_message_out_init; chosen so that data packets will have
- * UNIT_TEST_DATA_PER_PACKET bytes of payload.
+/* Maximum packet size allowed by "network" (see homa_message_out_init;
+ * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
+ * of payload. The variable can be modified if useful in some tests.
  */
 #define MOCK_MTU (UNIT_TEST_DATA_PER_PACKET + HOMA_IPV4_HEADER_LENGTH \
 		+ sizeof(struct data_header))
+int mock_mtu = MOCK_MTU;
 
-struct dst_ops mock_dst_ops = {.mtu = mock_mtu};
+struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
 		.gso_max_size = MOCK_MTU};
@@ -768,9 +768,9 @@ cycles_t mock_get_cycles(void)
  * maximum size of packets that the network can transmit.
  * @dst_entry:   The route whose MTU is desired.
  */
-unsigned int mock_mtu(const struct dst_entry *dst)
+unsigned int mock_get_mtu(const struct dst_entry *dst)
 {
-	return MOCK_MTU;
+	return mock_mtu;
 }
 
 /**
@@ -914,6 +914,7 @@ void mock_teardown(void)
 	mock_xmit_log_verbose = 0;
 	mock_user_data[0] = 0;
 	user_address = 0;
+	mock_mtu = MOCK_MTU;
 	mock_net_device.gso_max_size = MOCK_MTU;
 	
 	int count = unit_hash_size(buffs_in_use);

@@ -269,7 +269,6 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 					h->id & 0xffffffff, h->type,
 					ntohl(ip_hdr(skb)->saddr),
 					ntohs(h->sport));
-			tt_record1("... dport %d", ntohs(h->dport));
 			INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
@@ -404,7 +403,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				rpc->msgout.granted = rpc->msgout.length;
 		}
 		rpc->msgout.sched_priority = h->priority;
-		homa_xmit_data(rpc, true);
+		homa_xmit_data(rpc, false);
 		if (!rpc->msgout.next_packet && !rpc->is_client) {
 			/* This is a server RPC that has been completely sent;
 			 * time to delete the RPC.
@@ -508,7 +507,7 @@ void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			homa_rpc_abort(rpc, err);
 		} else {
 			rpc->state = RPC_OUTGOING;
-			homa_xmit_data(rpc, true);
+			homa_xmit_data(rpc, false);
 		}
 	}
 	kfree_skb(skb);

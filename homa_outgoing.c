@@ -370,11 +370,10 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  * them to be sent (some may be sent immediately; others may be sent
  * later by the pacer thread).
  * @rpc:       RPC to check for transmittable packets.
- * @use_pacer: True means that we should add this RPC to the throttled
- *             list if the NIC queue is too long for this packet right now.
- *             False means the caller will try to send the packet again later.
+ * @pacer:     True means we were invoked from the pacer, which changes the
+ *             behavior a bit.
  */
-void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
+void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
 {
 	while (rpc->msgout.next_packet) {
 		int priority;
@@ -384,14 +383,22 @@ void homa_xmit_data(struct homa_rpc *rpc, bool use_pacer)
 		
 		if (offset >= rpc->msgout.granted)
 			break;
-	
-		if (((rpc->msgout.length - offset) > homa->throttle_min_bytes)
-				&& ((get_cycles() + homa->max_nic_queue_cycles)
-				< atomic_long_read(&homa->link_idle_time))
-				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE)) {
-			if (use_pacer)
+		
+		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
+			if (list_first_or_null_rcu(&homa->throttled_rpcs,
+					struct homa_rpc, throttled_links)
+					&& !pacer) {
+				/* Since there are other throttled messages,
+				 * add this one to the throttled list and
+				 * let the pacer handle it. */
 				homa_add_to_throttled(rpc);
-			break;
+				break;
+			}
+			if (!homa_check_nic_queue(homa, skb, false)) {
+				if (!pacer)
+					homa_add_to_throttled(rpc);
+				break;
+			}
 		}
 		
 		if (offset < rpc->msgout.unscheduled) {
@@ -452,8 +459,6 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 			kfree_skb(skb);
 		}
 	}
-	homa_update_idle_time(rpc->hsk->homa,
-			skb->tail - skb->transport_header);
 	INC_METRIC(packets_sent[0], 1);
 }
 
@@ -532,6 +537,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			tt_record3("retransmitting offset %d, length %d, id %d",
 					offset, length,
 					h->common.id & 0xffffffff);
+			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
 			__homa_xmit_data(new_skb, rpc, priority);
 			INC_METRIC(resent_packets, 1);
 		}
@@ -558,31 +564,52 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 }
 
 /**
- * homa_update_idle_time() - This function is invoked whenever a packet
- * is queued for transmission; it updates homa->link_idle_time to reflect
- * the new transmission.
- * @homa:    Overall data about the Homa protocol implementation.
- * @bytes:   Number of bytes in the packet that was just transmitted,
- *           not including IP or Ethernet headers.
+ * homa_check_nic_queue() - This function is invoked before passing a packet
+ * to the NIC for transmission. It serves two purposes. First, it maintains
+ * an estimate of the NIC queue length. Second, it indicates to the caller
+ * whether the NIC queue is so full that no new packets should be queued
+ * (Homa's SRPT depends on keeping the NIC queue short).
+ * @homa:     Overall data about the Homa protocol implementation.
+ * @skb:      Packet that is about to be transmitted.
+ * @force:    True means this packet is going to be transmitted
+ *            regardless of the queue length.
+ * Return:    Nonzero is returned if either the NIC queue length is
+ *            acceptably short or @force was specified. 0 means that the
+ *            NIC queue is at capacity or beyond, so the caller should delay
+ *            the transmission of @skb. If nonzero is returned, then the
+ *            queue estimate is updated to reflect the transmission of @skb.
  */
-void homa_update_idle_time(struct homa *homa, int bytes)
+int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
-	__u64 old_idle, new_idle, clock;
-	int cycles_for_packet;
+	__u64 idle, new_idle, clock;
+	int cycles_for_packet, segs, bytes;
 	
+	segs = skb_shinfo(skb)->gso_segs;
+	bytes = skb->tail - skb->transport_header;
 	bytes += HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
+	if (segs > 0)
+		bytes += (segs - 1) * (sizeof32(struct data_header)
+				- sizeof32(struct data_segment)
+				+ HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER
+				+ HOMA_ETH_OVERHEAD);
 	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
 	while (1) {
 		clock = get_cycles();
-		old_idle = atomic_long_read(&homa->link_idle_time);
-		if (old_idle < clock)
+		idle = atomic_long_read(&homa->link_idle_time);
+		if (((clock + homa->max_nic_queue_cycles) < idle) && !force
+				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
+			return 0;
+		if (idle < clock)
 			new_idle = clock + cycles_for_packet;
 		else
-			new_idle = old_idle + cycles_for_packet;
-		if (atomic_long_cmpxchg_relaxed(&homa->link_idle_time, old_idle,
-				new_idle) == old_idle)
+			new_idle = idle + cycles_for_packet;
+		
+		/* This method must be thread-safe. */
+		if (atomic_long_cmpxchg_relaxed(&homa->link_idle_time, idle,
+				new_idle) == idle)
 			break;
 	}
+	return 1;
 }
 
 /**
@@ -606,11 +633,11 @@ int homa_pacer_main(void *transportInfo)
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links) == NULL) {
-//			tt_record("pacer sleeping");
+			tt_record("pacer sleeping");
 			INC_METRIC(pacer_cycles, get_cycles() - start);
 			schedule();
 			start = get_cycles();
-//			tt_record1("pacer woke up");
+			tt_record("pacer woke up");
 			continue;
 		}
 		__set_current_state(TASK_RUNNING);
@@ -635,10 +662,35 @@ void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
 	struct sock *sk;
+	int i;
+	int ids[4];
 	
+	while (1) {
+		__s64 diff = (__s64) (atomic_long_read(&homa->link_idle_time)
+				- get_cycles());
+		if (diff < homa->max_nic_queue_cycles) {
+			if (diff < 0) {
+				INC_METRIC(pacer_lost_cycles, -diff);
+				tt_record1("homa_pacer_xmit lost %d cycles",
+						-diff);
+			}
+			break;
+		}
+	}
 	while ((get_cycles() + homa->max_nic_queue_cycles)
 			< atomic_long_read(&homa->link_idle_time)) {}
 	rcu_read_lock();
+	i = 0;
+	ids[0] = ids[1] = ids[2] = ids[3] = 0;
+	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs,
+			throttled_links) {
+		ids[i] = rpc->id;
+		i++;
+		if (i >= 4)
+			break;
+	}
+	tt_record4("Pacer throttled list: %d %d %d %d", ids[0], ids[1],
+			ids[2], ids[3]);
 	while (1) {
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links);
@@ -664,7 +716,7 @@ void homa_pacer_xmit(struct homa *homa)
 	 * socket can't go away now, nor can the RPC.
 	 */
 	rcu_read_unlock();
-	homa_xmit_data(rpc, false);
+	homa_xmit_data(rpc, true);
 	if (!rpc->msgout.next_packet
 			|| (homa_data_offset(rpc->msgout.next_packet)
 			>= rpc->msgout.granted)) {

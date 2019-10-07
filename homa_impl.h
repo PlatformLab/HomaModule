@@ -1328,6 +1328,13 @@ struct homa_metrics {
 	 * (not including blocked time), as measured with get_cycles().
 	 */
 	__u64 pacer_cycles;
+	
+	/**
+	 * @pacer_lost_cycles: unnecessary delays in transmitting packets
+	 * (i.e. wasted output bandwidth) because the pacer was slow or got
+	 * descheduled.
+	 */
+	__u64 pacer_lost_cycles;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -1440,6 +1447,8 @@ extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
 extern void     homa_prios_changed(struct homa *homa);
+extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
+			bool force);
 extern void     homa_close(struct sock *sock, long timeout);
 extern void     homa_compile_metrics(struct homa_metrics *m);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
@@ -1568,7 +1577,6 @@ extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
 extern void     homa_unhash(struct sock *sk);
 extern int      homa_unsched_priority(struct homa_peer *peer, int length);
-extern void     homa_update_idle_time(struct homa *homa, int bytes);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void     homa_validate_grantable_list(struct homa *homa, char *message);
@@ -1578,7 +1586,7 @@ extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
 			struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_xmit_data(struct homa_rpc *rpc, bool use_pacer);
+extern void     homa_xmit_data(struct homa_rpc *rpc, bool pacer);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			int priority);
 

@@ -604,8 +604,6 @@ void tcp_server::read(int fd)
 			message_header *header) {
 		metrics.requests++;
 		metrics.data += size;
-		if (size != 100000)
-			printf("Received message with size %d\n", size);
 		if (send_message(fd, size, header) != 0) {
 			if ((errno != EPIPE) && (errno != ECONNRESET)) {
 				printf("Error sending reply to %s: %s\n",
