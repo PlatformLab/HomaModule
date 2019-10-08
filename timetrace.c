@@ -31,8 +31,11 @@ static const struct file_operations tt_fops = {
 /* Used to remove the /proc file during tt_destroy. */
 static struct proc_dir_entry *tt_dir_entry;
 
-/* Synchronizes accesses to global state such as frozen and init. */
-static struct mutex tt_mutex;
+/* Synchronizes accesses to global state such as frozen and init.  A mutex
+ * isn't safe here, because tt_freeze gets called at times when threads
+ * can't sleep.
+ */
+static spinlock_t tt_lock;
 
 /* No new timetrace entries will be made whenever this is nonzero (counts
  * the number of active /proc reads, plus 1 more if tt_frozen is true).
@@ -95,7 +98,7 @@ int tt_init(char *proc_file)
 		goto error;
 	}
 	
-	mutex_init(&tt_mutex);
+	spin_lock_init(&tt_lock);
 	tt_freeze_count.counter = 0;
 	tt_frozen = false;
 	init = true;
@@ -125,7 +128,7 @@ int tt_init(char *proc_file)
 void tt_destroy(void)
 {
 	int i;
-	mutex_lock(&tt_mutex);
+	spin_lock(&tt_lock);
 	if (init) {
 		init = false;
 		proc_remove(tt_dir_entry);
@@ -143,7 +146,7 @@ void tt_destroy(void)
 	}
 #endif
 	
-	mutex_unlock(&tt_mutex);
+	spin_unlock(&tt_lock);
 }
 
 /**
@@ -154,13 +157,13 @@ void tt_destroy(void)
 void tt_freeze(void)
 {
 	tt_record("timetrace frozen");
-	printk(KERN_NOTICE "freezing timetrace\n");
-	mutex_lock(&tt_mutex);
+	printk(KERN_NOTICE "tt_freeze invoked\n");
+	spin_lock(&tt_lock);
 	if (!tt_frozen) {
 		tt_frozen = true;
 		atomic_inc(&tt_freeze_count);
 	}
-	mutex_unlock(&tt_mutex);
+	spin_unlock(&tt_lock);
 }
 
 /**
@@ -226,7 +229,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	int result = 0;
 	int i;
 	
-	mutex_lock(&tt_mutex);
+	spin_lock(&tt_lock);
 	if (!init) {
 		result = -EINVAL;
 		goto done;
@@ -289,7 +292,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	}
 	
 	done:
-	mutex_unlock(&tt_mutex);
+	spin_unlock(&tt_lock);
 	return result;
 }
 
@@ -317,7 +320,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	int result = 0;
 	struct tt_proc_file *pf = file->private_data;
 	
-	mutex_lock(&tt_mutex);
+	spin_lock(&tt_lock);
 	if ((pf == NULL) || (pf->file != file)) {
 		printk(KERN_ERR "tt_metrics_read found damaged "
 				"private_data: 0x%p\n", file->private_data);
@@ -431,7 +434,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	result = copied_to_user;
 	
 	done:
-	mutex_unlock(&tt_mutex);
+	spin_unlock(&tt_lock);
 	return result;
 }
 
@@ -457,7 +460,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 	kfree(pf);
 	file->private_data = NULL;
 	
-	mutex_lock(&tt_mutex);
+	spin_lock(&tt_lock);
 		
 	if (init) {
 		if (tt_frozen && (atomic_read(&tt_freeze_count) == 2)) {
@@ -478,6 +481,6 @@ int tt_proc_release(struct inode *inode, struct file *file)
 		atomic_dec(&tt_freeze_count);
 	}
 	
-	mutex_unlock(&tt_mutex);
+	spin_unlock(&tt_lock);
 	return 0;
 }
