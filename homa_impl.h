@@ -1571,6 +1571,7 @@ extern struct homa_sock
 extern struct homa_sock
                *homa_socktab_start_scan(struct homa_socktab *socktab,
 			struct homa_socktab_scan *scan);
+extern void     homa_spin(int usecs);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern void     homa_tasklet_handler(unsigned long data);

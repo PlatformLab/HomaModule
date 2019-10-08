@@ -989,3 +989,16 @@ void homa_prios_changed(struct homa *homa)
 	}
 	homa->cutoff_version++;
 }
+
+/**
+ * homa_spin() - Delay (without sleeping) for a given time interval.
+ * @usecs:   How long to delay (in microseconds)
+ */
+void homa_spin(int usecs)
+{
+	__u64 end;
+	end = get_cycles() + (usecs*cpu_khz)/1000;
+	while (get_cycles() < end) {
+		/* Empty loop body.*/
+	}
+}

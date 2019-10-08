@@ -854,48 +854,19 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0
  */
 int homa_pkt_recv(struct sk_buff *skb) {
-	__be32 saddr = ip_hdr(skb)->saddr;
-	int length = skb->len;
+	__be32 saddr;
 	struct common_header *h;
-	struct sock *sk = NULL;
 	struct sk_buff *others;
 	__u16 dport;
 	static __u64 last = 0;
 	__u64 now;
-//	char buffer[200];
-//	int discard;
-
-//	get_random_bytes(&discard, sizeof(discard));
-//	if ((discard & 0x3ff) < homa->temp[0]) {
-//		INC_METRIC(temp1, 1);
-//		printk(KERN_WARNING "Dropping packet: %s\n",
-//			homa_print_packet_short(skb, buffer, sizeof(buffer)));
-//		goto discard;
-//	}
-
-	if (length < HOMA_MAX_HEADER) {
-		if (homa->verbose)
-			printk(KERN_WARNING "Homa packet from %s too short: "
-					"%d bytes\n",
-					homa_print_ipv4_addr(saddr), length);
-		INC_METRIC(short_packets, 1);
-		goto discard;
-	}
+	int header_offset;
 	
-	/* The code below makes the header available at skb->data, even
-	 * if the packet is fragmented.
-	 */
-	if (!pskb_may_pull(skb, HOMA_MAX_HEADER)) {
-		if (homa->verbose)
-			printk(KERN_NOTICE "Homa can't handle fragmented "
-					"packet (no space for header); "
-					"discarding\n");
-		goto discard;
-	}
+	/* If non-NULL, this socket is locked; must eventually be unlocked. */
+	struct sock *sk = NULL;
+	struct sock *new_sk;
+	
 	INC_METRIC(pkt_recv_calls, 1);
-	h = (struct common_header *) skb->data;
-	tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
-			ntohl(saddr), ntohs(h->sport), h->id, h->type);
 	now = get_cycles();
 	if ((now - last) > 1000000) {
 		int scaled_ms = (int) (10*(now-last)/cpu_khz);
@@ -910,106 +881,142 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		}
 	}
 	last = now;
-	if (unlikely(h->type == FREEZE)) {
-		/* Check for FREEZE here, rather than in homa_incoming.c,
-		 * so it will work even for unknown RPCs and sockets.
-		 */
-		tt_record4("Received freeze request on port %d from 0x%x:%d, "
-				"id %d",
-				ntohs(h->dport), ntohl(saddr), ntohs(h->sport),
-				h->id & 0xffffffff);
-		tt_freeze();
-		goto discard;
-	}
-
-	dport = ntohs(h->dport);
-	rcu_read_lock();
-	sk = (struct sock *) homa_sock_find(&homa->port_map, dport);
-	if (!sk) {
-		/* Eventually should return an error result to sender if
-		 * it is a client.
-		 */
-		if (homa->verbose)
-			printk(KERN_NOTICE "Homa packet incoming from %s "
-				"referred to unknown port %u\n",
-				homa_print_ipv4_addr(saddr), dport);
-		rcu_read_unlock();
-		goto discard;
-	}
-	bh_lock_sock_nested(sk);
 	
-	/* Once we've locked the socket we can release the RCU read lock:
-	 * the socket can't go away now. */
-	rcu_read_unlock();
-	if (unlikely(sock_owned_by_user(sk))) {
-		/* Can't process packet now because the socket is locked
-		 * and we can't wait for it to become unlocked. Queue the
-		 * packet with the socket; it will get processed whenever
-		 * the socket lock is released.
-		 * 
-		 * Note: the limit in the sk_add_backlog call is chosen to
-		 * be infinite: the limit isn't useful, because (as of 4.16.10)
-		 * the length is counted in a way that allows it to grow
-		 * without bound, even though the backlog isn't actually
-		 * growing. Also, Homa's built-in congestion control should
-		 * already throttle the backlog.
-		 */
-		int status = sk_add_backlog(sk, skb, ~0);
-		if (unlikely(status != 0)) {
-			if (homa->verbose)
-				printk(KERN_WARNING "Unexpected Homa backlog "
-						"overflow (port %d, %d queued "
-						"bytes)\n",
-						dport, sk->sk_backlog.len);
-			goto discard;
-		}
-		goto done;
-	}
-	if (!homa_sk(sk)->homa) {
-		if (homa->verbose)
-			printk(KERN_NOTICE "Homa packet incoming from "
-				"%s referred to unknown port %u\n",
-				homa_print_ipv4_addr(saddr), dport);
-		goto discard;
-	}
-	
-	/* If GRO has occurred, this packet may actually be a group of
-	 * packets, consisting of the main packet plus any number of
-	 * additional packets queued on its frag_list. Process them
-	 * in order. 
+	/* skb may actually contain many distinct packets, linked through
+	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Each
+	 * iteration through this loop processes one of those packets.
 	 */
+	
 	others = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {
-		homa_pkt_dispatch(sk, skb);
+		saddr = ip_hdr(skb)->saddr;
 		
-		/* Find the next packet (freeing any packets whose headers
-		 * can't be made contiguous).
+		/* Make sure the header is available at skb->data. One
+		 * complication: it's possible that the IP header hasn't
+		 * yet been removed (this happens for GRO packets on
+		 * the frag_list, since they aren't handled explicitly
+		 * by IP.
 		 */
-		while (1) {
-			if (others == NULL)
-				goto done;
-			skb = others;
-			others = others->next;
-			if (pskb_may_pull(skb, HOMA_MAX_HEADER))
-				break;
+		header_offset = skb_transport_header(skb) - skb->data;
+		if (skb->len < (HOMA_MAX_HEADER + header_offset)) {
+			if (homa->verbose)
+				printk(KERN_WARNING "Homa packet from %s too "
+						"short: %d bytes\n",
+						homa_print_ipv4_addr(saddr),
+						skb->len - header_offset);
+			INC_METRIC(short_packets, 1);
+			goto discard;
+		}
+	
+		/* The code below makes the header available at skb->data, even
+		 * if the packet is fragmented.
+		 */
+		if (!pskb_may_pull(skb, HOMA_MAX_HEADER + header_offset)) {
 			if (homa->verbose)
 				printk(KERN_NOTICE "Homa can't handle fragmented "
 						"packet (no space for header); "
 						"discarding\n");
-			kfree_skb(skb);
+			UNIT_LOG("", "pskb discard");
+			goto discard;
 		}
+		if (header_offset)
+			__skb_pull(skb, header_offset);
+		
+		h = (struct common_header *) skb->data;
+		tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
+				ntohl(saddr), ntohs(h->sport), h->id, h->type);
+		if (unlikely(h->type == FREEZE)) {
+			/* Check for FREEZE here, rather than in homa_incoming.c,
+			 * so it will work even if the RPC and/or socket are
+			 * unknown.
+			 */
+			tt_record4("Received freeze request on port %d from "
+					"0x%x:%d, id %d",
+					ntohs(h->dport), ntohl(saddr),
+					ntohs(h->sport), h->id);
+			tt_freeze();
+			goto discard;
+		}
+		
+		dport = ntohs(h->dport);
+		rcu_read_lock();
+		new_sk = (struct sock *) homa_sock_find(&homa->port_map, dport);
+		if (!new_sk) {
+			/* Eventually should return an error result to sender if
+			 * it is a client.
+			 */
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa packet from %s "
+					"referred to unknown port %u\n",
+					homa_print_ipv4_addr(saddr), dport);
+			rcu_read_unlock();
+			goto discard;
+		}
+		if (new_sk == sk) {
+			/* Reuse socket lock from the last iteration.  Once
+			 * we've locked the socket we can release the RCU
+			 * read lock: the socket can't go away now. */
+			rcu_read_unlock();
+		} else {
+			/* This is a different socket; must lock it. */
+			if (sk)
+				bh_unlock_sock(sk);
+			bh_lock_sock_nested(new_sk);
+			sk = new_sk;
+			rcu_read_unlock();
+			if (unlikely(sock_owned_by_user(sk))) {
+				/* Can't process packet now because the socket
+				 * is locked and we can't wait for it to become
+				 * unlocked. Queue the packet on the socket's
+				 * backlog; it will get processed when the
+				 * socket lock is released.
+				 * 
+				 * Note: the limit in the sk_add_backlog call
+				 * is chosen to be infinite so that packets
+				 * don't get dropped during periods of
+				 * congestion (the limit is the maximum number
+				 * of consecutive packets that can be added to
+				 * the backlog before it has been completely
+				 * emptied). This can result in backlog
+				 * processing running arbitrarily long, which
+				 * could starve the thread releasing the lock.
+				 */
+				int status = sk_add_backlog(sk, skb, ~0);
+				if (likely(status == 0))
+					goto next_packet;
+				if (homa->verbose)
+					printk(KERN_WARNING
+						"Unexpected Homa backlog "
+						"overflow (port %d, %d queued "
+						"bytes)\n",
+						dport, sk->sk_backlog.len);
+				goto discard;
+			}
+		}
+		if (!homa_sk(sk)->homa) {
+			if (homa->verbose)
+				printk(KERN_NOTICE "Homa packet incoming from "
+					"%s referred to unknown port %u\n",
+					homa_print_ipv4_addr(saddr), dport);
+			goto discard;
+		}
+		
+		homa_pkt_dispatch(sk, skb);
+		goto next_packet;
+		
+discard:
+		kfree_skb(skb);
+		
+next_packet:
+		if (others == NULL)
+			break;
+		skb = others;
+		others = others->next;
 	}
-
-    done:
-	bh_unlock_sock(sk);
-//        tt_record("homa_pkt_recv done");
-	return 0;
-
-    discard:
+	
 	if (sk)
 		bh_unlock_sock(sk);
-	kfree_skb(skb);
 	return 0;
 }
 
@@ -1026,35 +1033,11 @@ int homa_pkt_recv(struct sk_buff *skb) {
  */
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
-	struct sk_buff *others;
 	int dport = ntohs(((struct common_header *) skb_transport_header(skb))
 			->dport);
 	
 	tt_record1("homa_backlog_rcv invoked for port %d", dport);
-	others = skb_shinfo(skb)->frag_list;
-	skb_shinfo(skb)->frag_list = NULL;
-	while (1) {
-		homa_pkt_dispatch(sk, skb);
-		
-		/* Find the next packet (freeing any packets whose headers
-		 * can't be made contiguous).
-		 */
-		while (1) {
-			if (others == NULL)
-				goto done;
-			skb = others;
-			others = others->next;
-			if (pskb_may_pull(skb, HOMA_MAX_HEADER))
-				break;
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa can't handle fragmented "
-						"packet (no space for header); "
-						"discarding\n");
-			kfree_skb(skb);
-		}
-	}
-    done:
-//	tt_record1("homa_backlog_rcv done, port %d", dport);
+	homa_pkt_dispatch(sk, skb);
 	return 0;
 }
 

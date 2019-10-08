@@ -49,6 +49,13 @@ FIXTURE_TEARDOWN(homa_plumbing)
 	homa = NULL;
 }
 
+TEST_F(homa_plumbing, homa_pkt_recv__basics)
+{
+	struct sk_buff *skb;
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	homa_pkt_recv(skb);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_pkt_recv__packet_too_short)
 {
 	struct sk_buff *skb;
@@ -57,13 +64,57 @@ TEST_F(homa_plumbing, homa_pkt_recv__packet_too_short)
 	homa_pkt_recv(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_pkt_recv__cant_pull_header)
+{
+	struct sk_buff *skb;
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	skb->data_len = skb->len - 20;
+	homa_pkt_recv(skb);
+	EXPECT_STREQ("pskb discard", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_pkt_recv__remove_extra_headers)
+{
+	struct sk_buff *skb;
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	__skb_push(skb, 10);
+	homa_pkt_recv(skb);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_pkt_recv__unknown_socket)
 {
 	struct sk_buff *skb;
-	self->data.common.dport = 100;
+	self->data.common.dport = htons(100);
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_pkt_recv(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_pkt_recv__multiple_packets_different_sockets)
+{
+	struct sk_buff *skb, *skb2;
+	struct homa_sock sock2;
+	mock_sock_init(&sock2, &self->homa, 0, 0);
+	homa_sock_bind(&self->homa.port_map, &sock2, self->server_port+1);
+	
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	self->data.common.dport = htons(self->server_port+1);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = NULL;
+	homa_pkt_recv(skb);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&sock2.active_rpcs));
+	homa_sock_destroy(&sock2);
+}
+TEST_F(homa_plumbing, homa_pkt_recv__multiple_packets_same_socket)
+{
+	struct sk_buff *skb, *skb2;
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	self->data.common.id += 1;
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = NULL;
+	homa_pkt_recv(skb);
+	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_pkt_recv__use_backlog)
 {
