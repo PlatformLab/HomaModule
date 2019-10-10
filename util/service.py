@@ -115,7 +115,7 @@ for line in f:
         continue
     rpc = active[id]
 
-    if re.match('.*Incoming packet .*, type 20', line):
+    if re.match('.*homa_pkt_recv: first.*, type 20', line):
         if not "rcv_lag" in rpc:
             lag = time - rpc["start"] - 4.5
             # print("receive lag for id %s: %.1f" % (id, lag))

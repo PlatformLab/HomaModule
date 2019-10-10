@@ -861,6 +861,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	static __u64 last = 0;
 	__u64 now;
 	int header_offset;
+	int first_packet = 1;
 	
 	/* If non-NULL, this socket is locked; must eventually be unlocked. */
 	struct sock *sk = NULL;
@@ -924,8 +925,13 @@ int homa_pkt_recv(struct sk_buff *skb) {
 			__skb_pull(skb, header_offset);
 		
 		h = (struct common_header *) skb->data;
-		tt_record4("Incoming packet from 0x%x:%d, id %llu, type %d",
-				ntohl(saddr), ntohs(h->sport), h->id, h->type);
+		if (first_packet) {
+			tt_record4("homa_pkt_recv: first packet from 0x%x:%d, "
+					"id %llu, type %d",
+					ntohl(saddr), ntohs(h->sport),
+					h->id, h->type);
+			first_packet = 0;
+		}
 		if (unlikely(h->type == FREEZE)) {
 			/* Check for FREEZE here, rather than in homa_incoming.c,
 			 * so it will work even if the RPC and/or socket are
@@ -983,14 +989,19 @@ int homa_pkt_recv(struct sk_buff *skb) {
 				 * could starve the thread releasing the lock.
 				 */
 				int status = sk_add_backlog(sk, skb, ~0);
+				
+				/* Can't retain this socket for future packets,
+				 * since it isn't properly locked.
+				 */
+				bh_unlock_sock(sk);
+				sk = NULL;
 				if (likely(status == 0))
 					goto next_packet;
 				if (homa->verbose)
 					printk(KERN_WARNING
 						"Unexpected Homa backlog "
-						"overflow (port %d, %d queued "
-						"bytes)\n",
-						dport, sk->sk_backlog.len);
+						"overflow (port %d)\n",
+						dport);
 				goto discard;
 			}
 		}
