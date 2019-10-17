@@ -959,51 +959,46 @@ int homa_pkt_recv(struct sk_buff *skb) {
 			rcu_read_unlock();
 			goto discard;
 		}
-		if (new_sk == sk) {
-			/* Reuse socket lock from the last iteration.  Once
-			 * we've locked the socket we can release the RCU
-			 * read lock: the socket can't go away now. */
-			rcu_read_unlock();
-		} else {
-			/* This is a different socket; must lock it. */
+		if (new_sk != sk) {
+			/* This is a different socket from the last iteration;
+			 * must lock it.
+			 */
 			if (sk)
 				bh_unlock_sock(sk);
 			bh_lock_sock_nested(new_sk);
 			sk = new_sk;
-			rcu_read_unlock();
-			if (unlikely(sock_owned_by_user(sk))) {
-				/* Can't process packet now because the socket
-				 * is locked and we can't wait for it to become
-				 * unlocked. Queue the packet on the socket's
-				 * backlog; it will get processed when the
-				 * socket lock is released.
-				 * 
-				 * Note: the limit in the sk_add_backlog call
-				 * is chosen to be infinite so that packets
-				 * don't get dropped during periods of
-				 * congestion (the limit is the maximum number
-				 * of consecutive packets that can be added to
-				 * the backlog before it has been completely
-				 * emptied). This can result in backlog
-				 * processing running arbitrarily long, which
-				 * could starve the thread releasing the lock.
-				 */
-				int status = sk_add_backlog(sk, skb, ~0);
-				
-				/* Can't retain this socket for future packets,
-				 * since it isn't properly locked.
-				 */
-				bh_unlock_sock(sk);
-				sk = NULL;
-				if (likely(status == 0))
-					goto next_packet;
-				if (homa->verbose)
-					printk(KERN_WARNING
-						"Unexpected Homa backlog "
-						"overflow (port %d)\n",
-						dport);
-				goto discard;
-			}
+		}
+		
+		/* Once we've locked the socket we can release the RCU
+                 * read lock: the socket can't go away now.
+		 */
+		rcu_read_unlock();
+		if (unlikely(sock_owned_by_user(sk))) {
+			/* Can't process packet now because the socket
+			 * is locked and we can't wait for it to become
+			 * unlocked. Queue the packet on the socket's
+			 * backlog; it will get processed when the
+			 * socket lock is released.
+			 * 
+			 * Note: the limit in the sk_add_backlog call
+			 * is chosen to be infinite so that packets
+			 * don't get dropped during periods of
+			 * congestion (the limit is the maximum number
+			 * of consecutive packets that can be added to
+			 * the backlog before it has been completely
+			 * emptied). This can result in backlog
+			 * processing running arbitrarily long, which
+			 * could starve the thread releasing the lock.
+			 */
+			int status = sk_add_backlog(sk, skb, ~0);
+			if (likely(status == 0))
+				goto next_packet;
+			if (homa->verbose)
+				printk(KERN_WARNING
+					"Unexpected Homa backlog overflow "
+					"(port %d), discarding packet\n",
+					dport);
+			goto discard;
 		}
 		if (!homa_sk(sk)->homa) {
 			if (homa->verbose)
