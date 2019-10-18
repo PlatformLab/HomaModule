@@ -692,8 +692,6 @@ void homa_pacer_xmit(struct homa *homa)
 			break;
 		}
 	}
-	while ((get_cycles() + homa->max_nic_queue_cycles)
-			< atomic_long_read(&homa->link_idle_time)) {}
 	rcu_read_lock();
 	i = 0;
 	ids[0] = ids[1] = ids[2] = ids[3] = 0;
