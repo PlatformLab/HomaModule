@@ -1175,6 +1175,12 @@ struct homa {
 	bool pacer_exit;
 	
 	/**
+	 * @pacer_active: synchronization variable: 1 means an instance
+	 * of homa_pacer_xmit is already running, 0 means not.
+	 */
+	atomic_t pacer_active;
+	
+	/**
 	 * @link_idle_time: The time, measured by get_cycles() at which we
 	 * estimate that all of the packets we have passed to Linux for
 	 * transmission will have been transmitted. May be in the past.
@@ -1518,7 +1524,7 @@ extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
 extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);
-extern void     homa_pacer_xmit(struct homa *homa);
+extern void     homa_pacer_xmit(struct homa *homa, int softirq);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern struct homa_peer
@@ -1605,5 +1611,26 @@ extern int      __homa_xmit_control(void *contents, size_t length,
 extern void     homa_xmit_data(struct homa_rpc *rpc, bool pacer);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			int priority);
+
+/**
+ * check_pacer() - This method is invoked at various places in Homa to
+ * see if the pacer needs to transmit more packets and, if so, transmit
+ * them. It's needed because the pacer thread may get descheduled by
+ * Linux, result in output stalls.
+ * @homa:    Overall data about the Homa protocol implementation. No locks
+ *           should be held when this function is invoked.
+ * @softirq: Nonzero means this code is running at softirq (bh) level;
+ *           zero means it's running in process context.
+ */
+static inline void check_pacer(struct homa *homa, int softirq)
+{
+	if (list_first_or_null_rcu(&homa->throttled_rpcs,
+			struct homa_rpc, throttled_links) == NULL)
+		return;
+	if ((get_cycles() + homa->max_nic_queue_cycles) <
+			atomic_long_read(&homa->link_idle_time))
+		return;
+	homa_pacer_xmit(homa, softirq);
+}
 
 #endif /* _HOMA_IMPL_H */

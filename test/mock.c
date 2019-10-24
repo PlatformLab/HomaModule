@@ -49,6 +49,7 @@ int mock_copy_to_user_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
+int mock_spin_lock_held = 0;
 int mock_vmalloc_errors = 0;
 
 /* If a test sets this variable to non-NULL, this function will be invoked
@@ -141,6 +142,7 @@ static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
 unsigned long page_offset_base = 0;
 unsigned long vmemmap_base = 0;
+int __preempt_count = 0;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
@@ -490,18 +492,7 @@ int kthread_stop(struct task_struct *k)
 	return 0;
 }
 
-void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
-{
-	if (mock_spin_lock_hook) {
-		mock_spin_lock_hook();
-	}
-	mock_active_locks++;
-}
-
-void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
-{
-	mock_active_locks--;
-}
+void __local_bh_enable_ip(unsigned long ip, unsigned int cnt) {}
 
 void lock_sock_nested(struct sock *sk, int subclass)
 {
@@ -584,6 +575,27 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
 	mock_active_locks++;
+}
+
+void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
+{
+	if (mock_spin_lock_hook) {
+		mock_spin_lock_hook();
+	}
+	mock_active_locks++;
+}
+
+void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
+{
+	mock_active_locks--;
+}
+
+int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
+{
+	if (mock_check_error(&mock_spin_lock_held))
+		return 0;
+	mock_active_locks++;
+	return 1;
 }
 
 struct ctl_table_header *register_net_sysctl(struct net *net,

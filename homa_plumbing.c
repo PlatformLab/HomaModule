@@ -1038,6 +1038,7 @@ next_packet:
 	
 	if (sk)
 		bh_unlock_sock(sk);
+	check_pacer(homa, 1);
 	return 0;
 }
 

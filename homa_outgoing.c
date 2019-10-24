@@ -657,7 +657,7 @@ int homa_pacer_main(void *transportInfo)
 		}
 		__set_current_state(TASK_RUNNING);
 		
-		homa_pacer_xmit(homa);
+		homa_pacer_xmit(homa, 0);
 		now = get_cycles();
 		INC_METRIC(pacer_cycles, now - start);
 		start = now;
@@ -667,95 +667,133 @@ int homa_pacer_main(void *transportInfo)
 }
 
 /**
- * homa_pacer_xmit() - Wait until we can send at least one packet from
- * the throttled list, then send as many packets as possible from the
- * highest priority message. Note: this function is only invoked from
- * process context (never BH).
+ * homa_pacer_xmit() - Transmit as many packets as possible from
+ * the throttled list. Note: this function may be invoked from either
+ * process context or softirq (BH) level. This function is invoked from
+ * multiple places, not just in the pacer thread. The reason for this is
+ * that (as of 10/2019) Linux's scheduling of the pacer thread is
+ * unpredictable: the thread may block for long periods of time (e.g., because
+ * it is assigned to the same CPU as a busy interrupt handler). This can
+ * result in poor utilization of the network link. So, this method gets
+ * invoked from other places as well, to increase the likelihood that we keep
+ * the link busy. Those other invocations are not guaranteed to happen, so
+ * the pacer thread provides a backstop.
  * @homa:    Overall data about the Homa protocol implementation.
+ * @softirq: Nonzero means this code is running at softirq (bh) level;
+ *           zero means it's running in process context.
  */
-void homa_pacer_xmit(struct homa *homa)
+void homa_pacer_xmit(struct homa *homa, int softirq)
 {
 	struct homa_rpc *rpc;
 	struct sock *sk;
-	int i;
-	int ids[4];
+        int i, locked;
 	
-	while (1) {
-		__s64 diff = (__s64) (atomic_long_read(&homa->link_idle_time)
+	/* Make sure only one instance of this function executes at a
+	 * time.
+	 */
+	local_bh_disable();
+	if (atomic_cmpxchg(&homa->pacer_active, 0, 1) != 0)
+		goto done;
+	
+	/* Each iteration through the following loop makes one attempt
+	 * at sending packets. We limit the number of passes through this
+	 * loop in order to cap the time that interrupts are disabled.
+	 */
+	for (i = 0; i < 5; i++) {
+		__s64 backlog = (__s64) (atomic_long_read(&homa->link_idle_time)
 				- get_cycles());
-		if (diff < homa->max_nic_queue_cycles) {
-			if (diff < 0) {
-				INC_METRIC(pacer_lost_cycles, -diff);
-				tt_record1("homa_pacer_xmit lost %d cycles",
-						-diff);
-			}
+		if (backlog > homa->max_nic_queue_cycles)
 			break;
-		}
-	}
-	rcu_read_lock();
-	i = 0;
-	ids[0] = ids[1] = ids[2] = ids[3] = 0;
-	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs,
-			throttled_links) {
-		ids[i] = rpc->id;
-		i++;
-		if (i >= 4)
-			break;
-	}
-	tt_record4("Pacer throttled list: %d %d %d %d", ids[0], ids[1],
-			ids[2], ids[3]);
-	while (1) {
+		
+		/* Grab the first throttled RPC and try to lock its socket.
+		 * This requires a tricky dance because RPCs can be added to or
+		 * removed from the throttled list while we are trying to
+		 * grab the first one.
+		 */
+		rcu_read_lock();
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links);
 		if (rpc == NULL) {
 			rcu_read_unlock();
-			return;
+			break;
 		}
 		sk = (struct sock *) rpc->hsk;
-		lock_sock(sk);
-		if (rpc == list_first_or_null_rcu(&homa->throttled_rpcs,
-				struct homa_rpc, throttled_links))
+		locked = 0;
+		if (spin_trylock(&sk->sk_lock.slock)) {
+			if (sk->sk_lock.owned) {
+				spin_unlock(&sk->sk_lock.slock);
+			} else {
+				locked = 1;
+				if (!softirq) {
+					sk->sk_lock.owned = 1;
+					spin_unlock(&sk->sk_lock.slock);
+					mutex_acquire(&sk->sk_lock.dep_map,
+							0, 0, _RET_IP_);
+				}
+			}
+		}
+		
+		/* We can release the RCU lock now, since either (a) we
+		 * have locked the socket, which prevents either it or the
+		 * RPC from going away, or (b) we failed to lock, in which
+		 * case we're going to exit.
+		 */
+		rcu_read_unlock();
+		if (unlikely(!locked)) {
+			UNIT_LOG("; ", "socket owned");
 			break;
-			
-		/* RPC might have been deleted before we got the socket
-		 * lock; start over.
-		 */
-		release_sock(sk);
-		continue;
-	}
+		}
+		if (rpc != list_first_or_null_rcu(&homa->throttled_rpcs,
+				struct homa_rpc, throttled_links)) {
+			/* List changed; start again. */
+			goto unlock;
+		}
 
-	/* At this point we've identified the highest priority RPC and
-	 * locked its socket. We can now release the RCU read lock: the
-	 * socket can't go away now, nor can the RPC.
-	 */
-	rcu_read_unlock();
-	homa_xmit_data(rpc, true);
-	if (!rpc->msgout.next_packet
-			|| (homa_data_offset(rpc->msgout.next_packet)
-			>= rpc->msgout.granted)) {
-		/* Nothing more to transmit from this message (right now),
-		 * so remove it from the throttled list.
-		 */
-		spin_lock_bh(&homa->throttle_lock);
-		if (!list_empty(&rpc->throttled_links)) {
-			list_del_rcu(&rpc->throttled_links);
-
-			/* Note: this reinitialization is only safe
-			 * because the pacer only looks at the first
-			 * element of the list, rather than traversing
-			 * it (and besides, we know the pacer isn't
-			 * active concurrently, since this code *is*
-			 * the pacer). It would not be safe under more
-			 * general usage patterns.
+		if (backlog < 0) {
+			INC_METRIC(pacer_lost_cycles, -backlog);
+			tt_record1("homa_pacer_xmit lost %d cycles",
+					-backlog);
+		}
+		tt_record3("pacer calling homa_xmit_data for rpc id %llu,"
+				"port %d, softirq %d",
+				rpc->id, rpc->is_client ? rpc->hsk->client_port
+				: rpc->hsk->server_port, softirq);
+		homa_xmit_data(rpc, true);
+		if (!rpc->msgout.next_packet
+				|| (homa_data_offset(rpc->msgout.next_packet)
+				>= rpc->msgout.granted)) {
+			/* Nothing more to transmit from this message (right now),
+			 * so remove it from the throttled list.
 			 */
-			INIT_LIST_HEAD_RCU(&rpc->throttled_links);
+			spin_lock_bh(&homa->throttle_lock);
+			if (!list_empty(&rpc->throttled_links)) {
+				list_del_rcu(&rpc->throttled_links);
+
+				/* Note: this reinitialization is only safe
+				 * because the pacer only looks at the first
+				 * element of the list, rather than traversing
+				 * it (and besides, we know the pacer isn't
+				 * active concurrently, since this code *is*
+				 * the pacer). It would not be safe under more
+				 * general usage patterns.
+				 */
+				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
+			}
+			spin_unlock_bh(&homa->throttle_lock);
+			if (!rpc->msgout.next_packet && !rpc->is_client) {
+				homa_rpc_free(rpc);
+			}
 		}
-		spin_unlock_bh(&homa->throttle_lock);
-		if (!rpc->msgout.next_packet && !rpc->is_client) {
-			homa_rpc_free(rpc);
-		}
+unlock:
+		if (softirq)
+			bh_unlock_sock(sk);
+		else
+			release_sock(sk);
 	}
-	release_sock(sk);
+	atomic_set(&homa->pacer_active, 0);
+	
+done:
+	local_bh_enable();
 }
 
 /**

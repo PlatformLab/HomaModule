@@ -614,7 +614,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	homa_pacer_xmit(&self->homa, 0);
 	EXPECT_STREQ("xmit DATA P6 1400@0; xmit DATA P6 1400@1400",
 		unit_log_get());
 	unit_log_clear();
@@ -623,14 +623,74 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 		"request 2, next_offset 0; "
 		"request 3, next_offset 0", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	homa_add_to_throttled(crpc1);
+	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	atomic_set(&self->homa.pacer_active, 1);
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa, 0);
+	EXPECT_STREQ("", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 0", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_full)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	homa_add_to_throttled(crpc1);
+	self->homa.max_nic_queue_cycles = 2000;
+	mock_cycles = 10000;
+	atomic_long_set(&self->homa.link_idle_time, 12010);
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa, 0);
+	EXPECT_STREQ("", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 0", unit_log_get());
+}
 TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 {
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	homa_pacer_xmit(&self->homa, 0);
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__spin_lock_unavailable)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	lock_sock((struct sock *) crpc1->hsk);
+	homa_add_to_throttled(crpc1);
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	mock_spin_lock_held = 1;
+	homa_pacer_xmit(&self->homa, 0);
+	EXPECT_STREQ("socket owned", unit_log_get());
+	release_sock((struct sock *) crpc1->hsk);
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__socket_locked)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_NE(NULL, crpc1);
+	lock_sock((struct sock *) crpc1->hsk);
+	homa_add_to_throttled(crpc1);
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa, 0);
+	EXPECT_STREQ("socket owned", unit_log_get());
+	release_sock((struct sock *) crpc1->hsk);
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 {
@@ -645,11 +705,12 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA P6 1000@0", unit_log_get());
+	homa_pacer_xmit(&self->homa, 0);
+	EXPECT_STREQ("xmit DATA P6 1000@0; xmit DATA P6 1400@0",
+			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request 2, next_offset 1400", unit_log_get());
 	EXPECT_TRUE(list_empty(&crpc1->throttled_links));
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
@@ -663,7 +724,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	homa_pacer_xmit(&self->homa, 0);
 	EXPECT_STREQ("xmit DATA P6 1000@0; homa_remove_from_grantable invoked",
 			unit_log_get());
 	unit_log_clear();

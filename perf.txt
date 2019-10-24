@@ -12,3 +12,16 @@ of the Homa Linux kernel module.
   * Tried polling for messages (7/2019), but this made performance worse
     because the softirq handler runs on the same CPU as the receiving user
     process.
+
+* It is hard for the pacer to keep the uplink fully utilized, because it
+  gets descheduled for long periods of time.
+  * Tried disabling interrupts while the pacer is running, but this doesn't
+    work: if a packet gets sent with interrupts disabled, the interrupts get
+    reenabled someplace along the way, which can lead to deadlock. Also,
+    the VLAN driver uses "interrupts off" as a signal that it should polling
+    mode, which doesn't work.
+  * Tried calling homa_pacer_xmit from multiple places; this helps a bit
+    (5-10%).
+  * Tried making the pacer thread a high-priority real-time thread; this
+    actually made things a bit worse.
+    

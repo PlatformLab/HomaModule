@@ -106,6 +106,7 @@ int homa_init(struct homa *homa)
 		return err;
 	}
 	homa->pacer_exit = false;
+	atomic_set(&homa->pacer_active, 0);
 	atomic_long_set(&homa->link_idle_time, get_cycles());
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
