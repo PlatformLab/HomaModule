@@ -249,7 +249,7 @@ void homa_timer(struct homa *homa)
 				us = "client";
 				them = "server";
 				tt_record3("Sent RESEND for server RPC id "
-						"%llu, server 0x%x:%d",
+						"%llu, client 0x%x:%d",
 						rpc->id, htonl(rpc->peer->addr),
 						rpc->dport);
 			}
