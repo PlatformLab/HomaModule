@@ -1,0 +1,58 @@
+This file describes the synchronization strategy used for Homa.
+
+* In the Linux TCP/IP stack, the primary locking mechanism is a lock
+  per socket. However, per-socket locks aren't adequate for Homa, because
+  sockets are "larger" in Homa. In TCP, a socket corresponds to a single
+  connection between the source and destination; an application can have
+  hundreds or thousands of sockets open at once, so per-socket locks leave
+  lots of opportunities for concurrency. With Homa, a single socket can be
+  used for communicating with any number of peers, so there will typically
+  be no more than one socket per thread. As a result, a single Homa socket
+  must support many concurrent RPCs efficiently, and a per-socket lock would
+  create a  bottleneck (Homa tried this approach initially).
+
+* Thus, the primary lock used in Homa is a per-RPC lock. This allows operations
+  on different RPCs to proceed concurrently. RPC locks are actually stored in
+  the hash table buckets used to look them up. This is important because it
+  makes looking up RPCs and locking them atomic. Without this approach it
+  is possible that an RPC could get deleted after it was looked up but before
+  it was locked.
+
+* There are several other locks in Homa besides RPC locks. When multiple
+  locks are held, they must always be acquired in a consistent order, in
+  order to prevent deadlock. For each lock, here are the other locks that
+  may be acquired while holding the given lock.
+  * RPC: socket, grantable, throttle
+  * Socket: port_map.write_lock
+  * Peertab: none
+  * Grantable: none
+  * Throttle: none
+  * Metrics: none
+  * port_map.write_lock: none
+
+* It is important that sockets are not deleted in the middle of an
+  operation involving them. However, Homa doesn't usually lock sockets,
+  so other mechanisms are required to ensure their persistence. For kernel
+  calls, Homa assumes that Linux will prevent socket deletion while the
+  kernel call is executing. In other situations, Homa uses rcu_read_lock
+  to prevent socket deletion.
+
+* The timer creates tricky synchronization issues. Rather than looking up
+  RPCs using the hash tables, it scans all of the active RPCs for a socket.
+  It locks each RPC that it finds, but there is a risk that an RPC could
+  be deleted and its memory recycled before the timer can lock it; this
+  could result in corruption. Locking the socket for the duration of the
+  scan would prevent this problem, but that isn't possible because of
+  the locking order constraints. It's OK if the RPC gets deleted, as long
+  as its memory doesn't get reclaimed. The RCU mechanism could be used for
+  this, but RCU results in *very* long delays before final reclamation
+  (tens of ms), even without contention, which means that a large number
+  of dead RPCs could accumulate. Thus I decided not to the Linux RCU
+  mechanism. Instead, Homa has a special-purpose RCU-like mechanism in the
+  form of the disable_reaps member of the socket; this can be used to
+  temporarily prevent RPC reclamation while the timer is scanning. RPCs
+  can be deleted while the timer is scanning, but their memory won't go
+  away.
+
+* Issues:
+  * rpc->num_skbuffs miscomputed in data_packet.

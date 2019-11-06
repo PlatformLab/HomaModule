@@ -610,7 +610,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
 	while (1) {
 		clock = get_cycles();
-		idle = atomic_long_read(&homa->link_idle_time);
+		idle = atomic64_read(&homa->link_idle_time);
 		if (((clock + homa->max_nic_queue_cycles) < idle) && !force
 				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
@@ -620,7 +620,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 			new_idle = idle + cycles_for_packet;
 		
 		/* This method must be thread-safe. */
-		if (atomic_long_cmpxchg_relaxed(&homa->link_idle_time, idle,
+		if (atomic64_cmpxchg_relaxed(&homa->link_idle_time, idle,
 				new_idle) == idle)
 			break;
 	}
@@ -657,7 +657,7 @@ int homa_pacer_main(void *transportInfo)
 		}
 		__set_current_state(TASK_RUNNING);
 		
-		homa_pacer_xmit(homa, 0);
+		homa_pacer_xmit(homa);
 		now = get_cycles();
 		INC_METRIC(pacer_cycles, now - start);
 		start = now;
@@ -679,18 +679,18 @@ int homa_pacer_main(void *transportInfo)
  * the link busy. Those other invocations are not guaranteed to happen, so
  * the pacer thread provides a backstop.
  * @homa:    Overall data about the Homa protocol implementation.
- * @softirq: Nonzero means this code is running at softirq (bh) level;
- *           zero means it's running in process context.
  */
-void homa_pacer_xmit(struct homa *homa, int softirq)
+void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	struct sock *sk;
-        int i, locked;
+        int i;
+	static __u64 gap_start = 0;
 	
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
+	if (gap_start == 0)
+		gap_start = get_cycles();
 	local_bh_disable();
 	if (atomic_cmpxchg(&homa->pacer_active, 0, 1) != 0)
 		goto done;
@@ -700,64 +700,36 @@ void homa_pacer_xmit(struct homa *homa, int softirq)
 	 * loop in order to cap the time that interrupts are disabled.
 	 */
 	for (i = 0; i < 5; i++) {
-		__s64 backlog = (__s64) (atomic_long_read(&homa->link_idle_time)
+		__s64 backlog = (__s64) (atomic64_read(&homa->link_idle_time)
 				- get_cycles());
 		if (backlog > homa->max_nic_queue_cycles)
 			break;
 		
-		/* Grab the first throttled RPC and try to lock its socket.
-		 * This requires a tricky dance because RPCs can be added to or
-		 * removed from the throttled list while we are trying to
-		 * grab the first one.
+		/* Lock the first throttled RPC. This may not be possible
+		 * because we have to hold throttle_lock while locking
+		 * the RPC, but then we can't wait for the RPC lock because
+		 * of lock ordering constraints (see sync.txt). Thus, if
+		 * the RPC lock isn't available, do nothing.
 		 */
-		rcu_read_lock();
+		spin_lock_bh(&homa->throttle_lock);
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links);
-		if (rpc == NULL) {
-			rcu_read_unlock();
+		if ((rpc == NULL) || !(spin_trylock_bh(rpc->lock))) {
+			spin_unlock_bh(&homa->throttle_lock);
+			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
 		}
-		sk = (struct sock *) rpc->hsk;
-		locked = 0;
-		if (spin_trylock(&sk->sk_lock.slock)) {
-			if (sk->sk_lock.owned) {
-				spin_unlock(&sk->sk_lock.slock);
-			} else {
-				locked = 1;
-				if (!softirq) {
-					sk->sk_lock.owned = 1;
-					spin_unlock(&sk->sk_lock.slock);
-					mutex_acquire(&sk->sk_lock.dep_map,
-							0, 0, _RET_IP_);
-				}
-			}
-		}
-		
-		/* We can release the RCU lock now, since either (a) we
-		 * have locked the socket, which prevents either it or the
-		 * RPC from going away, or (b) we failed to lock, in which
-		 * case we're going to exit.
-		 */
-		rcu_read_unlock();
-		if (unlikely(!locked)) {
-			UNIT_LOG("; ", "socket owned");
-			break;
-		}
-		if (rpc != list_first_or_null_rcu(&homa->throttled_rpcs,
-				struct homa_rpc, throttled_links)) {
-			/* List changed; start again. */
-			goto unlock;
-		}
+		spin_unlock_bh(&homa->throttle_lock);
 
 		if (backlog < 0) {
 			INC_METRIC(pacer_lost_cycles, -backlog);
-			tt_record1("homa_pacer_xmit lost %d cycles",
-					-backlog);
+			tt_record2("homa_pacer_xmit lost %d cycles (lockout %d)",
+					-backlog, get_cycles() - gap_start);
 		}
-		tt_record3("pacer calling homa_xmit_data for rpc id %llu,"
-				"port %d, softirq %d",
+		tt_record2("pacer calling homa_xmit_data for rpc id %llu, "
+				"port %d",
 				rpc->id, rpc->is_client ? rpc->hsk->client_port
-				: rpc->hsk->server_port, softirq);
+				: rpc->hsk->server_port);
 		homa_xmit_data(rpc, true);
 		if (!rpc->msgout.next_packet
 				|| (homa_data_offset(rpc->msgout.next_packet)
@@ -784,11 +756,7 @@ void homa_pacer_xmit(struct homa *homa, int softirq)
 				homa_rpc_free(rpc);
 			}
 		}
-unlock:
-		if (softirq)
-			bh_unlock_sock(sk);
-		else
-			release_sock(sk);
+		spin_unlock_bh(rpc->lock);
 	}
 	atomic_set(&homa->pacer_active, 0);
 	

@@ -47,28 +47,27 @@ TEST_F(homa_socktab, homa_port_hash)
 
 TEST_F(homa_socktab, homa_socktab_start_scan)
 {
-	struct homa_sock hsk;
-	struct homa homa;
 	struct homa_socktab_scan scan;
-	homa_init(&homa);
-	mock_sock_init(&hsk, &homa, HOMA_MIN_CLIENT_PORT+100, 0);
-	EXPECT_EQ(&hsk, homa_socktab_start_scan(&homa.port_map, &scan));
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_CLIENT_PORT+100, 0);
+	EXPECT_EQ(&self->hsk, homa_socktab_start_scan(&self->homa.port_map,
+			&scan));
 	EXPECT_EQ(100, scan.current_bucket);
-	homa_destroy(&homa);
 }
 
 TEST_F(homa_socktab, homa_socktab_next__basics)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4, *hsk;
-	struct homa homa;
 	struct homa_socktab_scan scan;
 	int first_port = 34000;
-	homa_init(&homa);
-	mock_sock_init(&hsk1, &homa, first_port, 0);
-	mock_sock_init(&hsk2, &homa, first_port+HOMA_SOCKTAB_BUCKETS, 0);
-	mock_sock_init(&hsk3, &homa, first_port+2*HOMA_SOCKTAB_BUCKETS, 10);
-	mock_sock_init(&hsk4, &homa, first_port+5, 20);
-	hsk = homa_socktab_start_scan(&homa.port_map, &scan);
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	mock_sock_init(&hsk1, &self->homa, first_port, 0);
+	mock_sock_init(&hsk2, &self->homa, first_port+HOMA_SOCKTAB_BUCKETS, 0);
+	mock_sock_init(&hsk3, &self->homa, first_port+2*HOMA_SOCKTAB_BUCKETS, 10);
+	mock_sock_init(&hsk4, &self->homa, first_port+5, 20);
+	hsk = homa_socktab_start_scan(&self->homa.port_map, &scan);
 	EXPECT_EQ(first_port+2*HOMA_SOCKTAB_BUCKETS, hsk->client_port);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(first_port+HOMA_SOCKTAB_BUCKETS, hsk->client_port);
@@ -78,19 +77,18 @@ TEST_F(homa_socktab, homa_socktab_next__basics)
 	EXPECT_EQ(first_port+5, hsk->client_port);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
-	homa_destroy(&homa);
 }
 TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 {
 	struct homa_sock hsk1, hsk2, hsk3, *hsk;
-	struct homa homa;
 	struct homa_socktab_scan scan;
 	int first_port = 34000;
-	homa_init(&homa);
-	mock_sock_init(&hsk1, &homa, first_port, 0);
-	mock_sock_init(&hsk2, &homa, first_port+HOMA_SOCKTAB_BUCKETS, 0);
-	mock_sock_init(&hsk3, &homa, first_port+2*HOMA_SOCKTAB_BUCKETS, 10);
-	hsk = homa_socktab_start_scan(&homa.port_map, &scan);
+	homa_destroy(&self->homa);
+	homa_init(&self->homa);
+	mock_sock_init(&hsk1, &self->homa, first_port, 0);
+	mock_sock_init(&hsk2, &self->homa, first_port+HOMA_SOCKTAB_BUCKETS, 0);
+	mock_sock_init(&hsk3, &self->homa, first_port+2*HOMA_SOCKTAB_BUCKETS, 10);
+	hsk = homa_socktab_start_scan(&self->homa.port_map, &scan);
 	EXPECT_EQ(first_port+2*HOMA_SOCKTAB_BUCKETS, hsk->client_port);
 	homa_sock_destroy(&hsk2);
 	hsk = homa_socktab_next(&scan);
@@ -100,7 +98,6 @@ TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 	EXPECT_EQ(first_port, hsk->client_port);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
-	homa_destroy(&homa);
 }
 
 TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)

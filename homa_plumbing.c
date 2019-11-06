@@ -1,8 +1,3 @@
-/* This file consists mostly of "glue" that hooks Homa into the rest of
- * the Linux kernel. The guts of the protocol are in other files.
- */
-
-#include "homa_impl.h"
 /* Copyright (c) 2019, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
@@ -18,6 +13,11 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+/* This file consists mostly of "glue" that hooks Homa into the rest of
+ * the Linux kernel. The guts of the protocol are in other files.
+ */
+
+#include "homa_impl.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("John Ousterhout");
@@ -147,13 +147,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "link_mbps",
-		.data		= &homa_data.link_mbps,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -173,6 +166,20 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "link_mbps",
+		.data		= &homa_data.link_mbps,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "max_dead_buffs",
+		.data		= &homa_data.max_dead_buffs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.procname	= "max_prio",
@@ -208,6 +215,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "reap_limit",
+		.data		= &homa_data.reap_limit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.procname	= "resend_interval",
@@ -472,15 +486,15 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		&iter);
 	if (unlikely(err))
 		return err;
-
-	lock_sock(sk);
 	if (hsk->shutdown) {
 		err = -ESHUTDOWN;
 		goto error;
 	}
 	err = homa_wait_for_message(hsk, args.flags, args.id, &rpc);
-	if (err != 0)
+	if (err != 0) {
+		rpc = NULL;
 		goto error;
+	}
 	
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
@@ -493,6 +507,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			&args.source_addr, sizeof(args) -
 			offsetof(struct homa_args_recv_ipv4, source_addr)))) {
 		err = -EFAULT;
+		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args");
 		goto error;
 	}
 	
@@ -512,25 +527,24 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			tt_freeze();
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		}
-		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
 		tt_record2("homa_rpc_free finished, id %u, temp %d",
 				rpc->id & 0xffffffff, hsk->homa->temp[0]);
 	} else {
 		rpc->state = RPC_IN_SERVICE;
 	}
-	release_sock(sk);
+	spin_unlock_bh(rpc->lock);
 	tt_record2("homa_ioc_recv finished, id %u, port %d",
 			rpc->id & 0xffffffff,
 			rpc->is_client ? hsk->client_port : hsk->server_port);
 	return result;
 	
 error:
+	tt_record1("homa_ioc_recv error %d", err);
 	if (rpc != NULL) {
-		rpc->state = RPC_CLIENT_DONE;
 		homa_rpc_free(rpc);
+		spin_unlock_bh(rpc->lock);
 	}
-	release_sock(sk);
 	return err;
 }
 
@@ -561,36 +575,33 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 			&iter);
 	if (unlikely(err))
 		return err;
-
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
-
-	lock_sock(sk);
-	if (hsk->shutdown) {
-		err = -ESHUTDOWN;
-		goto done;
-	}
+	if (hsk->shutdown)
+		return -ESHUTDOWN;
+	
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
-	if (!srpc || (srpc->state != RPC_IN_SERVICE))
+	if (!srpc)
+		return -EINVAL;
+	if (srpc->state != RPC_IN_SERVICE) {
+		err = -EINVAL;
 		goto done;
+	}
 	srpc->state = RPC_OUTGOING;
 
 	err = homa_message_out_init(srpc, hsk->server_port, args.resplen,
 			&iter);
-        if (unlikely(err))
-		goto error;
+        if (unlikely(err)) {
+		homa_rpc_free(srpc);
+		goto done;
+	}
 	homa_xmit_data(srpc, false);
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
 	}
 done:
-	release_sock(sk);
-	return err;
-
-error:
-	homa_rpc_free(srpc);
-	release_sock(sk);
+	spin_unlock_bh(srpc->lock);
 	return err;
 }
 
@@ -608,8 +619,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct iovec iov;
 	struct iov_iter iter;
 	int err;
-	struct homa_rpc *crpc = NULL;
-
+	struct homa_rpc *crpc;
 			
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
@@ -619,20 +629,16 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	tt_record4("homa_ioc_send starting, target 0x%x:%d, port %d, id %u",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
-			hsk->client_port, hsk->next_outgoing_id & 0xffffffff);
+			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
 	err = import_single_range(WRITE, args.request, args.reqlen, &iov,
 		&iter);
 	if (unlikely(err))
 		return err;
-
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
-
-	lock_sock(sk);
-	if (hsk->shutdown) {
-		err = -ESHUTDOWN;
-		goto error;
-	}
+	if (hsk->shutdown)
+		return -ESHUTDOWN;
+	
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
@@ -640,22 +646,20 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_xmit_data(crpc, false);
-//	tt_record("About to reap");
-	homa_rpc_reap(hsk);
-//	tt_record("reaping finished");
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;
 		goto error;
 	}
-	release_sock(sk);
+	spin_unlock_bh(crpc->lock);
 	return 0;
 
     error:
-	if (crpc)
+	if (crpc) {
 		homa_rpc_free(crpc);
-	release_sock(sk);
+		spin_unlock_bh(crpc->lock);
+	}
 	return err;
 }
 
@@ -877,10 +881,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	__u64 now;
 	int header_offset;
 	int first_packet = 1;
-	
-	/* If non-NULL, this socket is locked; must eventually be unlocked. */
-	struct sock *sk = NULL;
-	struct sock *new_sk;
+	struct homa_sock *hsk;
 	
 	INC_METRIC(pkt_recv_calls, 1);
 	now = get_cycles();
@@ -902,7 +903,6 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Each
 	 * iteration through this loop processes one of those packets.
 	 */
-	
 	others = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {
@@ -960,10 +960,12 @@ int homa_pkt_recv(struct sk_buff *skb) {
 			goto discard;
 		}
 		
+		/* Find the socket and existing RPC (if there is one) for this
+		 * packet, and lock the RPC.
+		 */
 		dport = ntohs(h->dport);
-		rcu_read_lock();
-		new_sk = (struct sock *) homa_sock_find(&homa->port_map, dport);
-		if (!new_sk) {
+		hsk = homa_sock_find(&homa->port_map, dport);
+		if (!hsk) {
 			/* Eventually should return an error result to sender if
 			 * it is a client.
 			 */
@@ -971,59 +973,10 @@ int homa_pkt_recv(struct sk_buff *skb) {
 				printk(KERN_NOTICE "Homa packet from %s "
 					"referred to unknown port %u\n",
 					homa_print_ipv4_addr(saddr), dport);
-			rcu_read_unlock();
-			goto discard;
-		}
-		if (new_sk != sk) {
-			/* This is a different socket from the last iteration;
-			 * must lock it.
-			 */
-			if (sk)
-				bh_unlock_sock(sk);
-			bh_lock_sock_nested(new_sk);
-			sk = new_sk;
-		}
-		
-		/* Once we've locked the socket we can release the RCU
-                 * read lock: the socket can't go away now.
-		 */
-		rcu_read_unlock();
-		if (unlikely(sock_owned_by_user(sk))) {
-			/* Can't process packet now because the socket
-			 * is locked and we can't wait for it to become
-			 * unlocked. Queue the packet on the socket's
-			 * backlog; it will get processed when the
-			 * socket lock is released.
-			 * 
-			 * Note: the limit in the sk_add_backlog call
-			 * is chosen to be infinite so that packets
-			 * don't get dropped during periods of
-			 * congestion (the limit is the maximum number
-			 * of consecutive packets that can be added to
-			 * the backlog before it has been completely
-			 * emptied). This can result in backlog
-			 * processing running arbitrarily long, which
-			 * could starve the thread releasing the lock.
-			 */
-			int status = sk_add_backlog(sk, skb, ~0);
-			if (likely(status == 0))
-				goto next_packet;
-			if (homa->verbose)
-				printk(KERN_WARNING
-					"Unexpected Homa backlog overflow "
-					"(port %d), discarding packet\n",
-					dport);
-			goto discard;
-		}
-		if (!homa_sk(sk)->homa) {
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa packet incoming from "
-					"%s referred to unknown port %u\n",
-					homa_print_ipv4_addr(saddr), dport);
 			goto discard;
 		}
 		
-		homa_pkt_dispatch(sk, skb);
+		homa_pkt_dispatch(skb, hsk);
 		goto next_packet;
 		
 discard:
@@ -1036,30 +989,23 @@ next_packet:
 		others = others->next;
 	}
 	
-	if (sk)
-		bh_unlock_sock(sk);
 	check_pacer(homa, 1);
 	return 0;
 }
 
 /**
- * homa_backlog_rcv() - Invoked to handle packets that arrived when the
- * socket was locked, so homa_pkt_recv couldn't handle them at the time.
- * This method gets invoked later, when the socket is unlocked.
- * @sk:     Homa socket that owns the packet's destination port. Caller must
- *          own the lock for this and socket must not have been deleted.
+ * homa_backlog_rcv() - Invoked to handle packets saved on a socket's
+ * backlog because it was locked when the packets first arrived.
+ * @sk:     Homa socket that owns the packet's destination port.
  * @skb:    The incoming packet. This function takes ownership of the packet
- *          (we'll ensure that it is eventually freed).
+ *          (we'll delete it).
  *
  * Return:  Always returns 0.
  */
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
-	int dport = ntohs(((struct common_header *) skb_transport_header(skb))
-			->dport);
-	
-	tt_record1("homa_backlog_rcv invoked for port %d", dport);
-	homa_pkt_dispatch(sk, skb);
+	printk(KERN_WARNING "unimplemented backlog_rcv invoked on Homa socket\n");
+	kfree_skb(skb);
 	return 0;
 }
 
@@ -1082,7 +1028,7 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
 				ntohl(iph->saddr), ntohl(iph->daddr));
-		homa_dest_abort(homa, iph->daddr, error);
+		homa_peer_abort(homa, iph->daddr, error);
 	} else {
 		if (homa->verbose)
 			printk(KERN_NOTICE "homa_err_handler invoked with "

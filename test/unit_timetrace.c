@@ -55,6 +55,7 @@ TEST_F(timetrace, tt_freeze)
 
 TEST_F(timetrace, tt_record__basics)
 {
+	char buffer[1000];
 	tt_record("Message with no args");
 	mock_cycles++;
 	tt_record1("Message with 1 arg: %d", 99);
@@ -65,18 +66,19 @@ TEST_F(timetrace, tt_record__basics)
 	mock_cycles++;
 	tt_record4("Message with 4 args: %d %d %d %d", 1, 2, 3, 4);
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 500, 0);
+	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
 	EXPECT_STREQ("1000 [C01] Message with no args\n"
 			"1001 [C01] Message with 1 arg: 99\n"
 			"1002 [C01] Message with 2 args: 100 200 0 0\n"
 			"1003 [C01] Message with 3 args: 10 20 30 0\n"
 			"1004 [C01] Message with 4 args: 1 2 3 4\n",
-			mock_user_data);
+			buffer);
 }
 
 TEST_F(timetrace, tt_record_buf__wraparound)
 {
+	char buffer[100];
 	tt_buffer_size = 4;
 	tt_record("Message 1");
 	mock_cycles++;
@@ -88,11 +90,11 @@ TEST_F(timetrace, tt_record_buf__wraparound)
 	mock_cycles++;
 	tt_record("Message 5");
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 500, 0);
+	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
 	EXPECT_STREQ("1002 [C01] Message 3\n"
 			"1003 [C01] Message 4\n"
-			"1004 [C01] Message 5\n", mock_user_data);
+			"1004 [C01] Message 5\n", buffer);
 }
 
 TEST_F(timetrace, tt_proc_open__not_initialized)
@@ -109,6 +111,7 @@ TEST_F(timetrace, tt_proc_open__no_memory)
 }
 TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 {
+	char buffer[1000];
 	tt_buffer_size = 4;
 	
 	tt_record_buf(tt_buffers[0], 1500, "Buf0", 0, 0, 0, 0);
@@ -129,7 +132,7 @@ TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 	tt_record_buf(tt_buffers[3], 1400, "Buf3", 0, 0, 0, 0);
 	
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 500, 0);
+	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
 	EXPECT_STREQ("1150 [C02] Buf2\n"
 			"1160 [C02] Buf2\n"
@@ -139,7 +142,7 @@ TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 			"1400 [C03] Buf3\n"
 			"1500 [C00] Buf0\n"
 			"1600 [C00] Buf0\n"
-			"1700 [C00] Buf0\n", mock_user_data);
+			"1700 [C00] Buf0\n", buffer);
 }
 TEST_F(timetrace, tt_proc_open__increment_frozen)
 {
@@ -167,13 +170,16 @@ TEST_F(timetrace, tt_proc_read__uninitialized)
 }
 TEST_F(timetrace, tt_proc_read__nothing_to_read)
 {
+	char buffer[1000];
+	buffer[0] = 0;
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 20, 0);
-	EXPECT_STREQ("", mock_user_data);
+	tt_proc_read(&self->file, buffer, 20, 0);
+	EXPECT_STREQ("", buffer);
 	tt_proc_release(NULL, &self->file);
 }
 TEST_F(timetrace, tt_proc_read__leftovers)
 {
+	char buffer[1000];
 	tt_pf_storage = 100;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB CCCC DDDD EEEE FFFF "
@@ -183,19 +189,20 @@ TEST_F(timetrace, tt_proc_read__leftovers)
 			"0000 1111 2222 3333 4444 5555 "
 			"6666 7777", 0, 0, 0, 0);
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 20, 0);
-	EXPECT_STREQ("1000 [C00] AAAA BBBB", mock_user_data);
-	tt_proc_read(&self->file, (char*) 1000, 40, 0);
+	tt_proc_read(&self->file, buffer, 20, 0);
+	EXPECT_STREQ("1000 [C00] AAAA BBBB", buffer);
+	tt_proc_read(&self->file, buffer, 40, 0);
 	EXPECT_STREQ(" CCCC DDDD EEEE FFFF GGGG HHHH IIII JJJJ",
-			mock_user_data);
-	tt_proc_read(&self->file, (char*) 1000, 200, 0);
+			buffer);
+	tt_proc_read(&self->file, buffer, 200, 0);
 	EXPECT_STREQ(" KKKK LLLL MMMM NNNN OOOO PPPP\n"
 			"1001 [C00] 0000 1111 2222 3333 4444 "
-			"5555 6666 7777\n", mock_user_data);
+			"5555 6666 7777\n", buffer);
 	tt_proc_release(NULL, &self->file);
 }
 TEST_F(timetrace, tt_proc_read__sort_events_by_time)
-{	
+{
+	char buffer[1000];
 	tt_record_buf(tt_buffers[0], 1000, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1100, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1200, "Buf1", 0, 0, 0, 0);
@@ -207,7 +214,7 @@ TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 	tt_record_buf(tt_buffers[1], 1800, "Buf1", 0, 0, 0, 0);
 	
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 500, 0);
+	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
 	EXPECT_STREQ("1000 [C00] Buf0\n"
 		"1100 [C00] Buf0\n"
@@ -217,10 +224,11 @@ TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 		"1500 [C03] Buf3\n"
 		"1600 [C03] Buf3\n"
 		"1700 [C00] Buf0\n"
-		"1800 [C01] Buf1\n", mock_user_data);
+		"1800 [C01] Buf1\n", buffer);
 }
 TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 {
+	char buffer[1000];
 	tt_pf_storage = 25;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB", 0, 0, 0, 0);
@@ -229,20 +237,21 @@ TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 	tt_record_buf(tt_buffers[0], 1002,
 			"IIII JJJJ", 0, 0, 0, 0);
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 100, 0);
+	tt_proc_read(&self->file, buffer, 100, 0);
 	EXPECT_STREQ("1000 [C00] AAAA BBBB\n"
 		"1001 [C00] EEEE FFFF\n"
-		"1002 [C00] IIII JJJJ\n", mock_user_data);
+		"1002 [C00] IIII JJJJ\n", buffer);
 	tt_proc_release(NULL, &self->file);
 }
 TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 {
+	char buffer[1000];
 	tt_pf_storage = 20;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB CCCC DDDD", 0, 0, 0, 0);
 	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, (char*) 1000, 100, 0);
-	EXPECT_STREQ("1000 [C00] AAAA BBB\n", mock_user_data);
+	tt_proc_read(&self->file, buffer, 100, 0);
+	EXPECT_STREQ("1000 [C00] AAAA BBB\n", buffer);
 	tt_proc_release(NULL, &self->file);
 }
 

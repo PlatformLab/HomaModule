@@ -24,4 +24,3 @@ of the Homa Linux kernel module.
     (5-10%).
   * Tried making the pacer thread a high-priority real-time thread; this
     actually made things a bit worse.
-    

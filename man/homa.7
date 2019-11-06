@@ -137,7 +137,11 @@ To access a particular parameter, prepend
 .B .net.homa.
 to the value shown below.
 The parameters are also visible as files in the directory
-.IR /proc/sys/net/homa
+.IR /proc/sys/net/homa .
+Most of these parameters are intended only for use in Homa testing;
+the default values should work fine in production. It's probably a
+bad idea to change any of these unless you are sure you know what
+you are doing.
 .TP
 .I abort_resends
 An integer value specifying how long to wait before aborting RPCs. If
@@ -175,6 +179,20 @@ transmits full-size packets.
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.
+.TP
+.IR max_dead_buffs
+When an RPC completes, Homa doesn't immediately free up the resources it used,
+since this could delay the application (e.g. if there are lots of
+packet buffers to free). Instead, Homa defers RPC "reaping" to a time
+when it is less likely to impact application performance, and it performs
+the reaping in small chunks (see
+.IR reap_limit ).
+However, under some conditions this could result
+in an accumulation of dead RPCs. If the total number of packet buffers in
+dead RPCs reaches the value of this parameter, then Homa reaps more
+aggressively (which could impact application performance) until the number
+of dead packet buffers drops below
+.I max_dead_buffs .
 .TP
 .IR max_gso_size
 An integer value setting an upper limit on the size of an output packet,
@@ -214,6 +232,13 @@ is modified.
 An integer value specifying the lowest priority level that Homa will
 use. Must be between 0 and 7, inclusive; larger values indicate higher
 priority.
+.TP
+.IR reap_limit
+Homa tries to perform cleanup of dead RPCs at times when it doesn't have
+other work to do, so that this cost doesn't impact applications. This
+integer value specifies how many packet buffers Homa will free in a single
+call to the reaper; larger values may make the reaper more efficient, but
+they can also result in a larger delay for applications.
 .TP
 .IR resend_interval
 An integer value specifying how frequently resend requests can be sent

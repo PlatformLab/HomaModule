@@ -35,10 +35,10 @@ The argument
 is an ORed combination of the following values:
 .TP
 .B HOMA_RECV_REQUEST
-A request message may be returned.
+Any incoming request message may be returned.
 .TP
 .B HOMA_RECV_RESPONSE
-A response message may be returned.
+Any incoming response message may be returned.
 .TP
 .B HOMA_RECV_NONBLOCKING
 If no appropriate message is available, the call will return immediately
@@ -46,18 +46,14 @@ with an
 .B EAGAIN
 error, rather than blocking.
 .LP
-At least one of
-.BR HOMA_RECV_REQUEST " and " HOMA_RECV_RESPONSE
-must be set.
 If the initial value of
 .I *id
-is nonzero then a response message will be returned only if its
+is nonzero then a response message will be returned if and only if its
 id matches this value
 .RB ( HOMA_RECV_REQUEST
-must also be set in
-.IR flags ).
+is ignored in this case ).
 .PP
-The identifier for the message is returned at
+The identifier for the received message is returned at
 .IR *id .
 If
 .I src_addr
@@ -76,13 +72,13 @@ is updated to contain the actual size of the source address.
 The returned address is truncated  if  the buffer provided is too small;
 in this case,
 .I *addrlen
-will return a value greater than was supplied to the call.
+will return a value greater than its initial value.
 .PP
-If both
-.BR HOMA_RECV_REQUEST " and " HOMA_RECV_RESPONSE
-are specified in
-.IR flags ,
-then the message returned may be either a request or a response.
+For some settings of
+.I flags
+and
+.IR *id ,
+the message returned may be either a request or a response.
 The port number stored in
 .I src_addr
 can be used to distinguish requests from responses.
@@ -100,7 +96,7 @@ to respond (Homa retains state for the request until
 is invoked). 
 
 .SH RETURN VALUE
-On success, the return value is the size of the response message,
+On success, the return value is the size of the received message,
 which may be greater than
 .IR resplen .
 On error, \-1 is returned and

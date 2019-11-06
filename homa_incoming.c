@@ -29,7 +29,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		int incoming)
 {
 	msgin->total_length = length;
-	__skb_queue_head_init(&msgin->packets);
+	skb_queue_head_init(&msgin->packets);
 	msgin->bytes_remaining = length;
 	msgin->incoming = incoming;
 	if (msgin->incoming > msgin->total_length)
@@ -234,27 +234,25 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 }
 
 /**
- * homa_pkt_dispatch() - Top-level function for handling an incoming packet,
- * once its socket has been found and locked.
- * @sk:     Homa socket that owns the packet's destination port. Caller must
- *          own the lock for this and socket must not have been deleted.
- * @skb:    The incoming packet. This function takes ownership of the packet
- *          (we'll ensure that it is eventually freed).
+ * homa_pkt_dispatch() - Top-level function for handling an incoming packet.
+ * @skb:        The incoming packet. This function takes ownership of the
+ *              packet and will ensure that it is eventually freed.
+ * @hsk:        Homa socket that owns the packet's destination port. This socket
+ *              is not locked, but its existence is ensured for the life
+ *              of this method.
  *
- * Return:  Always returns 0.
+ * Return:  None.
  */
-int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
+void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 {
-//	extern int num_gaps;
-	struct homa_sock *hsk = homa_sk(sk);
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
+
+	/* Find and lock the RPC for this packet. */
 	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
-		rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
-				ntohs(h->sport), h->id);
-		if ((rpc == NULL) && (h->type == DATA)) {
-			/* New incoming RPC. */
+		if (h->type == DATA) {
+			/* Create a new RPC if one doesn't already exist. */
 			rpc = homa_rpc_new_server(hsk, ip_hdr(skb)->saddr,
 					(struct data_header *) h);
 			if (IS_ERR(rpc)) {
@@ -263,10 +261,14 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 						"error %lu",
 						-PTR_ERR(rpc));
 				INC_METRIC(server_cant_create_rpcs, 1);
+				rpc = NULL;
 				goto discard;
 			}
 			INC_METRIC(requests_received, 1);
-		}
+		} else
+			rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
+					ntohs(h->sport), h->id);
+			
 	} else {
 		rpc = homa_find_client_rpc(hsk, h->id);
 	}
@@ -323,11 +325,14 @@ int homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb)
 		INC_METRIC(unknown_packet_types, 1);
 		goto discard;
 	}
-	return 0;
+	goto done;
 	
     discard:
 	kfree_skb(skb);
-	return 0;
+    
+    done:
+	if (rpc)
+		spin_unlock_bh(rpc->lock);
 }
 
 /**
@@ -708,14 +713,13 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
- * homa_dest_abort() - Abort all outstanding client RPCs that were directed
- * to a particular host
+ * homa_peer_abort() - Abort all outstanding RPCs to/from a particular host.
  * @homa:    Overall data about the Homa protocol implementation.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
  * @error:   Negative errno value indicating the reason for the abort.
  */
-void homa_dest_abort(struct homa *homa, __be32 addr, int error)
+void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -729,21 +733,37 @@ void homa_dest_abort(struct homa *homa, __be32 addr, int error)
 		 */
 		if (list_empty(&hsk->active_rpcs))
 			continue;
-		bh_lock_sock_nested((struct sock *) hsk);
-		if (unlikely(sock_owned_by_user((struct sock *) hsk))) {
-			bh_unlock_sock((struct sock *) hsk);
-			continue;
-		}
+		atomic_inc(&hsk->reap_disable);
 		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
-				rpc_links) {
-			if (!rpc->is_client || (rpc->peer->addr != addr) ||
-					(rpc->state == RPC_READY))
+				active_links) {
+			if (rpc->peer->addr != addr)
 				continue;
-			homa_remove_from_grantable(homa, rpc);
-			rpc->error = error;
-			homa_rpc_ready(rpc);
+			homa_rpc_lock(rpc);
+			if ((rpc->state == RPC_DEAD)
+					|| (rpc->state == RPC_READY)) {
+				spin_unlock_bh(rpc->lock);
+				continue;
+			}
+			if (rpc->is_client) {
+				if (error == -ETIMEDOUT)
+					INC_METRIC(client_rpc_timeouts, 1);
+				homa_rpc_abort(rpc, error);
+			} else {
+				if (error == -ETIMEDOUT) {
+					INC_METRIC(server_rpc_timeouts, 1);
+					if (rpc->hsk->homa->verbose)
+						printk(KERN_NOTICE "Homa server "
+							"RPC timeout, client "
+							"%s:%d, id %llu",
+							homa_print_ipv4_addr(
+								rpc->peer->addr),
+							rpc->dport, rpc->id);
+				}
+				homa_rpc_free(rpc);
+			}
+			spin_unlock_bh(rpc->lock);
 		}
-		bh_unlock_sock((struct sock *) hsk);
+		atomic_dec(&hsk->reap_disable);
 	}
 	rcu_read_unlock();
 }
@@ -820,7 +840,7 @@ void homa_validate_grantable_list(struct homa *homa, char *where) {
  *           unless its RPC id matches this.
  * @rpc:     Used to return a pointer to an RPC that matches @flags and @id
  *           and has a complete incoming message. Only valid if the return
- *           value is 0.
+ *           value is 0. This RPC will be locked; the caller must unlock.
  *
  * Return:   0 for success, otherwise a negative errno value.
  */
@@ -828,108 +848,170 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 		struct homa_rpc **rpc)
 {
 	struct homa_rpc *r = NULL;
-	struct homa_interest response_interest, request_interest;
+	struct homa_interest resp_int, req_int;
 	
-	/* Step 1: see if there is an appropriate RPC available. */
-	if (flags & HOMA_RECV_RESPONSE) {
+	int err = 0;
+	
+	/* Normally this loop only gets executed once, but we may have
+	 * to start again if a "found" RPC gets deleted from underneath us.
+	 */
+	while (1) {
+		while (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
+			int reaper_found_work;
+			
+			/* Way too many dead RPCs; must cleanup immediately. */
+			spin_lock_bh(&hsk->lock);
+			reaper_found_work = homa_rpc_reap(hsk);
+			spin_unlock_bh(&hsk->lock);
+			if (!reaper_found_work)
+				break;
+		}
+		
+		/* Check to see if there is an appropriate RPC already
+		 * available, and at the same time register interests
+		 * so we'll be notified if an RPC becomes available in
+		 * the future.
+		 */
+		resp_int.thread = current;
+		resp_int.rpc = rpc;
+		resp_int.reg_rpc = NULL;
+		resp_int.links.next = LIST_POISON1;
+		req_int.thread = current;
+		req_int.rpc = rpc;
+		req_int.links.next = LIST_POISON1;
+		*rpc = NULL;
+		
 		if (id != 0) {
 			r = homa_find_client_rpc(hsk, id);
-			if ((r == NULL) || (r->interest != NULL))
+			if (r == NULL)
 				return -EINVAL;
+			if (r->interest != NULL) {
+				spin_unlock_bh(r->lock);
+				return -EINVAL;
+			}
 			if (r->state == RPC_READY) {
 				list_del_init(&r->ready_links);
 				*rpc = r;
+				spin_unlock_bh(r->lock);
 				return 0;
 			}
-		} else if (!list_empty(&hsk->ready_responses)) {
-			*rpc = list_first_entry(&hsk->ready_responses,
-					struct homa_rpc, ready_links);
-			list_del_init(&(*rpc)->ready_links);
-			return 0;
+			r->interest = &resp_int;
+			resp_int.reg_rpc = r;
+			spin_unlock_bh(r->lock);
 		}
-	}
-	if ((flags & HOMA_RECV_REQUEST)
-			&& !list_empty(&hsk->ready_requests)) {
-		*rpc = list_first_entry(&hsk->ready_requests,
-				struct homa_rpc, ready_links);
-		list_del_init(&(*rpc)->ready_links);
-		return 0;
-	}
-	if ((flags & (HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE)) == 0)
-		return -EINVAL;
-
-	/* Step 2: no appropriate RPC is available, so register
-	 * appropriate interests and go to sleep.
-	 */
-	*rpc = NULL;
-	if (flags & HOMA_RECV_NONBLOCKING) {
-		return -EAGAIN;
-	}
-	if (flags & HOMA_RECV_RESPONSE) {
-		response_interest.thread = current;
-		response_interest.rpc = rpc;
-		response_interest.rpc_deleted = false;
-		if (id != 0)
-			r->interest = &response_interest;
-		else
-			list_add_tail(&response_interest.links,
+		spin_lock_bh(&hsk->lock);
+		if ((id == 0) && (flags & HOMA_RECV_RESPONSE)) {
+			if (!list_empty(&hsk->ready_responses)) {
+				*rpc = list_first_entry(
+						&hsk->ready_responses,
+						struct homa_rpc,
+						ready_links);
+				list_del_init(&(*rpc)->ready_links);
+				goto found_rpc;
+			}
+			list_add_tail(&resp_int.links,
 					&hsk->response_interests);
-	}
-	if (flags & HOMA_RECV_REQUEST) {
-		request_interest.thread = current;
-		request_interest.rpc = rpc;
-		request_interest.rpc_deleted = false;
-		list_add_tail(&request_interest.links, &hsk->request_interests);
-	}
-	set_current_state(TASK_INTERRUPTIBLE);
-	
-	release_sock((struct sock *) hsk);
-	schedule();
-	__set_current_state(TASK_RUNNING);
-	if (*rpc != NULL)
-		tt_record1("homa_wait_for_message woke up, id %d",
-				(*rpc)->id & 0xffffffff);
-	else
-		tt_record("homa_wait_for_message woke up, rpc NULL");
-	lock_sock((struct sock *) hsk);
-
-	/* Step 3: back from sleeping; cleanup interests, then see
-	 * if a match was found.
-	 */
-	if (hsk->shutdown)
-		/* Socket has been shutdown; no need to clean up interests,
-		 * since the closer already did that.
-		 */
-		return -ESHUTDOWN;
-	if (flags & HOMA_RECV_RESPONSE) {
-		if (id != 0) {
-			if (!response_interest.rpc_deleted)
-				r->interest = NULL;
-		} else {
-			list_del(&response_interest.links);
 		}
-	}
-	if (flags & HOMA_RECV_REQUEST)
-		list_del(&request_interest.links);
-	if (*rpc != NULL)
-		return 0;
-	if (signal_pending(current)) {
-		return -EINTR;
-	}
-	if ((flags & HOMA_RECV_RESPONSE) && (id != 0)
-			&& response_interest.rpc_deleted)
-		return -EINVAL;
+		if (flags & HOMA_RECV_REQUEST) {
+			if (!list_empty(&hsk->ready_requests)) {
+				*rpc = list_first_entry(&hsk->ready_requests,
+						struct homa_rpc, ready_links);
+				list_del_init(&(*rpc)->ready_links);
+				goto found_rpc;
+			}
+			list_add_tail(&req_int.links,
+					&hsk->request_interests);
+		}
+		
+	        /* There is no ready RPC so far. Clean up dead RPCs before
+		 * going to sleep (do at least a little cleanup even in
+		 * nonblocking mode).
+		 */
+		while (!*rpc) {
+			int reaper_found_work = homa_rpc_reap(hsk);
+			if (flags & HOMA_RECV_NONBLOCKING) {
+				err = -EAGAIN;
+				goto error;
+			}
+			if (!reaper_found_work)
+				break;
+		}
+		
+		/* Now it's time to sleep. */
+		spin_unlock_bh(&hsk->lock);
+		set_current_state(TASK_INTERRUPTIBLE);
+		if (!*rpc && !hsk->shutdown)
+			schedule();
+		__set_current_state(TASK_RUNNING);
+		if (*rpc != NULL)
+			tt_record1("homa_wait_for_message woke up, id %d",
+					(*rpc)->id & 0xffffffff);
+		else
+			tt_record("homa_wait_for_message woke up, rpc NULL");
+		spin_lock_bh(&hsk->lock);
+		
+		if (hsk->shutdown) {
+			err = -ESHUTDOWN;
+			goto error;
+		}
+		if (*rpc != NULL)
+			goto found_rpc;
+		if (signal_pending(current)) {
+			err = -EINTR;
+			goto error;
+		}
+
+		/* Nothing happened (perhaps the RPC we were waiting for
+		 * was deleted?). Start over. */
+		spin_unlock_bh(&hsk->lock);
+		continue;
 	
-	/* Shouldn't ever get here! */
-	printk(KERN_ERR "Unexpected behavior in homa_wait_for_message\n");
-	return -EINVAL;
+found_rpc:
+		/* Cleanup interests. */
+		if (resp_int.reg_rpc)
+			resp_int.reg_rpc->interest = NULL;
+		if (resp_int.links.next != LIST_POISON1)
+			list_del(&resp_int.links);
+		if (req_int.links.next != LIST_POISON1)
+			list_del(&req_int.links);
+		
+		/* We need to lock the RPC we're going to return, but we have
+		 * to release the socket lock first, and once we do that the
+		 * RPC could get deleted. Thus we need to lookup the RPC
+		 * again to make sure it exists.
+		 */
+		r = *rpc;
+		if (r->is_client) {
+			__u64 client_id = r->id;
+			spin_unlock_bh(&hsk->lock);
+			*rpc = homa_find_client_rpc(hsk, client_id);
+		} else {
+			__u64 server_id = r->id;
+			__be32 saddr = r->peer->addr;
+			__u16 port = r->dport;
+			spin_unlock_bh(&hsk->lock);
+			*rpc = homa_find_server_rpc(hsk, saddr, port, server_id);
+		}
+		if (*rpc)
+			return 0;
+	}
+	
+error:
+	if (resp_int.reg_rpc)
+		resp_int.reg_rpc->interest = NULL;
+	if (resp_int.links.next != LIST_POISON1)
+		list_del(&resp_int.links);
+	if (req_int.links.next != LIST_POISON1)
+		list_del(&req_int.links);
+	spin_unlock_bh(&hsk->lock);
+	return err;
 }
 
 /**
  * @homa_rpc_ready: This function is called when the input message for
  * an RPC becomes complete. It marks the RPC as READY and either notifies
  * a waiting reader or queues the RPC.
- * @rpc:  RPC that now has a complete input message.
+ * @rpc:  RPC that now has a complete input message; must be locked.
  */
 void homa_rpc_ready(struct homa_rpc *rpc)
 {
@@ -950,6 +1032,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	}
 	
 	/* Second, check the interest list for this type of RPC. */
+	spin_lock_bh(&rpc->hsk->lock);
 	if (rpc->is_client) {
 		interest_list = &rpc->hsk->response_interests;
 		ready_list = &rpc->hsk->ready_responses;
@@ -958,6 +1041,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		ready_list = &rpc->hsk->ready_requests;
 	}
 	list_for_each_entry(interest, interest_list, links) {
+		struct task_struct *thread;
 		if (*interest->rpc != NULL) {
 			/* This interest has already been satisfied
 			 * (perhaps the thread hasn't had a chance to wake
@@ -965,14 +1049,16 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 			continue;
 		}
 		*interest->rpc = rpc;
-		wake_up_process(interest->thread);
-//		tt_record1("wake_up_process finished, id %u",
-//				rpc->id & 0xfffffffff);
+		thread = interest->thread;
+		spin_unlock_bh(&rpc->hsk->lock);
+		wake_up_process(thread);
+//		tt_record1("wake_up_process finished, id %d", rpc->id);
 		return;
 	}
 	
 	/* No interest so far; just queue the RPC. */
 	list_add_tail(&rpc->ready_links, ready_list);
+	spin_unlock_bh(&rpc->hsk->lock);
 	
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;

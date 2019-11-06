@@ -126,6 +126,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	int i;
 	
 	mutex_lock(&socktab->write_lock);
+	spin_lock_init(&hsk->lock);
 	hsk->homa = homa;
 	hsk->shutdown = false;
 	hsk->server_port = 0;
@@ -140,20 +141,27 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	}
 	hsk->client_port = homa->next_client_port;
 	homa->next_client_port++;
-	hsk->next_outgoing_id = 1;
+	atomic64_set(&hsk->next_outgoing_id, 1);
 	hsk->client_links.sock = hsk;
 	hlist_add_head_rcu(&hsk->client_links.hash_links,
 			&socktab->buckets[homa_port_hash(hsk->client_port)]);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
+	hsk->dead_skbs = 0;
 	INIT_LIST_HEAD(&hsk->ready_requests);
 	INIT_LIST_HEAD(&hsk->ready_responses);
 	INIT_LIST_HEAD(&hsk->request_interests);
 	INIT_LIST_HEAD(&hsk->response_interests);
-	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++)
-		INIT_HLIST_HEAD(&hsk->client_rpc_buckets[i]);
-	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++)
-		INIT_HLIST_HEAD(&hsk->server_rpc_buckets[i]);
+	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {
+		struct homa_rpc_bucket *bucket = &hsk->client_rpc_buckets[i];
+		spin_lock_init(&bucket->lock);
+		INIT_HLIST_HEAD(&bucket->rpcs);
+	}
+	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++) {
+		struct homa_rpc_bucket *bucket = &hsk->server_rpc_buckets[i];
+		spin_lock_init(&bucket->lock);
+		INIT_HLIST_HEAD(&bucket->rpcs);
+	}
 	mutex_unlock(&socktab->write_lock);
 }
 
@@ -166,14 +174,29 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
+	struct homa_rpc *rpc;
 	
-	if (hsk->shutdown)
+	spin_lock_bh(&hsk->lock);
+	if (hsk->shutdown) {
+		spin_unlock_bh(&hsk->lock);
 		return;
+	}
 	hsk->shutdown = true;
+	mutex_lock(&hsk->homa->port_map.write_lock);
+	hlist_del_rcu(&hsk->client_links.hash_links);
+	if (hsk->server_port != 0)
+		hlist_del_rcu(&hsk->server_links.hash_links);
+	mutex_unlock(&hsk->homa->port_map.write_lock);
+	
 	list_for_each_entry(interest, &hsk->request_interests, links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, links)
 		wake_up_process(interest->thread);
+	spin_unlock_bh(&hsk->lock);
+	
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
+		homa_rpc_free(rpc);
+	while (homa_rpc_reap(hsk)) {}
 }
 
 /**
@@ -183,26 +206,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
  */
 void homa_sock_destroy(struct homa_sock *hsk)
 {
-	struct list_head *pos, *next;
-
 	if (!hsk->homa)
 		return;
-	mutex_lock(&hsk->homa->port_map.write_lock);
-	hlist_del_rcu(&hsk->client_links.hash_links);
-	if (hsk->server_port != 0)
-		hlist_del_rcu(&hsk->server_links.hash_links);
-	mutex_unlock(&hsk->homa->port_map.write_lock);
-	
-	lock_sock((struct sock *) hsk);
 	homa_sock_shutdown(hsk);
-	list_for_each_safe(pos, next, &hsk->active_rpcs) {
-		struct homa_rpc *rpc = list_entry(pos,
-				struct homa_rpc, rpc_links);
-		homa_rpc_free(rpc);
-	}
-	while (!list_empty(&hsk->dead_rpcs))
-		homa_rpc_reap(hsk);
-	release_sock((struct sock *) hsk);
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 	hsk->homa = NULL;
 }

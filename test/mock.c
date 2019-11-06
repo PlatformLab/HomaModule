@@ -46,10 +46,12 @@ int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
 int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
+int mock_import_single_range_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
 int mock_spin_lock_held = 0;
+int mock_trylock_errors = 0;
 int mock_vmalloc_errors = 0;
 
 /* If a test sets this variable to non-NULL, this function will be invoked
@@ -73,16 +75,10 @@ struct task_struct mock_task;
  */
 int mock_xmit_log_verbose = 0;
 
-/* Information passed to copy_to_user is saved here (up to a limit).
- * Leave room for a terminating null char. at the end.
+/* If a test sets this variable to nonzero, call_rcu_sched will log
+ * whenever it is invoked.
  */
-#define USER_DATA_LIMIT 4000
-char mock_user_data[USER_DATA_LIMIT+1];
-
-/* User address corresponding to the beginning of mock_user_data, or
- * 0 if copy_to_user hasn't yet been called in this test.
- */
-static void *user_address;
+int mock_log_rcu_sched = 0;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
@@ -113,7 +109,14 @@ static struct unit_hash *vmallocs_in_use = NULL;
  */
 static int mock_active_locks = 0;
 
-/* Used as the return value for calls to get_cycles.
+/* The number of times rcu_read_lock has been called minus the number
+ * of times rcu_read_unlock has been called. 
+ * Should be 0 at the end of each test.
+ */
+static int mock_active_rcu_locks = 0;
+
+/* Used as the return value for calls to get_cycles. A value of ~0 means
+ * return actual clock time.
  */
 cycles_t mock_cycles = 0;
 
@@ -181,7 +184,8 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 
 void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 {
-	unit_log_printf("; ", "call_rcu_sched");
+	if (mock_log_rcu_sched)
+		unit_log_printf("; ", "call_rcu_sched");
 	func(head);
 }
 
@@ -223,27 +227,11 @@ size_t _copy_to_iter(const void *addr, size_t bytes, struct iov_iter *i)
 
 unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
-	int offset;
-	unsigned long length;
 	if (mock_check_error(&mock_copy_to_user_errors))
 		return -1;
+	memcpy(to, from, n);
+	((char *)(to))[n] = 0;
 	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
-	if (user_address == NULL)
-		user_address = to;
-	offset = to - user_address;
-	length = n;
-	if (offset >= USER_DATA_LIMIT)
-		return 0;
-	if (offset < 0) {
-		if (-offset >= length)
-			return 0;
-		length += offset;
-		offset = 0;
-	}
-	if ((offset+length) > USER_DATA_LIMIT)
-		length = USER_DATA_LIMIT - offset;
-	memcpy(mock_user_data + offset, from, length);
-	mock_user_data[offset + length] = 0;
 	return 0;
 }
 
@@ -261,7 +249,8 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
 	if (mock_check_error(&mock_copy_data_errors))
-		return false;
+		return 1;
+	memcpy(to, from, n);
 	unit_log_printf("; ", "_copy_from_user copied %lu bytes", n);
 	return 0;
 }
@@ -320,6 +309,8 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {
+	if (mock_check_error(&mock_import_single_range_errors))
+		return -EACCES;
 	return 0;
 }
 
@@ -585,6 +576,14 @@ void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 	mock_active_locks++;
 }
 
+int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
+{
+	if (mock_check_error(&mock_trylock_errors))
+		return 0;
+	mock_active_locks++;
+	return 1;
+}
+
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
 	mock_active_locks--;
@@ -636,6 +635,11 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 	unit_log_printf("; ", "skb_copy_datagram_iter ");
 	unit_log_data(NULL, from->data + offset, size);
 	return 0;
+}
+
+struct sk_buff *skb_dequeue(struct sk_buff_head *list)
+{
+	return __skb_dequeue(list);
 }
 
 void *skb_pull(struct sk_buff *skb, unsigned int len)
@@ -787,6 +791,11 @@ void mock_data_ready(struct sock *sk)
  */
 cycles_t mock_get_cycles(void)
 {
+	if (mock_cycles == ~0) {
+		uint32_t lo, hi;
+		__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
+		return (((uint64_t)hi << 32) | lo);
+	} 
 	return mock_cycles;
 }
 
@@ -798,6 +807,26 @@ cycles_t mock_get_cycles(void)
 unsigned int mock_get_mtu(const struct dst_entry *dst)
 {
 	return mock_mtu;
+}
+
+/**
+ * mock_rcu_read_lock() - Called instead of rcu_read_lock when Homa is compiled
+ * for unit testing.
+ */
+void mock_rcu_read_lock(void)
+{
+	mock_active_rcu_locks++;
+}
+
+/**
+ * mock_rcu_read_unlock() - Called instead of rcu_read_unlock when Homa is
+ * compiled for unit testing.
+ */
+void mock_rcu_read_unlock(void)
+{
+	if (mock_active_rcu_locks == 0)
+		FAIL(" rcu_read_unlock called without rcu_read_lock");
+	mock_active_rcu_locks--;
 }
 
 /**
@@ -931,16 +960,18 @@ void mock_teardown(void)
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
+	mock_cycles = 0;
+	mock_import_single_range_errors = 0;
 	mock_kmalloc_errors = 0;
+	mock_log_rcu_sched = 0;
 	mock_route_errors = 0;
+	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
 	memset(&mock_task, 0, sizeof(mock_task));
 	mock_schedule_hook = NULL;
 	mock_signal_pending = 0;
 	mock_spin_lock_hook = NULL;
 	mock_xmit_log_verbose = 0;
-	mock_user_data[0] = 0;
-	user_address = 0;
 	mock_mtu = MOCK_MTU;
 	mock_net_device.gso_max_size = MOCK_MTU;
 	
@@ -977,4 +1008,9 @@ void mock_teardown(void)
 	if (mock_active_locks > 0)
 		FAIL(" %d locks still locked after test", mock_active_locks);
 	mock_active_locks = 0;
+	
+	if (mock_active_rcu_locks > 0)
+		FAIL(" %d rcu_read_locks still active after test",
+				mock_active_rcu_locks);
+	mock_active_rcu_locks = 0;
 }

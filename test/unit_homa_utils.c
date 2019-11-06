@@ -98,9 +98,8 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 static const char *dead_rpcs(struct homa_sock *hsk)
 {
 	struct homa_rpc *rpc;
-	list_for_each_entry(rpc, &hsk->dead_rpcs, rpc_links) {
+	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links)
 		UNIT_LOG(" ", "%llu", rpc->id);
-	}
 	return unit_log_get();
 }
 
@@ -110,6 +109,7 @@ TEST_F(homa_utils, homa_rpc_new_client__normal)
 			&self->server_addr, 10000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
+	spin_unlock_bh(crpc->lock);
 }
 TEST_F(homa_utils, homa_rpc_new_client__malloc_error)
 {
@@ -127,18 +127,46 @@ TEST_F(homa_utils, homa_rpc_new_client__route_error)
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(crpc));
 }
+TEST_F(homa_utils, homa_rpc_new_client__msgout_init_error)
+{
+	mock_alloc_skb_errors = 1;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
+}
 
 TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc));
+	spin_unlock_bh(srpc->lock);
 	self->data.message_length = N(1600);
 	homa_data_pkt(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_free(srpc);
+}
+TEST_F(homa_utils, homa_rpc_new_server__already_exists)
+{
+	struct homa_rpc *srpc1 = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc1));
+	spin_unlock_bh(srpc1->lock);
+	self->data.common.id += HOMA_SERVER_RPC_BUCKETS;
+	struct homa_rpc *srpc2 = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc2));
+	spin_unlock_bh(srpc2->lock);
+	EXPECT_NE(srpc2, srpc1);
+	self->data.common.id -= HOMA_SERVER_RPC_BUCKETS;
+	struct homa_rpc *srpc3 = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc3));
+	spin_unlock_bh(srpc3->lock);
+	EXPECT_EQ(srpc3, srpc1);
 }
 TEST_F(homa_utils, homa_rpc_new_server__malloc_error)
 {
@@ -157,7 +185,34 @@ TEST_F(homa_utils, homa_rpc_new_server__addr_error)
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
 
-TEST_F(homa_utils, homa_rpc_free__state_incoming)
+TEST_F(homa_utils, homa_rpc_lock_slow)
+{
+	mock_cycles = ~0;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, 10000, NULL);
+	homa_rpc_free(crpc);
+	spin_unlock_bh(crpc->lock);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc));
+	spin_unlock_bh(srpc->lock);
+	
+	EXPECT_EQ(0, unit_get_metrics()->client_lock_misses);
+	EXPECT_EQ(0, unit_get_metrics()->client_lock_miss_cycles);
+	homa_rpc_lock_slow(crpc);
+	spin_unlock_bh(crpc->lock);
+	EXPECT_EQ(1, unit_get_metrics()->client_lock_misses);
+	EXPECT_NE(0, unit_get_metrics()->client_lock_miss_cycles);
+	EXPECT_EQ(0, unit_get_metrics()->server_lock_misses);
+	EXPECT_EQ(0, unit_get_metrics()->server_lock_miss_cycles);
+	homa_rpc_lock_slow(srpc);
+	spin_unlock_bh(srpc->lock);
+	EXPECT_EQ(1, unit_get_metrics()->server_lock_misses);
+	EXPECT_NE(0, unit_get_metrics()->server_lock_miss_cycles);
+	
+}
+
+TEST_F(homa_utils, homa_rpc_free__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
@@ -165,9 +220,27 @@ TEST_F(homa_utils, homa_rpc_free__state_incoming)
 	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_rpcs));
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
+	mock_log_rcu_sched = 1;
 	homa_rpc_free(crpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked",
+			unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->homa.grantable_rpcs));
+	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc->id));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
+}
+TEST_F(homa_utils, homa_rpc_free__already_dead)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 100);
+	unit_log_clear();
+	homa_rpc_free(crpc);
+	EXPECT_STREQ("homa_remove_from_grantable invoked",
+		unit_log_get());
+	unit_log_clear();
+	homa_rpc_free(crpc);
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_free__state_ready)
 {
@@ -185,69 +258,44 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 1000, 100);
 	interest.rpc = NULL;
-	interest.rpc_deleted = false;
+	interest.reg_rpc = crpc;
 	crpc->interest = &interest;
 	unit_log_clear();
 	homa_rpc_free(crpc);
-	EXPECT_TRUE(interest.rpc_deleted);
+	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; wake_up_process",
 		unit_log_get());
 }
-TEST_F(homa_utils, homa_rpc_free__throttled)
+TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 5000, NULL);
 	EXPECT_NE(NULL, crpc);
+	spin_unlock_bh(crpc->lock);
 	homa_add_to_throttled(crpc);
+	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
 	unit_log_clear();
 	homa_rpc_free(crpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; call_rcu_sched",
-		unit_log_get());
-}
-TEST_F(homa_utils, homa_rpc_free__defer_reaping)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 1000, 100);
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->rpcid+1, 10000, 100);
-	homa_rpc_free(crpc);
-	homa_rpc_free(srpc);
-	unit_log_clear();
-	EXPECT_STREQ("12345", dead_rpcs(&self->hsk));
+	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
 }
 
-TEST_F(homa_utils, homa_rpc_reap__reap_two)
+TEST_F(homa_utils, homa_rpc_free_rcu)
 {
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 2000, 100);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid+1, 2000, 100);
-	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid+2, 2000, 100);
-	homa_rpc_free(crpc1);
-	homa_rpc_free(crpc2);
-	homa_rpc_free(crpc3);
-	unit_log_clear();
-	EXPECT_STREQ("12345 12346 12347", dead_rpcs(&self->hsk));
-	unit_log_clear();
-	homa_rpc_reap(&self->hsk);
-	EXPECT_STREQ("reaped 12345; reaped 12346", unit_log_get());
-	unit_log_clear();
-	EXPECT_STREQ("12347", dead_rpcs(&self->hsk));
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 20000);
+	homa_rpc_free(crpc);
+	EXPECT_EQ(RPC_DEAD, crpc->state);
 }
-TEST_F(homa_utils, homa_rpc_reap__reap_just_one)
+
+TEST_F(homa_utils, homa_rpc_reap__basics)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 20000, 100);
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 2000);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid+1, 2000, 100);
+			self->server_port, self->rpcid+1, 5000, 100);
 	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid+2, 2000, 100);
@@ -256,36 +304,75 @@ TEST_F(homa_utils, homa_rpc_reap__reap_just_one)
 	homa_rpc_free(crpc3);
 	unit_log_clear();
 	EXPECT_STREQ("12345 12346 12347", dead_rpcs(&self->hsk));
+	EXPECT_EQ(11, self->hsk.dead_skbs);
 	unit_log_clear();
-	homa_rpc_reap(&self->hsk);
+	self->homa.reap_limit = 7;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12345", unit_log_get());
 	unit_log_clear();
 	EXPECT_STREQ("12346 12347", dead_rpcs(&self->hsk));
+	EXPECT_EQ(4, self->hsk.dead_skbs);
 }
-
+TEST_F(homa_utils, homa_rpc_reap__reap_disabled)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 2000);
+	homa_rpc_free(crpc1);
+	unit_log_clear();
+	atomic_inc(&self->hsk.reap_disable);
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	atomic_dec(&self->hsk.reap_disable);
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
+{
+	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_READY,
+			self->client_ip, self->server_ip, self->client_port,
+			41, 10000, 100);
+	homa_rpc_free(srpc1);
+	EXPECT_EQ(8, self->hsk.dead_skbs);
+	unit_log_clear();
+	self->homa.reap_limit = 5;
+	homa_rpc_reap(&self->hsk);
+	EXPECT_STREQ("41", dead_rpcs(&self->hsk));
+	EXPECT_EQ(3, self->hsk.dead_skbs);
+}
+TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
+{
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+}
 
 TEST_F(homa_utils, homa_find_client_rpc)
 {
-	self->hsk.next_outgoing_id = 3;
+	atomic64_set(&self->hsk.next_outgoing_id, 3);
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 1000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc1));
-	self->hsk.next_outgoing_id = 3 + 3*HOMA_CLIENT_RPC_BUCKETS;
+	spin_unlock_bh(crpc1->lock);
+	atomic64_set(&self->hsk.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 1000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc2));
-	self->hsk.next_outgoing_id += 3 + 10*HOMA_CLIENT_RPC_BUCKETS;
+	spin_unlock_bh(crpc2->lock);
+	atomic64_set(&self->hsk.next_outgoing_id, 3 + 10*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 1000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc3));
-	self->hsk.next_outgoing_id = 40;
+	spin_unlock_bh(crpc3->lock);
+	atomic64_set(&self->hsk.next_outgoing_id, 40);
 	struct homa_rpc *crpc4 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, 1000, NULL);
 	EXPECT_FALSE(IS_ERR(crpc4));
+	spin_unlock_bh(crpc4->lock);
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));
+	spin_unlock_bh(crpc1->lock);
 	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk, crpc2->id));
+	spin_unlock_bh(crpc2->lock);
 	EXPECT_EQ(crpc3, homa_find_client_rpc(&self->hsk, crpc3->id));
+	spin_unlock_bh(crpc3->lock);
 	EXPECT_EQ(crpc4, homa_find_client_rpc(&self->hsk, crpc4->id));
+	spin_unlock_bh(crpc4->lock);
 	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, 15));
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
@@ -313,12 +400,16 @@ TEST_F(homa_utils, homa_find_server_rpc)
 	EXPECT_NE(NULL, srpc4);
 	EXPECT_EQ(srpc1, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port, srpc1->id));
+	spin_unlock_bh(srpc1->lock);
 	EXPECT_EQ(srpc2, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port, srpc2->id));
+	spin_unlock_bh(srpc2->lock);
 	EXPECT_EQ(srpc3, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port+1, srpc3->id));
+	spin_unlock_bh(srpc3->lock);
 	EXPECT_EQ(srpc4, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port+1, srpc4->id));
+	spin_unlock_bh(srpc4->lock);
 	EXPECT_EQ(NULL, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port, 3));
 }

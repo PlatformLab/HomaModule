@@ -37,7 +37,11 @@
  * @resp_length:   Amount of data in the response.
  * 
  * Return:         The properly initialized homa_client_rpc, or NULL if
- *                 there was an error. If state is RPC_OUTGOING, then  ...
+ *                 there was an error. If @state is RPC_OUTGOING, no data
+ *                 will have been sent yet.  If @state is RPC_INCOMING, then
+ *                 one packet of data will have been received for the RPC;
+ *                 if @state is RPC_READY the entire RPC will have been
+ *                 received. The RPC is not locked.
  */
 struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		__be32 client_ip, __be32 server_ip, int server_port, int id,
@@ -45,19 +49,20 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 {
 	int bytes_received;
 	struct sockaddr_in server_addr;
-	int saved_id = hsk->next_outgoing_id;
+	int saved_id = atomic64_read(&hsk->next_outgoing_id);
 	
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = server_ip;
 	server_addr.sin_port =  htons(server_port);
 	if (id != 0)
-		hsk->next_outgoing_id = id;
+		atomic64_set(&hsk->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
 			req_length, NULL);
+	spin_unlock_bh(crpc->lock);
 	if (!crpc)
 		return NULL;
 	if (id != 0)
-		hsk->next_outgoing_id = saved_id;
+		atomic64_set(&hsk->next_outgoing_id, saved_id);
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
 	if (state == RPC_OUTGOING)
 		return crpc;
@@ -290,6 +295,7 @@ void unit_log_throttled(struct homa *homa)
  *                 one packet of data will have been received for the RPC;
  *                 otherwise the entire RPC will have been received. If
  *                 state is RPC_OUTGOING, no data will have been sent yet.
+ *                 The RPC is not locked.
  */
 struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		__be32 client_ip, __be32 server_ip, int client_port, int id,
@@ -311,6 +317,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
+	spin_unlock_bh(srpc->lock);
 	if (!srpc)
 		return NULL;
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,

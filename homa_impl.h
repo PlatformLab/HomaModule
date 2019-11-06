@@ -51,6 +51,12 @@ extern cycles_t mock_get_cycles(void);
 #define signal_pending(xxx) mock_signal_pending
 extern int mock_signal_pending;
 
+#define rcu_read_lock mock_rcu_read_lock
+extern void mock_rcu_read_lock(void);
+
+#define rcu_read_unlock mock_rcu_read_unlock
+extern void mock_rcu_read_unlock(void);
+
 #undef current
 #define current current_task
 
@@ -534,17 +540,16 @@ struct homa_interest {
 	
 	/**
 	 * @rpc: points to a word containing the address of a suitable RPC,
-	 * or NULL if none has been found yet. There may be multple interests
+	 * or NULL if none has been found yet. There may be multiple interests
 	 * pointing to the same word.
 	 */
 	struct homa_rpc **rpc;
 	
 	/**
-	 * @rpc_deleted: this value will be set to true if an RPC is
-	 * deleted at a time when its interest field points to this
-	 * structure.
+	 * @reg_rpc: RPC whose @interest field points here, or
+	 * NULL if none.
 	 */
-	bool rpc_deleted;
+	struct homa_rpc *reg_rpc;
 	
 	/**
 	 * @links: For linking this object into a list of waiting threads,
@@ -561,6 +566,12 @@ struct homa_interest {
 struct homa_rpc {
 	/** @hsk:  Socket that owns the RPC. */
 	struct homa_sock *hsk;
+	
+	/** @lock: Used to synchronize modifications to this structure;
+	 * points to the lock in hsk->client_rpc_buckets or
+	 * hsk->server_rpc_buckets.
+	 */
+	struct spinlock *lock;
 	
 	/**
 	 * @peer: Information about the other machine (the server, if
@@ -591,22 +602,21 @@ struct homa_rpc {
 	 * @RPC_IN_SERVICE:   Used only for server RPCs: the request message
 	 *                    has been read from the socket, but the response
 	 *                    message has not yet been presented to the kernel.
-	 * @RPC_CLIENT_DONE:  Used only on clients: set immediately before
-	 *                    freeing an RPC; used by the homa_rpc_free to
-	 *                    determine how to clean up.
+	 * @RPC_DEAD:         RPC has been deleted and is waiting to be
+	 *                    reaped.
 	 * 
 	 * Client RPCs pass through states in the following order:
-	 * RPC_OUTGOING, RPC_INCOMING, RPC_READY, RPC_CLIENT_DONE.
+	 * RPC_OUTGOING, RPC_INCOMING, RPC_READY, RPC_DEAD.
 	 * 
 	 * Server RPCs pass through states in the following order:
-	 * RPC_INCOMING, RPC_READY, RPC_IN_SERVICE, RPC_OUTGOING.
+	 * RPC_INCOMING, RPC_READY, RPC_IN_SERVICE, RPC_OUTGOING, RPC_DEAD.
 	 */
 	enum {
 		RPC_OUTGOING            = 5,
 		RPC_INCOMING            = 6,
 		RPC_READY               = 7,
 		RPC_IN_SERVICE          = 8,
-		RPC_CLIENT_DONE         = 9
+		RPC_DEAD                = 9
 	} state;
 	
 	/** @is_client: True means this is a client RPC, false means server. */
@@ -646,10 +656,13 @@ struct homa_rpc {
 	struct hlist_node hash_links;
 	
 	/**
-	 * @rpc_links: For linking this object into @hsk->active_rpcs
-	 * or @hsk->dead_rpcs.
+	 * @active_links: For linking this object into @hsk->active_rpcs.
+	 * Access with RCU.
 	 */
-	struct list_head rpc_links;
+	struct list_head active_links;
+	
+	/** @dead_links: For linking this object into @hsk->dead_rpcs. */
+	struct list_head dead_links;
 	
 	/**
 	 * @interest: Describes a thread that wants to be notified when
@@ -677,9 +690,6 @@ struct homa_rpc {
 	 */
 	struct list_head throttled_links;
 	
-	/** @rcu: Used by the RCU mechanism if RPC freeing must be deferred. */
-	struct rcu_head rcu;
-	
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
 	 * since the last time a packet was received for this RPC.
@@ -692,6 +702,21 @@ struct homa_rpc {
 	 */
 	int num_resends;
 };
+
+/**
+ * homa_rpc_lock() - Acquire the lock for an RPC.
+ * @rpc:   RPC to lock. Note: this function is only safe under
+ *         limited conditions. The caller must ensure that the RPC
+ *         cannot be reaped before the lock is acquired. It cannot
+ *         do that by acquiring the socket lock, since that violates
+ *         lock ordering constraints. One approach is to increment
+ *         rpc->hsk->reap_disable. Don't use this function unless you
+ *         are very sure what you are doing!  See sync.txt for more
+ *         info on locking.
+ */
+#define homa_rpc_lock(rpc)                             \
+	if (!spin_trylock_bh(rpc->lock))               \
+		homa_rpc_lock_slow(rpc);
 
 /**
  * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
@@ -783,12 +808,42 @@ struct homa_socktab_scan {
  */
 #define HOMA_SERVER_RPC_BUCKETS 1024
 
+struct homa_rpc_bucket {
+	/**
+	 * @lock: serves as a lock both for this bucket (e.g., when
+	 * adding and removing RPCs) and also for all of the RPCs in
+	 * the bucket. Must be held whenever manipulating an RPC in
+	 * this bucket. This dual purpose permits clean and safe
+	 * deletion and garbage collection of RPCs.
+	 */
+	struct spinlock lock;
+	
+	/** @rpcs: list of RPCs that hash to this bucket. */
+	struct hlist_head rpcs;
+};
+
 /**
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
 	/** @inet: Generic socket data; must be the first field. */
 	struct inet_sock inet;
+	
+	/**
+	 * @lock: Must be held when modifying fields such as interests
+	 * and lists of RPCs. This lock is used in place of sk->sk_lock
+	 * because it's used differently (it's always used as a simple
+	 * spin lock).  See sync.txt for more on Homa's synchronization
+	 * strategy.
+	 */
+	struct spinlock lock;
+	
+	/**
+	 * @reap_disable: no RPCs for this socket will be reaped while
+	 * this counter is nonzero. Allows safe traversal of lists
+	 * without holding socket lock. See sync.txt for more info.
+	 */
+	atomic_t reap_disable;
 	
 	/**
 	 * @homa: Overall state about the Homa implementation. NULL
@@ -808,8 +863,11 @@ struct homa_sock {
 	/** @client_port: Port number to use for outgoing RPC requests. */
 	__u16 client_port;
 	
-	/** @next_outgoing_id: Id to use for next outgoing RPC request. */
-	__u64 next_outgoing_id;
+	/** @next_outgoing_id: Id to use for next outgoing RPC request. Can
+	 * be incremented using atomic ops to assign the next id without
+	 * acquiring @lock.
+	 */
+	atomic64_t next_outgoing_id;
 	
 	/**
 	 * @client_socktab_links: Links this socket into the homa_socktab
@@ -828,7 +886,8 @@ struct homa_sock {
 	 * needed, since RPCs are already in one of the hash tables below,
 	 * but it's more efficient for homa_timer to have this list
 	 * (so it doesn't have to scan large numbers of hash buckets).
-	 * The list is sorted, with the oldest RPC first.
+	 * The list is sorted, with the oldest RPC first. Manipulate with
+	 * RCU so timer can access without locking.
 	 */
 	struct list_head active_rpcs;
 	
@@ -837,6 +896,9 @@ struct homa_sock {
 	 * called, but their packet buffers haven't yet been freed.
 	 */
 	struct list_head dead_rpcs;
+	
+	/** @dead_skbs: Total number of socket buffers in RPCS on dead_rpcs. */
+	int dead_skbs;
 	
 	/**
 	 * @ready_requests: Contains server RPCs in RPC_READY state that
@@ -864,15 +926,17 @@ struct homa_sock {
 	
 	/**
 	 * @client_rpc_buckets: Hash table for fast lookup of client RPCs.
-	 * Each entry is a list of client RPCs.
+	 * Modifications are synchronized with bucket locks, not
+	 * the socket lock.
 	 */
-	struct hlist_head client_rpc_buckets[HOMA_CLIENT_RPC_BUCKETS];
+	struct homa_rpc_bucket client_rpc_buckets[HOMA_CLIENT_RPC_BUCKETS];
 	
 	/**
 	 * @server_rpc_buckets: Hash table for fast lookup of server RPCs.
-	 * Each entry is a list of server RPCs.
+	 * Modifications are synchronized with bucket locks, not
+	 * the socket lock.
 	 */
-	struct hlist_head server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
+	struct homa_rpc_bucket server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
 };
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
@@ -887,10 +951,10 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
  * 
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct hlist_head *homa_client_rpc_bucket(struct homa_sock *hsk,
-		__u64 id)
+static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
 {
-	/* We can use a really simple hash function here because RPCs
+	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
 	 */
 	return &hsk->client_rpc_buckets[id & (HOMA_CLIENT_RPC_BUCKETS - 1)];
@@ -904,15 +968,23 @@ static inline struct hlist_head *homa_client_rpc_bucket(struct homa_sock *hsk,
  * 
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct hlist_head *homa_server_rpc_bucket(struct homa_sock *hsk,
-		__u64 id)
+static inline struct homa_rpc_bucket *homa_server_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
 {
-	/* Each client allocates RPC ids sequentailly, so they will
+	/* Each client allocates RPC ids sequentially, so they will
 	 * naturally distribute themselves across the hash space.
 	 * Thus we can use the id directly as hash.
 	 */
 	return &hsk->server_rpc_buckets[id & (HOMA_SERVER_RPC_BUCKETS - 1)];
 }
+
+#define homa_bucket_lock(bucket, type)                      \
+	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
+		__u64 start = get_cycles();                 \
+		INC_METRIC(type##_lock_misses, 1);        \
+		spin_lock_bh(&bucket->lock);                \
+		INC_METRIC(type##_lock_miss_cycles, get_cycles() - start); \
+	}
 
 /**
  * define HOMA_PEERTAB_BUCKETS - Number of bits in the bucket index for a
@@ -1118,6 +1190,22 @@ struct homa {
 	int abort_resends;
 	
 	/**
+	 * @reap_limit: Maximum number of packet buffers to free in a
+	 * single call to home_rpc_reap.
+	 */
+	int reap_limit;
+	
+	/**
+	 * @max_dead_buffs: If the number of packet buffers in dead but
+	 * not yet reaped RPCs is less than this number, then Homa reaps
+	 * RPCs in a way that minimizes impact on performance but may permit
+	 * dead RPCs to accumulate. If the number of dead packet buffers
+	 * exceeds this value, then Homa switches to a more aggressive approach
+	 * to reaping RPCs, which is more likely to impact performance.
+	 */
+	int max_dead_buffs;
+	
+	/**
 	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
 	 * @num_grantable.
 	 */
@@ -1188,7 +1276,7 @@ struct homa {
 	 * it could be a severe underestimate if there is competing traffic 
 	 * from, say, TCP. Access only with atomic ops.
 	 */
-	atomic_long_t link_idle_time;
+	atomic64_t link_idle_time;
 	
 	/**
 	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue
@@ -1343,7 +1431,7 @@ struct homa_metrics {
 	 * get_cycles().
 	 */
 	__u64 timer_cycles;
-	
+
 	/**
 	 * @pacer_cycles: total time spent executing in homa_pacer_main
 	 * (not including blocked time), as measured with get_cycles().
@@ -1356,6 +1444,12 @@ struct homa_metrics {
 	 * descheduled.
 	 */
 	__u64 pacer_lost_cycles;
+	
+	/**
+	 * @pacer_skipped_rpcs: total number of times that the pacer had to
+	 * abort because it couldn't lock an RPC.
+	 */
+	__u64 pacer_skipped_rpcs;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -1439,6 +1533,48 @@ struct homa_metrics {
 	__u64 server_rpc_timeouts;
 	
 	/**
+	 * @client_lock_misses: total number of times that Homa had to wait
+	 * to acquire a client bucket lock.
+	 */
+	__u64 client_lock_misses;
+	
+	/**
+	 * @client_lock_miss_cycles: total time spent waiting for client
+	 * bucket lock misses, measured by get_cycles().
+	 */
+	__u64 client_lock_miss_cycles;
+	
+	/**
+	 * @server_lock_misses: total number of times that Homa had to wait
+	 * to acquire a server bucket lock.
+	 */
+	__u64 server_lock_misses;
+	
+	/**
+	 * @server_lock_miss_cycles: total time spent waiting for server
+	 * bucket lock misses, measured by get_cycles().
+	 */
+	__u64 server_lock_miss_cycles;
+	
+	/**
+	 * @disabled_reaps: total number of times that the reaper exited
+	 * because it was disabled.
+	 */
+	__u64 disabled_reaps;
+	
+	/**
+	 * @reaper_runs: total number of times that the reaper was invoked
+	 * and was not disabled.
+	 */
+	__u64 reaper_calls;
+	
+	/**
+	 * @reaper_dead_skbs: incremented by hsk->dead_skbs each time that
+	 * reaper_calls is incremented.
+	 */
+	__u64 reaper_dead_skbs;
+	
+	/**
 	 * @temp1: this value, and the others below it, are reserved for
 	 * temporary use during testing.
 	 */
@@ -1467,6 +1603,7 @@ extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
+extern int      homa_check_timeout(struct homa_rpc *rpc);
 extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
 			bool force);
@@ -1476,7 +1613,6 @@ extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern void     homa_dest_abort(struct homa *homa, __be32 addr, int error);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
@@ -1524,7 +1660,8 @@ extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
 extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);
-extern void     homa_pacer_xmit(struct homa *homa, int softirq);
+extern void     homa_pacer_xmit(struct homa *homa);
+extern void     homa_peer_abort(struct homa *homa, __be32 addr, int error);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern struct homa_peer
@@ -1532,7 +1669,7 @@ extern struct homa_peer
 			struct inet_sock *inet);
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			int c2, int c3, int c4, int c5, int c6, int c7);
-extern int      homa_pkt_dispatch(struct sock *sk, struct sk_buff *skb);
+extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk);
 extern int      homa_pkt_recv(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
 			struct poll_table_struct *wait);
@@ -1556,6 +1693,7 @@ extern void     homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
+extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 			struct sockaddr_in *dest, size_t length,
@@ -1564,12 +1702,10 @@ extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
-extern void     homa_rpc_reap(struct homa_sock *hsk);
-extern void     homa_rpc_timeout(struct homa_rpc *rpc);
+extern int      homa_rpc_reap(struct homa_sock *hsk);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);
-extern void     homa_server_crashed(struct homa *homa, struct homa_peer *peer);
 extern void     homa_set_priority(struct sk_buff *skb, int priority);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);
@@ -1628,9 +1764,9 @@ static inline void check_pacer(struct homa *homa, int softirq)
 			struct homa_rpc, throttled_links) == NULL)
 		return;
 	if ((get_cycles() + homa->max_nic_queue_cycles) <
-			atomic_long_read(&homa->link_idle_time))
+			atomic64_read(&homa->link_idle_time))
 		return;
-	homa_pacer_xmit(homa, softirq);
+	homa_pacer_xmit(homa);
 }
 
 #endif /* _HOMA_IMPL_H */
