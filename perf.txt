@@ -24,3 +24,11 @@ of the Homa Linux kernel module.
     (5-10%).
   * Tried making the pacer thread a high-priority real-time thread; this
     actually made things a bit worse.
+
+* There can be a long lag in sending grants. One problem is that Linux
+  tries to collect large numbers of buffers before invoking the softirq
+  handler; this causes grants to be delayed. Implemented max_gro_skbs to
+  limit buffering. However, varying the parameter doesn't seem to affect
+  throughput (11/13/2019).
+
+

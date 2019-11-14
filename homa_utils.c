@@ -114,6 +114,7 @@ int homa_init(struct homa *homa)
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 0;
 	homa->max_gso_size = 1000000;
+	homa->max_gro_skbs = 20;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;

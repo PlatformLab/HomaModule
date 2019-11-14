@@ -191,7 +191,12 @@ struct common_header {
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
 	
-	__be16 unused3;
+	/**
+	 * @gro_count: value on the wire is undefined. Used only by
+	 * homa_offload.c (it counts the total number of packets aggregated
+	 * into this packet, including the top-level packet).
+	 */
+	__u16 gro_count;
 	
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
@@ -1311,6 +1316,12 @@ struct homa {
 	 * lower the limit already enforced by Linux.
 	 */
 	int max_gso_size;
+	
+	/**
+	 * @max_gro_skbs: Maximum number of socket buffers that can be
+	 * aggregated by the GRO mechanism.
+	 */
+	int max_gro_skbs;
 	
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked

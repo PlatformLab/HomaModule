@@ -194,6 +194,12 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I max_dead_buffs .
 .TP
+.IR max_gro_skbs
+An integer value setting an upper limit on the number of buffers that
+Homa will allow to accumulate at interrupt level before passing them
+to the softirq handler. At one point there was a theory that a low value might
+improve performance, but it doesn't seem to have any impact.
+.TP
 .IR max_gso_size
 An integer value setting an upper limit on the size of an output packet,
 before segmentation using GSO. The Linux networking layer already imposes

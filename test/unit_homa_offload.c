@@ -20,6 +20,8 @@
 #include "mock.h"
 #include "utils.h"
 
+extern struct homa *homa;
+
 FIXTURE(homa_offload) {
 	__be32 ip;
 	struct data_header header;
@@ -77,7 +79,6 @@ TEST_F(homa_offload, homa_gro_receive__header_too_short)
 	EXPECT_EQ(1, flush);
 	kfree_skb(skb);
 }
-
 TEST_F(homa_offload, homa_gro_receive__dport_doesnt_match)
 {
 	struct sk_buff *skb;
@@ -92,7 +93,6 @@ TEST_F(homa_offload, homa_gro_receive__dport_doesnt_match)
 	EXPECT_EQ(0, same_flow);
 	kfree_skb(skb);
 }
-
 TEST_F(homa_offload, homa_gro_receive__append)
 {
 	struct sk_buff *skb, *skb2;
@@ -117,5 +117,45 @@ TEST_F(homa_offload, homa_gro_receive__append)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	same_flow = NAPI_GRO_CB(skb2)->same_flow;
+	EXPECT_EQ(1, same_flow);
+}
+TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
+{
+	struct sk_buff *skb, *skb2, *skb3;
+	int same_flow;
+	
+	homa->max_gro_skbs = 3;
+	self->header.seg.offset = htonl(6000);
+	skb = mock_skb_new(self->ip, &self->header.common, 1400, 0);
+	NAPI_GRO_CB(skb)->same_flow = 0;
+	homa_gro_receive(&self->gro_list, skb);
+	
+	self->header.common.sport = htons(40001);
+	skb2 = mock_skb_new(self->ip, &self->header.common, 1400, 0);
+	NAPI_GRO_CB(skb)->same_flow = 1;
+	NAPI_GRO_CB(skb2)->same_flow = 0;
+	EXPECT_EQ(NULL, homa_gro_receive(&self->gro_list, skb2));
+	
+	self->header.common.sport = htons(40002);
+	skb3 = mock_skb_new(self->ip, &self->header.common, 1400, 0);
+	NAPI_GRO_CB(skb)->same_flow = 1;
+	NAPI_GRO_CB(skb3)->same_flow = 0;
+	EXPECT_NE(NULL, homa_gro_receive(&self->gro_list, skb3));
+	
+	unit_log_frag_list(self->gro_list->next, 1);
+	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
+			"message_length 10000, offset 6000, data_length 1400, "
+			"incoming 10000, cutoff_version 0; "
+			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
+			"message_length 10000, offset 6000, data_length 1400, "
+			"incoming 10000, cutoff_version 0; "
+			"DATA from 196.168.0.1:40002, dport 88, id 1001, "
+			"message_length 10000, offset 6000, data_length 1400, "
+			"incoming 10000, cutoff_version 0", unit_log_get());
+	same_flow = NAPI_GRO_CB(skb)->same_flow;
+	EXPECT_EQ(1, same_flow);
+	same_flow = NAPI_GRO_CB(skb2)->same_flow;
+	EXPECT_EQ(1, same_flow);
+	same_flow = NAPI_GRO_CB(skb3)->same_flow;
 	EXPECT_EQ(1, same_flow);
 }

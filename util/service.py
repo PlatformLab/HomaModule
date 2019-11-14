@@ -48,6 +48,7 @@ else:
 # first_xmit -       Time when first result packet is transmitted
 # first_xmit_lag -   Extra time between receive_done and first_xmit
 # freed -            Time when RPC is freed (last packet transmitted)
+# grant_lag -        Time from start to xmit of first grant packet
 # xmit_lag -         Extra time between first_xmit and freed
 # interrupt -        Time of most recent packet reception by interrupt handler
 # interrupt_gaps -   Total time in unexpectedly long gaps between pack
@@ -78,6 +79,24 @@ def average(dict, key):
     for record in dict:
         sum += record[key]
     return sum/len(dict)
+
+def largest(dict, key):
+    max = None
+    if len(dict) == 0:
+        return 0.0
+    for record in dict:
+        if (key in record) and ((not max) or (record[key] > max[key])):
+            max = record
+    return max
+
+def smallest(dict, key):
+    min = None
+    if len(dict) == 0:
+        return 0.0
+    for record in dict:
+        if (key in record) and ((not min) or (record[key] < min[key])):
+            min = record
+    return min
 
 def collect(dict, key):
     result = []
@@ -123,6 +142,10 @@ for line in f:
                 lag = 0.0
             rpc["rcv_lag"] = lag
 
+    if re.match('.*mlx_xmit starting, .* type 21', line):
+        if not "grant_lag" in rpc:
+            rpc["grant_lag"] = time - rpc["start"]
+
     if re.match('.*message woke up,', line):
         lag = time - rpc["start"] - 35.2
         # print("wakeup lag for id %s: %.1f" % (id, lag))
@@ -156,13 +179,17 @@ for line in f:
             lag = 0
         rpc["last_packet_lag"] = lag
 
-    if re.match('.*Freeing server RPC', line):
+    if re.match('.*Freeing rpc', line):
         total = time - rpc["start"]
         rpc["total"] = total
+        if not "first_xmit" in rpc:
+            print("No first_xmit for id %s" % (id))
+            continue
         lag = time - rpc["first_xmit"] - 26.0
         if lag < 0:
             lag = 0.0
         rpc["xmit_lag"] = lag
+        print("xmit_lag for id %s: %.1f" % (rpc["id"], lag))
 
         complete.append(rpc)
         del(active[id])
@@ -238,3 +265,12 @@ print("first_xmit lag:          %5.1f us (%4.1f%%)" % (average_first_xmit_lag,
 print("xmit lag:                %5.1f us (%4.1f%%)" % (average_xmit_lag,
         100.0* average_xmit_lag/average_lag))
 print("Average total lag:       %5.1f us" % (average_lag))
+
+
+times = collect(complete, "grant_lag")
+times.sort()
+min = smallest(complete, "grant_lag")
+max = largest(complete, "grant_lag")
+print("Grant delay: min %.1f us (%s), P50 %.1f us, P90 %.1fus, max %.1f us (%s)" % (
+        min["grant_lag"], min["id"], times[len(times)//2], times[9*len(times)//10],
+        max["grant_lag"], max["id"]))

@@ -412,8 +412,6 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
-	tt_record3("received grant for id %llu, offset %d, state %d",
-			h->common.id, ntohl(h->offset), rpc->state);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
@@ -431,6 +429,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			homa_rpc_free(rpc);
 		}
 	}
+	tt_record3("processed grant for id %llu, offset %d, state %d",
+			h->common.id, ntohl(h->offset), rpc->state);
 	kfree_skb(skb);
 }
 

@@ -414,4 +414,24 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   netdevice.h:       netdev_start_xmit
   netdevice.h:       __netdev_start_xmit
   en_tx.c:           mlx5e_xmit
- 
+
+* Call stack for packet input handling (this is only approximate):
+  en_txrc.c:         mlx5e_napi_poll
+  en_rx.c:           mlx5e_poll_rx_cq
+  en_rx.c:           mlx5e_handle_rx_cqe
+  dev.c:             napi_gro_receive
+  dev.c:             dev_gro_receive
+  ???                protocol-specific handler
+  dev.c:             napi_skb_finish
+  dev.c:             napi_gro_complete
+  dev.c:             netif_receive_skb_internal
+  dev.c:             enqueue_to_backlog
+  .... switch to softirq core ....
+  dev.c:             process_backlog
+  dev.c:             __netif_receive_skb
+  dev.c:             __netif_receive_skb_core
+  dev.c:             deliver_skb
+  ip_input.c:        ip_rcv
+  ip_input.c:        ip_rcv_finish
+  ip_input.c:        dst_input
+  homa_plumbing.c:   homa_pkt_recv

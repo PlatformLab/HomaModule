@@ -27,6 +27,8 @@ static const struct net_offload homa_offload = {
 	},
 };
 
+extern struct homa *homa;
+
 /**
  * homa_offload_init() - Invoked to enable GRO and GSO. Typically invoked
  * when the Homa module loads.
@@ -96,10 +98,27 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		}
 	}
 	
+	/* Set the hash for the skb, which will be used for RPS (the default
+	 * hash doesn't understand Homa, so it doesn't include port #'s,
+	 * which results in worse load-balancing).
+	 */
+	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h_new->sport,
+			h_new->dport, 0), false);
+	
+	h_new->gro_count = 1;
 	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
 		struct common_header *h_held;
-		if (!NAPI_GRO_CB(held_skb)->same_flow)
-			continue;
+		if (!NAPI_GRO_CB(held_skb)->same_flow) {
+			/* The normal behavior would be to skip this packet.
+			 * However, the fact that we compute our own hashes
+			 * above breaks the same_flow computation (as of
+			 * 11/2019): when gro_list_prepare is invoked, the
+			 * new packet doesn't yet have our hash, while the
+			 * comparison packet does, so gro_list_prepare
+			 * clears same_flow. It doesn't appear that we
+			 * lose anything by ignoring same_flow.
+			 */
+		}
 
 		h_held = (struct common_header *) skb_transport_header(held_skb);
 
@@ -120,7 +139,10 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		skb->next = NULL;
 		NAPI_GRO_CB(skb)->same_flow = 1;
 		NAPI_GRO_CB(held_skb)->count++;
-	       break;
+		h_held->gro_count++;
+		if (h_held->gro_count >= homa->max_gro_skbs)
+			return pp;
+	        break;
 	}
 	return NULL;
 	
@@ -133,7 +155,8 @@ flush:
 /**
  * homa_gro_complete() - This function is invoked just before a packet that
  * was held for GRO processing is passed up the network stack, in case the
- * protocol needs to do some cleanup on the merged packet.
+ * protocol needs to do some cleanup on the merged packet. Right now there
+ * is nothing to do.
  * @skb:     The packet for which GRO processing is now finished.
  * @hoffset: Offset within the packet of the transport header.
  *
@@ -141,14 +164,5 @@ flush:
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
-	struct common_header *h;
-	h = (struct common_header *) skb_transport_header(skb);
-	
-	/* Set the hash for the skb, which will be used for RPS (the default
-	 * hash doesn't understand Homa, so it doesn't include port #'s,
-	 * which results in worse load-balancing).
-	 */
-	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h->sport,
-			h->dport, 0), false);
 	return 0;
 }
