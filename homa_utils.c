@@ -192,7 +192,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->is_client = true;
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
-	crpc->num_skbuffs = 0;
+	crpc->msgin.num_skbs = 0;
 	err = homa_message_out_init(crpc, hsk->client_port, length, iter);
 	if (err) {
 		kfree(crpc);
@@ -273,10 +273,10 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->state = RPC_INCOMING;
 	srpc->is_client = false;
 	srpc->error = 0;
-	srpc->num_skbuffs = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->incoming));
 	srpc->msgout.length = -1;
+	srpc->msgout.num_skbs = 0;
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->grantable_links);
@@ -348,7 +348,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 		rpc->interest = NULL;
 	}
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
-	rpc->hsk->dead_skbs += rpc->num_skbuffs;
+	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
 	rpc->state = RPC_DEAD;
 	spin_unlock_bh(&rpc->hsk->lock);
 	
@@ -407,7 +407,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 				rpc->msgout.packets = *homa_next_skb(
 						rpc->msgout.packets);
 				num_skbs++;
-				rpc->num_skbuffs--;
+				rpc->msgout.num_skbs--;
 				if (num_skbs >= hsk->homa->reap_limit)
 					goto release;
 			}
@@ -421,7 +421,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 					break;
 				skbs[num_skbs] = skb;
 				num_skbs++;
-				rpc->num_skbuffs--;
+				rpc->msgin.num_skbs--;
 				if (num_skbs >= hsk->homa->reap_limit)
 					goto release;
 			}

@@ -161,10 +161,12 @@ TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 	self->data.seg.offset = htonl(1400);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
+	EXPECT_EQ(1, self->message.num_skbs);
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
 	unit_log_skb_list(&self->message.packets, 0);
 	EXPECT_STREQ("DATA P1 1400@1400", unit_log_get());
+	EXPECT_EQ(1, self->message.num_skbs);
 }
 TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 {
@@ -176,6 +178,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 			&self->data.common, 1400, 2000));
 	unit_log_skb_list(&self->message.packets, 0);
 	EXPECT_STREQ("DATA P1 1400@1400; DATA P1 1400@2000", unit_log_get());
+	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 	
 	unit_log_clear();
@@ -184,6 +187,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 			&self->data.common, 1400, 1800));
 	unit_log_skb_list(&self->message.packets, 0);
 	EXPECT_STREQ("DATA P1 1400@1400; DATA P1 1400@2000", unit_log_get());
+	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 }
 
@@ -424,7 +428,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(200, crpc->msgin.bytes_remaining);
-	EXPECT_EQ(2, crpc->num_skbuffs);
+	EXPECT_EQ(1, crpc->msgin.num_skbs);
 	
 	unit_log_clear();
 	self->data.seg.offset = htonl(1400);
@@ -433,7 +437,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_EQ(RPC_READY, crpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(0, crpc->msgin.bytes_remaining);
-	EXPECT_EQ(3, crpc->num_skbuffs);
+	EXPECT_EQ(2, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_data_pkt__wrong_rpc_state)
 {

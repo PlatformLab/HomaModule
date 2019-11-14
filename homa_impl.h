@@ -456,6 +456,12 @@ struct homa_message_out {
 	struct sk_buff *packets;
 	
 	/**
+	 * @num_skbs:  Total number of buffers in @packets. Will be 0 if
+	 * @length is less than 0.
+	 */
+	int num_skbs;
+	
+	/**
 	 * @next_packet: Pointer within @request of the next packet to transmit.
 	 * 
 	 * All packets before this one have already been sent. NULL means
@@ -501,6 +507,12 @@ struct homa_message_in {
 	 * exactly one data_segment.
 	 */
 	struct sk_buff_head packets;
+	
+	/**
+	 * @num_skbs:  Total number of buffers in @packets. Will be 0 if
+	 * @total_length is less than 0.
+	 */
+	int num_skbs;
 	
 	/**
 	 * @bytes_remaining: Amount of data for this message that has
@@ -647,11 +659,6 @@ struct homa_rpc {
 	 * response).
 	 */
 	struct homa_message_out msgout;
-	
-	/**
-	 * @num_skbuffs:  Total skbuffs used by msgin and msgout.
-	 */
-	int num_skbuffs;
 	
 	/**
 	 * @hash_links: Used to link this object into a hash bucket for

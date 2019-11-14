@@ -30,6 +30,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 {
 	msgin->total_length = length;
 	skb_queue_head_init(&msgin->packets);
+	msgin->num_skbs = 0;
 	msgin->bytes_remaining = length;
 	msgin->incoming = incoming;
 	if (msgin->incoming > msgin->total_length)
@@ -120,6 +121,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	}
 	__skb_insert(skb, skb2, skb2->next, &msgin->packets);
 	msgin->bytes_remaining -= (ceiling - floor);
+	msgin->num_skbs++;
 }
 
 /**
@@ -373,7 +375,6 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 	}
 	homa_add_packet(&rpc->msgin, skb);
-	rpc->num_skbuffs++;
 	if (rpc->msgin.scheduled)
 		homa_manage_grants(homa, rpc);
 	if (rpc->msgin.bytes_remaining == 0)

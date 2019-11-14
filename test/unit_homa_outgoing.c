@@ -78,7 +78,7 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 			"message_length 3000, offset 2800, data_length 200, "
 			"incoming 10000, cutoff_version 0",
 		     unit_log_get());
-	EXPECT_EQ(3, crpc->num_skbuffs);
+	EXPECT_EQ(3, crpc->msgout.num_skbs);
 }
 TEST_F(homa_outgoing, homa_message_out_init__message_too_long)
 {
@@ -144,7 +144,7 @@ TEST_F(homa_outgoing, homa_message_out_init__multiple_segs_per_skbuff)
 			"DATA P1 1400@4200 1400@5600 1400@7000; "
 			"DATA P1 1400@8400 200@9800",
 			unit_log_get());
-	EXPECT_EQ(3, crpc->num_skbuffs);
+	EXPECT_EQ(3, crpc->msgout.num_skbs);
 }
 TEST_F(homa_outgoing, homa_message_out_init__use_small_extra_space)
 {
@@ -157,7 +157,7 @@ TEST_F(homa_outgoing, homa_message_out_init__use_small_extra_space)
 	unit_log_message_out_packets(&crpc->msgout, 0);
 	EXPECT_STREQ("DATA P1 1400@0 200@1400",
 			unit_log_get());
-	EXPECT_EQ(1, crpc->num_skbuffs);
+	EXPECT_EQ(1, crpc->msgout.num_skbs);
 }
 TEST_F(homa_outgoing, homa_message_out_init__set_incoming)
 {

@@ -83,6 +83,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 	
 	rpc->msgout.length = len;
 	rpc->msgout.packets = NULL;
+	rpc->msgout.num_skbs = 0;
 	rpc->msgout.next_packet = NULL;
 	rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
@@ -188,7 +189,7 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		*last_link = NULL;
 		if (!rpc->msgout.next_packet)
 			rpc->msgout.next_packet = skb;
-		rpc->num_skbuffs++;
+		rpc->msgout.num_skbs++;
 	}
 //	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
 	return 0;
