@@ -53,6 +53,3 @@ This file describes the synchronization strategy used for Homa.
   temporarily prevent RPC reclamation while the timer is scanning. RPCs
   can be deleted while the timer is scanning, but their memory won't go
   away.
-
-* Issues:
-  * rpc->num_skbuffs miscomputed in data_packet.
