@@ -37,7 +37,7 @@ FIXTURE(homa_plumbing) {
 	struct homa_args_recv_ipv4 recv_args;
 	struct homa_args_reply_ipv4 reply_args;
 	struct homa_args_send_ipv4 send_args;
-	char buffer[1000];
+	char buffer[2000];
 };
 FIXTURE_SETUP(homa_plumbing)
 {
@@ -68,7 +68,7 @@ FIXTURE_SETUP(homa_plumbing)
 	self->recv_args.flags = HOMA_RECV_RESPONSE;
 	self->recv_args.id = 0;
 	self->reply_args.response = self->buffer;
-	self->reply_args.resplen = sizeof(self->buffer);
+	self->reply_args.resplen = 1000;
 	self->reply_args.dest_addr = self->client_addr;
 	self->reply_args.id = self->rpcid;
 	self->send_args.request = self->buffer;
@@ -88,12 +88,6 @@ TEST_F(homa_plumbing, homa_ioc_recv__cant_read_user_args)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_ioc_recv((struct sock *) &self->hsk,
-		(unsigned long) &self->recv_args));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__import_single_range_error)
-{
-	mock_import_single_range_errors = 1;
-	EXPECT_EQ(EACCES, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
@@ -174,17 +168,6 @@ TEST_F(homa_plumbing, homa_ioc_reply__cant_read_user_args)
 	EXPECT_EQ(EFAULT, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
 }
-TEST_F(homa_plumbing, homa_ioc_reply__import_single_range_error)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->rpcid, 2000, 100);
-	unit_log_clear();
-	mock_import_single_range_errors = 1;
-	EXPECT_EQ(EACCES, -homa_ioc_reply((struct sock *) &self->hsk,
-		(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-}
 TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
@@ -228,8 +211,8 @@ TEST_F(homa_plumbing, homa_ioc_reply__error_in_homa_message_out_init)
 	mock_alloc_skb_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_DEAD, srpc->state);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_reply__free_rpc)
 {
@@ -249,6 +232,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 		        self->rpcid, 2000, 100);
 	unit_log_clear();
 	self->reply_args.resplen = 10000;
+	self->reply_args.response = (void *) 1000;
 	self->homa.rtt_bytes = 5000;
 	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
@@ -262,13 +246,6 @@ TEST_F(homa_plumbing, homa_ioc_send__cant_read_user_args)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_ioc_send((struct sock *) &self->hsk,
-		(unsigned long) &self->send_args));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_send__import_single_range_error)
-{
-	mock_import_single_range_errors = 1;
-	EXPECT_EQ(EACCES, -homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }

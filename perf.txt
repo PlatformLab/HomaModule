@@ -31,4 +31,16 @@ of the Homa Linux kernel module.
   limit buffering. However, varying the parameter doesn't seem to affect
   throughput (11/13/2019).
 
+* Without RPS enabled, Homa performance is limited by a single core handling
+  all softirq actions. In order for RPS to work well, Homa must implement
+  its own hash function for mapping packets to cores (the default IP hasher
+  doesn't know about Homa ports, so it considers only the peer IP address.
+  However, with RPS, packets can get spread out over too many cores, which
+  causes poor latency when there is a single client and the server is
+  underloaded.
+
+* Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
+                       1 server thread          18 server threads
+No RPS/RFS                  16.0 us                  16.3 us
+RPS/RFS enabled             17.4 us                  21.5 us
 

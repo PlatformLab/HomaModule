@@ -179,6 +179,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->users.refs.counter = 1;
 	skb->_skb_refdst = 0;
 	ip_hdr(skb)->saddr = 0;
+	skb->truesize = size;
 	return skb;
 }
 
@@ -248,10 +249,12 @@ bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
 unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
+	__u64 int_from = (__u64) from;
 	if (mock_check_error(&mock_copy_data_errors))
 		return 1;
-	memcpy(to, from, n);
-	unit_log_printf("; ", "_copy_from_user copied %lu bytes", n);
+	if (int_from > 200000)
+		memcpy(to, from, n);
+	unit_log_printf("; ", "_copy_from_user %lu bytes at %llu", n, int_from);
 	return 0;
 }
 

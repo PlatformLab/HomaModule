@@ -57,7 +57,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	if (id != 0)
 		atomic64_set(&hsk->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
-			req_length, NULL);
+			NULL, req_length);
 	spin_unlock_bh(crpc->lock);
 	if (!crpc)
 		return NULL;
@@ -236,6 +236,30 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 	}
 }
 
+
+/**
+ * unit_log_filled_skbs() - Append to the test log a human-readable description
+ * of a list of packet buffers created by homa_fill_packets.
+ * @skb:         First in list of sk_buffs to print; the list is linked
+ *               using homa_next_skb.
+ * @verbose:     If non-zero, use homa_print_packet for each packet;
+ *               otherwise use homa_print_packet_short.
+ */
+void unit_log_filled_skbs(struct sk_buff *skb, int verbose)
+{
+	char buffer[400];
+	
+	while (skb != NULL) {
+		if (verbose) {
+			homa_print_packet(skb, buffer, sizeof(buffer));
+		} else {
+			homa_print_packet_short(skb, buffer, sizeof(buffer));
+		}
+		unit_log_printf("; ", "%s", buffer);
+		skb = *homa_next_skb(skb);
+	}
+}
+
 /**
  * unit_log_skb_list() - Append to the test log a human-readable description
  * of a list of packet buffers.
@@ -349,9 +373,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	int err = homa_message_out_init(srpc, hsk->server_port, resp_length,
-			NULL);
-	EXPECT_EQ(0, err);
+	homa_message_out_init(srpc, hsk->server_port,
+			homa_fill_packets(hsk->homa, srpc->peer, (void *) 2000,
+			resp_length), resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;

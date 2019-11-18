@@ -63,66 +63,76 @@ inline static void set_priority(struct sk_buff *skb, int priority)
 }
 
 /**
- * homa_message_out_init() - Initializes an RPC's msgout, loads packet data
- * from a user-space buffer. Doesn't actually send any packets.
- * @rpc:     RPC whose msgout is to be initialized; current contents are
- *           assumed to be garbage.
- * @sport:   Source port number to use for the message.
- * @len:     Total length of the message.
- * @iter:    Info about the request buffer in user space.
+ * homa_fill_packets() - Create one or more packets and fill them with
+ * data from user space.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @peer:    Peer to which the packets will be sent (needed for things like
+ *           the MTU).
+ * @from:    Address of the user-space source buffer.
+ * @len:     Number of bytes of user data.
  * 
- * Return:   Either 0 (for success) or a negative errno value.
+ * Return:   Address of the first packet in a list of packets linked through
+ *           homa_next_skb, or a negative errno if there was an error. No
+ *           fields are set in the packet headers except for type, incoming,
+ *           offset, and length information. homa_message_out_init will fill
+ *           in the other fields.
  */
-int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
-		struct iov_iter *iter)
+struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
+		char __user *buffer, size_t len)
 {
-	int bytes_left;
-	struct sk_buff *skb;
-	int err, mtu, max_pkt_data, gso_max;
-	struct sk_buff **last_link;
-	
-	rpc->msgout.length = len;
-	rpc->msgout.packets = NULL;
-	rpc->msgout.num_skbs = 0;
-	rpc->msgout.next_packet = NULL;
-	rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes;
-	rpc->msgout.granted = rpc->msgout.unscheduled;
-	if (rpc->msgout.granted > rpc->msgout.length)
-		rpc->msgout.granted = rpc->msgout.length;
-	rpc->msgout.sched_priority = 0;
-	
-	/* Do the check here so the struct is cleanly initialized after
-	 * an error.
+	/* Note: this function is separate from homa_message_out_init
+	 * because it must be invoked without holding an RPC lock, and
+	 * homa_message_out_init must sometimes be called with the lock
+	 * held.
 	 */
-	if (unlikely(len > HOMA_MAX_MESSAGE_LENGTH)) {
+	int bytes_left, incoming;
+	struct sk_buff *skb;
+	struct sk_buff *first = NULL;
+	int err, mtu, max_pkt_data, gso_size, max_gso_data;
+	struct sk_buff **last_link;
+
+	if (unlikely((len > HOMA_MAX_MESSAGE_LENGTH) || (len == 0))) {
 		err = -EINVAL;
 		goto error;
 	}
 	
-	mtu = dst_mtu(rpc->peer->dst);
+	mtu = dst_mtu(peer->dst);
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
-	gso_max = rpc->peer->dst->dev->gso_max_size;
-	if (gso_max > rpc->hsk->homa->max_gso_size)
-		gso_max = rpc->hsk->homa->max_gso_size;
+	if (len <= max_pkt_data) {
+		incoming = max_gso_data = len;
+		gso_size = mtu;
+	} else {
+		int bufs_per_gso;
+		
+		gso_size = peer->dst->dev->gso_max_size;
+		if (gso_size > homa->max_gso_size)
+			gso_size = homa->max_gso_size;
+		
+		/* Round gso_size down to an even # of mtus. */
+		bufs_per_gso = gso_size/mtu;
+		max_gso_data = bufs_per_gso * max_pkt_data;
+		gso_size = bufs_per_gso * mtu;
+		
+		/* Round unscheduled bytes *up* to an even number of gsos. */
+		incoming = homa->rtt_bytes + max_gso_data - 1;
+		incoming -= incoming % max_gso_data;
+		if (incoming > len)
+			incoming = len;
+	}
 	
 	/* Copy message data from user space and form sk_buffs. Each
 	 * sk_buff may contain multiple data_segments, each of which will
 	 * turn into a separate packet, using either TSO in the NIC or
 	 * GSO in software.
 	 */
-	for (bytes_left = len, last_link = &rpc->msgout.packets;
-			bytes_left > 0; ) {
+	for (bytes_left = len, last_link = &first; bytes_left > 0; ) {
 		struct data_header *h;
 		struct data_segment *seg;
-		int skb_size, available, last_pkt_length;
-		
-		if (likely(bytes_left <= max_pkt_data))
-			skb_size = mtu + HOMA_SKB_EXTRA;
-		else
-			skb_size = gso_max + HOMA_SKB_EXTRA;
+		int available, last_pkt_length;
 		
 		/* The sizeof32(void*) creates extra space for homa_next_skb. */
-		skb = alloc_skb(skb_size + sizeof32(void*), GFP_KERNEL);
+		skb = alloc_skb(gso_size + HOMA_SKB_EXTRA + sizeof32(void*),
+				GFP_KERNEL);
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
 			goto error;
@@ -138,17 +148,9 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		skb_reset_transport_header(skb);
 		h = (struct data_header *) skb_put(skb,
 				sizeof(*h) - sizeof(struct data_segment));
-		h->common.sport = htons(sport);
-		h->common.dport = htons(rpc->dport);
-		homa_set_doff(h);
 		h->common.type = DATA;
-		h->common.id = rpc->id;
-		h->message_length = htonl(rpc->msgout.length);
-		h->incoming = htonl(rpc->msgout.unscheduled);
-		h->cutoff_version = rpc->peer->cutoff_version;
-		h->retransmit = 0;
-		available = skb_size - HOMA_IPV4_HEADER_LENGTH - HOMA_SKB_EXTRA
-			- (sizeof(*h) - sizeof(struct data_segment));
+		h->message_length = htonl(len);
+		available = max_gso_data;
 		
 		/* Each iteration of the following loop adds one segment
 		 * to the buffer.
@@ -156,27 +158,25 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		do {
 			int seg_size;
 			seg = (struct data_segment *) skb_put(skb, sizeof(*seg));
-			seg->offset = htonl(rpc->msgout.length - bytes_left);
+			seg->offset = htonl(len - bytes_left);
 			if (bytes_left <= max_pkt_data)
 				seg_size = bytes_left;
 			else
 				seg_size = max_pkt_data;
 			seg->segment_length = htonl(seg_size);
-			err = skb_add_data_nocache((struct sock *) rpc->hsk,
-					skb, iter, seg_size);
-			if (unlikely(err != 0)) {
+			if (copy_from_user(skb_put(skb, seg_size), buffer,
+					seg_size)) {
+				err = -EFAULT;
 				kfree_skb(skb);
 				goto error;
 			}
 			bytes_left -= seg_size;
+			buffer += seg_size;
 			(skb_shinfo(skb)->gso_segs)++;
-			available -= sizeof32(*seg) + seg_size;
-		} while ((bytes_left > 0) && (((available - sizeof32(*seg))
-				>= max_pkt_data)
-				|| (available - sizeof32(*seg))
-				>= bytes_left));
-		if ((rpc->msgout.length - bytes_left) > rpc->msgout.unscheduled)
-			h->incoming = htonl(rpc->msgout.length - bytes_left);
+			available -= seg_size;
+		} while ((available > 0) && (bytes_left > 0));
+		h->incoming = htonl(((len - bytes_left) > incoming) ?
+				(len - bytes_left) : incoming);
 		
 		/* Make sure that the last segment won't result in a
 		 * packet that's too small.
@@ -187,16 +187,52 @@ int homa_message_out_init(struct homa_rpc *rpc, int sport, size_t len,
 		*last_link = skb;
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
-		if (!rpc->msgout.next_packet)
-			rpc->msgout.next_packet = skb;
-		rpc->msgout.num_skbs++;
 	}
-//	tt_record1("Output message initialized for id %u", rpc->id & 0xffffffff);
-	return 0;
+	return first;
 	
     error:
-	homa_message_out_destroy(&rpc->msgout);
-	return err;
+	homa_free_skbs(first);
+	return ERR_PTR(err);
+}
+
+/**
+ * homa_message_out_init() - Initializes an RPC's msgout. Doesn't actually
+ * send any packets.
+ * @rpc:     RPC whose msgout is to be initialized; current contents of
+ *           msgout are assumed to be garbage.
+ * @sport:   Source port number to use for the message.
+ * @skb:     First in a list of packets returned by homa_fill_packets
+ * @len:     Total length of the message.
+ */
+void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
+		int len)
+{
+	rpc->msgout.length = len;
+	rpc->msgout.packets = skb;
+	rpc->msgout.num_skbs = 0;
+	rpc->msgout.next_packet = skb;
+	rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes;
+	rpc->msgout.granted = rpc->msgout.unscheduled;
+	if (rpc->msgout.granted > rpc->msgout.length)
+		rpc->msgout.granted = rpc->msgout.length;
+	rpc->msgout.sched_priority = 0;
+	
+	/* Must scan the packets to fill in header fields that weren't
+	 * known when the packets were allocated.
+	 */
+	while (skb) {
+		struct data_header *h = (struct data_header *)
+				skb_transport_header(skb);
+		rpc->msgout.num_skbs++;
+		h->common.sport = htons(sport);
+		h->common.dport = htons(rpc->dport);
+		homa_set_doff(h);
+		h->common.id = rpc->id;
+		h->message_length = htonl(len);
+		h->cutoff_version = rpc->peer->cutoff_version;
+		h->retransmit = 0;
+		skb = *homa_next_skb(skb);
+	}
 }
 
 /**

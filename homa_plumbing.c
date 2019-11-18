@@ -490,7 +490,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			sizeof(args))))
 		return -EFAULT;
 	err = import_single_range(READ, args.buf, args.len, &iov,
-		&iter);
+		&iter);		
 	if (unlikely(err))
 		return err;
 	if (hsk->shutdown) {
@@ -502,6 +502,18 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc = NULL;
 		goto error;
 	}
+	
+	/* Must free the RPC lock before copying to user space (see
+	 * sync.txt). Mark the RPC so we can still access the RPC
+	 * even without holding its lock.
+	 */
+	rpc->dont_reap = true;
+	if (rpc->is_client) {
+		homa_rpc_free(rpc);
+	} else {
+		rpc->state = RPC_IN_SERVICE;
+	}
+	spin_unlock_bh(rpc->lock);
 	
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
@@ -522,35 +534,21 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		err = rpc->error;
 		goto error;
 	}
-
+	
 //	tt_record1("starting copy_data, %d bytes in message",
 //			rpc->msgin.total_length);
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
 //	tt_record1("finished copy_data, copied %d bytes", result);
-	if (rpc->is_client) {
-		if (rpc->id == hsk->homa->temp[0]) {
-			struct freeze_header freeze;
-			tt_record1("Freezing timetrace at id %d", rpc->id);
-			tt_freeze();
-			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-		}
-		homa_rpc_free(rpc);
-		tt_record2("homa_rpc_free finished, id %u, temp %d",
-				rpc->id & 0xffffffff, hsk->homa->temp[0]);
-	} else {
-		rpc->state = RPC_IN_SERVICE;
-	}
-	spin_unlock_bh(rpc->lock);
 	tt_record2("homa_ioc_recv finished, id %u, port %d",
 			rpc->id & 0xffffffff,
 			rpc->is_client ? hsk->client_port : hsk->server_port);
+	rpc->dont_reap = false;
 	return result;
 	
 error:
 	tt_record1("homa_ioc_recv error %d", err);
 	if (rpc != NULL) {
-		homa_rpc_free(rpc);
-		spin_unlock_bh(rpc->lock);
+		rpc->dont_reap = false;
 	}
 	return err;
 }
@@ -566,11 +564,13 @@ error:
 int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_reply_ipv4 args;
-	struct iovec iov;
-	struct iov_iter iter;
 	int err = 0;
 	struct homa_rpc *srpc;
+	struct homa_peer *peer;
+	struct sk_buff *skbs;
 
+	if (hsk->shutdown)
+		return -ESHUTDOWN;
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 	tt_record2("homa_ioc_reply starting, id %llu, port %d",
@@ -578,31 +578,30 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	err = import_single_range(WRITE, args.response, args.resplen, &iov,
-			&iter);
-	if (unlikely(err))
-		return err;
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
-	if (hsk->shutdown)
-		return -ESHUTDOWN;
+	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
+			&hsk->inet);
+	if (IS_ERR(peer))
+		return PTR_ERR(peer);
+	skbs = homa_fill_packets(hsk->homa, peer, args.response, args.resplen);
+	if (IS_ERR(skbs))
+		return PTR_ERR(skbs);
 	
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
-	if (!srpc)
+	if (!srpc) {
+		homa_free_skbs(skbs);
 		return -EINVAL;
+	}
 	if (srpc->state != RPC_IN_SERVICE) {
+		homa_rpc_free(srpc);
 		err = -EINVAL;
 		goto done;
 	}
 	srpc->state = RPC_OUTGOING;
 
-	err = homa_message_out_init(srpc, hsk->server_port, args.resplen,
-			&iter);
-        if (unlikely(err)) {
-		homa_rpc_free(srpc);
-		goto done;
-	}
+	homa_message_out_init(srpc, hsk->server_port, skbs, args.resplen);
 	homa_xmit_data(srpc, false);
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
@@ -623,8 +622,6 @@ done:
 int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_send_ipv4 args;
-	struct iovec iov;
-	struct iov_iter iter;
 	int err;
 	struct homa_rpc *crpc;
 			
@@ -637,16 +634,13 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
 			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
-	err = import_single_range(WRITE, args.request, args.reqlen, &iov,
-		&iter);
-	if (unlikely(err))
-		return err;
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
 	if (hsk->shutdown)
 		return -ESHUTDOWN;
 	
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.reqlen, &iter);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.request,
+			args.reqlen);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;

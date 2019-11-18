@@ -156,20 +156,20 @@ void homa_destroy(struct homa *homa)
  * locks held.
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
- * @length:   Size of the request message.
- * @iter:     Data for the message.
+ * @buffer:   Address (in user space) of the first byte of the request message.
+ * @len:      Number of bytes in the request message.
  * 
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. The RPC will be locked; the
  *            caller must eventually unlock it. 
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		struct sockaddr_in *dest, size_t length,
-		struct iov_iter *iter)
+		struct sockaddr_in *dest, void __user *buffer, size_t len)
 {
 	int err;
 	struct homa_rpc *crpc;
 	struct homa_rpc_bucket *bucket;
+	struct sk_buff *skb = NULL;
 	
 	crpc = (struct homa_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
@@ -180,24 +180,26 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->id = atomic64_fetch_add(1, &hsk->next_outgoing_id);
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
+	crpc->state = RPC_OUTGOING;
+	crpc->is_client = true;
+	crpc->dont_reap = false;
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
 			dest->sin_addr.s_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		err = PTR_ERR(crpc->peer);
-		kfree(crpc);
-		return ERR_PTR(err);
+		goto error;
 	}
 	crpc->dport = ntohs(dest->sin_port);
-	crpc->state = RPC_OUTGOING;
-	crpc->is_client = true;
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
-	err = homa_message_out_init(crpc, hsk->client_port, length, iter);
-	if (err) {
-		kfree(crpc);
-		return ERR_PTR(err);
+	skb = homa_fill_packets(hsk->homa, crpc->peer, buffer, len);
+	if (IS_ERR(skb)) {
+		err = PTR_ERR(skb);
+		skb = NULL;
+		goto error;
 	}
+	homa_message_out_init(crpc, hsk->client_port, skb, len);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);
@@ -208,7 +210,8 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
-	 * to be performed without holding locks.
+	 * to be performed without holding locks. Also, can't hold spin
+	 * locks while doing things that could block, such as memory allocation.
 	 */
 	homa_bucket_lock(bucket, client);
 	hlist_add_head(&crpc->hash_links, &bucket->rpcs);
@@ -217,6 +220,11 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	spin_unlock_bh(&hsk->lock);
 	
 	return crpc;
+	
+error:
+	homa_free_skbs(skb);
+	kfree(crpc);
+	return ERR_PTR(err);
 }
 
 /**
@@ -262,6 +270,9 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->hsk = hsk;
 	srpc->lock = &bucket->lock;
+	srpc->state = RPC_INCOMING;
+	srpc->is_client = false;
+	srpc->dont_reap = false;
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
 	if (unlikely(IS_ERR(srpc->peer))) {
 		err = PTR_ERR(srpc->peer);
@@ -270,8 +281,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = h->common.id;
-	srpc->state = RPC_INCOMING;
-	srpc->is_client = false;
 	srpc->error = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->incoming));
@@ -401,6 +410,10 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	tt_record3("Starting homa_rpc_reap, dead_skbs %d, instance %d, port %d",
 			hsk->dead_skbs, instance, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
+		if (rpc->dont_reap) {
+			INC_METRIC(disabled_reaps, 1);
+			continue;
+		}
 		if (rpc->msgout.length >= 0) {
 			while (rpc->msgout.packets) {
 				skbs[num_skbs] = rpc->msgout.packets;
@@ -1169,5 +1182,18 @@ void homa_spin(int usecs)
 	end = get_cycles() + (usecs*cpu_khz)/1000;
 	while (get_cycles() < end) {
 		/* Empty loop body.*/
+	}
+}
+
+/**
+ * homa_free_skbs() - Free all of the skbs in a list.
+ * @head:    First in a list of socket buffers linked through homa_next_skb.
+ */
+void homa_free_skbs(struct sk_buff *head)
+{
+	while (head) {
+		struct sk_buff *next = *homa_next_skb(head);
+		kfree_skb(head);
+		head = next;
 	}
 }

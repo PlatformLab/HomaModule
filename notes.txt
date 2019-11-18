@@ -42,12 +42,8 @@ Notes for Homa implementation in Linux:
   * Do the pacing from the sending thread?
 
 * Things to do:
-  * Figure out how to get the NIC to include port numbers in the
-    hash used for distributing interrupts.
   * More work related to GSO/GRO:
-    * Add configuration option to limit MTU
     * Add new kernel call to combine send message & wait reply?
-    * Combine packets for different sockets in the same GRO unit?
   * Don't grant to more than one message from a given sender at a time.
   * Figure out socket locking disciplines.
   * Unimplemented interface functions.
@@ -435,3 +431,11 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_pkt_recv
+
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 0, data_length 1400, incoming 10000, cutoff_version 0;
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 1400, data_length 1400, incoming 10000, cutoff_version 0;
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 2800, data_length 200, incoming 10000, cutoff_version 0
+
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 0, data_length 1400, incoming 3000, cutoff_version 0;
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 1400, data_length 1400, incoming 3000, cutoff_version 0;
+DATA from 0.0.0.0:40000, dport 99, id 1, message_length 3000, offset 2800, data_length 200, incoming 3000, cutoff_version 0

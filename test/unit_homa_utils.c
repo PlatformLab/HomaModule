@@ -106,7 +106,7 @@ static const char *dead_rpcs(struct homa_sock *hsk)
 TEST_F(homa_utils, homa_rpc_new_client__normal)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, (char *) 2000, 10000);
 	EXPECT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 	spin_unlock_bh(crpc->lock);
@@ -115,7 +115,7 @@ TEST_F(homa_utils, homa_rpc_new_client__malloc_error)
 {
 	mock_kmalloc_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, (char *) 2000, 10000);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
@@ -123,7 +123,7 @@ TEST_F(homa_utils, homa_rpc_new_client__route_error)
 {
 	mock_route_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, (char *) 2000, 10000);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(crpc));
 }
@@ -131,7 +131,7 @@ TEST_F(homa_utils, homa_rpc_new_client__msgout_init_error)
 {
 	mock_alloc_skb_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, (char *) 2000, 10000);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
@@ -189,7 +189,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 {
 	mock_cycles = ~0;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 10000, NULL);
+			&self->server_addr, (char *) 2000, 10000);
 	homa_rpc_free(crpc);
 	spin_unlock_bh(crpc->lock);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
@@ -269,7 +269,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 5000, NULL);
+			&self->server_addr, (char *) 2000, 5000);
 	EXPECT_NE(NULL, crpc);
 	spin_unlock_bh(crpc->lock);
 	homa_add_to_throttled(crpc);
@@ -325,6 +325,28 @@ TEST_F(homa_utils, homa_rpc_reap__reap_disabled)
 	atomic_dec(&self->hsk.reap_disable);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 2000);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid+1, 1000, 2000);
+	homa_rpc_free(crpc1);
+	homa_rpc_free(crpc2);
+	unit_log_clear();
+	self->homa.reap_limit = 3;
+	crpc1->dont_reap = true;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("reaped 12346", unit_log_get());
+	unit_log_clear();
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("", unit_log_get());
+	crpc1->dont_reap = false;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("reaped 12345", unit_log_get());
+}
 TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 {
 	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_READY,
@@ -347,22 +369,22 @@ TEST_F(homa_utils, homa_find_client_rpc)
 {
 	atomic64_set(&self->hsk.next_outgoing_id, 3);
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc1));
 	spin_unlock_bh(crpc1->lock);
 	atomic64_set(&self->hsk.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc2));
 	spin_unlock_bh(crpc2->lock);
 	atomic64_set(&self->hsk.next_outgoing_id, 3 + 10*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc3));
 	spin_unlock_bh(crpc3->lock);
 	atomic64_set(&self->hsk.next_outgoing_id, 40);
 	struct homa_rpc *crpc4 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, 1000, NULL);
+			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc4));
 	spin_unlock_bh(crpc4->lock);
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));

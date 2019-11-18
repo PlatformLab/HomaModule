@@ -246,7 +246,7 @@ struct data_header {
 	__be32 message_length;
 	
 	/**
-	 * @incoming: We can expect the sender to send all of the
+	 * @incoming: The receiver can expect the sender to send all of the
 	 * bytes in the message up to at least this offset (exclusive),
 	 * even without additional grants. This includes unscheduled
 	 * bytes, granted bytes, plus any additional bytes the sender
@@ -591,21 +591,6 @@ struct homa_rpc {
 	struct spinlock *lock;
 	
 	/**
-	 * @peer: Information about the other machine (the server, if
-	 * this is a client RPC, or the client, if this is a server RPC).
-	 */
-	struct homa_peer *peer;
-	
-	/** @dport: Port number on @peer that will handle packets. */
-	__u16 dport;
-	
-	/**
-	 * @id: Unique identifier for the RPC among all those issued
-	 * from its port. Selected by the client.
-	 */
-	__u64 id;
-	
-	/**
 	 * @state: The current state of this RPC:
 	 * 
 	 * @RPC_OUTGOING:     The RPC is waiting for @msgout to be transmitted
@@ -620,7 +605,8 @@ struct homa_rpc {
 	 *                    has been read from the socket, but the response
 	 *                    message has not yet been presented to the kernel.
 	 * @RPC_DEAD:         RPC has been deleted and is waiting to be
-	 *                    reaped.
+	 *                    reaped. In some cases, information in the RPC
+	 *                    structure may be accessed in this state.
 	 * 
 	 * Client RPCs pass through states in the following order:
 	 * RPC_OUTGOING, RPC_INCOMING, RPC_READY, RPC_DEAD.
@@ -638,6 +624,27 @@ struct homa_rpc {
 	
 	/** @is_client: True means this is a client RPC, false means server. */
 	bool is_client;
+	
+	/** 
+	 * @dont_reap: True means data is still being copied out of the
+	 * RPC to a receiver, so it isn't safe to reap it yet.
+	 */
+	bool dont_reap;
+	
+	/**
+	 * @peer: Information about the other machine (the server, if
+	 * this is a client RPC, or the client, if this is a server RPC).
+	 */
+	struct homa_peer *peer;
+	
+	/** @dport: Port number on @peer that will handle packets. */
+	__u16 dport;
+	
+	/**
+	 * @id: Unique identifier for the RPC among all those issued
+	 * from its port. Selected by the client.
+	 */
+	__u64 id;
 	
 	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has
@@ -1637,11 +1644,15 @@ extern int      homa_disconnect(struct sock *sk, int flags);
 extern int      homa_dointvec(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
+extern struct sk_buff
+                *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
+			char __user *from, size_t len);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk, __be32 saddr,
 			__u16 sport, __u64 id);
+extern void     homa_free_skbs(struct sk_buff *skb);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern void     homa_get_resend_range(struct homa_message_in *msgin,
 			struct resend_header *resend);
@@ -1666,8 +1677,8 @@ extern void     homa_message_in_destroy(struct homa_message_in *msgin);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 			int incoming);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
-extern int      homa_message_out_init(struct homa_rpc *rpc, int sport,
-			size_t len, struct iov_iter *iter);
+extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
+			struct sk_buff *skb, int len);
 extern int      homa_message_out_reset(struct homa_rpc *rpc);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
@@ -1714,8 +1725,7 @@ extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
-			struct sockaddr_in *dest, size_t length,
-			struct iov_iter *iter);
+		struct sockaddr_in *dest, void __user *buffer, size_t len);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
