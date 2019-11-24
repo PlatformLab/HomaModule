@@ -44,3 +44,9 @@ of the Homa Linux kernel module.
 No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
 RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 
+* It's better to queue a waiting thread at the *front* of the list, rather
+  than the rear (if there is a pool of server threads but not enough load
+  to keep them all busy, it's better to reuse a few threads rather than
+  spreading work across all of them; this produces better cash locality).
+  This approach improves latency by 200-500ns at low loads.
+
