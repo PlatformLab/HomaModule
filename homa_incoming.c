@@ -910,7 +910,11 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 				list_del_init(&(*rpc)->ready_links);
 				goto found_rpc;
 			}
-			list_add_tail(&resp_int.links,
+			/* Insert this thread at the *front* of the list;
+			 * we'll get better cache locality if we reuse
+			 * the same thread over and over, rather than
+			 * round-robining between threads.  Same below.*/
+			list_add(&resp_int.links,
 					&hsk->response_interests);
 		}
 		if (flags & HOMA_RECV_REQUEST) {
@@ -920,7 +924,7 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 				list_del_init(&(*rpc)->ready_links);
 				goto found_rpc;
 			}
-			list_add_tail(&req_int.links,
+			list_add(&req_int.links,
 					&hsk->request_interests);
 		}
 		

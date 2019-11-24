@@ -40,7 +40,7 @@ of the Homa Linux kernel module.
   underloaded.
 
 * Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
-                       1 server thread          18 server threads
-No RPS/RFS                  16.0 us                  16.3 us
-RPS/RFS enabled             17.4 us                  21.5 us
+                    1 server thread  18 threads  TCP, 1 thread  TCP, 18 threads
+No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
+RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 
