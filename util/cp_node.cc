@@ -44,17 +44,19 @@
 #include "test_utils.h"
 
 /* Command-line parameter values (and default values): */
-uint32_t client_max = 100000;
+bool alt_client = false;
+uint32_t client_max = 1;
 int client_threads = 0;
 int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-uint32_t server_max = 5;
+uint32_t server_max = 1;
 double net_util = 0.8;
+int port_threads = 1;
 const char *protocol = "homa";
-int server_threads = 1;
 int server_nodes = 1;
+int server_ports = 1;
 const char *workload = "100";
 
 /** @rand_gen: random number generator. */
@@ -117,6 +119,9 @@ void print_help(const char *name)
 {
 	printf("Usage: %s [options]\n\n"
 		"The following options are supported:\n\n"
+		"--alt_client          Only create 1 thread per client, which waits"
+		"                      for its own requests (can't support --client_max"
+		"                      greater than 1)"
 		"--client_max          Maximum number of outstanding requests from a single\n"
 		"                      client (across all servers) (default: %d)\n"
 		"--client_threads      Number of request invocation threads to run on this\n"
@@ -128,18 +133,20 @@ void print_help(const char *name)
 		"--is_server           Instantiate server threads on this node\n"
 		"--net_util            Target network utilization, including headers and packet\n"
 		"                      gaps (default: %.2f)\n"
+		"--port_threads        Number of server threads to service each port\n"
+		"                      (Homa only, default: %d)\n"
 		"--protocol            Transport protocol to use for requests: homa or tcp\n"
 		"                      (default: %s)\n"
 		"--server_max          Maximum number of outstanding requests from a client\n"
 		"                      to a single server thread (default: %d)\n"
 		"--server_nodes        Number of nodes running server threads (default: %d)\n"
-		"--server_threads      Number of server threads/ports on each server node\n"
+		"--server_ports        Number of server ports on each server node\n"
 		"                      (default: %d)\n"
 		"--workload            Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n",
 		name, client_max, client_threads, first_port, first_server,
-		first_server, net_util, protocol, server_max, server_nodes,
-		server_threads, workload);
+		first_server, net_util, port_threads, protocol, server_max,
+		server_nodes, server_ports, workload);
 }
 
 /**
@@ -384,8 +391,9 @@ class server_metrics {
 std::vector<server_metrics *> metrics;
 
 /**
- * class homa_server - Holds information about a single Homa server,
- * which consists of a thread that handles requests on a given port.
+ * class homa_server - Holds information about a single Homa server
+ * thread, which handles requests on a given port. There may be more
+ * than one thread on the same port.
  */
 class homa_server {
     public:
@@ -404,30 +412,13 @@ std::vector<homa_server *> homa_servers;
 
 /**
  * homa_server::homa_server() - Constructor for homa_server objects.
- * @port:  Port on which to receive requests
+ * @fd:  File descriptor for Homa socket to use for receiving
+ *       requests.
  */
-homa_server::homa_server(int port)
-	: fd(-1)
+homa_server::homa_server(int fd)
+	: fd(fd)
         , metrics()
 {
-	struct sockaddr_in addr_in;
-	
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-	if (fd < 0) {
-		printf("Couldn't open Homa socket: %s\n", strerror(errno));
-		exit(1);
-	}
-	
-	memset(&addr_in, 0, sizeof(addr_in));
-	addr_in.sin_family = AF_INET;
-	addr_in.sin_port = htons(port);
-	if (bind(fd, (struct sockaddr *) &addr_in, sizeof(addr_in)) != 0) {
-		printf("Couldn't bind socket to Homa port %d: %s\n", port,
-				strerror(errno));
-		exit(1);
-	}
-	printf("Successfully bound to Homa port %d\n", port);
-	
 	std::thread server(&homa_server::server, this);
 	server.detach();
 }
@@ -806,6 +797,7 @@ class homa_client : public client {
 	homa_client(void);
 	void receiver(void);
 	void sender(void);
+	void wait_response(uint64_t id);
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
@@ -820,16 +812,53 @@ homa_client::homa_client()
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}
 	
-	std::thread receiver(&homa_client::receiver, this);
-	while (!receiver_running) {
-		/* Wait for the receiver to begin execution before
-		 * starting the sender; otherwise the initial RPCs
-		 * may appear to take a long time.
-		 */
+	if (!alt_client) {
+		std::thread receiver(&homa_client::receiver, this);
+		while (!receiver_running) {
+			/* Wait for the receiver to begin execution before
+			 * starting the sender; otherwise the initial RPCs
+			 * may appear to take a long time.
+			 */
+		}
+		receiver.detach();
 	}
-	receiver.detach();
 	std::thread sender(&homa_client::sender, this);
 	sender.detach();
+}
+
+/**
+ * homa_client::weight_response() - Wait for a response to arrive and
+ * update statistics.
+ * @id   Id of a specific RPC to wait for, or 0 for "any response".
+ */
+void homa_client::wait_response(uint64_t id)
+{
+	char response[1000000];
+	message_header *header = reinterpret_cast<message_header *>(response);
+	struct sockaddr_in server_addr;
+	
+	id = 0;
+	int length = homa_recv(fd, response, sizeof(response),
+			HOMA_RECV_RESPONSE, &id,
+			(struct sockaddr *) &server_addr,
+			sizeof(server_addr));
+	if (length < 0) {
+		printf("Error in homa_recv: %s (id %lu, server %s)\n",
+			strerror(errno), id,
+			print_address(&server_addr));
+		exit(1);
+	}
+	uint32_t elapsed = rdtsc() & 0xffffffff;
+	elapsed -= header->start_time;
+	responses[header->server_id]++;
+	total_responses++;
+	response_data += length;
+	total_rtt += elapsed;
+	actual_lengths[next_result] = length;
+	actual_rtts[next_result] = elapsed;
+	next_result++;
+	if (next_result >= actual_lengths.size())
+			next_result = 0;
 }
 
 /**
@@ -889,6 +918,12 @@ void homa_client::sender()
 		next_interval++;
 		if (next_interval >= request_intervals.size())
 			next_interval = 0;
+		
+		if (!receiver_running) {
+			/* There isn't a separate receiver thread; wait for
+			 * the response here. */
+			wait_response(id);
+		}
 	}
 }
 
@@ -897,36 +932,10 @@ void homa_client::sender()
  * that waits for RPC responses and then logs statistics about them.
  */
 void homa_client::receiver(void)
-{
-	char response[1000000];
-	message_header *header = reinterpret_cast<message_header *>(response);
-	uint64_t id;
-	struct sockaddr_in server_addr;
-	
+{	
 	receiver_running = 1;
 	while (1) {
-		id = 0;
-		int length = homa_recv(fd, response, sizeof(response),
-				HOMA_RECV_RESPONSE, &id,
-				(struct sockaddr *) &server_addr,
-				sizeof(server_addr));
-		if (length < 0) {
-			printf("Error in homa_recv: %s (id %lu, server %s)\n",
-				strerror(errno), id,
-				print_address(&server_addr));
-			exit(1);
-		}
-		uint32_t elapsed = rdtsc() & 0xffffffff;
-		elapsed -= header->start_time;
-		responses[header->server_id]++;
-		total_responses++;
-		response_data += length;
-		total_rtt += elapsed;
-		actual_lengths[next_result] = length;
-		actual_rtts[next_result] = elapsed;
-		next_result++;
-		if (next_result >= actual_lengths.size())
-			next_result = 0;
+		wait_response(0);
 	}
 }
 
@@ -1216,6 +1225,8 @@ int main(int argc, char** argv)
 		if (strcmp(argv[next_arg], "--help") == 0) {
 			print_help(argv[0]);
 			exit(0);
+		} else if (strcmp(argv[next_arg], "--alt_client") == 0) {
+			alt_client = true;
 		} else if (strcmp(argv[next_arg], "--client_max") == 0) {
 			client_max = int_arg(argv[next_arg+1],
 					argv[next_arg]);
@@ -1238,6 +1249,10 @@ int main(int argc, char** argv)
 			net_util = float_arg(argv[next_arg+1],
 					argv[next_arg]);
 			next_arg++;
+		} else if (strcmp(argv[next_arg], "--port_threads") == 0) {
+			port_threads = int_arg(argv[next_arg+1],
+					argv[next_arg]);
+			next_arg++;
 		} else if (strcmp(argv[next_arg], "--protocol") == 0) {
 			next_arg++;
 			protocol = argv[next_arg];
@@ -1253,8 +1268,8 @@ int main(int argc, char** argv)
 			server_nodes = int_arg(argv[next_arg+1],
 					argv[next_arg]);
 			next_arg++;
-		} else if (strcmp(argv[next_arg], "--server_threads") == 0) {
-			server_threads = int_arg(argv[next_arg+1],
+		} else if (strcmp(argv[next_arg], "--server_ports") == 0) {
+			server_ports = int_arg(argv[next_arg+1],
 					argv[next_arg]);
 			next_arg++;
 		} else if (strcmp(argv[next_arg], "--workload") == 0) {
@@ -1278,21 +1293,46 @@ int main(int argc, char** argv)
 	/* Spawn server threads. */
 	if (is_server) {
 		if (homa_protocol) {
-			for (i = 0; i < server_threads; i++) {
-				homa_server *server = new homa_server(
-						first_port + i);
-				homa_servers.push_back(server);
-				metrics.push_back(&server->metrics);
+			for (i = 0; i < server_ports; i++) {
+				struct sockaddr_in addr_in;
+				int fd, j, port;
+
+				fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+				if (fd < 0) {
+					printf("Couldn't open Homa socket: "
+						"	%s\n", strerror(errno));
+					exit(1);
+				}
+
+				port = first_port + i;
+				memset(&addr_in, 0, sizeof(addr_in));
+				addr_in.sin_family = AF_INET;
+				addr_in.sin_port = htons(port);
+				if (bind(fd, (struct sockaddr *) &addr_in,
+						sizeof(addr_in)) != 0) {
+					printf("Couldn't bind socket to Homa "
+							"port %d: %s\n", port,
+							strerror(errno));
+					exit(1);
+				}
+				printf("Successfully bound to Homa port %d\n",
+						port);
+				for (j = 0; j < port_threads; j++) {
+					homa_server *server = new homa_server(
+							fd);
+					homa_servers.push_back(server);
+					metrics.push_back(&server->metrics);
+				}
 			}
 		} else {
-			for (i = 0; i < server_threads; i++) {
+			for (i = 0; i < server_ports; i++) {
 				tcp_server *server = new tcp_server(
 						first_port + i);
 				tcp_servers.push_back(server);
 				metrics.push_back(&server->metrics);
 			}
 		}
-		last_per_server_rpcs.resize(server_threads, 0);
+		last_per_server_rpcs.resize(server_ports, 0);
 	}
 	
 	/* Initialize server_addrs. */
@@ -1315,7 +1355,7 @@ int main(int argc, char** argv)
 		}
 		dest = reinterpret_cast<struct sockaddr_in *>
 				(matching_addresses->ai_addr);
-		for (int thread = 0; thread < server_threads; thread++) {
+		for (int thread = 0; thread < server_ports; thread++) {
 			dest->sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
 		}
