@@ -384,10 +384,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
  */
 int homa_rpc_reap(struct homa_sock *hsk)
 {
-	/* Note: there is no need to lock RPCs here, since there is no
-	 * way for anyone else to access them (but do need the socket
-	 * lock).
-	 */
 	struct sk_buff *skbs[hsk->homa->reap_limit];
 	struct homa_rpc *rpcs[hsk->homa->reap_limit];
 	int num_skbs = 0;
@@ -463,6 +459,12 @@ release:
 	}
 	for (i = 0; i < num_rpcs; i++) {
 		UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
+		/* Lock and unlock the RPC before freeing it. This is needed
+		 * to deal with races where the last user of the RPC (such
+		 * as homa_ioc_reply) hasn't unlocked it yet.
+		 */
+		homa_rpc_lock(rpcs[i]);
+		spin_unlock_bh(rpcs[i]->lock);
 		kfree(rpcs[i]);
 	}
 	spin_lock_bh(&hsk->lock);
