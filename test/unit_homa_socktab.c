@@ -233,3 +233,19 @@ TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
 	homa_sock_destroy(&hsk3);
 	homa_sock_destroy(&hsk4);
 }
+
+TEST_F(homa_socktab, homa_sock_lock_slow)
+{
+	mock_cycles = ~0;
+	
+	homa_sock_lock(&self->hsk);
+	EXPECT_EQ(0, unit_get_metrics()->socket_lock_misses);
+	EXPECT_EQ(0, unit_get_metrics()->socket_lock_miss_cycles);
+	homa_sock_unlock(&self->hsk);
+	
+	mock_trylock_errors = 1;
+	homa_sock_lock(&self->hsk);
+	EXPECT_EQ(1, unit_get_metrics()->socket_lock_misses);
+	EXPECT_NE(0, unit_get_metrics()->socket_lock_miss_cycles);
+	homa_sock_unlock(&self->hsk);
+}

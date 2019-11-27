@@ -513,7 +513,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	} else {
 		rpc->state = RPC_IN_SERVICE;
 	}
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 	
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
@@ -607,7 +607,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(srpc);
 	}
 done:
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	return err;
 }
 
@@ -653,13 +653,13 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto error;
 	}
-	spin_unlock_bh(crpc->lock);
+	homa_rpc_unlock(crpc);
 	return 0;
 
     error:
 	if (crpc) {
 		homa_rpc_free(crpc);
-		spin_unlock_bh(crpc->lock);
+		homa_rpc_unlock(crpc);
 	}
 	return err;
 }

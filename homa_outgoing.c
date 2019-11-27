@@ -793,7 +793,7 @@ void homa_pacer_xmit(struct homa *homa)
 				homa_rpc_free(rpc);
 			}
 		}
-		spin_unlock_bh(rpc->lock);
+		homa_rpc_unlock(rpc);
 	}
 	atomic_set(&homa->pacer_active, 0);
 	

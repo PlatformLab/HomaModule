@@ -58,7 +58,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		atomic64_set(&hsk->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
 			NULL, req_length);
-	spin_unlock_bh(crpc->lock);
+	homa_rpc_unlock(crpc);
 	if (!crpc)
 		return NULL;
 	if (id != 0)
@@ -341,7 +341,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	if (!srpc)
 		return NULL;
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,

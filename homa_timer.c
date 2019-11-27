@@ -189,7 +189,7 @@ void homa_timer(struct homa *homa)
 			if ((rpc->state == RPC_READY)
 					|| (rpc->state == RPC_IN_SERVICE)) {
 				rpc->silent_ticks = 0;
-				spin_unlock_bh(rpc->lock);
+				homa_rpc_unlock(rpc);
 				continue;
 			}
 			rpc->silent_ticks++;
@@ -197,20 +197,20 @@ void homa_timer(struct homa *homa)
 				if (homa_check_timeout(rpc))
 					dead_peer = rpc->peer;
 			}
-			spin_unlock_bh(rpc->lock);
+			homa_rpc_unlock(rpc);
 		}
 		if (print_active) {
 			struct list_head *pos;
 			int requests = 0;
 			int responses = 0;
-			spin_lock_bh(&hsk->lock);
+			homa_sock_lock(hsk);
 			list_for_each(pos, &hsk->ready_requests) {
 				requests++;
 			}
 			list_for_each(pos, &hsk->ready_responses) {
 				responses++;
 			}
-			spin_unlock_bh(&hsk->lock);
+			homa_sock_unlock(hsk);
 			printk(KERN_NOTICE "%d ready requests, %d ready "
 					"responses for socket\n",
 					requests, responses);

@@ -69,6 +69,11 @@ extern void mock_rcu_read_unlock(void);
 
 /* Forward declarations. */
 struct homa_sock;
+struct homa_rpc;
+
+/* Declarations used in this file, so they can't be made at the end. */
+extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
+extern void     homa_sock_lock_slow(struct homa_sock *hsk);
 
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
@@ -733,9 +738,18 @@ struct homa_rpc {
  *         are very sure what you are doing!  See sync.txt for more
  *         info on locking.
  */
-#define homa_rpc_lock(rpc)                             \
-	if (!spin_trylock_bh(rpc->lock))               \
+inline static void homa_rpc_lock(struct homa_rpc *rpc) {
+	if (!spin_trylock_bh(rpc->lock))
 		homa_rpc_lock_slow(rpc);
+}
+
+/**
+ * homa_rpc_unlock() - Release the lock for an RPC.
+ * @rpc:   RPC to unlock.
+ */
+inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
+	spin_unlock_bh(rpc->lock);
+}
 
 /**
  * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
@@ -957,9 +971,28 @@ struct homa_sock {
 	 */
 	struct homa_rpc_bucket server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
 };
+
 static inline struct homa_sock *homa_sk(const struct sock *sk)
 {
 	return (struct homa_sock *)sk;
+}
+
+/**
+ * homa_sock_lock() - Acquire the lock for a socket. If the socket
+ * isn't immediately available, record stats on the waiting time.
+ * @hsk:   Socket to lock.
+ */
+static inline void homa_sock_lock(struct homa_sock *hsk) {
+	if (!spin_trylock_bh(&hsk->lock))
+		homa_sock_lock_slow(hsk);
+}
+
+/**
+ * homa_sock_unlock() - Release the lock for a socket.
+ * @hsk:   Socket to lock.
+ */
+static inline void homa_sock_unlock(struct homa_sock *hsk) {
+	spin_unlock_bh(&hsk->lock);
 }
 
 /**
@@ -1582,6 +1615,18 @@ struct homa_metrics {
 	__u64 server_lock_miss_cycles;
 	
 	/**
+	 * @socket_lock_miss_cycles: total time spent waiting for socket
+	 * lock misses, measured by get_cycles().
+	 */
+	__u64 socket_lock_miss_cycles;
+	
+	/**
+	 * @socket_lock_misses: total number of times that Homa had to wait
+	 * to acquire a socket lock.
+	 */
+	__u64 socket_lock_misses;
+	
+	/**
 	 * @disabled_reaps: total number of times that the reaper exited
 	 * because it was disabled.
 	 */
@@ -1722,7 +1767,6 @@ extern void     homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
-extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 		struct sockaddr_in *dest, void __user *buffer, size_t len);

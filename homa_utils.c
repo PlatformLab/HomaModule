@@ -215,9 +215,9 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	 */
 	homa_bucket_lock(bucket, client);
 	hlist_add_head(&crpc->hash_links, &bucket->rpcs);
-	spin_lock_bh(&hsk->lock);
+	homa_sock_lock(hsk);
 	list_add_tail_rcu(&crpc->active_links, &hsk->active_rpcs);
-	spin_unlock_bh(&hsk->lock);
+	homa_sock_unlock(hsk);
 	
 	return crpc;
 	
@@ -294,10 +294,10 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->num_resends = 0;
 	
 	/* Initialize fields that require the socket lock. */
-	spin_lock_bh(&hsk->lock);
+	homa_sock_lock(hsk);
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
-	spin_unlock_bh(&hsk->lock);
+	homa_sock_unlock(hsk);
 	return srpc;
 
 error:
@@ -347,7 +347,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
-	spin_lock_bh(&rpc->hsk->lock);
+	homa_sock_lock(rpc->hsk);
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
 	__list_del_entry(&rpc->ready_links);
@@ -359,7 +359,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
 	rpc->state = RPC_DEAD;
-	spin_unlock_bh(&rpc->hsk->lock);
+	homa_sock_unlock(rpc->hsk);
 	
 	if (unlikely(!list_empty(&rpc->throttled_links))) {
 		spin_lock_bh(&rpc->hsk->homa->throttle_lock);
@@ -453,7 +453,7 @@ release:
 	if ((num_skbs == 0) && (num_rpcs == 0))
 		return 0;
 	hsk->dead_skbs -= num_skbs;
-	spin_unlock_bh(&hsk->lock);
+	homa_sock_unlock(hsk);
 	for (i = 0; i < num_skbs; i++) {
 		kfree_skb(skbs[i]);
 	}
@@ -464,10 +464,10 @@ release:
 		 * as homa_ioc_reply) hasn't unlocked it yet.
 		 */
 		homa_rpc_lock(rpcs[i]);
-		spin_unlock_bh(rpcs[i]->lock);
+		homa_rpc_unlock(rpcs[i]);
 		kfree(rpcs[i]);
 	}
-	spin_lock_bh(&hsk->lock);
+	homa_sock_lock(hsk);
 	return 1;
 }
 
@@ -881,6 +881,8 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->client_lock_miss_cycles += cm->client_lock_miss_cycles;
 		m->server_lock_misses += cm->server_lock_misses;
 		m->server_lock_miss_cycles += cm->server_lock_miss_cycles;
+		m->socket_lock_misses += cm->socket_lock_misses;
+		m->socket_lock_miss_cycles += cm->socket_lock_miss_cycles;
 		m->disabled_reaps += cm->disabled_reaps;
 		m->reaper_calls += cm->reaper_calls;
 		m->reaper_dead_skbs += cm->reaper_dead_skbs;
@@ -1101,6 +1103,14 @@ char *homa_print_metrics(struct homa *homa)
 			"server_lock_miss_cycles%15llu  "
 			"Time lost waiting for server bucket locks\n",
 			m.server_lock_miss_cycles);
+	homa_append_metric(homa,
+			"socket_lock_misses     %15llu  "
+			"Socket lock misses\n",
+			m.socket_lock_misses);
+	homa_append_metric(homa,
+			"socket_lock_miss_cycles%15llu  "
+			"Time lost waiting for socket locks\n",
+			m.socket_lock_miss_cycles);
 	homa_append_metric(homa,
 			"disabled_reaps         %15llu  "
 			"Reaper invocations that were disabled\n",

@@ -334,7 +334,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
     
     done:
 	if (rpc)
-		spin_unlock_bh(rpc->lock);
+		homa_rpc_unlock(rpc);
 }
 
 /**
@@ -742,7 +742,7 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 			homa_rpc_lock(rpc);
 			if ((rpc->state == RPC_DEAD)
 					|| (rpc->state == RPC_READY)) {
-				spin_unlock_bh(rpc->lock);
+				homa_rpc_unlock(rpc);
 				continue;
 			}
 			if (rpc->is_client) {
@@ -762,7 +762,7 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 				}
 				homa_rpc_free(rpc);
 			}
-			spin_unlock_bh(rpc->lock);
+			homa_rpc_unlock(rpc);
 		}
 		atomic_dec(&hsk->reap_disable);
 	}
@@ -861,9 +861,9 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 			int reaper_found_work;
 			
 			/* Way too many dead RPCs; must cleanup immediately. */
-			spin_lock_bh(&hsk->lock);
+			homa_sock_lock(hsk);
 			reaper_found_work = homa_rpc_reap(hsk);
-			spin_unlock_bh(&hsk->lock);
+			homa_sock_unlock(hsk);
 			if (!reaper_found_work)
 				break;
 		}
@@ -887,20 +887,20 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 			if (r == NULL)
 				return -EINVAL;
 			if (r->interest != NULL) {
-				spin_unlock_bh(r->lock);
+				homa_rpc_unlock(r);
 				return -EINVAL;
 			}
 			if (r->state == RPC_READY) {
 				list_del_init(&r->ready_links);
 				*rpc = r;
-				spin_unlock_bh(r->lock);
+				homa_rpc_unlock(r);
 				return 0;
 			}
 			r->interest = &resp_int;
 			resp_int.reg_rpc = r;
-			spin_unlock_bh(r->lock);
+			homa_rpc_unlock(r);
 		}
-		spin_lock_bh(&hsk->lock);
+		homa_sock_lock(hsk);
 		if ((id == 0) && (flags & HOMA_RECV_RESPONSE)) {
 			if (!list_empty(&hsk->ready_responses)) {
 				*rpc = list_first_entry(
@@ -943,7 +943,7 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 		}
 		
 		/* Now it's time to sleep. */
-		spin_unlock_bh(&hsk->lock);
+		homa_sock_unlock(hsk);
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (!*rpc && !hsk->shutdown)
 			schedule();
@@ -953,7 +953,7 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 					(*rpc)->id & 0xffffffff);
 		else
 			tt_record("homa_wait_for_message woke up, rpc NULL");
-		spin_lock_bh(&hsk->lock);
+		homa_sock_lock(hsk);
 		
 		if (hsk->shutdown) {
 			err = -ESHUTDOWN;
@@ -968,7 +968,7 @@ int homa_wait_for_message(struct homa_sock *hsk, int flags, __u64 id,
 
 		/* Nothing happened (perhaps the RPC we were waiting for
 		 * was deleted?). Start over. */
-		spin_unlock_bh(&hsk->lock);
+		homa_sock_unlock(hsk);
 		continue;
 	
 found_rpc:
@@ -988,13 +988,13 @@ found_rpc:
 		r = *rpc;
 		if (r->is_client) {
 			__u64 client_id = r->id;
-			spin_unlock_bh(&hsk->lock);
+			homa_sock_unlock(hsk);
 			*rpc = homa_find_client_rpc(hsk, client_id);
 		} else {
 			__u64 server_id = r->id;
 			__be32 saddr = r->peer->addr;
 			__u16 port = r->dport;
-			spin_unlock_bh(&hsk->lock);
+			homa_sock_unlock(hsk);
 			*rpc = homa_find_server_rpc(hsk, saddr, port, server_id);
 		}
 		if (*rpc)
@@ -1008,7 +1008,7 @@ error:
 		list_del(&resp_int.links);
 	if (req_int.links.next != LIST_POISON1)
 		list_del(&req_int.links);
-	spin_unlock_bh(&hsk->lock);
+	homa_sock_unlock(hsk);
 	return err;
 }
 
@@ -1037,7 +1037,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	}
 	
 	/* Second, check the interest list for this type of RPC. */
-	spin_lock_bh(&rpc->hsk->lock);
+	homa_sock_lock(rpc->hsk);
 	if (rpc->is_client) {
 		interest_list = &rpc->hsk->response_interests;
 		ready_list = &rpc->hsk->ready_responses;
@@ -1055,7 +1055,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		}
 		*interest->rpc = rpc;
 		thread = interest->thread;
-		spin_unlock_bh(&rpc->hsk->lock);
+		homa_sock_unlock(rpc->hsk);
 		wake_up_process(thread);
 //		tt_record1("wake_up_process finished, id %d", rpc->id);
 		return;
@@ -1063,7 +1063,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	
 	/* No interest so far; just queue the RPC. */
 	list_add_tail(&rpc->ready_links, ready_list);
-	spin_unlock_bh(&rpc->hsk->lock);
+	homa_sock_unlock(rpc->hsk);
 	
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;

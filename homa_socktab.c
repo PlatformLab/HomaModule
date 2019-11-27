@@ -176,9 +176,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
 	
-	spin_lock_bh(&hsk->lock);
+	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
-		spin_unlock_bh(&hsk->lock);
+		homa_sock_unlock(hsk);
 		return;
 	}
 	hsk->shutdown = true;
@@ -192,7 +192,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, links)
 		wake_up_process(interest->thread);
-	spin_unlock_bh(&hsk->lock);
+	homa_sock_unlock(hsk);
 	
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
 		homa_rpc_free(rpc);
@@ -274,4 +274,19 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 		}
 	}
 	return result;
+}
+
+/**
+ * homa_sock_lock_slow() - This function implements the slow path for
+ * acquiring a socketC lock. It is invoked when a socket lock isn't immediately
+ * available. It waits for the lock, but also records statistics about
+ * the waiting time.
+ * @hsk:    socket to  lock.
+ */
+void homa_sock_lock_slow(struct homa_sock *hsk)
+{
+	__u64 start = get_cycles();
+	spin_lock_bh(&hsk->lock);
+	INC_METRIC(socket_lock_misses, 1);
+	INC_METRIC(socket_lock_miss_cycles, get_cycles() - start);
 }

@@ -889,7 +889,7 @@ TEST_F(homa_incoming, homa_manage_grants__adjust_priority_order)
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 3);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	srpc->msgin.bytes_remaining = 28600;
 	homa_manage_grants(&self->homa, srpc);
 	unit_log_clear();
@@ -911,7 +911,7 @@ TEST_F(homa_incoming, homa_manage_grants__adjust_priority_order)
 	srpc = homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port, 4);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);;
 	srpc->msgin.bytes_remaining = 1000;
 	homa_manage_grants(&self->homa, srpc);
 	unit_log_clear();
@@ -1003,7 +1003,7 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	
 	/* Share lowest priority level. */
 	self->homa.min_prio = 2;
@@ -1048,7 +1048,7 @@ TEST_F(homa_incoming, homa_manage_grants__grant_after_rpc_deleted)
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 	homa_rpc_free(srpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; xmit GRANT 11400@2",
@@ -1065,7 +1065,7 @@ TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	
 	/* First time: on the list. */
 	homa_remove_from_grantable(&self->homa, srpc);
@@ -1090,7 +1090,7 @@ TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
 			self->client_ip, self->client_port, 1);
 	EXPECT_NE(NULL, srpc);
-	spin_unlock_bh(srpc->lock);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
 	EXPECT_STREQ("", unit_log_get());
@@ -1240,7 +1240,7 @@ TEST_F(homa_incoming, homa_wait_for_message__return_specific_id)
 			self->rpcid, &rpc);
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(crpc, rpc);
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__return_from_ready_responses)
 {
@@ -1255,7 +1255,7 @@ TEST_F(homa_incoming, homa_wait_for_message__return_from_ready_responses)
 			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING, 0, &rpc);
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(crpc, rpc);
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__return_from_ready_requests)
 {
@@ -1270,7 +1270,7 @@ TEST_F(homa_incoming, homa_wait_for_message__return_from_ready_requests)
 			HOMA_RECV_REQUEST|HOMA_RECV_NONBLOCKING, 0, &rpc);
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(srpc, rpc);
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__id_not_ready)
 {
@@ -1328,7 +1328,7 @@ TEST_F(homa_incoming, homa_wait_for_message__id_arrives_while_sleeping)
 			"0 in ready_responses, 0 in request_interests, "
 			"0 in response_interests", unit_log_get());
 	EXPECT_EQ(0, self->hsk.dead_skbs);
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__response_arrives_while_sleeping)
 {
@@ -1351,7 +1351,7 @@ TEST_F(homa_incoming, homa_wait_for_message__response_arrives_while_sleeping)
 			"1 in response_interests", unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__request_arrives_while_sleeping)
 {
@@ -1372,7 +1372,7 @@ TEST_F(homa_incoming, homa_wait_for_message__request_arrives_while_sleeping)
 			"0 in ready_responses, 1 in request_interests, "
 			"0 in response_interests", unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
-	spin_unlock_bh(rpc->lock);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__signal)
 {
