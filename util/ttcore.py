@@ -83,7 +83,7 @@ if len(sys.argv) > 1:
 
 if len(substrings) == 0:
     substrings = ["mlx processed",
-        "Incoming packet",
+        "homa_pkt_recv: first",
         "homa_ioc_recv finished",
         "homa_ioc_send starting",
         "mlx_xmit starting, id",
