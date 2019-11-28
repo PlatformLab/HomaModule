@@ -41,6 +41,7 @@ else:
 # Scan the old data file (if it exists and build a dictionary of
 # values.
 prev = {}
+deltas = {}
 try:
     f = open(data_file)
 except IOError:
@@ -64,6 +65,10 @@ data = open(data_file, "w")
 time_delta = 0
 total_packets = 0
 gro_packets = 0
+elapsed_secs = 0
+reaper_calls = 0
+pad = ""
+
 for line in f:
     data.write(line)
     match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
@@ -77,25 +82,52 @@ for line in f:
         old = prev[symbol]
     else:
         old = 0
-    if (symbol == "rdtsc_cycles") and (old != 0):
-        time_delta = count - old
+    delta = float(count - old)
+    deltas[symbol] = delta
+    if (symbol == "rdtsc_cycles") and (old != 0) and "cpu_khz" in prev:
+        time_delta = float(count - old)
+        elapsed_secs = time_delta/(prev["cpu_khz"] * 1000.0)
+        pad = pad.ljust(13)
     if old != count:
-        if (symbol == "rdtsc_cycles") and (time_delta != 0) \
-                and "cpu_khz" in prev:
-            print("%-24s %15d (%.1fs) %s" % (symbol, count-old,
-                float(count-old)/(1000.0*prev["cpu_khz"]), doc))
+        rate_info = ""
+        if (time_delta != 0):
+            rate = float(count - old)/elapsed_secs
+            if rate > 1000000:
+                rate_info = "(%5.1f M/s) " % (rate/1000000.0)
+            elif (rate > 1000):
+                rate_info = "(%5.1f K/s) " % (rate/1000.0)
+            else:
+                rate_info = "(%5.1f  /s) " % (rate)
+            rate_info = rate_info.ljust(13)
+        if (symbol == "rdtsc_cycles") and (time_delta != 0):
+            print("%-24s           %5.2f %sCPU clock rate (GHz)" % (
+                  "clock_rate", float(prev["cpu_khz"])/1e06, pad))
+            secs = "(%.1f s)" % (delta/(1000.0*prev["cpu_khz"]))
+            secs = secs.ljust(12)
+            print("%-24s %15d %s %s" % (symbol, count-old, secs, doc))
         elif symbol.endswith("_cycles") and (time_delta != 0):
-            print("%-24s %15d (%.1f%%) %s" % (symbol, count-old,
-                100.0*float(count-old)/float(time_delta), doc))
+            percent = "(%.1f%%)" % (100.0*delta/time_delta)
+            percent = percent.ljust(12)
+            print("%-24s %15d %s %s" % (symbol, count-old, percent, doc))
         else:
-            print("%-24s %15d %s" % (symbol, count-old, doc))
+            print("%-24s %15d %s%s" % (symbol, count-old, rate_info, doc))
             if symbol.startswith("packets_rcvd_"):
                 total_packets += count-old
             if symbol == "pkt_recv_calls":
                 gro_packets = count-old
+        if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
+            print("%-24s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
+                  "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
+        if symbol.endswith("_miss_cycles") and (time_delta != 0):
+            prefix = symbol[:-12]
+            if (prefix + "_misses") in deltas:
+                ns = (delta/deltas[prefix + "_misses"])/(prev["cpu_khz"]
+                        * 1e-06)
+                print("%-24s          %6.1f %sAvg. wait time per %s miss (ns)" % (
+                    prefix + "_miss_delay", ns, pad, prefix))
 if gro_packets != 0:
-    print("%-24s          %6.2f Homa packets per GRO 'packet'" % (
-        "gro_benefit", float(total_packets)/float(gro_packets)))
+    print("%-24s          %6.2f %sHoma packets per GRO 'packet'" % (
+          "gro_benefit", float(total_packets)/float(gro_packets), pad))
 
 f.close()
 data.close()
