@@ -21,7 +21,7 @@ This file describes the synchronization strategy used for Homa.
 * Certain operations are not permitted while holding spinlock, such as memory
   allocation and copying data to/from user space (spinlocks disable
   interrupts, so the holder must not block). RPC locks are spinlocks,
-  and that resulted in awwkard code in several places to move prohibited
+  and that results in awkward code in several places to move prohibited
   operations outside the locked regions. In particular, there is extra
   complexity to make sure that RPCs are not garbage collected while these
   operations are occurring without a lock.

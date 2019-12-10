@@ -116,9 +116,9 @@ TEST_F(homa_socktab, homa_sock_shutdown)
 {
 	struct homa_interest interest1, interest2, interest3;
 	EXPECT_FALSE(self->hsk.shutdown);
-	list_add_tail(&interest1.links, &self->hsk.request_interests);
-	list_add_tail(&interest2.links, &self->hsk.request_interests);
-	list_add_tail(&interest3.links, &self->hsk.response_interests);
+	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
+	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
+	list_add_tail(&interest3.response_links, &self->hsk.response_interests);
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
 	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
@@ -156,9 +156,9 @@ TEST_F(homa_socktab, homa_sock_destroy__wakeup_interests)
 	struct homa_interest interest1, interest2, interest3;
 	struct homa_sock hsk2;
 	mock_sock_init(&hsk2, &self->homa, 0, 0);
-	list_add_tail(&interest1.links, &hsk2.request_interests);
-	list_add_tail(&interest2.links, &hsk2.request_interests);
-	list_add_tail(&interest3.links, &hsk2.response_interests);
+	list_add_tail(&interest1.request_links, &hsk2.request_interests);
+	list_add_tail(&interest2.request_links, &hsk2.request_interests);
+	list_add_tail(&interest3.response_links, &hsk2.response_interests);
 	homa_sock_destroy(&hsk2);
 	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
 		"wake_up_process", unit_log_get());

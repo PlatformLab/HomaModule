@@ -141,21 +141,6 @@ enum homa_packet_type {
  */
 #define HOMA_NUM_PRIORITIES 8
 
-/**
- * homa_next_skb() - Compute address of Homa's private link field in @skb.
- * @skb:     Socket buffer containing private link field.
- * 
- * Homa needs to keep a list of buffers in a message, but it can't use the
- * links built into sk_buffs because Homa wants to retain its list even
- * after sending the packet, and the built-in links get used during sending.
- * Thus we allocate extra space at the very end of the packet's data
- * area to hold a forward pointer for a list.
- */
-static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
-{
-	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char*));
-}
-
 #define sizeof32(type) ((int) (sizeof(type)))
 
 /**
@@ -285,26 +270,6 @@ _Static_assert(((sizeof(struct data_header) - sizeof(struct data_segment))
 		& 0x3) == 0,
 		" data_header length not a multiple of 4 bytes (required "
 		"for TCP/TSO compatibility");
-/**
- * homa_set_doff() - Fills in the doff TCP header field for a Homa packet.
- * @h:   Packet header whose doff field is to be set.
- */
-static inline void homa_set_doff(struct data_header *h)
-{
-	h->common.doff = (sizeof(struct data_header)
-			- sizeof(struct data_segment)) << 2;
-}
-
-/**
- * homa_data_offset() - Returns the offset-within-message of the first
- * byte in a data packet.
- * @skb:  Must contain a valid data packet.
- */
-static inline int homa_data_offset(struct sk_buff *skb)
-{
-	return ntohl(((struct data_header *) skb_transport_header(skb))
-			->seg.offset);
-}
 
 /**
  * struct grant_header - Wire format for GRANT packets, which are sent by
@@ -561,11 +526,31 @@ struct homa_interest {
 	struct task_struct *thread;
 	
 	/**
-	 * @rpc: points to a word containing the address of a suitable RPC,
-	 * or NULL if none has been found yet. There may be multiple interests
-	 * pointing to the same word.
+	 * @id: Id of the RPC that was found, or zero if none. This variable
+	 * is used for synchronization, and must be set after the variables
+	 * below it. This variable and the others below are used later to
+	 * look up and lock the RPC. It isn't safe to pass the RPC itself:
+	 * the locking rules create a window where the RPC could be deleted.
 	 */
-	struct homa_rpc **rpc;
+	atomic_long_t id;
+	
+	/**
+	 * @peer_addr: IP address of the peer for the matching RPC. Valid
+	 * only if @id is nonzero.
+	 */
+	__be32 peer_addr;
+	
+	/**
+	 * @peer_port: Port of the peer for the matching RPC. Valid
+	 * only if @id is nonzero.
+	 */
+	__u16 peer_port;
+	
+	/**
+	 * @is_client: True means that the matching RPC is a client RPC. Valid
+	 * only if @id is nonzero.
+	 */
+	bool is_client;
 	
 	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
@@ -574,10 +559,16 @@ struct homa_interest {
 	struct homa_rpc *reg_rpc;
 	
 	/**
-	 * @links: For linking this object into a list of waiting threads,
-	 * such as &homa_sock.request_interests.
+	 * @req_links: For linking this object into
+	 * &homa_sock.request_interests.
 	 */
-	struct list_head links;
+	struct list_head request_links;
+	
+	/**
+	 * @req_links: For linking this object into
+	 * &homa_sock.request_interests.
+	 */
+	struct list_head response_links;
 };
 
 /**
@@ -790,22 +781,6 @@ struct homa_socktab_links {
 };
 
 /**
- * port_hash() - Hash function for port numbers.
- * @port:   Port number being looked up.
- *
- * Return:  The index of the bucket in which this port will be found (if
- *          it exists.
- */
-static inline int homa_port_hash(__u16 port)
-{
-	/* We can use a really simple hash function here because client
-	 * port numbers are allocated sequentially and server port numbers
-	 * are unpredictable.
-	 */
-	return port & (HOMA_SOCKTAB_BUCKETS - 1);
-}
-
-/**
  * struct homa_socktab_scan - Records the state of an iteration over all
  * the entries in a homa_socktab, in a way that permits RCU-safe deletion
  * of entries.
@@ -971,72 +946,6 @@ struct homa_sock {
 	 */
 	struct homa_rpc_bucket server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
 };
-
-static inline struct homa_sock *homa_sk(const struct sock *sk)
-{
-	return (struct homa_sock *)sk;
-}
-
-/**
- * homa_sock_lock() - Acquire the lock for a socket. If the socket
- * isn't immediately available, record stats on the waiting time.
- * @hsk:   Socket to lock.
- */
-static inline void homa_sock_lock(struct homa_sock *hsk) {
-	if (!spin_trylock_bh(&hsk->lock))
-		homa_sock_lock_slow(hsk);
-}
-
-/**
- * homa_sock_unlock() - Release the lock for a socket.
- * @hsk:   Socket to lock.
- */
-static inline void homa_sock_unlock(struct homa_sock *hsk) {
-	spin_unlock_bh(&hsk->lock);
-}
-
-/**
- * homa_client_rpc_bucket() - Find the bucket containing a given
- * client RPC.
- * @hsk:      Socket associated with the RPC.
- * @id:       Id of the desired RPC.
- * 
- * Return:    The bucket in which this RPC will appear, if the RPC exists.
- */
-static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
-		struct homa_sock *hsk, __u64 id)
-{
-	/* We can use a really simple hash function here because RPC ids
-	 * are allocated sequentially.
-	 */
-	return &hsk->client_rpc_buckets[id & (HOMA_CLIENT_RPC_BUCKETS - 1)];
-}
-
-/**
- * homa_server_rpc_bucket() - Find the bucket containing a given
- * server RPC.
- * @hsk:         Socket associated with the RPC.
- * @id:          Id of the desired RPC.
- * 
- * Return:    The bucket in which this RPC will appear, if the RPC exists.
- */
-static inline struct homa_rpc_bucket *homa_server_rpc_bucket(
-		struct homa_sock *hsk, __u64 id)
-{
-	/* Each client allocates RPC ids sequentially, so they will
-	 * naturally distribute themselves across the hash space.
-	 * Thus we can use the id directly as hash.
-	 */
-	return &hsk->server_rpc_buckets[id & (HOMA_SERVER_RPC_BUCKETS - 1)];
-}
-
-#define homa_bucket_lock(bucket, type)                      \
-	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
-		__u64 start = get_cycles();                 \
-		INC_METRIC(type##_lock_misses, 1);        \
-		spin_lock_bh(&bucket->lock);                \
-		INC_METRIC(type##_lock_miss_cycles, get_cycles() - start); \
-	}
 
 /**
  * define HOMA_PEERTAB_BUCKETS - Number of bits in the bucket index for a
@@ -1627,10 +1536,16 @@ struct homa_metrics {
 	__u64 socket_lock_misses;
 	
 	/**
-	 * @disabled_reaps: total number of times that the reaper exited
-	 * because it was disabled.
+	 * @disabled_reaps: total number of times that the reaper couldn't
+	 * run at all because it was disabled.
 	 */
 	__u64 disabled_reaps;
+	
+	/**
+	 * @disabled_rpc_reaps: total number of times that the reaper skipped
+	 * an RPC because reaping was disabled for that particular RPC
+	 */
+	__u64 disabled_rpc_reaps;
 	
 	/**
 	 * @reaper_runs: total number of times that the reaper was invoked
@@ -1653,6 +1568,141 @@ struct homa_metrics {
 	__u64 temp3;
 	__u64 temp4;
 };
+
+#define homa_bucket_lock(bucket, type)                      \
+	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
+		__u64 start = get_cycles();                 \
+		INC_METRIC(type##_lock_misses, 1);        \
+		spin_lock_bh(&bucket->lock);                \
+		INC_METRIC(type##_lock_miss_cycles, get_cycles() - start); \
+	}
+
+/**
+ * homa_client_rpc_bucket() - Find the bucket containing a given
+ * client RPC.
+ * @hsk:      Socket associated with the RPC.
+ * @id:       Id of the desired RPC.
+ * 
+ * Return:    The bucket in which this RPC will appear, if the RPC exists.
+ */
+static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
+{
+	/* We can use a really simple hash function here because RPC ids
+	 * are allocated sequentially.
+	 */
+	return &hsk->client_rpc_buckets[id & (HOMA_CLIENT_RPC_BUCKETS - 1)];
+}
+
+/**
+ * homa_data_offset() - Returns the offset-within-message of the first
+ * byte in a data packet.
+ * @skb:  Must contain a valid data packet.
+ */
+static inline int homa_data_offset(struct sk_buff *skb)
+{
+	return ntohl(((struct data_header *) skb_transport_header(skb))
+			->seg.offset);
+}
+
+/*
+ * homa_interest_set() - Assign a particular RPC to a particular interest;
+ * this synchronizes with a thread waiting for the RPC.
+ * @interest:  Interest to fill in.
+ * @rpc:       RPC to assign to @interest.
+ */
+inline static void homa_interest_set(struct homa_interest *interest,
+		struct homa_rpc *rpc)
+{
+	interest->peer_addr = rpc->peer->addr;
+	interest->peer_port = rpc->dport;
+	interest->is_client = rpc->is_client;
+	
+	/* Must set last for proper synchronization. */
+	atomic_long_set_release(&interest->id, rpc->id);
+}
+
+/**
+ * homa_next_skb() - Compute address of Homa's private link field in @skb.
+ * @skb:     Socket buffer containing private link field.
+ * 
+ * Homa needs to keep a list of buffers in a message, but it can't use the
+ * links built into sk_buffs because Homa wants to retain its list even
+ * after sending the packet, and the built-in links get used during sending.
+ * Thus we allocate extra space at the very end of the packet's data
+ * area to hold a forward pointer for a list.
+ */
+static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
+{
+	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char*));
+}
+
+/**
+ * port_hash() - Hash function for port numbers.
+ * @port:   Port number being looked up.
+ *
+ * Return:  The index of the bucket in which this port will be found (if
+ *          it exists.
+ */
+static inline int homa_port_hash(__u16 port)
+{
+	/* We can use a really simple hash function here because client
+	 * port numbers are allocated sequentially and server port numbers
+	 * are unpredictable.
+	 */
+	return port & (HOMA_SOCKTAB_BUCKETS - 1);
+}
+
+/**
+ * homa_server_rpc_bucket() - Find the bucket containing a given
+ * server RPC.
+ * @hsk:         Socket associated with the RPC.
+ * @id:          Id of the desired RPC.
+ * 
+ * Return:    The bucket in which this RPC will appear, if the RPC exists.
+ */
+static inline struct homa_rpc_bucket *homa_server_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
+{
+	/* Each client allocates RPC ids sequentially, so they will
+	 * naturally distribute themselves across the hash space.
+	 * Thus we can use the id directly as hash.
+	 */
+	return &hsk->server_rpc_buckets[id & (HOMA_SERVER_RPC_BUCKETS - 1)];
+}
+
+/**
+ * homa_set_doff() - Fills in the doff TCP header field for a Homa packet.
+ * @h:   Packet header whose doff field is to be set.
+ */
+static inline void homa_set_doff(struct data_header *h)
+{
+	h->common.doff = (sizeof(struct data_header)
+			- sizeof(struct data_segment)) << 2;
+}
+
+static inline struct homa_sock *homa_sk(const struct sock *sk)
+{
+	return (struct homa_sock *)sk;
+}
+
+/**
+ * homa_sock_lock() - Acquire the lock for a socket. If the socket
+ * isn't immediately available, record stats on the waiting time.
+ * @hsk:   Socket to lock.
+ */
+static inline void homa_sock_lock(struct homa_sock *hsk) {
+	if (!spin_trylock_bh(&hsk->lock))
+		homa_sock_lock_slow(hsk);
+}
+
+/**
+ * homa_sock_unlock() - Release the lock for a socket.
+ * @hsk:   Socket to lock.
+ */
+static inline void homa_sock_unlock(struct homa_sock *hsk) {
+	spin_unlock_bh(&hsk->lock);
+}
 
 #define INC_METRIC(metric, count) \
 		(homa_metrics[smp_processor_id()]->metric) += (count)
@@ -1810,8 +1860,9 @@ extern int      homa_unsched_priority(struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void     homa_validate_grantable_list(struct homa *homa, char *message);
-extern int      homa_wait_for_message(struct homa_sock *hsk, int flags,
-			__u64 id, struct homa_rpc **rpc);
+extern struct homa_rpc
+	       *homa_wait_for_message(struct homa_sock *hsk, int flags,
+			__u64 id);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,

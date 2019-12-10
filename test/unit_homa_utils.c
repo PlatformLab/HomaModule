@@ -257,7 +257,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 1000, 100);
-	interest.rpc = NULL;
+	atomic_long_set(&interest.id, 0);
 	interest.reg_rpc = crpc;
 	crpc->interest = &interest;
 	unit_log_clear();

@@ -497,8 +497,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		err = -ESHUTDOWN;
 		goto error;
 	}
-	err = homa_wait_for_message(hsk, args.flags, args.id, &rpc);
-	if (err != 0) {
+	rpc = homa_wait_for_message(hsk, args.flags, args.id);
+	if (IS_ERR(rpc)) {
+		err = PTR_ERR(rpc);
 		rpc = NULL;
 		goto error;
 	}

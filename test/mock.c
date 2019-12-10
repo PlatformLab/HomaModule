@@ -583,6 +583,9 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 {
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
+	if (mock_spin_lock_hook) {
+		mock_spin_lock_hook();
+	}
 	mock_active_locks++;
 	return 1;
 }
@@ -1008,11 +1011,11 @@ void mock_teardown(void)
 	unit_hash_free(vmallocs_in_use);
 	vmallocs_in_use = NULL;
 	
-	if (mock_active_locks > 0)
+	if (mock_active_locks != 0)
 		FAIL(" %d locks still locked after test", mock_active_locks);
 	mock_active_locks = 0;
 	
-	if (mock_active_rcu_locks > 0)
+	if (mock_active_rcu_locks != 0)
 		FAIL(" %d rcu_read_locks still active after test",
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;

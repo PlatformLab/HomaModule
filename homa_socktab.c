@@ -188,9 +188,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		hlist_del_rcu(&hsk->server_links.hash_links);
 	mutex_unlock(&hsk->homa->port_map.write_lock);
 	
-	list_for_each_entry(interest, &hsk->request_interests, links)
+	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
-	list_for_each_entry(interest, &hsk->response_interests, links)
+	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
 	
@@ -286,7 +286,9 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 void homa_sock_lock_slow(struct homa_sock *hsk)
 {
 	__u64 start = get_cycles();
+	tt_record("beginning wait for socket lock");
 	spin_lock_bh(&hsk->lock);
+	tt_record("ending wait for socket lock");
 	INC_METRIC(socket_lock_misses, 1);
 	INC_METRIC(socket_lock_miss_cycles, get_cycles() - start);
 }

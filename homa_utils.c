@@ -407,7 +407,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 			hsk->dead_skbs, instance, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 		if (rpc->dont_reap) {
-			INC_METRIC(disabled_reaps, 1);
+			INC_METRIC(disabled_rpc_reaps, 1);
 			continue;
 		}
 		if (rpc->msgout.length >= 0) {
@@ -884,6 +884,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->socket_lock_misses += cm->socket_lock_misses;
 		m->socket_lock_miss_cycles += cm->socket_lock_miss_cycles;
 		m->disabled_reaps += cm->disabled_reaps;
+		m->disabled_rpc_reaps += cm->disabled_rpc_reaps;
 		m->reaper_calls += cm->reaper_calls;
 		m->reaper_dead_skbs += cm->reaper_dead_skbs;
 		m->temp1 += cm->temp1;
@@ -1115,6 +1116,10 @@ char *homa_print_metrics(struct homa *homa)
 			"disabled_reaps         %15llu  "
 			"Reaper invocations that were disabled\n",
 			m.disabled_reaps);
+	homa_append_metric(homa,
+			"disabled_rpc_reaps     %15llu  "
+			"Disabled RPCs skipped by reaper\n",
+			m.disabled_rpc_reaps);
 	homa_append_metric(homa,
 			"reaper_calls           %15llu  "
 			"Reaper invocations that were not disabled\n",
