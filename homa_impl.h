@@ -672,7 +672,8 @@ struct homa_rpc {
 	
 	/**
 	 * @active_links: For linking this object into @hsk->active_rpcs.
-	 * Access with RCU.
+	 * The next field will be LIST_POISON1 if this RPC hasn't yet been
+	 * linked into @hsk->active_rpcs. Access with RCU.
 	 */
 	struct list_head active_links;
 	
@@ -1823,7 +1824,7 @@ extern struct homa_rpc
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
-extern void     homa_rpc_ready(struct homa_rpc *rpc);
+extern void     homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock);
 extern int      homa_rpc_reap(struct homa_sock *hsk);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,

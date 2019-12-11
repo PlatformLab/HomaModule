@@ -249,7 +249,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
-
+	
 	/* Find and lock the RPC for this packet. */
 	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
@@ -266,7 +266,6 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 				rpc = NULL;
 				goto discard;
 			}
-			INC_METRIC(requests_received, 1);
 		} else
 			rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
 					ntohs(h->sport), h->id);
@@ -377,8 +376,23 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	homa_add_packet(&rpc->msgin, skb);
 	if (rpc->msgin.scheduled)
 		homa_manage_grants(homa, rpc);
-	if (rpc->msgin.bytes_remaining == 0)
-		homa_rpc_ready(rpc);
+	if (rpc->active_links.next == LIST_POISON1) {
+		/* This is the first packet of a server RPC, so we have to
+		 * add the RPC to @hsk->active_rpcs. We do it here, rather
+		 * than in homa_rpc_new_server, so we can acquire the socket
+		 * lock just once to both add the RPC to active_rpcs and
+		 * also add the RPC to the ready list, if appropriate.
+		 */
+		INC_METRIC(requests_received, 1);
+		homa_sock_lock(rpc->hsk);
+		list_add_tail_rcu(&rpc->active_links, &rpc->hsk->active_rpcs);
+		if (rpc->msgin.bytes_remaining == 0)
+			homa_rpc_ready(rpc, true);
+		homa_sock_unlock(rpc->hsk);
+	} else {
+		if (rpc->msgin.bytes_remaining == 0)
+			homa_rpc_ready(rpc, false);
+	}
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
 		 * to resend CUTOFFS packets if one gets lost, but we don't
@@ -710,7 +724,7 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 {
 	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
-	homa_rpc_ready(crpc);
+	homa_rpc_ready(crpc, false);
 }
 
 /**
@@ -1028,13 +1042,17 @@ done:
  * @homa_rpc_ready: This function is called when the input message for
  * an RPC becomes complete. It marks the RPC as READY and either notifies
  * a waiting reader or queues the RPC.
- * @rpc:  RPC that now has a complete input message; must be locked.
+ * @rpc:                RPC that now has a complete input message;
+ *                      must be locked.
+ * @caller_locked_sock: True means the caller has already acquired the
+ *                      socket lock; otherwise we'll lock it here (and
+ *                      unlock when we're done).
  */
-void homa_rpc_ready(struct homa_rpc *rpc)
+void homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock)
 {
 	struct homa_interest *interest;
 	struct sock *sk;
-	int locked = 0;
+	bool sock_locked = caller_locked_sock;
 	
 	rpc->state = RPC_READY;
 	
@@ -1048,8 +1066,10 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	}
 	
 	/* Second, check the interest list for this type of RPC. */
-	homa_sock_lock(rpc->hsk);
-	locked = 1;
+	if (!sock_locked) {
+		homa_sock_lock(rpc->hsk);
+		sock_locked = true;
+	}
 	if (rpc->is_client) {
 		interest = list_first_entry_or_null(
 				&rpc->hsk->response_interests,
@@ -1069,7 +1089,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	/* If we get here, no-one is waiting for the RPC, so it has been
 	 * queued.
 	 */
-	homa_sock_unlock(rpc->hsk);
+	if (sock_locked && !caller_locked_sock)
+		homa_sock_unlock(rpc->hsk);
 	
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;
@@ -1087,22 +1108,22 @@ handoff:
 		interest->reg_rpc = NULL;
 	}
 	if (interest->request_links.next != LIST_POISON1) {
-		if (!locked) {
+		if (!sock_locked) {
 			homa_sock_lock(rpc->hsk);
-			locked = 1;
+			sock_locked = true;
 		}
 		list_del(&interest->request_links);
 		interest->request_links.next = LIST_POISON1;
 	}
 	if (interest->response_links.next != LIST_POISON1) {
-		if (!locked) {
+		if (!sock_locked) {
 			homa_sock_lock(rpc->hsk);
-			locked = 1;
+			sock_locked = true;
 		}
 		list_del(&interest->response_links);
 		interest->response_links.next = LIST_POISON1;
 	}
-	if (locked)
+	if (sock_locked && !caller_locked_sock)
 		homa_sock_unlock(rpc->hsk);
 	wake_up_process(interest->thread);
 }

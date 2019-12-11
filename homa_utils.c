@@ -238,6 +238,8 @@ error:
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
  *          to h, then it is returned instead of creating a new RPC.
+ *          If a new RPC is created, it is not yet linked into
+ *          @hsk->active_rpcs.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		__be32 source, struct data_header *h)
@@ -286,18 +288,15 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 			ntohl(h->incoming));
 	srpc->msgout.length = -1;
 	srpc->msgout.num_skbs = 0;
+	srpc->active_links.next = LIST_POISON1;
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
 	srpc->num_resends = 0;
-	
-	/* Initialize fields that require the socket lock. */
-	homa_sock_lock(hsk);
+
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
-	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
-	homa_sock_unlock(hsk);
 	return srpc;
 
 error:

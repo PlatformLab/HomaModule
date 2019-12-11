@@ -1,6 +1,25 @@
 This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.
 
+* The socket lock is a throughput bottleneck when a multi-threaded server
+  is receiving large numbers of small requests. One problem was that the
+  lock was being acquired twice while processing a single-packet incoming
+  request: once during RPC initialization to add the RPC to active_rpcs,
+  and again later to add dispatch the RPC to a server thread. Restructured
+  the code to do both of these with a single lock acquisition. Also
+  cleaned up homa_wait_for_message to reduce the number of times it
+  acquires socket locks. This produced the following improvements, measured
+  with one server (--port_threads 8) and 3 clients (--workload 100 --alt_client
+  --client_threads 20):
+  * Throughput increased from 650 kops/sec to 760
+  * socket_lock_miss_cycles dropped from 318% to 193%
+  * server_lock_miss_cycles dropped from 1.4% to 0.7%
+
+* Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
+                    1 server thread  18 threads  TCP, 1 thread  TCP, 18 threads
+No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
+RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
+
 * It's better to queue a waiting thread at the *front* of the list, rather
   than the rear (if there is a pool of server threads but not enough load
   to keep them all busy, it's better to reuse a few threads rather than
@@ -44,9 +63,4 @@ of the Homa Linux kernel module.
   However, with RPS, packets can get spread out over too many cores, which
   causes poor latency when there is a single client and the server is
   underloaded.
-
-* Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
-                    1 server thread  18 threads  TCP, 1 thread  TCP, 18 threads
-No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
-RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 

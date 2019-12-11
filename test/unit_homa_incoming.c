@@ -28,7 +28,7 @@ struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
 void ready_hook(void)
 {
-	homa_rpc_ready(hook_rpc);
+	homa_rpc_ready(hook_rpc, false);
 	unit_log_printf("; ",
 			"%d in ready_requests, %d in ready_responses, "
 			"%d in request_interests, %d in response_interests",
@@ -514,6 +514,36 @@ TEST_F(homa_incoming, homa_data_pkt__send_grant)
 	EXPECT_NE(NULL, srpc);
 	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
 	EXPECT_EQ(11400, srpc->msgin.incoming);
+}
+TEST_F(homa_incoming, homa_data_pkt__short_server_rpc_ready)
+{
+	self->data.message_length = htonl(100);
+	self->data.incoming = htonl(100);
+	self->data.seg.segment_length = htonl(100);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			100, 0), srpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	homa_rpc_unlock(srpc);
+}
+TEST_F(homa_incoming, homa_data_pkt__long_server_rpc_ready)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 2000, 1000);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	self->data.message_length = htonl(2000);
+	self->data.incoming = htonl(600);
+	self->data.seg.offset = htonl(1400);
+	self->data.seg.segment_length = htonl(600);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 1400), srpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {
@@ -1440,7 +1470,7 @@ TEST_F(homa_incoming, homa_rpc_ready__interest_on_rpc)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	crpc->interest = &interest;
-	homa_rpc_ready(crpc);
+	homa_rpc_ready(crpc, false);
 	crpc->interest = NULL;
 	EXPECT_EQ(crpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(NULL, interest.reg_rpc);
@@ -1462,7 +1492,7 @@ TEST_F(homa_incoming, homa_rpc_ready__response_interests)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	list_add_tail(&interest.response_links, &self->hsk.response_interests);
-	homa_rpc_ready(crpc);
+	homa_rpc_ready(crpc, false);
 	EXPECT_EQ(crpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
 	EXPECT_STREQ("wake_up_process", unit_log_get());
@@ -1475,7 +1505,7 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_responses)
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 	
-	homa_rpc_ready(crpc);
+	homa_rpc_ready(crpc, false);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 }
@@ -1493,7 +1523,7 @@ TEST_F(homa_incoming, homa_rpc_ready__request_interests)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	list_add_tail(&interest.request_links, &self->hsk.request_interests);
-	homa_rpc_ready(srpc);
+	homa_rpc_ready(srpc, false);
 	EXPECT_EQ(srpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	EXPECT_STREQ("wake_up_process", unit_log_get());
@@ -1506,7 +1536,7 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_requests)
 	EXPECT_NE(NULL, srpc);
 	unit_log_clear();
 	
-	homa_rpc_ready(srpc);
+	homa_rpc_ready(srpc, false);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }

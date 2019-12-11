@@ -154,17 +154,26 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 	struct homa_rpc *srpc1 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc1));
+	if (srpc1->active_links.next == LIST_POISON1)
+		list_add_tail_rcu(&srpc1->active_links,
+				&srpc1->hsk->active_rpcs);
 	homa_rpc_unlock(srpc1);
 	self->data.common.id += HOMA_SERVER_RPC_BUCKETS;
 	struct homa_rpc *srpc2 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc2));
+	if (srpc2->active_links.next == LIST_POISON1)
+		list_add_tail_rcu(&srpc2->active_links,
+				&srpc2->hsk->active_rpcs);
 	homa_rpc_unlock(srpc2);
 	EXPECT_NE(srpc2, srpc1);
 	self->data.common.id -= HOMA_SERVER_RPC_BUCKETS;
 	struct homa_rpc *srpc3 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc3));
+	if (srpc3->active_links.next == LIST_POISON1)
+		list_add_tail_rcu(&srpc3->active_links,
+				&srpc3->hsk->active_rpcs);
 	homa_rpc_unlock(srpc3);
 	EXPECT_EQ(srpc3, srpc1);
 }
@@ -195,6 +204,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc));
+	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
 	homa_rpc_unlock(srpc);
 	
 	EXPECT_EQ(0, unit_get_metrics()->client_lock_misses);
