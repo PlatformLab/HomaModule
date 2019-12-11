@@ -1824,7 +1824,7 @@ extern struct homa_rpc
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
 			struct data_header *h);
-extern void     homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock);
+extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_rpc_reap(struct homa_sock *hsk);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,

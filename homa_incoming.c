@@ -387,11 +387,14 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_sock_lock(rpc->hsk);
 		list_add_tail_rcu(&rpc->active_links, &rpc->hsk->active_rpcs);
 		if (rpc->msgin.bytes_remaining == 0)
-			homa_rpc_ready(rpc, true);
+			homa_rpc_ready(rpc);
 		homa_sock_unlock(rpc->hsk);
 	} else {
-		if (rpc->msgin.bytes_remaining == 0)
-			homa_rpc_ready(rpc, false);
+		if (rpc->msgin.bytes_remaining == 0) {
+			homa_sock_lock(rpc->hsk);
+			homa_rpc_ready(rpc);
+			homa_sock_unlock(rpc->hsk);
+		}
 	}
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
@@ -724,7 +727,9 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 {
 	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
-	homa_rpc_ready(crpc, false);
+	homa_sock_lock(crpc->hsk);
+	homa_rpc_ready(crpc);
+	homa_sock_unlock(crpc->hsk);
 }
 
 /**
@@ -1043,22 +1048,17 @@ done:
  * an RPC becomes complete. It marks the RPC as READY and either notifies
  * a waiting reader or queues the RPC.
  * @rpc:                RPC that now has a complete input message;
- *                      must be locked.
- * @caller_locked_sock: True means the caller has already acquired the
- *                      socket lock; otherwise we'll lock it here (and
- *                      unlock when we're done).
+ *                      must be locked. The caller must also have
+ *                      locked the socket this RPC.
  */
-void homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock)
+void homa_rpc_ready(struct homa_rpc *rpc)
 {
 	struct homa_interest *interest;
 	struct sock *sk;
-	bool sock_locked = caller_locked_sock;
 	
 	rpc->state = RPC_READY;
 	
 	/* First, see if someone is interested in this RPC specifically.
-	 * We don't need to lock the socket here; the RPC lock provides
-	 * sufficient protection from races.
 	 */
 	if (rpc->interest) {
 		interest = rpc->interest;
@@ -1066,10 +1066,6 @@ void homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock)
 	}
 	
 	/* Second, check the interest list for this type of RPC. */
-	if (!sock_locked) {
-		homa_sock_lock(rpc->hsk);
-		sock_locked = true;
-	}
 	if (rpc->is_client) {
 		interest = list_first_entry_or_null(
 				&rpc->hsk->response_interests,
@@ -1089,8 +1085,6 @@ void homa_rpc_ready(struct homa_rpc *rpc, bool caller_locked_sock)
 	/* If we get here, no-one is waiting for the RPC, so it has been
 	 * queued.
 	 */
-	if (sock_locked && !caller_locked_sock)
-		homa_sock_unlock(rpc->hsk);
 	
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;
@@ -1108,22 +1102,12 @@ handoff:
 		interest->reg_rpc = NULL;
 	}
 	if (interest->request_links.next != LIST_POISON1) {
-		if (!sock_locked) {
-			homa_sock_lock(rpc->hsk);
-			sock_locked = true;
-		}
 		list_del(&interest->request_links);
 		interest->request_links.next = LIST_POISON1;
 	}
 	if (interest->response_links.next != LIST_POISON1) {
-		if (!sock_locked) {
-			homa_sock_lock(rpc->hsk);
-			sock_locked = true;
-		}
 		list_del(&interest->response_links);
 		interest->response_links.next = LIST_POISON1;
 	}
-	if (sock_locked && !caller_locked_sock)
-		homa_sock_unlock(rpc->hsk);
 	wake_up_process(interest->thread);
 }

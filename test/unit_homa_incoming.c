@@ -28,7 +28,7 @@ struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
 void ready_hook(void)
 {
-	homa_rpc_ready(hook_rpc, false);
+	homa_rpc_ready(hook_rpc);
 	unit_log_printf("; ",
 			"%d in ready_requests, %d in ready_responses, "
 			"%d in request_interests, %d in response_interests",
@@ -1470,7 +1470,7 @@ TEST_F(homa_incoming, homa_rpc_ready__interest_on_rpc)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	crpc->interest = &interest;
-	homa_rpc_ready(crpc, false);
+	homa_rpc_ready(crpc);
 	crpc->interest = NULL;
 	EXPECT_EQ(crpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(NULL, interest.reg_rpc);
@@ -1492,7 +1492,7 @@ TEST_F(homa_incoming, homa_rpc_ready__response_interests)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	list_add_tail(&interest.response_links, &self->hsk.response_interests);
-	homa_rpc_ready(crpc, false);
+	homa_rpc_ready(crpc);
 	EXPECT_EQ(crpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
 	EXPECT_STREQ("wake_up_process", unit_log_get());
@@ -1505,7 +1505,7 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_responses)
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 	
-	homa_rpc_ready(crpc, false);
+	homa_rpc_ready(crpc);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 }
@@ -1523,7 +1523,7 @@ TEST_F(homa_incoming, homa_rpc_ready__request_interests)
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
 	list_add_tail(&interest.request_links, &self->hsk.request_interests);
-	homa_rpc_ready(srpc, false);
+	homa_rpc_ready(srpc);
 	EXPECT_EQ(srpc->id, atomic_long_read(&interest.id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	EXPECT_STREQ("wake_up_process", unit_log_get());
@@ -1536,7 +1536,7 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_requests)
 	EXPECT_NE(NULL, srpc);
 	unit_log_clear();
 	
-	homa_rpc_ready(srpc, false);
+	homa_rpc_ready(srpc);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
