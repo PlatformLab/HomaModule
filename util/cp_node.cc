@@ -781,7 +781,6 @@ client::client()
 		printf("Invalid workload '%s'\n", workload);
 		exit(1);
 	}
-	request_lengths.push_back(100);
 	request_intervals.push_back(0);
 	requests.resize(server_addrs.size());
 	responses.resize(server_addrs.size());
@@ -911,6 +910,11 @@ void homa_client::sender()
 		}
 		requests[server]++;
 		total_requests++;
+		if (request_lengths[next_length] == 100) {
+			printf("Sent message with 100 bytes, next_length %d, "
+					" size %lu\n",
+					next_length, request_lengths.size());
+		}
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
