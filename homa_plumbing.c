@@ -509,11 +509,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 * even without holding its lock.
 	 */
 	rpc->dont_reap = true;
-	if (rpc->is_client) {
+	if (rpc->is_client)
 		homa_rpc_free(rpc);
-	} else {
+	else
 		rpc->state = RPC_IN_SERVICE;
-	}
 	homa_rpc_unlock(rpc);
 	
 	args.id = rpc->id;

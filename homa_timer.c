@@ -194,8 +194,14 @@ void homa_timer(struct homa *homa)
 			}
 			rpc->silent_ticks++;
 			if (rpc->silent_ticks >= homa->resend_ticks) {
-				if (homa_check_timeout(rpc))
+				if (homa_check_timeout(rpc)) {
+					tt_record4("rpc timed out: peer 0x%x, "
+							"port %d, id %d, state %d",
+							rpc->peer->addr,
+							rpc->dport, rpc->id,
+							rpc->state);
 					dead_peer = rpc->peer;
+				}
 			}
 			homa_rpc_unlock(rpc);
 		}

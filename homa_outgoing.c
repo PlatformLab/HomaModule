@@ -672,49 +672,49 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
  */
 int homa_pacer_main(void *transportInfo)
 {
-	cycles_t start, now;
+	cycles_t start;
 	struct homa *homa = (struct homa *) transportInfo;
 	
-	start = get_cycles();
 	while (1) {
 		if (homa->pacer_exit) {
 			break;
 		}
 		
-		/* Sleep this thread if the throttled list is empty. */
+		start = get_cycles();
+		homa_pacer_xmit(homa);
+		INC_METRIC(pacer_cycles, get_cycles() - start);
+		
+		/* Sleep this thread if the throttled list is empty. Even
+		 * if the throttled list isn't empty, call the scheduler
+		 * to give other processes a chance to run (if we don't,
+		 * softirq handlers can get locked out, which prevents
+		 * incoming packets from being handled).
+		 */
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
-				struct homa_rpc, throttled_links) == NULL) {
+				struct homa_rpc, throttled_links) == NULL)
 			tt_record("pacer sleeping");
-			INC_METRIC(pacer_cycles, get_cycles() - start);
-			schedule();
-			start = get_cycles();
-			tt_record("pacer woke up");
-			continue;
-		}
+		else
+			__set_current_state(TASK_RUNNING);
+		INC_METRIC(pacer_cycles, get_cycles() - start);
+		schedule();
 		__set_current_state(TASK_RUNNING);
-		
-		homa_pacer_xmit(homa);
-		now = get_cycles();
-		INC_METRIC(pacer_cycles, now - start);
-		start = now;
 	}
 	do_exit(0);
 	return 0;
 }
 
 /**
- * homa_pacer_xmit() - Transmit as many packets as possible from
- * the throttled list. Note: this function may be invoked from either
- * process context or softirq (BH) level. This function is invoked from
- * multiple places, not just in the pacer thread. The reason for this is
- * that (as of 10/2019) Linux's scheduling of the pacer thread is
- * unpredictable: the thread may block for long periods of time (e.g., because
- * it is assigned to the same CPU as a busy interrupt handler). This can
- * result in poor utilization of the network link. So, this method gets
- * invoked from other places as well, to increase the likelihood that we keep
- * the link busy. Those other invocations are not guaranteed to happen, so
- * the pacer thread provides a backstop.
+ * homa_pacer_xmit() - Transmit packets from  the throttled list. Note:
+ * this function may be invoked from either process context or softirq (BH)
+ * level. This function is invoked from multiple places, not just in the
+ * pacer thread. The reason for this is that (as of 10/2019) Linux's scheduling
+ * of the pacer thread is unpredictable: the thread may block for long periods
+ * of time (e.g., because it is assigned to the same CPU as a busy interrupt
+ * handler). This can result in poor utilization of the network link. So,
+ * this method gets invoked from other places as well, to increase the
+ * likelihood that we keep the link busy. Those other invocations are not
+ * guaranteed to happen, so the pacer thread provides a backstop.
  * @homa:    Overall data about the Homa protocol implementation.
  */
 void homa_pacer_xmit(struct homa *homa)
@@ -723,18 +723,20 @@ void homa_pacer_xmit(struct homa *homa)
         int i;
 	static __u64 gap_start = 0;
 	
+	if (gap_start == 0)
+		gap_start = get_cycles();
+	
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
-	if (gap_start == 0)
-		gap_start = get_cycles();
-	local_bh_disable();
 	if (atomic_cmpxchg(&homa->pacer_active, 0, 1) != 0)
-		goto done;
+		return;
 	
 	/* Each iteration through the following loop makes one attempt
 	 * at sending packets. We limit the number of passes through this
-	 * loop in order to cap the time that interrupts are disabled.
+	 * loop in order to cap the time spend in one call to this function
+	 * (see note in homa_pacer_main about interfering with softirq
+	 * handlers).
 	 */
 	for (i = 0; i < 5; i++) {
 		__s64 backlog = (__s64) (atomic64_read(&homa->link_idle_time)
@@ -751,7 +753,11 @@ void homa_pacer_xmit(struct homa *homa)
 		spin_lock_bh(&homa->throttle_lock);
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links);
-		if ((rpc == NULL) || !(spin_trylock_bh(rpc->lock))) {
+		if (rpc == NULL) {
+			spin_unlock_bh(&homa->throttle_lock);
+			break;
+		}
+		if (!(spin_trylock_bh(rpc->lock))) {
 			spin_unlock_bh(&homa->throttle_lock);
 			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
@@ -796,9 +802,6 @@ void homa_pacer_xmit(struct homa *homa)
 		homa_rpc_unlock(rpc);
 	}
 	atomic_set(&homa->pacer_active, 0);
-	
-done:
-	local_bh_enable();
 }
 
 /**
