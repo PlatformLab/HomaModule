@@ -1181,46 +1181,36 @@ TEST_F(homa_incoming, homa_peer_abort__multiple_sockets)
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 5000, 1600);
-	struct homa_rpc *srpc1, *srpc2;
+	struct homa_rpc *crpc2, *crpc3;
 	mock_sock_init(&hsk1, &self->homa, 0, self->server_port);
 	mock_sock_init(&hsk2, &self->homa, 0, self->server_port+1);
-	srpc1 = unit_server_rpc(&hsk1, RPC_INCOMING,
-			self->server_ip, self->client_ip, self->client_port,
-			self->rpcid+3, 10000, 100);
-	srpc2 = unit_server_rpc(&hsk1, RPC_INCOMING,
-			self->server_ip, self->client_ip, self->client_port,
-			self->rpcid+4, 5000, 100);
+	crpc2 = unit_client_rpc(&hsk1, RPC_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid+3,
+			5000, 1600);
+	crpc3 = unit_client_rpc(&hsk1, RPC_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid+4,
+			5000, 1600);
 	unit_log_clear();
 	homa_peer_abort(&self->homa, self->server_ip, -EPROTONOSUPPORT);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(RPC_READY, crpc1->state);
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
-	EXPECT_EQ(RPC_DEAD, srpc1->state);
-	EXPECT_EQ(RPC_DEAD, srpc2->state);
-	EXPECT_EQ(0, unit_list_length(&hsk1.active_rpcs));
-	EXPECT_EQ(2, unit_list_length(&hsk1.dead_rpcs));
+	EXPECT_EQ(RPC_READY, crpc2->state);
+	EXPECT_EQ(EPROTONOSUPPORT, -crpc2->error);
+	EXPECT_EQ(RPC_READY, crpc3->state);
+	EXPECT_EQ(2, unit_list_length(&hsk1.active_rpcs));
+	EXPECT_EQ(2, unit_list_length(&hsk1.ready_responses));
 }
 TEST_F(homa_incoming, homa_peer_abort__log_timeout_stats)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 5000, 1600);
-	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING,
-			self->server_ip, self->client_ip, self->client_port,
-			self->rpcid+3, 10000, 100);
-	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING,
-			self->server_ip, self->client_ip, self->client_port,
-			self->rpcid+4, 5000, 100);
 	unit_log_clear();
 	homa_peer_abort(&self->homa, self->server_ip, -ETIMEDOUT);
 	EXPECT_EQ(RPC_READY, crpc1->state);
 	EXPECT_EQ(ETIMEDOUT, -crpc1->error);
-	EXPECT_EQ(RPC_DEAD, srpc1->state);
-	EXPECT_EQ(RPC_DEAD, srpc2->state);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
-	EXPECT_EQ(2, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_EQ(1, unit_get_metrics()->client_rpc_timeouts);
-	EXPECT_EQ(2, unit_get_metrics()->server_rpc_timeouts);
 }
 
 TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)

@@ -196,11 +196,24 @@ void homa_timer(struct homa *homa)
 			if (rpc->silent_ticks >= homa->resend_ticks) {
 				if (homa_check_timeout(rpc)) {
 					tt_record4("rpc timed out: peer 0x%x, "
-							"port %d, id %d, state %d",
+							"port %d, id %d,"
+							"state %d",
 							rpc->peer->addr,
 							rpc->dport, rpc->id,
 							rpc->state);
-					dead_peer = rpc->peer;
+					if (rpc->is_client)
+						dead_peer = rpc->peer;
+					else {
+						INC_METRIC(server_rpc_timeouts, 1);
+						if (rpc->hsk->homa->verbose)
+							printk(KERN_NOTICE "Homa server "
+								"RPC timeout, client "
+								"%s:%d, id %llu",
+								homa_print_ipv4_addr(
+									rpc->peer->addr),
+								rpc->dport, rpc->id);
+						homa_rpc_free(rpc);
+					}
 				}
 			}
 			homa_rpc_unlock(rpc);

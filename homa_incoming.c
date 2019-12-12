@@ -733,7 +733,7 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
- * homa_peer_abort() - Abort all outstanding RPCs to/from a particular host.
+ * homa_peer_abort() - Abort all client RPCs to a particular host.
  * @homa:    Overall data about the Homa protocol implementation.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
@@ -768,18 +768,6 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 				if (error == -ETIMEDOUT)
 					INC_METRIC(client_rpc_timeouts, 1);
 				homa_rpc_abort(rpc, error);
-			} else {
-				if (error == -ETIMEDOUT) {
-					INC_METRIC(server_rpc_timeouts, 1);
-					if (rpc->hsk->homa->verbose)
-						printk(KERN_NOTICE "Homa server "
-							"RPC timeout, client "
-							"%s:%d, id %llu",
-							homa_print_ipv4_addr(
-								rpc->peer->addr),
-							rpc->dport, rpc->id);
-				}
-				homa_rpc_free(rpc);
 			}
 			homa_rpc_unlock(rpc);
 		}
