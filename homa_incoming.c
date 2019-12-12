@@ -1020,23 +1020,22 @@ lock_rpc:
 
 done:
 	/* Note: if we went to sleep, then this info was already cleaned
-	 * up by whoever woke us up.
+	 * up by whoever woke us up. Also, values in the interest may
+	 * change between when we test them below and when we acquire
+	 * the socket lock.
 	 */
-	if (interest.reg_rpc)
-		interest.reg_rpc->interest = NULL;
-	if (interest.request_links.next != LIST_POISON1) {
+	if ((interest.reg_rpc) || (interest.request_links.next != LIST_POISON1)
+			|| (interest.response_links.next != LIST_POISON1)) {
 		if (!sock_locked) {
 			homa_sock_lock(hsk);
 			sock_locked = 1;
 		}
-		list_del(&interest.request_links);
-	}
-	if (interest.response_links.next != LIST_POISON1) {
-		if (!sock_locked) {
-			homa_sock_lock(hsk);
-			sock_locked = 1;
-		}
-		list_del(&interest.response_links);
+		if (interest.reg_rpc)
+			interest.reg_rpc->interest = NULL;
+		if (interest.request_links.next != LIST_POISON1)
+			list_del(&interest.request_links);
+		if (interest.response_links.next != LIST_POISON1)
+			list_del(&interest.response_links);
 	}
 	if (sock_locked)
 		homa_sock_unlock(hsk);
