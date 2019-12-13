@@ -41,7 +41,7 @@ FIXTURE_SETUP(homa_offload)
 			.segment_length = htonl(1400)}};
 	skb = mock_skb_new(self->ip, &self->header.common, 3000,
 			self->header.seg.offset);
-	NAPI_GRO_CB(skb)->same_flow = 1;
+	NAPI_GRO_CB(skb)->same_flow = 0;
 	NAPI_GRO_CB(skb)->data_offset = sizeof32(struct data_header);
 	NAPI_GRO_CB(skb)->last = skb;
         self->header.seg.offset = htonl(4000);
@@ -77,20 +77,6 @@ TEST_F(homa_offload, homa_gro_receive__header_too_short)
 	EXPECT_STREQ("no header", unit_log_get());
 	flush = NAPI_GRO_CB(skb)->flush;
 	EXPECT_EQ(1, flush);
-	kfree_skb(skb);
-}
-TEST_F(homa_offload, homa_gro_receive__dport_doesnt_match)
-{
-	struct sk_buff *skb;
-	int same_flow;
-	self->header.seg.offset = htonl(6000);
-	self->header.common.dport += 1;
-	skb = mock_skb_new(self->ip, &self->header.common, 1400, 0);
-	homa_gro_receive(&self->gro_list, skb);
-	NAPI_GRO_CB(skb)->same_flow = 0;
-	EXPECT_STREQ("", unit_log_get());
-	same_flow = NAPI_GRO_CB(skb)->same_flow;
-	EXPECT_EQ(0, same_flow);
 	kfree_skb(skb);
 }
 TEST_F(homa_offload, homa_gro_receive__append)

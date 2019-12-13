@@ -106,10 +106,10 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 
 		h_held = (struct common_header *) skb_transport_header(held_skb);
 
-		if (h_new->dport != h_held->dport) {
-			NAPI_GRO_CB(held_skb)->same_flow = 0;
-			continue;
-		}
+		/* Note: Homa will aggregate packets from different RPCs
+		 * and different ports in order to maximize the benefits
+	         * of GRO.
+	         */
 		
 		/* Aggregate skb into held_skb. We don't update the length of
 		 * held_skb, because we'll eventually split it up and process
