@@ -98,27 +98,11 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		}
 	}
 	
-	/* Set the hash for the skb, which will be used for RPS (the default
-	 * hash doesn't understand Homa, so it doesn't include port #'s,
-	 * which results in worse load-balancing).
-	 */
-	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr, h_new->sport,
-			h_new->dport, 0), false);
-	
 	h_new->gro_count = 1;
 	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
 		struct common_header *h_held;
-		if (!NAPI_GRO_CB(held_skb)->same_flow) {
-			/* The normal behavior would be to skip this packet.
-			 * However, the fact that we compute our own hashes
-			 * above breaks the same_flow computation (as of
-			 * 11/2019): when gro_list_prepare is invoked, the
-			 * new packet doesn't yet have our hash, while the
-			 * comparison packet does, so gro_list_prepare
-			 * clears same_flow. It doesn't appear that we
-			 * lose anything by ignoring same_flow.
-			 */
-		}
+		if (!NAPI_GRO_CB(held_skb)->same_flow)
+			continue;
 
 		h_held = (struct common_header *) skb_transport_header(held_skb);
 
@@ -164,5 +148,22 @@ flush:
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
+	struct common_header *h = (struct common_header *)
+			skb_transport_header(skb);
+	struct data_header *d = (struct data_header *) h;
+	tt_record3("homa_gro_complete type %d, id %d, offset %d",
+			h->type, h->id, ntohl(d->seg.offset));
+	
+	/* Set the hash for the skb, which will be used for RPS (the default
+	 * hash doesn't understand Homa, so it doesn't include port #'s).
+	 * Setting the hash here is suboptimal, because this function doesn't
+	 * get invoked for skb's where nothing was merged onto them.
+	 * However, setting the hash in homa_gro_receive doesn't work either,
+	 * because it messes up the same_flow computation, which will compare
+	 * the default hash of a new packet with the recomputed hash of a
+	 * held packet. 
+	 */
+	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr,
+			h->sport, h->dport, 0), false);
 	return 0;
 }
