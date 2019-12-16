@@ -57,6 +57,7 @@ int port_threads = 1;
 const char *protocol = "homa";
 int server_nodes = 1;
 int server_ports = 1;
+bool verbose = false;
 const char *workload = "100";
 
 /** @rand_gen: random number generator. */
@@ -142,6 +143,7 @@ void print_help(const char *name)
 		"--server_nodes        Number of nodes running server threads (default: %d)\n"
 		"--server_ports        Number of server ports on each server node\n"
 		"                      (default: %d)\n"
+		"--verbose             Print lots of trace ouptut for debugging\n"
 		"--workload            Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n",
 		name, client_max, client_threads, first_port, first_server,
@@ -205,6 +207,12 @@ int int_arg(const char *value, const char *name)
  */
 struct message_header {
 	/**
+	 * @length: total number of bytes in the message, including this
+	 * header.
+	 */
+	int length;
+	
+	/**
 	 * @start_time: the time when the client initiated the request.
 	 * This is the low-order 32 bits of a rdtsc value.
 	 */
@@ -221,19 +229,20 @@ struct message_header {
  * send_message() - Writes a message to a file descriptor in the
  * standard form (size, timestamp, then arbitrary ignored padding).
  * @fd:         File descriptor on which to write the message.
- * @size:       Size of message to write (must be at least 8).
- * @header:     Transmitted as the first bytes of the message
- *              (after the size word).
+ * @header:     Transmitted as the first bytes of the message.
+ *              If the size isn't at least as large as the header.
+ *              we'll round it up.
  * 
  * Return:   Zero for success; anything else means there was an error
  *           (check errno for details).
  */
-int send_message(int fd, int size, message_header *header)
+int send_message(int fd, message_header *header)
 {
-	int buffer[100000/sizeof(uint32_t)];
-	buffer[0] = size;
-	*(reinterpret_cast<message_header *>(&buffer[1])) = *header;
-	for (int bytes_left = size; bytes_left > 0; ) {
+	char buffer[100000];
+	if (header->length < sizeof32(*header))
+		header->length = sizeof32(*header);
+	*(reinterpret_cast<message_header *>(buffer)) = *header;
+	for (int bytes_left = header->length; bytes_left > 0; ) {
 		int this_size = bytes_left;
 		if (this_size > sizeof32(buffer))
 			this_size = sizeof32(buffer);
@@ -252,7 +261,7 @@ int send_message(int fd, int size, message_header *header)
 class tcp_message {
     public:
 	tcp_message(int fd, struct sockaddr_in peer);
-	int read(std::function<void (int size, message_header *header)> func);
+	int read(std::function<void (message_header *header)> func);
 	
 	/** @fd: File descriptor to use for reading data. */
 	int fd;
@@ -271,16 +280,9 @@ class tcp_message {
 	int bytes_received;
 	
 	/**
-	 * @size: this variable and @timestamp will eventually hold the
-	 * first 8 bytes of the message; if @bytes_received is less than
-	 * 8, then these values have not yet been fully read. This variable
-	 * gives the total message length in bytes (including the size).
-	 */
-	int size;
-	
-	/**
-	 * @header: first bytes of the message, starting at byte 4; not valid
-	 * unless @bytes_received >= 4+sizeof(message_header).
+	 * @header: will eventually hold the first bytes of the message.
+	 * If @bytes_received is less than the size of this value, then
+	 * it has not yet been fully read.
 	 */
 	message_header header;
 } __attribute__((packed));
@@ -294,7 +296,6 @@ tcp_message::tcp_message(int fd, struct sockaddr_in peer)
 	: fd(fd)
 	, peer(peer)
 	, bytes_received(0)
-        , size(0)
         , header()
 {
 }
@@ -311,13 +312,14 @@ tcp_message::tcp_message(int fd, struct sockaddr_in peer)
  *             by the peer, or there was an error. Before returning, this
  *             method prints an error message.
  */
-int tcp_message::read(std::function<void (int size, message_header *header)> func)
+int tcp_message::read(std::function<void (message_header *header)> func)
 {
 	char buffer[100000];
 	char *next = buffer;
-#define TCP_HDR_SIZE (sizeof32(int) + sizeof32(message_header))
 	
 	int count = ::read(fd, buffer, sizeof(buffer));
+	if (verbose)
+		printf("tcp_message read %d bytes on fd %d\n", count, fd);
 	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
 		/* Connection was closed by the client. */
 		return 1;
@@ -333,27 +335,27 @@ int tcp_message::read(std::function<void (int size, message_header *header)> fun
 	 * The first 4 bytes of each request give its length.
 	 */
 	while (count > 0) {
-		/* First, fill in the size and message_header with incoming
-		 * data (there's no guarantee that a single read will return
+		/* First, fill in the message header with incoming data
+		 * (there's no guarantee that a single read will return
 		 * all of the bytes needed for these).
 		 */
-		int header_bytes = TCP_HDR_SIZE - bytes_received;
+		int header_bytes = sizeof32(message_header) - bytes_received;
 		if (header_bytes > 0) {
 			if (count < header_bytes)
 				header_bytes = count;
-			char *header = reinterpret_cast<char *>(&size);
-			memcpy(header + bytes_received, next, header_bytes);
+			char *dst = reinterpret_cast<char *>(&header);
+			memcpy(dst + bytes_received, next, header_bytes);
 			bytes_received += header_bytes;
 			next += header_bytes;
 			count -= header_bytes;
-			if (bytes_received < TCP_HDR_SIZE)
+			if (bytes_received < sizeof32(message_header))
 				break;
 		}
 		
 		/* At this point we know the request length, so read until
 		 * we've got a full request.
 		 */
-		int needed = size - bytes_received;
+		int needed = header.length - bytes_received;
 		if (count < needed) {
 			bytes_received += count;
 			break;
@@ -362,7 +364,7 @@ int tcp_message::read(std::function<void (int size, message_header *header)> fun
 		/* We now have a full request. */
 		count -= needed;
 		next += needed;
-		func(size, &header);
+		func(&header);
 		bytes_received = 0;
 	}
 	return 0;
@@ -466,6 +468,9 @@ class tcp_server {
 	void read(int fd);
 	void server(void);
 	
+	/** @port: Port on which we listen for connections. */
+	int port;
+	
 	/** @listen_fd: File descriptor for the listen socket. */
 	int listen_fd;
 	
@@ -488,7 +493,8 @@ std::vector<tcp_server *> tcp_servers;
  *         requests.
  */
 tcp_server::tcp_server(int port)
-	: listen_fd(-1)
+	: port(port)
+	, listen_fd(-1)
         , connections()
         , metrics()
 {
@@ -550,6 +556,9 @@ void tcp_server::server()
 		int num_events;
 		
 		num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+		if (verbose)
+			printf("tcp_server on port %d got %d events from "
+					"epoll_wait\n", port, num_events);
 		if (num_events < 0) {
 			printf("epoll_wait failed: %s\n", strerror(errno));
 			exit(1);
@@ -575,6 +584,9 @@ void tcp_server::accept(int epoll_fd)
 	struct sockaddr_in client_addr;
 	socklen_t addr_len = sizeof(client_addr);
 	
+	if (verbose)
+		printf("tcp_server on port %d accepting new connection\n",
+				port);
 	fd = ::accept(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
 			&addr_len);
 	if (fd < 0) {
@@ -606,11 +618,14 @@ void tcp_server::accept(int epoll_fd)
  */
 void tcp_server::read(int fd)
 {
-	int error = connections[fd]->read([this, fd](int size,
-			message_header *header) {
+	int error = connections[fd]->read([this, fd](message_header *header) {
 		metrics.requests++;
-		metrics.data += size;
-		if (send_message(fd, size, header) != 0) {
+		metrics.data += header->length;
+		if (verbose)
+			printf("tcp_server id %d received message "
+					"on fd %d, length %d\n",
+					header->server_id, fd, header->length);
+		if (send_message(fd, header) != 0) {
 			if ((errno != EPIPE) && (errno != ECONNRESET)) {
 				printf("Error sending reply to %s: %s\n",
 						print_address(&connections[fd]->peer),
@@ -620,6 +635,9 @@ void tcp_server::read(int fd)
 		};
 	});
 	if (error) {
+		if (verbose)
+			printf("tcp_server on port %d closing client "
+					"connection\n", port);
 		if (close(fd) < 0) {
 			printf("Error closing TCP connection to %s: %s\n",
 					print_address(&connections[fd]->peer),
@@ -636,6 +654,12 @@ void tcp_server::read(int fd)
  */
 class client {
     public:
+	/**
+	 * @id: unique identifier for this client (index starting at
+	 * 0 for the first client.
+	 */
+	int id;
+	    
 	/**
 	 * @receiver_running: nonzero means the receiving thread has
 	 * initialized and is ready to receive responses.
@@ -739,15 +763,20 @@ class client {
 	 */
 	uint64_t total_rtt;
 	
-	client();
+	client(int id);
 };
 
 /** @clients: keeps track of all existing clients. */
 std::vector<client *> clients;
 	
-/** client::client() - Constructor for client objects. */
-client::client()
-	: receiver_running(0)
+/**
+ * client::client() - Constructor for client objects.
+ *
+ * @id: Unique identifier for this client (index starting at 0?)
+ */
+client::client(int id)
+	: id(id)
+	, receiver_running(0)
 	, request_servers()
 	, next_server(0)
 	, request_lengths()
@@ -793,7 +822,7 @@ client::client()
  */
 class homa_client : public client {
     public:
-	homa_client(void);
+	homa_client(int id);
 	void receiver(void);
 	void sender(void);
 	void wait_response(uint64_t id);
@@ -802,9 +831,14 @@ class homa_client : public client {
 	int fd;
 };
 
-/** homa_client::homa_client() - Constructor for homa_client objects. */
-homa_client::homa_client()
-	: fd(-1)
+/**
+ * homa_client::homa_client() - Constructor for homa_client objects.
+ *
+ * @id: Unique identifier for this client (index starting at 0?)
+ */
+homa_client::homa_client(int id)
+	: client(id)
+	, fd(-1)
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -897,15 +931,18 @@ void homa_client::sender()
 			continue;
 		}
 		
+		header->length = request_lengths[next_length];
+		if (header->length < sizeof32(*header))
+			header->length = sizeof32(*header);
 		header->start_time = now & 0xffffffff;
 		header->server_id = server;
-		int status = homa_send(fd, request, request_lengths[next_length],
+		int status = homa_send(fd, request, header->length,
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
 			sizeof(server_addrs[0]), &id);
 		if (status < 0) {
-			printf("Error in homa_client::sender: %s\n",
-				strerror(errno));
+			printf("Error in homa_send: %s (request length %d)\n",
+				strerror(errno), header->length);
 			exit(1);
 		}
 		requests[server]++;
@@ -945,7 +982,7 @@ void homa_client::receiver(void)
  */
 class tcp_client : public client {
     public:
-	tcp_client(void);
+	tcp_client(int id);
 	void receiver(void);
 	void sender(void);
 	
@@ -956,9 +993,14 @@ class tcp_client : public client {
 	std::vector<tcp_message> messages;
 };
 
-/** tcp_client::tcp_client() - Constructor for tcp_client objects. */
-tcp_client::tcp_client()
-	: messages()
+/**
+ * tcp_client::tcp_client() - Constructor for tcp_client objects.
+ *
+ * @id: Unique identifier for this client (index starting at 0?)
+ */
+tcp_client::tcp_client(int id)
+	: client(id)
+	, messages()
 {
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
 		int fd = socket(PF_INET, SOCK_STREAM, 0);
@@ -1028,16 +1070,21 @@ void tcp_client::sender()
 			continue;
 		}
 		
+		header.length = request_lengths[next_length];
 		header.start_time = now & 0xffffffff;
 		header.server_id = server;
-		int status = send_message(messages[server].fd,
-				request_lengths[next_length], &header);
+		int status = send_message(messages[server].fd, &header);
 		if (status != 0) {
 			printf("Error in TCP socket write for %s: %s\n",
 				print_address(&server_addrs[server]),
 				strerror(errno));
 			exit(1);
 		}
+		if (verbose)
+			printf("tcp_client %d sent request to server port "
+					"%d, length %d\n",
+					id, header.server_id,
+					request_lengths[next_length]);
 		requests[server]++;
 		total_requests++;
 		next_length++;
@@ -1085,6 +1132,10 @@ void tcp_client::receiver(void)
 		
 		while (1) {
 			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+			if (verbose)
+				printf("tcp_client %d got %d events from "
+						"epoll_wait\n",
+						id, num_events);
 			if (num_events > 0)
 				break;
 			if ((errno == EAGAIN) || (errno == EINTR))
@@ -1095,19 +1146,23 @@ void tcp_client::receiver(void)
 		}
 		for (int i = 0; i < num_events; i++) {
 			tcp_message *message = &messages[events[i].data.u32];
-			int error = message->read([this](int size,
+			int error = message->read([this](
 					message_header *header) {
 				uint32_t elapsed = rdtsc() & 0xffffffff;
 				elapsed -= header->start_time;
 				responses[header->server_id]++;
 				total_responses++;
-				response_data += size;
+				response_data += header->length;
 				total_rtt += elapsed;
-				actual_lengths[next_result] = size;
+				actual_lengths[next_result] = header->length;
 				actual_rtts[next_result] = elapsed;
 				next_result++;
 				if (next_result >= actual_lengths.size())
 					next_result = 0;
+				if (verbose)
+					printf("tcp_client %d received result "
+							"from server port %d\n",
+							id, header->server_id);
 			});
 			if (error) {
 				printf("Connection with server closed.\n");
@@ -1271,6 +1326,8 @@ int main(int argc, char** argv)
 			server_ports = int_arg(argv[next_arg+1],
 					argv[next_arg]);
 			next_arg++;
+		} else if (strcmp(argv[next_arg], "--verbose") == 0) {
+			verbose = true;
 		} else if (strcmp(argv[next_arg], "--workload") == 0) {
 			workload = argv[next_arg+1];
 			next_arg++;
@@ -1363,9 +1420,9 @@ int main(int argc, char** argv)
 	/* Create clients. */
 	for (i = 0; i < client_threads; i++) {
 		if (homa_protocol)
-			clients.push_back(new homa_client);
+			clients.push_back(new homa_client(i));
 		else
-			clients.push_back(new tcp_client);
+			clients.push_back(new tcp_client(i));
 	}
 	
 	/* Print a few statistics every second. */

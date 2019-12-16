@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "dist.h"
+#include "homa.h"
 
 /**
  * dist_sample() - Generate a collection of values sampled randomly from a
@@ -69,7 +70,10 @@ int dist_sample(const char *dist, std::mt19937 *rand_gen, int num_samples,
 		double cdf_fraction = uniform_dist(*rand_gen);
 		for (dist_point *p = points; ; p++) {
 			if (p->fraction > cdf_fraction) {
-				sizes->push_back(p->length);
+				int length = p->length;
+				if (length > HOMA_MAX_MESSAGE_LENGTH)
+					length = HOMA_MAX_MESSAGE_LENGTH;
+				sizes->push_back(length);
 				break;
 			}
 		}
