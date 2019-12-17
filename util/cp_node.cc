@@ -129,29 +129,29 @@ void print_help(const char *name)
 		"commands are supported, each followed by a list of options supported\n"
 		"by that command:\n\n"
 		"client [options]      Start one or more client threads\n"
-		"    --alt_client      Only create 1 thread per client, which waits\n"
+		"    --alt-client      Only create 1 thread per client, which waits\n"
 		"                      for its own requests (can't support --client_max\n"
 		"                      greater than 1)\n"
-		"    --first_port      Lowest port number to use for each server (default: %d)\n"
-		"    --first_server    Id of first server node (default: %d, meaning node-%d)\n"
-		"    --net_util        Target network utilization, including only message data\n"
+		"    --first-port      Lowest port number to use for each server (default: %d)\n"
+		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --net-util        Target network utilization, including only message data\n"
 		"                      bytes (default: %.2f)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --server_max      Maximum number of outstanding requests from a single\n"
+		"    --server-max      Maximum number of outstanding requests from a single\n"
 		"                      client thread to a single server port (default: %d)\n"
-		"    --server_nodes    Number of nodes running server threads (default: %d)\n"
-		"    --server_ports    Number of server ports on each server node\n"
+		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
+		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
-		"    --thread_max      Maximum number of outstanding requests from a single\n"
+		"    --thread-max      Maximum number of outstanding requests from a single\n"
 		"                      client thread (across all servers) (default: %d)\n"
 		"    --threads         Number of request invocation threads to create\n"
 		"                      (default: %d)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
-		"    --first_port      Lowest port number to use (default: %d)\n"
+		"    --first-port      Lowest port number to use (default: %d)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --port_threads    Number of server threads to service each port\n"
+		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
 		"    --ports           Number of ports to listen on (default: %d)\n",
 		first_port, first_server, first_server, net_util, protocol,
@@ -1354,17 +1354,17 @@ int client_cmd(std::vector<string> &words)
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--alt_client") == 0) {
+		if (strcmp(option, "--alt-client") == 0) {
 			alt_client = true;
-		} else if (strcmp(option, "--first_port") == 0) {
+		} else if (strcmp(option, "--first-port") == 0) {
 			if (!parse_int(words, i+1, &first_port, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--first_server") == 0) {
+		} else if (strcmp(option, "--first-server") == 0) {
 			if (!parse_int(words, i+1, &first_server, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--net_util") == 0) {
+		} else if (strcmp(option, "--net-util") == 0) {
 			if (!parse_float(words, i+1, &net_util, option))
 				return 0;
 			i++;
@@ -1376,20 +1376,20 @@ int client_cmd(std::vector<string> &words)
 			}
 			protocol = words[i+1].c_str();
 			i++;
-		} else if (strcmp(option, "--server_max") == 0) {
+		} else if (strcmp(option, "--server-max") == 0) {
 			if (!parse_int(words, i+1, (int *) &server_max,
 					option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--server_nodes") == 0) {
+		} else if (strcmp(option, "--server-nodes") == 0) {
 			if (!parse_int(words, i+1, &server_nodes, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--server_ports") == 0) {
+		} else if (strcmp(option, "--server-ports") == 0) {
 			if (!parse_int(words, i+1, &server_ports, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--thread_max") == 0) {
+		} else if (strcmp(option, "--thread-max") == 0) {
 			if (!parse_int(words, i+1, (int *) &client_max,
 					option))
 				return 0;
@@ -1439,11 +1439,11 @@ int server_cmd(std::vector<string> &words)
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--first_port") == 0) {
+		if (strcmp(option, "--first-port") == 0) {
 			if (!parse_int(words, i+1, &first_port, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--port_threads") == 0) {
+		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse_int(words, i+1, &port_threads, option))
 				return 0;
 			i++;
