@@ -18,6 +18,7 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -30,12 +31,14 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <algorithm>
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <thread>
 #include <vector>
@@ -153,7 +156,9 @@ void print_help(const char *name)
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
-		"    --ports           Number of ports to listen on (default: %d)\n",
+		"    --ports           Number of ports to listen on (default: %d)\n\n"
+		"stop [options]        Stop existing client and/or server threads; each\n"
+		"                      option must be either 'clients' or 'servers'\n",
 		first_port, first_server, first_server, net_util, protocol,
 		server_max, server_nodes, server_ports, client_max,
 		client_threads, workload,
@@ -461,6 +466,7 @@ std::vector<server_metrics *> metrics;
 class homa_server {
     public:
 	homa_server(int port);
+	~homa_server();
 	void server(void);
 	
 	/** @fd: File descriptor for Homa socket. */
@@ -468,6 +474,9 @@ class homa_server {
 	
 	/** @metrics: Performance statistics. */
 	server_metrics metrics;
+	
+	/** @thread: Background thread that services requests. */
+	std::thread thread;
 };
 
 /** @homa_servers: keeps track of all existing Homa clients. */
@@ -481,9 +490,19 @@ std::vector<homa_server *> homa_servers;
 homa_server::homa_server(int fd)
 	: fd(fd)
         , metrics()
+	, thread(&homa_server::server, this)
 {
-	std::thread server(&homa_server::server, this);
-	server.detach();
+}
+
+/**
+ * homa_server::~homa_server() - Destructor for homa_servers; terminates
+ * the background thread.
+ */
+homa_server::~homa_server()
+{
+	shutdown(fd, SHUT_RDWR);
+	close(fd);
+	thread.join();
 }
 
 /**
@@ -499,12 +518,16 @@ void homa_server::server(void)
 		uint64_t id = 0;
 		int result;
 		
-		length = homa_recv(fd, message, sizeof(message),
-			HOMA_RECV_REQUEST, &id, (struct sockaddr *) &source,
-			sizeof(source));
-		if (length < 0) {
-			printf("homa_recv failed: %s\n", strerror(errno));
-			continue;
+		while (1) {
+			length = homa_recv(fd, message, sizeof(message),
+				HOMA_RECV_REQUEST, &id,
+				(struct sockaddr *) &source, sizeof(source));
+			if (length >= 0)
+				break;
+			if ((errno == EBADF) || (errno == ESHUTDOWN))
+				return;
+			else if ((errno != EINTR) && (errno != EAGAIN))
+				printf("homa_recv failed: %s\n", strerror(errno));
 		}
 
 		result = homa_reply(fd, message, length,
@@ -525,6 +548,7 @@ void homa_server::server(void)
 class tcp_server {
     public:
 	tcp_server(int port);
+	~tcp_server();
 	void accept(int epoll_fd);
 	void read(int fd);
 	void server(void);
@@ -535,6 +559,9 @@ class tcp_server {
 	/** @listen_fd: File descriptor for the listen socket. */
 	int listen_fd;
 	
+	/** @epoll_fd: File descriptor used for epolling. */
+	int epoll_fd;
+	
 	/**
 	 * @connections: Entry i contains information for a client
 	 * connection on fd i.
@@ -543,6 +570,15 @@ class tcp_server {
 	
 	/** @metrics: Performance statistics. */
 	server_metrics metrics;
+	
+	/**
+	 * @thread: Background thread that both accepts connections and
+	 * services requests on them.
+	 */
+	std::optional<std::thread> thread;
+	
+	/** @stop: True means that background threads should exit. */
+	bool stop;
 };
 
 /** @tcp_servers: keeps track of all existing Homa clients. */
@@ -556,8 +592,11 @@ std::vector<tcp_server *> tcp_servers;
 tcp_server::tcp_server(int port)
 	: port(port)
 	, listen_fd(-1)
+	, epoll_fd(-1)
         , connections()
         , metrics()
+        , thread()
+        , stop(false)
 {
 	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
@@ -585,18 +624,7 @@ tcp_server::tcp_server(int port)
 		exit(1);
 	}
 	
-	std::thread server(&tcp_server::server, this);
-	server.detach();
-}
-
-/**
- * tcp_server::server() - Handles incoming TCP requests on a listen socket
- * and all of the connections accepted via that socket. Normally invoked as
- * top-level method in a thread
- */
-void tcp_server::server()
-{	
-	int epoll_fd = epoll_create(10);
+	epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
 		printf("Couldn't create epoll instance: %s\n", strerror(errno));
 		exit(1);
@@ -610,6 +638,64 @@ void tcp_server::server()
 		exit(1);
 	}
 	
+	thread.emplace(&tcp_server::server, this);
+}
+
+/**
+ * tcp_server::~tcp_server() - Destructor for TCP servers. Terminates the
+ * server's background thread.
+ */
+tcp_server::~tcp_server()
+{
+	int fds[2];
+	
+	stop = true;
+	
+	/* In order to wake up the background thread, open a file that is
+	 * readable and add it to the epoll set.
+	 */
+	if (pipe2(fds, 0) < 0) {
+		printf("Couldn't create pipe to shutdown TCP "
+				"server: %s\n", strerror(errno));
+		exit(1);
+	}
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+	ev.data.fd = fds[0];
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fds[0], &ev);
+	if (write(fds[1], "xxxx", 4) < 0) {
+		printf("Couldn't write to TCP shutdown pipe: %s\n",
+				strerror(errno));
+		exit(1);
+	}
+	
+	thread->join();
+	close(listen_fd);
+	close(epoll_fd);
+	close(fds[0]);
+	close(fds[1]);
+	for (unsigned i = 0; i < connections.size(); i++) {
+		if (connections[i] != NULL) {
+			if (close(i) < 0)
+				printf("Error closing TCP connection to "
+						"%s: %s\n",
+						print_address(
+						&connections[i]->peer),
+						strerror(errno));
+			delete connections[i];
+			connections[i] = NULL;
+		}
+	}
+}
+
+/**
+ * tcp_server::server() - Handles incoming TCP requests on a listen socket
+ * and all of the connections accepted via that socket. Normally invoked as
+ * top-level method in a thread
+ */
+void tcp_server::server()
+{
+	
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
 #define MAX_EVENTS 20
@@ -617,6 +703,8 @@ void tcp_server::server()
 		int num_events;
 		
 		num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+		if (stop)
+			return;
 		if (verbose)
 			printf("tcp_server on port %d got %d events from "
 					"epoll_wait\n", port, num_events);
@@ -825,6 +913,7 @@ class client {
 	uint64_t total_rtt;
 	
 	client(int id);
+	virtual ~client() {}
 };
 
 /** @clients: keeps track of all existing clients. */
@@ -884,12 +973,25 @@ client::client(int id)
 class homa_client : public client {
     public:
 	homa_client(int id);
+	virtual ~homa_client();
 	void receiver(void);
 	void sender(void);
 	void wait_response(uint64_t id);
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
+	
+	/** @stop: true means threads should exit ASAP. */
+	bool stop;
+	
+	/** @receiver: thread that receives responses. */
+	std::optional<std::thread> receiving_thread;
+	
+	/**
+	 * @sender: thread that sends requests (may also receive
+	 * responses if --alt-client has been specified).
+	 */
+	std::optional<std::thread> sending_thread;
 };
 
 /**
@@ -900,6 +1002,9 @@ class homa_client : public client {
 homa_client::homa_client(int id)
 	: client(id)
 	, fd(-1)
+        , stop(false)
+        , receiving_thread()
+        , sending_thread()
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -907,17 +1012,29 @@ homa_client::homa_client(int id)
 	}
 	
 	if (!alt_client) {
-		std::thread receiver(&homa_client::receiver, this);
+		receiving_thread.emplace(&homa_client::receiver, this);
 		while (!receiver_running) {
 			/* Wait for the receiver to begin execution before
 			 * starting the sender; otherwise the initial RPCs
 			 * may appear to take a long time.
 			 */
 		}
-		receiver.detach();
 	}
-	std::thread sender(&homa_client::sender, this);
-	sender.detach();
+	sending_thread.emplace(&homa_client::sender, this);
+}
+
+/**
+ * homa_client::~homa_client() - Destructor for homa_client objects;
+ * will terminate threads created for this client.
+ */
+homa_client::~homa_client()
+{
+	stop = true;
+	close(fd);
+	if (sending_thread)
+		sending_thread->join();
+	if (receiving_thread)
+		receiving_thread->join();
 }
 
 /**
@@ -937,6 +1054,8 @@ void homa_client::wait_response(uint64_t id)
 			(struct sockaddr *) &server_addr,
 			sizeof(server_addr));
 	if (length < 0) {
+		if (stop)
+			return;
 		printf("Error in homa_recv: %s (id %lu, server %s)\n",
 			strerror(errno), id,
 			print_address(&server_addr));
@@ -974,6 +1093,8 @@ void homa_client::sender()
 		 * and (b) there aren't too many requests outstanding.
 		 */
 		while (1) {
+			if (stop)
+				return;
 			now = rdtsc();
 			if (now < next_start)
 				continue;
@@ -1002,6 +1123,8 @@ void homa_client::sender()
 			&server_addrs[server]),
 			sizeof(server_addrs[0]), &id);
 		if (status < 0) {
+			if (stop)
+				return;
 			printf("Error in homa_send: %s (request length %d)\n",
 				strerror(errno), header->length);
 			exit(1);
@@ -1032,6 +1155,8 @@ void homa_client::receiver(void)
 {	
 	receiver_running = 1;
 	while (1) {
+		if (stop)
+			return;
 		wait_response(0);
 	}
 }
@@ -1044,14 +1169,33 @@ void homa_client::receiver(void)
 class tcp_client : public client {
     public:
 	tcp_client(int id);
+	virtual ~tcp_client();
 	void receiver(void);
 	void sender(void);
 	
 	/** 
-	 * @messages: one entry for each server in server_addrs; used to
+	 * @messages: One entry for each server in server_addrs; used to
 	 * receive responses from that server.
 	 */
 	std::vector<tcp_message> messages;
+	
+	/**
+	 * @epoll_fd: File descriptor used by @receiving_thread to
+	 * wait for incoming messages.
+	 */
+	int epoll_fd;
+	
+	/** @stop:  True means background threads should exit. */
+	bool stop;
+	
+	/** @receiver: thread that receives responses. */
+	std::optional<std::thread> receiving_thread;
+	
+	/**
+	 * @sender: thread that sends requests (may also receive
+	 * responses if --alt-client has been specified).
+	 */
+	std::optional<std::thread> sending_thread;
 };
 
 /**
@@ -1062,6 +1206,10 @@ class tcp_client : public client {
 tcp_client::tcp_client(int id)
 	: client(id)
 	, messages()
+        , epoll_fd(-1)
+        , stop(false)
+        , receiving_thread()
+        , sending_thread()
 {
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
 		int fd = socket(PF_INET, SOCK_STREAM, 0);
@@ -1073,9 +1221,8 @@ tcp_client::tcp_client(int id)
 		if (connect(fd, reinterpret_cast<struct sockaddr *>(
 				&server_addrs[i]),
 				sizeof(server_addrs[i])) == -1) {
-			printf("Couldn't connect to %s:%d: %s\n",
+			printf("Couldn't connect to %s: %s\n",
 					print_address(&server_addrs[i]),
-					ntohs(server_addrs[i].sin_port),
 					strerror(errno));
 			exit(1);
 		}
@@ -1084,16 +1231,72 @@ tcp_client::tcp_client(int id)
 		messages.emplace_back(fd, server_addrs[i]);
 	}
 	
-	std::thread receiver(&tcp_client::receiver, this);
+	epoll_fd = epoll_create(10);
+	if (epoll_fd < 0) {
+		printf("tcp_client couldn't create epoll instance: "
+				"%s\n", strerror(errno));
+		exit(1);
+	}
+	struct epoll_event ev;
+	for (uint32_t i = 0; i < messages.size(); i++) {
+		ev.events = EPOLLIN;
+		ev.data.u32 = i;
+		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, messages[i].fd,
+				&ev) != 0) {
+			printf("tcp_client couldn't add TCP socket %d "
+					"to epoll: %s\n", i, strerror(errno));
+			exit(1);
+		}
+	}
+	
+	receiving_thread.emplace(&tcp_client::receiver, this);
 	while (!receiver_running) {
 		/* Wait for the receiver to begin execution before
 		 * starting the sender; otherwise the initial RPCs
 		 * may appear to take a long time.
 		 */
 	}
-	receiver.detach();
-	std::thread sender(&tcp_client::sender, this);
-	sender.detach();
+	sending_thread.emplace(&tcp_client::sender, this);
+}
+
+/**
+ * tcp_client::~tcp_client() - Destructor for tcp_client objects;
+ * will terminate threads created for this client.
+ */
+tcp_client::~tcp_client()
+{
+	int fds[2];
+	
+	stop = true;
+	
+	/* In order to wake up the background thread, open a file that is
+	 * readable and add it to the epoll set.
+	 */
+	if (pipe2(fds, 0) < 0) {
+		printf("Couldn't create pipe to shutdown TCP "
+				"server: %s\n", strerror(errno));
+		exit(1);
+	}
+	struct epoll_event ev;
+	ev.events = EPOLLIN;
+	ev.data.fd = fds[0];
+	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fds[0], &ev);
+	if (write(fds[1], "xxxx", 4) < 0) {
+		printf("Couldn't write to TCP shutdown pipe: %s\n",
+				strerror(errno));
+		exit(1);
+	}
+	
+	if (sending_thread)
+		sending_thread->join();
+	if (receiving_thread)
+		receiving_thread->join();
+	
+	close(fds[0]);
+	close(fds[1]);
+	close(epoll_fd);
+	for (tcp_message &message: messages)
+		close(message.fd);
 }
 
 /**
@@ -1113,6 +1316,8 @@ void tcp_client::sender()
 		 * and (b) there aren't too many requests outstanding.
 		 */
 		while (1) {
+			if (stop)
+				return;
 			now = rdtsc();
 			if (now < next_start)
 				continue;
@@ -1164,23 +1369,6 @@ void tcp_client::sender()
  */
 void tcp_client::receiver(void)
 {
-	int epoll_fd = epoll_create(10);
-	if (epoll_fd < 0) {
-		printf("tcp_client::receiver couldn't create epoll instance: "
-				"%s\n", strerror(errno));
-		exit(1);
-	}
-	struct epoll_event ev;
-	for (uint32_t i = 0; i < messages.size(); i++) {
-		ev.events = EPOLLIN;
-		ev.data.u32 = i;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, messages[i].fd,
-				&ev) != 0) {
-			printf("Couldn't add TCP socket %d to epoll: %s\n",
-					i, strerror(errno));
-			exit(1);
-		}
-	}
 	receiver_running = 1;
 	
 	/* Each iteration through this loop processes a batch of incoming
@@ -1193,6 +1381,8 @@ void tcp_client::receiver(void)
 		
 		while (1) {
 			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+			if (stop)
+				return;
 			if (verbose)
 				printf("tcp_client %d got %d events from "
 						"epoll_wait\n",
@@ -1510,6 +1700,36 @@ int server_cmd(std::vector<string> &words)
 }
 
 /**
+ * stop_cmd() - Parse the arguments for a "stop" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int stop_cmd(std::vector<string> &words)
+{	
+	for (unsigned i = 1; i < words.size(); i++) {
+		const char *option = words[i].c_str();
+		if (strcmp(option, "clients") == 0) {
+			for (client *client: clients)
+				delete client;
+			clients.clear();
+		} else if (strcmp(option, "servers") == 0) {
+			for (homa_server *server: homa_servers)
+				delete server;
+			homa_servers.clear();
+			for (tcp_server *server: tcp_servers)
+				delete server;
+			tcp_servers.clear();
+		} else {
+			printf("Unknown option '%s'; must be clients or "
+				"servers\n", option);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/**
  * exec_words() - Given a command that has been parsed into words,
  * execute the command corresponding to the words.
  * @words:  Each entry represents one word of the command, like argc/argv.
@@ -1524,6 +1744,8 @@ int exec_words(std::vector<string> &words)
 		return client_cmd(words);
 	} else if (words[0].compare("server") == 0) {
 		return server_cmd(words);
+	} else if (words[0].compare("stop") == 0) {
+		return stop_cmd(words);
 	} else {
 		printf("Unknown command '%s'\n", words[0].c_str());
 		return 0;

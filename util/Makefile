@@ -26,7 +26,7 @@ cp_node: cp_node.o dist.o $(LIB_OBJS)
 	g++ $(CFLAGS) $^ -lpthread -o $@
 	
 %.o: %.cc test_utils.h ../homa.h
-	g++ -c $(CFLAGS) -std=c++11 $< -o $@
+	g++ -c $(CFLAGS) -std=c++17 $< -o $@
 	
 %.o: %.c test_utils.h ../homa.h
 	cc -c $(CFLAGS) $< -o $@
