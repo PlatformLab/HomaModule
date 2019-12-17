@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <iostream>
 #include <random>
 #include <thread>
 #include <vector>
@@ -42,6 +43,8 @@
 #include "dist.h"
 #include "homa.h"
 #include "test_utils.h"
+
+using std::string;
 
 /* Command-line parameter values (and default values): */
 bool alt_client = false;
@@ -118,85 +121,107 @@ std::vector<uint64_t> last_per_server_rpcs;
  */
 void print_help(const char *name)
 {
-	printf("Usage: %s [options]\n\n"
-		"The following options are supported:\n\n"
-		"--alt_client          Only create 1 thread per client, which waits"
-		"                      for its own requests (can't support --client_max"
-		"                      greater than 1)"
-		"--client_max          Maximum number of outstanding requests from a single\n"
-		"                      client (across all servers) (default: %d)\n"
-		"--client_threads      Number of request invocation threads to run on this\n"
-		"                      node (default: %d)\n"
-		"--first_port          First port number to use on servers (default: %d)\n"
-		"--first_server        Id of first server for clients to use (default: %d,\n"
-		"                      meaning node-%d)\n"
-		"--help                Print this message\n"
-		"--is_server           Instantiate server threads on this node\n"
-		"--net_util            Target network utilization, including headers and packet\n"
-		"                      gaps (default: %.2f)\n"
-		"--port_threads        Number of server threads to service each port\n"
-		"                      (Homa only, default: %d)\n"
-		"--protocol            Transport protocol to use for requests: homa or tcp\n"
-		"                      (default: %s)\n"
-		"--server_max          Maximum number of outstanding requests from a client\n"
-		"                      to a single server thread (default: %d)\n"
-		"--server_nodes        Number of nodes running server threads (default: %d)\n"
-		"--server_ports        Number of server ports on each server node\n"
+	printf("Usage: cp_node [command]\n\n"
+		"If there are command-line options, they constitute a single command\n"
+		"to execute, after which cp_node will print statistics every second.\n\n"
+		"If there are no command-line options, then cp_node enters a loop reading\n"
+		"lines from standard input and executing them as commands. The following\n"
+		"commands are supported, each followed by a list of options supported\n"
+		"by that command:\n\n"
+		"client [options]      Start one or more client threads\n"
+		"    --alt_client      Only create 1 thread per client, which waits\n"
+		"                      for its own requests (can't support --client_max\n"
+		"                      greater than 1)\n"
+		"    --first_port      Lowest port number to use for each server (default: %d)\n"
+		"    --first_server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --net_util        Target network utilization, including only message data\n"
+		"                      bytes (default: %.2f)\n"
+		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
+		"    --server_max      Maximum number of outstanding requests from a single\n"
+		"                      client thread to a single server port (default: %d)\n"
+		"    --server_nodes    Number of nodes running server threads (default: %d)\n"
+		"    --server_ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
-		"--verbose             Print lots of trace ouptut for debugging\n"
-		"--workload            Name of distribution for request lengths (e.g., 'w1')\n"
-		"                      or integer for fixed length (default: %s)\n",
-		name, client_max, client_threads, first_port, first_server,
-		first_server, net_util, port_threads, protocol, server_max,
-		server_nodes, server_ports, workload);
+		"    --thread_max      Maximum number of outstanding requests from a single\n"
+		"                      client thread (across all servers) (default: %d)\n"
+		"    --threads         Number of request invocation threads to create\n"
+		"                      (default: %d)\n"
+		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
+		"                      or integer for fixed length (default: %s)\n\n"
+		"server [options]      Start serving requests on one or more ports\n"
+		"    --first_port      Lowest port number to use (default: %d)\n"
+		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
+		"    --port_threads    Number of server threads to service each port\n"
+		"                      (Homa only, default: %d)\n"
+		"    --ports           Number of ports to listen on (default: %d)\n",
+		first_port, first_server, first_server, net_util, protocol,
+		server_max, server_nodes, server_ports, client_max,
+		client_threads, workload,
+		first_port, protocol, port_threads, server_ports);
 }
 
 /**
- * float_arg() - Parse a floating--point command-line argument from a string;
- * print an error message and exit if there is a problem.
- * @value:  String value of argument (from argv array).
- * @name:   Name of argument (for use in error messages).
- * Return:  The floating-poing value corresponding to @value.
+ * parse_float() - Parse an floating-point value from an argument word.
+ * @words:  Words of a command being parsed.
+ * @i:      Index within words of a word expected to contain a floating-
+ *          point value (may be outside the range of words, in which case an
+ *          error message is printed).
+ * @value:  The value corresponding to @words[i] is stored here,
+ *          if the function completes successfully.
+ * @option: Name of option being parsed (for use in error messages).
+ * Return:  Nonzero means success, zero means an error occurred (and a
+ *          message was printed).
  */
-double float_arg(const char *value, const char *name)
+int parse_float(std::vector<string> &words, unsigned i, double *value,
+		const char *option)
 {
-	double result;
+	double num;
 	char *end;
-	if ((value == NULL) || (value[0] == 0)) {
-		printf("No value provided for %s\n", name);
-		exit(1);
+	
+	if (i >= words.size()) {
+		printf("No value provided for %s\n", option);
+		return 0;
 	}
-	result = strtod(value, &end);
+	num = strtod(words[i].c_str(), &end);
 	if (*end != 0) {
-		printf("Bad value '%s' for %s; must be integer\n",
-			value, name);
-		exit(1);
+		printf("Bad value '%s' for %s; must be floating-point "
+				"number\n", words[i].c_str(), option);
+		return 0;
 	}
-	return result;
+	*value = num;
+	return 1;
 }
 
 /**
- * int_arg() - Parse an integer command-line argument from a string; print
- * an error message and exit if there is a problem.
- * @value:  String value of argument (from argv array).
- * @name:   Name of argument (for use in error messages).
- * Return:  The integer value corresponding to @value.
+ * parse_int() - Parse an integer value from an argument word.
+ * @words:  Words of a command being parsed.
+ * @i:      Index within words of a word expected to contain an integer
+ *          value (may be outside the range of words, in which case an
+ *          error message is printed).
+ * @value:  The integer value corresponding to @words[i] is stored here,
+ *          if the function completes successfully.
+ * @option: Name of option being parsed (for use in error messages).
+ * Return:  Nonzero means success, zero means an error occurred (and a
+ *          message was printed).
  */
-int int_arg(const char *value, const char *name)
+int parse_int(std::vector<string> &words, unsigned i, int *value,
+		const char *option)
 {
-	int result;
+	int num;
 	char *end;
-	if ((value == NULL) || (value[0] == 0)) {
-		printf("No value provided for %s\n", name);
-		exit(1);
+	
+	if (i >= words.size()) {
+		printf("No value provided for %s\n", option);
+		return 0;
 	}
-	result = strtol(value, &end, 0);
+	num = strtol(words[i].c_str(), &end, 0);
 	if (*end != 0) {
 		printf("Bad value '%s' for %s; must be integer\n",
-			value, name);
-		exit(1);
+				words[i].c_str(), option);
+		return 0;
 	}
-	return result;
+	*value = num;
+	return 1;
 }
 
 /**
@@ -251,6 +276,42 @@ int send_message(int fd, message_header *header)
 		bytes_left -= this_size;
 	}
 	return 0;
+}
+
+
+/**
+ * init_server_addrs() - Set up the server_addrs table (addresses of the
+ * server/port combinations that clients will communicate with), based on
+ * current configuration parameters. Any previous contents of the table
+ * are discarded
+ */
+void init_server_addrs(void)
+{
+	server_addrs.clear();
+	for (int node = 0; node < server_nodes; node++) {
+		char host[100];
+		struct addrinfo hints;
+		struct addrinfo *matching_addresses;
+		struct sockaddr_in *dest;
+
+		snprintf(host, sizeof(host), "node-%d", node + first_server);
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_DGRAM;
+		int status = getaddrinfo(host, NULL, &hints,
+				&matching_addresses);
+		if (status != 0) {
+			printf("Couldn't look up address for %s: %s\n",
+					host, gai_strerror(status));
+			exit(1);
+		}
+		dest = reinterpret_cast<struct sockaddr_in *>
+				(matching_addresses->ai_addr);
+		for (int thread = 0; thread < server_ports; thread++) {
+			dest->sin_port = htons(first_port + thread);
+			server_addrs.push_back(*dest);
+		}
+	}
 }
 
 /**
@@ -1271,169 +1332,260 @@ void client_stats(uint64_t now)
 	last_total_rtt = total_rtt;
 }
 
-int main(int argc, char** argv)
+/**
+ * client_cmd() - Parse the arguments for a "client" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int client_cmd(std::vector<string> &words)
 {
-	int next_arg, i, homa_protocol;
-	
-	for (next_arg = 1; (next_arg < argc); next_arg += 1) {
-		if (strcmp(argv[next_arg], "--help") == 0) {
-			print_help(argv[0]);
-			exit(0);
-		} else if (strcmp(argv[next_arg], "--alt_client") == 0) {
+	alt_client = false;
+	client_max = 1;
+	client_threads = 1;
+	first_port = 4000;
+	first_server = 1;
+	server_max = 1;
+	net_util = 0.8;
+	port_threads = 1;
+	protocol = "homa";
+	server_nodes = 1;
+	workload = "100";
+	for (unsigned i = 1; i < words.size(); i++) {
+		const char *option = words[i].c_str();
+
+		if (strcmp(option, "--alt_client") == 0) {
 			alt_client = true;
-		} else if (strcmp(argv[next_arg], "--client_max") == 0) {
-			client_max = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--client_threads") == 0) {
-			client_threads = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--first_port") == 0) {
-			first_port = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--first_server") == 0) {
-			first_server = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--is_server") == 0) {
-			is_server = true;
-		} else if (strcmp(argv[next_arg], "--net_util") == 0) {
-			net_util = float_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--port_threads") == 0) {
-			port_threads = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--protocol") == 0) {
-			next_arg++;
-			protocol = argv[next_arg];
-			if (protocol == NULL) {
-				printf("No value provided for --protocol\n");
-				exit(1);
+		} else if (strcmp(option, "--first_port") == 0) {
+			if (!parse_int(words, i+1, &first_port, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--first_server") == 0) {
+			if (!parse_int(words, i+1, &first_server, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--net_util") == 0) {
+			if (!parse_float(words, i+1, &net_util, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--protocol") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
 			}
-		} else if (strcmp(argv[next_arg], "--server_max") == 0) {
-			server_max = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--server_nodes") == 0) {
-			server_nodes = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--server_ports") == 0) {
-			server_ports = int_arg(argv[next_arg+1],
-					argv[next_arg]);
-			next_arg++;
-		} else if (strcmp(argv[next_arg], "--verbose") == 0) {
-			verbose = true;
-		} else if (strcmp(argv[next_arg], "--workload") == 0) {
-			workload = argv[next_arg+1];
-			next_arg++;
+			protocol = words[i+1].c_str();
+			i++;
+		} else if (strcmp(option, "--server_max") == 0) {
+			if (!parse_int(words, i+1, (int *) &server_max,
+					option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--server_nodes") == 0) {
+			if (!parse_int(words, i+1, &server_nodes, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--server_ports") == 0) {
+			if (!parse_int(words, i+1, &server_ports, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--thread_max") == 0) {
+			if (!parse_int(words, i+1, (int *) &client_max,
+					option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--threads") == 0) {
+			if (!parse_int(words, i+1, &client_threads, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--workload") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			workload = words[i+1].c_str();
+			i++;
 		} else {
-			printf("Unknown option %s; type '%s --help' for help\n",
-				argv[next_arg], argv[0]);
-			exit(1);
+			printf("Unknown option '%s'\n", option);
+			return 0;
 		}
 	}
-	if (strcmp(protocol, "homa") == 0)
-		homa_protocol = 1;
-	else if (strcmp(protocol, "tcp") == 0)
-	        homa_protocol = 0;
-	else {
-		printf("Unknown protocol '%s': must be homa or tcp\n", protocol);
-		exit(1);
-	}
-	
-	/* Spawn server threads. */
-	if (is_server) {
-		if (homa_protocol) {
-			for (i = 0; i < server_ports; i++) {
-				struct sockaddr_in addr_in;
-				int fd, j, port;
+	init_server_addrs();
 
-				fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-				if (fd < 0) {
-					printf("Couldn't open Homa socket: "
-						"	%s\n", strerror(errno));
-					exit(1);
-				}
-
-				port = first_port + i;
-				memset(&addr_in, 0, sizeof(addr_in));
-				addr_in.sin_family = AF_INET;
-				addr_in.sin_port = htons(port);
-				if (bind(fd, (struct sockaddr *) &addr_in,
-						sizeof(addr_in)) != 0) {
-					printf("Couldn't bind socket to Homa "
-							"port %d: %s\n", port,
-							strerror(errno));
-					exit(1);
-				}
-				printf("Successfully bound to Homa port %d\n",
-						port);
-				for (j = 0; j < port_threads; j++) {
-					homa_server *server = new homa_server(
-							fd);
-					homa_servers.push_back(server);
-					metrics.push_back(&server->metrics);
-				}
-			}
-		} else {
-			for (i = 0; i < server_ports; i++) {
-				tcp_server *server = new tcp_server(
-						first_port + i);
-				tcp_servers.push_back(server);
-				metrics.push_back(&server->metrics);
-			}
-		}
-		last_per_server_rpcs.resize(server_ports, 0);
-	}
-	
-	/* Initialize server_addrs. */
-	for (int node = 0; node < server_nodes; node++) {
-		char host[100];
-		struct addrinfo hints;
-		struct addrinfo *matching_addresses;
-		struct sockaddr_in *dest;
-
-		snprintf(host, sizeof(host), "node-%d", node + first_server);
-		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = AF_INET;
-		hints.ai_socktype = SOCK_DGRAM;
-		int status = getaddrinfo(host, NULL, &hints,
-				&matching_addresses);
-		if (status != 0) {
-			printf("Couldn't look up address for %s: %s\n",
-					host, gai_strerror(status));
-			exit(1);
-		}
-		dest = reinterpret_cast<struct sockaddr_in *>
-				(matching_addresses->ai_addr);
-		for (int thread = 0; thread < server_ports; thread++) {
-			dest->sin_port = htons(first_port + thread);
-			server_addrs.push_back(*dest);
-		}
-	}
-	
 	/* Create clients. */
-	for (i = 0; i < client_threads; i++) {
-		if (homa_protocol)
+	for (int i = 0; i < client_threads; i++) {
+		if (strcmp(protocol, "homa") == 0)
 			clients.push_back(new homa_client(i));
 		else
 			clients.push_back(new tcp_client(i));
 	}
-	
-	/* Print a few statistics every second. */
-	while (1) {
-		sleep(1);
-		uint64_t now = rdtsc();
-		server_stats(now);
-		client_stats(now);
-		
-		last_stats_time = now;
-	}
-	exit(0);
+	return 1;
 }
 
+/**
+ * server_cmd() - Parse the arguments for a "server" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int server_cmd(std::vector<string> &words)
+{
+	first_port = 4000;
+        protocol = "homa";
+	port_threads = 1;
+	server_ports = 1;
+	
+	for (unsigned i = 1; i < words.size(); i++) {
+		const char *option = words[i].c_str();
+
+		if (strcmp(option, "--first_port") == 0) {
+			if (!parse_int(words, i+1, &first_port, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--port_threads") == 0) {
+			if (!parse_int(words, i+1, &port_threads, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--ports") == 0) {
+			if (!parse_int(words, i+1, &server_ports, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--protocol") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			protocol = words[i+1].c_str();
+			i++;
+		} else {
+			printf("Unknown option '%s'\n", option);
+			return 0;
+		}
+	}
+
+	if (strcmp(protocol, "homa") == 0) {
+		for (int i = 0; i < server_ports; i++) {
+			struct sockaddr_in addr_in;
+			int fd, j, port;
+
+			fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+			if (fd < 0) {
+				printf("Couldn't open Homa socket: "
+						"%s\n", strerror(errno));
+				exit(1);
+			}
+
+			port = first_port + i;
+			memset(&addr_in, 0, sizeof(addr_in));
+			addr_in.sin_family = AF_INET;
+			addr_in.sin_port = htons(port);
+			if (bind(fd, (struct sockaddr *) &addr_in,
+					sizeof(addr_in)) != 0) {
+				printf("Couldn't bind socket to Homa "
+						"port %d: %s\n", port,
+						strerror(errno));
+				exit(1);
+			}
+			printf("Successfully bound to Homa port %d\n",
+					port);
+			for (j = 0; j < port_threads; j++) {
+				homa_server *server = new homa_server(
+						fd);
+				homa_servers.push_back(server);
+				metrics.push_back(&server->metrics);
+			}
+		}
+	} else {
+		for (int i = 0; i < server_ports; i++) {
+			tcp_server *server = new tcp_server(
+					first_port + i);
+			tcp_servers.push_back(server);
+			metrics.push_back(&server->metrics);
+		}
+	}
+	last_per_server_rpcs.resize(server_ports, 0);
+	return 1;
+}
+
+/**
+ * exec_words() - Given a command that has been parsed into words,
+ * execute the command corresponding to the words.
+ * @words:  Each entry represents one word of the command, like argc/argv.
+ * 
+ * Return:  Nonzero means success, zero means there was an error. 
+ */
+int exec_words(std::vector<string> &words)
+{
+	if (words.size() == 0)
+		return 1;
+	if (words[0].compare("client") == 0) {
+		return client_cmd(words);
+	} else if (words[0].compare("server") == 0) {
+		return server_cmd(words);
+	} else {
+		printf("Unknown command '%s'\n", words[0].c_str());
+		return 0;
+	}
+}
+
+/**
+ * exec_string() - Given a string, parse it into words and execute the
+ * resulting command.
+ * @cmd:  Command to execute.
+ */
+void exec_string(const char *cmd)
+{
+	const char *p = cmd;
+	std::vector<string> words;
+	
+	while (1) {
+		int word_length = strcspn(p, " \t\n");
+		if (word_length > 0)
+			words.emplace_back(p, word_length);
+		p += word_length;
+		if (*p == 0)
+			break;
+		p++;
+	}
+	exec_words(words);
+}
+
+int main(int argc, char** argv)
+{
+	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
+		print_help(argv[0]);
+		exit(0);
+	}
+	
+	if (argc > 1) {
+		std::vector<string> words;
+		for (int i = 1; i < argc; i++)
+			words.emplace_back(argv[i]);
+		if (!exec_words(words))
+			exit(1);
+		
+		/* Instead of going interactive, just print stats.
+		 * every second.
+		 */
+		while (1) {
+			sleep(1);
+			uint64_t now = rdtsc();
+			server_stats(now);
+			client_stats(now);
+
+			last_stats_time = now;
+		}
+	}
+	
+	while (1) {
+		string line;
+		
+		printf("%% ");
+		fflush(stdout);
+		if (!std::getline(std::cin, line))
+			exit(0);
+		exec_string(line.c_str());
+	}
+}
