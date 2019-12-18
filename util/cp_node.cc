@@ -58,7 +58,7 @@ int first_server = 1;
 bool is_server = false;
 int id = -1;
 uint32_t server_max = 1;
-double net_util = 0.8;
+double net_bw = 1000.0;
 int port_threads = 1;
 const char *protocol = "homa";
 int server_nodes = 1;
@@ -137,8 +137,8 @@ void print_help(const char *name)
 		"                      greater than 1)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
-		"    --net-util        Target network utilization, including only message data\n"
-		"                      bytes (default: %.2f)\n"
+		"    --net-bw          Target network utilization, including only message data,\n"
+		"                      MB/s (default: %.1f)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --server-max      Maximum number of outstanding requests from a single\n"
 		"                      client thread to a single server port (default: %d)\n"
@@ -151,6 +151,8 @@ void print_help(const char *name)
 		"                      (default: %d)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n\n"
+		"dump_times file       Log RTT times (and lengths) to file\n\n"
+		"exit                  Exit the application\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
@@ -159,7 +161,7 @@ void print_help(const char *name)
 		"    --ports           Number of ports to listen on (default: %d)\n\n"
 		"stop [options]        Stop existing client and/or server threads; each\n"
 		"                      option must be either 'clients' or 'servers'\n",
-		first_port, first_server, first_server, net_util, protocol,
+		first_port, first_server, first_server, net_bw, protocol,
 		server_max, server_nodes, server_ports, client_max,
 		client_threads, workload,
 		first_port, protocol, port_threads, server_ports);
@@ -1122,6 +1124,8 @@ void homa_client::sender()
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
 			sizeof(server_addrs[0]), &id);
+		if (stop)
+			return;
 		if (status < 0) {
 			if (stop)
 				return;
@@ -1536,7 +1540,7 @@ int client_cmd(std::vector<string> &words)
 	first_port = 4000;
 	first_server = 1;
 	server_max = 1;
-	net_util = 0.8;
+	net_bw = 1000.0;
 	port_threads = 1;
 	protocol = "homa";
 	server_nodes = 1;
@@ -1554,8 +1558,8 @@ int client_cmd(std::vector<string> &words)
 			if (!parse_int(words, i+1, &first_server, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--net-util") == 0) {
-			if (!parse_float(words, i+1, &net_util, option))
+		} else if (strcmp(option, "--net-bw") == 0) {
+			if (!parse_float(words, i+1, &net_bw, option))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--protocol") == 0) {
@@ -1610,6 +1614,62 @@ int client_cmd(std::vector<string> &words)
 		else
 			clients.push_back(new tcp_client(i));
 	}
+	return 1;
+}
+
+/**
+ * dump_times_cmd() - Parse the arguments for a "dump_times" command and
+ * execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int dump_times_cmd(std::vector<string> &words)
+{
+	FILE *f;
+	time_t now;
+	char time_buffer[100];
+	
+	if (words.size() != 2) {
+		printf("Wrong # args; must be 'dump_times file'\n");
+		return 0;
+	}
+	f = fopen(words[1].c_str(), "w");
+	if (f == NULL) {
+		printf("Couldn't open file %s: %s\n", words[1].c_str(),
+				strerror(errno));
+		return 0;
+	}
+	
+	time(&now);
+	strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S",
+			localtime(&now));
+	fprintf(f, "# Round-trip times measured by cp_node at %s\n",
+			time_buffer);
+	fprintf(f, "# --protocol %s, --workload %s, --net-bw %.1f --threads %d,\n",
+			protocol, workload, net_bw, client_threads);
+	fprintf(f, "# --server-nodes %d --server-ports %d, --thread-max %d, --server-max %d\n",
+			server_nodes, server_ports, client_max, server_max);
+	fprintf(f, "# Length   RTT (usec)\n");
+	for (client *client: clients) {
+		__u32 start = client->next_result;
+		__u32 i = start;
+		while (1) {
+			if (client->actual_rtts[i] != 0) {
+				fprintf(f, "%8d %12.2f\n",
+						client->actual_lengths[i],
+						1e06*to_seconds(
+						client->actual_rtts[i]));
+				client->actual_rtts[i] = 0;
+			}
+			i++;
+			if (i >= client->actual_rtts.size())
+				i = 0;
+			if (i == start)
+				break;
+		}
+	}
+	fclose(f);
 	return 1;
 }
 
@@ -1742,6 +1802,10 @@ int exec_words(std::vector<string> &words)
 		return 1;
 	if (words[0].compare("client") == 0) {
 		return client_cmd(words);
+	} else if (words[0].compare("dump_times") == 0) {
+		return dump_times_cmd(words);
+	} else if (words[0].compare("exit") == 0) {
+		exit(0);
 	} else if (words[0].compare("server") == 0) {
 		return server_cmd(words);
 	} else if (words[0].compare("stop") == 0) {
