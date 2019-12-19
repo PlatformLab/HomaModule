@@ -95,6 +95,23 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_data)
 			"DATA P1 1400@8400 200@9800",
 			unit_log_get());
 }
+TEST_F(homa_outgoing, homa_fill_packets__gso_max_less_than_mtu)
+{
+	mock_net_device.gso_max_size = 6000;
+	self->homa.max_gso_size = 2000 + HOMA_IPV4_HEADER_LENGTH
+			+ sizeof(struct data_header);
+	mock_mtu = 3000;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 5000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	unit_log_message_out_packets(&crpc->msgout, 0);
+	EXPECT_STREQ("DATA P1 2000@0; "
+			"DATA P1 2000@2000; "
+			"DATA P1 1000@4000",
+			unit_log_get());
+}
 TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_small_skb)
 {
 	mock_alloc_skb_errors = 1;

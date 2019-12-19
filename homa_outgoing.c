@@ -110,6 +110,12 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 		
 		/* Round gso_size down to an even # of mtus. */
 		bufs_per_gso = gso_size/mtu;
+		if (bufs_per_gso == 0) {
+			bufs_per_gso = 1;
+			mtu = gso_size;
+			max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH
+					- sizeof(struct data_header);
+		}
 		max_gso_data = bufs_per_gso * max_pkt_data;
 		gso_size = bufs_per_gso * mtu;
 		
