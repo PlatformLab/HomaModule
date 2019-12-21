@@ -1,0 +1,139 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2019, Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This program runs one or more performance measurements of Homa on
+# a cluster of machines with names "node-0" to "node-N". Type
+# "cperf --help" for elementary documentation.
+# Usage:
+# cperf [options] test test ...
+
+import argparse
+import fcntl
+import os
+import shutil
+import subprocess
+import time
+
+# Each entry in this array contains the Popen object for communication
+# with one node (indexed by node number).
+nodes = []
+
+def wait_output(string, r):
+    """
+    The r argument specifies a range of node indexes. This method waits
+    until the given string has appeared on the stdout of each of the given
+    nodes. If a long time goes by without the string appearing, an exception
+    is thrown.
+    """
+    global nodes
+    outputs = []
+
+    for i in r:
+        outputs.append("")
+    timeout = time.time() + 5.0
+    while time.time() < timeout:
+        for i in r:
+            data = nodes[i].stdout.read(1000)
+            if data != None:
+                if data != "":
+                    print("output from node-%d: '%s'" % (i, data))
+                outputs[i] += data
+        bad_node = -1
+        for i in r:
+            if not string in outputs[i]:
+                bad_node = i
+                break
+        if bad_node < 0:
+            return
+        time.sleep(0.1)
+    raise Exception("bad output from node-%d: expected '%s', got '%s'"
+            % (bad_node, string, outputs[bad_node]))
+
+def start_nodes(r):
+    """
+    Start up cp_node on the given range of node indexes. References
+    to the nodes will be stored in the nodes array.
+    """
+    global nodes
+    while len(nodes) < r.stop:
+        nodes.append(None)
+    for n in r:
+        node = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
+                "node-%d" % (n), "cp_node"], encoding="utf-8",
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT)
+        fl = fcntl.fcntl(node.stdin, fcntl.F_GETFL)
+        fcntl.fcntl(node.stdin, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        fl = fcntl.fcntl(node.stdout, fcntl.F_GETFL)
+        fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+        nodes[n] = node
+    wait_output("% ", r)
+
+def do_cmd(command, r):
+    """
+    Execute a cp_node command on the range of notes given by r, and
+    wait for the command to complete on each node. The command should
+    be terminated by a newline.
+    """
+    global nodes
+    for n in r:
+        nodes[n].stdin.write(command)
+        nodes[n].stdin.flush()
+    time.sleep(2.0)
+    wait_output("% ", r)
+
+parser = argparse.ArgumentParser(description=
+        'Run one or more Homa performance benchmarks on a cluster of nodes.  '
+        'Each test argument names one test to run.  To understand how a '
+        'particular test works, look at the code for the function '
+        'test_<name>, where a <name> is the value typed on the command '
+        'line. Not all of the options described below are used by all '
+        'benchmarks.',
+        usage='%(prog)s [options] test test ...')
+parser.add_argument('-l', '--log-dir', dest='log_dir',
+        metavar='D', default="logs/" + time.strftime('%Y%m%d%H%M%S'),
+        help='directory to use for logs and metrics')
+parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
+        required=True, metavar='N',
+        help='total number of nodes to use in the cluster')
+parser.add_argument('-p', '--protocol', dest='protocol',
+        choices=['homa', 'tcp'], default="homa",
+        help='transport protocol to use')
+parser.add_argument('-w', '--workload', dest='workload',
+        metavar='W', default="w3",
+        help='workload to use for benchmark (w1-w5 or number)')
+
+args = parser.parse_args()
+if os.path.exists(args.log_dir):
+    shutil.rmtree(args.log_dir)
+os.makedirs(args.log_dir)
+
+print("Starting nodes")
+start_nodes(range(args.num_nodes))
+print("Starting servers")
+do_cmd("server --ports 4\n", range(args.num_nodes))
+print("Starting clients")
+do_cmd("client --threads 5 --server-ports 4 --workload %s --server-nodes 3 "
+        "--first-server 0\n" % (args.workload),
+        range(args.num_nodes))
+time.sleep(5.0)
+print("Dumping stats")
+do_cmd("dump_times rtts.txt\n", range(args.num_nodes))
+
+print("Retrieving stats")
+for n in range(args.num_nodes):
+    subprocess.run(["rsync", "-rtv", "node-%d:rtts.txt" % (n),
+            "%s/rtts-%d.txt" % (args.log_dir, n)])
