@@ -1,0 +1,36 @@
+#!/bin/bash
+# This script installs all of the files needed to run Homa tests on one
+# or more target machines; it also loads the Homa kernel module.
+#
+# Usage:
+# install num_nodes [first]
+#
+# The "num_nodes" arguments indicates how many servers should be updated.
+# The "first" argument is optional; it is an integer identifying the
+# first node on which installation will occur (e.g. "install 4 2" means
+# node-2 through node-5 will be updated. "first" defaults to 0.
+# This script assumes that Homa has been built in ~/homaModule on the
+# current machine (this includes both homa.ko and all of the binaries in util).
+
+root=~/homaModule
+
+if [ $# -eq 2 ]; then
+    first=$2
+elif [ $# -eq 1 ]; then
+    first=0
+else
+    echo "Usage: install num_nodes [first]"
+    exit 1
+fi
+last=`expr $first + $1 - 1`
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node-$i
+    echo
+    echo *** Installing on $node ***
+    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile $node:
+    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/bin/ $node:bin/
+    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/metrics.py $root/util/ttprint.py $root/util/ttsum.py $node:bin/
+    ssh $node 'echo $PATH'
+    ssh $node 'start_xl170 ~/bin/homa.ko'
+done

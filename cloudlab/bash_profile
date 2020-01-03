@@ -1,0 +1,21 @@
+export LANG=C
+export VISUAL=vi
+
+# The following lines arrange for the current git branch to
+# appear in the shell prompt.
+
+parse_git_branch() {
+  ref=$(git symbolic-ref HEAD -q 2>/dev/null)
+  st=$?
+  if [ $st -eq 1 ]; then
+    echo "[detached]"
+  elif [ $st -eq 0 ]; then
+    echo " [${ref#refs/heads/}]"
+  fi
+}
+
+PS1="${debian_chroot:+($debian_chroot)}\u@\h:\w\$(parse_git_branch)\$ "
+XTERM_TITLE="\w$(parse_git_branch)"
+PS1="\n\[\e]0;$XTERM_TITLE\a\]\[\e[1;32m\]$PS1\[\e[1;37m\]"
+
+. ~/.bashrc

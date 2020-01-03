@@ -5,7 +5,7 @@
 
 if [ $# -eq 0 ]; then
     # targets="ms0919.utah.cloudlab.us ms0903.utah.cloudlab.us"
-    targets="hp056.utah.cloudlab.us hp057.utah.cloudlab.us"
+    targets="hp078.utah.cloudlab.us"
 else
     targets=$*
 fi
@@ -16,8 +16,9 @@ for t in $targets; do
 done
 for t in $targets; do
     echo $t
-    rsync -rtv cloudlab/bin/start_xl170 cloudlab/bin/start_m510 \
-            cloudlab/bin/update_linux ouster@$t:homaModule/
+    rsync -rtv cloudlab/bin/ ouster@$t:bin/
+    rsync -rtv cloudlab/bash_profile ouster@$t:.bash_profile
+    rsync -rtv cloudlab/bashrc ouster@$t:.bashrc
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
         cp .ssh/cloudlab_rsa .ssh/id_rsa
