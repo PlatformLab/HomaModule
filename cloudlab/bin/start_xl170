@@ -1,10 +1,18 @@
 # This script starts up the Homa module and configures it for the
 # local system. If Homa was previously installed, it is uninstalled.
+# Usage:
+# start_xl170 [mod_file]
+
+if [ $# -eq 1 ]; then
+    homa=$1
+else
+    homa=~/homaModule/homa.ko
+fi
 
 # sudo ip link set ens1f1 mtu 1500
 # sudo ip link set vlan320 mtu 1500
 sudo rmmod homa
-sudo insmod ~/homaModule/homa.ko
+sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
 sudo sysctl /net/homa/max_nic_queue_ns=10000
 sudo sysctl /net/homa/rtt_bytes=70000
