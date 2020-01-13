@@ -421,6 +421,14 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h, 0, 0), &self->hsk);
 	EXPECT_EQ(1, unit_get_metrics()->unknown_packet_types);
 }
+TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc_but_socket_shutdown)
+{
+	self->hsk.shutdown = 1;
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), &self->hsk);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	self->hsk.shutdown = 0;
+}
 
 TEST_F(homa_incoming, homa_data_pkt__basics)
 {
@@ -544,6 +552,24 @@ TEST_F(homa_incoming, homa_data_pkt__long_server_rpc_ready)
 			1400, 1400), srpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+}
+TEST_F(homa_incoming, homa_data_pkt__socket_shutdown)
+{
+	self->data.message_length = htonl(100);
+	self->data.incoming = htonl(100);
+	self->data.seg.segment_length = htonl(100);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	homa_rpc_lock(srpc);
+	self->hsk.shutdown = 1;
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			100, 0), srpc);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	homa_rpc_unlock(srpc);
+	self->hsk.shutdown = 0;
 }
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)
 {

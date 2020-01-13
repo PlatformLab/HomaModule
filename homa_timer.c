@@ -153,7 +153,7 @@ void homa_timer(struct homa *homa)
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
-		if (list_empty(&hsk->active_rpcs))
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
 		
 		atomic_inc(&hsk->reap_disable);
@@ -222,7 +222,7 @@ void homa_timer(struct homa *homa)
 			struct list_head *pos;
 			int requests = 0;
 			int responses = 0;
-			homa_sock_lock(hsk);
+			homa_sock_lock(hsk, "homa_timer");
 			list_for_each(pos, &hsk->ready_requests) {
 				requests++;
 			}

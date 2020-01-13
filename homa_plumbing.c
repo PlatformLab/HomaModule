@@ -493,10 +493,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		&iter);		
 	if (unlikely(err))
 		return err;
-	if (hsk->shutdown) {
-		err = -ESHUTDOWN;
-		goto error;
-	}
 	rpc = homa_wait_for_message(hsk, args.flags, args.id);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
@@ -569,8 +565,6 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
 
-	if (hsk->shutdown)
-		return -ESHUTDOWN;
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 	tt_record2("homa_ioc_reply starting, id %llu, port %d",
@@ -636,8 +630,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
-	if (hsk->shutdown)
-		return -ESHUTDOWN;
 	
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.request,
 			args.reqlen);

@@ -798,7 +798,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
 
 /* Don't know how to unit test homa_pacer_stop... */
 
-TEST_F(homa_outgoing, homa_add_to_throttled)
+TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 {
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (void *) 1000, 10000);

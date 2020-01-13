@@ -427,7 +427,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  * to be transmitted according to the scheduling mechanism, arrange for
  * them to be sent (some may be sent immediately; others may be sent
  * later by the pacer thread).
- * @rpc:       RPC to check for transmittable packets.
+ * @rpc:       RPC to check for transmittable packets. Must be locked by
+ *             caller.
  * @pacer:     True means we were invoked from the pacer, which changes the
  *             behavior a bit.
  */
@@ -438,6 +439,14 @@ void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
 		struct sk_buff *skb = rpc->msgout.next_packet;
 		struct homa *homa = rpc->hsk->homa;
 		int offset = homa_data_offset(skb);
+		
+		if (homa == NULL) {
+			printk(KERN_NOTICE "NULL homa pointer in homa_xmit_"
+				"data, state %d, shutdown %d, id %llu, socket %d",
+				rpc->state, rpc->hsk->shutdown, rpc->id,
+				rpc->hsk->client_port);
+			BUG();
+		}
 		
 		if (offset >= rpc->msgout.granted)
 			break;
@@ -754,7 +763,9 @@ void homa_pacer_xmit(struct homa *homa)
 		 * because we have to hold throttle_lock while locking
 		 * the RPC, but then we can't wait for the RPC lock because
 		 * of lock ordering constraints (see sync.txt). Thus, if
-		 * the RPC lock isn't available, do nothing.
+		 * the RPC lock isn't available, do nothing. Holding the
+		 * throttle lock while locking the RPC is important because
+		 * it keeps the RPC from being deleted before it can be locked.
 		 */
 		spin_lock_bh(&homa->throttle_lock);
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
@@ -769,7 +780,7 @@ void homa_pacer_xmit(struct homa *homa)
 			break;
 		}
 		spin_unlock_bh(&homa->throttle_lock);
-
+		
 		if (backlog < 0) {
 			INC_METRIC(pacer_lost_cycles, -backlog);
 			tt_record2("homa_pacer_xmit lost %d cycles (lockout %d)",

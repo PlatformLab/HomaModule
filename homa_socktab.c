@@ -127,6 +127,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	
 	mutex_lock(&socktab->write_lock);
 	spin_lock_init(&hsk->lock);
+	hsk->last_locker = "none";
 	hsk->homa = homa;
 	hsk->shutdown = false;
 	hsk->server_port = 0;
@@ -176,27 +177,50 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
 	
-	homa_sock_lock(hsk);
+	homa_sock_lock(hsk, "homa_socket_shutdown #1");
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		return;
 	}
+	printk(KERN_NOTICE "Shutting down socket %d, id %lu",
+			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
+	atomic_inc(&hsk->reap_disable);
+	
+	/* The order of cleanup is very important, because there could be
+	 * active operations that hold RPC locks but not the socket lock.
+	 * 1. Set @shutdown; this ensures that no new RPCs will be created for
+	 *    this socket (though some creations might already be in progress).
+	 * 2. Remove the socket from the port map: this ensures that
+	 *    incoming packets for the socket will be dropped.
+	 * 3. Go through all of the RPCs and delete them; this will
+	 *    synchronize with any operations in progress.
+	 * 4. Perform other socket cleanup: at this point we know that
+	 *    there will be no concurrent activities on individual RPCs.
+	 * See sync.txt for additional information about locking.
+	 */
 	hsk->shutdown = true;
 	mutex_lock(&hsk->homa->port_map.write_lock);
 	hlist_del_rcu(&hsk->client_links.hash_links);
 	if (hsk->server_port != 0)
 		hlist_del_rcu(&hsk->server_links.hash_links);
 	mutex_unlock(&hsk->homa->port_map.write_lock);
+	homa_sock_unlock(hsk);
+	
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+		homa_rpc_lock(rpc);
+		homa_rpc_free(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	homa_sock_lock(hsk, "homa_socket_shutdown #2");
 	
 	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
-	homa_sock_unlock(hsk);
 	
-	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
-		homa_rpc_free(rpc);
-	while (homa_rpc_reap(hsk)) {}
+	atomic_dec(&hsk->reap_disable);
+	while (homa_rpc_reap(hsk) != 0) {}
+	homa_sock_unlock(hsk);
 }
 
 /**

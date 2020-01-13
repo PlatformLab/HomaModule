@@ -848,6 +848,11 @@ struct homa_sock {
 	struct spinlock lock;
 	
 	/**
+	 * @last_locker: identifies the code that most recently acquired
+	 * @lock successfully. Occasionally used for debugging. */
+	char *last_locker;
+	
+	/**
 	 * @reap_disable: no RPCs for this socket will be reaped while
 	 * this counter is nonzero. Allows safe traversal of lists
 	 * without holding socket lock. See sync.txt for more info.
@@ -1690,11 +1695,17 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 /**
  * homa_sock_lock() - Acquire the lock for a socket. If the socket
  * isn't immediately available, record stats on the waiting time.
- * @hsk:   Socket to lock.
+ * @hsk:     Socket to lock.
+ * @locker:  Static string identifying where the socket was locked;
+ *           used to track down deadlocks.
  */
-static inline void homa_sock_lock(struct homa_sock *hsk) {
-	if (!spin_trylock_bh(&hsk->lock))
+static inline void homa_sock_lock(struct homa_sock *hsk, char *locker) {
+	if (!spin_trylock_bh(&hsk->lock)) {
+//		printk(KERN_NOTICE "Slow path for socket %d, last locker %s",
+//				hsk->client_port, hsk->last_locker);
 		homa_sock_lock_slow(hsk);
+	}
+//	hsk->last_locker = locker;
 }
 
 /**
@@ -1733,7 +1744,7 @@ extern void     homa_compile_metrics(struct homa_metrics *m);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
 			struct homa_rpc *crpc);
-extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern int      homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);

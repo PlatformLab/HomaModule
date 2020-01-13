@@ -214,8 +214,14 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	 * locks while doing things that could block, such as memory allocation.
 	 */
 	homa_bucket_lock(bucket, client);
+	homa_sock_lock(hsk, "homa_rpc_new_client");
+	if (hsk->shutdown) {
+		homa_sock_unlock(hsk);
+		homa_rpc_unlock(crpc);
+		err = -ESHUTDOWN;
+		goto error;
+	}
 	hlist_add_head(&crpc->hash_links, &bucket->rpcs);
-	homa_sock_lock(hsk);
 	list_add_tail_rcu(&crpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
 	
@@ -346,7 +352,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
-	homa_sock_lock(rpc->hsk);
+	homa_sock_lock(rpc->hsk, "homa_rpc_free");
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
 	__list_del_entry(&rpc->ready_links);
@@ -378,8 +384,12 @@ void homa_rpc_free(struct homa_rpc *rpc)
  *         caller. The lock may be released and then reacquired by this
  *         function.
  * 
- * Return: Zero means there were no RPCs to reap; nonzero means we found
- *         some work to do.
+ * Return: A value greater than 0 means the function found work to do;
+ *         there may be additional RPCs that haven't yet been reaped.
+ *         A value of zero means that there are no RPCs ready to be
+ *         reaped. A value less than zero means that reaping was disabled,
+ *         so the method didn't do anything; there may or may not be
+ *         RPCs available to reap.
  */
 int homa_rpc_reap(struct homa_sock *hsk)
 {
@@ -393,7 +403,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	
 	if (atomic_read(&hsk->reap_disable)) {
 		INC_METRIC(disabled_reaps, 1);
-		return 0;
+		return -1;
 	}
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
@@ -466,7 +476,7 @@ release:
 		homa_rpc_unlock(rpcs[i]);
 		kfree(rpcs[i]);
 	}
-	homa_sock_lock(hsk);
+	homa_sock_lock(hsk, "homa_rpc_reap");
 	return 1;
 }
 

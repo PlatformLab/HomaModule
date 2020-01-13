@@ -135,6 +135,15 @@ TEST_F(homa_utils, homa_rpc_new_client__msgout_init_error)
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
+TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
+{
+	self->hsk.shutdown = 1;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (char *) 2000, 10000);
+	EXPECT_TRUE(IS_ERR(crpc));
+	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(crpc));
+	self->hsk.shutdown = 1;
+}
 
 TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
@@ -331,7 +340,7 @@ TEST_F(homa_utils, homa_rpc_reap__reap_disabled)
 	homa_rpc_free(crpc1);
 	unit_log_clear();
 	atomic_inc(&self->hsk.reap_disable);
-	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	EXPECT_EQ(-1, homa_rpc_reap(&self->hsk));
 	atomic_dec(&self->hsk.reap_disable);
 	EXPECT_STREQ("", unit_log_get());
 }

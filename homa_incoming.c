@@ -298,7 +298,8 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	switch (h->type) {
 	case DATA:
 		INC_METRIC(packets_received[DATA - DATA], 1);
-		homa_data_pkt(skb, rpc);
+		if (homa_data_pkt(skb, rpc) != 0)
+			return;
 		break;
 	case GRANT:
 		INC_METRIC(packets_received[GRANT - DATA], 1);
@@ -342,9 +343,12 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
  * 
- * This method may change the RPC's state to RPC_READY.
+ * Return: Zero means the function completed successfully. Nonzero means
+ * that the RPC had to be unlocked and deleted because the socket has been
+ * shut down; the caller should not access the RPC anymore. Note: this method
+ * may change the RPC's state to RPC_READY.
  */
-void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
@@ -359,7 +363,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
-			return;			
+			return 0;			
 		}
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
 				incoming);
@@ -384,14 +388,25 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 * also add the RPC to the ready list, if appropriate.
 		 */
 		INC_METRIC(requests_received, 1);
-		homa_sock_lock(rpc->hsk);
+		homa_sock_lock(rpc->hsk, "homa_data_pkt (first)");
+		if (rpc->hsk->shutdown) {
+			/* Unsafe to add new RPCs to a socket after shutdown
+			 * has begun; destroy the new RPC.
+			 */
+			homa_message_in_destroy(&rpc->msgin);
+			kfree(rpc);
+			homa_sock_unlock(rpc->hsk);
+			homa_rpc_unlock(rpc);
+			return 1;
+		}
+			
 		list_add_tail_rcu(&rpc->active_links, &rpc->hsk->active_rpcs);
 		if (rpc->msgin.bytes_remaining == 0)
 			homa_rpc_ready(rpc);
 		homa_sock_unlock(rpc->hsk);
 	} else {
 		if (rpc->msgin.bytes_remaining == 0) {
-			homa_sock_lock(rpc->hsk);
+			homa_sock_lock(rpc->hsk, "homa_data_pkt (not first)");
 			homa_rpc_ready(rpc);
 			homa_sock_unlock(rpc->hsk);
 		}
@@ -418,6 +433,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			rpc->peer->last_update_jiffies = jiffies;
 		}
 	}
+	return 0;
 }
 
 /**
@@ -727,7 +743,7 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 {
 	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
-	homa_sock_lock(crpc->hsk);
+	homa_sock_lock(crpc->hsk, "homa_rpc_abort");
 	homa_rpc_ready(crpc);
 	homa_sock_unlock(crpc->hsk);
 }
@@ -863,15 +879,12 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	 */
 	while (1) {
 		while (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
-			int reaper_found_work;
-			
 			/* Way too many dead RPCs; must cleanup immediately. */
 			if (!sock_locked) {
-				homa_sock_lock(hsk);
+				homa_sock_lock(hsk, "homa_wait_for_message #1");
 				sock_locked = 1;
 			}
-			reaper_found_work = homa_rpc_reap(hsk);
-			if (!reaper_found_work)
+			if (homa_rpc_reap(hsk) <= 0)
 				break;
 		}
 		
@@ -907,7 +920,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			homa_rpc_unlock(rpc);
 		}
 		if (!sock_locked) {
-			homa_sock_lock(hsk);
+			homa_sock_lock(hsk, "homa_wait_for_message #2");
 			sock_locked = 1;
 		}
 		if ((id == 0) && (flags & HOMA_RECV_RESPONSE)) {
@@ -944,12 +957,12 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		 * nonblocking mode).
 		 */
 		while (!atomic_long_read(&interest.id)) {
-			int reaper_found_work = homa_rpc_reap(hsk);
+			int reaper_result = homa_rpc_reap(hsk);
 			if (flags & HOMA_RECV_NONBLOCKING) {
 				result = ERR_PTR(-EAGAIN);
 				goto done;
 			}
-			if (!reaper_found_work)
+			if (reaper_result <= 0)
 				break;
 		}
 		
@@ -1015,7 +1028,7 @@ done:
 	if ((interest.reg_rpc) || (interest.request_links.next != LIST_POISON1)
 			|| (interest.response_links.next != LIST_POISON1)) {
 		if (!sock_locked) {
-			homa_sock_lock(hsk);
+			homa_sock_lock(hsk, "homa_wait_for_message #3");
 			sock_locked = 1;
 		}
 		if (interest.reg_rpc)

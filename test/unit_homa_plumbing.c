@@ -179,18 +179,6 @@ TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 		(unsigned long) &self->reply_args));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 }
-TEST_F(homa_plumbing, homa_ioc_reply__socket_shutdown)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->rpcid, 2000, 100);
-	unit_log_clear();
-	self->hsk.shutdown = true;
-	EXPECT_EQ(ESHUTDOWN, -homa_ioc_reply((struct sock *) &self->hsk,
-		(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	self->hsk.shutdown = false;
-}
 TEST_F(homa_plumbing, homa_ioc_reply__cant_find_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
@@ -255,13 +243,6 @@ TEST_F(homa_plumbing, homa_ioc_send__bad_address_family)
 	EXPECT_EQ(EAFNOSUPPORT, -homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_send__socket_shutdown)
-{
-	self->hsk.shutdown = true;
-	EXPECT_EQ(ESHUTDOWN, -homa_ioc_send((struct sock *) &self->hsk,
-		(unsigned long) &self->send_args));
-	self->hsk.shutdown = false;
 }
 TEST_F(homa_plumbing, homa_ioc_send__error_in_homa_rpc_new_client)
 {
