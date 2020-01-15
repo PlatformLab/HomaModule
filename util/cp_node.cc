@@ -22,6 +22,8 @@
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <poll.h>
+#include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -32,12 +34,15 @@
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
 #include <algorithm>
 #include <atomic>
 #include <functional>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <random>
 #include <thread>
@@ -58,7 +63,7 @@ int first_server = 1;
 bool is_server = false;
 int id = -1;
 uint32_t server_max = 1;
-double net_bw = 1000.0;
+double net_bw = 0.0;
 int port_threads = 1;
 const char *protocol = "homa";
 int server_nodes = 1;
@@ -101,6 +106,12 @@ uint64_t last_client_data;
 uint64_t last_total_rtt;
 
 /**
+ * @last_lag: total lag across all clients (measured in rdtsc cycles)
+ * as of the last time we printed statistics.
+ */
+uint64_t last_lag;
+
+/**
  * @last_server_rpcs: total number of server RPCS handled by this
  * application as of the last time we printed statistics.
  */
@@ -117,6 +128,21 @@ uint64_t last_server_data;
  * as of the last time we printed statistics.
  */
 std::vector<uint64_t> last_per_server_rpcs;
+
+/** @log_file: where log messages get printed. */
+FILE* log_file = stdout;
+
+enum Msg_Type {NORMAL, VERBOSE};
+
+/** @log_level: only print log messages if they have a level <= this value. */
+Msg_Type log_level = NORMAL;
+
+/**
+ * @cmd_lock: held whenever a command is executing.  Used to ensure that
+ * operations such as statistics printing don't run when commands such
+ * as "stop" are changing the client or server structure.
+ */
+std::mutex cmd_lock;
 
 /**
  * print_help() - Print out usage information for this program.
@@ -138,7 +164,7 @@ void print_help(const char *name)
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
 		"    --net-bw          Target network utilization, including only message data,\n"
-		"                      MB/s (default: %.1f)\n"
+		"                      GB/s; 0 means send continuously (default: %.1f)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --server-max      Maximum number of outstanding requests from a single\n"
 		"                      client thread to a single server port (default: %d)\n"
@@ -153,6 +179,13 @@ void print_help(const char *name)
 		"                      or integer for fixed length (default: %s)\n\n"
 		"dump_times file       Log RTT times (and lengths) to file\n\n"
 		"exit                  Exit the application\n\n"
+		"log [options] [msg]   Configure logging as determined by the options. If\n"
+		"                      there is an \"option\" that doesn't start with \"--\",\n"
+		"                      then it and all of the remaining words are printed to\n"
+		"                      the log as a message.\n"
+		"    --file            Name of log file to use for future messages (\"-\"\n"
+		"                      means use standard output\n"
+		"    --level           Log level: either normal or verbose\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
@@ -165,6 +198,27 @@ void print_help(const char *name)
 		server_max, server_nodes, server_ports, client_max,
 		client_threads, workload,
 		first_port, protocol, port_threads, server_ports);
+}
+
+/**
+ * log() - Print a message to the current log file
+ * @type:   Kind of message (NORMAL or VERBOSE); used to control degree of
+ *          log verbosity
+ * @format: printf-style format string, followed by printf-style arguments.
+ */
+void log(Msg_Type type, const char *format, ...)
+{
+	char buffer[1000];
+	struct timespec now;
+	va_list args;
+
+	if (type > log_level)
+		return;
+	va_start(args, format);
+	clock_gettime(CLOCK_REALTIME, &now);
+
+	vsnprintf(buffer, sizeof(buffer), format, args);
+	fprintf(log_file, "%010lu.%09lu %s", now.tv_sec, now.tv_nsec, buffer);
 }
 
 /**
@@ -308,7 +362,7 @@ void init_server_addrs(void)
 		int status = getaddrinfo(host, NULL, &hints,
 				&matching_addresses);
 		if (status != 0) {
-			printf("Couldn't look up address for %s: %s\n",
+			log(NORMAL, "FATAL: couldn't look up address for %s:\n",
 					host, gai_strerror(status));
 			exit(1);
 		}
@@ -328,11 +382,17 @@ void init_server_addrs(void)
  */
 class tcp_message {
     public:
-	tcp_message(int fd, struct sockaddr_in peer);
+	tcp_message(int fd, int port, struct sockaddr_in peer);
 	int read(std::function<void (message_header *header)> func);
 	
 	/** @fd: File descriptor to use for reading data. */
 	int fd;
+	
+	/**
+	 * @port: Local port used to read this message (for error
+	 * messages).
+	 */
+	int port;
 	
 	/**
 	 * @per: Address of the machine we're reading from; used for
@@ -353,6 +413,12 @@ class tcp_message {
 	 * it has not yet been fully read.
 	 */
 	message_header header;
+	
+	/**
+	 * @error_message: holds human-readable error information after
+	 * an error.
+	 */
+	char error_message[200];
 } __attribute__((packed));
 
 /**
@@ -360,8 +426,9 @@ class tcp_message {
  * @fd:        File descriptor from which to read data.
  * @peer:      Address of the machine we're reading from; used for messages.
  */
-tcp_message::tcp_message(int fd, struct sockaddr_in peer)
+tcp_message::tcp_message(int fd, int port, struct sockaddr_in peer)
 	: fd(fd)
+        , port(port)
 	, peer(peer)
 	, bytes_received(0)
         , header()
@@ -377,8 +444,8 @@ tcp_message::tcp_message(int fd, struct sockaddr_in peer)
  *             may be called multiple times in a single indication of this
  *             method.
  * Return:     Zero means success; nonzero means the socket was closed
- *             by the peer, or there was an error. Before returning, this
- *             method prints an error message.
+ *             by the peer, or there was an error; a human-readable message
+ *	       will be left in @error_message.
  */
 int tcp_message::read(std::function<void (message_header *header)> func)
 {
@@ -386,15 +453,18 @@ int tcp_message::read(std::function<void (message_header *header)> func)
 	char *next = buffer;
 	
 	int count = ::read(fd, buffer, sizeof(buffer));
-	if (verbose)
-		printf("tcp_message read %d bytes on fd %d\n", count, fd);
 	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
 		/* Connection was closed by the client. */
+		snprintf(error_message, sizeof(error_message),
+				"TCP connection on port %d closed by peer %s",
+				port, print_address(&peer));
 		return 1;
 	}
 	if (count < 0) {
-		printf("Error reading from TCP connection: %s\n",
-				strerror(errno));
+		snprintf(error_message, sizeof(error_message),
+				"Error reading from TCP connection on "
+				"port %d to %s: %s", port,
+				print_address(&peer), strerror(errno));
 		return 1;
 	}
 	
@@ -529,13 +599,15 @@ void homa_server::server(void)
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
 				return;
 			else if ((errno != EINTR) && (errno != EAGAIN))
-				printf("homa_recv failed: %s\n", strerror(errno));
+				log(NORMAL, "homa_recv failed: %s\n",
+						strerror(errno));
 		}
 
 		result = homa_reply(fd, message, length,
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {
-			printf("Homa_reply failed: %s\n", strerror(errno));
+			log(NORMAL, "FATAL: homa_reply failed: %s\n",
+					strerror(errno));
 			exit(1);
 		}
 		metrics.requests++;
@@ -602,14 +674,16 @@ tcp_server::tcp_server(int port)
 {
 	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
-		printf("Couldn't open server socket: %s\n", strerror(errno));
+		log(NORMAL, "FATAL: couldn't open server socket: %s\n",
+				strerror(errno));
 		exit(1);
 	}
 	int option_value = 1;
 	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &option_value,
 			sizeof(option_value)) != 0) {
-		printf("Couldn't set SO_REUSEADDR on listen socket: %s",
-			strerror(errno));
+		log(NORMAL, "FATAL: couldn't set SO_REUSEADDR on listen "
+				"socket: %s",
+				strerror(errno));
 		exit(1);
 	}
 	struct sockaddr_in addr;
@@ -618,24 +692,28 @@ tcp_server::tcp_server(int port)
 	addr.sin_addr.s_addr = INADDR_ANY;
 	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))
 			== -1) {
-		printf("Couldn't bind to port %d: %s\n", port, strerror(errno));
+		log(NORMAL, "FATAL: couldn't bind to port %d: %s\n", port,
+				strerror(errno));
 		exit(1);
 	}
 	if (listen(listen_fd, 1000) == -1) {
-		printf("Couldn't listen on socket: %s", strerror(errno));
+		log(NORMAL, "FATAL: couldn't listen on socket: %s",
+				strerror(errno));
 		exit(1);
 	}
 	
 	epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
-		printf("Couldn't create epoll instance: %s\n", strerror(errno));
+		log(NORMAL, "FATAL: couldn't create epoll instance for "
+				"TCP server: %s\n",
+				strerror(errno));
 		exit(1);
 	}
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
 	ev.data.fd = listen_fd;
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listen_fd, &ev) < 0) {
-		printf("Couldn't add listen socket to epoll: %s\n",
+		log(NORMAL, "FATAL: couldn't add listen socket to epoll: %s\n",
 				strerror(errno));
 		exit(1);
 	}
@@ -657,7 +735,7 @@ tcp_server::~tcp_server()
 	 * readable and add it to the epoll set.
 	 */
 	if (pipe2(fds, 0) < 0) {
-		printf("Couldn't create pipe to shutdown TCP "
+		log(NORMAL, "FATAL: couldn't create pipe to shutdown TCP "
 				"server: %s\n", strerror(errno));
 		exit(1);
 	}
@@ -666,7 +744,7 @@ tcp_server::~tcp_server()
 	ev.data.fd = fds[0];
 	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fds[0], &ev);
 	if (write(fds[1], "xxxx", 4) < 0) {
-		printf("Couldn't write to TCP shutdown pipe: %s\n",
+		log(NORMAL, "FATAL: couldn't write to TCP shutdown pipe: %s\n",
 				strerror(errno));
 		exit(1);
 	}
@@ -679,7 +757,7 @@ tcp_server::~tcp_server()
 	for (unsigned i = 0; i < connections.size(); i++) {
 		if (connections[i] != NULL) {
 			if (close(i) < 0)
-				printf("Error closing TCP connection to "
+				log(NORMAL, "Error closing TCP connection to "
 						"%s: %s\n",
 						print_address(
 						&connections[i]->peer),
@@ -704,14 +782,16 @@ void tcp_server::server()
 		struct epoll_event events[MAX_EVENTS];
 		int num_events;
 		
-		num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
-		if (stop)
-			return;
-		if (verbose)
-			printf("tcp_server on port %d got %d events from "
-					"epoll_wait\n", port, num_events);
-		if (num_events < 0) {
-			printf("epoll_wait failed: %s\n", strerror(errno));
+		while (1) {
+			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
+			if (stop)
+				return;
+			if (num_events >= 0)
+				break;
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			log(NORMAL, "FATAL: epoll_wait failed: %s\n",
+					strerror(errno));
 			exit(1);
 		}
 		for (int i = 0; i < num_events; i++) {
@@ -735,19 +815,18 @@ void tcp_server::accept(int epoll_fd)
 	struct sockaddr_in client_addr;
 	socklen_t addr_len = sizeof(client_addr);
 	
-	if (verbose)
-		printf("tcp_server on port %d accepting new connection\n",
-				port);
 	fd = ::accept(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
 			&addr_len);
 	if (fd < 0) {
-		printf("Couldn't accept incoming TCP connection: %s",
-			strerror(errno));
+		log(NORMAL, "FATAL: couldn't accept incoming TCP connection: "
+				"%s\n", strerror(errno));
 		exit(1);
 	}
+	log(NORMAL, "tcp_server on port %d accepted connection from %s, fd %d\n",
+			port, print_address(&client_addr), fd);
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-	tcp_message *message = new tcp_message(fd, client_addr);
+	tcp_message *message = new tcp_message(fd, port, client_addr);
 	connections.resize(fd + 1);
 	connections[fd] = message;
 	
@@ -755,8 +834,8 @@ void tcp_server::accept(int epoll_fd)
 	ev.events = EPOLLIN;
 	ev.data.fd = fd;
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
-		printf("Couldn't add new TCP connection to epoll: %s\n",
-				strerror(errno));
+		log(NORMAL, "FATAL: couldn't add new TCP connection to epoll: "
+				"%s\n", strerror(errno));
 		exit(1);
 	}
 }
@@ -772,13 +851,10 @@ void tcp_server::read(int fd)
 	int error = connections[fd]->read([this, fd](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
-		if (verbose)
-			printf("tcp_server id %d received message "
-					"on fd %d, length %d\n",
-					header->server_id, fd, header->length);
 		if (send_message(fd, header) != 0) {
 			if ((errno != EPIPE) && (errno != ECONNRESET)) {
-				printf("Error sending reply to %s: %s\n",
+				log(NORMAL, "FATAL: error sending TCP reply "
+						"to %s: %s\n",
 						print_address(&connections[fd]->peer),
 						strerror(errno));
 				exit(1);
@@ -786,11 +862,9 @@ void tcp_server::read(int fd)
 		};
 	});
 	if (error) {
-		if (verbose)
-			printf("tcp_server on port %d closing client "
-					"connection\n", port);
+		log(NORMAL, "%s\n", connections[fd]->error_message);
 		if (close(fd) < 0) {
-			printf("Error closing TCP connection to %s: %s\n",
+			log(NORMAL, "Error closing TCP connection to %s: %s\n",
 					print_address(&connections[fd]->peer),
 					strerror(errno));
 		}
@@ -854,8 +928,8 @@ class client {
 	std::vector<int> request_intervals;
 
 	/**
-	 * @next_interval: index into request_lengths of the length to use for
-	 * the next outgoing RPC.
+	 * @next_interval: index into request_intervals of the value to use
+	 * for the next outgoing RPC.
 	 */
 	std::atomic<uint32_t> next_interval;
 	
@@ -914,6 +988,13 @@ class client {
 	 */
 	uint64_t total_rtt;
 	
+	/**
+	 * @lag: time in rdtsc cycles by which we are running behind
+	 * because server_max or client_max was exceeded (i.e., the
+	 * request we just sent should have been sent @lag cycles ago).
+	 */
+	uint64_t lag;
+	
 	client(int id);
 	virtual ~client() {}
 };
@@ -943,6 +1024,8 @@ client::client(int id)
 	, total_requests(0)
 	, total_responses(0)
 	, response_data(0)
+        , total_rtt(0)
+        , lag(0)
 {
 	/* Precompute information about the requests this client will
 	 * generate. Pick a different prime number for the size of each
@@ -959,12 +1042,35 @@ client::client(int id)
 		request_servers.push_back(server);
 	}
 	if (!dist_sample(workload, &rand_gen, NUM_LENGTHS, &request_lengths)) {
-		printf("Invalid workload '%s'\n", workload);
+		printf("FATAL: invalid workload '%s'\n", workload);
 		exit(1);
 	}
-	request_intervals.push_back(0);
+	if (net_bw == 0.0)
+		request_intervals.push_back(0);
+	else {
+		double lambda = 1e09*net_bw/(dist_mean(workload)*client_threads);
+		double cycles_per_second = get_cycles_per_sec();
+		std::exponential_distribution<double> interval_dist(lambda);
+		for (int i = 0; i < NUM_INTERVALS; i++) {
+			double seconds = interval_dist(rand_gen);
+			int cycles = int(seconds*cycles_per_second);
+			request_intervals.push_back(cycles);
+		}
+	}
 	requests.resize(server_addrs.size());
 	responses.resize(server_addrs.size());
+	double avg_length = 0;
+	for (size_t i = 0; i < request_lengths.size(); i++)
+		avg_length += request_lengths[i];
+	avg_length /= NUM_LENGTHS;
+	uint64_t interval_sum = 0;
+	for (size_t i = 0; i < request_intervals.size(); i++)
+		interval_sum += request_intervals[i];
+	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
+	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
+			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
+			avg_length*1e-3, dist_mean(workload)*1e-3, rate*1e-3,
+			avg_length*rate*1e-6);
 }
 
 /**
@@ -1010,7 +1116,7 @@ homa_client::homa_client(int id)
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
-		printf("Couldn't open Homa socket: %s\n", strerror(errno));
+		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
 	}
 	
 	if (!alt_client) {
@@ -1032,6 +1138,7 @@ homa_client::homa_client(int id)
 homa_client::~homa_client()
 {
 	stop = true;
+	shutdown(fd, SHUT_RDWR);
 	close(fd);
 	if (sending_thread)
 		sending_thread->join();
@@ -1051,16 +1158,19 @@ void homa_client::wait_response(uint64_t id)
 	struct sockaddr_in server_addr;
 	
 	id = 0;
-	int length = homa_recv(fd, response, sizeof(response),
-			HOMA_RECV_RESPONSE, &id,
-			(struct sockaddr *) &server_addr,
-			sizeof(server_addr));
+	int length;
+	do {
+		length = homa_recv(fd, response, sizeof(response),
+				HOMA_RECV_RESPONSE, &id,
+				(struct sockaddr *) &server_addr,
+				sizeof(server_addr));
+	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (stop)
 			return;
-		printf("Error in homa_recv: %s (id %lu, server %s)\n",
-			strerror(errno), id,
-			print_address(&server_addr));
+		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s\n",
+				strerror(errno), id,
+				print_address(&server_addr));
 		exit(1);
 	}
 	uint32_t elapsed = rdtsc() & 0xffffffff;
@@ -1084,7 +1194,7 @@ void homa_client::sender()
 {
 	char request[1000000];
 	message_header *header = reinterpret_cast<message_header *>(request);
-	uint64_t next_start = 0;
+	uint64_t next_start = rdtsc();
 	
 	while (1) {
 		uint64_t now;
@@ -1111,7 +1221,7 @@ void homa_client::sender()
 		if ((requests[server] - responses[server]) >= server_max) {
 			/* This server is overloaded, so skip it (don't
 			 * let one slow server stop the whole benchmark).
-			 */
+			 */ 
 			continue;
 		}
 		
@@ -1129,8 +1239,9 @@ void homa_client::sender()
 		if (status < 0) {
 			if (stop)
 				return;
-			printf("Error in homa_send: %s (request length %d)\n",
-				strerror(errno), header->length);
+			log(NORMAL, "FATAL: error in homa_send: %s (request "
+					"length %d)\n", strerror(errno),
+					header->length);
 			exit(1);
 		}
 		requests[server]++;
@@ -1138,7 +1249,8 @@ void homa_client::sender()
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
-		next_start = now + request_intervals[next_interval];
+		lag = now - next_start;
+		next_start = next_start + request_intervals[next_interval];
 		next_interval++;
 		if (next_interval >= request_intervals.size())
 			next_interval = 0;
@@ -1218,27 +1330,37 @@ tcp_client::tcp_client(int id)
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
 		int fd = socket(PF_INET, SOCK_STREAM, 0);
 		if (fd == -1) {
-			printf("Couldn't open TCP socket: %s\n",
+			log(NORMAL, "FATAL: couldn't open TCP client "
+					"socket: %s\n",
 					strerror(errno));
 			exit(1);
 		}
 		if (connect(fd, reinterpret_cast<struct sockaddr *>(
 				&server_addrs[i]),
 				sizeof(server_addrs[i])) == -1) {
-			printf("Couldn't connect to %s: %s\n",
+			log(NORMAL, "FATAL: client couldn't connect "
+					"to %s: %s\n",
 					print_address(&server_addrs[i]),
 					strerror(errno));
 			exit(1);
 		}
 		int flag = 1;
 		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-		messages.emplace_back(fd, server_addrs[i]);
+		struct sockaddr_in addr;
+		socklen_t length = sizeof(addr);
+		if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&addr),
+				&length)) {
+			log(NORMAL, "FATAL: getsockname failed for TCP client: "
+					"%s", strerror(errno));
+			exit(1);
+		}
+		messages.emplace_back(fd, ntohs(addr.sin_port), server_addrs[i]);
 	}
 	
 	epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
-		printf("tcp_client couldn't create epoll instance: "
-				"%s\n", strerror(errno));
+		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
+				"instance: %s\n", strerror(errno));
 		exit(1);
 	}
 	struct epoll_event ev;
@@ -1247,8 +1369,9 @@ tcp_client::tcp_client(int id)
 		ev.data.u32 = i;
 		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, messages[i].fd,
 				&ev) != 0) {
-			printf("tcp_client couldn't add TCP socket %d "
-					"to epoll: %s\n", i, strerror(errno));
+			log(NORMAL, "FATAL: tcp_client couldn't add TCP "
+					"socket %d  to epoll: %s\n", i,
+					strerror(errno));
 			exit(1);
 		}
 	}
@@ -1277,7 +1400,7 @@ tcp_client::~tcp_client()
 	 * readable and add it to the epoll set.
 	 */
 	if (pipe2(fds, 0) < 0) {
-		printf("Couldn't create pipe to shutdown TCP "
+		log(NORMAL, "FATAL: couldn't create pipe to shutdown TCP "
 				"server: %s\n", strerror(errno));
 		exit(1);
 	}
@@ -1286,8 +1409,8 @@ tcp_client::~tcp_client()
 	ev.data.fd = fds[0];
 	epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fds[0], &ev);
 	if (write(fds[1], "xxxx", 4) < 0) {
-		printf("Couldn't write to TCP shutdown pipe: %s\n",
-				strerror(errno));
+		log(NORMAL, "FATAL: couldn't write to TCP shutdown "
+				"pipe: %s\n", strerror(errno));
 		exit(1);
 	}
 	
@@ -1309,7 +1432,7 @@ tcp_client::~tcp_client()
  */
 void tcp_client::sender()
 {
-	uint64_t next_start = 0;
+	uint64_t next_start = rdtsc();
 	message_header header;
 	
 	while (1) {
@@ -1345,13 +1468,14 @@ void tcp_client::sender()
 		header.server_id = server;
 		int status = send_message(messages[server].fd, &header);
 		if (status != 0) {
-			printf("Error in TCP socket write for %s: %s\n",
-				print_address(&server_addrs[server]),
-				strerror(errno));
+			log(NORMAL, "FATAL: error in TCP socket write to %s: "
+					"%s (client port %d)\n",
+					print_address(&server_addrs[server]),
+					strerror(errno), messages[server].port);
 			exit(1);
 		}
 		if (verbose)
-			printf("tcp_client %d sent request to server port "
+			log(NORMAL, "tcp_client %d sent request to server port "
 					"%d, length %d\n",
 					id, header.server_id,
 					request_lengths[next_length]);
@@ -1360,7 +1484,8 @@ void tcp_client::sender()
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
-		next_start = now + request_intervals[next_interval];
+		lag = now - next_start;
+		next_start += request_intervals[next_interval];
 		next_interval++;
 		if (next_interval >= request_intervals.size())
 			next_interval = 0;
@@ -1387,15 +1512,12 @@ void tcp_client::receiver(void)
 			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 			if (stop)
 				return;
-			if (verbose)
-				printf("tcp_client %d got %d events from "
-						"epoll_wait\n",
-						id, num_events);
 			if (num_events > 0)
 				break;
 			if ((errno == EAGAIN) || (errno == EINTR))
 				continue;
-			printf("epoll_wait failed in tcp_client: %s\n",
+			log(NORMAL, "FATAL: epoll_wait failed in tcp_client: "
+					"%s\n",
 					strerror(errno));
 			exit(1);
 		}
@@ -1414,13 +1536,10 @@ void tcp_client::receiver(void)
 				next_result++;
 				if (next_result >= actual_lengths.size())
 					next_result = 0;
-				if (verbose)
-					printf("tcp_client %d received result "
-							"from server port %d\n",
-							id, header->server_id);
 			});
 			if (error) {
-				printf("Connection with server closed.\n");
+				log(NORMAL, "FATAL: %s (client)\n",
+						message->error_message);
 				exit(1);
 			}
 		}
@@ -1448,17 +1567,21 @@ void server_stats(uint64_t now)
 				"%s%lu", (offset != 0) ? " " : "",
 				server->requests - last_per_server_rpcs[i]);
 		offset += length;
+		if (i > last_per_server_rpcs.size())
+			printf("last_per_server_rpcs has %lu entries, needs %lu\n",
+					last_per_server_rpcs.size(),
+					metrics.size());
 		last_per_server_rpcs[i] = server->requests;
 	}
 	if ((last_stats_time != 0) && (server_data != last_server_data)) {
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
 		double data = (double) (server_data - last_server_data);
-		printf("Servers: %.2f Kops/sec, %.2f MB/sec, "
+		log(NORMAL, "Servers: %.2f Kops/sec, %.2f MB/sec, "
 				"avg. length %.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
 				data/rpcs);
-		printf("RPCs per server: %s\n", details);
+		log(NORMAL, "RPCs per server: %s\n", details);
 	}
 	last_server_rpcs = server_rpcs;
 	last_server_data = server_data;
@@ -1476,6 +1599,7 @@ void client_stats(uint64_t now)
 	uint64_t client_rpcs = 0;
 	uint64_t client_data = 0;
 	uint64_t total_rtt = 0;
+	uint64_t lag = 0;
 	uint64_t cdf_times[CDF_VALUES];
 	int times_per_client;
 	int cdf_index = 0;
@@ -1491,6 +1615,7 @@ void client_stats(uint64_t now)
 			client_rpcs += count;
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
+		lag += client->lag;
 		for (int i = 1; i <= times_per_client; i++) {
 			/* Collect the most recent RTTs from the client for
 			 * computing a CDF.
@@ -1512,7 +1637,7 @@ void client_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double data = (double) (client_data - last_client_data);
-		printf("Clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
+		log(NORMAL, "Clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
 				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
 				"%.1f bytes\n",
 				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
@@ -1520,10 +1645,38 @@ void client_stats(uint64_t now)
 				to_seconds(cdf_times[99*cdf_index/100])*1e06,
 				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
 			        data/rpcs);
+		double lag_fraction;
+		if (lag > last_lag)
+			lag_fraction = (to_seconds(lag - last_lag)/elapsed)
+				/ clients.size();
+		else
+			lag_fraction = -(to_seconds(last_lag - lag)/elapsed)
+				/ clients.size();
+		if (lag_fraction >= .01)
+			log(NORMAL, "Lag due to overload: %.1f%%\n",
+					lag_fraction*100.0);
 	}
 	last_client_rpcs = client_rpcs;
 	last_client_data = client_data;
 	last_total_rtt = total_rtt;
+	last_lag = lag;
+}
+
+/**
+ * log_stats() - Enter an infinite loop printing statistics to the
+ * log every second. This function never returns.
+ */
+void log_stats()
+{
+	while (1) {
+		sleep(1);
+		std::lock_guard<std::mutex> lock(cmd_lock);
+		uint64_t now = rdtsc();
+		server_stats(now);
+		client_stats(now);
+
+		last_stats_time = now;
+	}
 }
 
 /**
@@ -1540,7 +1693,7 @@ int client_cmd(std::vector<string> &words)
 	first_port = 4000;
 	first_server = 1;
 	server_max = 1;
-	net_bw = 1000.0;
+	net_bw = 0.0;
 	port_threads = 1;
 	protocol = "homa";
 	server_nodes = 1;
@@ -1674,6 +1827,79 @@ int dump_times_cmd(std::vector<string> &words)
 }
 
 /**
+ * log_cmd() - Parse the arguments for a "log" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int log_cmd(std::vector<string> &words)
+{
+	for (unsigned i = 1; i < words.size(); i++) {
+		const char *option = words[i].c_str();
+		
+		if (strncmp(option, "--", 2) != 0) {
+			string message;
+			for (unsigned j = i; j < words.size(); j++) {
+				if (j != i)
+					message.append(" ");
+				message.append(words[j]);
+			}
+			message.append("\n");
+			log(NORMAL, "%s", message.c_str());
+			return 1;
+		}
+
+		if (strcmp(option, "--file") == 0) {
+			FILE *f;
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			const char *name = words[i+1].c_str();
+			if (strcmp(name, "-") == 0)
+				f = stdout;
+			else {
+				f = fopen(name, "w");
+				if (f == NULL) {
+					printf("Couldn't open %s: %s\n", name,
+							strerror(errno));
+					return 0;
+				}
+				setlinebuf(f);
+			}
+			if (log_file != stdout)
+				fclose(log_file);
+			log_file = f;
+			i++;
+		} else if (strcmp(option, "--level") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			if (words[i+1].compare("normal") == 0)
+				log_level = NORMAL;
+			else if (words[i+1].compare("verbose") == 0)
+				log_level = VERBOSE;
+			else {
+				printf("Unknown log level '%s'; must be "
+						"normal or verbose\n",
+						words[i+1].c_str());
+				return 0;
+			}
+			log(NORMAL, "Log level is now %s\n",
+					words[i+1].c_str());
+			i++;
+		} else {
+			printf("Unknown option '%s'\n", option);
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/**
  * server_cmd() - Parse the arguments for a "server" command and execute it.
  * @words:  Command arguments (including the command name as @words[0]).
  * 
@@ -1722,8 +1948,9 @@ int server_cmd(std::vector<string> &words)
 
 			fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 			if (fd < 0) {
-				printf("Couldn't open Homa socket: "
-						"%s\n", strerror(errno));
+				log(NORMAL, "FATAL: couldn't open Homa socket: "
+						"%s\n",
+						strerror(errno));
 				exit(1);
 			}
 
@@ -1733,12 +1960,12 @@ int server_cmd(std::vector<string> &words)
 			addr_in.sin_port = htons(port);
 			if (bind(fd, (struct sockaddr *) &addr_in,
 					sizeof(addr_in)) != 0) {
-				printf("Couldn't bind socket to Homa "
-						"port %d: %s\n", port,
+				log(NORMAL, "FATAL: couldn't bind socket "
+						"to Homa port %d: %s\n", port,
 						strerror(errno));
 				exit(1);
 			}
-			printf("Successfully bound to Homa port %d\n",
+			log(NORMAL, "Successfully bound to Homa port %d\n",
 					port);
 			for (j = 0; j < port_threads; j++) {
 				homa_server *server = new homa_server(
@@ -1780,6 +2007,8 @@ int stop_cmd(std::vector<string> &words)
 			for (tcp_server *server: tcp_servers)
 				delete server;
 			tcp_servers.clear();
+			last_per_server_rpcs.clear();
+			metrics.clear();
 		} else {
 			printf("Unknown option '%s'; must be clients or "
 				"servers\n", option);
@@ -1798,12 +2027,15 @@ int stop_cmd(std::vector<string> &words)
  */
 int exec_words(std::vector<string> &words)
 {
+	std::lock_guard<std::mutex> lock(cmd_lock);
 	if (words.size() == 0)
 		return 1;
 	if (words[0].compare("client") == 0) {
 		return client_cmd(words);
 	} else if (words[0].compare("dump_times") == 0) {
 		return dump_times_cmd(words);
+	} else if (words[0].compare("log") == 0) {
+		return log_cmd(words);
 	} else if (words[0].compare("exit") == 0) {
 		exit(0);
 	} else if (words[0].compare("server") == 0) {
@@ -1826,6 +2058,9 @@ void exec_string(const char *cmd)
 	const char *p = cmd;
 	std::vector<string> words;
 	
+	if (log_file != stdout)
+		log(NORMAL, "Command: %s, length %d\n", cmd, strlen(cmd));
+	
 	while (1) {
 		int word_length = strcspn(p, " \t\n");
 		if (word_length > 0)
@@ -1840,6 +2075,20 @@ void exec_string(const char *cmd)
 
 int main(int argc, char** argv)
 {
+	setlinebuf(stdout);
+	signal(SIGPIPE, SIG_IGN);
+	struct rlimit limits;
+	if (getrlimit(RLIMIT_NOFILE, &limits) != 0) {
+		log(NORMAL, "FATAL: couldn't read file descriptor limits: "
+				"%s\n", strerror(errno));
+		exit(1);
+	}
+	limits.rlim_cur = limits.rlim_max;
+	if (setrlimit(RLIMIT_NOFILE, &limits) != 0) {
+		log(NORMAL, "FATAL: couldn't increase file descriptor limit: "
+				"%s\n", strerror(errno));
+		exit(1);
+	}
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
 		exit(0);
@@ -1855,23 +2104,21 @@ int main(int argc, char** argv)
 		/* Instead of going interactive, just print stats.
 		 * every second.
 		 */
-		while (1) {
-			sleep(1);
-			uint64_t now = rdtsc();
-			server_stats(now);
-			client_stats(now);
-
-			last_stats_time = now;
-		}
+		log_stats();
 	}
 	
+	
+	std::thread logger(log_stats);
 	while (1) {
 		string line;
 		
 		printf("%% ");
 		fflush(stdout);
-		if (!std::getline(std::cin, line))
+		if (!std::getline(std::cin, line)) {
+			if (log_file != stdout)
+				log(NORMAL, "cp_node exiting normally\n");
 			exit(0);
+		}
 		exec_string(line.c_str());
 	}
 }

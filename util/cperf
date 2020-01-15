@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2019, Stanford University
+# Copyright (c) 2019-2020, Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -22,30 +22,35 @@
 
 import argparse
 import fcntl
+import glob
 import os
 import shutil
 import subprocess
+import sys
 import time
+import traceback
 
 # Each entry in this array contains the Popen object for communication
 # with one node (indexed by node number).
 nodes = []
 
-def wait_output(string, r):
+def wait_output(string, r, cmd):
     """
     The r argument specifies a range of node indexes. This method waits
     until the given string has appeared on the stdout of each of the given
     nodes. If a long time goes by without the string appearing, an exception
-    is thrown.
+    is thrown; the cmd argument is used in the error message to indicate
+    the command that failed.
     """
     global nodes
     outputs = []
+    printed = False
 
     for i in r:
         while len(outputs) <= i:
             outputs.append("")
-    timeout = time.time() + 5.0
-    while time.time() < timeout:
+    start_time = time.time()
+    while time.time() < (start_time + 5.0):
         for i in r:
             data = nodes[i].stdout.read(1000)
             if data != None:
@@ -62,16 +67,22 @@ def wait_output(string, r):
                 break
         if bad_node < 0:
             return
+        if (time.time() > (start_time + 5.0)) and not printed:
+            print("expected output from node-%d not yet received "
+            "after command '%s': expecting '%s', got '%s'"
+            % (bad_node, cmd, string, outputs[bad_node]))
+            printed = True;
         time.sleep(0.1)
-    raise Exception("bad output from node-%d: expected '%s', got '%s'"
-            % (bad_node, string, outputs[bad_node]))
+    raise Exception("bad output from node-%d after command '%s': "
+            "expected '%s', got '%s'"
+            % (bad_node, cmd, string, outputs[bad_node]))
 
 def start_nodes(r):
     """
     Start up cp_node on the given range of node indexes. References
     to the nodes will be stored in the nodes array.
     """
-    global nodes
+    global nodes, args
     while len(nodes) < r.stop:
         nodes.append(None)
     for n in r:
@@ -84,7 +95,21 @@ def start_nodes(r):
         fl = fcntl.fcntl(node.stdout, fcntl.F_GETFL)
         fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
         nodes[n] = node
-    wait_output("% ", r)
+    wait_output("% ", r, "ssh")
+    if (args.debug):
+            print('Servers started; pausing for debug setup.')
+            input('Type <Enter> to continue: ')
+
+def stop_nodes():
+    """
+    Exit all of the nodes that are currently running.
+    """
+    global nodes
+    for n in nodes:
+        n.stdin.write("exit\n")
+        n.stdin.flush()
+    for n in nodes:
+        n.wait(5.0)   
 
 def do_cmd(command, r):
     """
@@ -97,7 +122,24 @@ def do_cmd(command, r):
         nodes[n].stdin.write(command)
         nodes[n].stdin.flush()
     time.sleep(2.0)
-    wait_output("% ", r)
+    wait_output("% ", r, command)
+
+def scan_log(file):
+    """
+    Read a single log file and extract various useful information,
+    such as fatal error messages or interesting statistics.
+    """
+    for line in open(file):
+        if "FATAL:" in line:
+            print("%s: %s" % (file, line))
+
+def scan_logs():
+    """
+    Read all of the note-specific log files produced by a run, and
+    extract useful information.
+    """
+    for file in glob.glob(args.log_dir + "/node-*.log"):
+        scan_log(file)
 
 def test_basic():
     """
@@ -117,7 +159,7 @@ def test_basic():
     do_cmd("dump_times rtts.txt\n", range(args.num_nodes))
     print("Retrieving stats")
     for n in range(args.num_nodes):
-        subprocess.run(["rsync", "-rtv", "node-%d:rtts.txt" % (n),
+        subprocess.run(["rsync", "-rtvq", "node-%d:rtts.txt" % (n),
                 "%s/rtts-%d.txt" % (args.log_dir, n)])
 
 def test_slowdown():
@@ -127,37 +169,81 @@ def test_slowdown():
     """
 
     global args
-    print("Starting nodes")
-    start_nodes(range(args.num_nodes))
-    print("Starting servers")
-    do_cmd("server --ports 18\n", range(args.num_nodes))
-    print("Starting clients (unloaded)")
-    do_cmd("client --threads 1 --server-ports 1 --workload %s --server-nodes 1 "
-            "--first-server 2\n" % (args.workload), [1])
-    print("Starting unloaded experiment")
-    do_cmd("dump_times unloaded.txt\n", range(args.num_nodes))
-    time.sleep(args.seconds)
-    print("Dumping unloaded stats")
-    do_cmd("dump_times unloaded.txt\n", range(args.num_nodes))
+    try:
+        print("Starting nodes")
+        start_nodes(range(args.num_nodes))
+        log_level = "normal"
+        if args.verbose:
+            log_level = "verbose"
+        do_cmd("log --file node.log --level %s\n" % (log_level),
+                range(args.num_nodes))
 
-    print("Retarting clients (loaded)")
-    do_cmd("stop clients\n", range(args.num_nodes))
-    do_cmd("client --threads 10 --server-ports 18 --workload %s "
-            "--server-nodes %d --first-server 0\n" % (args.workload,
-            args.num_nodes), range(args.num_nodes))
-    print("Starting loaded experiment")
-    do_cmd("dump_times loaded.txt\n", range(args.num_nodes))
-    time.sleep(args.seconds)
-    print("Dumping loaded stats")
-    do_cmd("dump_times loaded.txt\n", range(args.num_nodes))
+        print("Starting Homa servers")
+        do_cmd("server --ports 18\n", range(args.num_nodes))
 
-    print("Retrieving stats")
-    subprocess.run(["rsync", "-rtv", "node-1:unloaded.txt",
+        print("Starting Homa clients (unloaded)")
+        do_cmd("client --threads 1 --server-ports 1 --workload %s "
+                "--server-nodes 1 --first-server 2\n" % (args.workload), [1])
+        print("Starting unloaded experiment")
+        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
+        do_cmd("log Starting unloaded experiment\n", range(args.num_nodes))
+        time.sleep(args.seconds)
+        print("Dumping unloaded stats")
+        do_cmd("dump_times unloaded.txt\n", range(args.num_nodes))
+
+        print("Restarting Homa clients (loaded)")
+        do_cmd("stop clients\n", range(args.num_nodes))
+        do_cmd("client --threads 10 --server-ports 18 --workload %s "
+                "--server-nodes %d --first-server 0 --net-bw %.3f\n" %
+                (args.workload, args.num_nodes, args.net_bw),
+                range(args.num_nodes))
+        print("Starting loaded experiment")
+        for node in range(args.num_nodes):
+            subprocess.run(["rsh", "node-%d" % (node), "metrics.py"],
+                    stdout=subprocess.DEVNULL)
+        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
+        do_cmd("log Starting loaded experiment\n", range(args.num_nodes))
+        time.sleep(args.seconds)
+        print("Dumping loaded stats")
+        do_cmd("dump_times loaded.txt\n", range(args.num_nodes))
+        for node in range(args.num_nodes):
+            f = open("%s/node-%d.metrics" % (args.log_dir, node), 'w')
+            subprocess.run(["rsh", "node-%d" % (node), "metrics.py"], stdout=f);
+            f.close()
+
+        print("Restarting servers for TCP")
+        do_cmd("stop clients\n", range(args.num_nodes))
+        do_cmd("stop servers\n", range(args.num_nodes))
+        do_cmd("server --ports 18  --protocol tcp\n", range(args.num_nodes))
+        print("Starting TCP clients (loaded)")
+        do_cmd("client --threads 10 --server-ports 18 --workload %s "
+                "--server-nodes %d --first-server 0 --net-bw %.3f "
+                "--protocol tcp\n" %
+                (args.workload, args.num_nodes, args.net_bw),
+                range(args.num_nodes))
+        print("Starting TCP experiment")
+        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
+        time.sleep(args.seconds)
+        print("Dumping TCP stats")
+        do_cmd("dump_times tcp.txt\n", range(args.num_nodes))
+        print("Finishing")
+        do_cmd("stop clients\n", range(args.num_nodes))
+        stop_nodes()
+    except Exception as e:
+        print(traceback.print_exc(file=sys.stdout))
+
+    print("Retrieving logs")
+    subprocess.run(["rsync", "-rtvq", "node-1:unloaded.txt",
             "%s/unloaded.txt" % (args.log_dir)])
     for n in range(args.num_nodes):
-        subprocess.run(["rsync", "-rtv", "node-%d:loaded.txt" % (n),
+        subprocess.run(["rsync", "-rtvq", "node-%d:node.log" % (n),
+                "%s/node-%d.log" % (args.log_dir, n)])
+        subprocess.run(["rsync", "-rtvq", "node-%d:loaded.txt" % (n),
                 "%s/loaded-%d.txt" % (args.log_dir, n)])
-    print("Finished: results in %s" % (args.log_dir))
+        subprocess.run(["rsync", "-rtvq", "node-%d:tcp.txt" % (n),
+                "%s/tcp-%d.txt" % (args.log_dir, n)])
+    scan_logs()
+    print("Finished: results are in %s" % (args.log_dir))
     
 
 parser = argparse.ArgumentParser(description=
@@ -168,6 +254,12 @@ parser = argparse.ArgumentParser(description=
         'line. Not all of the options described below are used by all '
         'benchmarks.',
         usage='%(prog)s [options] test test ...')
+parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
+        metavar='B', default=0.0,
+        help='generate a total of B GB/sec of bandwidth from each client '
+        'machine (default: 0, which means run as fast as possible)')
+parser.add_argument('-d', '--debug', dest='debug', action='store_true',
+        help='pause after starting servers to enable debugging setup')
 parser.add_argument('-l', '--log-dir', dest='log_dir',
         metavar='D', default="logs/" + time.strftime('%Y%m%d%H%M%S'),
         help='directory to use for logs and metrics')
@@ -176,10 +268,12 @@ parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
         help='total number of nodes to use in the cluster')
 parser.add_argument('-p', '--protocol', dest='protocol',
         choices=['homa', 'tcp'], default="homa",
-        help='transport protocol to use')
+        help='transport protocol to use (default: homa)')
 parser.add_argument('-s', '--seconds', type=int, dest='seconds',
         metavar='S', default=5,
         help='run each experiment for S seconds (default: 5 secs)')
+parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
+        help='enable verbose output in node logs')
 parser.add_argument('-w', '--workload', dest='workload',
         metavar='W', default="w3",
         help='workload to use for benchmark (w1-w5 or number, default: w3)')

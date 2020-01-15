@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# Copyright (c) 2020, Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE
+
+# Kill processes with a given name on a cluster of machines.
+#
+# Usage:
+# ckill name num_nodes [first]
+#
+# "name" gives the name of the process to be killed (suitable as an
+# argument to "pidof"). The "num_nodes" arguments indicates how many
+# servers should be examined for processes to kill. The "first" argument
+# is optional; it is an integer identifying the first node on which
+# killing will occur (e.g. "ckill cp_node 4 2" means node-2 throughnode-5 will be 
+# updated will be searched. "first" defaults to 0.
+
+root=~/homaModule
+
+if [ $# -eq 3 ]; then
+    first=$3
+elif [ $# -eq 2 ]; then
+    first=0
+else
+    echo "Usage: ckill name num_nodes [first]"
+    exit 1
+fi
+last=`expr $first + $2 - 1`
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node-$i
+    echo "ssh node-$i 'kill \`pidof $1\`'"
+    ssh node-$i "kill \`pidof $1\`"
+done

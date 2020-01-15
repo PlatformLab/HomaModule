@@ -25,6 +25,7 @@
 #include <sys/time.h>
 
 #include <algorithm>
+#include <atomic>
 
 #include "test_utils.h"
 
@@ -179,24 +180,25 @@ void seed_buffer(void *buffer, size_t length, int seed)
  * 
  * This function keeps a collection of static buffers to hold the printable
  * strings, so callers don't have to worry about allocating space, even if
- * several addresses are in use at once.
+ * several addresses are in use at once. This function is also thread-safe.
  */
-char *print_address(struct sockaddr_in *addr)
+const char *print_address(struct sockaddr_in *addr)
 {
 #define BUF_SIZE 50
-#define NUM_BUFFERS 10
+#define NUM_BUFFERS 16
 	static char buffers[NUM_BUFFERS][BUF_SIZE];
-	static int next_buffer = 0;
+	static std::atomic<int> next_buffer = 0;
 	
-	char *buffer = buffers[next_buffer];
-	next_buffer++;
-	if (next_buffer >= NUM_BUFFERS)
-		next_buffer = 0;
+	char *buffer = buffers[next_buffer.fetch_add(1)
+		& (NUM_BUFFERS-1)];
 	if (addr->sin_family != AF_INET) {
-		snprintf(buffer, BUF_SIZE, "Unknown family %d", addr->sin_family);
+		snprintf(buffer, BUF_SIZE, "Unknown family %d",
+				addr->sin_family);
 		return buffer;
 	}
 	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
+	if ((buffer - &buffers[0][0]) > NUM_BUFFERS*BUF_SIZE)
+		printf("Buffer pointer corrupted!\n");
 	snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
 		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
 	return buffer;

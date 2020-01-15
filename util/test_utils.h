@@ -30,7 +30,8 @@ extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
-extern char   *print_address(struct sockaddr_in *addr);
+extern const char*
+               print_address(struct sockaddr_in *addr);
 extern double  to_seconds(uint64_t cycles);
 
 /**

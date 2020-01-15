@@ -17,7 +17,7 @@
 # This script generates a plot of slowdown as a function of message
 # length, with an x-axis scaled to match the CDF of message lengths.
 #
-# Usage: plot_slowdown.py log_dir ...
+# Usage: plot_slowdown.py log_dir
 #
 # "log_dir" is the name of a directory containing log files created by
 # "cperf slowdown"
@@ -102,6 +102,64 @@ def read_loaded(file):
             rtts[length] = [usec]
     f.close()
 
+def make_plot(files):
+    """
+    The files argument is a list of filenames. Read data from all of these
+    files and generate plot data in global variables.
+    """
+    global rtts, counts, cum_frac, x, y_p50, y_p99, y_p999, total, lengths
+
+    rtts = {}
+    counts = {}
+    cum_frac = {}
+    for file in files:
+        print("Reading data from %s" % (file))
+        read_loaded(file)
+
+    # Compute cum_frac
+    lengths = sorted(counts.keys())
+    total = 0
+    cumulative = 0
+    for length in lengths:
+        total += counts[length]
+    for length in lengths:
+        cumulative += counts[length]
+        cum_frac[length] = cumulative/total
+
+    # Generate plot data
+    min_count = 0
+    min_length = 0
+    p50 = 0
+    p99 = 0
+    p999 = 0
+    x = []
+    y_p50 = []
+    y_p99 = []
+    y_p999 = []
+    for length in lengths:
+        if not length in unloaded:
+            continue
+        sorted_times = sorted(rtts[length])
+        count = len(sorted_times)
+        if (min_length == 0) or (count < min_count):
+            min_count = count
+            min_length = length
+        x.append(cum_frac[length])
+        y_p50.append(p50)
+        y_p99.append(p99)
+        y_p999.append(p999)
+        x.append(cum_frac[length])
+        p50 = sorted_times[count//2]/unloaded[length]
+        p99 = sorted_times[count*99//100]/unloaded[length]
+        p999 = sorted_times[count*999//1000]/unloaded[length]
+        print("length %d, p50 %.1f, p99 %.1f, p999 %.1f, count %d, p999 index %d"
+                % (length, p50, p99, p999, count, count*999//1000))
+        y_p50.append(p50)
+        y_p99.append(p99)
+        y_p999.append(p999)
+    print("There are only %d times for length %d" % (min_count, min_length))
+
+
 if len(sys.argv) != 2:
     print("Usage: %s name log_dir" % (sys.argv[0]))
     exit(1)
@@ -109,56 +167,7 @@ log_dir = sys.argv[1]
 
 print("Reading unloaded data")
 get_unloaded(log_dir + "/unloaded.txt")
-data_files = glob.glob(log_dir + "/loaded-*.txt")
-if len(data_files) == 0:
-    print("No files loaded-*.txt found in %s" % (log_dir))
-    exit(1)
-for file in data_files:
-    print("Reading loaded data from %s" % (file))
-    read_loaded(file)
-
-# Compute cum_frac
-lengths = sorted(counts.keys())
-total = 0
-cumulative = 0
-for length in lengths:
-    total += counts[length]
-for length in lengths:
-    cumulative += counts[length]
-    cum_frac[length] = cumulative/total
-
-# Generate plot data
-min_count = 0
-min_length = 0
-p50 = 0
-p99 = 0
-p999 = 0
-x = []
-y_p50 = []
-y_p99 = []
-y_p999 = []
-for length in lengths:
-    if not length in unloaded:
-        continue
-    sorted_times = sorted(rtts[length])
-    count = len(sorted_times)
-    if (min_length == 0) or (count < min_count):
-        min_count = count
-        min_length = length
-    x.append(cum_frac[length])
-    y_p50.append(p50)
-    y_p99.append(p99)
-    y_p999.append(p999)
-    x.append(cum_frac[length])
-    p50 = sorted_times[count//2]/unloaded[length]
-    p99 = sorted_times[count*99//100]/unloaded[length]
-    p999 = sorted_times[count*999//1000]/unloaded[length]
-    print("length %d, p50 %.1f, p99 %.1f, p999 %.1f, count %d, p999 index %d"
-            % (length, p50, p99, p999, count, count*999//1000))
-    y_p50.append(p50)
-    y_p99.append(p99)
-    y_p999.append(p999)
-print("There are only %d times for length %d" % (min_count, min_length))
+make_plot(glob.glob(log_dir + "/loaded-*.txt"))
 
 plt.figure(figsize=[6, 3])
 plt.rcParams.update({'font.size': 10})
@@ -183,9 +192,12 @@ for tick in range(0, 11):
     xlabels.append(length)
 plt.xticks(xticks, xlabels)
 plt.tight_layout()
-plt.plot(x, y_p50, label="P50")
-plt.plot(x, y_p99, label="P99")
-plt.plot(x, y_p999, label="P999")
+
+plt.plot(x, y_p50, label="Homa P50")
+plt.plot(x, y_p99, label="Homa P99")
+make_plot(glob.glob(log_dir + "/tcp-*.txt"))
+plt.plot(x, y_p50, label="TCP P50")
+plt.plot(x, y_p99, label="TCP P99")
 plt.legend()
 
 plt.savefig("%s/slowdown.pdf" % (log_dir))

@@ -119,7 +119,10 @@ double dist_mean(const char *dist)
 	mean = 0;
 	prev_fraction = 0.0;
 	for (dist_point *p = points; ; p++) {
-		mean += static_cast<double>(p->length)
+		int length = p->length;
+		if (length > HOMA_MAX_MESSAGE_LENGTH)
+			length = HOMA_MAX_MESSAGE_LENGTH;
+		mean += static_cast<double>(length)
 				* (p->fraction - prev_fraction);
 		prev_fraction = p->fraction;
 		if (p->fraction >= 1.0)
