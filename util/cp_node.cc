@@ -18,6 +18,7 @@
  */
 
 #include <errno.h>
+#include <execinfo.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
@@ -136,6 +137,9 @@ enum Msg_Type {NORMAL, VERBOSE};
 
 /** @log_level: only print log messages if they have a level <= this value. */
 Msg_Type log_level = NORMAL;
+
+extern void log(Msg_Type type, const char *format, ...)
+	__attribute__((format(printf, 2, 3)));
 
 /**
  * @cmd_lock: held whenever a command is executing.  Used to ensure that
@@ -362,7 +366,8 @@ void init_server_addrs(void)
 		int status = getaddrinfo(host, NULL, &hints,
 				&matching_addresses);
 		if (status != 0) {
-			log(NORMAL, "FATAL: couldn't look up address for %s:\n",
+			log(NORMAL, "FATAL: couldn't look up address "
+					"for %s: %s\n",
 					host, gai_strerror(status));
 			exit(1);
 		}
@@ -827,7 +832,8 @@ void tcp_server::accept(int epoll_fd)
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 	tcp_message *message = new tcp_message(fd, port, client_addr);
-	connections.resize(fd + 1);
+	while (connections.size() <= static_cast<unsigned>(fd))
+		connections.push_back(NULL);
 	connections[fd] = message;
 	
 	struct epoll_event ev;
@@ -2037,6 +2043,8 @@ int exec_words(std::vector<string> &words)
 	} else if (words[0].compare("log") == 0) {
 		return log_cmd(words);
 	} else if (words[0].compare("exit") == 0) {
+		if (log_file != stdout)
+			log(NORMAL, "cp_node exiting\n");
 		exit(0);
 	} else if (words[0].compare("server") == 0) {
 		return server_cmd(words);
@@ -2059,7 +2067,7 @@ void exec_string(const char *cmd)
 	std::vector<string> words;
 	
 	if (log_file != stdout)
-		log(NORMAL, "Command: %s, length %d\n", cmd, strlen(cmd));
+		log(NORMAL, "Command: %s, length %lu\n", cmd, strlen(cmd));
 	
 	while (1) {
 		int word_length = strcspn(p, " \t\n");
@@ -2071,6 +2079,51 @@ void exec_string(const char *cmd)
 		p++;
 	}
 	exec_words(words);
+}
+
+/**
+ * error_handler() - This method is invoked after a terminal error such
+ * as a segfault; it logs a backtrace and exits.
+ * @signal    Signal number that caused this method to be invoked.
+ * @info      Details about the cause of the signal; used to find the
+ *            faulting address for segfaults.
+ * @ucontext  CPU context at the time the signal occurred.
+ */
+void error_handler(int signal, siginfo_t* info, void* ucontext)
+{
+	ucontext_t* uc = static_cast<ucontext_t*>(ucontext);
+	void* caller_address = reinterpret_cast<void*>(
+			uc->uc_mcontext.gregs[REG_RIP]);
+
+	log(NORMAL, "Signal %d (%s) at address %p from %p\n",
+			signal, strsignal(signal), info->si_addr,
+			caller_address);
+
+	const int max_frames = 128;
+	void* return_addresses[max_frames];
+	int frames = backtrace(return_addresses, max_frames);
+
+	// Overwrite sigaction with caller's address.
+	return_addresses[1] = caller_address;
+
+	char** symbols = backtrace_symbols(return_addresses, frames);
+	if (symbols == NULL) {
+		/* If the malloc failed we might be able to get the backtrace out
+		 * to stderr still.
+		 */
+		log(NORMAL, "backtrace_symbols failed; trying "
+				"backtrace_symbols_fd\n");
+		backtrace_symbols_fd(return_addresses, frames, 2);
+		return;
+	}
+
+	log(NORMAL, "Backtrace:\n");
+	for (int i = 1; i < frames; ++i)
+		log(NORMAL, "%s\n", symbols[i]);
+	fflush(log_file);
+
+	/* Use abort, rather than exit, to dump core/trap in gdb. */
+	abort();
 }
 
 int main(int argc, char** argv)
@@ -2089,6 +2142,13 @@ int main(int argc, char** argv)
 				"%s\n", strerror(errno));
 		exit(1);
 	}
+	struct sigaction action;
+	action.sa_sigaction = error_handler;
+	action.sa_flags = SA_RESTART | SA_SIGINFO;
+	if (sigaction(SIGSEGV, &action, NULL) != 0)
+		log(VERBOSE, "Couldn't set signal handler for SIGSEGV; "
+				"continuing anyway\n");
+
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
 		exit(0);
@@ -2116,7 +2176,7 @@ int main(int argc, char** argv)
 		fflush(stdout);
 		if (!std::getline(std::cin, line)) {
 			if (log_file != stdout)
-				log(NORMAL, "cp_node exiting normally\n");
+				log(NORMAL, "cp_node exiting\n");
 			exit(0);
 		}
 		exec_string(line.c_str());
