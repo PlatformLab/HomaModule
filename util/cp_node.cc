@@ -73,7 +73,8 @@ bool verbose = false;
 const char *workload = "100";
 
 /** @rand_gen: random number generator. */
-std::mt19937 rand_gen(12345);
+std::mt19937 rand_gen(
+		std::chrono::system_clock::now().time_since_epoch().count());
 
 /**
  * @server_addrs: Internet addresses for each of the server threads available
