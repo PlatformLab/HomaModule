@@ -171,8 +171,11 @@ make_plot(glob.glob(log_dir + "/loaded-*.txt"))
 
 plt.figure(figsize=[6, 3])
 plt.rcParams.update({'font.size': 10})
-plt.axis([0, 1.0, 0, 20])
-plt.xlabel("Message Length")
+plt.axis()
+plt.xlim(0, 1.0)
+plt.yscale("log")
+# plt.ylim(1, 100)
+plt.xlabel("Message Length (KB)")
 plt.ylabel("Slowdown")
 plt.grid(which="major", axis="y")
 
@@ -189,9 +192,14 @@ for tick in range(0, 11):
         length = lengths[i]
         cumulative += counts[length]
         i += 1
-    xlabels.append(length)
+    kb = length/1000.0
+    if kb < 3.0:
+        xlabels.append("%.2f" % (kb))
+    elif kb < 30.0:
+        xlabels.append("%.1f" % (kb))
+    else:
+        xlabels.append("%.0f" % (kb))
 plt.xticks(xticks, xlabels)
-plt.tight_layout()
 
 plt.plot(x, y_p50, label="Homa P50")
 plt.plot(x, y_p99, label="Homa P99")
@@ -199,6 +207,7 @@ make_plot(glob.glob(log_dir + "/tcp-*.txt"))
 plt.plot(x, y_p50, label="TCP P50")
 plt.plot(x, y_p99, label="TCP P99")
 plt.legend()
+plt.tight_layout()
 
 plt.savefig("%s/slowdown.pdf" % (log_dir))
     

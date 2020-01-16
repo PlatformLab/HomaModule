@@ -24,6 +24,7 @@ import argparse
 import fcntl
 import glob
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,21 @@ import traceback
 # Each entry in this array contains the Popen object for communication
 # with one node (indexed by node number).
 nodes = []
+
+# Names of nodes that did not exit normally.
+fail_nodes = []
+
+# Open file for log messages to be retained in the log directory.
+log_file = 0
+
+def log(message):
+    """
+    Write the message argument both to stdout and to the cperf log file.
+    """
+    global log_file
+    print(message)
+    log_file.write(message)
+    log_file.write("\n")
 
 def wait_output(string, r, cmd):
     """
@@ -58,7 +74,7 @@ def wait_output(string, r, cmd):
                 if print_data.endswith(string):
                     print_data = print_data[:(len(data) - len(string))]
                 if print_data != "":
-                    print("output from node-%d: '%s'" % (i, print_data))
+                    log("output from node-%d: '%s'" % (i, print_data))
                 outputs[i] += data
         bad_node = -1
         for i in r:
@@ -68,7 +84,7 @@ def wait_output(string, r, cmd):
         if bad_node < 0:
             return
         if (time.time() > (start_time + 5.0)) and not printed:
-            print("expected output from node-%d not yet received "
+            log("expected output from node-%d not yet received "
             "after command '%s': expecting '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
             printed = True;
@@ -97,7 +113,7 @@ def start_nodes(r):
         nodes[n] = node
     wait_output("% ", r, "ssh")
     if (args.debug):
-            print('Servers started; pausing for debug setup.')
+            log('Servers started; pausing for debug setup.')
             input('Type <Enter> to continue: ')
 
 def stop_nodes():
@@ -124,40 +140,199 @@ def do_cmd(command, r):
     time.sleep(2.0)
     wait_output("% ", r, command)
 
-def scan_log(file):
+def scan_log(file, node, data):
     """
     Read a single log file and extract various useful information,
-    such as fatal error messages or interesting statistics.
+    such as fatal error messages or interesting statistics. The node
+    parameter gives the name of the node that generated the log. The
+    data argument is an object that will be filled in with info
+    extracted from the log; see scan_logs for details.
     """
+    exited = False
+    prot = ""
+
     for line in open(file):
+        if "Starting loaded experiment" in line:
+            prot = "homa"
+        if "Starting TCP experiment" in line:
+            prot = "tcp"
+        if "Command: dump_times" in line:
+            prot = ""
+        if prot != "":
+            match = re.match('.*(Clients|Servers): ([0-9.]+) Kops/sec, '
+                        '([0-9.]+) MB/sec', line)
+            if match:
+                if match.group(1) == "Clients":
+                    type = "client"
+                else:
+                    type = "server"
+                key = type + "_" + prot + "_kops"
+                if not node in data[key]:
+                    data[key][node] = []
+                data[key][node].append(float(match.group(2)))
+                key = type + "_" + prot + "_bw"
+                if not node in data[key]:
+                    data[key][node] = []
+                data[key][node].append(float(match.group(3)))
         if "FATAL:" in line:
-            print("%s: %s" % (file, line))
+            log("%s: %s" % (file, line))
+            exited = True
+        if "cp_node exiting" in line:
+            exited = True
+    if not exited:
+        data["fail_nodes"].append(node)
 
 def scan_logs():
     """
-    Read all of the note-specific log files produced by a run, and
+    Read all of the nodte-specific log files produced by a run, and
     extract useful information.
     """
-    for file in glob.glob(args.log_dir + "/node-*.log"):
-        scan_log(file)
+    data = {}
+
+    # Names of nodes that didn't exit normally.
+    data["fail_nodes"] = []
+
+    # Dictionaries indexed by node names; each value is a list of
+    # measured throughputs (for client or server, Homa or TCP) for
+    # that node (each reading is one second during the experiment).
+    data["client_homa_bw"] = {}
+    data["server_homa_bw"] = {}
+    data["client_tcp_bw"] = {}
+    data["server_tcp_bw"] = {}
+
+    # Same as above, but measuring kops/sec. instead of throughput.
+    data["client_homa_kops"] = {}
+    data["server_homa_kops"] = {}
+    data["client_tcp_kops"] = {}
+    data["server_tcp_kops"] = {}
+
+    for file in sorted(glob.glob(args.log_dir + "/node-*.log")):
+        node = re.match('.*/(node-[0-9]+)\.log', file).group(1)
+        scan_log(file, node, data)
+
+    client_avg_kops = server_avg_kops = client_avg_bw = server_avg_bw = 0.0
+    averages = []
+    log("Homa clients")
+    log("------------")
+    for node in sorted(data["client_homa_bw"].keys()):
+        bw = data["client_homa_bw"][node]
+        avg = sum(bw)/len(bw)
+        log("%s: %.1f MB/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), bw))))
+        averages.append(avg)
+    if len(averages) > 0:
+        client_avg_bw = sum(averages)/len(averages)
+        log("Overall average: %.1f MB/sec\n" % (client_avg_bw))
+
+    averages = []
+    for node in sorted(data["client_homa_kops"].keys()):
+        kops = data["client_homa_kops"][node]
+        avg = sum(kops)/len(kops)
+        log("%s: %.1f Kops/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), kops))))
+        averages.append(avg)
+    if len(averages) > 0:
+        client_avg_kops = sum(averages)/len(averages)
+        log("Overall average: %.1f Kops/sec\n" % (client_avg_kops))
+
+    averages = []
+    log("Homa servers")
+    log("------------")
+    for node in sorted(data["server_homa_bw"].keys()):
+        bw = data["server_homa_bw"][node]
+        avg = sum(bw)/len(bw)
+        log("%s: %.1f MB/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), bw))))
+        averages.append(avg)
+    if len(averages) > 0:
+        server_avg_bw = sum(averages)/len(averages)
+        log("Overall average: %.1f MB/sec\n" % (client_avg_bw))
+
+    averages = []
+    for node in sorted(data["server_homa_kops"].keys()):
+        kops = data["server_homa_kops"][node]
+        avg = sum(kops)/len(kops)
+        log("%s: %.1f Kops/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), kops))))
+        averages.append(avg)
+    if len(averages) > 0:
+        server_avg_kops = sum(averages)/len(averages)
+        log("Overall average: %.1f Kops/sec" % (client_avg_kops))
+    log("Homa totals: %.1f Kops/sec, %.1f MB/sec\n" % (
+            client_avg_kops + server_avg_kops, client_avg_bw + server_avg_bw))
+
+    client_avg_kops = server_avg_kops = client_avg_bw = server_avg_bw = 0.0
+    averages = []
+    log("TCP clients")
+    log("------------")
+    for node in sorted(data["client_tcp_bw"].keys()):
+        bw = data["client_tcp_bw"][node]
+        avg = sum(bw)/len(bw)
+        log("%s: %.1f MB/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), bw))))
+        averages.append(avg)
+    if len(averages) > 0:
+        client_avg_bw = sum(averages)/len(averages)
+        log("Overall average: %.1f MB/sec\n" % (client_avg_bw))
+
+    averages = []
+    for node in sorted(data["client_tcp_kops"].keys()):
+        kops = data["client_tcp_kops"][node]
+        avg = sum(kops)/len(kops)
+        log("%s: %.1f Kops/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), kops))))
+        averages.append(avg)
+    if len(averages) > 0:
+        client_avg_kops = sum(averages)/len(averages)
+        log("Overall average: %.1f Kops/sec\n" % (client_avg_kops))
+
+    averages = []
+    log("TCP servers")
+    log("------------")
+    for node in sorted(data["server_tcp_bw"].keys()):
+        bw = data["server_tcp_bw"][node]
+        avg = sum(bw)/len(bw)
+        log("%s: %.1f MB/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), bw))))
+        averages.append(avg)
+    if len(averages) > 0:
+        server_avg_bw = sum(averages)/len(averages)
+        log("Overall average: %.1f MB/sec\n" % (client_avg_bw))
+
+    averages = []
+    for node in sorted(data["server_tcp_kops"].keys()):
+        kops = data["server_tcp_kops"][node]
+        avg = sum(kops)/len(kops)
+        log("%s: %.1f Kops/sec (%s)" % (node, avg,
+            ", ".join(map(lambda x: "%.1f" % (x), kops))))
+        averages.append(avg)
+    if len(averages) > 0:
+        server_avg_kops = sum(averages)/len(averages)
+        log("Overall average: %.1f Kops/sec" % (client_avg_kops))
+    log("TCP totals: %.1f Kops/sec, %.1f MB/sec\n" % (
+            client_avg_kops + server_avg_kops, client_avg_bw + server_avg_bw))
+
+    if len(data["fail_nodes"]) != 0:
+        log("Nodes appear to have crashed: %s" % (
+                ", ".join(data["fail_nodes"])))
 
 def test_basic():
     """
     Run a single workload for a while.
     """
     global args
-    print("Starting nodes")
+    log("Starting nodes")
     start_nodes(range(args.num_nodes))
-    print("Starting servers")
+    log("Starting servers")
     do_cmd("server --ports 4\n", range(args.num_nodes))
-    print("Starting clients")
+    log("Starting clients")
     do_cmd("client --threads 5 --server-ports 4 --workload %s --server-nodes 3 "
             "--first-server 0\n" % (args.workload),
             range(args.num_nodes))
     time.sleep(args.seconds)
-    print("Dumping stats")
+    log("Dumping stats")
     do_cmd("dump_times rtts.txt\n", range(args.num_nodes))
-    print("Retrieving stats")
+    log("Retrieving stats")
     for n in range(args.num_nodes):
         subprocess.run(["rsync", "-rtvq", "node-%d:rtts.txt" % (n),
                 "%s/rtts-%d.txt" % (args.log_dir, n)])
@@ -170,7 +345,7 @@ def test_slowdown():
 
     global args
     try:
-        print("Starting nodes")
+        log("Starting nodes")
         start_nodes(range(args.num_nodes))
         log_level = "normal"
         if args.verbose:
@@ -178,61 +353,64 @@ def test_slowdown():
         do_cmd("log --file node.log --level %s\n" % (log_level),
                 range(args.num_nodes))
 
-        print("Starting Homa servers")
+        log("Starting Homa servers")
         do_cmd("server --ports 18\n", range(args.num_nodes))
 
-        print("Starting Homa clients (unloaded)")
+        log("Starting Homa clients (unloaded)")
         do_cmd("client --threads 1 --server-ports 1 --workload %s "
-                "--server-nodes 1 --first-server 2\n" % (args.workload), [1])
-        print("Starting unloaded experiment")
+                "--server-nodes 1 --first-server 2 --thread-max 1\n" % (
+                args.workload), [1])
+        log("Starting unloaded experiment")
         do_cmd("dump_times /dev/null\n", range(args.num_nodes))
         do_cmd("log Starting unloaded experiment\n", range(args.num_nodes))
         time.sleep(args.seconds)
-        print("Dumping unloaded stats")
+        log("Dumping unloaded stats")
         do_cmd("dump_times unloaded.txt\n", range(args.num_nodes))
 
-        print("Restarting Homa clients (loaded)")
+        log("Restarting Homa clients (loaded)")
         do_cmd("stop clients\n", range(args.num_nodes))
         do_cmd("client --threads 10 --server-ports 18 --workload %s "
-                "--server-nodes %d --first-server 0 --net-bw %.3f\n" %
-                (args.workload, args.num_nodes, args.net_bw),
-                range(args.num_nodes))
-        print("Starting loaded experiment")
+                "--server-nodes %d --first-server 0 --net-bw %.3f "
+                "--thread-max %d --server-max %d\n" %
+                (args.workload, args.num_nodes, args.net_bw, args.thread_max,
+                args.server_max), range(args.num_nodes))
+        log("Starting loaded experiment")
         for node in range(args.num_nodes):
             subprocess.run(["rsh", "node-%d" % (node), "metrics.py"],
                     stdout=subprocess.DEVNULL)
         do_cmd("dump_times /dev/null\n", range(args.num_nodes))
         do_cmd("log Starting loaded experiment\n", range(args.num_nodes))
         time.sleep(args.seconds)
-        print("Dumping loaded stats")
+        log("Dumping loaded stats")
         do_cmd("dump_times loaded.txt\n", range(args.num_nodes))
         for node in range(args.num_nodes):
             f = open("%s/node-%d.metrics" % (args.log_dir, node), 'w')
             subprocess.run(["rsh", "node-%d" % (node), "metrics.py"], stdout=f);
             f.close()
 
-        print("Restarting servers for TCP")
+        log("Restarting servers for TCP")
         do_cmd("stop clients\n", range(args.num_nodes))
         do_cmd("stop servers\n", range(args.num_nodes))
         do_cmd("server --ports 18  --protocol tcp\n", range(args.num_nodes))
-        print("Starting TCP clients (loaded)")
+        log("Starting TCP clients (loaded)")
         do_cmd("client --threads 10 --server-ports 18 --workload %s "
                 "--server-nodes %d --first-server 0 --net-bw %.3f "
-                "--protocol tcp\n" %
-                (args.workload, args.num_nodes, args.net_bw),
-                range(args.num_nodes))
-        print("Starting TCP experiment")
+                "--protocol tcp --thread-max %d --server-max %d\n" %
+                (args.workload, args.num_nodes, args.net_bw, args.thread_max,
+                args.server_max), range(args.num_nodes))
+        log("Starting TCP experiment")
         do_cmd("dump_times /dev/null\n", range(args.num_nodes))
+        do_cmd("log Starting TCP experiment\n", range(args.num_nodes))
         time.sleep(args.seconds)
-        print("Dumping TCP stats")
+        log("Dumping TCP stats")
         do_cmd("dump_times tcp.txt\n", range(args.num_nodes))
-        print("Finishing")
+        log("Finishing")
         do_cmd("stop clients\n", range(args.num_nodes))
         stop_nodes()
     except Exception as e:
-        print(traceback.print_exc(file=sys.stdout))
+        log(traceback.print_exc(file=sys.stdout))
 
-    print("Retrieving logs")
+    log("Retrieving logs")
     subprocess.run(["rsync", "-rtvq", "node-1:unloaded.txt",
             "%s/unloaded.txt" % (args.log_dir)])
     for n in range(args.num_nodes):
@@ -243,8 +421,7 @@ def test_slowdown():
         subprocess.run(["rsync", "-rtvq", "node-%d:tcp.txt" % (n),
                 "%s/tcp-%d.txt" % (args.log_dir, n)])
     scan_logs()
-    print("Finished: results are in %s" % (args.log_dir))
-    
+    log("Finished: results are in %s" % (args.log_dir))
 
 parser = argparse.ArgumentParser(description=
         'Run one or more Homa performance benchmarks on a cluster of nodes.  '
@@ -272,6 +449,14 @@ parser.add_argument('-p', '--protocol', dest='protocol',
 parser.add_argument('-s', '--seconds', type=int, dest='seconds',
         metavar='S', default=5,
         help='run each experiment for S seconds (default: 5 secs)')
+parser.add_argument('--server-max', type=int, dest='server_max',
+        metavar='count', default=20,
+        help='maximum number of requests a single client thread can have '
+        'outstanding to a single server port at a time (default: 20)')
+parser.add_argument('--thread-max', type=int, dest='thread_max',
+        metavar='count', default=20,
+        help='maximum number of requests each client thread can have '
+        'outstanding at a time (default: 20)')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
         help='enable verbose output in node logs')
 parser.add_argument('-w', '--workload', dest='workload',
@@ -279,10 +464,14 @@ parser.add_argument('-w', '--workload', dest='workload',
         help='workload to use for benchmark (w1-w5 or number, default: w3)')
 
 args, tests = parser.parse_known_args()
+if tests[0] == "scan":
+    scan_logs()
+    exit(0)
 if os.path.exists(args.log_dir):
     shutil.rmtree(args.log_dir)
 os.makedirs(args.log_dir)
+log_file = open("%s/cperf.log" % args.log_dir, "w")
 
 for test in tests:
-    print("Running test %s" % (test))
+    log("Running test %s" % (test))
     eval("test_%s()" % (test))
