@@ -844,31 +844,26 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_rpc *candidate;
+	int bytes_left;
 
 	if (!list_empty(&rpc->throttled_links)) {
 		return;
 	}
+	bytes_left = rpc->msgout.length - homa_data_offset(
+			rpc->msgout.next_packet);
 	spin_lock_bh(&homa->throttle_lock);
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
 			throttled_links) {
-		int bytes_left, bytes_left_cand;
-		bytes_left = rpc->msgout.length - homa_data_offset(
-				rpc->msgout.next_packet);
-		
-		/* Watch out: the pacer might have just transmitted the last
-		 * packet from candidate.
-		 */
-		if (!candidate->msgout.next_packet)
-			bytes_left_cand = 0;
-		else
-			bytes_left_cand = candidate->msgout.length - homa_data_offset(
+		int bytes_left_cand;
+	
+		bytes_left_cand = candidate->msgout.length - homa_data_offset(
 				candidate->msgout.next_packet);
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
-			goto done;
-		}
+		goto done;
 	}
+		}
 	list_add_tail_rcu(&rpc->throttled_links, &homa->throttled_rpcs);
 done:
 	spin_unlock_bh(&homa->throttle_lock);
