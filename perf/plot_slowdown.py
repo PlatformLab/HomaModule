@@ -144,10 +144,11 @@ def make_plot(files):
         if (min_length == 0) or (count < min_count):
             min_count = count
             min_length = length
-        x.append(cum_frac[length])
-        y_p50.append(p50)
-        y_p99.append(p99)
-        y_p999.append(p999)
+        if len(x) > 0:
+            x.append(cum_frac[length])
+            y_p50.append(p50)
+            y_p99.append(p99)
+            y_p999.append(p999)
         x.append(cum_frac[length])
         p50 = sorted_times[count//2]/unloaded[length]
         p99 = sorted_times[count*99//100]/unloaded[length]
