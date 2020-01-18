@@ -137,7 +137,6 @@ def do_cmd(command, r):
     for n in r:
         nodes[n].stdin.write(command)
         nodes[n].stdin.flush()
-    time.sleep(2.0)
     wait_output("% ", r, command)
 
 def scan_log(file, node, data):
@@ -344,68 +343,72 @@ def test_slowdown():
     """
 
     global args
+    r = range(args.num_nodes)
     try:
         log("Starting nodes")
-        start_nodes(range(args.num_nodes))
+        start_nodes(r)
         log_level = "normal"
         if args.verbose:
             log_level = "verbose"
-        do_cmd("log --file node.log --level %s\n" % (log_level),
-                range(args.num_nodes))
+        do_cmd("log --file node.log --level %s\n" % (log_level), r)
 
         log("Starting Homa servers")
-        do_cmd("server --ports 18\n", range(args.num_nodes))
+        do_cmd("server --ports 18\n", r)
 
         log("Starting Homa clients (unloaded)")
         do_cmd("client --threads 1 --server-ports 1 --workload %s "
                 "--server-nodes 1 --first-server 2 --thread-max 1\n" % (
                 args.workload), [1])
         log("Starting unloaded experiment")
-        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
-        do_cmd("log Starting unloaded experiment\n", range(args.num_nodes))
+        do_cmd("dump_times /dev/null\n", r)
+        do_cmd("log Starting unloaded experiment\n", r)
         time.sleep(args.seconds)
         log("Dumping unloaded stats")
-        do_cmd("dump_times unloaded.txt\n", range(args.num_nodes))
+        do_cmd("dump_times unloaded.txt\n", r)
 
         log("Restarting Homa clients (loaded)")
-        do_cmd("stop clients\n", range(args.num_nodes))
-        do_cmd("client --threads 10 --server-ports 18 --workload %s "
-                "--server-nodes %d --first-server 0 --net-bw %.3f "
-                "--thread-max %d --server-max %d\n" %
-                (args.workload, args.num_nodes, args.net_bw, args.thread_max,
-                args.server_max), range(args.num_nodes))
+        do_cmd("stop clients\n", r)
+        for node in r:
+            command = "client --threads 10 --server-ports 18 --workload %s " \
+                    "--server-nodes %d --first-server 0 --net-bw %.3f " \
+                    "--thread-max %d --server-max %d --id %d\n" % (
+                    args.workload, args.num_nodes, args.net_bw,
+                    args.thread_max, args.server_max, node)
+            nodes[node].stdin.write(command)
+            nodes[node].stdin.flush()
+        wait_output("% ", r, command)
         log("Starting loaded experiment")
-        for node in range(args.num_nodes):
+        for node in r:
             subprocess.run(["rsh", "node-%d" % (node), "metrics.py"],
                     stdout=subprocess.DEVNULL)
-        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
-        do_cmd("log Starting loaded experiment\n", range(args.num_nodes))
+        do_cmd("dump_times /dev/null\n", r)
+        do_cmd("log Starting loaded experiment\n", r)
         time.sleep(args.seconds)
         log("Dumping loaded stats")
-        do_cmd("dump_times loaded.txt\n", range(args.num_nodes))
-        for node in range(args.num_nodes):
+        do_cmd("dump_times loaded.txt\n", r)
+        for node in r:
             f = open("%s/node-%d.metrics" % (args.log_dir, node), 'w')
             subprocess.run(["rsh", "node-%d" % (node), "metrics.py"], stdout=f);
             f.close()
 
         log("Restarting servers for TCP")
-        do_cmd("stop clients\n", range(args.num_nodes))
-        do_cmd("stop servers\n", range(args.num_nodes))
-        do_cmd("server --ports 18  --protocol tcp\n", range(args.num_nodes))
+        do_cmd("stop clients\n", r)
+        do_cmd("stop servers\n", r)
+        do_cmd("server --ports 18  --protocol tcp\n", r)
         log("Starting TCP clients (loaded)")
         do_cmd("client --threads 10 --server-ports 18 --workload %s "
                 "--server-nodes %d --first-server 0 --net-bw %.3f "
                 "--protocol tcp --thread-max %d --server-max %d\n" %
                 (args.workload, args.num_nodes, args.net_bw, args.thread_max,
-                args.server_max), range(args.num_nodes))
+                args.server_max), r)
         log("Starting TCP experiment")
-        do_cmd("dump_times /dev/null\n", range(args.num_nodes))
-        do_cmd("log Starting TCP experiment\n", range(args.num_nodes))
+        do_cmd("dump_times /dev/null\n", r)
+        do_cmd("log Starting TCP experiment\n", r)
         time.sleep(args.seconds)
         log("Dumping TCP stats")
-        do_cmd("dump_times tcp.txt\n", range(args.num_nodes))
+        do_cmd("dump_times tcp.txt\n", r)
         log("Finishing")
-        do_cmd("stop clients\n", range(args.num_nodes))
+        do_cmd("stop clients\n", r)
         stop_nodes()
     except Exception as e:
         log(traceback.print_exc(file=sys.stdout))
@@ -413,7 +416,7 @@ def test_slowdown():
     log("Retrieving logs")
     subprocess.run(["rsync", "-rtvq", "node-1:unloaded.txt",
             "%s/unloaded.txt" % (args.log_dir)])
-    for n in range(args.num_nodes):
+    for n in r:
         subprocess.run(["rsync", "-rtvq", "node-%d:node.log" % (n),
                 "%s/node-%d.log" % (args.log_dir, n)])
         subprocess.run(["rsync", "-rtvq", "node-%d:loaded.txt" % (n),

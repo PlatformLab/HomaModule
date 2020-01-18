@@ -168,6 +168,8 @@ void print_help(const char *name)
 		"                      greater than 1)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --id              Id of this node; a value of I >= 0 means requests will\n"
+		"                      not be sent to node-I (default: -1)\n"
 		"    --net-bw          Target network utilization, including only message data,\n"
 		"                      GB/s; 0 means send continuously (default: %.1f)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
@@ -354,13 +356,16 @@ int send_message(int fd, message_header *header)
 void init_server_addrs(void)
 {
 	server_addrs.clear();
-	for (int node = 0; node < server_nodes; node++) {
+	for (int node = first_server; node < first_server + server_nodes;
+			node++) {
 		char host[100];
 		struct addrinfo hints;
 		struct addrinfo *matching_addresses;
 		struct sockaddr_in *dest;
 
-		snprintf(host, sizeof(host), "node-%d", node + first_server);
+		if (node == id)
+			continue;
+		snprintf(host, sizeof(host), "node-%d", node);
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = AF_INET;
 		hints.ai_socktype = SOCK_DGRAM;
@@ -1716,6 +1721,10 @@ int client_cmd(std::vector<string> &words)
 			i++;
 		} else if (strcmp(option, "--first-server") == 0) {
 			if (!parse_int(words, i+1, &first_server, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--id") == 0) {
+			if (!parse_int(words, i+1, &id, option))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--net-bw") == 0) {
