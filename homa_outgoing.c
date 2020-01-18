@@ -856,8 +856,14 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 			throttled_links) {
 		int bytes_left_cand;
 	
-		bytes_left_cand = candidate->msgout.length - homa_data_offset(
-				candidate->msgout.next_packet);
+		/* Watch out: the pacer might have just transmitted the last
+		 * packet from candidate.
+		 */
+		if (!candidate->msgout.next_packet)
+			bytes_left_cand = 0;
+		else
+			bytes_left_cand = candidate->msgout.length -
+				homa_data_offset(candidate->msgout.next_packet);
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
