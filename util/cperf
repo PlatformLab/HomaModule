@@ -353,7 +353,7 @@ def test_slowdown():
         do_cmd("log --file node.log --level %s\n" % (log_level), r)
 
         log("Starting Homa servers")
-        do_cmd("server --ports 18\n", r)
+        do_cmd("server --ports 9\n", r)
 
         log("Starting Homa clients (unloaded)")
         do_cmd("client --threads 1 --server-ports 1 --workload %s "
@@ -369,7 +369,7 @@ def test_slowdown():
         log("Restarting Homa clients (loaded)")
         do_cmd("stop clients\n", r)
         for node in r:
-            command = "client --threads 10 --server-ports 18 --workload %s " \
+            command = "client --threads 5 --server-ports 9 --workload %s " \
                     "--server-nodes %d --first-server 0 --net-bw %.3f " \
                     "--thread-max %d --server-max %d --id %d\n" % (
                     args.workload, args.num_nodes, args.net_bw,
@@ -394,9 +394,9 @@ def test_slowdown():
         log("Restarting servers for TCP")
         do_cmd("stop clients\n", r)
         do_cmd("stop servers\n", r)
-        do_cmd("server --ports 18  --protocol tcp\n", r)
+        do_cmd("server --ports 9  --protocol tcp\n", r)
         log("Starting TCP clients (loaded)")
-        do_cmd("client --threads 10 --server-ports 18 --workload %s "
+        do_cmd("client --threads 5 --server-ports 9 --workload %s "
                 "--server-nodes %d --first-server 0 --net-bw %.3f "
                 "--protocol tcp --thread-max %d --server-max %d\n" %
                 (args.workload, args.num_nodes, args.net_bw, args.thread_max,
@@ -467,6 +467,9 @@ parser.add_argument('-w', '--workload', dest='workload',
         help='workload to use for benchmark (w1-w5 or number, default: w3)')
 
 args, tests = parser.parse_known_args()
+if len(tests) == 0:
+    print("No tests specified; type 'cperf --help' for help")
+    exit(1)
 if tests[0] == "scan":
     scan_logs()
     exit(0)
