@@ -274,21 +274,23 @@ plt.grid(which="major", axis="y")
 # Generate x-axis labels
 xticks = []
 xlabels = []
-cum_frac = 0.0
-target = 0.0
+cumulative_count = 0
+target_count = 0
+tick = 0
 rtts = homa["rtts"]
 total = homa["total_messages"]
 for length in sorted(rtts.keys()):
-    cum_frac += len(rtts[length])/total
-    while cum_frac >= target:
-        xticks.append(target)
+    cumulative_count += len(rtts[length])
+    while cumulative_count >= target_count:
+        xticks.append(target_count/total)
         if length < 1000:
             xlabels.append("%.0f" % (length))
         elif length < 100000:
             xlabels.append("%.1fK" % (length/1000))
         else:
             xlabels.append("%.0fK" % (length/1000))
-        target += 0.1
+        tick += 1
+        target_count = (total*tick)/10
 plt.xticks(xticks, xlabels)
 
 x, y = make_histogram(homa["cum_frac"], homa["slow_50"])
