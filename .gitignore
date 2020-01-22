@@ -11,7 +11,7 @@
 *.diff
 .tags*
 .deps
-man/*.pdf
+*.pdf
 
 
 # Ignore IDE files

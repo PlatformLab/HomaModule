@@ -5,4 +5,5 @@ nbproject
 private
 cloudlab
 *.pyc
+*.pdf
 *.tt
