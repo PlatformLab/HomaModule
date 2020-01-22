@@ -221,6 +221,13 @@ a better approximation of SRPT, but the value must be high enough to
 queue the next packet before
 the NIC becomes idle; otherwise, output bandwidth will be lost.
 .TP
+.IR max_overcommit
+An integer value setting an upper limit on the number of incoming
+messages to which Homa will issue grants at any given time. Higher
+numbers generally improve link bandwidth utilization, but can result
+in more buffering and may affect tail latency if there are not many
+priority levels available. Must be at least 1.
+.TP
 .IR max_prio
 An integer value specifying the highest priority level that Homa will
 use. Must be between 0 and 7, inclusive; larger values indicate higher
