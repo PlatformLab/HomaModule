@@ -84,7 +84,7 @@ std::vector<struct sockaddr_in> server_addrs;
 
 /**
  * @last_stats_time: time (in rdtsc cycles) when we last printed
- * staticsics.
+ * staticsics. Zero means that none of the statistics below are valid.
  */
 uint64_t last_stats_time;
 
@@ -1571,6 +1571,7 @@ void server_stats(uint64_t now)
 	int length;
 	uint64_t server_rpcs = 0;
 	uint64_t server_data = 0;
+	details[0] = 0;
 	for (uint32_t i = 0; i < metrics.size(); i++) {
 		server_metrics *server = metrics[i];
 		server_rpcs += server->requests;
@@ -1783,6 +1784,7 @@ int client_cmd(std::vector<string> &words)
 		else
 			clients.push_back(new tcp_client(i));
 	}
+	last_stats_time = 0;
 	return 1;
 }
 
@@ -1999,6 +2001,7 @@ int server_cmd(std::vector<string> &words)
 		}
 	}
 	last_per_server_rpcs.resize(server_ports, 0);
+	last_stats_time = 0;
 	return 1;
 }
 
