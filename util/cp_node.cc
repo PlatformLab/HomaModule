@@ -2000,7 +2000,7 @@ int server_cmd(std::vector<string> &words)
 			metrics.push_back(&server->metrics);
 		}
 	}
-	last_per_server_rpcs.resize(server_ports, 0);
+	last_per_server_rpcs.resize(server_ports*port_threads, 0);
 	last_stats_time = 0;
 	return 1;
 }
