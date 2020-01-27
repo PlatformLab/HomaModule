@@ -143,7 +143,8 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 			err = -ENOMEM;
 			goto error;
 		}
-		if (unlikely(bytes_left > max_pkt_data)) {
+		if (unlikely((bytes_left > max_pkt_data)
+				&& (max_gso_data > max_pkt_data))) {
 			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
 					+ max_pkt_data;
 			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;

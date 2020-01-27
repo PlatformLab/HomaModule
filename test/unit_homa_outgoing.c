@@ -129,6 +129,38 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_large_skb)
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
 }
+TEST_F(homa_outgoing, homa_fill_packets__set_gso_info)
+{
+	// First message: uses GSO
+	mock_net_device.gso_max_size = 10000;
+	self->homa.max_gso_size = 4000;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 2000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	EXPECT_EQ(1408, skb_shinfo(crpc->msgout.packets)->gso_size);
+	
+	// Second message: no GSO (message fits in one packet)
+	mock_net_device.gso_max_size = 10000;
+	self->homa.max_gso_size = 4200;
+	crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 1000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	EXPECT_EQ(0, skb_shinfo(crpc->msgout.packets)->gso_size);
+	
+	// Third message: GSO limit is one packet
+	mock_net_device.gso_max_size = 10000;
+	self->homa.max_gso_size = 1000;
+	crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 3000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	EXPECT_EQ(0, skb_shinfo(crpc->msgout.packets)->gso_size);
+}
 TEST_F(homa_outgoing, homa_fill_packets__cant_copy_data)
 {
 	mock_copy_data_errors = 2;
