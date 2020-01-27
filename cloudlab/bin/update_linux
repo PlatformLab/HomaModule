@@ -7,8 +7,9 @@
 v=4.15.18+
 for t in $*; do
     echo $t
-    ssh $t 'rm -rf tmp; mkdir tmp'
+    ssh $t 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
     rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
-            /boot/vmlinuz-$v $t:tmp
-    ssh $t 'sudo cp -f tmp/* /boot; sudo reboot'
+            /boot/vmlinuz-$v $t:tmp/boot/
+    rsync -rtv /lib/modules/$v/kernel/net/8021q/ $t:tmp/8021q/
+    ssh $t "sudo cp -f tmp/boot/* /boot; sudo cp -f tmp/8021q/8021q.ko /lib/modules/$v/kernel/net/8021q; sudo reboot"
 done
