@@ -411,7 +411,7 @@ def test_slowdown():
         do_cmd("stop clients\n", r)
         stop_nodes()
     except Exception as e:
-        log(traceback.print_exc(file=sys.stdout))
+        log(traceback.format_exc())
 
     log("Retrieving logs")
     subprocess.run(["rsync", "-rtvq", "node-1:unloaded.txt",

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -147,6 +147,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "base_priority",
+		.data		= &homa_data.base_priority,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -180,13 +187,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "max_prio",
-		.data		= &homa_data.max_prio,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_gro_skbs",
@@ -224,8 +224,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "min_prio",
-		.data		= &homa_data.min_prio,
+		.procname	= "num_priorities",
+		.data		= &homa_data.num_priorities,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -275,7 +275,7 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "unsched_cutoffs",
 		.data		= &homa_data.unsched_cutoffs,
-		.maxlen		= HOMA_NUM_PRIORITIES*sizeof(int),
+		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
@@ -1164,7 +1164,8 @@ int homa_dointvec(struct ctl_table *table, int write,
 		 * particular value was written (don't want to increment
 		 * cutoff_version otherwise).
 		 */
-		if (table->data == &homa_data.unsched_cutoffs) {
+		if ((table->data == &homa_data.unsched_cutoffs)
+				|| (table->data == &homa_data.num_priorities)) {
 			homa_prios_changed(homa);
 		}
 	}

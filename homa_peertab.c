@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -130,8 +130,8 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 		goto done;
 	}
 	peer->dst = &rt->dst;
-	peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 0;
-	peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] = INT_MAX;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 0;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = INT_MAX;
 	peer->cutoff_version = 0;
 	peer->last_update_jiffies = 0;
 	peer->last_resend_tick = 0;
@@ -146,15 +146,17 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 /**
  * homa_peer_unsched_priority() - Returns the priority level to use for
  * unscheduled packets of a message.
+ * @homa:     Overall data about the Homa protocol implementation.
  * @peer:     The destination of the message.
  * @length:   Number of bytes in the message.
  * 
  * Return:    A priority level.
  */
-int homa_unsched_priority(struct homa_peer *peer, int length)
+int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
+		int length)
 {
 	int i;
-	for (i = HOMA_NUM_PRIORITIES-1; ; i--) {
+	for (i = homa->num_priorities-1; ; i--) {
 		if (peer->unsched_cutoffs[i] >= length)
 			return i;
 	}

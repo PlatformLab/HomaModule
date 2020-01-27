@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -74,8 +74,8 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_size_limit)
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
-	EXPECT_STREQ("DATA P1 1400@0 1400@1400; "
-			"DATA P1 1400@2800 800@4200",
+	EXPECT_STREQ("DATA P0 1400@0 1400@1400; "
+			"DATA P0 1400@2800 800@4200",
 			unit_log_get());
 	homa_free_skbs(skb);
 }
@@ -89,10 +89,10 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_data)
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA P1 1400@0 1400@1400; "
-			"DATA P1 1400@2800 1400@4200; "
-			"DATA P1 1400@5600 1400@7000; "
-			"DATA P1 1400@8400 200@9800",
+	EXPECT_STREQ("DATA P0 1400@0 1400@1400; "
+			"DATA P0 1400@2800 1400@4200; "
+			"DATA P0 1400@5600 1400@7000; "
+			"DATA P0 1400@8400 200@9800",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_fill_packets__gso_max_less_than_mtu)
@@ -107,9 +107,9 @@ TEST_F(homa_outgoing, homa_fill_packets__gso_max_less_than_mtu)
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA P1 2000@0; "
-			"DATA P1 2000@2000; "
-			"DATA P1 1000@4000",
+	EXPECT_STREQ("DATA P0 2000@0; "
+			"DATA P0 2000@2000; "
+			"DATA P0 1000@4000",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_small_skb)
@@ -186,9 +186,9 @@ TEST_F(homa_outgoing, homa_fill_packets__multiple_segs_per_skbuff)
 			unit_log_get());
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
-	EXPECT_STREQ("DATA P1 1400@0 1400@1400 1400@2800; "
-			"DATA P1 1400@4200 1400@5600 1400@7000; "
-			"DATA P1 1400@8400 200@9800",
+	EXPECT_STREQ("DATA P0 1400@0 1400@1400 1400@2800; "
+			"DATA P0 1400@4200 1400@5600 1400@7000; "
+			"DATA P0 1400@8400 200@9800",
 			unit_log_get());
 	homa_free_skbs(skb);
 }
@@ -205,10 +205,10 @@ TEST_F(homa_outgoing, homa_fill_packets__set_incoming)
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA P1 1400@0 1400@1400; "
-			"DATA P1 1400@2800 1400@4200; "
-			"DATA P1 1400@5600 1400@7000; "
-			"DATA P1 1400@8400 200@9800",
+	EXPECT_STREQ("DATA P0 1400@0 1400@1400; "
+			"DATA P0 1400@2800 1400@4200; "
+			"DATA P0 1400@5600 1400@7000; "
+			"DATA P0 1400@8400 200@9800",
 			unit_log_get());
 	skb = crpc->msgout.packets;
 	h = (struct data_header *) skb_transport_header(skb);
@@ -231,7 +231,7 @@ TEST_F(homa_outgoing, homa_fill_packets__expand_last_segment)
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
-	EXPECT_STREQ("DATA P1 1400@0 2@1400", unit_log_get());
+	EXPECT_STREQ("DATA P0 1400@0 2@1400", unit_log_get());
 	EXPECT_EQ(1416, skb->len - sizeof32(struct data_header)
 			- sizeof32(struct data_segment));
 	homa_free_skbs(skb);
@@ -250,13 +250,13 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 			"_copy_from_user 200 bytes at 3800", unit_log_get());
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, "
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, prio 0, "
 			"message_length 3000, offset 0, data_length 1400, "
 			"incoming 3000, cutoff_version 0; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
+		     "DATA from 0.0.0.0:40000, dport 99, id 1, prio 0, "
 			"message_length 3000, offset 1400, data_length 1400, "
 			"incoming 3000, cutoff_version 0; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
+		     "DATA from 0.0.0.0:40000, dport 99, id 1, prio 0, "
 			"message_length 3000, offset 2800, data_length 200, "
 			"incoming 3000, cutoff_version 0",
 		     unit_log_get());
@@ -277,7 +277,7 @@ TEST_F(homa_outgoing, homa_message_out_reset__basics)
 	EXPECT_EQ(crpc->msgout.packets, crpc->msgout.next_packet);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA P1 1400@0; DATA P1 1400@1400; DATA P1 200@2800",
+	EXPECT_STREQ("DATA P0 1400@0; DATA P0 1400@1400; DATA P0 200@2800",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_message_out_reset__cant_allocate_skb)
@@ -292,21 +292,7 @@ TEST_F(homa_outgoing, homa_message_out_reset__cant_allocate_skb)
 	EXPECT_EQ(ENOMEM, -err);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA P1 1400@0; DATA P1 200@2800", unit_log_get());
-}
-
-TEST_F(homa_outgoing, homa_set_priority)
-{
-	struct sk_buff *skb = alloc_skb(1000, GFP_KERNEL);
-	homa_set_priority(skb, 0);
-	EXPECT_EQ(1, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
-	
-	homa_set_priority(skb, 1);
-	EXPECT_EQ(0, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
-	
-	homa_set_priority(skb, 7);
-	EXPECT_EQ(7, (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT);
-	kfree_skb(skb);
+	EXPECT_STREQ("DATA P0 1400@0; DATA P0 200@2800", unit_log_get());
 }
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)
@@ -323,7 +309,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1111, "
-			"prio 7, offset 12345, grant_prio 4",
+			"prio 8, offset 12345, grant_prio 4",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_control__client_response)
@@ -341,7 +327,7 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), crpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1111, "
-			"prio 7, offset 12345, grant_prio 4",
+			"prio 8, offset 12345, grant_prio 4",
 			unit_log_get());
 }
 
@@ -409,10 +395,10 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 			7000, 0);
 	unit_log_clear();
 	homa_xmit_data(crpc, false);
-	EXPECT_STREQ("xmit DATA P6 1400@0; "
-			"xmit DATA P6 1400@1400; "
-			"xmit DATA P2 1400@2800; "
-			"xmit DATA P2 1400@4200", unit_log_get());
+	EXPECT_STREQ("xmit DATA P7 1400@0; "
+			"xmit DATA P7 1400@1400; "
+			"xmit DATA P3 1400@2800; "
+			"xmit DATA P3 1400@4200", unit_log_get());
 	EXPECT_EQ(5600, homa_data_offset(crpc->msgout.next_packet));
 }
 TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
@@ -426,7 +412,7 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 	self->homa.max_nic_queue_cycles = 500;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_xmit_data(crpc, false);
-	EXPECT_STREQ("xmit DATA P6 200@0", unit_log_get());
+	EXPECT_STREQ("xmit DATA P7 200@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
@@ -448,8 +434,8 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	
 	/* The first RPC throttles because the NIC queueu is too full. */
 	homa_xmit_data(crpc1, false);
-	EXPECT_STREQ("xmit DATA P6 1400@0; "
-			"xmit DATA P6 1400@1400; "
+	EXPECT_STREQ("xmit DATA P7 1400@0; "
+			"xmit DATA P7 1400@1400; "
 			"wake_up_process", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -521,7 +507,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
-	EXPECT_STREQ("xmit DATA P6 1000@0", unit_log_get());
+	EXPECT_STREQ("xmit DATA P7 1000@0", unit_log_get());
 	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
 	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
 }
@@ -548,13 +534,13 @@ TEST_F(homa_outgoing, homa_resend_data)
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
 	homa_resend_data(crpc, 7000, 10000, 2);
-	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
+	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 3, "
 			"message_length 16000, offset 7000, data_length 1400, "
 			"incoming 10000, cutoff_version 0, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
+			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 3, "
 			"message_length 16000, offset 8400, data_length 1400, "
 			"incoming 10000, cutoff_version 0, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 2, "
+			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, prio 3, "
 			"message_length 16000, offset 9800, data_length 1400, "
 			"incoming 11200, cutoff_version 0, RETRANSMIT",
 			unit_log_get());
@@ -562,13 +548,13 @@ TEST_F(homa_outgoing, homa_resend_data)
 	unit_log_clear();
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 2800, 4200, 3);
-	EXPECT_STREQ("xmit DATA retrans P3 1400@2800", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans P4 1400@2800", unit_log_get());
 	
 	unit_log_clear();
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 4199, 4201, 7);
-	EXPECT_STREQ("xmit DATA retrans P7 1400@2800; "
-			"xmit DATA retrans P7 1400@4200", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans P8 1400@2800; "
+			"xmit DATA retrans P8 1400@4200", unit_log_get());
 	
 	unit_log_clear();
 	mock_xmit_log_verbose = 0;
@@ -713,7 +699,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA P6 1400@0; xmit DATA P6 1400@1400",
+	EXPECT_STREQ("xmit DATA P7 1400@0; xmit DATA P7 1400@1400",
 		unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -782,7 +768,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	unit_log_clear();
 	mock_trylock_errors = 0;
 	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA P6 1400@0; xmit DATA P6 1400@1400",
+	EXPECT_STREQ("xmit DATA P7 1400@0; xmit DATA P7 1400@1400",
 		unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
@@ -801,7 +787,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA P6 1000@0; xmit DATA P6 1400@0",
+	EXPECT_STREQ("xmit DATA P7 1000@0; xmit DATA P7 1400@0",
 			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -820,7 +806,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA P6 1000@0; homa_remove_from_grantable invoked",
+	EXPECT_STREQ("xmit DATA P7 1000@0; homa_remove_from_grantable invoked",
 			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);

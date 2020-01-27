@@ -98,12 +98,12 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	rpc->peer->last_resend_tick = homa->timer_ticks;
 	rpc->num_resends++;
 	homa_get_resend_range(&rpc->msgin, &resend);
-	resend.priority = homa->max_prio;
+	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 	if (rpc->is_client) {
 		us = "server";
 		them = "client";
-		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d,	"
+		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "
 				"offset %d",
 				rpc->id, htonl(rpc->peer->addr), rpc->dport,
 				ntohl(resend.offset));

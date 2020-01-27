@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -36,7 +36,7 @@ int homa_init(struct homa *homa)
 	size_t aligned_size;
 	char *first;
 	int i, err;
-	_Static_assert(HOMA_NUM_PRIORITIES >= 8,
+	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 			"homa_init assumes at least 8 priority levels");
 	
 	/* Initialize Homa metrics (if no-one else has already done it),
@@ -70,13 +70,13 @@ int homa_init(struct homa *homa)
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
-	homa->max_prio = HOMA_NUM_PRIORITIES - 1;
-	homa->min_prio = 0;
-	homa->max_sched_prio = HOMA_NUM_PRIORITIES - 5;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-1] = 200;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-2] = 2800;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-3] = 15000;
-	homa->unsched_cutoffs[HOMA_NUM_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+	homa->num_priorities = HOMA_MAX_PRIORITIES;
+	homa->base_priority = 1;
+	homa->max_sched_prio = HOMA_MAX_PRIORITIES - 5;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = 2800;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-3] = 15000;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
 #ifdef __UNIT_TEST__
 	/* Unit tests won't send CUTOFFS messages unless the test changes
 	 * this variable.
@@ -577,21 +577,11 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	struct common_header *common = (struct common_header *) skb->data;
 	
 	used = homa_snprintf(buffer, buf_len, used,
-		"%s from %s:%u, dport %d, id %llu",
+		"%s from %s:%u, dport %d, id %llu, prio %d",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-		ntohs(common->sport), ntohs(common->dport), common->id);
-	if (skb->vlan_tci & VLAN_TAG_PRESENT) {
-		int priority = (skb->vlan_tci & VLAN_PRIO_MASK)
-				>> VLAN_PRIO_SHIFT;
-		if (priority == 0) {
-			priority = 1;
-		} else if (priority == 1) {
-			priority = 0;
-		}
-		used = homa_snprintf(buffer, buf_len, used,
-				", prio %d", priority);
-	}		
+		ntohs(common->sport), ntohs(common->dport), common->id,
+		skb->priority);
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
@@ -681,12 +671,6 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	struct common_header *common =
 			(struct common_header *) skb_transport_header(skb);
-	int priority = (skb->vlan_tci & VLAN_PRIO_MASK) >> VLAN_PRIO_SHIFT;
-	if (priority == 0) {
-		priority = 1;
-	} else if (priority == 1) {
-		priority = 0;
-	}
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *) common;
@@ -696,7 +680,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s P%d %d@%d",
 				h->retransmit ? " retrans" : "",
-				priority, seg_length, ntohl(h->seg.offset));
+				skb->priority, seg_length, ntohl(h->seg.offset));
 		bytes_left = skb->len - sizeof32(*h) - seg_length;
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
 			seg = (struct data_segment *) (skb->data + skb->len
@@ -1160,40 +1144,37 @@ char *homa_print_metrics(struct homa *homa)
 /**
  * homa_prios_changed() - This function is called whenever configuration
  * information related to priorities, such as @homa->unsched_cutoffs or
- * @homa->min_prio, is modified. It adjust the cutoffs if needed to maintain
- * consistency, and it updates other values that depend on this information.
+ * @homa->num_priorities, is modified. It adjusts the cutoffs if needed
+ * to maintain consistency, and it updates other values that depend on
+ * this information.
  * @homa: Contains the priority info to be checked and updated.
  */
 void homa_prios_changed(struct homa *homa)
 {
 	int i;
 	
+	if (homa->num_priorities > HOMA_MAX_PRIORITIES)
+		homa->num_priorities = HOMA_MAX_PRIORITIES;
+	
 	/* This guarantees that we will choose priority 0 if nothing else
 	 * in the cutoff array matches.
 	 */
 	homa->unsched_cutoffs[0] = INT_MAX;
 	
-	for (i = HOMA_NUM_PRIORITIES-1; ; i--) {
-		if (i > homa->max_prio) {
+	for (i = HOMA_MAX_PRIORITIES-1; ; i--) {
+		if (i >= homa->num_priorities) {
 			homa->unsched_cutoffs[i] = 0;
 			continue;
 		}
-		if (i == homa->min_prio) {
+		if (i == 0) {
 			homa->unsched_cutoffs[i] = INT_MAX;
-			homa->max_sched_prio = i-1;
+			homa->max_sched_prio = 0;
 			break;
 		}
 		if ((homa->unsched_cutoffs[i] >= HOMA_MAX_MESSAGE_SIZE)) {
 			homa->max_sched_prio = i-1;
 			break;
 		}
-	}
-	if (homa->max_sched_prio < homa->min_prio) {
-		/* Must have at least one priority level for scheduled
-		 * packets; will end up with min_prio shared between
-		 * scheduled and unscheduled packets.
-		 */
-		homa->max_sched_prio = homa->min_prio;
 	}
 	homa->cutoff_version++;
 }

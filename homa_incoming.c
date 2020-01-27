@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -424,7 +424,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			struct cutoffs_header h2;
 			int i;
 			
-			for (i = 0; i < HOMA_NUM_PRIORITIES; i++) {
+			for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
 				h2.unsched_cutoffs[i] =
 						htonl(homa->unsched_cutoffs[i]);
 			}
@@ -582,7 +582,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
-		for (i = 1; i <HOMA_NUM_PRIORITIES; i++)
+		for (i = 1; i <HOMA_MAX_PRIORITIES; i++)
 			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
 		peer->cutoff_version = h->cutoff_version;
 	}
@@ -692,12 +692,11 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		candidate->msgin.incoming = new_grant;
 		h.offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = (homa->max_sched_prio - homa->min_prio + 1)
-				- homa->num_grantable;
+		extra_levels = homa->max_sched_prio + 1 - homa->num_grantable;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
-		else if (priority < homa->min_prio)
-			priority = homa->min_prio;
+		else if (priority < 0)
+			priority = 0;
 		h.priority = priority;
 		if (!homa_xmit_control(GRANT, &h, sizeof(h), candidate)) {
 			/* Don't do anything if the grant couldn't be sent; let

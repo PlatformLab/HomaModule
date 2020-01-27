@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -46,7 +46,7 @@ TEST_F(homa_peertab, homa_peer_find__basics)
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
-	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_NUM_PRIORITIES-2]);
+	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
 	
 	peer2 = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
@@ -121,7 +121,7 @@ TEST_F(homa_peertab, homa_unsched_priority)
 	struct homa_peer peer;
 	homa_peer_set_cutoffs(&peer, INT_MAX, 0, 0, INT_MAX, 200, 100, 0, 0);
 	
-	EXPECT_EQ(5, homa_unsched_priority(&peer, 10));
-	EXPECT_EQ(4, homa_unsched_priority(&peer, 200));
-	EXPECT_EQ(3, homa_unsched_priority(&peer, 201));
+	EXPECT_EQ(5, homa_unsched_priority(&self->homa, &peer, 10));
+	EXPECT_EQ(4, homa_unsched_priority(&self->homa, &peer, 200));
+	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
 }

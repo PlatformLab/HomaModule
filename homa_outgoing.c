@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -21,45 +21,21 @@
 
 /**
  * set_priority() - Arrange for a packet to have a VLAN header that
- * specifies a priority for the packet.
+ * specifies a priority for the packet. Note: vconfig must be used
+ * to map these priorities to VLAN priority levels.
  * @skb:        The packet was priority should be set.
+ * @hsk:        Socket on which the packet will be sent.
  * @priority:   Priority level for the packet, in the range 0 (for lowest
  *              priority) to 7 ( for highest priority).
  */
-inline static void set_priority(struct sk_buff *skb, int priority)
+inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
+		int priority)
 {
-	/* The priority values stored in the VLAN header are weird, in that
-	 * the value 0 is not the lowest priority; this table maps from
-	 * "sensible" values as provided by the @priority argument to the
-	 * corresponding value for the VLAN header. See the IEEE P802.1
-	 * standard for details.
+	/* As of 1/2020 Linux overwrites skb->priority with the socket's
+	 * priority, so we write the priority to the socket as well.
 	 */
-	static int tci[] = {
-		(1 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(0 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(2 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(3 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(4 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(5 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(6 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT,
-		(7 << VLAN_PRIO_SHIFT) | VLAN_TAG_PRESENT
-	};
-#ifndef __UNIT_TEST__
-	return;
-#endif
-#if 0
-	static int count = 0;
-	static int prio = 4;
-	count++;
-	if ((count & 7) == 0) {
-		/* Change priority levels every eighth packet. */
-		prio ^= 1;
-		tt_record1("Changed priority to %d", prio);
-	}
-	priority = prio;
-#endif
-	skb->vlan_proto = htons(0x8100);
-	skb->vlan_tci = tci[priority];
+	 skb->priority = hsk->inet.sk.sk_priority =
+			priority + hsk->homa->base_priority;
 }
 
 /**
@@ -85,7 +61,7 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 	 * homa_message_out_init must sometimes be called with the lock
 	 * held.
 	 */
-	int bytes_left, incoming;
+	int bytes_left, unsched;
 	struct sk_buff *skb;
 	struct sk_buff *first = NULL;
 	int err, mtu, max_pkt_data, gso_size, max_gso_data;
@@ -99,7 +75,7 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 	mtu = dst_mtu(peer->dst);
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
 	if (len <= max_pkt_data) {
-		incoming = max_gso_data = len;
+		unsched = max_gso_data = len;
 		gso_size = mtu;
 	} else {
 		int bufs_per_gso;
@@ -120,10 +96,10 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 		gso_size = bufs_per_gso * mtu;
 		
 		/* Round unscheduled bytes *up* to an even number of gsos. */
-		incoming = homa->rtt_bytes + max_gso_data - 1;
-		incoming -= incoming % max_gso_data;
-		if (incoming > len)
-			incoming = len;
+		unsched = homa->rtt_bytes + max_gso_data - 1;
+		unsched -= unsched % max_gso_data;
+		if (unsched > len)
+			unsched = len;
 	}
 	
 	/* Copy message data from user space and form sk_buffs. Each
@@ -182,8 +158,8 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 			(skb_shinfo(skb)->gso_segs)++;
 			available -= seg_size;
 		} while ((available > 0) && (bytes_left > 0));
-		h->incoming = htonl(((len - bytes_left) > incoming) ?
-				(len - bytes_left) : incoming);
+		h->incoming = htonl(((len - bytes_left) > unsched) ?
+				(len - bytes_left) : unsched);
 		
 		/* Make sure that the last segment won't result in a
 		 * packet that's too small.
@@ -324,18 +300,6 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
 }
 
 /**
- * homa_set_priority() - Arrange for a packet to have a VLAN header that
- * specifies a priority for the packet.
- * @skb:        The packet was priority should be set.
- * @priority:   Priority level for the packet, in the range 0 (for lowest
- *              priority) to 7 ( for highest priority).
- */
-void homa_set_priority(struct sk_buff *skb, int priority)
-{
-	set_priority(skb, priority);
-}
-
-/**
  * homa_xmit_control() - Send a control packet to the other end of an RPC.
  * @type:      Packet type, such as DATA.
  * @contents:  Address of buffer containing the contents of the packet.
@@ -398,7 +362,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	extra_bytes = HOMA_MAX_HEADER - length;
 	if (extra_bytes > 0)
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
-	set_priority(skb, hsk->homa->max_prio);
+	set_priority(skb, hsk, hsk->homa->num_priorities-1);
 	dst_hold(peer->dst);
 	skb_dst_set(skb, peer->dst);
 	skb_get(skb);
@@ -470,7 +434,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
 		}
 		
 		if (offset < rpc->msgout.unscheduled) {
-			priority = homa_unsched_priority(rpc->peer,
+			priority = homa_unsched_priority(homa, rpc->peer,
 					rpc->msgout.length);
 		} else {
 			priority = rpc->msgout.sched_priority;
@@ -496,7 +460,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	struct data_header *h = (struct data_header *)
 			skb_transport_header(skb);
 
-	set_priority(skb, priority);
+	set_priority(skb, rpc->hsk, priority);
 
 	/* Update cutoff_version in case it has changed since the
 	 * message was initially created.

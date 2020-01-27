@@ -33,7 +33,6 @@ Notes for Homa implementation in Linux:
   * More work related to GSO/GRO:
     * Add new kernel call to combine send message & wait reply?
   * Don't grant to more than one message from a given sender at a time.
-  * Figure out socket locking disciplines.
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.
@@ -57,8 +56,6 @@ Notes for Homa implementation in Linux:
     from user space?
   * When a struct homa is destroyed, all of its sockets end up in an unsafe
     state in terms of their socktab links.
-  * Is current locking safe if a socket gets deleted while a packet is
-    being received?
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Under some conditions, peer information will need to be invalidated.
@@ -72,8 +69,6 @@ Notes for Homa implementation in Linux:
     do with skbuffs (e.g., update sk_wmem_alloc?)
   * Add support for cgroups (e.g. to manage memory allocation)
   * Eliminate all uses of int: use s32 instead.
-  * Can GRANTs be batched? Right now, if a string of packets is received
-    back-to-back for a message, a separate grant gets sent for each packet.
 
 * Questions for Linux experts:
   * If an interrupt arrives after a thread has been woken up to receive an
@@ -420,5 +415,9 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_pkt_recv
 
-Got the "cperf slowdown" test working with TCP
-* Added log mechanism to cperf, improved log messages.
+I'm finally getting to the point where I'm ready to test the Linux kernel implementation of the Homa transport protocol, and for this I need to enable priority queues in the switch. I had been assuming that I would use the new user-controllable switches for this, but I just read the fine print today and realized that these switches only operate at 10 Gbps, which isn't interesting for Homa.
+
+So, I'm writing to see if there's some way to enable the priority queues for the xl170 hosts in an experiment (preferably without having to bother you every time I start a new experiment). The easiest solution to this problem is just to enable the priority queues by default for all host downlinks in all of the switches. This seems like a benign change: enabling the priority queues for one host won't impact any other hosts, and for people that aren't using priorities, enabling the queues shouldn't change anything. What do you think?
+
+-John-
+

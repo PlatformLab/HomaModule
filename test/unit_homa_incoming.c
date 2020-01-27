@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -79,6 +79,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_addr.sin_addr.s_addr = self->server_ip;
 	self->server_addr.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
+	self->homa.num_priorities = 1;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
@@ -136,7 +137,7 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 0));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 1400@0; DATA P1 1400@1400; DATA P1 800@4200",
+	EXPECT_STREQ("DATA P0 1400@0; DATA P0 1400@1400; DATA P0 800@4200",
 			unit_log_get());
 	EXPECT_EQ(6400, self->message.bytes_remaining);
 	
@@ -145,8 +146,8 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2800));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 1400@0; DATA P1 1400@1400; DATA P1 1400@2800; "
-			"DATA P1 800@4200", unit_log_get());
+	EXPECT_STREQ("DATA P0 1400@0; DATA P0 1400@1400; DATA P0 1400@2800; "
+			"DATA P0 800@4200", unit_log_get());
 }
 TEST_F(homa_incoming, homa_add_packet__varying_sizes)
 {
@@ -160,7 +161,7 @@ TEST_F(homa_incoming, homa_add_packet__varying_sizes)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 6000, 4000));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 4000@0; DATA P1 6000@4000",
+	EXPECT_STREQ("DATA P0 4000@0; DATA P0 6000@4000",
 			unit_log_get());
 	EXPECT_EQ(0, self->message.bytes_remaining);
 }
@@ -173,7 +174,7 @@ TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 1400@1400", unit_log_get());
+	EXPECT_STREQ("DATA P0 1400@1400", unit_log_get());
 	EXPECT_EQ(1, self->message.num_skbs);
 }
 TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
@@ -185,7 +186,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2000));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 1400@1400; DATA P1 1400@2000", unit_log_get());
+	EXPECT_STREQ("DATA P0 1400@1400; DATA P0 1400@2000", unit_log_get());
 	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 	
@@ -194,7 +195,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1800));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P1 1400@1400; DATA P1 1400@2000", unit_log_get());
+	EXPECT_STREQ("DATA P0 1400@1400; DATA P0 1400@2000", unit_log_get());
 	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 }
@@ -625,7 +626,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_EQ(12600, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA P3 1400@11200", unit_log_get());
+	EXPECT_STREQ("xmit DATA P4 1400@11200", unit_log_get());
 	
 	/* Don't let grant offset go backwards. */
 	h.offset = htonl(10000);
@@ -691,10 +692,11 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_client)
 			.length = 0,
 			.priority = 3};
 	mock_xmit_log_verbose = 1;
+	self->homa.num_priorities = 8;
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_STREQ("xmit RESTART from 0.0.0.0:99, dport 40000, id 99999, "
-			"prio 7", unit_log_get());
+			"prio 8", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_server)
 {
@@ -780,7 +782,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 	
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("xmit DATA retrans P3 1400@0", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans P4 1400@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 {
@@ -799,8 +801,8 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 	
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("xmit DATA retrans P4 1400@0; "
-			"xmit DATA retrans P4 1400@1400", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans P5 1400@0; "
+			"xmit DATA retrans P5 1400@1400", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_restart_pkt__basics)
@@ -818,7 +820,7 @@ TEST_F(homa_incoming, homa_restart_pkt__basics)
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0), 
 			&self->hsk);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"xmit DATA P6 1400@0; xmit DATA P6 600@1400",
+			"xmit DATA P1 1400@0; xmit DATA P1 600@1400",
 			unit_log_get());
 	EXPECT_EQ(-1, crpc->msgin.total_length);
 }
@@ -1070,11 +1072,11 @@ TEST_F(homa_incoming, homa_manage_grants__choose_priority_level)
 	homa_rpc_unlock(srpc);
 	
 	/* Share lowest priority level. */
-	self->homa.min_prio = 2;
+	self->homa.max_sched_prio = 1;
 	srpc->msgin.bytes_remaining -= 1400;
 	unit_log_clear();
 	homa_manage_grants(&self->homa, srpc);
-	EXPECT_STREQ("xmit GRANT 12800@2", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 12800@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_manage_grants__many_messages_of_same_size)
 {

@@ -1,5 +1,4 @@
-/* Copyright (c) 2019, Stanford University
- *
+/* Copyright (c) 2019-2020
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
@@ -1363,7 +1362,7 @@ tcp_client::tcp_client(int id)
 		if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&addr),
 				&length)) {
 			log(NORMAL, "FATAL: getsockname failed for TCP client: "
-					"%s", strerror(errno));
+					"%s\n", strerror(errno));
 			exit(1);
 		}
 		messages.emplace_back(fd, ntohs(addr.sin_port), server_addrs[i]);

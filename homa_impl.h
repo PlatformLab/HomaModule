@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -135,11 +135,11 @@ enum homa_packet_type {
 #define ETHERNET_MAX_PAYLOAD 1500
 
 /**
- * define HOMA_NUM_PRIORITIES - The total number of priority levels available
- * for Homa (the actual number can be restricted to less than this at runtime).
- * Changing this value is a big deal: it will affect packet formats.
+ * define HOMA_MAX_PRIORITIES - The maximum number of priority levels that
+ * Homa can use (the actual number can be restricted to less than this at
+ * runtime). Changing this value will affect packet formats.
  */
-#define HOMA_NUM_PRIORITIES 8
+#define HOMA_MAX_PRIORITIES 8
 
 #define sizeof32(type) ((int) (sizeof(type)))
 
@@ -382,7 +382,7 @@ struct cutoffs_header {
 	 * sent to the sender of this packet. See documentation for
 	 * @homa.unsched_cutoffs for the meanings of these values.
 	 */
-	__be32 unsched_cutoffs[HOMA_NUM_PRIORITIES];
+	__be32 unsched_cutoffs[HOMA_MAX_PRIORITIES];
 	
 	/**
 	 * @cutoff_version: unique identifier associated with @unsched_cutoffs.
@@ -1011,7 +1011,7 @@ struct homa_peer {
 	 * packet from that host. See documentation for @homa.unsched_cutoffs
 	 * for the meanings of these values.
 	 */
-	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
+	int unsched_cutoffs[HOMA_MAX_PRIORITIES];
 	
 	/**
 	 * @cutoff_version: value of cutoff_version in the most recent
@@ -1086,21 +1086,25 @@ struct homa {
 	int link_mbps;
 	
 	/**
-	 * @max_prio: The highest priority level available for Homa's use.
-	 * Set externally via sysctl.
+	 * @num_priorities: The total number of priority levels available for
+	 * Homa's use. Internally, Homa will use priorities from 0 to
+	 * num_priorities-1, inclusive. Set externally via sysctl.
 	 */
-	int max_prio;
+	int num_priorities;
 	
 	/**
-	 * @min_prio: The lowest priority level available for Homa's use.
+	 * @base_priority: when specifying priorities in outbound packets,
+	 * Homa will add this value to each internally computed priority;
+	 * these values are then mapped to VLAN QOS levels by Linux (see
+	 * vconfig(1)).
 	 * Set externally via sysctl.
 	 */
-	int min_prio;
+	int base_priority;
 	
 	/**
 	 * @max_sched_prio: The highest priority level currently available for
-	 * scheduled packets. Must be no less than min_prio. Levels above this
-	 * are reserved for unscheduled packets.  Set externally via sysctl.
+	 * scheduled packets. Levels above this are reserved for unscheduled
+	 * packets.  Set externally via sysctl.
 	 */
 	int max_sched_prio;
 	
@@ -1114,7 +1118,7 @@ struct homa {
 	 * HOMA_MAX_MESSAGE_SIZE or greater (entry 0 is usually INT_MAX).
 	 *Set externally via sysctl.
 	 */
-	int unsched_cutoffs[HOMA_NUM_PRIORITIES];
+	int unsched_cutoffs[HOMA_MAX_PRIORITIES];
 	
 	/**
 	 * @cutoff_version: increments every time unsched_cutoffs is
@@ -1840,7 +1844,6 @@ extern int      homa_rpc_reap(struct homa_sock *hsk);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);
-extern void     homa_set_priority(struct sk_buff *skb, int priority);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
@@ -1868,7 +1871,8 @@ extern char    *homa_symbol_for_type(uint8_t type);
 extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
 extern void     homa_unhash(struct sock *sk);
-extern int      homa_unsched_priority(struct homa_peer *peer, int length);
+extern int      homa_unsched_priority(struct homa *homa,
+			struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern void     homa_validate_grantable_list(struct homa *homa, char *message);
