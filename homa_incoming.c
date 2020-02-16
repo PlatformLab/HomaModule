@@ -394,9 +394,9 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 * has begun; destroy the new RPC.
 			 */
 			homa_message_in_destroy(&rpc->msgin);
-			kfree(rpc);
 			homa_sock_unlock(rpc->hsk);
 			homa_rpc_unlock(rpc);
+			kfree(rpc);
 			return 1;
 		}
 			
