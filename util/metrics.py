@@ -100,33 +100,33 @@ for line in f:
                 rate_info = "(%5.1f  /s) " % (rate)
             rate_info = rate_info.ljust(13)
         if (symbol == "rdtsc_cycles") and (time_delta != 0):
-            print("%-24s           %5.2f %sCPU clock rate (GHz)" % (
+            print("%-28s           %5.2f %sCPU clock rate (GHz)" % (
                   "clock_rate", float(prev["cpu_khz"])/1e06, pad))
             secs = "(%.1f s)" % (delta/(1000.0*prev["cpu_khz"]))
             secs = secs.ljust(12)
-            print("%-24s %15d %s %s" % (symbol, count-old, secs, doc))
+            print("%-28s %15d %s %s" % (symbol, count-old, secs, doc))
         elif symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
-            print("%-24s %15d %s %s" % (symbol, count-old, percent, doc))
+            print("%-28s %15d %s %s" % (symbol, count-old, percent, doc))
         else:
-            print("%-24s %15d %s%s" % (symbol, count-old, rate_info, doc))
+            print("%-28s %15d %s%s" % (symbol, count-old, rate_info, doc))
             if symbol.startswith("packets_rcvd_"):
                 total_packets += count-old
             if symbol == "pkt_recv_calls":
                 gro_packets = count-old
         if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
-            print("%-24s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
+            print("%-28s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
                   "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if (prefix + "_misses") in deltas:
                 ns = (delta/deltas[prefix + "_misses"])/(prev["cpu_khz"]
                         * 1e-06)
-                print("%-24s          %6.1f %sAvg. wait time per %s miss (ns)" % (
+                print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
 if gro_packets != 0:
-    print("%-24s          %6.2f %sHoma packets per GRO 'packet'" % (
+    print("%-28s          %6.2f %sHoma packets per GRO 'packet'" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
 
 f.close()

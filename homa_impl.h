@@ -70,10 +70,13 @@ extern void mock_rcu_read_unlock(void);
 /* Forward declarations. */
 struct homa_sock;
 struct homa_rpc;
+struct homa;
 
 /* Declarations used in this file, so they can't be made at the end. */
+extern void     homa_grantable_lock_slow(struct homa *homa);
 extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern void     homa_sock_lock_slow(struct homa_sock *hsk);
+extern void     homa_throttle_lock_slow(struct homa *homa);
 
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
@@ -1494,63 +1497,87 @@ struct homa_metrics {
 	 * because it was too short to hold all the required information.
 	 */
 	__u64 short_packets;
-	
+
 	/**
 	 * @client_rpc_timeouts: total number of times an RPC was aborted on
 	 * the client side because of a timeout.
 	 */
 	
 	__u64 client_rpc_timeouts;
-	
+
 	/**
 	 * @server_rpc_timeouts: total number of times an RPC was aborted on
 	 * the server side because of a timeout.
 	 */
 	
 	__u64 server_rpc_timeouts;
-	
+
 	/**
 	 * @client_lock_misses: total number of times that Homa had to wait
 	 * to acquire a client bucket lock.
 	 */
 	__u64 client_lock_misses;
-	
+
 	/**
 	 * @client_lock_miss_cycles: total time spent waiting for client
 	 * bucket lock misses, measured by get_cycles().
 	 */
 	__u64 client_lock_miss_cycles;
-	
+
 	/**
 	 * @server_lock_misses: total number of times that Homa had to wait
 	 * to acquire a server bucket lock.
 	 */
 	__u64 server_lock_misses;
-	
+
 	/**
 	 * @server_lock_miss_cycles: total time spent waiting for server
 	 * bucket lock misses, measured by get_cycles().
 	 */
 	__u64 server_lock_miss_cycles;
-	
+
 	/**
 	 * @socket_lock_miss_cycles: total time spent waiting for socket
 	 * lock misses, measured by get_cycles().
 	 */
 	__u64 socket_lock_miss_cycles;
-	
+
 	/**
 	 * @socket_lock_misses: total number of times that Homa had to wait
 	 * to acquire a socket lock.
 	 */
 	__u64 socket_lock_misses;
-	
+
+	/**
+	 * @throttle_lock_miss_cycles: total time spent waiting for throttle
+	 * lock misses, measured by get_cycles().
+	 */
+	__u64 throttle_lock_miss_cycles;
+
+	/**
+	 * @throttle_lock_misses: total number of times that Homa had to wait
+	 * to acquire the throttle lock.
+	 */
+	__u64 throttle_lock_misses;
+
+	/**
+	 * @grantable_lock_miss_cycles: total time spent waiting for grantable
+	 * lock misses, measured by get_cycles().
+	 */
+	__u64 grantable_lock_miss_cycles;
+
+	/**
+	 * @grantable_lock_misses: total number of times that Homa had to wait
+	 * to acquire the grantable lock.
+	 */
+	__u64 grantable_lock_misses;
+
 	/**
 	 * @disabled_reaps: total number of times that the reaper couldn't
 	 * run at all because it was disabled.
 	 */
 	__u64 disabled_reaps;
-	
+
 	/**
 	 * @disabled_rpc_reaps: total number of times that the reaper skipped
 	 * an RPC because reaping was disabled for that particular RPC
@@ -1718,6 +1745,44 @@ static inline void homa_sock_lock(struct homa_sock *hsk, char *locker) {
  */
 static inline void homa_sock_unlock(struct homa_sock *hsk) {
 	spin_unlock_bh(&hsk->lock);
+}
+
+/**
+ * homa_grantable_lock() - Acquire the grantable lock. If the lock
+ * isn't immediately available, record stats on the waiting time.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+static inline void homa_grantable_lock(struct homa *homa) {
+	if (!spin_trylock_bh(&homa->grantable_lock)) {
+		homa_grantable_lock_slow(homa);
+	}
+}
+
+/**
+ * homa_grantable_unlock() - Release the grantable lock.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+static inline void homa_grantable_unlock(struct homa *homa) {
+	spin_unlock_bh(&homa->grantable_lock);
+}
+
+/**
+ * homa_throttle_lock() - Acquire the throttle lock. If the lock
+ * isn't immediately available, record stats on the waiting time.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+static inline void homa_throttle_lock(struct homa *homa) {
+	if (!spin_trylock_bh(&homa->throttle_lock)) {
+		homa_throttle_lock_slow(homa);
+	}
+}
+
+/**
+ * homa_throttle_unlock() - Release the throttle lock.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+static inline void homa_throttle_unlock(struct homa *homa) {
+	spin_unlock_bh(&homa->throttle_lock);
 }
 
 #define INC_METRIC(metric, count) \

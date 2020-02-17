@@ -618,7 +618,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_message_in *msgin = &rpc->msgin;
 	static int invocation = 0;
 	
-	spin_lock_bh(&homa->grantable_lock);
+	homa_grantable_lock(homa);
 	invocation++;
 	
 	if (!rpc)
@@ -705,7 +705,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		tt_record2("sent grant for id %llu, offset %d", candidate->id,
 				new_grant);
 	}
-	spin_unlock_bh(&homa->grantable_lock);
+	homa_grantable_unlock(homa);
 }
 
 /**
@@ -720,15 +720,15 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 	UNIT_LOG("; ", "homa_remove_from_grantable invoked");
 	if (rpc->msgin.possibly_in_grant_queue
 			&& (rpc->msgin.total_length >= 0)) {
-		spin_lock_bh(&homa->grantable_lock);
+		homa_grantable_lock(homa);
 		if (!list_empty(&rpc->grantable_links)) {
 			homa->num_grantable--;
 			list_del_init(&rpc->grantable_links);
-			spin_unlock_bh(&homa->grantable_lock);
+			homa_grantable_unlock(homa);
 			homa_manage_grants(homa, NULL);
 			return;
 		}
-		spin_unlock_bh(&homa->grantable_lock);
+		homa_grantable_unlock(homa);
 	}
 }
 

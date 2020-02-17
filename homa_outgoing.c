@@ -732,19 +732,19 @@ void homa_pacer_xmit(struct homa *homa)
 		 * throttle lock while locking the RPC is important because
 		 * it keeps the RPC from being deleted before it can be locked.
 		 */
-		spin_lock_bh(&homa->throttle_lock);
+		homa_throttle_lock(homa);
 		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
 				struct homa_rpc, throttled_links);
 		if (rpc == NULL) {
-			spin_unlock_bh(&homa->throttle_lock);
+			homa_throttle_unlock(homa);
 			break;
 		}
 		if (!(spin_trylock_bh(rpc->lock))) {
-			spin_unlock_bh(&homa->throttle_lock);
+			homa_throttle_unlock(homa);
 			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
 		}
-		spin_unlock_bh(&homa->throttle_lock);
+		homa_throttle_unlock(homa);
 		
 		if (backlog < 0) {
 			INC_METRIC(pacer_lost_cycles, -backlog);
@@ -762,7 +762,7 @@ void homa_pacer_xmit(struct homa *homa)
 			/* Nothing more to transmit from this message (right now),
 			 * so remove it from the throttled list.
 			 */
-			spin_lock_bh(&homa->throttle_lock);
+			homa_throttle_lock(homa);
 			if (!list_empty(&rpc->throttled_links)) {
 				list_del_rcu(&rpc->throttled_links);
 
@@ -776,7 +776,7 @@ void homa_pacer_xmit(struct homa *homa)
 				 */
 				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
 			}
-			spin_unlock_bh(&homa->throttle_lock);
+			homa_throttle_unlock(homa);
 			if (!rpc->msgout.next_packet && !rpc->is_client) {
 				homa_rpc_free(rpc);
 			}
@@ -816,7 +816,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	}
 	bytes_left = rpc->msgout.length - homa_data_offset(
 			rpc->msgout.next_packet);
-	spin_lock_bh(&homa->throttle_lock);
+	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
 			throttled_links) {
 		int bytes_left_cand;
@@ -837,7 +837,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 		}
 	list_add_tail_rcu(&rpc->throttled_links, &homa->throttled_rpcs);
 done:
-	spin_unlock_bh(&homa->throttle_lock);
+	homa_throttle_unlock(homa);
 	wake_up_process(homa->pacer_kthread);
 //	tt_record("woke up pacer thread");
 }
