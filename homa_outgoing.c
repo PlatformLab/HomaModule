@@ -662,7 +662,6 @@ int homa_pacer_main(void *transportInfo)
 		
 		start = get_cycles();
 		homa_pacer_xmit(homa);
-		INC_METRIC(pacer_cycles, get_cycles() - start);
 		
 		/* Sleep this thread if the throttled list is empty. Even
 		 * if the throttled list isn't empty, call the scheduler
