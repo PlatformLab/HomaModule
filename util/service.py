@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2019 Stanford University
+# Copyright (c) 2019-2020 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -41,6 +41,9 @@ else:
 # RPC structures have the following elements:
 # start -            Time of first record
 # id -               RPC id
+# bogus -            This RPC doesn't appear to be a "clean" server-side
+#                    RPC (e.g., it isn't complete, or might be a client-side
+#                    RPC).
 # rcv_lag -          Extra time before first call to homa_pkt_rcv
 # wakeup_lag -       Extra time before the server thread wakes up
 # recv_done -        The time when homa_ioc_recv finishes
@@ -49,9 +52,14 @@ else:
 # first_xmit_lag -   Extra time between receive_done and first_xmit
 # freed -            Time when RPC is freed (last packet transmitted)
 # grant_lag -        Time from start to xmit of first grant packet
+# offset0 -          True means the trace contains incoming offset 0
+# peer -             Host name + port for the peer; used to detect cases
+#                    where RPCs with same id but different peers interleave
 # xmit_lag -         Extra time between first_xmit and freed
+# xmit_grant_delay - Time from xmit of first response packet until receipt
+#                    of first grant
 # interrupt -        Time of most recent packet reception by interrupt handler
-# interrupt_gaps -   Total time in unexpectedly long gaps between pack
+# interrupt_gaps -   Total time in unexpectedly long gaps between packet
 #                    receptions by the interrupt handler
 # last_packet_lag -  Extra time before the interrupt handler received the
 #                    last packet
@@ -67,6 +75,10 @@ active = {}
 # at least one result has been sent)
 complete = []
 
+# RPCs that were discarded because they did not appear to be complete server
+# RPCs
+discards = ""
+
 min = 1000000
 min_id = ""
 max = 0
@@ -77,7 +89,10 @@ def average(dict, key):
     if len(dict) == 0:
         return 0.0
     for record in dict:
-        sum += record[key]
+            if not key in record:
+                # print("key %s not in record: %s" % (key, record))
+                continue
+            sum += record[key]
     return sum/len(dict)
 
 def largest(dict, key):
@@ -101,7 +116,8 @@ def smallest(dict, key):
 def collect(dict, key):
     result = []
     for record in dict:
-        result.append(record[key])
+        if key in record:
+            result.append(record[key])
     return result;
 
 for line in f:
@@ -111,17 +127,21 @@ for line in f:
     time = float(match.group(1))
     id = match.group(2)
 
-    if re.match('.*mlx received homa.* offset ', line):
-        if not id in active:
-            rpc = {}
-            rpc["start"] = time
-            rpc["id"] = id
-            rpc["packets"] = 1
-            active[id] = rpc
-        else:
-            rpc = active[id]
-            rpc["packets"] += 1
+    if not id in active:
+        rpc = {}
+        rpc["start"] = time
+        rpc["id"] = id
+        rpc["packets"] = 0
+        active[id] = rpc
+        rpc["bogus"] = not re.match('.*mlx received homa.* offset ', line)
+    else:
+        rpc = active[id]
 
+    match = re.match('.*mlx received homa.* offset ([0-9]+)', line)
+    if match:
+        rpc["packets"] += 1
+        if int(match.group(1)) == 0:
+            rpc["offset0"] = True
         if not "interrupt" in rpc:
             rpc["interrupt_gaps"] = -9.4
         else:
@@ -130,11 +150,54 @@ for line in f:
                 rpc["interrupt_gaps"] += lag
         rpc["interrupt"] = time
 
-    if not id in active:
+    if re.match('.*Freeing rpc', line):
+        if not "first_xmit" in rpc:
+            rpc["bogus"] = True
+        if rpc["bogus"]:
+            if discards != "":
+                discards += ", "
+            discards += "id %s @ %.3f (%d packets)" % (rpc["id"], rpc["start"],
+                    rpc["packets"])
+        else:
+            total = time - rpc["start"]
+            rpc["total"] = total
+            lag = time - rpc["first_xmit"] - 26.0
+            if lag < 0:
+                lag = 0.0
+            rpc["xmit_lag"] = lag
+            # print("xmit_lag for id %s: %.1f" % (rpc["id"], lag))
+            complete.append(rpc)
+        del(active[id])
         continue
-    rpc = active[id]
 
-    if re.match('.*homa_pkt_recv: first.*, type 20', line):
+    if rpc["bogus"]:
+        continue
+
+    # Detect interleaved RPCs with same id but different peers.
+    match = re.match('.*mlx received homa packet from (.*) id', line)
+    if match:
+        peer = match.group(1)
+        if "peer" in rpc:
+            if peer != rpc["peer"]:
+                print("Interleaved RPCs with same id %s, peers %s and "
+                        "%s; ignoring" % (id, peer, rpc["peer"]))
+                rpc["bogus"] = True
+                continue
+        else:
+            rpc["peer"] = peer
+    match = re.match('.*mlx_xmit starting, .* dest (.*),', line)
+    if match:
+        peer = match.group(1)
+        if "peer" in rpc:
+            if peer != rpc["peer"]:
+                print("Interleaved RPCs with same id %s, peers %s and "
+                        "%s; ignoring" % (id, peer, rpc["peer"]))
+                rpc["bogus"] = True
+                continue
+        else:
+            rpc["peer"] = peer
+
+    if re.match('.*incoming data packet', line):
         if not "rcv_lag" in rpc:
             lag = time - rpc["start"] - 4.5
             # print("receive lag for id %s: %.1f" % (id, lag))
@@ -147,6 +210,9 @@ for line in f:
             rpc["grant_lag"] = time - rpc["start"]
 
     if re.match('.*message woke up,', line):
+        if not "offset0" in rpc:
+            rpc["bogus"] = True
+            continue
         lag = time - rpc["start"] - 35.2
         # print("wakeup lag for id %s: %.1f" % (id, lag))
         if lag < 0:
@@ -165,6 +231,9 @@ for line in f:
 
     if re.match('.*mlx_xmit starting.* offset ', line) \
             and not "first_xmit" in rpc:
+        if not "offset0" in rpc:
+            rpc["bogus"] = True
+            continue
         if not "recv_done" in rpc:
             print("No recv_done for id %s" % (id))
             continue
@@ -179,40 +248,21 @@ for line in f:
             lag = 0
         rpc["last_packet_lag"] = lag
 
-    if re.match('.*Freeing rpc', line):
-        total = time - rpc["start"]
-        rpc["total"] = total
+    if re.match('.*processing grant for ', line) \
+            and not "xmit_grant_delay" in rpc:
         if not "first_xmit" in rpc:
-            print("No first_xmit for id %s" % (id))
+            print("Missing first_xmit for id %s; ignoring" % (id))
+            rpc["bogus"] = True
             continue
-        lag = time - rpc["first_xmit"] - 26.0
+        lag = time - rpc["first_xmit"]
         if lag < 0:
             lag = 0.0
-        rpc["xmit_lag"] = lag
-        print("xmit_lag for id %s: %.1f" % (rpc["id"], lag))
-
-        complete.append(rpc)
-        del(active[id])
+        rpc["xmit_grant_delay"] = lag
+        print("xmit_grant_delay for id %s: %.1f" % (id, lag))
 
 if len(complete) == 0:
     print("No complete RPCs were found; have trace records changed format?")
     exit(1)
-
-# Discard data for any RPCs that haven't received the right number of packets.
-counts = collect(complete, "packets")
-expected_count = counts[len(counts)//2]
-discards = ""
-i = 0
-while i < len(complete):
-    rpc = complete[i]
-    if rpc["packets"] != expected_count:
-        if discards != "":
-            discards += ", "
-        discards += "id %s @ %.3f (%d packets)" % (rpc["id"], rpc["start"],
-                rpc["packets"])
-        del(complete[i])
-    else:
-        i += 1
 
 # Print info about each completed RPC, plus compute min/max.
 min = 1000000
@@ -221,7 +271,7 @@ max = 0
 max_id = ""
 for rpc in complete:
     total = rpc["total"]
-    print("%s %.2f" % (rpc["id"], total))
+    # print("%s %.2f" % (rpc["id"], total))
     if total < min:
         min = total
         min_id = rpc["id"]
@@ -231,7 +281,7 @@ for rpc in complete:
         max = total
         max_id = rpc["id"]
 
-if discards != "":
+if 0 and discards != "":
     print("Discarded RPCs: %s" % (discards))
 
 average_lag = average(complete, "total") - min
@@ -244,6 +294,7 @@ average_first_xmit_lag = average(complete, "first_xmit_lag")
 average_interrupt_gaps = average(complete, "interrupt_gaps")
 average_last_packet_lag = average(complete, "last_packet_lag")
 average_xmit_lag = average(complete, "xmit_lag")
+average_xmit_grant_delay = average(complete, "xmit_grant_delay")
 
 times = collect(complete, "total")
 times.sort()
@@ -266,11 +317,26 @@ print("xmit lag:                %5.1f us (%4.1f%%)" % (average_xmit_lag,
         100.0* average_xmit_lag/average_lag))
 print("Average total lag:       %5.1f us" % (average_lag))
 
-
-times = collect(complete, "grant_lag")
-times.sort()
 min = smallest(complete, "grant_lag")
 max = largest(complete, "grant_lag")
-print("Grant delay: min %.1f us (%s), P50 %.1f us, P90 %.1fus, max %.1f us (%s)" % (
-        min["grant_lag"], min["id"], times[len(times)//2], times[9*len(times)//10],
-        max["grant_lag"], max["id"]))
+times = collect(complete, "grant_lag")
+if len(times) > 0:
+    times.sort()
+    print("Grant delay: min %.1f us (%s), P50 %.1f us, P90 %.1fus, "
+            "max %.1f us (%s)" % (min["grant_lag"], min["id"],
+            times[len(times)//2], times[9*len(times)//10],
+            max["grant_lag"], max["id"]))
+else:
+    print("No grants sent, so can't show grant delay");
+
+times = collect(complete, "xmit_grant_delay")
+if len(times) > 0:
+    times.sort()
+    min = smallest(complete, "xmit_grant_delay")
+    max = largest(complete, "xmit_grant_delay")
+    print("Average xmit grant delay: %.1f us" % (average_xmit_grant_delay))
+    print("Xmit grant delay: min %.1f us (%s), P50 %.1f us, P90 %.1fus, max %.1f us (%s)" % (
+            min["xmit_grant_delay"], min["id"], times[len(times)//2],
+            times[9*len(times)//10], max["xmit_grant_delay"], max["id"]))
+else:
+    print("No grants received, so can't show xmit grant delay");
