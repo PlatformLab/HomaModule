@@ -417,22 +417,32 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 6000);
+	EXPECT_NE(NULL, crpc1);
+	homa_rpc_unlock(crpc1);
+	unit_log_clear();
+	
+	crpc1->msgout.granted = 1000;
+	homa_xmit_data(crpc1, false);
+	EXPECT_STREQ("xmit DATA P7 1400@0", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+}
 TEST_F(homa_outgoing, homa_xmit_data__throttle)
 {
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (void *) 1000, 6000);
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, (void *) 1000, 5000);
 	EXPECT_NE(NULL, crpc1);
 	homa_rpc_unlock(crpc1);
-	EXPECT_NE(NULL, crpc2);
-	homa_rpc_unlock(crpc2);
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	
-	/* The first RPC throttles because the NIC queueu is too full. */
 	homa_xmit_data(crpc1, false);
 	EXPECT_STREQ("xmit DATA P7 1400@0; "
 			"xmit DATA P7 1400@1400; "
@@ -440,18 +450,8 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
-	
-	/* The second RPC throttles because the throttle list isn't empty. */
-	unit_log_clear();
-	self->homa.max_nic_queue_cycles = 20000;
-	homa_xmit_data(crpc2, false);
-	EXPECT_STREQ("wake_up_process", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 1, next_offset 2800; request 2, next_offset 0",
-			unit_log_get());
 }
-TEST_F(homa_outgoing, homa_xmit_data__pacer)
+TEST_F(homa_outgoing, homa_xmit_data__force)
 {
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (void *) 1000, 6000);
@@ -471,13 +471,14 @@ TEST_F(homa_outgoing, homa_xmit_data__pacer)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
 	
-	/* Now the test RPC. */
+	/* Now force transmission. */
 	unit_log_clear();
 	homa_xmit_data(crpc2, true);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("xmit DATA P7 1400@0; wake_up_process", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
+	EXPECT_STREQ("request 1, next_offset 2800; "
+			"request 2, next_offset 1400", unit_log_get());
 }
 
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
@@ -724,24 +725,6 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 0", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_full)
-{
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, (void *) 1000, 10000);
-	EXPECT_NE(NULL, crpc1);
-	homa_rpc_unlock(crpc1);
-	homa_add_to_throttled(crpc1);
-	self->homa.max_nic_queue_cycles = 2000;
-	mock_cycles = 10000;
-	atomic64_set(&self->homa.link_idle_time, 12010);
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 1, next_offset 0", unit_log_get());
-}
 TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 {
 	self->homa.max_nic_queue_cycles = 2000;
@@ -750,6 +733,24 @@ TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 	homa_pacer_xmit(&self->homa);
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 10000);
+	EXPECT_NE(NULL, crpc1);
+	homa_rpc_unlock(crpc1);
+	homa_add_to_throttled(crpc1);
+	self->homa.max_nic_queue_cycles = 2001;
+	mock_cycles = 10000;
+	atomic64_set(&self->homa.link_idle_time, 12000);
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa);
+	EXPECT_STREQ("xmit DATA P7 1400@0", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request 1, next_offset 1400", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 {

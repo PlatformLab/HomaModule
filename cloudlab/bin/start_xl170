@@ -8,7 +8,7 @@ if [ $# -eq 1 ]; then
 else
     homa=~/homaModule/homa.ko
 fi
-vlan=vlan295
+vlan=vlan287
 
 # sudo ip link set ens1f1 mtu 1500
 # sudo ip link set $vlan mtu 1500
@@ -19,6 +19,7 @@ sudo sysctl /net/homa/max_nic_queue_ns=10000
 sudo sysctl /net/homa/rtt_bytes=70000
 sudo sysctl /net/homa/grant_increment=10000
 sudo sysctl /net/homa/max_gso_size=20000
+sudo sysctl /net/homa/num_priorities=1
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1

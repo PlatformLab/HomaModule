@@ -7,3 +7,4 @@ cloudlab
 *.pyc
 *.pdf
 *.tt
+*.log

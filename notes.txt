@@ -414,10 +414,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_pkt_recv
-
-I'm finally getting to the point where I'm ready to test the Linux kernel implementation of the Homa transport protocol, and for this I need to enable priority queues in the switch. I had been assuming that I would use the new user-controllable switches for this, but I just read the fine print today and realized that these switches only operate at 10 Gbps, which isn't interesting for Homa.
-
-So, I'm writing to see if there's some way to enable the priority queues for the xl170 hosts in an experiment (preferably without having to bother you every time I start a new experiment). The easiest solution to this problem is just to enable the priority queues by default for all host downlinks in all of the switches. This seems like a benign change: enabling the priority queues for one host won't impact any other hosts, and for people that aren't using priorities, enabling the queues shouldn't change anything. What do you think?
-
--John-
-

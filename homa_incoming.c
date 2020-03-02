@@ -446,6 +446,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
+	tt_record3("processing grant for id %llu, offset %d, priority %d",
+			h->common.id, ntohl(h->offset), h->priority);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
@@ -463,8 +465,6 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			homa_rpc_free(rpc);
 		}
 	}
-	tt_record3("processed grant for id %llu, offset %d, state %d",
-			h->common.id, ntohl(h->offset), rpc->state);
 	kfree_skb(skb);
 }
 
@@ -702,8 +702,8 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			/* Don't do anything if the grant couldn't be sent; let
 			 * other retry mechanisms handle this. */
 		}
-		tt_record2("sent grant for id %llu, offset %d", candidate->id,
-				new_grant);
+		tt_record3("sent grant for id %llu, offset %d, priority %d",
+				candidate->id, new_grant, priority);
 	}
 	homa_grantable_unlock(homa);
 }
@@ -1048,7 +1048,7 @@ done:
  * a waiting reader or queues the RPC.
  * @rpc:                RPC that now has a complete input message;
  *                      must be locked. The caller must also have
- *                      locked the socket this RPC.
+ *                      locked the socket for this RPC.
  */
 void homa_rpc_ready(struct homa_rpc *rpc)
 {

@@ -31,6 +31,10 @@
 inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 		int priority)
 {
+	struct common_header *h = (struct common_header *)
+			skb_transport_header(skb);
+	h->priority = priority;
+	
 	/* As of 1/2020 Linux overwrites skb->priority with the socket's
 	 * priority, so we write the priority to the socket as well.
 	 */
@@ -394,10 +398,11 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  * later by the pacer thread).
  * @rpc:       RPC to check for transmittable packets. Must be locked by
  *             caller.
- * @pacer:     True means we were invoked from the pacer, which changes the
- *             behavior a bit.
+ * @force:     True means send at least one packet, even if the NIC queue
+ *             is too long. False means that zero packets may be sent, if
+ *             the NIC queue is sufficiently long.
  */
-void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
+void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
 	while (rpc->msgout.next_packet) {
 		int priority;
@@ -417,18 +422,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
 			break;
 		
 		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
-			if (list_first_or_null_rcu(&homa->throttled_rpcs,
-					struct homa_rpc, throttled_links)
-					&& !pacer) {
-				/* Since there are other throttled messages,
-				 * add this one to the throttled list and
-				 * let the pacer handle it. */
+			if (!homa_check_nic_queue(homa, skb, force)) {
 				homa_add_to_throttled(rpc);
-				break;
-			}
-			if (!homa_check_nic_queue(homa, skb, false)) {
-				if (!pacer)
-					homa_add_to_throttled(rpc);
 				break;
 			}
 		}
@@ -443,6 +438,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool pacer)
 		
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
+		force = false;
 	}
 }
 
@@ -711,21 +707,41 @@ void homa_pacer_xmit(struct homa *homa)
 	if (atomic_cmpxchg(&homa->pacer_active, 0, 1) != 0)
 		return;
 	
-	/* Each iteration through the following loop makes one attempt
-	 * at sending packets. We limit the number of passes through this
-	 * loop in order to cap the time spend in one call to this function
-	 * (see note in homa_pacer_main about interfering with softirq
-	 * handlers).
+	/* Each iteration through the following loop sends one packet. We
+	 * limit the number of passes through this loop in order to cap the
+	 * time spent in one call to this function (see note in
+	 * homa_pacer_main about interfering with softirq handlers).
 	 */
 	for (i = 0; i < 5; i++) {
-		__s64 backlog = (__s64) (atomic64_read(&homa->link_idle_time)
-				- get_cycles());
-		if (backlog > homa->max_nic_queue_cycles)
-			break;
+		__u64 idle_time, now;
+		
+		/* If the NIC queue is too long, wait until it gets shorter. */
+		now = get_cycles();
+		idle_time = atomic64_read(&homa->link_idle_time);
+		if (now > idle_time) {
+			INC_METRIC(pacer_lost_cycles, now - idle_time);
+			tt_record2("homa_pacer_xmit lost %d cycles (lockout %d)",
+					now - idle_time, now - gap_start);
+		} else {
+			while ((now + homa->max_nic_queue_cycles) < idle_time) {
+				/* If we've xmitted at least one packet then
+				 * return (this helps with testing and also
+				 * allows homa_pacer_main to yield the core).
+				 */
+				if (i != 0)
+					goto done;
+				now = get_cycles();
+			}
+		}
+		/* Note: when we get here, it's possible that the NIC queue is
+		 * still too long because other threads have queued packets,
+		 * but we transmit anyway so we don't starve (see perf.text
+		 * for more info).
+		 */
 		
 		/* Lock the first throttled RPC. This may not be possible
 		 * because we have to hold throttle_lock while locking
-		 * the RPC, but then we can't wait for the RPC lock because
+		 * the RPC; that means we can't wait for the RPC lock because
 		 * of lock ordering constraints (see sync.txt). Thus, if
 		 * the RPC lock isn't available, do nothing. Holding the
 		 * throttle lock while locking the RPC is important because
@@ -745,11 +761,6 @@ void homa_pacer_xmit(struct homa *homa)
 		}
 		homa_throttle_unlock(homa);
 		
-		if (backlog < 0) {
-			INC_METRIC(pacer_lost_cycles, -backlog);
-			tt_record2("homa_pacer_xmit lost %d cycles (lockout %d)",
-					-backlog, get_cycles() - gap_start);
-		}
 		tt_record2("pacer calling homa_xmit_data for rpc id %llu, "
 				"port %d",
 				rpc->id, rpc->is_client ? rpc->hsk->client_port
@@ -782,6 +793,7 @@ void homa_pacer_xmit(struct homa *homa)
 		}
 		homa_rpc_unlock(rpc);
 	}
+    done:
 	atomic_set(&homa->pacer_active, 0);
 }
 
@@ -831,9 +843,9 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
-		goto done;
-	}
+			goto done;
 		}
+	}
 	list_add_tail_rcu(&rpc->throttled_links, &homa->throttled_rpcs);
 done:
 	homa_throttle_unlock(homa);

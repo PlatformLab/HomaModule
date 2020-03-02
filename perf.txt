@@ -1,5 +1,35 @@
 This file contains various notes and lessons learned concerning performance
-of the Homa Linux kernel module.
+of the Homa Linux kernel module.  The notes are in reverse chronological
+order: most recent notes first.
+
+* (Feb. 2019) The pacer can potentially be a severe performance bottleneck
+  (a single thread cannot keep the network utilized with packets that are
+  not huge). In a test with 2 clients bombarding a single server with
+  1000-byte packets, performance started off high but then suddenly dropped
+  by 10x. There were two contributing factors. First, once the pacer got
+  involved, all transmissions had to go through the pacer, and the pacer
+  became the bottleneck. Second, this resulted in growth of the throttle
+  queue (essentially all standing requests: > 300 entries in this experiment).
+  Since the queue is scanned from highest to lowest priority, every insertion
+  had to scan the entire queue, which took about 6 us. At this point the queue
+  lock becomes the bottleneck, resulting in 10x drop in performance.
+
+  I tried inserting RPCs from the other end of the throttle queue, but
+  this still left a 2x reduction in throughput because the pacer couldn't
+  keep up. In addition, it seems like there could potentially be situations
+  where inserting from the other end results in long searches. So, I backed
+  this out.
+
+  The solution was to allow threads other than the pacer to transmit packets
+  even if there are entries on the throttle queue, as long as the NIC queue
+  isn't long. This allows other threads besides the pacer to transmit
+  packets if the pacer can't keep up. In order to avoid pacer starvation,
+  the pacer uses a modified approach: if the NIC queue is too full for it to
+  transmit a packet immediately, it computes the time when it expects the
+  NIC queue to get below threshold, waits until that time arrives, and
+  then transmits; it doesn't check again to see if the NIC queue is
+  actually below threshold (which it may not be if other threads have
+  also been transmitting). This guarantees that the pacer will make progress.
 
 * The socket lock is a throughput bottleneck when a multi-threaded server
   is receiving large numbers of small requests. One problem was that the
@@ -20,11 +50,12 @@ of the Homa Linux kernel module.
 No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
 RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 
-* It's better to queue a waiting thread at the *front* of the list, rather
-  than the rear (if there is a pool of server threads but not enough load
-  to keep them all busy, it's better to reuse a few threads rather than
-  spreading work across all of them; this produces better cash locality).
-  This approach improves latency by 200-500ns at low loads.
+* It's better to queue a thead waiting for incoming mnessages at the *front*
+  of the list in homa_wait_for_message, rather than the rear. If there is a
+  pool of server threads but not enough load to keep them all busy, it's
+  better to reuse a few threads rather than spreading work across all of
+  them; this produces better cache locality). This approach improves latency
+  by 200-500ns at low loads.
 
 * Problem: large messages have no pipelining. For example, copying bytes
   from user space to output buffers is not overlapped with sending packets,

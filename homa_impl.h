@@ -196,7 +196,11 @@ struct common_header {
 	 * the checksum in a TCP header (TSO may modify this?).*/
 	__be16 checksum;
 	
-	__be16 unused4;
+	/**
+	 * @priority: the priority at which the packet was set; used
+	 * only for debugging.
+	 */
+	__u16 priority;
 	
 	/**
 	 * @id: Identifier for the RPC associated with this packet; must
@@ -1948,7 +1952,7 @@ extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
 			struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_xmit_data(struct homa_rpc *rpc, bool pacer);
+extern void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			int priority);
 
