@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020, Stanford University
+# Copyright (c) 2020 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -185,14 +185,16 @@ def get_short_cdf(data):
     """
     Given data collected by read_dump, extract out all RTTs for messages
     shorter than 1500 bytes that are also among the 10% of shortest
-    messages. Return a list with two elements (a list of x-coords and a
-    list of y-coords) that histogram the complementary cdf.
+    messages (if there are no messages shorter than 1500 bytes, then
+    extract data for the shortest message length available). Return a
+    list with two elements (a list of x-coords and a list of y-coords)
+    that histogram the complementary cdf.
     """
     short = []
     rtts = data["rtts"]
     messages_left = data["total_messages"]//10
     for length in sorted(rtts.keys()):
-        if length >= 1500:
+        if (length >= 1500) and (len(short) > 0):
             break
         short.extend(rtts[length])
         messages_left -= len(rtts[length])
