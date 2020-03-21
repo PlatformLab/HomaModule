@@ -117,6 +117,7 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 //		char buffer[100];
 //		printk(KERN_NOTICE "redundant Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
+		INC_METRIC(redundant_packets, 1);
 		kfree_skb(skb);
 		return;
 	}

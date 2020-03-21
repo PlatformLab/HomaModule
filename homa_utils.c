@@ -868,6 +868,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 		m->server_cant_create_rpcs += cm->server_cant_create_rpcs;
 		m->unknown_packet_types += cm->unknown_packet_types;
 		m->short_packets += cm->short_packets;
+		m->redundant_packets += cm->redundant_packets;
 		m->client_rpc_timeouts += cm->client_rpc_timeouts;
 		m->server_rpc_timeouts += cm->server_rpc_timeouts;
 		m->client_lock_misses += cm->client_lock_misses;
@@ -1081,6 +1082,10 @@ char *homa_print_metrics(struct homa *homa)
 			"short_packets             %15llu  "
 			"Packets discarded because too short\n",
 			m.short_packets);
+	homa_append_metric(homa,
+			"redundant_packets             %15llu  "
+			"Packets discarded because data already received\n",
+			m.redundant_packets);
 	homa_append_metric(homa,
 			"client_rpc_timeouts       %15llu  "
 			"RPCs aborted by client because of timeout\n",

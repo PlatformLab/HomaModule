@@ -1507,6 +1507,13 @@ struct homa_metrics {
 	 * because it was too short to hold all the required information.
 	 */
 	__u64 short_packets;
+	
+	/**
+	 * @redundant_packets: total number of times a packet was discarded
+	 * because all of its they had already been received (perhaps a
+	 * resent packet that turned out to be unnecessary?).
+	 */
+	__u64 redundant_packets;
 
 	/**
 	 * @client_rpc_timeouts: total number of times an RPC was aborted on
