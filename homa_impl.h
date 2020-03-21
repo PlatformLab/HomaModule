@@ -1358,17 +1358,17 @@ struct homa {
  * All counters are free-running: they never reset.
  */
 #define HOMA_NUM_SMALL_COUNTS 64
-#define HOMA_NUM_MEDIUM_COUNTS 64
+#define HOMA_NUM_MEDIUM_COUNTS 128
 struct homa_metrics {	
 	/**
-	 * @small_msg_counts: entry i holds the total number of bytes
+	 * @small_msg_bytes: entry i holds the total number of bytes
 	 * received in messages whose length is between 64*i and 64*i + 63,
 	 * inclusive.
 	 */
 	__u64 small_msg_bytes[HOMA_NUM_SMALL_COUNTS];
 	
 	/**
-	 * @medium_msg_counts: entry i holds the total number of bytes
+	 * @medium_msg_bytes: entry i holds the total number of bytes
 	 * received in messages whose length is between 1024*i and
 	 * 1024*i + 1023, inclusive. The first four entries are always 0
 	 * (small_msg_counts covers this range).
@@ -1377,7 +1377,13 @@ struct homa_metrics {
 	
 	/**
 	 * @large_msg_count: the total number of messages received whose
-	 * length is 0x100 or greater.
+	 * length is too large to appear in medium_msg_bytes.
+	 */
+	__u64 large_msg_count;
+	
+	/**
+	 * @large_msg_bytes: the total number of bytes received in
+	 * messages too large to be counted by medium_msg_bytes.
 	 */
 	__u64 large_msg_bytes;
 	

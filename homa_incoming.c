@@ -38,11 +38,12 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	msgin->priority = 0;
 	msgin->scheduled = length > incoming;
 	msgin->possibly_in_grant_queue = msgin->scheduled;
-	if (length <= 4096) {
+	if (length < HOMA_NUM_SMALL_COUNTS*64) {
 		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
-	} else if (length <= 0x10000) {
+	} else if (length < HOMA_NUM_MEDIUM_COUNTS*1024) {
 		INC_METRIC(medium_msg_bytes[(length-1) >> 10], length);
 	} else {
+		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
 }

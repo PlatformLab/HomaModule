@@ -844,6 +844,7 @@ void homa_compile_metrics(struct homa_metrics *m)
 			m->small_msg_bytes[j] += cm->small_msg_bytes[j];
 		for (j = 0; j < HOMA_NUM_MEDIUM_COUNTS; j++)
 			m->medium_msg_bytes[j] += cm->medium_msg_bytes[j];
+		m->large_msg_count += cm->large_msg_count;
 		m->large_msg_bytes += cm->large_msg_bytes;
 		for (j = DATA; j < BOGUS;  j++) {
 			m->packets_sent[j-DATA] += cm->packets_sent[j-DATA];
@@ -987,6 +988,10 @@ char *homa_print_metrics(struct homa *homa)
 			(i+1)*1024, m.medium_msg_bytes[i], lower, (i+1)*1024);
 		lower = (i+1)*1024 + 1;
 	}
+	homa_append_metric(homa,
+			"large_msg_count           %15llu  "
+			"# of incoming messages >= %d bytes\n",
+			m.large_msg_count, lower);
 	homa_append_metric(homa,
 			"large_msg_bytes           %15llu  "
 			"Bytes in incoming messages >= %d bytes\n",
