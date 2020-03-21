@@ -108,14 +108,14 @@ TEST_F(homa_incoming, homa_message_in_init)
 	EXPECT_EQ(127, msgin.incoming);
 	homa_message_in_init(&msgin, 128, 10000);
 	homa_message_in_init(&msgin, 130, 10000);
-	homa_message_in_init(&msgin, 0x1000, 10000);
+	homa_message_in_init(&msgin, 0xfff, 10000);
 	homa_message_in_init(&msgin, 0x3000, 10000);
 	homa_message_in_init(&msgin, 1000000, 10000);
 	EXPECT_EQ(10000, msgin.incoming);
 	homa_message_in_init(&msgin, 2000000, 10000);
 	EXPECT_EQ(255, unit_get_metrics()->small_msg_bytes[1]);
 	EXPECT_EQ(130, unit_get_metrics()->small_msg_bytes[2]);
-	EXPECT_EQ(0x1000, unit_get_metrics()->small_msg_bytes[63]);
+	EXPECT_EQ(0xfff, unit_get_metrics()->small_msg_bytes[63]);
 	EXPECT_EQ(0x3000, unit_get_metrics()->medium_msg_bytes[11]);
 	EXPECT_EQ(0, unit_get_metrics()->medium_msg_bytes[15]);
 	EXPECT_EQ(3000000, unit_get_metrics()->large_msg_bytes);
@@ -137,7 +137,7 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 0));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 1400@0; DATA P0 1400@1400; DATA P0 800@4200",
+	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 800@4200",
 			unit_log_get());
 	EXPECT_EQ(6400, self->message.bytes_remaining);
 	
@@ -146,8 +146,8 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2800));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 1400@0; DATA P0 1400@1400; DATA P0 1400@2800; "
-			"DATA P0 800@4200", unit_log_get());
+	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 1400@2800; "
+			"DATA 800@4200", unit_log_get());
 }
 TEST_F(homa_incoming, homa_add_packet__varying_sizes)
 {
@@ -161,7 +161,7 @@ TEST_F(homa_incoming, homa_add_packet__varying_sizes)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 6000, 4000));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 4000@0; DATA P0 6000@4000",
+	EXPECT_STREQ("DATA 4000@0; DATA 6000@4000",
 			unit_log_get());
 	EXPECT_EQ(0, self->message.bytes_remaining);
 }
@@ -174,7 +174,7 @@ TEST_F(homa_incoming, homa_add_packet__redundant_packet)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 1400@1400", unit_log_get());
+	EXPECT_STREQ("DATA 1400@1400", unit_log_get());
 	EXPECT_EQ(1, self->message.num_skbs);
 }
 TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
@@ -186,7 +186,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2000));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 1400@1400; DATA P0 1400@2000", unit_log_get());
+	EXPECT_STREQ("DATA 1400@1400; DATA 1400@2000", unit_log_get());
 	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 	
@@ -195,7 +195,7 @@ TEST_F(homa_incoming, homa_add_packet__overlapping_ranges)
 	homa_add_packet(&self->message, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1800));
 	unit_log_skb_list(&self->message.packets, 0);
-	EXPECT_STREQ("DATA P0 1400@1400; DATA P0 1400@2000", unit_log_get());
+	EXPECT_STREQ("DATA 1400@1400; DATA 1400@2000", unit_log_get());
 	EXPECT_EQ(2, self->message.num_skbs);
 	EXPECT_EQ(8000, self->message.bytes_remaining);
 }
@@ -626,7 +626,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_EQ(12600, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA P4 1400@11200", unit_log_get());
+	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
 	
 	/* Don't let grant offset go backwards. */
 	h.offset = htonl(10000);
@@ -695,8 +695,8 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_client)
 	self->homa.num_priorities = 8;
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("xmit RESTART from 0.0.0.0:99, dport 40000, id 99999, "
-			"prio 8", unit_log_get());
+	EXPECT_STREQ("xmit RESTART from 0.0.0.0:99, dport 40000, id 99999",
+			unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc_from_server)
 {
@@ -779,10 +779,12 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 	EXPECT_NE(NULL, crpc);
 	homa_xmit_data(crpc, false);
 	unit_log_clear();
+	mock_clear_xmit_prios();
 	
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("xmit DATA retrans P4 1400@0", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
+	EXPECT_STREQ("3", mock_xmit_prios);
 }
 TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 {
@@ -798,11 +800,13 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 	EXPECT_NE(NULL, srpc);
 	homa_xmit_data(srpc, false);
 	unit_log_clear();
+	mock_clear_xmit_prios();
 	
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("xmit DATA retrans P5 1400@0; "
-			"xmit DATA retrans P5 1400@1400", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans 1400@0; "
+			"xmit DATA retrans 1400@1400", unit_log_get());
+	EXPECT_STREQ("4 4", mock_xmit_prios);
 }
 
 TEST_F(homa_incoming, homa_restart_pkt__basics)
@@ -820,7 +824,7 @@ TEST_F(homa_incoming, homa_restart_pkt__basics)
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0), 
 			&self->hsk);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"xmit DATA P1 1400@0; xmit DATA P1 600@1400",
+			"xmit DATA 1400@0; xmit DATA 600@1400",
 			unit_log_get());
 	EXPECT_EQ(-1, crpc->msgin.total_length);
 }

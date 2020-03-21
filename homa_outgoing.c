@@ -20,13 +20,11 @@
 #include "homa_impl.h"
 
 /**
- * set_priority() - Arrange for a packet to have a VLAN header that
- * specifies a priority for the packet. Note: vconfig must be used
- * to map these priorities to VLAN priority levels.
+ * set_priority() - Arrange for an outgoing packet to have a particular
+ * priority level.
  * @skb:        The packet was priority should be set.
  * @hsk:        Socket on which the packet will be sent.
- * @priority:   Priority level for the packet, in the range 0 (for lowest
- *              priority) to 7 ( for highest priority).
+ * @priority:   Priority level for the packet.
  */
 inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 		int priority)
@@ -35,11 +33,14 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 			skb_transport_header(skb);
 	h->priority = priority;
 	
-	/* As of 1/2020 Linux overwrites skb->priority with the socket's
-	 * priority, so we write the priority to the socket as well.
+	/* Note: this code initially specified the priority in the VLAN
+	 * header, but as of 3/2020, this performed badly on the CloudLab
+	 * cluster being used for testing: 100 us of extra delay occurred
+	 * whenever a packet's VLAN priority differed from the previous
+	 * packet. So, now we use the DSCP field in the IP header instead.
 	 */
-	 skb->priority = hsk->inet.sk.sk_priority =
-			priority + hsk->homa->base_priority;
+	((struct inet_sock *) hsk)->tos =
+			(priority + hsk->homa->base_priority)<<3;
 }
 
 /**

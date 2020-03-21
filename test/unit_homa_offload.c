@@ -95,10 +95,10 @@ TEST_F(homa_offload, homa_gro_receive__append)
 	
 	unit_log_frag_list(self->gro_list->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
-			"prio 0, message_length 10000, offset 6000, "
+			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000, cutoff_version 0; "
 			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
-			"prio 0, message_length 10000, offset 6000, "
+			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000, cutoff_version 0",
 			unit_log_get());
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
@@ -131,13 +131,13 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	
 	unit_log_frag_list(self->gro_list->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
-			"prio 0, message_length 10000, offset 6000, "
+			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000, cutoff_version 0; "
 			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
-			"prio 0, message_length 10000, offset 6000, "
+			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000, cutoff_version 0; "
 			"DATA from 196.168.0.1:40002, dport 88, id 1001, "
-			"prio 0, message_length 10000, offset 6000, "
+			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000, cutoff_version 0",
 			unit_log_get());
 	same_flow = NAPI_GRO_CB(skb)->same_flow;

@@ -123,6 +123,10 @@ cycles_t mock_cycles = 0;
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
 
+/* List of priorities for all outbound packets. */
+char mock_xmit_prios[1000];
+int mock_xmit_prios_offset = 0;
+
 /* Maximum packet size allowed by "network" (see homa_message_out_init;
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
@@ -382,6 +386,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
+	const char *prefix = " ";
 	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
 		/* Latest data (as of 1/2019) suggests that ip_queue_xmit
 		 * frees packets after errors.
@@ -389,6 +394,12 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 		kfree_skb(skb);
 		return -ENETDOWN;
 	}
+	if (mock_xmit_prios_offset == 0)
+		prefix = "";
+	mock_xmit_prios_offset += snprintf(
+			mock_xmit_prios + mock_xmit_prios_offset,
+			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
+			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>3);
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
@@ -782,6 +793,16 @@ int mock_check_error(int *errorMask)
 }
 
 /**
+ * mock_clear_xmit_prios() - Remove all information from the list of
+ * transmit priorities.
+ */
+void mock_clear_xmit_prios()
+{
+	mock_xmit_prios_offset = 0;
+	mock_xmit_prios[0] = 0;
+}
+
+/**
  * mock_data_ready() - Invoked through sk->sk_data_ready; logs a message
  * to indicate that it was invoked.
  * @sk:    Associated socket; not used here.
@@ -969,6 +990,8 @@ void mock_teardown(void)
 	mock_cycles = 0;
 	mock_import_single_range_errors = 0;
 	mock_kmalloc_errors = 0;
+	mock_xmit_prios_offset = 0;
+	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
 	mock_route_errors = 0;
 	mock_trylock_errors = 0;

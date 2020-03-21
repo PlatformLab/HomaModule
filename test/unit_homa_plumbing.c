@@ -160,7 +160,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__basics)
 	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
 	EXPECT_NE(RPC_IN_SERVICE, srpc->state);
-	EXPECT_SUBSTR("xmit DATA P7 1000@0", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_ioc_reply__cant_read_user_args)
 {
@@ -210,7 +210,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__free_rpc)
 	unit_log_clear();
 	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
-	EXPECT_SUBSTR("xmit DATA P7 1000@0", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
@@ -225,7 +225,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
 		(unsigned long) &self->reply_args));
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
-	EXPECT_SUBSTR("xmit DATA P7 1400@0; xmit DATA P7 1400@1400",
+	EXPECT_SUBSTR("xmit DATA 1400@0; xmit DATA 1400@1400",
 			unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -256,7 +256,7 @@ TEST_F(homa_plumbing, homa_ioc_send__cant_update_user_arguments)
 	atomic64_set(&self->hsk.next_outgoing_id, 1234);
 	EXPECT_EQ(EFAULT, -homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
-	EXPECT_SUBSTR("xmit DATA P7 200@0", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_send__successful_send)
@@ -264,7 +264,7 @@ TEST_F(homa_plumbing, homa_ioc_send__successful_send)
 	atomic64_set(&self->hsk.next_outgoing_id, 1234);
 	EXPECT_EQ(0, homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
-	EXPECT_SUBSTR("xmit DATA P7 200@0", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
 	EXPECT_EQ(1234L, self->send_args.id);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }

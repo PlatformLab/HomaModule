@@ -23,6 +23,7 @@ extern cycles_t    mock_cycles;
 extern int         mock_import_single_range_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
+extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
 extern int         mock_mtu;
 extern struct net_device
@@ -38,6 +39,7 @@ extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 
 extern int         mock_check_error(int *errorMask);
+extern void        mock_clear_xmit_prios(void);
 extern void        mock_data_ready(struct sock *sk);
 extern cycles_t    mock_get_cycles(void);
 extern unsigned int

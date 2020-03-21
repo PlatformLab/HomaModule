@@ -71,7 +71,7 @@ int homa_init(struct homa *homa)
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
-	homa->base_priority = 1;
+	homa->base_priority = 0;
 	homa->max_sched_prio = HOMA_MAX_PRIORITIES - 5;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = 2800;
@@ -577,11 +577,10 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	struct common_header *common = (struct common_header *) skb->data;
 	
 	used = homa_snprintf(buffer, buf_len, used,
-		"%s from %s:%u, dport %d, id %llu, prio %d",
+		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-		ntohs(common->sport), ntohs(common->dport), common->id,
-		skb->priority);
+		ntohs(common->sport), ntohs(common->dport), common->id);
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
@@ -678,9 +677,9 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		int bytes_left, used, i;
 		int seg_length = ntohl(h->seg.segment_length);
 		
-		used = homa_snprintf(buffer, buf_len, 0, "DATA%s P%d %d@%d",
+		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				h->retransmit ? " retrans" : "",
-				skb->priority, seg_length, ntohl(h->seg.offset));
+				seg_length, ntohl(h->seg.offset));
 		bytes_left = skb->len - sizeof32(*h) - seg_length;
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
 			seg = (struct data_segment *) (skb->data + skb->len
