@@ -704,6 +704,14 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			/* Don't do anything if the grant couldn't be sent; let
 			 * other retry mechanisms handle this. */
 		}
+		
+		/* The following line is needed to prevent spurious resends.
+		 * Without it, if the timer fires right after we send the
+		 * grant, it might think the RPC is slow and request a
+		 * resend (until we send the grant, timeouts won't occur
+		 * because there's no granted data).
+		 */
+		candidate->silent_ticks = 0;
 		tt_record3("sent grant for id %llu, offset %d, priority %d",
 				candidate->id, new_grant, priority);
 	}
