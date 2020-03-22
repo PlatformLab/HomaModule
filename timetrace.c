@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -24,13 +24,16 @@
 #endif
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;
-extern struct tt_buffer *tt_linux_buffers[NR_CPUS];
+extern struct tt_buffer *tt_linux_buffers[];
 extern atomic_t * tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
 #endif
 
 /* Separate buffers for each core: this eliminates the need for
  * synchronization in tt_record, which improves performance significantly.
+ * NR_CPUS is an overestimate of the actual number of cores; we use it
+ * here, rather than nr_cpu_ids, because it allows for static allocation
+ * of this array. And
  */
 struct tt_buffer *tt_buffers[NR_CPUS];
 
@@ -94,7 +97,7 @@ int tt_init(char *proc_file)
 		return 0;
 	}
 
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		struct tt_buffer *buffer;
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
 		if (buffer == NULL) {
@@ -119,7 +122,7 @@ int tt_init(char *proc_file)
 	init = true;
 	
 #ifdef TT_KERNEL
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = tt_buffers[i];
 	}
 	tt_linux_buffer_mask = TT_BUF_SIZE-1;
@@ -129,7 +132,7 @@ int tt_init(char *proc_file)
 	return 0;
 	
 	error:
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		kfree(tt_buffers[i]);
 		tt_buffers[i] = NULL;
 	}
@@ -148,7 +151,7 @@ void tt_destroy(void)
 		init = false;
 		proc_remove(tt_dir_entry);
 	}
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		kfree(tt_buffers[i]);
 		tt_buffers[i] = NULL;
 	}
@@ -156,7 +159,7 @@ void tt_destroy(void)
 	
 #ifdef TT_KERNEL
 	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = NULL;
 	}
 #endif
@@ -272,7 +275,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	 * events that were discarded).
 	 */
 	start_time = 0;
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
 		if (buffer->events[tt_buffer_size-1].format == NULL) {
 			pf->pos[i] = 0;
@@ -290,7 +293,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	/* Skip over all events before start_time, in order to make
 	 * sure that there's no missing data in what we print. 
 	 */
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
 		while ((buffer->events[pf->pos[i]].timestamp < start_time)
 				&& (pf->pos[i] != buffer->next_index)) {
@@ -378,7 +381,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		__u64 earliest_time = ~0;
 
 		/* Check all the traces to find the earliest available event. */
-		for (i = 0; i < NR_CPUS; i++) {
+		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
 			event = &buffer->events[pf->pos[i]];
 			if ((pf->pos[i] != buffer->next_index)
@@ -487,7 +490,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 			/* We are the last active open of the file; reset all of
 			 * the buffers to "empty".
 			 */
-			for (i = 0; i < NR_CPUS; i++) {
+			for (i = 0; i < nr_cpu_ids; i++) {
 				struct tt_buffer *buffer = tt_buffers[i];
 				buffer->events[tt_buffer_size-1].format = NULL;
 				buffer->next_index = 0;

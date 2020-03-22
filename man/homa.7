@@ -336,6 +336,11 @@ when Homa starts, but never again after that).
 To compute statistics over an interval, read this file once at the beginning of
 the interval, a second time at the end of the interval, and compute the
 difference between the two readings.
+.IP
+Most of the counters are computed separately for each core. The data for
+each core is preceded by a line whose counter name is "core"; the value is
+the core number for the following lines. A few counters appear before the first
+"core" line: these are core-independent counters such as elapsed time.
 .SH IOCTLS
 .PP
 Homa supports several

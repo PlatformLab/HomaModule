@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -166,7 +166,7 @@ TEST_F(homa_timer, homa_timer__basics)
 	self->homa.timer_ticks = 300;
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
-	EXPECT_EQ(1, unit_get_metrics()->client_rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->client_rpc_timeouts);
 	EXPECT_EQ(RPC_READY, crpc->state);
 }
 TEST_F(homa_timer, homa_timer__rpc_ready)
@@ -199,7 +199,7 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 	srpc->num_resends = self->homa.abort_resends;
 	srpc->silent_ticks = self->homa.resend_ticks;
 	homa_timer(&self->homa);
-	EXPECT_EQ(1, unit_get_metrics()->server_rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->server_rpc_timeouts);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }

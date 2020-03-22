@@ -17,7 +17,9 @@
 
 #include "homa_impl.h"
 
-/* Separate performance counters for each core. */
+/* Separate performance counters for each core. NR_CPUS is an overestimate
+ * of the actual number, but allows us to allocate the array statically.
+ */
 struct homa_metrics *homa_metrics[NR_CPUS];
 
 /* Points to block of memory holding all homa_metrics; used to free it. */
@@ -44,13 +46,14 @@ int homa_init(struct homa *homa)
 	 */
 	if (!metrics_memory) {
 		aligned_size = (sizeof(struct homa_metrics) + 0x3f) & ~0x3f;
-		metrics_memory = vmalloc(0x3f + (NR_CPUS*aligned_size));
+		metrics_memory = vmalloc(0x3f + (nr_cpu_ids*aligned_size));
 		if (!metrics_memory) {
-			printk(KERN_ERR "Homa couldn't allocate memory for metrics\n");
+			printk(KERN_ERR "Homa couldn't allocate memory "
+					"for metrics\n");
 			return -ENOMEM;
 		}
 		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
-		for (i = 0; i < NR_CPUS; i++) {
+		for (i = 0; i < nr_cpu_ids; i++) {
 			homa_metrics[i] = (struct homa_metrics *)
 					(first + i*aligned_size);
 			memset(homa_metrics[i], 0, aligned_size);
@@ -143,7 +146,7 @@ void homa_destroy(struct homa *homa)
 	if (metrics_memory) {
 		vfree(metrics_memory);
 		metrics_memory = NULL;
-		for (i = 0; i < NR_CPUS; i++) {
+		for (i = 0; i < nr_cpu_ids; i++) {
 			homa_metrics[i] = NULL;
 		}
 	}
@@ -828,73 +831,6 @@ char *homa_symbol_for_type(uint8_t type)
 }
 
 /**
- * homa_compile_metrics() - Combine all of the core-specific metrics into
- * a single collection.
- * @m:    Will be updated so that each entry in this structure contains
- *        the sum of all of the values from the core-specific metrics
- *        structures.
- */
-void homa_compile_metrics(struct homa_metrics *m)
-{
-	int i, j;
-	memset(m, 0, sizeof(*m));
-	for (i = 0; i < NR_CPUS; i++) {
-		struct homa_metrics *cm = homa_metrics[i];
-		for (j = 0; j < HOMA_NUM_SMALL_COUNTS; j++)
-			m->small_msg_bytes[j] += cm->small_msg_bytes[j];
-		for (j = 0; j < HOMA_NUM_MEDIUM_COUNTS; j++)
-			m->medium_msg_bytes[j] += cm->medium_msg_bytes[j];
-		m->large_msg_count += cm->large_msg_count;
-		m->large_msg_bytes += cm->large_msg_bytes;
-		for (j = DATA; j < BOGUS;  j++) {
-			m->packets_sent[j-DATA] += cm->packets_sent[j-DATA];
-			m->packets_received[j-DATA] +=
-					cm->packets_received[j-DATA];
-		}
-		m->requests_received += cm->requests_received;
-		m->responses_received += cm->responses_received;
-		m->pkt_recv_calls += cm->pkt_recv_calls;
-		m->timer_cycles += cm->timer_cycles;
-		m->pacer_cycles += cm->pacer_cycles;
-		m->pacer_lost_cycles += cm->pacer_lost_cycles;
-		m->pacer_skipped_rpcs += cm->pacer_skipped_rpcs;
-		m->resent_packets += cm->resent_packets;
-		m->peer_hash_links += cm->peer_hash_links;
-		m->peer_new_entries += cm->peer_new_entries;
-		m->peer_kmalloc_errors += cm->peer_kmalloc_errors;
-		m->peer_route_errors += cm->peer_route_errors;
-		m->control_xmit_errors += cm->control_xmit_errors;
-		m->data_xmit_errors += cm->data_xmit_errors;
-		m->unknown_rpcs += cm->unknown_rpcs;
-		m->server_cant_create_rpcs += cm->server_cant_create_rpcs;
-		m->unknown_packet_types += cm->unknown_packet_types;
-		m->short_packets += cm->short_packets;
-		m->redundant_packets += cm->redundant_packets;
-		m->client_rpc_timeouts += cm->client_rpc_timeouts;
-		m->server_rpc_timeouts += cm->server_rpc_timeouts;
-		m->client_lock_misses += cm->client_lock_misses;
-		m->client_lock_miss_cycles += cm->client_lock_miss_cycles;
-		m->server_lock_misses += cm->server_lock_misses;
-		m->server_lock_miss_cycles += cm->server_lock_miss_cycles;
-		m->socket_lock_misses += cm->socket_lock_misses;
-		m->socket_lock_miss_cycles += cm->socket_lock_miss_cycles;
-		m->grantable_lock_misses += cm->grantable_lock_misses;
-		m->grantable_lock_miss_cycles += cm->grantable_lock_miss_cycles;
-		m->throttle_lock_misses += cm->throttle_lock_misses;
-		m->throttle_lock_miss_cycles += cm->throttle_lock_miss_cycles;
-		m->disabled_reaps += cm->disabled_reaps;
-		m->disabled_rpc_reaps += cm->disabled_rpc_reaps;
-		m->reaper_calls += cm->reaper_calls;
-		m->reaper_dead_skbs += cm->reaper_dead_skbs;
-		m->temp1 += cm->temp1;
-		m->temp2 += cm->temp2;
-		m->temp3 += cm->temp3;
-		m->temp4 += cm->temp4;
-	}
-}
-
-
-/**
  * homa_append_metric() - Formats a new metric and appends it to homa->metrics.
  * @homa:        The new data will appended to the @metrics field of
  *               this structure.
@@ -961,10 +897,8 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
  */
 char *homa_print_metrics(struct homa *homa)
 {
-	static struct homa_metrics m;
-	int i, lower = 0;
+	int core, i, lower = 0;
 	
-	homa_compile_metrics(&m);
 	homa->metrics_length = 0;
 	homa_append_metric(homa,
 			"rdtsc_cycles         %20llu  "
@@ -974,200 +908,223 @@ char *homa_print_metrics(struct homa *homa)
 			"cpu_khz                   %15llu  "
 			"Clock rate for RDTSC counter, in khz\n",
 			cpu_khz);
-	for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
+	for (core = 0; core < nr_cpu_ids; core++) {
+		struct homa_metrics *m = homa_metrics[core];
 		homa_append_metric(homa,
-			"msg_bytes_%-9d       %15llu  "
-			"Bytes in incoming messages containing %d-%d bytes\n",
-			(i+1)*64, m.small_msg_bytes[i], lower, (i+1)*64);
-		lower = (i+1)*64 + 1;
-	}
-	for (i = (HOMA_NUM_SMALL_COUNTS*64)/1024; i < HOMA_NUM_MEDIUM_COUNTS;
-			i++) {
+				"core                      %15d  "
+				"Core id for following metrics\n",
+				core);
+		for (i = 0; i < HOMA_NUM_SMALL_COUNTS; i++) {
+			homa_append_metric(homa,
+				"msg_bytes_%-9d       %15llu  "
+				"Bytes in incoming messages containing "
+				"%d-%d bytes\n",
+				(i+1)*64, m->small_msg_bytes[i], lower,
+				(i+1)*64);
+			lower = (i+1)*64 + 1;
+		}
+		for (i = (HOMA_NUM_SMALL_COUNTS*64)/1024;
+				i < HOMA_NUM_MEDIUM_COUNTS; i++) {
+			homa_append_metric(homa,
+				"msg_bytes_%-9d       %15llu  "
+				"Bytes in incoming messages containing "
+				"%d-%d bytes\n",
+				(i+1)*1024, m->medium_msg_bytes[i], lower,
+				(i+1)*1024);
+			lower = (i+1)*1024 + 1;
+		}
 		homa_append_metric(homa,
-			"msg_bytes_%-9d       %15llu  "
-			"Bytes in incoming messages containing %d-%d bytes\n",
-			(i+1)*1024, m.medium_msg_bytes[i], lower, (i+1)*1024);
-		lower = (i+1)*1024 + 1;
-	}
-	homa_append_metric(homa,
-			"large_msg_count           %15llu  "
-			"# of incoming messages >= %d bytes\n",
-			m.large_msg_count, lower);
-	homa_append_metric(homa,
-			"large_msg_bytes           %15llu  "
-			"Bytes in incoming messages >= %d bytes\n",
-			m.large_msg_bytes, lower);
-	for (i = DATA; i < BOGUS;  i++) {
-		char *symbol = homa_symbol_for_type(i);
+				"large_msg_count           %15llu  "
+				"# of incoming messages >= %d bytes\n",
+				m->large_msg_count, lower);
 		homa_append_metric(homa,
-				"packets_sent_%-7s      %15llu  "
-				"%s packets sent\n",
-				symbol, m.packets_sent[i-DATA], symbol);
-	}
-	for (i = DATA; i < BOGUS;  i++) {
-		char *symbol = homa_symbol_for_type(i);
+				"large_msg_bytes           %15llu  "
+				"Bytes in incoming messages >= %d bytes\n",
+				m->large_msg_bytes, lower);
+		for (i = DATA; i < BOGUS;  i++) {
+			char *symbol = homa_symbol_for_type(i);
+			homa_append_metric(homa,
+					"packets_sent_%-7s      %15llu  "
+					"%s packets sent\n",
+					symbol, m->packets_sent[i-DATA],
+					symbol);
+		}
+		for (i = DATA; i < BOGUS;  i++) {
+			char *symbol = homa_symbol_for_type(i);
+			homa_append_metric(homa,
+					"packets_rcvd_%-7s      %15llu  "
+					"%s packets received\n",
+					symbol, m->packets_received[i-DATA],
+					symbol);
+		}
 		homa_append_metric(homa,
-				"packets_rcvd_%-7s      %15llu  "
-				"%s packets received\n",
-				symbol, m.packets_received[i-DATA], symbol);
+				"requests_received         %15llu  "
+				"Incoming request messages\n",
+				m->requests_received);
+		homa_append_metric(homa,
+				"responses_received        %15llu  "
+				"Incoming response messages\n",
+				m->responses_received);
+		homa_append_metric(homa,
+				"pkt_recv_calls            %15llu  "
+				"Calls to homa_pkt_recv (i.e. # GRO pkts "
+				"received)\n",
+				m->pkt_recv_calls);
+		homa_append_metric(homa,
+				"timer_cycles              %15llu  "
+				"Time spent in homa_timer (measured with "
+				"get_cycles)\n",
+				m->timer_cycles);
+		homa_append_metric(homa,
+				"pacer_cycles              %15llu  "
+				"Time spent in homa_pacer (measured with "
+				"get_cycles)\n",
+				m->pacer_cycles);
+		homa_append_metric(homa,
+				"pacer_lost_cycles         %15llu  "
+				"Lost transmission time because pacer was "
+				"slow\n",
+				m->pacer_lost_cycles);
+		homa_append_metric(homa,
+				"pacer_skipped_rpcs        %15llu  "
+				"Pacer aborts because of locked RPCs\n",
+				m->pacer_skipped_rpcs);
+		homa_append_metric(homa,
+				"resent_packets            %15llu  "
+				"DATA packets sent in response to RESENDs\n",
+				m->resent_packets);
+		homa_append_metric(homa,
+				"peer_hash_links           %15llu  "
+				"Hash chain link traversals in peer table\n",
+				m->peer_hash_links);
+		homa_append_metric(homa,
+				"peer_new_entries          %15llu  "
+				"New entries created in peer table\n",
+				m->peer_new_entries);
+		homa_append_metric(homa,
+				"peer_kmalloc_errors       %15llu  "
+				"kmalloc failures creating peer table "
+				"entries\n",
+				m->peer_kmalloc_errors);
+		homa_append_metric(homa,
+				"peer_route_errors         %15llu  "
+				"Routing failures creating peer table "
+				"entries\n",
+				m->peer_route_errors);
+		homa_append_metric(homa,
+				"control_xmit_errors       %15llu  "
+				"Errors sending control packets\n",
+				m->control_xmit_errors);
+		homa_append_metric(homa,
+				"data_xmit_errors          %15llu  "
+				"Errors sending data packets\n",
+				m->data_xmit_errors);
+		homa_append_metric(homa,
+				"unknown_rpcs              %15llu  "
+				"Packets discarded because RPC is unknown\n",
+				m->unknown_rpcs);
+		homa_append_metric(homa,
+				"server_cant_create_rpcs   %15llu  "
+				"Packets discarded because server "
+				"couldn't create RPC\n",
+				m->server_cant_create_rpcs);
+		homa_append_metric(homa,
+				"unknown_packet_types      %15llu  "
+				"Packets discarded because of unsupported "
+				"type\n",
+				m->unknown_packet_types);
+		homa_append_metric(homa,
+				"short_packets             %15llu  "
+				"Packets discarded because too short\n",
+				m->short_packets);
+		homa_append_metric(homa,
+				"redundant_packets         %15llu  "
+				"Packets discarded because data already "
+				"received\n",
+				m->redundant_packets);
+		homa_append_metric(homa,
+				"client_rpc_timeouts       %15llu  "
+				"RPCs aborted by client because of timeout\n",
+				m->client_rpc_timeouts);
+		homa_append_metric(homa,
+				"server_rpc_timeouts       %15llu  "
+				"RPCs aborted by server because of timeout\n",
+				m->server_rpc_timeouts);
+		homa_append_metric(homa,
+				"client_lock_misses        %15llu  "
+				"Bucket lock misses for client RPCs\n",
+				m->client_lock_misses);
+		homa_append_metric(homa,
+				"client_lock_miss_cycles   %15llu  "
+				"Time lost waiting for client bucket locks\n",
+				m->client_lock_miss_cycles);
+		homa_append_metric(homa,
+				"server_lock_misses        %15llu  "
+				"Bucket lock misses for server RPCs\n",
+				m->server_lock_misses);
+		homa_append_metric(homa,
+				"server_lock_miss_cycles   %15llu  "
+				"Time lost waiting for server bucket locks\n",
+				m->server_lock_miss_cycles);
+		homa_append_metric(homa,
+				"socket_lock_misses        %15llu  "
+				"Socket lock misses\n",
+				m->socket_lock_misses);
+		homa_append_metric(homa,
+				"socket_lock_miss_cycles   %15llu  "
+				"Time lost waiting for socket locks\n",
+				m->socket_lock_miss_cycles);
+		homa_append_metric(homa,
+				"grantable_lock_misses     %15llu  "
+				"Grantable lock misses\n",
+				m->grantable_lock_misses);
+		homa_append_metric(homa,
+				"grantable_lock_miss_cycles%15llu  "
+				"Time lost waiting for grantable lock\n",
+				m->grantable_lock_miss_cycles);
+		homa_append_metric(homa,
+				"throttle_lock_misses      %15llu  "
+				"Throttle lock misses\n",
+				m->throttle_lock_misses);
+		homa_append_metric(homa,
+				"throttle_lock_miss_cycles %15llu  "
+				"Time lost waiting for throttle locks\n",
+				m->throttle_lock_miss_cycles);
+		homa_append_metric(homa,
+				"disabled_reaps            %15llu  "
+				"Reaper invocations that were disabled\n",
+				m->disabled_reaps);
+		homa_append_metric(homa,
+				"disabled_rpc_reaps        %15llu  "
+				"Disabled RPCs skipped by reaper\n",
+				m->disabled_rpc_reaps);
+		homa_append_metric(homa,
+				"reaper_calls              %15llu  "
+				"Reaper invocations that were not disabled\n",
+				m->reaper_calls);
+		homa_append_metric(homa,
+				"reaper_dead_skbs          %15llu  "
+				"Sum of hsk->dead_skbs across all reaper "
+				"calls\n",
+				m->reaper_dead_skbs);
+		homa_append_metric(homa,
+				"temp1                     %15llu  "
+				"Temporary use in testing\n",
+				m->temp1);
+		homa_append_metric(homa,
+				"temp2                     %15llu  "
+				"Temporary use in testing\n",
+				m->temp2);
+		homa_append_metric(homa,
+				"temp3                     %15llu  "
+				"Temporary use in testing\n",
+				m->temp3);
+		homa_append_metric(homa,
+				"temp4                     %15llu  "
+				"Temporary use in testing\n",
+				m->temp4);
 	}
-	homa_append_metric(homa,
-			"requests_received         %15llu  "
-			"Incoming request messages\n",
-			m.requests_received);
-	homa_append_metric(homa,
-			"responses_received        %15llu  "
-			"Incoming response messages\n",
-			m.responses_received);
-	homa_append_metric(homa,
-			"pkt_recv_calls            %15llu  "
-			"Calls to homa_pkt_recv (i.e. # GRO pkts received)\n",
-			m.pkt_recv_calls);
-	homa_append_metric(homa,
-			"timer_cycles              %15llu  "
-			"Time spent in homa_timer (measured with get_cycles)\n",
-			m.timer_cycles);
-	homa_append_metric(homa,
-			"pacer_cycles              %15llu  "
-			"Time spent in homa_pacer (measured with get_cycles)\n",
-			m.pacer_cycles);
-	homa_append_metric(homa,
-			"pacer_lost_cycles         %15llu  "
-			"Lost transmission time because pacer was slow\n",
-			m.pacer_lost_cycles);
-	homa_append_metric(homa,
-			"pacer_skipped_rpcs        %15llu  "
-			"Pacer aborts because of locked RPCs\n",
-			m.pacer_skipped_rpcs);
-	homa_append_metric(homa,
-			"resent_packets            %15llu  "
-			"DATA packets sent in response to RESENDs\n",
-			m.resent_packets);
-	homa_append_metric(homa,
-			"peer_hash_links           %15llu  "
-			"Hash chain link traversals in peer table\n",
-			m.peer_hash_links);
-	homa_append_metric(homa,
-			"peer_new_entries          %15llu  "
-			"New entries created in peer table\n",
-			m.peer_new_entries);
-	homa_append_metric(homa,
-			"peer_kmalloc_errors       %15llu  "
-			"kmalloc failures creating peer table entries\n",
-			m.peer_kmalloc_errors);
-	homa_append_metric(homa,
-			"peer_route_errors         %15llu  "
-			"Routing failures creating peer table entries\n",
-			m.peer_route_errors);
-	homa_append_metric(homa,
-			"control_xmit_errors       %15llu  "
-			"Errors sending control packets\n",
-			m.control_xmit_errors);
-	homa_append_metric(homa,
-			"data_xmit_errors          %15llu  "
-			"Errors sending data packets\n",
-			m.data_xmit_errors);
-	homa_append_metric(homa,
-			"unknown_rpcs              %15llu  "
-			"Packets discarded because RPC is unknown\n",
-			m.unknown_rpcs);
-	homa_append_metric(homa,
-			"server_cant_create_rpcs   %15llu  "
-			"Packets discarded because server couldn't create RPC\n",
-			m.server_cant_create_rpcs);
-	homa_append_metric(homa,
-			"unknown_packet_types      %15llu  "
-			"Packets discarded because of unsupported type\n",
-			m.unknown_packet_types);
-	homa_append_metric(homa,
-			"short_packets             %15llu  "
-			"Packets discarded because too short\n",
-			m.short_packets);
-	homa_append_metric(homa,
-			"redundant_packets             %15llu  "
-			"Packets discarded because data already received\n",
-			m.redundant_packets);
-	homa_append_metric(homa,
-			"client_rpc_timeouts       %15llu  "
-			"RPCs aborted by client because of timeout\n",
-			m.client_rpc_timeouts);
-	homa_append_metric(homa,
-			"server_rpc_timeouts       %15llu  "
-			"RPCs aborted by server because of timeout\n",
-			m.server_rpc_timeouts);
-	homa_append_metric(homa,
-			"client_lock_misses        %15llu  "
-			"Bucket lock misses for client RPCs\n",
-			m.client_lock_misses);
-	homa_append_metric(homa,
-			"client_lock_miss_cycles   %15llu  "
-			"Time lost waiting for client bucket locks\n",
-			m.client_lock_miss_cycles);
-	homa_append_metric(homa,
-			"server_lock_misses        %15llu  "
-			"Bucket lock misses for server RPCs\n",
-			m.server_lock_misses);
-	homa_append_metric(homa,
-			"server_lock_miss_cycles   %15llu  "
-			"Time lost waiting for server bucket locks\n",
-			m.server_lock_miss_cycles);
-	homa_append_metric(homa,
-			"socket_lock_misses        %15llu  "
-			"Socket lock misses\n",
-			m.socket_lock_misses);
-	homa_append_metric(homa,
-			"socket_lock_miss_cycles   %15llu  "
-			"Time lost waiting for socket locks\n",
-			m.socket_lock_miss_cycles);
-	homa_append_metric(homa,
-			"grantable_lock_misses     %15llu  "
-			"Grantable lock misses\n",
-			m.grantable_lock_misses);
-	homa_append_metric(homa,
-			"grantable_lock_miss_cycles%15llu  "
-			"Time lost waiting for grantable lock\n",
-			m.grantable_lock_miss_cycles);
-	homa_append_metric(homa,
-			"throttle_lock_misses      %15llu  "
-			"Throttle lock misses\n",
-			m.throttle_lock_misses);
-	homa_append_metric(homa,
-			"throttle_lock_miss_cycles %15llu  "
-			"Time lost waiting for throttle locks\n",
-			m.throttle_lock_miss_cycles);
-	homa_append_metric(homa,
-			"disabled_reaps            %15llu  "
-			"Reaper invocations that were disabled\n",
-			m.disabled_reaps);
-	homa_append_metric(homa,
-			"disabled_rpc_reaps        %15llu  "
-			"Disabled RPCs skipped by reaper\n",
-			m.disabled_rpc_reaps);
-	homa_append_metric(homa,
-			"reaper_calls              %15llu  "
-			"Reaper invocations that were not disabled\n",
-			m.reaper_calls);
-	homa_append_metric(homa,
-			"reaper_dead_skbs          %15llu  "
-			"Sum of hsk->dead_skbs across all reaper calls\n",
-			m.reaper_dead_skbs);
-	homa_append_metric(homa,
-			"temp1                     %15llu  "
-			"Temporary use in testing\n",
-			m.temp1);
-	homa_append_metric(homa,
-			"temp2                     %15llu  "
-			"Temporary use in testing\n",
-			m.temp2);
-	homa_append_metric(homa,
-			"temp3                     %15llu  "
-			"Temporary use in testing\n",
-			m.temp3);
-	homa_append_metric(homa,
-			"temp4                     %15llu  "
-			"Temporary use in testing\n",
-			m.temp4);
-	
+
 	return homa->metrics;
 }
 

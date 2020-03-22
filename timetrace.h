@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -119,7 +119,7 @@ extern int       tt_proc_open(struct inode *inode, struct file *file);
 extern ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
 			size_t length, loff_t *offset);
 extern int       tt_proc_release(struct inode *inode, struct file *file);
-extern struct    tt_buffer *tt_buffers[NR_CPUS];
+extern struct    tt_buffer *tt_buffers[];
 extern int       tt_buffer_size;
 extern atomic_t  tt_freeze_count;
 extern bool      tt_frozen;

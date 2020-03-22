@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -28,8 +28,6 @@ extern struct homa_rpc
 			__be32 client_ip, __be32 server_ip, int server_port,
 			int id, int req_length, int resp_length);
 extern __be32        unit_get_in_addr(char *s);
-extern struct homa_metrics
-                    *unit_get_metrics(void);
 extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 extern void          unit_log_frag_list(struct sk_buff *skb, int verbose);

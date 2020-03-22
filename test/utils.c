@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -130,22 +130,6 @@ __be32 unit_get_in_addr(char *s)
 		return htonl((a<<24) + (b<<16) + (c<<8) + d);
 	}
 	return 0;
-}
-
-/**
- * unit_get_metrics() - Compile all of the metrics and return a pointer
- * to the result. Unit tests should use this method rather than just
- * checking homa_metrics[1] in order to ensure that homa_compile_metrics
- * will include the desired metric.
- * 
- * Result:      Compiled metrics from all cores.
- */
-struct homa_metrics *unit_get_metrics(void)
-{
-	static struct homa_metrics compiled;
-	
-	homa_compile_metrics(&compiled);
-	return &compiled;
 }
 
 /**

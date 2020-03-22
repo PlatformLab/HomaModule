@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -140,14 +140,15 @@ struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
 		.gso_max_size = MOCK_MTU};
 
-struct task_struct *current_task = &mock_task;
-unsigned long ex_handler_refcount = 0;
-unsigned long phys_base = 0;
-struct net init_net;
-unsigned long volatile jiffies = 1100;
 static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
+struct task_struct *current_task = &mock_task;
+unsigned long ex_handler_refcount = 0;
+struct net init_net;
+unsigned long volatile jiffies = 1100;
+unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base = 0;
+unsigned long phys_base = 0;
 unsigned long vmemmap_base = 0;
 int __preempt_count = 0;
 

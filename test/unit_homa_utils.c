@@ -216,18 +216,18 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
 	homa_rpc_unlock(srpc);
 	
-	EXPECT_EQ(0, unit_get_metrics()->client_lock_misses);
-	EXPECT_EQ(0, unit_get_metrics()->client_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->client_lock_misses);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->client_lock_miss_cycles);
 	homa_rpc_lock_slow(crpc);
 	homa_rpc_unlock(crpc);
-	EXPECT_EQ(1, unit_get_metrics()->client_lock_misses);
-	EXPECT_NE(0, unit_get_metrics()->client_lock_miss_cycles);
-	EXPECT_EQ(0, unit_get_metrics()->server_lock_misses);
-	EXPECT_EQ(0, unit_get_metrics()->server_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->client_lock_misses);
+	EXPECT_NE(0, homa_metrics[cpu_number]->client_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->server_lock_misses);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->server_lock_miss_cycles);
 	homa_rpc_lock_slow(srpc);
 	homa_rpc_unlock(srpc);
-	EXPECT_EQ(1, unit_get_metrics()->server_lock_misses);
-	EXPECT_NE(0, unit_get_metrics()->server_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->server_lock_misses);
+	EXPECT_NE(0, homa_metrics[cpu_number]->server_lock_miss_cycles);
 	
 }
 

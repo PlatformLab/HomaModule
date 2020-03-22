@@ -41,7 +41,6 @@ FIXTURE_TEARDOWN(homa_peertab)
 TEST_F(homa_peertab, homa_peer_find__basics)
 {
 	struct homa_peer *peer, *peer2;
-	struct homa_metrics metrics;
 	
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
@@ -55,8 +54,7 @@ TEST_F(homa_peertab, homa_peer_find__basics)
 	peer2 = homa_peer_find(&self->peertab, 22222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
 	
-	homa_compile_metrics(&metrics);
-	EXPECT_EQ(2, metrics.peer_new_entries);
+	EXPECT_EQ(2, homa_metrics[cpu_number]->peer_new_entries);
 }
 
 static struct _test_data_homa_peertab *test_data;
@@ -93,27 +91,23 @@ TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 {
 	struct homa_peer *peer;
-	struct homa_metrics metrics;
 	
 	mock_kmalloc_errors = 1;
 	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 	
-	homa_compile_metrics(&metrics);
-	EXPECT_EQ(1, metrics.peer_kmalloc_errors);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->peer_kmalloc_errors);
 }
 
 TEST_F(homa_peertab, homa_peer_find__route_error)
 {
 	struct homa_peer *peer;
-	struct homa_metrics metrics;
 	
 	mock_route_errors = 1;
 	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 	
-	homa_compile_metrics(&metrics);
-	EXPECT_EQ(1, metrics.peer_route_errors);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->peer_route_errors);
 }
 
 TEST_F(homa_peertab, homa_unsched_priority)

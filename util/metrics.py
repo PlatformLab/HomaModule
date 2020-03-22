@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
-# Copyright (c) 2019 Stanford University
+# Copyright (c) 2019-2020 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -33,65 +33,128 @@ import re
 import string
 import sys
 
+# Both prev and cur below are arrays of dictionaries: each element of
+# the array stores information for one core in the form of a dictionary,
+# where keys are metric names and values are metric values.
+prev = []
+cur = []
+
+# List of metric names, in the order in which they appeared in the
+# input file.
+symbols = []
+
+# Maps from metric name to the difference in total counts between new
+# and old data.
+deltas = {}
+
+# Maps from metric name to the documentation for that metric.
+docs = {}
+
+# Read in metrics, parse the results for internal use, and, optionally
+# copy the raw metrics to an output file. Also reinitialize symbols
+
+def read_metrics(metrics_file, out):
+    """
+    Read metrics from the file whose name is "metrics_file" and generate
+    a data structure in the format described above for "prev". In
+    addition, if out is not None, write the raw metrics to that file.
+    Returns the parsed metrics.
+    """
+
+    global symbols, docs
+    symbols.clear()
+    metrics = []
+    metrics.append({})
+    core = 0
+    f = open(metrics_file)
+    for line in f:
+        if out:
+            out.write(line)
+
+        match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
+        if not match:
+            print("Ignoring bogus line in metrics file %s: %s" %
+                    (metrics_file, line))
+            continue
+        symbol = match.group(1)
+        count = int(match.group(2))
+        doc = match.group(3)
+        if symbol == "core":
+            core = count
+            while len(metrics) <= core:
+                metrics.append({})
+            continue
+        if core == 0:
+            symbols.append(symbol)
+            docs[symbol] = doc
+        metrics[core][symbol] = count
+    f.close()
+    return metrics;
+
+# Read the metrics saved the last time we ran, as well as the new
+# metrics.
+
 if len(sys.argv) > 1:
     data_file = sys.argv[1]
 else:
     data_file = os.path.expanduser("~") + "/.homa_metrics"
-
-# Scan the old data file (if it exists and build a dictionary of
-# values.
-prev = {}
-deltas = {}
 try:
-    f = open(data_file)
+    prev = read_metrics(data_file, None)
 except IOError:
+    prev = []
     pass
-if 'f' in locals():
-    for line in f:
-        match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
-        if not match:
-            print("Bogus line in data file: %s" % (line))
-            continue
-        symbol = match.group(1)
-        count = int(match.group(2))
-        prev[symbol] = count
-    f.close()
-
-# Scan the current metrics: compare with info from the data file, output
-# differences, and also rewrite the data file with current data.
-
-f = open("/proc/net/homa_metrics")
 data = open(data_file, "w")
+cur = read_metrics("/proc/net/homa_metrics", data)
+data.close()
+
+# Sum all of the individual core counts for both the new and old data and
+# compute the difference in "deltas"
+for symbol in symbols:
+    if (symbol == "rdtsc_cycles") or (symbol == "cpu_khz") or (symbol == "core"):
+        # This symbol shouldn't be summed.
+        continue
+    total_cur = 0
+    for core in cur:
+        total_cur += core[symbol]
+    total_prev = 0
+    for core in prev:
+        total_prev += core[symbol]
+    delta = total_cur - total_prev
+    deltas[symbol] = delta
+
 time_delta = 0
 total_packets = 0
 gro_packets = 0
 elapsed_secs = 0
 reaper_calls = 0
 pad = ""
+cpu_khz = float(cur[0]["cpu_khz"])
 
-for line in f:
-    data.write(line)
-    match = re.match('^([^ ]*) *([0-9]+) *(.*)', line)
-    if not match:
-        print("Bogus line in Homa metrics: %s" % (line))
+if len(prev) > 0:
+    time_delta = cur[0]["rdtsc_cycles"] - prev[0]["rdtsc_cycles"]
+    elapsed_secs = float(time_delta)/(cpu_khz * 1000.0)
+    pad = pad.ljust(13)
+    secs = "(%.1f s)" % (elapsed_secs)
+    secs = secs.ljust(12)
+    print("%-28s %15d %s %s" % ("rdtsc_cycles", time_delta, secs,
+            docs["rdtsc_cycles"]))
+else:
+    print("%-15s %28d %s%s" % ("rdtsc_cycles", cur[0]["rdtsc_cycles"],
+            "", docs["rdtsc_cycles"]))
+
+print("%-28s           %5.2f %sCPU clock rate (GHz)" % ("clock_rate",
+        cpu_khz/1e06, pad))
+
+for symbol in symbols:
+    if (symbol == "rdtsc_cycles") or (symbol == "cpu_khz"):
+        # This symbol is handled specially above
         continue
-    symbol = match.group(1)
-    count = int(match.group(2))
-    doc = match.group(3)
-    if (symbol in prev):
-        old = prev[symbol]
-    else:
-        old = 0
-    delta = float(count - old)
-    deltas[symbol] = delta
-    if (symbol == "rdtsc_cycles") and (old != 0) and "cpu_khz" in prev:
-        time_delta = float(count - old)
-        elapsed_secs = time_delta/(prev["cpu_khz"] * 1000.0)
-        pad = pad.ljust(13)
-    if old != count:
+    delta = deltas[symbol]
+    doc = docs[symbol]
+    if delta != 0:
         rate_info = ""
         if (time_delta != 0):
-            rate = float(count - old)/elapsed_secs
+            rate = float(delta)/elapsed_secs
             if rate > 1000000:
                 rate_info = "(%5.1f M/s) " % (rate/1000000.0)
             elif (rate > 1000):
@@ -99,35 +162,25 @@ for line in f:
             else:
                 rate_info = "(%5.1f  /s) " % (rate)
             rate_info = rate_info.ljust(13)
-        if (symbol == "rdtsc_cycles") and (time_delta != 0):
-            print("%-28s           %5.2f %sCPU clock rate (GHz)" % (
-                  "clock_rate", float(prev["cpu_khz"])/1e06, pad))
-            secs = "(%.1f s)" % (delta/(1000.0*prev["cpu_khz"]))
-            secs = secs.ljust(12)
-            print("%-28s %15d %s %s" % (symbol, count-old, secs, doc))
-        elif symbol.endswith("_cycles") and (time_delta != 0):
+        if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
-            print("%-28s %15d %s %s" % (symbol, count-old, percent, doc))
+            print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
         else:
-            print("%-28s %15d %s%s" % (symbol, count-old, rate_info, doc))
+            print("%-28s %15d %s%s" % (symbol, delta, rate_info, doc))
             if symbol.startswith("packets_rcvd_"):
-                total_packets += count-old
+                total_packets += delta
             if symbol == "pkt_recv_calls":
-                gro_packets = count-old
+                gro_packets = delta
         if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
             print("%-28s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
                   "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if (prefix + "_misses") in deltas:
-                ns = (delta/deltas[prefix + "_misses"])/(prev["cpu_khz"]
-                        * 1e-06)
+                ns = (delta/deltas[prefix + "_misses"])/cpu_khz * 1e-06
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
 if gro_packets != 0:
     print("%-28s          %6.2f %sHoma packets per GRO 'packet'" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
-
-f.close()
-data.close()

@@ -113,12 +113,12 @@ TEST_F(homa_incoming, homa_message_in_init)
 	homa_message_in_init(&msgin, 1000000, 10000);
 	EXPECT_EQ(10000, msgin.incoming);
 	homa_message_in_init(&msgin, 2000000, 10000);
-	EXPECT_EQ(255, unit_get_metrics()->small_msg_bytes[1]);
-	EXPECT_EQ(130, unit_get_metrics()->small_msg_bytes[2]);
-	EXPECT_EQ(0xfff, unit_get_metrics()->small_msg_bytes[63]);
-	EXPECT_EQ(0x3000, unit_get_metrics()->medium_msg_bytes[11]);
-	EXPECT_EQ(0, unit_get_metrics()->medium_msg_bytes[15]);
-	EXPECT_EQ(3000000, unit_get_metrics()->large_msg_bytes);
+	EXPECT_EQ(255, homa_metrics[cpu_number]->small_msg_bytes[1]);
+	EXPECT_EQ(130, homa_metrics[cpu_number]->small_msg_bytes[2]);
+	EXPECT_EQ(0xfff, homa_metrics[cpu_number]->small_msg_bytes[63]);
+	EXPECT_EQ(0x3000, homa_metrics[cpu_number]->medium_msg_bytes[11]);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->medium_msg_bytes[15]);
+	EXPECT_EQ(3000000, homa_metrics[cpu_number]->large_msg_bytes);
 }
 
 TEST_F(homa_incoming, homa_add_packet__basics)
@@ -359,7 +359,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_client_rpc)
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_EQ(1, unit_get_metrics()->unknown_rpcs);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->unknown_rpcs);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 {
@@ -420,7 +420,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .type = 99};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h, 0, 0), &self->hsk);
-	EXPECT_EQ(1, unit_get_metrics()->unknown_packet_types);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->unknown_packet_types);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc_but_socket_shutdown)
 {
@@ -897,7 +897,7 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	struct sk_buff *skb = mock_skb_new(self->server_ip, &h.common, 0, 0);
 	mock_kmalloc_errors = 1;
 	homa_cutoffs_pkt(skb, &self->hsk);
-	EXPECT_EQ(1, unit_get_metrics()->peer_kmalloc_errors);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->peer_kmalloc_errors);
 	peer = homa_peer_find(&self->homa.peers, self->server_ip,
 			&self->hsk.inet);
 	ASSERT_FALSE(IS_ERR(peer));
@@ -1204,8 +1204,8 @@ TEST_F(homa_incoming, homa_peer_abort__basics)
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
 	EXPECT_EQ(0, -crpc2->error);
 	EXPECT_EQ(RPC_OUTGOING, crpc3->state);
-	EXPECT_EQ(0, unit_get_metrics()->client_rpc_timeouts);
-	EXPECT_EQ(0, unit_get_metrics()->server_rpc_timeouts);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->client_rpc_timeouts);
+	EXPECT_EQ(0, homa_metrics[cpu_number]->server_rpc_timeouts);
 }
 TEST_F(homa_incoming, homa_peer_abort__multiple_sockets)
 {
@@ -1242,7 +1242,7 @@ TEST_F(homa_incoming, homa_peer_abort__log_timeout_stats)
 	homa_peer_abort(&self->homa, self->server_ip, -ETIMEDOUT);
 	EXPECT_EQ(RPC_READY, crpc1->state);
 	EXPECT_EQ(ETIMEDOUT, -crpc1->error);
-	EXPECT_EQ(1, unit_get_metrics()->client_rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics[cpu_number]->client_rpc_timeouts);
 }
 
 TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)
