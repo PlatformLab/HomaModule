@@ -386,22 +386,23 @@ TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
 
 TEST_F(homa_utils, homa_find_client_rpc)
 {
-	atomic64_set(&self->hsk.next_outgoing_id, 3);
+	atomic64_set(&self->homa.next_outgoing_id, 3);
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc1));
 	homa_rpc_unlock(crpc1);
-	atomic64_set(&self->hsk.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
+	atomic64_set(&self->homa.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc2));
 	homa_rpc_unlock(crpc2);
-	atomic64_set(&self->hsk.next_outgoing_id, 3 + 10*HOMA_CLIENT_RPC_BUCKETS);
+	atomic64_set(&self->homa.next_outgoing_id,
+			3 + 10*HOMA_CLIENT_RPC_BUCKETS);
 	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc3));
 	homa_rpc_unlock(crpc3);
-	atomic64_set(&self->hsk.next_outgoing_id, 40);
+	atomic64_set(&self->homa.next_outgoing_id, 40);
 	struct homa_rpc *crpc4 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, (char *) 2000, 1000);
 	EXPECT_FALSE(IS_ERR(crpc4));

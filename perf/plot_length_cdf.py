@@ -17,11 +17,12 @@
 # This script generates a plot showing the CDF of message lengths,
 # gathered from one or more experiment runs.
 #
-# Usage: plot_length_dist.py name dir name dir ...
+# Usage: plot_length_dist.py name pattern name pattern ...
 #
 # Each "name" argument gives the name a workload, which will appear in the
-# graph keys. Each "dir" argument gives a directory containing data files
-# that measure the distribution.
+# graph keys. Each "pattern" argument gives a glob string (such as
+# ("logs/w1/loaded*.txt") describine one or more data files that measure
+# the distribution.
 
 import glob
 import matplotlib.pyplot as plt
@@ -58,18 +59,23 @@ def read_rtts(file, column):
     f.close()
 
 if (len(sys.argv) < 3) or not (len(sys.argv) & 1):
-    print("Usage: %s name dir name dir ..." % (sys.argv[0]))
+    print("Usage: %s name pattern name pattern ..." % (sys.argv[0]))
     exit(1)
 
 workloads = []
 for i in range(1, len(sys.argv), 2):
     info = {}
     info["name"] = sys.argv[i]
-    dir = sys.argv[i+1]
+    pattern = sys.argv[i+1]
 
     counts = {}
-    for f in glob.glob("%s/rtts*.txt" % dir):
+    got_data = False
+    for f in glob.glob(pattern):
         read_rtts(f, 0)
+        got_data = True
+    if not got_data:
+        print("Couldn't find any files corresponding to '%s'" % (pattern))
+        continue;
 
     info["total_msgs"] = 0.0
     info["total_bytes"] = 0.0
@@ -116,6 +122,7 @@ plt.ylabel("Cum. Frac. Bytes")
 plt.grid(which="major", axis="both")
 
 for w in workloads:
+    print("Plotting workload %s" % (w["name"]));
     plt.plot(w["x"], w["cum_bytes"], label=w["name"])
 plt.legend()
 

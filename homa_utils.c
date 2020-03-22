@@ -59,6 +59,7 @@ int homa_init(struct homa *homa)
 	
 	homa->pacer_kthread = NULL;
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
+	atomic64_set(&homa->next_outgoing_id, 1);
 	homa_socktab_init(&homa->port_map);
 	err = homa_peertab_init(&homa->peers);
 	if (err) {
@@ -177,7 +178,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
-	crpc->id = atomic64_fetch_add(1, &hsk->next_outgoing_id);
+	crpc->id = atomic64_fetch_add(1, &hsk->homa->next_outgoing_id);
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;

@@ -634,7 +634,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	tt_record4("homa_ioc_send starting, target 0x%x:%d, port %d, id %u",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
-			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
+			hsk->client_port,
+			atomic64_read(&hsk->homa->next_outgoing_id));
 	if (unlikely(args.dest_addr.sin_family != AF_INET))
 		return -EAFNOSUPPORT;
 	

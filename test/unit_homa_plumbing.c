@@ -253,7 +253,7 @@ TEST_F(homa_plumbing, homa_ioc_send__error_in_homa_rpc_new_client)
 TEST_F(homa_plumbing, homa_ioc_send__cant_update_user_arguments)
 {
 	mock_copy_to_user_errors = 1;
-	atomic64_set(&self->hsk.next_outgoing_id, 1234);
+	atomic64_set(&self->homa.next_outgoing_id, 1234);
 	EXPECT_EQ(EFAULT, -homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
 	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
@@ -261,7 +261,7 @@ TEST_F(homa_plumbing, homa_ioc_send__cant_update_user_arguments)
 }
 TEST_F(homa_plumbing, homa_ioc_send__successful_send)
 {
-	atomic64_set(&self->hsk.next_outgoing_id, 1234);
+	atomic64_set(&self->homa.next_outgoing_id, 1234);
 	EXPECT_EQ(0, homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
 	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());

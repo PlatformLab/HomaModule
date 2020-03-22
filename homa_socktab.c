@@ -142,7 +142,6 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	}
 	hsk->client_port = homa->next_client_port;
 	homa->next_client_port++;
-	atomic64_set(&hsk->next_outgoing_id, 1);
 	hsk->client_links.sock = hsk;
 	hlist_add_head_rcu(&hsk->client_links.hash_links,
 			&socktab->buckets[homa_port_hash(hsk->client_port)]);
@@ -182,8 +181,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_sock_unlock(hsk);
 		return;
 	}
-	printk(KERN_NOTICE "Shutting down socket %d, id %lu",
-			hsk->client_port, atomic64_read(&hsk->next_outgoing_id));
+	printk(KERN_NOTICE "Shutting down socket %d", hsk->client_port);
 	atomic_inc(&hsk->reap_disable);
 	
 	/* The order of cleanup is very important, because there could be

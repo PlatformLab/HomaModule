@@ -884,12 +884,6 @@ struct homa_sock {
 	/** @client_port: Port number to use for outgoing RPC requests. */
 	__u16 client_port;
 	
-	/** @next_outgoing_id: Id to use for next outgoing RPC request. Can
-	 * be incremented using atomic ops to assign the next id without
-	 * acquiring @lock.
-	 */
-	atomic64_t next_outgoing_id;
-	
 	/**
 	 * @client_socktab_links: Links this socket into the homa_socktab
 	 * based on client_port.
@@ -1062,6 +1056,11 @@ struct homa {
 	 * This port may also be in use already; must check.
 	 */
 	__u16 next_client_port;
+	
+	/** @next_outgoing_id: Id to use for next outgoing RPC request.
+	 * Accessed without locks.
+	 */
+	atomic64_t next_outgoing_id;
 	
 	/**
 	 * @port_map: Information about all open sockets; indexed by
