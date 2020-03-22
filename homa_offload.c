@@ -151,8 +151,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	struct common_header *h = (struct common_header *)
 			skb_transport_header(skb);
 	struct data_header *d = (struct data_header *) h;
-	tt_record3("homa_gro_complete type %d, id %d, offset %d",
-			h->type, h->id, ntohl(d->seg.offset));
+	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
+			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
 	/* Set the hash for the skb, which will be used for RPS (the default
 	 * hash doesn't understand Homa, so it doesn't include port #'s).
