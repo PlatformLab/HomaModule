@@ -1406,11 +1406,11 @@ struct homa_metrics {
 	__u64 responses_received;
 	
 	/**
-	 * @pkt_recv_calls: total number of calls to homa_pkt_recv (i.e.,
+	 * @softirq_calls: total number of calls to homa_softirq (i.e.,
 	 * total number of GRO packets processed, each of which could contain
 	 * multiple Homa packets.
 	 */
-	__u64 pkt_recv_calls;
+	__u64 softirq_calls;
 	
 	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
@@ -1887,7 +1887,7 @@ extern struct homa_peer
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk);
-extern int      homa_pkt_recv(struct sk_buff *skb);
+extern int      homa_softirq(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
 			struct poll_table_struct *wait);
 extern char    *homa_print_ipv4_addr(__be32 addr);

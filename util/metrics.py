@@ -170,7 +170,7 @@ for symbol in symbols:
             print("%-28s %15d %s%s" % (symbol, delta, rate_info, doc))
             if symbol.startswith("packets_rcvd_"):
                 total_packets += delta
-            if symbol == "pkt_recv_calls":
+            if symbol == "softirq_calls":
                 gro_packets = delta
         if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
             print("%-28s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
@@ -182,5 +182,5 @@ for symbol in symbols:
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
 if gro_packets != 0:
-    print("%-28s          %6.2f %sHoma packets per GRO 'packet'" % (
+    print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))

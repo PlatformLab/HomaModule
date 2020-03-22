@@ -966,10 +966,10 @@ char *homa_print_metrics(struct homa *homa)
 				"Incoming response messages\n",
 				m->responses_received);
 		homa_append_metric(homa,
-				"pkt_recv_calls            %15llu  "
-				"Calls to homa_pkt_recv (i.e. # GRO pkts "
+				"softirq_calls             %15llu  "
+				"Calls to homa_softirq (i.e. # GRO pkts "
 				"received)\n",
-				m->pkt_recv_calls);
+				m->softirq_calls);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer (measured with "

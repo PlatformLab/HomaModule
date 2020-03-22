@@ -413,4 +413,4 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
-  homa_plumbing.c:   homa_pkt_recv
+  homa_plumbing.c:   homa_softirq

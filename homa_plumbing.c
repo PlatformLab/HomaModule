@@ -121,7 +121,7 @@ struct inet_protosw homa_protosw = {
 static struct net_protocol homa_protocol = {
 	.early_demux =	NULL, /*homa_v4_early_demux */
 	.early_demux_handler =	NULL, /* homa_v4_early_demux_handler */
-	.handler =	homa_pkt_recv,
+	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler,
 	.no_policy =	1,
 	.netns_ok =	1,
@@ -868,12 +868,12 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
 }
 
 /**
- * homa_handler() - Top-level input packet handler; invoked by IP through
- * homa_protocol.handler when a Homa packet arrives.
+ * homa_softirq() - This function is invoked at SoftIRQ level to handle
+ * incoming packets.
  * @skb:   The incoming packet.
  * Return: Always 0
  */
-int homa_pkt_recv(struct sk_buff *skb) {
+int homa_softirq(struct sk_buff *skb) {
 	__be32 saddr;
 	struct common_header *h;
 	struct sk_buff *others;
@@ -884,7 +884,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 	int first_packet = 1;
 	struct homa_sock *hsk;
 	
-	INC_METRIC(pkt_recv_calls, 1);
+	INC_METRIC(softirq_calls, 1);
 	now = get_cycles();
 	if ((now - last) > 1000000) {
 		int scaled_ms = (int) (10*(now-last)/cpu_khz);
@@ -942,7 +942,7 @@ int homa_pkt_recv(struct sk_buff *skb) {
 		
 		h = (struct common_header *) skb->data;
 		if (first_packet) {
-			tt_record4("homa_pkt_recv: first packet from 0x%x:%d, "
+			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
 					ntohl(saddr), ntohs(h->sport),
 					h->id, h->type);
