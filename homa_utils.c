@@ -971,15 +971,48 @@ char *homa_print_metrics(struct homa *homa)
 				"received)\n",
 				m->softirq_calls);
 		homa_append_metric(homa,
+				"softirq_cycles            %15llu  "
+				"Time spent in homa_softirq\n",
+				m->softirq_cycles);
+		homa_append_metric(homa,
+				"napi_cycles               %15llu  "
+				"Time spent in NAPI-level packet handlng\n",
+				m->napi_cycles);
+		homa_append_metric(homa,
+				"send_cycles               %15llu  "
+				"Time spent in homa_ioc_send kernel call\n",
+				m->send_cycles);
+		homa_append_metric(homa,
+				"recv_cycles               %15llu  "
+				"Time spent in homa_ioc_recv kernel call\n",
+				m->recv_cycles - m->blocked_cycles);
+		homa_append_metric(homa,
+				"blocked_cycles            %15llu  "
+				"Time spent blocked in homa_ioc_recv\n",
+				m->blocked_cycles);
+		homa_append_metric(homa,
+				"reply_cycles              %15llu  "
+				"Time spent in homa_ioc_reply kernel call\n",
+				m->reply_cycles);
+		homa_append_metric(homa,
+				"manage_grants_cycles      %15llu  "
+				"Time spent in manage_grants\n",
+				m->manage_grants_cycles);
+		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
-				"Time spent in homa_timer (measured with "
-				"get_cycles)\n",
+				"Time spent in homa_timer\n",
 				m->timer_cycles);
 		homa_append_metric(homa,
 				"pacer_cycles              %15llu  "
-				"Time spent in homa_pacer (measured with "
-				"get_cycles)\n",
+				"Time spent in homa_pacer\n",
 				m->pacer_cycles);
+		homa_append_metric(homa,
+				"homa_cycles               %15llu  "
+				"Total time in all Homa-related functions\n",
+				m->softirq_cycles + m->napi_cycles +
+				m->send_cycles + m->recv_cycles +
+				m->reply_cycles - m->blocked_cycles +
+				m->timer_cycles + m->pacer_cycles);
 		homa_append_metric(homa,
 				"pacer_lost_cycles         %15llu  "
 				"Lost transmission time because pacer was "

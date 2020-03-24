@@ -27,6 +27,9 @@ extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[];
 extern atomic_t * tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
+extern void       tt_inc_metric(int offset, __u64 count);
+extern void       (*tt_linux_inc_metrics)(int offset, __u64 count);
+extern void       tt_linux_skip_metrics(int offset, __u64 count);
 #endif
 
 /* Separate buffers for each core: this eliminates the need for
@@ -127,6 +130,7 @@ int tt_init(char *proc_file)
 	}
 	tt_linux_buffer_mask = TT_BUF_SIZE-1;
 	tt_linux_freeze_count = &tt_freeze_count;
+	tt_linux_inc_metrics = tt_inc_metric;
 #endif
 	
 	return 0;
@@ -162,6 +166,7 @@ void tt_destroy(void)
 	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = NULL;
 	}
+	tt_linux_inc_metrics = tt_linux_skip_metrics;
 #endif
 	
 	spin_unlock(&tt_lock);
@@ -501,4 +506,17 @@ int tt_proc_release(struct inode *inode, struct file *file)
 	
 	spin_unlock(&tt_lock);
 	return 0;
+}
+
+/**
+ * tt_inc_metric() - Invoked by Linux kernel code to update a
+ * Homa metric.
+ * @offset:   Offset within struct homa_metrics of the desired metric.
+ * @count:    Amount by which to increment to the metric.
+ */
+void tt_inc_metric(int offset, __u64 count)
+{
+	__u64 *metric = (__u64 *)(((char *) homa_metrics[smp_processor_id()])
+			+ offset);
+	*metric += count;
 }

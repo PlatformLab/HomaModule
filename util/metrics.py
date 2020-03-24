@@ -91,6 +91,19 @@ def read_metrics(metrics_file, out):
     f.close()
     return metrics;
 
+def scale_number(number):
+    """
+    Return a string describing a number, but with a "K", "M", or "G"
+    suffix to keep the number small and readable
+    """
+
+    if number > 1000000:
+        return "%5.1f M" % (number/1000000.0)
+    elif (number > 1000):
+        return "%5.1f K" % (number/1000.0)
+    else:
+        return "%5.1f  " % (number)
+
 # Read the metrics saved the last time we ran, as well as the new
 # metrics.
 
@@ -155,13 +168,7 @@ for symbol in symbols:
         rate_info = ""
         if (time_delta != 0):
             rate = float(delta)/elapsed_secs
-            if rate > 1000000:
-                rate_info = "(%5.1f M/s) " % (rate/1000000.0)
-            elif (rate > 1000):
-                rate_info = "(%5.1f K/s) " % (rate/1000.0)
-            else:
-                rate_info = "(%5.1f  /s) " % (rate)
-            rate_info = rate_info.ljust(13)
+            rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
@@ -178,9 +185,74 @@ for symbol in symbols:
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if (prefix + "_misses") in deltas:
-                ns = (delta/deltas[prefix + "_misses"])/cpu_khz * 1e-06
+                ns = (delta/deltas[prefix + "_misses"])/(cpu_khz * 1e-06)
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
 if gro_packets != 0:
     print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
+
+# Print CPU usage by core
+if len(prev) > 0:
+    print("\nPer-core CPU usage:")
+    print("-------------------")
+    totals = []
+    while len(totals) < len(cur):
+        totals.append(0.0);
+    cores_per_line = 8
+    for first_core in range(0, len(cur), cores_per_line):
+        if first_core != 0:
+            print("");
+        end_core = first_core + cores_per_line
+        if end_core > len(cur):
+            end_core = len(cur)
+        line = "             "
+        for core in range(first_core, end_core):
+            line += "  Core%-2d" % (core)
+        print(line)
+        for where in ["interrupt", "softirq", "send", "recv", "timer", "pacer"]:
+            symbol = where + "_cycles"
+            line = "%-10s  " % (where)
+            for core in range(first_core, end_core):
+                frac = float(cur[core][symbol] - prev[core][symbol]) / float(
+                        time_delta)
+                line += "   %5.2f" % (frac)
+                totals[core] += frac;
+            print(line)
+        line = "Total       "
+        for core in range(first_core, end_core):
+            line += "   %5.2f" % (totals[core])
+        print(line)
+ 
+if (elapsed_secs != 0):
+    print("\nLock misses:")
+    print("------------")
+    print("            Misses/sec.  ns/miss   %CPU")
+    for lock in ["client", "socket", "grantable", "throttle"]:
+        misses = float(deltas[lock + "_lock_misses"])
+        cycles = float(deltas[lock + "_lock_miss_cycles"])
+        if misses == 0:
+            cycles_per_miss = 0.0
+        else:
+            cycles_per_miss = cycles/misses
+        print("%-10s    %s    %6.1f   %5.1f" % (lock,
+                scale_number(misses/elapsed_secs),
+                cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
+
+    print("\nPacket processing time:")
+    print("-----------------------")
+    packets_received = 0.0
+    for symbol in symbols:
+        if symbol.startswith("packets_rcvd_"):
+            packets_received += deltas[symbol]
+    print("Total packets received: %s/s" % (
+            scale_number(packets_received/elapsed_secs)))
+    print("Interrupt handler:     %6.1f ns/packet" % (
+            (float(deltas["interrupt_cycles"])/packets_received)
+            /(cpu_khz/1e06)))
+    print("SoftIRQ handler:       %6.1f ns/packet" % (
+            (float(deltas["softirq_cycles"])/packets_received)
+            /(cpu_khz/1e06)))
+    print("manage_grants:         %6.1f ns/packet" % (
+            (float(deltas["manage_grants_cycles"])/packets_received)
+            /(cpu_khz/1e06)))

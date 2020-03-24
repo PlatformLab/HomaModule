@@ -619,6 +619,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 	int rank;
 	struct homa_message_in *msgin = &rpc->msgin;
 	static int invocation = 0;
+	__u64 start = get_cycles();
 	
 	homa_grantable_lock(homa);
 	invocation++;
@@ -716,6 +717,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 				candidate->id, new_grant, priority);
 	}
 	homa_grantable_unlock(homa);
+	INC_METRIC(manage_grants_cycles, get_cycles() - start);
 }
 
 /**
@@ -979,8 +981,11 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		homa_sock_unlock(hsk);
 		sock_locked = 0;
 		set_current_state(TASK_INTERRUPTIBLE);
-		if (!atomic_long_read(&interest.id) && !hsk->shutdown)
+		if (!atomic_long_read(&interest.id) && !hsk->shutdown) {
+			__u64 start = get_cycles();
 			schedule();
+			INC_METRIC(blocked_cycles, get_cycles() - start);
+		}
 		__set_current_state(TASK_RUNNING);
 		if (atomic_long_read(&interest.id) != 0)
 			tt_record1("homa_wait_for_message woke up, id %d",

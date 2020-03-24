@@ -489,6 +489,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int err;
 	int result;
 	struct homa_rpc *rpc = NULL;
+	__u64 start = get_cycles();
 
 	tt_record1("homa_ioc_recv starting, port %d",
 			hsk->server_port != 0 ? hsk->server_port : 
@@ -546,6 +547,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			rpc->id & 0xffffffff,
 			rpc->is_client ? hsk->client_port : hsk->server_port);
 	rpc->dont_reap = false;
+	INC_METRIC(recv_cycles, get_cycles() - start);
 	return result;
 	
 error:
@@ -553,6 +555,7 @@ error:
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}
+	INC_METRIC(recv_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -571,34 +574,44 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_rpc *srpc;
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
+	__u64 start = get_cycles();
 
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
-		return -EFAULT;
+	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
+		err = -EFAULT;
+		goto done;
+	}
 	tt_record2("homa_ioc_reply starting, id %llu, port %d",
 			args.id, hsk->server_port);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	if (unlikely(args.dest_addr.sin_family != AF_INET))
-		return -EAFNOSUPPORT;
+	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
+		err = -EAFNOSUPPORT;
+		goto done;
+	}
 	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
 			&hsk->inet);
-	if (IS_ERR(peer))
-		return PTR_ERR(peer);
+	if (IS_ERR(peer)) {
+		err = PTR_ERR(peer);
+		goto done;
+	}
 	skbs = homa_fill_packets(hsk->homa, peer, args.response, args.resplen);
-	if (IS_ERR(skbs))
-		return PTR_ERR(skbs);
+	if (IS_ERR(skbs)) {
+		err = PTR_ERR(skbs);
+		goto done;
+	}
 	
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
 	if (!srpc) {
 		homa_free_skbs(skbs);
-		return -EINVAL;
+		err = -EINVAL;
+		goto done;
 	}
 	if (srpc->state != RPC_IN_SERVICE) {
 		homa_rpc_free(srpc);
 		err = -EINVAL;
-		goto done;
+		goto unlock;
 	}
 	srpc->state = RPC_OUTGOING;
 
@@ -607,8 +620,11 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
 	}
-done:
+unlock:
 	homa_rpc_unlock(srpc);
+
+done:
+	INC_METRIC(reply_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -624,10 +640,13 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_send_ipv4 args;
 	int err;
-	struct homa_rpc *crpc;
+	struct homa_rpc *crpc = NULL;
+	__u64 start = get_cycles();
 			
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
-		return -EFAULT;
+	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
+		err = -EFAULT;
+		goto error;
+	}
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -636,8 +655,10 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 			ntohs(args.dest_addr.sin_port),
 			hsk->client_port,
 			atomic64_read(&hsk->homa->next_outgoing_id));
-	if (unlikely(args.dest_addr.sin_family != AF_INET))
-		return -EAFNOSUPPORT;
+	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
+		err = -EAFNOSUPPORT;
+		goto error;
+	}
 	
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.request,
 			args.reqlen);
@@ -654,6 +675,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_rpc_unlock(crpc);
+	INC_METRIC(send_cycles, get_cycles() - start);
 	return 0;
 
     error:
@@ -661,6 +683,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(crpc);
 		homa_rpc_unlock(crpc);
 	}
+	INC_METRIC(send_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -879,26 +902,27 @@ int homa_softirq(struct sk_buff *skb) {
 	struct sk_buff *others;
 	__u16 dport;
 	static __u64 last = 0;
-	__u64 now;
+	__u64 start;
 	int header_offset;
 	int first_packet = 1;
 	struct homa_sock *hsk;
+	int num_packets = 0;
 	
+	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	now = get_cycles();
-	if ((now - last) > 1000000) {
-		int scaled_ms = (int) (10*(now-last)/cpu_khz);
+	if ((start - last) > 1000000) {
+		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
 			tt_record3("Gap in incoming packets: %d cycles "
 					"(%d.%1d ms)",
-					(int) (now - last), scaled_ms/10,
+					(int) (start - last), scaled_ms/10,
 					scaled_ms%10);
 			printk(KERN_NOTICE "Gap in incoming packets: %llu "
-					"cycles, (%d.%1d ms)", (now - last),
+					"cycles, (%d.%1d ms)", (start - last),
 					scaled_ms/10, scaled_ms%10);
 		}
 	}
-	last = now;
+	last = start;
 	
 	/* skb may actually contain many distinct packets, linked through
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Each
@@ -908,6 +932,7 @@ int homa_softirq(struct sk_buff *skb) {
 	skb_shinfo(skb)->frag_list = NULL;
 	while (1) {
 		saddr = ip_hdr(skb)->saddr;
+		num_packets++;
 		
 		/* Make sure the header is available at skb->data. One
 		 * complication: it's possible that the IP header hasn't
@@ -991,6 +1016,7 @@ next_packet:
 	}
 	
 	check_pacer(homa, 1);
+	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }
 

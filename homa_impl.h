@@ -1413,6 +1413,50 @@ struct homa_metrics {
 	__u64 softirq_calls;
 	
 	/**
+	 * @softirq_cycles: total time spent executing homa_softirq, as
+	 * measured with get_cycles().
+	 */
+	__u64 softirq_cycles;
+	
+	/**
+	 * @napi_cycles: total time spent processing Homa packets
+	 * in the NAPI layer (the lowest layer), as measured with
+	 * get_cycles().
+	 */
+	__u64 napi_cycles;
+	
+	/**
+	 * @send_cycles: total time spent executing the homa_ioc_send
+	 * kernel call handler, as measured with get_cycles().
+	 */
+	__u64 send_cycles;
+	
+	/**
+	 * @recv_cycles: total time spent executing the homa_ioc_recv
+	 * kernel call handler (including time when the thread is blocked),
+	 * as measured with get_cycles().
+	 */
+	__u64 recv_cycles;
+	
+	/**
+	 * @blocked_cycles: total time threads spend in blocked state
+	 * while executing the homa_ioc_recv kernel call handler.
+	 */
+	__u64 blocked_cycles;
+	
+	/**
+	 * @reply_cycles: total time spent executing the homa_ioc_reply
+	 * kernel call handler, as measured with get_cycles().
+	 */
+	__u64 reply_cycles;
+	
+	/**
+	 * @manage_grants_cycles: total time spent in manage_grants, as
+	 * measured with get_cycles().
+	 */
+	__u64 manage_grants_cycles;
+	
+	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
 	 * get_cycles().
 	 */
