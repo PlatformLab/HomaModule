@@ -1451,10 +1451,10 @@ struct homa_metrics {
 	__u64 reply_cycles;
 	
 	/**
-	 * @manage_grants_cycles: total time spent in manage_grants, as
+	 * @send_grants_cycles: total time spent in send_grants, as
 	 * measured with get_cycles().
 	 */
-	__u64 manage_grants_cycles;
+	__u64 send_grants_cycles;
 	
 	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
@@ -1860,7 +1860,9 @@ extern void     homa_add_packet(struct homa_message_in *msgin,
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
-extern int      homa_bind(struct socket *sk, struct sockaddr *addr, int addr_len);
+extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
+			int addr_len);
+extern void     homa_check_grantable(struct homa *homa, struct homa_rpc *rpc);
 extern int      homa_check_timeout(struct homa_rpc *rpc);
 extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
@@ -1902,7 +1904,6 @@ extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern void     homa_manage_grants(struct homa *homa, struct homa_rpc *rpc);
 extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
 			struct iov_iter *iter, int max_bytes);
 extern void     homa_message_in_destroy(struct homa_message_in *msgin);
@@ -1962,6 +1963,7 @@ extern struct homa_rpc
 			struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_rpc_reap(struct homa_sock *hsk);
+extern void     homa_send_grants(struct homa *homa);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 			size_t size, int flags);

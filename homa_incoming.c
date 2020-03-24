@@ -381,7 +381,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	}
 	homa_add_packet(&rpc->msgin, skb);
 	if (rpc->msgin.scheduled)
-		homa_manage_grants(homa, rpc);
+		homa_check_grantable(homa, rpc);
 	if (rpc->active_links.next == LIST_POISON1) {
 		/* This is the first packet of a server RPC, so we have to
 		 * add the RPC to @hsk->active_rpcs. We do it here, rather
@@ -592,42 +592,22 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 }
 
 /**
- * homa_manage_grants() - This function is invoked to set priorities of
- * messages for grants, determine whether grants can be sent out and, if so,
- * send them.
+ * homa_check_grantable() - This function ensures that an RPC is on the
+ * grantable list if appropriate, and not on it otherwise. It also adjust
  * @homa:    Overall data about the Homa protocol implementation.
- * @rpc:     If non-null, this is an RPC whose msgin just received a packet;
- *           rpc->msgin->scheduled should be true.  This RPC may need to
- *           be (re-)positioned in the grant queue. NULL typically means
- *           an RPC has just been removed from the queue, which may allow
- *           grants to be sent for other RPCs.
+ * @rpc:     RPC to check; typically the status of this RPC has changed
+ *           in a way that may affect its grantability (e.g. a packet
+ *           just arrived for it).
  */
-void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
+void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
-	/* The overall goal is to grant simultaneously to up to
-	 * homa->max_overcommit messages. Ideally, each message should use
-	 * a different priority level, determined by bytes_remaining (fewest
-	 * bytes_remaining gets the highest priority). If there aren't enough
-	 * scheduled priority levels for all of the messages, then the lowest
-	 * level gets shared by multiple messages. If there are fewer messages
-	 * than priority levels, then we use the lowest available levels
-	 * (new higher-priority messages can use the higher levels to achieve
-	 * instantaneous preemption).
-	 */
 	struct list_head *pos;
 	struct homa_rpc *candidate;
-	int rank;
 	struct homa_message_in *msgin = &rpc->msgin;
-	static int invocation = 0;
-	__u64 start = get_cycles();
 	
 	homa_grantable_lock(homa);
-	invocation++;
 	
-	if (!rpc)
-		goto check_grant;
-	
-	/* First, make sure this message is in the right place in (or not in)
+	/* Make sure this message is in the right place in (or not in)
 	 * homa->grantable_msgs.
 	 */
 	if (msgin->incoming >= msgin->total_length) {
@@ -646,7 +626,7 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 			if (candidate->msgin.bytes_remaining
 					> msgin->bytes_remaining) {
 				list_add_tail(&rpc->grantable_links, pos);
-				goto check_grant;
+				goto done;
 			}
 		}
 		list_add_tail(&rpc->grantable_links, &homa->grantable_rpcs);
@@ -657,25 +637,63 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		 */
 		candidate = list_prev_entry(rpc, grantable_links);
 		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
-			goto check_grant;
+			goto done;
 		__list_del_entry(&candidate->grantable_links);
 		list_add(&candidate->grantable_links, &rpc->grantable_links);
 	}
+    done:
+	homa_grantable_unlock(homa);
+}
+
+/**
+ * homa_send_grants() - This function checks to see whether it is
+ * appropriate to send grants and, if so, it sends them.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_send_grants(struct homa *homa)
+{
+	/* The overall goal is to grant simultaneously to up to
+	 * homa->max_overcommit messages. Ideally, each message should use
+	 * a different priority level, determined by bytes_remaining (fewest
+	 * bytes_remaining gets the highest priority). If there aren't enough
+	 * scheduled priority levels for all of the messages, then the lowest
+	 * level gets shared by multiple messages. If there are fewer messages
+	 * than priority levels, then we use the lowest available levels
+	 * (new higher-priority messages can use the higher levels to achieve
+	 * instantaneous preemption).
+	 */
+	struct list_head *pos;
+	struct homa_rpc *candidate;
+	int rank, i;
+	__u64 start = get_cycles();
 	
-    check_grant:
-	/* Next, see if there are any messages that deserve a grant (they have
+	/* The variables below keep track of grants we need to send;
+	 * don't send any until the very end, and release the lock
+	 * first.
+	 */
+	/* Copy homa->max_overcommit in case it changes. */
+	int max_grants = homa->max_overcommit;
+	struct grant_header grants[max_grants];
+	struct homa_rpc *rpcs[max_grants];
+	int num_grants = 0;
+	
+	if (list_empty(&homa->grantable_rpcs))
+		return;
+	
+	homa_grantable_lock(homa);
+	
+	/* See if there are any messages that deserve a grant (they have
 	 * fewer than homa->rtt_bytes of data in transit).
 	 */
 	rank = 0;
 	list_for_each(pos, &homa->grantable_rpcs) {
 		int extra_levels, priority;
 		int received, new_grant;
-		struct grant_header h;
+		struct grant_header *grant;
 		
 		rank++;
-		if (rank > homa->max_overcommit) {
+		if (rank > max_grants)
 			break;
-		}
 		candidate = list_entry(pos, struct homa_rpc, grantable_links);
 		
 		/* Invariant: candidate msgin's incoming < total_length
@@ -693,18 +711,17 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
-		h.offset = htonl(new_grant);
+		rpcs[num_grants] = candidate;
+		grant = &grants[num_grants];
+		num_grants++;
+		grant->offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
 		extra_levels = homa->max_sched_prio + 1 - homa->num_grantable;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
 		else if (priority < 0)
 			priority = 0;
-		h.priority = priority;
-		if (!homa_xmit_control(GRANT, &h, sizeof(h), candidate)) {
-			/* Don't do anything if the grant couldn't be sent; let
-			 * other retry mechanisms handle this. */
-		}
+		grant->priority = priority;
 		
 		/* The following line is needed to prevent spurious resends.
 		 * Without it, if the timer fires right after we send the
@@ -716,8 +733,17 @@ void homa_manage_grants(struct homa *homa, struct homa_rpc *rpc)
 		tt_record3("sent grant for id %llu, offset %d, priority %d",
 				candidate->id, new_grant, priority);
 	}
+	
 	homa_grantable_unlock(homa);
-	INC_METRIC(manage_grants_cycles, get_cycles() - start);
+	if (num_grants > 1)
+		printk(KERN_NOTICE "homa_send_grants is sending %d grants",
+				num_grants);
+	for (i = 0; i < num_grants; i++) {
+		/* Send any accumulated grants (ignore errors). */
+		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
+			rpcs[i]);
+	}
+	INC_METRIC(send_grants_cycles, get_cycles() - start);
 }
 
 /**
@@ -737,7 +763,7 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 			homa->num_grantable--;
 			list_del_init(&rpc->grantable_links);
 			homa_grantable_unlock(homa);
-			homa_manage_grants(homa, NULL);
+			homa_send_grants(homa);
 			return;
 		}
 		homa_grantable_unlock(homa);

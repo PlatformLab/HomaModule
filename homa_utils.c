@@ -995,9 +995,9 @@ char *homa_print_metrics(struct homa *homa)
 				"Time spent in homa_ioc_reply kernel call\n",
 				m->reply_cycles);
 		homa_append_metric(homa,
-				"manage_grants_cycles      %15llu  "
-				"Time spent in manage_grants\n",
-				m->manage_grants_cycles);
+				"send_grants_cycles      %15llu  "
+				"Time spent in send_grants\n",
+				m->send_grants_cycles);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",

@@ -1015,6 +1015,7 @@ next_packet:
 		others = others->next;
 	}
 	
+	homa_send_grants(homa);
 	check_pacer(homa, 1);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;

@@ -210,7 +210,7 @@ if len(prev) > 0:
         for core in range(first_core, end_core):
             line += "  Core%-2d" % (core)
         print(line)
-        for where in ["interrupt", "softirq", "send", "recv", "timer", "pacer"]:
+        for where in ["napi", "softirq", "send", "recv", "timer", "pacer"]:
             symbol = where + "_cycles"
             line = "%-10s  " % (where)
             for core in range(first_core, end_core):
@@ -247,12 +247,12 @@ if (elapsed_secs != 0):
             packets_received += deltas[symbol]
     print("Total packets received: %s/s" % (
             scale_number(packets_received/elapsed_secs)))
-    print("Interrupt handler:     %6.1f ns/packet" % (
-            (float(deltas["interrupt_cycles"])/packets_received)
+    print("NAPI handler:          %6.1f ns/packet" % (
+            (float(deltas["napi_cycles"])/packets_received)
             /(cpu_khz/1e06)))
     print("SoftIRQ handler:       %6.1f ns/packet" % (
             (float(deltas["softirq_cycles"])/packets_received)
             /(cpu_khz/1e06)))
-    print("manage_grants:         %6.1f ns/packet" % (
-            (float(deltas["manage_grants_cycles"])/packets_received)
+    print("Send grants:           %6.1f ns/packet" % (
+            (float(deltas["send_grants_cycles"])/packets_received)
             /(cpu_khz/1e06)))
