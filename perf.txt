@@ -2,7 +2,15 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
-* (Feb. 2019) The pacer can potentially be a severe performance bottleneck
+* (Mar. 2020) Noticed that throughput varies by 20% from run to run of
+  some benchmarks (e.g. a single client sending 500KB messages to a single
+  server). This happens because of poor load balancing in Linux. With a
+  single plant, all packets arrive through a single NAPI core, which is fully
+  utilized. However, if Linux also happens to place other threads on that
+  core (such as the pacer) it takes time away from NAPI, which reduces
+  throughput.
+
+* (Feb. 2020) The pacer can potentially be a severe performance bottleneck
   (a single thread cannot keep the network utilized with packets that are
   not huge). In a test with 2 clients bombarding a single server with
   1000-byte packets, performance started off high but then suddenly dropped
