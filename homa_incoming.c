@@ -735,9 +735,6 @@ void homa_send_grants(struct homa *homa)
 	}
 	
 	homa_grantable_unlock(homa);
-	if (num_grants > 1)
-		printk(KERN_NOTICE "homa_send_grants is sending %d grants",
-				num_grants);
 	for (i = 0; i < num_grants; i++) {
 		/* Send any accumulated grants (ignore errors). */
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
