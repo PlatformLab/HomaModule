@@ -192,9 +192,8 @@ if gro_packets != 0:
     print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
 
-# Print CPU usage by core
-if len(prev) > 0:
-    print("\nPer-core CPU usage:")
+if elapsed_secs != 0:
+    print("\nPer-Core CPU Usage:")
     print("-------------------")
     totals = []
     while len(totals) < len(cur):
@@ -223,11 +222,49 @@ if len(prev) > 0:
         for core in range(first_core, end_core):
             line += "   %5.2f" % (totals[core])
         print(line)
+
+    packets_received = 0.0
+    for symbol in symbols:
+        if symbol.startswith("packets_rcvd_"):
+            packets_received += deltas[symbol]
+
+    print("\nOverall Core Utilization:")
+    print("-------------------------")
+    total_cores = 0.0;
+    for op in ["send", "recv", "reply"]:
+        time = float(deltas[op + "_cycles"])
+        cores = time/time_delta
+        total_cores += cores
+        calls = float(deltas[op + "_calls"])
+        if calls == 0:
+            us_per = 0
+        else:
+            us_per = (time/calls)/(cpu_khz/1e03)
+        print("%s           %6.2f   %7.2f us/call" % ((op + " kcall").ljust(12),
+                cores, us_per))
+
+    for print_name, symbol in [["NAPI handler", "napi_cycles"],
+            ["SoftIRQ handler", "softirq_cycles"]]:
+        cpu_time = float(deltas[symbol])
+        cores = cpu_time/time_delta
+        total_cores += cores;
+        print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
+                cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
+
+    for print_name, symbol in [["Pacer", "pacer_cycles"],
+            ["Timer handler", "timer_cycles"]]:
+        cpu_time = float(deltas[symbol])
+        cores = cpu_time/time_delta
+        total_cores += cores;
+        print("%s        %6.2f" % (print_name.ljust(15),
+                cores))
+
+    print("------------------------------");
+    print("Total Core Utilization %6.2f" % (total_cores))
  
-if (elapsed_secs != 0):
-    print("\nLock misses:")
+    print("\nLock Misses:")
     print("------------")
-    print("            Misses/sec.  ns/miss   %CPU")
+    print("            Misses/sec.  ns/Miss   %CPU")
     for lock in ["client", "socket", "grantable", "throttle"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
@@ -238,21 +275,3 @@ if (elapsed_secs != 0):
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
-
-    print("\nPacket processing time:")
-    print("-----------------------")
-    packets_received = 0.0
-    for symbol in symbols:
-        if symbol.startswith("packets_rcvd_"):
-            packets_received += deltas[symbol]
-    print("Total packets received: %s/s" % (
-            scale_number(packets_received/elapsed_secs)))
-    print("NAPI handler:          %6.1f ns/packet" % (
-            (float(deltas["napi_cycles"])/packets_received)
-            /(cpu_khz/1e06)))
-    print("SoftIRQ handler:       %6.1f ns/packet" % (
-            (float(deltas["softirq_cycles"])/packets_received)
-            /(cpu_khz/1e06)))
-    print("Send grants:           %6.1f ns/packet" % (
-            (float(deltas["send_grants_cycles"])/packets_received)
-            /(cpu_khz/1e06)))

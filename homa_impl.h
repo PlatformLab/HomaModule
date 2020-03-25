@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -1431,12 +1431,18 @@ struct homa_metrics {
 	 */
 	__u64 send_cycles;
 	
+	/** @send_calls: total number of invocations of the send kernel call. */
+	__u64 send_calls;
+	
 	/**
 	 * @recv_cycles: total time spent executing the homa_ioc_recv
 	 * kernel call handler (including time when the thread is blocked),
 	 * as measured with get_cycles().
 	 */
 	__u64 recv_cycles;
+	
+	/** @recv_calls: total number of invocations of the recv kernel call. */
+	__u64 recv_calls;
 	
 	/**
 	 * @blocked_cycles: total time threads spend in blocked state
@@ -1450,11 +1456,8 @@ struct homa_metrics {
 	 */
 	__u64 reply_cycles;
 	
-	/**
-	 * @send_grants_cycles: total time spent in send_grants, as
-	 * measured with get_cycles().
-	 */
-	__u64 send_grants_cycles;
+	/** @reply_calls: total number of invocations of the reply kernel call. */
+	__u64 reply_calls;
 	
 	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with

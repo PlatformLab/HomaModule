@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -665,7 +665,6 @@ void homa_send_grants(struct homa *homa)
 	struct list_head *pos;
 	struct homa_rpc *candidate;
 	int rank, i;
-	__u64 start = get_cycles();
 	
 	/* The variables below keep track of grants we need to send;
 	 * don't send any until the very end, and release the lock
@@ -740,7 +739,6 @@ void homa_send_grants(struct homa *homa)
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
 			rpcs[i]);
 	}
-	INC_METRIC(send_grants_cycles, get_cycles() - start);
 }
 
 /**

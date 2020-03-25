@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -547,6 +547,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			rpc->id & 0xffffffff,
 			rpc->is_client ? hsk->client_port : hsk->server_port);
 	rpc->dont_reap = false;
+	INC_METRIC(recv_calls, 1);
 	INC_METRIC(recv_cycles, get_cycles() - start);
 	return result;
 	
@@ -624,6 +625,7 @@ unlock:
 	homa_rpc_unlock(srpc);
 
 done:
+	INC_METRIC(reply_calls, 1);
 	INC_METRIC(reply_cycles, get_cycles() - start);
 	return err;
 }
@@ -675,6 +677,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	homa_rpc_unlock(crpc);
+	INC_METRIC(send_calls, 1);
 	INC_METRIC(send_cycles, get_cycles() - start);
 	return 0;
 
@@ -683,6 +686,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(crpc);
 		homa_rpc_unlock(crpc);
 	}
+	INC_METRIC(send_calls, 1);
 	INC_METRIC(send_cycles, get_cycles() - start);
 	return err;
 }

@@ -983,9 +983,17 @@ char *homa_print_metrics(struct homa *homa)
 				"Time spent in homa_ioc_send kernel call\n",
 				m->send_cycles);
 		homa_append_metric(homa,
+				"send_calls                %15llu  "
+				"Total invocations of send kernel call\n",
+				m->send_calls);
+		homa_append_metric(homa,
 				"recv_cycles               %15llu  "
 				"Time spent in homa_ioc_recv kernel call\n",
 				m->recv_cycles - m->blocked_cycles);
+		homa_append_metric(homa,
+				"recv_calls                %15llu  "
+				"Total invocations of recv kernel call\n",
+				m->recv_calls);
 		homa_append_metric(homa,
 				"blocked_cycles            %15llu  "
 				"Time spent blocked in homa_ioc_recv\n",
@@ -995,9 +1003,9 @@ char *homa_print_metrics(struct homa *homa)
 				"Time spent in homa_ioc_reply kernel call\n",
 				m->reply_cycles);
 		homa_append_metric(homa,
-				"send_grants_cycles      %15llu  "
-				"Time spent in send_grants\n",
-				m->send_grants_cycles);
+				"reply_calls               %15llu  "
+				"Total invocations of reply kernel call\n",
+				m->reply_calls);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",
