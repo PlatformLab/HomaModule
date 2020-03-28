@@ -353,11 +353,11 @@ def test_slowdown():
         do_cmd("log --file node.log --level %s\n" % (log_level), r)
 
         log("Starting Homa servers")
-        do_cmd("server --ports 9\n", r)
+        do_cmd("server --ports 2 --port-threads 4\n", r)
 
         log("Starting Homa clients (unloaded)")
-        do_cmd("client --threads 1 --server-ports 1 --workload %s "
-                "--server-nodes 1 --first-server 2 --thread-max 1\n" % (
+        do_cmd("client --ports 1 --server-ports 1 --workload %s "
+                "--server-nodes 1 --first-server 2 --port-max 1\n" % (
                 args.workload), [1])
         log("Starting unloaded experiment")
         do_cmd("dump_times /dev/null\n", r)
@@ -369,9 +369,10 @@ def test_slowdown():
         log("Restarting Homa clients (loaded)")
         do_cmd("stop clients\n", r)
         for node in r:
-            command = "client --threads 5 --server-ports 9 --workload %s " \
-                    "--server-nodes %d --first-server 0 --net-bw %.3f " \
-                    "--thread-max %d --server-max %d --id %d\n" % (
+            command = "client --ports 3 --port-receivers 3 --server-ports 2 " \
+                    "--workload %s --server-nodes %d --first-server 0 " \
+                    "--net-bw %.3f --port-max %d --server-max %d " \
+                    "--id %d\n" % (
                     args.workload, args.num_nodes, args.net_bw,
                     args.thread_max, args.server_max, node)
             nodes[node].stdin.write(command)
@@ -396,9 +397,9 @@ def test_slowdown():
         do_cmd("stop servers\n", r)
         do_cmd("server --ports 9  --protocol tcp\n", r)
         log("Starting TCP clients (loaded)")
-        do_cmd("client --threads 5 --server-ports 9 --workload %s "
+        do_cmd("client --ports 5 --server-ports 9 --workload %s "
                 "--server-nodes %d --first-server 0 --net-bw %.3f "
-                "--protocol tcp --thread-max %d --server-max %d\n" %
+                "--protocol tcp --port-max %d --server-max %d\n" %
                 (args.workload, args.num_nodes, args.net_bw, args.thread_max,
                 args.server_max), r)
         log("Starting TCP experiment")

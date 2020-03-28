@@ -55,18 +55,19 @@
 
 using std::string;
 
-/* Command-line parameter values (and default values): */
-bool alt_client = false;
+/* Command-line parameter values (note: changes to default values must
+ * also be reflected in client and server constructors): */
 uint32_t client_max = 1;
-int client_threads = 0;
+int client_ports = 0;
 int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
 uint32_t server_max = 1;
 double net_bw = 0.0;
+int port_receivers = 1;
 int port_threads = 1;
-const char *protocol = "homa";
+const char *protocol;
 int server_nodes = 1;
 int server_ports = 1;
 bool verbose = false;
@@ -163,9 +164,6 @@ void print_help(const char *name)
 		"commands are supported, each followed by a list of options supported\n"
 		"by that command:\n\n"
 		"client [options]      Start one or more client threads\n"
-		"    --alt-client      Only create 1 thread per client, which waits\n"
-		"                      for its own requests (can't support --client_max\n"
-		"                      greater than 1)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
@@ -174,14 +172,16 @@ void print_help(const char *name)
 		"                      GB/s; 0 means send continuously (default: %.1f)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --server-max      Maximum number of outstanding requests from a single\n"
-		"                      client thread to a single server port (default: %d)\n"
+		"                      client port to a single server port (default: %d)\n"
 		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
 		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
-		"    --thread-max      Maximum number of outstanding requests from a single\n"
-		"                      client thread (across all servers) (default: %d)\n"
-		"    --threads         Number of request invocation threads to create\n"
-		"                      (default: %d)\n"
+		"    --port-max        Maximum number of outstanding requests from a single\n"
+		"                      client port (across all servers) (default: %d)\n"
+		"    --ports           Number of ports on which to send requests (one"
+		"                      sending thread per port (default: %d)\n"
+		"    --port_receivers  Number of threads to listen for responses on each\n"
+		"                      port (default: %d)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n\n"
 		"dump_times file       Log RTT times (and lengths) to file\n\n"
@@ -203,7 +203,7 @@ void print_help(const char *name)
 		"                      option must be either 'clients' or 'servers'\n",
 		first_port, first_server, first_server, net_bw, protocol,
 		server_max, server_nodes, server_ports, client_max,
-		client_threads, workload,
+		client_ports, port_receivers, workload,
 		first_port, protocol, port_threads, server_ports);
 }
 
@@ -898,10 +898,10 @@ class client {
 	int id;
 	    
 	/**
-	 * @receiver_running: nonzero means the receiving thread has
-	 * initialized and is ready to receive responses.
+	 * @receivers_running: number of receiving threads that have
+	 * initialized and are ready to receive responses.
 	 */
-	std::atomic<int> receiver_running;
+	std::atomic<size_t> receivers_running;
 	
 	/**
 	 * @request_servers: a randomly chosen collection of indexes into
@@ -964,17 +964,17 @@ class client {
 	 */
 #define NUM_CLIENT_STATS 500000
 	
-	/**
-	 * @next_result: index into both actual_lengths and actual_rtts
-	 * where info about the next RPC completion will be stored.
-	 */
-	uint32_t next_result;
-	
 	/** @requests: total number of RPCs issued so far for each server. */
 	std::vector<uint64_t> requests;
 	
-	/** @responses: total number of responses received so far. */
-	std::vector<uint64_t> responses;
+	/** @responses: total number of responses received so far from
+	 * each server. Dynamically allocated (as of 3/2020, can't use
+	 * vector with std::atomic).
+	 */
+	std::atomic<uint64_t> *responses;
+	
+	/** @num_servers: Number of entries in @responses. */
+	size_t num_servers;
 	
 	/**
 	 * @total_requests: total number of RPCs issued so far across all
@@ -992,13 +992,13 @@ class client {
 	 * @response_data: total number of bytes of data in responses
 	 * received so far.
 	 */
-	uint64_t response_data;
+	std::atomic<uint64_t> response_data;
 	
 	/**
 	 * @total_rtt: sum of round-trip times (in rdtsc cycles) for
 	 * all responses received so far.
 	 */
-	uint64_t total_rtt;
+	std::atomic<uint64_t> total_rtt;
 	
 	/**
 	 * @lag: time in rdtsc cycles by which we are running behind
@@ -1008,7 +1008,8 @@ class client {
 	uint64_t lag;
 	
 	client(int id);
-	virtual ~client() {}
+	virtual ~client();
+	void record(int length, uint32_t rtt, int server_id);
 };
 
 /** @clients: keeps track of all existing clients. */
@@ -1021,7 +1022,7 @@ std::vector<client *> clients;
  */
 client::client(int id)
 	: id(id)
-	, receiver_running(0)
+	, receivers_running(0)
 	, request_servers()
 	, next_server(0)
 	, request_lengths()
@@ -1030,9 +1031,9 @@ client::client(int id)
 	, next_interval(0)
 	, actual_lengths(NUM_CLIENT_STATS, 0)
 	, actual_rtts(NUM_CLIENT_STATS, 0)
-	, next_result(0)
 	, requests()
 	, responses()
+        , num_servers(server_addrs.size())
 	, total_requests(0)
 	, total_responses(0)
 	, response_data(0)
@@ -1048,7 +1049,7 @@ client::client(int id)
 #define NUM_LENGTHS 7207
 #define NUM_INTERVALS 8783
 	std::uniform_int_distribution<int> server_dist(0,
-			static_cast<int>(server_addrs.size() - 1));
+			static_cast<int>(num_servers - 1));
 	for (int i = 0; i < NUM_SERVERS; i++) {
 		int server = server_dist(rand_gen);
 		request_servers.push_back(server);
@@ -1060,7 +1061,7 @@ client::client(int id)
 	if (net_bw == 0.0)
 		request_intervals.push_back(0);
 	else {
-		double lambda = 1e09*net_bw/(dist_mean(workload)*client_threads);
+		double lambda = 1e09*net_bw/(dist_mean(workload)*client_ports);
 		double cycles_per_second = get_cycles_per_sec();
 		std::exponential_distribution<double> interval_dist(lambda);
 		for (int i = 0; i < NUM_INTERVALS; i++) {
@@ -1070,7 +1071,9 @@ client::client(int id)
 		}
 	}
 	requests.resize(server_addrs.size());
-	responses.resize(server_addrs.size());
+	responses = new std::atomic<uint64_t>[num_servers];
+	for (size_t i = 0; i < num_servers; i++)
+		responses[i] = 0;
 	double avg_length = 0;
 	for (size_t i = 0; i < request_lengths.size(); i++)
 		avg_length += request_lengths[i];
@@ -1083,6 +1086,31 @@ client::client(int id)
 			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
 			avg_length*1e-3, dist_mean(workload)*1e-3, rate*1e-3,
 			avg_length*rate*1e-6);
+}
+
+/**
+ * Destructor for clients.
+ */
+client::~client()
+{
+	delete[] responses;
+}
+
+/**
+ * record() - Records statistics about a particular request.
+ * @length:     Size of the request and response messages for the request,
+ *              in bytes.
+ * @rtt:        Total round-trip time to complete the request, in rdtsc cycles.
+ * @server_id:  Index of the server for this request in @server_addrs.
+ */
+void client::record(int length, uint32_t rtt, int server_id)
+{
+	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
+	responses[server_id]++;
+	response_data += length;
+	total_rtt += rtt;
+	actual_lengths[slot] = length;
+	actual_rtts[slot] = rtt;
 }
 
 /**
@@ -1104,12 +1132,12 @@ class homa_client : public client {
 	/** @stop: true means threads should exit ASAP. */
 	bool stop;
 	
-	/** @receiver: thread that receives responses. */
-	std::optional<std::thread> receiving_thread;
+	/** @receiver: threads that receive responses. */
+	std::vector<std::thread> receiving_threads;
 	
 	/**
 	 * @sender: thread that sends requests (may also receive
-	 * responses if --alt-client has been specified).
+	 * responses if port_receivers is 0).
 	 */
 	std::optional<std::thread> sending_thread;
 };
@@ -1123,7 +1151,7 @@ homa_client::homa_client(int id)
 	: client(id)
 	, fd(-1)
         , stop(false)
-        , receiving_thread()
+        , receiving_threads()
         , sending_thread()
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
@@ -1131,14 +1159,14 @@ homa_client::homa_client(int id)
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
 	}
 	
-	if (!alt_client) {
-		receiving_thread.emplace(&homa_client::receiver, this);
-		while (!receiver_running) {
-			/* Wait for the receiver to begin execution before
-			 * starting the sender; otherwise the initial RPCs
-			 * may appear to take a long time.
-			 */
-		}
+	for (int i = 0; i < port_receivers; i++) {
+		receiving_threads.emplace_back(&homa_client::receiver, this);
+	}
+	while (receivers_running < receiving_threads.size()) {
+		/* Wait for the receivers to begin execution before
+		 * starting the sender; otherwise the initial RPCs
+		 * may appear to take a long time.
+		 */
 	}
 	sending_thread.emplace(&homa_client::sender, this);
 }
@@ -1154,8 +1182,8 @@ homa_client::~homa_client()
 	close(fd);
 	if (sending_thread)
 		sending_thread->join();
-	if (receiving_thread)
-		receiving_thread->join();
+	for (std::thread &thread: receiving_threads)
+		thread.join();
 }
 
 /**
@@ -1185,17 +1213,8 @@ void homa_client::wait_response(uint64_t id)
 				print_address(&server_addr));
 		exit(1);
 	}
-	uint32_t elapsed = rdtsc() & 0xffffffff;
-	elapsed -= header->start_time;
-	responses[header->server_id]++;
-	total_responses++;
-	response_data += length;
-	total_rtt += elapsed;
-	actual_lengths[next_result] = length;
-	actual_rtts[next_result] = elapsed;
-	next_result++;
-	if (next_result >= actual_lengths.size())
-			next_result = 0;
+	uint32_t end_time = rdtsc() & 0xffffffff;
+	record(length, end_time - header->start_time, header->server_id);
 }
 
 /**
@@ -1267,7 +1286,7 @@ void homa_client::sender()
 		if (next_interval >= request_intervals.size())
 			next_interval = 0;
 		
-		if (!receiver_running) {
+		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
 			wait_response(id);
@@ -1281,12 +1300,9 @@ void homa_client::sender()
  */
 void homa_client::receiver(void)
 {	
-	receiver_running = 1;
-	while (1) {
-		if (stop)
-			return;
+	receivers_running++;
+	while (!stop)
 		wait_response(0);
-	}
 }
 
 /**
@@ -1316,12 +1332,12 @@ class tcp_client : public client {
 	/** @stop:  True means background threads should exit. */
 	bool stop;
 	
-	/** @receiver: thread that receives responses. */
-	std::optional<std::thread> receiving_thread;
+	/** @receiver: threads that receive responses. */
+	std::vector<std::thread> receiving_threads;
 	
 	/**
 	 * @sender: thread that sends requests (may also receive
-	 * responses if --alt-client has been specified).
+	 * responses if port_receivers is 0).
 	 */
 	std::optional<std::thread> sending_thread;
 };
@@ -1336,9 +1352,14 @@ tcp_client::tcp_client(int id)
 	, messages()
         , epoll_fd(-1)
         , stop(false)
-        , receiving_thread()
+        , receiving_threads()
         , sending_thread()
 {
+	if (port_receivers != 1) {
+		log(NORMAL, "FATAL: --port-receivers is %d, but TCP only "
+				"supports 1", port_receivers);
+		exit(1);
+	}
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
 		int fd = socket(PF_INET, SOCK_STREAM, 0);
 		if (fd == -1) {
@@ -1388,8 +1409,8 @@ tcp_client::tcp_client(int id)
 		}
 	}
 	
-	receiving_thread.emplace(&tcp_client::receiver, this);
-	while (!receiver_running) {
+	receiving_threads.emplace_back(&tcp_client::receiver, this);
+	while (receivers_running == 0) {
 		/* Wait for the receiver to begin execution before
 		 * starting the sender; otherwise the initial RPCs
 		 * may appear to take a long time.
@@ -1428,8 +1449,8 @@ tcp_client::~tcp_client()
 	
 	if (sending_thread)
 		sending_thread->join();
-	if (receiving_thread)
-		receiving_thread->join();
+	for (std::thread& thread: receiving_threads)
+		thread.join();
 	
 	close(fds[0]);
 	close(fds[1]);
@@ -1510,7 +1531,7 @@ void tcp_client::sender()
  */
 void tcp_client::receiver(void)
 {
-	receiver_running = 1;
+	receivers_running++;
 	
 	/* Each iteration through this loop processes a batch of incoming
 	 * responses
@@ -1537,17 +1558,10 @@ void tcp_client::receiver(void)
 			tcp_message *message = &messages[events[i].data.u32];
 			int error = message->read([this](
 					message_header *header) {
-				uint32_t elapsed = rdtsc() & 0xffffffff;
-				elapsed -= header->start_time;
-				responses[header->server_id]++;
-				total_responses++;
-				response_data += header->length;
-				total_rtt += elapsed;
-				actual_lengths[next_result] = header->length;
-				actual_rtts[next_result] = elapsed;
-				next_result++;
-				if (next_result >= actual_lengths.size())
-					next_result = 0;
+				uint32_t end_time = rdtsc() & 0xffffffff;
+				record(header->length,
+						end_time - header->start_time,
+						header->server_id);
 			});
 			if (error) {
 				log(NORMAL, "FATAL: %s (client)\n",
@@ -1624,8 +1638,8 @@ void client_stats(uint64_t now)
 	if (times_per_client > NUM_CLIENT_STATS)
 		times_per_client = NUM_CLIENT_STATS;
 	for (client *client: clients) {
-		for (int count: client->responses)
-			client_rpcs += count;
+		for (size_t i = 0; i < client->num_servers; i++)
+			client_rpcs += client->responses[i];
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
 		lag += client->lag;
@@ -1633,9 +1647,8 @@ void client_stats(uint64_t now)
 			/* Collect the most recent RTTs from the client for
 			 * computing a CDF.
 			 */
-			int src = client->next_result - i;
-			if (src < 0)
-				src += NUM_CLIENT_STATS;
+			int src = (client->total_responses - i)
+					% NUM_CLIENT_STATS;
 			if (client->actual_rtts[src] == 0) {
 				/* Client hasn't accumulated times_per_client
 				 * entries yet; just use what it has. */
@@ -1700,23 +1713,20 @@ void log_stats()
  */
 int client_cmd(std::vector<string> &words)
 {
-	alt_client = false;
 	client_max = 1;
-	client_threads = 1;
+	client_ports = 1;
 	first_port = 4000;
 	first_server = 1;
 	server_max = 1;
 	net_bw = 0.0;
-	port_threads = 1;
+	port_receivers = 1;
 	protocol = "homa";
 	server_nodes = 1;
 	workload = "100";
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--alt-client") == 0) {
-			alt_client = true;
-		} else if (strcmp(option, "--first-port") == 0) {
+		if (strcmp(option, "--first-port") == 0) {
 			if (!parse_int(words, i+1, &first_port, option))
 				return 0;
 			i++;
@@ -1730,6 +1740,19 @@ int client_cmd(std::vector<string> &words)
 			i++;
 		} else if (strcmp(option, "--net-bw") == 0) {
 			if (!parse_float(words, i+1, &net_bw, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--ports") == 0) {
+			if (!parse_int(words, i+1, &client_ports, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--port-max") == 0) {
+			if (!parse_int(words, i+1, (int *) &client_max,
+					option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--port-receivers") == 0) {
+			if (!parse_int(words, i+1, &port_receivers, option))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--protocol") == 0) {
@@ -1753,15 +1776,6 @@ int client_cmd(std::vector<string> &words)
 			if (!parse_int(words, i+1, &server_ports, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--thread-max") == 0) {
-			if (!parse_int(words, i+1, (int *) &client_max,
-					option))
-				return 0;
-			i++;
-		} else if (strcmp(option, "--threads") == 0) {
-			if (!parse_int(words, i+1, &client_threads, option))
-				return 0;
-			i++;
 		} else if (strcmp(option, "--workload") == 0) {
 			if ((i + 1) >= words.size()) {
 				printf("No value provided for %s\n",
@@ -1778,7 +1792,7 @@ int client_cmd(std::vector<string> &words)
 	init_server_addrs();
 
 	/* Create clients. */
-	for (int i = 0; i < client_threads; i++) {
+	for (int i = 0; i < client_ports; i++) {
 		if (strcmp(protocol, "homa") == 0)
 			clients.push_back(new homa_client(i));
 		else
@@ -1818,12 +1832,12 @@ int dump_times_cmd(std::vector<string> &words)
 	fprintf(f, "# Round-trip times measured by cp_node at %s\n",
 			time_buffer);
 	fprintf(f, "# --protocol %s, --workload %s, --net-bw %.1f --threads %d,\n",
-			protocol, workload, net_bw, client_threads);
-	fprintf(f, "# --server-nodes %d --server-ports %d, --thread-max %d, --server-max %d\n",
+			protocol, workload, net_bw, client_ports);
+	fprintf(f, "# --server-nodes %d --server-ports %d, --port-max %d, --server-max %d\n",
 			server_nodes, server_ports, client_max, server_max);
 	fprintf(f, "# Length   RTT (usec)\n");
 	for (client *client: clients) {
-		__u32 start = client->next_result;
+		__u32 start = client->total_responses % NUM_CLIENT_STATS;
 		__u32 i = start;
 		while (1) {
 			if (client->actual_rtts[i] != 0) {
