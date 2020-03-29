@@ -373,8 +373,8 @@ def test_slowdown():
                     "--workload %s --server-nodes %d --first-server 0 " \
                     "--net-bw %.3f --port-max %d --server-max %d " \
                     "--id %d\n" % (
-                    args.workload, args.num_nodes, args.net_bw,
-                    args.thread_max, args.server_max, node)
+                    args.workload, args.num_nodes, args.net_bw/2,
+                    args.port_max, args.server_max, node)
             nodes[node].stdin.write(command)
             nodes[node].stdin.flush()
         wait_output("% ", r, command)
@@ -400,7 +400,7 @@ def test_slowdown():
         do_cmd("client --ports 5 --server-ports 9 --workload %s "
                 "--server-nodes %d --first-server 0 --net-bw %.3f "
                 "--protocol tcp --port-max %d --server-max %d\n" %
-                (args.workload, args.num_nodes, args.net_bw, args.thread_max,
+                (args.workload, args.num_nodes, args.net_bw/2, args.port_max,
                 args.server_max), r)
         log("Starting TCP experiment")
         do_cmd("dump_times /dev/null\n", r)
@@ -450,17 +450,17 @@ parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
 parser.add_argument('-p', '--protocol', dest='protocol',
         choices=['homa', 'tcp'], default="homa",
         help='transport protocol to use (default: homa)')
+parser.add_argument('--port-max', type=int, dest='port_max',
+        metavar='count', default=100,
+        help='maximum number of requests each client thread can have '
+        'outstanding at a time (default: 20)')
 parser.add_argument('-s', '--seconds', type=int, dest='seconds',
         metavar='S', default=5,
         help='run each experiment for S seconds (default: 5 secs)')
 parser.add_argument('--server-max', type=int, dest='server_max',
-        metavar='count', default=20,
+        metavar='count', default=100,
         help='maximum number of requests a single client thread can have '
         'outstanding to a single server port at a time (default: 20)')
-parser.add_argument('--thread-max', type=int, dest='thread_max',
-        metavar='count', default=20,
-        help='maximum number of requests each client thread can have '
-        'outstanding at a time (default: 20)')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
         help='enable verbose output in node logs')
 parser.add_argument('-w', '--workload', dest='workload',
