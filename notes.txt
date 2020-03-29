@@ -14,10 +14,9 @@ Notes for Homa implementation in Linux:
     (e.g. don't hash based on packet info). Is there some way to hash to
     the same location under low load, but use multiple cores under high
     load?
-  * Record CPU time at client level
   * Get dynamic priority adjustment working
   * TCP does non-blocking sends for responses, which can delay processing
-    other requests for the same thread.
+    other requests for the same thread; may be unfair?
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.

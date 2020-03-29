@@ -17,13 +17,13 @@
 
 #include "homa_impl.h"
 
-/* Separate performance counters for each core. NR_CPUS is an overestimate
- * of the actual number, but allows us to allocate the array statically.
+/* Core-specific information. NR_CPUS is an overestimate of the actual
+ * number, but allows us to allocate the array statically.
  */
-struct homa_metrics *homa_metrics[NR_CPUS];
+struct homa_core *homa_cores[NR_CPUS];
 
-/* Points to block of memory holding all homa_metrics; used to free it. */
-char *metrics_memory;
+/* Points to block of memory holding all homa_cores; used to free it. */
+char *core_memory;
 
 /**
  * homa_init() - Constructor for homa objects.
@@ -41,22 +41,22 @@ int homa_init(struct homa *homa)
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 			"homa_init assumes at least 8 priority levels");
 	
-	/* Initialize Homa metrics (if no-one else has already done it),
-	 * making sure that each core has private cache lines for its metrics.
+	/* Initialize core-specific info (if no-one else has already done it),
+	 * making sure that each core has private cache lines.
 	 */
-	if (!metrics_memory) {
-		aligned_size = (sizeof(struct homa_metrics) + 0x3f) & ~0x3f;
-		metrics_memory = vmalloc(0x3f + (nr_cpu_ids*aligned_size));
-		if (!metrics_memory) {
+	if (!core_memory) {
+		aligned_size = (sizeof(struct homa_core) + 0x3f) & ~0x3f;
+		core_memory = vmalloc(0x3f + (nr_cpu_ids*aligned_size));
+		if (!core_memory) {
 			printk(KERN_ERR "Homa couldn't allocate memory "
-					"for metrics\n");
+					"for core-specific data\n");
 			return -ENOMEM;
 		}
-		first = (char *) (((__u64) metrics_memory + 0x3f) & ~0x3f);
+		first = (char *) (((__u64) core_memory + 0x3f) & ~0x3f);
 		for (i = 0; i < nr_cpu_ids; i++) {
-			homa_metrics[i] = (struct homa_metrics *)
+			homa_cores[i] = (struct homa_core *)
 					(first + i*aligned_size);
-			memset(homa_metrics[i], 0, aligned_size);
+			memset(homa_cores[i], 0, aligned_size);
 		}
 	}
 	
@@ -143,11 +143,11 @@ void homa_destroy(struct homa *homa)
 	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(&homa->port_map);
 	homa_peertab_destroy(&homa->peers);
-	if (metrics_memory) {
-		vfree(metrics_memory);
-		metrics_memory = NULL;
+	if (core_memory) {
+		vfree(core_memory);
+		core_memory = NULL;
 		for (i = 0; i < nr_cpu_ids; i++) {
-			homa_metrics[i] = NULL;
+			homa_cores[i] = NULL;
 		}
 	}
 	if (homa->metrics)
@@ -909,7 +909,7 @@ char *homa_print_metrics(struct homa *homa)
 			"Clock rate for RDTSC counter, in khz\n",
 			cpu_khz);
 	for (core = 0; core < nr_cpu_ids; core++) {
-		struct homa_metrics *m = homa_metrics[core];
+		struct homa_metrics *m = &homa_cores[core]->metrics;
 		homa_append_metric(homa,
 				"core                      %15d  "
 				"Core id for following metrics\n",
@@ -1018,6 +1018,10 @@ char *homa_print_metrics(struct homa *homa)
 				"reply_calls               %15llu  "
 				"Total invocations of reply kernel call\n",
 				m->reply_calls);
+		homa_append_metric(homa,
+				"user_cycles               %15llu  "
+				"App. time outside Homa kernel call handler\n",
+				m->user_cycles);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",

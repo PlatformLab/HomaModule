@@ -379,7 +379,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_metrics[cpu_number]->control_xmit_errors);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
 }
 
 TEST_F(homa_outgoing, homa_xmit_data__basics)
@@ -524,7 +524,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__transmit_error)
 	mock_ip_queue_xmit_errors = 1;
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_metrics[cpu_number]->data_xmit_errors);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
 }
 
 TEST_F(homa_outgoing, homa_resend_data)
@@ -773,7 +773,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	mock_trylock_errors = -1;
 	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_metrics[cpu_number]->pacer_skipped_rpcs);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.pacer_skipped_rpcs);
 	unit_log_clear();
 	mock_trylock_errors = 0;
 	homa_pacer_xmit(&self->homa);

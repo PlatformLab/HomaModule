@@ -516,7 +516,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
  */
 void tt_inc_metric(int offset, __u64 count)
 {
-	__u64 *metric = (__u64 *)(((char *) homa_metrics[smp_processor_id()])
-			+ offset);
+	__u64 *metric = (__u64 *)(((char *)
+			&homa_cores[smp_processor_id()]->metrics) + offset);
 	*metric += count;
 }

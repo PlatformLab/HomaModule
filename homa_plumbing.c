@@ -489,7 +489,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int err;
 	int result;
 	struct homa_rpc *rpc = NULL;
-	__u64 start = get_cycles();
 
 	tt_record1("homa_ioc_recv starting, port %d", hsk->client_port);
 	if (unlikely(copy_from_user(&args, (void *) arg,
@@ -541,8 +540,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 //	tt_record3("homa_ioc_recv finished, id %u, port %d, length %d",
 //			rpc->id & 0xffffffff, hsk->client_port, result);
 	rpc->dont_reap = false;
-	INC_METRIC(recv_calls, 1);
-	INC_METRIC(recv_cycles, get_cycles() - start);
 	return result;
 	
 error:
@@ -550,7 +547,6 @@ error:
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}
-	INC_METRIC(recv_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -569,7 +565,6 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_rpc *srpc;
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
-	__u64 start = get_cycles();
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
@@ -621,8 +616,6 @@ unlock:
 done:
 //	tt_record3("homa_ioc_reply finished, id %llu, port %d, length %d",
 //			args.id, hsk->client_port, args.resplen);
-	INC_METRIC(reply_calls, 1);
-	INC_METRIC(reply_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -639,7 +632,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_args_send_ipv4 args;
 	int err;
 	struct homa_rpc *crpc = NULL;
-	__u64 start = get_cycles();
 			
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
@@ -675,8 +667,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
 //			crpc->id, hsk->client_port, args.reqlen);
 	homa_rpc_unlock(crpc);
-	INC_METRIC(send_calls, 1);
-	INC_METRIC(send_cycles, get_cycles() - start);
 	return 0;
 
     error:
@@ -684,8 +674,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(crpc);
 		homa_rpc_unlock(crpc);
 	}
-	INC_METRIC(send_calls, 1);
-	INC_METRIC(send_cycles, get_cycles() - start);
 	return err;
 }
 
@@ -700,12 +688,25 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
  */
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	int result;
+	__u64 start = get_cycles();
+	struct homa_core *core = homa_cores[smp_processor_id()];
+	if (current == core->thread)
+		INC_METRIC(user_cycles, start - core->syscall_end_time);
+	
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
+		core = homa_cores[smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(send_calls, 1);
+		INC_METRIC(send_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCRECV:
 		result = homa_ioc_recv(sk, arg);
+		core = homa_cores[smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(recv_calls, 1);
+		INC_METRIC(recv_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCINVOKE:
 		printk(KERN_NOTICE "HOMAIOCINVOKE not yet implemented\n");
@@ -713,6 +714,10 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
+		core = homa_cores[smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(reply_calls, 1);
+		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCABORT:
 		printk(KERN_NOTICE "HOMAIOCABORT not yet implemented\n");
@@ -723,6 +728,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		result = -EINVAL;
 		break;
 	}
+	core->thread = current;
 	return result;
 }
 

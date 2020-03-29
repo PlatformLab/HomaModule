@@ -166,7 +166,7 @@ TEST_F(homa_timer, homa_timer__basics)
 	self->homa.timer_ticks = 300;
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
-	EXPECT_EQ(1, homa_metrics[cpu_number]->client_rpc_timeouts);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_rpc_timeouts);
 	EXPECT_EQ(RPC_READY, crpc->state);
 }
 TEST_F(homa_timer, homa_timer__rpc_ready)
@@ -199,7 +199,7 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 	srpc->num_resends = self->homa.abort_resends;
 	srpc->silent_ticks = self->homa.resend_ticks;
 	homa_timer(&self->homa);
-	EXPECT_EQ(1, homa_metrics[cpu_number]->server_rpc_timeouts);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_rpc_timeouts);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }

@@ -1478,6 +1478,17 @@ struct homa_metrics {
 	__u64 reply_calls;
 	
 	/**
+	 * @user_cycles: total time spent in user threads between the
+	 * completion of one Homa system call and the initiation of another.
+	 * This includes time spent in kernel call and return, plus time
+	 * in the user thread (including any non-Homa system calls it makes)
+	 * plus time when the thread is preempted (e.g. to run NAPI or
+	 * SoftIRQ handlers). This metric is only useful under very limited
+	 * conditions.
+	 */
+	__u64 user_cycles;
+	
+	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
 	 * get_cycles().
 	 */
@@ -1684,6 +1695,28 @@ struct homa_metrics {
 	__u64 temp4;
 };
 
+/**
+ * struct homa_core - Homa allocates one of these structures for each
+ * core, to hold information that needs to be kept on a per-core basis.
+ */
+struct homa_core {
+	/**
+	 * @thread: the most recent thread to invoke a Homa system call
+	 * on this core, or NULL if none.
+	 */
+	struct task_struct *thread;
+	
+	/**
+	 * @syscall_end_time: the time, in rdtsc units, when the last
+	 * Homa system call completed on this core. Meaningless if thread
+	 * is NULL.
+	 */
+	__u64 syscall_end_time;
+	
+	/** @metrics: performance statistics for this core. */
+	struct homa_metrics metrics;
+};
+
 #define homa_bucket_lock(bucket, type)                      \
 	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
 		__u64 start = get_cycles();                 \
@@ -1864,9 +1897,9 @@ static inline void homa_throttle_unlock(struct homa *homa) {
 }
 
 #define INC_METRIC(metric, count) \
-		(homa_metrics[smp_processor_id()]->metric) += (count)
+		(homa_cores[smp_processor_id()]->metrics.metric) += (count)
 
-extern struct homa_metrics *homa_metrics[];
+extern struct homa_core *homa_cores[];
 
 #ifdef __UNIT_TEST__
 extern void unit_log_printf(const char *separator, const char* format, ...)

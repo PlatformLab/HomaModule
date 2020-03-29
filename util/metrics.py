@@ -247,17 +247,24 @@ if elapsed_secs != 0:
 
     print("\nOverall Core Utilization:")
     print("-------------------------")
-    total_cores = 0.0;
-    for op in ["send", "recv", "reply"]:
+    total_cores = 0.0
+    total_syscalls = 0
+    for op in ["send", "recv", "reply", "user"]:
         time = float(deltas[op + "_cycles"])
         cores = time/time_delta
         total_cores += cores
-        calls = float(deltas[op + "_calls"])
+        if op != "user":
+            calls = float(deltas[op + "_calls"])
+            total_syscalls += calls
+            label = op + " syscall"
+        else:
+            calls = total_syscalls
+            label = "call/return/user"
         if calls == 0:
             us_per = 0
         else:
             us_per = (time/calls)/(cpu_khz/1e03)
-        print("%s           %6.2f   %7.2f us/call" % ((op + " kcall").ljust(12),
+        print("%s       %6.2f   %7.2f us/syscall" % (label.ljust(16),
                 cores, us_per))
 
     for print_name, symbol in [["NAPI handler", "napi_cycles"],
@@ -293,8 +300,8 @@ if elapsed_secs != 0:
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
  
-    print("\nCanaries: possible problem indicators")
-    print("-------------------------------------")
+    print("\nCanaries (possible problem indicators):")
+    print("---------------------------------------")
     for symbol in ["requests_queued", "responses_queued"]:
         delta = deltas[symbol]
         if delta != 0:
