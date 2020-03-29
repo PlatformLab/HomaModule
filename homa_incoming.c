@@ -1108,6 +1108,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		if (interest)
 			goto handoff;
 		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_responses);
+		INC_METRIC(responses_queued, 1);
 	} else {
 		interest = list_first_entry_or_null(
 				&rpc->hsk->request_interests,
@@ -1115,6 +1116,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		if (interest)
 			goto handoff;
 		list_add_tail(&rpc->ready_links, &rpc->hsk->ready_requests);
+		INC_METRIC(requests_queued, 1);
 	}
 	
 	/* If we get here, no-one is waiting for the RPC, so it has been

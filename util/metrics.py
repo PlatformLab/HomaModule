@@ -137,6 +137,7 @@ for symbol in symbols:
 
 time_delta = 0
 total_packets = 0
+total_received_bytes = 0
 gro_packets = 0
 elapsed_secs = 0
 reaper_calls = 0
@@ -169,8 +170,18 @@ for symbol in symbols:
         if (time_delta != 0):
             rate = float(delta)/elapsed_secs
             rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+        if ("msg_bytes" in symbol) and (symbol != "sent_msg_bytes"):
+            total_received_bytes += delta;
         if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
+            percent = percent.ljust(12)
+            print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
+        elif symbol.endswith("_queued") and (time_delta != 0):
+            received = deltas[symbol[:-7] + "_received"]
+            if received != 0:
+                percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
+            else:
+                percent = " "
             percent = percent.ljust(12)
             print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
         else:
@@ -188,6 +199,12 @@ for symbol in symbols:
                 ns = (delta/deltas[prefix + "_misses"])/(cpu_khz * 1e-06)
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
+    if (symbol == "large_msg_bytes") and (total_received_bytes != 0) \
+            and (time_delta != 0):
+        rate = float(total_received_bytes)/elapsed_secs
+        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+        print("%-28s %15d %s%s" % ("received_msg_bytes", total_received_bytes,
+                rate_info, "Total bytes in all incoming messages"))
 if gro_packets != 0:
     print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
@@ -275,3 +292,26 @@ if elapsed_secs != 0:
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
+ 
+    print("\nCanaries: possible problem indicators")
+    print("-------------------------------------")
+    for symbol in ["requests_queued", "responses_queued"]:
+        delta = deltas[symbol]
+        if delta != 0:
+            received = deltas[symbol[:-7] + "_received"]
+            percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
+            percent = percent.ljust(12)
+            print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
+    for symbol in ["resent_packets", "peer_kmalloc_errors",
+            "peer_route_errors", "control_xmit_errors",
+            "data_xmit_errors", "unknown_rpcs",
+            "server_cant_create_rpcs", "server_cant_create_rpcs",
+            "short_packets", "redundant_packets",
+            "client_rpc_timeouts", "server_rpc_timeouts"]:
+        if deltas[symbol] == 0:
+            continue
+        rate = float(deltas[symbol])/elapsed_secs
+        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+        print("%-28s %15d %s%s" % (symbol, deltas[symbol],
+                rate_info, docs[symbol]))
+        

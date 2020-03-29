@@ -941,6 +941,10 @@ char *homa_print_metrics(struct homa *homa)
 				"large_msg_bytes           %15llu  "
 				"Bytes in incoming messages >= %d bytes\n",
 				m->large_msg_bytes, lower);
+		homa_append_metric(homa,
+				"sent_msg_bytes            %15llu  "
+				"Total bytes in all outgoing messages\n",
+				m->sent_msg_bytes);
 		for (i = DATA; i < BOGUS;  i++) {
 			char *symbol = homa_symbol_for_type(i);
 			homa_append_metric(homa,
@@ -962,9 +966,17 @@ char *homa_print_metrics(struct homa *homa)
 				"Incoming request messages\n",
 				m->requests_received);
 		homa_append_metric(homa,
+				"requests_queued           %15llu  "
+				"Requests for which no thread was waiting\n",
+				m->requests_queued);
+		homa_append_metric(homa,
 				"responses_received        %15llu  "
 				"Incoming response messages\n",
 				m->responses_received);
+		homa_append_metric(homa,
+				"responses_queued          %15llu  "
+				"Responses for which no thread was waiting\n",
+				m->responses_queued);
 		homa_append_metric(homa,
 				"softirq_calls             %15llu  "
 				"Calls to homa_softirq (i.e. # GRO pkts "

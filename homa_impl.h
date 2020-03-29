@@ -1384,6 +1384,12 @@ struct homa_metrics {
 	__u64 large_msg_bytes;
 	
 	/**
+	 * @sent_msg_bytes: The total number of bytes in outbound
+	 * messages.
+	 */
+	__u64 sent_msg_bytes;
+	
+	/**
 	 * @packets_sent: total number of packets sent for each packet type
 	 * (entry 0 corresponds to DATA, and so on).
 	 */
@@ -1401,9 +1407,21 @@ struct homa_metrics {
 	__u64 requests_received;
 	
 	/**
+	 * @requests_queued: total number of requests that were added to
+	 * @homa->ready_requests (no thread was waiting).
+	 */
+	__u64 requests_queued;
+	
+	/**
 	 * @responses_received: total number of response messages received.
 	 */
 	__u64 responses_received;
+	
+	/**
+	 * @responses_queued: total number of responses that were added to
+	 * @homa->ready_responses (no thread was waiting).
+	 */
+	__u64 responses_queued;
 	
 	/**
 	 * @softirq_calls: total number of calls to homa_softirq (i.e.,

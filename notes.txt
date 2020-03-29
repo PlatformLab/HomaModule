@@ -1,33 +1,27 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Machine status:
-  rc71: up-to-date
-  rc72: up-to-date
-  rc73: up-to-date
-  rc74: up-to-date
-  rc75: up-to-date
-  rc69: Henry's machine
-
-* Design notes for cp:
-  * General flow for an experiment:
-    * Distribute software to nodes, start Homa
-    * Start cp_node on each node
-    * Start servers
-    * Start clients
-    * Clear stats
-    * Wait a while, then log stats
-    * Repeat with different parameters?
-  * Use cp_node's stdin/stdout for communication and control. Commands:
-    * client args
-    * server args
+* Performance-related tasks:
+  * Implement new benchmark that segregates clients and servers on
+    different machines
+  * Reduce the number of available priorities, see how that impacts
+    performance
+  * Order the queue of ready messages by size? May not matter for
+    existing benchmarks, but could matter more for real applications, where
+    long messages are likely to have longer service times.
+  * Experiment with RPS/RFS options.
+  * Redo hashing function in homa_offload to distribute load more evenly
+    (e.g. don't hash based on packet info). Is there some way to hash to
+    the same location under low load, but use multiple cores under high
+    load?
+  * Record CPU time at client level
+  * Get dynamic priority adjustment working
+  * TCP does non-blocking sends for responses, which can delay processing
+    other requests for the same thread.
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
   * Reorganize common_header to pack the id into unused fields.
-
-* Possible performance improvements:
-  * Do the pacing from the sending thread?
 
 * Things to do:
   * More work related to GSO/GRO:
@@ -68,7 +62,6 @@ Notes for Homa implementation in Linux:
   * Check tcp_transmit_skb to make sure we are doing everything we need to
     do with skbuffs (e.g., update sk_wmem_alloc?)
   * Add support for cgroups (e.g. to manage memory allocation)
-  * Eliminate all uses of int: use s32 instead.
 
 * Questions for Linux experts:
   * If an interrupt arrives after a thread has been woken up to receive an

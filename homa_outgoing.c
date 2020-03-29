@@ -221,6 +221,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 		h->retransmit = 0;
 		skb = *homa_next_skb(skb);
 	}
+	INC_METRIC(sent_msg_bytes, len);
 }
 
 /**

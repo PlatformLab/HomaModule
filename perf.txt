@@ -2,13 +2,33 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
-* (Mar. 2020) Noticed that throughput varies by 20% from run to run of
-  some benchmarks (e.g. a single client sending 500KB messages to a single
-  server). This happens because of poor load balancing in Linux. With a
-  single plant, all packets arrive through a single NAPI core, which is fully
-  utilized. However, if Linux also happens to place other threads on that
-  core (such as the pacer) it takes time away from NAPI, which reduces
-  throughput.
+* (Mar. 2020) For the slowdown tests, the --port-max value needs to be
+  pretty high to get true Poisson behavior. It was originally 20, but
+  increasing it had significant impact on performance for TCP, particularly
+  for short-message workloads. For example, TCP P99 slowdown for W1 increased
+  from 15 to 170x when --port-max increase from 20-100. Performance
+  got even worse at --port-max=200, but I decided to stick with 100 for now.
+
+* (Mar. 2020) Having multiple threads receiving a single port makes a
+  big difference in tail latency. cperf had been using just one receiver
+  thread for each port (on both clients and servers); changing to
+  multiple threads reduced P50/P99 slowdown for small messages in W5
+  from 7/65 to 2.5/7.5!
+
+* Performance suffers from a variety of load balancing problems. Here
+  are some examples:
+  * (March 2020) Throughput varies by 20% from run to run when a single client
+    sends 500KB messages to a single server. In this configuration, all
+    packets arrive through a single NAPI core, which is fully utilized.
+    However, if Linux also happens to place other threads on that core (such
+    as the pacer) it takes time away from NAPI, which reduces throughput.
+  * (March 2020) When analyzing tail latency for small messages in W5, I found
+    that user threads are occasionally delayed 100s of microseconds in waking
+    up to handle a message. The problem is that both the NAPI and SoftIRQ
+    threads happened (randomly) to get busy on that core the same time,
+    and they completely monopolized the core.
+  * (March 2020) Linux switches threads between cores very frequently when
+    threads sleep (2/3 of the time in experiments today). 
 
 * (Feb. 2020) The pacer can potentially be a severe performance bottleneck
   (a single thread cannot keep the network utilized with packets that are

@@ -440,7 +440,7 @@ void homa_close(struct sock *sk, long timeout) {
 	sk_common_release(sk);
 	tt_record2("closed socket, client port %d, server port %d\n",
 			hsk->client_port, hsk->server_port);
-	tt_freeze();
+//	tt_freeze();
 }
 
 /**
@@ -491,9 +491,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_rpc *rpc = NULL;
 	__u64 start = get_cycles();
 
-	tt_record1("homa_ioc_recv starting, port %d",
-			hsk->server_port != 0 ? hsk->server_port : 
-			hsk->client_port);
+	tt_record1("homa_ioc_recv starting, port %d", hsk->client_port);
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -539,13 +537,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-//	tt_record1("starting copy_data, %d bytes in message",
-//			rpc->msgin.total_length);
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
-//	tt_record1("finished copy_data, copied %d bytes", result);
-	tt_record2("homa_ioc_recv finished, id %u, port %d",
-			rpc->id & 0xffffffff,
-			rpc->is_client ? hsk->client_port : hsk->server_port);
+//	tt_record3("homa_ioc_recv finished, id %u, port %d, length %d",
+//			rpc->id & 0xffffffff, hsk->client_port, result);
 	rpc->dont_reap = false;
 	INC_METRIC(recv_calls, 1);
 	INC_METRIC(recv_cycles, get_cycles() - start);
@@ -582,7 +576,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 	tt_record2("homa_ioc_reply starting, id %llu, port %d",
-			args.id, hsk->server_port);
+			args.id, hsk->client_port);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -625,6 +619,8 @@ unlock:
 	homa_rpc_unlock(srpc);
 
 done:
+//	tt_record3("homa_ioc_reply finished, id %llu, port %d, length %d",
+//			args.id, hsk->client_port, args.resplen);
 	INC_METRIC(reply_calls, 1);
 	INC_METRIC(reply_cycles, get_cycles() - start);
 	return err;
@@ -676,6 +672,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto error;
 	}
+//	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
+//			crpc->id, hsk->client_port, args.reqlen);
 	homa_rpc_unlock(crpc);
 	INC_METRIC(send_calls, 1);
 	INC_METRIC(send_cycles, get_cycles() - start);
