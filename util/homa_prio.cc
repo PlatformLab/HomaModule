@@ -31,8 +31,11 @@
 
 #include "homa.h"
 
-/** @log_file: where log messages get printed. */
-FILE* log_file = stdout;
+/* Values of command-line arguments (and their default values): */
+
+FILE *log_file = stdout;
+const char *log_file_name = NULL;
+int reconfig_interval = 1000;
 
 enum Msg_Type {NORMAL, VERBOSE};
 
@@ -56,9 +59,18 @@ struct interval {
 	 */
 	int64_t total_bytes;
 	
+	/**
+	 * @unsched_bytes: estimate of the total unscheduled bytes in
+	 * incoming messages in this range (it's an estimate because we
+	 * don't have the actual number of messages, so we have to estimate
+	 * that).
+	 */
+	int64_t unsched_bytes;
+	
 	interval(int max_size, int64_t total_bytes)
 		: max_size(max_size)
 		, total_bytes(total_bytes)
+	        , unsched_bytes(0)
 	{}
 };
 
@@ -102,7 +114,15 @@ void log(Msg_Type type, const char *format, ...)
  */
 void print_help(const char *name)
 {
-	printf("Usage: homa_prio args\n");
+	printf("Usage: homa_prio options\n\n"
+		"Monitor incoming Homa traffic and adjust priorities for unscheduled\n"
+		"packets to match recent traffic. The following options are available:\n"
+		"--help            Print this message\n"
+		"--interval        Time period over which traffic is averaged to compute\n"
+		"                  priorities, in ms (default: %d)\n"
+		"--log_file        Name of file in which to write log messages\n"
+		"                  (default: stdin)\n",
+		reconfig_interval);
 }
 
 /**
@@ -143,12 +163,12 @@ bool get_param(const char *name, int *value)
 }
 
 /**
- * read_metrics() -  Read in a Homa metrics file and extract out all
- * of the traffic statistics.
+ * read_metrics() -  Read in a Homa metrics file and extract the traffic
+ * statistics.
  * @path:      Path to file containing metrics; this file must be in
  *             the form output by Homa.
  * @metrics:   Will be filled in with all of the associated Homa statistics.
- *             If the justices couldn't be read, then metrics->intervals
+ *             If the statistics couldn't be read, then metrics->intervals
  *             will be empty.
  */
 void read_metrics(const char *path, metrics *metrics)
@@ -165,8 +185,9 @@ void read_metrics(const char *path, metrics *metrics)
 	}
 	while (getline(f, line)) {
 		// Lines in the file start with a symbol name followed by
-		// a count. Filter out the lines that start with "msg_bytes"
+		// a count. Look for lines that start with "msg_bytes"
 		// or "large_msg_bytes".
+		size_t current_index = 0;
 		uint64_t count;
 		std::string symbol;
 		const char *s;
@@ -205,7 +226,34 @@ void read_metrics(const char *path, metrics *metrics)
 						"number\n", symbol.c_str());
 				continue;
 			}
-			metrics->intervals.emplace_back(size, count);;
+			
+			/* See whether (a) there is an existing entry to
+			 * increment, or (b) we need to add a new entry.
+			 */
+			if ((current_index > 0) && (size <= metrics
+					->intervals[current_index].max_size))
+				current_index = 0;
+			while ((current_index < metrics->intervals.size()) &&
+					(size > metrics->intervals[
+					current_index].max_size))
+				current_index++;
+			if (current_index >= metrics->intervals.size()) {
+				metrics->intervals.emplace_back(size, count);
+			} else if (metrics->intervals[current_index].max_size
+					>= size) {
+				interval *ivl = &metrics->intervals[current_index];
+				ivl->total_bytes += count;
+			} else {
+				log(NORMAL, "Unexpected request size %d; "
+						"inserting new entry with "
+						"total_bytes %lu\n",
+						size, count);
+				metrics->intervals.emplace(
+						metrics->intervals.begin()
+						+ current_index,
+						size, count);
+			}
+//			printf("Interval: %lu bytes, max_size %d\n", count, size);
 			continue;
 		}
 		if (strcmp(s, "large_msg_count") == 0) {
@@ -230,7 +278,7 @@ void read_metrics(const char *path, metrics *metrics)
 void set_cutoffs(metrics *diff)
 {
 	int num_priorities, rtt_bytes;
-	int64_t total_bytes, unsched_bytes;
+	int64_t total_bytes, total_unsched_bytes;
 	int prev_size;
 	int cutoffs[8];
 	
@@ -248,54 +296,56 @@ void set_cutoffs(metrics *diff)
 	// Count the total bytes and unscheduled bytes received over the
 	// interval.
 	total_bytes = 0;
-	unsched_bytes = 0;
+	total_unsched_bytes = 0;
 	prev_size = 0;
 	for (interval &interval: diff->intervals) {
+		if (interval.max_size < prev_size)
+			log(NORMAL, "Wrong interval order: size %d followed "
+					"by %d\n",
+					prev_size, interval.max_size);
 		total_bytes += interval.total_bytes;
 		if (interval.max_size <= rtt_bytes)
-			unsched_bytes += interval.total_bytes;
+			interval.unsched_bytes = interval.total_bytes;
 		else {
 			int avg_size = (interval.max_size + prev_size)/2;
-			unsched_bytes += (interval.total_bytes/avg_size)
+			interval.unsched_bytes = (interval.total_bytes/avg_size)
 					* rtt_bytes;
+			if (interval.unsched_bytes > interval.total_bytes)
+				interval.unsched_bytes = interval.total_bytes;
 		}
+		total_unsched_bytes += interval.unsched_bytes;
 		prev_size = interval.max_size;
 	}
 	total_bytes += diff->large_msg_bytes;
-	unsched_bytes += diff->large_msg_count * rtt_bytes;
+	total_unsched_bytes += diff->large_msg_count * rtt_bytes;
 	
 	// Divide priorities between scheduled and unscheduled packets.
-	int64_t unsched_prios = (unsched_bytes*num_priorities + total_bytes/2)
+	int64_t unsched_prios = (total_unsched_bytes*num_priorities + total_bytes/2)
 			/total_bytes;
 	if (unsched_prios < 1)
 		unsched_prios = 1;
 	double total_mb = total_bytes;
 	total_mb /= 1e06;
-	double unsched_mb = unsched_bytes;
+	double unsched_mb = total_unsched_bytes;
 	unsched_mb /= 1e06;
-	log(NORMAL, "Statistics %.1f MB total, %.1f MB unsched, "
-			"%ld unsched_prios\n",
-			total_mb, unsched_mb, unsched_prios);
+	log(NORMAL, "Statistics: %.1f MB total, %.1f MB unsched (%.1f%%), "
+			"%ld unsched priorities\n",
+			total_mb, unsched_mb, 100.0*unsched_mb/total_mb,
+			unsched_prios);
 	
 	// Compute cutoffs for unscheduled priorities.
-	int64_t bytes_per_prio = unsched_bytes/unsched_prios;
+	int64_t bytes_per_prio;
+	if (unsched_prios < num_priorities)
+		bytes_per_prio = 1 + total_unsched_bytes/unsched_prios;
+	else
+		bytes_per_prio = 1 + total_bytes/num_priorities;
 	int64_t next_cutoff_bytes = bytes_per_prio;
 	int next_cutoff = num_priorities - 1;
-	unsched_bytes = 0;
-	prev_size = 0;
+	int cum_unsched_bytes = 0;
 	for (interval &interval: diff->intervals) {
-		if (interval.max_size <= rtt_bytes)
-			unsched_bytes += interval.total_bytes;
-		else {
-			int avg_size = (interval.max_size + prev_size)/2;
-			int64_t this_unsched = (interval.total_bytes/avg_size)
-					* rtt_bytes;
-			if (this_unsched > interval.total_bytes)
-				this_unsched = interval.total_bytes;
-			unsched_bytes += this_unsched;
-		}
-		prev_size = interval.max_size;
-		if (unsched_bytes >= next_cutoff_bytes) {
+		if (cum_unsched_bytes >= total_unsched_bytes)
+			break;
+		if (cum_unsched_bytes >= next_cutoff_bytes) {
 //			log(NORMAL, "Cutoff %d at length %d: %lu cumulative KB, "
 //					"next_cutoff_bytes %lu KB\n",
 //					next_cutoff, interval.max_size,
@@ -303,12 +353,14 @@ void set_cutoffs(metrics *diff)
 //					next_cutoff_bytes/1000);
 			cutoffs[next_cutoff] = interval.max_size;
 			next_cutoff--;
-			next_cutoff_bytes += bytes_per_prio;
+			next_cutoff_bytes = cum_unsched_bytes + bytes_per_prio;
+			if (next_cutoff_bytes >= total_unsched_bytes)
+				break;
 		}
 		
 	}
-	for (int i = num_priorities - unsched_prios; i >= 0; i--)
-		cutoffs[i] = HOMA_MAX_MESSAGE_LENGTH;
+	for ( ; next_cutoff >= 0; next_cutoff--)
+		cutoffs[next_cutoff] = HOMA_MAX_MESSAGE_LENGTH;
 	/* This isn't strictly needed, but it looks cleaner. */
 	for (int i = num_priorities; i < 8; i++)
 		cutoffs[i] = 0;
@@ -366,17 +418,73 @@ bool diff_metrics(metrics *prev, metrics *cur, metrics *diff)
 	return true;
 }
 
-int main(int argc, char** argv)
+/**
+ * parse_int() - Parse an integer value from an argument word.
+ * @argv:   Command-line arguments.
+ * @i:      Index within argv of an option, which is supposed to be followed
+ *          an integer value.
+ * @value:  The integer value corresponding to @argv[i+1] is stored here,
+ *          if the function completes successfully.
+ * Return:  True means success, false means an error occurred (and a
+ *          message was printed).
+ */
+bool parse_int(const char **argv, int i, int *value)
 {
-	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
-		print_help(argv[0]);
-		exit(0);
+	int num;
+	char *end;
+	
+	if (argv[i+1] == NULL) {
+		printf("No value provided for %s\n", argv[i]);
+		return false;
 	}
+	num = strtol(argv[i+1], &end, 0);
+	if (*end != 0) {
+		printf("Bad value '%s' for %s; must be integer\n",
+				argv[i+1], argv[i]);
+		return false;
+	}
+	*value = num;
+	return true;
+}
+
+int main(int argc, const char** argv)
+{	
+	/* Parse arguments. */
+	for (int i = 1; i < argc; i++) {
+		const char *option = argv[i];
+
+		if (strcmp(option, "--help") == 0) {
+			print_help(argv[0]);
+			exit(0);
+		} else if (strcmp(option, "--interval") == 0) {
+			if (!parse_int(argv, i, &reconfig_interval))
+				exit(1);
+			i++;
+		} else if (strcmp(option, "--log_file") == 0) {
+			log_file_name = argv[i+1];
+			if (log_file_name == NULL){
+				printf("No value provided for %s\n",
+						option);
+				exit(1);
+			}
+			log_file = fopen(log_file_name, "w");
+			if (log_file == NULL) {
+				printf("Couldn't open log file %s: %s\n",
+					log_file_name, strerror(errno));
+			}
+			setlinebuf(log_file);
+			i++;
+		} else {
+			printf("Unknown option '%s'\n", argv[i]);
+			exit(1);
+		}
+	}
+	
 	metrics m[2], diff;
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
-	while (1) {		
-		usleep(1000000);
+	while (1) {
+		usleep(1000*reconfig_interval);
 		if (prev_metrics->intervals.empty()) {
 			read_metrics("/proc/net/homa_metrics", prev_metrics);
 			continue;
