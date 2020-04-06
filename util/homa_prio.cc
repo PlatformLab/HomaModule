@@ -35,6 +35,7 @@
 
 FILE *log_file = stdout;
 const char *log_file_name = NULL;
+bool no_update = false;
 int reconfig_interval = 1000;
 
 enum Msg_Type {NORMAL, VERBOSE};
@@ -85,6 +86,9 @@ struct metrics {
 	/* Homa metrics with the same name. */
 	int64_t large_msg_count;
 	int64_t large_msg_bytes;
+	
+	/** @total_bytes: total bytes received across all message sizes. */
+	int64_t total_bytes;
 };
 
 /**
@@ -176,6 +180,7 @@ void read_metrics(const char *path, metrics *metrics)
 	metrics->intervals.clear();
 	metrics->large_msg_count = 0;
 	metrics->large_msg_bytes = 0;
+	metrics->total_bytes = 0;
 	std::ifstream f(path);
 	std::string line;
 	if (!f.is_open()) {
@@ -253,13 +258,14 @@ void read_metrics(const char *path, metrics *metrics)
 						+ current_index,
 						size, count);
 			}
-//			printf("Interval: %lu bytes, max_size %d\n", count, size);
+			metrics->total_bytes += count;
 			continue;
 		}
 		if (strcmp(s, "large_msg_count") == 0) {
 			metrics->large_msg_count = count;
 		} else {
-			metrics->large_msg_bytes = count;
+			metrics->large_msg_bytes += count;
+			metrics->total_bytes += count;
 		}
 		continue;
 		
@@ -271,16 +277,18 @@ void read_metrics(const char *path, metrics *metrics)
 }
 
 /**
- * set_cutoffs() -  Given information about recent traffic, set Homa's
- * parameters for assigning packet priorities.
- * @diff:   Metrics containing traffic over a recent interval
+ * compute_cutoffs() -  Given information about recent traffic, compute
+ * appropriate cutoffs for unscheduled priorities.
+ * @diff:        Metrics containing traffic over a recent interval
+ * @cutoffs:     Will be filled in with the message size cutoff for each
+ *               of the priority levels, suitable for storing in Homa's
+ *               unsched_cutoffs parameter.
  */
-void set_cutoffs(metrics *diff)
+void compute_cutoffs(metrics *diff, int cutoffs[8])
 {
 	int num_priorities, rtt_bytes;
 	int64_t total_bytes, total_unsched_bytes;
 	int prev_size;
-	int cutoffs[8];
 	
 	if (!get_param("num_priorities", &num_priorities)) {
 		log(NORMAL, "get_param failed for num_priorities\n");
@@ -343,6 +351,7 @@ void set_cutoffs(metrics *diff)
 	int next_cutoff = num_priorities - 1;
 	int cum_unsched_bytes = 0;
 	for (interval &interval: diff->intervals) {
+		cum_unsched_bytes += interval.unsched_bytes;
 		if (cum_unsched_bytes >= total_unsched_bytes)
 			break;
 		if (cum_unsched_bytes >= next_cutoff_bytes) {
@@ -364,12 +373,21 @@ void set_cutoffs(metrics *diff)
 	/* This isn't strictly needed, but it looks cleaner. */
 	for (int i = num_priorities; i < 8; i++)
 		cutoffs[i] = 0;
-	
+}
+
+/**
+ * install_cutoffs() - Update the cutoffs for unscheduled priorities
+ * inside the Homa implementation on this machine.
+ * @cutoffs:    Largest message size that may use each priority level
+ *              (see documentation for Homa's unsched_cutoffs parameter
+ *              for details).
+ */
+void install_cutoffs(int cutoffs[8])
+{
 	char buffer[200];
 	snprintf(buffer, sizeof(buffer), "%d %d %d %d %d %d %d %d",
 			cutoffs[0], cutoffs[1], cutoffs[2], cutoffs[3],
 			cutoffs[4], cutoffs[5], cutoffs[6], cutoffs[7]);
-	log(NORMAL, "New cutoffs: %s\n", buffer);
 	const char *path = "/proc/sys/net/homa/unsched_cutoffs";
 	std::ofstream f(path, std::ofstream::out);
 	if (!f.is_open()) {
@@ -415,6 +433,7 @@ bool diff_metrics(metrics *prev, metrics *cur, metrics *diff)
 	}
 	diff->large_msg_count = cur->large_msg_count - prev->large_msg_count;
 	diff->large_msg_bytes = cur->large_msg_bytes - prev->large_msg_bytes;
+	diff->total_bytes = cur->total_bytes - prev->total_bytes;
 	return true;
 }
 
@@ -474,6 +493,8 @@ int main(int argc, const char** argv)
 			}
 			setlinebuf(log_file);
 			i++;
+		} else if (strcmp(option, "--no_update") == 0) {
+			no_update = true;
 		} else {
 			printf("Unknown option '%s'\n", argv[i]);
 			exit(1);
@@ -483,6 +504,7 @@ int main(int argc, const char** argv)
 	metrics m[2], diff;
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
+	int cutoffs[8];
 	while (1) {
 		usleep(1000*reconfig_interval);
 		if (prev_metrics->intervals.empty()) {
@@ -504,7 +526,12 @@ int main(int argc, const char** argv)
 		if (total_bytes < 40000000)
 			continue;
 		
-		set_cutoffs(&diff);
+		compute_cutoffs(&diff, cutoffs);
+		log(NORMAL, "Best cutoffs: %d %d %d %d %d %d %d %d\n",
+			cutoffs[0], cutoffs[1], cutoffs[2], cutoffs[3],
+			cutoffs[4], cutoffs[5], cutoffs[6], cutoffs[7]);
+		if (!no_update)
+			install_cutoffs(cutoffs);
 		metrics *tmp = prev_metrics;
 		prev_metrics = cur_metrics;
 		cur_metrics = tmp;
