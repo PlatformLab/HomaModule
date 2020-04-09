@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE
+
+# This script sets the cutoffs for unscheduled priorities on one or more
+# nodes to match the characteristics of the Homa workloads.
+#
+# Usage:
+# set_cutoffs workload num_nodes [first]
+#
+# The "workload" argument must be one of w1-w5; the cutoffs will be set
+# to values appropriate for that workload. The "num_nodes" arguments indicates
+# how many servers should be updated. The "first" argument is optional; it
+# is an integer identifying the first node on which installation will occur
+# (e.g. "set_cutoffs w3 4 2" means node-2 through node-5 will be updated.
+# "first" defaults to 0.
+
+root=~/homaModule
+
+if [ $# -eq 3 ]; then
+    first=$3
+elif [ $# -eq 2 ]; then
+    first=0
+else
+    echo "Usage: set_cutoffs workload num_nodes [first]"
+    exit 1
+fi
+last=`expr $first + $2 - 1`
+
+if [ $1 = w1 ]; then
+    cutoffs="1000000 12288 2112 1280 832 576 384 192"
+elif [ $1 = w2 ]; then
+    cutoffs="1000000 1000000 1000000 7168 1920 640 448 320"
+elif [ $1 = w3 ]; then
+    cutoffs="1000000 1000000 1000000 1000000 1000000 63488 12288 3008"
+elif [ $1 = w4 ]; then
+    cutoffs="1000000 1000000 1000000 1000000 1000000 1000000 1000000 68608"
+elif [ $1 = w5 ]; then
+    cutoffs="1000000 1000000 1000000 1000000 1000000 1000000 1000000 1000000"
+else
+    echo "Unknown workload '$1'; must be w1-w5"
+    exit 1
+fi
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node-$i
+    echo '*** Updating cutoffs on' $node '***'
+    ssh $node sudo sysctl /net/homa/unsched_cutoffs=\"$cutoffs\"
+done
