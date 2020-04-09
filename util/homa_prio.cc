@@ -37,7 +37,8 @@ FILE *log_file = stdout;
 const char *log_file_name = NULL;
 bool no_update = false;
 int reconfig_interval = 1000;
-int threshold = 10000;
+double min_drift = 1.0;
+int min_messages = 10000;
 
 enum Msg_Type {NORMAL, VERBOSE};
 
@@ -119,6 +120,10 @@ void log(Msg_Type type, const char *format, ...)
 
 	if (type > log_level)
 		return;
+	if (strcmp(format, "\n") == 0) {
+		fprintf(log_file, "\n");
+		return;
+	}
 	va_start(args, format);
 	clock_gettime(CLOCK_REALTIME, &now);
 
@@ -138,14 +143,18 @@ void print_help(const char *name)
 		"--help            Print this message\n"
 		"--interval        Time period over which traffic is averaged to compute\n"
 		"                  priorities, in ms (default: %d)\n"
-		"--log_file        Name of file in which to write log messages\n"
+		"--log-file        Name of file in which to write log messages\n"
 		"                  (default: stdin)\n"
-		"--no_update       Compute and print cutoffs, but don't modify Homa\n"
-		"                  parameters\n"
-		"--threshold       Don't compute new cutoffs unless at least this many\n"
+		"--min-drift       Minimum amount by which the message size distribution\n"
+		"                  must change before new cutoffs will be installed\n"
+		"                  (default: %.1f). Intended to prevent churn; don't modify\n"
+		"                  this unless you understand the code!\n"
+		"--min-messages    Don't compute new cutoffs unless at least this many\n"
 		"                  messages have been received since the last computation\n"
-		"                  (default: %d)\n",
-		reconfig_interval, threshold);
+		"                  (default: %d)\n"
+		"--no-update       Compute and print cutoffs, but don't modify Homa\n"
+		"                  parameters\n",
+		reconfig_interval, min_drift, min_messages);
 }
 
 /**
@@ -469,6 +478,93 @@ bool diff_metrics(metrics *prev, metrics *cur, metrics *diff)
 }
 
 /**
+ * get_deciles() - Given set of metrics, compute a summary of the distribution
+ * of message sizes.
+ * @m:        Metrics describing a collection of messages.
+ * @deciles:  This array will be filled in such that entry i (0 < i <= 8)
+ *            holds the message length l such chat (i+1)*10% of all messages
+ *            in m have a length <= l.
+ */
+void get_deciles(metrics *m, int deciles[9])
+{
+	int msgs_per_decile = m->total_messages/10;
+	int64_t next_decile = msgs_per_decile;
+	int64_t msgs_so_far = 0;
+	int decile = 0;
+	for (interval &interval: m->intervals) {
+		msgs_so_far += interval.total_messages;
+		if (interval.total_messages > 0)
+		while (msgs_so_far >= next_decile) {
+			deciles[decile] = interval.max_size;
+			decile++;
+			if (decile >= 9)
+				goto loop_end;
+			next_decile += msgs_per_decile;
+		}
+	}
+    loop_end:
+	for ( ; decile < 9; decile++)
+		deciles[decile] = HOMA_MAX_MESSAGE_LENGTH;
+}
+
+/**
+ * diff_deciles() - This function returns a measure of difference between
+ * two sets of decile message distributions.
+ * @d1:      A set of deciles returned by get_deciles.
+ * @d2:      Another set of deciles returned by get_deciles.
+ * Return:   The sum of the fractional differences between corresponding
+ *           entries in the two decile arrays; each pair can contribute
+ *           up to 1.0 to the result. A return value of 0 means that the
+ *           two arrays were identical.
+ */
+double diff_deciles(int d1[9], int d2[9])
+{
+	double diff = 0.0;
+	for (int i = 0; i < 9; i++) {
+		double smaller, larger;
+		if (d1[i] < d2[i]) {
+			smaller = d1[i];
+			larger = d2[i];
+		} else {
+			larger = d1[i];
+			smaller = d2[i];
+		}
+		if (larger != 0)
+			diff += (larger - smaller)/larger;
+	}
+	return diff;
+}
+
+/**
+ * parse_doublet() - Parse an integer value from an argument word.
+ * @argv:   Command-line arguments.
+ * @i:      Index within argv of an option, which is supposed to be followed
+ *          a floating-point value.
+ * @value:  The floating-point value corresponding to @argv[i+1] is stored here,
+ *          if the function completes successfully.
+ * Return:  True means success, false means an error occurred (and a
+ *          message was printed).
+ */
+bool parse_double(const char **argv, int i, double *value)
+{
+	double num;
+	char *end;
+	
+	if (argv[i+1] == NULL) {
+		printf("No value provided for %s\n", argv[i]);
+		return false;
+	}
+	num = strtod(argv[i+1], &end);
+	if (*end != 0) {
+		printf("Bad value '%s' for %s; must be floating-point number\n",
+				argv[i+1], argv[i]);
+		return false;
+	}
+	*value = num;
+	return true;
+}
+
+/**
  * parse_int() - Parse an integer value from an argument word.
  * @argv:   Command-line arguments.
  * @i:      Index within argv of an option, which is supposed to be followed
@@ -510,7 +606,7 @@ int main(int argc, const char** argv)
 			if (!parse_int(argv, i, &reconfig_interval))
 				exit(1);
 			i++;
-		} else if (strcmp(option, "--log_file") == 0) {
+		} else if (strcmp(option, "--log-file") == 0) {
 			log_file_name = argv[i+1];
 			if (log_file_name == NULL){
 				printf("No value provided for %s\n",
@@ -524,23 +620,27 @@ int main(int argc, const char** argv)
 			}
 			setlinebuf(log_file);
 			i++;
-		} else if (strcmp(option, "--no_update") == 0) {
-			no_update = true;
-		} else if (strcmp(option, "--threshold") == 0) {
-			if (!parse_int(argv, i, &threshold))
+		} else if (strcmp(option, "--min-drift") == 0) {
+			if (!parse_double(argv, i, &min_drift))
 				exit(1);
 			i++;
+		} else if (strcmp(option, "--min-messages") == 0) {
+			if (!parse_int(argv, i, &min_messages))
+				exit(1);
+			i++;
+		} else if (strcmp(option, "--no-update") == 0) {
+			no_update = true;
 		} else {
 			printf("Unknown option '%s'\n", argv[i]);
 			exit(1);
 		}
 	}
 	
-	metrics m[2], d[2];
+	metrics m[2];
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
-	metrics *prev_diff = &d[0];
-	metrics *cur_diff = &d[1];
+	metrics diff;
+	int prev_deciles[9];
 	int cutoffs[8];
 	while (1) {
 		usleep(1000*reconfig_interval);
@@ -551,26 +651,39 @@ int main(int argc, const char** argv)
 		read_metrics("/proc/net/homa_metrics", cur_metrics);
 		if (cur_metrics->intervals.empty())
 			continue;
-		if (!diff_metrics(prev_metrics, cur_metrics, cur_diff))
+		if (!diff_metrics(prev_metrics, cur_metrics, &diff))
 			continue;
 		
 		// Don't update the cutoffs until we've collected enough
 		// data to provide reasonable statistics.
-		if ((cur_diff->total_messages < threshold) ||
-				(cur_diff->total_bytes == 0))
+		if ((diff.total_messages < min_messages) ||
+				(diff.total_bytes == 0))
 			continue;
 		
-		compute_cutoffs(cur_diff, cutoffs);
+		int deciles[9];
+		get_deciles(&diff, deciles);
+		log(NORMAL, "\n");
+		log(NORMAL, "Decile message distribution: %d %d %d %d %d "
+				"%d %d %d %d\n",
+				deciles[0], deciles[1], deciles[2], deciles[3],
+				deciles[4], deciles[5], deciles[6], deciles[7],
+				deciles[8]);
+		double drift = diff_deciles(prev_deciles, deciles);
+		log(NORMAL, "Decile drift: %.2f\n", drift);
+		compute_cutoffs(&diff, cutoffs);
 		log(NORMAL, "Best cutoffs: %d %d %d %d %d %d %d %d\n",
 			cutoffs[0], cutoffs[1], cutoffs[2], cutoffs[3],
 			cutoffs[4], cutoffs[5], cutoffs[6], cutoffs[7]);
-		if (!no_update)
-			install_cutoffs(cutoffs);
+		if (drift >= min_drift) {
+			if (!no_update)
+				install_cutoffs(cutoffs);
+			for (int i = 0; i < 9; i++)
+				prev_deciles[i] = deciles[i];
+		} else
+			log(NORMAL, "Not updating cutoffs: decile drift "
+					"< threshold (%.1f)\n", min_drift);
 		metrics *tmp = prev_metrics;
 		prev_metrics = cur_metrics;
 		cur_metrics = tmp;
-		tmp = prev_diff;
-		prev_diff = cur_diff;
-		cur_diff = tmp;
 	}
 }
