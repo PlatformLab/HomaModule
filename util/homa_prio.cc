@@ -37,6 +37,7 @@ FILE *log_file = stdout;
 const char *log_file_name = NULL;
 bool no_update = false;
 int reconfig_interval = 1000;
+int threshold = 10000;
 
 enum Msg_Type {NORMAL, VERBOSE};
 
@@ -61,6 +62,12 @@ struct interval {
 	int64_t total_bytes;
 	
 	/**
+	 * @total_messages: an estimate of the total number of messages
+	 * in this interval (exact statistics are not kept).
+	 */
+	int64_t total_messages;
+	
+	/**
 	 * @unsched_bytes: estimate of the total unscheduled bytes in
 	 * incoming messages in this range (it's an estimate because we
 	 * don't have the actual number of messages, so we have to estimate
@@ -68,9 +75,10 @@ struct interval {
 	 */
 	int64_t unsched_bytes;
 	
-	interval(int max_size, int64_t total_bytes)
+	interval(int max_size, int64_t total_bytes, int64_t total_messages)
 		: max_size(max_size)
 		, total_bytes(total_bytes)
+		, total_messages(total_messages)
 	        , unsched_bytes(0)
 	{}
 };
@@ -89,6 +97,12 @@ struct metrics {
 	
 	/** @total_bytes: total bytes received across all message sizes. */
 	int64_t total_bytes;
+	
+	/**
+	 * @estimated_msgs: total number of messages received (only an
+	 * estimate; exact counts aren't kept).
+	 */
+	int64_t total_messages;
 };
 
 /**
@@ -125,8 +139,13 @@ void print_help(const char *name)
 		"--interval        Time period over which traffic is averaged to compute\n"
 		"                  priorities, in ms (default: %d)\n"
 		"--log_file        Name of file in which to write log messages\n"
-		"                  (default: stdin)\n",
-		reconfig_interval);
+		"                  (default: stdin)\n"
+		"--no_update       Compute and print cutoffs, but don't modify Homa\n"
+		"                  parameters\n"
+		"--threshold       Don't compute new cutoffs unless at least this many\n"
+		"                  messages have been received since the last computation\n"
+		"                  (default: %d)\n",
+		reconfig_interval, threshold);
 }
 
 /**
@@ -181,6 +200,7 @@ void read_metrics(const char *path, metrics *metrics)
 	metrics->large_msg_count = 0;
 	metrics->large_msg_bytes = 0;
 	metrics->total_bytes = 0;
+	metrics->total_messages = 0;
 	std::ifstream f(path);
 	std::string line;
 	if (!f.is_open()) {
@@ -243,7 +263,7 @@ void read_metrics(const char *path, metrics *metrics)
 					current_index].max_size))
 				current_index++;
 			if (current_index >= metrics->intervals.size()) {
-				metrics->intervals.emplace_back(size, count);
+				metrics->intervals.emplace_back(size, count, 0);
 			} else if (metrics->intervals[current_index].max_size
 					>= size) {
 				interval *ivl = &metrics->intervals[current_index];
@@ -256,12 +276,21 @@ void read_metrics(const char *path, metrics *metrics)
 				metrics->intervals.emplace(
 						metrics->intervals.begin()
 						+ current_index,
-						size, count);
+						size, count, 0);
 			}
 			metrics->total_bytes += count;
+			int prev_size = 0;
+			if (current_index > 0)
+				prev_size = metrics->intervals[current_index -1]
+						.max_size;
+			int messages = 2*count/(size + prev_size);
+		        metrics->intervals[current_index].total_messages +=
+				messages;
+			metrics->total_messages += messages;
 			continue;
 		}
 		if (strcmp(s, "large_msg_count") == 0) {
+			metrics->total_messages += count;
 			metrics->large_msg_count = count;
 		} else {
 			metrics->large_msg_bytes += count;
@@ -301,8 +330,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8])
 	if (num_priorities == 1)
 		return;
 	
-	// Count the total bytes and unscheduled bytes received over the
-	// interval.
+	// Compute the unscheduled bytes received over the interval.
 	total_bytes = 0;
 	total_unsched_bytes = 0;
 	prev_size = 0;
@@ -315,8 +343,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8])
 		if (interval.max_size <= rtt_bytes)
 			interval.unsched_bytes = interval.total_bytes;
 		else {
-			int avg_size = (interval.max_size + prev_size)/2;
-			interval.unsched_bytes = (interval.total_bytes/avg_size)
+			interval.unsched_bytes = interval.total_messages
 					* rtt_bytes;
 			if (interval.unsched_bytes > interval.total_bytes)
 				interval.unsched_bytes = interval.total_bytes;
@@ -328,18 +355,20 @@ void compute_cutoffs(metrics *diff, int cutoffs[8])
 	total_unsched_bytes += diff->large_msg_count * rtt_bytes;
 	
 	// Divide priorities between scheduled and unscheduled packets.
-	int64_t unsched_prios = (total_unsched_bytes*num_priorities + total_bytes/2)
-			/total_bytes;
+	int64_t unsched_prios = (total_unsched_bytes*num_priorities
+			+ total_bytes/2)/total_bytes;
 	if (unsched_prios < 1)
 		unsched_prios = 1;
-	double total_mb = total_bytes;
-	total_mb /= 1e06;
+	double total_mb = diff->total_bytes;
+	total_mb *= 1e-6;
 	double unsched_mb = total_unsched_bytes;
-	unsched_mb /= 1e06;
-	log(NORMAL, "Statistics: %.1f MB total, %.1f MB unsched (%.1f%%), "
-			"%ld unsched priorities\n",
-			total_mb, unsched_mb, 100.0*unsched_mb/total_mb,
-			unsched_prios);
+	unsched_mb *= 1e-6;
+	double total_messages = diff->total_messages;
+	total_messages *= 1e-3;
+	log(NORMAL, "Statistics: %.1f K messages, %.1f MB total, "
+			"%.1f MB unsched (%.1f%%), %ld unsched priorities\n",
+			total_messages, total_mb, unsched_mb,
+			100.0*unsched_mb/total_mb, unsched_prios);
 	
 	// Compute cutoffs for unscheduled priorities.
 	int64_t bytes_per_prio;
@@ -429,11 +458,13 @@ bool diff_metrics(metrics *prev, metrics *cur, metrics *diff)
 			return false;
 		}
 		diff->intervals.emplace_back(curi.max_size,
-				curi.total_bytes - previ.total_bytes);
+				curi.total_bytes - previ.total_bytes,
+				curi.total_messages - previ.total_messages);
 	}
 	diff->large_msg_count = cur->large_msg_count - prev->large_msg_count;
 	diff->large_msg_bytes = cur->large_msg_bytes - prev->large_msg_bytes;
 	diff->total_bytes = cur->total_bytes - prev->total_bytes;
+	diff->total_messages = cur->total_messages - prev->total_messages;
 	return true;
 }
 
@@ -495,15 +526,21 @@ int main(int argc, const char** argv)
 			i++;
 		} else if (strcmp(option, "--no_update") == 0) {
 			no_update = true;
+		} else if (strcmp(option, "--threshold") == 0) {
+			if (!parse_int(argv, i, &threshold))
+				exit(1);
+			i++;
 		} else {
 			printf("Unknown option '%s'\n", argv[i]);
 			exit(1);
 		}
 	}
 	
-	metrics m[2], diff;
+	metrics m[2], d[2];
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
+	metrics *prev_diff = &d[0];
+	metrics *cur_diff = &d[1];
 	int cutoffs[8];
 	while (1) {
 		usleep(1000*reconfig_interval);
@@ -514,19 +551,16 @@ int main(int argc, const char** argv)
 		read_metrics("/proc/net/homa_metrics", cur_metrics);
 		if (cur_metrics->intervals.empty())
 			continue;
-		if (!diff_metrics(prev_metrics, cur_metrics, &diff))
+		if (!diff_metrics(prev_metrics, cur_metrics, cur_diff))
 			continue;
 		
 		// Don't update the cutoffs until we've collected enough
 		// data to provide reasonable statistics.
-		uint64_t total_bytes = 0;
-		for (interval &interval: diff.intervals)
-			total_bytes += interval.total_bytes;
-		total_bytes += diff.large_msg_bytes;
-		if (total_bytes < 40000000)
+		if ((cur_diff->total_messages < threshold) ||
+				(cur_diff->total_bytes == 0))
 			continue;
 		
-		compute_cutoffs(&diff, cutoffs);
+		compute_cutoffs(cur_diff, cutoffs);
 		log(NORMAL, "Best cutoffs: %d %d %d %d %d %d %d %d\n",
 			cutoffs[0], cutoffs[1], cutoffs[2], cutoffs[3],
 			cutoffs[4], cutoffs[5], cutoffs[6], cutoffs[7]);
@@ -535,5 +569,8 @@ int main(int argc, const char** argv)
 		metrics *tmp = prev_metrics;
 		prev_metrics = cur_metrics;
 		cur_metrics = tmp;
+		tmp = prev_diff;
+		prev_diff = cur_diff;
+		cur_diff = tmp;
 	}
 }
