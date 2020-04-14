@@ -191,7 +191,7 @@ void print_help(const char *name)
 		"                      then it and all of the remaining words are printed to\n"
 		"                      the log as a message.\n"
 		"    --file            Name of log file to use for future messages (\"-\"\n"
-		"                      means use standard output\n"
+		"                      means use standard output)\n"
 		"    --level           Log level: either normal or verbose\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
@@ -2094,7 +2094,7 @@ void exec_string(const char *cmd)
 	std::vector<string> words;
 	
 	if (log_file != stdout)
-		log(NORMAL, "Command: %s, length %lu\n", cmd, strlen(cmd));
+		log(NORMAL, "Command: %s\n", cmd);
 	
 	while (1) {
 		int word_length = strcspn(p, " \t\n");
