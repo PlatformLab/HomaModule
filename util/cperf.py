@@ -21,6 +21,9 @@ import argparse
 import copy
 import fcntl
 import glob
+import math
+import matplotlib.pyplot as plt
+import numpy as np
 import os
 import re
 import shutil
@@ -46,26 +49,51 @@ log_file = 0
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
 
-# Defaults for command-line options, if the application doesn's specify its
-# own values..
+# Defaults for command-line options, if the application doesn't specify its
+# own values.
 default_defaults = {
-    'net_bw':         0.0,
-    'client_ports':   4,
-    'log_dir':        'logs/' + time.strftime('%Y%m%d%H%M%S'),
-    'protocol':       'homa',
-    'port_max':       500,
-    'port_receivers': 3,
-    'port_threads':   2,
-    'seconds':        5,
-    'server_max':     500,
-    'server_ports':   8,
-    'workload':       'w3'
+    'net_bw':            0.0,
+    'client_ports':      5,
+    'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
+    'protocol':          'homa',
+    'port_max':          500,
+    'port_receivers':    3,
+    'port_threads':      2,
+    'seconds':           5,
+    'server_max':        500,
+    'server_ports':      9,
+    'tcp_client_ports':  9,
+    'tcp_server_ports':  15,
+    'workload':          'w5'
 }
+
+# Keys are experiment names, and each value is the digested data for that
+# experiment.  The digest is itself a dictionary containing some or all of
+# the following keys:
+# rtts:             A dictionary with message lengths as keys; each value is
+#                  a list of the RTTs (in usec) for all messages of that length.
+# total_messages:  Total number of samples in rtts.
+# lengths:         Sorted list of message lengths, corresponding to buckets
+#                  chosen for plotting
+# cum_frac:        Cumulative fraction of all messages corresponding to each length
+# counts:          Number of RTTs represented by each bucket
+# p50:             List of 50th percentile rtts corresponding to each length
+# p99:             List of 99th percentile rtts corresponding to each length
+# p999:            List of 999th percentile rtts corresponding to each length
+# slow_50:         List of 50th percentile slowdowns corresponding to each length
+# slow_99:         List of 99th percentile slowdowns corresponding to each length
+# slow_999:        List of 999th percentile slowdowns corresponding to each length
+digests = {}
+
+# A dictionary where keys are message lengths, and each value is the median
+# unloaded RTT (usecs) for messages of that length.
+unloaded_p50 = {}
 
 def log(message):
     """
-    Write the message argument, followed by a newline, both to stdout and to
-    the cperf log file.
+    Write the a log message both to stdout and to the cperf log file.
+
+    message:  The log message to write; a newline will be appended.
     """
     global log_file
     print(message)
@@ -74,8 +102,10 @@ def log(message):
 
 def vlog(message):
     """
-    Log a message, like log, but if verbose blogging isn't enabled, then
-    log only to the cperf log file, not to stdou
+    Log a message, like log, but if verbose logging isn't enabled, then
+    log only to the cperf log file, not to stdout.
+
+    message:  The log message to write; a newline will be appended.
     """
     global log_file, verbose
     if verbose:
@@ -86,11 +116,14 @@ def vlog(message):
 def get_parser(description, usage, defaults = {}):
     """
     Returns an ArgumentParser for options that are commonly used in
-    performance tests. The description argument is a string describing the
-    overall functionality of this particular performance test. Usage is
-    a command synopsis (passed as usage to ArgumentParser. Defaults is
-    a dictionary that can be used to modify the defaults for some of the
-    options (there is a default default for each option).
+    performance tests.
+
+    description:    A string describing the overall functionality of this
+                    particular performance test
+    usage:          A command synopsis (passed as usage to ArgumentParser)
+    defaults:       A dictionary whose keys are option names and whose values
+                    are defaults; used to modify the defaults for some of the
+                    options (there is a default default for each option).
     """
     for key in default_defaults:
         if not key in defaults:
@@ -117,10 +150,8 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
             required=True, metavar='N',
             help='Total number of nodes to use in the cluster')
-    parser.add_argument('-p', '--protocol', dest='protocol',
-            choices=['homa', 'tcp'], default=defaults['protocol'],
-            help='Transport protocol to use (default: %s)'
-            % (defaults['protocol']))
+    parser.add_argument('--plot-only', dest='plot_only', action='store_true',
+            help='Don\'t run experiments; generate plot(s) with existing data')
     parser.add_argument('--port-max', type=int, dest='port_max',
             metavar='count', default=defaults['port_max'],
             help='Maximum number of requests each client thread can have '
@@ -134,6 +165,10 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['port_threads'],
             help='Number of threads listening on each Homa server port '
             '(default: %d)'% (defaults['port_threads']))
+    parser.add_argument('-p', '--protocol', dest='protocol',
+            choices=['homa', 'tcp'], default=defaults['protocol'],
+            help='Transport protocol to use (default: %s)'
+            % (defaults['protocol']))
     parser.add_argument('-s', '--seconds', type=int, dest='seconds',
             metavar='S', default=defaults['seconds'],
             help='Run each experiment for S seconds (default: %.1f)'
@@ -147,11 +182,20 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['server_ports'],
             help='Number of ports on which each server should listen '
             '(default: %d)'% (defaults['server_ports']))
+    parser.add_argument('--tcp-client-ports', type=int, dest='tcp_client_ports',
+            metavar='count', default=defaults['tcp_client_ports'],
+            help='Number of ports on which each TCP client should issue requests '
+            '(default: %d)'% (defaults['tcp_client_ports']))
+    parser.add_argument('--tcp-server-ports', type=int, dest='tcp_server_ports',
+            metavar='count', default=defaults['tcp_server_ports'],
+            help='Number of ports on which TCP servers should listen '
+            '(default: %d)'% (defaults['tcp_server_ports']))
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
             help='Enable verbose output in node logs')
     parser.add_argument('-w', '--workload', dest='workload',
             metavar='W', default=defaults['workload'],
-            help='Workload to use for benchmark (w1-w5 or number, default: %s)'
+            help='Workload to use for benchmark: w1-w5 or number, empty '
+            'means try each of w1-w5 (default: %s)'
             % (defaults['workload']))
     return parser
 
@@ -160,29 +204,32 @@ def init(options):
     Initialize various global state, such as the log file.
     """
     global log_dir, log_file, verbose
-    if os.path.exists(options.log_dir):
-        shutil.rmtree(options.log_dir)
     log_dir = options.log_dir
-    os.makedirs(log_dir)
-    log_file = open("%s/cperf.log" % log_dir, "w")
+    if not options.plot_only:
+        if os.path.exists(log_dir):
+            shutil.rmtree(log_dir)
+        os.makedirs(log_dir)
+    log_file = open("%s/cperf.log" % log_dir, "a")
     verbose = options.verbose
 
 def wait_output(string, nodes, cmd):
     """
-    This method waits until the given string has appeared on the stdout of
+    This method waits until a particular string has appeared on the stdout of
     each of the nodes in the list given by nodes. If a long time goes by without
-    the string appearing, an exception is thrown; the cmd argument is used
-    in the error message to indicate the command that failed.
+    the string appearing, an exception is thrown.
+    string:    The value to wait for
+    cmd:       Used in error messages to indicate the command that failed
     """
     global active_nodes
     outputs = []
     printed = False
+    time_limit = 10.0
 
     for id in nodes:
         while len(outputs) <= id:
             outputs.append("")
     start_time = time.time()
-    while time.time() < (start_time + 5.0):
+    while time.time() < (start_time + time_limit):
         for id in nodes:
             data = active_nodes[id].stdout.read(1000)
             if data != None:
@@ -199,7 +246,7 @@ def wait_output(string, nodes, cmd):
                 break
         if bad_node < 0:
             return
-        if (time.time() > (start_time + 5.0)) and not printed:
+        if (time.time() > (start_time + time_limit)) and not printed:
             log("expected output from node-%d not yet received "
             "after command '%s': expecting '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
@@ -211,8 +258,10 @@ def wait_output(string, nodes, cmd):
 
 def start_nodes(r):
     """
-    Start up cp_node on nodes with ids in the range given by r,
-    if it isn't already running.
+    Start up cp_node on a group of nodes.
+
+    r:  The range of nodes on which to start cp_node, if it isn't already
+        running
     """
     global active_nodes
     started = []
@@ -234,13 +283,17 @@ def start_nodes(r):
     log_level = "normal"
     if verbose:
         log_level = "verbose"
-    do_cmd("log --file node.log --level %s\n" % (log_level), r)
+    command = "log --file node.log --level %s" % (log_level)
+    for id in started:
+        active_nodes[id].stdin.write(command + "\n")
+        active_nodes[id].stdin.flush()
+    wait_output("% ", started, command)
 
 def stop_nodes():
     """
-    Exit all of the nodes that are currently running.
+    Exit all of the nodes that are currently active.
     """
-    global active_nodes
+    global active_nodes, server_nodes
     for node in active_nodes.values():
         node.stdin.write("exit\n")
         node.stdin.flush()
@@ -249,14 +302,18 @@ def stop_nodes():
     for id in active_nodes:
         subprocess.run(["rsync", "-rtvq", "node-%d:node.log" % (id),
                 "%s/node-%d.log" % (log_dir, id)])
-    active_nodes.clear();
+    active_nodes.clear()
+    server_nodes = range(0,0)
 
 def do_cmd(command, r, r2 = range(0,0)):
     """
-    Execute a cp_node command on the range of nodes given by r and r2, and
-    wait for the command to complete on each node. The command need
-    be terminated by a newline. If there is overlap between r and r2, the
-    overlapping nodes will perform the command only once.
+    Execute a cp_node command on a given group of nodes.
+
+    command:    A command to execute on each node
+    r:          A group of node ids on which to run the command (range, list, etc.)
+    r2:         An optional additional group of node ids on which to run the
+                command; if a note is present in both r and r2, the
+                command will only be performed once
     """
     global active_nodes
     nodes = []
@@ -267,54 +324,65 @@ def do_cmd(command, r, r2 = range(0,0)):
             nodes.append(id)
     for id in nodes:
         vlog("Command for node-%d: %s" % (id, command[:-1]))
-        active_nodes[id].stdin.write(command)
+        active_nodes[id].stdin.write(command + "\n")
         active_nodes[id].stdin.flush()
     wait_output("% ", nodes, command)
 
 def start_servers(r, options):
     """
-    Starts cp_node servers running on nodes whose ids fall in the range given
-    by r. Options is a dictionary that must contain at least the following
-    keys, which will be used to configure the servers:
-    server_ports
-    port_threads
-    protocol
+    Starts cp_node servers running on a group of nodes
+
+    r:       A group of node ids on which to start cp_node servers
+    options: A namespace that must contain at least the following
+             keys, which will be used to configure the servers:
+                 server_ports
+                 port_threads
+                 protocol
     """
     global server_nodes
+    log("Starting %s servers %d:%d" % (options.protocol, r.start, r.stop-1))
     if len(server_nodes) > 0:
+        print("stopping servers, server_nodes: %s" % (server_nodes))
         do_cmd("stop servers", server_nodes)
         server_nodes = range(0,0)
     start_nodes(r)
-    do_cmd("server --ports %d --port-threads %d --protocol %s\n" % (
-            options.server_ports, options.port_threads,
-            options.protocol), r)
+    if options.protocol == "homa":
+        do_cmd("server --ports %d --port-threads %d --protocol %s" % (
+                options.server_ports, options.port_threads,
+                options.protocol), r)
+    else:
+        do_cmd("server --ports %d --protocol %s" % (
+                options.tcp_server_ports, options.protocol), r)
     server_nodes = r
 
 def run_experiment(name, clients, options):
     """
-    Starts cp_node clients running on nodes in the range given by clients,
-    lets the clients run for an amount of time given by options.seconds,
-    and gathers statistics. Name is an identifier for this experiment, which
-    is used in the name of files created in the log directory. Options is a
-    namespace that must contain at least the following attributes, which control
-    the experiment:
-    client_ports
-    first_server
-    net_bw
-    port_max
-    port_receivers
-    protocol
-    seconds
-    server_max
-    server_nodes
-    server_ports
-    workload
+    Starts cp_node clients running on a group of nodes, lets the clients run
+    for an amount of time given by options.seconds, and gathers statistics.
+
+    name:     Identifier for this experiment, which is used in the names
+              of files created in the log directory.
+    options:  A namespace that must contain at least the following attributes,
+              which control the experiment:
+                  client_ports
+                  first_server
+                  net_bw
+                  port_max
+                  port_receivers
+                  protocol
+                  seconds
+                  server_max
+                  server_nodes
+                  server_ports
+                  tcp_client_ports
+                  tcp_server_ports
+                  workload
     """
 
     global active_nodes
     start_nodes(clients)
     nodes = []
-    log("Starting %s experiment with clients %d-%d" % (
+    log("Starting %s experiment with clients %d:%d" % (
             name, clients.start, clients.stop-1))
     num_servers = len(server_nodes)
     if "server_nodes" in options:
@@ -323,64 +391,83 @@ def run_experiment(name, clients, options):
     if "first_server" in options:
         first_server = options.first_server
     for id in clients:
-        command = "client --ports %d --port-receivers %d --server-ports %d " \
-                "--workload %s --server-nodes %d --first-server %d " \
-                "--net-bw %.3f --port-max %d --server-max %d --protocol %s " \
-                "--id %d\n" % (
-                options.client_ports,
-                options.port_receivers,
-                options.server_ports,
-                options.workload,
-                num_servers,
-                first_server,
-                options.net_bw,
-                options.port_max,
-                options.server_max,
-                options.protocol,
-                id);
-        active_nodes[id].stdin.write(command)
+        if options.protocol == "homa":
+            command = "client --ports %d --port-receivers %d --server-ports %d " \
+                    "--workload %s --server-nodes %d --first-server %d " \
+                    "--net-bw %.3f --port-max %d --server-max %d --protocol %s " \
+                    "--id %d" % (
+                    options.client_ports,
+                    options.port_receivers,
+                    options.server_ports,
+                    options.workload,
+                    num_servers,
+                    first_server,
+                    options.net_bw,
+                    options.port_max,
+                    options.server_max,
+                    options.protocol,
+                    id);
+        else:
+            command = "client --ports %d --server-ports %d " \
+                    "--workload %s --server-nodes %d --first-server %d " \
+                    "--net-bw %.3f --port-max %d --server-max %d --protocol %s " \
+                    "--id %d" % (
+                    options.tcp_client_ports,
+                    options.tcp_server_ports,
+                    options.workload,
+                    num_servers,
+                    first_server,
+                    options.net_bw,
+                    options.port_max,
+                    options.server_max,
+                    options.protocol,
+                    id);
+        active_nodes[id].stdin.write(command + "\n")
         active_nodes[id].stdin.flush()
         nodes.append(id)
         vlog("Command for node-%d: %s" % (id, command[:-1]))
     wait_output("% ", nodes, command)
     vlog("Recording initial metrics")
-    for id in clients:
-        subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
-                stdout=subprocess.DEVNULL)
-    do_cmd("dump_times /dev/null\n", clients)
-    do_cmd("log Starting %s experiment\n" % (name), server_nodes, clients)
+    if options.protocol == "homa":
+        for id in active_nodes:
+            subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
+                    stdout=subprocess.DEVNULL)
+    do_cmd("dump_times /dev/null", clients)
+    do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
     time.sleep(options.seconds)
-    do_cmd("log Ending %s experiment\n" % (name), server_nodes, clients)
+    do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
-    do_cmd("dump_times rtts\n", clients)
-    for id in clients:
-        f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
-        subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
-        f.close()
-    do_cmd("stop clients\n", clients)
+    do_cmd("dump_times rtts", clients)
+    if options.protocol == "homa":
+        for id in active_nodes:
+            f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
+            subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
+            f.close()
+    do_cmd("stop clients", clients)
     for id in clients:
         subprocess.run(["rsync", "-rtvq", "node-%d:rtts" % (id),
                 "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
-def scan_log(file_name, node, experiments):
+def scan_log(file, node, experiments):
     """
-    Read a single log file and extract various useful information,
-    such as fatal error messages or interesting statistics. The node
-    parameter gives the name of the node that generated the log, such
-    as "node-1". The experiments argument is:
-       * A dictionary indexed by experiment name, where each value is:
-       * A dictionary indexed by node name, where each value is:
-       * A dictionary with keys client_kops, client_mbps, server_kops,
-         or server_Mbps, each of which is:
-       * A list of values measured at regular intervals for that node.
-    This method adds adds information from the given log file to the
-    experiments structure.
+    Read a log file and extract various useful information, such as fatal
+    error messages or interesting statistics.
+
+    file:         Name of the log file to read
+    node:         Name of the node that generated the log, such as "node-1".
+    experiments:  Info from the given log file is added to this structure
+                  * At the top level it is dictionary indexed by experiment
+                    name, where
+                  * Each value is dictionary indexed by node name, where
+                  * Each value is a dictionary with keys client_kops,
+                    client_mbps, server_kops, or server_Mbps, each of which is
+                  * A list of values measured at regular intervals for that node
     """
     exited = False
     experiment = ""
     node_data = None
 
-    for line in open(file_name):
+    for line in open(file):
         match = re.match('.*Starting (.*) experiment', line)
         if match:
             experiment = match.group(1)
@@ -486,3 +573,357 @@ def scan_logs():
                 "(avg per node)" % (name, len(nodes["all"]),
                 (totals["client_mbps"] + totals["server_mbps"])/len(nodes["all"]),
                 (totals["client_kops"] + totals["server_kops"])/len(nodes["all"])))
+
+def read_rtts(file, rtts):
+    """
+    Read a file generated by cp_node's "dump_times" command and add its
+    data to the information present in rtts.
+
+    file:    Name of the log file.
+    rtts:    Dictionary whose keys are message lengths; each value is a
+             list of all of the rtts recorded for that message length (in usecs)
+    Returns: The total number of rtts read from the file.
+    """
+
+    total = 0
+    f = open(file, "r")
+    for line in f:
+        stripped = line.strip();
+        if stripped[0] == '#':
+            continue
+        words = stripped.split()
+        if (len(words) < 2):
+            print("Line in %s too short (need at least 2 columns): '%s'" %
+                    (file, line))
+            continue
+        length = int(words[0])
+        usec = float(words[1])
+        if length in rtts:
+            rtts[length].append(usec)
+        else:
+            rtts[length] = [usec]
+        total += 1
+    f.close()
+    return total
+
+def get_buckets(rtts, total):
+    """
+    Computes a reasonable set of the buckets for histogramming the information
+    in rtts. We don't want super-small buckets because the statistics will be
+    bad, so this method merges several message sizes if needed to ensure
+    that each bucket has a reasonable number of messages.
+
+    rtts:     A collection of message rtts, as returned by read_rtts
+    total:    Total number of samples in rtts
+    Returns:  A list of <length, cum_frac> pairs, in sorted order. The length
+              is the largest message size for a bucket, and cum_frac is the
+              fraction of all messages with that length or smaller.
+    """
+    buckets = []
+    min_size = total//400
+    cur_bucket_count = 0
+    cumulative = 0
+    for length in sorted(rtts.keys()):
+        samples = len(rtts[length])
+        cur_bucket_count += samples
+        cumulative += samples
+        if cur_bucket_count >= min_size:
+            buckets.append([length, cumulative/total])
+            cur_bucket_count = 0
+        last_length = length
+    if cur_bucket_count != 0:
+        buckets[-1] = [last_length, 1.0]
+    return buckets
+
+def set_unloaded(experiment):
+    """
+    Compute the optimal RTTs for each message size.
+    
+    experiment:   Name of experiment that measured RTTs under low load
+    """
+    
+    # Find (or generate) unloaded data for comparison.
+    files = sorted(glob.glob("%s/%s-*.rtts" % (log_dir, experiment)))
+    if len(files) == 0:
+        raise Exception("Couldn't find %s RTT data" % (experiment))
+    rtts = {}
+    for file in files:
+        read_rtts(file, rtts)
+    unloaded_p50.clear()
+    for length in rtts.keys():
+        unloaded_p50[length] = sorted(rtts[length])[len(rtts[length])//2]
+    vlog("Computed unloaded_p50: %d entries" % len(unloaded_p50))
+
+def get_digest(experiment):
+    """
+    Returns an element of digest that contains data for a particular
+    experiment; if this is the first request for a given experiment, the
+    method reads the data for experiment and generates the digest. For
+    each new digest generated, a .data file is generated in the "reports"
+    subdirectory of the log directory.
+
+    experiment:  Name of the desired experiment
+    """
+    global digests, log_dir, unloaded_p50
+
+    if experiment in digests:
+        return digests[experiment]
+    digest = {}
+    digest["rtts"] = {}
+    digest["total_messages"] = 0
+    digest["lengths"] = []
+    digest["cum_frac"] = []
+    digest["counts"] = []
+    digest["p50"] = []
+    digest["p99"] = []
+    digest["p999"] = []
+    digest["slow_50"] = []
+    digest["slow_99"] = []
+    digest["slow_999"] = []
+
+    # Read in the RTT files for this experiment.
+    files = sorted(glob.glob(log_dir + ("/%s-*.rtts" % (experiment))))
+    if len(files) == 0:
+        raise Exception("Couldn't find RTT data for %s experiment"
+                % (experiment))
+    sys.stdout.write("Reading RTT data for %s experiment: " % (experiment))
+    sys.stdout.flush()
+    for file in files:
+        digest["total_messages"] += read_rtts(file, digest["rtts"])
+        sys.stdout.write("#")
+        sys.stdout.flush()
+    print("")
+    
+    if len(unloaded_p50) == 0:
+        raise Exception("No unloaded data: must invoked set_unloaded")
+
+    rtts = digest["rtts"]
+    buckets = get_buckets(rtts, digest["total_messages"])
+    bucket_length, bucket_cum_frac = buckets[0]
+    next_bucket = 1
+    bucket_rtts = []
+    bucket_slowdowns = []
+    bucket_count = 0
+    cur_unloaded = unloaded_p50[min(unloaded_p50.keys())]
+    lengths = sorted(rtts.keys())
+    lengths.append(999999999)            # Force one extra loop iteration
+    for length in lengths:
+        if length > bucket_length:
+            digest["lengths"].append(bucket_length)
+            digest["cum_frac"].append(bucket_cum_frac)
+            digest["counts"].append(bucket_count)
+            if len(bucket_rtts) == 0:
+                bucket_rtts.append(0)
+                bucket_slowdowns.append(0)
+            bucket_rtts = sorted(bucket_rtts)
+            digest["p50"].append(bucket_rtts[bucket_count//2])
+            digest["p99"].append(bucket_rtts[bucket_count*99//100])
+            digest["p999"].append(bucket_rtts[bucket_count*999//1000])
+            bucket_slowdowns = sorted(bucket_slowdowns)
+            digest["slow_50"].append(bucket_slowdowns[bucket_count//2])
+            digest["slow_99"].append(bucket_slowdowns[bucket_count*99//100])
+            digest["slow_999"].append(bucket_slowdowns[bucket_count*999//1000])
+            if next_bucket >= len(buckets):
+                break
+            bucket_rtts = []
+            bucket_slowdowns = []
+            bucket_count = 0
+            bucket_length, bucket_cum_frac = buckets[next_bucket]
+            next_bucket += 1
+        if length in unloaded_p50:
+            cur_unloaded = unloaded_p50[length]
+        bucket_count += len(rtts[length])
+        for rtt in rtts[length]:
+            bucket_rtts.append(rtt)
+            bucket_slowdowns.append(rtt/cur_unloaded)
+
+        dir = "%s/reports" % (log_dir)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
+        f.write("# Digested data for %s experiment\n" % (experiment))
+        f.write("# length cum_frac  samples     p50      p99     p999   "
+                "s50    s99    s999\n")
+        for i in range(len(digest["lengths"])):
+            f.write(" %7d %8.3f %8d %7.1f %8.1f %8.1f %5.1f %6.1f %7.1f\n"
+                    % (digest["lengths"][i], digest["cum_frac"][i],
+                    digest["counts"][i], digest["p50"][i], digest["p99"][i],
+                    digest["p999"][i], digest["slow_50"][i],
+                    digest["slow_99"][i], digest["slow_999"][i]))
+        f.close()
+
+    digests[experiment] = digest
+    return digest
+
+def start_slowdown_plot(title, max_y, x_experiment):
+    """
+    Create a pyplot graph that will be used for slowdown data.
+
+    title:         Title for the plot; may be empty
+    max_y:         Maximum y-coordinate
+    x_experiment:  Name of experiment whose rtt distribution will be used to
+                   label the x-axis of the plot
+    """
+
+    plt.figure(figsize=[6, 3])
+    if title != "":
+        plt.title(title)
+    plt.rcParams.update({'font.size': 10})
+    plt.axis()
+    plt.xlim(0, 1.0)
+    plt.yscale("log")
+    plt.ylim(1, max_y)
+    ticks = []
+    labels = []
+    y = 1
+    while y <= max_y:
+        ticks.append(y);
+        labels.append("%d" % (y))
+        y = y*10
+    plt.yticks(ticks, labels)
+    plt.xlabel("Message Length")
+    plt.ylabel("Slowdown")
+    plt.grid(which="major", axis="y")
+
+    # Generate x-axis labels
+    ticks = []
+    labels = []
+    cumulative_count = 0
+    target_count = 0
+    tick = 0
+    digest = get_digest(x_experiment)
+    rtts = digest["rtts"]
+    total = digest["total_messages"]
+    for length in sorted(rtts.keys()):
+        cumulative_count += len(rtts[length])
+        while cumulative_count >= target_count:
+            ticks.append(target_count/total)
+            if length < 1000:
+                labels.append("%.0f" % (length))
+            elif length < 100000:
+                labels.append("%.1fK" % (length/1000))
+            else:
+                labels.append("%.0fK" % (length/1000))
+            tick += 1
+            target_count = (total*tick)/10
+    plt.xticks(ticks, labels)
+
+def make_histogram(x, y):
+    """
+    Given x and y coordinates, return new lists of coordinates that describe
+    a histogram (transform (x1,y1) and (x2,y2) into (x1,y1), (x2,y1), (x2,y2)
+    to make steps.
+
+    x:        List of x-coordinates
+    y:        List of y-coordinates corresponding to x
+    Returns:  A list containing two lists, one with new x values and one
+              with new y values.
+    """
+    x_new = []
+    y_new = []
+    for i in range(len(x)):
+        if len(x_new) != 0:
+            x_new.append(x[i])
+            y_new.append(y[i-1])
+        else:
+            x_new.append(0)
+            y_new.append(y[i])
+        x_new.append(x[i])
+        y_new.append(y[i])
+    return [x_new, y_new]
+
+def plot_slowdown(experiment, percentile, label):
+    """
+    Add a slowdown histogram to the current graph.
+
+    experiment:    Name of the experiment whose data should be graphed.
+    percentile:    While percentile of slowdown to graph: must be "p50", "p99",
+                   or "p999"
+    label:         Text to display in the graph legend for this curve
+    """
+
+    digest = get_digest(experiment)
+    if percentile == "p50":
+        x, y = make_histogram(digest["cum_frac"], digest["slow_50"])
+    elif percentile == "p99":
+        x, y = make_histogram(digest["cum_frac"], digest["slow_99"])
+    elif percentile == "p999":
+        x, y = make_histogram(digest["cum_frac"], digest["slow_999"])
+    else:
+        raise Exception("Bad percentile selector %s; must be p50, p99, or p999"
+                % (percentile))
+    plt.plot(x, y, label=label)
+
+def start_cdf_plot(title, min_x, max_x, num_samples, x_label, y_label):
+    """
+    Create a pyplot graph that will be display a complementary CDF with
+    log axes.
+
+    title:      Overall title for the graph (empty means no title)
+    min_x:       Smallest x-coordinate that must be visible
+    max_x:       Largest x-coordinate that must be visible
+    min_y:       Smallest y-coordinate that must be visible (1.0 is always
+                 the largest value for y)
+    x_label:     Label for the x axis (empty means no label)
+    num_samples: Maximum number of samples in any given curve (used to
+                 scale the y axis)
+    """
+    plt.figure(figsize=[5, 4])
+    if title != "":
+        plt.title(title)
+    plt.rcParams.update({'font.size': 10})
+    plt.axis()
+    plt.xscale("log")
+
+    # Round out the x-axis limits to even powers of 10.
+    exp = math.floor(math.log(min_x , 10))
+    min_x = 10**exp
+    exp = math.ceil(math.log(max_x, 10))
+    max_x = 10**exp
+    plt.xlim(min_x, max_x)
+
+    plt.yscale("log")
+    plt.ylim(1/num_samples, 1.0)
+    # plt.yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
+    if x_label:
+        plt.xlabel(x_label)
+    if y_label:
+        plt.ylabel(y_label)
+    plt.grid(which="major", axis="y")
+    plt.grid(which="major", axis="x")
+
+def get_short_cdf(experiment):
+    """
+    Return a complementary CDF histogram for the RTTs of short messages in
+    an experiment. Short messages means all messages shorter than 1500 bytes
+    that are also among the 10% of shortest messages (if there are no messages
+    shorter than 1500 bytes, then extract data for the shortest message
+    length available).
+
+    experiment:  Name of the experiment containing the data to plot
+    Returns:     A list with two elements (a list of x-coords and a list
+                 of y-coords) that histogram the complementary cdf.
+    """
+    short = []
+    digest = get_digest(experiment)
+    rtts = digest["rtts"]
+    messages_left = digest["total_messages"]//10
+    for length in sorted(rtts.keys()):
+        if (length >= 1500) and (len(short) > 0):
+            break
+        short.extend(rtts[length])
+        messages_left -= len(rtts[length])
+        if messages_left < 0:
+            break
+    x = []
+    y = []
+    total = len(short)
+    remaining = total
+    for rtt in sorted(short):
+        if len(x) > 0:
+            x.append(rtt)
+            y.append(remaining/total)
+        remaining -= 1
+        x.append(rtt)
+        y.append(remaining/total)
+    return [x, y]

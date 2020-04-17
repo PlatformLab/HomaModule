@@ -1,0 +1,109 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark compares the performance of Homa with TCP.
+# Type "cp_vs_tcp --help" for documentation.
+
+from cperf import *
+
+# Info to use (workload and corresponding bandwidth) when running all
+# of the workloads.
+load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
+
+parser = get_parser(description=
+        'Measures slowdown as a function of message size for Homa and TCP.',
+        usage='%(prog)s [options]',
+        defaults={
+            "server_ports":     3,
+            "port_threads":     3,
+            "client_ports":     3,
+            "port_receivers":   3,
+            "tcp_server_ports": 9,
+            "tcp_client_ports": 5,
+            "workload":         ""
+        })
+options = parser.parse_args()
+init(options)
+servers = range(0, options.num_nodes)
+clients = range(0, options.num_nodes)
+
+if options.workload != "":
+    load_info = [[options.workload, options.net_bw]];
+
+for workload, bw in load_info:
+    options.workload = workload
+    options.net_bw = bw/2.0
+    unloaded_exp = "unloaded_" + workload;
+    homa_exp = "homa_" + workload;
+    tcp_exp = "tcp_" + workload;
+    if not options.plot_only:
+        try:
+            log("Setting unscheduled cutoffs for %s" % (workload))
+            result = subprocess.run(["set_cutoffs", workload,
+                    str(options.num_nodes)], stdout=subprocess.DEVNULL)
+            options.protocol = "homa"
+            start_servers(servers, options)
+
+            o = copy.deepcopy(options);
+            o.client_ports = 1
+            o.port_max = 1
+            o.server_ports = 1
+            o.server_nodes = 1
+            o.first_server = 1
+            run_experiment(unloaded_exp, range(0, 1), o)
+
+            run_experiment(homa_exp, clients, options)
+
+            options.protocol = "tcp"
+            start_servers(servers, options)
+            run_experiment(tcp_exp, clients, options)
+        except Exception as e:
+            log(traceback.format_exc())
+
+    set_unloaded(unloaded_exp)
+
+    # Generate slowdown plot.
+    log("Generating slowdown plot for %s" % (workload))
+    title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
+            options.num_nodes, bw)
+    start_slowdown_plot(title, 400, homa_exp)
+    plot_slowdown(tcp_exp, "p99", "TCP P99")
+    plot_slowdown(homa_exp, "p99", "Homa P99")
+    plot_slowdown(tcp_exp, "p50", "TCP P50")
+    plot_slowdown(homa_exp, "p50", "Homa P50")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("%s/reports/vs_tcp_%s.pdf" % (options.log_dir, workload))
+
+    # Generate CDF of small-message RTTs.
+    log("Generating short message CDF for %s" % (workload))
+    unloaded_x, unloaded_y = get_short_cdf(unloaded_exp)
+    homa_x, homa_y = get_short_cdf(homa_exp)
+    tcp_x, tcp_y = get_short_cdf(tcp_exp)
+    start_cdf_plot(title, min(unloaded_x[0], homa_x[0], tcp_x[0]),
+            max(unloaded_x[-1], homa_x[-1], tcp_x[-1]),
+            max(len(unloaded_x), len(homa_x), len(tcp_x))/2 + 1,
+            "RTT (usecs)",
+            "Cumulative Fraction Short Messages")
+    plt.plot(tcp_x, tcp_y, label="TCP")
+    plt.plot(homa_x, homa_y, label="Homa")
+    plt.plot(unloaded_x, unloaded_y, label="Homa low load")
+    plt.legend(loc="upper right")
+    plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))
+
+log("Stopping nodes")
+stop_nodes()
+scan_logs()
