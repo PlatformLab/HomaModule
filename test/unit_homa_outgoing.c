@@ -874,3 +874,28 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 		"request 4, next_offset 0; "
 		"request 3, next_offset 0", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_add_to_throttled__inc_metrics)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 5000);
+	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 10000);
+	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 15000);
+	EXPECT_NE(NULL, crpc3);
+	homa_rpc_unlock(crpc1);
+	homa_rpc_unlock(crpc2);
+	homa_rpc_unlock(crpc3);
+	
+	homa_add_to_throttled(crpc1);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_adds);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.throttle_list_checks);
+	
+	homa_add_to_throttled(crpc2);
+	EXPECT_EQ(2, homa_cores[cpu_number]->metrics.throttle_list_adds);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_checks);
+	
+	homa_add_to_throttled(crpc3);
+	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_adds);
+	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_checks);
+}

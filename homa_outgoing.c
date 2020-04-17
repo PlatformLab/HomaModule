@@ -823,6 +823,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_rpc *candidate;
 	int bytes_left;
+	int checks = 0;
 
 	if (!list_empty(&rpc->throttled_links)) {
 		return;
@@ -833,6 +834,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
 			throttled_links) {
 		int bytes_left_cand;
+		checks++;
 	
 		/* Watch out: the pacer might have just transmitted the last
 		 * packet from candidate.
@@ -852,5 +854,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 done:
 	homa_throttle_unlock(homa);
 	wake_up_process(homa->pacer_kthread);
+	INC_METRIC(throttle_list_adds, 1);
+	INC_METRIC(throttle_list_checks, checks);
 //	tt_record("woke up pacer thread");
 }

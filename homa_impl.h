@@ -1686,6 +1686,17 @@ struct homa_metrics {
 	__u64 reaper_dead_skbs;
 	
 	/**
+	 * @throttle_list_adds: Total number of calls to homa_add_to_throttled.
+	 */
+	__u64 throttle_list_adds;
+	
+	/**
+	 * @throttle_list_checks: Number of list elements examined in
+	 * calls to homa_add_to_throttled.
+	 */
+	__u64 throttle_list_checks;
+	
+	/**
 	 * @temp1: this value, and the others below it, are reserved for
 	 * temporary use during testing.
 	 */

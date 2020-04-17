@@ -2,6 +2,7 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Performance-related tasks:
+  * Large values of --port-max cause performance degradation for w4 and w5
   * Implement new benchmark that segregates clients and servers on
     different machines
   * Reduce the number of available priorities, see how that impacts
@@ -13,10 +14,10 @@ Notes for Homa implementation in Linux:
   * Redo hashing function in homa_offload to distribute load more evenly
     (e.g. don't hash based on packet info). Is there some way to hash to
     the same location under low load, but use multiple cores under high
-    load?
-  * Get dynamic priority adjustment working
+    load? Tried simple totally random approach, but that made things worse.
   * TCP does non-blocking sends for responses, which can delay processing
     other requests for the same thread; may be unfair?
+  * Don't grant to more than one message from a given sender at a time.
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.

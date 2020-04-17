@@ -267,13 +267,14 @@ if elapsed_secs != 0:
         print("%s       %6.2f   %7.2f us/syscall" % (label.ljust(16),
                 cores, us_per))
 
-    for print_name, symbol in [["NAPI handler", "napi_cycles"],
-            ["SoftIRQ handler", "softirq_cycles"]]:
-        cpu_time = float(deltas[symbol])
-        cores = cpu_time/time_delta
-        total_cores += cores;
-        print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
-                cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
+    if packets_received > 0:
+        for print_name, symbol in [["NAPI handler", "napi_cycles"],
+                ["SoftIRQ handler", "softirq_cycles"]]:
+            cpu_time = float(deltas[symbol])
+            cores = cpu_time/time_delta
+            total_cores += cores;
+            print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
+                    cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
 
     for print_name, symbol in [["Pacer", "pacer_cycles"],
             ["Timer handler", "timer_cycles"]]:
@@ -321,4 +322,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
+    if deltas["throttle_list_adds"] > 0:
+        print("%-28s %15.1f              List traversals per throttle "
+                "list insert" % ("checks_per_throttle_insert",
+                deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
         

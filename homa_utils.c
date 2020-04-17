@@ -1165,6 +1165,15 @@ char *homa_print_metrics(struct homa *homa)
 				"calls\n",
 				m->reaper_dead_skbs);
 		homa_append_metric(homa,
+				"throttle_list_adds        %15llu  "
+				"Calls to homa_add_to_throttled\n",
+				m->throttle_list_adds);
+		homa_append_metric(homa,
+				"throttle_list_checks      %15llu  "
+				"List elements checked in "
+				"homa_add_to_throttled\n",
+				m->throttle_list_checks);
+		homa_append_metric(homa,
 				"temp1                     %15llu  "
 				"Temporary use in testing\n",
 				m->temp1);
