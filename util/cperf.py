@@ -37,6 +37,12 @@ import traceback
 # a Popen object that can be used to communicate with the node.
 active_nodes = {}
 
+# If a server's id appears as a key in this dictionary, it means we
+# have started homa_prio running on that node. The value of each entry is
+# a Popen object for the homa_prio instance; if this is terminated, then
+# the homa_prio process will end
+homa_prios = {}
+
 # The range of nodes currently running cp_node servers.
 server_nodes = range(0,0)
 
@@ -56,14 +62,16 @@ default_defaults = {
     'client_ports':      5,
     'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'protocol':          'homa',
-    'port_max':          500,
+    'port_max':          20,
     'port_receivers':    3,
     'port_threads':      2,
     'seconds':           5,
-    'server_max':        500,
+    'server_max':        20,
     'server_ports':      9,
     'tcp_client_ports':  9,
     'tcp_server_ports':  15,
+    'unsched':           0,
+    'unsched_boost':     0.0,
     'workload':          'w5'
 }
 
@@ -150,6 +158,9 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
             required=True, metavar='N',
             help='Total number of nodes to use in the cluster')
+    parser.add_argument('--no-homa-prio', dest='no_homa_prio',
+            action='store_true', default=False,
+            help='Don\'t run homa_prio on nodes to adjust unscheduled cutoffs')
     parser.add_argument('--plot-only', dest='plot_only', action='store_true',
             help='Don\'t run experiments; generate plot(s) with existing data')
     parser.add_argument('--port-max', type=int, dest='port_max',
@@ -190,6 +201,16 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['tcp_server_ports'],
             help='Number of ports on which TCP servers should listen '
             '(default: %d)'% (defaults['tcp_server_ports']))
+    parser.add_argument('--unsched', type=int, dest='unsched',
+            metavar='count', default=defaults['unsched'],
+            help='If nonzero, homa_prio will always use this number of '
+            'unscheduled priorities, rather than computing from workload'
+            '(default: %d)'% (defaults['unsched']))
+    parser.add_argument('--unsched-boost', type=float, dest='unsched_boost',
+            metavar='float', default=defaults['unsched'],
+            help='Increase the number of unscheduled priorities that homa_prio '
+            'assigns by this (possibly fractional) amount (default: %.2f)'
+            % (defaults['unsched_boost']))
     parser.add_argument('-v', '--verbose', dest='verbose', action='store_true',
             help='Enable verbose output in node logs')
     parser.add_argument('-w', '--workload', dest='workload',
@@ -256,12 +277,13 @@ def wait_output(string, nodes, cmd):
             "expected '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
 
-def start_nodes(r):
+def start_nodes(r, options):
     """
     Start up cp_node on a group of nodes.
 
-    r:  The range of nodes on which to start cp_node, if it isn't already
-        running
+    r:        The range of nodes on which to start cp_node, if it isn't already
+              running
+    options:  Command-line options that may affect experiment
     """
     global active_nodes
     started = []
@@ -278,6 +300,15 @@ def start_nodes(r):
         fl = fcntl.fcntl(node.stdout, fcntl.F_GETFL)
         fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
         active_nodes[id] = node
+        if not options.no_homa_prio:
+            f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
+            homa_prios[id] = subprocess.Popen(["ssh", "-o",
+                    "StrictHostKeyChecking=no", "node-%d" % (id), "sudo",
+                    "bin/homa_prio", "--interval", "500", "--unsched",
+                    str(options.unsched), "--unsched-boost",
+                    str(options.unsched_boost)], encoding="utf-8",
+                    stdout=f, stderr=subprocess.STDOUT)
+            f.close
         started.append(id)
     wait_output("% ", started, "ssh")
     log_level = "normal"
@@ -294,6 +325,10 @@ def stop_nodes():
     Exit all of the nodes that are currently active.
     """
     global active_nodes, server_nodes
+    for id, popen in homa_prios.items():
+        subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no",
+                "node-%d" % id, "sudo", "pkill", "homa_prio"])
+        popen.wait(5.0)
     for node in active_nodes.values():
         node.stdin.write("exit\n")
         node.stdin.flush()
@@ -328,6 +363,31 @@ def do_cmd(command, r, r2 = range(0,0)):
         active_nodes[id].stdin.flush()
     wait_output("% ", nodes, command)
 
+def do_ssh(command, nodes):
+    """
+    Use ssh to execute a particular shell command on a group of nodes.
+
+    command:  command to execute on each node (a list of argument words)
+    nodes:    specifies ids of the nodes on which to execute the command:
+              should be a range, list, or other object that supports "in"
+    """
+    for id in nodes:
+        subprocess.run(["ssh", "node-%d" % id] + command,
+                stdout=subprocess.DEVNULL)
+
+def set_homa_parameter(name, value, nodes):
+    """
+    Modify the value of a Homa configuration parameter on a group of nodes.
+
+    name:     name of the configuration parameter to modify
+    value:    desired value for the parameter
+    nodes:    specifies ids of the nodes on which to execute the command:
+              should be a range, list, or other object that supports "in"
+    """
+    for id in nodes:
+        subprocess.run(["ssh", "node-%d" % id, "sudo", "sysctl",
+                ".net.homa.%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
+
 def start_servers(r, options):
     """
     Starts cp_node servers running on a group of nodes
@@ -342,10 +402,9 @@ def start_servers(r, options):
     global server_nodes
     log("Starting %s servers %d:%d" % (options.protocol, r.start, r.stop-1))
     if len(server_nodes) > 0:
-        print("stopping servers, server_nodes: %s" % (server_nodes))
         do_cmd("stop servers", server_nodes)
         server_nodes = range(0,0)
-    start_nodes(r)
+    start_nodes(r, options)
     if options.protocol == "homa":
         do_cmd("server --ports %d --port-threads %d --protocol %s" % (
                 options.server_ports, options.port_threads,
@@ -380,7 +439,7 @@ def run_experiment(name, clients, options):
     """
 
     global active_nodes
-    start_nodes(clients)
+    start_nodes(clients, options)
     nodes = []
     log("Starting %s experiment with clients %d:%d" % (
             name, clients.start, clients.stop-1))
@@ -427,8 +486,10 @@ def run_experiment(name, clients, options):
         nodes.append(id)
         vlog("Command for node-%d: %s" % (id, command[:-1]))
     wait_output("% ", nodes, command)
-    vlog("Recording initial metrics")
     if options.protocol == "homa":
+        # Wait a bit so that homa_prio can set priorities appropriately
+        time.sleep(2)
+        vlog("Recording initial metrics")
         for id in active_nodes:
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
                     stdout=subprocess.DEVNULL)
@@ -439,6 +500,7 @@ def run_experiment(name, clients, options):
     log("Retrieving data for %s experiment" % (name))
     do_cmd("dump_times rtts", clients)
     if options.protocol == "homa":
+        vlog("Recording final metrics")
         for id in active_nodes:
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
@@ -737,20 +799,20 @@ def get_digest(experiment):
             bucket_rtts.append(rtt)
             bucket_slowdowns.append(rtt/cur_unloaded)
 
-        dir = "%s/reports" % (log_dir)
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-        f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
-        f.write("# Digested data for %s experiment\n" % (experiment))
-        f.write("# length cum_frac  samples     p50      p99     p999   "
-                "s50    s99    s999\n")
-        for i in range(len(digest["lengths"])):
-            f.write(" %7d %8.3f %8d %7.1f %8.1f %8.1f %5.1f %6.1f %7.1f\n"
-                    % (digest["lengths"][i], digest["cum_frac"][i],
-                    digest["counts"][i], digest["p50"][i], digest["p99"][i],
-                    digest["p999"][i], digest["slow_50"][i],
-                    digest["slow_99"][i], digest["slow_999"][i]))
-        f.close()
+    dir = "%s/reports" % (log_dir)
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+    f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
+    f.write("# Digested data for %s experiment\n" % (experiment))
+    f.write("# length cum_frac  samples     p50      p99     p999   "
+            "s50    s99    s999\n")
+    for i in range(len(digest["lengths"])):
+        f.write(" %7d %8.3f %8d %7.1f %8.1f %8.1f %5.1f %6.1f %7.1f\n"
+                % (digest["lengths"][i], digest["cum_frac"][i],
+                digest["counts"][i], digest["p50"][i], digest["p99"][i],
+                digest["p999"][i], digest["slow_50"][i],
+                digest["slow_99"][i], digest["slow_999"][i]))
+    f.close()
 
     digests[experiment] = digest
     return digest

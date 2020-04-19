@@ -43,17 +43,15 @@ clients = range(0, options.num_nodes)
 if options.workload != "":
     load_info = [[options.workload, options.net_bw]];
 
-for workload, bw in load_info:
-    options.workload = workload
-    options.net_bw = bw/2.0
-    unloaded_exp = "unloaded_" + workload;
-    homa_exp = "homa_" + workload;
-    tcp_exp = "tcp_" + workload;
-    if not options.plot_only:
+# First, run all of the experiments
+if not options.plot_only:
+    for workload, bw in load_info:
+        options.workload = workload
+        options.net_bw = bw/2.0
+        unloaded_exp = "unloaded_" + workload;
+        homa_exp = "homa_" + workload;
+        tcp_exp = "tcp_" + workload;
         try:
-            log("Setting unscheduled cutoffs for %s" % (workload))
-            result = subprocess.run(["set_cutoffs", workload,
-                    str(options.num_nodes)], stdout=subprocess.DEVNULL)
             options.protocol = "homa"
             start_servers(servers, options)
 
@@ -72,6 +70,16 @@ for workload, bw in load_info:
             run_experiment(tcp_exp, clients, options)
         except Exception as e:
             log(traceback.format_exc())
+
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+# Generate plots and reports
+for workload, bw in load_info:
+    unloaded_exp = "unloaded_" + workload;
+    homa_exp = "homa_" + workload;
+    tcp_exp = "tcp_" + workload;
 
     set_unloaded(unloaded_exp)
 
@@ -103,7 +111,3 @@ for workload, bw in load_info:
     plt.plot(unloaded_x, unloaded_y, label="Homa low load")
     plt.legend(loc="upper right")
     plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))
-
-log("Stopping nodes")
-stop_nodes()
-scan_logs()
