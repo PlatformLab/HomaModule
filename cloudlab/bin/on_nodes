@@ -1,0 +1,40 @@
+#!/bin/bash
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE
+
+# This uses ssh to run a given command on one or more nodes in the
+# cluster.
+#
+# Usage:
+# on_nodes num_nodes cmd arg arg ...
+#
+# The "num_nodes" arguments indicates how many nodes the command should
+# be run on (starting at node-0). The remaining arguments are a command
+# and its arguments to run on the given machines
+
+root=~/homaModule
+
+if [ $# -lt 2 ]; then
+    echo "Usage: on_nodes num_nodes cmd arg arg ..."
+    exit 1
+fi
+last=`expr $1 - 1`
+shift
+
+for ((i = 0 ; i <= $last; i++)); do
+    node=node-$i
+    echo $node:
+    ssh $node $@
+done
