@@ -1,0 +1,95 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark measures Homa slowdown as the number of available
+# priority levels is varied.
+# Type "cp_prios --help" for documentation.
+
+from cperf import *
+
+# Info to use (workload and corresponding bandwidth) when running all
+# of the workloads.
+load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
+
+# Number of priority levels to try for each workload.
+priorities = [8, 4, 3, 2, 1]
+
+parser = get_parser(description=
+        'Measures slowdown as a function of message size for Homa and TCP.',
+        usage='%(prog)s [options]',
+        defaults={
+            "server_ports":     3,
+            "port_threads":     3,
+            "client_ports":     3,
+            "port_receivers":   3,
+            "workload":         ""
+        })
+options = parser.parse_args()
+init(options)
+servers = range(0, options.num_nodes)
+clients = range(0, options.num_nodes)
+
+if options.workload != "":
+    load_info = [[options.workload, options.net_bw]];
+
+if not options.plot_only:
+    try:
+        # Start servers and measure unloaded latencies.
+        start_servers(servers, options)
+        o = copy.deepcopy(options);
+        o.client_ports = 1
+        o.port_max = 1
+        o.server_ports = 1
+        o.server_nodes = 1
+        o.first_server = 1
+        run_experiment("unloaded", range(0, 1), o)
+
+        # For each workload, run a set of experiments with varying numbers
+        # of priority levels.
+        for workload, bw in load_info:
+            options.workload = workload
+            options.net_bw = bw/2.0
+            for prios in priorities:
+                log("Configuring Homa for %d priority levels" % (prios))
+                set_homa_parameter("num_priorities", prios,
+                        range(0, options.num_nodes))
+                run_experiment("%s_%dprios" % (workload, prios), clients,
+                        options)
+    except Exception as e:
+        log(traceback.format_exc())
+                   
+    set_homa_parameter("num_priorities", 8, range(0, options.num_nodes))
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+# Generate plots and reports
+set_unloaded("unloaded")
+for workload, bw in load_info:
+    # Generate slowdown plot.
+    log("Generating slowdown plot for %s" % (workload))
+    title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
+            options.num_nodes, bw)
+    start_slowdown_plot(title, 1000, "%s_%dprios" % (workload, priorities[-1]))
+    for prios in priorities:
+        if prios == 1:
+            label = "1 priority"
+        else:
+            label = "%d priorities" % prios
+        plot_slowdown("%s_%dprios" % (workload,prios), "p99", label)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("%s/reports/prios_%s.pdf" % (options.log_dir, workload))
