@@ -3,6 +3,7 @@ Notes for Homa implementation in Linux:
 
 * Performance-related tasks:
   * Large values of --port-max cause performance degradation for w4 and w5
+    With --port-max 10, Homa gets the same throughput as TCP for w4 and w5!
   * Implement new benchmark that segregates clients and servers on
     different machines
   * Reduce the number of available priorities, see how that impacts
@@ -17,6 +18,7 @@ Notes for Homa implementation in Linux:
     load? Tried simple totally random approach, but that made things worse.
   * TCP does non-blocking sends for responses, which can delay processing
     other requests for the same thread; may be unfair?
+  * Make sure TCP is optimized (e.g. DCTCP)
   * Don't grant to more than one message from a given sender at a time.
 
 * Notes for GSO and GRO:
