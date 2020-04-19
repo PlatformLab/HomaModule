@@ -639,7 +639,7 @@ int main(int argc, const char** argv)
 			if (!parse_int(argv, i, &unsched))
 				exit(1);
 			i++;
-		} else if (strcmp(option, "--unsched_boost") == 0) {
+		} else if (strcmp(option, "--unsched-boost") == 0) {
 			if (!parse_double(argv, i, &unsched_boost))
 				exit(1);
 			i++;
