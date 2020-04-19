@@ -39,6 +39,8 @@ bool no_update = false;
 int reconfig_interval = 1000;
 double min_drift = 1.0;
 int min_messages = 10000;
+int unsched = 0;
+double unsched_boost = 0.0;
 
 enum Msg_Type {NORMAL, VERBOSE};
 
@@ -153,8 +155,12 @@ void print_help(const char *name)
 		"                  messages have been received since the last computation\n"
 		"                  (default: %d)\n"
 		"--no-update       Compute and print cutoffs, but don't modify Homa\n"
-		"                  parameters\n",
-		reconfig_interval, min_drift, min_messages);
+		"                  parameters\n"
+		"--unsched         Always use this number of unscheduled priorities;\n"
+		"                  0 means adjust based on workload (default: %d)\n"
+		"--unsched_boost   Add this floating-point amount to the number of unscheduled\n"
+		"                  priorities that would normally be used (default: 0.0)\n",
+		reconfig_interval, min_drift, min_messages, unsched);
 }
 
 /**
@@ -317,27 +323,20 @@ void read_metrics(const char *path, metrics *metrics)
 /**
  * compute_cutoffs() -  Given information about recent traffic, compute
  * appropriate cutoffs for unscheduled priorities.
- * @diff:        Metrics containing traffic over a recent interval
- * @cutoffs:     Will be filled in with the message size cutoff for each
- *               of the priority levels, suitable for storing in Homa's
- *               unsched_cutoffs parameter.
+ * @diff:            Metrics containing traffic over a recent interval
+ * @cutoffs:         Will be filled in with the message size cutoff for each
+ *                   of the priority levels, suitable for storing in Homa's
+ *                   unsched_cutoffs parameter.
+ * @num_priorities:  Total number of priorities available for Homa (including
+ *                   both scheduled and unscheduled).
+ * @rtt_bytes:       Homa's rtt_bytes parameter (i.e., the maximum number of
+ *                   unscheduled bytes in any message).
  */
-void compute_cutoffs(metrics *diff, int cutoffs[8])
+void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
+		int rtt_bytes)
 {
-	int num_priorities, rtt_bytes;
 	int64_t total_bytes, total_unsched_bytes;
 	int prev_size;
-	
-	if (!get_param("num_priorities", &num_priorities)) {
-		log(NORMAL, "get_param failed for num_priorities\n");
-		return;
-	}
-	if (!get_param("rtt_bytes", &rtt_bytes)) {
-		log(NORMAL, "get_param failed for rtt_bytes\n");
-		return;
-	}
-	if (num_priorities == 1)
-		return;
 	
 	// Compute the unscheduled bytes received over the interval.
 	total_bytes = 0;
@@ -364,10 +363,16 @@ void compute_cutoffs(metrics *diff, int cutoffs[8])
 	total_unsched_bytes += diff->large_msg_count * rtt_bytes;
 	
 	// Divide priorities between scheduled and unscheduled packets.
-	int64_t unsched_prios = (total_unsched_bytes*num_priorities
-			+ total_bytes/2)/total_bytes;
-	if (unsched_prios < 1)
-		unsched_prios = 1;
+	int64_t unsched_prios = unsched;
+	if (unsched == 0) {
+		double prios = static_cast<double>(num_priorities)
+			* static_cast<double>(total_unsched_bytes)
+		        / static_cast<double>(total_bytes);
+		prios += unsched_boost + 0.5;
+		unsched_prios = prios;
+		if (unsched_prios < 1)
+			unsched_prios = 1;
+	}
 	double total_mb = diff->total_bytes;
 	total_mb *= 1e-6;
 	double unsched_mb = total_unsched_bytes;
@@ -630,6 +635,14 @@ int main(int argc, const char** argv)
 			i++;
 		} else if (strcmp(option, "--no-update") == 0) {
 			no_update = true;
+		} else if (strcmp(option, "--unsched") == 0) {
+			if (!parse_int(argv, i, &unsched))
+				exit(1);
+			i++;
+		} else if (strcmp(option, "--unsched_boost") == 0) {
+			if (!parse_double(argv, i, &unsched_boost))
+				exit(1);
+			i++;
 		} else {
 			printf("Unknown option '%s'\n", argv[i]);
 			exit(1);
@@ -640,8 +653,11 @@ int main(int argc, const char** argv)
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
 	metrics diff;
-	int prev_deciles[9];
+	int prev_deciles[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 	int cutoffs[8];
+	int num_priorities = 1;
+	int rtt_bytes = 0;
+	int prev_num_priorities = -1;
 	while (1) {
 		usleep(1000*reconfig_interval);
 		if (prev_metrics->intervals.empty()) {
@@ -653,12 +669,36 @@ int main(int argc, const char** argv)
 			continue;
 		if (!diff_metrics(prev_metrics, cur_metrics, &diff))
 			continue;
+		if (!get_param("num_priorities", &num_priorities)) {
+			log(NORMAL, "get_param failed for num_priorities\n");
+			continue;
+		}
+		if (!get_param("rtt_bytes", &rtt_bytes)) {
+			log(NORMAL, "get_param failed for rtt_bytes\n");
+			continue;
+		}
 		
 		// Don't update the cutoffs until we've collected enough
 		// data to provide reasonable statistics.
 		if ((diff.total_messages < min_messages) ||
 				(diff.total_bytes == 0))
 			continue;
+		metrics *tmp = prev_metrics;
+		prev_metrics = cur_metrics;
+		cur_metrics = tmp;
+		
+		if (num_priorities != prev_num_priorities) {
+			log(NORMAL, "\n");
+			log(NORMAL, "num_priorities changed from %d to %d\n",
+					prev_num_priorities, num_priorities);
+			if (num_priorities < 2)
+				log(NORMAL, "Cutoff computation will stop "
+					"until num_priorities > 1\n");
+		}
+		if (num_priorities == 1) {
+			prev_num_priorities = num_priorities;
+			continue;
+		}
 		
 		int deciles[9];
 		get_deciles(&diff, deciles);
@@ -669,21 +709,23 @@ int main(int argc, const char** argv)
 				deciles[4], deciles[5], deciles[6], deciles[7],
 				deciles[8]);
 		double drift = diff_deciles(prev_deciles, deciles);
-		log(NORMAL, "Decile drift: %.2f\n", drift);
-		compute_cutoffs(&diff, cutoffs);
-		log(NORMAL, "Best cutoffs: %d %d %d %d %d %d %d %d\n",
-			cutoffs[0], cutoffs[1], cutoffs[2], cutoffs[3],
-			cutoffs[4], cutoffs[5], cutoffs[6], cutoffs[7]);
-		if (drift >= min_drift) {
-			if (!no_update)
-				install_cutoffs(cutoffs);
-			for (int i = 0; i < 9; i++)
-				prev_deciles[i] = deciles[i];
-		} else
-			log(NORMAL, "Not updating cutoffs: decile drift "
-					"< threshold (%.1f)\n", min_drift);
-		metrics *tmp = prev_metrics;
-		prev_metrics = cur_metrics;
-		cur_metrics = tmp;
+		if ((drift < min_drift)
+				&& (num_priorities == prev_num_priorities)) {
+			log(NORMAL, "Decile drift %.2f less than min-drift "
+					"(%.2f); not updating\n",
+					drift, min_drift);
+			continue;
+		}
+		compute_cutoffs(&diff, cutoffs, num_priorities, rtt_bytes);
+		log(NORMAL, "Decile drift %.2f, best cutoffs: %d %d %d %d "
+				"%d %d %d %d\n",
+				drift, cutoffs[0], cutoffs[1], cutoffs[2],
+				cutoffs[3], cutoffs[4], cutoffs[5], cutoffs[6],
+				cutoffs[7]);
+		if (!no_update)
+			install_cutoffs(cutoffs);
+		for (int i = 0; i < 9; i++)
+			prev_deciles[i] = deciles[i];
+		prev_num_priorities = num_priorities;
 	}
 }
