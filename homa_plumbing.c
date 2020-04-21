@@ -1007,6 +1007,9 @@ int homa_softirq(struct sk_buff *skb) {
 				printk(KERN_NOTICE "Homa packet from %s "
 					"referred to unknown port %u\n",
 					homa_print_ipv4_addr(saddr), dport);
+			tt_record3("Discarding packet for unknown port %u, "
+					"id %llu, type %d", dport, h->id,
+					h->type);
 			goto discard;
 		}
 		
