@@ -2071,7 +2071,7 @@ int exec_words(std::vector<string> &words)
 		return log_cmd(words);
 	} else if (words[0].compare("exit") == 0) {
 		if (log_file != stdout)
-			log(NORMAL, "cp_node exiting\n");
+			log(NORMAL, "cp_node exiting (exit command)\n");
 		exit(0);
 	} else if (words[0].compare("server") == 0) {
 		return server_cmd(words);
@@ -2203,7 +2203,7 @@ int main(int argc, char** argv)
 		fflush(stdout);
 		if (!std::getline(std::cin, line)) {
 			if (log_file != stdout)
-				log(NORMAL, "cp_node exiting\n");
+				log(NORMAL, "cp_node exiting (EOF on stdin)\n");
 			exit(0);
 		}
 		exec_string(line.c_str());
