@@ -16,11 +16,11 @@
 /* This file contains the workload distributions from the Homa paper, plus
  * some functions to manipulate them. */
 
+#include <limits>
 #include <stdlib.h>
 #include <string.h>
 
 #include "dist.h"
-#include "homa.h"
 
 /**
  * dist_sample() - Generate a collection of values sampled randomly from a
@@ -70,10 +70,7 @@ int dist_sample(const char *dist, std::mt19937 *rand_gen, int num_samples,
 		double cdf_fraction = uniform_dist(*rand_gen);
 		for (dist_point *p = points; ; p++) {
 			if (p->fraction > cdf_fraction) {
-				int length = p->length;
-				if (length > HOMA_MAX_MESSAGE_LENGTH)
-					length = HOMA_MAX_MESSAGE_LENGTH;
-				sizes->push_back(length);
+				sizes->push_back(p->length);
 				break;
 			}
 		}
@@ -83,13 +80,15 @@ int dist_sample(const char *dist, std::mt19937 *rand_gen, int num_samples,
 
 /**
  * dist_mean() - Returns the mean value in a distribution.
- * @dist:   Specifies the distribution to use, in the same way as the
- *          @dist argument to dist_sample.
+ * @dist:        Specifies the distribution to use, in the same way as the
+ *               @dist argument to dist_sample.
+ * @max_length:  Assume that any lengths longer than this value will
+ *               be truncated to this. 0 means no truncation.
  * 
  * Return:  the mean value, or a negative value if dist isn't a valid
  *          workload name.
  */
-double dist_mean(const char *dist)
+double dist_mean(const char *dist, int max_length)
 {
 	char *end;
 	int length;
@@ -118,10 +117,12 @@ double dist_mean(const char *dist)
 	
 	mean = 0;
 	prev_fraction = 0.0;
+	if (max_length == 0)
+		max_length = std::numeric_limits<int>::max();
 	for (dist_point *p = points; ; p++) {
 		int length = p->length;
-		if (length > HOMA_MAX_MESSAGE_LENGTH)
-			length = HOMA_MAX_MESSAGE_LENGTH;
+		if (length > max_length)
+			length = max_length;
 		mean += static_cast<double>(length)
 				* (p->fraction - prev_fraction);
 		prev_fraction = p->fraction;

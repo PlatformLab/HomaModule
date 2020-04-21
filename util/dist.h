@@ -38,7 +38,7 @@ struct dist_point {
 	double fraction;
 };
 
-extern double   dist_mean(const char *dist);
+extern double   dist_mean(const char *dist, int max_length);
 extern int      dist_sample(const char *dist, std::mt19937 *rand_gen,
 			int num_samples, std::vector<int> *sizes);
 

@@ -61,6 +61,7 @@ default_defaults = {
     'net_bw':            0.0,
     'client_ports':      5,
     'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
+    'no_trunc':          '',
     'protocol':          'homa',
     'port_max':          20,
     'port_receivers':    3,
@@ -469,14 +470,15 @@ def run_experiment(name, clients, options):
         else:
             command = "client --ports %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f --port-max %d --server-max %d --protocol %s " \
-                    "--id %d" % (
+                    "--net-bw %.3f %s --port-max %d --server-max %d "\
+                    "--protocol %s --id %d" % (
                     options.tcp_client_ports,
                     options.tcp_server_ports,
                     options.workload,
                     num_servers,
                     first_server,
                     options.net_bw,
+                    options.no_trunc,
                     options.port_max,
                     options.server_max,
                     options.protocol,
@@ -484,7 +486,7 @@ def run_experiment(name, clients, options):
         active_nodes[id].stdin.write(command + "\n")
         active_nodes[id].stdin.flush()
         nodes.append(id)
-        vlog("Command for node-%d: %s" % (id, command[:-1]))
+        vlog("Command for node-%d: %s" % (id, command))
     wait_output("% ", nodes, command)
     if options.protocol == "homa":
         # Wait a bit so that homa_prio can set priorities appropriately
@@ -798,6 +800,7 @@ def get_digest(experiment):
         for rtt in rtts[length]:
             bucket_rtts.append(rtt)
             bucket_slowdowns.append(rtt/cur_unloaded)
+    log("Digest finished for %s" % (experiment))
 
     dir = "%s/reports" % (log_dir)
     if not os.path.exists(dir):
@@ -864,8 +867,10 @@ def start_slowdown_plot(title, max_y, x_experiment):
                 labels.append("%.0f" % (length))
             elif length < 100000:
                 labels.append("%.1fK" % (length/1000))
-            else:
+            elif length < 1000000:
                 labels.append("%.0fK" % (length/1000))
+            else:
+                labels.append("%.1fM" % (length/1000000))
             tick += 1
             target_count = (total*tick)/10
     plt.xticks(ticks, labels)

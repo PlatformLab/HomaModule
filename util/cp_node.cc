@@ -65,6 +65,7 @@ bool is_server = false;
 int id = -1;
 uint32_t server_max = 1;
 double net_bw = 0.0;
+bool tcp_trunc = true;
 int port_receivers = 1;
 int port_threads = 1;
 const char *protocol;
@@ -170,6 +171,7 @@ void print_help(const char *name)
 		"                      not be sent to node-I (default: -1)\n"
 		"    --net-bw          Target network utilization, including only message data,\n"
 		"                      GB/s; 0 means send continuously (default: %.1f)\n"
+		"    --no-trunc        For TCP, allow messages longer than Homa's limit"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --server-max      Maximum number of outstanding requests from a single\n"
 		"                      client port to a single server port (default: %d)\n"
@@ -1061,7 +1063,8 @@ client::client(int id)
 	if (net_bw == 0.0)
 		request_intervals.push_back(0);
 	else {
-		double lambda = 1e09*net_bw/(dist_mean(workload)*client_ports);
+		double lambda = 1e09*net_bw/(dist_mean(workload,
+				HOMA_MAX_MESSAGE_LENGTH)*client_ports);
 		double cycles_per_second = get_cycles_per_sec();
 		std::exponential_distribution<double> interval_dist(lambda);
 		for (int i = 0; i < NUM_INTERVALS; i++) {
@@ -1084,7 +1087,8 @@ client::client(int id)
 	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
 	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
 			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
-			avg_length*1e-3, dist_mean(workload)*1e-3, rate*1e-3,
+			avg_length*1e-3, dist_mean(workload,
+			HOMA_MAX_MESSAGE_LENGTH)*1e-3, rate*1e-3,
 			avg_length*rate*1e-6);
 }
 
@@ -1257,6 +1261,8 @@ void homa_client::sender()
 		}
 		
 		header->length = request_lengths[next_length];
+		if (header->length > HOMA_MAX_MESSAGE_LENGTH)
+			header->length = HOMA_MAX_MESSAGE_LENGTH;
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
 		header->start_time = now & 0xffffffff;
@@ -1497,6 +1503,8 @@ void tcp_client::sender()
 		}
 		
 		header.length = request_lengths[next_length];
+		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
+			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		header.start_time = now & 0xffffffff;
 		header.server_id = server;
 		int status = send_message(messages[server].fd, &header);
@@ -1722,6 +1730,7 @@ int client_cmd(std::vector<string> &words)
 	port_receivers = 1;
 	protocol = "homa";
 	server_nodes = 1;
+	tcp_trunc = true;
 	workload = "100";
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
@@ -1742,6 +1751,8 @@ int client_cmd(std::vector<string> &words)
 			if (!parse_float(words, i+1, &net_bw, option))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--no-trunc") == 0) {
+			tcp_trunc = false;
 		} else if (strcmp(option, "--ports") == 0) {
 			if (!parse_int(words, i+1, &client_ports, option))
 				return 0;
