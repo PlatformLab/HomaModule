@@ -25,7 +25,7 @@ from cperf import *
 load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
 
 # Number of priority levels to try for each workload.
-priorities = [8, 4, 3, 2, 1]
+priorities = [1, 2, 3, 4, 8]
 
 parser = get_parser(description=
         'Measures slowdown as a function of message size for Homa and TCP.',
@@ -49,19 +49,21 @@ if not options.plot_only:
     try:
         # Start servers and measure unloaded latencies.
         start_servers(servers, options)
-        o = copy.deepcopy(options);
-        o.client_ports = 1
-        o.port_max = 1
-        o.server_ports = 1
-        o.server_nodes = 1
-        o.first_server = 1
-        run_experiment("unloaded", range(0, 1), o)
 
         # For each workload, run a set of experiments with varying numbers
         # of priority levels.
         for workload, bw in load_info:
             options.workload = workload
             options.net_bw = bw/2.0
+
+            o = copy.deepcopy(options);
+            o.client_ports = 1
+            o.port_max = 1
+            o.server_ports = 1
+            o.server_nodes = 1
+            o.first_server = 1
+            run_experiment("unloaded_" + workload, range(0, 1), o)
+
             for prios in priorities:
                 log("Configuring Homa for %d priority levels" % (prios))
                 set_homa_parameter("num_priorities", prios,
@@ -77,8 +79,8 @@ if not options.plot_only:
     scan_logs()
 
 # Generate plots and reports
-set_unloaded("unloaded")
 for workload, bw in load_info:
+    set_unloaded("unloaded_" + workload)
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
