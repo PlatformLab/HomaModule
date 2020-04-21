@@ -358,7 +358,7 @@ def do_cmd(command, r, r2 = range(0,0)):
         if id not in r:
             nodes.append(id)
     for id in nodes:
-        vlog("Command for node-%d: %s" % (id, command[:-1]))
+        vlog("Command for node-%d: %s" % (id, command))
         active_nodes[id].stdin.write(command + "\n")
         active_nodes[id].stdin.flush()
     wait_output("% ", nodes, command)
