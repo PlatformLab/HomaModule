@@ -261,7 +261,9 @@ to a given peer (regardless of how many RPCs are outstanding to that
 peer). This is in units
 of "ticks" (see 
 .I resend_ticks
-below).
+below). This value and
+.I abort_resends
+should be chosen together.
 .TP
 .IR resend_ticks
 An integer value specifying a number of "ticks", each of which corresponds
@@ -278,9 +280,6 @@ respond, it probably means that peer is overloaded; sending a lot of resends
 will just make the problem
 worse. It's unlikely that multiple packets get lost in a short time
 interval, so it's OK to pay extra time if that's what really happened.
-This value and
-.I abort_ticks
-should be chosen together.
 .TP
 .IR rtt_bytes
 An integer value specifying the worst-case round-trip latency (assuming
