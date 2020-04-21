@@ -307,9 +307,10 @@ if elapsed_secs != 0:
         delta = deltas[symbol]
         if delta != 0:
             received = deltas[symbol[:-7] + "_received"]
-            percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
-            percent = percent.ljust(12)
-            print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
+            if (received != 0):
+                percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
+                percent = percent.ljust(12)
+                print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
     for symbol in ["resent_packets", "peer_kmalloc_errors",
             "peer_route_errors", "control_xmit_errors",
             "data_xmit_errors", "unknown_rpcs",
