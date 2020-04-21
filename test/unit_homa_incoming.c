@@ -1059,6 +1059,28 @@ TEST_F(homa_incoming, homa_send_grants__choose_grant_offset)
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 40000@0", unit_log_get());
 }
+TEST_F(homa_incoming, homa_send_grants__remove_from_list_when_fully_granted)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			1, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 2, 50000, 100);
+	
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 4000;
+	srpc->msgin.bytes_remaining = 3000;
+	srpc->msgin.incoming = 38000;
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request 1, remaining 3000; request 2, remaining 48600",
+			unit_log_get());
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 40000@1; xmit GRANT 14000@0", unit_log_get());
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request 2, remaining 48600", unit_log_get());
+}
 TEST_F(homa_incoming, homa_send_grants__choose_priority_level)
 {
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,

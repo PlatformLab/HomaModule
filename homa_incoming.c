@@ -293,6 +293,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			goto discard;
 		}
 	} else {
+		BUG_ON(rpc->state == RPC_DEAD);
 		rpc->silent_ticks = 0;
 		rpc->num_resends = 0;
 	}
@@ -597,7 +598,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC to check; typically the status of this RPC has changed
  *           in a way that may affect its grantability (e.g. a packet
- *           just arrived for it).
+ *           just arrived for it). Must be locked.
  */
 void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
@@ -606,6 +607,7 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_message_in *msgin = &rpc->msgin;
 	
 	homa_grantable_lock(homa);
+	BUG_ON(rpc->state == RPC_DEAD);
 	
 	/* Make sure this message is in the right place in (or not in)
 	 * homa->grantable_msgs.
@@ -662,9 +664,9 @@ void homa_send_grants(struct homa *homa)
 	 * (new higher-priority messages can use the higher levels to achieve
 	 * instantaneous preemption).
 	 */
-	struct list_head *pos;
+	struct list_head *pos, *next;
 	struct homa_rpc *candidate;
-	int rank, i;
+	int rank, i, num_grantable;
 	
 	/* The variables below keep track of grants we need to send;
 	 * don't send any until the very end, and release the lock
@@ -681,11 +683,16 @@ void homa_send_grants(struct homa *homa)
 	
 	homa_grantable_lock(homa);
 	
+	/* Save the original value of num_grantable for use below (the
+	 * actual value may change because of deletions.
+	 */
+	num_grantable = homa->num_grantable;
+	
 	/* See if there are any messages that deserve a grant (they have
 	 * fewer than homa->rtt_bytes of data in transit).
 	 */
 	rank = 0;
-	list_for_each(pos, &homa->grantable_rpcs) {
+	list_for_each_safe(pos, next, &homa->grantable_rpcs) {
 		int extra_levels, priority;
 		int received, new_grant;
 		struct grant_header *grant;
@@ -694,6 +701,7 @@ void homa_send_grants(struct homa *homa)
 		if (rank > max_grants)
 			break;
 		candidate = list_entry(pos, struct homa_rpc, grantable_links);
+		BUG_ON(candidate->state == RPC_DEAD);
 		
 		/* Invariant: candidate msgin's incoming < total_length
 		 * (otherwise it won't be on this list).
@@ -705,8 +713,11 @@ void homa_send_grants(struct homa *homa)
 		new_grant = candidate->msgin.incoming + homa->grant_increment;
 		if ((received + homa->rtt_bytes) > new_grant)
 			new_grant = received + homa->rtt_bytes;
-		if (new_grant > candidate->msgin.total_length)
+		if (new_grant >= candidate->msgin.total_length) {
 			new_grant = candidate->msgin.total_length;
+			homa->num_grantable--;
+			list_del_init(&candidate->grantable_links);
+		}
 		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
@@ -715,7 +726,7 @@ void homa_send_grants(struct homa *homa)
 		num_grants++;
 		grant->offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = homa->max_sched_prio + 1 - homa->num_grantable;
+		extra_levels = homa->max_sched_prio + 1 - num_grantable;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
 		else if (priority < 0)
@@ -746,7 +757,7 @@ void homa_send_grants(struct homa *homa)
  * is no longer linked into homa->grantable_rpcs (i.e. it won't be
  * visible to homa_manage_grants).
  * @homa:    Overall data about the Homa protocol implementation.
- * @rpc:     RPC that is being destroyed.
+ * @rpc:     RPC that is being destroyed. Must be locked.
  */
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {

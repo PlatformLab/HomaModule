@@ -4,6 +4,8 @@
 nbproject
 private
 cloudlab
+reports
+*.data
 *.pyc
 *.pdf
 *.tt
