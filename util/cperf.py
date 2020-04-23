@@ -468,6 +468,10 @@ def run_experiment(name, clients, options):
                     options.protocol,
                     id);
         else:
+            if "no_trunc" in options:
+                trunc = '--no-trunc'
+            else:
+                trunc = ''
             command = "client --ports %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
                     "--net-bw %.3f %s --port-max %d --server-max %d "\
@@ -478,7 +482,7 @@ def run_experiment(name, clients, options):
                     num_servers,
                     first_server,
                     options.net_bw,
-                    options.no_trunc,
+                    trunc,
                     options.port_max,
                     options.server_max,
                     options.protocol,

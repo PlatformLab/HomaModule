@@ -37,7 +37,7 @@ parser = get_parser(description=
             "workload":         ""
         })
 options = parser.parse_args()
-options.no_trunc = "--no-trunc"
+options.no_trunc = True
 init(options)
 servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
