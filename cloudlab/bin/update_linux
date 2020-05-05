@@ -1,15 +1,49 @@
-#!/bin/sh
-# This script uses files on one machine to update the kernel on another
-# machine and reboot that machine.
+#!/bin/bash
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE
+
+# This script uses files on the current machine to update the kernel one
+# or more other machines and reboot to those machines.
+#
 # Usage:
-# update_linux machine machine ...
+# update_linux num_nodes [first]
+#
+# The "num_nodes" arguments indicates how many nodes the command should
+# be run on (starting at node-1). The "first" argument is optional; it is
+# an integer identifying the first node on which installation will occur
+# (e.g. "update_linux 4 2" means node-2 through node-5 will be updated).
+# "first" defaults to 1.
 
 v=4.15.18+
-for t in $*; do
-    echo $t
-    ssh $t 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
+
+if [ $# -eq 2 ]; then
+    first=$2
+elif [ $# -eq 1 ]; then
+    first=1
+else
+    echo "Usage: update_linux num_nodes [first]"
+    exit 1
+fi
+last=`expr $first + $1 - 1`
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node-$i
+    echo $node
+    ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
     rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
-            /boot/vmlinuz-$v $t:tmp/boot/
-    rsync -rtv /lib/modules/$v/kernel/net/8021q/ $t:tmp/8021q/
-    ssh $t "sudo cp -f tmp/boot/* /boot; sudo cp -f tmp/8021q/8021q.ko /lib/modules/$v/kernel/net/8021q; sudo reboot"
+            /boot/vmlinuz-$v $node:tmp/boot/
+    rsync -rtv /lib/modules/$v/kernel/net/8021q/ $node:tmp/8021q/
+    ssh $node "sudo cp -f tmp/boot/* /boot; sudo cp -f tmp/8021q/8021q.ko /lib/modules/$v/kernel/net/8021q; sudo reboot"
 done
