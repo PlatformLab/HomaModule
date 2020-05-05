@@ -478,16 +478,6 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 //			rpc->msgout.next_offset);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
-		
-		/* It appears that ip_queue_xmit frees skbuffs after
-		 * errors; the following code raises an alert if this
-		 * isn't actually the case.
-		 */
-		if (refcount_read(&skb->users) > 1) {
-			printk(KERN_NOTICE "ip_queue_xmit didn't free "
-					"Homa data packet after error\n");
-			kfree_skb(skb);
-		}
 	}
 	INC_METRIC(packets_sent[0], 1);
 }
