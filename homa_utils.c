@@ -97,8 +97,8 @@ int homa_init(struct homa *homa)
 	homa->reap_limit = 10;
 	homa->max_dead_buffs = 10000;
 	spin_lock_init(&homa->grantable_lock);
-	INIT_LIST_HEAD(&homa->grantable_rpcs);
-	homa->num_grantable = 0;
+	INIT_LIST_HEAD(&homa->grantable_peers);
+	homa->num_grantable_peers = 0;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
 	homa->throttle_min_bytes = 300;
@@ -437,7 +437,8 @@ int homa_rpc_reap(struct homa_sock *hsk)
 		i = 0;
 		if (rpc->msgin.total_length >= 0) {
 			while (1) {
-				struct sk_buff *skb = skb_dequeue(
+				struct sk_buff *skb;
+				skb = skb_dequeue(
 						&rpc->msgin.packets);
 				if (!skb)
 					break;
@@ -478,6 +479,7 @@ release:
 		 */
 		homa_rpc_lock(rpcs[i]);
 		homa_rpc_unlock(rpcs[i]);
+		rpcs[i]->state = 0;
 		kfree(rpcs[i]);
 	}
 	homa_sock_lock(hsk, "homa_rpc_reap");

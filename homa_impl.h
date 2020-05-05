@@ -511,7 +511,7 @@ struct homa_message_in {
 	
 	/**
 	 * @possibly_in_grant_queue: True means this RPC may be linked
-	 * into homa->grantable_rpcs. Zero means it can't possibly be in
+	 * into peer->grantable_rpcs. Zero means it can't possibly be in
 	 * the list, so no need to check (which means acquiring a global
 	 * lock) when cleaning up the RPC.
 	 */
@@ -697,8 +697,8 @@ struct homa_rpc {
 	struct list_head ready_links;
 	
 	/**
-	 * @grantable_links: Used to link this RPC into homa->grantable_rpcs.
-	 * If this RPC isn't in homa->grantable_rpcs, this is an empty
+	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
+	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
@@ -1026,6 +1026,22 @@ struct homa_peer {
 	unsigned long last_update_jiffies;
 	
 	/**
+	 * grantable_rpcs: Contains all homa_rpcs (both requests and
+	 * responses) involving this peer whose msgins require additional
+	 * grants before they can complete. The list is sorted in priority
+	 * order (head has fewest bytes_remaining).  Locked with
+	 * homa->grantable_lock.
+	 */
+	struct list_head grantable_rpcs;
+	
+	/**
+	 * @grantable_links: Used to link this peer into homa->grantable_peers,
+	 * if there are entries in grantable_rpcs. If grantable_rpcs is empty,
+	 * this is an empty list pointing to itself.
+	 */
+	struct list_head grantable_links;
+	
+	/**
 	 * last_resend_tick: value of @homa->timer_ticks when the most recent
 	 * RESEND request was sent to this peer. Manipulated only by
 	 * homa_timer, so no synchronization needed.
@@ -1186,15 +1202,15 @@ struct homa {
 	struct spinlock grantable_lock;
 	
 	/**
-	 * @grantable_rpcs: Contains all homa_rpcs (both requests and
-	 * responses) whose msgins require additional grants before they can
-	 * complete. The list is sorted in priority order (head has fewest
-	 * bytes_remaining).
+	 * @grantable_peers: Contains all homa_peers whose grantable_rpcs
+	 * lists are non-empty. The list is sorted in priority order (the
+	 * rpc with the fewest bytes_remaining is the first one on the first
+	 * peer's list).
 	 */
-	struct list_head grantable_rpcs;
+	struct list_head grantable_peers;
 	
-	/** @num_grantable: The number of messages in grantable_msgs. */
-	int num_grantable;
+	/** @num_grantable_peers: The number of peers in grantable_peers. */
+	int num_grantable_peers;
 	
 	/**
 	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
@@ -2010,6 +2026,8 @@ extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			int noblock, int flags, int *addr_len);
 extern void     homa_rehash(struct sock *sk);
+extern void     homa_remove_grantable_locked(struct homa *homa,
+			struct homa_rpc *rpc);
 extern void     homa_remove_from_grantable(struct homa *homa,
 			struct homa_rpc *rpc);
 extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
@@ -2063,7 +2081,6 @@ extern int      homa_unsched_priority(struct homa *homa,
 			struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
-extern void     homa_validate_grantable_list(struct homa *homa, char *message);
 extern struct homa_rpc
 	       *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			__u64 id);

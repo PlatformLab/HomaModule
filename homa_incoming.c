@@ -593,8 +593,9 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 }
 
 /**
- * homa_check_grantable() - This function ensures that an RPC is on the
- * grantable list if appropriate, and not on it otherwise. It also adjust
+ * homa_check_grantable() - This function ensures that an RPC is on a
+ * grantable list if appropriate, and not on one otherwise. It also adjusts
+ * the position of the RPC upward on its list, if needed.
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC to check; typically the status of this RPC has changed
  *           in a way that may affect its grantability (e.g. a packet
@@ -602,47 +603,86 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
  */
 void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
-	struct list_head *pos;
 	struct homa_rpc *candidate;
+	struct homa_peer *peer = rpc->peer;
+	struct homa_peer *peer_cand;
 	struct homa_message_in *msgin = &rpc->msgin;
 	
 	homa_grantable_lock(homa);
 	BUG_ON(rpc->state == RPC_DEAD);
 	
 	/* Make sure this message is in the right place in (or not in)
-	 * homa->grantable_msgs.
+	 * the grantable_rpcs list for its peer.
 	 */
 	if (msgin->incoming >= msgin->total_length) {
 		/* Message fully granted; no need to track it anymore. */
-		if (!list_empty(&rpc->grantable_links)) {
-			homa->num_grantable--;
-			list_del_init(&rpc->grantable_links);
-		}
+		if (!list_empty(&rpc->grantable_links))
+			homa_remove_grantable_locked(homa, rpc);
 		msgin->possibly_in_grant_queue = 0;
-	} else if (list_empty(&rpc->grantable_links)) {
-		/* Message not yet tracked; add it in priority order. */
-		homa->num_grantable++;
-		list_for_each(pos, &homa->grantable_rpcs) {
-			candidate = list_entry(pos, struct homa_rpc,
-					grantable_links);
+		goto done;
+	}
+	if (list_empty(&rpc->grantable_links)) {
+		/* Message not yet tracked; add it in priority order to
+		 * the peer's list.
+		 */
+		list_for_each_entry(candidate, &peer->grantable_rpcs,
+				grantable_links) {
 			if (candidate->msgin.bytes_remaining
 					> msgin->bytes_remaining) {
-				list_add_tail(&rpc->grantable_links, pos);
-				goto done;
+				list_add_tail(&rpc->grantable_links,
+						&candidate->grantable_links);
+				goto position_peer;
 			}
 		}
-		list_add_tail(&rpc->grantable_links, &homa->grantable_rpcs);
-	} else while (homa->grantable_rpcs.next != &rpc->grantable_links) {
+		list_add_tail(&rpc->grantable_links, &peer->grantable_rpcs);
+	} else while (rpc != list_first_entry(&peer->grantable_rpcs,
+			struct homa_rpc, grantable_links)) {
 		/* Message is on the list, but its priority may have
 		 * increased because of the recent packet arrival. If so,
 		 * adjust its position in the list.
 		 */
 		candidate = list_prev_entry(rpc, grantable_links);
 		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
-			goto done;
+			goto position_peer;
 		__list_del_entry(&candidate->grantable_links);
 		list_add(&candidate->grantable_links, &rpc->grantable_links);
 	}
+	
+    position_peer:
+	/* At this point rpc is positioned correctly on the list for its peer.
+	 * However, the peer may need to be added to, or moved upward on,
+	 * homa->grantable_peers.
+	 */
+	if (list_empty(&peer->grantable_links)) {
+		/* Must add peer to the overall Homa list. */
+		homa->num_grantable_peers++;
+		list_for_each_entry(peer_cand, &homa->grantable_peers,
+				grantable_links) {
+			candidate = list_first_entry(&peer_cand->grantable_rpcs,
+					struct homa_rpc, grantable_links);
+			if (candidate->msgin.bytes_remaining
+					> msgin->bytes_remaining) {
+				list_add_tail(&peer->grantable_links,
+						&peer_cand->grantable_links);
+				goto done;
+			}
+		}
+		list_add_tail(&peer->grantable_links, &homa->grantable_peers);
+		goto done;
+	}
+        /* The peer is on Homa's list, but it may need to move upward. */
+        while (peer != list_first_entry(&homa->grantable_peers,
+			struct homa_peer, grantable_links)) {
+		struct homa_peer *prev_peer = list_prev_entry(
+			peer, grantable_links);
+		candidate = list_first_entry(&prev_peer->grantable_rpcs,
+				struct homa_rpc, grantable_links);
+		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
+			goto done;
+		__list_del_entry(&prev_peer->grantable_links);
+		list_add(&prev_peer->grantable_links, &peer->grantable_links);
+	}
+				
     done:
 	homa_grantable_unlock(homa);
 }
@@ -664,9 +704,9 @@ void homa_send_grants(struct homa *homa)
 	 * (new higher-priority messages can use the higher levels to achieve
 	 * instantaneous preemption).
 	 */
-	struct list_head *pos, *next;
 	struct homa_rpc *candidate;
-	int rank, i, num_grantable;
+	struct homa_peer *peer;
+	int rank, i;
 	
 	/* The variables below keep track of grants we need to send;
 	 * don't send any until the very end, and release the lock
@@ -678,21 +718,17 @@ void homa_send_grants(struct homa *homa)
 	struct homa_rpc *rpcs[max_grants];
 	int num_grants = 0;
 	
-	if (list_empty(&homa->grantable_rpcs))
+	if (list_empty(&homa->grantable_peers))
 		return;
 	
 	homa_grantable_lock(homa);
 	
-	/* Save the original value of num_grantable for use below (the
-	 * actual value may change because of deletions.
-	 */
-	num_grantable = homa->num_grantable;
-	
 	/* See if there are any messages that deserve a grant (they have
-	 * fewer than homa->rtt_bytes of data in transit).
+	 * fewer than homa->rtt_bytes of data in transit). Consider only
+	 * a single (highest-priority) entry for each peer.
 	 */
 	rank = 0;
-	list_for_each_safe(pos, next, &homa->grantable_rpcs) {
+	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
 		int extra_levels, priority;
 		int received, new_grant;
 		struct grant_header *grant;
@@ -700,7 +736,8 @@ void homa_send_grants(struct homa *homa)
 		rank++;
 		if (rank > max_grants)
 			break;
-		candidate = list_entry(pos, struct homa_rpc, grantable_links);
+		candidate = list_first_entry(&peer->grantable_rpcs,
+				struct homa_rpc, grantable_links);
 		BUG_ON(candidate->state == RPC_DEAD);
 		
 		/* Invariant: candidate msgin's incoming < total_length
@@ -713,11 +750,8 @@ void homa_send_grants(struct homa *homa)
 		new_grant = candidate->msgin.incoming + homa->grant_increment;
 		if ((received + homa->rtt_bytes) > new_grant)
 			new_grant = received + homa->rtt_bytes;
-		if (new_grant >= candidate->msgin.total_length) {
+		if (new_grant > candidate->msgin.total_length)
 			new_grant = candidate->msgin.total_length;
-			homa->num_grantable--;
-			list_del_init(&candidate->grantable_links);
-		}
 		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
@@ -726,7 +760,8 @@ void homa_send_grants(struct homa *homa)
 		num_grants++;
 		grant->offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = homa->max_sched_prio + 1 - num_grantable;
+		extra_levels = homa->max_sched_prio + 1
+				- homa->num_grantable_peers;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
 		else if (priority < 0)
@@ -744,6 +779,12 @@ void homa_send_grants(struct homa *homa)
 				candidate->id, new_grant, priority);
 	}
 	
+	/* Unlink any RPCs that have now been fully granted. */
+	for (i = 0; i < num_grants; i++) {
+		if (rpcs[i]->msgin.incoming >= rpcs[i]->msgin.total_length)
+			homa_remove_grantable_locked(homa, rpcs[i]);
+	}
+	
 	homa_grantable_unlock(homa);
 	for (i = 0; i < num_grants; i++) {
 		/* Send any accumulated grants (ignore errors). */
@@ -753,8 +794,59 @@ void homa_send_grants(struct homa *homa)
 }
 
 /**
+ * homa_remove_grantable_locked() - This method does all the real work of
+ * homa_remove_from_grantable, but it assumes that the caller holds the
+ * grantable lock, so it can be used by other functions that already
+ * hold the lock.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @rpc:     RPC that is no longer grantable. Must be locked, and must
+ *           currently be linked into grantable lists.
+ */
+void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
+{
+	struct homa_rpc *head;
+	struct homa_peer *peer = rpc->peer;
+	struct homa_rpc *candidate;
+
+	head =  list_first_entry(&peer->grantable_rpcs,
+			struct homa_rpc, grantable_links);
+	list_del_init(&rpc->grantable_links);
+	if (rpc != head)
+		return;
+	
+	/* The removed RPC was at the front of the peer's list. This means
+	 * we may have to adjust the position of the peer in Homa's list,
+	 * or perhaps remove it.
+	 */
+	
+	if (list_empty(&peer->grantable_rpcs)) {
+		homa->num_grantable_peers--;
+		list_del_init(&peer->grantable_links);
+		return;
+	}
+	
+	/* The peer may have to move down in Homa's list (removal of
+	 * an RPC can't cause the peer to move up).
+	 */
+	head =  list_first_entry(&peer->grantable_rpcs,
+			struct homa_rpc, grantable_links);
+        while (peer != list_last_entry(&homa->grantable_peers, struct homa_peer,
+			grantable_links)) {
+		struct homa_peer *next_peer = list_next_entry(
+				peer, grantable_links);
+		candidate = list_first_entry(&next_peer->grantable_rpcs,
+				struct homa_rpc, grantable_links);
+		if (candidate->msgin.bytes_remaining
+				> head->msgin.bytes_remaining)
+			break;
+		__list_del_entry(&peer->grantable_links);
+		list_add(&peer->grantable_links, &next_peer->grantable_links);
+	}
+}
+
+/**
  * homa_remove_from_grantable() - This method ensures that an RPC
- * is no longer linked into homa->grantable_rpcs (i.e. it won't be
+ * is no longer linked into peer->grantable_rpcs (i.e. it won't be
  * visible to homa_manage_grants).
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC that is being destroyed. Must be locked.
@@ -766,8 +858,7 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 			&& (rpc->msgin.total_length >= 0)) {
 		homa_grantable_lock(homa);
 		if (!list_empty(&rpc->grantable_links)) {
-			homa->num_grantable--;
-			list_del_init(&rpc->grantable_links);
+			homa_remove_grantable_locked(homa, rpc);
 			homa_grantable_unlock(homa);
 			homa_send_grants(homa);
 			return;
@@ -833,70 +924,6 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 		atomic_dec(&hsk->reap_disable);
 	}
 	rcu_read_unlock();
-}
-
-/**
- * homa_validate_grantable_list_list() - Scan the grantable_rpcs list to
- * see if it has somehow gotten looped back on itself. This function
- * is intended for debugging.
- * @homa:    Overall data about the Homa protocol implementation.
- * @where:   Text to include in message printed if a problem is
- *           found. Typically identifies the caller of this function.
- */
-void homa_validate_grantable_list(struct homa *homa, char *where) {
-	struct list_head *pos;
-	struct homa_rpc *rpc = NULL;
-	struct homa_rpc *first, *rpc2;
-	int count = 0;
-	first = 0;
-	list_for_each(pos, &homa->grantable_rpcs) {
-		count++;
-		rpc = list_entry(pos, struct homa_rpc,
-				grantable_links);
-		if (count == 1000) {
-			printk(KERN_NOTICE "Grantable list has %d entries "
-					"at %s!\n",
-					count, where);
-			goto error;
-		}
-		if (first == NULL) {
-			first = rpc;
-		} else if (rpc == first) {
-			printk(KERN_NOTICE "Circular grant list at %s, "
-					"%d entries\n",
-					where, count-1);
-			goto error;
-		}
-	}
-	return;
-	
-	error:
-	rpc2 = list_next_entry(rpc, grantable_links);
-	while (1) {
-		printk(KERN_NOTICE "Id %llu is on the grantable list\n",
-				rpc2->id);
-		if (list_empty(&rpc2->grantable_links)) {
-			printk(KERN_NOTICE "Rpc id %llu links to itself.\n",
-				rpc2->id);
-			if (rpc2->grantable_links.prev == &rpc2->grantable_links) {
-				printk(KERN_NOTICE "Rpc id %llu is init state.\n",
-					rpc2->id);
-			}
-		}
-		if (rpc2 == rpc) {
-			break;
-		}
-	}
-	count = 0;
-	list_for_each(pos, &homa->grantable_rpcs) {
-		if (rpc == list_entry(pos, struct homa_rpc, grantable_links)) {
-			printk(KERN_NOTICE "%d entries before id %llu on "
-				"grantable list\n", count, rpc->id);
-			break;
-		}
-		count++;
-	}
-	BUG();
 }
 
 /**

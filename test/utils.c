@@ -177,20 +177,25 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
  */
 void unit_log_grantables(struct homa *homa)
 {
-	struct list_head *pos;
+	struct homa_peer *peer;
 	struct homa_rpc *rpc;
 	int count = 0;
-	list_for_each(pos, &homa->grantable_rpcs) {
+	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
 		count++;
-		rpc = list_entry(pos, struct homa_rpc, grantable_links);
-		unit_log_printf("; ", "%s %lu, remaining %d",
-				rpc->is_client ? "response" : "request",
-				(long unsigned int) rpc->id,
-				rpc->msgin.bytes_remaining);
+		list_for_each_entry(rpc, &peer->grantable_rpcs,
+				grantable_links) {
+			unit_log_printf("; ", "%s from %s, id %lu, "
+					"remaining %d",
+					rpc->is_client ? "response" : "request",
+					homa_print_ipv4_addr(peer->addr),
+					(long unsigned int) rpc->id,
+					rpc->msgin.bytes_remaining);
+		}
 	}
-	if (count != homa->num_grantable) {
-		unit_log_printf("; ", "num_grantable error: should be %d, is %d",
-			count, homa->num_grantable);
+	if (count != homa->num_grantable_peers) {
+		unit_log_printf("; ", "num_grantable_peers error: should "
+				"be %d, is %d",
+				count, homa->num_grantable_peers);
 	}
 }
 

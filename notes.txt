@@ -20,6 +20,7 @@ Notes for Homa implementation in Linux:
     other requests for the same thread; may be unfair?
   * Make sure TCP is optimized (e.g. DCTCP)
   * Don't grant to more than one message from a given sender at a time.
+  * Check out "-w 500000": Homa has less throughput than TCP.
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
