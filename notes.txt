@@ -21,6 +21,7 @@ Notes for Homa implementation in Linux:
   * Make sure TCP is optimized (e.g. DCTCP)
   * Don't grant to more than one message from a given sender at a time.
   * Check out "-w 500000": Homa has less throughput than TCP.
+  * With only 2 priorities, throughput for W4 seems to drop to 1.7 GB/s max?
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.

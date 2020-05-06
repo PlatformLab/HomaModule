@@ -352,7 +352,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 {
 	struct common_header *h;
 	int extra_bytes;
-	int result;
+	int result, priority;
 	
 	/* Allocate the same size sk_buffs as for the smallest data
          * packets (better reuse of sk_buffs?).
@@ -368,7 +368,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	extra_bytes = HOMA_MAX_HEADER - length;
 	if (extra_bytes > 0)
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
-	set_priority(skb, hsk, hsk->homa->num_priorities-1);
+	priority = hsk->homa->num_priorities-1;
+	set_priority(skb, hsk, priority);
 	dst_hold(peer->dst);
 	skb_dst_set(skb, peer->dst);
 	skb_get(skb);
@@ -390,6 +391,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	}
 	kfree_skb(skb);
 	INC_METRIC(packets_sent[h->type - DATA], 1);
+	INC_METRIC(priority_bytes[priority], skb->len);
+	INC_METRIC(priority_packets[priority], 1);
 	return result;
 }
 
@@ -480,6 +483,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 		INC_METRIC(data_xmit_errors, 1);
 	}
 	INC_METRIC(packets_sent[0], 1);
+	INC_METRIC(priority_bytes[priority], skb->len);
+	INC_METRIC(priority_packets[priority], 1);
 }
 
 /**

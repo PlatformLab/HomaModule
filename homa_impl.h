@@ -1417,6 +1417,12 @@ struct homa_metrics {
 	 */
 	__u64 packets_received[BOGUS-DATA];
 	
+	/** @priority_bytes: total bytes sent at each priority level. */
+	__u64 priority_bytes[HOMA_MAX_PRIORITIES];
+	
+	/** @priority_packets: total packets sent at each priority level. */
+	__u64 priority_packets[HOMA_MAX_PRIORITIES];
+	
 	/**
 	 * @requests_received: total number of request messages received.
 	 */
