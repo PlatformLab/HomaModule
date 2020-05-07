@@ -400,7 +400,7 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	mock_xmit_prios_offset += snprintf(
 			mock_xmit_prios + mock_xmit_prios_offset,
 			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
-			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>3);
+			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>5);
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else

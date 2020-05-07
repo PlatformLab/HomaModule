@@ -40,7 +40,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 	 * packet. So, now we use the DSCP field in the IP header instead.
 	 */
 	((struct inet_sock *) hsk)->tos =
-			(priority + hsk->homa->base_priority)<<3;
+			(priority + hsk->homa->base_priority)<<5;
 }
 
 /**
