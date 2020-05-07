@@ -37,12 +37,12 @@ for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
     done
 sudo ethtool -K ens1f1 ntuple on
 
-# Set VLAN priority mappings
-sudo vconfig set_egress_map $vlan 1 1
-sudo vconfig set_egress_map $vlan 2 0
-sudo vconfig set_egress_map $vlan 3 2
-sudo vconfig set_egress_map $vlan 4 3
-sudo vconfig set_egress_map $vlan 5 4
-sudo vconfig set_egress_map $vlan 6 5
-sudo vconfig set_egress_map $vlan 7 6
-sudo vconfig set_egress_map $vlan 8 7
+# Set VLAN priority mappings (no longer needed: we use IP priorities instead)
+# sudo vconfig set_egress_map $vlan 1 1
+# sudo vconfig set_egress_map $vlan 2 0
+# sudo vconfig set_egress_map $vlan 3 2
+# sudo vconfig set_egress_map $vlan 4 3
+# sudo vconfig set_egress_map $vlan 5 4
+# sudo vconfig set_egress_map $vlan 6 5
+# sudo vconfig set_egress_map $vlan 7 6
+# sudo vconfig set_egress_map $vlan 8 7
