@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -56,6 +56,23 @@ FIXTURE_TEARDOWN(homa_outgoing)
 {
 	homa_destroy(&self->homa);
 	unit_teardown();
+}
+
+TEST_F(homa_outgoing, set_priority__priority_mapping)
+{
+	struct homa_rpc *srpc;
+	struct grant_header h;
+	
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	EXPECT_NE(NULL, srpc);
+	
+	h.offset = htonl(12345);
+	h.priority = 4;
+	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	self->homa.priority_map[7] = 3;
+	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("7 3", mock_xmit_prios);
 }
 
 TEST_F(homa_outgoing, homa_fill_packets__message_too_long)

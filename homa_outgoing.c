@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -24,7 +24,8 @@
  * priority level.
  * @skb:        The packet was priority should be set.
  * @hsk:        Socket on which the packet will be sent.
- * @priority:   Priority level for the packet.
+ * @priority:   Priority level for the packet; must be less than
+ *              HOMA_MAX_PRIORITIES.
  */
 inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 		int priority)
@@ -40,7 +41,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 	 * packet. So, now we use the DSCP field in the IP header instead.
 	 */
 	((struct inet_sock *) hsk)->tos =
-			(priority + hsk->homa->base_priority)<<5;
+			hsk->homa->priority_map[priority]<<5;
 }
 
 /**

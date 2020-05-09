@@ -147,13 +147,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "base_priority",
-		.data		= &homa_data.base_priority,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -229,6 +222,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "priority_map",
+		.data		= &homa_data.priority_map,
+		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
 	},
 	{
 		.procname	= "reap_limit",

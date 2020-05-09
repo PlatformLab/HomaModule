@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -75,7 +75,8 @@ int homa_init(struct homa *homa)
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
-	homa->base_priority = 0;
+	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
+		homa->priority_map[i] = i;
 	homa->max_sched_prio = HOMA_MAX_PRIORITIES - 5;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = 2800;

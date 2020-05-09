@@ -19,7 +19,6 @@ Notes for Homa implementation in Linux:
   * TCP does non-blocking sends for responses, which can delay processing
     other requests for the same thread; may be unfair?
   * Make sure TCP is optimized (e.g. DCTCP)
-  * Don't grant to more than one message from a given sender at a time.
   * Check out "-w 500000": Homa has less throughput than TCP.
   * With only 2 priorities, throughput for W4 seems to drop to 1.7 GB/s max?
 

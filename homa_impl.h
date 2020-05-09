@@ -1112,13 +1112,11 @@ struct homa {
 	int num_priorities;
 	
 	/**
-	 * @base_priority: when specifying priorities in outbound packets,
-	 * Homa will add this value to each internally computed priority;
-	 * these values are then mapped to VLAN QOS levels by Linux (see
-	 * vconfig(1)).
-	 * Set externally via sysctl.
+	 * @priority_map: entry i gives the value to store in the high-order
+	 * 3 bits of the DSCP field of IP headers to implement priority level
+	 * i. Set externally via sysctl.
 	 */
-	int base_priority;
+	int priority_map[HOMA_MAX_PRIORITIES];
 	
 	/**
 	 * @max_sched_prio: The highest priority level currently available for
