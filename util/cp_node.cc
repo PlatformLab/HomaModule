@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <iostream>
 #include <mutex>
@@ -171,19 +172,19 @@ void print_help(const char *name)
 		"                      not be sent to node-I (default: -1)\n"
 		"    --net-bw          Target network utilization, including only message data,\n"
 		"                      GB/s; 0 means send continuously (default: %.1f)\n"
-		"    --no-trunc        For TCP, allow messages longer than Homa's limit"
+		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
+		"    --ports           Number of ports on which to send requests (one\n"
+		"                      sending thread per port (default: %d)\n"
+		"    --port-max        Maximum number of outstanding requests from a single\n"
+		"                      client port (across all servers) (default: %d)\n"
+		"    --port-receivers  Number of threads to listen for responses on each\n"
+		"                      port (default: %d)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --server-max      Maximum number of outstanding requests from a single\n"
 		"                      client port to a single server port (default: %d)\n"
 		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
 		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
-		"    --port-max        Maximum number of outstanding requests from a single\n"
-		"                      client port (across all servers) (default: %d)\n"
-		"    --ports           Number of ports on which to send requests (one"
-		"                      sending thread per port (default: %d)\n"
-		"    --port_receivers  Number of threads to listen for responses on each\n"
-		"                      port (default: %d)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n\n"
 		"dump_times file       Log RTT times (and lengths) to file\n\n"
@@ -203,9 +204,9 @@ void print_help(const char *name)
 		"    --ports           Number of ports to listen on (default: %d)\n\n"
 		"stop [options]        Stop existing client and/or server threads; each\n"
 		"                      option must be either 'clients' or 'servers'\n",
-		first_port, first_server, first_server, net_bw, protocol,
-		server_max, server_nodes, server_ports, client_max,
-		client_ports, port_receivers, workload,
+		first_port, first_server, first_server, net_bw, client_ports,
+		client_max, port_receivers, protocol, server_max,
+		server_nodes, server_ports, workload,
 		first_port, protocol, port_threads, server_ports);
 }
 
@@ -321,35 +322,6 @@ struct message_header {
 };
 
 /**
- * send_message() - Writes a message to a file descriptor in the
- * standard form (size, timestamp, then arbitrary ignored padding).
- * @fd:         File descriptor on which to write the message.
- * @header:     Transmitted as the first bytes of the message.
- *              If the size isn't at least as large as the header.
- *              we'll round it up.
- * 
- * Return:   Zero for success; anything else means there was an error
- *           (check errno for details).
- */
-int send_message(int fd, message_header *header)
-{
-	char buffer[100000];
-	if (header->length < sizeof32(*header))
-		header->length = sizeof32(*header);
-	*(reinterpret_cast<message_header *>(buffer)) = *header;
-	for (int bytes_left = header->length; bytes_left > 0; ) {
-		int this_size = bytes_left;
-		if (this_size > sizeof32(buffer))
-			this_size = sizeof32(buffer);
-		if (send(fd, buffer, this_size, MSG_NOSIGNAL) < 0)
-			return -1;
-		bytes_left -= this_size;
-	}
-	return 0;
-}
-
-
-/**
  * init_server_addrs() - Set up the server_addrs table (addresses of the
  * server/port combinations that clients will communicate with), based on
  * current configuration parameters. Any previous contents of the table
@@ -389,27 +361,39 @@ void init_server_addrs(void)
 }
 
 /**
- * struct tcp_message - Handles the reading of TCP messages; a message
- * may arrive in several chunks spaced out in time; this class keeps track
- * of the current state.
+ * struct tcp_connection - Handles the reading and writing of TCP messages
+ * from/to a given peer. Incoming messages may arrive in several chunks
+ * spaced out in time, and outgoing messages may have to be sent in
+ * multiple chunks because the stream backed up. This class keeps track
+ * of the state of partial messages.
  */
-class tcp_message {
+class tcp_connection {
     public:
-	tcp_message(int fd, int port, struct sockaddr_in peer);
+	tcp_connection(int fd, uint32_t epoll_id, int port,
+			struct sockaddr_in peer);
+	size_t pending();
 	int read(std::function<void (message_header *header)> func);
+	bool send_message(message_header *header);
+	void set_epoll_events(int epoll_fd, uint32_t events);
+	bool xmit();
 	
-	/** @fd: File descriptor to use for reading data. */
+	/** @fd: File descriptor to use for reading and writing data. */
 	int fd;
 	
 	/**
-	 * @port: Local port used to read this message (for error
-	 * messages).
+	 * @epoll_id: identifier for this connection, which will be stored
+	 * in the u32 field of the data for epoll events for this
+	 * connection. */
+	uint32_t epoll_id;
+	
+	/**
+	 * @port: Port number associated with this connection (listen port
+	 * for servers, outgoing port for clients). Used for error messages.
 	 */
 	int port;
 	
 	/**
-	 * @per: Address of the machine we're reading from; used for
-	 * messages.
+	 * @peer: Address of the machine on the other end of this connection.
 	 */
 	struct sockaddr_in peer;
 	
@@ -421,46 +405,81 @@ class tcp_message {
 	int bytes_received;
 	
 	/**
-	 * @header: will eventually hold the first bytes of the message.
-	 * If @bytes_received is less than the size of this value, then
-	 * it has not yet been fully read.
+	 * @header: will eventually hold the first bytes of an incoming
+	 * message. If @bytes_received is less than the size of this value,
+	 * then it has not yet been fully read.
 	 */
 	message_header header;
+	
+	/**
+	 * @outgoing: queue of headers for messages waiting to be
+	 * transmitted. The first entry may have been partially transmitted.
+	 */
+	std::deque<message_header> outgoing;
+	
+	/*
+	 * @bytes_sent: Nonzero means we have sent part of the first message
+	 * in outgoing; the value indicates how many bytes have been
+	 * successfully transmitted.
+	 */
+	int bytes_sent;
+	
+	/*
+	 * @epoll_events: OR-ed combination of epoll events such as EPOLLIN
+	 * currently enabled for this connection.
+	 */
+	uint32_t epoll_events;
 	
 	/**
 	 * @error_message: holds human-readable error information after
 	 * an error.
 	 */
 	char error_message[200];
-} __attribute__((packed));
+};
 
 /**
- * tcp_message:: tcp_message() - Constructor for tcp_message objects.
+ * tcp_connection:: tcp_connection() - Constructor for tcp_connection objects.
  * @fd:        File descriptor from which to read data.
+ * @epoll_id:  Identifier to store in the u32 data field of epoll events
+ *             for this connection.
+ * @port:      Port number associated with this connection; used for messages.
  * @peer:      Address of the machine we're reading from; used for messages.
  */
-tcp_message::tcp_message(int fd, int port, struct sockaddr_in peer)
+tcp_connection::tcp_connection(int fd, uint32_t epoll_id, int port,
+		struct sockaddr_in peer)
 	: fd(fd)
+	, epoll_id(epoll_id)
         , port(port)
 	, peer(peer)
 	, bytes_received(0)
         , header()
+        , outgoing()
+        , bytes_sent(0)
+        , epoll_events(0)
 {
 }
 
 /**
- * tcp_message::read() - Reads more data from a TCP connection and calls
+ * pending() - Return a count of the number of messages currently
+ * waiting to be transmitted (nonzero means the connection is backed up).
+ */
+inline size_t tcp_connection::pending()
+{
+	return outgoing.size();
+}
+
+/**
+ * tcp_connection::read() - Reads more data from a TCP connection and calls
  * a function to handle complete messages, if any.
- * @func:      Function to call when there is a complete message; the arguments
- *             to the function contain the total length of the message, plus
- *             a pointer to the standard header from the message. Func
- *             may be called multiple times in a single indication of this
- *             method.
+ * @func:      Function to call when there is a complete message; the argument
+ *             to the function is a pointer to the standard header from the
+ *             message. Func may be called multiple times in a single
+ *             invocation of this method.
  * Return:     Zero means success; nonzero means the socket was closed
  *             by the peer, or there was an error; a human-readable message
  *	       will be left in @error_message.
  */
-int tcp_message::read(std::function<void (message_header *header)> func)
+int tcp_connection::read(std::function<void (message_header *header)> func)
 {
 	char buffer[100000];
 	char *next = buffer;
@@ -519,6 +538,103 @@ int tcp_message::read(std::function<void (message_header *header)> func)
 		bytes_received = 0;
 	}
 	return 0;
+}
+
+/**
+ * tcp_connection::set_epoll_events() - Convenience method to set events
+ * for epolling on this connection.
+ * @epoll_fd:  File descriptor on which epoll events are collected and
+ *             waited for.
+ * @event:     OR-ed combination of EPOLLIN, EPOLLOUT, etc.
+ */
+void tcp_connection::set_epoll_events(int epoll_fd, uint32_t events)
+{
+	struct epoll_event ev;
+	
+	if (events == epoll_events)
+		return;
+	ev.events = events;
+	ev.data.u32 = epoll_id;
+	if (epoll_ctl(epoll_fd, (epoll_events == 0) ? EPOLL_CTL_ADD
+			: EPOLL_CTL_MOD, fd, &ev) < 0) {
+		log(NORMAL, "FATAL: couldn't add/modify epoll event: %s\n",
+				strerror(errno));
+		exit(1);
+	}
+	epoll_events = events;
+}
+
+/**
+ * tcp_connection::send_message() - Begin the process of sending a message
+ * to a peer; the message may not be completely transmitted at the time this
+ * method returns.
+ * @header:     Transmitted as the first bytes of the message.
+ *              If the size isn't at least as large as the header,
+ *              we'll round it up.
+ * Return:  true means the message was completely transmitted; false means
+ * it has not been fully transmitted (xmit will need to be called later to
+ * finish the job).
+ */
+bool tcp_connection::send_message(message_header *header)
+{
+	if (header->length < sizeof32(*header))
+		header->length = sizeof32(*header);
+	outgoing.emplace_back(*header);
+	if (outgoing.size() > 1)
+		return false;
+	return xmit();
+}
+
+/**
+ * tcp_connection::xmit() - Transmit as much data as possible on this
+ * connection.
+ * Return:  true means all available data has been sent; false means
+ *          there is data that couldn't be sent because the stream
+ *          backed up.
+ */
+bool tcp_connection::xmit()
+{
+	char buffer[100000];
+	struct message_header *header;
+	int start;
+	int send_length;
+	ssize_t result;
+	
+	while (true) {
+		if (outgoing.size() == 0)
+			return true;
+		header = &outgoing[0];
+		if (bytes_sent < sizeof32(*header)) {
+			*(reinterpret_cast<message_header *>(buffer))
+					= *header;
+			start = bytes_sent;
+		} else
+			start = 0;
+		send_length = header->length - bytes_sent;
+		if (send_length > (sizeof32(buffer) - start))
+			send_length = sizeof32(buffer) - start;
+		result = send(fd, buffer + start, send_length,
+				MSG_NOSIGNAL|MSG_DONTWAIT);
+		if (result >= 0)
+			bytes_sent += result;
+		else {
+			if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+				return false;
+			if ((errno == EPIPE) || (errno == ECONNRESET))
+				bytes_sent = header->length;
+			else {
+				log(NORMAL, "FATAL: error sending TCP message "
+						"to %s: %s (port %d)\n",
+						print_address(&peer),
+						strerror(errno), port);
+				exit(1);
+			}
+		}
+		if (bytes_sent < header->length)
+			return false;
+		bytes_sent = 0;
+		outgoing.pop_front();
+	}
 }
 
 /**
@@ -653,7 +769,7 @@ class tcp_server {
 	 * @connections: Entry i contains information for a client
 	 * connection on fd i.
 	 */
-	std::vector<tcp_message *> connections;
+	std::vector<tcp_connection *> connections;
 	
 	/** @metrics: Performance statistics. */
 	server_metrics metrics;
@@ -808,11 +924,21 @@ void tcp_server::server()
 			exit(1);
 		}
 		for (int i = 0; i < num_events; i++) {
-			int fd = events[i].data.fd;
+			int fd = events[i].data.u32;
 			if (fd == listen_fd)
 				accept(epoll_fd);
-			else
-				read(fd);
+			else {
+				if ((events[i].events & EPOLLIN) &&
+						(connections[fd] != NULL))
+					read(fd);
+				if ((events[i].events & EPOLLOUT) &&
+						(connections[fd] != NULL)) {
+					if (connections[fd]->xmit())
+						connections[fd]->set_epoll_events(
+								epoll_fd,
+								EPOLLIN);
+				}
+			}
 		}
 	}
 }
@@ -839,19 +965,12 @@ void tcp_server::accept(int epoll_fd)
 			port, print_address(&client_addr), fd);
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-	tcp_message *message = new tcp_message(fd, port, client_addr);
+	tcp_connection *connection = new tcp_connection(fd, fd, port,
+			client_addr);
 	while (connections.size() <= static_cast<unsigned>(fd))
 		connections.push_back(NULL);
-	connections[fd] = message;
-	
-	struct epoll_event ev;
-	ev.events = EPOLLIN;
-	ev.data.fd = fd;
-	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &ev) < 0) {
-		log(NORMAL, "FATAL: couldn't add new TCP connection to epoll: "
-				"%s\n", strerror(errno));
-		exit(1);
-	}
+	connections[fd] = connection;
+	connection->set_epoll_events(epoll_fd, EPOLLIN);
 }
 
 /**
@@ -865,15 +984,9 @@ void tcp_server::read(int fd)
 	int error = connections[fd]->read([this, fd](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
-		if (send_message(fd, header) != 0) {
-			if ((errno != EPIPE) && (errno != ECONNRESET)) {
-				log(NORMAL, "FATAL: error sending TCP reply "
-						"to %s: %s\n",
-						print_address(&connections[fd]->peer),
-						strerror(errno));
-				exit(1);
-			}
-		};
+		if (!connections[fd]->send_message(header))
+			connections[fd]->set_epoll_events(epoll_fd,
+					EPOLLIN|EPOLLOUT);
 	});
 	if (error) {
 		log(NORMAL, "%s\n", connections[fd]->error_message);
@@ -1320,18 +1433,26 @@ class tcp_client : public client {
     public:
 	tcp_client(int id);
 	virtual ~tcp_client();
+	void read(tcp_connection *connection);
 	void receiver(void);
 	void sender(void);
 	
 	/** 
-	 * @messages: One entry for each server in server_addrs; used to
-	 * receive responses from that server.
+	 * @connections: One entry for each server in server_addrs; used to
+	 * communicate with that server.
 	 */
-	std::vector<tcp_message> messages;
+	std::vector<tcp_connection *> connections;
+	
+	/**
+	 * @blocked: Contains all of the connections for hich there is
+	 * pending output that couldn't be sent because the connection
+	 * was backed up.
+	 */
+	std::vector<tcp_connection *> blocked;
 	
 	/**
 	 * @epoll_fd: File descriptor used by @receiving_thread to
-	 * wait for incoming messages.
+	 * wait for epoll events.
 	 */
 	int epoll_fd;
 	
@@ -1355,7 +1476,8 @@ class tcp_client : public client {
  */
 tcp_client::tcp_client(int id)
 	: client(id)
-	, messages()
+	, connections()
+        , blocked()
         , epoll_fd(-1)
         , stop(false)
         , receiving_threads()
@@ -1366,6 +1488,14 @@ tcp_client::tcp_client(int id)
 				"supports 1", port_receivers);
 		exit(1);
 	}
+	
+	epoll_fd = epoll_create(10);
+	if (epoll_fd < 0) {
+		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
+				"instance: %s\n", strerror(errno));
+		exit(1);
+	}
+	
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
 		int fd = socket(PF_INET, SOCK_STREAM, 0);
 		if (fd == -1) {
@@ -1393,26 +1523,10 @@ tcp_client::tcp_client(int id)
 					"%s\n", strerror(errno));
 			exit(1);
 		}
-		messages.emplace_back(fd, ntohs(addr.sin_port), server_addrs[i]);
-	}
-	
-	epoll_fd = epoll_create(10);
-	if (epoll_fd < 0) {
-		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
-				"instance: %s\n", strerror(errno));
-		exit(1);
-	}
-	struct epoll_event ev;
-	for (uint32_t i = 0; i < messages.size(); i++) {
-		ev.events = EPOLLIN;
-		ev.data.u32 = i;
-		if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, messages[i].fd,
-				&ev) != 0) {
-			log(NORMAL, "FATAL: tcp_client couldn't add TCP "
-					"socket %d  to epoll: %s\n", i,
-					strerror(errno));
-			exit(1);
-		}
+		connections.emplace_back(new tcp_connection(fd, i,
+				ntohs(addr.sin_port), server_addrs[i]));
+		connections[connections.size()-1]->set_epoll_events(epoll_fd,
+				EPOLLIN);
 	}
 	
 	receiving_threads.emplace_back(&tcp_client::receiver, this);
@@ -1461,8 +1575,10 @@ tcp_client::~tcp_client()
 	close(fds[0]);
 	close(fds[1]);
 	close(epoll_fd);
-	for (tcp_message &message: messages)
-		close(message.fd);
+	for (tcp_connection *connection: connections) {
+		close(connection->fd);
+		delete connection;
+	}
 }
 
 /**
@@ -1473,6 +1589,10 @@ void tcp_client::sender()
 {
 	uint64_t next_start = rdtsc();
 	message_header header;
+	size_t max_pending = 1;
+	
+	/* Index of the next connection in blocked on which to try sending. */
+	size_t next_blocked = 0;
 	
 	while (1) {
 		uint64_t now;
@@ -1485,10 +1605,20 @@ void tcp_client::sender()
 			if (stop)
 				return;
 			now = rdtsc();
-			if (now < next_start)
-				continue;
-			if ((total_requests - total_responses) < client_max)
+			if ((now >= next_start)
+					&& ((total_requests - total_responses)
+					< client_max))
 				break;
+			
+			/* Try to finish I/O on backed up connections. */
+			if (blocked.size() == 0)
+				continue;
+			if (next_blocked >= blocked.size())
+				next_blocked = 0;
+			if (blocked[next_blocked]->xmit())
+				blocked.erase(blocked.begin() + next_blocked);
+			else
+				next_blocked++;
 		}
 		
 		server = request_servers[next_server];
@@ -1507,13 +1637,16 @@ void tcp_client::sender()
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		header.start_time = now & 0xffffffff;
 		header.server_id = server;
-		int status = send_message(messages[server].fd, &header);
-		if (status != 0) {
-			log(NORMAL, "FATAL: error in TCP socket write to %s: "
-					"%s (client port %d)\n",
-					print_address(&server_addrs[server]),
-					strerror(errno), messages[server].port);
-			exit(1);
+		size_t old_pending = connections[server]->pending();
+		if ((!connections[server]->send_message(&header))
+				&& (old_pending == 0)) {
+			blocked.push_back(connections[server]);
+			if (connections[server]->pending() > max_pending) {
+				max_pending = connections[server]->pending();
+				log(NORMAL, "max_pending now %lu for "
+						"tcp_client %d\n",
+						max_pending, id);
+			}
 		}
 		if (verbose)
 			log(NORMAL, "tcp_client %d sent request to server port "
@@ -1563,20 +1696,30 @@ void tcp_client::receiver(void)
 			exit(1);
 		}
 		for (int i = 0; i < num_events; i++) {
-			tcp_message *message = &messages[events[i].data.u32];
-			int error = message->read([this](
-					message_header *header) {
-				uint32_t end_time = rdtsc() & 0xffffffff;
-				record(header->length,
-						end_time - header->start_time,
-						header->server_id);
-			});
-			if (error) {
-				log(NORMAL, "FATAL: %s (client)\n",
-						message->error_message);
-				exit(1);
-			}
+			tcp_connection *connection =
+					connections[events[i].data.fd];
+			if (events[i].events & EPOLLIN)
+				read(connection);
 		}
+	}
+}
+
+/**
+ * tcp_client::read() - Is available data from a TCP connection; if an
+ * entire response has now been read, records statistics for that request.
+ * @connection:  TCP connection that has data available to read.
+ */
+void tcp_client::read(tcp_connection *connection)
+{
+	int error = connection->read([this](message_header *header) {
+		uint32_t end_time = rdtsc() & 0xffffffff;
+		record(header->length, end_time - header->start_time,
+				header->server_id);
+	});
+	if (error) {
+		log(NORMAL, "FATAL: %s (client)\n",
+				connection->error_message);
+		exit(1);
 	}
 }
 
