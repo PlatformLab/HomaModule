@@ -1716,14 +1716,9 @@ struct homa_metrics {
 	 */
 	__u64 throttle_list_checks;
 	
-	/**
-	 * @temp1: this value, and the others below it, are reserved for
-	 * temporary use during testing.
-	 */
-	__u64 temp1;
-	__u64 temp2;
-	__u64 temp3;
-	__u64 temp4;
+	/** @temp: For temporary use during testing. */
+#define NUM_TEMP_METRICS 10
+	__u64 temp[NUM_TEMP_METRICS];
 };
 
 /**

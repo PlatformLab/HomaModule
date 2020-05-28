@@ -1188,22 +1188,11 @@ char *homa_print_metrics(struct homa *homa)
 				"List elements checked in "
 				"homa_add_to_throttled\n",
 				m->throttle_list_checks);
-		homa_append_metric(homa,
-				"temp1                     %15llu  "
-				"Temporary use in testing\n",
-				m->temp1);
-		homa_append_metric(homa,
-				"temp2                     %15llu  "
-				"Temporary use in testing\n",
-				m->temp2);
-		homa_append_metric(homa,
-				"temp3                     %15llu  "
-				"Temporary use in testing\n",
-				m->temp3);
-		homa_append_metric(homa,
-				"temp4                     %15llu  "
-				"Temporary use in testing\n",
-				m->temp4);
+		for (i = 0; i < NUM_TEMP_METRICS;  i++)
+			homa_append_metric(homa,
+					"temp%-2d                  %15llu  "
+					"Temporary use in testing\n",
+					i, m->temp[i]);
 	}
 
 	return homa->metrics;
