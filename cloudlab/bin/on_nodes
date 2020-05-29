@@ -35,6 +35,7 @@ shift
 
 for ((i = 0 ; i <= $last; i++)); do
     node=node-$i
+    echo ""
     echo $node:
     ssh $node $@
 done
