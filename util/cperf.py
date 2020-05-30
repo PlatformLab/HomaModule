@@ -63,11 +63,11 @@ default_defaults = {
     'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'no_trunc':          '',
     'protocol':          'homa',
-    'port_max':          20,
+    'port_max':          1000,
     'port_receivers':    3,
     'port_threads':      2,
     'seconds':           5,
-    'server_max':        20,
+    'server_max':        500,
     'server_ports':      9,
     'tcp_client_ports':  9,
     'tcp_server_ports':  15,
@@ -511,6 +511,7 @@ def run_experiment(name, clients, options):
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
             f.close()
+    do_cmd("stop senders", clients)
     do_cmd("stop clients", clients)
     for id in clients:
         subprocess.run(["rsync", "-rtvq", "node-%d:rtts" % (id),
@@ -564,8 +565,10 @@ def scan_log(file, node, experiments):
                     node_data[key] = []
                 node_data[key].append(float(match.group(3)))
         if "FATAL:" in line:
-            log("%s: %s" % (file, line))
+            log("%s: %s" % (file, line[:-1]))
             exited = True
+        if "ERROR:" in line:
+            log("%s: %s" % (file, line[:-1]))
         if "cp_node exiting" in line:
             exited = True
     if not exited:

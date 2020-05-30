@@ -1006,6 +1006,12 @@ void tcp_server::read(int fd)
  */
 class client {
     public:
+	client(int id);
+	virtual ~client();
+	void check_completion(const char *protocol);
+	void record(int length, uint32_t rtt, int server_id);
+	virtual void stop_sender(void) {}
+	
 	/**
 	 * @id: unique identifier for this client (index starting at
 	 * 0 for the first client.
@@ -1121,10 +1127,6 @@ class client {
 	 * request we just sent should have been sent @lag cycles ago).
 	 */
 	uint64_t lag;
-	
-	client(int id);
-	virtual ~client();
-	void record(int length, uint32_t rtt, int server_id);
 };
 
 /** @clients: keeps track of all existing clients. */
@@ -1214,6 +1216,31 @@ client::~client()
 }
 
 /**
+ * check_completion() - Make sure that all outstanding requests have
+ * completed; if not, generate a log message.
+ * @protocol:  String that identifies the current protocol for the log
+ *             message, if any.
+ */
+void client::check_completion(const char *protocol)
+{
+	string server_info;
+	int incomplete = total_requests - total_responses;
+	for (size_t i = 0; i < requests.size(); i++) {
+		char buffer[100];
+		int diff = requests[i] - responses[i];
+		if (diff == 0)
+			continue;
+		if (!server_info.empty())
+			server_info.append(", ");
+		snprintf(buffer, sizeof(buffer), "s%lu: %d", i, diff);
+		server_info.append(buffer);
+	}
+	if ((incomplete != 0) || !server_info.empty())
+		log(NORMAL, "ERROR: %d incomplete %s requests (%s)\n",
+				incomplete, protocol, server_info.c_str());
+}
+
+/**
  * record() - Records statistics about a particular request.
  * @length:     Size of the request and response messages for the request,
  *              in bytes.
@@ -1223,7 +1250,7 @@ client::~client()
 void client::record(int length, uint32_t rtt, int server_id)
 {
 	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
-	responses[server_id]++;
+	responses[server_id].fetch_add(1);
 	response_data += length;
 	total_rtt += rtt;
 	actual_lengths[slot] = length;
@@ -1241,13 +1268,20 @@ class homa_client : public client {
 	virtual ~homa_client();
 	void receiver(void);
 	void sender(void);
-	void wait_response(uint64_t id);
+	virtual void stop_sender(void);
+	bool wait_response(uint64_t id);
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
 	
-	/** @stop: true means threads should exit ASAP. */
-	bool stop;
+	/** @stop_sending: true means the sending thread should exit ASAP. */
+	bool exit_sender;
+	
+	/** @stop: true means receiving threads should exit ASAP. */
+	bool exit_receivers;
+	
+	/** @server_exited:  just what you'd guess from the name. */
+	bool sender_exited;
 	
 	/** @receiver: threads that receive responses. */
 	std::vector<std::thread> receiving_threads;
@@ -1267,13 +1301,16 @@ class homa_client : public client {
 homa_client::homa_client(int id)
 	: client(id)
 	, fd(-1)
-        , stop(false)
+        , exit_sender(false)
+        , exit_receivers(false)
+        , sender_exited(false)
         , receiving_threads()
         , sending_thread()
 {
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
+		exit(1);
 	}
 	
 	for (int i = 0; i < port_receivers; i++) {
@@ -1294,21 +1331,50 @@ homa_client::homa_client(int id)
  */
 homa_client::~homa_client()
 {
-	stop = true;
+	uint64_t start = rdtsc();
+	exit_sender = true;
+	exit_receivers = true;
+	while (!sender_exited || (total_responses != total_requests)) {
+		if (to_seconds(rdtsc() - start) > 0.5)
+			break;
+	}
 	shutdown(fd, SHUT_RDWR);
 	close(fd);
 	if (sending_thread)
 		sending_thread->join();
 	for (std::thread &thread: receiving_threads)
 		thread.join();
+	check_completion("homa");
+}
+
+/**
+ * homa_client::stop_sender() - Ask the sending thread to stop sending,
+ * and wait until it exits (but give up if that takes too long).
+ */
+void homa_client::stop_sender(void)
+{
+	uint64_t start = rdtsc();
+	exit_sender = true;
+	while (1) {
+		if (sender_exited) {
+			if (sending_thread) {
+				sending_thread->join();
+				sending_thread.reset();
+			}
+		}
+		if (to_seconds(rdtsc() - start) > 0.5)
+			break;
+	}
 }
 
 /**
  * homa_client::weight_response() - Wait for a response to arrive and
  * update statistics.
- * @id   Id of a specific RPC to wait for, or 0 for "any response".
+ * @id     Id of a specific RPC to wait for, or 0 for "any response".
+ * Return: True means that a response was received; false means the client
+ *         has been stopped and the socket has been shut down.
  */
-void homa_client::wait_response(uint64_t id)
+bool homa_client::wait_response(uint64_t id)
 {
 	char response[1000000];
 	message_header *header = reinterpret_cast<message_header *>(response);
@@ -1323,8 +1389,8 @@ void homa_client::wait_response(uint64_t id)
 				sizeof(server_addr));
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
-		if (stop)
-			return;
+		if (exit_receivers)
+			return false;
 		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s\n",
 				strerror(errno), id,
 				print_address(&server_addr));
@@ -1332,6 +1398,7 @@ void homa_client::wait_response(uint64_t id)
 	}
 	uint32_t end_time = rdtsc() & 0xffffffff;
 	record(length, end_time - header->start_time, header->server_id);
+	return true;
 }
 
 /**
@@ -1353,8 +1420,10 @@ void homa_client::sender()
 		 * and (b) there aren't too many requests outstanding.
 		 */
 		while (1) {
-			if (stop)
+			if (exit_sender) {
+				sender_exited = true;
 				return;
+			}
 			now = rdtsc();
 			if (now < next_start)
 				continue;
@@ -1384,11 +1453,7 @@ void homa_client::sender()
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
 			sizeof(server_addrs[0]), &id);
-		if (stop)
-			return;
 		if (status < 0) {
-			if (stop)
-				return;
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
 					header->length);
@@ -1420,8 +1485,7 @@ void homa_client::sender()
 void homa_client::receiver(void)
 {	
 	receivers_running++;
-	while (!stop)
-		wait_response(0);
+	while (wait_response(0)) {}
 }
 
 /**
@@ -2187,6 +2251,9 @@ int stop_cmd(std::vector<string> &words)
 			for (client *client: clients)
 				delete client;
 			clients.clear();
+		} else if (strcmp(option, "senders") == 0) {
+			for (client *client: clients)
+				client->stop_sender();
 		} else if (strcmp(option, "servers") == 0) {
 			for (homa_server *server: homa_servers)
 				delete server;
@@ -2197,8 +2264,8 @@ int stop_cmd(std::vector<string> &words)
 			last_per_server_rpcs.clear();
 			metrics.clear();
 		} else {
-			printf("Unknown option '%s'; must be clients or "
-				"servers\n", option);
+			printf("Unknown option '%s'; must be clients, senders, "
+				"or servers\n", option);
 			return 0;
 		}
 	}
