@@ -366,6 +366,28 @@ TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12345", unit_log_get());
 }
+TEST_F(homa_utils, homa_rpc_reap__grand_in_progress)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 2000);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid+1, 1000, 2000);
+	homa_rpc_free(crpc1);
+	homa_rpc_free(crpc2);
+	unit_log_clear();
+	self->homa.reap_limit = 3;
+	crpc1->grant_in_progress = true;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("reaped 12346", unit_log_get());
+	unit_log_clear();
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("", unit_log_get());
+	crpc1->grant_in_progress = false;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_STREQ("reaped 12345", unit_log_get());
+}
 TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 {
 	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_READY,

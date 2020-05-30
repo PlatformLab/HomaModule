@@ -409,6 +409,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_sock_unlock(rpc->hsk);
 	} else {
 		if (rpc->msgin.bytes_remaining == 0) {
+			homa_remove_from_grantable(homa, rpc);
 			homa_sock_lock(rpc->hsk, "homa_data_pkt (not first)");
 			homa_rpc_ready(rpc);
 			homa_sock_unlock(rpc->hsk);
@@ -753,8 +754,17 @@ void homa_send_grants(struct homa *homa)
 		if (new_grant > candidate->msgin.total_length)
 			new_grant = candidate->msgin.total_length;
 		
+		/* The following line is needed to prevent spurious resends.
+		 * Without it, if the timer fires right after we send the
+		 * grant, it might think the RPC is slow and request a
+		 * resend (until we send the grant, timeouts won't occur
+		 * because there's no granted data).
+		 */
+		candidate->silent_ticks = 0;
+		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
+		candidate->grant_in_progress = true;
 		rpcs[num_grants] = candidate;
 		grant = &grants[num_grants];
 		num_grants++;
@@ -767,29 +777,22 @@ void homa_send_grants(struct homa *homa)
 		else if (priority < 0)
 			priority = 0;
 		grant->priority = priority;
-		
-		/* The following line is needed to prevent spurious resends.
-		 * Without it, if the timer fires right after we send the
-		 * grant, it might think the RPC is slow and request a
-		 * resend (until we send the grant, timeouts won't occur
-		 * because there's no granted data).
-		 */
-		candidate->silent_ticks = 0;
 		tt_record3("sent grant for id %llu, offset %d, priority %d",
 				candidate->id, new_grant, priority);
 	}
 	
-	/* Unlink any RPCs that have now been fully granted. */
-	for (i = 0; i < num_grants; i++) {
-		if (rpcs[i]->msgin.incoming >= rpcs[i]->msgin.total_length)
-			homa_remove_grantable_locked(homa, rpcs[i]);
-	}
-	
 	homa_grantable_unlock(homa);
+	
+	/* By sending grants without holding grantable_lock here, we reduce
+	 * contention on that lock significantly. This only works because
+	 * rpc->grant_in_progress keeps the RPC from being deleted out from
+	 * under us.
+	 */
 	for (i = 0; i < num_grants; i++) {
 		/* Send any accumulated grants (ignore errors). */
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
 			rpcs[i]);
+		rpcs[i]->grant_in_progress = false;
 	}
 }
 

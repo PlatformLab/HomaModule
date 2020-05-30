@@ -188,6 +188,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->state = RPC_OUTGOING;
 	crpc->is_client = true;
 	crpc->dont_reap = false;
+	crpc->grant_in_progress = false;
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
 			dest->sin_addr.s_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
@@ -286,6 +287,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->state = RPC_INCOMING;
 	srpc->is_client = false;
 	srpc->dont_reap = false;
+	srpc->grant_in_progress = false;
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
 	if (unlikely(IS_ERR(srpc->peer))) {
 		err = PTR_ERR(srpc->peer);
@@ -420,7 +422,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	tt_record3("Starting homa_rpc_reap, dead_skbs %d, instance %d, port %d",
 			hsk->dead_skbs, instance, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
-		if (rpc->dont_reap) {
+		if (rpc->dont_reap || rpc->grant_in_progress) {
 			INC_METRIC(disabled_rpc_reaps, 1);
 			continue;
 		}

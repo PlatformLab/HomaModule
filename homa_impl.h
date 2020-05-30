@@ -632,6 +632,13 @@ struct homa_rpc {
 	bool dont_reap;
 	
 	/**
+	 * @grant_in_progress: True means a grant is being sent for this
+	 * RPC, and we released grantable_lock to reduce contention; it's
+	 * not safe to reap the RPC until this value is set false again.
+	 */
+	bool grant_in_progress;
+	
+	/**
 	 * @peer: Information about the other machine (the server, if
 	 * this is a client RPC, or the client, if this is a server RPC).
 	 */
@@ -1027,10 +1034,10 @@ struct homa_peer {
 	
 	/**
 	 * grantable_rpcs: Contains all homa_rpcs (both requests and
-	 * responses) involving this peer whose msgins require additional
-	 * grants before they can complete. The list is sorted in priority
-	 * order (head has fewest bytes_remaining).  Locked with
-	 * homa->grantable_lock.
+	 * responses) involving this peer whose msgins require (or required
+	 * them in the past) and have not been fully received. The list is
+	 * sorted in priority order (head has fewest bytes_remaining).
+	 * Locked with homa->grantable_lock.
 	 */
 	struct list_head grantable_rpcs;
 	
@@ -1200,10 +1207,11 @@ struct homa {
 	struct spinlock grantable_lock;
 	
 	/**
-	 * @grantable_peers: Contains all homa_peers whose grantable_rpcs
-	 * lists are non-empty. The list is sorted in priority order (the
-	 * rpc with the fewest bytes_remaining is the first one on the first
-	 * peer's list).
+	 * @grantable_peers: Contains all homa_peers for which there are
+	 * RPCs that require grants (or have required them in the past)
+	 * and for which not all the data has been received. The list is
+	 * sorted in priority order (the rpc with the fewest bytes_remaining
+	 * is the first one on the first peer's list).
 	 */
 	struct list_head grantable_peers;
 	

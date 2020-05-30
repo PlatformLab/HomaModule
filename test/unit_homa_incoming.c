@@ -555,6 +555,40 @@ TEST_F(homa_incoming, homa_data_pkt__long_server_rpc_ready)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
+TEST_F(homa_incoming, homa_data_pkt__remove_from_grantable_when_ready)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 11200, 1000);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 12345, remaining 9800",
+			unit_log_get());
+
+	// Send all of the data packets except the last one.
+	self->data.message_length = htonl(11200);
+	self->data.incoming = 100000;
+	for (int i = 1400; i < 9800; i += 1400) {
+		self->data.seg.offset = htonl(i);
+		homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+				1400, i), srpc);
+	}
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 12345, remaining 1400",
+			unit_log_get());
+	
+	// Send the last data packet.
+	self->data.seg.offset = htonl(9800);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 1400), srpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+}
 TEST_F(homa_incoming, homa_data_pkt__socket_shutdown)
 {
 	self->data.message_length = htonl(100);
@@ -1182,24 +1216,6 @@ TEST_F(homa_incoming, homa_send_grants__choose_priority_level)
 	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 12800@0", unit_log_get());
-}
-TEST_F(homa_incoming, homa_send_grants__remove_from_list_when_fully_granted)
-{
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
-			self->server_ip, self->client_port, 1, 11000, 100);
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
-			self->server_ip, self->client_port, 2, 10500, 100);
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
-			self->server_ip, self->client_port, 3, 50000, 100);
-	unit_log_clear();
-	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 10500@2; "
-			"xmit GRANT 11000@1; "
-			"xmit GRANT 11400@0", unit_log_get());
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 198.168.0.1, id 3, remaining 48600",
-			unit_log_get());
 }
 TEST_F(homa_incoming, homa_send_grants__many_messages_of_same_size)
 {
