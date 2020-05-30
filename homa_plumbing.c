@@ -46,6 +46,12 @@ struct homa *homa = &homa_data;
  */
 static bool exiting = false;
 
+/* Set via sysctl to request that information on a particular topic
+ * be printed to the system log. The value written determines the
+ * topic.
+ */
+static int log_topic;
+
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
  * to implement top-level system calls. Many of these operations can
@@ -170,6 +176,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "link_mbps",
 		.data		= &homa_data.link_mbps,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "log_topic",
+		.data		= &log_topic,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -921,13 +934,13 @@ int homa_softirq(struct sk_buff *skb) {
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
-			tt_record3("Gap in incoming packets: %d cycles "
-					"(%d.%1d ms)",
-					(int) (start - last), scaled_ms/10,
-					scaled_ms%10);
-			printk(KERN_NOTICE "Gap in incoming packets: %llu "
-					"cycles, (%d.%1d ms)", (start - last),
-					scaled_ms/10, scaled_ms%10);
+//			tt_record3("Gap in incoming packets: %d cycles "
+//					"(%d.%1d ms)",
+//					(int) (start - last), scaled_ms/10,
+//					scaled_ms%10);
+//			printk(KERN_NOTICE "Gap in incoming packets: %llu "
+//					"cycles, (%d.%1d ms)", (start - last),
+//					scaled_ms/10, scaled_ms%10);
 		}
 	}
 	last = start;
@@ -1206,6 +1219,15 @@ int homa_dointvec(struct ctl_table *table, int write,
 		if ((table->data == &homa_data.unsched_cutoffs)
 				|| (table->data == &homa_data.num_priorities)) {
 			homa_prios_changed(homa);
+		}
+		
+		/* Handle the special value log_topic by invoking a function
+		 * to print information to the log.
+		 */
+		if (table->data == &log_topic) {
+			if (log_topic == 1)
+				homa_log_grantable_list(homa);
+			log_topic = 0;
 		}
 	}
 	return result;

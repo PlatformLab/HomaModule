@@ -871,6 +871,72 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 }
 
 /**
+ * homa_log_grantable_list() - Print information about the entries on the
+ * grantable list to the kernel log. This is intended for debugging use
+ * via the log_topic sysctl parameter.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_log_grantable_list(struct homa *homa)
+{
+	int bucket, count;
+	struct homa_peer *peer, *peer2;
+	struct homa_rpc *rpc;
+	
+	printk(KERN_NOTICE "Logging Homa grantable list\n");
+	homa_grantable_lock(homa);
+	for (bucket = 0; bucket < HOMA_PEERTAB_BUCKETS; bucket++) {
+		hlist_for_each_entry_rcu(peer, &homa->peers.buckets[bucket],
+				peertab_links) {
+			printk(KERN_NOTICE "Checking peer %s\n",
+					homa_print_ipv4_addr(peer->addr));
+			if (list_empty(&peer->grantable_rpcs))
+				continue;
+			count = 0;
+			list_for_each_entry(rpc, &peer->grantable_rpcs,
+					grantable_links) {
+				int offset;
+				if ((rpc->msgout.length > 0) &&
+						(rpc->msgout.next_packet != NULL))
+					offset = homa_data_offset(
+							rpc->msgout.next_packet);
+				else
+					offset = -1;
+				count++;
+				if (count > 2)
+					continue;
+				printk(KERN_NOTICE "Id %llu, state %s, length "
+						"%d, remaining %d, incoming "
+						"%d\n", rpc->id,
+						homa_symbol_for_state(rpc),
+						rpc->msgin.total_length,
+						rpc->msgin.bytes_remaining,
+						rpc->msgin.incoming);
+				printk(KERN_NOTICE "msgout.length %d, "
+						"msgout.granted %d, offset %d\n",
+						rpc->msgout.length,
+						rpc->msgout.granted,
+						offset);
+			}
+			printk(KERN_NOTICE "Peer %s has %d grantable RPCs\n",
+					homa_print_ipv4_addr(peer->addr),
+					count);
+			list_for_each_entry(peer2, &homa->grantable_peers,
+					grantable_links) {
+				if (peer2 == peer)
+					goto next_peer;
+			}
+			printk(KERN_NOTICE "Peer %s has grantable RPCs but "
+					"isn't on homa->grantable_peers\n",
+					homa_print_ipv4_addr(peer->addr));
+			next_peer:
+			continue;
+		}
+	}
+	homa_grantable_unlock(homa);
+	printk(KERN_NOTICE "Finished logging Homa grantable list\n");
+}
+
+/**
  * homa_rpc_abort() - Terminate an RPC and arrange for an error to be returned
  * to the application.
  * @crpc:    RPC to be terminated. Must be a client RPC (@is_client != 0).

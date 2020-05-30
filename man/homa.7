@@ -180,6 +180,11 @@ transmits full-size packets.
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.
 .TP
+.IR log_topic
+This value always reads as 0. Writing a nonzero value will cause Homa to
+log various state information to the system log, depending on the value.
+For details on the recognized values, consult the Homa code.
+.TP
 .IR max_dead_buffs
 When an RPC completes, Homa doesn't immediately free up the resources it used,
 since this could delay the application (e.g. if there are lots of
