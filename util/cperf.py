@@ -79,7 +79,7 @@ default_defaults = {
 # Keys are experiment names, and each value is the digested data for that
 # experiment.  The digest is itself a dictionary containing some or all of
 # the following keys:
-# rtts:             A dictionary with message lengths as keys; each value is
+# rtts:            A dictionary with message lengths as keys; each value is
 #                  a list of the RTTs (in usec) for all messages of that length.
 # total_messages:  Total number of samples in rtts.
 # lengths:         Sorted list of message lengths, corresponding to buckets
@@ -504,7 +504,8 @@ def run_experiment(name, clients, options):
     time.sleep(options.seconds)
     do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
-    do_cmd("dump_times rtts", clients)
+    if not "no_rtt_files" in options:
+        do_cmd("dump_times rtts", clients)
     if options.protocol == "homa":
         vlog("Recording final metrics")
         for id in active_nodes:
@@ -513,9 +514,10 @@ def run_experiment(name, clients, options):
             f.close()
     do_cmd("stop senders", clients)
     do_cmd("stop clients", clients)
-    for id in clients:
-        subprocess.run(["rsync", "-rtvq", "node-%d:rtts" % (id),
-                "%s/%s-%d.rtts" % (options.log_dir, name, id)])
+    if not "no_rtt_files" in options:
+        for id in clients:
+            subprocess.run(["rsync", "-rtvq", "node-%d:rtts" % (id),
+                    "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
 def scan_log(file, node, experiments):
     """
@@ -529,7 +531,8 @@ def scan_log(file, node, experiments):
                     name, where
                   * Each value is dictionary indexed by node name, where
                   * Each value is a dictionary with keys client_kops,
-                    client_mbps, server_kops, or server_Mbps, each of which is
+                    client_mbps, client_latency, server_kops, or server_Mbps,
+                    each of which is
                   * A list of values measured at regular intervals for that node
     """
     exited = False
@@ -549,21 +552,28 @@ def scan_log(file, node, experiments):
         if re.match('.*Ending .* experiment', line):
             experiment = ""
         if experiment != "":
-            match = re.match('.*(Clients|Servers): ([0-9.]+) Kops/sec, '
-                        '([0-9.]+) MB/sec', line)
+            match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
+                        '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
             if match:
-                if match.group(1) == "Clients":
-                    type = "client"
-                else:
-                    type = "server"
-                key = type + "_kops"
-                if not key in node_data:
-                    node_data[key] = []
-                node_data[key].append(float(match.group(2)))
-                key = type + "_mbps"
-                if not key in node_data:
-                    node_data[key] = []
-                node_data[key].append(float(match.group(3)))
+                if not "client_kops" in node_data:
+                    node_data["client_kops"] = []
+                node_data["client_kops"].append(float(match.group(1)))
+                if not "client_mbps" in node_data:
+                    node_data["client_mbps"] = []
+                node_data["client_mbps"].append(float(match.group(2)))
+                if not "client_latency" in node_data:
+                    node_data["client_latency"] = []
+                node_data["client_latency"].append(float(match.group(3)))
+            else:
+                match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+                        '([0-9.]+) MB/sec', line)
+                if match:
+                    if not "server_kops" in node_data:
+                        node_data["server_kops"] = []
+                    node_data["server_kops"].append(float(match.group(1)))
+                    if not "server_mbps" in node_data:
+                        node_data["server_mbps"] = []
+                    node_data["server_mbps"].append(float(match.group(2)))
         if "FATAL:" in line:
             log("%s: %s" % (file, line[:-1]))
             exited = True
@@ -928,7 +938,7 @@ def plot_slowdown(experiment, percentile, label):
                 % (percentile))
     plt.plot(x, y, label=label)
 
-def start_cdf_plot(title, min_x, max_x, num_samples, x_label, y_label):
+def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
     """
     Create a pyplot graph that will be display a complementary CDF with
     log axes.
@@ -939,8 +949,7 @@ def start_cdf_plot(title, min_x, max_x, num_samples, x_label, y_label):
     min_y:       Smallest y-coordinate that must be visible (1.0 is always
                  the largest value for y)
     x_label:     Label for the x axis (empty means no label)
-    num_samples: Maximum number of samples in any given curve (used to
-                 scale the y axis)
+    y_label:     Label for the y axis (empty means no label)
     """
     plt.figure(figsize=[5, 4])
     if title != "":
@@ -957,7 +966,7 @@ def start_cdf_plot(title, min_x, max_x, num_samples, x_label, y_label):
     plt.xlim(min_x, max_x)
 
     plt.yscale("log")
-    plt.ylim(1/num_samples, 1.0)
+    plt.ylim(min_y, 1.0)
     # plt.yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
     if x_label:
         plt.xlabel(x_label)

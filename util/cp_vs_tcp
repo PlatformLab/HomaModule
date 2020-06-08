@@ -61,6 +61,7 @@ if not options.plot_only:
             o.server_ports = 1
             o.server_nodes = 1
             o.first_server = 1
+            o.seconds = 5
             run_experiment(unloaded_exp, range(0, 1), o)
 
             run_experiment(homa_exp, clients, options)
@@ -87,7 +88,7 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 400, homa_exp)
+    start_slowdown_plot(title, 1000, homa_exp)
     plot_slowdown(tcp_exp, "p99", "TCP P99")
     plot_slowdown(homa_exp, "p99", "Homa P99")
     plot_slowdown(tcp_exp, "p50", "TCP P50")
@@ -103,8 +104,7 @@ for workload, bw in load_info:
     tcp_x, tcp_y = get_short_cdf(tcp_exp)
     start_cdf_plot(title, min(unloaded_x[0], homa_x[0], tcp_x[0]),
             max(unloaded_x[-1], homa_x[-1], tcp_x[-1]),
-            max(len(unloaded_x), len(homa_x), len(tcp_x))/2 + 1,
-            "RTT (usecs)",
+            1e-05, "RTT (usecs)",
             "Cumulative Fraction Short Messages")
     plt.plot(tcp_x, tcp_y, label="TCP")
     plt.plot(homa_x, homa_y, label="Homa")

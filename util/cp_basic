@@ -1,0 +1,194 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark computes basic latency and throughput numbers
+# for Homa and TCP.
+
+from cperf import *
+
+def avg(values, fmt):
+    """
+    Return a string giving the average of a list of values, followed by the
+    individual values in parens.
+    values:    The values.
+    fmt:       Format string such as "%.2f" for formatting the values.
+    """
+    result = fmt % (sum(values)/float(len(values)))
+    result += " ("
+    for value in values:
+        if result[-1] != "(":
+            result += " "
+        result += fmt % (value)
+    result += ")"
+    return result
+
+parser = get_parser(description=
+        'Measures basic latency and single-machine throughput for Homa and TCP.',
+        usage='%(prog)s [options]',
+        defaults={
+            "client_ports":   9,
+            "port_receivers": 1,
+            "server_ports":   6,
+            "port_threads":   3})
+options = parser.parse_args()
+options.no_rtt_files = True
+init(options)
+if options.num_nodes < 2:
+    print("--num_nodes too small (%d): must be at least 2"
+            % (options.num_nodes))
+    sys.exit(-1)
+
+if not options.plot_only:
+    # Homa client latency (small messages, low load)
+    start_servers(range(1, options.num_nodes), options)
+    o = copy.deepcopy(options)
+    o.client_ports = 1
+    o.port_receivers = 0
+    o.port_max = 1
+    o.server_nodes = 1
+    o.first_server  = 1
+    o.server_ports = 1
+    o.workload = "100"
+    o.num_servers = 1
+    o.first_server = 1
+    run_experiment("homa_latency", range(0, 1), o)
+
+    # Homa client RPC throughput (single client, many servers, small messages)
+    o = copy.deepcopy(options)
+    o.workload = "100"
+    o.server_max = 1
+    o.server_nodes = options.num_nodes-1
+    o.first_server = 1
+    run_experiment("homa_client_rpc_tput", range(0, 1), o)
+
+    # Homa client throughput (single client, many servers, large messages)
+    o.workload = "500000"
+    run_experiment("homa_client_tput", range(0, 1), o)
+
+    # Homa server RPC throughput (single server, many clients, small messages)
+    start_servers(range(0, 1), options)
+    o = copy.deepcopy(options)
+    o.workload = "100"
+    o.server_max = 1
+    o.server_nodes = 1
+    o.first_server = 0
+    run_experiment("homa_server_rpc_tput", range(1, options.num_nodes), o)
+
+    # Homa server throughput (single server, many clients, large messages)
+    o.workload = "500000"
+    run_experiment("homa_server_tput", range(1, options.num_nodes), o)
+
+    # TCP client latency (small messages, low load)
+    options.protocol = "tcp"
+    start_servers(range(1, options.num_nodes), options)
+    o = copy.deepcopy(options)
+    o.tcp_client_ports = 1
+    o.port_max = 1
+    o.server_nodes = 1
+    o.first_server  = 1
+    o.tcp_server_ports = 1
+    o.workload = "100"
+    o.num_servers = 1
+    o.first_server = 1
+    run_experiment("tcp_latency", range(0, 1), o)
+
+    # TCP client RPC throughput (single client, many servers, small messages)
+    o = copy.deepcopy(options)
+    o.workload = "100"
+    o.server_max = 2
+    o.server_nodes = options.num_nodes-1
+    o.first_server = 1
+    run_experiment("tcp_client_rpc_tput", range(0, 1), o)
+
+    # TCP client throughput (single client, many servers, large messages)
+    o.workload = "500000"
+    o.port_max = 1
+    run_experiment("tcp_client_tput", range(0, 1), o)
+
+    # TCP server RPC throughput (single server, many clients, small messages)
+    start_servers(range(0, 1), options)
+    o = copy.deepcopy(options)
+    o.workload = "100"
+    o.server_max = 1
+    o.server_nodes = 1
+    o.first_server = 0
+    run_experiment("tcp_server_rpc_tput", range(1, options.num_nodes), o)
+
+    # TCP server throughput (single server, many clients, large messages)
+    o.workload = "500000"
+    o.port_max = 1
+    run_experiment("tcp_server_tput", range(1, options.num_nodes), o)
+
+    log("Stopping nodes")
+    stop_nodes()
+
+# Parse the log files to extract useful data
+experiments = {}
+scan_log(options.log_dir + "/node-0.log", "node-0", experiments)
+
+node = experiments["homa_latency"]["node-0"]
+if len(node["client_latency"]) == 0:
+    raise Error("No Homa client latencies found")
+print("Homa RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+
+node = experiments["homa_client_rpc_tput"]["node-0"]
+if len(node["client_kops"]) == 0:
+    raise Error("No Homa client RPC throughputs found")
+print("Homa client RPC throughput (Kops/sec): %s"
+        % (avg(node["client_kops"], "%.2f")))
+
+node = experiments["homa_server_rpc_tput"]["node-0"]
+if len(node["server_kops"]) == 0:
+    raise Error("No Homa server RPC throughputs found")
+print("Homa server RPC throughput (Kops/sec): %s"
+        % (avg(node["server_kops"], "%.2f")))
+
+node = experiments["homa_client_tput"]["node-0"]
+if len(node["client_mbps"]) == 0:
+    raise Error("No Homa client throughputs found")
+print("Homa client throughput (Mbps): %s"
+        % (avg(node["client_mbps"], "%.1f")))
+
+node = experiments["homa_server_tput"]["node-0"]
+if len(node["server_mbps"]) == 0:
+    raise Error("No Homa server throughputs found")
+print("Homa server throughput (Mbps): %s"
+        % (avg(node["server_mbps"], "%.1f")))
+
+node = experiments["tcp_latency"]["node-0"]
+if len(node["client_latency"]) == 0:
+    raise Error("No TCP client latencies found")
+print("\nTCP RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+
+node = experiments["tcp_client_rpc_tput"]["node-0"]
+if len(node["client_kops"]) == 0:
+    raise Error("No TCP client RPC throughputs found")
+print("TCP client RPC throughput (Kops/sec): %s" % (avg(node["client_kops"], "%.2f")))
+
+node = experiments["tcp_server_rpc_tput"]["node-0"]
+if len(node["server_kops"]) == 0:
+    raise Error("No TCP server RPC throughputs found")
+print("TCP server RPC throughput (Kops/sec): %s" % (avg(node["server_kops"], "%.2f")))
+
+node = experiments["tcp_client_tput"]["node-0"]
+if len(node["client_mbps"]) == 0:
+    raise Error("No TCP client throughputs found")
+print("TCP client throughput (Mbps): %s" % (avg(node["client_mbps"], "%.1f")))
+
+node = experiments["tcp_server_tput"]["node-0"]
+if len(node["server_mbps"]) == 0:
+    raise Error("No TCP server throughputs found")
+print("TCP server throughput (Mbps): %s" % (avg(node["server_mbps"], "%.1f")))
