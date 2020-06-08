@@ -226,7 +226,7 @@ if elapsed_secs != 0:
         for core in range(first_core, end_core):
             line += "  Core%-2d" % (core)
         print(line)
-        for where in ["napi", "softirq", "send", "recv", "timer", "pacer"]:
+        for where in ["napi", "softirq", "send", "recv", "reply", "timer", "pacer"]:
             symbol = where + "_cycles"
             line = "%-10s  " % (where)
             for core in range(first_core, end_core):
