@@ -40,6 +40,7 @@ last=`expr $first + $1 - 1`
 
 for ((i = $first ; i <= $last; i++)); do
     node=node-$i
+    echo
     echo $node
     ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
     rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
