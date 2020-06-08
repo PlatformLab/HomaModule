@@ -1335,7 +1335,7 @@ homa_client::~homa_client()
 	exit_sender = true;
 	exit_receivers = true;
 	while (!sender_exited || (total_responses != total_requests)) {
-		if (to_seconds(rdtsc() - start) > 0.5)
+		if (to_seconds(rdtsc() - start) > 2.0)
 			break;
 	}
 	shutdown(fd, SHUT_RDWR);
@@ -1391,7 +1391,7 @@ bool homa_client::wait_response(uint64_t id)
 	if (length < 0) {
 		if (exit_receivers)
 			return false;
-		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s\n",
+		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
 				strerror(errno), id,
 				print_address(&server_addr));
 		exit(1);
