@@ -128,6 +128,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	mutex_lock(&socktab->write_lock);
 	spin_lock_init(&hsk->lock);
 	hsk->last_locker = "none";
+	atomic_set(&hsk->reap_disable, 0);
 	hsk->homa = homa;
 	hsk->shutdown = false;
 	hsk->server_port = 0;

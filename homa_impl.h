@@ -632,11 +632,12 @@ struct homa_rpc {
 	bool dont_reap;
 	
 	/**
-	 * @grant_in_progress: True means a grant is being sent for this
-	 * RPC, and we released grantable_lock to reduce contention; it's
-	 * not safe to reap the RPC until this value is set false again.
+	 * @grants_in_progress: Count of active grant sends for this RPC;
+	 * it's not safe to reap the RPC unless this value is zero.
+	 * This variable is needed so that grantable_lock can be released
+	 * while sending grants to reduce contention.
 	 */
-	bool grant_in_progress;
+	atomic_t grants_in_progress;
 	
 	/**
 	 * @peer: Information about the other machine (the server, if

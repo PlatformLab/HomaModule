@@ -378,13 +378,13 @@ TEST_F(homa_utils, homa_rpc_reap__grand_in_progress)
 	homa_rpc_free(crpc2);
 	unit_log_clear();
 	self->homa.reap_limit = 3;
-	crpc1->grant_in_progress = true;
+	atomic_inc(&crpc1->grants_in_progress);
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12346", unit_log_get());
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("", unit_log_get());
-	crpc1->grant_in_progress = false;
+	atomic_dec(&crpc1->grants_in_progress);
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12345", unit_log_get());
 }

@@ -364,7 +364,12 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			ntohl(h->seg.offset), ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
-		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
+		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY)
+				|| (rpc->msgout.next_packet != NULL))) {
+			/* Note about check above: if a response packet
+			 * arrives before we have finished sending the
+			 * request, it must be bogus.
+			 */
 			kfree_skb(skb);
 			return 0;			
 		}
@@ -485,8 +490,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
-	tt_record3("resend request for id %llu, offset %d, length %d",
-			h->common.id, ntohl(h->offset), ntohl(h->length));
+	tt_record4("resend request for id %llu, offset %d, length %d, RPC state %d",
+			h->common.id, ntohl(h->offset), ntohl(h->length),
+			(rpc == NULL) ? 0 : rpc->state);
 
 	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
@@ -764,7 +770,7 @@ void homa_send_grants(struct homa *homa)
 		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
-		candidate->grant_in_progress = true;
+		atomic_inc(&candidate->grants_in_progress);
 		rpcs[num_grants] = candidate;
 		grant = &grants[num_grants];
 		num_grants++;
@@ -785,14 +791,14 @@ void homa_send_grants(struct homa *homa)
 	
 	/* By sending grants without holding grantable_lock here, we reduce
 	 * contention on that lock significantly. This only works because
-	 * rpc->grant_in_progress keeps the RPC from being deleted out from
+	 * rpc->grants_in_progress keeps the RPC from being deleted out from
 	 * under us.
 	 */
 	for (i = 0; i < num_grants; i++) {
 		/* Send any accumulated grants (ignore errors). */
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
 			rpcs[i]);
-		rpcs[i]->grant_in_progress = false;
+		atomic_dec(&rpcs[i]->grants_in_progress);
 	}
 }
 

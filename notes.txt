@@ -1,13 +1,18 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* How to fix the problem with RPCs that get "stuck" and don't make
+  progress:
+  * Ignore response packets if the request hasn't been completely sent.
+  * Respond to resends on clients, even if in INCOMING state.
+  * Implement a generation number in RPCs to invalidate old response
+    data after a RESTART
+
 * Performance-related tasks:
   * Large values of --port-max cause performance degradation for w4 and w5
     With --port-max 10, Homa gets the same throughput as TCP for w4 and w5!
   * Implement new benchmark that segregates clients and servers on
     different machines
-  * Reduce the number of available priorities, see how that impacts
-    performance
   * Order the queue of ready messages by size? May not matter for
     existing benchmarks, but could matter more for real applications, where
     long messages are likely to have longer service times.
@@ -16,11 +21,11 @@ Notes for Homa implementation in Linux:
     (e.g. don't hash based on packet info). Is there some way to hash to
     the same location under low load, but use multiple cores under high
     load? Tried simple totally random approach, but that made things worse.
-  * TCP does non-blocking sends for responses, which can delay processing
-    other requests for the same thread; may be unfair?
   * Make sure TCP is optimized (e.g. DCTCP)
   * Check out "-w 500000": Homa has less throughput than TCP.
-  * With only 2 priorities, throughput for W4 seems to drop to 1.7 GB/s max?
+  * Add flag to remove all instrumentation from Homa, for best performance.
+  * In W4, look at small-mssage CDF: P999 for Homa is still bad (almost 10 ms!)
+    Figure out why? Context switches?
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.
@@ -29,7 +34,6 @@ Notes for Homa implementation in Linux:
 * Things to do:
   * More work related to GSO/GRO:
     * Add new kernel call to combine send message & wait reply?
-  * Don't grant to more than one message from a given sender at a time.
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.

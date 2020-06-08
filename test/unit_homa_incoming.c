@@ -438,6 +438,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 			self->server_port, self->rpcid, 1000, 1600);
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
+	crpc->msgout.next_packet = NULL;
 	self->data.message_length = htonl(1600);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc);
@@ -467,6 +468,19 @@ TEST_F(homa_incoming, homa_data_pkt__wrong_rpc_state)
 	EXPECT_EQ(RPC_OUTGOING, srpc->state);
 	EXPECT_EQ(5, mock_skb_count());
 }
+TEST_F(homa_incoming, homa_data_pkt__request_not_fully_sent)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 1600);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	self->data.message_length = htonl(1600);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 0), crpc);
+	EXPECT_EQ(RPC_OUTGOING, crpc->state);
+	EXPECT_EQ(0, crpc->msgin.num_skbs);
+}
 TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -492,6 +506,7 @@ TEST_F(homa_incoming, homa_data_pkt__update_incoming)
 	unit_log_clear();
 	self->data.message_length = htonl(6000);
 	self->data.incoming = htonl(4000);
+	crpc->msgout.next_packet = NULL;
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc);
 	EXPECT_EQ(RPC_INCOMING, crpc->state);

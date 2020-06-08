@@ -2,6 +2,10 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
+* (May 2020) Noticed that cores can disappear for 10-12ms, during which
+  softirq handlers do not get invoked. Homa timetraces show no activity
+  of any kind during that time (e.g., no interrupts either).
+
 * (Mar. 2020) For the slowdown tests, the --port-max value needs to be
   pretty high to get true Poisson behavior. It was originally 20, but
   increasing it had significant impact on performance for TCP, particularly
@@ -9,7 +13,7 @@ order: most recent notes first.
   from 15 to 170x when --port-max increase from 20-100. Performance
   got even worse at --port-max=200, but I decided to stick with 100 for now.
 
-* (Mar. 2020) Having multiple threads receiving a single port makes a
+* (Mar. 2020) Having multiple threads receiving on a single port makes a
   big difference in tail latency. cperf had been using just one receiver
   thread for each port (on both clients and servers); changing to
   multiple threads reduced P50/P99 slowdown for small messages in W5
@@ -78,7 +82,7 @@ order: most recent notes first.
 No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
 RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 
-* It's better to queue a thead waiting for incoming mnessages at the *front*
+* It's better to queue a thread waiting for incoming messages at the *front*
   of the list in homa_wait_for_message, rather than the rear. If there is a
   pool of server threads but not enough load to keep them all busy, it's
   better to reuse a few threads rather than spreading work across all of
