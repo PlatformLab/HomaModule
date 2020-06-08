@@ -27,9 +27,9 @@ extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[];
 extern atomic_t * tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
-extern void       tt_inc_metric(int offset, __u64 count);
-extern void       (*tt_linux_inc_metrics)(int offset, __u64 count);
-extern void       tt_linux_skip_metrics(int offset, __u64 count);
+extern void       tt_inc_metric(int metric, __u64 count);
+extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
+extern void       tt_linux_skip_metrics(int metric, __u64 count);
 #endif
 
 /* Separate buffers for each core: this eliminates the need for
@@ -511,12 +511,23 @@ int tt_proc_release(struct inode *inode, struct file *file)
 /**
  * tt_inc_metric() - Invoked by Linux kernel code to update a
  * Homa metric.
- * @offset:   Offset within struct homa_metrics of the desired metric.
+ * @metric:   A value such as TT_NAPI_CYCLES indicating which metric
+ *            to increment.
  * @count:    Amount by which to increment to the metric.
  */
-void tt_inc_metric(int offset, __u64 count)
+void tt_inc_metric(int metric, __u64 count)
 {
-	__u64 *metric = (__u64 *)(((char *)
-			&homa_cores[smp_processor_id()]->metrics) + offset);
-	*metric += count;
+	/* Maps from the metric argument to an offset within homa_metrics.
+	 * This level of indirection is needed so that the kernel doesn't
+	 * have to be recompiled every time a new metric gets added (which
+	 * can change all of the offsets). See the kernel's timetrace.h
+	 * for the legal values of metric.
+	 */
+	static int offsets[] = {
+		offsetof(struct homa_metrics, napi_cycles),
+	};
+	__u64 *metric_addr = (__u64 *)(((char *)
+			&homa_cores[smp_processor_id()]->metrics)
+			+ offsets[metric]);
+	*metric_addr += count;
 }
