@@ -781,6 +781,9 @@ TEST_F(homa_incoming, homa_resend_pkt__server_sends_busy)
 }
 TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 {
+	/* Important to respond to resends even if client thinks the
+	 * server must already have received everything.
+	 */
 	struct resend_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .type = RESEND},
@@ -788,14 +791,14 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 			.length = htonl(200),
 			.priority = 3};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 2000, 100);
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 2000, 3000);
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 	
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("xmit DATA retrans 1400@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__send_busy_instead_of_data)
 {

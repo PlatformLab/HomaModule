@@ -365,6 +365,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY)
+//				)) {
 				|| (rpc->msgout.next_packet != NULL))) {
 			/* Note about check above: if a response packet
 			 * arrives before we have finished sending the
@@ -529,7 +530,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		}
 	} else {
 		/* We are the client for this RPC. */
-		if ((rpc == NULL) || (rpc->state != RPC_OUTGOING))
+//		if ((rpc == NULL) || (rpc->state != RPC_OUTGOING))
+		if (rpc == NULL)
 			goto done;
 	}
 	if (rpc->msgout.next_packet && (homa_data_offset(rpc->msgout.next_packet)
