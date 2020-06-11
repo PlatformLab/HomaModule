@@ -546,6 +546,77 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 }
 
 /**
+ * homa_rpc_log() - Log info about a particular RPC; this is functionality
+ * pulled out of homa_rpc_log_active because its indentation got too deep.
+ * @rpc:  RPC for which key info should be written to the system log.
+ */
+void homa_rpc_log(struct homa_rpc *rpc)
+{
+	char *type = (rpc->is_client) ? "Client" : "Server";
+	char *peer = homa_print_ipv4_addr(rpc->peer->addr);
+	
+	if (rpc->state == RPC_INCOMING)
+		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
+				"generation %d, %d/%d bytes received, "
+				"incoming %d\n",
+				type, rpc->id, peer, rpc->dport,
+				rpc->generation, rpc->msgin.total_length
+				- rpc->msgin.bytes_remaining,
+				rpc->msgin.total_length, rpc->msgin.incoming);
+	else if (rpc->state == RPC_OUTGOING) {
+		int offset;
+		if (rpc->msgout.next_packet != NULL) {
+			struct data_header *h = (struct data_header *)
+					rpc->msgout.next_packet->data;
+			offset = ntohl(h->seg.offset);
+		} else
+			offset = rpc->msgout.length;
+		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
+				"generation %d, outgoing length %d, "
+				"granted %d, next xmit offset %d, "
+				"incoming bytes left %d\n",
+				type, rpc->id, peer, rpc->dport,
+				rpc->generation, rpc->msgout.length,
+				rpc->msgout.granted, offset,
+				rpc->msgin.bytes_remaining);
+	} else
+		printk(KERN_NOTICE "%s RPC %s, id %llu, peer %s:%d, "
+				"generation %d, incoming length %d, "
+				"outgoing length %d\n",
+				type, homa_symbol_for_state(rpc),
+				rpc->id, peer, rpc->dport, rpc->generation,
+				rpc->msgin.total_length, rpc->msgout.length);
+}
+
+/**
+ * homa_rpc_log_active() - Print information to the system log about all
+ * active RPCs. Intended primarily for debugging.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_rpc_log_active(struct homa *homa)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	
+	printk("Logging active Homa RPCs:\n");
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+		
+		atomic_inc(&hsk->reap_disable);
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			homa_rpc_log(rpc);
+		}
+		atomic_dec(&hsk->reap_disable);
+	}
+	rcu_read_unlock();
+	printk("Finished logging active Homa RPCs\n");
+}
+
+/**
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
  * @addr:    Address to convert, in network byte order.

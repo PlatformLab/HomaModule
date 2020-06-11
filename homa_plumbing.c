@@ -1227,6 +1227,8 @@ int homa_dointvec(struct ctl_table *table, int write,
 		if (table->data == &log_topic) {
 			if (log_topic == 1)
 				homa_log_grantable_list(homa);
+			else if (log_topic == 2)
+				homa_rpc_log_active(homa);
 			log_topic = 0;
 		}
 	}
