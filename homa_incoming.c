@@ -374,12 +374,8 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			ntohl(h->seg.offset), ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
-		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY)
-				|| (rpc->msgout.next_packet != NULL))) {
-			/* Note about check above: if a response packet
-			 * arrives before we have finished sending the
-			 * request, it must be bogus.
-			 */
+		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
+			
 			kfree_skb(skb);
 			return 0;			
 		}
