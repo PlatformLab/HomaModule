@@ -320,7 +320,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			.sport = htons(client_port),
 	                .dport = htons(hsk->server_port),
 			.type = DATA,
-			.id = id
+			.id = id,
+			.generation = htons(1)
 		},
 		.message_length = htonl(req_length),
 		.incoming = htonl(10000),

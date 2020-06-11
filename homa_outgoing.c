@@ -30,10 +30,6 @@
 inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 		int priority)
 {
-	struct common_header *h = (struct common_header *)
-			skb_transport_header(skb);
-	h->priority = priority;
-	
 	/* Note: this code initially specified the priority in the VLAN
 	 * header, but as of 3/2020, this performed badly on the CloudLab
 	 * cluster being used for testing: 100 us of extra delay occurred
@@ -217,6 +213,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 		h->common.dport = htons(rpc->dport);
 		homa_set_doff(h);
 		h->common.id = rpc->id;
+		h->common.generation = htons(rpc->generation);
 		h->message_length = htonl(len);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
@@ -332,6 +329,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	}
 	h->dport = htons(rpc->dport);
 	h->id = rpc->id;
+	h->generation = htons(rpc->generation);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
 
@@ -464,10 +462,11 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 
 	set_priority(skb, rpc->hsk, priority);
 
-	/* Update cutoff_version in case it has changed since the
-	 * message was initially created.
+	/* Update info that may have changed since the message was initially
+	 * created.
 	 */
 	h->cutoff_version = rpc->peer->cutoff_version;
+	h->common.generation = htons(rpc->generation);
 	
 	dst_hold(rpc->peer->dst);
 	skb_dst_set(skb, rpc->peer->dst);

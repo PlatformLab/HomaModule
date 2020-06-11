@@ -1,12 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* How to fix the problem with RPCs that get "stuck" and don't make
-  progress:
-  * Ignore response packets if the request hasn't been completely sent.
-  * Respond to resends on clients, even if in INCOMING state.
-  * Implement a generation number in RPCs to invalidate old response
-    data after a RESTART
+* Cleanups still needed:
+  * Get larger MTUs working again
+  * Fix cp_prios (w3 particularly problematic?)
 
 * Performance-related tasks:
   * Large values of --port-max cause performance degradation for w4 and w5
@@ -26,6 +23,7 @@ Notes for Homa implementation in Linux:
   * Add flag to remove all instrumentation from Homa, for best performance.
   * In W4, look at small-mssage CDF: P999 for Homa is still bad (almost 10 ms!)
     Figure out why? Context switches?
+  * Analyze high Homa P99 for W3.
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.

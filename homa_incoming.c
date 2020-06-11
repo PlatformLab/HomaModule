@@ -293,7 +293,17 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			goto discard;
 		}
 	} else {
+		__u16 pkt_generation = ntohs(h->generation);
 		BUG_ON(rpc->state == RPC_DEAD);
+		if (pkt_generation != rpc->generation) {
+			if (!rpc->is_client && (pkt_generation
+					> rpc->generation))
+				rpc->generation = pkt_generation;
+			else {
+				INC_METRIC(stale_generations, 1);
+				goto discard;
+			}
+		}
 		rpc->silent_ticks = 0;
 		rpc->num_resends = 0;
 	}
@@ -365,7 +375,6 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY)
-//				)) {
 				|| (rpc->msgout.next_packet != NULL))) {
 			/* Note about check above: if a response packet
 			 * arrives before we have finished sending the
@@ -515,6 +524,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			restart.common.sport = h->common.dport;
 			restart.common.dport = h->common.sport;
 			restart.common.id = h->common.id;
+			restart.common.generation = h->common.generation;
 			restart.common.type = RESTART;
 			peer = homa_peer_find(&hsk->homa->peers,
 					ip_hdr(skb)->saddr, &hsk->inet);
@@ -530,7 +540,6 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		}
 	} else {
 		/* We are the client for this RPC. */
-//		if ((rpc == NULL) || (rpc->state != RPC_OUTGOING))
 		if (rpc == NULL)
 			goto done;
 	}
@@ -569,6 +578,17 @@ void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_remove_from_grantable(rpc->hsk->homa, rpc);
 		homa_message_in_destroy(&rpc->msgin);
 		err = homa_message_out_reset(rpc);
+		rpc->generation++;
+		if (rpc->generation == 0) {
+			INC_METRIC(generation_overflows, 1);
+			printk(KERN_WARNING "Aborting Homa RPC id %llu to "
+					"server %s:%d: generation overflowed "
+					"(EOVERFLOW)\n",
+					rpc->id,
+					homa_print_ipv4_addr(rpc->peer->addr),
+					rpc->dport);
+			err = -EOVERFLOW;
+		}
 		if (err) {
 			homa_rpc_abort(rpc, err);
 		} else {

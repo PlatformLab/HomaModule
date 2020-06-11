@@ -316,7 +316,8 @@ if elapsed_secs != 0:
             "data_xmit_errors", "unknown_rpcs",
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
-            "client_rpc_timeouts", "server_rpc_timeouts"]:
+            "client_rpc_timeouts", "server_rpc_timeouts",
+            "stale_generations", "generation_overflows"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs

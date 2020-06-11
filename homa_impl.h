@@ -194,10 +194,10 @@ struct common_header {
 	__be16 checksum;
 	
 	/**
-	 * @priority: the priority at which the packet was set; used
-	 * only for debugging.
+	 * @generation: the generation of the RPC this packet is associated
+	 * with.
 	 */
-	__u16 priority;
+	__be16 generation;
 	
 	/**
 	 * @id: Identifier for the RPC associated with this packet; must
@@ -653,6 +653,13 @@ struct homa_rpc {
 	 * from its port. Selected by the client.
 	 */
 	__u64 id;
+	
+	/**
+	 * @generation: Incremented each time the RPC is restarted. Used to
+	 * detect and discard packets from older generations so they don't
+	 * interfere with the current generation.
+	 */
+	__u16 generation;
 	
 	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has
@@ -1590,6 +1597,19 @@ struct homa_metrics {
 	 * discarded because it referred to a nonexistent RPC.
 	 */
 	__u64 unknown_rpcs;
+	
+	/**
+	 * @stale_generations: total number of times an incoming packet was
+	 * discarded because it didn't have the most up-to-date generation
+	 * for the RPC.
+	 */
+	__u64 stale_generations;
+	
+	/**
+	 * @generation_overflows: total number of times an RPC had to be
+	 * aborted because its generation number wrapped back around to 0.
+	 */
+	__u64 generation_overflows;
 	
 	/**
 	 * @cant_create_server_rpc: total number of times a server discarded

@@ -33,7 +33,7 @@ FIXTURE_SETUP(homa_offload)
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
-			.type = DATA, .id = 1000},
+			.type = DATA, .id = 1000, .generation = htons(1)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.retransmit = 0,
@@ -96,10 +96,10 @@ TEST_F(homa_offload, homa_gro_receive__append)
 	unit_log_frag_list(self->gro_list->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000, cutoff_version 0; "
+			"data_length 1400, incoming 10000; "
 			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000, cutoff_version 0",
+			"data_length 1400, incoming 10000",
 			unit_log_get());
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
@@ -132,13 +132,13 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	unit_log_frag_list(self->gro_list->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000, cutoff_version 0; "
+			"data_length 1400, incoming 10000; "
 			"DATA from 196.168.0.1:40001, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000, cutoff_version 0; "
+			"data_length 1400, incoming 10000; "
 			"DATA from 196.168.0.1:40002, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000, cutoff_version 0",
+			"data_length 1400, incoming 10000",
 			unit_log_get());
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);

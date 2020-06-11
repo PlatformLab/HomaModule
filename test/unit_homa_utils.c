@@ -202,6 +202,17 @@ TEST_F(homa_utils, homa_rpc_new_server__addr_error)
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
+TEST_F(homa_utils, homa_rpc_new_server__set_generation)
+{
+	self->data.common.generation = htons(3);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_FALSE(IS_ERR(srpc));
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(3, srpc->generation);
+	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
+	homa_rpc_free(srpc);
+}
 
 TEST_F(homa_utils, homa_rpc_lock_slow)
 {

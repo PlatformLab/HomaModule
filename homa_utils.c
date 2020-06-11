@@ -183,6 +183,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
 	crpc->id = atomic64_fetch_add(1, &hsk->homa->next_outgoing_id);
+	crpc->generation = 1;
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
@@ -296,6 +297,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = h->common.id;
+	srpc->generation = ntohs(h->common.generation);
 	srpc->error = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->incoming));
@@ -592,6 +594,9 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
 		ntohs(common->sport), ntohs(common->dport), common->id);
+	if (ntohs(common->generation) != 1)
+		used = homa_snprintf(buffer, buf_len, used, ", generation %d",
+				ntohs(common->generation));
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
@@ -601,13 +606,17 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		int bytes_left, i;
 		used = homa_snprintf(buffer, buf_len, used,
 				", message_length %d, offset %d, "
-				"data_length %d, incoming %d, "
-				"cutoff_version %d%s",
+				"data_length %d, incoming %d",
 				ntohl(h->message_length),
 				ntohl(h->seg.offset), seg_length,
-				ntohl(h->incoming),
-				ntohs(h->cutoff_version),
-				h->retransmit ? ", RETRANSMIT" : "");
+				ntohl(h->incoming));
+		if (ntohs(h->cutoff_version != 0))
+			used = homa_snprintf(buffer, buf_len, used,
+					", cutoff_version %d",
+					ntohs(h->cutoff_version));
+		if (h->retransmit)
+			used = homa_snprintf(buffer, buf_len, used,
+					", RETRANSMIT");
 		bytes_left = skb->len - sizeof32(*h) - seg_length;
 		if (skb_shinfo(skb)->gso_segs <= 1)
 			break;
@@ -1099,6 +1108,14 @@ char *homa_print_metrics(struct homa *homa)
 				"unknown_rpcs              %15llu  "
 				"Packets discarded because RPC is unknown\n",
 				m->unknown_rpcs);
+		homa_append_metric(homa,
+				"stale_generations         %15llu  "
+				"Packets discarded because stale generation\n",
+				m->stale_generations);
+		homa_append_metric(homa,
+				"generation_overflows      %15llu  "
+				"RPCs aborted because of generation wrap-around\n",
+				m->generation_overflows);
 		homa_append_metric(homa,
 				"server_cant_create_rpcs   %15llu  "
 				"Packets discarded because server "

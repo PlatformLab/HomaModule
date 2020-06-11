@@ -267,13 +267,13 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	unit_log_message_out_packets(&crpc->msgout, 1);
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 0, data_length 1400, "
-			"incoming 3000, cutoff_version 0; "
+			"incoming 3000; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 1400, data_length 1400, "
-			"incoming 3000, cutoff_version 0; "
+			"incoming 3000; "
 		     "DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 3000, offset 2800, data_length 200, "
-			"incoming 3000, cutoff_version 0",
+			"incoming 3000",
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 }
@@ -513,6 +513,19 @@ TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
 	EXPECT_SUBSTR("cutoff_version 123", unit_log_get());
 }
+TEST_F(homa_outgoing, __homa_xmit_data__update_generation)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 100, 1000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	crpc->generation = 4;
+	mock_xmit_log_verbose = 1;
+	unit_log_clear();
+	skb_get(crpc->msgout.packets);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
+	EXPECT_SUBSTR(", generation 4,", unit_log_get());
+}
 TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 {
 	int old_refcount;
@@ -557,13 +570,13 @@ TEST_F(homa_outgoing, homa_resend_data)
 	homa_resend_data(crpc, 7000, 10000, 2);
 	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 16000, offset 7000, data_length 1400, "
-			"incoming 10000, cutoff_version 0, RETRANSMIT; "
+			"incoming 10000, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 16000, offset 8400, data_length 1400, "
-			"incoming 10000, cutoff_version 0, RETRANSMIT; "
+			"incoming 10000, RETRANSMIT; "
 			"xmit DATA from 0.0.0.0:40000, dport 99, id 1, "
 			"message_length 16000, offset 9800, data_length 1400, "
-			"incoming 11200, cutoff_version 0, RETRANSMIT",
+			"incoming 11200, RETRANSMIT",
 			unit_log_get());
 	EXPECT_STREQ("2 2 2", mock_xmit_prios);
 	
