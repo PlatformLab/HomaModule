@@ -255,7 +255,8 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	/* Find and lock the RPC for this packet. */
 	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
 		/* We are the server for this RPC. */
-		if (h->type == DATA) {
+		if ((h->type == DATA)
+				&& !((struct data_header *) h)->retransmit) {
 			/* Create a new RPC if one doesn't already exist. */
 			rpc = homa_rpc_new_server(hsk, ip_hdr(skb)->saddr,
 					(struct data_header *) h);
@@ -283,7 +284,9 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 					homa_print_packet(skb, buffer,
 					sizeof(buffer)));
 		}
-		if ((h->type != CUTOFFS) && (h->type != RESEND)) {
+		if (h->type != CUTOFFS) {
+			if (h->type == RESEND)
+				homa_xmit_unknown(skb, hsk);
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					h->id & 0xffffffff, h->type,
@@ -300,6 +303,11 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 					> rpc->generation))
 				rpc->generation = pkt_generation;
 			else {
+				tt_record4("Discarding packet because of "
+						"stale generation: id %d, "
+						"peer 0x%x:%d, type %d",
+						rpc->id, ntohl(rpc->peer->addr),
+						ntohs(h->sport), h->type);
 				INC_METRIC(stale_generations, 1);
 				goto discard;
 			}
@@ -322,12 +330,14 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		INC_METRIC(packets_received[RESEND - DATA], 1);
 		homa_resend_pkt(skb, rpc, hsk);
 		break;
-	case RESTART:
-		INC_METRIC(packets_received[RESTART - DATA], 1);
-		homa_restart_pkt(skb, rpc);
+	case UNKNOWN:
+		INC_METRIC(packets_received[UNKNOWN - DATA], 1);
+		homa_unknown_pkt(skb, rpc);
 		break;
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
+		tt_record2("received BUSY for id %d, peer 0x%x",
+				h->id, ntohl(rpc->peer->addr));
 		/* Nothing to do for these packets except reset silent_ticks,
 		 * which happened above.
 		 */
@@ -367,10 +377,8 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	struct data_header *h = (struct data_header *) skb->data;
 	int incoming = ntohl(h->incoming);
 	
-	tt_record4("incoming data packet, id %llu, port %d, offset %d/%d",
-			h->common.id,
-			rpc->is_client ? rpc->hsk->client_port
-			: rpc->hsk->server_port,
+	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
+			h->common.id, ntohl(rpc->peer->addr),
 			ntohl(h->seg.offset), ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
@@ -487,8 +495,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
  * homa_resend_pkt() - Handler for incoming RESEND packets
  * @skb:     Incoming packet; size already verified large enough for header.
  *           This function now owns the packet.
- * @rpc:     Information about the RPC corresponding to this packet; NULL
- *           if the packet doesn't belong to an existing RPC.
+ * @rpc:     Information about the RPC corresponding to this packet; must
+ *           be locked by caller.
  * @hsk:     Socket on which the packet was received.
  */
 void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
@@ -500,44 +508,12 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			h->common.id, ntohl(h->offset), ntohl(h->length),
 			(rpc == NULL) ? 0 : rpc->state);
 
-	if (ntohs(h->common.dport) < HOMA_MIN_CLIENT_PORT) {
+	if (!rpc->is_client) {
 		/* We are the server for this RPC. */
-		if (rpc == NULL) {
-			/* Send RESTART. */
-			struct restart_header restart;
-			struct homa_peer *peer;
-			
-			if (hsk->homa->verbose)
-				printk(KERN_NOTICE "sending RESTART to client "
-						"%s:%d for id %llu",
-						homa_print_ipv4_addr(
-						ip_hdr(skb)->saddr),
-						ntohs(h->common.sport),
-						h->common.id);
-			tt_record3("sending restart to 0x%x:%d for id %llu",
-					ntohl(ip_hdr(skb)->saddr),
-					ntohs(h->common.sport), h->common.id);
-			restart.common.sport = h->common.dport;
-			restart.common.dport = h->common.sport;
-			restart.common.id = h->common.id;
-			restart.common.generation = h->common.generation;
-			restart.common.type = RESTART;
-			peer = homa_peer_find(&hsk->homa->peers,
-					ip_hdr(skb)->saddr, &hsk->inet);
-			if (IS_ERR(peer))
-				goto done;
-			__homa_xmit_control(&restart, sizeof(restart), peer,
-					hsk);
-			goto done;
-		}
 		if (rpc->state != RPC_OUTGOING) {
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 			goto done;
 		}
-	} else {
-		/* We are the client for this RPC. */
-		if (rpc == NULL)
-			goto done;
 	}
 	if (rpc->msgout.next_packet && (homa_data_offset(rpc->msgout.next_packet)
 			< rpc->msgout.granted)) {
@@ -556,41 +532,57 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 }
 
 /**
- * homa_restart_pkt() - Handler for incoming RESTART packets.
+ * homa_unknown_pkt() - Handler for incoming UNKNOWN packets.
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
  */
-void homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	int err;
-	tt_record3("Received restart for id %llu, server %x:%d", rpc->id,
-			rpc->peer->addr, rpc->dport);
-	if (rpc->hsk->homa->verbose)
-		printk(KERN_NOTICE "Restarting rpc to server %s:%d, id %llu",
-				homa_print_ipv4_addr(rpc->peer->addr),
-				rpc->dport, rpc->id);
-	if (rpc->state != RPC_READY) {
-		homa_remove_from_grantable(rpc->hsk->homa, rpc);
-		homa_message_in_destroy(&rpc->msgin);
-		err = homa_message_out_reset(rpc);
-		rpc->generation++;
-		if (rpc->generation == 0) {
-			INC_METRIC(generation_overflows, 1);
-			printk(KERN_WARNING "Aborting Homa RPC id %llu to "
-					"server %s:%d: generation overflowed "
-					"(EOVERFLOW)\n",
+	tt_record3("Received unknown for id %llu, peer %x:%d", rpc->id,
+			ntohl(rpc->peer->addr), rpc->dport);\
+	if (rpc->is_client) {
+		if (rpc->hsk->homa->verbose)
+			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
+					"id %llu",
+					homa_print_ipv4_addr(rpc->peer->addr),
+					rpc->dport, rpc->id);
+		tt_record3("Restarting id %d to server 0x%x:%d",
+				rpc->id, ntohl(rpc->peer->addr), rpc->dport);
+		INC_METRIC(restarted_rpcs, 1);
+		if (rpc->state != RPC_READY) {
+			homa_remove_from_grantable(rpc->hsk->homa, rpc);
+			homa_message_in_destroy(&rpc->msgin);
+			err = homa_message_out_reset(rpc);
+			rpc->generation++;
+			if (rpc->generation == 0) {
+				INC_METRIC(generation_overflows, 1);
+				printk(KERN_WARNING "Aborting Homa RPC id %llu "
+						"to server %s:%d: generation "
+						"overflowed (EOVERFLOW)\n",
+						rpc->id,
+						homa_print_ipv4_addr(
+							rpc->peer->addr),
+						rpc->dport);
+				err = -EOVERFLOW;
+			}
+			if (err) {
+				homa_rpc_abort(rpc, err);
+			} else {
+				rpc->state = RPC_OUTGOING;
+				homa_xmit_data(rpc, false);
+			}
+		}
+	} else {
+		if (rpc->hsk->homa->verbose)
+			printk(KERN_NOTICE "Freeing rpc id %llu from client "
+					"%s:%d: unknown to client",
 					rpc->id,
 					homa_print_ipv4_addr(rpc->peer->addr),
 					rpc->dport);
-			err = -EOVERFLOW;
-		}
-		if (err) {
-			homa_rpc_abort(rpc, err);
-		} else {
-			rpc->state = RPC_OUTGOING;
-			homa_xmit_data(rpc, false);
-		}
+		homa_rpc_free(rpc);
+		INC_METRIC(server_rpc_cancels, 1);
 	}
 	kfree_skb(skb);
 }
@@ -766,8 +758,11 @@ void homa_send_grants(struct homa *homa)
 		BUG_ON(candidate->state == RPC_DEAD);
 		
 		/* Invariant: candidate msgin's incoming < total_length
-		 * (otherwise it won't be on this list).
+		 * (otherwise it won't be on this list). Yikes! This isn't
+		 * true anymore...
 		 */
+		if (candidate->msgin.incoming >= candidate->msgin.total_length)
+			continue;
 		received = (candidate->msgin.total_length
 				- candidate->msgin.bytes_remaining);
 		if ((candidate->msgin.incoming - received) >= homa->rtt_bytes)
@@ -918,28 +913,10 @@ void homa_log_grantable_list(struct homa *homa)
 			count = 0;
 			list_for_each_entry(rpc, &peer->grantable_rpcs,
 					grantable_links) {
-				int offset;
-				if ((rpc->msgout.length > 0) &&
-						(rpc->msgout.next_packet != NULL))
-					offset = homa_data_offset(
-							rpc->msgout.next_packet);
-				else
-					offset = -1;
 				count++;
-				if (count > 2)
+				if (count > 10)
 					continue;
-				printk(KERN_NOTICE "Id %llu, state %s, length "
-						"%d, remaining %d, incoming "
-						"%d\n", rpc->id,
-						homa_symbol_for_state(rpc),
-						rpc->msgin.total_length,
-						rpc->msgin.bytes_remaining,
-						rpc->msgin.incoming);
-				printk(KERN_NOTICE "msgout.length %d, "
-						"msgout.granted %d, offset %d\n",
-						rpc->msgout.length,
-						rpc->msgout.granted,
-						offset);
+				homa_rpc_log(rpc);
 			}
 			printk(KERN_NOTICE "Peer %s has %d grantable RPCs\n",
 					homa_print_ipv4_addr(peer->addr),

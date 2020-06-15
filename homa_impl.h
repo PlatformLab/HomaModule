@@ -84,7 +84,7 @@ enum homa_packet_type {
 	DATA               = 20,
 	GRANT              = 21,
 	RESEND             = 22,
-	RESTART            = 23,
+	UNKNOWN            = 23,
 	BUSY               = 24,
 	CUTOFFS            = 25,
 	FREEZE             = 26,
@@ -338,25 +338,20 @@ _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
 		"resend_header too large");
 
 /**
- * struct restart_header - Wire format for RESTART packets.
+ * struct unknown_header - Wire format for UNKNOWN packets.
  *
- * A RESTART is sent by a server when it receives a RESEND request for
- * an RPC that is unknown to it. This can occur in two situations. The first
- * situation is when all of the request packets sent by the client were lost.
- * The second situation is when the server received the entire request,
- * processed it, transmitted the response, and discarded its RPC state, but
- * some of the response packets were lost. A RESTART request indicates to the
- * client that it should restart the RPC from the beginning, discarding any
- * partial response received so far and reinitiating transmission of the
- * request. Note that this can cause an RPC to be executed multiple times
- * on the server; this is explicitly allowed by the Homa protocol.
+ * An UNKNOWN packet is sent by either server or client when it receives a
+ * packet for an RPC that is unknown to it. When a client receives an
+ * UNKNOWN packet it will typically restart the RPC from the beginning;
+ * when a server receives an UNKNOWN packet it will typically discard its
+ * state for the RPC.
  */
-struct restart_header {
+struct unknown_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
 } __attribute__((packed));
-_Static_assert(sizeof(struct restart_header) <= HOMA_MAX_HEADER,
-		"restart_header too large");
+_Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
+		"unknown_header too large");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -1635,6 +1630,12 @@ struct homa_metrics {
 	 * resent packet that turned out to be unnecessary?).
 	 */
 	__u64 redundant_packets;
+	
+	/**
+	 * @restarted_rpcs: total number of times a client restarted an
+	 * RPC because it received an UNKNOWN packet for it.
+	 */
+	__u64 restarted_rpcs;
 
 	/**
 	 * @client_rpc_timeouts: total number of times an RPC was aborted on
@@ -1649,6 +1650,13 @@ struct homa_metrics {
 	 */
 	
 	__u64 server_rpc_timeouts;
+
+	/**
+	 * @server_rpc_cancels: total number of times an RPC was aborted on
+	 * the server side because it is no longer known to the client.
+	 */
+	
+	__u64 server_rpc_cancels;
 
 	/**
 	 * @client_lock_misses: total number of times that Homa had to wait
@@ -2063,7 +2071,6 @@ extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			int priority);
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			struct homa_sock *hsk);
-extern void     homa_restart_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
@@ -2108,6 +2115,7 @@ extern char    *homa_symbol_for_type(uint8_t type);
 extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
 extern void     homa_unhash(struct sock *sk);
+extern void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_unsched_priority(struct homa *homa,
 			struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
@@ -2122,6 +2130,7 @@ extern int      __homa_xmit_control(void *contents, size_t length,
 extern void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			int priority);
+extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 /**
  * check_pacer() - This method is invoked at various places in Homa to

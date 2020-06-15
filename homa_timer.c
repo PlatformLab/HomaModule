@@ -198,12 +198,20 @@ void homa_timer(struct homa *homa)
 					tt_record4("rpc timed out: peer 0x%x, "
 							"port %d, id %d,"
 							"state %d",
-							rpc->peer->addr,
+							htonl(rpc->peer->addr),
 							rpc->dport, rpc->id,
 							rpc->state);
-					if (rpc->is_client)
+					if (rpc->is_client) {
+						if (!tt_frozen) {
+							struct freeze_header freeze;
+							tt_record2("Freezing because of RPC timeout, id %d, peer 0x%x", rpc->id, htonl(rpc->peer->addr));
+							tt_freeze();
+							homa_xmit_control(FREEZE,
+								&freeze,
+								sizeof(freeze),rpc);
+						}
 						dead_peer = rpc->peer;
-					else {
+					} else {
 						INC_METRIC(server_rpc_timeouts, 1);
 						if (rpc->hsk->homa->verbose)
 							printk(KERN_NOTICE "Homa server "

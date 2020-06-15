@@ -598,6 +598,7 @@ void homa_rpc_log_active(struct homa *homa)
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
+	int count = 0;
 	
 	printk("Logging active Homa RPCs:\n");
 	rcu_read_lock();
@@ -608,12 +609,13 @@ void homa_rpc_log_active(struct homa *homa)
 		
 		atomic_inc(&hsk->reap_disable);
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			count++;
 			homa_rpc_log(rpc);
 		}
 		atomic_dec(&hsk->reap_disable);
 	}
 	rcu_read_unlock();
-	printk("Finished logging active Homa RPCs\n");
+	printk("Finished logging active Homa RPCs: %d active RPCs\n", count);
 }
 
 /**
@@ -718,7 +720,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 				h->priority);
 		break;
 	}
-	case RESTART:
+	case UNKNOWN:
 		/* Nothing to add here. */
 		break;
 	case BUSY:
@@ -796,8 +798,8 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 				h->priority);
 		break;
 	}
-	case RESTART:
-		snprintf(buffer, buf_len, "RESTART");
+	case UNKNOWN:
+		snprintf(buffer, buf_len, "UNKNOWN");
 		break;
 	case BUSY:
 		snprintf(buffer, buf_len, "BUSY");
@@ -897,8 +899,8 @@ char *homa_symbol_for_type(uint8_t type)
 		return "GRANT";
 	case RESEND:
 		return "RESEND";
-	case RESTART:
-		return "RESTART";
+	case UNKNOWN:
+		return "UNKNOWN";
 	case BUSY:
 		return "BUSY";
 	case CUTOFFS:
@@ -1181,7 +1183,7 @@ char *homa_print_metrics(struct homa *homa)
 				m->unknown_rpcs);
 		homa_append_metric(homa,
 				"stale_generations         %15llu  "
-				"Packets discarded because stale generation\n",
+				"Packets discarded because of stale generation\n",
 				m->stale_generations);
 		homa_append_metric(homa,
 				"generation_overflows      %15llu  "
@@ -1207,6 +1209,10 @@ char *homa_print_metrics(struct homa *homa)
 				"received\n",
 				m->redundant_packets);
 		homa_append_metric(homa,
+				"restarted_rpcs            %15llu  "
+				"RPCs restarted because server discarded state\n",
+				m->restarted_rpcs);
+		homa_append_metric(homa,
 				"client_rpc_timeouts       %15llu  "
 				"RPCs aborted by client because of timeout\n",
 				m->client_rpc_timeouts);
@@ -1214,6 +1220,10 @@ char *homa_print_metrics(struct homa *homa)
 				"server_rpc_timeouts       %15llu  "
 				"RPCs aborted by server because of timeout\n",
 				m->server_rpc_timeouts);
+		homa_append_metric(homa,
+				"server_rpc_cancels       %15llu  "
+				"Server RPCs aborted because unknown to client\n",
+				m->server_rpc_cancels);
 		homa_append_metric(homa,
 				"client_lock_misses        %15llu  "
 				"Bucket lock misses for client RPCs\n",

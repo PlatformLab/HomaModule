@@ -888,8 +888,8 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	case RESEND:
 		header_size = sizeof(struct resend_header);
 		break;
-	case RESTART:
-		header_size = sizeof(struct restart_header);
+	case UNKNOWN:
+		header_size = sizeof(struct unknown_header);
 		break;
 	case BUSY:
 		header_size = sizeof(struct busy_header);

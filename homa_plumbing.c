@@ -999,11 +999,13 @@ int homa_softirq(struct sk_buff *skb) {
 			 * so it will work even if the RPC and/or socket are
 			 * unknown.
 			 */
-			tt_record4("Received freeze request on port %d from "
-					"0x%x:%d, id %d",
-					ntohs(h->dport), ntohl(saddr),
-					ntohs(h->sport), h->id);
-			tt_freeze();
+			if (!tt_frozen) {
+				tt_record4("Freezing because of request on "
+						"port %d from 0x%x:%d, id %d",
+						ntohs(h->dport), ntohl(saddr),
+						ntohs(h->sport), h->id);
+				tt_freeze();
+			}
 			goto discard;
 		}
 		
@@ -1229,6 +1231,10 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_log_grantable_list(homa);
 			else if (log_topic == 2)
 				homa_rpc_log_active(homa);
+			else if (log_topic == 3) {
+				tt_record("Freezing because of sysctl");
+				tt_freeze();
+			}
 			log_topic = 0;
 		}
 	}

@@ -396,6 +396,37 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 }
 
 /**
+ * homa_xmit_unknown() - Send an UNKNOWN packet to a peer.
+ * @skb:   Buffer containing an incoming packet; identifies the peer to
+ *         which the UNKNOWN packet should be sent.
+ * @hsk:   Socket that should be used to send the UNKNOWN packet.
+ */
+void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
+{
+	struct common_header *h = (struct common_header *) skb->data;
+	struct unknown_header unknown;
+	struct homa_peer *peer;
+
+	if (hsk->homa->verbose)
+		printk(KERN_NOTICE "sending UNKNOWN to peer "
+				"%s:%d for id %llu",
+				homa_print_ipv4_addr(ip_hdr(skb)->saddr),
+				ntohs(h->sport), h->id);
+	tt_record3("sending unknown to 0x%x:%d for id %llu",
+			ntohl(ip_hdr(skb)->saddr),
+			ntohs(h->sport), h->id);
+	unknown.common.sport = h->dport;
+	unknown.common.dport = h->sport;
+	unknown.common.id = h->id;
+	unknown.common.generation = h->generation;
+	unknown.common.type = UNKNOWN;
+	peer = homa_peer_find(&hsk->homa->peers,
+			ip_hdr(skb)->saddr, &hsk->inet);
+	if (!IS_ERR(peer))
+		 __homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
+}
+
+/**
  * homa_xmit_data() - If an RPC has outbound data packets that are permitted
  * to be transmitted according to the scheduling mechanism, arrange for
  * them to be sent (some may be sent immediately; others may be sent
@@ -491,12 +522,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
  * homa_resend_data() - This function is invoked as part of handling RESEND
  * requests. It retransmits the packets containing a given range of bytes
  * from a message.
- * @msgout:   Message containing the packets.
- * @start:    Offset within @msgout of the first byte to retransmit.
- * @end:      Offset within @msgout of the byte just after the last one
+ * @rpc:      RPC for which data should be resent.
+ * @start:    Offset within @rpc->msgout of the first byte to retransmit.
+ * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.
- * @sk:       Socket to use for transmission.
- * @peer:     Information about the destination.
  * @priority: Priority level to use for the retransmitted data packets.
  */
 void homa_resend_data(struct homa_rpc *rpc, int start, int end,
@@ -555,10 +584,12 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 					- new_skb->len);
 			h = ((struct data_header *) skb_transport_header(new_skb));
 			h->retransmit = 1;
-			if ((offset + length) > end)
-				h->incoming = htonl(offset + length);
+			if ((offset + length) <= rpc->msgout.granted)
+				h->incoming = htonl(rpc->msgout.granted);
+			else if ((offset + length) > rpc->msgout.length)
+				h->incoming = htonl(rpc->msgout.length);
 			else
-				h->incoming = htonl(end);
+				h->incoming = htonl(offset + length);
 			tt_record3("retransmitting offset %d, length %d, id %d",
 					offset, length,
 					h->common.id & 0xffffffff);

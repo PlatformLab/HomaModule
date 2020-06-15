@@ -399,6 +399,24 @@ TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
 }
 
+TEST_F(homa_outgoing, homa_xmit_unknown)
+{
+	struct sk_buff *skb;
+	struct grant_header h = {{.sport = htons(self->client_port),
+	                .dport = htons(self->server_port),
+			.id = 99999,
+			.generation = htons(1),
+			.type = GRANT},
+		        .offset = htonl(11200),
+			.priority = 3};
+	mock_xmit_log_verbose = 1;
+	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
+	homa_xmit_unknown(skb, &self->hsk);
+	EXPECT_STREQ("xmit UNKNOWN from 0.0.0.0:99, dport 40000, id 99999",
+			unit_log_get());
+	kfree_skb(skb);
+}
+
 TEST_F(homa_outgoing, homa_xmit_data__basics)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -557,7 +575,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__transmit_error)
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
 }
 
-TEST_F(homa_outgoing, homa_resend_data)
+TEST_F(homa_outgoing, homa_resend_data__basics)
 {
 	mock_net_device.gso_max_size = 5000;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -599,6 +617,27 @@ TEST_F(homa_outgoing, homa_resend_data)
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 16000, 17000, 7);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_resend_data__set_incoming)
+{
+	mock_net_device.gso_max_size = 5000;
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 16000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	EXPECT_EQ(10000, crpc->msgout.granted);
+	homa_resend_data(crpc, 8400, 8800, 2);
+	EXPECT_SUBSTR("incoming 10000", unit_log_get());
+	
+	unit_log_clear();
+	homa_resend_data(crpc, 9800, 10000, 2);
+	EXPECT_SUBSTR("incoming 11200", unit_log_get());
+	
+	unit_log_clear();
+	homa_resend_data(crpc, 15500, 16500, 2);
+	EXPECT_SUBSTR("incoming 16000", unit_log_get());
 }
 
 TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
