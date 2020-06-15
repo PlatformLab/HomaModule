@@ -332,7 +332,10 @@ def stop_nodes():
         popen.wait(5.0)
     for node in active_nodes.values():
         node.stdin.write("exit\n")
-        node.stdin.flush()
+        try:
+            node.stdin.flush()
+        except BrokenPipeError:
+            log("Broken pipe to node-%d" % (id))
     for node in active_nodes.values():
         node.wait(5.0)
     for id in active_nodes:
@@ -361,7 +364,10 @@ def do_cmd(command, r, r2 = range(0,0)):
     for id in nodes:
         vlog("Command for node-%d: %s" % (id, command))
         active_nodes[id].stdin.write(command + "\n")
-        active_nodes[id].stdin.flush()
+        try:
+            active_nodes[id].stdin.flush()
+        except BrokenPipeError:
+            log("Broken pipe to node-%d" % (id))
     wait_output("% ", nodes, command)
 
 def do_ssh(command, nodes):
@@ -488,7 +494,10 @@ def run_experiment(name, clients, options):
                     options.protocol,
                     id);
         active_nodes[id].stdin.write(command + "\n")
-        active_nodes[id].stdin.flush()
+        try:
+            active_nodes[id].stdin.flush()
+        except BrokenPipeError:
+            log("Broken pipe to node-%d" % (id))
         nodes.append(id)
         vlog("Command for node-%d: %s" % (id, command))
     wait_output("% ", nodes, command)
@@ -512,6 +521,9 @@ def run_experiment(name, clients, options):
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
             f.close()
+    # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
+    # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
+    # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=1"], clients)
     do_cmd("stop senders", clients)
     do_cmd("stop clients", clients)
     if not "no_rtt_files" in options:
