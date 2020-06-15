@@ -1842,6 +1842,7 @@ void client_stats(uint64_t now)
 	uint64_t client_data = 0;
 	uint64_t total_rtt = 0;
 	uint64_t lag = 0;
+	uint64_t outstanding_rpcs = 0;
 	uint64_t cdf_times[CDF_VALUES];
 	int times_per_client;
 	int cdf_index = 0;
@@ -1858,6 +1859,8 @@ void client_stats(uint64_t now)
 		client_data += client->response_data;
 		total_rtt += client->total_rtt;
 		lag += client->lag;
+		outstanding_rpcs += client->total_requests
+			- client->total_responses;
 		for (int i = 1; i <= times_per_client; i++) {
 			/* Collect the most recent RTTs from the client for
 			 * computing a CDF.
@@ -1897,6 +1900,8 @@ void client_stats(uint64_t now)
 			log(NORMAL, "Lag due to overload: %.1f%%\n",
 					lag_fraction*100.0);
 	}
+	if (outstanding_rpcs != 0)
+		log(NORMAL, "Outstanding client RPCs: %lu\n", outstanding_rpcs);
 	last_client_rpcs = client_rpcs;
 	last_client_data = client_data;
 	last_total_rtt = total_rtt;
