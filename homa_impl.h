@@ -1589,7 +1589,9 @@ struct homa_metrics {
 	
 	/**
 	 * @unknown_rpc: total number of times an incoming packet was
-	 * discarded because it referred to a nonexistent RPC.
+	 * discarded because it referred to a nonexistent RPC. Doesn't
+	 * count grant packets received by servers (since these are
+	 * fairly common).
 	 */
 	__u64 unknown_rpcs;
 	

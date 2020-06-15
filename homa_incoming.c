@@ -292,7 +292,9 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 					h->id & 0xffffffff, h->type,
 					ntohl(ip_hdr(skb)->saddr),
 					ntohs(h->sport));
-			INC_METRIC(unknown_rpcs, 1);
+			if ((h->type != GRANT) || (ntohs(h->dport)
+					>= HOMA_MIN_CLIENT_PORT))
+				INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
 	} else {

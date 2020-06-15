@@ -1179,7 +1179,7 @@ char *homa_print_metrics(struct homa *homa)
 				m->data_xmit_errors);
 		homa_append_metric(homa,
 				"unknown_rpcs              %15llu  "
-				"Packets discarded because RPC is unknown\n",
+				"Non-grant packets discarded because RPC unknown\n",
 				m->unknown_rpcs);
 		homa_append_metric(homa,
 				"stale_generations         %15llu  "
