@@ -506,9 +506,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
-	tt_record4("resend request for id %llu, offset %d, length %d, RPC state %d",
+	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
 			h->common.id, ntohl(h->offset), ntohl(h->length),
-			(rpc == NULL) ? 0 : rpc->state);
+			h->priority);
 
 	if (!rpc->is_client) {
 		/* We are the server for this RPC. */
@@ -1022,12 +1022,11 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	while (1) {
 		while (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
 			/* Way too many dead RPCs; must cleanup immediately. */
-			if (!sock_locked) {
-				homa_sock_lock(hsk, "homa_wait_for_message #1");
-				sock_locked = 1;
-			}
-			if (homa_rpc_reap(hsk) <= 0)
+			if (!homa_rpc_reap(hsk))
 				break;
+			
+			/* Give NAPI and SoftIRQ tasks a chance to run. */
+			schedule();
 		}
 		
 		/* Check to see if there is an appropriate RPC already
@@ -1098,19 +1097,22 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		 * going to sleep (do at least a little cleanup even in
 		 * nonblocking mode).
 		 */
+		homa_sock_unlock(hsk);
+		sock_locked = 0;
 		while (!atomic_long_read(&interest.id)) {
 			int reaper_result = homa_rpc_reap(hsk);
 			if (flags & HOMA_RECV_NONBLOCKING) {
 				result = ERR_PTR(-EAGAIN);
 				goto done;
 			}
-			if (reaper_result <= 0)
+			if (reaper_result == 0)
 				break;
+			
+			/* Give NAPI and SoftIRQ tasks a chance to run. */
+			schedule();
 		}
 		
 		/* Now it's time to sleep. */
-		homa_sock_unlock(hsk);
-		sock_locked = 0;
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (!atomic_long_read(&interest.id) && !hsk->shutdown) {
 			__u64 start = get_cycles();

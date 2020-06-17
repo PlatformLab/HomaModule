@@ -218,8 +218,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up_process(interest->thread);
 	
 	atomic_dec(&hsk->reap_disable);
-	while (homa_rpc_reap(hsk) != 0) {}
 	homa_sock_unlock(hsk);
+	while (homa_rpc_reap(hsk) != 0) {}
 }
 
 /**

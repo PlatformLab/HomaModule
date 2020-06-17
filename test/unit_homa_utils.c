@@ -351,7 +351,7 @@ TEST_F(homa_utils, homa_rpc_reap__reap_disabled)
 	homa_rpc_free(crpc1);
 	unit_log_clear();
 	atomic_inc(&self->hsk.reap_disable);
-	EXPECT_EQ(-1, homa_rpc_reap(&self->hsk));
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	atomic_dec(&self->hsk.reap_disable);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -374,10 +374,10 @@ TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("", unit_log_get());
 	crpc1->dont_reap = false;
-	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12345", unit_log_get());
 }
-TEST_F(homa_utils, homa_rpc_reap__grand_in_progress)
+TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
@@ -396,7 +396,7 @@ TEST_F(homa_utils, homa_rpc_reap__grand_in_progress)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("", unit_log_get());
 	atomic_dec(&crpc1->grants_in_progress);
-	EXPECT_EQ(1, homa_rpc_reap(&self->hsk));
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 	EXPECT_STREQ("reaped 12345", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)

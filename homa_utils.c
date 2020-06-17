@@ -349,9 +349,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 {
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
-	tt_record3("Freeing rpc id %d, total_length %d, lock 0x%x", rpc->id,
-			rpc->msgin.total_length,
-			*(int *) &rpc->msgin.packets.lock);
 	
 	/* Before doing anything else, unlink the input message from
 	 * homa->grantable_msgs. This will synchronize to ensure that
@@ -372,6 +369,9 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	}
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
+	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
+			rpc->hsk->client_port,
+			rpc->hsk->dead_skbs);
 	rpc->state = RPC_DEAD;
 	homa_sock_unlock(rpc->hsk);
 	
@@ -389,16 +389,13 @@ void homa_rpc_free(struct homa_rpc *rpc)
  * free all of its packet buffers, so we try to perform this work
  * off the critical path where it won't delay applications. Each call to
  * this function does a small chunk of work.
- * @hsk:   Homa socket that may contain dead RPCs. Must be locked by the
- *         caller. The lock may be released and then reacquired by this
- *         function.
+ * @hsk:   Homa socket that may contain dead RPCs. Must not be locked by the
+ *         caller; this function will lock and release.
  * 
- * Return: A value greater than 0 means the function found work to do;
- *         there may be additional RPCs that haven't yet been reaped.
- *         A value of zero means that there are no RPCs ready to be
- *         reaped. A value less than zero means that reaping was disabled,
- *         so the method didn't do anything; there may or may not be
- *         RPCs available to reap.
+ * Return: A return value of 0 means that we reaped everything we possibly
+ *         could; calling again will do no work (there could be unreaped RPCs,
+ *         but if so, reaping has been disabled for them).  A value greater than
+ *         zero means there is still more reaping work to be done.
  */
 int homa_rpc_reap(struct homa_sock *hsk)
 {
@@ -407,12 +404,11 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	int num_skbs = 0;
 	int num_rpcs = 0;
 	struct homa_rpc *rpc;
-	static int instance = 0;
-	int i;
+	int i, result;
 	
 	if (atomic_read(&hsk->reap_disable)) {
 		INC_METRIC(disabled_reaps, 1);
-		return -1;
+		return 0;
 	}
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
@@ -420,16 +416,16 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	/* Collect buffers and freeable RPCs until either we hit our limit
 	 * or run out of RPCs.
 	 */
-	instance++;
-	tt_record3("Starting homa_rpc_reap, dead_skbs %d, instance %d, port %d",
-			hsk->dead_skbs, instance, hsk->client_port);
+	homa_sock_lock(hsk, "homa_rpc_reap");
+	tt_record2("Starting homa_rpc_reap, dead_skbs %d, port %d",
+			hsk->dead_skbs, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 		if (rpc->dont_reap || (atomic_read(&rpc->grants_in_progress)
 				!= 0)) {
 			INC_METRIC(disabled_rpc_reaps, 1);
 			continue;
 		}
-		tt_record1("Reaping rpc id %x", rpc->id);
+		tt_record1("Reaping rpc id %d", rpc->id);
 		if (rpc->msgout.length >= 0) {
 			while (rpc->msgout.packets) {
 				skbs[num_skbs] = rpc->msgout.packets;
@@ -471,9 +467,8 @@ int homa_rpc_reap(struct homa_sock *hsk)
 release:
 	tt_record2("reaping %d skbs, %d rpcs", num_skbs, num_rpcs);
         
-	if ((num_skbs == 0) && (num_rpcs == 0))
-		return 0;
 	hsk->dead_skbs -= num_skbs;
+	result = !list_empty(&hsk->dead_rpcs) && ((num_skbs + num_rpcs) != 0);
 	homa_sock_unlock(hsk);
 	for (i = 0; i < num_skbs; i++) {
 		kfree_skb(skbs[i]);
@@ -489,8 +484,7 @@ release:
 		rpcs[i]->state = 0;
 		kfree(rpcs[i]);
 	}
-	homa_sock_lock(hsk, "homa_rpc_reap");
-	return 1;
+	return result;
 }
 
 /**
