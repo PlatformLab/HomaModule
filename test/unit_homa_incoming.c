@@ -21,7 +21,7 @@
 #include "utils.h"
 
 /* The following variable (and function) are used via mock_schedule_hook
- * to mark an RPC ready.
+ * to mark an RPC ready (but only if thread is sleeping).
  */
 struct homa_rpc *hook_rpc = NULL;
 struct homa_sock *hook_hsk = NULL;
@@ -38,6 +38,19 @@ void ready_hook(void)
 			unit_list_length(&hook_rpc->hsk->ready_responses),
 			unit_list_length(&hook_rpc->hsk->request_interests),
 			unit_list_length(&hook_rpc->hsk->response_interests));
+}
+
+/* The following function is used by a market_schedule_hook to mark an
+ * RPC ready even if a thread is polling.
+ */
+int poll_count = 0;
+void poll_hook(void)
+{
+	if (poll_count <= 0)
+		return;
+	poll_count--;
+	if (poll_count == 0)
+		homa_rpc_ready(hook_rpc);
 }
 
 /* The following function is used via mock_schedule_hook to delete an RPC. */
@@ -1720,6 +1733,26 @@ TEST_F(homa_incoming, homa_wait_for_message__id_not_ready)
 			self->rpcid);
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
 	EXPECT_EQ(25, self->hsk.dead_skbs);
+}
+TEST_F(homa_incoming, homa_wait_for_message__id_arrives_while_polling)
+{
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc1);
+	
+	hook_rpc = crpc1;
+	poll_count = 5;
+	self->homa.poll_cycles = 1000000;
+	mock_schedule_hook = poll_hook;
+	unit_log_clear();
+	rpc = homa_wait_for_message(&self->hsk, 0, self->rpcid);
+	EXPECT_EQ(crpc1, rpc);
+	EXPECT_EQ(NULL, crpc1->interest);
+	EXPECT_STREQ("wake_up_process", unit_log_get());
+	EXPECT_EQ(0, self->hsk.dead_skbs);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__id_arrives_while_sleeping)
 {
