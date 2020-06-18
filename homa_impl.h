@@ -1115,6 +1115,19 @@ struct homa {
 	int link_mbps;
 	
 	/**
+	 * @poll_usecs: Amount of time (in microseconds) that a thread
+	 * will spend busy-waiting for an incoming messages before
+	 * going to sleep. Set externally via sysctl.
+	 */
+	int poll_usecs;
+	
+	/**
+	 * @poll_cycles: The value of @poll_usecs in the units returned
+	 * by get_cycles().
+	 */
+	int poll_cycles;
+	
+	/**
 	 * @num_priorities: The total number of priority levels available for
 	 * Homa's use. Internally, Homa will use priorities from 0 to
 	 * num_priorities-1, inclusive. Set externally via sysctl.
@@ -1453,6 +1466,18 @@ struct homa_metrics {
 	 * @homa->ready_responses (no thread was waiting).
 	 */
 	__u64 responses_queued;
+	
+	/**
+	 * @fast_wakeups: total number of times that a message arrived for
+	 * a receiving thread that was polling in homa_wait_for_message.
+	 */
+	__u64 fast_wakeups;
+	
+	/**
+	 * @slow_wakeups: total number of times that a receiving thread
+	 * had to be put to sleep (no message arrived while it was polling).
+	 */
+	__u64 slow_wakeups;
 	
 	/**
 	 * @softirq_calls: total number of calls to homa_softirq (i.e.,
@@ -2019,6 +2044,7 @@ extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
 		homa_hrtimer(struct hrtimer *timer);
 extern int      homa_init(struct homa *homa);
+extern void     homa_incoming_sysctl_changed(struct homa *homa);
 extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);

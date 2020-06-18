@@ -984,6 +984,7 @@ void mock_spin_unlock(spinlock_t *lock)
 void mock_teardown(void)
 {
 	cpu_number = 1;
+	cpu_khz = 1000000;
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;

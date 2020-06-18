@@ -246,6 +246,12 @@ The number of priority levels that Homa will use; Homa will use this many
 consecutive priority level starting with 0 (before priority mapping).
 Must not be more than 8.
 .TP
+.IR poll_usecs
+When a thread waits for an incoming message, Homa first busy-waits for a
+short amount of time before putting the thread to sleep. If a message arrives
+during this time, a context switch is avoided and latency is reduced.
+This parameter specifies how long to busy-wait, in microseconds.
+.TP
 .IR priority_map
 Used to map the internal priority levels computed by Homa (which range
 from 0 to

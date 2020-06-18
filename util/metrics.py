@@ -301,6 +301,18 @@ if elapsed_secs != 0:
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
  
+    total_messages = float(deltas["requests_received"]
+            + deltas["responses_received"])
+    if total_messages > 0.0:
+        print("\nReceiving Messages:")
+        print("-------------------")
+        poll_percent = 100.0*float(deltas["fast_wakeups"])/total_messages
+        sleep_percent = 100.0*float(deltas["slow_wakeups"])/total_messages
+        print("Available immediately:   %4.1f%%" % (100.0 - poll_percent
+                - sleep_percent))
+        print("Arrival while polling:   %4.1f%%" % (poll_percent))
+        print("Arrival while sleeping:  %4.1f%%" % (sleep_percent))
+ 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
     for symbol in ["requests_queued", "responses_queued"]:

@@ -3,7 +3,8 @@ Notes for Homa implementation in Linux:
 
 * Cleanups still needed:
   * Get larger MTUs working again
-  * Fix cp_prios (w3 particularly problematic?)
+  * Problem with grants: whether or not to keep on grantable list after
+    fully granted.
 
 * Performance-related tasks:
   * Large values of --port-max cause performance degradation for w4 and w5
@@ -23,7 +24,12 @@ Notes for Homa implementation in Linux:
   * Add flag to remove all instrumentation from Homa, for best performance.
   * In W4, look at small-mssage CDF: P999 for Homa is still bad (almost 10 ms!)
     Figure out why? Context switches?
-  * Analyze high Homa P99 for W3.
+  * Understand high TCP P99 for W1?
+  * Modify code to reduce maximum rate of reaping, especially after large
+    bursts of deletions?
+  * Reimplement busy-waiting
+  * Analyze metrics, such as unknown_rpcs or redundant data packets, to see
+    why they are happening.
 
 * Notes for GSO and GRO:
   * Check that control packet sizes really are the same as small data packets.

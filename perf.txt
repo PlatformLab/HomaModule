@@ -2,9 +2,17 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
+* (June 2020) Implemented busy-waiting, where Homa spins for 2 RTTs
+  before putting a receiving thread to sleep. This reduced 100B RTT
+  on the xl170 cluster from 17.8 us to 15.3 us.
+
 * (May 2020) Noticed that cores can disappear for 10-12ms, during which
   softirq handlers do not get invoked. Homa timetraces show no activity
-  of any kind during that time (e.g., no interrupts either).
+  of any kind during that time (e.g., no interrupts either?). Found out
+  later that this is Homa's fault: there is no preemption when executing
+  in the kernel, and RPC reaping could potentially run on for a very long
+  time if it gets behind. Fixed this by adding calls to schedule() so that
+  SoftIRQ tasks can run.
 
 * (Mar. 2020) For the slowdown tests, the --port-max value needs to be
   pretty high to get true Poisson behavior. It was originally 20, but

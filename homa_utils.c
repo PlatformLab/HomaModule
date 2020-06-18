@@ -74,6 +74,7 @@ int homa_init(struct homa *homa)
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
+	homa->poll_usecs = 100;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
 		homa->priority_map[i] = i;
@@ -1072,6 +1073,14 @@ char *homa_print_metrics(struct homa *homa)
 				"responses_queued          %15llu  "
 				"Responses for which no thread was waiting\n",
 				m->responses_queued);
+		homa_append_metric(homa,
+				"fast_wakeups              %15llu  "
+				"Messages received while polling\n",
+				m->fast_wakeups);
+		homa_append_metric(homa,
+				"slow_wakeups              %15llu  "
+				"Messages receipts for which thread had to sleep\n",
+				m->slow_wakeups);
 		homa_append_metric(homa,
 				"softirq_calls             %15llu  "
 				"Calls to homa_softirq (i.e. # GRO pkts "

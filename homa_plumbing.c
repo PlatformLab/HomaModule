@@ -237,6 +237,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "poll_usecs",
+		.data		= &homa_data.poll_usecs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "priority_map",
 		.data		= &homa_data.priority_map,
 		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
@@ -1212,6 +1219,7 @@ int homa_dointvec(struct ctl_table *table, int write,
 		/* Don't worry which particular value changed; update
 		 * all info that is dependent on any sysctl value.
 		 */
+		homa_incoming_sysctl_changed(homa);
 		homa_outgoing_sysctl_changed(homa);
 		
 		/* For this value, only call the method when this

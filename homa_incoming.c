@@ -1015,6 +1015,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
 	int sock_locked = 0;
+	uint64_t stop_polling;
 	
 	/* Normally this loop only gets executed once, but we may have
 	 * to start again if a "found" RPC gets deleted from underneath us.
@@ -1111,6 +1112,19 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			/* Give NAPI and SoftIRQ tasks a chance to run. */
 			schedule();
 		}
+		
+		/* Busy-wait for a while before going to sleep; this avoids
+		 * context-switching overhead to wake up.
+		 */
+		stop_polling = get_cycles() + hsk->homa->poll_cycles;
+		while (get_cycles() < stop_polling) {
+			if (atomic_long_read(&interest.id)) {
+				INC_METRIC(fast_wakeups, 1);
+				goto lock_rpc;
+			}
+			schedule();
+		}
+		INC_METRIC(slow_wakeups, 1);
 		
 		/* Now it's time to sleep. */
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -1259,4 +1273,21 @@ handoff:
 		interest->response_links.next = LIST_POISON1;
 	}
 	wake_up_process(interest->thread);
+}
+
+/**
+ * homa_incoming_sysctl_changed() - Invoked whenever a sysctl value is changed;
+ * any input-related parameters that depend on sysctl-settable values.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_incoming_sysctl_changed(struct homa *homa)
+{
+	__u64 tmp;
+		
+	/* Code below is written carefully to avoid integer underflow or
+	 * overflow under expected usage patterns. Be careful when changing!
+	 */
+	tmp = homa->poll_usecs;
+	tmp = (tmp*cpu_khz)/1000;
+	homa->poll_cycles = tmp;
 }

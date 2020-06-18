@@ -1936,3 +1936,11 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_requests)
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
+
+TEST_F(homa_incoming, homa_incoming_sysctl_changed)
+{
+	cpu_khz = 2000000;
+	self->homa.poll_usecs = 40;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(80000, self->homa.poll_cycles);
+}
