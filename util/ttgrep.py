@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Copyright (c) 2019 Stanford University
+# Copyright (c) 2019-2020 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -17,8 +17,9 @@
 """
 Scan the time trace data in a log file; find all records containing
 a given string, and output only those records. If the --rebase argument
-is present, times are offset so the first event is at time 0
-Usage: ttgrep.py [--rebase] string file
+is present, times are offset so the first event is at time 0. If the file
+is omitted, standard input is used.
+Usage: ttgrep.py [--rebase] string [file]
 """
 
 from __future__ import division, print_function
@@ -66,8 +67,11 @@ if (len(sys.argv) > 1) and (sys.argv[1] == "--rebase"):
     rebase = True
     del sys.argv[1]
 
-if len(sys.argv) != 3:
-    print("Usage: %s [--rebase] string logFile" % (sys.argv[0]))
+f = sys.stdin
+if len(sys.argv) == 3:
+    f = open(sys.argv[2])
+elif len(sys.argv) != 2:
+    print("Usage: %s [--rebase] string [logFile]" % (sys.argv[0]))
     sys.exit(1)
 
-scan(open(sys.argv[2]), sys.argv[1])
+scan(f, sys.argv[1])
