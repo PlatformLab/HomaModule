@@ -1091,24 +1091,37 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	EXPECT_EQ(0, peer->cutoff_version);
 }
 
-TEST_F(homa_incoming, homa_check_grantable__stop_tracking_when_fully_granted)
+TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
-			self->rpcid, 20000, 100);
+			self->rpcid, 5000, 100);
 	EXPECT_NE(NULL, srpc);
-	EXPECT_TRUE(srpc->msgin.possibly_in_grant_queue);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 12345, remaining 18600",
-			unit_log_get());
-	
-	srpc->msgin.incoming = 20000;
-	homa_check_grantable(&self->homa, srpc);
-	EXPECT_FALSE(srpc->msgin.possibly_in_grant_queue);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
+	
+	srpc->msgin.total_length = 20000;
+	srpc->msgin.bytes_remaining = 15000;
+	srpc->msgin.incoming = 18000;
+	homa_check_grantable(&self->homa, srpc);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	
+	srpc->msgin.incoming = 20000;
+	homa_check_grantable(&self->homa, srpc);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	
+	srpc->msgin.incoming = 18000;
+	srpc->msgin.bytes_remaining = 10000;
+	homa_check_grantable(&self->homa, srpc);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 12345, remaining 10000",
+			unit_log_get());
 }
 TEST_F(homa_incoming, homa_check_grantable__move_upward_in_peer_list)
 {
@@ -1895,6 +1908,7 @@ TEST_F(homa_incoming, homa_rpc_ready__interest_on_rpc)
 	unit_log_clear();
 	
 	atomic_long_set(&interest.id, 0);
+	interest.thread = &mock_task;
 	interest.reg_rpc = crpc;
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
@@ -1917,6 +1931,7 @@ TEST_F(homa_incoming, homa_rpc_ready__response_interests)
 	unit_log_clear();
 	
 	atomic_long_set(&interest.id, 0);
+	interest.thread = &mock_task;
 	interest.reg_rpc = NULL;
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;
@@ -1948,6 +1963,7 @@ TEST_F(homa_incoming, homa_rpc_ready__request_interests)
 	unit_log_clear();
 	
 	atomic_long_set(&interest.id, 0);
+	interest.thread = &mock_task;
 	interest.reg_rpc = NULL;
 	interest.request_links.next = LIST_POISON1;
 	interest.response_links.next = LIST_POISON1;

@@ -627,19 +627,20 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_peer *peer_cand;
 	struct homa_message_in *msgin = &rpc->msgin;
 	
+	/* No need to do anything unless this message is ready for more
+	 * grants.
+	 */
+	if (((rpc->msgin.incoming - (rpc->msgin.total_length
+			- rpc->msgin.bytes_remaining)) >= homa->rtt_bytes)
+			|| (rpc->msgin.incoming >= rpc->msgin.total_length))
+		return;
+	
 	homa_grantable_lock(homa);
 	BUG_ON(rpc->state == RPC_DEAD);
 	
-	/* Make sure this message is in the right place in (or not in)
-	 * the grantable_rpcs list for its peer.
+	/* Make sure this message is in the right place in the grantable_rpcs
+	 * list for its peer.
 	 */
-	if (msgin->incoming >= msgin->total_length) {
-		/* Message fully granted; no need to track it anymore. */
-		if (!list_empty(&rpc->grantable_links))
-			homa_remove_grantable_locked(homa, rpc);
-		msgin->possibly_in_grant_queue = 0;
-		goto done;
-	}
 	if (list_empty(&rpc->grantable_links)) {
 		/* Message not yet tracked; add it in priority order to
 		 * the peer's list.
@@ -832,6 +833,7 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
 
+	rpc->msgin.possibly_in_grant_queue = 0;
 	head =  list_first_entry(&peer->grantable_rpcs,
 			struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
@@ -1127,6 +1129,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		INC_METRIC(slow_wakeups, 1);
 		
 		/* Now it's time to sleep. */
+		tt_record1("homa_wait_for_message sleeping, pid %d", current->pid);
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (!atomic_long_read(&interest.id) && !hsk->shutdown) {
 			__u64 start = get_cycles();
@@ -1135,8 +1138,9 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		}
 		__set_current_state(TASK_RUNNING);
 		if (atomic_long_read(&interest.id) != 0)
-			tt_record1("homa_wait_for_message woke up, id %d",
-					atomic_long_read(&interest.id));
+			tt_record2("homa_wait_for_message woke up, id %d, pid %d",
+					atomic_long_read(&interest.id),
+					current->pid);
 		else
 			tt_record("homa_wait_for_message woke up, rpc NULL");
 		
@@ -1273,6 +1277,7 @@ handoff:
 		interest->response_links.next = LIST_POISON1;
 	}
 	wake_up_process(interest->thread);
+	tt_record1("woke up pid %d", interest->thread->pid);
 }
 
 /**
