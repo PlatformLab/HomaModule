@@ -435,6 +435,11 @@ class tcp_connection {
 	 * an error.
 	 */
 	char error_message[200];
+	
+	/**
+	 * @buffer: used as input buffer for reading from socket.
+	 */
+	char buffer[100000];
 };
 
 /**
@@ -456,6 +461,7 @@ tcp_connection::tcp_connection(int fd, uint32_t epoll_id, int port,
         , outgoing()
         , bytes_sent(0)
         , epoll_events(0)
+        , buffer()
 {
 }
 
@@ -481,7 +487,6 @@ inline size_t tcp_connection::pending()
  */
 int tcp_connection::read(std::function<void (message_header *header)> func)
 {
-	char buffer[100000];
 	char *next = buffer;
 	
 	int count = ::read(fd, buffer, sizeof(buffer));
@@ -989,7 +994,8 @@ void tcp_server::read(int fd)
 					EPOLLIN|EPOLLOUT);
 	});
 	if (error) {
-		log(NORMAL, "%s\n", connections[fd]->error_message);
+		log(NORMAL, "Closing client connection: %s\n",
+				connections[fd]->error_message);
 		if (close(fd) < 0) {
 			log(NORMAL, "Error closing TCP connection to %s: %s\n",
 					print_address(&connections[fd]->peer),
