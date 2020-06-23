@@ -1238,10 +1238,12 @@ int homa_dointvec(struct ctl_table *table, int write,
 			if (log_topic == 1)
 				homa_log_grantable_list(homa);
 			else if (log_topic == 2)
-				homa_rpc_log_active(homa);
+				homa_rpc_log_active(homa, 0);
 			else if (log_topic == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
+			} else {
+				homa_rpc_log_active(homa, log_topic);
 			}
 			log_topic = 0;
 		}

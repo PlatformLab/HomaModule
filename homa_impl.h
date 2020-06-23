@@ -2127,7 +2127,7 @@ extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern void     homa_rpc_log(struct homa_rpc *rpc);
-extern void     homa_rpc_log_active(struct homa *homa);
+extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
 		struct sockaddr_in *dest, void __user *buffer, size_t len);

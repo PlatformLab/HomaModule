@@ -590,8 +590,10 @@ void homa_rpc_log(struct homa_rpc *rpc)
  * homa_rpc_log_active() - Print information to the system log about all
  * active RPCs. Intended primarily for debugging.
  * @homa:    Overall data about the Homa protocol implementation.
+ * @id:      An RPC id: if nonzero, then only RPCs with this id will be
+ *           logged.
  */
-void homa_rpc_log_active(struct homa *homa)
+void homa_rpc_log_active(struct homa *homa, uint64_t id)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -608,6 +610,8 @@ void homa_rpc_log_active(struct homa *homa)
 		atomic_inc(&hsk->reap_disable);
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			count++;
+			if ((id != 0) && (id != rpc->id))
+				continue;
 			homa_rpc_log(rpc);
 		}
 		atomic_dec(&hsk->reap_disable);
