@@ -215,6 +215,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
 	crpc->num_resends = 0;
+	crpc->magic = HOMA_RPC_MAGIC;
 	
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
@@ -311,6 +312,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
 	srpc->num_resends = 0;
+	srpc->magic = HOMA_RPC_MAGIC;
 
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	return srpc;
@@ -427,6 +429,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 			continue;
 		}
 		tt_record1("Reaping rpc id %d", rpc->id);
+		rpc->magic = 0;
 		if (rpc->msgout.length >= 0) {
 			while (rpc->msgout.packets) {
 				skbs[num_skbs] = rpc->msgout.packets;

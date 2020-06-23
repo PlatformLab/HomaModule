@@ -731,6 +731,17 @@ struct homa_rpc {
 	 * the last time we received a packet for this RPC from @peer.
 	 */
 	int num_resends;
+
+	/**
+	 * @magic: when the RPC is alive, this holds a distinct value that
+	 * is unlikely to occur naturally. The value is cleared when the
+	 * RPC is reaped, so we can detect accidental use of an RPC after
+	 * it has been reaped.
+	 */
+#define HOMA_RPC_MAGIC 0xdeadbeef
+	int magic;
+
+	uint64_t start_cycles;
 };
 
 /**
@@ -755,6 +766,19 @@ inline static void homa_rpc_lock(struct homa_rpc *rpc) {
  */
 inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
 	spin_unlock_bh(rpc->lock);
+}
+
+/**
+ * homa_rpc_validate() - Check to see if an RPC has been reaped (which
+ * would mean it is no longer valid); if so, crash the kernel with a stack
+ * trace.
+ * @rpc:   RPC to validate.
+ */
+inline static void homa_rpc_validate(struct homa_rpc *rpc) {
+	if (rpc->magic == HOMA_RPC_MAGIC)
+		return;
+	printk(KERN_ERR "Accessing reaped Homa RPC!\n");
+	BUG();
 }
 
 /**
