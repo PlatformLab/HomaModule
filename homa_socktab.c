@@ -229,11 +229,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
  */
 void homa_sock_destroy(struct homa_sock *hsk)
 {
-	if (!hsk->homa)
-		return;
 	homa_sock_shutdown(hsk);
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
-	hsk->homa = NULL;
 }
 
 /**
