@@ -1232,9 +1232,10 @@ int homa_dointvec(struct ctl_table *table, int write,
 			else if (log_topic == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-			} else {
+			} else if (log_topic == 4)
+				homa_log_throttled(homa);
+			else
 				homa_rpc_log_active(homa, log_topic);
-			}
 			log_topic = 0;
 		}
 	}

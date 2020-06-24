@@ -2104,6 +2104,7 @@ extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern void     homa_log_grantable_list(struct homa *homa);
+extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
 			struct iov_iter *iter, int max_bytes);
 extern void     homa_message_in_destroy(struct homa_message_in *msgin);

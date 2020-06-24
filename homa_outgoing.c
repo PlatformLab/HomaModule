@@ -884,3 +884,33 @@ done:
 	INC_METRIC(throttle_list_checks, checks);
 //	tt_record("woke up pacer thread");
 }
+
+/**
+ * homa_log_throttled() - Print information to the system log about the
+ * RPCs on the throttled list.
+ * @homa:   Overall information about the Homa transport.
+ */
+void homa_log_throttled(struct homa *homa)
+{
+	struct homa_rpc *rpc;
+	int rpcs = 0;
+	int64_t bytes = 0;
+	
+	printk(KERN_NOTICE "Printing throttled list\n");
+	homa_throttle_lock(homa);
+	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
+		rpcs++;
+		if (!(spin_trylock_bh(rpc->lock))) {
+			printk(KERN_NOTICE "Skipping throttled RPC: locked\n");
+			continue;
+		}
+		bytes += rpc->msgout.length
+				- homa_data_offset(rpc->msgout.next_packet);
+		if (rpcs <= 5)
+			homa_rpc_log(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	homa_throttle_unlock(homa);
+	printk(KERN_NOTICE "Finished printing throttle list: %d rpcs, "
+			"%lld bytes\n", rpcs, bytes);
+}
