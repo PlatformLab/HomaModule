@@ -209,10 +209,14 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
+	
+	homa_sock_lock(hsk, "homa_socket_shutdown #2");
 	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
+	homa_sock_unlock(hsk);
+	
 	while (!list_empty(&hsk->dead_rpcs))
 		homa_rpc_reap(hsk);
 }
