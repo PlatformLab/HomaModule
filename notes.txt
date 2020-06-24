@@ -7,8 +7,6 @@ Notes for Homa implementation in Linux:
     fully granted.
 
 * Performance-related tasks:
-  * Large values of --port-max cause performance degradation for w4 and w5
-    With --port-max 10, Homa gets the same throughput as TCP for w4 and w5!
   * Implement new benchmark that segregates clients and servers on
     different machines
   * Order the queue of ready messages by size? May not matter for
@@ -21,13 +19,11 @@ Notes for Homa implementation in Linux:
     load? Tried simple totally random approach, but that made things worse.
   * Make sure TCP is optimized (e.g. DCTCP)
   * Check out "-w 500000": Homa has less throughput than TCP.
-  * Add flag to remove all instrumentation from Homa, for best performance.
   * In W4, look at small-mssage CDF: P999 for Homa is still bad (almost 10 ms!)
     Figure out why? Context switches?
   * Understand high TCP P99 for W1?
   * Modify code to reduce maximum rate of reaping, especially after large
     bursts of deletions?
-  * Reimplement busy-waiting
   * Analyze metrics, such as unknown_rpcs or redundant data packets, to see
     why they are happening.
 
