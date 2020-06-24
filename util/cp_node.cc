@@ -435,11 +435,6 @@ class tcp_connection {
 	 * an error.
 	 */
 	char error_message[200];
-	
-	/**
-	 * @buffer: used as input buffer for reading from socket.
-	 */
-	char buffer[100000];
 };
 
 /**
@@ -461,7 +456,6 @@ tcp_connection::tcp_connection(int fd, uint32_t epoll_id, int port,
         , outgoing()
         , bytes_sent(0)
         , epoll_events(0)
-        , buffer()
 {
 }
 
@@ -487,9 +481,18 @@ inline size_t tcp_connection::pending()
  */
 int tcp_connection::read(std::function<void (message_header *header)> func)
 {
+	char buffer[100000];
 	char *next = buffer;
 	
 	int count = ::read(fd, buffer, sizeof(buffer));
+	if ((count < 0) && (errno == EFAULT)) {
+		/* As of 6/2020, the system call above sometimes returns
+		 * EFAULT for no apparent reason (particularly under high
+		 * load). Retrying seems to work...
+		 */
+		log(NORMAL, "WARNING: tcp_connect::read retrying after EFAULT\n");
+		count = ::read(fd, buffer, sizeof(buffer));
+	}
 	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
 		/* Connection was closed by the client. */
 		snprintf(error_message, sizeof(error_message),
@@ -498,6 +501,9 @@ int tcp_connection::read(std::function<void (message_header *header)> func)
 		return 1;
 	}
 	if (count < 0) {
+		log(NORMAL, "ERROR: read failed for TCP connection on "
+				"port %d to %s: %s\\n", port,
+				print_address(&peer), strerror(errno));
 		snprintf(error_message, sizeof(error_message),
 				"Error reading from TCP connection on "
 				"port %d to %s: %s", port,
