@@ -741,6 +741,10 @@ struct homa_rpc {
 #define HOMA_RPC_MAGIC 0xdeadbeef
 	int magic;
 
+	/**
+	 * @start_cycles: time (from get_cycles()) when this RPC was initiated
+	 * on the client. Used (sometimes) for testing.
+	 */
 	uint64_t start_cycles;
 };
 
@@ -891,11 +895,11 @@ struct homa_sock {
 	char *last_locker;
 	
 	/**
-	 * @reap_disable: no RPCs for this socket will be reaped while
-	 * this counter is nonzero. Allows safe traversal of lists
-	 * without holding socket lock. See sync.txt for more info.
+	 * @protect_count: counts the number of calls to homa_protect_rpcs
+	 * for which there have not yet been calls to homa_unprotect_rpcs.
+	 * See sync.txt for more info.
 	 */
-	atomic_t reap_disable;
+	atomic_t protect_count;
 	
 	/**
 	 * @homa: Overall state about the Homa implementation. NULL
@@ -943,7 +947,7 @@ struct homa_sock {
 	 */
 	struct list_head dead_rpcs;
 	
-	/** @dead_skbs: Total number of socket buffers in RPCS on dead_rpcs. */
+	/** @dead_skbs: Total number of socket buffers in RPCs on dead_rpcs. */
 	int dead_skbs;
 	
 	/**
@@ -1074,13 +1078,6 @@ struct homa_peer {
 	 * this is an empty list pointing to itself.
 	 */
 	struct list_head grantable_links;
-	
-	/**
-	 * last_resend_tick: value of @homa->timer_ticks when the most recent
-	 * RESEND request was sent to this peer. Manipulated only by
-	 * homa_timer, so no synchronization needed.
-	 */
-	__u32 last_resend_tick;
 	
 	/**
 	 * @peertab_links: Links this object into a bucket of its
@@ -1973,6 +1970,39 @@ static inline void homa_sock_unlock(struct homa_sock *hsk) {
 }
 
 /**
+ * homa_protect_rpcs() - Ensures that no RPCs will be reaped for a given
+ * socket until until homa_sock_unprotect is called. Typically
+ * used by functions that want to scan the active RPCs for a socket
+ * without holding the socket lock.  Multiple calls to this function may
+ * be in effect at once.
+ * @hsk:    Socket whose RPCs should be protected. Must not be locked
+ *          by the caller; will be locked here.
+ * 
+ * Return:  1 for success, 0 if the socket has been shutdown, in which
+ *          case its RPCs cannot be protected.
+ */
+static inline int homa_protect_rpcs(struct homa_sock *hsk)
+{
+	int result;
+	homa_sock_lock(hsk, "homa_sock_protect");
+	result = !hsk->shutdown;
+	if (result)
+		atomic_inc(&hsk->protect_count);
+	homa_sock_unlock(hsk);
+	return result;
+}
+
+/**
+ * homa_unprotect_rpcs() - Cancel the effect of a previous call to
+ * homa_sock_protect(), so that RPCs can once again be reaped.
+ * @hsk:    Socket whose RPCs should be unprotected.
+ */
+static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
+{
+	atomic_dec(&hsk->protect_count);
+}
+
+/**
  * homa_grantable_lock() - Acquire the grantable lock. If the lock
  * isn't immediately available, record stats on the waiting time.
  * @homa:    Overall data about the Homa protocol implementation.
@@ -2164,8 +2194,8 @@ extern struct homa_sock
 extern void     homa_spin(int usecs);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
-extern void     homa_tasklet_handler(unsigned long data);
 extern void	homa_timer(struct homa *homa);
+extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
 extern void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_unsched_priority(struct homa *homa,

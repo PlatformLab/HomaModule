@@ -92,10 +92,6 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	}
 
 	/* Must issue a RESEND. */
-	if ((homa->timer_ticks - rpc->peer->last_resend_tick)
-			< homa->resend_interval)
-		return 0;
-	rpc->peer->last_resend_tick = homa->timer_ticks;
 	rpc->num_resends++;
 	homa_get_resend_range(&rpc->msgin, &resend);
 	resend.priority = homa->num_priorities-1;
@@ -139,6 +135,7 @@ void homa_timer(struct homa *homa)
 	bool print_active = false;
 	int num_active = 0;
 	struct homa_peer *dead_peer = NULL;
+	int rpc_count = 0;
 	
 	start = get_cycles();
 	homa->timer_ticks++;
@@ -156,7 +153,8 @@ void homa_timer(struct homa *homa)
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
 		
-		atomic_inc(&hsk->reap_disable);
+		if (!homa_protect_rpcs(hsk))
+			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			homa_rpc_lock(rpc);
 			if (unlikely(print_active)) {
@@ -196,19 +194,31 @@ void homa_timer(struct homa *homa)
 			if (rpc->silent_ticks >= homa->resend_ticks) {
 				if (homa_check_timeout(rpc)) {
 					tt_record4("rpc timed out: peer 0x%x, "
-							"port %d, id %d,"
+							"id %d, client %d,"
 							"state %d",
 							htonl(rpc->peer->addr),
-							rpc->dport, rpc->id,
+							rpc->id, rpc->is_client,
 							rpc->state);
+					printk(KERN_NOTICE "RPC timed out: id "
+							"%llu, peer %s, "
+							"client %d\n",
+							rpc->id,
+							homa_print_ipv4_addr(
+							rpc->peer->addr),
+							rpc->is_client);
 					if (rpc->is_client) {
 						if (!tt_frozen) {
 							struct freeze_header freeze;
-							tt_record2("Freezing because of RPC timeout, id %d, peer 0x%x", rpc->id, htonl(rpc->peer->addr));
-							tt_freeze();
+							tt_record2("Freezing "
+							"because of RPC timeout,"
+							" id %d, peer 0x%x",
+							rpc->id,
+							htonl(rpc->peer->addr));
 							homa_xmit_control(FREEZE,
 								&freeze,
-								sizeof(freeze),rpc);
+								sizeof(freeze),
+								rpc);
+							tt_freeze();
 						}
 						dead_peer = rpc->peer;
 					} else {
@@ -225,24 +235,34 @@ void homa_timer(struct homa *homa)
 				}
 			}
 			homa_rpc_unlock(rpc);
+			rpc_count++;
+			if (rpc_count >= 5) {
+				/* Give other kernel threads a chance to run
+				 * on this core.
+				 */
+				schedule();
+				rpc_count = 0;
+			}
 		}
+		homa_unprotect_rpcs(hsk);
 		if (print_active) {
 			struct list_head *pos;
 			int requests = 0;
 			int responses = 0;
-			homa_sock_lock(hsk, "homa_timer");
-			list_for_each(pos, &hsk->ready_requests) {
-				requests++;
-			}
-			list_for_each(pos, &hsk->ready_responses) {
-				responses++;
+			homa_sock_lock(hsk, "homa_timer print active");
+			if (!hsk->shutdown) {
+				list_for_each(pos, &hsk->ready_requests) {
+					requests++;
+				}
+				list_for_each(pos, &hsk->ready_responses) {
+					responses++;
+				}
 			}
 			homa_sock_unlock(hsk);
 			printk(KERN_NOTICE "%d ready requests, %d ready "
 					"responses for socket\n",
 					requests, responses);
 		}
-		atomic_dec(&hsk->reap_disable);
 	}
 	rcu_read_unlock();
 	if (dead_peer) {

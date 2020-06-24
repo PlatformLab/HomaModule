@@ -667,6 +667,23 @@ TEST_F(homa_incoming, homa_data_pkt__long_server_rpc_ready)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
+TEST_F(homa_incoming, homa_data_pkt__long_server_rpc_ready_but_socket_shutdown)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 2000, 1000);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	self->data.message_length = htonl(2000);
+	self->data.incoming = htonl(600);
+	self->data.seg.offset = htonl(1400);
+	self->data.seg.segment_length = htonl(600);
+	self->hsk.shutdown = 1;
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 1400), srpc);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	self->hsk.shutdown = 0;
+}
 TEST_F(homa_incoming, homa_data_pkt__remove_from_grantable_when_ready)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
@@ -1572,7 +1589,7 @@ TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 	EXPECT_SUBSTR("id 2,", unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_rpc_abort)
+TEST_F(homa_incoming, homa_rpc_abort__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
@@ -1584,6 +1601,19 @@ TEST_F(homa_incoming, homa_rpc_abort)
 	EXPECT_EQ(EFAULT, -crpc->error);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
 			"sk->sk_data_ready invoked", unit_log_get());
+}
+TEST_F(homa_incoming, homa_rpc_abort__socket_shutdown)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	unit_log_clear();
+	self->hsk.shutdown = 1;
+	homa_rpc_abort(crpc, -EFAULT);
+	EXPECT_EQ(RPC_OUTGOING, crpc->state);
+	EXPECT_EQ(EFAULT, -crpc->error);
+	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
+	self->hsk.shutdown = 0;
 }
 
 TEST_F(homa_incoming, homa_peer_abort__basics)
@@ -1694,6 +1724,21 @@ TEST_F(homa_incoming, homa_wait_for_message__return_specific_id)
 			self->rpcid);
 	EXPECT_EQ(crpc, rpc);
 	homa_rpc_unlock(rpc);
+}
+TEST_F(homa_incoming, homa_wait_for_message__socket_shutdown)
+{
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	
+	self->hsk.shutdown = 1;
+	rpc = homa_wait_for_message(&self->hsk,
+			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING,
+			self->rpcid);
+	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(rpc));
+	self->hsk.shutdown = 0;
 }
 TEST_F(homa_incoming, homa_wait_for_message__return_from_ready_responses)
 {

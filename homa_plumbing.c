@@ -46,6 +46,9 @@ struct homa *homa = &homa_data;
  */
 static bool exiting = false;
 
+/* Thread that runs timer code to detect lost packets and crashed peers. */
+static struct task_struct *timer_kthread;
+
 /* Set via sysctl to request that information on a particular topic
  * be printed to the system log. The value written determines the
  * topic.
@@ -312,23 +315,12 @@ static struct ctl_table homa_ctl_table[] = {
 /* Used to remove sysctl values when the module is unloaded. */
 static struct ctl_table_header *homa_ctl_header;
 
-/* Tasklet that does all of the real work for timers. Runs at SOFTIRQ level. */
-static struct tasklet_struct timer_tasklet;
-
-/* IRQ-level timer that triggers timer-based operations such as resends
- * and aborts. Used only to schedule timer_tasklet. */
-static struct hrtimer hrtimer;
-
-/* Time between consecutive firings of hrtimer. */
-static ktime_t tick_interval;
-
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
  * Return: 0 on success, otherwise a negative errno.
  */
 static int __init homa_load(void) {
 	int status;
-	struct timespec ts;
 	
 	printk(KERN_NOTICE "Homa module loading\n");
 	status = proto_register(&homa_prot, 1);
@@ -369,19 +361,22 @@ static int __init homa_load(void) {
 		printk(KERN_ERR "Homa couldn't init offloads\n");
 		goto out_cleanup;
 	}
-	tasklet_init(&timer_tasklet, homa_tasklet_handler, 0);
-	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	hrtimer.function = &homa_hrtimer;
-	ts.tv_nsec = 1000000;                   /* 1 ms */
-	ts.tv_sec = 0;
-	tick_interval = timespec_to_ktime(ts);
-	hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
+	
+	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
+	if (IS_ERR(timer_kthread)) {
+		status = PTR_ERR(timer_kthread);
+		printk(KERN_ERR "couldn't create homa pacer thread: error %d\n",
+				status);
+		timer_kthread = NULL;
+		goto out_cleanup;
+	}
 	
 	tt_init("timetrace");
 	
 	return 0;
 
 out_cleanup:
+	homa_offload_end();
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
@@ -401,16 +396,10 @@ static void __exit homa_unload(void) {
 	
 	tt_destroy();
 	
-	/* Stopping the hrtimer and tasklet is tricky, because each
-	 * reschedules the other. This means that the timer could get
-	 * invoked again after executing tasklet_disable. So, we stop
-	 * it yet again. The exiting variable will cause it to do
-	 * nothing, in case it triggers again before we cancel it the
-	 * second time. Very tricky! 
-	 */
-	hrtimer_cancel(&hrtimer);
-	tasklet_kill(&timer_tasklet);
-	hrtimer_cancel(&hrtimer);
+	if (timer_kthread) {
+		wake_up_process(timer_kthread);
+		timer_kthread = NULL;
+	}
 	if (homa_offload_end() != 0)
 		printk(KERN_ERR "Homa couldn't stop offloads\n");
 	unregister_net_sysctl_table(homa_ctl_header);
@@ -510,7 +499,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	int result;
 	struct homa_rpc *rpc = NULL;
 
-	tt_record1("homa_ioc_recv starting, port %d", hsk->client_port);
+	tt_record2("homa_ioc_recv starting, port %d, pid %d",
+			hsk->client_port, current->pid);
 	if (unlikely(copy_from_user(&args, (void *) arg,
 			sizeof(args))))
 		return -EFAULT;
@@ -1252,32 +1242,48 @@ int homa_dointvec(struct ctl_table *table, int write,
 }
 
 /**
- * homa_hrtimer() - This function is invoked at regular intervals by the
- * hrtimer mechanism. Runs at IRQ level.
+ * homa_hrtimer() - This function is invoked by the hrtimer mechanism to
+ * wake up the timer thread. Runs at IRQ level.
  * @timer:   The timer that triggered; not used.
  * 
  * Return:   Always HRTIMER_RESTART.
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {
-	if (exiting) {
-		return HRTIMER_NORESTART;
-	}
-	tasklet_hi_schedule(&timer_tasklet);
-	
-	/* Don't restart here; homa_tasklet_handler will restart the timer
-	 * after it finishes its work (this guarantees a minimum interval
-	 * between invocations, even if the work takes a long time).*/
+	wake_up_process(timer_kthread);
 	return HRTIMER_NORESTART;
 }
 
 /**
- * homa_tasklet_handler() - Invoked at SOFTIRQ level to handle timing-
- * related functions for Homa.
- * @data:   Not used.
+ * homa_timer_main() - Top-level function for the timer thread.
+ * @transportInfo:  Pointer to struct homa.
+ *
+ * Return:         Always 0.
  */
-void homa_tasklet_handler(unsigned long data)
+int homa_timer_main(void *transportInfo)
 {
-	homa_timer(homa);
-	hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
+	struct homa *homa = (struct homa *) transportInfo;
+	struct timespec ts;
+	ktime_t tick_interval;
+	struct hrtimer hrtimer;
+	
+	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer.function = &homa_hrtimer;
+	ts.tv_nsec = 1000000;                   /* 1 ms */
+	ts.tv_sec = 0;
+	tick_interval = timespec_to_ktime(ts);
+	while (1) {
+		set_current_state(TASK_UNINTERRUPTIBLE);
+		if (!exiting) {
+			hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
+			schedule();
+		}
+		__set_current_state(TASK_RUNNING);
+		if (exiting)
+			break;
+		homa_timer(homa);
+	}
+	hrtimer_cancel(&hrtimer);
+	do_exit(0);
+	return 0;
 }

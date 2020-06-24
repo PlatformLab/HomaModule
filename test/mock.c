@@ -197,6 +197,11 @@ void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
+int _cond_resched(void)
+{
+	return 0;
+}
+
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_copy_data_errors))
@@ -282,6 +287,9 @@ void dst_release(struct dst_entry *dst)
 	unit_hash_erase(routes_in_use, dst);
 	free(dst);
 }
+
+void finish_wait(struct wait_queue_head *wq_head,
+		struct wait_queue_entry *wq_entry) {}
 
 void get_random_bytes(void *buf, int nbytes)
 {
@@ -378,6 +386,11 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 
 void inet_unregister_protosw(struct inet_protosw *p) {}
+
+void init_wait_entry(struct wait_queue_entry *wq_entry, int flags) {}
+
+void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
+		struct lock_class_key *key) {}
 
 void iov_iter_revert(struct iov_iter *i, size_t bytes)
 {
@@ -526,6 +539,12 @@ void mutex_lock(struct mutex *lock)
 void mutex_unlock(struct mutex *lock)
 {
 	mock_active_locks--;
+}
+
+long prepare_to_wait_event(struct wait_queue_head *wq_head,
+		struct wait_queue_entry *wq_entry, int state)
+{
+	return 0;
 }
 
 int printk(const char *s, ...)
@@ -762,6 +781,9 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
 {
 	return 0;
 }
+
+void __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
+		int nr_exclusive, void *key) {}
 
 int wake_up_process(struct task_struct *tsk)
 {

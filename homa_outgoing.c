@@ -669,7 +669,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 }
 
 /**
- * homa_pacer_thread() - Top-level function for the pacer thread.
+ * homa_pacer_main() - Top-level function for the pacer thread.
  * @transportInfo:  Pointer to struct homa.
  *
  * Return:         Always 0.

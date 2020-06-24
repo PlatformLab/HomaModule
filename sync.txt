@@ -50,21 +50,19 @@ This file describes the synchronization strategy used for Homa.
     is shut down, which could add the new RPC after all of its RPCs
     have supposedly been deleted. Handling this requires careful ordering
     of operations during shutdown, plus the rest of Homa must be careful
-    never to add new RPCs to socket for which shutdown has begun.
+    never to add new RPCs to a socket that has been shut down.
 
-* The timer creates tricky synchronization issues. Rather than looking up
-  RPCs using the hash tables, it scans all of the active RPCs for a socket.
-  It locks each RPC that it finds, but there is a risk that an RPC could
-  be deleted and its memory recycled before the timer can lock it; this
-  could result in corruption. Locking the socket for the duration of the
-  scan would prevent this problem, but that isn't possible because of
-  the locking order constraints. It's OK if the RPC gets deleted, as long
-  as its memory doesn't get reclaimed. The RCU mechanism could be used for
-  this, but RCU results in *very* long delays before final reclamation
-  (tens of ms), even without contention, which means that a large number
-  of dead RPCs could accumulate. Thus I decided not to the Linux RCU
-  mechanism. Instead, Homa has a special-purpose RCU-like mechanism in the
-  form of the disable_reaps member of the socket; this can be used to
-  temporarily prevent RPC reclamation while the timer is scanning. RPCs
-  can be deleted while the timer is scanning, but their memory won't go
-  away.
+* There are a few places where Homa needs to scan all of the active RPCs
+  for a socket, such as the timer. Such code will lock each RPC that it
+  finds, but there is a risk that an RPC could be deleted and its memory
+  recycled before it can be locked; this could result in corruption. Locking
+  the socket for the duration of the scan would prevent this problem, but
+  that isn't possible because of the locking order constraints. It's OK if
+  the RPC gets deleted, as long as its memory doesn't get reclaimed. The
+  RCU mechanism could be used for this, but RCU results in *very* long delays
+  before final reclamation (tens of ms), even without contention, which means
+  that a large number of dead RPCs could accumulate. Thus I decided not to use
+  the Linux RCU mechanism. Instead, Homa has a special-purpose RCU-like
+  mechanism via the function homa_protect_rpcs; this function prevents RPC
+  reaping for a socket. RPCs can still be deleted, but their memory won't go
+  away until homa_unprotect_rpcs is invoked.

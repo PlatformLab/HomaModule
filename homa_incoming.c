@@ -432,7 +432,8 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		if (rpc->msgin.bytes_remaining == 0) {
 			homa_remove_from_grantable(homa, rpc);
 			homa_sock_lock(rpc->hsk, "homa_data_pkt (not first)");
-			homa_rpc_ready(rpc);
+			if (!rpc->hsk->shutdown)
+				homa_rpc_ready(rpc);
 			homa_sock_unlock(rpc->hsk);
 		}
 	}
@@ -513,6 +514,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	if (!rpc->is_client) {
 		/* We are the server for this RPC. */
 		if (rpc->state != RPC_OUTGOING) {
+			tt_record1("sending BUSY from resend, state %d",
+					rpc->state);
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 			goto done;
 		}
@@ -522,6 +525,10 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		/* We have chosen not to transmit data from this message;
 		 * send BUSY instead.
 		 */
+		tt_record3("sending BUSY from resend, id %d, offset %d, "
+				"granted %d", rpc->id,
+				homa_data_offset(rpc->msgout.next_packet),
+				rpc->msgout.granted);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
 		homa_resend_data(rpc, ntohl(h->offset),
@@ -952,7 +959,8 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 	homa_remove_from_grantable(crpc->hsk->homa, crpc);
 	crpc->error = error;
 	homa_sock_lock(crpc->hsk, "homa_rpc_abort");
-	homa_rpc_ready(crpc);
+	if (!crpc->hsk->shutdown)
+		homa_rpc_ready(crpc);
 	homa_sock_unlock(crpc->hsk);
 }
 
@@ -977,7 +985,8 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 		 */
 		if (list_empty(&hsk->active_rpcs))
 			continue;
-		atomic_inc(&hsk->reap_disable);
+		if (!homa_protect_rpcs(hsk))
+			continue;
 		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				active_links) {
 			if (rpc->peer->addr != addr)
@@ -995,7 +1004,7 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 			}
 			homa_rpc_unlock(rpc);
 		}
-		atomic_dec(&hsk->reap_disable);
+		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
 }
@@ -1066,6 +1075,10 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		if (!sock_locked) {
 			homa_sock_lock(hsk, "homa_wait_for_message #2");
 			sock_locked = 1;
+			if (hsk->shutdown) {
+				result = ERR_PTR(-ESHUTDOWN);
+				goto done;
+			}
 		}
 		if ((id == 0) && (flags & HOMA_RECV_RESPONSE)) {
 			if (!list_empty(&hsk->ready_responses)) {
@@ -1102,8 +1115,15 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		 */
 		homa_sock_unlock(hsk);
 		sock_locked = 0;
-		while (!atomic_long_read(&interest.id)) {
-			int reaper_result = homa_rpc_reap(hsk);
+		while (1) {
+			int reaper_result;
+			if (atomic_long_read(&interest.id)) {
+				tt_record1("received message while reaping, "
+						"id %d",
+						atomic_long_read(&interest.id));
+				goto lock_rpc;
+			}
+			reaper_result = homa_rpc_reap(hsk);
 			if (flags & HOMA_RECV_NONBLOCKING) {
 				result = ERR_PTR(-EAGAIN);
 				goto done;
@@ -1121,6 +1141,9 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		stop_polling = get_cycles() + hsk->homa->poll_cycles;
 		while (get_cycles() < stop_polling) {
 			if (atomic_long_read(&interest.id)) {
+				tt_record1("received message while polling, "
+						"id %d",
+						atomic_long_read(&interest.id));
 				INC_METRIC(fast_wakeups, 1);
 				goto lock_rpc;
 			}
@@ -1129,7 +1152,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		INC_METRIC(slow_wakeups, 1);
 		
 		/* Now it's time to sleep. */
-		tt_record1("homa_wait_for_message sleeping, pid %d", current->pid);
 		set_current_state(TASK_INTERRUPTIBLE);
 		if (!atomic_long_read(&interest.id) && !hsk->shutdown) {
 			__u64 start = get_cycles();
@@ -1277,7 +1299,6 @@ handoff:
 		interest->response_links.next = LIST_POISON1;
 	}
 	wake_up_process(interest->thread);
-	tt_record1("woke up pid %d", interest->thread->pid);
 }
 
 /**

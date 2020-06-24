@@ -128,7 +128,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	mutex_lock(&socktab->write_lock);
 	spin_lock_init(&hsk->lock);
 	hsk->last_locker = "none";
-	atomic_set(&hsk->reap_disable, 0);
+	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
 	hsk->shutdown = false;
 	hsk->server_port = 0;
@@ -177,13 +177,12 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
 	
-	homa_sock_lock(hsk, "homa_socket_shutdown #1");
+	homa_sock_lock(hsk, "homa_socket_shutdown");
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		return;
 	}
 	printk(KERN_NOTICE "Shutting down socket %d", hsk->client_port);
-	atomic_inc(&hsk->reap_disable);
 	
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
@@ -210,16 +209,12 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	homa_sock_lock(hsk, "homa_socket_shutdown #2");
-	
 	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
-	
-	atomic_dec(&hsk->reap_disable);
-	homa_sock_unlock(hsk);
-	while (homa_rpc_reap(hsk) != 0) {}
+	while (!list_empty(&hsk->dead_rpcs))
+		homa_rpc_reap(hsk);
 }
 
 /**

@@ -26,11 +26,21 @@
 FIXTURE(homa_socktab) {
 	struct homa homa;
 	struct homa_sock hsk;
+	__be32 client_ip;
+	int client_port;
+	__be32 server_ip;
+	int server_port;
+	__u64 rpcid;
 };
 FIXTURE_SETUP(homa_socktab)
 {
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_port = 40000;
+	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_port = 99;
+	self->rpcid = 12345;
 }
 FIXTURE_TEARDOWN(homa_socktab)
 {
@@ -93,7 +103,7 @@ TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 	homa_sock_destroy(&hsk2);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(first_port+HOMA_SOCKTAB_BUCKETS, hsk->client_port);
-	EXPECT_EQ(NULL, hsk->homa);
+	EXPECT_EQ(1, hsk->shutdown);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(first_port, hsk->client_port);
 	hsk = homa_socktab_next(&scan);
@@ -112,20 +122,8 @@ TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)
 	homa_sock_destroy(&hsk3);
 }
 
-TEST_F(homa_socktab, homa_sock_shutdown)
-{
-	struct homa_interest interest1, interest2, interest3;
-	EXPECT_FALSE(self->hsk.shutdown);
-	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
-	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
-	list_add_tail(&interest3.response_links, &self->hsk.response_interests);
-	homa_sock_shutdown(&self->hsk);
-	EXPECT_TRUE(self->hsk.shutdown);
-	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
-		"wake_up_process", unit_log_get());
-}
 
-TEST_F(homa_socktab, homa_sock_destroy__basics)
+TEST_F(homa_socktab, homa_sock_shutdown__basics)
 {
 	int client2, client3;
 	struct homa_sock hsk2, hsk3;
@@ -139,27 +137,53 @@ TEST_F(homa_socktab, homa_sock_destroy__basics)
 	EXPECT_EQ(&hsk2, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(&hsk3, homa_sock_find(&self->homa.port_map, client3));
 	
-	homa_sock_destroy(&hsk2);
+	homa_sock_shutdown(&hsk2);
 	
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client2));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(&hsk3, homa_sock_find(&self->homa.port_map, client3));
 	
-	homa_sock_destroy(&hsk3);
+	homa_sock_shutdown(&hsk3);
 	
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client2));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client3));
 }
-TEST_F(homa_socktab, homa_sock_destroy__wakeup_interests)
+TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
+{
+	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid,
+			20000, 1600);
+	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid+1,
+			5000, 5000);
+	self->hsk.shutdown = 1;
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_TRUE(self->hsk.shutdown);
+	EXPECT_EQ(2 ,unit_list_length(&self->hsk.active_rpcs));
+	self->hsk.shutdown = 0;
+}
+TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
+{
+	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid,
+			20000, 1600);
+	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->rpcid+1,
+			5000, 5000);
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_TRUE(self->hsk.shutdown);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_socktab, homa_sock_shutdown__wakeup_interests)
 {
 	struct homa_interest interest1, interest2, interest3;
-	struct homa_sock hsk2;
-	mock_sock_init(&hsk2, &self->homa, 0, 0);
-	list_add_tail(&interest1.request_links, &hsk2.request_interests);
-	list_add_tail(&interest2.request_links, &hsk2.request_interests);
-	list_add_tail(&interest3.response_links, &hsk2.response_interests);
-	homa_sock_destroy(&hsk2);
+	EXPECT_FALSE(self->hsk.shutdown);
+	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
+	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
+	list_add_tail(&interest3.response_links, &self->hsk.response_interests);
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_TRUE(self->hsk.shutdown);
 	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
 		"wake_up_process", unit_log_get());
 }

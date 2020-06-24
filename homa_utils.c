@@ -103,7 +103,7 @@ int homa_init(struct homa *homa)
 	homa->num_grantable_peers = 0;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
-	homa->throttle_min_bytes = 300;
+	homa->throttle_min_bytes = 1000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 			"homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -409,8 +409,10 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	struct homa_rpc *rpc;
 	int i, result;
 	
-	if (atomic_read(&hsk->reap_disable)) {
+	homa_sock_lock(hsk, "homa_rpc_reap");
+	if (atomic_read(&hsk->protect_count)) {
 		INC_METRIC(disabled_reaps, 1);
+		homa_sock_unlock(hsk);
 		return 0;
 	}
 	INC_METRIC(reaper_calls, 1);
@@ -419,7 +421,6 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	/* Collect buffers and freeable RPCs until either we hit our limit
 	 * or run out of RPCs.
 	 */
-	homa_sock_lock(hsk, "homa_rpc_reap");
 	tt_record2("Starting homa_rpc_reap, dead_skbs %d, port %d",
 			hsk->dead_skbs, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
@@ -607,14 +608,15 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
 		
-		atomic_inc(&hsk->reap_disable);
+		if (!homa_protect_rpcs(hsk))
+			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			count++;
 			if ((id != 0) && (id != rpc->id))
 				continue;
 			homa_rpc_log(rpc);
 		}
-		atomic_dec(&hsk->reap_disable);
+		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
 	printk("Finished logging active Homa RPCs: %d active RPCs\n", count);

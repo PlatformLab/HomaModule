@@ -343,16 +343,16 @@ TEST_F(homa_utils, homa_rpc_reap__basics)
 	EXPECT_STREQ("12346 12347", dead_rpcs(&self->hsk));
 	EXPECT_EQ(4, self->hsk.dead_skbs);
 }
-TEST_F(homa_utils, homa_rpc_reap__reap_disabled)
+TEST_F(homa_utils, homa_rpc_reap__protected)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 5000, 2000);
 	homa_rpc_free(crpc1);
 	unit_log_clear();
-	atomic_inc(&self->hsk.reap_disable);
+	homa_protect_rpcs(&self->hsk);
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
-	atomic_dec(&self->hsk.reap_disable);
+	homa_unprotect_rpcs(&self->hsk);
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)

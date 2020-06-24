@@ -114,7 +114,7 @@ TEST_F(homa_timer, homa_check_timeout__server_rpc__state_not_incoming)
 	srpc->silent_ticks = 3;
 	EXPECT_EQ(0, homa_check_timeout(srpc));
 }
-TEST_F(homa_timer, homa_check_timeout__too_soon_for_resend)
+TEST_F(homa_timer, homa_check_timeout__send_resend)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
@@ -125,14 +125,8 @@ TEST_F(homa_timer, homa_check_timeout__too_soon_for_resend)
 	EXPECT_EQ(0, homa_check_timeout(srpc));
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 
-	/* No RESEND: not enough time since last one. */
-	unit_log_clear();
-	EXPECT_EQ(0, homa_check_timeout(srpc));
-	EXPECT_STREQ("", unit_log_get());
-	
 	/* Send another RESEND. */
 	unit_log_clear();
-	self->homa.timer_ticks = 200;
 	EXPECT_EQ(0, homa_check_timeout(srpc));
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 }
@@ -156,14 +150,12 @@ TEST_F(homa_timer, homa_timer__basics)
 
 	/* Send another RESEND. */
 	unit_log_clear();
-	self->homa.timer_ticks = 200;
 	homa_timer(&self->homa);
 	EXPECT_EQ(3, crpc->silent_ticks);
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 	
 	/* Abort RPC. */
 	unit_log_clear();
-	self->homa.timer_ticks = 300;
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_rpc_timeouts);
