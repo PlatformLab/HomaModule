@@ -3,6 +3,13 @@
 # Usage:
 # start_xl170 [mod_file]
 
+rps=1
+for arg in $@; do
+    if [ $arg = no_rps ]; then
+        rps=0
+    fi
+    done
+
 if [ $# -eq 1 ]; then
     homa=$1
 else
@@ -28,14 +35,27 @@ sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1
 rm -f ~/.homa_metrics
 
 # Turn on RPS and RFS
-sudo sysctl -w net.core.rps_sock_flow_entries=32768
-for f in /sys/class/net/ens1f1/queues/rx-*/rps_flow_cnt; do
-    sudo bash -c "echo 2048 > $f"
-    done
-for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
-    sudo bash -c "echo fffff > $f"
-    done
-sudo ethtool -K ens1f1 ntuple on
+if [ $rps -eq 1 ]; then
+    echo Turning on RPS/RFS
+    sudo sysctl -w net.core.rps_sock_flow_entries=32768
+    for f in /sys/class/net/ens1f1/queues/rx-*/rps_flow_cnt; do
+        sudo bash -c "echo 2048 > $f"
+        done
+    for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
+        sudo bash -c "echo fffff > $f"
+        done
+    sudo ethtool -K ens1f1 ntuple on
+else 
+    echo Turning off RPS/RFS
+    sudo sysctl -w net.core.rps_sock_flow_entries=0
+    for f in /sys/class/net/ens1f1/queues/rx-*/rps_flow_cnt; do
+        sudo bash -c "echo 0 > $f"
+        done
+    for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
+        sudo bash -c "echo 00000 > $f"
+        done
+    sudo ethtool -K ens1f1 ntuple off
+fi
 
 # Set VLAN priority mappings (no longer needed: we use IP priorities instead)
 # sudo vconfig set_egress_map $vlan 1 1
