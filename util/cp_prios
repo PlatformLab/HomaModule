@@ -22,7 +22,7 @@ from cperf import *
 
 # Info to use (workload and corresponding bandwidth) when running all
 # of the workloads.
-load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
+load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
 
 # Number of priority levels to try for each workload.
 priorities = [1, 2, 3, 4, 8]

@@ -566,16 +566,25 @@ def scan_log(file, node, experiments):
                 if not "client_latency" in node_data:
                     node_data["client_latency"] = []
                 node_data["client_latency"].append(float(match.group(3)))
-            else:
-                match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
-                        '([0-9.]+) MB/sec', line)
-                if match:
-                    if not "server_kops" in node_data:
-                        node_data["server_kops"] = []
-                    node_data["server_kops"].append(float(match.group(1)))
-                    if not "server_mbps" in node_data:
-                        node_data["server_mbps"] = []
-                    node_data["server_mbps"].append(float(match.group(2)))
+                continue
+
+            match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+                    '([0-9.]+) MB/sec', line)
+            if match:
+                if not "server_kops" in node_data:
+                    node_data["server_kops"] = []
+                node_data["server_kops"].append(float(match.group(1)))
+                if not "server_mbps" in node_data:
+                    node_data["server_mbps"] = []
+                node_data["server_mbps"].append(float(match.group(2)))
+                continue
+
+            match = re.match('.*Outstanding client RPCs: ([0-9.]+)', line)
+            if match:
+                if not "outstanding_rpcs" in node_data:
+                    node_data["outstanding_rpcs"] = []
+                node_data["outstanding_rpcs"].append(int(match.group(1)))
+                continue
         if "FATAL:" in line:
             log("%s: %s" % (file, line[:-1]))
             exited = True
@@ -644,7 +653,14 @@ def scan_logs():
                 vlog("%s average: %.1f Kops/sec"
                         % (type.capitalize(), totals[kops_key]/len(averages)))
 
-        log("\nClients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        for node in sorted(exp.keys()):
+            if "outstanding_rpcs" in exp[node]:
+                counts = exp[node]["outstanding_rpcs"]
+                log("\nOutstanding RPCs for %s: %s" % (node,
+                        ", ".join(map(lambda x: "%d" % (x), counts))))
+                break
+
+        log("Clients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["client"]),
                 totals["client_mbps"]/len(nodes["client"]),
                 totals["client_kops"]/len(nodes["client"])))
