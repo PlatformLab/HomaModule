@@ -725,12 +725,6 @@ struct homa_rpc {
 	 * since the last time a packet was received for this RPC.
 	 */
 	int silent_ticks;
-	
-	/**
-	 * @num_resends: the number of RESEND requests we have sent since
-	 * the last time we received a packet for this RPC from @peer.
-	 */
-	int num_resends;
 
 	/**
 	 * @magic: when the RPC is alive, this holds a distinct value that
@@ -1084,6 +1078,19 @@ struct homa_peer {
 	 * homa_peertab.
 	 */
 	struct hlist_node peertab_links;
+	
+	/**
+	 * @outstanding_resends: the number of resend requests we have
+	 * send to this server (spaced @homa.resend_interval apart) since
+	 * we received a packet from this peer.
+	 */
+	int outstanding_resends;
+	
+	/**
+	 * @most_recent_resend: @homa->timer_ticks when the most recent
+	 * resend was sent to this peer.
+	 */
+	int most_recent_resend;
 };
 
 /**
@@ -1216,10 +1223,17 @@ struct homa {
 	int resend_interval;
 	
 	/**
-	 * @abort_resends: Abort an RPC if there is still no response
-	 * after this many resends.
+	 * @timeout_resends: Assume that a server is dead if it has not
+	 * responded after this many RESENDs have been sent to it.
 	 */
-	int abort_resends;
+	int timeout_resends;
+	
+	/**
+	 * @rpc_discard_ticks: The server will discard an RPC from a client
+	 * if this many homa timer ticks go by with no packets from the
+	 * client.
+	 */
+	int rpc_discard_ticks;
 	
 	/**
 	 * @reap_limit: Maximum number of packet buffers to free in a
@@ -1686,25 +1700,25 @@ struct homa_metrics {
 	__u64 restarted_rpcs;
 
 	/**
-	 * @client_rpc_timeouts: total number of times an RPC was aborted on
-	 * the client side because of a timeout.
+	 * @client_peer_timeouts: total number of times a client aborted all
+	 * RPCs to a server because the server was non-responsive.
 	 */
 	
-	__u64 client_rpc_timeouts;
+	__u64 client_peer_timeouts;
 
 	/**
-	 * @server_rpc_timeouts: total number of times an RPC was aborted on
+	 * @server_rpc_discards: total number of times an RPC was aborted on
 	 * the server side because of a timeout.
 	 */
 	
-	__u64 server_rpc_timeouts;
+	__u64 server_rpc_discards;
 
 	/**
-	 * @server_rpc_cancels: total number of times an RPC was aborted on
+	 * @server_rpcs_unknown: total number of times an RPC was aborted on
 	 * the server side because it is no longer known to the client.
 	 */
 	
-	__u64 server_rpc_cancels;
+	__u64 server_rpcs_unknown;
 
 	/**
 	 * @client_lock_misses: total number of times that Homa had to wait

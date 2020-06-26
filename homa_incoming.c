@@ -315,7 +315,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			}
 		}
 		rpc->silent_ticks = 0;
-		rpc->num_resends = 0;
+		rpc->peer->outstanding_resends = 0;
 	}
 	
 	switch (h->type) {
@@ -591,7 +591,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 					homa_print_ipv4_addr(rpc->peer->addr),
 					rpc->dport);
 		homa_rpc_free(rpc);
-		INC_METRIC(server_rpc_cancels, 1);
+		INC_METRIC(server_rpcs_unknown, 1);
 	}
 	kfree_skb(skb);
 }
@@ -998,8 +998,6 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 				continue;
 			}
 			if (rpc->is_client) {
-				if (error == -ETIMEDOUT)
-					INC_METRIC(client_rpc_timeouts, 1);
 				homa_rpc_abort(rpc, error);
 			}
 			homa_rpc_unlock(rpc);

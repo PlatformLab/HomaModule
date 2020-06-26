@@ -133,13 +133,6 @@ struct homa_args_reply_ipv4 {
  */
 
 /**
- * The next invocation of the Homa timer will log info about active RPCs,
- * then clear this flag; used to see if RPCs are getting "stuck" and not
- * progressing or aborting.
- */
-#define HOMA_FLAG_LOG_ACTIVE_RPCS 1
-
-/**
  * Disable the output throttling mechanism: always send all packets
  * immediately.
  */

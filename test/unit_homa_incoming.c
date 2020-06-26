@@ -517,6 +517,27 @@ TEST_F(homa_incoming, homa_pkt_dispatch__future_generation_for_server_rpc)
 	EXPECT_EQ(4, srpc->generation);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.stale_generations);
 }
+TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	EXPECT_EQ(10000, crpc->msgout.granted);
+	unit_log_clear();
+	crpc->silent_ticks = 5;
+	crpc->peer->outstanding_resends = 2;
+	
+	struct grant_header h = {{.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.id = self->rpcid, .generation = htons(1),
+			.type = GRANT}, .offset = htonl(11200),
+			.priority = 3};
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_EQ(0, crpc->silent_ticks);
+	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+}
 TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -1634,8 +1655,6 @@ TEST_F(homa_incoming, homa_peer_abort__basics)
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
 	EXPECT_EQ(0, -crpc2->error);
 	EXPECT_EQ(RPC_OUTGOING, crpc3->state);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_rpc_timeouts);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.server_rpc_timeouts);
 }
 TEST_F(homa_incoming, homa_peer_abort__multiple_sockets)
 {
@@ -1662,17 +1681,6 @@ TEST_F(homa_incoming, homa_peer_abort__multiple_sockets)
 	EXPECT_EQ(RPC_READY, crpc3->state);
 	EXPECT_EQ(2, unit_list_length(&hsk1.active_rpcs));
 	EXPECT_EQ(2, unit_list_length(&hsk1.ready_responses));
-}
-TEST_F(homa_incoming, homa_peer_abort__log_timeout_stats)
-{
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 5000, 1600);
-	unit_log_clear();
-	homa_peer_abort(&self->homa, self->server_ip, -ETIMEDOUT);
-	EXPECT_EQ(RPC_READY, crpc1->state);
-	EXPECT_EQ(ETIMEDOUT, -crpc1->error);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_rpc_timeouts);
 }
 
 TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)

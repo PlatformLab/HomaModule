@@ -143,13 +143,6 @@ the default values should work fine in production. It's probably a
 bad idea to change any of these unless you are sure you know what
 you are doing.
 .TP
-.I abort_resends
-An integer value specifying how long to wait before aborting RPCs. If
-this many resend requests have been issued for an RPC and no response
-has been received from the peer, then
-Homa will abort the RPC with
-.BR ETIMEDOUT .
-.TP
 .I cutoff_version
 (Read-only) The current version for unscheduled cutoffs; incremented
 automatically when unsched_cutoffs is modified.
@@ -157,14 +150,9 @@ automatically when unsched_cutoffs is modified.
 .IR flags
 Individual bits can be set or cleared to control particular Homa behaviors.
 If the
-.B HOMA_FLAG_LOG_ACTIVE_RPCS
-bit is set, Homa will log information about all active RPCs in the next
-invocation of its timeout detection code. Once the information has been
-logged, the bit will be cleared.
-If the
 .B HOMA_FLAG_DONT_THROTTLE
 bit is set, Homa will not throttle output transmissions; packets will
-always be sent immediatly. This could result in long transmit queues for
+always be sent immediately. This could result in long transmit queues for
 the NIC, which defeats part of Homa's SRPT scheduling mechanism.
 .TP
 .IR grant_increment
@@ -270,13 +258,13 @@ call to the reaper; larger values may make the reaper more efficient, but
 they can also result in a larger delay for applications.
 .TP
 .IR resend_interval
-An integer value specifying how frequently resend requests can be sent
+An integer value specifying how frequently resend requests may be sent
 to a given peer (regardless of how many RPCs are outstanding to that
 peer). This is in units
 of "ticks" (see 
 .I resend_ticks
 below). This value and
-.I abort_resends
+.I timeout_resends
 should be chosen together.
 .TP
 .IR resend_ticks
@@ -284,16 +272,27 @@ An integer value specifying a number of "ticks", each of which corresponds
 to one invocation of Homa's internal timer function, which runs every
 millisecond.
 Homa will begin issuing resend requests for an RPC once this many ticks have
-elapsed without receiving expected data from a peer; the exact timing and
+elapsed without receiving expected data from the peer; the exact timing and
 spacing of those requests is determined by
 .IR resend_interval .
 The general
 idea is to send the first resend request relatively quickly, in order to
 minimize the delay caused by lost packets. However, if a peer still doesn't
-respond, it probably means that peer is overloaded; sending a lot of resends
+respond, it probably means the peer is overloaded; sending a lot of resends
 will just make the problem
 worse. It's unlikely that multiple packets get lost in a short time
 interval, so it's OK to pay extra time if that's what really happened.
+.TP
+.IR rpc_discard_ticks
+If this much time elapses on a server without receiving any packets
+related to an RPC from the client, then the server assumes that the client
+no longer cares about the RPC, and the server discards its state. This
+is in units of "ticks" (see 
+.I resend_ticks
+above). This value should be chosen in conjunction with
+.I resend_ticks
+and
+.IR resend_interval .
 .TP
 .IR rtt_bytes
 An integer value specifying the worst-case round-trip latency (assuming
@@ -318,6 +317,13 @@ small packets fast enough to build up a queue at the NIC.
 Bypassing the throttling mechanism improves efficiency.
 This value can be set to 0 to force all packets to use the throttling
 mechanism.
+.TP
+.I timeout_resends
+An integer value specifying how long to wait before considering a peer
+to be dead. If this many resend requests have been issued to a peer without
+receiving any packets from the peer, then Homa will consider the peer
+dead and abort all RPCs involving that peer with
+.BR ETIMEDOUT .
 .TP
 .IR unsched_cutoffs
 An array of 8 integer values. The nth element specifies the largest

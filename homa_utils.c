@@ -95,7 +95,8 @@ int homa_init(struct homa *homa)
 	homa->max_overcommit = 8;
 	homa->resend_ticks = 2;
 	homa->resend_interval = 5;
-	homa->abort_resends = 10;
+	homa->timeout_resends = 10;
+	homa->rpc_discard_ticks = 50;
 	homa->reap_limit = 10;
 	homa->max_dead_buffs = 10000;
 	spin_lock_init(&homa->grantable_lock);
@@ -214,7 +215,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
-	crpc->num_resends = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	
 	/* Initialize fields that require locking. This allows the most
@@ -311,7 +311,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
-	srpc->num_resends = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
@@ -1225,17 +1224,17 @@ char *homa_print_metrics(struct homa *homa)
 				"RPCs restarted because server discarded state\n",
 				m->restarted_rpcs);
 		homa_append_metric(homa,
-				"client_rpc_timeouts       %15llu  "
-				"RPCs aborted by client because of timeout\n",
-				m->client_rpc_timeouts);
+				"client_peer_timeouts      %15llu  "
+				"Nonresponsive servers detected by clients\n",
+				m->client_peer_timeouts);
 		homa_append_metric(homa,
-				"server_rpc_timeouts       %15llu  "
-				"RPCs aborted by server because of timeout\n",
-				m->server_rpc_timeouts);
+				"server_rpc_discards       %15llu  "
+				"RPCs aborted by server because of timeouts\n",
+				m->server_rpc_discards);
 		homa_append_metric(homa,
-				"server_rpc_cancels       %15llu  "
-				"Server RPCs aborted because unknown to client\n",
-				m->server_rpc_cancels);
+				"server_rpcs_unknown       %15llu  "
+				"RPCs aborted by server because unknown to client\n",
+				m->server_rpcs_unknown);
 		homa_append_metric(homa,
 				"client_lock_misses        %15llu  "
 				"Bucket lock misses for client RPCs\n",

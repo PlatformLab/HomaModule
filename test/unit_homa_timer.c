@@ -52,6 +52,18 @@ FIXTURE_TEARDOWN(homa_timer)
 	unit_teardown();
 }
 
+TEST_F(homa_timer, homa_check_timeout__resend_ticks_not_reached)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 50000, 200);
+	unit_log_clear();
+	crpc->silent_ticks = 1;
+	crpc->peer->outstanding_resends = self->homa.timeout_resends + 10;
+	EXPECT_EQ(0, homa_check_timeout(crpc));
+	EXPECT_EQ(1, crpc->silent_ticks);
+	EXPECT_STREQ("", unit_log_get());
+}
 TEST_F(homa_timer, homa_check_timeout__client_rpc__granted_bytes_not_sent)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -75,15 +87,16 @@ TEST_F(homa_timer, homa_check_timeout__client_rpc__all_granted_bytes_received)
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("xmit BUSY", unit_log_get());
 }
-TEST_F(homa_timer, homa_check_timeout__client_timeout)
+TEST_F(homa_timer, homa_check_timeout__client_rpc_peer_timeout)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 200, 10000);
 	unit_log_clear();
-	crpc->silent_ticks = 100;
-	crpc->num_resends = self->homa.abort_resends;
+	crpc->silent_ticks = self->homa.resend_ticks;
+	crpc->peer->outstanding_resends = self->homa.timeout_resends;
 	EXPECT_EQ(1, homa_check_timeout(crpc));
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_peer_timeouts);
 }
 TEST_F(homa_timer, homa_check_timeout__server_rpc__all_granted_bytes_received)
 {
@@ -96,14 +109,14 @@ TEST_F(homa_timer, homa_check_timeout__server_rpc__all_granted_bytes_received)
 	EXPECT_EQ(0, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_timer, homa_check_timeout__server_rpc__timeout)
+TEST_F(homa_timer, homa_check_timeout__server_rpc__discard)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 5000, 5000);
-	srpc->silent_ticks = 3;
-	srpc->num_resends = self->homa.abort_resends;
+	srpc->silent_ticks = self->homa.rpc_discard_ticks;
 	EXPECT_EQ(1, homa_check_timeout(srpc));
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_rpc_discards);
 }
 TEST_F(homa_timer, homa_check_timeout__server_rpc__state_not_incoming)
 {
@@ -111,8 +124,44 @@ TEST_F(homa_timer, homa_check_timeout__server_rpc__state_not_incoming)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
 	unit_log_clear();
-	srpc->silent_ticks = 3;
+	srpc->silent_ticks = self->homa.resend_ticks;
 	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(self->homa.resend_ticks, srpc->silent_ticks);
+}
+TEST_F(homa_timer, homa_check_timeout__special_case_for_first_grantable)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 50000, 5000);
+
+	/* Don't consider special case unless we already sent one resend
+	 * to this peer.
+	 */
+	unit_log_clear();
+	srpc->silent_ticks = self->homa.resend_ticks;
+	srpc->peer->most_recent_resend = self->homa.timer_ticks - 1;
+	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_STREQ("", unit_log_get());
+	
+	/* Try again with the right value for most_recent_resend. */
+	unit_log_clear();
+	srpc->peer->most_recent_resend = self->homa.timer_ticks;
+	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_STREQ("xmit RESEND 1400-9999@7", unit_log_get());
+}
+TEST_F(homa_timer, homa_check_timeout__too_soon_for_another_resend)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 5000, 5000);
+
+	/* Send RESEND. */
+	unit_log_clear();
+	srpc->silent_ticks = self->homa.resend_ticks;
+	srpc->peer->most_recent_resend = self->homa.timer_ticks
+			- self->homa.resend_interval + 1;
+	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_timer, homa_check_timeout__send_resend)
 {
@@ -122,18 +171,17 @@ TEST_F(homa_timer, homa_check_timeout__send_resend)
 
 	/* Send RESEND. */
 	unit_log_clear();
+	srpc->silent_ticks = self->homa.resend_ticks;
+	EXPECT_EQ(0, srpc->peer->most_recent_resend);
 	EXPECT_EQ(0, homa_check_timeout(srpc));
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
-
-	/* Send another RESEND. */
-	unit_log_clear();
-	EXPECT_EQ(0, homa_check_timeout(srpc));
-	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+	EXPECT_EQ(100, srpc->peer->most_recent_resend);
+	EXPECT_EQ(1, srpc->peer->outstanding_resends);
 }
 
 TEST_F(homa_timer, homa_timer__basics)
 {
-	self->homa.abort_resends = 2;
+	self->homa.timeout_resends = 2;
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 200, 5000);
@@ -148,17 +196,18 @@ TEST_F(homa_timer, homa_timer__basics)
 	EXPECT_EQ(2, crpc->silent_ticks);
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 
-	/* Send another RESEND. */
+	/* Don't send another RESEND (resend_interval not reached). */
 	unit_log_clear();
 	homa_timer(&self->homa);
 	EXPECT_EQ(3, crpc->silent_ticks);
-	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+	EXPECT_STREQ("", unit_log_get());
 	
-	/* Abort RPC. */
+	/* Timeout the peer. */
 	unit_log_clear();
+	crpc->peer->outstanding_resends = self->homa.timeout_resends;
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_rpc_timeouts);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_peer_timeouts);
 	EXPECT_EQ(RPC_READY, crpc->state);
 }
 TEST_F(homa_timer, homa_timer__rpc_ready)
@@ -188,10 +237,9 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 5000, 5000);
 	unit_log_clear();
-	srpc->num_resends = self->homa.abort_resends;
-	srpc->silent_ticks = self->homa.resend_ticks;
+	srpc->silent_ticks = self->homa.rpc_discard_ticks;
 	homa_timer(&self->homa);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_rpc_timeouts);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_rpc_discards);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }

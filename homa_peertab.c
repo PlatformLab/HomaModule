@@ -137,6 +137,8 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
+	peer->outstanding_resends = 0;
+	peer->most_recent_resend = 0;
 	INC_METRIC(peer_new_entries, 1);
 	
     done:

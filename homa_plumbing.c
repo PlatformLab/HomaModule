@@ -149,13 +149,6 @@ static struct proc_dir_entry *metrics_dir_entry = NULL;
 /* Used to configure sysctl access to Homa configuration parameters.*/
 static struct ctl_table homa_ctl_table[] = {
 	{
-		.procname	= "abort_resends",
-		.data		= &homa_data.abort_resends,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -275,6 +268,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "rpc_discard_ticks",
+		.data		= &homa_data.rpc_discard_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "rtt_bytes",
 		.data		= &homa_data.rtt_bytes,
 		.maxlen		= sizeof(int),
@@ -291,6 +291,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "throttle_min_bytes",
 		.data		= &homa_data.throttle_min_bytes,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "timeout_resends",
+		.data		= &homa_data.timeout_resends,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -396,10 +403,8 @@ static void __exit homa_unload(void) {
 	
 	tt_destroy();
 	
-	if (timer_kthread) {
+	if (timer_kthread)
 		wake_up_process(timer_kthread);
-		timer_kthread = NULL;
-	}
 	if (homa_offload_end() != 0)
 		printk(KERN_ERR "Homa couldn't stop offloads\n");
 	unregister_net_sysctl_table(homa_ctl_header);
