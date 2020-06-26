@@ -59,12 +59,12 @@ using std::string;
 /* Command-line parameter values (note: changes to default values must
  * also be reflected in client and server constructors): */
 uint32_t client_max = 1;
+uint32_t client_port_max = 1;
 int client_ports = 0;
 int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-uint32_t server_max = 1;
 double net_bw = 0.0;
 bool tcp_trunc = true;
 int port_receivers = 1;
@@ -166,6 +166,9 @@ void print_help(const char *name)
 		"commands are supported, each followed by a list of options supported\n"
 		"by that command:\n\n"
 		"client [options]      Start one or more client threads\n"
+		"    --client-max      Maximum number of outstanding requests from a single\n"
+		"                      client machine (divided equally among client ports)\n"
+		"                      (default: %d)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
@@ -175,13 +178,9 @@ void print_help(const char *name)
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
-		"    --port-max        Maximum number of outstanding requests from a single\n"
-		"                      client port (across all servers) (default: %d)\n"
 		"    --port-receivers  Number of threads to listen for responses on each\n"
 		"                      port (default: %d)\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --server-max      Maximum number of outstanding requests from a single\n"
-		"                      client port to a single server port (default: %d)\n"
 		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
 		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
@@ -204,8 +203,8 @@ void print_help(const char *name)
 		"    --ports           Number of ports to listen on (default: %d)\n\n"
 		"stop [options]        Stop existing client and/or server threads; each\n"
 		"                      option must be either 'clients' or 'servers'\n",
-		first_port, first_server, first_server, net_bw, client_ports,
-		client_max, port_receivers, protocol, server_max,
+		client_max, first_port, first_server, first_server, net_bw,
+		client_ports, port_receivers, protocol,
 		server_nodes, server_ports, workload,
 		first_port, protocol, port_threads, server_ports);
 }
@@ -1135,8 +1134,8 @@ class client {
 	
 	/**
 	 * @lag: time in rdtsc cycles by which we are running behind
-	 * because server_max or client_max was exceeded (i.e., the
-	 * request we just sent should have been sent @lag cycles ago).
+	 * because client_port_max was exceeded (i.e., the request
+	 * we just sent should have been sent @lag cycles ago).
 	 */
 	uint64_t lag;
 };
@@ -1439,7 +1438,7 @@ void homa_client::sender()
 			now = rdtsc();
 			if (now < next_start)
 				continue;
-			if ((total_requests - total_responses) < client_max)
+			if ((total_requests - total_responses) < client_port_max)
 				break;
 		}
 		
@@ -1447,12 +1446,6 @@ void homa_client::sender()
 		next_server++;
 		if (next_server >= request_servers.size())
 			next_server = 0;
-		if ((requests[server] - responses[server]) >= server_max) {
-			/* This server is overloaded, so skip it (don't
-			 * let one slow server stop the whole benchmark).
-			 */ 
-			continue;
-		}
 		
 		header->length = request_lengths[next_length];
 		if (header->length > HOMA_MAX_MESSAGE_LENGTH)
@@ -1683,7 +1676,7 @@ void tcp_client::sender()
 			now = rdtsc();
 			if ((now >= next_start)
 					&& ((total_requests - total_responses)
-					< client_max))
+					< client_port_max))
 				break;
 			
 			/* Try to finish I/O on backed up connections. */
@@ -1701,12 +1694,6 @@ void tcp_client::sender()
 		next_server++;
 		if (next_server >= request_servers.size())
 			next_server = 0;
-		if (requests[server] >= (responses[server] + server_max)) {
-			/* This server is overloaded, so skip it (don't
-			 * let one slow server stop the whole benchmark).
-			 */
-			continue;
-		}
 		
 		header.length = request_lengths[next_length];
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
@@ -1949,7 +1936,6 @@ int client_cmd(std::vector<string> &words)
 	client_ports = 1;
 	first_port = 4000;
 	first_server = 1;
-	server_max = 1;
 	net_bw = 0.0;
 	port_receivers = 1;
 	protocol = "homa";
@@ -1959,7 +1945,12 @@ int client_cmd(std::vector<string> &words)
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--first-port") == 0) {
+		if (strcmp(option, "--client-max") == 0) {
+			if (!parse_int(words, i+1, (int *) &client_max,
+					option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--first-port") == 0) {
 			if (!parse_int(words, i+1, &first_port, option))
 				return 0;
 			i++;
@@ -1981,11 +1972,6 @@ int client_cmd(std::vector<string> &words)
 			if (!parse_int(words, i+1, &client_ports, option))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--port-max") == 0) {
-			if (!parse_int(words, i+1, (int *) &client_max,
-					option))
-				return 0;
-			i++;
 		} else if (strcmp(option, "--port-receivers") == 0) {
 			if (!parse_int(words, i+1, &port_receivers, option))
 				return 0;
@@ -1997,11 +1983,6 @@ int client_cmd(std::vector<string> &words)
 				return 0;
 			}
 			protocol = words[i+1].c_str();
-			i++;
-		} else if (strcmp(option, "--server-max") == 0) {
-			if (!parse_int(words, i+1, (int *) &server_max,
-					option))
-				return 0;
 			i++;
 		} else if (strcmp(option, "--server-nodes") == 0) {
 			if (!parse_int(words, i+1, &server_nodes, option))
@@ -2025,6 +2006,9 @@ int client_cmd(std::vector<string> &words)
 		}
 	}
 	init_server_addrs();
+	client_port_max = client_max/client_ports;
+	if (client_port_max < 1)
+		client_port_max = 1;
 
 	/* Create clients. */
 	for (int i = 0; i < client_ports; i++) {
@@ -2068,8 +2052,8 @@ int dump_times_cmd(std::vector<string> &words)
 			time_buffer);
 	fprintf(f, "# --protocol %s, --workload %s, --net-bw %.1f --threads %d,\n",
 			protocol, workload, net_bw, client_ports);
-	fprintf(f, "# --server-nodes %d --server-ports %d, --port-max %d, --server-max %d\n",
-			server_nodes, server_ports, client_max, server_max);
+	fprintf(f, "# --server-nodes %d --server-ports %d, --client-max %d\n",
+			server_nodes, server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");
 	for (client *client: clients) {
 		__u32 start = client->total_responses % NUM_CLIENT_STATS;

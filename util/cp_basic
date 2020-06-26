@@ -57,7 +57,7 @@ if not options.plot_only:
     o = copy.deepcopy(options)
     o.client_ports = 1
     o.port_receivers = 0
-    o.port_max = 1
+    o.client_max = 1
     o.server_nodes = 1
     o.first_server  = 1
     o.server_ports = 1
@@ -96,7 +96,7 @@ if not options.plot_only:
     start_servers(range(1, options.num_nodes), options)
     o = copy.deepcopy(options)
     o.tcp_client_ports = 1
-    o.port_max = 1
+    o.client_max = 1
     o.server_nodes = 1
     o.first_server  = 1
     o.tcp_server_ports = 1
@@ -115,7 +115,7 @@ if not options.plot_only:
 
     # TCP client throughput (single client, many servers, large messages)
     o.workload = "500000"
-    o.port_max = 1
+    o.client_max = 1
     run_experiment("tcp_client_tput", range(0, 1), o)
 
     # TCP server RPC throughput (single server, many clients, small messages)
@@ -129,7 +129,7 @@ if not options.plot_only:
 
     # TCP server throughput (single server, many clients, large messages)
     o.workload = "500000"
-    o.port_max = 1
+    o.client_max = 1
     run_experiment("tcp_server_tput", range(1, options.num_nodes), o)
 
     log("Stopping nodes")

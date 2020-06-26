@@ -904,8 +904,9 @@ void homa_log_throttled(struct homa *homa)
 			printk(KERN_NOTICE "Skipping throttled RPC: locked\n");
 			continue;
 		}
-		bytes += rpc->msgout.length
-				- homa_data_offset(rpc->msgout.next_packet);
+		if (rpc->msgout.next_packet != NULL)
+			bytes += rpc->msgout.length - homa_data_offset(
+					rpc->msgout.next_packet);
 		if (rpcs <= 5)
 			homa_rpc_log(rpc);
 		homa_rpc_unlock(rpc);

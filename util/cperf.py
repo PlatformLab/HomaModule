@@ -59,15 +59,14 @@ verbose = False
 # own values.
 default_defaults = {
     'net_bw':            0.0,
+    'client_max':        2000,
     'client_ports':      5,
     'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'no_trunc':          '',
     'protocol':          'homa',
-    'port_max':          1000,
     'port_receivers':    3,
     'port_threads':      2,
     'seconds':           5,
-    'server_max':        500,
     'server_ports':      9,
     'tcp_client_ports':  9,
     'tcp_server_ports':  15,
@@ -145,6 +144,11 @@ def get_parser(description, usage, defaults = {}):
             help='Generate a total of B Gbits/sec of bandwidth from each '
             'client machine; 0 means run as fast as possible (default: %.2f)'
             % (defaults['net_bw']))
+    parser.add_argument('--client-max', type=int, dest='client_max',
+            metavar='count', default=defaults['client_max'],
+            help='Maximum number of requests each client machine can have '
+            'outstanding at a time (divided evenly among its ports) '
+            '(default: %d)' % (defaults['client_max']))
     parser.add_argument('--client-ports', type=int, dest='client_ports',
             metavar='count', default=defaults['client_ports'],
             help='Number of ports on which each client should issue requests '
@@ -164,11 +168,6 @@ def get_parser(description, usage, defaults = {}):
             help='Don\'t run homa_prio on nodes to adjust unscheduled cutoffs')
     parser.add_argument('--plot-only', dest='plot_only', action='store_true',
             help='Don\'t run experiments; generate plot(s) with existing data')
-    parser.add_argument('--port-max', type=int, dest='port_max',
-            metavar='count', default=defaults['port_max'],
-            help='Maximum number of requests each client thread can have '
-            'outstanding at a time (default: %d)'
-            % (defaults['port_max']))
     parser.add_argument('--port-receivers', type=int, dest='port_receivers',
             metavar='count', default=defaults['port_receivers'],
             help='Number of threads listening for responses on each client '
@@ -185,11 +184,6 @@ def get_parser(description, usage, defaults = {}):
             metavar='S', default=defaults['seconds'],
             help='Run each experiment for S seconds (default: %.1f)'
             % (defaults['seconds']))
-    parser.add_argument('--server-max', type=int, dest='server_max',
-            metavar='count', default=defaults['server_max'],
-            help='Maximum number of requests a single client thread can have '
-            'outstanding to a single server port at a time (default: %d)'
-            % (defaults['server_max']))
     parser.add_argument('--server-ports', type=int, dest='server_ports',
             metavar='count', default=defaults['server_ports'],
             help='Number of ports on which each server should listen '
@@ -245,7 +239,7 @@ def wait_output(string, nodes, cmd):
     global active_nodes
     outputs = []
     printed = False
-    time_limit = 10.0
+    time_limit = 15.0
 
     for id in nodes:
         while len(outputs) <= id:
@@ -430,14 +424,13 @@ def run_experiment(name, clients, options):
               of files created in the log directory.
     options:  A namespace that must contain at least the following attributes,
               which control the experiment:
+                  client_max
                   client_ports
                   first_server
                   net_bw
-                  port_max
                   port_receivers
                   protocol
                   seconds
-                  server_max
                   server_nodes
                   server_ports
                   tcp_client_ports
@@ -460,8 +453,7 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa":
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f --port-max %d --server-max %d --protocol %s " \
-                    "--id %d" % (
+                    "--net-bw %.3f --client-max %d --protocol %s --id %d" % (
                     options.client_ports,
                     options.port_receivers,
                     options.server_ports,
@@ -469,8 +461,7 @@ def run_experiment(name, clients, options):
                     num_servers,
                     first_server,
                     options.net_bw,
-                    options.port_max,
-                    options.server_max,
+                    options.client_max,
                     options.protocol,
                     id);
         else:
@@ -480,8 +471,7 @@ def run_experiment(name, clients, options):
                 trunc = ''
             command = "client --ports %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f %s --port-max %d --server-max %d "\
-                    "--protocol %s --id %d" % (
+                    "--net-bw %.3f %s --client-max %d --protocol %s --id %d" % (
                     options.tcp_client_ports,
                     options.tcp_server_ports,
                     options.workload,
@@ -489,8 +479,7 @@ def run_experiment(name, clients, options):
                     first_server,
                     options.net_bw,
                     trunc,
-                    options.port_max,
-                    options.server_max,
+                    options.client_max,
                     options.protocol,
                     id);
         active_nodes[id].stdin.write(command + "\n")
@@ -508,7 +497,8 @@ def run_experiment(name, clients, options):
         for id in active_nodes:
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
                     stdout=subprocess.DEVNULL)
-    do_cmd("dump_times /dev/null", clients)
+    if not "no_rtt_files" in options:
+        do_cmd("dump_times /dev/null", clients)
     do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
     time.sleep(options.seconds)
     do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
@@ -521,10 +511,10 @@ def run_experiment(name, clients, options):
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
             f.close()
+    do_cmd("stop senders", clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=1"], clients)
-    do_cmd("stop senders", clients)
     do_cmd("stop clients", clients)
     if not "no_rtt_files" in options:
         for id in clients:
