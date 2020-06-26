@@ -653,14 +653,7 @@ def scan_logs():
                 vlog("%s average: %.1f Kops/sec"
                         % (type.capitalize(), totals[kops_key]/len(averages)))
 
-        for node in sorted(exp.keys()):
-            if "outstanding_rpcs" in exp[node]:
-                counts = exp[node]["outstanding_rpcs"]
-                log("\nOutstanding RPCs for %s: %s" % (node,
-                        ", ".join(map(lambda x: "%d" % (x), counts))))
-                break
-
-        log("Clients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("\nClients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["client"]),
                 totals["client_mbps"]/len(nodes["client"]),
                 totals["client_kops"]/len(nodes["client"])))
@@ -672,6 +665,13 @@ def scan_logs():
                 "(avg per node)" % (name, len(nodes["all"]),
                 (totals["client_mbps"] + totals["server_mbps"])/len(nodes["all"]),
                 (totals["client_kops"] + totals["server_kops"])/len(nodes["all"])))
+
+        for node in sorted(exp.keys()):
+            if "outstanding_rpcs" in exp[node]:
+                counts = exp[node]["outstanding_rpcs"]
+                log("Outstanding RPCs for %s: %s" % (node,
+                        ", ".join(map(lambda x: "%d" % (x), counts))))
+                break
 
 def read_rtts(file, rtts):
     """
