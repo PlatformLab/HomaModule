@@ -29,6 +29,7 @@ extern struct homa_rpc
 			int id, int req_length, int resp_length);
 extern __be32        unit_get_in_addr(char *s);
 extern int           unit_list_length(struct list_head *head);
+extern void          unit_log_active_ids(struct homa_sock *hsk);
 extern void          unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 extern void          unit_log_frag_list(struct sk_buff *skb, int verbose);
 extern void          unit_log_grantables(struct homa *homa);

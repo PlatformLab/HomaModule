@@ -276,6 +276,74 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_softirq__reorder_incoming_packets)
+{
+	struct sk_buff *skb, *skb2, *skb3, *skb4;
+	
+	self->data.common.id = 2000;
+	self->data.message_length = htonl(2000);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.id = 200;
+	self->data.message_length = htonl(200);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
+	self->data.common.id = 300;
+	self->data.message_length = htonl(300);
+	skb3 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
+	self->data.common.id = 5000;
+	self->data.message_length = htonl(5000);
+	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = skb3;
+	skb3->next = skb4;
+	skb4->next = NULL;
+	homa_softirq(skb);
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("200 300 2000 5000", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__reorder_short_packet_at_front)
+{
+	struct sk_buff *skb, *skb2, *skb3, *skb4;
+	
+	self->data.common.id = 200;
+	self->data.message_length = htonl(200);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
+	self->data.common.id = 4000;
+	self->data.message_length = htonl(4000);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.id = 300;
+	self->data.message_length = htonl(300);
+	skb3 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
+	self->data.common.id = 5000;
+	self->data.message_length = htonl(5000);
+	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = skb3;
+	skb3->next = skb4;
+	skb4->next = NULL;
+	homa_softirq(skb);
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("200 300 4000 5000", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
+{
+	struct sk_buff *skb, *skb2, *skb3;
+	
+	self->data.common.id = 2000;
+	self->data.message_length = htonl(2000);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.id = 3000;
+	self->data.message_length = htonl(3000);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.id = 5000;
+	self->data.message_length = htonl(5000);
+	skb3 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = skb3;
+	skb3->next = NULL;
+	homa_softirq(skb);
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("2000 3000 5000", unit_log_get());
+}
 TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 {
 	struct sk_buff *skb;

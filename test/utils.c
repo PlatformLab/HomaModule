@@ -148,6 +148,18 @@ int unit_list_length(struct list_head *head)
 }
 
 /**
+ * unit_log_active_ids() - Appended to the test log a list of the active
+ * RPC ids for a given socket, in order.
+ * @hsk:   Socket whose active RPC ids should be logged.
+ */
+void unit_log_active_ids(struct homa_sock *hsk)
+{
+	struct homa_rpc *rpc;
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
+		unit_log_printf(" ", "%llu", rpc->id);
+}
+
+/**
  * unit_log_frag_list() - Append to the test log a human-readable description
  * of all of the packets on a given skb's frag_list.
  * @skb:         Packet whose frag_list is of interest.

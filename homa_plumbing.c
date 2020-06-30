@@ -922,7 +922,8 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
 int homa_softirq(struct sk_buff *skb) {
 	__be32 saddr;
 	struct common_header *h;
-	struct sk_buff *others;
+	struct sk_buff *packets, *short_packets, *next;
+	struct sk_buff **prev_link, **short_link;
 	__u16 dport;
 	static __u64 last = 0;
 	__u64 start;
@@ -948,15 +949,34 @@ int homa_softirq(struct sk_buff *skb) {
 	last = start;
 	
 	/* skb may actually contain many distinct packets, linked through
-	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Each
-	 * iteration through this loop processes one of those packets.
+	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. First, pull
+	 * out all the short packets into a separate list, then splice this
+	 * list into the front of the packet list, so that all the short
+	 * packets will get served first.
 	 */
-	others = skb_shinfo(skb)->frag_list;
+	
+	skb->next = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
-	while (1) {
+	packets = skb;
+	prev_link = &packets;
+	short_packets = NULL;
+	short_link = &short_packets;
+	for (skb = packets; skb != NULL; skb = skb->next) {
+		if (skb->len < 1400) {
+			*prev_link = skb->next;
+			*short_link = skb;
+			short_link = &skb->next;
+		} else
+			prev_link = &skb->next;
+	}
+	*short_link = packets;
+	packets = short_packets;
+
+	for (skb = packets; skb != NULL; skb = next) {
+		next = skb->next;
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
-		
+
 		/* Make sure the header is available at skb->data. One
 		 * complication: it's possible that the IP header hasn't
 		 * yet been removed (this happens for GRO packets on
@@ -1007,13 +1027,13 @@ int homa_softirq(struct sk_buff *skb) {
 						ntohs(h->dport), ntohl(saddr),
 						ntohs(h->sport), h->id);
 				tt_freeze();
+//				homa_rpc_log_active(homa, h->id);
+//				homa_log_grantable_list(homa);
+//				homa_log_throttled(homa);
 			}
 			goto discard;
 		}
 		
-		/* Find the socket and existing RPC (if there is one) for this
-		 * packet, and lock the RPC.
-		 */
 		dport = ntohs(h->dport);
 		hsk = homa_sock_find(&homa->port_map, dport);
 		if (!hsk) {
@@ -1031,16 +1051,10 @@ int homa_softirq(struct sk_buff *skb) {
 		}
 		
 		homa_pkt_dispatch(skb, hsk);
-		goto next_packet;
+		continue;
 		
 discard:
 		kfree_skb(skb);
-		
-next_packet:
-		if (others == NULL)
-			break;
-		skb = others;
-		others = others->next;
 	}
 	
 	homa_send_grants(homa);
