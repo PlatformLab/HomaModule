@@ -1276,6 +1276,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) rpc->hsk;
 	sk->sk_data_ready(sk);
+	tt_record1("homa_rpc_ready finished queuing id %d", rpc->id);
 	return;
 	
 handoff:
@@ -1297,6 +1298,7 @@ handoff:
 		interest->response_links.next = LIST_POISON1;
 	}
 	wake_up_process(interest->thread);
+	tt_record1("homa_rpc_ready handed off id %d", rpc->id);
 }
 
 /**
