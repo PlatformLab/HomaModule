@@ -129,8 +129,8 @@ extern bool      tt_test_no_khz;
 /* Debugging variables exposed by the version of timetrace built into
  * the kernel.
  */
-extern int64_t    tt_debug_int64[10];
-extern void *     tt_debug_ptr[10];
+extern int64_t    tt_debug_int64[100];
+extern void *     tt_debug_ptr[100];
 
 /**
  * tt_rdtsc(): return the current value of the fine-grain CPU cycle counter
