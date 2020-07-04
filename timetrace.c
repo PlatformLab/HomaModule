@@ -167,6 +167,10 @@ void tt_destroy(void)
 		tt_linux_buffers[i] = NULL;
 	}
 	tt_linux_inc_metrics = tt_linux_skip_metrics;
+	for (i = 0; i < 100; i++) {
+		tt_debug_int64[i] = 0;
+		tt_debug_ptr[i] = 0;
+	}
 #endif
 	
 	spin_unlock(&tt_lock);
