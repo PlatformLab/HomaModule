@@ -428,7 +428,12 @@ int homa_rpc_reap(struct homa_sock *hsk)
 			INC_METRIC(disabled_rpc_reaps, 1);
 			continue;
 		}
-		tt_record1("Reaping rpc id %d", rpc->id);
+		if (rpc->msgout.packets)
+			tt_record2("Reaping rpc msgout, id %d, peer 0x%x",
+					rpc->id, ntohl(rpc->peer->addr));
+		else
+			tt_record2("Reaping rpc msgin, id %d, peer 0x%x",
+					rpc->id, ntohl(rpc->peer->addr));
 		rpc->magic = 0;
 		if (rpc->msgout.length >= 0) {
 			while (rpc->msgout.packets) {
