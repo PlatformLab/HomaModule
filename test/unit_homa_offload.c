@@ -23,6 +23,7 @@
 extern struct homa *homa;
 
 FIXTURE(homa_offload) {
+	struct homa homa;
 	__be32 ip;
 	struct data_header header;
 	struct sk_buff *gro_list;
@@ -30,6 +31,7 @@ FIXTURE(homa_offload) {
 FIXTURE_SETUP(homa_offload)
 {
 	struct sk_buff *skb, *skb2;
+	homa_init(&self->homa);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
@@ -63,6 +65,7 @@ FIXTURE_TEARDOWN(homa_offload)
 		kfree_skb(self->gro_list);
 		self->gro_list = next;
 	}
+	homa_destroy(&self->homa);
 	unit_teardown();
 }
 
@@ -146,4 +149,43 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	EXPECT_EQ(1, same_flow);
 	same_flow = NAPI_GRO_CB(skb3)->same_flow;
 	EXPECT_EQ(1, same_flow);
+}
+
+TEST_F(homa_offload, homa_gro_complete_core_id_wraparound)
+{
+	struct sk_buff *skb = self->gro_list;
+	homa_cores[6]->last_active = 30;
+	homa_cores[7]->last_active = 25;
+	homa_cores[0]->last_active = 20;
+	homa_cores[1]->last_active = 15;
+	homa_cores[2]->last_active = 10;
+	
+	cpu_number = 7;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(2, skb->hash - 32);
+	
+	cpu_number = 6;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(1, skb->hash - 32);
+	
+	cpu_number = 5;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(0, skb->hash - 32);
+}
+TEST_F(homa_offload, homa_gro_complete_pick_core)
+{
+	struct sk_buff *skb = self->gro_list;
+	homa_cores[2]->last_active = 2;
+	homa_cores[3]->last_active = 4;
+	homa_cores[4]->last_active = 6;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(2, skb->hash - 32);
+	
+	homa_cores[2]->last_active = 10;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(3, skb->hash - 32);
+	
+	homa_cores[3]->last_active = 20;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(4, skb->hash - 32);
 }

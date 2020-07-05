@@ -82,6 +82,8 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	struct sk_buff *held_skb;
 	struct sk_buff **pp;
 	
+	homa_cores[smp_processor_id()]->last_active = get_cycles();
+	
 	/* Get access to the Homa header for the packet. I don't understand
 	 * why such ornate code is needed, but this mimics what TCP does.
 	 */
@@ -151,11 +153,13 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	struct common_header *h = (struct common_header *)
 			skb_transport_header(skb);
 	struct data_header *d = (struct data_header *) h;
+	struct rps_sock_flow_table *sock_flow_table;
 	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
-	/* Set the hash for the skb, which will be used for RPS (the default
-	 * hash doesn't understand Homa, so it doesn't include port #'s).
+	/* Choose the core that will handle SoftIRQ processing for this
+	 * group of packets. We do this by setting the packet hash and
+	 * an entry to the socket flow table that will match that hash.
 	 * Setting the hash here is suboptimal, because this function doesn't
 	 * get invoked for skb's where nothing was merged onto them.
 	 * However, setting the hash in homa_gro_receive doesn't work either,
@@ -163,7 +167,45 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	 * the default hash of a new packet with the recomputed hash of a
 	 * held packet. 
 	 */
-	__skb_set_sw_hash(skb, jhash_3words(ip_hdr(skb)->saddr,
-			h->sport, h->dport, 0), false);
+	
+	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	if (sock_flow_table != NULL) {
+		/* Pick the next three cores in order after the current
+		 * one, and choose the one that has been idle the longest.
+		 */
+		int target, id1, id2, id3;
+		int hash;
+		__u64 time, time1, time2, time3;
+		
+		id1 = smp_processor_id() + 1;
+		if (unlikely(id1 >= nr_cpu_ids))
+			id1 = 0;
+		id2 = id1 + 1;
+		if (unlikely(id2 >= nr_cpu_ids))
+			id2 = 0;
+		id3 = id2 + 1;
+		if (unlikely(id3 >= nr_cpu_ids))
+			id3 = 0;
+		time1 = homa_cores[id1]->last_active;
+		time2 = homa_cores[id2]->last_active;
+		time3 = homa_cores[id3]->last_active;
+		target = id1;
+		time = time1;
+		if (time2 < time) {
+			target = id2;
+			time = time2;
+		}
+		if (time3 <time)
+			target = id3;
+		
+		hash = target + rps_cpu_mask + 1;
+		if (sock_flow_table->ents[target] != target) {
+			rcu_read_lock();
+			sock_flow_table = rcu_dereference(rps_sock_flow_table);
+			sock_flow_table->ents[hash] = hash;
+			rcu_read_unlock();
+		}
+		__skb_set_sw_hash(skb, hash, false);
+	}
 	return 0;
 }

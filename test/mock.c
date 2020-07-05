@@ -151,6 +151,10 @@ unsigned long page_offset_base = 0;
 unsigned long phys_base = 0;
 unsigned long vmemmap_base = 0;
 int __preempt_count = 0;
+char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
+struct rps_sock_flow_table *rps_sock_flow_table
+		= (struct rps_sock_flow_table *) sock_flow_table;
+__u32 rps_cpu_mask = 0x1f;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}

@@ -1825,6 +1825,15 @@ struct homa_metrics {
  * core, to hold information that needs to be kept on a per-core basis.
  */
 struct homa_core {
+	
+	/**
+	 * @last_active: the last time (in get_cycle() units) that
+	 * there was system activity, such NAPI or SoftIRQ, on this
+	 * core. Used to pick a less-busy core for assigning SoftIRQ
+	 * handlers.
+	 */
+	__u64 last_active;
+	
 	/**
 	 * @thread: the most recent thread to invoke a Homa system call
 	 * on this core, or NULL if none.
@@ -1832,7 +1841,7 @@ struct homa_core {
 	struct task_struct *thread;
 	
 	/**
-	 * @syscall_end_time: the time, in rdtsc units, when the last
+	 * @syscall_end_time: the time, in get_cycle() units, when the last
 	 * Homa system call completed on this core. Meaningless if thread
 	 * is NULL.
 	 */

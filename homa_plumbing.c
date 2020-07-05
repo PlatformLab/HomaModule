@@ -934,6 +934,7 @@ int homa_softirq(struct sk_buff *skb) {
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
+	homa_cores[smp_processor_id()]->last_active = start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
