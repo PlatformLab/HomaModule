@@ -502,6 +502,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct iov_iter iter;
 	int err;
 	int result;
+	uint64_t elapsed;
 	struct homa_rpc *rpc = NULL;
 
 	tt_record2("homa_ioc_recv starting, port %d, pid %d",
@@ -518,6 +519,19 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(rpc);
 		rpc = NULL;
 		goto error;
+	}
+	elapsed = get_cycles() - rpc->start_cycles;
+	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
+			&& (rpc->msgin.total_length < 500) && (rpc->is_client)
+			&& !tt_frozen) {
+		struct freeze_header freeze;
+		hsk->homa->temp[1] = 0;
+		tt_record4("Freezing because elapsed time is %d cycles, "
+				"id %d, peer 0x%x, length %d",
+				elapsed, rpc->id, ntohl(rpc->peer->addr),
+				rpc->msgin.total_length);
+		tt_freeze();
+		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}
 	
 	/* Must free the RPC lock before copying to user space (see
@@ -672,6 +686,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
+	crpc->start_cycles = get_cycles();
 	homa_xmit_data(crpc, false);
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
