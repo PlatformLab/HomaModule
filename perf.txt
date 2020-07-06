@@ -2,6 +2,31 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
+* (July 2020) Small-message latency. The best-case RTT for small messages
+  is very difficult to achieve under any real-world conditions. As soon as
+  there is any load whatsoever, best-case latency jumps from 15 us to 25-40 us
+  (depending on overall load). The latency CDF for Homa is almost completely
+  unaffected by load (whereas it varies dramatically with TCP).
+
+* (July 2020) Small-request optimization: if NAPI and SoftIRQ for a packet
+  are both done on the same core, it reduces round-trip latency by about
+  2 us for short messages; however, this works against the optimization below
+  for spreading out the load. I tried implementing it only for packets that
+  don't get merged for GRO, but it didn't make a noticeable difference (see
+  note above about best-case latency for short messages).
+
+* (June-July 2020) Analyzing tail latency. P99 latency under W4 seems to
+  occur primarily because of core congestion: a core becomes completely
+  consumed with either NAPI or SoftIRQ processing (or both) for a long
+  message, which keeps it from processing a short message. For example,
+  the user thread that handles the message might be on the congested core,
+  and hence doesn't run for a long time while the core does NAPI/SoftIRQ
+  work. I modified Homa's GRO code to pick the SoftIRQ core for each batch
+  of packets intelligently (choose a core that doesn't appear to be busy
+  with either NAPI or SoftIRQ processing), and this helped a bit, but not
+  a lot (10-20% reduction in P99 for W4). Even with clever assignment of
+  SoftIRQ processing, the load from NAPI can be enough to monopolize a core.
+
 * (June 2020) Cost of interrupt handler for receiving packets:
       mlx5e_mpwqe_fill_rx_skb: 200 ns
       napi_gro_receive:        150 ns
