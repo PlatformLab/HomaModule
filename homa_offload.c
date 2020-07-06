@@ -199,7 +199,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			target = id3;
 		
 		hash = target + rps_cpu_mask + 1;
-		if (sock_flow_table->ents[target] != target) {
+		if (sock_flow_table->ents[hash] != hash) {
 			rcu_read_lock();
 			sock_flow_table = rcu_dereference(rps_sock_flow_table);
 			sock_flow_table->ents[hash] = hash;
