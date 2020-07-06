@@ -186,7 +186,7 @@ void homa_timer(struct homa *homa)
 	
 	start = get_cycles();
 	homa->timer_ticks++;
-	tt_record("homa_timer starting");
+//	tt_record("homa_timer starting");
 
 	/* Scan all existing RPCs in all sockets.  The rcu_read_lock
 	 * below prevents sockets from being deleted during the scan.
@@ -239,5 +239,5 @@ void homa_timer(struct homa *homa)
 	}
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
-	tt_record("homa_timer finishing");
+//	tt_record("homa_timer finishing");
 }
