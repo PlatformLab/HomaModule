@@ -69,7 +69,6 @@ if not options.plot_only:
     # Homa client RPC throughput (single client, many servers, small messages)
     o = copy.deepcopy(options)
     o.workload = "100"
-    o.server_max = 1
     o.server_nodes = options.num_nodes-1
     o.first_server = 1
     run_experiment("homa_client_rpc_tput", range(0, 1), o)
@@ -82,7 +81,6 @@ if not options.plot_only:
     start_servers(range(0, 1), options)
     o = copy.deepcopy(options)
     o.workload = "100"
-    o.server_max = 1
     o.server_nodes = 1
     o.first_server = 0
     run_experiment("homa_server_rpc_tput", range(1, options.num_nodes), o)
@@ -108,7 +106,6 @@ if not options.plot_only:
     # TCP client RPC throughput (single client, many servers, small messages)
     o = copy.deepcopy(options)
     o.workload = "100"
-    o.server_max = 2
     o.server_nodes = options.num_nodes-1
     o.first_server = 1
     run_experiment("tcp_client_rpc_tput", range(0, 1), o)
@@ -122,7 +119,6 @@ if not options.plot_only:
     start_servers(range(0, 1), options)
     o = copy.deepcopy(options)
     o.workload = "100"
-    o.server_max = 1
     o.server_nodes = 1
     o.first_server = 0
     run_experiment("tcp_server_rpc_tput", range(1, options.num_nodes), o)
