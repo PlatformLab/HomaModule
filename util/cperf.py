@@ -138,7 +138,8 @@ def get_parser(description, usage, defaults = {}):
             defaults[key] = default_defaults[key]
     parser = argparse.ArgumentParser(description=description + ' The options '
             'below may include some that are not used by this particular '
-            'benchmark', usage=usage,add_help=False)
+            'benchmark', usage=usage, add_help=False,
+            conflict_handler='resolve')
     parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
             metavar='B', default=defaults['net_bw'],
             help='Generate a total of B Gbits/sec of bandwidth from each '

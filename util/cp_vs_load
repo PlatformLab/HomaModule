@@ -1,0 +1,116 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark generates CDFs of short-message latency for Homa
+# and TCP under different loads.
+# Type "cp_vs_load --help" for documentation.
+
+from cperf import *
+
+# Info to use (workload and corresponding bandwidth) when running all
+# of the workloads.
+load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
+
+parser = get_parser(description=
+        'Measures slowdown as a function of message size for Homa and TCP.',
+        usage='%(prog)s [options]',
+        defaults={
+            "server_ports":     3,
+            "port_threads":     3,
+            "client_ports":     3,
+            "port_receivers":   3,
+            "tcp_server_ports": 9,
+            "tcp_client_ports": 5,
+            "workload":         ""
+        })
+parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
+        metavar='B', required=True,
+        help='Maximum bandwidth (Gbits/sec) to generate from each client '
+        'machine; additional experiments will run at 0.1, 0.2, and 0.5 this '
+        'value')
+parser.add_argument('-w', '--workload', dest='workload',
+        metavar='W', required = True,
+        help='Workload to use for benchmark: w1-w5 or number')
+options = parser.parse_args()
+init(options)
+servers = range(0, options.num_nodes)
+clients = range(0, options.num_nodes)
+fractions = [1.0, 0.5, 0.2, 0.1]
+
+# Run the experiments
+if not options.plot_only:
+    try:
+        options.protocol = "homa"
+        start_servers(servers, options)
+
+        o = copy.deepcopy(options)
+        o.net_bw = 0.0
+        o.client_ports = 1
+        o.client_max = 1
+        o.server_ports = 1
+        o.server_nodes = 1
+        o.first_server = 1
+        o.seconds = 5
+        run_experiment("unloaded_%s" % (options.workload), range(0, 1), o)
+
+        for fraction in fractions:
+            o = copy.deepcopy(options)
+            o.net_bw = options.net_bw*fraction/2.0
+            run_experiment("homa%3.1f_%s" % (fraction, options.workload),
+                    clients, o)
+
+        options.protocol = "tcp"
+        start_servers(servers, options)
+        for fraction in fractions:
+            o = copy.deepcopy(options)
+            o.net_bw = options.net_bw*fraction/2.0
+            run_experiment("tcp%3.1f_%s" % (fraction, options.workload),
+                    clients, o)
+    except Exception as e:
+        log(traceback.format_exc())
+
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+# Generate plots and reports
+unloaded_exp = "unloaded_%s" % (options.workload)
+set_unloaded(unloaded_exp)
+
+# Generate CDF of small-message RTTs.
+log("Generating short message CDFs")
+title = "%s %d nodes" % (options.workload.capitalize(), options.num_nodes)
+start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
+        "Cumulative Fraction of Short Messages")
+
+set_unloaded("unloaded_%s" % (options.workload))
+styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
+for fraction in fractions:
+    x, y = get_short_cdf("tcp%3.1f_%s" % (fraction, options.workload))
+    plt.plot(x, y, label="TCP %4.2f GB/sec" % (fraction * options.net_bw),
+            color="#1f77b4", linestyle=styles.pop())
+styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
+for fraction in fractions:
+    x, y = get_short_cdf("homa%3.1f_%s" % (fraction, options.workload))
+    plt.plot(x, y, label="Homa %4.2f GB/sec" % (fraction * options.net_bw),
+            color="#ff7f0e", linestyle=styles.pop())
+x, y = get_short_cdf(unloaded_exp)
+plt.plot(x, y, label="Homa best case", color="#2ca02c")
+
+plt.legend(loc="upper right")
+plt.savefig("%s/reports/load_cdfs_%s.pdf" % (options.log_dir, options.workload))
+
+# print(plt.rcParams['axes.prop_cycle'].by_key()['color'])
