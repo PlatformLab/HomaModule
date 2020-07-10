@@ -1,0 +1,114 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark measures the throughput of a single client as a
+# function of the number of sending threads
+
+from cperf import *
+
+parser = get_parser(description=
+        'Measures throughput of a single client as a function of the number '
+        ' of sending threads.',
+        usage='%(prog)s [options]',
+        defaults={
+            "server_ports":   6,
+            "port_threads":   3})
+options = parser.parse_args()
+options.no_rtt_files = True
+init(options)
+if options.num_nodes < 2:
+    print("--num_nodes too small (%d): must be at least 2"
+            % (options.num_nodes))
+    sys.exit(-1)
+dir = "%s/reports" % (options.log_dir)
+if not os.path.exists(dir):
+    os.makedirs(dir)
+
+options.server_nodes = options.num_nodes - 1
+options.first_server = 1
+options.port_receivers = 1
+options.no_rtt_files = True
+options.net_bw = 0.0
+workloads = ["w1", "w2", "w3", "w4", "w5"]
+port_range = range(1,11)
+
+# Run the experiments, if desired
+if not options.plot_only:
+    start_servers(range(1, options.num_nodes), options)
+    for workload in workloads:
+        for ports in port_range:
+            exp = "%s_%s_%d" % (options.protocol, workload, ports)
+            options.workload = workload
+            options.client_ports = ports
+            options.tcp_client_ports = ports
+            run_experiment(exp, range(0,1), options)
+    log("Stopping nodes")
+    stop_nodes()
+
+# Parse the log files to extract useful data
+experiments = {}
+scan_log(options.log_dir + "/node-0.log", "node-0", experiments)
+
+# Keys are workload names, values are lists of throughputs for each
+# number of ports
+tput = {}
+
+for workload in workloads:
+    tput[workload] = []
+    for ports in port_range:
+        exp = "%s_%s_%d" % (options.protocol, workload, ports)
+        node = experiments[exp]["node-0"]
+        readings = node["client_kops"]
+        if len(readings) == 0:
+            raise Error("No client RPC throughput found for experiment %s"
+                    % (exp))
+        tput[workload].append(sum(readings)/len(readings))
+        
+# print(tput)
+fig, (ax1, ax2) = plt.subplots(2, figsize=[4, 5])
+fig.suptitle("%s Single-Client Throughput" % (options.protocol.capitalize()),
+        y=0.95)
+plt.rcParams.update({'font.size': 10})
+ax1.set_ylim(0, 2000)
+ax2.set_ylim(0, 60)
+for axis in [ax1, ax2]:
+    axis.get_xaxis().set_tick_params(direction='in')
+    axis.get_yaxis().set_tick_params(direction='in')
+    axis.set_xlim(0, port_range[-1])
+    top = axis.twiny()
+    top.set_xlim(0, port_range[-1])
+    top.set_xticklabels([])
+    top.get_xaxis().set_tick_params(direction='in')
+
+    axis.set_ylabel("Kops/second")
+    right = axis.twinx()
+    right.set_ylim(0, axis.get_ylim()[1])
+    right.set_yticklabels([])
+    right.get_yaxis().set_tick_params(direction='in')
+ax1.grid(axis='y', which='major', linestyle='dotted')
+ax2.set_xlabel("Sending threads")
+ax2.grid(axis='y', which='major', linestyle='dotted')
+colors = ['#9467bd', '#d62728', '#2ca02c', '#ff7f0e', '#1f77b4']
+for workload in workloads:
+    if (workload == "w4") or (workload == "w5"):
+        ax2.plot(port_range, tput[workload], label=workload, color=colors.pop())
+    else:
+        ax1.plot(port_range, tput[workload], label=workload, color=colors.pop())
+
+ax1.legend(loc="upper left", prop={'size': 9})
+ax2.legend(loc="upper left", prop={'size': 9})
+# plt.tight_layout()
+plt.savefig("%s/reports/%s_client_tput.pdf" % (options.log_dir, options.protocol))

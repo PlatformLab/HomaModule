@@ -423,6 +423,7 @@ def run_experiment(name, clients, options):
 
     name:     Identifier for this experiment, which is used in the names
               of files created in the log directory.
+    clients:  List of node numbers on which to run clients
     options:  A namespace that must contain at least the following attributes,
               which control the experiment:
                   client_max
