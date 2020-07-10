@@ -2,6 +2,17 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order: most recent notes first.
 
+* (July 2020) P999 latency for small messages. This is 5 ms or more in most
+  of the workloads, and it turns out to be caused by Linux SoftIRQ handling.
+  If __do_softirq thinks it is taking too much time, it stops processing
+  all softirqs in the high-priority NAPI thread, and instead defers them
+  to another thread, softirqd, which intentionally runs at a low priority
+  so as not to interfere with user threads. This sometimes means it has to
+  wait for a full time slice for other threads, which seems to be 5-7 ms.
+  I tried disabling this feature of __do_softirq, so that all requests get
+  processed in the high-priority thread, and the P999 latency improved by
+  about 10x (< 1 ms worst case).
+
 * (July 2020) Small-message latency. The best-case RTT for small messages
   is very difficult to achieve under any real-world conditions. As soon as
   there is any load whatsoever, best-case latency jumps from 15 us to 25-40 us

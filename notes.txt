@@ -5,6 +5,7 @@ Notes for Homa implementation in Linux:
   * Get larger MTUs working again
   * Problem with grants: whether or not to keep on grantable list after
     fully granted.
+  * Return UNKNOWN in homa_softirq if socket isn't known.
 
 * Performance-related tasks:
   * Implement new benchmark that segregates clients and servers on
@@ -13,14 +14,8 @@ Notes for Homa implementation in Linux:
     existing benchmarks, but could matter more for real applications, where
     long messages are likely to have longer service times.
   * Experiment with RPS/RFS options.
-  * Redo hashing function in homa_offload to distribute load more evenly
-    (e.g. don't hash based on packet info). Is there some way to hash to
-    the same location under low load, but use multiple cores under high
-    load? Tried simple totally random approach, but that made things worse.
   * Make sure TCP is optimized (e.g. DCTCP)
   * Check out "-w 500000": Homa has less throughput than TCP.
-  * In W4, look at small-mssage CDF: P999 for Homa is still bad (almost 10 ms!)
-    Figure out why? Context switches?
   * Understand high TCP P99 for W1?
   * Modify code to reduce maximum rate of reaping, especially after large
     bursts of deletions?
