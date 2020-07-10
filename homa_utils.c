@@ -1092,8 +1092,12 @@ char *homa_print_metrics(struct homa *homa)
 				m->fast_wakeups);
 		homa_append_metric(homa,
 				"slow_wakeups              %15llu  "
-				"Messages receipts for which thread had to sleep\n",
+				"Messages received after thread went to sleep\n",
 				m->slow_wakeups);
+		homa_append_metric(homa,
+				"poll_cycles               %15llu  "
+				"Time spent polling for incoming messages\n",
+				m->poll_cycles);
 		homa_append_metric(homa,
 				"softirq_calls             %15llu  "
 				"Calls to homa_softirq (i.e. # GRO pkts "

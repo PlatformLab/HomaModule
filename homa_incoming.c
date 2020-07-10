@@ -1024,7 +1024,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
 	int sock_locked = 0;
-	uint64_t stop_polling;
+	uint64_t poll_start, now;
 	
 	/* Normally this loop only gets executed once, but we may have
 	 * to start again if a "found" RPC gets deleted from underneath us.
@@ -1136,17 +1136,22 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		/* Busy-wait for a while before going to sleep; this avoids
 		 * context-switching overhead to wake up.
 		 */
-		stop_polling = get_cycles() + hsk->homa->poll_cycles;
-		while (get_cycles() < stop_polling) {
+		poll_start = get_cycles();
+		while (1) {
+			now = get_cycles();
+			if (now >= (poll_start + hsk->homa->poll_cycles))
+				break;
 			if (atomic_long_read(&interest.id)) {
 				tt_record1("received message while polling, "
 						"id %d",
 						atomic_long_read(&interest.id));
 				INC_METRIC(fast_wakeups, 1);
+				INC_METRIC(poll_cycles, now - poll_start);
 				goto lock_rpc;
 			}
 			schedule();
 		}
+		INC_METRIC(poll_cycles, now - poll_start);
 		INC_METRIC(slow_wakeups, 1);
 		
 		/* Now it's time to sleep. */

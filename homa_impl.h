@@ -1515,6 +1515,12 @@ struct homa_metrics {
 	__u64 slow_wakeups;
 	
 	/**
+	 * @poll_cycles: total time spent in the polling loop in
+	 * homa_wait_for_message, as measured with get_cycles().
+	 */
+	__u64 poll_cycles;
+	
+	/**
 	 * @softirq_calls: total number of calls to homa_softirq (i.e.,
 	 * total number of GRO packets processed, each of which could contain
 	 * multiple Homa packets.

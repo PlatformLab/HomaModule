@@ -249,15 +249,19 @@ if elapsed_secs != 0:
     print("-------------------------")
     total_cores = 0.0
     total_syscalls = 0
-    for op in ["send", "recv", "reply", "user"]:
+    for op in ["send", "recv", "poll", "reply", "user"]:
         time = float(deltas[op + "_cycles"])
         cores = time/time_delta
-        total_cores += cores
-        if op != "user":
+        if op == "poll":
+            calls = float(deltas["recv_calls"])
+            label = "polling in recv"
+        elif op != "user":
+            total_cores += cores
             calls = float(deltas[op + "_calls"])
             total_syscalls += calls
             label = op + " syscall"
         else:
+            total_cores += cores
             calls = total_syscalls
             label = "call/return/user"
         if calls == 0:
