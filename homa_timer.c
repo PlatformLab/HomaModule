@@ -83,6 +83,7 @@ int homa_check_timeout(struct homa_rpc *rpc)
 						sizeof(freeze), rpc);
 				tt_freeze();
 			}
+			rpc->peer->outstanding_resends = 0;
 			return 1;
 		}
 	} else {

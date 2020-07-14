@@ -97,6 +97,7 @@ TEST_F(homa_timer, homa_check_timeout__client_rpc_peer_timeout)
 	crpc->peer->outstanding_resends = self->homa.timeout_resends;
 	EXPECT_EQ(1, homa_check_timeout(crpc));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_peer_timeouts);
+	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
 TEST_F(homa_timer, homa_check_timeout__server_rpc__all_granted_bytes_received)
 {
