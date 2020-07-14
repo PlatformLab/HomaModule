@@ -51,6 +51,32 @@ int homa_offload_end(void)
 }
 
 /**
+ * homa_set_softirq_cpu() - Arrange for SoftIRQ processing of a packet to
+ * occur on a specific core (creates a socket flow table entry for the core,
+ * and sets the packet's hash to map to the given entry).
+ * @skb:  Incoming packet
+ * @cpu:  Index of core to which the packet should be directed for
+ *        SoftIRQ processing.
+ */
+static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
+{
+	struct rps_sock_flow_table *sock_flow_table;
+	int hash;
+	
+	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	if (sock_flow_table == NULL)
+		return;
+	hash = cpu + rps_cpu_mask + 1;
+	if (sock_flow_table->ents[hash] != hash) {
+		rcu_read_lock();
+		sock_flow_table = rcu_dereference(rps_sock_flow_table);
+		sock_flow_table->ents[hash] = hash;
+		rcu_read_unlock();
+	}
+	__skb_set_sw_hash(skb, hash, false);
+}
+
+/**
  * homa_gro_receive() - Invoked for each input packet at a very low
  * level in the stack to perform GRO. However, this code does GRO in an
  * unusual way: it simply aggregates all packets targeted to a particular
@@ -102,16 +128,23 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	
 	h_new->gro_count = 1;
 	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
-		struct common_header *h_held;
-		if (!NAPI_GRO_CB(held_skb)->same_flow)
+		struct iphdr *iph  = (struct iphdr *) skb_network_header(held_skb);
+		struct common_header *h_held = (struct common_header *)
+				skb_transport_header(held_skb);
+
+//		tt_record4("homa_gro_receive held id %d, new id %d, "
+//				"gro_count %d, same_flow %d",
+//				h_held->id, h_new->id, h_held->gro_count,
+//				NAPI_GRO_CB(held_skb)->same_flow);
+		
+		/* Packets can be batched together as long as they are all
+		 * Homa packets, even if they are from different RPCs. Don't
+		 * use the same_flow mechanism that is normally used in
+		 * gro_receive, because it won't allow packets from different
+		 * sources to be aggregated.
+		 */
+		if (iph->protocol != IPPROTO_HOMA)
 			continue;
-
-		h_held = (struct common_header *) skb_transport_header(held_skb);
-
-		/* Note: Homa will aggregate packets from different RPCs
-		 * and different ports in order to maximize the benefits
-	         * of GRO.
-	         */
 		
 		/* Aggregate skb into held_skb. We don't update the length of
 		 * held_skb, because we'll eventually split it up and process
@@ -128,8 +161,19 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		h_held->gro_count++;
 		if (h_held->gro_count >= homa->max_gro_skbs)
 			return pp;
-	        break;
+	        return NULL;
 	}
+	
+	/* There was no existing Homa packet that this packet could be
+	 * batched with, so this packet will now go on gro_list for future
+	 * packets to be batch with. If the packet is sent up the stack
+	 * before another packet arrives for batching, we want it to be
+	 * processed on this same core (it's faster that way, and if
+	 * batching doesn't occur it means we aren't heavily loaded; if
+	 * batching does occur, homa_gro_complete will pick a different
+	 * core).
+	 */
+	homa_set_softirq_cpu(skb, smp_processor_id());
 	return NULL;
 	
 flush:
@@ -150,62 +194,31 @@ flush:
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
-	struct common_header *h = (struct common_header *)
-			skb_transport_header(skb);
-	struct data_header *d = (struct data_header *) h;
-	struct rps_sock_flow_table *sock_flow_table;
-	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
+	int target, id1, id2;
 	
-	/* Choose the core that will handle SoftIRQ processing for this
-	 * group of packets. We do this by setting the packet hash and
-	 * an entry to the socket flow table that will match that hash.
-	 * Setting the hash here is suboptimal, because this function doesn't
-	 * get invoked for skb's where nothing was merged onto them.
-	 * However, setting the hash in homa_gro_receive doesn't work either,
-	 * because it messes up the same_flow computation, which will compare
-	 * the default hash of a new packet with the recomputed hash of a
-	 * held packet. 
+//	struct common_header *h = (struct common_header *)
+//			skb_transport_header(skb);
+//	struct data_header *d = (struct data_header *) h;
+//	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
+//			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
+	
+	/* Pick a specific core to handle SoftIRQ processing for this
+	 * group of packets. The goal here is to spread load so that no
+	 * core gets overloaded. We do that by checking the next two cores
+	 * in order after this one, and choosing the one that has been idle
+	 * (hasn't done NAPI or SoftIRQ processing for Homa) the longest.
 	 */
-	
-	sock_flow_table = rcu_dereference(rps_sock_flow_table);
-	if (sock_flow_table != NULL) {
-		/* Pick the next three cores in order after the current
-		 * one, and choose the one that has been idle the longest.
-		 */
-		int target, id1, id2, id3;
-		int hash;
-		__u64 time, time1, time2, time3;
-		
-		id1 = smp_processor_id() + 1;
-		if (unlikely(id1 >= nr_cpu_ids))
-			id1 = 0;
-		id2 = id1 + 1;
-		if (unlikely(id2 >= nr_cpu_ids))
-			id2 = 0;
-		id3 = id2 + 1;
-		if (unlikely(id3 >= nr_cpu_ids))
-			id3 = 0;
-		time1 = homa_cores[id1]->last_active;
-		time2 = homa_cores[id2]->last_active;
-		time3 = homa_cores[id3]->last_active;
+	id1 = smp_processor_id() + 1;
+	if (unlikely(id1 >= nr_cpu_ids))
+		id1 = 0;
+	id2 = id1 + 1;
+	if (unlikely(id2 >= nr_cpu_ids))
+		id2 = 0;
+	if (homa_cores[id1]->last_active < homa_cores[id2]->last_active)
 		target = id1;
-		time = time1;
-		if (time2 < time) {
-			target = id2;
-			time = time2;
-		}
-		if (time3 <time)
-			target = id3;
-		
-		hash = target + rps_cpu_mask + 1;
-		if (sock_flow_table->ents[hash] != hash) {
-			rcu_read_lock();
-			sock_flow_table = rcu_dereference(rps_sock_flow_table);
-			sock_flow_table->ents[hash] = hash;
-			rcu_read_unlock();
-		}
-		__skb_set_sw_hash(skb, hash, false);
-	}
+	else
+		target = id2;
+	homa_set_softirq_cpu(skb, target);
+	
 	return 0;
 }

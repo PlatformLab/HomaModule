@@ -952,6 +952,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
 	ip_hdr(skb)->saddr = saddr;
+	ip_hdr(skb)->protocol = IPPROTO_HOMA;
 	skb->_skb_refdst = 0;
 	return skb;
 }

@@ -44,6 +44,7 @@ FIXTURE_SETUP(homa_offload)
 	skb = mock_skb_new(self->ip, &self->header.common, 3000,
 			self->header.seg.offset);
 	NAPI_GRO_CB(skb)->same_flow = 0;
+	((struct iphdr *) skb_network_header(skb))->protocol = IPPROTO_HOMA+1;
 	NAPI_GRO_CB(skb)->data_offset = sizeof32(struct data_header);
 	NAPI_GRO_CB(skb)->last = skb;
         self->header.seg.offset = htonl(4000);
@@ -158,34 +159,28 @@ TEST_F(homa_offload, homa_gro_complete_core_id_wraparound)
 	homa_cores[7]->last_active = 25;
 	homa_cores[0]->last_active = 20;
 	homa_cores[1]->last_active = 15;
-	homa_cores[2]->last_active = 10;
 	
 	cpu_number = 7;
 	homa_gro_complete(skb, 0);
-	EXPECT_EQ(2, skb->hash - 32);
+	EXPECT_EQ(1, skb->hash - 32);
 	
 	cpu_number = 6;
 	homa_gro_complete(skb, 0);
-	EXPECT_EQ(1, skb->hash - 32);
+	EXPECT_EQ(0, skb->hash - 32);
 	
 	cpu_number = 5;
 	homa_gro_complete(skb, 0);
-	EXPECT_EQ(0, skb->hash - 32);
+	EXPECT_EQ(7, skb->hash - 32);
 }
 TEST_F(homa_offload, homa_gro_complete_pick_core)
 {
 	struct sk_buff *skb = self->gro_list;
 	homa_cores[2]->last_active = 2;
 	homa_cores[3]->last_active = 4;
-	homa_cores[4]->last_active = 6;
 	homa_gro_complete(skb, 0);
 	EXPECT_EQ(2, skb->hash - 32);
 	
 	homa_cores[2]->last_active = 10;
 	homa_gro_complete(skb, 0);
 	EXPECT_EQ(3, skb->hash - 32);
-	
-	homa_cores[3]->last_active = 20;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(4, skb->hash - 32);
 }
