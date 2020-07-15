@@ -614,7 +614,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(peer);
 		goto done;
 	}
-	skbs = homa_fill_packets(hsk->homa, peer, args.response, args.resplen);
+	skbs = homa_fill_packets(hsk, peer, args.response, args.resplen);
 	if (IS_ERR(skbs)) {
 		err = PTR_ERR(skbs);
 		goto done;

@@ -984,6 +984,26 @@ struct homa_sock {
 };
 
 /**
+ * struct homa_dead_dst - Used to retain dst_entries that are no longer
+ * needed, until it is safe to delete them (I'm not confident that the RCU
+ * mechanism will be safe for these: the reference count could get implemented
+ * after it's on the RCU list?).
+ */
+struct homa_dead_dst {
+	/** @dst: Entry that is no longer used by a struct homa_peer. */
+	struct dst_entry *dst;
+	
+	/**
+	 * @gc_time: Time (in units of get_cycles) when it is safe
+	 * to free @dst.
+	 */
+	__u64 gc_time;
+	
+	/** @dst_links: Used to link together entries in peertab->dead_dsts. */
+	struct list_head dst_links;
+};
+
+/**
  * define HOMA_PEERTAB_BUCKETS - Number of bits in the bucket index for a
  * homa_peertab.  Should be large enough to hold an entry for every server
  * in a datacenter without long hash chains.
@@ -1009,6 +1029,12 @@ struct homa_peertab {
 	 * for lookups (RCU is used instead).
 	 */
 	struct spinlock write_lock;
+	
+	/**
+	 * @dead_dsts: List of dst_entries that are waiting to be deleted.
+	 * Hold @write_lock when manipulating.
+	 */
+	struct list_head dead_dsts;
 	
 	/**
 	 * @buckets: Pointer to heads of chains of homa_peers for each bucket.
@@ -2036,7 +2062,8 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
  * isn't immediately available, record stats on the waiting time.
  * @homa:    Overall data about the Homa protocol implementation.
  */
-static inline void homa_grantable_lock(struct homa *homa) {
+static inline void homa_grantable_lock(struct homa *homa)
+{
 	if (!spin_trylock_bh(&homa->grantable_lock)) {
 		homa_grantable_lock_slow(homa);
 	}
@@ -2046,7 +2073,8 @@ static inline void homa_grantable_lock(struct homa *homa) {
  * homa_grantable_unlock() - Release the grantable lock.
  * @homa:    Overall data about the Homa protocol implementation.
  */
-static inline void homa_grantable_unlock(struct homa *homa) {
+static inline void homa_grantable_unlock(struct homa *homa)
+{
 	spin_unlock_bh(&homa->grantable_lock);
 }
 
@@ -2055,7 +2083,8 @@ static inline void homa_grantable_unlock(struct homa *homa) {
  * isn't immediately available, record stats on the waiting time.
  * @homa:    Overall data about the Homa protocol implementation.
  */
-static inline void homa_throttle_lock(struct homa *homa) {
+static inline void homa_throttle_lock(struct homa *homa)
+{
 	if (!spin_trylock_bh(&homa->throttle_lock)) {
 		homa_throttle_lock_slow(homa);
 	}
@@ -2065,7 +2094,8 @@ static inline void homa_throttle_lock(struct homa *homa) {
  * homa_throttle_unlock() - Release the throttle lock.
  * @homa:    Overall data about the Homa protocol implementation.
  */
-static inline void homa_throttle_unlock(struct homa *homa) {
+static inline void homa_throttle_unlock(struct homa *homa)
+{
 	spin_unlock_bh(&homa->throttle_lock);
 }
 
@@ -2104,9 +2134,11 @@ extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern int      homa_dointvec(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
+extern void     homa_dst_refresh(struct homa_peertab *peertab,
+			struct homa_peer *peer, struct homa_sock *hsk);
 extern void     homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct sk_buff
-                *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
+                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			char __user *from, size_t len);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
@@ -2161,6 +2193,7 @@ extern struct homa_peer
 			struct inet_sock *inet);
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			int c2, int c3, int c4, int c5, int c6, int c7);
+extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk);
 extern int      homa_softirq(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
@@ -2263,6 +2296,21 @@ static inline void check_pacer(struct homa *homa, int softirq)
 			atomic64_read(&homa->link_idle_time))
 		return;
 	homa_pacer_xmit(homa);
+}
+
+/**
+ * homa_get_dst() - Returns destination information associated with a peer,
+ * updating it if the cached information is stale.
+ * @peer:   Peer whose destination information is desired.
+ * @hsk:    Homa socket; needed by lower-level code to recreate the dst.
+ * Return   Up-to-date destination for peer.
+ */
+static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
+	struct homa_sock *hsk)
+{
+	if (unlikely(peer->dst->obsolete > 0))
+		homa_dst_refresh(&hsk->homa->peers, peer, hsk);
+	return peer->dst;
 }
 
 #endif /* _HOMA_IMPL_H */

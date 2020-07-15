@@ -33,6 +33,7 @@ int homa_peertab_init(struct homa_peertab *peertab)
 	 */
 	int i;
 	spin_lock_init(&peertab->write_lock);
+	INIT_LIST_HEAD(&peertab->dead_dsts);
 	peertab->buckets = (struct hlist_head *) vmalloc(
 			HOMA_PEERTAB_BUCKETS * sizeof(*peertab->buckets));
 	if (!peertab->buckets)
@@ -66,6 +67,29 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 		}
 	}
 	vfree(peertab->buckets);
+	homa_peertab_gc_dsts(peertab, ~0);
+}
+
+/**
+ * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
+ * safe to do so.
+ * @peertab        The table in which to free entries.
+ * @now            Current time, in get_cycles units; entries with expiration
+ *                 dates no later than this will be freed. Specify ~0 to
+ *                 free all entries.
+ */
+void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
+{
+	while (!list_empty(&peertab->dead_dsts)) {
+		struct homa_dead_dst *dead = list_first_entry(
+				&peertab->dead_dsts, struct homa_dead_dst,
+				dst_links);
+		if (dead->gc_time > now)
+			break;
+		dst_release(dead->dst);
+		list_del(&dead->dst_links);
+		kfree(dead);
+	}
 }
 
 /**
@@ -144,6 +168,54 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
     done:
 	spin_unlock_bh(&peertab->write_lock);
 	return peer;
+}
+
+/**
+ * homa_dst_refresh() - This method is called when the dst for a peer is
+ * obsolete; it releases that dst and creates a new one.
+ * @peertab:  Table containing the peer.
+ * @peer:     Peer whose dst is obsolete.
+ * @hsk:      Socket that will be used to transmit data to the peer.
+ */
+void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
+		struct homa_sock *hsk)
+{
+	struct rtable *rt;
+	struct sock *sk = &hsk->inet.sk;
+	
+	spin_lock_bh(&peertab->write_lock);
+	flowi4_init_output(&peer->flow.u.ip4, sk->sk_bound_dev_if,
+			sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
+			sk->sk_protocol, 0, peer->addr, hsk->inet.inet_saddr,
+			0, 0, sk->sk_uid);
+	security_sk_classify_flow(sk, &peer->flow);
+	rt = ip_route_output_flow(sock_net(sk), &peer->flow.u.ip4, sk);
+	if (IS_ERR(rt)) {
+		/* Retain the existing dst if we can't create a new one. */
+		if (hsk->homa->verbose)
+			printk(KERN_NOTICE "homa_refresh couldn't recreate "
+					"dst: error %ld", PTR_ERR(rt));
+		INC_METRIC(peer_route_errors, 1);
+	} else {
+		struct homa_dead_dst *dead = (struct homa_dead_dst *)
+				kmalloc(sizeof(*dead), GFP_KERNEL);
+		if (unlikely(!dead)) {
+			/* Can't allocate memory to keep track of the
+			 * dead dst; just free it immediately (a bit
+			 * risky, admittedly).
+			 */
+			dst_release(peer->dst);
+		} else {
+			__u64 now = get_cycles();
+			
+			dead->dst = peer->dst;
+			dead->gc_time = now + (cpu_khz<<7);
+			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
+			homa_peertab_gc_dsts(peertab, now);
+		}
+		peer->dst = &rt->dst;
+	}
+	spin_unlock_bh(&peertab->write_lock);
 }
 
 /**

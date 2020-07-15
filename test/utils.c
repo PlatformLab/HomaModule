@@ -376,7 +376,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	if (srpc->state == state)
 		return srpc;
 	homa_message_out_init(srpc, hsk->server_port,
-			homa_fill_packets(hsk->homa, srpc->peer, (void *) 2000,
+			homa_fill_packets(hsk, srpc->peer, (void *) 2000,
 			resp_length), resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)

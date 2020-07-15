@@ -441,6 +441,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 	route->dst.__refcnt.counter = 1;
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_net_device;
+	route->dst.obsolete = 0;
 	if (!routes_in_use)
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");

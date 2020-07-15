@@ -77,7 +77,7 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 
 TEST_F(homa_outgoing, homa_fill_packets__message_too_long)
 {
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 2000000);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EINVAL, -PTR_ERR(skb));
@@ -86,7 +86,7 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_size_limit)
 {
 	mock_net_device.gso_max_size = 10000;
 	self->homa.max_gso_size = 3000;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 5000);
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();
@@ -130,7 +130,7 @@ TEST_F(homa_outgoing, homa_fill_packets__gso_max_less_than_mtu)
 TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_small_skb)
 {
 	mock_alloc_skb_errors = 1;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 500);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
@@ -139,7 +139,7 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_large_skb)
 {
 	mock_alloc_skb_errors = 1;
 	mock_net_device.gso_max_size = 5000;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 5000);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
@@ -179,7 +179,7 @@ TEST_F(homa_outgoing, homa_fill_packets__set_gso_info)
 TEST_F(homa_outgoing, homa_fill_packets__cant_copy_data)
 {
 	mock_copy_data_errors = 2;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 3000);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
@@ -187,7 +187,7 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_copy_data)
 TEST_F(homa_outgoing, homa_fill_packets__multiple_segs_per_skbuff)
 {
 	mock_net_device.gso_max_size = 5000;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 10000);
 	EXPECT_NE(NULL, skb);
 	EXPECT_STREQ("_copy_from_user 1400 bytes at 1000; "
@@ -241,7 +241,7 @@ TEST_F(homa_outgoing, homa_fill_packets__set_incoming)
 TEST_F(homa_outgoing, homa_fill_packets__expand_last_segment)
 {
 	mock_net_device.gso_max_size = 5000;
-	struct sk_buff *skb = homa_fill_packets(&self->homa, self->peer,
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
 			(char *) 1000, 1402);
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();

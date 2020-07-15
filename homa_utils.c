@@ -202,7 +202,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
-	skb = homa_fill_packets(hsk->homa, crpc->peer, buffer, len);
+	skb = homa_fill_packets(hsk, crpc->peer, buffer, len);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
 		skb = NULL;

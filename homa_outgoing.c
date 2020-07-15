@@ -43,7 +43,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 /**
  * homa_fill_packets() - Create one or more packets and fill them with
  * data from user space.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @hsk:     Socket via which these packets will be sent.
  * @peer:    Peer to which the packets will be sent (needed for things like
  *           the MTU).
  * @from:    Address of the user-space source buffer.
@@ -55,7 +55,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  *           offset, and length information. homa_message_out_init will fill
  *           in the other fields.
  */
-struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
+struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		char __user *buffer, size_t len)
 {
 	/* Note: this function is separate from homa_message_out_init
@@ -68,24 +68,28 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 	struct sk_buff *first = NULL;
 	int err, mtu, max_pkt_data, gso_size, max_gso_data;
 	struct sk_buff **last_link;
+	struct dst_entry *dst;
 
 	if (unlikely((len > HOMA_MAX_MESSAGE_LENGTH) || (len == 0))) {
 		err = -EINVAL;
 		goto error;
 	}
 	
-	mtu = dst_mtu(peer->dst);
+	dst = homa_get_dst(peer, hsk);
+	mtu = dst_mtu(dst);
+	
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
-	tt_record2("dst_mtu %d, max_pkt_data %d", mtu, max_pkt_data);
+	tt_record4("dst_mtu %d, peer 0x%x, max_pkt_data %d, obsolete %d", mtu,
+			ntohl(peer->addr), max_pkt_data, peer->dst->obsolete);
 	if (len <= max_pkt_data) {
 		unsched = max_gso_data = len;
 		gso_size = mtu;
 	} else {
 		int bufs_per_gso;
-		
+
 		gso_size = peer->dst->dev->gso_max_size;
-		if (gso_size > homa->max_gso_size)
-			gso_size = homa->max_gso_size;
+		if (gso_size > hsk->homa->max_gso_size)
+			gso_size = hsk->homa->max_gso_size;
 		
 		/* Round gso_size down to an even # of mtus. */
 		bufs_per_gso = gso_size/mtu;
@@ -99,7 +103,7 @@ struct sk_buff *homa_fill_packets(struct homa *homa, struct homa_peer *peer,
 		gso_size = bufs_per_gso * mtu;
 		
 		/* Round unscheduled bytes *up* to an even number of gsos. */
-		unsched = homa->rtt_bytes + max_gso_data - 1;
+		unsched = hsk->homa->rtt_bytes + max_gso_data - 1;
 		unsched -= unsched % max_gso_data;
 		if (unsched > len)
 			unsched = len;
@@ -353,14 +357,20 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	struct common_header *h;
 	int extra_bytes;
 	int result, priority;
+	struct dst_entry *dst;
+	struct sk_buff *skb;
 	
 	/* Allocate the same size sk_buffs as for the smallest data
          * packets (better reuse of sk_buffs?).
 	 */
-	struct sk_buff *skb = alloc_skb(dst_mtu(peer->dst) + HOMA_SKB_EXTRA
-			+ sizeof32(void*), GFP_KERNEL);
+	dst = homa_get_dst(peer, hsk);
+	skb = alloc_skb(dst_mtu(dst) + HOMA_SKB_EXTRA + sizeof32(void*),
+			GFP_KERNEL);
 	if (unlikely(!skb))
 		return -ENOBUFS;
+	dst_hold(dst);
+	skb_dst_set(skb, dst);
+	
 	skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
 	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
@@ -370,8 +380,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
 	priority = hsk->homa->num_priorities-1;
 	set_priority(skb, hsk, priority);
-	dst_hold(peer->dst);
-	skb_dst_set(skb, peer->dst);
 	skb->ooo_okay = 1;
 	skb_get(skb);
 	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
@@ -492,6 +500,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	int err;
 	struct data_header *h = (struct data_header *)
 			skb_transport_header(skb);
+	struct dst_entry *dst;
 
 	set_priority(skb, rpc->hsk, priority);
 
@@ -501,17 +510,19 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	h->cutoff_version = rpc->peer->cutoff_version;
 	h->common.generation = htons(rpc->generation);
 	
-	dst_hold(rpc->peer->dst);
-	skb_dst_set(skb, rpc->peer->dst);
+	dst = homa_get_dst(rpc->peer, rpc->hsk);
+	dst_hold(dst);
+	skb_dst_set(skb, dst);
+
 	skb->ooo_okay = 1;
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct common_header, checksum);
-	tt_record4("calling ip_queue_xmit: skb->len %d, gso_segs %d,"
-			"gso_size %d, gso_type %d",
-			skb->len, skb_shinfo(skb)->gso_segs,
-			skb_shinfo(skb)->gso_size,
-			skb_shinfo(skb)->gso_type);
+//	tt_record4("calling ip_queue_xmit: skb->len %d, gso_segs %d,"
+//			"gso_size %d, gso_type %d",
+//			skb->len, skb_shinfo(skb)->gso_segs,
+//			skb_shinfo(skb)->gso_size,
+//			skb_shinfo(skb)->gso_type);
 
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
 //	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "

@@ -38,6 +38,15 @@ FIXTURE_TEARDOWN(homa_peertab)
 	unit_teardown();
 }
 
+static int dead_count(struct homa_peertab *peertab)
+{
+	struct list_head *pos;
+	int count = 0;
+	list_for_each(pos, &peertab->dead_dsts)
+		count++;
+	return count;
+}
+
 TEST_F(homa_peertab, homa_peer_find__basics)
 {
 	struct homa_peer *peer, *peer2;
@@ -77,6 +86,24 @@ TEST_F(homa_peertab, homa_peertab_init__vmalloc_failed)
 	homa_peertab_destroy(&table);
 }
 
+TEST_F(homa_peertab, homa_peertab_gc_dsts)
+{
+	struct homa_peer *peer;
+	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
+	mock_cycles = 0;
+	homa_dst_refresh(&self->peertab, peer, &self->hsk);
+	mock_cycles = 50000000;
+	homa_dst_refresh(&self->peertab, peer, &self->hsk);
+	mock_cycles = 100000000;
+	homa_dst_refresh(&self->peertab, peer, &self->hsk);
+	EXPECT_EQ(3, dead_count(&self->peertab));
+	
+	homa_peertab_gc_dsts(&self->peertab, 150000000);
+	EXPECT_EQ(2, dead_count(&self->peertab));
+	homa_peertab_gc_dsts(&self->peertab, ~0);
+	EXPECT_EQ(0, dead_count(&self->peertab));
+}
+
 TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 {
 	struct homa_peer *peer;
@@ -87,7 +114,6 @@ TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 	EXPECT_NE(NULL, conflicting_peer);
 	EXPECT_EQ(conflicting_peer, peer);
 }
-
 TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 {
 	struct homa_peer *peer;
@@ -98,7 +124,6 @@ TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 	
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_kmalloc_errors);
 }
-
 TEST_F(homa_peertab, homa_peer_find__route_error)
 {
 	struct homa_peer *peer;
@@ -108,6 +133,64 @@ TEST_F(homa_peertab, homa_peer_find__route_error)
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 	
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_route_errors);
+}
+
+TEST_F(homa_peertab, homa_dst_refresh__basics)
+{
+	struct homa_peer *peer;
+	struct dst_entry *old_dst;
+	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ(11111, peer->addr);
+	
+	old_dst = homa_get_dst(peer, &self->hsk);
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	EXPECT_NE(old_dst, peer->dst);
+	EXPECT_EQ(1, dead_count(&self->homa.peers));
+}
+TEST_F(homa_peertab, homa_dst_refresh__routing_error)
+{
+	struct homa_peer *peer;
+	struct dst_entry *old_dst;
+	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ(11111, peer->addr);
+	
+	old_dst = homa_get_dst(peer, &self->hsk);
+	mock_route_errors = 1;
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	EXPECT_EQ(old_dst, peer->dst);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_route_errors);
+	EXPECT_EQ(0, dead_count(&self->homa.peers));
+}
+TEST_F(homa_peertab, homa_dst_refresh__malloc_error)
+{
+	struct homa_peer *peer;
+	struct dst_entry *old_dst;
+	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ(11111, peer->addr);
+	
+	old_dst = homa_get_dst(peer, &self->hsk);
+	mock_kmalloc_errors = 1;
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	EXPECT_NE(old_dst, peer->dst);
+	EXPECT_EQ(0, dead_count(&self->homa.peers));
+}
+TEST_F(homa_peertab, homa_dst_refresh__free_old_dsts)
+{
+	struct homa_peer *peer;
+	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ(11111, peer->addr);
+	
+	mock_cycles = 0;
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	EXPECT_EQ(2, dead_count(&self->homa.peers));
+	mock_cycles = 500000000;
+	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
+	EXPECT_EQ(1, dead_count(&self->homa.peers));
 }
 
 TEST_F(homa_peertab, homa_unsched_priority)
