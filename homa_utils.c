@@ -122,6 +122,7 @@ int homa_init(struct homa *homa)
 	homa->verbose = 0;
 	homa->max_gso_size = 1000000;
 	homa->max_gro_skbs = 20;
+	homa->gro_behavior = 0;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
@@ -1108,8 +1109,12 @@ char *homa_print_metrics(struct homa *homa)
 				"Time spent in homa_softirq\n",
 				m->softirq_cycles);
 		homa_append_metric(homa,
+				"linux_softirq_cycles      %15llu  "
+				"Time spent in all Linux SoftIRQ\n",
+				m->linux_softirq_cycles);
+		homa_append_metric(homa,
 				"napi_cycles               %15llu  "
-				"Time spent in NAPI-level packet handlng\n",
+				"Time spent in NAPI-level packet handling\n",
 				m->napi_cycles);
 		homa_append_metric(homa,
 				"send_cycles               %15llu  "

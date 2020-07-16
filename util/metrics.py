@@ -226,8 +226,12 @@ if elapsed_secs != 0:
         for core in range(first_core, end_core):
             line += "  Core%-2d" % (core)
         print(line)
-        for where in ["napi", "softirq", "send", "recv", "reply", "timer", "pacer"]:
-            symbol = where + "_cycles"
+        for where in ["napi", "softirq", "send", "recv", "reply",
+                "timer", "pacer"]:
+            if where == "softirq":
+                symbol = "linux_softirq_cycles"
+            else:
+                symbol = where + "_cycles"
             line = "%-10s  " % (where)
             for core in range(first_core, end_core):
                 frac = float(cur[core][symbol] - prev[core][symbol]) / float(
@@ -272,11 +276,13 @@ if elapsed_secs != 0:
                 cores, us_per))
 
     if packets_received > 0:
-        for print_name, symbol in [["NAPI handler", "napi_cycles"],
-                ["SoftIRQ handler", "softirq_cycles"]]:
+        for print_name, symbol in [["NAPI", "napi_cycles"],
+                ["Linux SoftIRQ", "linux_softirq_cycles"],
+                ["Homa SoftIRQ", "softirq_cycles"]]:
             cpu_time = float(deltas[symbol])
             cores = cpu_time/time_delta
-            total_cores += cores;
+            if symbol != "softirq_cycles":
+                total_cores += cores;
             print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
 

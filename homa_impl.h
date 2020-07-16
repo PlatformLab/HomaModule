@@ -1381,15 +1381,22 @@ struct homa {
 	/**
 	 * @max_gso_size: Maximum number of bytes that will be included
 	 * in a single output packet. Can be set externally via sysctl to
-	 * lower the limit already enforced by Linux.
+	 * lower the limit already enforced by Linux. 
 	 */
 	int max_gso_size;
 	
 	/**
 	 * @max_gro_skbs: Maximum number of socket buffers that can be
-	 * aggregated by the GRO mechanism.
+	 * aggregated by the GRO mechanism.  Set externally via sysctl.
 	 */
 	int max_gro_skbs;
+	
+	/**
+	 * @gro_behavior: Specifies how Homa packets should be processed at
+	 * GRO level. Must have one of the values of the homa_gro_behavior
+	 * enum.  Set externally via sysctl.
+	 */
+	int gro_behavior;
 	
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -1438,6 +1445,24 @@ struct homa {
 	 * short-term use during testing.
 	 */
 	int temp[4];
+};
+
+/**
+ * enum homa_gro_behavior - Legal values for the gro_behavior configuration
+ * parameter.
+ */
+enum homa_gro_behavior {
+	HOMA_GRO_NORMAL         = 0,
+	
+	/* Always schedule SoftIRQ processing on the same core that
+	 * GRO (and NAPI) ran on.
+	 */
+	HOMA_GRO_SAME_CORE      = 1,
+	
+	/* Bypass the Linux networking stack and invoke homa_softirq directly
+	 * from homa_gro_receive (i.e. at NAPI level).
+	 */
+	HOMA_GRO_BYPASS         = 2
 };
 
 /**
@@ -1560,9 +1585,16 @@ struct homa_metrics {
 	__u64 softirq_cycles;
 	
 	/**
-	 * @napi_cycles: total time spent processing Homa packets
-	 * in the NAPI layer (the lowest layer), as measured with
-	 * get_cycles().
+	 * @linux_softirq_cycles: total time spent executing all softirq
+	 * activities, as measured by the linux softirq module, in get_cycles()
+	 * units. Only available with modified Linux kernels.
+	 */
+	__u64 linux_softirq_cycles;
+	
+	/**
+	 * @napi_cycles: total time spent executing all NAPI activities,
+	 * as measured by the linux softirq module, in get_cycles() units.
+	 * Only available with modified Linux kernels.
 	 */
 	__u64 napi_cycles;
 	

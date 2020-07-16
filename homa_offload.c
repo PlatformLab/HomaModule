@@ -103,39 +103,64 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	struct common_header *h_new;
-	int hdr_offset, hdr_end;
+	struct data_header *h_new;
+//	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
 	struct sk_buff **pp;
+	struct iphdr *iph;
+	
+	if (!pskb_may_pull(skb, 64))
+		tt_record("homa_gro_receive can't pull enough data "
+				"from packet for trace");
+	iph = (struct iphdr *) skb_network_header(skb);
+	h_new = (struct data_header *) skb_transport_header(skb);
+	if (iph->protocol == 140) {
+		if (h_new->common.type == 20)
+			tt_record4("homa_gro_receive got packet from 0x%x "
+					"id %llu, offset %d, priority %d",
+					ntohl(ip_hdr(skb)->saddr),
+					h_new->common.id & 0xffffffff,
+					ntohl(h_new->seg.offset),
+					iph->tos >> 5);
+		else
+			tt_record4("homa_gro_receive got packet from 0x%x "
+					"id %llu, type %d, priority %d",
+					ntohl(ip_hdr(skb)->saddr),
+					h_new->common.id & 0xffffffff,
+					h_new->common.type, iph->tos >> 5);
+	}
 	
 	homa_cores[smp_processor_id()]->last_active = get_cycles();
+	
+	if (homa->gro_behavior == HOMA_GRO_BYPASS) {
+		homa_softirq(skb);
+		
+		/* This return value indicates that we have freed skb. */
+		return ERR_PTR(-EINPROGRESS);
+	}
 	
 	/* Get access to the Homa header for the packet. I don't understand
 	 * why such ornate code is needed, but this mimics what TCP does.
 	 */
-	hdr_offset = skb_gro_offset(skb);
-	hdr_end = hdr_offset + sizeof32(*h_new);
-	h_new = (struct common_header *) skb_gro_header_fast(skb, hdr_offset);
-	if (skb_gro_header_hard(skb, hdr_end)) {
-		h_new = (struct common_header *) skb_gro_header_slow(skb, hdr_end,
-				hdr_offset);
-		if (unlikely(!h_new)) {
-			/* Header not available in contiguous memory. */
-			UNIT_LOG(";", "no header");
-			goto flush;
-		}
-	}
+//	hdr_offset = skb_gro_offset(skb);
+//	hdr_end = hdr_offset + sizeof32(*h_new);
+//	h_new = (struct common_header *) skb_gro_header_fast(skb, hdr_offset);
+//	if (skb_gro_header_hard(skb, hdr_end)) {
+//		h_new = (struct common_header *) skb_gro_header_slow(skb, hdr_end,
+//				hdr_offset);
+//		if (unlikely(!h_new)) {
+//			/* Header not available in contiguous memory. */
+//			UNIT_LOG(";", "no header");
+//			goto flush;
+//		}
+//	}
 	
-	h_new->gro_count = 1;
+	h_new->common.gro_count = 1;
 	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
-		struct iphdr *iph  = (struct iphdr *) skb_network_header(held_skb);
+		struct iphdr *held_iph  = (struct iphdr *)
+				skb_network_header(held_skb);
 		struct common_header *h_held = (struct common_header *)
 				skb_transport_header(held_skb);
-
-//		tt_record4("homa_gro_receive held id %d, new id %d, "
-//				"gro_count %d, same_flow %d",
-//				h_held->id, h_new->id, h_held->gro_count,
-//				NAPI_GRO_CB(held_skb)->same_flow);
 		
 		/* Packets can be batched together as long as they are all
 		 * Homa packets, even if they are from different RPCs. Don't
@@ -143,7 +168,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		 * gro_receive, because it won't allow packets from different
 		 * sources to be aggregated.
 		 */
-		if (iph->protocol != IPPROTO_HOMA)
+		if (held_iph->protocol != IPPROTO_HOMA)
 			continue;
 		
 		/* Aggregate skb into held_skb. We don't update the length of
@@ -166,7 +191,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	
 	/* There was no existing Homa packet that this packet could be
 	 * batched with, so this packet will now go on gro_list for future
-	 * packets to be batch with. If the packet is sent up the stack
+	 * packets to be batched with. If the packet is sent up the stack
 	 * before another packet arrives for batching, we want it to be
 	 * processed on this same core (it's faster that way, and if
 	 * batching doesn't occur it means we aren't heavily loaded; if
@@ -174,10 +199,6 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	 * core).
 	 */
 	homa_set_softirq_cpu(skb, smp_processor_id());
-	return NULL;
-	
-flush:
-	NAPI_GRO_CB(skb)->flush = 1;
 	return NULL;
 }
 
@@ -202,23 +223,25 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 //			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
-	/* Pick a specific core to handle SoftIRQ processing for this
-	 * group of packets. The goal here is to spread load so that no
-	 * core gets overloaded. We do that by checking the next two cores
-	 * in order after this one, and choosing the one that has been idle
-	 * (hasn't done NAPI or SoftIRQ processing for Homa) the longest.
-	 */
-	id1 = smp_processor_id() + 1;
-	if (unlikely(id1 >= nr_cpu_ids))
-		id1 = 0;
-	id2 = id1 + 1;
-	if (unlikely(id2 >= nr_cpu_ids))
-		id2 = 0;
-	if (homa_cores[id1]->last_active < homa_cores[id2]->last_active)
-		target = id1;
-	else
-		target = id2;
-	homa_set_softirq_cpu(skb, target);
+	if (homa->gro_behavior == HOMA_GRO_NORMAL) {
+		/* Pick a specific core to handle SoftIRQ processing for this
+		 * group of packets. The goal here is to spread load so that no
+		 * core gets overloaded. We do that by checking the next two cores
+		 * in order after this one, and choosing the one that has been idle
+		 * (hasn't done NAPI or SoftIRQ processing for Homa) the longest.
+		 */
+		id1 = smp_processor_id() + 1;
+		if (unlikely(id1 >= nr_cpu_ids))
+			id1 = 0;
+		id2 = id1 + 1;
+		if (unlikely(id2 >= nr_cpu_ids))
+			id2 = 0;
+		if (homa_cores[id1]->last_active < homa_cores[id2]->last_active)
+			target = id1;
+		else
+			target = id2;
+		homa_set_softirq_cpu(skb, target);
+	}
 	
 	return 0;
 }
