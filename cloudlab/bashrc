@@ -98,3 +98,13 @@ fi
 alias gitmods="git status --short | awk '{print(\$2);}'"
 
 alias makemore='make 2>&1 | more'
+
+id ()
+{
+    ttgrep.py "id $1" node.tt
+}
+
+core ()
+{
+    ttgrep.py "[C$1]" node.tt > core.tt
+}
