@@ -97,6 +97,27 @@ digests = {}
 # unloaded RTT (usecs) for messages of that length.
 unloaded_p50 = {}
 
+# Standard colors for plotting
+tcp_color =      '#00B000'
+tcp_color2 =     '#5BD15B'
+homa_color =     '#1759BB'
+homa_color2 =    '#4287EC'
+dctcp_color =    '#985416'
+dctcp_color2 =   '#FF7F0E'
+unloaded_color = '#d62728'
+
+def boolean(s):
+    """
+    Used as a "type" in argparse specs; accepts Boolean-looking things.
+    """
+    map = {'true': True, 'yes': True, 'ok': True, "1": True, 'y': True,
+        't': True, 'false': False, 'no': False, '0': False, 'f': False,
+        'n': False}
+    lc = s.lower()
+    if lc not in map:
+        raise ValueError("Expected boolean value, got %s" % (s))
+    return map[lc]
+
 def log(message):
     """
     Write the a log message both to stdout and to the cperf log file.
@@ -178,7 +199,7 @@ def get_parser(description, usage, defaults = {}):
             help='Number of threads listening on each Homa server port '
             '(default: %d)'% (defaults['port_threads']))
     parser.add_argument('-p', '--protocol', dest='protocol',
-            choices=['homa', 'tcp'], default=defaults['protocol'],
+            choices=['homa', 'tcp', 'dctcp'], default=defaults['protocol'],
             help='Transport protocol to use (default: %s)'
             % (defaults['protocol']))
     parser.add_argument('-s', '--seconds', type=int, dest='seconds',
@@ -939,7 +960,7 @@ def make_histogram(x, y):
         y_new.append(y[i])
     return [x_new, y_new]
 
-def plot_slowdown(experiment, percentile, label):
+def plot_slowdown(experiment, percentile, label, **kwargs):
     """
     Add a slowdown histogram to the current graph.
 
@@ -947,6 +968,7 @@ def plot_slowdown(experiment, percentile, label):
     percentile:    While percentile of slowdown to graph: must be "p50", "p99",
                    or "p999"
     label:         Text to display in the graph legend for this curve
+    kwargs:        Additional keyword arguments to pass through to plt.plot
     """
 
     digest = get_digest(experiment)
@@ -959,7 +981,7 @@ def plot_slowdown(experiment, percentile, label):
     else:
         raise Exception("Bad percentile selector %s; must be p50, p99, or p999"
                 % (percentile))
-    plt.plot(x, y, label=label)
+    plt.plot(x, y, label=label, **kwargs)
 
 def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
     """

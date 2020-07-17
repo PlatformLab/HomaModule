@@ -28,13 +28,19 @@ parser = get_parser(description=
         usage='%(prog)s [options]',
         defaults={
             "server_ports":     3,
-            "port_threads":     3,
+            "port_threads":     2,
             "client_ports":     3,
             "port_receivers":   2,
-            "tcp_server_ports": 9,
-            "tcp_client_ports": 5,
+            "tcp_server_ports": 8,
+            "tcp_client_ports": 4,
             "workload":         ""
         })
+parser.add_argument('--tcp', dest='tcp', type=boolean,
+        default=True, help="Boolean value indicates whether measurements "
+                "should be run on TCP")
+parser.add_argument('--dctcp', dest='dctcp', type=boolean,
+        default=False, help="Boolean value indicates whether measurements "
+                "should be run on DCTCP")
 options = parser.parse_args()
 init(options)
 servers = range(0, options.num_nodes)
@@ -51,6 +57,7 @@ if not options.plot_only:
         unloaded_exp = "unloaded_" + workload;
         homa_exp = "homa_" + workload;
         tcp_exp = "tcp_" + workload;
+        dctcp_exp = "dctcp_" + workload;
         try:
             options.protocol = "homa"
             start_servers(servers, options)
@@ -67,9 +74,20 @@ if not options.plot_only:
 
             run_experiment(homa_exp, clients, options)
 
-            options.protocol = "tcp"
-            start_servers(servers, options)
-            run_experiment(tcp_exp, clients, options)
+            if options.tcp:
+                options.protocol = "tcp"
+                do_ssh(["sudo", "sysctl",
+                        ".net.ipv4.tcp_congestion_control=cubic"],
+                        range(0, options.num_nodes))
+                start_servers(servers, options)
+                run_experiment(tcp_exp, clients, options)
+
+            if options.dctcp:
+                do_ssh(["sudo", "sysctl",
+                        ".net.ipv4.tcp_congestion_control=dctcp"],
+                        range(0, options.num_nodes))
+                start_servers(servers, options)
+                run_experiment(dctcp_exp, clients, options)
         except Exception as e:
             log(traceback.format_exc())
 
@@ -82,6 +100,7 @@ for workload, bw in load_info:
     unloaded_exp = "unloaded_" + workload;
     homa_exp = "homa_" + workload;
     tcp_exp = "tcp_" + workload;
+    dctcp_exp = "dctcp_" + workload;
 
     set_unloaded(unloaded_exp)
 
@@ -90,11 +109,17 @@ for workload, bw in load_info:
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
     start_slowdown_plot(title, 1000, homa_exp)
-    plot_slowdown(tcp_exp, "p99", "TCP P99")
-    plot_slowdown(homa_exp, "p99", "Homa P99")
-    plot_slowdown(tcp_exp, "p50", "TCP P50")
-    plot_slowdown(homa_exp, "p50", "Homa P50")
-    plt.legend()
+    if options.tcp:
+        plot_slowdown(tcp_exp, "p99", "TCP P99", color=tcp_color)
+    if options.dctcp:
+        plot_slowdown(dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
+    plot_slowdown(homa_exp, "p99", "Homa P99", color=homa_color)
+    if options.tcp:
+        plot_slowdown(tcp_exp, "p50", "TCP P50", color=tcp_color2)
+    if options.dctcp:
+        plot_slowdown(dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
+    plot_slowdown(homa_exp, "p50", "Homa P50", color=homa_color2)
+    plt.legend(loc="upper right", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/vs_tcp_%s.pdf" % (options.log_dir, workload))
 
@@ -102,11 +127,17 @@ for workload, bw in load_info:
     log("Generating short message CDF for %s" % (workload))
     unloaded_x, unloaded_y = get_short_cdf(unloaded_exp)
     homa_x, homa_y = get_short_cdf(homa_exp)
-    tcp_x, tcp_y = get_short_cdf(tcp_exp)
+    if options.tcp:
+        tcp_x, tcp_y = get_short_cdf(tcp_exp)
+    if options.dctcp:
+        dctcp_x, dctcp_y = get_short_cdf(dctcp_exp)
     start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
             "Cumulative Fraction Short Messages")
-    plt.plot(tcp_x, tcp_y, label="TCP")
-    plt.plot(homa_x, homa_y, label="Homa")
-    plt.plot(unloaded_x, unloaded_y, label="Homa best case")
-    plt.legend(loc="upper right")
+    if options.tcp:
+        plt.plot(tcp_x, tcp_y, label="TCP", color=tcp_color)
+    if options.dctcp:
+        plt.plot(dctcp_x, dctcp_y, label="DCTCP", color=dctcp_color)
+    plt.plot(homa_x, homa_y, label="Homa", color=homa_color)
+    plt.plot(unloaded_x, unloaded_y, label="Homa best case", color=unloaded_color)
+    plt.legend(loc="upper right", prop={'size': 9})
     plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))
