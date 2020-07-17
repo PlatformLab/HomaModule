@@ -119,6 +119,7 @@ except IOError:
 data = open(data_file, "w")
 cur = read_metrics("/proc/net/homa_metrics", data)
 data.close()
+num_cores = len(cur)
 
 # Sum all of the individual core counts for both the new and old data and
 # compute the difference in "deltas"
@@ -213,15 +214,15 @@ if elapsed_secs != 0:
     print("\nPer-Core CPU Usage:")
     print("-------------------")
     totals = []
-    while len(totals) < len(cur):
+    while len(totals) < num_cores:
         totals.append(0.0);
     cores_per_line = 8
-    for first_core in range(0, len(cur), cores_per_line):
+    for first_core in range(0, num_cores, cores_per_line):
         if first_core != 0:
             print("");
         end_core = first_core + cores_per_line
-        if end_core > len(cur):
-            end_core = len(cur)
+        if end_core > num_cores:
+            end_core = num_cores
         line = "             "
         for core in range(first_core, end_core):
             line += "  Core%-2d" % (core)
@@ -245,58 +246,90 @@ if elapsed_secs != 0:
         print(line)
 
     packets_received = 0.0
+    packets_sent = 0.0
     for symbol in symbols:
         if symbol.startswith("packets_rcvd_"):
             packets_received += deltas[symbol]
+        if symbol.startswith("packets_sent_"):
+            packets_sent += deltas[symbol]
 
     print("\nOverall Core Utilization:")
     print("-------------------------")
-    total_cores = 0.0
+    total_cores_used = 0.0
     total_syscalls = 0
-    for op in ["send", "recv", "poll", "reply", "user"]:
-        time = float(deltas[op + "_cycles"])
-        cores = time/time_delta
-        if op == "poll":
-            calls = float(deltas["recv_calls"])
-            label = "polling in recv"
-        elif op != "user":
-            total_cores += cores
-            calls = float(deltas[op + "_calls"])
-            total_syscalls += calls
-            label = op + " syscall"
-        else:
-            total_cores += cores
-            calls = total_syscalls
-            label = "call/return/user"
-        if calls == 0:
-            us_per = 0
-        else:
-            us_per = (time/calls)/(cpu_khz/1e03)
-        print("%s       %6.2f   %7.2f us/syscall" % (label.ljust(16),
-                cores, us_per))
+
+    time = float(deltas["send_cycles"])
+    cores = time/time_delta
+    total_cores_used += cores
+    calls = float(deltas["send_calls"])
+    total_syscalls += calls
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (time/calls)/(cpu_khz/1e03)
+    print("send_syscall           %6.2f   %7.2f us/syscall" % (cores, us_per))
+
+    time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
+    cores = time/time_delta
+    total_cores_used += cores
+    calls = float(deltas["recv_calls"])
+    total_syscalls += calls
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (time/calls)/(cpu_khz/1e03)
+    print("recv_syscall (-poll)   %6.2f   %7.2f us/syscall" % (cores, us_per))
+
+    time = float(deltas["reply_cycles"])
+    cores = time/time_delta
+    total_cores_used += cores
+    calls = float(deltas["reply_calls"])
+    total_syscalls += calls
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (time/calls)/(cpu_khz/1e03)
+    print("reply_syscall          %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     if packets_received > 0:
         for print_name, symbol in [["NAPI", "napi_cycles"],
                 ["Linux SoftIRQ", "linux_softirq_cycles"],
-                ["Homa SoftIRQ", "softirq_cycles"],
-                ["Sending grants", "grant_cycles"]]:
+                ["  Homa SoftIRQ", "softirq_cycles"],
+                ["  Sending grants", "grant_cycles"]]:
             cpu_time = float(deltas[symbol])
             cores = cpu_time/time_delta
             if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
-                total_cores += cores;
-            print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
+                total_cores_used += cores;
+            print("%s     %6.2f   %7.2f us/packet" % (print_name.ljust(18),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
 
     for print_name, symbol in [["Pacer", "pacer_cycles"],
             ["Timer handler", "timer_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
-        total_cores += cores;
-        print("%s        %6.2f" % (print_name.ljust(15),
-                cores))
+        total_cores_used += cores;
+        print("%s     %6.2f" % (print_name.ljust(18), cores))
 
     print("------------------------------");
-    print("Total Core Utilization %6.2f" % (total_cores))
+    print("Total Core Utilization %6.2f" % (total_cores_used))
+
+    time = float(deltas["poll_cycles"])
+    cores = time/time_delta
+    calls = float(deltas["recv_calls"])
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (time/calls)/(cpu_khz/1e03)
+    print("\nPolling in recv        %6.2f   %7.2f us/syscall" % (cores, us_per))
+
+    time = float(deltas["user_cycles"])
+    cores = time/time_delta
+    calls = total_syscalls
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (time/calls)/(cpu_khz/1e03)
+    print("App/syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
  
     print("\nLock Misses:")
     print("------------")
@@ -323,6 +356,23 @@ if elapsed_secs != 0:
                 - sleep_percent))
         print("Arrival while polling:   %4.1f%%" % (poll_percent))
         print("Arrival while sleeping:  %4.1f%%" % (sleep_percent))
+ 
+    print("\nMiscellaneous:")
+    print("--------------")
+    if packets_received > 0:
+        print("Bytes/packet:      %6.0f" % (
+                total_received_bytes/packets_received))
+        print("Packets received:   %5.3f M/sec" % (
+                1e-6*packets_received/elapsed_secs))
+        print("Packets sent:       %5.3f M/sec" % (
+                1e-6*packets_received/elapsed_secs))
+        print("Core efficiency:    %5.3f M packets/sec/core "
+                "(sent & received combined)" % (
+                1e-6*(packets_sent + packets_received)/elapsed_secs
+                /total_cores_used))
+        print("                    %5.2f Gbps/core (goodput)" % (
+                8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
+                /(total_cores_used * elapsed_secs)))
  
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
