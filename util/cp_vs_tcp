@@ -30,7 +30,7 @@ parser = get_parser(description=
             "server_ports":     3,
             "port_threads":     3,
             "client_ports":     3,
-            "port_receivers":   3,
+            "port_receivers":   2,
             "tcp_server_ports": 9,
             "tcp_client_ports": 5,
             "workload":         ""
@@ -107,6 +107,6 @@ for workload, bw in load_info:
             "Cumulative Fraction Short Messages")
     plt.plot(tcp_x, tcp_y, label="TCP")
     plt.plot(homa_x, homa_y, label="Homa")
-    plt.plot(unloaded_x, unloaded_y, label="Homa low load")
+    plt.plot(unloaded_x, unloaded_y, label="Homa best case")
     plt.legend(loc="upper right")
     plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))
