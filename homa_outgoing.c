@@ -79,8 +79,6 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 	mtu = dst_mtu(dst);
 	
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
-	tt_record4("dst_mtu %d, peer 0x%x, max_pkt_data %d, obsolete %d", mtu,
-			ntohl(peer->addr), max_pkt_data, peer->dst->obsolete);
 	if (len <= max_pkt_data) {
 		unsched = max_gso_data = len;
 		gso_size = mtu;
