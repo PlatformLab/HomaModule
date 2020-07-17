@@ -373,6 +373,7 @@ def do_ssh(command, nodes):
     nodes:    specifies ids of the nodes on which to execute the command:
               should be a range, list, or other object that supports "in"
     """
+    vlog("ssh command on nodes %s: %s" % (str(nodes), " ".join(command)))
     for id in nodes:
         subprocess.run(["ssh", "node-%d" % id] + command,
                 stdout=subprocess.DEVNULL)
@@ -386,6 +387,8 @@ def set_homa_parameter(name, value, nodes):
     nodes:    specifies ids of the nodes on which to execute the command:
               should be a range, list, or other object that supports "in"
     """
+    vlog("Setting Homa parameter %s to %s on nodes %s" % (name, value,
+            str(nodes)))
     for id in nodes:
         subprocess.run(["ssh", "node-%d" % id, "sudo", "sysctl",
                 ".net.homa.%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
