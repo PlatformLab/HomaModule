@@ -295,6 +295,31 @@ int parse_int(std::vector<string> &words, unsigned i, int *value,
 }
 
 /**
+ * log_affinity() - Log a message listing the core affinity for the
+ * current thread.
+ */
+void log_affinity()
+{
+	cpu_set_t cores;
+	if (sched_getaffinity(0, sizeof(cores), &cores) != 0) {
+		log(NORMAL, "ERROR: couldn't read core affinities: %s",
+				strerror(errno));
+		return;
+	}
+	int total = CPU_COUNT(&cores);
+	std::string list = "";
+	for (int i = 0; total > 0; i++) {
+		if (!CPU_ISSET(i, &cores))
+			continue;
+		total--;
+		if (!list.empty())
+			list.append(" ");
+		list.append(std::to_string(i));
+	}
+	log(NORMAL, "Core affinities: %s\n", list.c_str());
+}
+
+/**
  * struct message_header - The first few bytes of each message (request or
  * response) have the structure defined here. The client initially specifies
  * this information in the request, and the server returns the information
@@ -2416,6 +2441,13 @@ int main(int argc, char** argv)
 		log_stats();
 	}
 	
+//	cpu_set_t cores;
+//	CPU_ZERO(&cores);
+//	for (int i = 2; i < 18; i++)
+//		CPU_SET(i, &cores);
+//	if (sched_setaffinity(0, sizeof(cores), &cores) != 0)
+//		log(NORMAL, "ERROR: couldn't set core affinity: %s\n",
+//				strerror(errno));
 	
 	std::thread logger(log_stats);
 	while (1) {
