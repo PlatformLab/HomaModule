@@ -140,8 +140,8 @@ The parameters are also visible as files in the directory
 .IR /proc/sys/net/homa .
 Most of these parameters are intended only for use in Homa testing;
 the default values should work fine in production. It's probably a
-bad idea to change any of these unless you are sure you know what
-you are doing.
+bad idea to change any of these unless you are sure you have made
+detailed performance measurements to justify the change.
 .TP
 .I cutoff_version
 (Read-only) The current version for unscheduled cutoffs; incremented
@@ -163,6 +163,10 @@ greater buffer occupancy. Reducing
 .I grant_increment
 below the amount of data in a full-size packet has no impact: Homa always
 transmits full-size packets.
+.TP
+.IR gro_policy
+An integer value that determines how Homa processes incoming packets
+at the GRO level. See code in homa_offload.c for more details.
 .TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to

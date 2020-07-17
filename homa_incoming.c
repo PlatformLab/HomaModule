@@ -734,6 +734,7 @@ void homa_send_grants(struct homa *homa)
 	struct homa_rpc *candidate;
 	struct homa_peer *peer;
 	int rank, i;
+	__u64 start;
 	
 	/* The variables below keep track of grants we need to send;
 	 * don't send any until the very end, and release the lock
@@ -748,6 +749,7 @@ void homa_send_grants(struct homa *homa)
 	if (list_empty(&homa->grantable_peers))
 		return;
 	
+	start = get_cycles();
 	homa_grantable_lock(homa);
 	
 	/* See if there are any messages that deserve a grant (they have
@@ -823,6 +825,7 @@ void homa_send_grants(struct homa *homa)
 			rpcs[i]);
 		atomic_dec(&rpcs[i]->grants_in_progress);
 	}
+	INC_METRIC(grant_cycles, get_cycles() - start);
 }
 
 /**
@@ -1156,6 +1159,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		
 		/* Now it's time to sleep. */
 		set_current_state(TASK_INTERRUPTIBLE);
+		tt_record1("homa_wait_for_message sleeping, pid %d",
+				current->pid);
 		if (!atomic_long_read(&interest.id) && !hsk->shutdown) {
 			__u64 start = get_cycles();
 			schedule();

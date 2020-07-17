@@ -132,7 +132,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	
 	homa_cores[smp_processor_id()]->last_active = get_cycles();
 	
-	if (homa->gro_behavior == HOMA_GRO_BYPASS) {
+	if (homa->gro_policy == HOMA_GRO_BYPASS) {
 		homa_softirq(skb);
 		
 		/* This return value indicates that we have freed skb. */
@@ -223,7 +223,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 //			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
-	if (homa->gro_behavior == HOMA_GRO_NORMAL) {
+	if (homa->gro_policy == HOMA_GRO_NORMAL) {
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no
 		 * core gets overloaded. We do that by checking the next two cores
@@ -241,6 +241,14 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		else
 			target = id2;
 		homa_set_softirq_cpu(skb, target);
+	} else if (homa->gro_policy == HOMA_GRO_NEXT) {
+		/* Use the next core (in circular order) to handle the
+		 * SoftIRQ processing.
+		 */
+		id1 = smp_processor_id() + 1;
+		if (unlikely(id1 >= nr_cpu_ids))
+			id1 = 0;
+		homa_set_softirq_cpu(skb, id1);
 	}
 	
 	return 0;

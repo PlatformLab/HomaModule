@@ -70,19 +70,19 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
-TEST_F(homa_offload, homa_gro_receive__header_too_short)
-{
-	struct sk_buff *skb;
-	int flush;
-	self->header.common.type = 0;
-	skb = mock_skb_new(self->ip, &self->header.common, 0, 0);
-	skb->len -= 2;
-	homa_gro_receive(&self->gro_list, skb);
-	EXPECT_STREQ("no header", unit_log_get());
-	flush = NAPI_GRO_CB(skb)->flush;
-	EXPECT_EQ(1, flush);
-	kfree_skb(skb);
-}
+//TEST_F(homa_offload, homa_gro_receive__header_too_short)
+//{
+//	struct sk_buff *skb;
+//	int flush;
+//	self->header.common.type = 0;
+//	skb = mock_skb_new(self->ip, &self->header.common, 0, 0);
+//	skb->len -= 2;
+//	homa_gro_receive(&self->gro_list, skb);
+//	EXPECT_STREQ("no header", unit_log_get());
+//	flush = NAPI_GRO_CB(skb)->flush;
+//	EXPECT_EQ(1, flush);
+//	kfree_skb(skb);
+//}
 TEST_F(homa_offload, homa_gro_receive__append)
 {
 	struct sk_buff *skb, *skb2;

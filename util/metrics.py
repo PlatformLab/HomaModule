@@ -278,10 +278,11 @@ if elapsed_secs != 0:
     if packets_received > 0:
         for print_name, symbol in [["NAPI", "napi_cycles"],
                 ["Linux SoftIRQ", "linux_softirq_cycles"],
-                ["Homa SoftIRQ", "softirq_cycles"]]:
+                ["Homa SoftIRQ", "softirq_cycles"],
+                ["Sending grants", "grant_cycles"]]:
             cpu_time = float(deltas[symbol])
             cores = cpu_time/time_delta
-            if symbol != "softirq_cycles":
+            if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
                 total_cores += cores;
             print("%s        %6.2f   %7.2f us/packet" % (print_name.ljust(15),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))

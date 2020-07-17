@@ -1392,11 +1392,11 @@ struct homa {
 	int max_gro_skbs;
 	
 	/**
-	 * @gro_behavior: Specifies how Homa packets should be processed at
-	 * GRO level. Must have one of the values of the homa_gro_behavior
+	 * @gro_policy: Specifies how Homa packets should be processed at
+	 * GRO level. Must have one of the values of the homa_gro_policy
 	 * enum.  Set externally via sysctl.
 	 */
-	int gro_behavior;
+	int gro_policy;
 	
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -1448,10 +1448,10 @@ struct homa {
 };
 
 /**
- * enum homa_gro_behavior - Legal values for the gro_behavior configuration
+ * enum homa_gro_policy - Legal values for the gro_policy configuration
  * parameter.
  */
-enum homa_gro_behavior {
+enum homa_gro_policy {
 	HOMA_GRO_NORMAL         = 0,
 	
 	/* Always schedule SoftIRQ processing on the same core that
@@ -1462,7 +1462,15 @@ enum homa_gro_behavior {
 	/* Bypass the Linux networking stack and invoke homa_softirq directly
 	 * from homa_gro_receive (i.e. at NAPI level).
 	 */
-	HOMA_GRO_BYPASS         = 2
+	HOMA_GRO_BYPASS         = 2,
+	
+	/* Schedule SoftIRQ processing on the next core (in circular order
+	 * unless there is only a single packet, in which case SoftIRQ runs
+	 * on the NAPI core.
+	 */
+	HOMA_GRO_NEXT           = 3
+		
+
 };
 
 /**
@@ -1631,6 +1639,12 @@ struct homa_metrics {
 	
 	/** @reply_calls: total number of invocations of the reply kernel call. */
 	__u64 reply_calls;
+	
+	/**
+	 * @grant_cycles: total time spent in homa_send_grants, as measured
+	 * with get_cycles().
+	 */
+	__u64 grant_cycles;
 	
 	/**
 	 * @user_cycles: total time spent in user threads between the

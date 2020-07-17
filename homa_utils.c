@@ -122,7 +122,7 @@ int homa_init(struct homa *homa)
 	homa->verbose = 0;
 	homa->max_gso_size = 1000000;
 	homa->max_gro_skbs = 20;
-	homa->gro_behavior = 0;
+	homa->gro_policy = 0;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
@@ -1144,6 +1144,10 @@ char *homa_print_metrics(struct homa *homa)
 				"reply_calls               %15llu  "
 				"Total invocations of reply kernel call\n",
 				m->reply_calls);
+		homa_append_metric(homa,
+				"grant_cycles              %15llu  "
+				"Time spent sending grants\n",
+				m->grant_cycles);
 		homa_append_metric(homa,
 				"user_cycles               %15llu  "
 				"App. time outside Homa kernel call handler\n",
