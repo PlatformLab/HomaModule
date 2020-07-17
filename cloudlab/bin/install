@@ -45,7 +45,7 @@ for ((i = $first ; i <= $last; i++)); do
     echo '*** Installing on' $node '***'
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile $node:
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/bin/ $node:bin/
-    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/metrics.py $root/util/ttprint.py $root/util/ttsum.py $root/util/ttgrep.py $root/util/service.py $root/util/client.py $root/util/ttcore.py $root/util/ttoffset.py $node:bin/
+    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/metrics.py $root/util/ttprint.py $root/util/ttsum.py $root/util/ttgrep.py $root/util/service.py $root/util/client.py $root/util/ttcore.py $root/util/ttoffset.py $root/util/scan.py $root/util/queue.py $node:bin/
     ssh $node 'echo $PATH'
     ssh $node 'start_xl170 ~/bin/homa.ko'
 done
