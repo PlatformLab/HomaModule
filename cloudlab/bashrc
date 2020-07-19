@@ -107,4 +107,5 @@ id ()
 core ()
 {
     ttgrep.py "[C$1]" node.tt > core.tt
+    less core.tt
 }
