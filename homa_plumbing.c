@@ -573,8 +573,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
-//	tt_record3("homa_ioc_recv finished, id %u, port %d, length %d",
-//			rpc->id & 0xffffffff, hsk->client_port, result);
+	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
+			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
+			current->pid);
 	rpc->dont_reap = false;
 	return result;
 	
@@ -606,8 +607,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto done;
 	}
-	tt_record2("homa_ioc_reply starting, id %llu, port %d",
-			args.id, hsk->client_port);
+	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
+			args.id, hsk->client_port, current->pid);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -676,11 +677,11 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	tt_record4("homa_ioc_send starting, target 0x%x:%d, port %d, id %u",
+	tt_record4("homa_ioc_send starting, target 0x%x:%d, id %u, pid %d",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
-			hsk->client_port,
-			atomic64_read(&hsk->homa->next_outgoing_id));
+			atomic64_read(&hsk->homa->next_outgoing_id),
+			current->pid);
 	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto error;
@@ -1280,6 +1281,13 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_rpc_log_active(homa, log_topic);
 			log_topic = 0;
 		}
+		
+//		if (table->data == &homa_data.temp) {
+//			tt_debug_int64[0] = homa_data.temp[0];
+//			tt_debug_int64[1] = homa_data.temp[1];
+//			tt_debug_int64[2] = homa_data.temp[2];
+//			tt_debug_int64[3] = homa_data.temp[3];
+//		}
 	}
 	return result;
 }
