@@ -1,6 +1,23 @@
 This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
-order: most recent notes first.
+order.
+
+* (July 2020) Unexplained gaps. I am observing gaps of 200-300 us where
+  a core appears to be doing nothing. These occur in a variety of places
+  in the code including in the middle of straight-line code or just
+  before an interrupt occurs. Furthermore, when these happen, *every* core
+  in the processor appears to stop at the same time (different cores are in
+  different places). The gaps do not appear to be related to interrupts (I
+  instrumented every __irq_entry in the Linux kernel sources), context
+  switches, or c-states (which I disabled).
+
+* (July 2020) RSS configuration. Tried changing the RSS configuration to
+  concentrate packet handling: NAPI and SoftIRQ are limited to a total of 4
+  cores, and cp_node sets core affinity so it doesn't use those cores. This
+  made tail latency significantly worse. It was difficult to identify a
+  a single clear reason; the smaller number of cores can become busy for
+  long periods of time, but it wasn't clear why this would affect tail
+  latency (e.g., why don't high priority packets get through fast?).
 
 * (July 2020) P999 latency for small messages. This is 5 ms or more in most
   of the workloads, and it turns out to be caused by Linux SoftIRQ handling.
