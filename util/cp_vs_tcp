@@ -21,19 +21,21 @@ from cperf import *
 
 # Info to use (workload and corresponding bandwidth) when running all
 # of the workloads.
-load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
+load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
 
 parser = get_parser(description=
         'Measures slowdown as a function of message size for Homa and TCP.',
         usage='%(prog)s [options]',
         defaults={
-            "server_ports":     3,
-            "port_threads":     2,
-            "client_ports":     3,
-            "port_receivers":   2,
-            "tcp_server_ports": 8,
-            "tcp_client_ports": 4,
-            "workload":         ""
+            "server_ports":         3,
+            "port_threads":         3,
+            "client_ports":         3,
+            "port_receivers":       2,
+            "tcp_server_ports":     8,
+            "tcp_port_threads":     1,
+            "tcp_client_ports":     4,
+            "tcp_receiver_threads": 1,
+            "workload":             ""
         })
 parser.add_argument('--tcp', dest='tcp', type=boolean,
         default=True, help="Boolean value indicates whether measurements "
@@ -119,7 +121,10 @@ for workload, bw in load_info:
     if options.dctcp:
         plot_slowdown(dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
     plot_slowdown(homa_exp, "p50", "Homa P50", color=homa_color2)
-    plt.legend(loc="upper right", prop={'size': 9})
+    if workload == "w5":
+        plt.legend(loc="upper right", prop={'size': 9})
+    else:
+        plt.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/vs_tcp_%s.pdf" % (options.log_dir, workload))
 

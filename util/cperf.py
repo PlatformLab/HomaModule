@@ -58,21 +58,23 @@ verbose = False
 # Defaults for command-line options, if the application doesn't specify its
 # own values.
 default_defaults = {
-    'net_bw':            0.0,
-    'client_max':        2000,
-    'client_ports':      5,
-    'log_dir':           'logs/' + time.strftime('%Y%m%d%H%M%S'),
-    'no_trunc':          '',
-    'protocol':          'homa',
-    'port_receivers':    3,
-    'port_threads':      2,
-    'seconds':           5,
-    'server_ports':      9,
-    'tcp_client_ports':  9,
-    'tcp_server_ports':  15,
-    'unsched':           0,
-    'unsched_boost':     0.0,
-    'workload':          'w5'
+    'net_bw':              0.0,
+    'client_max':          2000,
+    'client_ports':        5,
+    'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
+    'no_trunc':            '',
+    'protocol':            'homa',
+    'port_receivers':      3,
+    'port_threads':        2,
+    'seconds':             5,
+    'server_ports':        9,
+    'tcp_client_ports':    9,
+    'tcp_port_receivers':  1,
+    'tcp_server_ports':    15,
+    'tcp_port_threads':    1,
+    'unsched':             0,
+    'unsched_boost':       0.0,
+    'workload':            'w5'
 }
 
 # Keys are experiment names, and each value is the digested data for that
@@ -103,7 +105,7 @@ tcp_color2 =     '#5BD15B'
 homa_color =     '#1759BB'
 homa_color2 =    '#4287EC'
 dctcp_color =    '#985416'
-dctcp_color2 =   '#FF7F0E'
+dctcp_color2 =   '#E59247'
 unloaded_color = '#d62728'
 
 def boolean(s):
@@ -192,8 +194,8 @@ def get_parser(description, usage, defaults = {}):
             help='Don\'t run experiments; generate plot(s) with existing data')
     parser.add_argument('--port-receivers', type=int, dest='port_receivers',
             metavar='count', default=defaults['port_receivers'],
-            help='Number of threads listening for responses on each client '
-            'port (default: %d)'% (defaults['port_receivers']))
+            help='Number of threads listening for responses on each Homa '
+            'client port (default: %d)'% (defaults['port_receivers']))
     parser.add_argument('--port-threads', type=int, dest='port_threads',
             metavar='count', default=defaults['port_threads'],
             help='Number of threads listening on each Homa server port '
@@ -214,6 +216,15 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['tcp_client_ports'],
             help='Number of ports on which each TCP client should issue requests '
             '(default: %d)'% (defaults['tcp_client_ports']))
+    parser.add_argument('--tcp-port-receivers', type=int,
+            dest='tcp_port_receivers', metavar='count',
+            default=defaults['tcp_port_receivers'],
+            help='Number of threads listening for responses on each TCP client '
+            'port (default: %d)'% (defaults['tcp_port_receivers']))
+    parser.add_argument('--tcp-port-threads', type=int, dest='tcp_port_threads',
+            metavar='count', default=defaults['tcp_port_threads'],
+            help='Number of threads listening on each TCP server port '
+            '(default: %d)'% (defaults['port_threads']))
     parser.add_argument('--tcp-server-ports', type=int, dest='tcp_server_ports',
             metavar='count', default=defaults['tcp_server_ports'],
             help='Number of ports on which TCP servers should listen '
@@ -436,8 +447,9 @@ def start_servers(r, options):
                 options.server_ports, options.port_threads,
                 options.protocol), r)
     else:
-        do_cmd("server --ports %d --protocol %s" % (
-                options.tcp_server_ports, options.protocol), r)
+        do_cmd("server --ports %d --port-threads %d --protocol %s" % (
+                options.tcp_server_ports, options.tcp_port_threads,
+                options.protocol), r)
     server_nodes = r
 
 def run_experiment(name, clients, options):
@@ -495,10 +507,11 @@ def run_experiment(name, clients, options):
                 trunc = '--no-trunc'
             else:
                 trunc = ''
-            command = "client --ports %d --server-ports %d " \
+            command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
                     "--net-bw %.3f %s --client-max %d --protocol %s --id %d" % (
                     options.tcp_client_ports,
+                    options.tcp_port_receivers,
                     options.tcp_server_ports,
                     options.workload,
                     num_servers,

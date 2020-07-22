@@ -53,6 +53,7 @@
 #include "dist.h"
 #include "homa.h"
 #include "test_utils.h"
+#include "time_trace.h"
 
 using std::string;
 
@@ -84,6 +85,9 @@ std::mt19937 rand_gen(
  * to receive a Homa RPC.
  */
 std::vector<struct sockaddr_in> server_addrs;
+
+/** @message_id: used to generate unique identifiers for outgoing messages.*/
+std::atomic<uint32_t> message_id;
 
 /**
  * @last_stats_time: time (in rdtsc cycles) when we last printed
@@ -151,6 +155,14 @@ extern void log(Msg_Type type, const char *format, ...)
  * as "stop" are changing the client or server structure.
  */
 std::mutex cmd_lock;
+
+/**
+ * @fd_locks: used to synchronize concurrent accesses to the same fd
+ * (indexed by fd).
+ */
+
+#define MAX_FDS 10000
+std::atomic_bool fd_locks[MAX_FDS];
 
 /**
  * print_help() - Print out usage information for this program.
@@ -343,6 +355,12 @@ struct message_header {
 	 * the server for this request.
 	 */
 	int server_id;
+	
+	/**
+	 * @msg_id: unique identifier for this message among all those
+	 * from a given client machine.
+	 */
+	uint32_t msg_id;
 };
 
 /**
@@ -385,7 +403,37 @@ void init_server_addrs(void)
 }
 
 /**
- * struct tcp_connection - Handles the reading and writing of TCP messages
+ * class spin_lock - Implements simple spin lock guards: lock is acquired by
+ * constructor, released by destructor.
+ */
+class spin_lock {
+    public:
+	spin_lock(std::atomic_bool *mutex)
+		: mutex(mutex)
+	{
+		do {
+		    /* mutex.exchange() always invalidates the cache line
+		     * mutex resides in, regardless of whether it succeeded
+		     * in updating the value. To reduce cache invalidation
+		     * traffic, wait until we observe the lock to be free.
+		     */
+		    while (mutex->load(std::memory_order_relaxed)) {
+			/* Do nothing */
+		    }
+		} while (mutex->exchange(1, std::memory_order_acquire));
+	}
+		
+	~spin_lock()
+	{
+		mutex->store(0, std::memory_order_release);
+	}
+	
+    protected:
+	std::atomic_bool *mutex;
+};
+
+/**
+ * class tcp_connection - Handles the reading and writing of TCP messages
  * from/to a given peer. Incoming messages may arrive in several chunks
  * spaced out in time, and outgoing messages may have to be sent in
  * multiple chunks because the stream backed up. This class keeps track
@@ -396,7 +444,7 @@ class tcp_connection {
 	tcp_connection(int fd, uint32_t epoll_id, int port,
 			struct sockaddr_in peer);
 	size_t pending();
-	int read(std::function<void (message_header *header)> func);
+	int read(bool loop, std::function<void (message_header *header)> func);
 	bool send_message(message_header *header);
 	void set_epoll_events(int epoll_fd, uint32_t events);
 	bool xmit();
@@ -448,7 +496,7 @@ class tcp_connection {
 	 */
 	int bytes_sent;
 	
-	/*
+	/**
 	 * @epoll_events: OR-ed combination of epoll events such as EPOLLIN
 	 * currently enabled for this connection.
 	 */
@@ -495,6 +543,10 @@ inline size_t tcp_connection::pending()
 /**
  * tcp_connection::read() - Reads more data from a TCP connection and calls
  * a function to handle complete messages, if any.
+ * @loop:      If true, this function will read repeatedly from the
+ *             socket, stopping only when there is no more data to read
+ *             (the socket must be in nonblocking mode). If false, only
+ *             one read call will be issued.
  * @func:      Function to call when there is a complete message; the argument
  *             to the function is a pointer to the standard header from the
  *             message. Func may be called multiple times in a single
@@ -503,76 +555,103 @@ inline size_t tcp_connection::pending()
  *             by the peer, or there was an error; a human-readable message
  *	       will be left in @error_message.
  */
-int tcp_connection::read(std::function<void (message_header *header)> func)
+int tcp_connection::read(bool loop,
+		std::function<void (message_header *header)> func)
 {
 	char buffer[100000];
-	char *next = buffer;
+	char *next;
 	
-	int count = ::read(fd, buffer, sizeof(buffer));
-	if ((count < 0) && (errno == EFAULT)) {
-		/* As of 6/2020, the system call above sometimes returns
-		 * EFAULT for no apparent reason (particularly under high
-		 * load). Retrying seems to work...
-		 */
-		log(NORMAL, "WARNING: tcp_connect::read retrying after EFAULT\n");
-		count = ::read(fd, buffer, sizeof(buffer));
-	}
-	if ((count == 0) || ((count < 0) && (errno == ECONNRESET))) {
-		/* Connection was closed by the client. */
-		snprintf(error_message, sizeof(error_message),
-				"TCP connection on port %d closed by peer %s",
-				port, print_address(&peer));
-		return 1;
-	}
-	if (count < 0) {
-		log(NORMAL, "ERROR: read failed for TCP connection on "
-				"port %d to %s: %s\\n", port,
-				print_address(&peer), strerror(errno));
-		snprintf(error_message, sizeof(error_message),
-				"Error reading from TCP connection on "
-				"port %d to %s: %s", port,
-				print_address(&peer), strerror(errno));
-		return 1;
-	}
+	while (1) {
+		int count = ::read(fd, buffer, sizeof(buffer));
+		if (count <= 0) {
+			if ((count < 0) && ((errno == EAGAIN)
+					|| (errno == EWOULDBLOCK))) {
+				tt("read failed: EWOULDBLOCK");
+				return 0;
+			}
+			if ((count == 0) || ((count < 0)
+					&& (errno == ECONNRESET))) {
+				/* Connection was closed by the client. */
+				snprintf(error_message, sizeof(error_message),
+						"TCP connection on port %d "
+						"(fd %d) closed by peer %s",
+						port, fd, print_address(&peer));
+				return 1;
+			}
+
+			/* At this point count < 0. */
+			if (errno == EFAULT) {
+				/* As of 6/2020, the system call above
+				 * sometimes returns EFAULT for no apparent
+				 * reason (particularly under high load).
+				 * Retrying seems to work...
+				 */
+				log(NORMAL, "WARNING: tcp_connect::read "
+						"retrying after EFAULT\n");
+				continue;
+			}
+			log(NORMAL, "ERROR: read failed for TCP connection on "
+					"port %d (fd %d) to %s: %s (%d)\n",
+					port, fd, print_address(&peer),
+					strerror(errno), errno);
+			snprintf(error_message, sizeof(error_message),
+					"Error reading from TCP connection on "
+					"port %d (fd %d) to %s: %s", port, fd,
+					print_address(&peer), strerror(errno));
+			return 1;
+			
+		}
 	
-	/*
-	 * Process incoming bytes (could contains parts of multiple requests).
-	 * The first 4 bytes of each request give its length.
-	 */
-	while (count > 0) {
-		/* First, fill in the message header with incoming data
-		 * (there's no guarantee that a single read will return
-		 * all of the bytes needed for these).
+		/*
+		 * Process incoming bytes (could contains parts of multiple
+		 * requests). The first 4 bytes of each request give its
+		 * length.
 		 */
-		int header_bytes = sizeof32(message_header) - bytes_received;
-		if (header_bytes > 0) {
-			if (count < header_bytes)
-				header_bytes = count;
-			char *dst = reinterpret_cast<char *>(&header);
-			memcpy(dst + bytes_received, next, header_bytes);
-			bytes_received += header_bytes;
-			next += header_bytes;
-			count -= header_bytes;
-			if (bytes_received < sizeof32(message_header))
+		next = buffer;
+		while (count > 0) {
+			/* First, fill in the message header with incoming data
+			 * (there's no guarantee that a single read will return
+			 * all of the bytes needed for these).
+			 */
+			int header_bytes = sizeof32(message_header)
+				- bytes_received;
+			if (header_bytes > 0) {
+				if (count < header_bytes)
+					header_bytes = count;
+				char *dst = reinterpret_cast<char *>(&header);
+				memcpy(dst + bytes_received, next, header_bytes);
+				bytes_received += header_bytes;
+				next += header_bytes;
+				count -= header_bytes;
+				tt("Added %d bytes to header", header_bytes);
+				if (bytes_received < sizeof32(message_header))
+					break;
+				tt("Header complete for message %d: length %d bytes",
+						header.msg_id, header.length);
+			}
+
+			/* At this point we know the request length, so read until
+			 * we've got a full request.
+			 */
+			int needed = header.length - bytes_received;
+			if (count < needed) {
+				bytes_received += count;
+				tt("Incomplete message: have %d/%d bytes",
+						bytes_received, header.length);
 				break;
+			}
+			tt("Message %d received: %d bytes",
+					header.msg_id, header.length);
+
+			/* We now have a full request. */
+			count -= needed;
+			next += needed;
+			func(&header);
+			bytes_received = 0;
 		}
-		
-		/* At this point we know the request length, so read until
-		 * we've got a full request.
-		 */
-		int needed = header.length - bytes_received;
-		if (count < needed) {
-			bytes_received += count;
-			break;
-		}
-		
-		/* We now have a full request. */
-		count -= needed;
-		next += needed;
-		func(&header);
-		bytes_received = 0;
+		if (!loop)
+			return 0;
 	}
-	return 0;
 }
 
 /**
@@ -648,6 +727,9 @@ bool tcp_connection::xmit()
 		send_length = header->length - bytes_sent;
 		if (send_length > (sizeof32(buffer) - start))
 			send_length = sizeof32(buffer) - start;
+		tt("Sending %d bytes at offset %d/%d for message id %d",
+				send_length, bytes_sent, header->length,
+				header->msg_id);
 		result = send(fd, buffer + start, send_length,
 				MSG_NOSIGNAL|MSG_DONTWAIT);
 		if (result >= 0)
@@ -665,9 +747,14 @@ bool tcp_connection::xmit()
 				exit(1);
 			}
 		}
+		tt("After send, bytes_sent now %d/%d", bytes_sent,
+				header->length);
 		if (bytes_sent < header->length)
-			return false;
+			continue;
 		bytes_sent = 0;
+		tt("Finished sending message id %d (length %d), %u messages "
+				"still to send", header->msg_id,
+				header->length, outgoing.size());
 		outgoing.pop_front();
 	}
 }
@@ -701,9 +788,12 @@ std::vector<server_metrics *> metrics;
  */
 class homa_server {
     public:
-	homa_server(int port);
+	homa_server(int port, int id);
 	~homa_server();
-	void server(void);
+	void server();
+	
+	/** @id: Identifying number of this server. */
+	int id;
 	
 	/** @fd: File descriptor for Homa socket. */
 	int fd;
@@ -723,8 +813,9 @@ std::vector<homa_server *> homa_servers;
  * @fd:  File descriptor for Homa socket to use for receiving
  *       requests.
  */
-homa_server::homa_server(int fd)
-	: fd(fd)
+homa_server::homa_server(int fd, int id)
+	: id(id)
+	, fd(fd)
         , metrics()
 	, thread(&homa_server::server, this)
 {
@@ -750,6 +841,10 @@ void homa_server::server(void)
 	int message[1000000];
 	struct sockaddr_in source;
 	int length;
+	char buffer[50];
+	
+	snprintf(buffer, sizeof(buffer), "S%d", id);
+	time_trace::create_thread_buffer(buffer);
 	while (1) {
 		uint64_t id = 0;
 		int result;
@@ -785,14 +880,23 @@ void homa_server::server(void)
  */
 class tcp_server {
     public:
-	tcp_server(int port);
+	tcp_server(int port, int id, int num_threads);
 	~tcp_server();
 	void accept(int epoll_fd);
 	void read(int fd);
-	void server(void);
+	void server(int thread_id);
+	
+	/**
+	 * @mutex: For synchronizing access to server-wide state, such
+	 * as listen_fd.
+	 */
+	std::atomic_bool mutex;
 	
 	/** @port: Port on which we listen for connections. */
 	int port;
+	
+	/** @id: Unique identifier for this server. */
+	int id;
 	
 	/** @listen_fd: File descriptor for the listen socket. */
 	int listen_fd;
@@ -801,19 +905,27 @@ class tcp_server {
 	int epoll_fd;
 	
 	/**
-	 * @connections: Entry i contains information for a client
-	 * connection on fd i.
+	 * @epollet: EPOLLET if this flag should be used, or 0 otherwise.
+	 * We only use edge triggering if there are multiple receiving
+	 * threads (it's unneeded if there's only a single thread, and
+	 * it's faster not to use it).
 	 */
-	std::vector<tcp_connection *> connections;
+	int epollet;
+	
+	/**
+	 * @connections: Entry i contains information for a client
+	 * connection on fd i, or NULL if no such connection.
+	 */
+	tcp_connection *connections[MAX_FDS];
 	
 	/** @metrics: Performance statistics. */
 	server_metrics metrics;
 	
 	/**
-	 * @thread: Background thread that both accepts connections and
-	 * services requests on them.
+	 * @thread: Background threads that both accept connections and
+	 * service requests on them.
 	 */
-	std::optional<std::thread> thread;
+	std::vector<std::thread> threads;
 	
 	/** @stop: True means that background threads should exit. */
 	bool stop;
@@ -824,18 +936,25 @@ std::vector<tcp_server *> tcp_servers;
 
 /**
  * tcp_server::tcp_server() - Constructor for tcp_server objects.
- * @port:  Port number on which this server should listen for incoming
- *         requests.
+ * @port:         Port number on which this server should listen for incoming
+ *                requests.
+ * @id:           Unique identifier for this server.
+ * @num_threads:  Number of threads to service this listening socket and
+ *                all of the other sockets excepted from it.
  */
-tcp_server::tcp_server(int port)
-	: port(port)
+tcp_server::tcp_server(int port, int id, int num_threads)
+	: mutex(0)
+	, port(port)
+        , id(id)
 	, listen_fd(-1)
 	, epoll_fd(-1)
+        , epollet((num_threads > 0) ? EPOLLET : 0)
         , connections()
         , metrics()
-        , thread()
+        , threads()
         , stop(false)
 {
+	memset(connections, 0, sizeof(connections));
 	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		log(NORMAL, "FATAL: couldn't open server socket: %s\n",
@@ -846,6 +965,12 @@ tcp_server::tcp_server(int port)
 	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &option_value,
 			sizeof(option_value)) != 0) {
 		log(NORMAL, "FATAL: couldn't set SO_REUSEADDR on listen "
+				"socket: %s",
+				strerror(errno));
+		exit(1);
+	}
+	if (fcntl(listen_fd, F_SETFL, O_NONBLOCK) != 0) {
+		log(NORMAL, "FATAL: couldn't set O_NONBLOCK on listen "
 				"socket: %s",
 				strerror(errno));
 		exit(1);
@@ -882,7 +1007,8 @@ tcp_server::tcp_server(int port)
 		exit(1);
 	}
 	
-	thread.emplace(&tcp_server::server, this);
+	for (int i = 0; i < num_threads; i++)
+		threads.emplace_back(&tcp_server::server, this, i);
 }
 
 /**
@@ -895,7 +1021,7 @@ tcp_server::~tcp_server()
 	
 	stop = true;
 	
-	/* In order to wake up the background thread, open a file that is
+	/* In order to wake up the background threads, open a file that is
 	 * readable and add it to the epoll set.
 	 */
 	if (pipe2(fds, 0) < 0) {
@@ -913,12 +1039,13 @@ tcp_server::~tcp_server()
 		exit(1);
 	}
 	
-	thread->join();
+	for (size_t i = 0; i < threads.size(); i++)
+		threads[i].join();
 	close(listen_fd);
 	close(epoll_fd);
 	close(fds[0]);
 	close(fds[1]);
-	for (unsigned i = 0; i < connections.size(); i++) {
+	for (unsigned i = 0; i < MAX_FDS; i++) {
 		if (connections[i] != NULL) {
 			if (close(i) < 0)
 				log(NORMAL, "Error closing TCP connection to "
@@ -927,6 +1054,8 @@ tcp_server::~tcp_server()
 						&connections[i]->peer),
 						strerror(errno));
 			delete connections[i];
+			log(NORMAL, "Deleted connection at 0x%p, size %lu\n",
+				connections[i], sizeof(*connections[i]));
 			connections[i] = NULL;
 		}
 	}
@@ -935,10 +1064,17 @@ tcp_server::~tcp_server()
 /**
  * tcp_server::server() - Handles incoming TCP requests on a listen socket
  * and all of the connections accepted via that socket. Normally invoked as
- * top-level method in a thread
+ * top-level method in a thread. There can potentially be multiple instances
+ * of this function running simultaneously.
+ * @thread_id:  Unique id for this particular thread among all of the
+ *              threads in this server.
  */
-void tcp_server::server()
+void tcp_server::server(int thread_id)
 {
+	char buffer[50];
+	
+	snprintf(buffer, sizeof(buffer), "S%d.%d", id, thread_id);
+	time_trace::create_thread_buffer(buffer);
 	
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
@@ -960,9 +1096,11 @@ void tcp_server::server()
 		}
 		for (int i = 0; i < num_events; i++) {
 			int fd = events[i].data.u32;
-			if (fd == listen_fd)
+			if (fd == listen_fd) {
+				spin_lock lock_guard(&mutex);
 				accept(epoll_fd);
-			else {
+			} else {
+				spin_lock lock_guard(&fd_locks[fd]);
 				if ((events[i].events & EPOLLIN) &&
 						(connections[fd] != NULL))
 					read(fd);
@@ -971,7 +1109,7 @@ void tcp_server::server()
 					if (connections[fd]->xmit())
 						connections[fd]->set_epoll_events(
 								epoll_fd,
-								EPOLLIN);
+								EPOLLIN|epollet);
 				}
 			}
 		}
@@ -989,9 +1127,11 @@ void tcp_server::accept(int epoll_fd)
 	struct sockaddr_in client_addr;
 	socklen_t addr_len = sizeof(client_addr);
 	
-	fd = ::accept(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
-			&addr_len);
+	fd = ::accept4(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
+			&addr_len, SOCK_NONBLOCK);
 	if (fd < 0) {
+		if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+			return;
 		log(NORMAL, "FATAL: couldn't accept incoming TCP connection: "
 				"%s\n", strerror(errno));
 		exit(1);
@@ -1000,12 +1140,16 @@ void tcp_server::accept(int epoll_fd)
 			port, print_address(&client_addr), fd);
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+	if (fd >= MAX_FDS) {
+		log(NORMAL, "FATAL: TCP socket fd %d is greater than MAX_FDS\n",
+				fd);
+		exit(1);
+	}
+	spin_lock lock_guard(&fd_locks[fd]);
 	tcp_connection *connection = new tcp_connection(fd, fd, port,
 			client_addr);
-	while (connections.size() <= static_cast<unsigned>(fd))
-		connections.push_back(NULL);
 	connections[fd] = connection;
-	connection->set_epoll_events(epoll_fd, EPOLLIN);
+	connection->set_epoll_events(epoll_fd, EPOLLIN|epollet);
 }
 
 /**
@@ -1016,16 +1160,18 @@ void tcp_server::accept(int epoll_fd)
  */
 void tcp_server::read(int fd)
 {
-	int error = connections[fd]->read([this, fd](message_header *header) {
+	int error = connections[fd]->read(epollet,
+			[this, fd](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
-					EPOLLIN|EPOLLOUT);
+					EPOLLIN|EPOLLOUT|epollet);
 	});
 	if (error) {
 		log(NORMAL, "Closing client connection: %s\n",
 				connections[fd]->error_message);
+		spin_lock lock_guard(&mutex);
 		if (close(fd) < 0) {
 			log(NORMAL, "Error closing TCP connection to %s: %s\n",
 					print_address(&connections[fd]->peer),
@@ -1295,14 +1441,14 @@ void client::record(int length, uint32_t rtt, int server_id)
 
 /**
  * class homa_client - Holds information about a single Homa client,
- * which consists of one thread issuing requests and one thread receiving
- * responses. 
+ * which consists of one thread issuing requests and one or more threads
+ * receiving responses. 
  */
 class homa_client : public client {
     public:
 	homa_client(int id);
 	virtual ~homa_client();
-	void receiver(void);
+	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
 	bool wait_response(uint64_t id);
@@ -1350,7 +1496,7 @@ homa_client::homa_client(int id)
 	}
 	
 	for (int i = 0; i < port_receivers; i++) {
-		receiving_threads.emplace_back(&homa_client::receiver, this);
+		receiving_threads.emplace_back(&homa_client::receiver, this, i);
 	}
 	while (receivers_running < receiving_threads.size()) {
 		/* Wait for the receivers to begin execution before
@@ -1433,6 +1579,8 @@ bool homa_client::wait_response(uint64_t id)
 		exit(1);
 	}
 	uint32_t end_time = rdtsc() & 0xffffffff;
+	tt("Received response from server %d with %d bytes", header->server_id,
+			length);
 	record(length, end_time - header->start_time, header->server_id);
 	return true;
 }
@@ -1446,6 +1594,10 @@ void homa_client::sender()
 	char request[1000000];
 	message_header *header = reinterpret_cast<message_header *>(request);
 	uint64_t next_start = rdtsc();
+	char buffer[50];
+	
+	snprintf(buffer, sizeof(buffer), "C%d", id);
+	time_trace::create_thread_buffer(buffer);
 	
 	while (1) {
 		uint64_t now;
@@ -1479,6 +1631,7 @@ void homa_client::sender()
 			header->length = sizeof32(*header);
 		header->start_time = now & 0xffffffff;
 		header->server_id = server;
+		tt("sending to server %d, length %d", server, header->length);
 		int status = homa_send(fd, request, header->length,
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
@@ -1511,9 +1664,14 @@ void homa_client::sender()
 /**
  * homa_client::receiver() - Invoked as the top-level method in a thread
  * that waits for RPC responses and then logs statistics about them.
+ * @id:   Unique id for this receiver within its client.
  */
-void homa_client::receiver(void)
+void homa_client::receiver(int receiver_id)
 {	
+	char buffer[50];
+	snprintf(buffer, sizeof(buffer), "R%d.%d", id, receiver_id);
+	time_trace::create_thread_buffer(buffer);
+	
 	receivers_running++;
 	while (wait_response(0)) {}
 }
@@ -1528,7 +1686,7 @@ class tcp_client : public client {
 	tcp_client(int id);
 	virtual ~tcp_client();
 	void read(tcp_connection *connection);
-	void receiver(void);
+	void receiver(int id);
 	void sender(void);
 	
 	/** 
@@ -1538,7 +1696,7 @@ class tcp_client : public client {
 	std::vector<tcp_connection *> connections;
 	
 	/**
-	 * @blocked: Contains all of the connections for hich there is
+	 * @blocked: Contains all of the connections for which there is
 	 * pending output that couldn't be sent because the connection
 	 * was backed up.
 	 */
@@ -1549,6 +1707,14 @@ class tcp_client : public client {
 	 * wait for epoll events.
 	 */
 	int epoll_fd;
+	
+	/**
+	 * @epollet: EPOLLET if this flag should be used, or 0 otherwise.
+	 * We only use edge triggering if there are multiple receiving
+	 * threads (it's unneeded if there's only a single thread, and
+	 * it's faster not to use it).
+	 */
+	int epollet;
 	
 	/** @stop:  True means background threads should exit. */
 	bool stop;
@@ -1573,16 +1739,11 @@ tcp_client::tcp_client(int id)
 	, connections()
         , blocked()
         , epoll_fd(-1)
+	, epollet((port_receivers > 1) ? EPOLLET : 0)
         , stop(false)
         , receiving_threads()
         , sending_thread()
 {
-	if (port_receivers != 1) {
-		log(NORMAL, "FATAL: --port-receivers is %d, but TCP only "
-				"supports 1", port_receivers);
-		exit(1);
-	}
-	
 	epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
 		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
@@ -1609,6 +1770,13 @@ tcp_client::tcp_client(int id)
 		}
 		int flag = 1;
 		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+		if (fcntl(fd, F_SETFL, O_NONBLOCK) != 0) {
+			log(NORMAL, "FATAL: couldn't set O_NONBLOCK on socket "
+					"to server %s: %s",
+					print_address(&server_addrs[i]),
+					strerror(errno));
+			exit(1);
+		}
 		struct sockaddr_in addr;
 		socklen_t length = sizeof(addr);
 		if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&addr),
@@ -1620,12 +1788,14 @@ tcp_client::tcp_client(int id)
 		connections.emplace_back(new tcp_connection(fd, i,
 				ntohs(addr.sin_port), server_addrs[i]));
 		connections[connections.size()-1]->set_epoll_events(epoll_fd,
-				EPOLLIN);
+				EPOLLIN|epollet);
 	}
 	
-	receiving_threads.emplace_back(&tcp_client::receiver, this);
-	while (receivers_running == 0) {
-		/* Wait for the receiver to begin execution before
+	for (int i = 0; i < port_receivers; i++) {
+		receiving_threads.emplace_back(&tcp_client::receiver, this, i);
+	}
+	while (receivers_running < receiving_threads.size()) {
+		/* Wait for the receivers to begin execution before
 		 * starting the sender; otherwise the initial RPCs
 		 * may appear to take a long time.
 		 */
@@ -1681,6 +1851,11 @@ tcp_client::~tcp_client()
  */
 void tcp_client::sender()
 {
+	char buffer[50];
+	
+	snprintf(buffer, sizeof(buffer), "C%d", id);
+	time_trace::create_thread_buffer(buffer);
+	
 	uint64_t next_start = rdtsc();
 	message_header header;
 	size_t max_pending = 1;
@@ -1725,7 +1900,10 @@ void tcp_client::sender()
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		header.start_time = now & 0xffffffff;
 		header.server_id = server;
+		header.msg_id = message_id.fetch_add(1);
 		size_t old_pending = connections[server]->pending();
+		tt("sending message id %u to server %d, length %d",
+				header.msg_id, server, header.length);
 		if ((!connections[server]->send_message(&header))
 				&& (old_pending == 0)) {
 			blocked.push_back(connections[server]);
@@ -1757,9 +1935,14 @@ void tcp_client::sender()
 /**
  * tcp_client::receiver() - Invoked as the top-level method in a thread
  * that waits for RPC responses and then logs statistics about them.
+ * @receiver_id:  Id of this receiver (among those for the same port).
  */
-void tcp_client::receiver(void)
+void tcp_client::receiver(int receiver_id)
 {
+	char buffer[50];
+	
+	snprintf(buffer, sizeof(buffer), "R%d.%d", id, receiver_id);
+	time_trace::create_thread_buffer(buffer);
 	receivers_running++;
 	
 	/* Each iteration through this loop processes a batch of incoming
@@ -1784,10 +1967,12 @@ void tcp_client::receiver(void)
 			exit(1);
 		}
 		for (int i = 0; i < num_events; i++) {
-			tcp_connection *connection =
-					connections[events[i].data.fd];
-			if (events[i].events & EPOLLIN)
+			int fd = events[i].data.fd;
+			tcp_connection *connection = connections[fd];
+			if (events[i].events & EPOLLIN) {
+				spin_lock lock_guard(&fd_locks[fd]);
 				read(connection);
+			}
 		}
 	}
 }
@@ -1799,7 +1984,7 @@ void tcp_client::receiver(void)
  */
 void tcp_client::read(tcp_connection *connection)
 {
-	int error = connection->read([this](message_header *header) {
+	int error = connection->read(epollet, [this](message_header *header) {
 		uint32_t end_time = rdtsc() & 0xffffffff;
 		record(header->length, end_time - header->start_time,
 				header->server_id);
@@ -2245,15 +2430,15 @@ int server_cmd(std::vector<string> &words)
 					port);
 			for (j = 0; j < port_threads; j++) {
 				homa_server *server = new homa_server(
-						fd);
+						fd, homa_servers.size());
 				homa_servers.push_back(server);
 				metrics.push_back(&server->metrics);
 			}
 		}
 	} else {
 		for (int i = 0; i < server_ports; i++) {
-			tcp_server *server = new tcp_server(
-					first_port + i);
+			tcp_server *server = new tcp_server(first_port + i,
+					i, port_threads);
 			tcp_servers.push_back(server);
 			metrics.push_back(&server->metrics);
 		}
@@ -2299,6 +2484,33 @@ int stop_cmd(std::vector<string> &words)
 }
 
 /**
+ * tt_cmd() - Parse the arguments for a "tt" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int tt_cmd(std::vector<string> &words)
+{	
+	const char *option = words[1].c_str();
+	if (strcmp(option, "print") == 0) {
+		if (words.size() < 3) {
+			printf("No file name provided for %s\n", option);
+			return 0;
+		}
+		int error = time_trace::print_to_file(words[2].c_str());
+		if (error) {
+			printf("Couldn't open time trace file '%s': %s",
+				words[2].c_str(), strerror(error));
+			return 0;
+		}
+	} else {
+		printf("Unknown option '%s'; must be print\n", option);
+		return 0;
+	}
+	return 1;
+}
+
+/**
  * exec_words() - Given a command that has been parsed into words,
  * execute the command corresponding to the words.
  * @words:  Each entry represents one word of the command, like argc/argv.
@@ -2324,6 +2536,8 @@ int exec_words(std::vector<string> &words)
 		return server_cmd(words);
 	} else if (words[0].compare("stop") == 0) {
 		return stop_cmd(words);
+	} else if (words[0].compare("tt") == 0) {
+		return tt_cmd(words);
 	} else {
 		printf("Unknown command '%s'\n", words[0].c_str());
 		return 0;
@@ -2395,6 +2609,7 @@ void error_handler(int signal, siginfo_t* info, void* ucontext)
 	for (int i = 1; i < frames; ++i)
 		log(NORMAL, "%s\n", symbols[i]);
 	fflush(log_file);
+	while(1) {}
 
 	/* Use abort, rather than exit, to dump core/trap in gdb. */
 	abort();
