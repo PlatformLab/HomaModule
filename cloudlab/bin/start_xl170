@@ -4,6 +4,7 @@
 # start_xl170 [mod_file]
 
 rps=1
+limit_rss=0
 for arg in $@; do
     if [ $arg = no_rps ]; then
         rps=0
@@ -17,8 +18,8 @@ else
 fi
 vlan=vlan287
 
-# sudo ip link set ens1f1 mtu 1500
-# sudo ip link set $vlan mtu 1500
+sudo ip link set ens1f1 mtu 3000
+sudo ip link set $vlan mtu 3000
 sudo rmmod homa
 sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
@@ -27,9 +28,13 @@ sudo sysctl /net/homa/rtt_bytes=70000
 sudo sysctl /net/homa/grant_increment=10000
 sudo sysctl /net/homa/max_gso_size=20000
 sudo sysctl /net/homa/num_priorities=8
+sudo sysctl /net/homa/gro_policy=0
+# sudo sysctl /net/homa/poll_usecs=50
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
-sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 0 rx-frames 1
+sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1
+# sudo sysctl .net.core.netdev_budget=300
+# sudo sysctl .net.ipv4.congestion_control=dctcp
 
 # Clean metrics for metrics.py
 rm -f ~/.homa_metrics
@@ -57,12 +62,33 @@ else
     sudo ethtool -K ens1f1 ntuple off
 fi
 
-# Set VLAN priority mappings (no longer needed: we use IP priorities instead)
-# sudo vconfig set_egress_map $vlan 1 1
-# sudo vconfig set_egress_map $vlan 2 0
-# sudo vconfig set_egress_map $vlan 3 2
-# sudo vconfig set_egress_map $vlan 4 3
-# sudo vconfig set_egress_map $vlan 5 4
-# sudo vconfig set_egress_map $vlan 6 5
-# sudo vconfig set_egress_map $vlan 7 6
-# sudo vconfig set_egress_map $vlan 8 7
+if [ $limit_rss -eq 1 ]; then
+    echo Limiting RSS channels
+    sudo bash -c "echo 16 > /proc/irq/117/smp_affinity_list"
+    sudo bash -c "echo 18 > /proc/irq/118/smp_affinity_list"
+    sudo ethtool -L ens1f1 combined 2
+else
+    echo Using all RSS channels
+    sudo bash -c "echo 0 > /proc/irq/117/smp_affinity_list"
+    sudo bash -c "echo 1 > /proc/irq/118/smp_affinity_list"
+    sudo bash -c "echo 2 > /proc/irq/119/smp_affinity_list"
+    sudo bash -c "echo 3 > /proc/irq/120/smp_affinity_list"
+    sudo bash -c "echo 4 > /proc/irq/121/smp_affinity_list"
+    sudo bash -c "echo 5 > /proc/irq/122/smp_affinity_list"
+    sudo bash -c "echo 6 > /proc/irq/123/smp_affinity_list"
+    sudo bash -c "echo 7 > /proc/irq/124/smp_affinity_list"
+    sudo bash -c "echo 8 > /proc/irq/125/smp_affinity_list"
+    sudo bash -c "echo 9 > /proc/irq/126/smp_affinity_list"
+    sudo bash -c "echo 10 > /proc/irq/127/smp_affinity_list"
+    sudo bash -c "echo 11 > /proc/irq/128/smp_affinity_list"
+    sudo bash -c "echo 12 > /proc/irq/129/smp_affinity_list"
+    sudo bash -c "echo 13 > /proc/irq/130/smp_affinity_list"
+    sudo bash -c "echo 14 > /proc/irq/131/smp_affinity_list"
+    sudo bash -c "echo 15 > /proc/irq/132/smp_affinity_list"
+    sudo bash -c "echo 16 > /proc/irq/133/smp_affinity_list"
+    sudo bash -c "echo 17 > /proc/irq/134/smp_affinity_list"
+    sudo bash -c "echo 18 > /proc/irq/135/smp_affinity_list"
+    sudo bash -c "echo 19 > /proc/irq/136/smp_affinity_list"
+    sudo ethtool -L ens1f1 combined 20
+ 
+fi
