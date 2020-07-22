@@ -30,6 +30,7 @@ extern atomic_t   tt_linux_freeze_no_homa;
 extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
+extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1); 
 #endif
 
 /* Separate buffers for each core: this eliminates the need for
@@ -529,6 +530,7 @@ void tt_inc_metric(int metric, __u64 count)
 	 */
 	static int offsets[] = {
 		offsetof(struct homa_metrics, napi_cycles),
+		offsetof(struct homa_metrics, linux_softirq_cycles),
 	};
 	__u64 *metric_addr = (__u64 *)(((char *)
 			&homa_cores[smp_processor_id()]->metrics)
