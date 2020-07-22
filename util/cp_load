@@ -25,7 +25,8 @@ from cperf import *
 load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
 
 parser = get_parser(description=
-        'Measures slowdown as a function of message size for Homa and TCP.',
+        'Generates CDFS of short message latency as a function of load '
+        'for Homa and TCP.',
         usage='%(prog)s [options]',
         defaults={
             "server_ports":     3,
@@ -101,16 +102,16 @@ styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
 for fraction in fractions:
     x, y = get_short_cdf("tcp%3.1f_%s" % (fraction, options.workload))
     plt.plot(x, y, label="TCP %4.2f GB/sec" % (fraction * options.net_bw),
-            color="#1f77b4", linestyle=styles.pop())
+            color=tcp_color, linestyle=styles.pop())
 styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
 for fraction in fractions:
     x, y = get_short_cdf("homa%3.1f_%s" % (fraction, options.workload))
     plt.plot(x, y, label="Homa %4.2f GB/sec" % (fraction * options.net_bw),
-            color="#ff7f0e", linestyle=styles.pop())
+            color=homa_color, linestyle=styles.pop())
 x, y = get_short_cdf(unloaded_exp)
-plt.plot(x, y, label="Homa best case", color="#2ca02c")
+plt.plot(x, y, label="Homa best case", color=unloaded_color)
 
-plt.legend(loc="upper right")
+plt.legend(loc="upper right", prop={'size': 9})
 plt.savefig("%s/reports/load_cdfs_%s.pdf" % (options.log_dir, options.workload))
 
 # print(plt.rcParams['axes.prop_cycle'].by_key()['color'])
