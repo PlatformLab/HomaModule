@@ -2,14 +2,16 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
-* (July 2020) Unexplained gaps. I am observing gaps of 200-300 us where
+* (July 2020) SMIs impact tail latency. I observed gaps of 200-300 us where
   a core appears to be doing nothing. These occur in a variety of places
   in the code including in the middle of straight-line code or just
   before an interrupt occurs. Furthermore, when these happen, *every* core
   in the processor appears to stop at the same time (different cores are in
   different places). The gaps do not appear to be related to interrupts (I
   instrumented every __irq_entry in the Linux kernel sources), context
-  switches, or c-states (which I disabled).
+  switches, or c-states (which I disabled). It appears that the gaps are
+  caused by System Management Interrupts (SMIs); they appear to account
+  for about half of the P99 traces I examined in W4.
 
 * (July 2020) RSS configuration. Tried changing the RSS configuration to
   concentrate packet handling: NAPI and SoftIRQ are limited to a total of 4
