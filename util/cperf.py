@@ -410,11 +410,25 @@ def do_ssh(command, nodes):
         subprocess.run(["ssh", "node-%d" % id] + command,
                 stdout=subprocess.DEVNULL)
 
-def set_homa_parameter(name, value, nodes):
+def get_sysctl_parameter(name):
     """
-    Modify the value of a Homa configuration parameter on a group of nodes.
+    Retrieve the value of a particular system parameter using sysctl on
+    the current host, and return the value as a string.
 
-    name:     name of the configuration parameter to modify
+    name:      name of the desired configuration parameter
+    """
+    output = subprocess.run(["sysctl", name], stdout=subprocess.PIPE,
+            encoding="utf-8").stdout.rstrip()
+    match = re.match('.*= (.*)', output)
+    if not match:
+         raise Error("Couldn't parse sysctl output: %s" % output)
+    return match.group(1)
+
+def set_sysctl_parameter(name, value, nodes):
+    """
+    Modify the value of a system parameter on a group of nodes.
+
+    name:     name of the sysctl configuration parameter to modify
     value:    desired value for the parameter
     nodes:    specifies ids of the nodes on which to execute the command:
               should be a range, list, or other object that supports "in"
@@ -423,7 +437,7 @@ def set_homa_parameter(name, value, nodes):
             str(nodes)))
     for id in nodes:
         subprocess.run(["ssh", "node-%d" % id, "sudo", "sysctl",
-                ".net.homa.%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
+                "%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
 
 def start_servers(r, options):
     """

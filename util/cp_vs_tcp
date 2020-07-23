@@ -53,6 +53,8 @@ if options.workload != "":
 
 # First, run all of the experiments
 if not options.plot_only:
+    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control")
+    print("TCP congestion control: %s" % (congestion))
     for workload, bw in load_info:
         options.workload = workload
         options.net_bw = bw/2.0
@@ -93,6 +95,10 @@ if not options.plot_only:
         except Exception as e:
             log(traceback.format_exc())
 
+    if options.tcp or options.dctcp:
+        print("Resetting TCP congestion control to %s" % (congestion))
+        set_sysctl_parameter("net.ipv4.tcp_congestion_control", congestion,
+                range(0, options.num_nodes))
     log("Stopping nodes")
     stop_nodes()
     scan_logs()
@@ -113,13 +119,11 @@ for workload, bw in load_info:
     start_slowdown_plot(title, 1000, homa_exp)
     if options.tcp:
         plot_slowdown(tcp_exp, "p99", "TCP P99", color=tcp_color)
-    if options.dctcp:
-        plot_slowdown(dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
-    plot_slowdown(homa_exp, "p99", "Homa P99", color=homa_color)
-    if options.tcp:
         plot_slowdown(tcp_exp, "p50", "TCP P50", color=tcp_color2)
     if options.dctcp:
+        plot_slowdown(dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
         plot_slowdown(dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
+    plot_slowdown(homa_exp, "p99", "Homa P99", color=homa_color)
     plot_slowdown(homa_exp, "p50", "Homa P50", color=homa_color2)
     if workload == "w5":
         plt.legend(loc="upper right", prop={'size': 9})

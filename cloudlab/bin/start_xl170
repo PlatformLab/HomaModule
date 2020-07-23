@@ -33,7 +33,7 @@ sudo sysctl /net/homa/num_priorities=8
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1
 # sudo sysctl .net.core.netdev_budget=300
-sudo sysctl .net.ipv4.congestion_control=cubic
+# sudo sysctl .net.ipv4.tcp_congestion_control=cubic
 
 # Clean metrics for metrics.py
 rm -f ~/.homa_metrics
