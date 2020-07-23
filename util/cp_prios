@@ -28,14 +28,17 @@ load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.2], ["w5", 2.2]]
 priorities = [1, 2, 3, 4, 8]
 
 parser = get_parser(description=
-        'Measures slowdown as a function of message size for Homa and TCP.',
+        'Measures Homa slowdown as the number of available priority levels '
+        'varies.',
         usage='%(prog)s [options]',
         defaults={
-            "server_ports":     3,
-            "port_threads":     3,
-            "client_ports":     3,
-            "port_receivers":   3,
-            "workload":         ""
+            "server_ports":         3,
+            "port_threads":         3,
+            "client_ports":         3,
+            "port_receivers":       2,
+            "tcp_server_ports":     9,
+            "tcp_client_ports":     4,
+            "workload":             ""
         })
 options = parser.parse_args()
 init(options)
@@ -68,8 +71,12 @@ if not options.plot_only:
                 log("Configuring Homa for %d priority levels" % (prios))
                 set_homa_parameter("num_priorities", prios,
                         range(0, options.num_nodes))
-                run_experiment("%s_%dprios" % (workload, prios), clients,
+                run_experiment("homa_%s_%dprios" % (workload, prios), clients,
                         options)
+
+            options.protocol = "tcp"
+            start_servers(servers, options)
+            run_experiment("tcp_%s" % (workload), clients, options)
     except Exception as e:
         log(traceback.format_exc())
                    
@@ -85,13 +92,18 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 1000, "%s_%dprios" % (workload, priorities[-1]))
+    start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload, priorities[-1]))
+    plot_slowdown("tcp_" + workload, "p99", "TCP P99", color=tcp_color)
+    plot_slowdown("tcp_" + workload, "p50", "TCP P50", color=tcp_color2)
     for prios in priorities:
         if prios == 1:
-            label = "1 priority"
+            label = "Homa 1 prio"
         else:
-            label = "%d priorities" % prios
-        plot_slowdown("%s_%dprios" % (workload,prios), "p99", label)
-    plt.legend()
+            label = "Homa %d prios" % prios
+        plot_slowdown("homa_%s_%dprios" % (workload,prios), "p99", label)
+    if workload == "w5":
+        plt.legend(loc="upper right", prop={'size': 9})
+    else:
+        plt.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/prios_%s.pdf" % (options.log_dir, workload))

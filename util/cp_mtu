@@ -117,7 +117,7 @@ for mtu in mtus:
 x, y = get_short_cdf(unloaded_exp)
 plt.plot(x, y, label="Homa best case", color=unloaded_color)
 
-plt.legend(loc="upper right")
+plt.legend(loc="upper right", prop={'size': 9})
 plt.savefig("%s/reports/mtu_cdfs_%s.pdf" % (options.log_dir, options.workload))
 
 # print(plt.rcParams['axes.prop_cycle'].by_key()['color'])
