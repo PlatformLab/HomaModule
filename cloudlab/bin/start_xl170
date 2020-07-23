@@ -28,13 +28,12 @@ sudo sysctl /net/homa/rtt_bytes=70000
 sudo sysctl /net/homa/grant_increment=10000
 sudo sysctl /net/homa/max_gso_size=20000
 sudo sysctl /net/homa/num_priorities=8
-sudo sysctl /net/homa/gro_policy=0
 # sudo sysctl /net/homa/poll_usecs=50
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1
 # sudo sysctl .net.core.netdev_budget=300
-# sudo sysctl .net.ipv4.congestion_control=dctcp
+sudo sysctl .net.ipv4.congestion_control=cubic
 
 # Clean metrics for metrics.py
 rm -f ~/.homa_metrics

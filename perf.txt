@@ -2,7 +2,7 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
-* (July 2020) SMIs impact tail latency. I observed gaps of 200-300 us where
+* (July 2020) SMIs impact on tail latency. I observed gaps of 200-300 us where
   a core appears to be doing nothing. These occur in a variety of places
   in the code including in the middle of straight-line code or just
   before an interrupt occurs. Furthermore, when these happen, *every* core
@@ -13,13 +13,30 @@ order.
   caused by System Management Interrupts (SMIs); they appear to account
   for about half of the P99 traces I examined in W4.
 
-* (July 2020) RSS configuration. Tried changing the RSS configuration to
-  concentrate packet handling: NAPI and SoftIRQ are limited to a total of 4
-  cores, and cp_node sets core affinity so it doesn't use those cores. This
-  made tail latency significantly worse. It was difficult to identify a
-  a single clear reason; the smaller number of cores can become busy for
-  long periods of time, but it wasn't clear why this would affect tail
-  latency (e.g., why don't high priority packets get through fast?).
+* (July 2020) RSS configuration. Noticed that tail latency most often occurs
+  because too much work is being done by either NAPI or SoftIRQ (or both) on
+  a single core, which prevents application threads on that core from running.
+  Tried several alternative approaches to RSS to see if better load balancing
+  is possible, such as:
+  * Concentrate NAPI and SoftIRQ packet handling on a small number of cores,
+    and use core affinity to keep application threads off of those cores.
+  * Identify an unloaded core for SoftIRQ processing and steer packet batches
+    to these carefully chosen cores (attempted several different policies).
+  * Bypass the entire Linux networking stack and call homa_softirq directly
+    from homa_gro_receive.
+  * Arrange for SoftIRQ to run on the same core as NAPI (this is more efficient
+    because it avoids inter-processor interrupts, but can increase contention
+    on that core).
+  Most of these attempts made things worse, and none produced dramatic
+  benefits. In the end, I settled on the following hybrid approach:
+  * For single-packet batches (meaning the NAPI core is underloaded), process
+    SoftIRQ on the same core as NAPI. This reduces small-message RTT by about
+    3 us in underloaded systems.
+  * When there are packet batches, examine several adjacent cores, and pick
+    the one for SoftIRQ that has had the least recent NAPI/SoftIRQ work.
+  Overall, this results in a 20-35% improvement in P99 latency for small
+  messages under heavy-tailed workloads, in comparison to the Linux default
+  RSS behavior.
 
 * (July 2020) P999 latency for small messages. This is 5 ms or more in most
   of the workloads, and it turns out to be caused by Linux SoftIRQ handling.
@@ -140,62 +157,62 @@ order.
   actually below threshold (which it may not be if other threads have
   also been transmitting). This guarantees that the pacer will make progress.
 
-7. The socket lock is a throughput bottleneck when a multi-threaded server
-   is receiving large numbers of small requests. One problem was that the
-   lock was being acquired twice while processing a single-packet incoming
-   request: once during RPC initialization to add the RPC to active_rpcs,
-   and again later to add dispatch the RPC to a server thread. Restructured
-   the code to do both of these with a single lock acquisition. Also
-   cleaned up homa_wait_for_message to reduce the number of times it
-   acquires socket locks. This produced the following improvements, measured
-   with one server (--port_threads 8) and 3 clients (--workload 100 --alt_client
-   --client_threads 20):
-   * Throughput increased from 650 kops/sec to 760
-   * socket_lock_miss_cycles dropped from 318% to 193%
-   * server_lock_miss_cycles dropped from 1.4% to 0.7%
+* The socket lock is a throughput bottleneck when a multi-threaded server
+  is receiving large numbers of small requests. One problem was that the
+  lock was being acquired twice while processing a single-packet incoming
+  request: once during RPC initialization to add the RPC to active_rpcs,
+  and again later to add dispatch the RPC to a server thread. Restructured
+  the code to do both of these with a single lock acquisition. Also
+  cleaned up homa_wait_for_message to reduce the number of times it
+  acquires socket locks. This produced the following improvements, measured
+  with one server (--port_threads 8) and 3 clients (--workload 100 --alt_client
+  --client_threads 20):
+  * Throughput increased from 650 kops/sec to 760
+  * socket_lock_miss_cycles dropped from 318% to 193%
+  * server_lock_miss_cycles dropped from 1.4% to 0.7%
 
-6. Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
-                       1 server thread  18 threads  TCP, 1 thread  TCP, 18 threads
-   No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
-   RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
+* Impact of load balancing on latency (xl170, 100B RPCs, 11/2019):
+                      1 server thread  18 threads  TCP, 1 thread  TCP, 18 threads
+  No RPS/RFS             16.0 us         16.3 us      20.0 us        25.5 us
+  RPS/RFS enabled        17.1 us         21.5 us      21.9 us        26.5 us
 
-5. It's better to queue a thread waiting for incoming messages at the *front*
-   of the list in homa_wait_for_message, rather than the rear. If there is a
-   pool of server threads but not enough load to keep them all busy, it's
-   better to reuse a few threads rather than spreading work across all of
-   them; this produces better cache locality). This approach improves latency
-   by 200-500ns at low loads.
+* It's better to queue a thread waiting for incoming messages at the *front*
+  of the list in homa_wait_for_message, rather than the rear. If there is a
+  pool of server threads but not enough load to keep them all busy, it's
+  better to reuse a few threads rather than spreading work across all of
+  them; this produces better cache locality). This approach improves latency
+  by 200-500ns at low loads.
 
-4. Problem: large messages have no pipelining. For example, copying bytes
-   from user space to output buffers is not overlapped with sending packets,
-   and copying bytes from buffers to user space doesn't start until the
-   entire message has been received.
-   * Tried overlapping packet transmission with packet creation (7/2019) but
-     this made performance worse, not better. Not sure why.
+* Problem: large messages have no pipelining. For example, copying bytes
+  from user space to output buffers is not overlapped with sending packets,
+  and copying bytes from buffers to user space doesn't start until the
+  entire message has been received.
+  * Tried overlapping packet transmission with packet creation (7/2019) but
+    this made performance worse, not better. Not sure why.
 
-3. It is hard for the pacer to keep the uplink fully utilized, because it
-   gets descheduled for long periods of time.
-   * Tried disabling interrupts while the pacer is running, but this doesn't
-    work: if a packet gets sent with interrupts disabled, the interrupts get
-     reenabled someplace along the way, which can lead to deadlock. Also,
-     the VLAN driver uses "interrupts off" as a signal that it should polling
-     mode, which doesn't work.
-   * Tried calling homa_pacer_xmit from multiple places; this helps a bit
-     (5-10%).
-   * Tried making the pacer thread a high-priority real-time thread; this
-     actually made things a bit worse.
+* It is hard for the pacer to keep the uplink fully utilized, because it
+  gets descheduled for long periods of time.
+  * Tried disabling interrupts while the pacer is running, but this doesn't
+   work: if a packet gets sent with interrupts disabled, the interrupts get
+    reenabled someplace along the way, which can lead to deadlock. Also,
+    the VLAN driver uses "interrupts off" as a signal that it should polling
+    mode, which doesn't work.
+  * Tried calling homa_pacer_xmit from multiple places; this helps a bit
+    (5-10%).
+  * Tried making the pacer thread a high-priority real-time thread; this
+    actually made things a bit worse.
 
-2. There can be a long lag in sending grants. One problem is that Linux
-   tries to collect large numbers of buffers before invoking the softirq
-   handler; this causes grants to be delayed. Implemented max_gro_skbs to
-   limit buffering. However, varying the parameter doesn't seem to affect
-   throughput (11/13/2019).
+* There can be a long lag in sending grants. One problem is that Linux
+  tries to collect large numbers of buffers before invoking the softirq
+  handler; this causes grants to be delayed. Implemented max_gro_skbs to
+  limit buffering. However, varying the parameter doesn't seem to affect
+  throughput (11/13/2019).
 
-1. Without RPS enabled, Homa performance is limited by a single core handling
-   all softirq actions. In order for RPS to work well, Homa must implement
-   its own hash function for mapping packets to cores (the default IP hasher
-   doesn't know about Homa ports, so it considers only the peer IP address.
-   However, with RPS, packets can get spread out over too many cores, which
-   causes poor latency when there is a single client and the server is
-   underloaded.
+* Without RPS enabled, Homa performance is limited by a single core handling
+  all softirq actions. In order for RPS to work well, Homa must implement
+  its own hash function for mapping packets to cores (the default IP hasher
+  doesn't know about Homa ports, so it considers only the peer IP address.
+  However, with RPS, packets can get spread out over too many cores, which
+  causes poor latency when there is a single client and the server is
+  underloaded.
 

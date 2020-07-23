@@ -152,35 +152,26 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	EXPECT_EQ(1, same_flow);
 }
 
-TEST_F(homa_offload, homa_gro_complete_core_id_wraparound)
+TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 {
 	struct sk_buff *skb = self->gro_list;
+	homa->gro_policy = HOMA_GRO_IDLE;
 	homa_cores[6]->last_active = 30;
 	homa_cores[7]->last_active = 25;
 	homa_cores[0]->last_active = 20;
 	homa_cores[1]->last_active = 15;
-	
-	cpu_number = 7;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(1, skb->hash - 32);
-	
-	cpu_number = 6;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(0, skb->hash - 32);
+	homa_cores[2]->last_active = 10;
 	
 	cpu_number = 5;
 	homa_gro_complete(skb, 0);
-	EXPECT_EQ(7, skb->hash - 32);
-}
-TEST_F(homa_offload, homa_gro_complete_pick_core)
-{
-	struct sk_buff *skb = self->gro_list;
-	homa_cores[2]->last_active = 2;
-	homa_cores[3]->last_active = 4;
+	EXPECT_EQ(1, skb->hash - 32);
+	
+	homa_cores[6]->last_active = 5;
+	cpu_number = 5;
+	homa_gro_complete(skb, 0);
+	EXPECT_EQ(6, skb->hash - 32);
+	
+	cpu_number = 6;
 	homa_gro_complete(skb, 0);
 	EXPECT_EQ(2, skb->hash - 32);
-	
-	homa_cores[2]->last_active = 10;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(3, skb->hash - 32);
 }

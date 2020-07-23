@@ -114,25 +114,23 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 				"from packet for trace");
 	iph = (struct iphdr *) skb_network_header(skb);
 	h_new = (struct data_header *) skb_transport_header(skb);
-	if (iph->protocol == 140) {
-		if (h_new->common.type == 20)
-			tt_record4("homa_gro_receive got packet from 0x%x "
-					"id %llu, offset %d, priority %d",
-					ntohl(ip_hdr(skb)->saddr),
-					h_new->common.id & 0xffffffff,
-					ntohl(h_new->seg.offset),
-					iph->tos >> 5);
-		else
-			tt_record4("homa_gro_receive got packet from 0x%x "
-					"id %llu, type %d, priority %d",
-					ntohl(ip_hdr(skb)->saddr),
-					h_new->common.id & 0xffffffff,
-					h_new->common.type, iph->tos >> 5);
-	}
+	if (h_new->common.type == 20)
+		tt_record4("homa_gro_receive got packet from 0x%x "
+				"id %llu, offset %d, priority %d",
+				ntohl(ip_hdr(skb)->saddr),
+				h_new->common.id & 0xffffffff,
+				ntohl(h_new->seg.offset),
+				iph->tos >> 5);
+	else
+		tt_record4("homa_gro_receive got packet from 0x%x "
+				"id %llu, type %d, priority %d",
+				ntohl(ip_hdr(skb)->saddr),
+				h_new->common.id & 0xffffffff,
+				h_new->common.type, iph->tos >> 5);
 	
 	homa_cores[smp_processor_id()]->last_active = get_cycles();
 	
-	if (homa->gro_policy == HOMA_GRO_BYPASS) {
+	if (homa->gro_policy & HOMA_GRO_BYPASS) {
 		homa_softirq(skb);
 		
 		/* This return value indicates that we have freed skb. */
@@ -198,7 +196,8 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	 * batching does occur, homa_gro_complete will pick a different
 	 * core).
 	 */
-	homa_set_softirq_cpu(skb, smp_processor_id());
+	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
+		homa_set_softirq_cpu(skb, smp_processor_id());
 	return NULL;
 }
 
@@ -214,41 +213,42 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
  * Return:   Always returns 0, signifying success. 
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
-{
-	int target, id1, id2;
-	
+{	
 //	struct common_header *h = (struct common_header *)
 //			skb_transport_header(skb);
 //	struct data_header *d = (struct data_header *) h;
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 //			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
-	if (homa->gro_policy == HOMA_GRO_NORMAL) {
+	if (homa->gro_policy & HOMA_GRO_IDLE) {
+		int i, core, best;
+		__u64 best_time = ~0;
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no
-		 * core gets overloaded. We do that by checking the next two cores
-		 * in order after this one, and choosing the one that has been idle
-		 * (hasn't done NAPI or SoftIRQ processing for Homa) the longest.
+		 * core gets overloaded. We do that by checking the next several
+		 * cores in order after this one, and choosing the one that
+		 * has been idle the longest (hasn't done NAPI or SoftIRQ
+		 * processing for Homa).
 		 */
-		id1 = smp_processor_id() + 1;
-		if (unlikely(id1 >= nr_cpu_ids))
-			id1 = 0;
-		id2 = id1 + 1;
-		if (unlikely(id2 >= nr_cpu_ids))
-			id2 = 0;
-		if (homa_cores[id1]->last_active < homa_cores[id2]->last_active)
-			target = id1;
-		else
-			target = id2;
-		homa_set_softirq_cpu(skb, target);
-	} else if (homa->gro_policy == HOMA_GRO_NEXT) {
+		core = best = smp_processor_id();
+		for (i = 0; i < 4; i++) {
+			core++;
+			if (unlikely(core >= nr_cpu_ids))
+				core = 0;
+			if (homa_cores[core]->last_active < best_time) {
+				best_time = homa_cores[core]->last_active;
+				best = core;
+			}
+		}
+		homa_set_softirq_cpu(skb, best);
+	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
 		 */
-		id1 = smp_processor_id() + 1;
-		if (unlikely(id1 >= nr_cpu_ids))
-			id1 = 0;
-		homa_set_softirq_cpu(skb, id1);
+		int target = smp_processor_id() + 1;
+		if (unlikely(target >= nr_cpu_ids))
+			target = 0;
+		homa_set_softirq_cpu(skb, target);
 	}
 	
 	return 0;

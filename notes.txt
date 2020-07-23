@@ -2,7 +2,6 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Cleanups still needed:
-  * Get larger MTUs working again
   * Problem with grants: whether or not to keep on grantable list after
     fully granted.
   * Return UNKNOWN in homa_softirq if socket isn't known.
@@ -13,18 +12,12 @@ Notes for Homa implementation in Linux:
   * Order the queue of ready messages by size? May not matter for
     existing benchmarks, but could matter more for real applications, where
     long messages are likely to have longer service times.
-  * Experiment with RPS/RFS options.
-  * Make sure TCP is optimized (e.g. DCTCP)
   * Check out "-w 500000": Homa has less throughput than TCP.
   * Understand high TCP P99 for W1?
   * Modify code to reduce maximum rate of reaping, especially after large
     bursts of deletions?
-  * Analyze metrics, such as unknown_rpcs or redundant data packets, to see
-    why they are happening.
-
-* Notes for GSO and GRO:
-  * Check that control packet sizes really are the same as small data packets.
-  * Reorganize common_header to pack the id into unused fields.
+  * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
+    >1 request per kernel call?
 
 * Things to do:
   * More work related to GSO/GRO:
@@ -54,8 +47,6 @@ Notes for Homa implementation in Linux:
     state in terms of their socktab links.
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
-  * Under some conditions, peer information will need to be invalidated.
-    Use dst->obsolete? There is also a dst_check function.
   * Don't return any errors on sends?
   * Need to return errors to apps.
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
@@ -74,7 +65,9 @@ Notes for Homa implementation in Linux:
     Yes, but must specify GFP_ATOMIC as argument, not GFP_KERNEL; the operation
     will not sleep, which means it could fail more easily.
   * Is it OK to retain struct dst_entry pointers for a long time? Can they
-    ever become obsolete (e.g. because routes change)?
+    ever become obsolete (e.g. because routes change)? It looks like the
+    "obsolete" field will take care of this. However, a socket is used to
+    create a dst entry; what if that socket goes away?
   * Can flows and struct_dst's be shared across sockets? What information
     must be considered to make these things truly safe for sharing (e.g.
     source network port?)?

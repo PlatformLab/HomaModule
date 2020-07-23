@@ -1392,11 +1392,25 @@ struct homa {
 	int max_gro_skbs;
 	
 	/**
-	 * @gro_policy: Specifies how Homa packets should be processed at
-	 * GRO level. Must have one of the values of the homa_gro_policy
-	 * enum.  Set externally via sysctl.
+	 * @gro_policy: An OR'ed together collection of bits that determine
+	 * how Homa packets should be steered for SoftIRQ handling.  A value
+	 * of zero will eliminate any Homa-specific behaviors, reverting
+	 * to the Linux defaults. Set externally via sysctl (but modifying
+	 * it is almost certainly a bad idea; see below).
 	 */
 	int gro_policy;
+	
+	/* Bits that can be specified for gro_policy. These were created for
+	 * testing, in order to evaluate various possible policies; you almost
+	 * certainly should not use any value other than HOMA_GRO_NORMAL.
+	 * The meaning of the bits is also somewhat complicated; if you really
+	 * want to know what they mean, read the code of homa_offload.c
+	 */
+	#define HOMA_GRO_BYPASS      1
+        #define HOMA_GRO_SAME_CORE   2
+        #define HOMA_GRO_IDLE        4
+        #define HOMA_GRO_NEXT        8
+        #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
 	
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -1445,32 +1459,6 @@ struct homa {
 	 * short-term use during testing.
 	 */
 	int temp[4];
-};
-
-/**
- * enum homa_gro_policy - Legal values for the gro_policy configuration
- * parameter.
- */
-enum homa_gro_policy {
-	HOMA_GRO_NORMAL         = 0,
-	
-	/* Always schedule SoftIRQ processing on the same core that
-	 * GRO (and NAPI) ran on.
-	 */
-	HOMA_GRO_SAME_CORE      = 1,
-	
-	/* Bypass the Linux networking stack and invoke homa_softirq directly
-	 * from homa_gro_receive (i.e. at NAPI level).
-	 */
-	HOMA_GRO_BYPASS         = 2,
-	
-	/* Schedule SoftIRQ processing on the next core (in circular order
-	 * unless there is only a single packet, in which case SoftIRQ runs
-	 * on the NAPI core.
-	 */
-	HOMA_GRO_NEXT           = 3
-		
-
 };
 
 /**
