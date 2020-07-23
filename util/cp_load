@@ -91,8 +91,28 @@ if not options.plot_only:
 unloaded_exp = "unloaded_%s" % (options.workload)
 set_unloaded(unloaded_exp)
 
+# Generate slowdown plot.
+log("Generating slowdown plot for %s" % (options.workload))
+title = "%s %d nodes, %.2f GB/s" % (options.workload.capitalize(),
+        options.num_nodes, options.net_bw)
+start_slowdown_plot(title, 1000, "homa1.0_%s" % (options.workload))
+plot_slowdown("tcp%3.1f_%s" % (fractions[0], options.workload), "p99",
+        "TCP %4.2f GB/sec" % (fractions[0] * options.net_bw), color=tcp_color)
+plot_slowdown("tcp%3.1f_%s" % (fractions[-1], options.workload), "p99",
+        "TCP %4.2f GB/sec" % (fractions[-1] * options.net_bw), color=tcp_color2)
+plot_slowdown("homa%3.1f_%s" % (fractions[0], options.workload), "p99",
+        "Homa %4.2f GB/sec" % (fractions[0] * options.net_bw), color=homa_color)
+plot_slowdown("homa%3.1f_%s" % (fractions[-1], options.workload), "p99",
+        "Homa %4.2f GB/sec" % (fractions[-1] * options.net_bw), color=homa_color2)
+if options.workload == "w5":
+    plt.legend(loc="upper right", prop={'size': 9})
+else:
+    plt.legend(loc="upper left", prop={'size': 9})
+plt.tight_layout()
+plt.savefig("%s/reports/slowdown_%s.pdf" % (options.log_dir, options.workload))
+
 # Generate CDF of small-message RTTs.
-log("Generating short message CDFs")
+log("Generating short message CDFs for %s" % (options.workload))
 title = "%s %d nodes" % (options.workload.capitalize(), options.num_nodes)
 start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
         "Cumulative Fraction of Short Messages")
