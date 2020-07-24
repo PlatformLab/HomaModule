@@ -65,6 +65,7 @@ if not options.plot_only:
             o.server_ports = 1
             o.server_nodes = 1
             o.first_server = 1
+            o.unloaded = 500
             run_experiment("unloaded_" + workload, range(0, 1), o)
 
             for prios in priorities:

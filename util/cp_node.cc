@@ -75,6 +75,7 @@ int server_nodes = 1;
 int server_ports = 1;
 bool verbose = false;
 const char *workload = "100";
+int unloaded = 0;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -196,6 +197,9 @@ void print_help(const char *name)
 		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
 		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
+		"    --unloaded        Nonzero means run test in special mode for collecting\n"
+		"                      baseline data, with the given number of measurements\n"
+		"                      per length in the distribution (Homa only, default: 0)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
 		"                      or integer for fixed length (default: %s)\n\n"
 		"dump_times file       Log RTT times (and lengths) to file\n\n"
@@ -214,7 +218,8 @@ void print_help(const char *name)
 		"                      (Homa only, default: %d)\n"
 		"    --ports           Number of ports to listen on (default: %d)\n\n"
 		"stop [options]        Stop existing client and/or server threads; each\n"
-		"                      option must be either 'clients' or 'servers'\n",
+		"                      option must be either 'clients' or 'servers'\n\n"
+		"tt print file         Dump timetrace information to file\n",
 		client_max, first_port, first_server, first_server, net_bw,
 		client_ports, port_receivers, protocol,
 		server_nodes, server_ports, workload,
@@ -1448,6 +1453,8 @@ class homa_client : public client {
     public:
 	homa_client(int id);
 	virtual ~homa_client();
+	void measure_unloaded(int count);
+	uint32_t measure_rtt(int server, int length);
 	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
@@ -1495,16 +1502,22 @@ homa_client::homa_client(int id)
 		exit(1);
 	}
 	
-	for (int i = 0; i < port_receivers; i++) {
-		receiving_threads.emplace_back(&homa_client::receiver, this, i);
+	if (unloaded) {
+		measure_unloaded(unloaded);
+		sender_exited = true;
+	} else {
+		for (int i = 0; i < port_receivers; i++) {
+			receiving_threads.emplace_back(&homa_client::receiver,
+					this, i);
+		}
+		while (receivers_running < receiving_threads.size()) {
+			/* Wait for the receivers to begin execution before
+			 * starting the sender; otherwise the initial RPCs
+			 * may appear to take a long time.
+			 */
+		}
+		sending_thread.emplace(&homa_client::sender, this);
 	}
-	while (receivers_running < receiving_threads.size()) {
-		/* Wait for the receivers to begin execution before
-		 * starting the sender; otherwise the initial RPCs
-		 * may appear to take a long time.
-		 */
-	}
-	sending_thread.emplace(&homa_client::sender, this);
 }
 
 /**
@@ -1550,23 +1563,23 @@ void homa_client::stop_sender(void)
 }
 
 /**
- * homa_client::weight_response() - Wait for a response to arrive and
+ * homa_client::wait_response() - Wait for a response to arrive and
  * update statistics.
- * @id     Id of a specific RPC to wait for, or 0 for "any response".
- * Return: True means that a response was received; false means the client
- *         has been stopped and the socket has been shut down.
+ * @rpc_id:   Id of a specific RPC to wait for, or 0 for "any response".
+ * Return:    True means that a response was received; false means the client
+ *            has been stopped and the socket has been shut down.
  */
-bool homa_client::wait_response(uint64_t id)
+bool homa_client::wait_response(uint64_t rpc_id)
 {
 	char response[1000000];
 	message_header *header = reinterpret_cast<message_header *>(response);
 	struct sockaddr_in server_addr;
 	
-	id = 0;
+	rpc_id = 0;
 	int length;
 	do {
 		length = homa_recv(fd, response, sizeof(response),
-				HOMA_RECV_RESPONSE, &id,
+				HOMA_RECV_RESPONSE, &rpc_id,
 				(struct sockaddr *) &server_addr,
 				sizeof(server_addr));
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
@@ -1574,7 +1587,7 @@ bool homa_client::wait_response(uint64_t id)
 		if (exit_receivers)
 			return false;
 		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
-				strerror(errno), id,
+				strerror(errno), rpc_id,
 				print_address(&server_addr));
 		exit(1);
 	}
@@ -1601,7 +1614,7 @@ void homa_client::sender()
 	
 	while (1) {
 		uint64_t now;
-		uint64_t id;
+		uint64_t rpc_id;
 		int server;
 		
 		/* Wait until (a) we have reached the next start time
@@ -1635,7 +1648,7 @@ void homa_client::sender()
 		int status = homa_send(fd, request, header->length,
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
-			sizeof(server_addrs[0]), &id);
+			sizeof(server_addrs[0]), &rpc_id);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -1656,7 +1669,7 @@ void homa_client::sender()
 		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
-			wait_response(id);
+			wait_response(rpc_id);
 		}
 	}
 }
@@ -1664,7 +1677,7 @@ void homa_client::sender()
 /**
  * homa_client::receiver() - Invoked as the top-level method in a thread
  * that waits for RPC responses and then logs statistics about them.
- * @id:   Unique id for this receiver within its client.
+ * @receiver_id:   Unique id for this receiver within its client.
  */
 void homa_client::receiver(int receiver_id)
 {	
@@ -1674,6 +1687,92 @@ void homa_client::receiver(int receiver_id)
 	
 	receivers_running++;
 	while (wait_response(0)) {}
+}
+
+/**
+ * homa_client::measure_rtt() - Make a single request to a given server and
+ * return the RTT.
+ * @server:      Identifier of server to use for the request.
+ * @length:      Number of message bytes in the request.
+ *
+ * Return:       Round-trip time to service the request, in rdtsc cycles. 
+ */
+uint32_t homa_client::measure_rtt(int server, int length)
+{
+	char request[1000000];
+	message_header *header = reinterpret_cast<message_header *>(request);
+	uint64_t start;
+	uint64_t rpc_id;
+	struct sockaddr_in server_addr;
+	int status;
+
+	header->length = length;
+	if (header->length > HOMA_MAX_MESSAGE_LENGTH)
+		header->length = HOMA_MAX_MESSAGE_LENGTH;
+	if (header->length < sizeof32(*header))
+		header->length = sizeof32(*header);
+	header->server_id = server;
+	start = rdtsc();
+	header->start_time = start & 0xffffffff;
+	status = homa_send(fd, request, header->length,
+		reinterpret_cast<struct sockaddr *>(
+		&server_addrs[server]),
+		sizeof(server_addrs[0]), &rpc_id);
+	if (status < 0) {
+		log(NORMAL, "FATAL: error in homa_send: %s (request "
+				"length %d)\n", strerror(errno),
+				header->length);
+		exit(1);
+	}
+	do {
+		status = homa_recv(fd, request, sizeof(request),
+				HOMA_RECV_RESPONSE, &rpc_id,
+				(struct sockaddr *) &server_addr,
+				sizeof(server_addr));
+	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
+	if (status < 0) {
+		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
+				strerror(errno), rpc_id,
+				print_address(&server_addr));
+		exit(1);
+	}
+	return (rdtsc() - start) & 0xffffffff;
+}
+
+/**
+ * homa_client::measure_unloaded() - Gather baseline measurements of Homa
+ * under best-case conditions. This method will fill in the actual_lengths
+ * and actual_rtts arrays with several measurements for each message length
+ * in the current workload.
+ * @count:    How many samples to measure for each length in the distribution.
+ */
+void homa_client::measure_unloaded(int count)
+{
+	std::vector<dist_point> dist = dist_get(workload,
+			HOMA_MAX_MESSAGE_LENGTH, .0025);
+	int server = request_servers[0];
+	int slot;
+	
+	/* Make one request for each size and distribution, just to warm
+	 * up the system.
+	 */
+	for (dist_point &point: dist)
+		measure_rtt(server, point.length);
+	
+	/* Now do the real measurements.*/
+	slot = 0;
+	for (dist_point &point: dist) {
+		for (int i = 0; i < count; i++) {
+			actual_lengths[slot] = point.length;
+			actual_rtts[slot] = measure_rtt(server, point.length);
+			slot++;
+			if (slot >= NUM_CLIENT_STATS) {
+				log(NORMAL, "WARNING: not enough space to "
+						"record all unloaded RTTs");
+				slot = 0;
+			}
+		}
+	}
 }
 
 /**
@@ -2151,6 +2250,7 @@ int client_cmd(std::vector<string> &words)
 	protocol = "homa";
 	server_nodes = 1;
 	tcp_trunc = true;
+	unloaded = 0;
 	workload = "100";
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
@@ -2200,6 +2300,10 @@ int client_cmd(std::vector<string> &words)
 			i++;
 		} else if (strcmp(option, "--server-ports") == 0) {
 			if (!parse_int(words, i+1, &server_ports, option))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--unloaded") == 0) {
+			if (!parse_int(words, i+1, &unloaded, option))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--workload") == 0) {

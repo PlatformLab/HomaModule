@@ -23,6 +23,47 @@
 #include "dist.h"
 
 /**
+ * dist_lookup() - Returns raw information about a workload.
+ * @dist:         Name of the desired workload, such as "w1". Can also
+ *                be an integer, which indicates a uniform workload with
+ *                all requests the given size.
+ * @fixed:        If a uniform workload has been requested, this variable
+ *                will be filled in with the fixed size for that workload;
+ *                otherwise the value will be set to 0.
+ * 
+ * Return:        If @name refers to a valid (non-uniform) workload, the
+ *                return value will be appointed to the first point in
+ *                the array for that workload.  Otherwise the return value
+ *                will be NULL.
+ */
+dist_point *dist_lookup(const char *dist, int *fixed)
+{
+	char *end;
+	int length;
+	
+	/* First check for a fixed-size distribution. */
+	length = strtol(dist, &end, 10);
+	if ((length != 0) && (*end == 0)) {
+		*fixed = length;
+		return NULL;
+	}
+	*fixed = 0;
+	
+	if (strcmp(dist, "w1") == 0) {
+		return w1;
+	} else if (strcmp(dist, "w2") == 0) {
+		return w2;
+	} else if (strcmp(dist, "w3") == 0) {
+		return w3;
+	} else if (strcmp(dist, "w4") == 0) {
+		return w4;
+	} else if (strcmp(dist, "w5") == 0) {
+		return w5;
+	} 
+	return NULL;
+}
+
+/**
  * dist_sample() - Generate a collection of values sampled randomly from a
  * particular workload distribution.
  * @dist:         Name of the desired workload, such as "w1". Can also
@@ -38,33 +79,19 @@
 int dist_sample(const char *dist, std::mt19937 *rand_gen, int num_samples,
 		std::vector<int> *sizes)
 {
-	char *end;
 	int length;
 	dist_point *points;
 	std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
 	
-	/* First check for a fixed-size distribution. */
-	length = strtol(dist, &end, 10);
-	if ((length != 0) && (*end == 0)) {
+	points = dist_lookup(dist, &length);
+	if (length != 0) {
 		for (int i = 0; i < num_samples; i++) {
 			sizes->push_back(length);
 		}
 		return 1;
 	}
-	
-	if (strcmp(dist, "w1") == 0) {
-		points = w1;
-	} else if (strcmp(dist, "w2") == 0) {
-		points = w2;
-	} else if (strcmp(dist, "w3") == 0) {
-		points = w3;
-	} else if (strcmp(dist, "w4") == 0) {
-		points = w4;
-	} else if (strcmp(dist, "w5") == 0) {
-		points = w5;
-	} else {
+	if (!points)
 		return 0;
-	}
 	
 	for (int i = 0; i < num_samples; i++) {
 		double cdf_fraction = uniform_dist(*rand_gen);
@@ -90,30 +117,16 @@ int dist_sample(const char *dist, std::mt19937 *rand_gen, int num_samples,
  */
 double dist_mean(const char *dist, int max_length)
 {
-	char *end;
 	int length;
 	dist_point *points;
 	double mean, prev_fraction;
-	
-	/* First check for a fixed-size distribution. */
-	length = strtol(dist, &end, 10);
-	if ((length != 0) && (*end == 0)) {
+
+	points = dist_lookup(dist, &length);
+	if (length != 0) {
 		return length;
 	}
-	
-	if (strcmp(dist, "w1") == 0) {
-		points = w1;
-	} else if (strcmp(dist, "w2") == 0) {
-		points = w2;
-	} else if (strcmp(dist, "w3") == 0) {
-		points = w3;
-	} else if (strcmp(dist, "w4") == 0) {
-		points = w4;
-	} else if (strcmp(dist, "w5") == 0) {
-		points = w5;
-	} else {
+	if (!points)
 		return 0;
-	}
 	
 	mean = 0;
 	prev_fraction = 0.0;
@@ -130,6 +143,55 @@ double dist_mean(const char *dist, int max_length)
 			break;
 	}
 	return mean;
+}
+
+/**
+ * dist_get() - Returns a distribution, potentially merging buckets to
+ * reduce the total number of points. 
+ * @dist:        Name of the desired distribution, using the same syntax
+ *               as for dist_sample.
+ * @max_length:  Assume that any lengths longer than this value will
+ *               be truncated to this. 0 means no truncation.
+ * @min_bucket_frac:
+ *               Minimum increase in the @fraction values from entry to entry
+ *               in the result. Buckets from the raw distribution will be merged
+ *               if necessary to meet this threshold. A value of 0 means don't
+ *               combine buckets.
+ *
+ * Return:       A (possibly condensed) distribution, with points in increasing
+ *               order of @length. If the result is empty, it means that @dist
+ *               wasn't a valid name.
+ */
+std::vector<dist_point> dist_get(const char *dist, int max_length,
+		double min_bucket_frac)
+{
+	std::vector<dist_point> result;
+	int length;
+	dist_point *points;
+	double prev_fraction, fraction;
+	
+	points = dist_lookup(dist, &length);
+	if (length != 0) {
+		result.emplace_back(length, 1.0);
+		return result;
+	}
+	if (!points)
+		return result;
+	
+	prev_fraction = 0;
+	for (dist_point *p = points; ; p++) {
+		fraction = p->fraction;
+		if (p->length >= max_length)
+			fraction = 1.0;
+		if ((fraction - prev_fraction >= min_bucket_frac)
+				|| (fraction >= 1.0)) {
+			result.emplace_back(p->length, fraction);
+			prev_fraction = fraction;
+		}
+		if (fraction >= 1.0)
+			break;
+	}
+	return result;
 }
 
 /*

@@ -72,6 +72,7 @@ default_defaults = {
     'tcp_port_receivers':  1,
     'tcp_server_ports':    15,
     'tcp_port_threads':    1,
+    'unloaded':            0,
     'unsched':             0,
     'unsched_boost':       0.0,
     'workload':            'w5'
@@ -261,18 +262,19 @@ def init(options):
     log_file = open("%s/cperf.log" % log_dir, "a")
     verbose = options.verbose
 
-def wait_output(string, nodes, cmd):
+def wait_output(string, nodes, cmd, time_limit=10.0):
     """
     This method waits until a particular string has appeared on the stdout of
     each of the nodes in the list given by nodes. If a long time goes by without
     the string appearing, an exception is thrown.
-    string:    The value to wait for
-    cmd:       Used in error messages to indicate the command that failed
+    string:      The value to wait for
+    cmd:         Used in error messages to indicate the command that failed
+    time_limit:  An error will be generated if this much time goes by without
+                 the desired string appearing
     """
     global active_nodes
     outputs = []
     printed = False
-    time_limit = 15.0
 
     for id in nodes:
         while len(outputs) <= id:
@@ -516,6 +518,8 @@ def run_experiment(name, clients, options):
                     options.client_max,
                     options.protocol,
                     id);
+            if "unloaded" in options:
+                command += " --unloaded %d" % (options.unloaded)
         else:
             if "no_trunc" in options:
                 trunc = '--no-trunc'
@@ -542,19 +546,20 @@ def run_experiment(name, clients, options):
             log("Broken pipe to node-%d" % (id))
         nodes.append(id)
         vlog("Command for node-%d: %s" % (id, command))
-    wait_output("% ", nodes, command)
-    if options.protocol == "homa":
-        # Wait a bit so that homa_prio can set priorities appropriately
-        time.sleep(2)
-        vlog("Recording initial metrics")
-        for id in active_nodes:
-            subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
-                    stdout=subprocess.DEVNULL)
-    if not "no_rtt_files" in options:
-        do_cmd("dump_times /dev/null", clients)
-    do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
-    time.sleep(options.seconds)
-    do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
+    wait_output("% ", nodes, command, 30.0)
+    if not "unloaded" in options:
+        if options.protocol == "homa":
+            # Wait a bit so that homa_prio can set priorities appropriately
+            time.sleep(2)
+            vlog("Recording initial metrics")
+            for id in active_nodes:
+                subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
+                        stdout=subprocess.DEVNULL)
+        if not "no_rtt_files" in options:
+            do_cmd("dump_times /dev/null", clients)
+        do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
+        time.sleep(options.seconds)
+        do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
         do_cmd("dump_times rtts", clients)
@@ -676,7 +681,11 @@ def scan_logs():
             vlog("\n%ss for %s experiment:" % (type.capitalize(), name))
             for node in sorted(exp.keys()):
                 if not mbps_key in exp[node]:
-                    continue
+                    if name.startswith("unloaded"):
+                        exp[node][mbps_key] = [0.0]
+                        exp[node][kops_key] = [0.0]
+                    else:
+                        continue
                 mbps = exp[node][mbps_key]
                 avg = sum(mbps)/len(mbps)
                 vlog("%s: %.1f MB/sec (%s)" % (node, avg,
@@ -918,7 +927,7 @@ def start_slowdown_plot(title, max_y, x_experiment):
                    label the x-axis of the plot
     """
 
-    plt.figure(figsize=[6, 3])
+    plt.figure(figsize=[6, 4])
     if title != "":
         plt.title(title)
     plt.rcParams.update({'font.size': 10})
@@ -1063,13 +1072,17 @@ def get_short_cdf(experiment):
     digest = get_digest(experiment)
     rtts = digest["rtts"]
     messages_left = digest["total_messages"]//10
+    longest = 0
     for length in sorted(rtts.keys()):
         if (length >= 1500) and (len(short) > 0):
             break
         short.extend(rtts[length])
         messages_left -= len(rtts[length])
+        longest = length
         if messages_left < 0:
             break
+    vlog("Largest message used for short CDF for %s: %d"
+            % (experiment, longest))
     x = []
     y = []
     total = len(short)
