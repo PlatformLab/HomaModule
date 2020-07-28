@@ -792,7 +792,7 @@ void __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
 
 int wake_up_process(struct task_struct *tsk)
 {
-	unit_log_printf("; ", "wake_up_process");
+	unit_log_printf("; ", "wake_up_process pid %d", tsk ? tsk->pid : -1);
 	return 0;
 }
 

@@ -514,15 +514,24 @@ struct homa_message_in {
 };
 
 /**
- * struct homa_interest - Indicates that a blocked thread wishes to receive an
- * incoming request or response message.
+ * struct homa_interest - Contains various information used while waiting
+ * for incoming messages (indicates what kinds of messages a particular
+ * thread is interested in receiving).
  */
 struct homa_interest {
 	/**
-	 * @thread: thread that would like to receive a message. Will get
+	 * @thread: Thread that would like to receive a message. Will get
 	 * woken up when a suitable message becomes available.
 	 */
 	struct task_struct *thread;
+	
+	/**
+	 * @rpc: If non-null, it identifies the RPC given by @id and
+	 * @peer_addr, and that RPC is locked. Only set by
+	 * homa_register_interests. This is a shortcut so
+	 * homa_wait_for_message doesn't need to relock the RPC.
+	 */
+	struct homa_rpc *ready_rpc;
 	
 	/**
 	 * @id: Id of the RPC that was found, or zero if none. This variable
@@ -552,6 +561,18 @@ struct homa_interest {
 	bool is_client;
 	
 	/**
+	 * @polling: True means that the owner of this interest is actively
+	 * polling.
+	 */
+	bool polling;
+	
+	/**
+	 * @poll_restarts: Number of times this interest's thread has been
+	 * awakened to start polling again.
+	 */
+	int poll_restarts;
+	
+	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
 	 * NULL if none.
 	 */
@@ -569,6 +590,23 @@ struct homa_interest {
 	 */
 	struct list_head response_links;
 };
+
+/**
+ * homa_interest_init() - Fill in default values for all of the fields
+ * of a struct homa_interest.
+ * @interest:   Struct to initialize.
+ */
+static void inline homa_interest_init(struct homa_interest *interest)
+{
+	interest->thread = current;
+	interest->ready_rpc = NULL;
+	atomic_long_set(&interest->id, 0);
+	interest->polling = false;
+	interest->poll_restarts = 0;
+	interest->reg_rpc = NULL;
+	interest->request_links.next = LIST_POISON1;
+	interest->response_links.next = LIST_POISON1;
+}
 
 /**
  * struct homa_rpc - One of these structures exists for each active
@@ -1562,6 +1600,19 @@ struct homa_metrics {
 	__u64 slow_wakeups;
 	
 	/**
+	 * @poll_restarts: number of times that a sleeping thread was
+	 * awakened so that it could start polling again.
+	 */
+	__u64 poll_restarts;
+	
+	/**
+	 * @restart_fast_wakeups: number of times that a message arrived
+	 * for a polling thread when that thread had gone to sleep and been
+	 * reawakened to restart polling.
+	 */
+	__u64 restart_fast_wakeups;
+	
+	/**
 	 * @poll_cycles: total time spent in the polling loop in
 	 * homa_wait_for_message, as measured with get_cycles().
 	 */
@@ -2241,6 +2292,8 @@ extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
 			int count, int *eof, void *data);
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			int noblock, int flags, int *addr_len);
+extern int      homa_register_interests(struct homa_interest *interest,
+			struct homa_sock *hsk, int flags, __u64 id);
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_grantable_locked(struct homa *homa,
 			struct homa_rpc *rpc);

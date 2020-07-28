@@ -23,12 +23,12 @@ sudo ip link set $vlan mtu 3000
 sudo rmmod homa
 sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
-sudo sysctl /net/homa/max_nic_queue_ns=10000
+sudo sysctl /net/homa/max_nic_queue_ns=2000
 sudo sysctl /net/homa/rtt_bytes=70000
 sudo sysctl /net/homa/grant_increment=10000
-sudo sysctl /net/homa/max_gso_size=20000
+sudo sysctl /net/homa/max_gso_size=10000
 sudo sysctl /net/homa/num_priorities=8
-# sudo sysctl /net/homa/poll_usecs=50
+sudo sysctl /net/homa/poll_usecs=200
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
 sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1

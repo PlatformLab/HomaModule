@@ -293,8 +293,8 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	unit_log_clear();
 	homa_rpc_free(crpc);
 	EXPECT_EQ(NULL, interest.reg_rpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; wake_up_process",
-		unit_log_get());
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+			"wake_up_process pid 0", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {

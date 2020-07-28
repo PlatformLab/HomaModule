@@ -178,14 +178,22 @@ TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
 TEST_F(homa_socktab, homa_sock_shutdown__wakeup_interests)
 {
 	struct homa_interest interest1, interest2, interest3;
+	struct task_struct task1, task2, task3;
+	interest1.thread = &task1;
+	task1.pid = 100;
+	interest2.thread = &task2;
+	task2.pid = 200;
+	interest3.thread = &task3;
+	task3.pid = 300;
 	EXPECT_FALSE(self->hsk.shutdown);
 	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
 	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
 	list_add_tail(&interest3.response_links, &self->hsk.response_interests);
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
-	EXPECT_STREQ("wake_up_process; wake_up_process; wake_up_process; "
-		"wake_up_process", unit_log_get());
+	EXPECT_STREQ("wake_up_process pid -1; wake_up_process pid 100; "
+			"wake_up_process pid 200; wake_up_process pid 300",
+			unit_log_get());
 }
 
 TEST_F(homa_socktab, homa_sock_bind)

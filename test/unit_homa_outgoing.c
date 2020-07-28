@@ -483,7 +483,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	homa_xmit_data(crpc1, false);
 	EXPECT_STREQ("xmit DATA 1400@0; "
 			"xmit DATA 1400@1400; "
-			"wake_up_process", unit_log_get());
+			"wake_up_process pid -1", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800", unit_log_get());
@@ -511,7 +511,8 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	/* Now force transmission. */
 	unit_log_clear();
 	homa_xmit_data(crpc2, true);
-	EXPECT_STREQ("xmit DATA 1400@0; wake_up_process", unit_log_get());
+	EXPECT_STREQ("xmit DATA 1400@0; wake_up_process pid -1",
+			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 1, next_offset 2800; "

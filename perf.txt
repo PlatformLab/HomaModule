@@ -2,6 +2,36 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (July 2020) Best-case timetraces for short messages on xl170 CloudLab cluster.
+Clients:                                                             Cum.
+Event                                                               Median
+--------------------------------------------------------------------------
+[C?] homa_ioc_send starting, target ?:?, id ?, pid ?                     0
+[C?] mlx nic notified                                                  939
+[C?] Entering IRQ                                                     9589
+[C?] homa_gro_receive got packet from ? id ?, offset ?, priority ?   10491
+[C?] enqueue_to_backlog complete, cpu ?, id ?, peer ?                10644
+[C?] homa_softirq: first packet from ?:?, id ?, type ?               11300
+[C?] incoming data packet, id ?, peer ?, offset ?/?                  11416
+[C?] homa_rpc_ready handed off id ?                                  11560
+[C?] received message while polling, id ?                            11811
+[C?] Freeing rpc id ?, socket ?, dead_skbs ?                         11864
+[C?] homa_ioc_recv finished, id ?, peer ?, length ?, pid ?           11987
+
+Servers:                                                             Cum.
+Event                                                               Median
+--------------------------------------------------------------------------
+[C?] Entering IRQ                                                        0
+[C?] homa_gro_receive got packet from ? id ?, offset ?, priority ?     762
+[C?] homa_softirq: first packet from ?:?, id ?, type ?                1566
+[C?] incoming data packet, id ?, peer ?, offset ?/?                   1767
+[C?] homa_rpc_ready handed off id ?                                   2012
+[C?] received message while polling, id ?                             2071
+[C?] homa_ioc_recv finished, id ?, peer ?, length ?, pid ?            2459
+[C?] homa_ioc_reply starting, id ?, port ?, pid ?                     2940
+[C?] mlx nic notified                                                 3685
+
+
 * (July 2020) SMIs impact on tail latency. I observed gaps of 200-300 us where
   a core appears to be doing nothing. These occur in a variety of places
   in the code including in the middle of straight-line code or just
