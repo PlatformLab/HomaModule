@@ -561,18 +561,6 @@ struct homa_interest {
 	bool is_client;
 	
 	/**
-	 * @polling: True means that the owner of this interest is actively
-	 * polling.
-	 */
-	bool polling;
-	
-	/**
-	 * @poll_restarts: Number of times this interest's thread has been
-	 * awakened to start polling again.
-	 */
-	int poll_restarts;
-	
-	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
 	 * NULL if none.
 	 */
@@ -601,8 +589,6 @@ static void inline homa_interest_init(struct homa_interest *interest)
 	interest->thread = current;
 	interest->ready_rpc = NULL;
 	atomic_long_set(&interest->id, 0);
-	interest->polling = false;
-	interest->poll_restarts = 0;
 	interest->reg_rpc = NULL;
 	interest->request_links.next = LIST_POISON1;
 	interest->response_links.next = LIST_POISON1;
@@ -1598,19 +1584,6 @@ struct homa_metrics {
 	 * had to be put to sleep (no message arrived while it was polling).
 	 */
 	__u64 slow_wakeups;
-	
-	/**
-	 * @poll_restarts: number of times that a sleeping thread was
-	 * awakened so that it could start polling again.
-	 */
-	__u64 poll_restarts;
-	
-	/**
-	 * @restart_fast_wakeups: number of times that a message arrived
-	 * for a polling thread when that thread had gone to sleep and been
-	 * reawakened to restart polling.
-	 */
-	__u64 restart_fast_wakeups;
 	
 	/**
 	 * @poll_cycles: total time spent in the polling loop in

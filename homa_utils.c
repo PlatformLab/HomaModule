@@ -1096,14 +1096,6 @@ char *homa_print_metrics(struct homa *homa)
 				"Messages received after thread went to sleep\n",
 				m->slow_wakeups);
 		homa_append_metric(homa,
-				"poll_restarts             %15llu  "
-				"Sleeping threads awoken to begin polling again\n",
-				m->poll_restarts);
-		homa_append_metric(homa,
-				"restart_fast_wakeups      %15llu  "
-				"Messages received while polling after sleeping\n",
-				m->restart_fast_wakeups);
-		homa_append_metric(homa,
 				"poll_cycles               %15llu  "
 				"Time spent polling for incoming messages\n",
 				m->poll_cycles);

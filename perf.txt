@@ -2,6 +2,17 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (July 2020) Adaptive polling. A longer polling interval (e.g. 500 usecs)
+  lowers tail latency for heavy-tailed workloads such as W4, but it hurts
+  other workloads (P999 tail latency gets much worse for W1 because polling
+  threads create contention for cores; P99 tail latency for large messages
+  suffers in W3). I attempted an adaptive approach to polling, where a thread
+  stops polling if it is no longer first in line, and gets woken up later to
+  resume polling if it becomes first in line again. The hope was that this
+  would allow a longer polling interval without negatively impacting other
+  workloads. It did help, but only a bit, and it added a lot of complexity,
+  so I removed it.
+
 * (July 2020) Best-case timetraces for short messages on xl170 CloudLab cluster.
 Clients:                                                             Cum.
 Event                                                               Median
@@ -30,7 +41,6 @@ Event                                                               Median
 [C?] homa_ioc_recv finished, id ?, peer ?, length ?, pid ?            2459
 [C?] homa_ioc_reply starting, id ?, port ?, pid ?                     2940
 [C?] mlx nic notified                                                 3685
-
 
 * (July 2020) SMIs impact on tail latency. I observed gaps of 200-300 us where
   a core appears to be doing nothing. These occur in a variety of places

@@ -1121,7 +1121,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	struct homa_interest interest;
 	uint64_t poll_start, now;
 	int error;
-	int clever_polling = 1;
 	
 	homa_interest_init(&interest);
 	while (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
@@ -1182,10 +1181,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		 * context-switching overhead to wake up.
 		 */
 		poll_start = get_cycles();
-		if (clever_polling)
-			interest.polling = true;
 		while (1) {
-			int first_request, first_response;
 			now = get_cycles();
 			if (now >= (poll_start + hsk->homa->poll_cycles))
 				break;
@@ -1195,67 +1191,12 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 						atomic_long_read(&interest.id),
 						hsk->client_port,
 						current->pid);
-				if (interest.poll_restarts)
-					INC_METRIC(restart_fast_wakeups, 1);
 				INC_METRIC(fast_wakeups, 1);
 				INC_METRIC(poll_cycles, now - poll_start);
 				goto lock_rpc;
 			}
-			first_response = hsk->response_interests.next
-					== &interest.response_links;
-			first_request = hsk->request_interests.next
-					== &interest.request_links;
-			
-			/* Stop polling if there are other threads ahead
-			 * of us for everything we're waiting for.
-			 */
-			if (clever_polling) {
-				if (((flags & (HOMA_RECV_RESPONSE | HOMA_RECV_REQUEST))
-						== HOMA_RECV_RESPONSE)
-						&& !first_response && (id == 0)
-						&& (interest.response_links.next
-						!= LIST_POISON1)) {
-					tt_record2("Aborting poll: not first "
-							"response, socket %d, "
-							"pid %d",
-							hsk->client_port,
-							current->pid);
-					break;
-				}
-				if (((flags & (HOMA_RECV_RESPONSE | HOMA_RECV_REQUEST))
-						== HOMA_RECV_REQUEST)
-						&& !first_request
-						&& (interest.request_links.next
-						!= LIST_POISON1)) {
-					tt_record2("Aborting poll: not first "
-							"request, socket %d, "
-							"pid %d",
-							hsk->client_port,
-							current->pid);
-					break;
-				}
-				if ((flags & (HOMA_RECV_RESPONSE | HOMA_RECV_REQUEST))
-						== (HOMA_RECV_RESPONSE | 
-						HOMA_RECV_REQUEST)
-						&& !first_request
-						&& !first_response
-						&& (id == 0)
-						&& (interest.request_links.next
-						!= LIST_POISON1)
-						&& (interest.response_links.next
-						!= LIST_POISON1)) {
-					tt_record2("Aborting poll: not first "
-							"request or first "
-							"response,  socket %d, "
-							"pid %d",
-							hsk->client_port,
-							current->pid);
-					break;
-				}
-			}
 			schedule();
 		}
-		interest.polling = false;
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
 				hsk->client_port, current->pid);
 		INC_METRIC(poll_cycles, now - poll_start);
@@ -1394,34 +1335,12 @@ handoff:
 		interest->reg_rpc = NULL;
 	}
 	if (interest->request_links.next != LIST_POISON1) {
-		struct homa_interest *next;
 		list_del(&interest->request_links);
 		interest->request_links.next = LIST_POISON1;
-		next = list_first_entry_or_null(&hsk->request_interests,
-				struct homa_interest, request_links);
-		if ((next != NULL) && interest->polling
-				&& (next->poll_restarts < 2)) {
-			tt_record2("waking up pid %d to poll on socket %d",
-					next->thread->pid, hsk->client_port);
-			wake_up_process(next->thread);
-			next->poll_restarts++;
-			INC_METRIC(poll_restarts, 1);
-		}
 	}
 	if (interest->response_links.next != LIST_POISON1) {
-		struct homa_interest *next;
 		list_del(&interest->response_links);
 		interest->response_links.next = LIST_POISON1;
-		next = list_first_entry_or_null(&hsk->response_interests,
-				struct homa_interest, response_links);
-		if ((next != NULL) && interest->polling
-				&& (next->poll_restarts < 2)) {
-			tt_record2("waking up pid %d to poll on socket %d",
-					next->thread->pid, hsk->client_port);
-			wake_up_process(next->thread);
-			next->poll_restarts++;
-			INC_METRIC(poll_restarts, 1);
-		}
 	}
 	tt_record2("homa_rpc_ready handing off id %d to pid %d", rpc->id,
 			interest->thread->pid);
