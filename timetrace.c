@@ -184,6 +184,8 @@ void tt_destroy(void)
  */
 void tt_freeze(void)
 {
+	if (tt_frozen)
+		return;
 	tt_record("timetrace frozen");
 	printk(KERN_NOTICE "tt_freeze invoked\n");
 	spin_lock(&tt_lock);
