@@ -93,12 +93,14 @@ for workload, bw in load_info:
     start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload, priorities[-1]))
     plot_slowdown("tcp_" + workload, "p99", "TCP P99", color=tcp_color)
     plot_slowdown("tcp_" + workload, "p50", "TCP P50", color=tcp_color2)
+    colors = ['#985416', '#ff7f0e', '#d62728', '#9467bd', homa_color]
     for prios in priorities:
         if prios == 1:
             label = "Homa 1 prio"
         else:
             label = "Homa %d prios" % prios
-        plot_slowdown("homa_%s_%dprios" % (workload,prios), "p99", label)
+        plot_slowdown("homa_%s_%dprios" % (workload,prios), "p99", label,
+                color=colors.pop(0))
     if workload == "w5":
         plt.legend(loc="upper right", prop={'size': 9})
     else:

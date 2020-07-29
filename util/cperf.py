@@ -113,6 +113,10 @@ unloaded_color = '#d62728'
 # Default bandwidths to use when running all of the workloads.
 load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
 
+# PyPlot color circle colors:
+pyplot_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
+
 def boolean(s):
     """
     Used as a "type" in argparse specs; accepts Boolean-looking things.
