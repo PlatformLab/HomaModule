@@ -385,7 +385,7 @@ static int __init homa_load(void) {
 		goto out_cleanup;
 	}
 	
-	tt_init("timetrace");
+	tt_init("timetrace", homa->temp);
 	
 	return 0;
 

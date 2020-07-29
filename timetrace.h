@@ -107,7 +107,7 @@ struct tt_proc_file {
 
 extern void   tt_destroy(void);
 extern void   tt_freeze(void);
-extern int    tt_init(char *proc_file);
+extern int    tt_init(char *proc_file, int *temp);
 extern void   tt_record_buf(struct tt_buffer* buffer, __u64 timestamp,
 		const char* format, __u32 arg0, __u32 arg1,
 		__u32 arg2, __u32 arg3);

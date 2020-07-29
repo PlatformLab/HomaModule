@@ -25,8 +25,10 @@
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[];
-extern atomic_t * tt_linux_freeze_count;
+extern atomic_t  *tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
+extern int       *tt_linux_homa_temp;
+extern int        tt_linux_homa_temp_default[];
 extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
@@ -89,11 +91,14 @@ bool tt_test_no_khz = false;
  * tt_init(): Enable time tracing, create /proc file for reading traces.
  * @proc_file: Name of a file in /proc; this file can be read to extract
  *             the current timetrace.
+ * @temp:      Pointer to homa's "temp" configuration parameters, which
+ *             we should make available to the kernel. NULL means no
+ *             such variables available.
  * 
  * Return :    0 means success, anything else means an error occurred (a
  *             log message will be printed to describe the error).
  */
-int tt_init(char *proc_file)
+int tt_init(char *proc_file, int *temp)
 {
 	int i;
 	
@@ -132,6 +137,8 @@ int tt_init(char *proc_file)
 	tt_linux_buffer_mask = TT_BUF_SIZE-1;
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
+	if (temp)
+		tt_linux_homa_temp = temp;
 #endif
 	
 	return 0;
@@ -172,6 +179,7 @@ void tt_destroy(void)
 		tt_debug_int64[i] = 0;
 		tt_debug_ptr[i] = 0;
 	}
+	tt_linux_homa_temp = tt_linux_homa_temp_default;
 #endif
 	
 	spin_unlock(&tt_lock);
