@@ -19,10 +19,6 @@
 
 from cperf import *
 
-# Info to use (workload and corresponding bandwidth) when running all
-# of the workloads.
-load_info = [["w1", 0.2], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
-
 parser = get_parser(description=
         'Measures slowdown as a function of message size for Homa and TCP.',
         usage='%(prog)s [options]',

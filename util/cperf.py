@@ -103,11 +103,15 @@ unloaded_p50 = {}
 # Standard colors for plotting
 tcp_color =      '#00B000'
 tcp_color2 =     '#5BD15B'
+tcp_color3 =     '#96E296'
 homa_color =     '#1759BB'
 homa_color2 =    '#4287EC'
 dctcp_color =    '#985416'
 dctcp_color2 =   '#E59247'
 unloaded_color = '#d62728'
+
+# Default bandwidths to use when running all of the workloads.
+load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
 
 def boolean(s):
     """
