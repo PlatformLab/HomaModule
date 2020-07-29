@@ -2,6 +2,20 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (July 2020) P10 under load. Although Homa can provide 13.5 us RTTs under
+  best-case conditions, this almost never occurs in practice. Even at low
+  loads, the "best case" (P10) is more like 25-30 us. I analyzed a bunch
+  of 25-30 us message traces and found the following sources of additional
+  delay:
+  * Network delays (from passing packet to NIC until interrupt received)
+    account for 5-10 us of the additional delay (most likely packet queuing
+    in the NIC). There could also be delays in running the interrupt handler.
+  * Every stage of software runs slower, typically taking about 2x as long
+    (7.1 us becomes 12-23 us in my samples, with median 14.6 us)
+  * Occasional other glitches, such as having to wake up a receiving
+    user thread, or interference due to NAPI/SoftIRQ processing of other
+    messages.
+
 * (July 2020) Adaptive polling. A longer polling interval (e.g. 500 usecs)
   lowers tail latency for heavy-tailed workloads such as W4, but it hurts
   other workloads (P999 tail latency gets much worse for W1 because polling
