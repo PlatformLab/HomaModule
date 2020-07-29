@@ -161,9 +161,15 @@ std::mutex cmd_lock;
  * @fd_locks: used to synchronize concurrent accesses to the same fd
  * (indexed by fd).
  */
-
 #define MAX_FDS 10000
 std::atomic_bool fd_locks[MAX_FDS];
+
+
+/**
+ * @debug: values set with the "debug" command; typically used to
+ * trigger various debugging behaviors.
+ */
+int64_t debug[5];
 
 /**
  * print_help() - Print out usage information for this program.
@@ -201,7 +207,8 @@ void print_help(const char *name)
 		"                      baseline data, with the given number of measurements\n"
 		"                      per length in the distribution (Homa only, default: 0)\n"
 		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
-		"                      or integer for fixed length (default: %s)\n\n"
+		"                      or integer for fixed length (default: %s)\n\n"                "debug value value ... Set one or more int64_t values that may be used for\n"
+		"                      various debugging purposes\n\n"
 		"dump_times file       Log RTT times (and lengths) to file\n\n"
 		"exit                  Exit the application\n\n"
 		"log [options] [msg]   Configure logging as determined by the options. If\n"
@@ -219,7 +226,10 @@ void print_help(const char *name)
 		"    --ports           Number of ports to listen on (default: %d)\n\n"
 		"stop [options]        Stop existing client and/or server threads; each\n"
 		"                      option must be either 'clients' or 'servers'\n\n"
-		"tt print file         Dump timetrace information to file\n",
+		" tt [options]         Manage time tracing:\n"
+		"     freeze           Stop recording time trace information until\n"
+		"                      print has been invoked\n"
+		"     print file       Dump timetrace information to file\n",
 		client_max, first_port, first_server, first_server, net_bw,
 		client_ports, port_receivers, protocol,
 		server_nodes, server_ports, workload,
@@ -247,64 +257,49 @@ void log(Msg_Type type, const char *format, ...)
 	fprintf(log_file, "%010lu.%09lu %s", now.tv_sec, now.tv_nsec, buffer);
 }
 
-/**
- * parse_float() - Parse an floating-point value from an argument word.
- * @words:  Words of a command being parsed.
- * @i:      Index within words of a word expected to contain a floating-
- *          point value (may be outside the range of words, in which case an
- *          error message is printed).
- * @value:  The value corresponding to @words[i] is stored here,
- *          if the function completes successfully.
- * @option: Name of option being parsed (for use in error messages).
- * Return:  Nonzero means success, zero means an error occurred (and a
- *          message was printed).
- */
-int parse_float(std::vector<string> &words, unsigned i, double *value,
-		const char *option)
+inline void parse_type(const char *s, char **end, int *value)
 {
-	double num;
-	char *end;
-	
-	if (i >= words.size()) {
-		printf("No value provided for %s\n", option);
-		return 0;
-	}
-	num = strtod(words[i].c_str(), &end);
-	if (*end != 0) {
-		printf("Bad value '%s' for %s; must be floating-point "
-				"number\n", words[i].c_str(), option);
-		return 0;
-	}
-	*value = num;
-	return 1;
+	*value = strtol(s, end, 0);
+}
+
+inline void parse_type(const char *s, char **end, int64_t *value)
+{
+	*value = strtoll(s, end, 0);
+}
+
+inline void parse_type(const char *s, char **end, double *value)
+{
+	*value = strtod(s, end);
 }
 
 /**
- * parse_int() - Parse an integer value from an argument word.
- * @words:  Words of a command being parsed.
- * @i:      Index within words of a word expected to contain an integer
- *          value (may be outside the range of words, in which case an
- *          error message is printed).
- * @value:  The integer value corresponding to @words[i] is stored here,
- *          if the function completes successfully.
- * @option: Name of option being parsed (for use in error messages).
- * Return:  Nonzero means success, zero means an error occurred (and a
- *          message was printed).
+ * parse() - Parse a value of a particular type from an argument word.
+ * @words:     Words of a command being parsed.
+ * @i:         Index within words of a word expected to contain an integer
+ *             value (may be outside the range of words, in which case an
+ *             error message is printed).
+ * @value:     The parsed value corresponding to @words[i] is stored here,
+ *             if the function completes successfully.
+ * @format:    Name of option being parsed (for use in error messages).
+ * @type_name: Human-readable name for ValueType (for use in error messages).
+ * Return:     Nonzero means success, zero means an error occurred (and a
+ *             message was printed).
  */
-int parse_int(std::vector<string> &words, unsigned i, int *value,
-		const char *option)
+template<typename ValueType>
+int parse(std::vector<string> &words, unsigned i, ValueType *value,
+		const char *option, const char *type_name)
 {
-	int num;
+	ValueType num;
 	char *end;
 	
 	if (i >= words.size()) {
 		printf("No value provided for %s\n", option);
 		return 0;
 	}
-	num = strtol(words[i].c_str(), &end, 0);
+	parse_type(words[i].c_str(), &end, &num);
 	if (*end != 0) {
-		printf("Bad value '%s' for %s; must be integer\n",
-				words[i].c_str(), option);
+		printf("Bad value '%s' for %s; must be %s\n",
+				words[i].c_str(), option, type_name);
 		return 0;
 	}
 	*value = num;
@@ -2285,34 +2280,35 @@ int client_cmd(std::vector<string> &words)
 		const char *option = words[i].c_str();
 
 		if (strcmp(option, "--client-max") == 0) {
-			if (!parse_int(words, i+1, (int *) &client_max,
-					option))
+			if (!parse(words, i+1, (int *) &client_max,
+					option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--first-port") == 0) {
-			if (!parse_int(words, i+1, &first_port, option))
+			if (!parse(words, i+1, &first_port, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--first-server") == 0) {
-			if (!parse_int(words, i+1, &first_server, option))
+			if (!parse(words, i+1, &first_server, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--id") == 0) {
-			if (!parse_int(words, i+1, &id, option))
+			if (!parse(words, i+1, &id, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--net-bw") == 0) {
-			if (!parse_float(words, i+1, &net_bw, option))
+			if (!parse(words, i+1, &net_bw, option, "float"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--no-trunc") == 0) {
 			tcp_trunc = false;
 		} else if (strcmp(option, "--ports") == 0) {
-			if (!parse_int(words, i+1, &client_ports, option))
+			if (!parse(words, i+1, &client_ports, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--port-receivers") == 0) {
-			if (!parse_int(words, i+1, &port_receivers, option))
+			if (!parse(words, i+1, &port_receivers, option,
+					"integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--protocol") == 0) {
@@ -2324,15 +2320,15 @@ int client_cmd(std::vector<string> &words)
 			protocol = words[i+1].c_str();
 			i++;
 		} else if (strcmp(option, "--server-nodes") == 0) {
-			if (!parse_int(words, i+1, &server_nodes, option))
+			if (!parse(words, i+1, &server_nodes, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--server-ports") == 0) {
-			if (!parse_int(words, i+1, &server_ports, option))
+			if (!parse(words, i+1, &server_ports, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--unloaded") == 0) {
-			if (!parse_int(words, i+1, &unloaded, option))
+			if (!parse(words, i+1, &unloaded, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--workload") == 0) {
@@ -2361,6 +2357,30 @@ int client_cmd(std::vector<string> &words)
 			clients.push_back(new tcp_client(i));
 	}
 	last_stats_time = 0;
+	return 1;
+}
+
+/**
+ * debug_cmd() - Parse the arguments for a "debug" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int debug_cmd(std::vector<string> &words)
+{
+	int64_t value;
+	size_t num_debug = sizeof(debug)/sizeof(*debug);
+	
+	if (words.size() > (num_debug + 1)) {
+		printf("Too many debug values; at most %lu allowed\n",
+			num_debug);
+	}
+	for (size_t i = 1; i < words.size(); i++) {
+		if (!parse(words, i, &value, "debug", "64-bit integer"))
+			return 0;
+		debug[i-1] = value;
+	}
+	printf("Debug values: %ld %ld\n", debug[0], debug[1]);
 	return 1;
 }
 
@@ -2510,15 +2530,15 @@ int server_cmd(std::vector<string> &words)
 		const char *option = words[i].c_str();
 
 		if (strcmp(option, "--first-port") == 0) {
-			if (!parse_int(words, i+1, &first_port, option))
+			if (!parse(words, i+1, &first_port, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--port-threads") == 0) {
-			if (!parse_int(words, i+1, &port_threads, option))
+			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--ports") == 0) {
-			if (!parse_int(words, i+1, &server_ports, option))
+			if (!parse(words, i+1, &server_ports, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--protocol") == 0) {
@@ -2625,7 +2645,9 @@ int stop_cmd(std::vector<string> &words)
 int tt_cmd(std::vector<string> &words)
 {	
 	const char *option = words[1].c_str();
-	if (strcmp(option, "print") == 0) {
+	if (strcmp(option, "freeze") == 0) {
+		time_trace::freeze();
+	} else if (strcmp(option, "print") == 0) {
 		if (words.size() < 3) {
 			printf("No file name provided for %s\n", option);
 			return 0;
@@ -2637,7 +2659,8 @@ int tt_cmd(std::vector<string> &words)
 			return 0;
 		}
 	} else {
-		printf("Unknown option '%s'; must be print\n", option);
+		printf("Unknown option '%s'; must be freeze or print\n",
+				option);
 		return 0;
 	}
 	return 1;
@@ -2657,6 +2680,8 @@ int exec_words(std::vector<string> &words)
 		return 1;
 	if (words[0].compare("client") == 0) {
 		return client_cmd(words);
+	} else if (words[0].compare("debug") == 0) {
+		return debug_cmd(words);
 	} else if (words[0].compare("dump_times") == 0) {
 		return dump_times_cmd(words);
 	} else if (words[0].compare("log") == 0) {
