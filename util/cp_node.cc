@@ -803,6 +803,12 @@ class homa_server {
 	/** @fd: File descriptor for Homa socket. */
 	int fd;
 	
+	/**
+	 * @buffer: Used for receiving requests and sending responses;
+	 * malloced, size HOMA_MAX_MESSAGE_LENGTH
+	 */
+	char *buffer;
+	
 	/** @metrics: Performance statistics. */
 	server_metrics metrics;
 	
@@ -821,6 +827,7 @@ std::vector<homa_server *> homa_servers;
 homa_server::homa_server(int fd, int id)
 	: id(id)
 	, fd(fd)
+        , buffer(new char[HOMA_MAX_MESSAGE_LENGTH])
         , metrics()
 	, thread(&homa_server::server, this)
 {
@@ -834,6 +841,7 @@ homa_server::~homa_server()
 {
 	shutdown(fd, SHUT_RDWR);
 	close(fd);
+	delete buffer;
 	thread.join();
 }
 
@@ -843,19 +851,19 @@ homa_server::~homa_server()
  */
 void homa_server::server(void)
 {
-	int message[1000000];
+	int *message = reinterpret_cast<int *>(buffer);
 	struct sockaddr_in source;
 	int length;
-	char buffer[50];
+	char id_buffer[50];
 	
-	snprintf(buffer, sizeof(buffer), "S%d", id);
-	time_trace::create_thread_buffer(buffer);
+	snprintf(id_buffer, sizeof(id_buffer), "S%d", id);
+	time_trace::create_thread_buffer(id_buffer);
 	while (1) {
 		uint64_t id = 0;
 		int result;
 		
 		while (1) {
-			length = homa_recv(fd, message, sizeof(message),
+			length = homa_recv(fd, message, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_REQUEST, &id,
 				(struct sockaddr *) &source, sizeof(source));
 			if (length >= 0)
@@ -1454,11 +1462,11 @@ class homa_client : public client {
 	homa_client(int id);
 	virtual ~homa_client();
 	void measure_unloaded(int count);
-	uint32_t measure_rtt(int server, int length);
+	uint32_t measure_rtt(int server, int length, char *buffer);
 	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
-	bool wait_response(uint64_t id);
+	bool wait_response(uint64_t id, char* buffer);
 	
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
@@ -1471,6 +1479,18 @@ class homa_client : public client {
 	
 	/** @server_exited:  just what you'd guess from the name. */
 	bool sender_exited;
+	
+	/**
+	 * @sender_buffer: used by the sender to send requests, and also
+	 * by measure_unloaded; malloced, size HOMA_MAX_MESSAGE_LENGTH.
+	 */
+	char *sender_buffer;
+	
+	/**
+	 * @receiver_buffers: one for each receiver thread, used to
+	 * receive responses; malloced, size HOMA_MAX_MESSAGE_LENGTH.
+	 */
+	std::vector<char *> receiver_buffers;
 	
 	/** @receiver: threads that receive responses. */
 	std::vector<std::thread> receiving_threads;
@@ -1493,6 +1513,8 @@ homa_client::homa_client(int id)
         , exit_sender(false)
         , exit_receivers(false)
         , sender_exited(false)
+        , sender_buffer(new char[HOMA_MAX_MESSAGE_LENGTH])
+        , receiver_buffers()
         , receiving_threads()
         , sending_thread()
 {
@@ -1507,6 +1529,8 @@ homa_client::homa_client(int id)
 		sender_exited = true;
 	} else {
 		for (int i = 0; i < port_receivers; i++) {
+			receiver_buffers.emplace_back(
+				new char[HOMA_MAX_MESSAGE_LENGTH]);
 			receiving_threads.emplace_back(&homa_client::receiver,
 					this, i);
 		}
@@ -1535,8 +1559,11 @@ homa_client::~homa_client()
 	}
 	shutdown(fd, SHUT_RDWR);
 	close(fd);
+	delete sender_buffer;
 	if (sending_thread)
 		sending_thread->join();
+	for (char *buffer: receiver_buffers)
+		delete buffer;
 	for (std::thread &thread: receiving_threads)
 		thread.join();
 	check_completion("homa");
@@ -1566,19 +1593,20 @@ void homa_client::stop_sender(void)
  * homa_client::wait_response() - Wait for a response to arrive and
  * update statistics.
  * @rpc_id:   Id of a specific RPC to wait for, or 0 for "any response".
+ * @buffer:   Memory that can be used for receiving the response message;
+ *            must contain HOMA_MAX_MESSAGE_LENGTH bytes.
  * Return:    True means that a response was received; false means the client
  *            has been stopped and the socket has been shut down.
  */
-bool homa_client::wait_response(uint64_t rpc_id)
+bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 {
-	char response[1000000];
-	message_header *header = reinterpret_cast<message_header *>(response);
+	message_header *header = reinterpret_cast<message_header *>(buffer);
 	struct sockaddr_in server_addr;
 	
 	rpc_id = 0;
 	int length;
 	do {
-		length = homa_recv(fd, response, sizeof(response),
+		length = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_RESPONSE, &rpc_id,
 				(struct sockaddr *) &server_addr,
 				sizeof(server_addr));
@@ -1604,8 +1632,7 @@ bool homa_client::wait_response(uint64_t rpc_id)
  */
 void homa_client::sender()
 {
-	char request[1000000];
-	message_header *header = reinterpret_cast<message_header *>(request);
+	message_header *header = reinterpret_cast<message_header *>(sender_buffer);
 	uint64_t next_start = rdtsc();
 	char buffer[50];
 	
@@ -1645,7 +1672,7 @@ void homa_client::sender()
 		header->start_time = now & 0xffffffff;
 		header->server_id = server;
 		tt("sending to server %d, length %d", server, header->length);
-		int status = homa_send(fd, request, header->length,
+		int status = homa_send(fd, sender_buffer, header->length,
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
 			sizeof(server_addrs[0]), &rpc_id);
@@ -1669,7 +1696,7 @@ void homa_client::sender()
 		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
-			wait_response(rpc_id);
+			wait_response(rpc_id, sender_buffer);
 		}
 	}
 }
@@ -1686,7 +1713,7 @@ void homa_client::receiver(int receiver_id)
 	time_trace::create_thread_buffer(buffer);
 	
 	receivers_running++;
-	while (wait_response(0)) {}
+	while (wait_response(0, receiver_buffers[receiver_id])) {}
 }
 
 /**
@@ -1694,13 +1721,14 @@ void homa_client::receiver(int receiver_id)
  * return the RTT.
  * @server:      Identifier of server to use for the request.
  * @length:      Number of message bytes in the request.
+ * @buffer:      Block of memory to use for request and response; must
+ *               contain HOMA_MAX_MESSAGE_LENGTH bytes.
  *
  * Return:       Round-trip time to service the request, in rdtsc cycles. 
  */
-uint32_t homa_client::measure_rtt(int server, int length)
+uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 {
-	char request[1000000];
-	message_header *header = reinterpret_cast<message_header *>(request);
+	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
 	uint64_t rpc_id;
 	struct sockaddr_in server_addr;
@@ -1714,7 +1742,7 @@ uint32_t homa_client::measure_rtt(int server, int length)
 	header->server_id = server;
 	start = rdtsc();
 	header->start_time = start & 0xffffffff;
-	status = homa_send(fd, request, header->length,
+	status = homa_send(fd, buffer, header->length,
 		reinterpret_cast<struct sockaddr *>(
 		&server_addrs[server]),
 		sizeof(server_addrs[0]), &rpc_id);
@@ -1725,7 +1753,7 @@ uint32_t homa_client::measure_rtt(int server, int length)
 		exit(1);
 	}
 	do {
-		status = homa_recv(fd, request, sizeof(request),
+		status = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_RESPONSE, &rpc_id,
 				(struct sockaddr *) &server_addr,
 				sizeof(server_addr));
@@ -1757,18 +1785,19 @@ void homa_client::measure_unloaded(int count)
 	 * up the system.
 	 */
 	for (dist_point &point: dist)
-		measure_rtt(server, point.length);
+		measure_rtt(server, point.length, sender_buffer);
 	
 	/* Now do the real measurements.*/
 	slot = 0;
 	for (dist_point &point: dist) {
 		for (int i = 0; i < count; i++) {
 			actual_lengths[slot] = point.length;
-			actual_rtts[slot] = measure_rtt(server, point.length);
+			actual_rtts[slot] = measure_rtt(server, point.length,
+					sender_buffer);
 			slot++;
 			if (slot >= NUM_CLIENT_STATS) {
 				log(NORMAL, "WARNING: not enough space to "
-						"record all unloaded RTTs");
+						"record all unloaded RTTs\n");
 				slot = 0;
 			}
 		}
