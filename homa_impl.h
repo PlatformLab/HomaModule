@@ -96,11 +96,6 @@ enum homa_packet_type {
 	 */
 };
 
-/**
- * define HOMA_MAX_MESSAGE_SIZE - Largest permissible message size, in bytes.
- */
-#define HOMA_MAX_MESSAGE_SIZE 1000000
-
 /** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
 #define HOMA_IPV4_HEADER_LENGTH 20
 

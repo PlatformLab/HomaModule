@@ -82,7 +82,7 @@ int homa_init(struct homa *homa)
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 200;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = 2800;
 	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-3] = 15000;
-	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-4] = HOMA_MAX_MESSAGE_SIZE;
+	homa->unsched_cutoffs[HOMA_MAX_PRIORITIES-4] = HOMA_MAX_MESSAGE_LENGTH;
 #ifdef __UNIT_TEST__
 	/* Unit tests won't send CUTOFFS messages unless the test changes
 	 * this variable.
@@ -196,6 +196,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
 			dest->sin_addr.s_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
+		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
 		goto error;
 	}
@@ -206,6 +207,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	skb = homa_fill_packets(hsk, crpc->peer, buffer, len);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
+		tt_record1("error in homa_fill_packets: %d", err);
 		skb = NULL;
 		goto error;
 	}
@@ -1359,7 +1361,7 @@ void homa_prios_changed(struct homa *homa)
 			homa->max_sched_prio = 0;
 			break;
 		}
-		if ((homa->unsched_cutoffs[i] >= HOMA_MAX_MESSAGE_SIZE)) {
+		if ((homa->unsched_cutoffs[i] >= HOMA_MAX_MESSAGE_LENGTH)) {
 			homa->max_sched_prio = i-1;
 			break;
 		}
