@@ -87,7 +87,7 @@ def scan(f, startingEvent):
         if (thisEventTime < lastTime):
             print('Time went backwards at the following line:\n%s' % (line))
         lastTime = thisEventTime
-        if (thisEventTime != 0.0) :
+        if thisEventInterval != 0.0:
             if not thisEvent in eventIntervals:
                 eventIntervals[thisEvent] = []
             eventIntervals[thisEvent].append(thisEventInterval)
