@@ -82,10 +82,55 @@ std::mt19937 rand_gen(
 		std::chrono::system_clock::now().time_since_epoch().count());
 
 /**
+ * struct conn_id - A 32-bit value that encodes a unique connection
+ * between a TCP client and server.
+ */
+struct conn_id {
+	/**
+	 * @client_port: the index (starting at 0) of the port within
+	 * the client (corresponds to a particular sending thread). 
+	 */
+	uint8_t client_port;
+	
+	/** @client: the node index for the client (starts from zero). */
+	uint8_t client;
+	
+	/**
+	 * @server_port: the index (starting at 0) of a particular port
+	 * within the server.
+	 */
+	uint8_t server_port;
+	
+	/** @server: the node index for the server (starts from 0). */
+	uint8_t server;
+	
+	conn_id(uint8_t server, uint8_t server_port, uint8_t client,
+			uint8_t client_port)
+		: client_port(client_port), client(client),
+		server_port(server_port), server(server)
+	{}
+	
+	conn_id()
+		: client_port(0), client(0), server_port(0), server(0)
+	{}
+	
+	inline operator int()
+	{
+		return *(reinterpret_cast<int *>(this));
+	}
+};
+
+/**
  * @server_addrs: Internet addresses for each of the server threads available
  * to receive a Homa RPC.
  */
 std::vector<struct sockaddr_in> server_addrs;
+
+/**
+ * @server_ids: for each entry in @server_addrs, a connection identifier
+ * with all fields filled in except client_port, which will be 0.
+ */
+std::vector<conn_id> server_ids;
 
 /** @message_id: used to generate unique identifiers for outgoing messages.*/
 std::atomic<uint32_t> message_id;
@@ -351,10 +396,10 @@ struct message_header {
 	uint32_t start_time;
 	
 	/**
-	 * @server_id: the index in @server_addrs (on the client) of
-	 * the server for this request.
+	 * @cid: uniquely identifies the connection between a client
+	 * and a server.
 	 */
-	int server_id;
+	conn_id cid;
 	
 	/**
 	 * @msg_id: unique identifier for this message among all those
@@ -398,6 +443,7 @@ void init_server_addrs(void)
 		for (int thread = 0; thread < server_ports; thread++) {
 			dest->sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
+			server_ids.emplace_back(node, thread, id, 0);
 		}
 	}
 }
@@ -565,10 +611,8 @@ int tcp_connection::read(bool loop,
 		int count = ::read(fd, buffer, sizeof(buffer));
 		if (count <= 0) {
 			if ((count < 0) && ((errno == EAGAIN)
-					|| (errno == EWOULDBLOCK))) {
-				tt("read failed: EWOULDBLOCK");
+					|| (errno == EWOULDBLOCK)))
 				return 0;
-			}
 			if ((count == 0) || ((count < 0)
 					&& (errno == ECONNRESET))) {
 				/* Connection was closed by the client. */
@@ -623,11 +667,14 @@ int tcp_connection::read(bool loop,
 				bytes_received += header_bytes;
 				next += header_bytes;
 				count -= header_bytes;
-				tt("Added %d bytes to header", header_bytes);
-				if (bytes_received < sizeof32(message_header))
+				if (bytes_received < sizeof32(message_header)) {
+					tt("Received %d header bytes; need %d "
+							"more for complete "
+							"header", count,
+							sizeof32(message_header)
+							- bytes_received);
 					break;
-				tt("Header complete for message %d: length %d bytes",
-						header.msg_id, header.length);
+				}
 			}
 
 			/* At this point we know the request length, so read until
@@ -635,15 +682,15 @@ int tcp_connection::read(bool loop,
 			 */
 			int needed = header.length - bytes_received;
 			if (count < needed) {
+				tt("Received %d bytes for cid %u, id %d; need "
+						"%d more for complete message",
+						count, header.cid,
+						needed-count);
 				bytes_received += count;
-				tt("Incomplete message: have %d/%d bytes",
-						bytes_received, header.length);
 				break;
 			}
-			tt("Message %d received: %d bytes",
-					header.msg_id, header.length);
 
-			/* We now have a full request. */
+			/* We now have a full message. */
 			count -= needed;
 			next += needed;
 			func(&header);
@@ -727,9 +774,6 @@ bool tcp_connection::xmit()
 		send_length = header->length - bytes_sent;
 		if (send_length > (sizeof32(buffer) - start))
 			send_length = sizeof32(buffer) - start;
-		tt("Sending %d bytes at offset %d/%d for message id %d",
-				send_length, bytes_sent, header->length,
-				header->msg_id);
 		result = send(fd, buffer + start, send_length,
 				MSG_NOSIGNAL|MSG_DONTWAIT);
 		if (result >= 0)
@@ -747,14 +791,16 @@ bool tcp_connection::xmit()
 				exit(1);
 			}
 		}
-		tt("After send, bytes_sent now %d/%d", bytes_sent,
-				header->length);
-		if (bytes_sent < header->length)
+		if (bytes_sent < header->length) {
+			tt("Sent %d bytes (out of %d) on cid 0x%08x",
+					result, header->length, header->cid);
 			continue;
+		}
 		bytes_sent = 0;
-		tt("Finished sending message id %d (length %d), %u messages "
-				"still to send", header->msg_id,
-				header->length, outgoing.size());
+		tt("Finished sending TCP message, cid 0x%08x, id %d, length %d, "
+				"%u messages queued", header->cid,
+				header->msg_id, header->length,
+				outgoing.size() - 1);
 		outgoing.pop_front();
 	}
 }
@@ -1172,6 +1218,8 @@ void tcp_server::read(int fd)
 			[this, fd](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
+		tt("Received TCP request, cid 0x%08x, id %u, length %d",
+				header->cid, header->msg_id, header->length);
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
 					EPOLLIN|EPOLLOUT|epollet);
@@ -1615,9 +1663,9 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 		exit(1);
 	}
 	uint32_t end_time = rdtsc() & 0xffffffff;
-	tt("Received response from server %d with %d bytes", header->server_id,
-			length);
-	record(length, end_time - header->start_time, header->server_id);
+	tt("Received response, cid 0x%08x, id %x, %d bytes",
+			header->cid, header->msg_id, length);
+	record(length, end_time - header->start_time, header->cid.server);
 	return true;
 }
 
@@ -1665,8 +1713,10 @@ void homa_client::sender()
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
 		header->start_time = now & 0xffffffff;
-		header->server_id = server;
-		tt("sending to server %d, length %d", server, header->length);
+		header->cid = server_ids[server];
+		header->cid.client_port = id;
+		tt("sending request, cid 0x%08x, id %u, length %d",
+				header->cid, header->msg_id, header->length);
 		int status = homa_send(fd, sender_buffer, header->length,
 			reinterpret_cast<struct sockaddr *>(
 			&server_addrs[server]),
@@ -1734,7 +1784,8 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 		header->length = HOMA_MAX_MESSAGE_LENGTH;
 	if (header->length < sizeof32(*header))
 		header->length = sizeof32(*header);
-	header->server_id = server;
+	header->cid = server_ids[server];
+	header->cid.client_port = id;
 	start = rdtsc();
 	header->start_time = start & 0xffffffff;
 	status = homa_send(fd, buffer, header->length,
@@ -2022,11 +2073,12 @@ void tcp_client::sender()
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		header.start_time = now & 0xffffffff;
-		header.server_id = server;
+		header.cid = server_ids[server];
+		header.cid.client_port = id;
 		header.msg_id = message_id.fetch_add(1);
 		size_t old_pending = connections[server]->pending();
-		tt("sending message id %u to server %d, length %d",
-				header.msg_id, server, header.length);
+		tt("Sending TCP request, cid 0x%08x, id %u, length %d",
+				header.cid, header.msg_id, header.length);
 		if ((!connections[server]->send_message(&header))
 				&& (old_pending == 0)) {
 			blocked.push_back(connections[server]);
@@ -2038,9 +2090,12 @@ void tcp_client::sender()
 			}
 		}
 		if (verbose)
-			log(NORMAL, "tcp_client %d sent request to server port "
-					"%d, length %d\n",
-					id, header.server_id,
+			log(NORMAL, "tcp_client %d.%d sent request to server %d, "
+					"port %d, length %d\n",
+					header.cid.client,
+					header.cid.client_port,
+					header.cid.server,
+					header.cid.server_port,
 					request_lengths[next_length]);
 		requests[server]++;
 		total_requests++;
@@ -2076,6 +2131,7 @@ void tcp_client::receiver(int receiver_id)
 		struct epoll_event events[MAX_EVENTS];
 		int num_events;
 		
+		tt("calling epoll_wait");
 		while (1) {
 			num_events = epoll_wait(epoll_fd, events, MAX_EVENTS, -1);
 			if (stop)
@@ -2089,6 +2145,7 @@ void tcp_client::receiver(int receiver_id)
 					strerror(errno));
 			exit(1);
 		}
+		tt("epoll_wait returned %d events", num_events);
 		for (int i = 0; i < num_events; i++) {
 			int fd = events[i].data.fd;
 			tcp_connection *connection = connections[fd];
@@ -2109,8 +2166,20 @@ void tcp_client::read(tcp_connection *connection)
 {
 	int error = connection->read(epollet, [this](message_header *header) {
 		uint32_t end_time = rdtsc() & 0xffffffff;
+		uint32_t elapsed = end_time - header->start_time;
+		tt("Received TCP response, cid 0x%08x, id %u, length %d, "
+				"elapsed %d",
+				header->cid, header->msg_id,
+				header->length, elapsed);
+		if ((header->length < 1500) && (elapsed > debug[0])
+				&& (elapsed < debug[1])) {
+			tt("Freezing timetrace because of long RTT for "
+					"cid 0x%08x, id %u",
+					header->cid, header->msg_id);
+			time_trace::freeze();
+		}
 		record(header->length, end_time - header->start_time,
-				header->server_id);
+				header->cid.server);
 	});
 	if (error) {
 		log(NORMAL, "FATAL: %s (client)\n",
@@ -2380,7 +2449,6 @@ int debug_cmd(std::vector<string> &words)
 			return 0;
 		debug[i-1] = value;
 	}
-	printf("Debug values: %ld %ld\n", debug[0], debug[1]);
 	return 1;
 }
 
