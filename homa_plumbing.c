@@ -746,10 +746,6 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(recv_calls, 1);
 		INC_METRIC(recv_cycles, core->syscall_end_time - start);
 		break;
-	case HOMAIOCINVOKE:
-		printk(KERN_NOTICE "HOMAIOCINVOKE not yet implemented\n");
-		result = -EINVAL;
-		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
 		core = homa_cores[smp_processor_id()];
@@ -757,9 +753,10 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(reply_calls, 1);
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
-	case HOMAIOCABORT:
-		printk(KERN_NOTICE "HOMAIOCABORT not yet implemented\n");
-		result = -EINVAL;
+	case HOMAIOCFREEZE:
+		tt_record("Freezing timetrace because of HOMAIOCFREEZE ioctl");
+		tt_freeze();
+		result = 0;
 		break;
 	default:
 		printk(KERN_NOTICE "Unknown Homa ioctl: %d\n", cmd);

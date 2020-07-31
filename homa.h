@@ -58,9 +58,8 @@ extern "C"
 
 #define HOMAIOCSEND   1003101
 #define HOMAIOCRECV   1003102
-#define HOMAIOCINVOKE 1003103
-#define HOMAIOCREPLY  1003104
-#define HOMAIOCABORT  1003105
+#define HOMAIOCREPLY  1003103
+#define HOMAIOCFREEZE 1003104
 
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,

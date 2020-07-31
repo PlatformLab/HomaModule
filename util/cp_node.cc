@@ -289,6 +289,7 @@ void print_help(const char *name)
 		" tt [options]         Manage time tracing:\n"
 		"     freeze           Stop recording time trace information until\n"
 		"                      print has been invoked\n"
+		"     kfreeze          Freeze the kernel's internal timetrace\n"
 		"     print file       Dump timetrace information to file\n",
 		client_max, first_port, first_server, first_server, net_bw,
 		client_ports, port_receivers, protocol,
@@ -389,6 +390,23 @@ void log_affinity()
 		list.append(std::to_string(i));
 	}
 	log(NORMAL, "Core affinities: %s\n", list.c_str());
+}
+
+/**
+ * kfreeze() - Freeze the kernel-level timetrace.
+ */
+void kfreeze()
+{
+	int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		log(NORMAL, "ERROR: kfreeze couldn't open Homa socket: %s\n",
+				strerror(errno));
+		return;
+	}
+	if (ioctl(fd, HOMAIOCFREEZE, NULL) != 0)
+		log(NORMAL, "ERROR: HOMAIOCFREEZE ioctl failed: %s\n",
+				strerror(errno));
+	close(fd);
 }
 
 /**
@@ -2766,6 +2784,8 @@ int tt_cmd(std::vector<string> &words)
 	const char *option = words[1].c_str();
 	if (strcmp(option, "freeze") == 0) {
 		time_trace::freeze();
+	} else if (strcmp(option, "kfreeze") == 0) {
+		kfreeze();
 	} else if (strcmp(option, "print") == 0) {
 		if (words.size() < 3) {
 			printf("No file name provided for %s\n", option);
