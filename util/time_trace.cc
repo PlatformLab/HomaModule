@@ -17,7 +17,7 @@
 
 #include "time_trace.h"
 
-__thread time_trace::buffer* time_trace::thread_buffer = NULL;
+__thread time_trace::buffer* time_trace::tb = NULL;
 std::vector<time_trace::buffer*> time_trace::thread_buffers;
 int time_trace::frozen = 0;
 
@@ -27,20 +27,20 @@ int time_trace::frozen = 0;
 static std::mutex mutex;
 
 /**
- * create_thread_buffer() - Creates a thread-private time_trace::buffer object
- * for the current thread, if one doesn't already exist.  Must be invoked by
- * each thread before it calls record.
- * @name:  Short descriptive name for the current thread; will appear in
- *         time trace printouts.
+ * time_trace::free_unused() - Frees all of the thread-local buffers that
+ * are no longer in use (they don't get freed when the thread_buffer
+ * objects are deleted, in order to allow timetraces to be dumped after
+ * threads have exited).
  */
-void
-time_trace::create_thread_buffer(std::string name)
+void time_trace::cleanup()
 {
 	std::lock_guard<std::mutex> guard(mutex);
-	if (thread_buffer == NULL) {
-		thread_buffer = new buffer(name);
-		thread_buffers.push_back(thread_buffer);
-		tt("Created new thread_buffer");
+	for (int i = (int) (thread_buffers.size() - 1); i >= 0; i--) {
+		time_trace::buffer *buffer = thread_buffers[i];
+		if (buffer->ref_count == 0) {
+			delete buffer;
+			thread_buffers.erase(thread_buffers.begin() + i);
+		}
 	}
 }
 
@@ -53,8 +53,8 @@ void time_trace::freeze()
 }
 
 /**
- * get_trace() - Return a string containing all of the trace records from all of the
- * thread-local buffers.
+ * get_trace() - Return a string containing all of the trace records from all
+ * of the thread-local buffers.
  */
 std::string time_trace::get_trace()
 {
@@ -213,6 +213,7 @@ time_trace::print_to_file(const char *name)
 time_trace::buffer::buffer(std::string name)
 	: name(name)
 	, next_index(0)
+        , ref_count(0)
 	, events()
 {
 	// Mark all of the events invalid.
@@ -259,4 +260,37 @@ void time_trace::buffer::record(uint64_t timestamp, const char* format,
 	event->arg1 = arg1;
 	event->arg2 = arg2;
 	event->arg3 = arg3;
+}
+
+/**
+ * time_trace::thread_buffer::thread_buffer() - Constructor for thread_buffers.
+ * Creates a thread-private time_trace::buffer object for the current thread,
+ * if one doesn't already exist.
+ * @name:  Short descriptive name for the current thread; will appear in
+ *         time trace printouts.
+ */
+time_trace::thread_buffer::thread_buffer(std::string name)
+	: buffer(NULL)
+{
+	std::lock_guard<std::mutex> guard(mutex);
+	if (tb == NULL) {
+		tb = new time_trace::buffer(name);
+		thread_buffers.push_back(tb);
+		tt("Created new thread_buffer");
+	}
+	buffer = tb;
+	buffer->ref_count++;
+}
+
+/**
+ * time_trace::thread_buffer::thread_buffer() - Destructor for
+ * thread_buffers. Deletes the thread-private variable if there are no more
+ * objects referring to the buffer.
+ */
+time_trace::thread_buffer::~thread_buffer()
+{
+	std::lock_guard<std::mutex> guard(mutex);
+	buffer->ref_count--;
+	if (buffer->ref_count == 0)
+		tb = NULL;
 }

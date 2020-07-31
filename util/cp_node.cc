@@ -922,10 +922,10 @@ void homa_server::server(void)
 	int *message = reinterpret_cast<int *>(buffer);
 	struct sockaddr_in source;
 	int length;
-	char id_buffer[50];
+	char thread_name[50];
 	
-	snprintf(id_buffer, sizeof(id_buffer), "S%d", id);
-	time_trace::create_thread_buffer(id_buffer);
+	snprintf(thread_name, sizeof(thread_name), "S%d", id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	while (1) {
 		uint64_t id = 0;
 		int result;
@@ -1152,10 +1152,10 @@ tcp_server::~tcp_server()
  */
 void tcp_server::server(int thread_id)
 {
-	char buffer[50];
+	char thread_name[50];
 	
-	snprintf(buffer, sizeof(buffer), "S%d.%d", id, thread_id);
-	time_trace::create_thread_buffer(buffer);
+	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
@@ -1719,10 +1719,10 @@ void homa_client::sender()
 {
 	message_header *header = reinterpret_cast<message_header *>(sender_buffer);
 	uint64_t next_start = rdtsc();
-	char buffer[50];
+	char thread_name[50];
 	
-	snprintf(buffer, sizeof(buffer), "C%d", id);
-	time_trace::create_thread_buffer(buffer);
+	snprintf(thread_name, sizeof(thread_name), "C%d", id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	
 	while (1) {
 		uint64_t now;
@@ -1796,9 +1796,9 @@ void homa_client::sender()
  */
 void homa_client::receiver(int receiver_id)
 {	
-	char buffer[50];
-	snprintf(buffer, sizeof(buffer), "R%d.%d", id, receiver_id);
-	time_trace::create_thread_buffer(buffer);
+	char thread_name[50];
+	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	
 	receivers_running++;
 	while (wait_response(0, receiver_buffers[receiver_id])) {}
@@ -2068,10 +2068,10 @@ tcp_client::~tcp_client()
  */
 void tcp_client::sender()
 {
-	char buffer[50];
+	char thread_name[50];
 	
-	snprintf(buffer, sizeof(buffer), "C%d", id);
-	time_trace::create_thread_buffer(buffer);
+	snprintf(thread_name, sizeof(thread_name), "C%d", id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	
 	uint64_t next_start = rdtsc();
 	message_header header;
@@ -2162,10 +2162,10 @@ void tcp_client::sender()
  */
 void tcp_client::receiver(int receiver_id)
 {
-	char buffer[50];
+	char thread_name[50];
 	
-	snprintf(buffer, sizeof(buffer), "R%d.%d", id, receiver_id);
-	time_trace::create_thread_buffer(buffer);
+	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
+	time_trace::thread_buffer thread_buffer(thread_name);
 	receivers_running++;
 	
 	/* Each iteration through this loop processes a batch of incoming
@@ -2475,6 +2475,7 @@ int client_cmd(std::vector<string> &words)
 			clients.push_back(new tcp_client(i));
 	}
 	last_stats_time = 0;
+	time_trace::cleanup();
 	return 1;
 }
 
