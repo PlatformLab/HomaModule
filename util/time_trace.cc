@@ -40,6 +40,7 @@ time_trace::create_thread_buffer(std::string name)
 	if (thread_buffer == NULL) {
 		thread_buffer = new buffer(name);
 		thread_buffers.push_back(thread_buffer);
+		tt("Created new thread_buffer");
 	}
 }
 

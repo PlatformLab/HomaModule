@@ -51,6 +51,10 @@ class time_trace {
 	static void freeze();
 	static std::string get_trace();
 	static int print_to_file(const char *name);
+
+	/** @frozen: nonzero means that the timetrace is already frozen. */
+	static int frozen;
+	
 	class buffer;
 
 	/**
@@ -101,9 +105,6 @@ class time_trace {
 	 * buffers created so far. Entries never get deleted from this object.
 	 */
 	static std::vector<buffer*> thread_buffers;
-
-	/** @frozen: nonzero means that no entries should be recorded. */
-	static int frozen;
 
 	/** struct event - Holds one entry in a time_trace::buffer. */
 	struct event {
@@ -157,7 +158,7 @@ class time_trace {
 		 * call to record.
 		 */
 		int next_index;
-
+		
 		/**
 		 * @events: Holds information from the most recent calls to record.
 		 */
