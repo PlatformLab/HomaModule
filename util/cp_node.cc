@@ -70,10 +70,12 @@ double net_bw = 0.0;
 bool tcp_trunc = true;
 int port_receivers = 1;
 int port_threads = 1;
+std::string protocol_string;
 const char *protocol;
 int server_nodes = 1;
 int server_ports = 1;
 bool verbose = false;
+std::string workload_string;
 const char *workload = "100";
 int unloaded = 0;
 
@@ -131,6 +133,19 @@ std::vector<struct sockaddr_in> server_addrs;
  * with all fields filled in except client_port, which will be 0.
  */
 std::vector<conn_id> server_ids;
+
+/**
+ * @freeze: one entry for each node index; 1 means messages to that
+ * node should contain a flag telling the node to freeze its time trace.
+ */
+std::vector<int> freeze;
+
+/**
+ * @first_id: entry i contains the index in server_addrs of the first
+ * entry for the server ports on node i. Used to map from node+port to
+ * server id.
+ */
+std::vector<int> first_id;
 
 /** @message_id: used to generate unique identifiers for outgoing messages.*/
 std::atomic<uint32_t> message_id;
@@ -387,7 +402,10 @@ struct message_header {
 	 * @length: total number of bytes in the message, including this
 	 * header.
 	 */
-	int length;
+	int length:31;
+	
+	/** @freeze: true means the recipient should freeze its time trace. */
+	unsigned int freeze:1;
 	
 	/**
 	 * @start_time: the time when the client initiated the request.
@@ -412,11 +430,15 @@ struct message_header {
  * init_server_addrs() - Set up the server_addrs table (addresses of the
  * server/port combinations that clients will communicate with), based on
  * current configuration parameters. Any previous contents of the table
- * are discarded
+ * are discarded. This also initializes related arrays @server_ids and
+ * @freeze.
  */
 void init_server_addrs(void)
 {
 	server_addrs.clear();
+	server_ids.clear();
+	freeze.clear();
+	first_id.clear();
 	for (int node = first_server; node < first_server + server_nodes;
 			node++) {
 		char host[100];
@@ -440,11 +462,16 @@ void init_server_addrs(void)
 		}
 		dest = reinterpret_cast<struct sockaddr_in *>
 				(matching_addresses->ai_addr);
+		while (((int) first_id.size()) < node)
+			first_id.push_back(-1);
+		first_id.push_back((int) server_addrs.size());
 		for (int thread = 0; thread < server_ports; thread++) {
 			dest->sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
 			server_ids.emplace_back(node, thread, id, 0);
 		}
+		while (((int) freeze.size()) <= node)
+			freeze.push_back(0);
 	}
 }
 
@@ -1220,6 +1247,11 @@ void tcp_server::read(int fd)
 		metrics.data += header->length;
 		tt("Received TCP request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
+		if (header->freeze) {
+			tt("Freezing timetrace because of request on "
+					"cid 0x%08x", header->cid);
+			time_trace::freeze();
+		}
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
 					EPOLLIN|EPOLLOUT|epollet);
@@ -1247,7 +1279,7 @@ class client {
 	client(int id);
 	virtual ~client();
 	void check_completion(const char *protocol);
-	void record(int length, uint32_t rtt, int server_id);
+	void record(int length, uint32_t rtt, conn_id cid);
 	virtual void stop_sender(void) {}
 	
 	/**
@@ -1483,11 +1515,21 @@ void client::check_completion(const char *protocol)
  * @length:     Size of the request and response messages for the request,
  *              in bytes.
  * @rtt:        Total round-trip time to complete the request, in rdtsc cycles.
- * @server_id:  Index of the server for this request in @server_addrs.
+ * @conn_id:    Identifier for the connection over which the request was
+ *              sent.
  */
-void client::record(int length, uint32_t rtt, int server_id)
+void client::record(int length, uint32_t rtt, conn_id cid)
 {
+	int server_id;
 	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
+	
+	server_id = first_id[cid.server];
+	if (server_id == -1) {
+		log(NORMAL, "WARNING: response received from unknown "
+				"cid 0x%08x\n", (int) cid);
+		return;
+	}
+	server_id += cid.server_port;
 	responses[server_id].fetch_add(1);
 	response_data += length;
 	total_rtt += rtt;
@@ -1665,7 +1707,7 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 	uint32_t end_time = rdtsc() & 0xffffffff;
 	tt("Received response, cid 0x%08x, id %x, %d bytes",
 			header->cid, header->msg_id, length);
-	record(length, end_time - header->start_time, header->cid.server);
+	record(length, end_time - header->start_time, header->cid);
 	return true;
 }
 
@@ -1715,6 +1757,7 @@ void homa_client::sender()
 		header->start_time = now & 0xffffffff;
 		header->cid = server_ids[server];
 		header->cid.client_port = id;
+		header->freeze = freeze[header->cid.server];
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
 		int status = homa_send(fd, sender_buffer, header->length,
@@ -2076,9 +2119,11 @@ void tcp_client::sender()
 		header.cid = server_ids[server];
 		header.cid.client_port = id;
 		header.msg_id = message_id.fetch_add(1);
+		header.freeze = freeze[header.cid.server];
 		size_t old_pending = connections[server]->pending();
-		tt("Sending TCP request, cid 0x%08x, id %u, length %d",
-				header.cid, header.msg_id, header.length);
+		tt("Sending TCP request, cid 0x%08x, id %u, length %d, freeze %d",
+				header.cid, header.msg_id, header.length,
+				header.freeze);
 		if ((!connections[server]->send_message(&header))
 				&& (old_pending == 0)) {
 			blocked.push_back(connections[server]);
@@ -2172,14 +2217,16 @@ void tcp_client::read(tcp_connection *connection)
 				header->cid, header->msg_id,
 				header->length, elapsed);
 		if ((header->length < 1500) && (elapsed > debug[0])
-				&& (elapsed < debug[1])) {
+				&& (elapsed < debug[1])
+				&& !time_trace::frozen) {
 			tt("Freezing timetrace because of long RTT for "
 					"cid 0x%08x, id %u",
 					header->cid, header->msg_id);
 			time_trace::freeze();
+			freeze[header->cid.server] = 1;
 		}
 		record(header->length, end_time - header->start_time,
-				header->cid.server);
+				header->cid);
 	});
 	if (error) {
 		log(NORMAL, "FATAL: %s (client)\n",
@@ -2386,7 +2433,8 @@ int client_cmd(std::vector<string> &words)
 						option);
 				return 0;
 			}
-			protocol = words[i+1].c_str();
+			protocol_string = words[i+1];
+			protocol = protocol_string.c_str();
 			i++;
 		} else if (strcmp(option, "--server-nodes") == 0) {
 			if (!parse(words, i+1, &server_nodes, option, "integer"))
@@ -2406,7 +2454,8 @@ int client_cmd(std::vector<string> &words)
 						option);
 				return 0;
 			}
-			workload = words[i+1].c_str();
+			workload_string = words[i+1];
+			workload = workload_string.c_str();
 			i++;
 		} else {
 			printf("Unknown option '%s'\n", option);
@@ -2615,7 +2664,8 @@ int server_cmd(std::vector<string> &words)
 						option);
 				return 0;
 			}
-			protocol = words[i+1].c_str();
+			protocol_string = words[i+1];
+			protocol = protocol_string.c_str();
 			i++;
 		} else {
 			printf("Unknown option '%s'\n", option);
