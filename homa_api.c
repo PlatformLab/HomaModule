@@ -23,33 +23,6 @@
 #include "homa.h"
 
 /**
- * homa_invoke() - Send a request message and wait for the response.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @request:    First byte of buffer containing the request message.
- * @reqlen:     Number of bytes at @request.
- * @dest_addr:  Address of server to which the request should be sent.
- * @addrlen:    Size of @dest_addr in bytes.
- * @response:   First byte of buffer containing the request message.
- * @resplen:    Number of bytes at @request.
- * 
- * Return:      The total size of the incoming message. This may be larger
- *              than len, in which case the last bytes of the incoming message
- *              were discarded. If an error occurred, -1 is returned and
- *              errno is set appropriately. 
- */
-ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
-		const struct sockaddr *dest_addr, size_t addrlen,
-		void *response, size_t resplen)
-{
-	uint64_t id;
-	
-	if (homa_send(sockfd, request, reqlen, dest_addr, addrlen, &id) < 0)
-		return -1;
-	return homa_recv(sockfd, response, resplen, HOMA_RECV_RESPONSE, &id,
-		0, 0);
-}
-
-/**
  * homa_recv() - Wait for an incoming message (either request or response)
  * and return it.
  * @sockfd:     File descriptor for the socket on which to receive the message.
