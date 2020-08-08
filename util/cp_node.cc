@@ -36,6 +36,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 #include <sys/time.h>
 #include <sys/types.h>
 
@@ -224,6 +225,12 @@ std::mutex cmd_lock;
 #define MAX_FDS 10000
 std::atomic_bool fd_locks[MAX_FDS];
 
+/**
+ * @kfreeze_count: number of times that kfreeze has been evoked since
+ * the last time a client was created; used to eliminate redundant
+ * freezes that waste time.
+ */
+int kfreeze_count = 0;
 
 /**
  * @debug: values set with the "debug" command; typically used to
@@ -397,6 +404,9 @@ void log_affinity()
  */
 void kfreeze()
 {
+	kfreeze_count++;
+	if (kfreeze_count > 1)
+		return;
 	int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "ERROR: kfreeze couldn't open Homa socket: %s\n",
@@ -727,10 +737,10 @@ int tcp_connection::read(bool loop,
 			 */
 			int needed = header.length - bytes_received;
 			if (count < needed) {
-				tt("Received %d bytes for cid %u, id %d; need "
-						"%d more for complete message",
-						count, header.cid,
-						needed-count);
+				tt("Received %d bytes for cid 0x%08x, id %d; "
+						"need %d more for complete "
+						"message", count, header.cid,
+						header.msg_id, needed-count);
 				bytes_received += count;
 				break;
 			}
@@ -917,6 +927,7 @@ homa_server::homa_server(int fd, int id)
         , metrics()
 	, thread(&homa_server::server, this)
 {
+	kfreeze_count = 0;
 }
 
 /**
@@ -1108,6 +1119,7 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 	
 	for (int i = 0; i < num_threads; i++)
 		threads.emplace_back(&tcp_server::server, this, i);
+	kfreeze_count = 0;
 }
 
 /**
@@ -1174,6 +1186,7 @@ void tcp_server::server(int thread_id)
 	
 	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
+	int pid = syscall(__NR_gettid);
 	
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
@@ -1193,6 +1206,8 @@ void tcp_server::server(int thread_id)
 					strerror(errno));
 			exit(1);
 		}
+		tt("epoll_wait returned %d events in server pid %d",
+				num_events, pid);
 		for (int i = 0; i < num_events; i++) {
 			int fd = events[i].data.u32;
 			if (fd == listen_fd) {
@@ -1265,10 +1280,11 @@ void tcp_server::read(int fd)
 		metrics.data += header->length;
 		tt("Received TCP request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
-		if (header->freeze) {
+		if ((header->freeze) && !time_trace::frozen) {
 			tt("Freezing timetrace because of request on "
 					"cid 0x%08x", header->cid);
 			time_trace::freeze();
+			kfreeze();
 		}
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
@@ -1493,6 +1509,7 @@ client::client(int id)
 			avg_length*1e-3, dist_mean(workload,
 			HOMA_MAX_MESSAGE_LENGTH)*1e-3, rate*1e-3,
 			avg_length*rate*1e-6);
+	kfreeze_count = 0;
 }
 
 /**
@@ -2185,6 +2202,7 @@ void tcp_client::receiver(int receiver_id)
 	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
 	receivers_running++;
+	int pid = syscall(__NR_gettid);
 	
 	/* Each iteration through this loop processes a batch of incoming
 	 * responses
@@ -2208,7 +2226,8 @@ void tcp_client::receiver(int receiver_id)
 					strerror(errno));
 			exit(1);
 		}
-		tt("epoll_wait returned %d events", num_events);
+		tt("epoll_wait returned %d events in client pid %d",
+				num_events, pid);
 		for (int i = 0; i < num_events; i++) {
 			int fd = events[i].data.fd;
 			tcp_connection *connection = connections[fd];
@@ -2237,11 +2256,12 @@ void tcp_client::read(tcp_connection *connection)
 		if ((header->length < 1500) && (elapsed > debug[0])
 				&& (elapsed < debug[1])
 				&& !time_trace::frozen) {
+			freeze[header->cid.server] = 1;
 			tt("Freezing timetrace because of long RTT for "
 					"cid 0x%08x, id %u",
 					header->cid, header->msg_id);
 			time_trace::freeze();
-			freeze[header->cid.server] = 1;
+			kfreeze();
 		}
 		record(header->length, end_time - header->start_time,
 				header->cid);
