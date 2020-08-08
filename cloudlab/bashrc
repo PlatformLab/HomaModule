@@ -104,8 +104,31 @@ id ()
     ttgrep.py "id $1" node.tt
 }
 
+cpid()
+{
+    ttgrep.py "id $1" cp.tt
+}
+
 core ()
 {
     ttgrep.py "[C$1]" node.tt > core.tt
-    less core.tt
+    less +G core.tt
+}
+
+thread ()
+{
+    ttgrep.py "[$1]" cp.tt > thread.tt
+    less +G thread.tt
+}
+
+cid ()
+{
+    ttgrep.py "cid $1" cp.tt > cid.tt
+    less +G cid.tt
+}
+
+pid ()
+{
+    ttgrep.py "pid $1" $2 > pid.tt
+    less +G pid.tt
 }
