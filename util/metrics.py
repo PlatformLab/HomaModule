@@ -291,17 +291,19 @@ if elapsed_secs != 0:
         us_per = (time/calls)/(cpu_khz/1e03)
     print("reply_syscall          %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    if packets_received > 0:
-        for print_name, symbol in [["NAPI", "napi_cycles"],
-                ["Linux SoftIRQ", "linux_softirq_cycles"],
-                ["  Homa SoftIRQ", "softirq_cycles"],
-                ["  Sending grants", "grant_cycles"]]:
-            cpu_time = float(deltas[symbol])
-            cores = cpu_time/time_delta
-            if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
-                total_cores_used += cores;
+    for print_name, symbol in [["NAPI", "napi_cycles"],
+            ["Linux SoftIRQ", "linux_softirq_cycles"],
+            ["  Homa SoftIRQ", "softirq_cycles"],
+            ["  Sending grants", "grant_cycles"]]:
+        cpu_time = float(deltas[symbol])
+        cores = cpu_time/time_delta
+        if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
+            total_cores_used += cores;
+        if packets_received > 0:
             print("%s     %6.2f   %7.2f us/packet" % (print_name.ljust(18),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
+        else:
+            print("%s     %6.2f" % (print_name.ljust(18), cores))
 
     for print_name, symbol in [["Pacer", "pacer_cycles"],
             ["Timer handler", "timer_cycles"]]:
