@@ -754,7 +754,8 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCFREEZE:
-		tt_record("Freezing timetrace because of HOMAIOCFREEZE ioctl");
+		tt_record("Freezing timetrace because of HOMAIOCFREEZE ioctl, "
+				"pid %d", current->pid);
 		tt_freeze();
 		result = 0;
 		break;
