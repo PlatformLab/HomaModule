@@ -28,12 +28,12 @@ parser = get_parser(description=
             "port_threads":     3,
             "client_ports":     3,
             "port_receivers":   3,
-            "tcp_server_ports": 9,
-            "tcp_client_ports": 5,
+            "tcp_server_ports": 8,
+            "tcp_client_ports": 4,
             "workload":         ""
         })
 options = parser.parse_args()
-options.no_trunc = True
+# options.no_trunc = True
 init(options)
 servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
@@ -53,13 +53,15 @@ if not options.plot_only:
             start_servers(servers, options)
 
             o = copy.deepcopy(options);
-            o.client_ports = 1
+            o.tcp_client_ports = 1
             o.client_max = 1
-            o.server_ports = 1
+            o.tcp_server_ports = 1
             o.server_nodes = 1
             o.first_server = 1
+            o.unloaded = 500
             run_experiment(unloaded_exp, range(0, 1), o)
             run_experiment(tcp_exp, clients, options)
+            do_cmd("tt print cp.tt", clients)
         except Exception as e:
             log(traceback.format_exc())
 
@@ -78,7 +80,7 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 5000, tcp_exp)
+    start_slowdown_plot(title, 1000, tcp_exp)
     plot_slowdown(tcp_exp, "p99", "TCP P99")
     plot_slowdown(tcp_exp, "p50", "TCP P50")
     plt.legend()
