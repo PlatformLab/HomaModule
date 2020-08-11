@@ -10,13 +10,6 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   Here is a partial list of functionality that is still missing:
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of KB?) may cause buffer exhaustion and deadlock.
-  - Performance analysis and tuning are currently underway. Some performance
-    improvements have already been made, such as opening TSO and GRO, and
-    I expect additional improvements in the future. As of 9/2019, Homa's
-    unloaded latency is about 2us less than TCP, but TCP's throughput under
-    load is about 2x that of Homa. I haven't yet tested Homa's expected
-    advantage in terms of congestion control and small request latency under
-    load.
 
 - Linux v4.16.10 is the primary development platform for this code. It is also
   known to work with v4.15.0-38-generic;  other versions of Linux have not been
@@ -46,6 +39,21 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page "homa.7".
      
 ## Significant recent improvements
+- June 2020: implemented busy-waiting during homa_recv: shaves 2
+  microseconds off latency.
+- June 2020: several fixes to prevent RPCs from getting "stuck",
+  where they never make progress.
+- May 2020: got priorities working correctly using the DSCP field
+  of IP headers.
+- December 2019: first versions of cperf ("cluster performance")
+  benchmark.
+- December 2019 - June 2020: many improvements to the GRO mechanism,
+  including better hashing and batching across RPCs; improves both
+  throughput and latency.
+- Fall 2019: many improvements to pacer, spread over a couple of months.
+- November 6, 2019: reworked locking to use RPC-level locks instead of
+  socket locks for most things (significantly reduces socket lock.
+  contention). Many more refinements to this in subsequent commits.
 - September 25, 2019: reworked timeout mechanism to eliminate over-hasty
   timeouts. Also, limit the rate at which RESENDs will be sent to an
   overloaded machine.
