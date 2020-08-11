@@ -28,7 +28,7 @@ FIXTURE_SETUP(timetrace)
 	self->file.private_data = 0;
 	tt_buffer_size = 64;
 	tt_test_no_khz = true;
-	tt_init("tt");
+	tt_init("tt", NULL);
 	mock_cycles = 1000;
 }
 FIXTURE_TEARDOWN(timetrace)
