@@ -155,44 +155,50 @@ std::atomic<uint32_t> message_id;
  * @last_stats_time: time (in rdtsc cycles) when we last printed
  * staticsics. Zero means that none of the statistics below are valid.
  */
-uint64_t last_stats_time;
+uint64_t last_stats_time = 0;
 
 /**
  * @last_client_rpcs: total number of client RPCS completed by this
  * application as of the last time we printed statistics.
  */
-uint64_t last_client_rpcs;
+uint64_t last_client_rpcs = 0;
 
 /**
  * @last_client_data: total amount of data in client RPCS completed by this
  * application as of the last time we printed statistics.
  */
-uint64_t last_client_data;
+uint64_t last_client_data = 0;
 
 /**
  * @last_total_elapsed: total amount of elapsed time for all client RPCs
  * issued by this application (in units of rdtsc cycles), as of the last
  * time we printed statistics.
  */
-uint64_t last_total_rtt;
+uint64_t last_total_rtt = 0;
 
 /**
  * @last_lag: total lag across all clients (measured in rdtsc cycles)
  * as of the last time we printed statistics.
  */
-uint64_t last_lag;
+uint64_t last_lag = 0;
+
+/**
+ * @last_backups: total # of backed-up sends as of the last time we
+ * printed statistics.
+ */
+uint64_t last_backups = 0;
 
 /**
  * @last_server_rpcs: total number of server RPCS handled by this
  * application as of the last time we printed statistics.
  */
-uint64_t last_server_rpcs;
+uint64_t last_server_rpcs = 0;
 
 /**
  * @last_server_data: total amount of data in server RPCS handled by this
  * application as of the last time we printed statistics.
  */
-uint64_t last_server_data;
+uint64_t last_server_data = 0;
 
 /**
  * @last_per_server_rpcs: server->requests for each individual server,
@@ -1954,6 +1960,21 @@ class tcp_client : public client {
 	 */
 	std::vector<tcp_connection *> blocked;
 	
+	/** @requests: total number of message bytes sent to each server. */
+	std::vector<uint64_t> bytes_sent;
+	
+	/**
+	 *  @requests: total number of message bytes received from each server.
+	 */
+	std::atomic<uint64_t> *bytes_rcvd;
+	
+	/**
+	 * @backups: total number of times that a stream was congested
+	 * (many bytes queued for a server, but no response received yet)
+	 * when a new message was added to the stream.
+	 */
+	uint64_t backups;
+	
 	/**
 	 * @epoll_fd: File descriptor used by @receiving_thread to
 	 * wait for epoll events.
@@ -1990,12 +2011,20 @@ tcp_client::tcp_client(int id)
 	: client(id)
 	, connections()
         , blocked()
+        , bytes_sent()
+        , bytes_rcvd(NULL)
+        , backups(0)
         , epoll_fd(-1)
 	, epollet((port_receivers > 1) ? EPOLLET : 0)
         , stop(false)
         , receiving_threads()
         , sending_thread()
 {
+	bytes_rcvd = new std::atomic<uint64_t>[num_servers];
+	for (size_t i = 0; i < num_servers; i++) {
+		bytes_sent.push_back(0);
+		bytes_rcvd[i] = 0;
+	}
 	epoll_fd = epoll_create(10);
 	if (epoll_fd < 0) {
 		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
@@ -2095,6 +2124,7 @@ tcp_client::~tcp_client()
 		close(connection->fd);
 		delete connection;
 	}
+	delete[] bytes_rcvd;
 }
 
 /**
@@ -2179,6 +2209,9 @@ void tcp_client::sender()
 					request_lengths[next_length]);
 		requests[server]++;
 		total_requests++;
+		if ((bytes_sent[server] - bytes_rcvd[server]) > 100000)
+			backups++;
+		bytes_sent[server] += header.length;
 		next_length++;
 		if (next_length >= request_lengths.size())
 			next_length = 0;
@@ -2265,6 +2298,8 @@ void tcp_client::read(tcp_connection *connection)
 		}
 		record(header->length, end_time - header->start_time,
 				header->cid);
+		bytes_rcvd[first_id[header->cid.server]
+				+ header->cid.server_port] += header->length;
 	});
 	if (error) {
 		log(NORMAL, "FATAL: %s (client)\n",
@@ -2330,9 +2365,10 @@ void client_stats(uint64_t now)
 	uint64_t lag = 0;
 	uint64_t outstanding_rpcs = 0;
 	uint64_t cdf_times[CDF_VALUES];
+	uint64_t backups = 0;
 	int times_per_client;
 	int cdf_index = 0;
-	
+
 	if (clients.size() == 0)
 		return;
 	
@@ -2361,6 +2397,9 @@ void client_stats(uint64_t now)
 			cdf_times[cdf_index] = client->actual_rtts[src];
 			cdf_index++;
 		}
+		tcp_client *tclient = dynamic_cast<tcp_client *>(client);
+		if (tclient)
+			backups += tclient->backups;
 	}
 	std::sort(cdf_times, cdf_times + cdf_index);
 	if ((last_stats_time != 0) && (client_data != last_client_data)) {
@@ -2385,6 +2424,13 @@ void client_stats(uint64_t now)
 		if (lag_fraction >= .01)
 			log(NORMAL, "Lag due to overload: %.1f%%\n",
 					lag_fraction*100.0);
+		if (backups != 0) {
+			log(NORMAL, "Backed-up sends: %lu/%lu (%.1f%%)\n",
+					backups - last_backups,
+					client_rpcs - last_client_rpcs,
+					100.0*(backups - last_backups)
+					/(client_rpcs - last_client_rpcs));
+		}
 	}
 	if (outstanding_rpcs != 0)
 		log(NORMAL, "Outstanding client RPCs: %lu\n", outstanding_rpcs);
@@ -2392,6 +2438,7 @@ void client_stats(uint64_t now)
 	last_client_data = client_data;
 	last_total_rtt = total_rtt;
 	last_lag = lag;
+	last_backups = backups;
 }
 
 /**
