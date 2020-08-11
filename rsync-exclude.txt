@@ -5,6 +5,7 @@ nbproject
 private
 cloudlab
 reports
+__pycache__
 *.data
 *.pyc
 *.pdf
