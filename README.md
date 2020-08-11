@@ -3,13 +3,13 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
   Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
 
-- The code here is is still a work in progress. As of September 2019, Homa's
-  functionality is nearly complete, and it  should be capable of running real
-  applications. See the "invoke" test in tests/homa_test.c for an
-  example), and see below in this document for information on recent improvements.
-  Here is a partial list of functionality that is still missing:
+- As of August 2020, Homa has complete functionality for running real applications,
+  and its tail latency is more than 10x better than TCP for all workloads I have
+  measured (Homa's 99-th percentile latency is usually better than TCP's mean
+  latency). Here is a list of the most significant functionality that is still
+  missing:
   - Socket buffer memory management needs more work. Large numbers of large
-    messages (hundreds of KB?) may cause buffer exhaustion and deadlock.
+    messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
 
 - Linux v4.16.10 is the primary development platform for this code. It is also
   known to work with v4.15.0-38-generic;  other versions of Linux have not been
@@ -22,12 +22,15 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is quite different from TCP sockets.
 
-- The subdirectory "unit" contains unit tests, which you can run by typing
+- The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
   
-- The subdirectory "tests" contains an assortment of programs that may be
-  useful in exercising Homa. Compile them by typing "make" in that
-  subdirectory.
+- The subdirectory "util" contains an assortment of utility programs that
+  you may find useful in exercising Homa. Compile them by typing "make" in that
+  subdirectory. Most notable is the "cperf" family of programs, which will
+  run a variety of benchmarks on a cluster of nodes. The file cperf.py contains
+  library functions for benchmarking, which are used by a variety of benchmarks
+  with names starting with "cp_".
   
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
