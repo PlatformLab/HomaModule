@@ -19,18 +19,22 @@
 
 import argparse
 import copy
-import fcntl
+import datetime
 import glob
 import math
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
 import time
 import traceback
+
+if platform.system() != "Windows":
+    import fcntl
 
 # If a server's id appears as a key in this dictionary, it means we
 # have started cp_node running on that node. The value of each entry is
@@ -99,6 +103,15 @@ digests = {}
 # A dictionary where keys are message lengths, and each value is the median
 # unloaded RTT (usecs) for messages of that length.
 unloaded_p50 = {}
+
+# Keys are filenames, and each value is a dictionary containing data read
+# from that file. Within that dictionary, each key is the name of a column
+# within the file, and the value is a list of numbers read from the given
+# column of the given file.
+data_from_files = {}
+
+# Time when this benchmark was run.
+date_time = str(datetime.datetime.now())
 
 # Standard colors for plotting
 tcp_color =      '#00B000'
@@ -267,8 +280,17 @@ def init(options):
         if os.path.exists(log_dir):
             shutil.rmtree(log_dir)
         os.makedirs(log_dir)
-    log_file = open("%s/cperf.log" % log_dir, "a")
+        os.makedirs(log_dir + "/reports")
+    log_file = open("%s/reports/cperf.log" % log_dir, "a")
     verbose = options.verbose
+    vlog("cperf starting at %s" % (date_time))
+    s = ""
+    opts = vars(options)
+    for name in sorted(opts.keys()):
+        if len(s) != 0:
+            s += ", "
+        s += ("--%s: %s" % (name, str(opts[name])))
+    vlog("Options: %s" % (s))
 
 def wait_output(string, nodes, cmd, time_limit=10.0):
     """
@@ -566,7 +588,9 @@ def run_experiment(name, clients, options):
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
-        time.sleep(options.seconds)
+        time.sleep(2)
+        do_cmd("debug 5000000 7000000", clients);
+        time.sleep(options.seconds - 2)
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
@@ -577,6 +601,8 @@ def run_experiment(name, clients, options):
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
             f.close()
+        shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
+                "%s/reports/%s.metrics" % (options.log_dir, name))
     do_cmd("stop senders", clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
@@ -908,10 +934,9 @@ def get_digest(experiment):
     log("Digest finished for %s" % (experiment))
 
     dir = "%s/reports" % (log_dir)
-    if not os.path.exists(dir):
-        os.makedirs(dir)
     f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
-    f.write("# Digested data for %s experiment\n" % (experiment))
+    f.write("# Digested data for %s experiment, run at %s\n"
+            % (experiment, date_time))
     f.write("# length cum_frac  samples     p50      p99     p999   "
             "s50    s99    s999\n")
     for i in range(len(digest["lengths"])):
@@ -932,7 +957,8 @@ def start_slowdown_plot(title, max_y, x_experiment):
     title:         Title for the plot; may be empty
     max_y:         Maximum y-coordinate
     x_experiment:  Name of experiment whose rtt distribution will be used to
-                   label the x-axis of the plot
+                   label the x-axis of the plot. None means don't label the
+                   x-axis.
     """
 
     plt.figure(figsize=[6, 4])
@@ -943,6 +969,7 @@ def start_slowdown_plot(title, max_y, x_experiment):
     plt.xlim(0, 1.0)
     plt.yscale("log")
     plt.ylim(1, max_y)
+    plt.tick_params(right=True, which="both")
     ticks = []
     labels = []
     y = 1
@@ -955,30 +982,64 @@ def start_slowdown_plot(title, max_y, x_experiment):
     plt.ylabel("Slowdown")
     plt.grid(which="major", axis="y")
 
-    # Generate x-axis labels
+    if x_experiment != None:
+        # Generate x-axis labels
+        ticks = []
+        labels = []
+        cumulative_count = 0
+        target_count = 0
+        tick = 0
+        digest = get_digest(x_experiment)
+        rtts = digest["rtts"]
+        total = digest["total_messages"]
+        for length in sorted(rtts.keys()):
+            cumulative_count += len(rtts[length])
+            while cumulative_count >= target_count:
+                ticks.append(target_count/total)
+                if length < 1000:
+                    labels.append("%.0f" % (length))
+                elif length < 100000:
+                    labels.append("%.1fK" % (length/1000))
+                elif length < 1000000:
+                    labels.append("%.0fK" % (length/1000))
+                else:
+                    labels.append("%.1fM" % (length/1000000))
+                tick += 1
+                target_count = (total*tick)/10
+        plt.xticks(ticks, labels)
+
+def cdf_xaxis(x_values, counts, num_ticks):
+    """
+    Generate lables for an x-axis that is scaled nonlinearly to reflect
+    a particular distribution of samples.
+    
+    x:        list of x-values
+    counts:   list giving the number of samples for each point in x
+    ticks:    total number of ticks go generate (including axis ends)
+    """
+
     ticks = []
     labels = []
+    total = sum(counts)
     cumulative_count = 0
     target_count = 0
     tick = 0
-    digest = get_digest(x_experiment)
-    rtts = digest["rtts"]
-    total = digest["total_messages"]
-    for length in sorted(rtts.keys()):
-        cumulative_count += len(rtts[length])
+    for (x, count) in zip(x_values, counts):
+        cumulative_count += count
         while cumulative_count >= target_count:
             ticks.append(target_count/total)
-            if length < 1000:
-                labels.append("%.0f" % (length))
-            elif length < 100000:
-                labels.append("%.1fK" % (length/1000))
-            elif length < 1000000:
-                labels.append("%.0fK" % (length/1000))
+            if x < 1000:
+                labels.append("%.0f" % (x))
+            elif x < 100000:
+                labels.append("%.1fK" % (x/1000))
+            elif x < 1000000:
+                labels.append("%.0fK" % (x/1000))
             else:
-                labels.append("%.1fM" % (length/1000000))
+                labels.append("%.1fM" % (x/1000000))
             tick += 1
-            target_count = (total*tick)/10
+            target_count = (total*tick)/(num_ticks-1)
     plt.xticks(ticks, labels)
+        
 
 def make_histogram(x, y):
     """
@@ -997,9 +1058,6 @@ def make_histogram(x, y):
         if len(x_new) != 0:
             x_new.append(x[i])
             y_new.append(y[i-1])
-        else:
-            x_new.append(0)
-            y_new.append(y[i])
         x_new.append(x[i])
         y_new.append(y[i])
     return [x_new, y_new]
@@ -1053,6 +1111,7 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
     exp = math.ceil(math.log(max_x, 10))
     max_x = 10**exp
     plt.xlim(min_x, max_x)
+    plt.tick_params(top=True, which="both")
 
     plt.yscale("log")
     plt.ylim(min_y, 1.0)
@@ -1070,12 +1129,14 @@ def get_short_cdf(experiment):
     an experiment. Short messages means all messages shorter than 1500 bytes
     that are also among the 10% of shortest messages (if there are no messages
     shorter than 1500 bytes, then extract data for the shortest message
-    length available).
+    length available). This function also saves the data in a file in the
+    reports directory.
 
     experiment:  Name of the experiment containing the data to plot
     Returns:     A list with two elements (a list of x-coords and a list
                  of y-coords) that histogram the complementary cdf.
     """
+    global log_dir, date_time
     short = []
     digest = get_digest(experiment)
     rtts = digest["rtts"]
@@ -1095,11 +1156,67 @@ def get_short_cdf(experiment):
     y = []
     total = len(short)
     remaining = total
+    f = open("%s/reports/%s_cdf.data" % (log_dir, experiment), "w")
+    f.write("# Fraction of RTTS longer than a given time for %s experiment\n"
+            % (experiment));
+    f.write("# Includes messages <= %d bytes; measured at %s\n"
+            % (longest, date_time))
+    f.write("# Data collected at %s \n" % (date_time))
+    f.write("#       usec        frac\n")
+
+    # Reduce the volumne of data by waiting to add new points until there
+    # has been a significant change in either coordinate. "prev" variables hold
+    # the last point actually graphed.
+    prevx = 0
+    prevy = 1.0
     for rtt in sorted(short):
+        remaining -= 1
+        frac = remaining/total
+        if (prevy != 0) and (prevx != 0) and (abs((frac - prevy)/prevy) < .01) \
+                and (abs((rtt - prevx)/prevx) < .01):
+            continue;
         if len(x) > 0:
             x.append(rtt)
-            y.append(remaining/total)
-        remaining -= 1
+            y.append(prevy)
         x.append(rtt)
-        y.append(remaining/total)
+        y.append(frac)
+        f.write("%12.3f  %.8f\n" % (rtt, frac))
+        prevx = rtt
+        prevy = frac
+    f.close()
     return [x, y]
+
+def column_from_file(file, column):
+    """
+    Return a list containing a column of data from a given file.
+
+    file:    Path to the file containing the desired data.
+    column:  Name of the column within the file.
+    """
+
+    global data_from_files
+    if file in data_from_files:
+        return data_from_files[file][column]
+
+    data = {}
+    last_comment = ""
+    columns = []
+    for line in open(file):
+        fields = line.strip().split()
+        if len(fields) == 0:
+            continue
+        if fields[0] == '#':
+            last_comment = line
+            continue
+        if len(columns) == 0:
+            # Parse column names
+            if len(last_comment) == 0:
+                raise Exception("no columns headers in data file '%s'" % (file))
+            columns = last_comment.split()
+            columns.pop(0)
+            for c in columns:
+                data[c] = []
+        for i in range(0, len(columns)):
+                data[columns[i]].append(float(fields[i]))
+    data_from_files[file] = data
+    return data[column]
