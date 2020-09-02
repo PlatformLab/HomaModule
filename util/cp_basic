@@ -66,6 +66,10 @@ if not options.plot_only:
     o.first_server = 1
     run_experiment("homa_latency", range(0, 1), o)
 
+    # Homa throughput with a single active (large) message
+    o.workload = "500000"
+    run_experiment("homa_1msg_tput", range(0, 1), o)
+
     # Homa client RPC throughput (single client, many servers, small messages)
     o = copy.deepcopy(options)
     o.workload = "100"
@@ -75,6 +79,7 @@ if not options.plot_only:
 
     # Homa client throughput (single client, many servers, large messages)
     o.workload = "500000"
+    o.client_max = 50
     run_experiment("homa_client_tput", range(0, 1), o)
 
     # Homa server RPC throughput (single server, many clients, small messages)
@@ -83,10 +88,12 @@ if not options.plot_only:
     o.workload = "100"
     o.server_nodes = 1
     o.first_server = 0
+    o.client_max = 10
     run_experiment("homa_server_rpc_tput", range(1, options.num_nodes), o)
 
     # Homa server throughput (single server, many clients, large messages)
     o.workload = "500000"
+    o.client_max = 5
     run_experiment("homa_server_tput", range(1, options.num_nodes), o)
 
     # TCP client latency (small messages, low load)
@@ -103,16 +110,21 @@ if not options.plot_only:
     o.first_server = 1
     run_experiment("tcp_latency", range(0, 1), o)
 
+    # TCP throughput with a single active (large) message
+    o.workload = "500000"
+    run_experiment("tcp_1msg_tput", range(0, 1), o)
+
     # TCP client RPC throughput (single client, many servers, small messages)
     o = copy.deepcopy(options)
     o.workload = "100"
     o.server_nodes = options.num_nodes-1
     o.first_server = 1
+    o.client_max = 100
     run_experiment("tcp_client_rpc_tput", range(0, 1), o)
 
     # TCP client throughput (single client, many servers, large messages)
     o.workload = "500000"
-    o.client_max = 1
+    o.client_max = 20
     run_experiment("tcp_client_tput", range(0, 1), o)
 
     # TCP server RPC throughput (single server, many clients, small messages)
@@ -121,11 +133,12 @@ if not options.plot_only:
     o.workload = "100"
     o.server_nodes = 1
     o.first_server = 0
+    o.client_max = 50
     run_experiment("tcp_server_rpc_tput", range(1, options.num_nodes), o)
 
     # TCP server throughput (single server, many clients, large messages)
     o.workload = "500000"
-    o.client_max = 1
+    o.client_max = 5
     run_experiment("tcp_server_tput", range(1, options.num_nodes), o)
 
     log("Stopping nodes")
@@ -138,53 +151,69 @@ scan_log(options.log_dir + "/node-0.log", "node-0", experiments)
 node = experiments["homa_latency"]["node-0"]
 if len(node["client_latency"]) == 0:
     raise Error("No Homa client latencies found")
-print("Homa RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+log("Homa RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+
+node = experiments["homa_1msg_tput"]["node-0"]
+if len(node["client_mbps"]) == 0:
+    raise Error("No Homa client throughput found")
+mbps = []
+for m in node["client_mbps"]:
+    mbps.append(2*m)
+log("Homa single message throughput (Mbps): %s" % (avg(mbps, "%.1f")))
 
 node = experiments["homa_client_rpc_tput"]["node-0"]
 if len(node["client_kops"]) == 0:
     raise Error("No Homa client RPC throughputs found")
-print("Homa client RPC throughput (Kops/sec): %s"
+log("Homa client RPC throughput (Kops/sec): %s"
         % (avg(node["client_kops"], "%.2f")))
 
 node = experiments["homa_server_rpc_tput"]["node-0"]
 if len(node["server_kops"]) == 0:
     raise Error("No Homa server RPC throughputs found")
-print("Homa server RPC throughput (Kops/sec): %s"
+log("Homa server RPC throughput (Kops/sec): %s"
         % (avg(node["server_kops"], "%.2f")))
 
 node = experiments["homa_client_tput"]["node-0"]
 if len(node["client_mbps"]) == 0:
     raise Error("No Homa client throughputs found")
-print("Homa client throughput (Mbps): %s"
+log("Homa client throughput (Mbps): %s"
         % (avg(node["client_mbps"], "%.1f")))
 
 node = experiments["homa_server_tput"]["node-0"]
 if len(node["server_mbps"]) == 0:
     raise Error("No Homa server throughputs found")
-print("Homa server throughput (Mbps): %s"
+log("Homa server throughput (Mbps): %s"
         % (avg(node["server_mbps"], "%.1f")))
 
 node = experiments["tcp_latency"]["node-0"]
 if len(node["client_latency"]) == 0:
     raise Error("No TCP client latencies found")
-print("\nTCP RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+log("\nTCP RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+
+node = experiments["tcp_1msg_tput"]["node-0"]
+if len(node["client_mbps"]) == 0:
+    raise Error("No TCP client throughput found")
+mbps = []
+for m in node["client_mbps"]:
+    mbps.append(2*m)
+log("TCP single message throughput (Mbps): %s" % (avg(mbps, "%.1f")))
 
 node = experiments["tcp_client_rpc_tput"]["node-0"]
 if len(node["client_kops"]) == 0:
     raise Error("No TCP client RPC throughputs found")
-print("TCP client RPC throughput (Kops/sec): %s" % (avg(node["client_kops"], "%.2f")))
+log("TCP client RPC throughput (Kops/sec): %s" % (avg(node["client_kops"], "%.2f")))
 
 node = experiments["tcp_server_rpc_tput"]["node-0"]
 if len(node["server_kops"]) == 0:
     raise Error("No TCP server RPC throughputs found")
-print("TCP server RPC throughput (Kops/sec): %s" % (avg(node["server_kops"], "%.2f")))
+log("TCP server RPC throughput (Kops/sec): %s" % (avg(node["server_kops"], "%.2f")))
 
 node = experiments["tcp_client_tput"]["node-0"]
 if len(node["client_mbps"]) == 0:
     raise Error("No TCP client throughputs found")
-print("TCP client throughput (Mbps): %s" % (avg(node["client_mbps"], "%.1f")))
+log("TCP client throughput (Mbps): %s" % (avg(node["client_mbps"], "%.1f")))
 
 node = experiments["tcp_server_tput"]["node-0"]
 if len(node["server_mbps"]) == 0:
     raise Error("No TCP server throughputs found")
-print("TCP server throughput (Mbps): %s" % (avg(node["server_mbps"], "%.1f")))
+log("TCP server throughput (Mbps): %s" % (avg(node["server_mbps"], "%.1f")))

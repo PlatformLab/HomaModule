@@ -70,10 +70,6 @@ if not options.plot_only:
                         range(0, options.num_nodes))
                 run_experiment("homa_%s_%dprios" % (workload, prios), clients,
                         options)
-
-            options.protocol = "tcp"
-            start_servers(servers, options)
-            run_experiment("tcp_%s" % (workload), clients, options)
     except Exception as e:
         log(traceback.format_exc())
                    
@@ -90,20 +86,19 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload, priorities[-1]))
-    plot_slowdown("tcp_" + workload, "p99", "TCP P99", color=tcp_color)
-    plot_slowdown("tcp_" + workload, "p50", "TCP P50", color=tcp_color2)
+    ax = start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload,
+            priorities[-1]))
     colors = ['#985416', '#ff7f0e', '#d62728', '#9467bd', homa_color]
     for prios in priorities:
         if prios == 1:
-            label = "Homa 1 prio"
+            label = "1 prio"
         else:
-            label = "Homa %d prios" % prios
-        plot_slowdown("homa_%s_%dprios" % (workload,prios), "p99", label,
+            label = "%d prios" % prios
+        plot_slowdown(ax, "homa_%s_%dprios" % (workload,prios), "p99", label,
                 color=colors.pop(0))
     if workload == "w5":
-        plt.legend(loc="upper right", prop={'size': 9})
+        ax.legend(loc="upper right", prop={'size': 9})
     else:
-        plt.legend(loc="upper left", prop={'size': 9})
+        ax.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/prios_%s.pdf" % (options.log_dir, workload))

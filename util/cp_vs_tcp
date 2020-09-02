@@ -34,11 +34,11 @@ parser = get_parser(description=
             "workload":             ""
         })
 parser.add_argument('--tcp', dest='tcp', type=boolean,
-        default=True, help="Boolean value indicates whether measurements "
-                "should be run on TCP")
+        default=True, help="Boolean value: indicates whether measurements "
+                "should be run on TCP (default: true)")
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
-        default=False, help="Boolean value indicates whether measurements "
-                "should be run on DCTCP")
+        default=False, help="Boolean value:: indicates whether measurements "
+                "should be run on DCTCP (default: false)")
 options = parser.parse_args()
 init(options)
 servers = range(0, options.num_nodes)
@@ -82,9 +82,9 @@ if not options.plot_only:
                 run_experiment(tcp_exp, clients, options)
 
             if options.dctcp:
-                do_ssh(["sudo", "sysctl",
-                        ".net.ipv4.tcp_congestion_control=dctcp"],
-                        range(0, options.num_nodes))
+                options.protocol = "tcp"
+                set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                        "dctcp", range(0, options.num_nodes))
                 start_servers(servers, options)
                 run_experiment(dctcp_exp, clients, options)
         except Exception as e:
@@ -111,16 +111,16 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 1000, homa_exp)
+    ax = start_slowdown_plot(title, 1000, homa_exp)
     if options.tcp:
-        plot_slowdown(tcp_exp, "p99", "TCP P99", color=tcp_color)
-        plot_slowdown(tcp_exp, "p50", "TCP P50", color=tcp_color2)
+        plot_slowdown(ax, tcp_exp, "p99", "TCP P99", color=tcp_color)
+        plot_slowdown(ax, tcp_exp, "p50", "TCP P50", color=tcp_color2)
     if options.dctcp:
-        plot_slowdown(dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
-        plot_slowdown(dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
-    plot_slowdown(homa_exp, "p99", "Homa P99", color=homa_color)
-    plot_slowdown(homa_exp, "p50", "Homa P50", color=homa_color2)
-    plt.legend(loc="upper right", prop={'size': 9})
+        plot_slowdown(ax, dctcp_exp, "p99", "DCTCP P99", color=dctcp_color)
+        plot_slowdown(ax, dctcp_exp, "p50", "DCTCP P50", color=dctcp_color2)
+    plot_slowdown(ax, homa_exp, "p99", "Homa P99", color=homa_color)
+    plot_slowdown(ax, homa_exp, "p50", "Homa P50", color=homa_color2)
+    ax.legend(loc="upper right", prop={'size': 9})
     plt.tight_layout()
     plt.savefig("%s/reports/vs_tcp_%s.pdf" % (options.log_dir, workload))
 

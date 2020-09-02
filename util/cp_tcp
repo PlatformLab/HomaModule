@@ -80,9 +80,9 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
             options.num_nodes, bw)
-    start_slowdown_plot(title, 1000, tcp_exp)
-    plot_slowdown(tcp_exp, "p99", "TCP P99")
-    plot_slowdown(tcp_exp, "p50", "TCP P50")
-    plt.legend()
+    ax = start_slowdown_plot(title, 1000, tcp_exp)
+    plot_slowdown(ax, tcp_exp, "p99", "TCP P99")
+    plot_slowdown(ax, tcp_exp, "p50", "TCP P50")
+    ax.legend()
     plt.tight_layout()
     plt.savefig("%s/reports/tcp_%s.pdf" % (options.log_dir, workload))

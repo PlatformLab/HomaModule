@@ -66,6 +66,7 @@ default_defaults = {
     'client_max':          2000,
     'client_ports':        5,
     'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
+    'mtu':                 0,
     'no_trunc':            '',
     'protocol':            'homa',
     'port_receivers':      3,
@@ -119,8 +120,10 @@ tcp_color2 =     '#5BD15B'
 tcp_color3 =     '#96E296'
 homa_color =     '#1759BB'
 homa_color2 =    '#4287EC'
-dctcp_color =    '#985416'
-dctcp_color2 =   '#E59247'
+homa_color3 =    '#96BCF4'
+dctcp_color =    '#7A4412'
+dctcp_color2 =   '#CB701D'
+dctcp_color3 =   '#EAA668'
 unloaded_color = '#d62728'
 
 # Default bandwidths to use when running all of the workloads.
@@ -199,6 +202,9 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['client_ports'],
             help='Number of ports on which each client should issue requests '
             '(default: %d)' % (defaults['client_ports']))
+    parser.add_argument('--cperf-log', dest='cperf_log',
+            metavar='F', default='cperf.log',
+            help='Name to use for the cperf log file (default: cperf.log)')
     parser.add_argument('-d', '--debug', dest='debug', action='store_true',
             help='Pause after starting servers to enable debugging setup')
     parser.add_argument('-h', '--help', action='help',
@@ -206,6 +212,10 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('-l', '--log-dir', dest='log_dir',
             metavar='D', default=defaults['log_dir'],
             help='Directory to use for logs and metrics')
+    parser.add_argument('--mtu', type=int, dest='mtu',
+            required=False, metavar='M', default=defaults['mtu'],
+            help='Maximum allowable packet size (0 means use existing, '
+            'default: %d)' % (defaults['mtu']))
     parser.add_argument('-n', '--nodes', type=int, dest='num_nodes',
             required=True, metavar='N',
             help='Total number of nodes to use in the cluster')
@@ -281,7 +291,7 @@ def init(options):
             shutil.rmtree(log_dir)
         os.makedirs(log_dir)
         os.makedirs(log_dir + "/reports")
-    log_file = open("%s/reports/cperf.log" % log_dir, "a")
+    log_file = open("%s/reports/%s" % (log_dir, options.cperf_log), "a")
     verbose = options.verbose
     vlog("cperf starting at %s" % (date_time))
     s = ""
@@ -291,6 +301,9 @@ def init(options):
             s += ", "
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
+    if options.mtu != 0:
+        log("Setting MTU to %d" % (options.mtu))
+        do_ssh(["set_mtu", str(options.mtu)], range(0, options.num_nodes))
 
 def wait_output(string, nodes, cmd, time_limit=10.0):
     """
@@ -576,7 +589,7 @@ def run_experiment(name, clients, options):
             log("Broken pipe to node-%d" % (id))
         nodes.append(id)
         vlog("Command for node-%d: %s" % (id, command))
-    wait_output("% ", nodes, command, 30.0)
+    wait_output("% ", nodes, command, 40.0)
     if not "unloaded" in options:
         if options.protocol == "homa":
             # Wait a bit so that homa_prio can set priorities appropriately
@@ -589,7 +602,7 @@ def run_experiment(name, clients, options):
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
         time.sleep(2)
-        do_cmd("debug 5000000 7000000", clients);
+        # do_cmd("debug 5000000 7000000", clients);
         time.sleep(options.seconds - 2)
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
@@ -969,26 +982,31 @@ def get_digest(experiment):
     digests[experiment] = digest
     return digest
 
-def start_slowdown_plot(title, max_y, x_experiment):
+def start_slowdown_plot(title, max_y, x_experiment, size=10,
+        show_top_label=True, show_bot_label=True, figsize=[6,4]):
     """
-    Create a pyplot graph that will be used for slowdown data.
+    Create a pyplot graph that will be used for slowdown data. Returns the
+    Axes object for the plot.
 
-    title:         Title for the plot; may be empty
-    max_y:         Maximum y-coordinate
-    x_experiment:  Name of experiment whose rtt distribution will be used to
-                   label the x-axis of the plot. None means don't label the
-                   x-axis.
+    title:           Title for the plot; may be empty
+    max_y:           Maximum y-coordinate
+    x_experiment:    Name of experiment whose rtt distribution will be used to
+                     label the x-axis of the plot. None means don't label the
+                     x-axis (caller will presumably invoke cdf_xaxis to do it).
+    size:            Size to use for fonts
+    show_top_label:  True means display title text for upper x-axis
+    show_bot_label:  True means display title text for lower x-axis
+    figsize:         Dimensions of plot
     """
 
-    plt.figure(figsize=[6, 4])
+    fig = plt.figure(figsize=figsize)
+    ax = fig.add_subplot(111)
     if title != "":
-        plt.title(title)
-    plt.rcParams.update({'font.size': 10})
-    plt.axis()
-    plt.xlim(0, 1.0)
-    plt.yscale("log")
-    plt.ylim(1, max_y)
-    plt.tick_params(right=True, which="both")
+        ax.set_title(title, size=size)
+    ax.set_xlim(0, 1.0)
+    ax.set_yscale("log")
+    ax.set_ylim(1, max_y)
+    ax.tick_params(right=True, which="both", direction="in")
     ticks = []
     labels = []
     y = 1
@@ -996,12 +1014,28 @@ def start_slowdown_plot(title, max_y, x_experiment):
         ticks.append(y);
         labels.append("%d" % (y))
         y = y*10
-    plt.yticks(ticks, labels)
-    plt.xlabel("Message Length")
-    plt.ylabel("Slowdown")
-    plt.grid(which="major", axis="y")
+    ax.set_yticks(ticks)
+    ax.set_yticklabels(labels, size=size)
+    if show_bot_label:
+        ax.set_xlabel("Message Length", size=size)
+    ax.set_ylabel("Slowdown", size=size)
+    ax.grid(which="major", axis="y")
 
-    if x_experiment != None:
+    top_axis = ax.twiny()
+    top_axis.tick_params(axis="x", direction="in")
+    top_axis.set_xlim(0, 1.0)
+    top_ticks = []
+    top_labels = []
+    for x in range(0, 11, 2):
+        top_ticks.append(x/10.0)
+        top_labels.append("%d%%" % (x*10))
+    top_axis.set_xticks(top_ticks)
+    top_axis.set_xticklabels(top_labels, size=size)
+    if show_top_label:
+        top_axis.set_xlabel("Cumulative % of Messages", size=size)
+    top_axis.xaxis.set_label_position('top')
+
+    if x_experiment != None: 
         # Generate x-axis labels
         ticks = []
         labels = []
@@ -1025,16 +1059,20 @@ def start_slowdown_plot(title, max_y, x_experiment):
                     labels.append("%.1fM" % (length/1000000))
                 tick += 1
                 target_count = (total*tick)/10
-        plt.xticks(ticks, labels)
+        ax.set_xticks(ticks)
+        ax.set_xticklabels(labels, size=size)
+    return ax
 
-def cdf_xaxis(x_values, counts, num_ticks):
+def cdf_xaxis(ax, x_values, counts, num_ticks, size=10):
     """
-    Generate lables for an x-axis that is scaled nonlinearly to reflect
+    Generate labels for an x-axis that is scaled nonlinearly to reflect
     a particular distribution of samples.
     
-    x:        list of x-values
-    counts:   list giving the number of samples for each point in x
-    ticks:    total number of ticks go generate (including axis ends)
+    ax:       matplotlib Axes object for the plot
+    x:        List of x-values
+    counts:   List giving the number of samples for each point in x
+    ticks:    Total number of ticks go generate (including axis ends)
+    size:     Font size to use for axis labels
     """
 
     ticks = []
@@ -1057,10 +1095,11 @@ def cdf_xaxis(x_values, counts, num_ticks):
                 labels.append("%.1fM" % (x/1000000))
             tick += 1
             target_count = (total*tick)/(num_ticks-1)
-    plt.xticks(ticks, labels)
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(labels, size=size)
         
 
-def make_histogram(x, y):
+def make_histogram(x, y, init=None, after=True):
     """
     Given x and y coordinates, return new lists of coordinates that describe
     a histogram (transform (x1,y1) and (x2,y2) into (x1,y1), (x2,y1), (x2,y2)
@@ -1068,23 +1107,36 @@ def make_histogram(x, y):
 
     x:        List of x-coordinates
     y:        List of y-coordinates corresponding to x
+    init:     An optional initial point (x and y coords) which will be
+              plotted before x and y
+    after:    True means the horizontal line corresponding to each
+              point occurs to the right of that point; False means to the
+              left
     Returns:  A list containing two lists, one with new x values and one
               with new y values.
     """
     x_new = []
     y_new = []
+    if init:
+        x_new.append(init[0]);
+        y_new.append(init[1]);
     for i in range(len(x)):
-        if len(x_new) != 0:
-            x_new.append(x[i])
-            y_new.append(y[i-1])
+        if i != 0:
+            if after:
+                x_new.append(x[i])
+                y_new.append(y[i-1])
+            else:
+                x_new.append(x[i-1])
+                y_new.append(y[i])
         x_new.append(x[i])
         y_new.append(y[i])
     return [x_new, y_new]
 
-def plot_slowdown(experiment, percentile, label, **kwargs):
+def plot_slowdown(ax, experiment, percentile, label, **kwargs):
     """
-    Add a slowdown histogram to the current graph.
+    Add a slowdown histogram to a plot.
 
+    ax:            matplotlib Axes object: info will be plotted here.
     experiment:    Name of the experiment whose data should be graphed.
     percentile:    While percentile of slowdown to graph: must be "p50", "p99",
                    or "p999"
@@ -1094,17 +1146,21 @@ def plot_slowdown(experiment, percentile, label, **kwargs):
 
     digest = get_digest(experiment)
     if percentile == "p50":
-        x, y = make_histogram(digest["cum_frac"], digest["slow_50"])
+        x, y = make_histogram(digest["cum_frac"], digest["slow_50"],
+                init=[0, digest["slow_50"][0]], after=False)
     elif percentile == "p99":
-        x, y = make_histogram(digest["cum_frac"], digest["slow_99"])
+        x, y = make_histogram(digest["cum_frac"], digest["slow_99"],
+                init=[0, digest["slow_99"][0]], after=False)
     elif percentile == "p999":
-        x, y = make_histogram(digest["cum_frac"], digest["slow_999"])
+        x, y = make_histogram(digest["cum_frac"], digest["slow_999"],
+                init=[0, digest["slow_999"][0]], after=False)
     else:
         raise Exception("Bad percentile selector %s; must be p50, p99, or p999"
                 % (percentile))
-    plt.plot(x, y, label=label, **kwargs)
+    ax.plot(x, y, label=label, **kwargs)
 
-def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
+def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
+        figsize=[5, 4], size=10):
     """
     Create a pyplot graph that will be display a complementary CDF with
     log axes.
@@ -1116,11 +1172,12 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
                  the largest value for y)
     x_label:     Label for the x axis (empty means no label)
     y_label:     Label for the y axis (empty means no label)
+    figsize:     Dimensions of plot
+    size:        Size to use for fonts
     """
-    plt.figure(figsize=[5, 4])
+    plt.figure(figsize=figsize)
     if title != "":
-        plt.title(title)
-    plt.rcParams.update({'font.size': 10})
+        plt.title(title, size=size)
     plt.axis()
     plt.xscale("log")
 
@@ -1130,15 +1187,15 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label):
     exp = math.ceil(math.log(max_x, 10))
     max_x = 10**exp
     plt.xlim(min_x, max_x)
-    plt.tick_params(top=True, which="both")
+    plt.tick_params(top=True, which="both", direction="in", labelsize=size)
 
     plt.yscale("log")
     plt.ylim(min_y, 1.0)
     # plt.yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
     if x_label:
-        plt.xlabel(x_label)
+        plt.xlabel(x_label, size=size)
     if y_label:
-        plt.ylabel(y_label)
+        plt.ylabel(y_label, size=size)
     plt.grid(which="major", axis="y")
     plt.grid(which="major", axis="x")
 
@@ -1183,7 +1240,7 @@ def get_short_cdf(experiment):
     f.write("# Data collected at %s \n" % (date_time))
     f.write("#       usec        frac\n")
 
-    # Reduce the volumne of data by waiting to add new points until there
+    # Reduce the volume of data by waiting to add new points until there
     # has been a significant change in either coordinate. "prev" variables hold
     # the last point actually graphed.
     prevx = 0
