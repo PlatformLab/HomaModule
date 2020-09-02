@@ -16,10 +16,7 @@ if [ $# -eq 1 ]; then
 else
     homa=~/homaModule/homa.ko
 fi
-vlan=vlan287
 
-sudo ip link set ens1f1 mtu 3000
-sudo ip link set $vlan mtu 3000
 sudo rmmod homa
 sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
