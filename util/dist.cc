@@ -194,6 +194,84 @@ std::vector<dist_point> dist_get(const char *dist, int max_length,
 	return result;
 }
 
+/**
+ * dist_msg_overhead() - Returns the total number of overhead bytes
+ * sent on the wire for a Homa message of a given size. The overhead
+ * includes packet headers, preambles, interpacket gaps, and control
+ * packets (such as grants) that are required in the normal case.
+ * @length:   Number of bytes in the message payload.
+ * @mtu:      Maximum size of an Ethernet payload.
+ * 
+ * Return:    Total overhead bytes for a message of the given length. 
+ */
+int dist_msg_overhead(int length, int mtu)
+{
+	int packet_data, packets, grants, common;
+	
+	/* Sizes of various sources of overhead. */
+	int preamble = 8;
+	int ether = 18;
+	int ip = 20;
+	int homa_data = 48;
+	int crc_gap = 16;
+	int homa_grant = 33;
+	int unsched = 70000;
+	int grant_increment = 10000;
+	
+	packet_data = mtu - (ip + homa_data);
+	packets = (length + packet_data - 1)/packet_data;
+	if (length <= unsched)
+		grants = 0;
+	else
+		grants = (length - unsched + grant_increment - 1)
+				/grant_increment;
+	common = preamble + ether + ip + crc_gap;
+	return packets*(common + homa_data) + grants*(common + homa_grant);
+}
+
+/**
+ * dist_overhead() - Returns the average number of overhead bytes sent
+ * on the wire (everything that consumes link bandwidth except actual
+ * message bytes, including packet headers, preambles, interpacket gaps,
+ * etc.) per byte of actual message data.
+ * @dist:        Name of the desired distribution, using the same syntax
+ *               as for dist_sample.
+ * @mtu:         Maximum size of an Ethernet payload.
+ * @max_length:  Assume that any lengths longer than this value will
+ *               be truncated to this. 0 means no truncation.
+ */
+double dist_overhead(const char *dist, int mtu, int max_length)
+{
+	dist_point *points;
+	double overhead, prev_fraction;
+	int length;
+
+	points = dist_lookup(dist, &length);
+	if (length != 0) {
+		return static_cast<double>(dist_msg_overhead(length, mtu))
+				/ static_cast<double>(length);
+	}
+	if (!points)
+		return 0.0;
+	
+	overhead = 0.0;
+	prev_fraction = 0.0;
+	if (max_length == 0)
+		max_length = std::numeric_limits<int>::max();
+	for (dist_point *p = points; ; p++) {
+		int length = p->length;
+		if (length > max_length)
+			length = max_length;
+		overhead += static_cast<double>(dist_msg_overhead(length, mtu))
+				* (p->fraction - prev_fraction)
+				/ static_cast<double>(length);
+		prev_fraction = p->fraction;
+		if (p->fraction >= 1.0)
+			break;
+	}
+	return overhead;
+}
+
 /*
  * The following arrays store CDFs for Workloads 1-5 from the Homa
  * SIGCOMM paper.

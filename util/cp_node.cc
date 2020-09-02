@@ -1289,6 +1289,8 @@ void tcp_server::read(int fd)
 		if ((header->freeze) && !time_trace::frozen) {
 			tt("Freezing timetrace because of request on "
 					"cid 0x%08x", header->cid);
+			log(NORMAL, "Freezing timetrace because of request on "
+					"cid 0x%08x", int(header->cid));
 			time_trace::freeze();
 			kfreeze();
 		}
@@ -2293,6 +2295,9 @@ void tcp_client::read(tcp_connection *connection)
 			tt("Freezing timetrace because of long RTT for "
 					"cid 0x%08x, id %u",
 					header->cid, header->msg_id);
+			log(NORMAL, "Freezing timetrace because of long RTT for "
+					"cid 0x%08x, id %u",
+					int(header->cid), header->msg_id);
 			time_trace::freeze();
 			kfreeze();
 		}
@@ -2644,6 +2649,36 @@ int dump_times_cmd(std::vector<string> &words)
 }
 
 /**
+ * info_cmd() - Parse the arguments for an "info" command and execute it.
+ * @words:  Command arguments (including the command name as @words[0]).
+ * 
+ * Return:  Nonzero means success, zero means there was an error.
+ */
+int info_cmd(std::vector<string> &words)
+{
+	const char *workload;
+	char *end;
+	int mtu;
+	
+	if (words.size() != 3) {
+		printf("Usage: info workload mtu\n");
+		return 0;
+	}
+	workload = words[1].c_str();
+	mtu = strtol(words[2].c_str(), &end, 0);
+	if (*end != 0) {
+		printf("Bad value '%s' for mtu; must be integer\n",
+				words[2].c_str());
+		return 0;
+	}
+	printf("Workload %s: mean %.1f bytes, overhead %.3f\n",
+			workload,
+			dist_mean(workload, HOMA_MAX_MESSAGE_LENGTH),
+			dist_overhead(workload, mtu, HOMA_MAX_MESSAGE_LENGTH));
+	return 1;
+}
+
+/**
  * log_cmd() - Parse the arguments for a "log" command and execute it.
  * @words:  Command arguments (including the command name as @words[0]).
  * 
@@ -2890,6 +2925,8 @@ int exec_words(std::vector<string> &words)
 		return debug_cmd(words);
 	} else if (words[0].compare("dump_times") == 0) {
 		return dump_times_cmd(words);
+	} else if (words[0].compare("info") == 0) {
+		return info_cmd(words);
 	} else if (words[0].compare("log") == 0) {
 		return log_cmd(words);
 	} else if (words[0].compare("exit") == 0) {

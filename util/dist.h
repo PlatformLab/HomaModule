@@ -46,6 +46,8 @@ extern std::vector<dist_point>
                 dist_get(const char *dist, int max_length,
 			double min_bucket_frac);
 extern double   dist_mean(const char *dist, int max_length);
+extern int      dist_msg_overhead(int length, int mtu);
+extern double   dist_overhead(const char *dist, int mtu, int max_length);
 extern int      dist_sample(const char *dist, std::mt19937 *rand_gen,
 			int num_samples, std::vector<int> *sizes);
 
