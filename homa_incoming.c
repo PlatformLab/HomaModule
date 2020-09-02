@@ -514,8 +514,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	if (!rpc->is_client) {
 		/* We are the server for this RPC. */
 		if (rpc->state != RPC_OUTGOING) {
-			tt_record1("sending BUSY from resend, state %d",
-					rpc->state);
+			tt_record2("sending BUSY from resend, id %d, state %d",
+					rpc->id, rpc->state);
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 			goto done;
 		}
@@ -1150,8 +1150,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			goto done;
 		}
 		
-		tt_record3("Preparing to poll, socket %d, flags 0x%x, pid %d",
-				hsk->client_port, flags, current->pid);
+//		tt_record3("Preparing to poll, socket %d, flags 0x%x, pid %d",
+//				hsk->client_port, flags, current->pid);
 		
 	        /* There is no ready RPC so far. Clean up dead RPCs before
 		 * going to sleep (do at least a little cleanup even in

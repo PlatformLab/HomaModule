@@ -431,12 +431,12 @@ int homa_rpc_reap(struct homa_sock *hsk)
 			INC_METRIC(disabled_rpc_reaps, 1);
 			continue;
 		}
-		if (rpc->msgout.packets)
-			tt_record2("Reaping rpc msgout, id %d, peer 0x%x",
-					rpc->id, ntohl(rpc->peer->addr));
-		else
-			tt_record2("Reaping rpc msgin, id %d, peer 0x%x",
-					rpc->id, ntohl(rpc->peer->addr));
+//		if (rpc->msgout.packets)
+//			tt_record2("Reaping rpc msgout, id %d, peer 0x%x",
+//					rpc->id, ntohl(rpc->peer->addr));
+//		else
+//			tt_record2("Reaping rpc msgin, id %d, peer 0x%x",
+//					rpc->id, ntohl(rpc->peer->addr));
 		rpc->magic = 0;
 		if (rpc->msgout.length >= 0) {
 			while (rpc->msgout.packets) {
@@ -477,7 +477,7 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	 * lock while doing this.
 	 */
 release:
-	tt_record2("reaping %d skbs, %d rpcs", num_skbs, num_rpcs);
+//	tt_record2("reaping %d skbs, %d rpcs", num_skbs, num_rpcs);
         
 	hsk->dead_skbs -= num_skbs;
 	result = !list_empty(&hsk->dead_rpcs) && ((num_skbs + num_rpcs) != 0);
