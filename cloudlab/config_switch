@@ -1,0 +1,74 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This program outputs the commands needed to configure a CloudLab switch
+# for Homa, or to reset it.
+# Usage:
+# config_switch [reset]
+#
+# Commands will be printed on stdout.
+
+import sys
+
+# Ports to configure
+ports = range(1, 41)
+
+def config():
+    # First, must enter "configure" mode
+    print("enable")
+    print("configure terminal")
+
+    for port in ports:
+        # Configure priorities for Homa.
+        print("interface ethernet 1/%d qos trust both" % (port))
+        for tc in range(8):
+            print("interface ethernet 1/%d traffic-class %d dcb ets strict" %
+                    (port, tc))
+
+        # Enable large packets
+        print("interface ethernet 1/%d mtu 9216 force" % (port))
+
+        # Set DCTCP marking thresholds:
+        print("interface ethernet 1/%d traffic-class 0 congestion-control ecn "
+                "minimum-absolute 70 maximum-absolute 70" % (port))
+        print("interface ethernet 1/%d traffic-class 1 congestion-control ecn "
+                "minimum-absolute 70 maximum-absolute 70" % (port))
+
+def reset():
+    # First, must enter "configure" mode
+    print("enable")
+    print("configure terminal")
+
+    for port in ports:
+        # Restore QOS priorities.
+        print("interface ethernet 1/%d no qos trust" % (port))
+        for tc in range(8):
+            print("interface ethernet 1/%d traffic-class %d no dcb ets" %
+                    (port, tc))
+
+        # Disable large packets
+        print("interface ethernet 1/%d mtu 1500 force" % (port))
+
+        # Reset DCTCP marking thresholds:
+        print("interface ethernet 1/%d no traffic-class 0 congestion-control"
+                % (port))
+        print("interface ethernet 1/%d no traffic-class 1 congestion-control"
+                % (port))
+
+if (len(sys.argv) == 2) and (sys.argv[1] == "reset"):
+    reset()
+else:
+    config()
