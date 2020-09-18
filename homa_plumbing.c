@@ -338,11 +338,15 @@ static int __init homa_load(void) {
 	
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
-			"grant_header %u, peer %u, ip_hdr %u\n",
+			"grant_header %u, peer %u, ip_hdr %u, flowi %u "
+			"tcp_sock %u homa_rpc %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),
-			sizeof32(struct iphdr));
+			sizeof32(struct iphdr),
+			sizeof32(struct flowi),
+			sizeof32(struct tcp_sock),
+			sizeof32(struct homa_rpc));
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed in homa_init: %d\n",
