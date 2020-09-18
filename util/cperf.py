@@ -22,6 +22,7 @@ import copy
 import datetime
 import glob
 import math
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -1006,7 +1007,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.set_xlim(0, 1.0)
     ax.set_yscale("log")
     ax.set_ylim(1, max_y)
-    ax.tick_params(right=True, which="both", direction="in")
+    ax.tick_params(right=True, which="both", direction="in", length=5)
     ticks = []
     labels = []
     y = 1
@@ -1022,7 +1023,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.grid(which="major", axis="y")
 
     top_axis = ax.twiny()
-    top_axis.tick_params(axis="x", direction="in")
+    top_axis.tick_params(axis="x", direction="in", length=5)
     top_axis.set_xlim(0, 1.0)
     top_ticks = []
     top_labels = []
@@ -1187,7 +1188,8 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     exp = math.ceil(math.log(max_x, 10))
     max_x = 10**exp
     plt.xlim(min_x, max_x)
-    plt.tick_params(top=True, which="both", direction="in", labelsize=size)
+    plt.tick_params(top=True, which="both", direction="in", labelsize=size,
+            length=5)
 
     plt.yscale("log")
     plt.ylim(min_y, 1.0)
@@ -1198,6 +1200,14 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
         plt.ylabel(y_label, size=size)
     plt.grid(which="major", axis="y")
     plt.grid(which="major", axis="x")
+    plt.plot([min_x, max_x*1.2], [0.5, 0.5], linestyle= (0, (5, 3)),
+            color="red", clip_on=False)
+    plt.text(max_x*1.3, 0.5, "P50", fontsize=16, horizontalalignment="left",
+            verticalalignment="center", color="red", size=size)
+    plt.plot([min_x, max_x*1.2], [0.01, 0.01], linestyle= (0, (5, 3)),
+            color="red", clip_on=False)
+    plt.text(max_x*1.3, 0.01, "P99", fontsize=16, horizontalalignment="left",
+            verticalalignment="center", color="red", size=size)
 
 def get_short_cdf(experiment):
     """
