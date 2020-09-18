@@ -477,8 +477,6 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	 * lock while doing this.
 	 */
 release:
-//	tt_record2("reaping %d skbs, %d rpcs", num_skbs, num_rpcs);
-        
 	hsk->dead_skbs -= num_skbs;
 	result = !list_empty(&hsk->dead_rpcs) && ((num_skbs + num_rpcs) != 0);
 	homa_sock_unlock(hsk);
@@ -496,6 +494,7 @@ release:
 		rpcs[i]->state = 0;
 		kfree(rpcs[i]);
 	}
+	tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
 	return result;
 }
 
