@@ -88,8 +88,8 @@ void homa_server(int port)
 		int result;
 		
 		length = homa_recv(fd, message, sizeof(message),
-			HOMA_RECV_REQUEST, &id, (struct sockaddr *) &source,
-			sizeof(source));
+			HOMA_RECV_REQUEST, (struct sockaddr *) &source,
+			sizeof(source), &id);
 		if (length < 0) {
 			printf("homa_recv failed: %s\n", strerror(errno));
 			continue;

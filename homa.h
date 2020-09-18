@@ -65,7 +65,8 @@ extern int     homa_send(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			uint64_t *id);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
-			uint64_t *id, struct sockaddr *src_addr, size_t addrlen);
+			struct sockaddr *src_addr, size_t addrlen,
+			uint64_t *id);
 extern ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
 			const struct sockaddr *dest_addr, size_t addrlen,
 			void *response, size_t resplen);

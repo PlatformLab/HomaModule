@@ -29,7 +29,6 @@ Notes for Homa implementation in Linux:
   * Try measuring performance without polling in Homa?
 
 * Things to do:
-  * Change rpc->id to rpc->seq, move seq to end of homa_recv parameter list?
   * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in

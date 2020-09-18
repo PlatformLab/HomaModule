@@ -30,23 +30,23 @@
  * @len:        Number of bytes available at @request.
  * @flags:      An ORed combination of bits such as HOMA_RECV_REQUEST and
  *              HOMA_RECV_NONBLOCKING
+ * @src_addr:   The sender's IP address will be returned here. If NULL, no
+ *              address information is returned.
+ * @addrlen:    Space available at @src_addr, in bytes.
  * @id:         Points to a unique RPC identifier, which is used both as
  *              an input and an output parameter. If the value is initially
  *              nonzero and the HOMA_RECV_RESPONSE flag is set, then a
  *              response will not be returned unless it matches this id.
  *              This word is also used to return the id for the incoming
  *              message, whether request or response.
- * @src_addr:   The sender's IP address will be returned here. If NULL, no
- *              address information is returned.
- * @addrlen:    Space available at @src_addr, in bytes.
  * 
  * Return:      The total size of the incoming message. This may be larger
  *              than len, in which case the last bytes of the incoming message
  *              were discarded. If an error occurred, -1 is returned and
  *              errno is set appropriately. 
  */
-ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags, uint64_t *id,
-	        struct sockaddr *src_addr, size_t addrlen)
+ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
+	        struct sockaddr *src_addr, size_t addrlen, uint64_t *id)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
