@@ -7,6 +7,12 @@ Notes for Homa implementation in Linux:
   * Return UNKNOWN in homa_softirq if socket isn't known.
 
 * Performance-related tasks:
+  * See if turning off c-states allows shorter polling intervals?
+  * Are Meltdown mitigations really disabled?
+  * Add metric for forced reaps because of too many messages.
+  * Consider a permanent reduction in rtt_bytes.
+  * Consider reducing throttle_min_bytes to see if it helps region 1
+    in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
   * Implement new benchmark that segregates clients and servers on
     different machines
@@ -20,24 +26,11 @@ Notes for Homa implementation in Linux:
     >1 request per kernel call?
   * Analyze W5 performance with unlimited Homa message size (why is P99 bad
     for small messages?)
-  * Measurements to take with 40-node cluster:
-    * Be sure to retune server and client port allocations
-    * Try 10, 20, and 40 nodes
-    * cp_basic
-    * cp_vs_tcp
-    * cp_load
-    * cp_mtu
-    * cp_prios
-    * DCTCP
-    * Try measurements with c-states disabled
-    * Turn off RPS?
-    * Turn off background threading for SoftIRQ?
-    * Single-server and single-client throughput
-    * Maximum sustainable load for each workload
+  * Try measuring performance without polling in Homa?
 
 * Things to do:
-  * More work related to GSO/GRO:
-    * Add new kernel call to combine send message & wait reply?
+  * Change rpc->id to rpc->seq, move seq to end of homa_recv parameter list?
+  * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
     struct proto and struct proto_ops.
