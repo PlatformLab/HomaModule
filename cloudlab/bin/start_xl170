@@ -3,6 +3,7 @@
 # Usage:
 # start_xl170 [mod_file]
 
+set -e
 rps=1
 limit_rss=0
 for arg in $@; do
@@ -17,7 +18,7 @@ else
     homa=~/homaModule/homa.ko
 fi
 
-sudo rmmod homa
+sudo rmmod homa || true
 sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
 sudo sysctl /net/homa/max_nic_queue_ns=2000
@@ -28,7 +29,7 @@ sudo sysctl /net/homa/num_priorities=8
 sudo sysctl /net/homa/poll_usecs=200
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
-sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1
+sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1 || true
 # sudo sysctl .net.core.netdev_budget=300
 # sudo sysctl .net.ipv4.tcp_congestion_control=cubic
 

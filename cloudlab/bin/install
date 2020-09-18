@@ -29,6 +29,7 @@
 
 root=~/homaModule
 
+set -e
 if [ $# -eq 2 ]; then
     first=$2
 elif [ $# -eq 1 ]; then
@@ -37,7 +38,7 @@ else
     echo "Usage: install num_nodes [first]"
     exit 1
 fi
-last=`expr $first + $1 - 1`
+last=`expr $first + $1 - 1` || true
 
 for ((i = $first ; i <= $last; i++)); do
     node=node-$i
