@@ -9,7 +9,6 @@ Notes for Homa implementation in Linux:
 * Performance-related tasks:
   * See if turning off c-states allows shorter polling intervals?
   * Are Meltdown mitigations really disabled?
-  * Add metric for forced reaps because of too many messages.
   * Consider a permanent reduction in rtt_bytes.
   * Consider reducing throttle_min_bytes to see if it helps region 1
     in the CDF?

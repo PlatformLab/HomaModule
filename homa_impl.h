@@ -1890,6 +1890,12 @@ struct homa_metrics {
 	__u64 reaper_dead_skbs;
 	
 	/**
+	 * @reap_too_many_dead: total number of times that homa_wait_for_message
+	 * invoked the reaper because dead_skbs was too high.
+	 */
+	__u64 reap_too_many_dead;
+	
+	/**
 	 * @throttle_list_adds: Total number of calls to homa_add_to_throttled.
 	 */
 	__u64 throttle_list_adds;

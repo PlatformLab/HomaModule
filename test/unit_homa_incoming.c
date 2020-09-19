@@ -1862,6 +1862,7 @@ TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)
 	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_RESPONSE, 44);
 	EXPECT_EQ(EINVAL, -PTR_ERR(rpc));
 	EXPECT_EQ(10, self->hsk.dead_skbs);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.reap_too_many_dead);
 }
 TEST_F(homa_incoming, homa_wait_for_message__rpc_from_register_interests)
 {

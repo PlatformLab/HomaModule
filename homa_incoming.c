@@ -1123,13 +1123,16 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	int error;
 	
 	homa_interest_init(&interest);
-	while (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
-		/* Way too many dead RPCs; must cleanup immediately. */
-		if (!homa_rpc_reap(hsk))
-			break;
+	if (hsk->dead_skbs > hsk->homa->max_dead_buffs) {
+		/* Too many dead RPCs; must cleanup immediately. */
+		INC_METRIC(reap_too_many_dead, 1);
+		do {
+			if (!homa_rpc_reap(hsk))
+				break;
 
-		/* Give NAPI and SoftIRQ tasks a chance to run. */
-		schedule();
+			/* Give NAPI and SoftIRQ tasks a chance to run. */
+			schedule();
+		} while (hsk->dead_skbs > hsk->homa->max_dead_buffs);
 	}
 	
 	/* Normally this loop only gets executed once, but we may have

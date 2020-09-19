@@ -1312,6 +1312,10 @@ char *homa_print_metrics(struct homa *homa)
 				"calls\n",
 				m->reaper_dead_skbs);
 		homa_append_metric(homa,
+				"reap_too_many_dead        %15llu  "
+				"Reaps forced by dead RPC buildup\n",
+				m->reap_too_many_dead);
+		homa_append_metric(homa,
 				"throttle_list_adds        %15llu  "
 				"Calls to homa_add_to_throttled\n",
 				m->throttle_list_adds);

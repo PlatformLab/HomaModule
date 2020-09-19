@@ -392,7 +392,8 @@ if elapsed_secs != 0:
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
             "client_peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "stale_generations", "generation_overflows"]:
+            "server_rpcs_unknown", "stale_generations", "generation_overflows",
+            "reap_too_many_dead"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
