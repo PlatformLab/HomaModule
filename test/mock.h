@@ -25,6 +25,7 @@ extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
+extern int         mock_max_grants;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;

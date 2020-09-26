@@ -35,6 +35,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	msgin->incoming = incoming;
 	if (msgin->incoming > msgin->total_length)
 		msgin->incoming = msgin->total_length;
+	msgin->extra_incoming = 0;
 	msgin->priority = 0;
 	msgin->scheduled = length > incoming;
 	msgin->possibly_in_grant_queue = msgin->scheduled;
@@ -393,17 +394,14 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				incoming);
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
-	} else {
-		if (incoming > rpc->msgin.incoming) {
-			if (incoming > rpc->msgin.total_length)
-				rpc->msgin.incoming = rpc->msgin.total_length;
-			else
-				rpc->msgin.incoming = incoming;
-		}
 	}
 	homa_add_packet(&rpc->msgin, skb);
-	if (rpc->msgin.scheduled)
+	if (rpc->msgin.scheduled) {
 		homa_check_grantable(homa, rpc);
+	} else if (!rpc->msgin.extra_incoming  && rpc->msgin.bytes_remaining) {
+		rpc->msgin.extra_incoming = rpc->msgin.bytes_remaining;
+		atomic_add(rpc->msgin.bytes_remaining, &homa->extra_incoming);
+	}
 	if (rpc->active_links.next == LIST_POISON1) {
 		/* This is the first packet of a server RPC, so we have to
 		 * add the RPC to @hsk->active_rpcs. We do it here, rather
@@ -643,7 +641,12 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 		return;
 	
 	homa_grantable_lock(homa);
-	BUG_ON(rpc->state == RPC_DEAD);
+	/* Note: must check incoming again: it might have changed. */
+	if ((rpc->state == RPC_DEAD) || (rpc->msgin.incoming
+			>= rpc->msgin.total_length)) {
+		homa_grantable_unlock(homa);
+		return;
+	}
 	
 	/* Make sure this message is in the right place in the grantable_rpcs
 	 * list for its peer.
@@ -721,8 +724,8 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
  */
 void homa_send_grants(struct homa *homa)
 {
-	/* The overall goal is to grant simultaneously to up to
-	 * homa->max_overcommit messages. Ideally, each message should use
+	/* The overall goal is to keep homa->max_incoming bytes of data on
+	 * their way to us at any given time. Ideally, each message should use
 	 * a different priority level, determined by bytes_remaining (fewest
 	 * bytes_remaining gets the highest priority). If there aren't enough
 	 * scheduled priority levels for all of the messages, then the lowest
@@ -732,7 +735,7 @@ void homa_send_grants(struct homa *homa)
 	 * instantaneous preemption).
 	 */
 	struct homa_rpc *candidate;
-	struct homa_peer *peer;
+	struct homa_peer *peer, *temp;
 	int rank, i;
 	__u64 start;
 	
@@ -740,10 +743,16 @@ void homa_send_grants(struct homa *homa)
 	 * don't send any until the very end, and release the lock
 	 * first.
 	 */
-	/* Copy homa->max_overcommit in case it changes. */
-	int max_grants = homa->max_overcommit;
-	struct grant_header grants[max_grants];
-	struct homa_rpc *rpcs[max_grants];
+	/* How many more bytes of incoming are available below the limit. */
+	int available = homa->max_incoming - atomic_read(&homa->extra_incoming);
+#ifdef __UNIT_TEST__
+	extern int mock_max_grants;
+#define MAX_GRANTS mock_max_grants
+#else
+#define MAX_GRANTS 10
+#endif
+	struct grant_header grants[MAX_GRANTS];
+	struct homa_rpc *rpcs[MAX_GRANTS];
 	int num_grants = 0;
 	
 	if (list_empty(&homa->grantable_peers))
@@ -757,33 +766,33 @@ void homa_send_grants(struct homa *homa)
 	 * a single (highest-priority) entry for each peer.
 	 */
 	rank = 0;
-	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
+	list_for_each_entry_safe(peer, temp, &homa->grantable_peers,
+			grantable_links) {
 		int extra_levels, priority;
-		int received, new_grant;
+		int received, new_grant, on_the_way;
 		struct grant_header *grant;
-		
+
 		rank++;
-		if (rank > max_grants)
-			break;
 		candidate = list_first_entry(&peer->grantable_rpcs,
 				struct homa_rpc, grantable_links);
-		BUG_ON(candidate->state == RPC_DEAD);
 		
 		/* Invariant: candidate msgin's incoming < total_length
-		 * (otherwise it won't be on this list). Yikes! This isn't
-		 * true anymore...
+		 * (otherwise it won't be on this list).
 		 */
-		if (candidate->msgin.incoming >= candidate->msgin.total_length)
-			continue;
 		received = (candidate->msgin.total_length
 				- candidate->msgin.bytes_remaining);
-		if ((candidate->msgin.incoming - received) >= homa->rtt_bytes)
+		on_the_way = candidate->msgin.incoming - received;
+		available -= on_the_way;
+		if (on_the_way >= homa->rtt_bytes)
 			continue;
 		new_grant = candidate->msgin.incoming + homa->grant_increment;
 		if ((received + homa->rtt_bytes) > new_grant)
 			new_grant = received + homa->rtt_bytes;
 		if (new_grant > candidate->msgin.total_length)
 			new_grant = candidate->msgin.total_length;
+		available -= new_grant - candidate->msgin.incoming;
+		if (available < 0)
+			break;
 		
 		/* The following line is needed to prevent spurious resends.
 		 * Without it, if the timer fires right after we send the
@@ -801,15 +810,25 @@ void homa_send_grants(struct homa *homa)
 		num_grants++;
 		grant->offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = homa->max_sched_prio + 1
-				- homa->num_grantable_peers;
+		extra_levels = homa->max_sched_prio + 1 -
+				homa->num_grantable_peers;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
-		else if (priority < 0)
+		if (priority < 0)
 			priority = 0;
 		grant->priority = priority;
 		tt_record3("sent grant for id %llu, offset %d, priority %d",
 				candidate->id, new_grant, priority);
+		if (new_grant == candidate->msgin.total_length) {
+			BUG_ON(candidate->msgin.extra_incoming != 0);
+			candidate->msgin.extra_incoming =
+					candidate->msgin.bytes_remaining;
+			atomic_add(candidate->msgin.extra_incoming,
+					&homa->extra_incoming);
+			homa_remove_grantable_locked(homa, candidate);
+		}
+		if (num_grants == MAX_GRANTS)
+			break;
 	}
 	
 	homa_grantable_unlock(homa);
@@ -821,6 +840,7 @@ void homa_send_grants(struct homa *homa)
 	 */
 	for (i = 0; i < num_grants; i++) {
 		/* Send any accumulated grants (ignore errors). */
+		BUG_ON(rpcs[i]->magic != HOMA_RPC_MAGIC);
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
 			rpcs[i]);
 		atomic_dec(&rpcs[i]->grants_in_progress);
@@ -854,7 +874,6 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 	 * we may have to adjust the position of the peer in Homa's list,
 	 * or perhaps remove it.
 	 */
-	
 	if (list_empty(&peer->grantable_rpcs)) {
 		homa->num_grantable_peers--;
 		list_del_init(&peer->grantable_links);
@@ -897,9 +916,12 @@ void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 			homa_remove_grantable_locked(homa, rpc);
 			homa_grantable_unlock(homa);
 			homa_send_grants(homa);
-			return;
-		}
-		homa_grantable_unlock(homa);
+		} else
+			homa_grantable_unlock(homa);
+	}
+	if (rpc->msgin.extra_incoming) {
+		atomic_sub(rpc->msgin.extra_incoming, &homa->extra_incoming);
+		rpc->msgin.extra_incoming = 0;
 	}
 }
 
@@ -1359,6 +1381,8 @@ handoff:
 void homa_incoming_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
+	
+	homa->max_incoming = homa->max_overcommit * homa->rtt_bytes;
 		
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!

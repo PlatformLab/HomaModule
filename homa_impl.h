@@ -138,6 +138,18 @@ enum homa_packet_type {
 
 #define sizeof32(type) ((int) (sizeof(type)))
 
+/** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
+#define CACHE_LINE_SIZE 64
+
+/**
+ * define CACHE_LINE - Declare a variable with a given name and type,
+ * followed by enough white space to fill out a cache line. Used to ensure
+ * that synchronization variables are on private cache lines, to reduce
+ * cache consistency overheads.
+ */
+#define CACHE_LINE(type, name) \
+	type name; char name##_spacer[CACHE_LINE_SIZE - sizeof(type)]
+
 /**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet. This must partially match the format of a TCP header so that
@@ -487,8 +499,17 @@ struct homa_message_in {
         /**
 	 * @incoming: Total # of bytes of the message that the sender will
 	 * transmit without additional grants. Never larger than @total_length.
+	 * Note: this may not be modified without holding @homa->grantable_lock.
 	 */
         int incoming;
+	
+	/**
+	 * @extra_incoming: the number of bytes in this message that have
+	 * been (or will be) received when the containing RPC is not on
+	 * the grantable list. Used to update homa->extra_incoming once
+	 * the message has been fully received.
+	 */
+	int extra_incoming;
 	
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
@@ -1145,6 +1166,94 @@ struct homa_peer {
  * unit tests.
  */
 struct homa {
+	/** @next_outgoing_id: Id to use for next outgoing RPC request.
+	 * Accessed without locks.
+	 */
+	CACHE_LINE(atomic64_t, next_outgoing_id);
+	
+	/**
+	 * @pacer_active: synchronization variable: 1 means an instance
+	 * of homa_pacer_xmit is already running, 0 means not.
+	 */
+	CACHE_LINE(atomic_t, pacer_active);
+	
+	/**
+	 * @link_idle_time: The time, measured by get_cycles() at which we
+	 * estimate that all of the packets we have passed to Linux for
+	 * transmission will have been transmitted. May be in the past.
+	 * This estimate assumes that only Homa is transmitting data, so
+	 * it could be a severe underestimate if there is competing traffic 
+	 * from, say, TCP. Access only with atomic ops.
+	 */
+	CACHE_LINE(atomic64_t, link_idle_time);
+	
+	/**
+	 * @grantable_lock: Used to synchronize access to @grantable_peers and
+	 * @num_grantable_peers.
+	 */
+	struct spinlock grantable_lock;
+	
+	/**
+	 * @grantable_peers: Contains all homa_peers for which there are
+	 * RPCs that require grants (or have required them in the past)
+	 * and for which not all the data has been received. The list is
+	 * sorted in priority order (the rpc with the fewest bytes_remaining
+	 * is the first one on the first peer's list).
+	 */
+	struct list_head grantable_peers;
+	
+	/** @num_grantable_peers: The number of peers in grantable_peers. */
+	int num_grantable_peers;
+	
+	/**
+	 * @spacer1: make sure variables above don't share a cache line
+	 * with variables below.
+	 */
+	char spacer1[CACHE_LINE_SIZE - sizeof(struct spinlock)
+			- sizeof(struct list_head) - sizeof(int)];
+	
+	/**
+	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
+	 * insert or remove an RPC from throttled_rpcs, must first acquire
+	 * the RPC's socket lock, then this lock.
+	 */
+	struct spinlock throttle_lock;
+	
+	/**
+	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
+	 * for transmission, but which couldn't be sent without exceeding
+	 * the queue limits for transmission. Manipulate only with "_rcu"
+	 * functions.
+	 */
+	struct list_head throttled_rpcs;
+	
+	/**
+	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
+	 * bypasses the throttle mechanism and is transmitted immediately.
+	 * We have this limit because for very small packets we can't keep
+	 * up with the NIC (we're limited by CPU overheads); there's no
+	 * need for throttling and going through the throttle mechanism
+	 * adds overhead, which slows things down. At least, that's the
+	 * hypothesis (needs to be verified experimentally!). Set externally
+	 * via sysctl.
+	 */
+	int throttle_min_bytes;
+	
+	/**
+	 * @spacer2: make sure variables above don't share a cache line
+	 * with variables below.
+	 */
+	char spacer2[CACHE_LINE_SIZE - sizeof(struct spinlock)
+			- sizeof(struct list_head) - sizeof(int)];
+	
+	/**
+	 * @extra_incoming: sum of all the @extra_incoming fields in all
+	 * homa_message_in structures. This is an upper bound on the
+	 * amount of switch buffer space that could be occupied by RPCs
+	 * not in @grantable_peers. 
+	 */
+	CACHE_LINE(atomic_t, extra_incoming);
+	
 	/**
 	 * @next_client_port: A client port number to consider for the
 	 * next Homa socket; increments monotonically. Current value may
@@ -1152,11 +1261,6 @@ struct homa {
 	 * This port may also be in use already; must check.
 	 */
 	__u16 next_client_port;
-	
-	/** @next_outgoing_id: Id to use for next outgoing RPC request.
-	 * Accessed without locks.
-	 */
-	atomic64_t next_outgoing_id;
 	
 	/**
 	 * @port_map: Information about all open sockets; indexed by
@@ -1256,6 +1360,13 @@ struct homa {
 	int max_overcommit;
 	
 	/**
+	 * @max_incoming: This value is computed from max_overcommit, and
+	 * is the limit on how many bytes are currently permitted to be
+	 * transmitted to us.
+	 */
+	int max_incoming;
+	
+	/**
 	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,
 	 * start sending RESEND requests.
 	 */
@@ -1297,51 +1408,6 @@ struct homa {
 	int max_dead_buffs;
 	
 	/**
-	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
-	 * @num_grantable.
-	 */
-	struct spinlock grantable_lock;
-	
-	/**
-	 * @grantable_peers: Contains all homa_peers for which there are
-	 * RPCs that require grants (or have required them in the past)
-	 * and for which not all the data has been received. The list is
-	 * sorted in priority order (the rpc with the fewest bytes_remaining
-	 * is the first one on the first peer's list).
-	 */
-	struct list_head grantable_peers;
-	
-	/** @num_grantable_peers: The number of peers in grantable_peers. */
-	int num_grantable_peers;
-	
-	/**
-	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
-	 * insert or remove an RPC from throttled_rpcs, must first acquire
-	 * the RPC's socket lock, then this lock.
-	 */
-	struct spinlock throttle_lock;
-	
-	/**
-	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
-	 * for transmission, but which couldn't be sent without exceeding
-	 * the queue limits for transmission. Manipulate only with "_rcu"
-	 * functions.
-	 */
-	struct list_head throttled_rpcs;
-	
-	/**
-	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
-	 * bypasses the throttle mechanism and is transmitted immediately.
-	 * We have this limit because for very small packets we can't keep
-	 * up with the NIC (we're limited by CPU overheads); there's no
-	 * need for throttling and going through the throttle mechanism
-	 * adds overhead, which slows things down. At least, that's the
-	 * hypothesis (needs to be verified experimentally!). Set externally
-	 * via sysctl.
-	 */
-	int throttle_min_bytes;
-	
-	/**
 	 * @pacer_kthread: Kernel thread that transmits packets from
 	 * throttled_rpcs in a way that limits queue buildup in the
 	 * NIC.
@@ -1353,22 +1419,6 @@ struct homa {
 	 * soon as possible.
 	 */
 	bool pacer_exit;
-	
-	/**
-	 * @pacer_active: synchronization variable: 1 means an instance
-	 * of homa_pacer_xmit is already running, 0 means not.
-	 */
-	atomic_t pacer_active;
-	
-	/**
-	 * @link_idle_time: The time, measured by get_cycles() at which we
-	 * estimate that all of the packets we have passed to Linux for
-	 * transmission will have been transmitted. May be in the past.
-	 * This estimate assumes that only Homa is transmitting data, so
-	 * it could be a severe underestimate if there is competing traffic 
-	 * from, say, TCP. Access only with atomic ops.
-	 */
-	atomic64_t link_idle_time;
 	
 	/**
 	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue

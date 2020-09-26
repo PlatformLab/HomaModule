@@ -61,8 +61,17 @@ int homa_init(struct homa *homa)
 	}
 	
 	homa->pacer_kthread = NULL;
-	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	atomic64_set(&homa->next_outgoing_id, 1);
+	atomic_set(&homa->pacer_active, 0);
+	atomic64_set(&homa->link_idle_time, get_cycles());
+	spin_lock_init(&homa->grantable_lock);
+	INIT_LIST_HEAD(&homa->grantable_peers);
+	homa->num_grantable_peers = 0;
+	spin_lock_init(&homa->throttle_lock);
+	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
+	homa->throttle_min_bytes = 1000;
+	atomic_set(&homa->extra_incoming, 0);
+	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
 	homa_socktab_init(&homa->port_map);
 	err = homa_peertab_init(&homa->peers);
 	if (err) {
@@ -93,18 +102,13 @@ int homa_init(struct homa *homa)
 #endif
 	homa->grant_increment = 0;
 	homa->max_overcommit = 8;
+	homa->max_incoming = 0;
 	homa->resend_ticks = 2;
 	homa->resend_interval = 5;
 	homa->timeout_resends = 10;
 	homa->rpc_discard_ticks = 50;
 	homa->reap_limit = 10;
 	homa->max_dead_buffs = 10000;
-	spin_lock_init(&homa->grantable_lock);
-	INIT_LIST_HEAD(&homa->grantable_peers);
-	homa->num_grantable_peers = 0;
-	spin_lock_init(&homa->throttle_lock);
-	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
-	homa->throttle_min_bytes = 1000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 			"homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -115,8 +119,6 @@ int homa_init(struct homa *homa)
 		return err;
 	}
 	homa->pacer_exit = false;
-	atomic_set(&homa->pacer_active, 0);
-	atomic64_set(&homa->link_idle_time, get_cycles());
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 0;
@@ -130,6 +132,7 @@ int homa_init(struct homa *homa)
 	homa->metrics_length = 0;
 	homa->metrics_active_opens = 0;
 	homa_outgoing_sysctl_changed(homa);
+	homa_incoming_sysctl_changed(homa);
 	return 0;
 }
 
@@ -360,6 +363,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 * homa_manage_grants doesn't access this RPC after destruction
 	 * begins.
 	 */
+	rpc->state = RPC_DEAD;
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
 	
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
@@ -377,7 +381,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 			rpc->hsk->client_port,
 			rpc->hsk->dead_skbs);
-	rpc->state = RPC_DEAD;
 	homa_sock_unlock(rpc->hsk);
 	
 	if (unlikely(!list_empty(&rpc->throttled_links))) {

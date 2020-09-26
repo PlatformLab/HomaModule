@@ -139,6 +139,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_addr.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	self->homa.num_priorities = 1;
+	self->homa.poll_cycles = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
@@ -623,6 +624,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(200, crpc->msgin.bytes_remaining);
 	EXPECT_EQ(1, crpc->msgin.num_skbs);
+	EXPECT_EQ(1600, crpc->msgin.incoming);
 	
 	unit_log_clear();
 	self->data.seg.offset = htonl(1400);
@@ -659,40 +661,6 @@ TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 	EXPECT_EQ(600, crpc->msgin.bytes_remaining);
 	crpc->state = RPC_INCOMING;
 }
-TEST_F(homa_incoming, homa_data_pkt__update_incoming)
-{
-	self->homa.rtt_bytes = 200;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 1000, 1600);
-	EXPECT_NE(NULL, crpc);
-	unit_log_clear();
-	self->data.message_length = htonl(6000);
-	self->data.incoming = htonl(4000);
-	crpc->msgout.next_packet = NULL;
-	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			1400, 0), crpc);
-	EXPECT_EQ(RPC_INCOMING, crpc->state);
-	EXPECT_EQ(4000, crpc->msgin.incoming);
-	
-	self->data.seg.offset = htonl(1400);
-	self->data.incoming = htonl(3000);
-	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			1400, 1400), crpc);
-	EXPECT_EQ(4000, crpc->msgin.incoming);
-	
-	self->data.seg.offset = htonl(2800);
-	self->data.incoming = htonl(5000);
-	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			2800, 2800), crpc);
-	EXPECT_EQ(5000, crpc->msgin.incoming);
-	
-	self->data.seg.offset = htonl(4200);
-	self->data.incoming = htonl(8000);
-	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			4200, 4200), crpc);
-	EXPECT_EQ(6000, crpc->msgin.incoming);
-}
 TEST_F(homa_incoming, homa_data_pkt__send_grant)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
@@ -702,6 +670,43 @@ TEST_F(homa_incoming, homa_data_pkt__send_grant)
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
 	EXPECT_EQ(11400, srpc->msgin.incoming);
+}
+TEST_F(homa_incoming, homa_data_pkt__set_extra_incoming_for_short_message)
+{
+	atomic_set(&self->homa.extra_incoming, 1000);
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 6000, 1000);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_EQ(4600, srpc->msgin.extra_incoming);
+	EXPECT_EQ(5600, atomic_read(&self->homa.extra_incoming));
+}
+TEST_F(homa_incoming, homa_data_pkt__dont_set_extra_incoming_for_large_message)
+{
+	atomic_set(&self->homa.extra_incoming, 1000);
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 100000, 1000);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_EQ(0, srpc->msgin.extra_incoming);
+	EXPECT_EQ(1000, atomic_read(&self->homa.extra_incoming));
+}
+TEST_F(homa_incoming, homa_data_pkt__dont_set_extra_incoming_for_one_pkt_message)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 1000, 1000);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	self->data.message_length = htonl(1000);
+	self->data.incoming = htonl(1000);
+	crpc->msgout.next_packet = NULL;
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 0), crpc);
+	EXPECT_EQ(RPC_READY, crpc->state);
+	EXPECT_EQ(1000, crpc->msgin.incoming);
+	EXPECT_EQ(0, crpc->msgin.extra_incoming);
+	EXPECT_EQ(0, atomic_read(&self->homa.extra_incoming));
 }
 TEST_F(homa_incoming, homa_data_pkt__short_server_rpc_ready)
 {
@@ -1359,32 +1364,40 @@ TEST_F(homa_incoming, homa_check_grantable__move_upward_in_homa_list)
 
 TEST_F(homa_incoming, homa_send_grants__pick_message_to_grant)
 {
-	struct homa_rpc *srpc;
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	struct homa_rpc *srpc1, *srpc2, *srpc3, *srpc4;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+	srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
 			self->server_ip, self->client_port, 2, 30000, 100);
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
+	srpc3 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
 			self->server_ip, self->client_port, 3, 40000, 100);
-	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+3,
+	srpc4 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+3,
 			self->server_ip, self->client_port, 4, 50000, 100);
 	homa_send_grants(&self->homa);
 	
-	/* Initially, all messages have been granted as much as possible. */
 	unit_log_clear();
+	srpc1->msgin.incoming = 11400;        /* 10000 bytes incoming */
+	srpc2->msgin.incoming = 1400;         /* 0 incoming */
+	srpc3->msgin.incoming = 1400;         /* 0 incoming */
+	srpc4->msgin.incoming = 1400;         /* 0 incoming */
 	
-	/* Messages that need grants are beyond max_overcommit. */
-	self->homa.max_overcommit = 2;
-	srpc->msgin.bytes_remaining -= 1400;
+	self->homa.max_incoming = 40000;
+	self->homa.grant_increment = 10000;
+	atomic_set(&self->homa.extra_incoming, 15000);
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 11400@2", unit_log_get());
+	
+	/* Try again (no new grants, since nothing has changed). */
 	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 	
-	/* There is a message to grant. */
-	self->homa.max_overcommit = 4;
+	/* Now create enough headroom for all of the messages. */
+	self->homa.max_incoming = 55000;
 	unit_log_clear();
 	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 12800@1", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11400@1; xmit GRANT 11400@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_send_grants__one_grant_per_peer)
 {
@@ -1467,7 +1480,8 @@ TEST_F(homa_incoming, homa_send_grants__choose_priority_level)
 }
 TEST_F(homa_incoming, homa_send_grants__many_messages_of_same_size)
 {
-	self->homa.max_overcommit = 2;
+	self->homa.rtt_bytes = 10000;
+	self->homa.max_incoming = 20000;
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
 	unit_log_clear();
@@ -1492,9 +1506,90 @@ TEST_F(homa_incoming, homa_send_grants__many_messages_of_same_size)
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_incoming, homa_send_grants__prevent_priorities_less_than_zero)
+{
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 15000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
+			self->server_ip, self->client_port, 3, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 4, 50000, 100);
+	
+	/* Arrange for one message to become fully granted; it will be
+	 * replaced in the list by another message from the same peer.
+	 */
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip+1, self->client_port, 2);
+	homa_rpc_unlock(srpc);
+	srpc->msgin.incoming = 25000;
+	srpc->msgin. bytes_remaining = 5000;
+	
+	self->homa.rtt_bytes = 10000;
+	self->homa.max_incoming = 50000;
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 11400@2; xmit GRANT 30000@1; "
+			"xmit GRANT 11400@0; xmit GRANT 11400@0",
+			unit_log_get());
+}
+TEST_F(homa_incoming, homa_send_grants__remove_from_grantable)
+{
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 15000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
+			self->server_ip, self->client_port, 3, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+3,
+			self->server_ip, self->client_port, 4, 50000, 100);
+	
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip, self->client_port, 1);
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(1, srpc->msgin.possibly_in_grant_queue);
+	
+	self->homa.rtt_bytes = 20000;
+	self->homa.max_incoming = 20000;
+	self->homa.grant_increment = 10000;
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 15000@3", unit_log_get());
+	EXPECT_EQ(13600, atomic_read(&self->homa.extra_incoming));
+	EXPECT_EQ(13600, srpc->msgin.extra_incoming);
+	EXPECT_EQ(0, srpc->msgin.possibly_in_grant_queue);
+}
+TEST_F(homa_incoming, homa_send_grants__MAX_GRANTS_exceeded)
+{
+	mock_max_grants = 3;
+	self->homa.rtt_bytes = 10000;
+	self->homa.max_incoming = 100000;
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
+			self->server_ip, self->client_port, 3, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+3,
+			self->server_ip, self->client_port, 4, 50000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+4,
+			self->server_ip, self->client_port, 5, 60000, 100);
+
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip, self->client_port, 1);
+	EXPECT_NE(NULL, srpc);
+	homa_rpc_unlock(srpc);
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 11400@3; xmit GRANT 11400@2; "
+			"xmit GRANT 11400@1", unit_log_get());
+}
 TEST_F(homa_incoming, homa_send_grants__grant_after_rpc_deleted)
 {
-	self->homa.max_overcommit = 2;
+	self->homa.rtt_bytes = 10000;
+	self->homa.max_incoming = 20000;
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
 	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
@@ -1633,7 +1728,7 @@ TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-};
+}
 TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 {
 	self->homa.max_overcommit = 1;
@@ -1653,6 +1748,27 @@ TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 	homa_rpc_free(srpc);
 	EXPECT_SUBSTR("xmit GRANT", unit_log_get());
 	EXPECT_SUBSTR("id 2,", unit_log_get());
+}
+TEST_F(homa_incoming, homa_remove_from_grantable__update_extra_incoming)
+{
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600",
+			unit_log_get());
+	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
+			self->client_ip, self->client_port, 1);
+	EXPECT_NE(NULL, srpc);
+	homa_rpc_unlock(srpc);
+	srpc->msgin.extra_incoming = 5000;
+	atomic_set(&self->homa.extra_incoming, 10000);
+	homa_remove_from_grantable(&self->homa, srpc);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(0, srpc->msgin.extra_incoming);
+	EXPECT_EQ(5000, atomic_read(&self->homa.extra_incoming));
 }
 
 TEST_F(homa_incoming, homa_rpc_abort__basics)

@@ -2,8 +2,6 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Cleanups still needed:
-  * Problem with grants: whether or not to keep on grantable list after
-    fully granted.
   * Return UNKNOWN in homa_softirq if socket isn't known.
 
 * Performance-related tasks:
@@ -40,8 +38,6 @@ Notes for Homa implementation in Linux:
     * Socket not supported on server (or server process ends while
       processing request).
     * Server timeout
-  * Figure out what to do with byte order for 64-bit entities like RPC ids.
-    There is no htonll, for some reason.
   * Is it safe to use non-locking skb queue functions?
   * Is the RCU usage for sockets safe? In particular, how long is it safe
     to use a homa_sock returned by homa_find_socket? Could it be deleted from
@@ -55,7 +51,6 @@ Notes for Homa implementation in Linux:
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Don't return any errors on sends?
-  * Need to return errors to apps.
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
     recently; should HomaModule do the same? Otherwise, will retransmit
     for requests whose service time is just about equal to the resend timer.

@@ -223,7 +223,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.data		= &homa_data.max_overcommit,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_sched_prio",

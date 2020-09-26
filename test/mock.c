@@ -80,6 +80,11 @@ int mock_xmit_log_verbose = 0;
  */
 int mock_log_rcu_sched = 0;
 
+/* The maximum number of grants that can be issued in one call to
+ * homa_send_grants.
+ */
+int mock_max_grants = 10;
+
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
  */
@@ -1020,6 +1025,7 @@ void mock_teardown(void)
 	mock_cycles = 0;
 	mock_import_single_range_errors = 0;
 	mock_kmalloc_errors = 0;
+	mock_max_grants = 10;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;
