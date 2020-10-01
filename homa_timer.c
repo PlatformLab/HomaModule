@@ -236,7 +236,7 @@ void homa_timer(struct homa *homa)
 		 * complexity). If there's more than one dead peer, we'll
 		 * timeout another one in the next call.
 		 */
-		homa_peer_abort(homa, dead_peer->addr, -ETIMEDOUT);
+		homa_abort_rpcs(homa, dead_peer->addr, 0, -ETIMEDOUT);
 	}
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);

@@ -33,6 +33,7 @@
 #include <linux/skbuff.h>
 #include <linux/version.h>
 #include <linux/socket.h>
+#include <net/icmp.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
@@ -2221,6 +2222,8 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 #define UNIT_LOG(...)
 #endif
 
+extern void     homa_abort_rpcs(struct homa *homa, __be32 addr, int port,
+			int error);
 extern void     homa_add_packet(struct homa_message_in *msgin,
 			struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
@@ -2294,7 +2297,6 @@ extern void     homa_outgoing_sysctl_changed(struct homa *homa);
 extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);
 extern void     homa_pacer_xmit(struct homa *homa);
-extern void     homa_peer_abort(struct homa *homa, __be32 addr, int error);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern struct homa_peer

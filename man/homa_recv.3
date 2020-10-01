@@ -134,6 +134,9 @@ did not contain either
 or there was no outstanding request with an id matching
 .IR *id .
 .TP
+.B ENOTCONN
+No socket is bound to the destination port for the request.
+.TP
 .B EPROTONOSUPPORT
 The destination machine does not support the Homa protocol.
 .TP
@@ -141,7 +144,7 @@ The destination machine does not support the Homa protocol.
 No memory available.
 .TP
 .B ESHUTDOWN
-The socked has been disabled using
+The socket has been disabled using
 .BR shutdown (2).
 .TP
 .B ETIMEDOUT

@@ -375,6 +375,7 @@ TEST_F(homa_plumbing, homa_softirq__unknown_socket)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_STREQ("icmp_send type 3, code 3", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
 {

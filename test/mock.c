@@ -331,6 +331,11 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode) {}
 
+void icmp_send(struct sk_buff *skb, int type, int code, __be32 info)
+{
+	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
+}
+
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {

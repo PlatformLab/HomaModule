@@ -1069,13 +1069,7 @@ int homa_softirq(struct sk_buff *skb) {
 		dport = ntohs(h->dport);
 		hsk = homa_sock_find(&homa->port_map, dport);
 		if (!hsk) {
-			/* Eventually should return an error result to sender if
-			 * it is a client.
-			 */
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa packet from %s "
-					"referred to unknown port %u\n",
-					homa_print_ipv4_addr(saddr), dport);
+			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 			tt_record3("Discarding packet for unknown port %u, "
 					"id %llu, type %d", dport, h->id,
 					h->type);
@@ -1122,7 +1116,14 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
 	
-	if (type == ICMP_DEST_UNREACH) {
+	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
+		struct common_header *h;
+		char *icmp = (char *) icmp_hdr(skb);
+		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
+		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
+				+ iph->ihl*4);
+		homa_abort_rpcs(homa, iph->daddr, htons(h->dport), -ENOTCONN);
+	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
 		if (code == ICMP_PROT_UNREACH)
 			error = -EPROTONOSUPPORT;
@@ -1130,7 +1131,7 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
 				ntohl(iph->saddr), ntohl(iph->daddr));
-		homa_peer_abort(homa, iph->daddr, error);
+		homa_abort_rpcs(homa, iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)
 			printk(KERN_NOTICE "homa_err_handler invoked with "

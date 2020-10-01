@@ -548,7 +548,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	int err;
 	tt_record3("Received unknown for id %llu, peer %x:%d", rpc->id,
-			ntohl(rpc->peer->addr), rpc->dport);\
+			ntohl(rpc->peer->addr), rpc->dport);
 	if (rpc->is_client) {
 		if (rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
@@ -990,13 +990,15 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
- * homa_peer_abort() - Abort all client RPCs to a particular host.
+ * homa_abort_rpcs() - Abort client RPCs for a particular destination.
  * @homa:    Overall data about the Homa protocol implementation.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
+ * @port:    If nonzero, then RPCs will only be aborted if they were
+ *	     targeted at this server port.
  * @error:   Negative errno value indicating the reason for the abort.
  */
-void homa_peer_abort(struct homa *homa, __be32 addr, int error)
+void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -1015,6 +1017,8 @@ void homa_peer_abort(struct homa *homa, __be32 addr, int error)
 		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				active_links) {
 			if (rpc->peer->addr != addr)
+				continue;
+			if ((port != 0) && (rpc->dport != port))
 				continue;
 			homa_rpc_lock(rpc);
 			if ((rpc->state == RPC_DEAD)

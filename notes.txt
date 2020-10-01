@@ -1,10 +1,16 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Cleanups still needed:
-  * Return UNKNOWN in homa_softirq if socket isn't known.
+* Ideas for providing a fraction of bandwidth to oldest message:
+  * Keep count of granted bytes until next "pity" grant
+  * When pity grant time is reached:
+      * If the pity list is empty, refill it
+      * Grant to the oldest element on the pity list that hasn't received
+        a pity grant
+  * Remove from the pity list in remove_grantable
 
 * Performance-related tasks:
+  * Consider ways of reducing tail latency for very large messages
   * See if turning off c-states allows shorter polling intervals?
   * Are Meltdown mitigations really disabled?
   * Consider a permanent reduction in rtt_bytes.
