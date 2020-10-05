@@ -1762,6 +1762,19 @@ TEST_F(homa_incoming, homa_remove_from_grantable__update_extra_incoming)
 	EXPECT_NE(NULL, srpc);
 	homa_rpc_unlock(srpc);
 	srpc->msgin.extra_incoming = 5000;
+	
+	/* First try: msgin isn't valid. */
+	srpc->msgin.total_length = -1;
+	atomic_set(&self->homa.extra_incoming, 10000);
+	homa_remove_from_grantable(&self->homa, srpc);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_SUBSTR("id 1", unit_log_get());
+	EXPECT_EQ(5000, srpc->msgin.extra_incoming);
+	EXPECT_EQ(10000, atomic_read(&self->homa.extra_incoming));
+	
+	/* Second try: actually do the decrement. */
+	srpc->msgin.total_length = 20000;
 	atomic_set(&self->homa.extra_incoming, 10000);
 	homa_remove_from_grantable(&self->homa, srpc);
 	unit_log_clear();

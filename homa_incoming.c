@@ -909,19 +909,22 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
 	UNIT_LOG("; ", "homa_remove_from_grantable invoked");
-	if (rpc->msgin.possibly_in_grant_queue
-			&& (rpc->msgin.total_length >= 0)) {
-		homa_grantable_lock(homa);
-		if (!list_empty(&rpc->grantable_links)) {
-			homa_remove_grantable_locked(homa, rpc);
-			homa_grantable_unlock(homa);
-			homa_send_grants(homa);
-		} else
-			homa_grantable_unlock(homa);
-	}
-	if (rpc->msgin.extra_incoming) {
-		atomic_sub(rpc->msgin.extra_incoming, &homa->extra_incoming);
-		rpc->msgin.extra_incoming = 0;
+	if (rpc->msgin.total_length >= 0) {
+		if (rpc->msgin.possibly_in_grant_queue) {
+			homa_grantable_lock(homa);
+			if (!list_empty(&rpc->grantable_links)) {
+				homa_remove_grantable_locked(homa, rpc);
+				homa_grantable_unlock(homa);
+				homa_send_grants(homa);
+			} else
+				homa_grantable_unlock(homa);
+		}
+		if (rpc->msgin.extra_incoming) {
+			atomic_sub(rpc->msgin.extra_incoming,
+					&homa->extra_incoming);
+			BUG_ON(atomic_read(&homa->extra_incoming) < 0);
+			rpc->msgin.extra_incoming = 0;
+		}
 	}
 }
 
