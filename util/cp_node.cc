@@ -442,12 +442,6 @@ struct message_header {
 	unsigned int freeze:1;
 	
 	/**
-	 * @start_time: the time when the client initiated the request.
-	 * This is the low-order 32 bits of a rdtsc value.
-	 */
-	uint32_t start_time;
-	
-	/**
 	 * @cid: uniquely identifies the connection between a client
 	 * and a server.
 	 */
@@ -1318,10 +1312,28 @@ void tcp_server::read(int fd)
  */
 class client {
     public:
+	/**
+	 * struct rinfo - Holds information about a request that we will
+	 * want when we get the response.
+	 */
+	struct rinfo {
+		/** @start_time: rdtsc time when the request was sent. */
+		uint64_t start_time;
+
+		/**
+		 * @active: true means the request has been sent but
+		 * a response hasn't yet been received.
+		 */
+		bool active;
+		
+		rinfo() : start_time(0), active(false) {}
+	};
+	    
 	client(int id);
 	virtual ~client();
 	void check_completion(const char *protocol);
-	void record(int length, uint32_t rtt, conn_id cid);
+	int get_rinfo();
+	void record(uint64_t end_time, message_header *header);
 	virtual void stop_sender(void) {}
 	
 	/**
@@ -1329,6 +1341,15 @@ class client {
 	 * 0 for the first client.
 	 */
 	int id;
+	
+	/**
+	 * @rinfos: storage for more than enough rinfos to handle all of the
+	 * outstanding requests.
+	 */
+	std::vector<rinfo> rinfos;
+	
+	/** @last_rinfo: index into rinfos of last slot that was allocated. */
+	int last_rinfo;
 	    
 	/**
 	 * @receivers_running: number of receiving threads that have
@@ -1389,7 +1410,7 @@ class client {
 	 * times (measured in rdtsc cycles) for the most recent RPCs. Entries
 	 * in this array correspond to those in @actual_lengths.
 	 */
-	std::vector<uint32_t> actual_rtts;
+	std::vector<uint64_t> actual_rtts;
 
 	/**
 	 * define NUM_CLENT_STATS: number of records in actual_lengths
@@ -1451,6 +1472,8 @@ std::vector<client *> clients;
  */
 client::client(int id)
 	: id(id)
+        , rinfos()
+        , last_rinfo(0)
 	, receivers_running(0)
 	, request_servers()
 	, next_server(0)
@@ -1469,6 +1492,8 @@ client::client(int id)
         , total_rtt(0)
         , lag(0)
 {
+	rinfos.resize(2*client_port_max);
+	
 	/* Precompute information about the requests this client will
 	 * generate. Pick a different prime number for the size of each
 	 * vector, so that they will wrap at different times, giving
@@ -1554,29 +1579,71 @@ void client::check_completion(const char *protocol)
 }
 
 /**
- * record() - Records statistics about a particular request.
- * @length:     Size of the request and response messages for the request,
- *              in bytes.
- * @rtt:        Total round-trip time to complete the request, in rdtsc cycles.
- * @conn_id:    Identifier for the connection over which the request was
- *              sent.
+ * get_rinfo() - Find an available rinfo slot and return its index in
+ * rinfos. 
  */
-void client::record(int length, uint32_t rtt, conn_id cid)
+int client::get_rinfo()
+{
+	int next = last_rinfo;
+	
+	while (true) {
+		next++;
+		if (next >= static_cast<int>(rinfos.size()))
+			next = 0;
+		if (next == last_rinfo) {
+			log(NORMAL, "FATAL: ran out of rinfos\n");
+			exit(1);
+		}
+		if (!rinfos[next].active) {
+			rinfos[next].active = true;
+			last_rinfo = next;
+			return next;
+		}
+	}
+}
+
+/**
+ * record() - Records statistics about a particular request.
+ * @end_time:   Completion time for the request, in rdtsc cycles.
+ * @header:     The header from the response.
+ */
+void client::record(uint64_t end_time, message_header *header)
 {
 	int server_id;
 	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
+	uint64_t rtt;
 	
-	server_id = first_id[cid.server];
-	if (server_id == -1) {
-		log(NORMAL, "WARNING: response received from unknown "
-				"cid 0x%08x\n", (int) cid);
+	if (header->msg_id >= rinfos.size()) {
+		log(NORMAL, "ERROR: msg_id (%u) exceed rinfos.size (%lu)\n",
+			header->msg_id, rinfos.size());
 		return;
 	}
-	server_id += cid.server_port;
+	rinfo *r = &rinfos[header->msg_id];
+	if (!r->active) {
+		log(NORMAL, "ERROR: response arrived for inactive msg_id %u\n",
+			header->msg_id);
+		return;
+	}
+	rtt = end_time - r->start_time;
+	r->active = false;
+	
+	if (rtt > 1000000000) {
+		log(NORMAL, "Very slow RPC: RTT %lu cycles, server %u.%u, "
+			"length %d\n",
+			rtt, header->cid.server, header->cid.server_port,
+			header->length);
+	}
+	server_id = first_id[header->cid.server];
+	if (server_id == -1) {
+		log(NORMAL, "WARNING: response received from unknown "
+				"cid 0x%08x\n", (int) header->cid);
+		return;
+	}
+	server_id += header->cid.server_port;
 	responses[server_id].fetch_add(1);
-	response_data += length;
+	response_data += header->length;
 	total_rtt += rtt;
-	actual_lengths[slot] = length;
+	actual_lengths[slot] = header->length;
 	actual_rtts[slot] = rtt;
 }
 
@@ -1590,7 +1657,7 @@ class homa_client : public client {
 	homa_client(int id);
 	virtual ~homa_client();
 	void measure_unloaded(int count);
-	uint32_t measure_rtt(int server, int length, char *buffer);
+	uint64_t measure_rtt(int server, int length, char *buffer);
 	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
@@ -1747,10 +1814,10 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 				print_address(&server_addr));
 		exit(1);
 	}
-	uint32_t end_time = rdtsc() & 0xffffffff;
+	uint64_t end_time = rdtsc();
 	tt("Received response, cid 0x%08x, id %x, %d bytes",
 			header->cid, header->msg_id, length);
-	record(length, end_time - header->start_time, header->cid);
+	record(end_time, header);
 	return true;
 }
 
@@ -1771,6 +1838,7 @@ void homa_client::sender()
 		uint64_t now;
 		uint64_t rpc_id;
 		int server;
+		int slot = get_rinfo();
 		
 		/* Wait until (a) we have reached the next start time
 		 * and (b) there aren't too many requests outstanding.
@@ -1778,6 +1846,7 @@ void homa_client::sender()
 		while (1) {
 			if (exit_sender) {
 				sender_exited = true;
+				rinfos[slot].active = false;
 				return;
 			}
 			now = rdtsc();
@@ -1787,6 +1856,7 @@ void homa_client::sender()
 				break;
 		}
 		
+		rinfos[slot].start_time = now;
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
@@ -1797,10 +1867,10 @@ void homa_client::sender()
 			header->length = HOMA_MAX_MESSAGE_LENGTH;
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
-		header->start_time = now & 0xffffffff;
 		header->cid = server_ids[server];
 		header->cid.client_port = id;
 		header->freeze = freeze[header->cid.server];
+		header->msg_id = slot;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
 		int status = homa_send(fd, sender_buffer, header->length,
@@ -1857,7 +1927,7 @@ void homa_client::receiver(int receiver_id)
  *
  * Return:       Round-trip time to service the request, in rdtsc cycles. 
  */
-uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
+uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
@@ -1873,7 +1943,6 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 	header->cid = server_ids[server];
 	header->cid.client_port = id;
 	start = rdtsc();
-	header->start_time = start & 0xffffffff;
 	status = homa_send(fd, buffer, header->length,
 		reinterpret_cast<struct sockaddr *>(
 		&server_addrs[server]),
@@ -1896,7 +1965,7 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 				print_address(&server_addr));
 		exit(1);
 	}
-	return (rdtsc() - start) & 0xffffffff;
+	return rdtsc() - start;
 }
 
 /**
@@ -2150,13 +2219,16 @@ void tcp_client::sender()
 	while (1) {
 		uint64_t now;
 		int server;
+		int slot = get_rinfo();
 		
 		/* Wait until (a) we have reached the next start time
 		 * and (b) there aren't too many requests outstanding.
 		 */
 		while (1) {
-			if (stop)
+			if (stop) {
+				rinfos[slot].active = false;
 				return;
+			}
 			now = rdtsc();
 			if ((now >= next_start)
 					&& ((total_requests - total_responses)
@@ -2174,6 +2246,7 @@ void tcp_client::sender()
 				next_blocked++;
 		}
 		
+		rinfos[slot].start_time = now;
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
@@ -2182,10 +2255,9 @@ void tcp_client::sender()
 		header.length = request_lengths[next_length];
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
-		header.start_time = now & 0xffffffff;
 		header.cid = server_ids[server];
 		header.cid.client_port = id;
-		header.msg_id = message_id.fetch_add(1);
+		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
 		size_t old_pending = connections[server]->pending();
 		tt("Sending TCP request, cid 0x%08x, id %u, length %d, freeze %d",
@@ -2282,27 +2354,26 @@ void tcp_client::receiver(int receiver_id)
 void tcp_client::read(tcp_connection *connection)
 {
 	int error = connection->read(epollet, [this](message_header *header) {
-		uint32_t end_time = rdtsc() & 0xffffffff;
-		uint32_t elapsed = end_time - header->start_time;
-		tt("Received TCP response, cid 0x%08x, id %u, length %d, "
-				"elapsed %d",
-				header->cid, header->msg_id,
-				header->length, elapsed);
-		if ((header->length < 1500) && (elapsed > debug[0])
-				&& (elapsed < debug[1])
-				&& !time_trace::frozen) {
-			freeze[header->cid.server] = 1;
-			tt("Freezing timetrace because of long RTT for "
-					"cid 0x%08x, id %u",
-					header->cid, header->msg_id);
-			log(NORMAL, "Freezing timetrace because of long RTT for "
-					"cid 0x%08x, id %u",
-					int(header->cid), header->msg_id);
-			time_trace::freeze();
-			kfreeze();
-		}
-		record(header->length, end_time - header->start_time,
-				header->cid);
+		uint64_t end_time = rdtsc();
+//		uint32_t elapsed = end_time - header->start_time;
+//		tt("Received TCP response, cid 0x%08x, id %u, length %d, "
+//				"elapsed %d",
+//				header->cid, header->msg_id,
+//				header->length, elapsed);
+//		if ((header->length < 1500) && (elapsed > debug[0])
+//				&& (elapsed < debug[1])
+//				&& !time_trace::frozen) {
+//			freeze[header->cid.server] = 1;
+//			tt("Freezing timetrace because of long RTT for "
+//					"cid 0x%08x, id %u",
+//					header->cid, header->msg_id);
+//			log(NORMAL, "Freezing timetrace because of long RTT for "
+//					"cid 0x%08x, id %u",
+//					int(header->cid), header->msg_id);
+//			time_trace::freeze();
+//			kfreeze();
+//		}
+		record(end_time, header);
 		bytes_rcvd[first_id[header->cid.server]
 				+ header->cid.server_port] += header->length;
 	});
