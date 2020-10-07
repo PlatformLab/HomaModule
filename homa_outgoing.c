@@ -762,6 +762,7 @@ void homa_pacer_xmit(struct homa *homa)
 	 */
 	for (i = 0; i < 5; i++) {
 		__u64 idle_time, now;
+		int offset;
 		
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = get_cycles();
@@ -809,10 +810,11 @@ void homa_pacer_xmit(struct homa *homa)
 		}
 		homa_throttle_unlock(homa);
 		
-		tt_record2("pacer calling homa_xmit_data for rpc id %llu, "
-				"port %d",
-				rpc->id, rpc->is_client ? rpc->hsk->client_port
-				: rpc->hsk->server_port);
+		offset = homa_rpc_send_offset(rpc);
+		tt_record4("pacer calling homa_xmit_data for rpc id %llu, "
+				"port %d, offset %d, bytes_left",
+				rpc->id, rpc->hsk->client_port,
+				offset, rpc->msgout.length - offset);
 		homa_xmit_data(rpc, true);
 		if (!rpc->msgout.next_packet
 				|| (homa_data_offset(rpc->msgout.next_packet)
