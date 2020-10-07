@@ -402,7 +402,10 @@ def stop_nodes():
     for id, popen in homa_prios.items():
         subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no",
                 "node-%d" % id, "sudo", "pkill", "homa_prio"])
-        popen.wait(5.0)
+        try:
+            popen.wait(5.0)
+        except subprocess.TimeoutExpired:
+            log("Timeout killing homa_prio on node-%d" % (id))
     for node in active_nodes.values():
         node.stdin.write("exit\n")
         try:
