@@ -304,6 +304,17 @@ TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)
 	EXPECT_EQ(0, resend.offset);
 	EXPECT_EQ(100, ntohl(resend.length));
 }
+TEST_F(homa_incoming, homa_get_resend_range__empty_range)
+{
+	struct resend_header resend;
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 5000, 5000);
+	
+	homa_get_resend_range(&srpc->msgin, &resend);
+	EXPECT_EQ(0, resend.offset);
+	EXPECT_EQ(0, ntohl(resend.length));
+}
 TEST_F(homa_incoming, homa_get_resend_range__various_gaps)
 {
 	struct resend_header resend;

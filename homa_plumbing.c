@@ -275,13 +275,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "rpc_discard_ticks",
-		.data		= &homa_data.rpc_discard_ticks,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
 		.procname	= "rtt_bytes",
 		.data		= &homa_data.rtt_bytes,
 		.maxlen		= sizeof(int),

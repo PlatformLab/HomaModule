@@ -31,91 +31,53 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	const char *us, *them;
 	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
+	
+	if ((rpc->state == RPC_OUTGOING)
+			&& (homa_rpc_send_offset(rpc) < rpc->msgout.granted)) {
+		/* There are granted bytes that we haven't transmitted, so
+		 * no need to be concerned about lack of traffic from the peer.
+		 */
+		rpc->silent_ticks = 0;
+		return 0;
+	}
+	
+	if ((rpc->state == RPC_INCOMING) && ((rpc->msgin.total_length
+			- rpc->msgin.bytes_remaining)
+			>= rpc->msgin.incoming)) {
+		/* We've received everything that we've granted, so we
+		 * shouldn't expect to hear anything until we grant more.
+		 */
+		rpc->silent_ticks = 0;
+		return 0;
+	}
 
 	if (rpc->silent_ticks < homa->resend_ticks)
 		return 0;
 	
-	if (rpc->is_client) {
-		if (rpc->msgout.next_packet && (homa_data_offset(
-				rpc->msgout.next_packet) < rpc->msgout.granted)) {
-			/* We haven't transmitted all of the granted bytes in
-			 * the request, so there's no need to be concerned
-			 * about the lack of traffic from the server.
-			 */
-			rpc->silent_ticks = 0;
-			return 0;
+	if (rpc->peer->outstanding_resends
+			>= rpc->hsk->homa->timeout_resends) {
+		INC_METRIC(peer_timeouts, 1);
+		tt_record4("peer 0x%x timed out for RPC id %d, "
+				"state %d, outstanding_resends %d",
+				htonl(rpc->peer->addr),
+				rpc->id, rpc->state,
+				rpc->peer->outstanding_resends);
+		if (homa->verbose)
+			printk(KERN_NOTICE "Homa peer %s timed out, id %llu",
+					homa_print_ipv4_addr(rpc->peer->addr),
+					rpc->id);
+		if (!tt_frozen) {
+			struct freeze_header freeze;
+			tt_record2("Freezing because of peer timeout,"
+					" id %d, peer 0x%x",
+					rpc->id,
+					htonl(rpc->peer->addr));
+			homa_xmit_control(FREEZE, &freeze,
+					sizeof(freeze), rpc);
+			tt_freeze();
 		}
-		if ((rpc->state == RPC_INCOMING) && ((rpc->msgin.total_length
-				- rpc->msgin.bytes_remaining)
-				>= rpc->msgin.incoming)) {
-			/* We've received everything that we've granted, so we
-			 * shouldn't expect to hear anything until we grant
-			 * more. However, if we don't communicate with the
-			 * server, it will eventually timeout and discard
-			 * the response. To prevent this, send a BUSY packet.
-			 */
-			struct busy_header busy;
-			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-			rpc->silent_ticks = 0;
-			return 0;
-		}
-		if (rpc->peer->outstanding_resends
-				>= rpc->hsk->homa->timeout_resends) {
-			INC_METRIC(client_peer_timeouts, 1);
-			tt_record4("server timed out: peer 0x%x, RPC id %d, "
-					"state %d, outstanding_resends %d",
-					htonl(rpc->peer->addr),
-					rpc->id, rpc->state,
-					rpc->peer->outstanding_resends);
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa server timeout, "
-						"server %s:%d, id %llu",
-						homa_print_ipv4_addr(
-							rpc->peer->addr),
-						rpc->dport, rpc->id);
-			if (!tt_frozen) {
-				struct freeze_header freeze;
-				tt_record2("Freezing because of server timeout,"
-						" id %d, peer 0x%x",
-						rpc->id,
-						htonl(rpc->peer->addr));
-				homa_xmit_control(FREEZE, &freeze,
-						sizeof(freeze), rpc);
-				tt_freeze();
-			}
-			rpc->peer->outstanding_resends = 0;
-			return 1;
-		}
-	} else {
-		/* Server RPC */
-		if ((rpc->state == RPC_INCOMING) && ((rpc->msgin.total_length
-				- rpc->msgin.bytes_remaining)
-				>= rpc->msgin.incoming)) {
-			/* We've received everything that we've granted, so we
-			 * shouldn't expect to hear anything until we grant
-			 * more.
-			 */
-			rpc->silent_ticks = 0;
-			return 0;
-		}
-		if (rpc->silent_ticks >= homa->rpc_discard_ticks) {
-			INC_METRIC(server_rpc_discards, 1);
-			tt_record2("discarding server RPC: peer 0x%x, id %d",
-					ntohl(rpc->peer->addr), rpc->id);
-			if (rpc->hsk->homa->verbose)
-				printk(KERN_NOTICE "Homa server discarding "
-						"RPC, client %s:%d, id %llu",
-						homa_print_ipv4_addr(
-							rpc->peer->addr),
-						rpc->dport, rpc->id);
-			return 1;
-		}
-
-		/* Don't send RESENDs in RPC_OUTGOING state: it's up to the
-		 * client to handle this.
-		 */
-		if (rpc->state != RPC_INCOMING)
-			return 0;
+		rpc->peer->outstanding_resends = 0;
+		return 1;
 	}
 	
 	/* Resends serve two purposes: to force retransmission of lost packets,
@@ -209,12 +171,8 @@ void homa_timer(struct homa *homa)
 				continue;
 			}
 			rpc->silent_ticks++;
-			if (homa_check_timeout(rpc)) {
-				if (rpc->is_client)
-					dead_peer = rpc->peer;
-				else
-					homa_rpc_free(rpc);
-			}
+			if (homa_check_timeout(rpc))
+				dead_peer = rpc->peer;
 			homa_rpc_unlock(rpc);
 			rpc_count++;
 			if (rpc_count >= 10) {

@@ -106,7 +106,6 @@ int homa_init(struct homa *homa)
 	homa->resend_ticks = 2;
 	homa->resend_interval = 5;
 	homa->timeout_resends = 10;
-	homa->rpc_discard_ticks = 50;
 	homa->reap_limit = 10;
 	homa->max_dead_buffs = 10000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
@@ -499,6 +498,26 @@ release:
 	}
 	tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
 	return result;
+}
+
+/**
+ * homa_rpc_send_offset() - Return the offset of the first unsent byte of a
+ * message.
+ * @rpc:      RPC whose msgout will be examined.
+ * 
+ * Return:    The first unsent byte for rpc->msgout (0 if the msgout
+ *            hasn't been initialized, message length if all bytes have been
+ *            sent).
+ */
+int homa_rpc_send_offset(struct homa_rpc *rpc)
+{
+	struct sk_buff *pkt = rpc->msgout.next_packet;
+	
+	if (rpc->msgout.length < 0)
+		return 0;
+	if (!pkt)
+		return rpc->msgout.length;
+	return homa_data_offset(pkt);
 }
 
 /**
@@ -1246,9 +1265,9 @@ char *homa_print_metrics(struct homa *homa)
 				"RPCs restarted because server discarded state\n",
 				m->restarted_rpcs);
 		homa_append_metric(homa,
-				"client_peer_timeouts      %15llu  "
-				"Nonresponsive servers detected by clients\n",
-				m->client_peer_timeouts);
+				"peer_timeouts             %15llu  "
+				"Peers found to be nonresponsive\n",
+				m->peer_timeouts);
 		homa_append_metric(homa,
 				"server_rpc_discards       %15llu  "
 				"RPCs aborted by server because of timeouts\n",

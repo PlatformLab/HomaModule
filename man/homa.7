@@ -287,17 +287,6 @@ will just make the problem
 worse. It's unlikely that multiple packets get lost in a short time
 interval, so it's OK to pay extra time if that's what really happened.
 .TP
-.IR rpc_discard_ticks
-If this much time elapses on a server without receiving any packets
-related to an RPC from the client, then the server assumes that the client
-no longer cares about the RPC, and the server discards its state. This
-is in units of "ticks" (see 
-.I resend_ticks
-above). This value should be chosen in conjunction with
-.I resend_ticks
-and
-.IR resend_interval .
-.TP
 .IR rtt_bytes
 An integer value specifying the worst-case round-trip latency (assuming
 unloaded servers and network) between this host and any other host with

@@ -330,7 +330,10 @@ struct resend_header {
 	
 	/**
 	 * @length: Number of bytes of data to retransmit; this could specify
-	 * a range longer than the total message size.
+	 * a range longer than the total message size. Zero is a special case
+	 * used by servers; in this case, there is no need to actually resend
+	 * anything; the purpose of this packet is to trigger an UNKNOWN
+	 * response if the client no longer cares about this RPC.
 	 */
 	__be32 length;
 	
@@ -1386,13 +1389,6 @@ struct homa {
 	int timeout_resends;
 	
 	/**
-	 * @rpc_discard_ticks: The server will discard an RPC from a client
-	 * if this many homa timer ticks go by with no packets from the
-	 * client.
-	 */
-	int rpc_discard_ticks;
-	
-	/**
 	 * @reap_limit: Maximum number of packet buffers to free in a
 	 * single call to home_rpc_reap.
 	 */
@@ -1836,11 +1832,11 @@ struct homa_metrics {
 	__u64 restarted_rpcs;
 
 	/**
-	 * @client_peer_timeouts: total number of times a client aborted all
-	 * RPCs to a server because the server was non-responsive.
+	 * @peer_timeouts: total number of times a peer (either client or
+	 * server) was found to be nonresponsive, resulting in RPC aborts.
 	 */
 	
-	__u64 client_peer_timeouts;
+	__u64 peer_timeouts;
 
 	/**
 	 * @server_rpc_discards: total number of times an RPC was aborted on
@@ -2342,6 +2338,7 @@ extern struct homa_rpc
 			struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_rpc_reap(struct homa_sock *hsk);
+extern int      homa_rpc_send_offset(struct homa_rpc *rpc);
 extern void     homa_send_grants(struct homa *homa);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,

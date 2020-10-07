@@ -417,6 +417,32 @@ TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
 }
 
+TEST_F(homa_utils, homa_rpc_send_offset__no_msgout)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+			41, 10000, 100);
+	EXPECT_EQ(0, homa_rpc_send_offset(srpc));
+}
+TEST_F(homa_utils, homa_rpc_send_offset__msgout_fully_transmitted)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 200);
+	EXPECT_EQ(5000, homa_rpc_send_offset(crpc));
+}
+TEST_F(homa_utils, homa_rpc_send_offset__msgout_partly_transmitted)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 10000, 200);
+	EXPECT_EQ(0, homa_rpc_send_offset(crpc));
+	crpc->msgout.next_packet = *homa_next_skb(crpc->msgout.next_packet);
+	EXPECT_EQ(1400, homa_rpc_send_offset(crpc));
+	crpc->msgout.next_packet = *homa_next_skb(crpc->msgout.next_packet);
+	EXPECT_EQ(2800, homa_rpc_send_offset(crpc));
+}
+
 TEST_F(homa_utils, homa_find_client_rpc)
 {
 	atomic64_set(&self->homa.next_outgoing_id, 3);

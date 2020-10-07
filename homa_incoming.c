@@ -209,6 +209,11 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	
 	missing_bytes = msgin->bytes_remaining
 			- (msgin->total_length - msgin->incoming);
+	if (missing_bytes == 0) {
+		resend->offset = 0;
+		resend->length = 0;
+		return;
+	}
 	end_offset = msgin->incoming;
 	
 	/* Basic idea: walk backwards through the message's packets until
@@ -993,7 +998,7 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
 }
 
 /**
- * homa_abort_rpcs() - Abort client RPCs for a particular destination.
+ * homa_abort_rpcs() - Abort all RPCs to/from a particular peer.
  * @homa:    Overall data about the Homa protocol implementation.
  * @addr:    Address (network order) of the destination whose RPCs are
  *           to be aborted.
@@ -1031,6 +1036,13 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 			}
 			if (rpc->is_client) {
 				homa_rpc_abort(rpc, error);
+			} else {
+				INC_METRIC(server_rpc_discards, 1);
+				tt_record2("discarding server RPC: peer 0x%x, "
+						"id %d",
+						ntohl(rpc->peer->addr),
+						rpc->id);
+				homa_rpc_free(rpc);
 			}
 			homa_rpc_unlock(rpc);
 		}

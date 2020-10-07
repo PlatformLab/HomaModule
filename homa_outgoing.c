@@ -550,6 +550,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 {
 	struct sk_buff *skb;
 	
+	if (end <= start)
+		return;
+	
 	/* The nested loop below scans each data_segment in each
 	 * packet, looking for those that overlap the range of
 	 * interest.

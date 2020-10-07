@@ -602,6 +602,12 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	mock_xmit_log_verbose = 0;
+	homa_resend_data(crpc, 1500, 1500, 3);
+	EXPECT_STREQ("", unit_log_get());
+	
+	unit_log_clear();
+	mock_clear_xmit_prios();
+	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 2800, 4200, 3);
 	EXPECT_STREQ("xmit DATA retrans 1400@2800", unit_log_get());
 	EXPECT_STREQ("3", mock_xmit_prios);
