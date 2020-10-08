@@ -2,6 +2,13 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (October 2020) NIC queue estimation. Experimented with how much to
+  underestimate network bandwidth. Answer: not much! The existing 5% margin
+  of safety leaves bandwidth on the table, which impacts tail latency for
+  large messages. Reduced it to 1%, which seems to be better across the
+  board. However, the tests were done with only 1 priority: need to recheck
+  when priorities are available again.
+
 * (July 2020) P10 under load. Although Homa can provide 13.5 us RTTs under
   best-case conditions, this almost never occurs in practice. Even at low
   loads, the "best case" (P10) is more like 25-30 us. I analyzed a bunch

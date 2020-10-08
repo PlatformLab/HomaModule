@@ -633,7 +633,7 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 	 * overflow under expected usage patterns. Be careful when changing!
 	 */
 	homa->cycles_per_kbyte = (8*(__u64) cpu_khz)/homa->link_mbps;
-	homa->cycles_per_kbyte = (105*homa->cycles_per_kbyte)/100;
+	homa->cycles_per_kbyte = (101*homa->cycles_per_kbyte)/100;
 	tmp = homa->max_nic_queue_ns;
 	tmp = (tmp*cpu_khz)/1000000;
 	homa->max_nic_queue_cycles = tmp;
