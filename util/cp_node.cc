@@ -1492,7 +1492,7 @@ client::client(int id)
         , total_rtt(0)
         , lag(0)
 {
-	rinfos.resize(2*client_port_max);
+	rinfos.resize(2*client_port_max + 5);
 	
 	/* Precompute information about the requests this client will
 	 * generate. Pick a different prime number for the size of each
@@ -1590,14 +1590,18 @@ int client::get_rinfo()
 		next++;
 		if (next >= static_cast<int>(rinfos.size()))
 			next = 0;
-		if (next == last_rinfo) {
-			log(NORMAL, "FATAL: ran out of rinfos\n");
-			exit(1);
-		}
 		if (!rinfos[next].active) {
 			rinfos[next].active = true;
 			last_rinfo = next;
 			return next;
+		}
+		if (next == last_rinfo) {
+			log(NORMAL, "FATAL: ran out of rinfos (%lu in use, "
+					"total_requests %ld, "
+					"total_responses %ld, last_rinfo %d)\n",
+					rinfos.size(), total_requests,
+				        total_responses.load(), last_rinfo);
+			exit(1);
 		}
 	}
 }
