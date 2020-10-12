@@ -79,7 +79,7 @@ int homa_check_timeout(struct homa_rpc *rpc)
 		rpc->peer->outstanding_resends = 0;
 		return 1;
 	}
-	
+
 	/* Resends serve two purposes: to force retransmission of lost packets,
 	 * and to detect if servers have crashed. We only send one resend to
 	 * a given peer at a time: if many RPCs need resends to the same peer,
