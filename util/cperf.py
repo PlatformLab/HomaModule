@@ -605,9 +605,10 @@ def run_experiment(name, clients, options):
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
-        time.sleep(2)
-        # do_cmd("debug 5000000 7000000", clients);
-        time.sleep(options.seconds - 2)
+        debug_delay = 0
+        # time.sleep(debug_delay)
+        # do_cmd("debug 240000000 480000000", clients);
+        time.sleep(options.seconds - debug_delay)
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
@@ -621,6 +622,8 @@ def run_experiment(name, clients, options):
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
                 "%s/reports/%s.metrics" % (options.log_dir, name))
     do_cmd("stop senders", clients)
+    # if "homa" in name:
+        # do_cmd("tt print cp.tt", clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=1"], clients)
@@ -987,7 +990,8 @@ def get_digest(experiment):
     return digest
 
 def start_slowdown_plot(title, max_y, x_experiment, size=10,
-        show_top_label=True, show_bot_label=True, figsize=[6,4]):
+        show_top_label=True, show_bot_label=True, figsize=[6,4],
+        y_label="Slowdown"):
     """
     Create a pyplot graph that will be used for slowdown data. Returns the
     Axes object for the plot.
@@ -1001,6 +1005,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     show_top_label:  True means display title text for upper x-axis
     show_bot_label:  True means display title text for lower x-axis
     figsize:         Dimensions of plot
+    y_label:         Label for the y-axis
     """
 
     fig = plt.figure(figsize=figsize)
@@ -1022,7 +1027,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.set_yticklabels(labels, size=size)
     if show_bot_label:
         ax.set_xlabel("Message Length", size=size)
-    ax.set_ylabel("Slowdown", size=size)
+    ax.set_ylabel(y_label, size=size)
     ax.grid(which="major", axis="y")
 
     top_axis = ax.twiny()
@@ -1184,6 +1189,7 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
         plt.title(title, size=size)
     plt.axis()
     plt.xscale("log")
+    ax = plt.gca()
 
     # Round out the x-axis limits to even powers of 10.
     exp = math.floor(math.log(min_x , 10))
@@ -1191,6 +1197,12 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     exp = math.ceil(math.log(max_x, 10))
     max_x = 10**exp
     plt.xlim(min_x, max_x)
+    ticks = []
+    tick = min_x
+    while tick <= max_x:
+        ticks.append(tick)
+        tick = tick*10
+    plt.xticks(ticks)
     plt.tick_params(top=True, which="both", direction="in", labelsize=size,
             length=5)
 
