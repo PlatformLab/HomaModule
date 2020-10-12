@@ -1597,6 +1597,46 @@ TEST_F(homa_incoming, homa_send_grants__MAX_GRANTS_exceeded)
 	EXPECT_STREQ("xmit GRANT 11400@3; xmit GRANT 11400@2; "
 			"xmit GRANT 11400@1", unit_log_get());
 }
+TEST_F(homa_incoming, homa_send_grants__grant_fifo)
+{
+	struct homa_rpc *srpc1;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 3;
+	self->homa.grant_fifo_fraction = 100;
+	self->homa.grant_nonfifo_left = 6000;
+	self->homa.grant_nonfifo = 10000;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	EXPECT_NE(NULL, srpc1);
+	EXPECT_EQ(10000, srpc1->msgin.incoming);
+	
+	/* First call: not time for FIFO grants yet. */
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 15000@0", unit_log_get());
+	EXPECT_EQ(15000, srpc1->msgin.incoming);
+	EXPECT_EQ(1000, self->homa.grant_nonfifo_left);
+	
+	/* Second call: time for a FIFO grant. */
+	unit_log_clear();
+	srpc1->msgin.incoming = 5000;
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 16400@3; xmit GRANT 11400@0", unit_log_get());
+	EXPECT_EQ(16400, srpc1->msgin.incoming);
+	EXPECT_EQ(4600, self->homa.grant_nonfifo_left);
+	
+	/* Third call: time for a FIFO grant, but FIFO fraction is zero. */
+	unit_log_clear();
+	srpc1->msgin.incoming = 5000;
+	self->homa.grant_nonfifo_left = 1000;
+	self->homa.grant_fifo_fraction = 0;
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
+	EXPECT_EQ(11400, srpc1->msgin.incoming);
+	EXPECT_EQ(4600, self->homa.grant_nonfifo_left);
+}
 TEST_F(homa_incoming, homa_send_grants__grant_after_rpc_deleted)
 {
 	self->homa.rtt_bytes = 10000;
@@ -1621,6 +1661,107 @@ TEST_F(homa_incoming, homa_send_grants__grant_after_rpc_deleted)
 	homa_rpc_free(srpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; xmit GRANT 11400@2",
 			unit_log_get());
+}
+
+TEST_F(homa_incoming, homa_grant_fifo__basics)
+{
+	struct homa_rpc *srpc;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 40000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 3, 20000, 100);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_EQ(10000, srpc->msgin.incoming);
+	
+	unit_log_clear();
+	homa_grant_fifo(&self->homa);
+	EXPECT_STREQ("xmit GRANT 15000@2", unit_log_get());
+	EXPECT_EQ(15000, srpc->msgin.incoming);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.fifo_grants);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.fifo_grants_no_incoming);
+}
+TEST_F(homa_incoming, homa_grant_fifo__pity_grant_still_active)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 40000, 100);
+	srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 3, 20000, 100);
+	EXPECT_NE(NULL, srpc1);
+	EXPECT_NE(NULL, srpc2);
+	srpc1->msgin.incoming = 16400;
+	
+	unit_log_clear();
+	homa_grant_fifo(&self->homa);
+	EXPECT_STREQ("xmit GRANT 15000@2", unit_log_get());
+	EXPECT_EQ(16400, srpc1->msgin.incoming);
+	EXPECT_EQ(15000, srpc2->msgin.incoming);
+}
+TEST_F(homa_incoming, homa_grant_fifo__no_good_candidates)
+{
+	struct homa_rpc *srpc1;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 40000, 100);
+	EXPECT_NE(NULL, srpc1);
+	srpc1->msgin.incoming = 16400;
+	
+	unit_log_clear();
+	homa_grant_fifo(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(16400, srpc1->msgin.incoming);
+}
+TEST_F(homa_incoming, homa_grant_fifo__increment_fifo_grants_no_incoming)
+{
+	struct homa_rpc *srpc1;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 40000, 100);
+	EXPECT_NE(NULL, srpc1);
+	srpc1->msgin.incoming = 1400;
+	
+	unit_log_clear();
+	homa_grant_fifo(&self->homa);
+	EXPECT_STREQ("xmit GRANT 6400@2", unit_log_get());
+	EXPECT_EQ(6400, srpc1->msgin.incoming);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.fifo_grants_no_incoming);
+}
+TEST_F(homa_incoming, homa_grant_fifo__remove_from_grantable)
+{
+	struct homa_rpc *srpc1;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 15000, 100);
+	EXPECT_NE(NULL, srpc1);
+	
+	unit_log_clear();
+	homa_grant_fifo(&self->homa);
+	EXPECT_STREQ("xmit GRANT 15000@2", unit_log_get());
+	EXPECT_EQ(15000, srpc1->msgin.incoming);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_remove_grantable_locked__basics)
@@ -2339,10 +2480,29 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_requests)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
 }
 
-TEST_F(homa_incoming, homa_incoming_sysctl_changed)
+TEST_F(homa_incoming, homa_incoming_sysctl_changed__grant_nonfifo)
 {
 	cpu_khz = 2000000;
 	self->homa.poll_usecs = 40;
 	homa_incoming_sysctl_changed(&self->homa);
 	EXPECT_EQ(80000, self->homa.poll_cycles);
+}
+TEST_F(homa_incoming, homa_incoming_sysctl_changed__poll_cycles)
+{
+	self->homa.grant_increment = 10000;
+	self->homa.grant_fifo_fraction = 0;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(0, self->homa.grant_nonfifo);
+	
+	self->homa.grant_fifo_fraction = 100;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(90000, self->homa.grant_nonfifo);
+	
+	self->homa.grant_fifo_fraction = 500;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(10000, self->homa.grant_nonfifo);
+	
+	self->homa.grant_fifo_fraction = 2000;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(10000, self->homa.grant_nonfifo);
 }

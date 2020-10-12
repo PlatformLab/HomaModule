@@ -62,11 +62,15 @@ int homa_init(struct homa *homa)
 	
 	homa->pacer_kthread = NULL;
 	atomic64_set(&homa->next_outgoing_id, 1);
-	atomic_set(&homa->pacer_active, 0);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	homa->num_grantable_peers = 0;
+	homa->grant_nonfifo = 0;
+	homa->grant_nonfifo_left = 0;
+	atomic_set(&homa->pacer_active, 0);
+	homa->pacer_fifo_fraction = 0;
+	homa->pacer_fifo_count = 1;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
 	homa->throttle_min_bytes = 1000;
@@ -101,6 +105,7 @@ int homa_init(struct homa *homa)
 	homa->cutoff_version = 1;
 #endif
 	homa->grant_increment = 0;
+	homa->grant_fifo_fraction = 0;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
 	homa->resend_ticks = 2;
@@ -425,8 +430,8 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	/* Collect buffers and freeable RPCs until either we hit our limit
 	 * or run out of RPCs.
 	 */
-	tt_record2("Starting homa_rpc_reap, dead_skbs %d, port %d",
-			hsk->dead_skbs, hsk->client_port);
+//	tt_record2("Starting homa_rpc_reap, dead_skbs %d, port %d",
+//			hsk->dead_skbs, hsk->client_port);
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 		if (rpc->dont_reap || (atomic_read(&rpc->grants_in_progress)
 				!= 0)) {
@@ -1346,6 +1351,15 @@ char *homa_print_metrics(struct homa *homa)
 				"List elements checked in "
 				"homa_add_to_throttled\n",
 				m->throttle_list_checks);
+		homa_append_metric(homa,
+				"fifo_grants               %15llu  "
+				"Grants issued using FIFO priority\n",
+				m->fifo_grants);
+		homa_append_metric(homa,
+				"fifo_grants_no_incoming   %15llu  "
+				"FIFO grants to messages with no "
+				"outstanding grants\n",
+				m->fifo_grants_no_incoming);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

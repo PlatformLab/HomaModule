@@ -660,6 +660,7 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 		/* Message not yet tracked; add it in priority order to
 		 * the peer's list.
 		 */
+		rpc->msgin.birth = get_cycles();
 		list_for_each_entry(candidate, &peer->grantable_rpcs,
 				grantable_links) {
 			if (candidate->msgin.bytes_remaining
@@ -775,6 +776,7 @@ void homa_send_grants(struct homa *homa)
 			grantable_links) {
 		int extra_levels, priority;
 		int received, new_grant, on_the_way;
+		int old_incoming;
 		struct grant_header *grant;
 
 		rank++;
@@ -790,7 +792,8 @@ void homa_send_grants(struct homa *homa)
 		available -= on_the_way;
 		if (on_the_way >= homa->rtt_bytes)
 			continue;
-		new_grant = candidate->msgin.incoming + homa->grant_increment;
+		old_incoming = candidate->msgin.incoming;
+		new_grant = old_incoming + homa->grant_increment;
 		if ((received + homa->rtt_bytes) > new_grant)
 			new_grant = received + homa->rtt_bytes;
 		if (new_grant > candidate->msgin.total_length)
@@ -809,6 +812,7 @@ void homa_send_grants(struct homa *homa)
 		
 		/* Send a grant for this message. */
 		candidate->msgin.incoming = new_grant;
+		homa->grant_nonfifo_left -= (new_grant - old_incoming);
 		atomic_inc(&candidate->grants_in_progress);
 		rpcs[num_grants] = candidate;
 		grant = &grants[num_grants];
@@ -836,6 +840,12 @@ void homa_send_grants(struct homa *homa)
 			break;
 	}
 	
+	if (homa->grant_nonfifo_left <= 0) {
+		homa->grant_nonfifo_left += homa->grant_nonfifo;
+		if (homa->grant_fifo_fraction)
+			homa_grant_fifo(homa);
+	}
+	
 	homa_grantable_unlock(homa);
 	
 	/* By sending grants without holding grantable_lock here, we reduce
@@ -851,6 +861,73 @@ void homa_send_grants(struct homa *homa)
 		atomic_dec(&rpcs[i]->grants_in_progress);
 	}
 	INC_METRIC(grant_cycles, get_cycles() - start);
+}
+
+/**
+ * homa_grant_fifo() - This function is invoked occasionally to give
+ * a high-priority grant to the oldest incoming message. We do this in
+ * order to reduce the starvation that SRPT can cause for long messages.
+ * @homa:    Overall data about the Homa protocol implementation. The
+ *           grantable_lock must be held by the caller.
+ */
+void homa_grant_fifo(struct homa *homa)
+{
+	struct homa_rpc *candidate, *oldest;
+	__u64 oldest_birth;
+	struct homa_peer *peer;
+	struct grant_header grant;
+	
+	oldest = NULL;
+	oldest_birth = ~0;
+	
+	/* Find the oldest message that doesn't currently have an
+	 * outstanding "pity grant".
+	 */
+	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
+		list_for_each_entry(candidate, &peer->grantable_rpcs,
+				grantable_links) {
+			int received, on_the_way;
+			
+			if (candidate->msgin.birth >= oldest_birth)
+				continue;
+			
+			received = (candidate->msgin.total_length
+					- candidate->msgin.bytes_remaining);
+			on_the_way = candidate->msgin.incoming - received;
+			if (on_the_way >= (homa->rtt_bytes
+					+ homa->grant_increment)) {
+				/* The last "pity" grant hasn't been used
+				 * up yet.
+				 */
+				continue;
+			}
+			oldest = candidate;
+			oldest_birth = candidate->msgin.birth;
+		}
+	}
+	if (oldest == NULL)
+		return;
+	INC_METRIC(fifo_grants, 1);
+	if ((oldest->msgin.total_length - oldest->msgin.bytes_remaining)
+			== oldest->msgin.incoming)
+		INC_METRIC(fifo_grants_no_incoming, 1);
+	
+	oldest->silent_ticks = 0;
+	oldest->msgin.incoming += homa->grant_increment;
+	if (oldest->msgin.incoming >= oldest->msgin.total_length) {
+		oldest->msgin.incoming = oldest->msgin.total_length;
+		oldest->msgin.extra_incoming =
+				oldest->msgin.bytes_remaining;
+		atomic_add(oldest->msgin.extra_incoming,
+				&homa->extra_incoming);
+		homa_remove_grantable_locked(homa, oldest);
+	}
+	grant.offset = htonl(oldest->msgin.incoming);
+	grant.priority = homa->max_sched_prio;
+	tt_record3("sending fifo grant for id %llu, offset %d, priority %d",
+			oldest->id, oldest->msgin.incoming,
+			homa->max_sched_prio);
+	homa_xmit_control(GRANT, &grant, sizeof(grant), oldest);
 }
 
 /**
@@ -1402,6 +1479,13 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	__u64 tmp;
 	
 	homa->max_incoming = homa->max_overcommit * homa->rtt_bytes;
+	
+	if (homa->grant_fifo_fraction > 500)
+		homa->grant_fifo_fraction = 500;
+	tmp = homa->grant_fifo_fraction;
+	if (tmp != 0)
+		tmp = (1000*homa->grant_increment)/tmp - homa->grant_increment;
+	homa->grant_nonfifo = tmp;
 		
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!

@@ -143,15 +143,6 @@ enum homa_packet_type {
 #define CACHE_LINE_SIZE 64
 
 /**
- * define CACHE_LINE - Declare a variable with a given name and type,
- * followed by enough white space to fill out a cache line. Used to ensure
- * that synchronization variables are on private cache lines, to reduce
- * cache consistency overheads.
- */
-#define CACHE_LINE(type, name) \
-	type name; char name##_spacer[CACHE_LINE_SIZE - sizeof(type)]
-
-/**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet. This must partially match the format of a TCP header so that
  * Homa can piggyback on TCP segmentation offload (and possibly other
@@ -465,6 +456,12 @@ struct homa_message_out {
 	
 	/** @priority: Priority level to use for future scheduled packets. */
 	__u8 sched_priority;
+	
+	/**
+	 * @init_cycles: Time in get_cycles units when this structure was
+	 * initialized.  Used to find the oldest outgoing message.
+	 */
+	__u64 init_cycles;
 };
 
 /**
@@ -531,6 +528,12 @@ struct homa_message_in {
 	 * lock) when cleaning up the RPC.
 	 */
 	bool possibly_in_grant_queue;
+	
+	/**
+	 * @birth: get_cycles time when this RPC was added to the grantable
+	 * list. Invalid if RPC isn't in the grantable list.
+	 */
+	__u64 birth;
 };
 
 /**
@@ -1173,13 +1176,7 @@ struct homa {
 	/** @next_outgoing_id: Id to use for next outgoing RPC request.
 	 * Accessed without locks.
 	 */
-	CACHE_LINE(atomic64_t, next_outgoing_id);
-	
-	/**
-	 * @pacer_active: synchronization variable: 1 means an instance
-	 * of homa_pacer_xmit is already running, 0 means not.
-	 */
-	CACHE_LINE(atomic_t, pacer_active);
+	atomic64_t next_outgoing_id;
 	
 	/**
 	 * @link_idle_time: The time, measured by get_cycles() at which we
@@ -1189,13 +1186,13 @@ struct homa {
 	 * it could be a severe underestimate if there is competing traffic 
 	 * from, say, TCP. Access only with atomic ops.
 	 */
-	CACHE_LINE(atomic64_t, link_idle_time);
+	atomic64_t link_idle_time __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @grantable_lock: Used to synchronize access to @grantable_peers and
 	 * @num_grantable_peers.
 	 */
-	struct spinlock grantable_lock;
+	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @grantable_peers: Contains all homa_peers for which there are
@@ -1210,11 +1207,36 @@ struct homa {
 	int num_grantable_peers;
 	
 	/**
-	 * @spacer1: make sure variables above don't share a cache line
-	 * with variables below.
+	 * @grant_nonfifo: How many bytes should be granted using the
+	 * normal priority system between grants to the oldest message.
 	 */
-	char spacer1[CACHE_LINE_SIZE - sizeof(struct spinlock)
-			- sizeof(struct list_head) - sizeof(int)];
+	int grant_nonfifo;
+	
+	/**
+	 * @grant_nonfifo_left: Counts down bytes using the normal
+	 * priority mechanism. When this reaches zero, it's time to grant
+	 * to the old message.
+	 */
+	int grant_nonfifo_left;
+	
+	/**
+	 * @pacer_active: Synchronization variable: 1 means an instance
+	 * of homa_pacer_xmit is already running, 0 means not.
+	 */
+	atomic_t pacer_active __attribute__((aligned(CACHE_LINE_SIZE)));
+	
+	/**
+	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when
+	 * the pacer should transmit next from the oldest message, rather
+	 * than the highest-priority message. Set externally via sysctl.
+	 */
+	int pacer_fifo_fraction;
+	
+	/**
+	 * @pacer_fifo_count: When this becomes <= zero, it's time for the
+	 * pacer to allow the oldest RPC to transmit.
+	 */
+	int pacer_fifo_count;
 	
 	/**
 	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
@@ -1244,19 +1266,12 @@ struct homa {
 	int throttle_min_bytes;
 	
 	/**
-	 * @spacer2: make sure variables above don't share a cache line
-	 * with variables below.
-	 */
-	char spacer2[CACHE_LINE_SIZE - sizeof(struct spinlock)
-			- sizeof(struct list_head) - sizeof(int)];
-	
-	/**
 	 * @extra_incoming: sum of all the @extra_incoming fields in all
 	 * homa_message_in structures. This is an upper bound on the
 	 * amount of switch buffer space that could be occupied by RPCs
 	 * not in @grantable_peers. 
 	 */
-	CACHE_LINE(atomic_t, extra_incoming);
+	atomic_t extra_incoming __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @next_client_port: A client port number to consider for the
@@ -1264,13 +1279,12 @@ struct homa {
 	 * be in the range allocated for servers; must check before using.
 	 * This port may also be in use already; must check.
 	 */
-	__u16 next_client_port;
+	__u16 next_client_port __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
-	 * @port_map: Information about all open sockets; indexed by
-	 * port number.
+	 * @port_map: Information about all open sockets.
 	 */
-	struct homa_socktab port_map;
+	struct homa_socktab port_map __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @peertab: Info about all the other hosts we have communicated
@@ -1352,10 +1366,18 @@ struct homa {
 	int cutoff_version;
 	
 	/**
-	 * @grant_increment: each grant sent by a Homa receiver will allow
-	 * this many additional bytes to be sent by the receiver.
+	 * @grant_increment: Each grant sent by a Homa receiver will allow
+	 * this many additional bytes to be sent by the receiver. Set
+	 * externally via sysctl.
 	 */
 	int grant_increment;
+	
+	/**
+	 * @grant_fifo_fraction: The fraction (in thousandths) of granted
+	 * bytes that should go to the *oldest* incoming message, rather
+	 * than the highest priority ones. Set externally via sysctl.
+	 */
+	int grant_fifo_fraction;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
@@ -1943,15 +1965,28 @@ struct homa_metrics {
 	__u64 reap_too_many_dead;
 	
 	/**
-	 * @throttle_list_adds: Total number of calls to homa_add_to_throttled.
+	 * @throttle_list_adds: total number of calls to homa_add_to_throttled.
 	 */
 	__u64 throttle_list_adds;
 	
 	/**
-	 * @throttle_list_checks: Number of list elements examined in
+	 * @throttle_list_checks: number of list elements examined in
 	 * calls to homa_add_to_throttled.
 	 */
 	__u64 throttle_list_checks;
+	
+	/**
+	 * @fifo_grants: total number of times that grants were sent to
+	 * the oldest message.
+	 */
+	__u64 fifo_grants;
+	
+	/**
+	 * @fifo_grants_no_incoming: total number of times that, when a
+	 * FIFO grant was issued, the message had no outstanding grants
+	 * (everything granted had been received).
+	 */
+	__u64 fifo_grants_no_incoming;
 	
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
@@ -2259,6 +2294,7 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
 			struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 			char __user *optval, int __user *option);
+extern void     homa_grant_fifo(struct homa *homa);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff

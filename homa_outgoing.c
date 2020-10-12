@@ -204,6 +204,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 	if (rpc->msgout.granted > rpc->msgout.length)
 		rpc->msgout.granted = rpc->msgout.length;
 	rpc->msgout.sched_priority = 0;
+	rpc->msgout.init_cycles = get_cycles();
 	
 	/* Must scan the packets to fill in header fields that weren't
 	 * known when the packets were allocated.
@@ -797,8 +798,23 @@ void homa_pacer_xmit(struct homa *homa)
 		 * it keeps the RPC from being deleted before it can be locked.
 		 */
 		homa_throttle_lock(homa);
-		rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
-				struct homa_rpc, throttled_links);
+		homa->pacer_fifo_count -= homa->pacer_fifo_fraction;
+		if (homa->pacer_fifo_count <= 0) {
+			__u64 oldest = ~0;
+			struct homa_rpc *cur;
+			
+			homa->pacer_fifo_count += 1000;
+			rpc = NULL;
+			list_for_each_entry_rcu(cur, &homa->throttled_rpcs,
+					throttled_links) {
+				if (cur->msgout.init_cycles < oldest) {
+					rpc = cur;
+					oldest = cur->msgout.init_cycles;
+				}
+			}
+		} else
+			rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
+					struct homa_rpc, throttled_links);
 		if (rpc == NULL) {
 			homa_throttle_unlock(homa);
 			break;
@@ -824,6 +840,9 @@ void homa_pacer_xmit(struct homa *homa)
 			 */
 			homa_throttle_lock(homa);
 			if (!list_empty(&rpc->throttled_links)) {
+				tt_record2("pacer removing id %d from "
+						"throttled list, offset %d",
+						rpc->id, offset);
 				list_del_rcu(&rpc->throttled_links);
 
 				/* Note: this reinitialization is only safe

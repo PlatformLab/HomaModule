@@ -163,6 +163,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "grant_fifo_fraction",
+		.data		= &homa_data.grant_fifo_fraction,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "grant_increment",
 		.data		= &homa_data.grant_increment,
 		.maxlen		= sizeof(int),
@@ -186,6 +193,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "log_topic",
 		.data		= &log_topic,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "pacer_fifo_fraction",
+		.data		= &homa_data.pacer_fifo_fraction,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -679,11 +693,11 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	tt_record4("homa_ioc_send starting, target 0x%x:%d, id %u, pid %d",
+	tt_record4("homa_ioc_send starting, target 0x%x:%d, id %u, length %d",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
 			atomic64_read(&hsk->homa->next_outgoing_id),
-			current->pid);
+			args.reqlen);
 	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto error;
