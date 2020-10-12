@@ -91,7 +91,8 @@ std::mt19937 rand_gen(
 struct conn_id {
 	/**
 	 * @client_port: the index (starting at 0) of the port within
-	 * the client (corresponds to a particular sending thread). 
+	 * the client (corresponds to a particular sending thread).
+	 * This will be the low byte returned by int().
 	 */
 	uint8_t client_port;
 	
@@ -948,7 +949,7 @@ homa_server::~homa_server()
  */
 void homa_server::server(void)
 {
-	int *message = reinterpret_cast<int *>(buffer);
+	message_header *header = reinterpret_cast<message_header *>(buffer);
 	struct sockaddr_in source;
 	int length;
 	char thread_name[50];
@@ -960,7 +961,7 @@ void homa_server::server(void)
 		int result;
 		
 		while (1) {
-			length = homa_recv(fd, message, HOMA_MAX_MESSAGE_LENGTH,
+			length = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_REQUEST, (struct sockaddr *) &source,
 				sizeof(source), &id);
 			if (length >= 0)
@@ -971,8 +972,18 @@ void homa_server::server(void)
 				log(NORMAL, "homa_recv failed: %s\n",
 						strerror(errno));
 		}
+		tt("Received Homa request, cid 0x%08x, id %u, length %d",
+				header->cid, header->msg_id, header->length);
+		if ((header->freeze) && !time_trace::frozen) {
+			tt("Freezing timetrace because of request on "
+					"cid 0x%08x", header->cid);
+			log(NORMAL, "Freezing timetrace because of request on "
+					"cid 0x%08x", int(header->cid));
+			time_trace::freeze();
+			kfreeze();
+		}
 
-		result = homa_reply(fd, message, length,
+		result = homa_reply(fd, buffer, length,
 			(struct sockaddr *) &source, sizeof(source), id);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed: %s\n",
@@ -1615,7 +1626,7 @@ void client::record(uint64_t end_time, message_header *header)
 {
 	int server_id;
 	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
-	uint64_t rtt;
+	int64_t rtt;
 	
 	if (header->msg_id >= rinfos.size()) {
 		log(NORMAL, "ERROR: msg_id (%u) exceed rinfos.size (%lu)\n",
@@ -1631,12 +1642,22 @@ void client::record(uint64_t end_time, message_header *header)
 	rtt = end_time - r->start_time;
 	r->active = false;
 	
-	if (rtt > 1000000000) {
-		log(NORMAL, "Very slow RPC: RTT %lu cycles, server %u.%u, "
-			"length %d\n",
-			rtt, header->cid.server, header->cid.server_port,
-			header->length);
+	tt("Received response, cid 0x%08x, id %u, length %d, "
+			"elapsed %d",
+			header->cid, header->msg_id,
+			header->length, rtt);
+	if ((rtt > debug[0]) && (rtt < debug[1]) && !time_trace::frozen) {
+		freeze[header->cid.server] = 1;
+		tt("Freezing timetrace because of long RTT for "
+				"cid 0x%08x, id %u",
+				header->cid, header->msg_id);
+		log(NORMAL, "Freezing timetrace because of long RTT for "
+				"cid 0x%08x, id %u",
+				int(header->cid), header->msg_id);
+		time_trace::freeze();
+		kfreeze();
 	}
+	
 	server_id = first_id[header->cid.server];
 	if (server_id == -1) {
 		log(NORMAL, "WARNING: response received from unknown "
