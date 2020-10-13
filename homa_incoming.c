@@ -534,6 +534,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 				rpc->msgout.granted);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
+		if (ntohl(h->length) == 0) {
+			/* This RESEND is from a server just trying to make
+			 * sure the client still cares about the RPC; return
+			 * BUSY so the server doesn't time us out.
+			 */
+			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+		}
 		homa_resend_data(rpc, ntohl(h->offset),
 				ntohl(h->offset) + ntohl(h->length),
 				h->priority);
