@@ -1519,15 +1519,17 @@ client::client(int id)
 		int server = server_dist(rand_gen);
 		request_servers.push_back(server);
 	}
-	if (!dist_sample(workload, &rand_gen, NUM_LENGTHS, &request_lengths)) {
+	std::vector<dist_point> points = dist_get(workload,
+			HOMA_MAX_MESSAGE_LENGTH);
+	if (points.empty()) {
 		printf("FATAL: invalid workload '%s'\n", workload);
 		exit(1);
 	}
+	dist_sample(points, &rand_gen, NUM_LENGTHS, request_lengths);
 	if (net_bw == 0.0)
 		request_intervals.push_back(0);
 	else {
-		double lambda = 1e09*net_bw/(dist_mean(workload,
-				HOMA_MAX_MESSAGE_LENGTH)*client_ports);
+		double lambda = 1e09*net_bw/(dist_mean(points)*client_ports);
 		double cycles_per_second = get_cycles_per_sec();
 		std::exponential_distribution<double> interval_dist(lambda);
 		for (int i = 0; i < NUM_INTERVALS; i++) {
@@ -1550,8 +1552,7 @@ client::client(int id)
 	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
 	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
 			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
-			avg_length*1e-3, dist_mean(workload,
-			HOMA_MAX_MESSAGE_LENGTH)*1e-3, rate*1e-3,
+			avg_length*1e-3, dist_mean(points)*1e-3, rate*1e-3,
 			avg_length*rate*1e-6);
 	kfreeze_count = 0;
 }
@@ -2003,7 +2004,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 void homa_client::measure_unloaded(int count)
 {
 	std::vector<dist_point> dist = dist_get(workload,
-			HOMA_MAX_MESSAGE_LENGTH, .0025);
+			HOMA_MAX_MESSAGE_LENGTH);
 	int server = request_servers[0];
 	int slot;
 	
@@ -2767,10 +2768,11 @@ int info_cmd(std::vector<string> &words)
 				words[2].c_str());
 		return 0;
 	}
+	std::vector<dist_point> points = dist_get(workload,
+			HOMA_MAX_MESSAGE_LENGTH);
 	printf("Workload %s: mean %.1f bytes, overhead %.3f\n",
-			workload,
-			dist_mean(workload, HOMA_MAX_MESSAGE_LENGTH),
-			dist_overhead(workload, mtu, HOMA_MAX_MESSAGE_LENGTH));
+			workload, dist_mean(points),
+			dist_overhead(points, mtu));
 	return 1;
 }
 

@@ -44,12 +44,14 @@ struct dist_point {
 
 extern std::vector<dist_point>
                 dist_get(const char *dist, int max_length,
-			double min_bucket_frac);
-extern double   dist_mean(const char *dist, int max_length);
+			double min_bucket_frac = .0025,
+			double max_size_range = 1.2);
+extern double   dist_mean(std::vector<dist_point> &points);
 extern int      dist_msg_overhead(int length, int mtu);
-extern double   dist_overhead(const char *dist, int mtu, int max_length);
-extern int      dist_sample(const char *dist, std::mt19937 *rand_gen,
-			int num_samples, std::vector<int> *sizes);
+extern double   dist_overhead(std::vector<dist_point> &points, int mtu);
+extern void     dist_sample(std::vector<dist_point> &points,
+			std::mt19937 *rand_gen, int num_samples,
+			std::vector<int> &sizes);
 
 extern dist_point w1[];
 extern dist_point w2[];
