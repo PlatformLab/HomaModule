@@ -295,13 +295,22 @@ Homa will begin issuing resend requests for an RPC once this many ticks have
 elapsed without receiving expected data from the peer; the exact timing and
 spacing of those requests is determined by
 .IR resend_interval .
-The general
-idea is to send the first resend request relatively quickly, in order to
-minimize the delay caused by lost packets. However, if a peer still doesn't
-respond, it probably means the peer is overloaded; sending a lot of resends
-will just make the problem
-worse. It's unlikely that multiple packets get lost in a short time
-interval, so it's OK to pay extra time if that's what really happened.
+The original plan was to send the first resend request relatively quickly,
+in order to minimize the delay caused by lost packets, then space out
+additional resends to minimize extra work created for an already-overloaded
+peer. However, as of October 2020, small values of
+.IR resend_ticks
+result in fairly frequent RPC restarts.  The problem is that a short message
+can get detoured on the slow path through ksoftirq, so that it takes one or
+more 4 ms time slices before it is processed by Homa. Meantime, with a low
+value of
+.IR resend_ticks ,
+the client issues a RESEND. Since the message has not yet been processed on the
+server, it sends UNKNOWN, causing the client to restart. A larger value of
+.IR
+resend_ticks
+reduces the likelihood of restarts (but doesn't completely eliminate the
+problem).
 .TP
 .IR rtt_bytes
 An integer value specifying the worst-case round-trip latency (assuming

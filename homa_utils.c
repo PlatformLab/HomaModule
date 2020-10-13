@@ -108,9 +108,19 @@ int homa_init(struct homa *homa)
 	homa->grant_fifo_fraction = 0;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
-	homa->resend_ticks = 2;
-	homa->resend_interval = 5;
-	homa->timeout_resends = 10;
+	
+	/* Note: resend_ticks used to be much smaller (about 2 ms), but this
+	 * resulted in fairly frequent RPC restarts.  The problem is that a
+	 * short message can get detoured on the slow path through ksoftirq,
+	 * so that it takes one or more 4ms time slices before it is
+	 * processed. Meantime, with a low value of resend_ticks, the client
+	 * issues a RESEND. Since the message has not yet been processed on the
+	 * server, it sends UNKNOWN, causing the client to restart. This
+	 * larger value eliminates most (but still not all) of the restarts.
+	 */
+	homa->resend_ticks = 15;
+	homa->resend_interval = 10;
+	homa->timeout_resends = 5;
 	homa->reap_limit = 10;
 	homa->max_dead_buffs = 10000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
