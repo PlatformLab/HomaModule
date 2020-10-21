@@ -64,7 +64,9 @@ verbose = False
 # own values.
 default_defaults = {
     'net_bw':              0.0,
-    'client_max':          2000,
+    # Note: very large numbers for client_max hurt Homa throughput with
+    # unlimited load (throttle queue inserts take a long time).
+    'client_max':          200,
     'client_ports':        5,
     'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'mtu':                 0,
