@@ -851,7 +851,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 	homa_add_to_throttled(crpc1);
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	atomic_set(&self->homa.pacer_active, 1);
+	mock_trylock_errors = 1;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
@@ -896,7 +896,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	self->homa.max_nic_queue_cycles = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	mock_trylock_errors = -1;
+	mock_trylock_errors = ~1;
 	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.pacer_skipped_rpcs);
@@ -1024,4 +1024,27 @@ TEST_F(homa_outgoing, homa_add_to_throttled__inc_metrics)
 	homa_add_to_throttled(crpc3);
 	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_adds);
 	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_checks);
+}
+
+TEST_F(homa_outgoing, homa_remove_from_throttled)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, (void *) 1000, 5000);
+	EXPECT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+	
+	homa_add_to_throttled(crpc);
+	EXPECT_FALSE(list_empty(&self->homa.throttled_rpcs));
+	
+	// First attempt will remove.
+	unit_log_clear();
+	homa_remove_from_throttled(crpc);
+	EXPECT_TRUE(list_empty(&self->homa.throttled_rpcs));
+	EXPECT_STREQ("removing id 1 from throttled list", unit_log_get());
+	
+	// Second attempt: nothing to do.
+	unit_log_clear();
+	homa_remove_from_throttled(crpc);
+	EXPECT_TRUE(list_empty(&self->homa.throttled_rpcs));
+	EXPECT_STREQ("", unit_log_get());
 }

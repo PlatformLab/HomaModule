@@ -68,7 +68,7 @@ int homa_init(struct homa *homa)
 	homa->num_grantable_peers = 0;
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
-	atomic_set(&homa->pacer_active, 0);
+	spin_lock_init(&homa->pacer_lock);
 	homa->pacer_fifo_fraction = 0;
 	homa->pacer_fifo_count = 1;
 	spin_lock_init(&homa->throttle_lock);
@@ -386,13 +386,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			rpc->hsk->client_port,
 			rpc->hsk->dead_skbs);
 	homa_sock_unlock(rpc->hsk);
-	
-	if (unlikely(!list_empty(&rpc->throttled_links))) {
-		homa_throttle_lock(rpc->hsk->homa);
-		list_del(&rpc->throttled_links);
-		INIT_LIST_HEAD(&rpc->throttled_links);
-		homa_throttle_unlock(rpc->hsk->homa);
-	}
+	homa_remove_from_throttled(rpc);
 }
 
 /**
@@ -596,20 +590,15 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				- rpc->msgin.bytes_remaining,
 				rpc->msgin.total_length, rpc->msgin.incoming);
 	else if (rpc->state == RPC_OUTGOING) {
-		int offset;
-		if (rpc->msgout.next_packet != NULL) {
-			struct data_header *h = (struct data_header *)
-					rpc->msgout.next_packet->data;
-			offset = ntohl(h->seg.offset);
-		} else
-			offset = rpc->msgout.length;
+		int offset = homa_rpc_send_offset(rpc);
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
-				"generation %d, outgoing length %d, "
-				"granted %d, next xmit offset %d, "
-				"incoming bytes left %d\n",
+				"gen %d, out length %d, "
+				"left %d, granted %d, "
+				"in left %d\n",
 				type, rpc->id, peer, rpc->dport,
 				rpc->generation, rpc->msgout.length,
-				rpc->msgout.granted, offset,
+				rpc->msgout.length - offset,
+				rpc->msgout.granted,
 				rpc->msgin.bytes_remaining);
 	} else
 		printk(KERN_NOTICE "%s RPC %s, id %llu, peer %s:%d, "

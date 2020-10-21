@@ -231,7 +231,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
  * as if no packets had been sent. Data for the message is preserved.
  * @rpc:    RPC whose msgout must be reset. Must be a client RPC that was
  *          successfully initialized in the past, and some packets may have
- *          been transmitted since then.
+ *          been transmitted since then. Must be locked by caller.
  * 
  * Return:  Zero for success, or a negative error status.
  */
@@ -242,6 +242,8 @@ int homa_message_out_reset(struct homa_rpc *rpc)
 	int err = 0;
 	struct homa_message_out *msgout = &rpc->msgout;
 	struct data_header *h;
+	
+	homa_remove_from_throttled(rpc);
 	
 	/* Copy all of the sk_buffs in the message. This is necessary because
 	 * some of the sk_buffs may already have been transmitted once;
@@ -676,9 +678,14 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 		if (((clock + homa->max_nic_queue_cycles) < idle) && !force
 				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
-		if (idle < clock)
+		if (idle < clock) {
+			if (!list_empty(&homa->throttled_rpcs)) {
+				INC_METRIC(pacer_lost_cycles, clock - idle);
+				tt_record1("pacer lost %d cycles",
+						clock - idle);
+			}
 			new_idle = clock + cycles_for_packet;
-		else
+		} else
 			new_idle = idle + cycles_for_packet;
 		
 		/* This method must be thread-safe. */
@@ -745,15 +752,11 @@ void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
         int i;
-	static __u64 gap_start = 0;
-	
-	if (gap_start == 0)
-		gap_start = get_cycles();
 	
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
-	if (atomic_cmpxchg(&homa->pacer_active, 0, 1) != 0)
+	if (!spin_trylock_bh(&homa->pacer_lock))
 		return;
 	
 	/* Each iteration through the following loop sends one packet. We
@@ -768,20 +771,14 @@ void homa_pacer_xmit(struct homa *homa)
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = get_cycles();
 		idle_time = atomic64_read(&homa->link_idle_time);
-		if (now > idle_time) {
-			INC_METRIC(pacer_lost_cycles, now - idle_time);
-			tt_record2("homa_pacer_xmit lost %d cycles (lockout %d)",
-					now - idle_time, now - gap_start);
-		} else {
-			while ((now + homa->max_nic_queue_cycles) < idle_time) {
-				/* If we've xmitted at least one packet then
-				 * return (this helps with testing and also
-				 * allows homa_pacer_main to yield the core).
-				 */
-				if (i != 0)
-					goto done;
-				now = get_cycles();
-			}
+		while ((now + homa->max_nic_queue_cycles) < idle_time) {
+			/* If we've xmitted at least one packet then
+			 * return (this helps with testing and also
+			 * allows homa_pacer_main to yield the core).
+			 */
+			if (i != 0)
+				goto done;
+			now = get_cycles();
 		}
 		/* Note: when we get here, it's possible that the NIC queue is
 		 * still too long because other threads have queued packets,
@@ -863,7 +860,7 @@ void homa_pacer_xmit(struct homa *homa)
 		homa_rpc_unlock(rpc);
 	}
     done:
-	atomic_set(&homa->pacer_active, 0);
+	spin_unlock_bh(&homa->pacer_lock);
 }
 
 /**
@@ -906,11 +903,8 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 		/* Watch out: the pacer might have just transmitted the last
 		 * packet from candidate.
 		 */
-		if (!candidate->msgout.next_packet)
-			bytes_left_cand = 0;
-		else
-			bytes_left_cand = candidate->msgout.length -
-				homa_data_offset(candidate->msgout.next_packet);
+		bytes_left_cand = candidate->msgout.length -
+				homa_rpc_send_offset(candidate);
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
@@ -924,6 +918,22 @@ done:
 	INC_METRIC(throttle_list_adds, 1);
 	INC_METRIC(throttle_list_checks, checks);
 //	tt_record("woke up pacer thread");
+}
+
+/**
+ * homa_remove_from_throttled() - Make sure that an RPC is not on the
+ * throttled list.
+ * @rpc:     RPC of interest.
+ */
+void homa_remove_from_throttled(struct homa_rpc *rpc)
+{
+	if (unlikely(!list_empty(&rpc->throttled_links))) {
+		UNIT_LOG("; ", "removing id %llu from throttled list", rpc->id);
+		homa_throttle_lock(rpc->hsk->homa);
+		list_del(&rpc->throttled_links);
+		homa_throttle_unlock(rpc->hsk->homa);
+		INIT_LIST_HEAD(&rpc->throttled_links);
+	}
 }
 
 /**
@@ -946,9 +956,8 @@ void homa_log_throttled(struct homa *homa)
 			continue;
 		}
 		if (rpc->msgout.next_packet != NULL)
-			bytes += rpc->msgout.length - homa_data_offset(
-					rpc->msgout.next_packet);
-		if (rpcs <= 5)
+			bytes += rpc->msgout.length - homa_rpc_send_offset(rpc);
+		if (rpcs <= 20)
 			homa_rpc_log(rpc);
 		homa_rpc_unlock(rpc);
 	}

@@ -1220,10 +1220,10 @@ struct homa {
 	int grant_nonfifo_left;
 	
 	/**
-	 * @pacer_active: Synchronization variable: 1 means an instance
-	 * of homa_pacer_xmit is already running, 0 means not.
+	 * @pacer_lock: Ensures that only one instance of homa_pacer_xmit
+	 * runs at a time.
 	 */
-	atomic_t pacer_active __attribute__((aligned(CACHE_LINE_SIZE)));
+	struct spinlock pacer_lock __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when
@@ -2357,6 +2357,7 @@ extern void     homa_remove_grantable_locked(struct homa *homa,
 			struct homa_rpc *rpc);
 extern void     homa_remove_from_grantable(struct homa *homa,
 			struct homa_rpc *rpc);
+extern void     homa_remove_from_throttled(struct homa_rpc *rpc);
 extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			int priority);
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
@@ -2435,8 +2436,7 @@ extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
  */
 static inline void check_pacer(struct homa *homa, int softirq)
 {
-	if (list_first_or_null_rcu(&homa->throttled_rpcs,
-			struct homa_rpc, throttled_links) == NULL)
+	if (list_empty(&homa->throttled_rpcs))
 		return;
 	if ((get_cycles() + homa->max_nic_queue_cycles) <
 			atomic64_read(&homa->link_idle_time))
