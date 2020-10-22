@@ -22,6 +22,7 @@
 # Names of the interfaces that must be configured (system-specific!)
 interfaces="ens1f1 vlan257"
 
+set -e
 for i in $interfaces; do
     sudo ip link set $i mtu $1
 done
