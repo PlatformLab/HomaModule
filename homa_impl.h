@@ -1771,8 +1771,8 @@ struct homa_metrics {
 	__u64 pacer_skipped_rpcs;
 	
 	/**
-	 * @pacer_needed_help: total number of times that check_pacer found
-	 * that the pacer was running behind, so it actually invoked
+	 * @pacer_needed_help: total number of times that homa_check_pacer
+	 * found that the pacer was running behind, so it actually invoked
 	 * homa_pacer_xmit.
 	 */
 	__u64 pacer_needed_help;
@@ -2450,7 +2450,7 @@ extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 /**
- * check_pacer() - This method is invoked at various places in Homa to
+ * homa_check_pacer() - This method is invoked at various places in Homa to
  * see if the pacer needs to transmit more packets and, if so, transmit
  * them. It's needed because the pacer thread may get descheduled by
  * Linux, result in output stalls.
@@ -2459,14 +2459,19 @@ extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
  * @softirq: Nonzero means this code is running at softirq (bh) level;
  *           zero means it's running in process context.
  */
-static inline void check_pacer(struct homa *homa, int softirq)
+static inline void homa_check_pacer(struct homa *homa, int softirq)
 {
 	if (list_empty(&homa->throttled_rpcs))
 		return;
-	if ((get_cycles() + homa->max_nic_queue_cycles) <
+	
+	/* The "/2" in the line below gives homa_pacer_main the first chance
+	 * to queue new packets; if the NIC queue becomes more than half
+	 * empty, then we will help out here.
+	 */
+	if ((get_cycles() + homa->max_nic_queue_cycles/2) <
 			atomic64_read(&homa->link_idle_time))
 		return;
-	tt_record("check_pacer calling homa_pacer_xmit");
+	tt_record("homa_check_pacer calling homa_pacer_xmit");
 	homa_pacer_xmit(homa);
 	INC_METRIC(pacer_needed_help, 1);
 }
