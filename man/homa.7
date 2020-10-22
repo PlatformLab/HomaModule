@@ -157,12 +157,14 @@ the NIC, which defeats part of Homa's SRPT scheduling mechanism.
 .TP
 .IR grant_fifo_fraction
 When sending grants, Homa normally uses an SRPT policy, granting to the
-message(s) with the fewest remaining bytes. However, it occasionally grants
-to the oldest message in order to prevent very large messages from starving.
-This value specifies the fraction of scheduled bandwidth that it reserves
+message(s) with the fewest remaining bytes. This parameter can be
+used to reserve some of the bandwidth for the oldest message,
+in order to prevent very large messages from starving.
+The value specifies the fraction of scheduled bandwidth that it reserves
 for the oldest message, specified in thousandths (e.g., 100 means that 10%
-of the bandwidth is for FIFO and 90% for SRPT). Note: there is currently
-no evidence that a value other than zero produces any benefit.
+of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
+value can provide significant benefits for the largest messages under very high
+loads, but for most loads its effect is negligible.
 .TP
 .IR grant_increment
 An integer value; each grant issued by a Homa receiver will allow the sender
@@ -253,6 +255,10 @@ the one with the fewest remaining bytes. However, it occasionally chooses
 the oldest message in order to prevent very large messages from starving.
 This value determines how frequently it picks the oldest message, specified
 in thousandths (e.g., 100 means that 10% of the time it picks the oldest).
+As of October 2020, it is hard to find situations where this value matters;
+however, under very extreme loads a small value does provide benefit for
+the largest messages, when used with
+.I grant_fifo_fraction.
 .TP
 .IR poll_usecs
 When a thread waits for an incoming message, Homa first busy-waits for a
