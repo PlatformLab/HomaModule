@@ -108,6 +108,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	struct sk_buff *held_skb;
 	struct sk_buff **pp;
 	struct iphdr *iph;
+	struct sk_buff **result = NULL;
 	
 	if (!pskb_may_pull(skb, 64))
 		tt_record("homa_gro_receive can't pull enough data "
@@ -183,8 +184,8 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		NAPI_GRO_CB(held_skb)->count++;
 		h_held->gro_count++;
 		if (h_held->gro_count >= homa->max_gro_skbs)
-			return pp;
-	        return NULL;
+			result = pp;
+	        goto done;
 	}
 	
 	/* There was no existing Homa packet that this packet could be
@@ -198,7 +199,10 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	 */
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, smp_processor_id());
-	return NULL;
+	
+	done:
+	homa_check_pacer(homa, 1);
+	return result;
 }
 
 

@@ -1090,7 +1090,6 @@ discard:
 	}
 	
 	homa_send_grants(homa);
-	homa_check_pacer(homa, 1);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }

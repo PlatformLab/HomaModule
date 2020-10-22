@@ -32,6 +32,7 @@ FIXTURE_SETUP(homa_offload)
 {
 	struct sk_buff *skb, *skb2;
 	homa_init(&self->homa);
+	homa_init(homa);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
@@ -67,6 +68,7 @@ FIXTURE_TEARDOWN(homa_offload)
 		self->gro_list = next;
 	}
 	homa_destroy(&self->homa);
+	homa_destroy(homa);
 	unit_teardown();
 }
 
