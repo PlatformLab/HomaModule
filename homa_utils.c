@@ -73,6 +73,7 @@ int homa_init(struct homa *homa)
 	homa->pacer_fifo_count = 1;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
+	homa->throttle_add = 0;
 	homa->throttle_min_bytes = 1000;
 	atomic_set(&homa->extra_incoming, 0);
 	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
@@ -1175,7 +1176,7 @@ char *homa_print_metrics(struct homa *homa)
 				m->timer_cycles);
 		homa_append_metric(homa,
 				"pacer_cycles              %15llu  "
-				"Time spent in homa_pacer\n",
+				"Time spent in homa_pacer_main\n",
 				m->pacer_cycles);
 		homa_append_metric(homa,
 				"homa_cycles               %15llu  "
@@ -1190,9 +1191,22 @@ char *homa_print_metrics(struct homa *homa)
 				"slow\n",
 				m->pacer_lost_cycles);
 		homa_append_metric(homa,
+				"pacer_bytes               %15llu  "
+				"Bytes transmitted when the pacer was active\n",
+				m->pacer_bytes);
+		homa_append_metric(homa,
 				"pacer_skipped_rpcs        %15llu  "
 				"Pacer aborts because of locked RPCs\n",
 				m->pacer_skipped_rpcs);
+		homa_append_metric(homa,
+				"pacer_needed_help         %15llu  "
+				"homa_pacer_xmit invocations from "
+				"homa_check_pacer\n",
+				m->pacer_needed_help);
+		homa_append_metric(homa,
+				"throttled_cycles          %15llu  "
+				"Time when the throttled queue was nonempty\n",
+				m->throttled_cycles);
 		homa_append_metric(homa,
 				"resent_packets            %15llu  "
 				"DATA packets sent in response to RESENDs\n",

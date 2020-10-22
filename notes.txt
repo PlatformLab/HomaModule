@@ -10,6 +10,7 @@ Notes for Homa implementation in Linux:
   * Remove from the pity list in remove_grantable
 
 * Performance-related tasks:
+  * Figure out why TCP W2 P99 gets worse with higher --client-max
   * Consider ways of reducing tail latency for very large messages
   * See if turning off c-states allows shorter polling intervals?
   * Are Meltdown mitigations really disabled?
@@ -17,12 +18,9 @@ Notes for Homa implementation in Linux:
   * Consider reducing throttle_min_bytes to see if it helps region 1
     in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
-  * Implement new benchmark that segregates clients and servers on
-    different machines
   * Order the queue of ready messages by size? May not matter for
     existing benchmarks, but could matter more for real applications, where
     long messages are likely to have longer service times.
-  * Check out "-w 500000": Homa has less throughput than TCP.
   * Modify code to reduce maximum rate of reaping, especially after large
     bursts of deletions?
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting

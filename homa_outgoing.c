@@ -678,6 +678,8 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 		if (((clock + homa->max_nic_queue_cycles) < idle) && !force
 				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
+		if (!list_empty(&homa->throttled_rpcs))
+			INC_METRIC(pacer_bytes, bytes);
 		if (idle < clock) {
 			if (!list_empty(&homa->throttled_rpcs)) {
 				INC_METRIC(pacer_lost_cycles, clock - idle);
@@ -841,6 +843,9 @@ void homa_pacer_xmit(struct homa *homa)
 						"throttled list, offset %d",
 						rpc->id, offset);
 				list_del_rcu(&rpc->throttled_links);
+				if (list_empty(&homa->throttled_rpcs))
+					INC_METRIC(throttled_cycles, get_cycles()
+							- homa->throttle_add);
 
 				/* Note: this reinitialization is only safe
 				 * because the pacer only looks at the first
@@ -888,10 +893,15 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	struct homa_rpc *candidate;
 	int bytes_left;
 	int checks = 0;
+	__u64 now;
 
 	if (!list_empty(&rpc->throttled_links)) {
 		return;
 	}
+	now = get_cycles();
+	if (!list_empty(&homa->throttled_rpcs))
+		INC_METRIC(throttled_cycles, now - homa->throttle_add);
+	homa->throttle_add = now;
 	bytes_left = rpc->msgout.length - homa_data_offset(
 			rpc->msgout.next_packet);
 	homa_throttle_lock(homa);
@@ -931,6 +941,9 @@ void homa_remove_from_throttled(struct homa_rpc *rpc)
 		UNIT_LOG("; ", "removing id %llu from throttled list", rpc->id);
 		homa_throttle_lock(rpc->hsk->homa);
 		list_del(&rpc->throttled_links);
+		if (list_empty(&rpc->hsk->homa->throttled_rpcs))
+			INC_METRIC(throttled_cycles, get_cycles()
+					- rpc->hsk->homa->throttle_add);
 		homa_throttle_unlock(rpc->hsk->homa);
 		INIT_LIST_HEAD(&rpc->throttled_links);
 	}

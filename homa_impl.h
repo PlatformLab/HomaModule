@@ -1254,6 +1254,12 @@ struct homa {
 	struct list_head throttled_rpcs;
 	
 	/**
+	 * @throttle_add: The get_cycles() time when the most recent RPC
+	 * was added to @throttled_rpcs.
+	 */
+	__u64 throttle_add;
+	
+	/**
 	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
 	 * bypasses the throttle mechanism and is transmitted immediately.
 	 * We have this limit because for very small packets we can't keep
@@ -1751,12 +1757,31 @@ struct homa_metrics {
 	 * descheduled.
 	 */
 	__u64 pacer_lost_cycles;
+
+	/**
+	 * @pacer_bytes: total number of bytes transmitted when
+	 * @homa->throttled_rpcs is nonempty.
+	 */
+	__u64 pacer_bytes;
 	
 	/**
 	 * @pacer_skipped_rpcs: total number of times that the pacer had to
 	 * abort because it couldn't lock an RPC.
 	 */
 	__u64 pacer_skipped_rpcs;
+	
+	/**
+	 * @pacer_needed_help: total number of times that check_pacer found
+	 * that the pacer was running behind, so it actually invoked
+	 * homa_pacer_xmit.
+	 */
+	__u64 pacer_needed_help;
+
+	/**
+	 * @throttled_cycles: total amount of time that @homa->throttled_rpcs
+	 * is nonempty, as measured with get_cycles().
+	 */
+	__u64 throttled_cycles;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -2441,7 +2466,9 @@ static inline void check_pacer(struct homa *homa, int softirq)
 	if ((get_cycles() + homa->max_nic_queue_cycles) <
 			atomic64_read(&homa->link_idle_time))
 		return;
+	tt_record("check_pacer calling homa_pacer_xmit");
 	homa_pacer_xmit(homa);
+	INC_METRIC(pacer_needed_help, 1);
 }
 
 /**

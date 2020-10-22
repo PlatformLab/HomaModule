@@ -367,14 +367,18 @@ if elapsed_secs != 0:
         print("Packets received:   %5.3f M/sec" % (
                 1e-6*packets_received/elapsed_secs))
         print("Packets sent:       %5.3f M/sec" % (
-                1e-6*packets_received/elapsed_secs))
+                1e-6*packets_sent/elapsed_secs))
         print("Core efficiency:    %5.3f M packets/sec/core "
                 "(sent & received combined)" % (
                 1e-6*(packets_sent + packets_received)/elapsed_secs
                 /total_cores_used))
-        print("                    %5.2f Gbps/core (goodput)" % (
+        print("                   %5.2f  Gbps/core (goodput)" % (
                 8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
                 /(total_cores_used * elapsed_secs)))
+    if deltas["throttled_cycles"] != 0:
+        throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
+        print("Pacer throughput:  %5.2f  Gbps" % (
+                deltas["pacer_bytes"]*8e-09/throttled_secs))
  
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
@@ -400,6 +404,14 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
+    for symbol in ["pacer_lost_cycles"]:
+        delta = deltas[symbol]
+        if delta == 0 or time_delta == 0:
+            continue
+        percent = "(%.1f%%)" % (100.0*delta/time_delta)
+        percent = percent.ljust(12)
+        print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
+
     if deltas["throttle_list_adds"] > 0:
         print("%-28s %15.1f              List traversals per throttle "
                 "list insert" % ("checks_per_throttle_insert",
