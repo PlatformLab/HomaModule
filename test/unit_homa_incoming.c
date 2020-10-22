@@ -141,6 +141,8 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
+	self->homa.pacer_fifo_fraction = 0;
+	self->homa.grant_fifo_fraction = 0;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),

@@ -69,7 +69,7 @@ int homa_init(struct homa *homa)
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
 	spin_lock_init(&homa->pacer_lock);
-	homa->pacer_fifo_fraction = 0;
+	homa->pacer_fifo_fraction = 50;
 	homa->pacer_fifo_count = 1;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
@@ -106,7 +106,7 @@ int homa_init(struct homa *homa)
 	homa->cutoff_version = 1;
 #endif
 	homa->grant_increment = 0;
-	homa->grant_fifo_fraction = 0;
+	homa->grant_fifo_fraction = 50;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
 	homa->resend_ticks = 15;
