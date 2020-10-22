@@ -200,7 +200,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, smp_processor_id());
 	
-	done:
+    done:
 	homa_check_pacer(homa, 1);
 	return result;
 }

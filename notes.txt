@@ -1,14 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Ideas for providing a fraction of bandwidth to oldest message:
-  * Keep count of granted bytes until next "pity" grant
-  * When pity grant time is reached:
-      * If the pity list is empty, refill it
-      * Grant to the oldest element on the pity list that hasn't received
-        a pity grant
-  * Remove from the pity list in remove_grantable
-
 * Performance-related tasks:
   * Figure out why TCP W2 P99 gets worse with higher --client-max
   * Consider ways of reducing tail latency for very large messages
@@ -30,6 +22,15 @@ Notes for Homa implementation in Linux:
   * Try measuring performance without polling in Homa?
 
 * Things to do:
+  * Implement at-most-once semantics:
+    * Don't delete server RPCs until acked by client.
+    * On client, keep small set of completed RPCs in homa_peer
+    * Send a few completed RPCs with each new RPC
+    * Make sequence numbers peer-specific
+    * State on server for each peer:
+      * Largest sequence number ever seen
+      * Smallest un-acked sequence number
+      * How to store bit map for gap?
   * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in

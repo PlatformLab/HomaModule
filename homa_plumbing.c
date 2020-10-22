@@ -623,8 +623,9 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto done;
 	}
-	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
-			args.id, hsk->client_port, current->pid);
+	tt_record4("homa_ioc_reply starting, id %llu, port %d, pid %d, "
+			"length %d",
+			args.id, hsk->client_port, current->pid, args.resplen);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
