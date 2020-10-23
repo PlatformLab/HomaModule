@@ -43,12 +43,15 @@ options.client_ports = 5
 options.tcp_client_ports = 5
 options.port_receivers = 2
 options.no_rtt_files = True
-options.net_bw = 0.0
-workloads = ["w1", "w2", "w3", "w4", "w5"]
+options.gbps = 0.0
+# workloads = ["w1", "w2", "w3", "w4", "w5"]
+workloads = ["w2", "w4"]
 if options.protocol == "homa":
     port_range = range(1, (20//options.port_threads) + 1)
 else:
     port_range = range(2, 21, 2)
+
+print("port_range: %s" % (port_range))
 
 # Run the experiments, if desired
 if not options.plot_only:
@@ -75,6 +78,7 @@ for workload in workloads:
     tput[workload] = []
     for ports in port_range:
         exp = "%s_%s_%d" % (options.protocol, workload, ports)
+        print("Experiment %s: %s" % (exp, experiments[exp]))
         node = experiments[exp]["node-0"]
         readings = node["server_kops"]
         if len(readings) == 0:

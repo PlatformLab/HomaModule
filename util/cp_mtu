@@ -38,7 +38,7 @@ parser.add_argument('-w', '--workload', dest='workload',
         help='Workload to use for benchmark: w1-w5 or number')
 options = parser.parse_args()
 init(options)
-options.net_bw = options.net_bw/2.0
+options.gbps = options.gbps/2.0
 servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
 mtus = [1500, 3000, 6000, 9000]
@@ -54,7 +54,7 @@ if not options.plot_only:
         start_servers(servers, options)
 
         o = copy.deepcopy(options)
-        o.net_bw = 0.0
+        o.gbps = 0.0
         o.client_ports = 1
         o.client_max = 1
         o.server_ports = 1

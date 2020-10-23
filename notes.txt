@@ -3,7 +3,6 @@ Notes for Homa implementation in Linux:
 
 * Performance-related tasks:
   * Figure out why TCP W2 P99 gets worse with higher --client-max
-  * Consider ways of reducing tail latency for very large messages
   * See if turning off c-states allows shorter polling intervals?
   * Are Meltdown mitigations really disabled?
   * Consider a permanent reduction in rtt_bytes.

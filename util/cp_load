@@ -36,7 +36,7 @@ parser = get_parser(description=
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
         default=False, help="Boolean value:: true means run measurements "
                 "on DCTCP (default: false)")
-parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
+parser.add_argument('-b', '--gpbs', type=float, dest='gbps',
         metavar='B', required=True,
         help='Maximum bandwidth (Gbits/sec) to generate from each client '
         'machine; additional experiments will run at 0.1, 0.2, and 0.5 this '
@@ -57,7 +57,7 @@ if not options.plot_only:
         start_servers(servers, options)
 
         o = copy.deepcopy(options)
-        o.net_bw = 0.0
+        o.gbps = 0.0
         o.client_ports = 1
         o.client_max = 1
         o.server_ports = 1
@@ -68,7 +68,7 @@ if not options.plot_only:
 
         for fraction in fractions:
             o = copy.deepcopy(options)
-            o.net_bw = options.net_bw*fraction/2.0
+            o.gbps = options.gbps*fraction/2.0
             run_experiment("homa%3.1f_%s" % (fraction, options.workload),
                     clients, o)
 
@@ -76,7 +76,7 @@ if not options.plot_only:
         start_servers(servers, options)
         for fraction in fractions:
             o = copy.deepcopy(options)
-            o.net_bw = options.net_bw*fraction/2.0
+            o.gbps = options.gbps*fraction/2.0
             run_experiment("tcp%3.1f_%s" % (fraction, options.workload),
                     clients, o)
 
@@ -89,7 +89,7 @@ if not options.plot_only:
                     range(0, options.num_nodes))
             for fraction in fractions:
                 o = copy.deepcopy(options)
-                o.net_bw = options.net_bw*fraction/2.0
+                o.gbps = options.gbps*fraction/2.0
                 run_experiment("dctcp%3.1f_%s" % (fraction, options.workload),
                         clients, o)
             set_sysctl_parameter("net.ipv4.tcp_congestion_control",
@@ -108,32 +108,34 @@ set_unloaded(unloaded_exp)
 # Generate slowdown plot.
 log("Generating slowdown plot for %s" % (options.workload))
 title = "%s %d nodes, %.2f GB/s" % (options.workload.capitalize(),
-        options.num_nodes, options.net_bw)
+        options.num_nodes, options.gbps)
 ax = start_slowdown_plot(title, 1000, "homa1.0_%s" % (options.workload))
 if options.dctcp:
     plot_slowdown(ax, "dctcp%3.1f_%s" % (fractions[0], options.workload),
-            "p99", "DCTCP %4.2f GB/sec" % (fractions[0] * options.net_bw),
+            "p99", "DCTCP %4.2f Gbps" % (fractions[0] * options.gbps),
             color=dctcp_color)
     plot_slowdown(ax, "dctcp%3.1f_%s" % (fractions[1], options.workload),
-            "p99", "DCTCP %4.2f GB/sec" % (fractions[1] * options.net_bw),
+            "p99", "DCTCP %4.2f Gbps" % (fractions[1] * options.gbps),
             color=dctcp_color2)
     plot_slowdown(ax, "dctcp%3.1f_%s" % (fractions[-1], options.workload),
-            "p99", "DCTCP %4.2f GB/sec" % (fractions[-1] * options.net_bw),
+            "p99", "DCTCP %4.2f Gbps" % (fractions[-1] * options.gbps),
             color=dctcp_color3)
 else:
     plot_slowdown(ax, "tcp%3.1f_%s" % (fractions[0], options.workload),
-            "p99",  "TCP %4.2f GB/sec" % (fractions[0] * options.net_bw),
+            "p99",  "TCP %4.2f Gbps" % (fractions[0] * options.gbps),
             color=tcp_color)
     plot_slowdown(ax, "tcp%3.1f_%s" % (fractions[1], options.workload),
-            "p99",  "TCP %4.2f GB/sec" % (fractions[1] * options.net_bw),
+            "p99",  "TCP %4.2f Gbps" % (fractions[1] * options.gbps),
             color=tcp_color2)
     plot_slowdown(ax, "tcp%3.1f_%s" % (fractions[-1], options.workload),
-            "p99", "TCP %4.2f GB/sec" % (fractions[-1] * options.net_bw),
+            "p99", "TCP %4.2f Gbps" % (fractions[-1] * options.gbps),
             color=tcp_color3)
 plot_slowdown(ax, "homa%3.1f_%s" % (fractions[0], options.workload), "p99",
-        "Homa %4.2f GB/sec" % (fractions[0] * options.net_bw), color=homa_color)
+        "Homa %4.2f Gbps" % (fractions[0] * options.gbps), color=homa_color)
+plot_slowdown(ax, "homa%3.1f_%s" % (fractions[1], options.workload), "p99",
+        "Homa %4.2f Gbps" % (fractions[1] * options.gbps), color=homa_color)
 plot_slowdown(ax, "homa%3.1f_%s" % (fractions[-1], options.workload), "p99",
-        "Homa %4.2f GB/sec" % (fractions[-1] * options.net_bw), color=homa_color2)
+        "Homa %4.2f Gbps" % (fractions[-1] * options.gbps), color=homa_color2)
 if options.workload == "w5":
     ax.legend(loc="upper right", prop={'size': 9})
 else:
@@ -152,17 +154,17 @@ styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
 if options.dctcp:
     for fraction in fractions:
         x, y = get_short_cdf("dctcp%3.1f_%s" % (fraction, options.workload))
-        plt.plot(x, y, label="DCTCP %4.2f GB/sec" % (fraction * options.net_bw),
+        plt.plot(x, y, label="DCTCP %4.2f Gbps" % (fraction * options.gbps),
                 color=dctcp_color, linestyle=styles.pop())
 else:
     for fraction in fractions:
         x, y = get_short_cdf("tcp%3.1f_%s" % (fraction, options.workload))
-        plt.plot(x, y, label="TCP %4.2f GB/sec" % (fraction * options.net_bw),
+        plt.plot(x, y, label="TCP %4.2f Gbps" % (fraction * options.gbps),
                 color=tcp_color, linestyle=styles.pop())
 styles = [(0, (1, 1)), (0, (2, 2)), (0, (5, 2)), "solid"]
 for fraction in fractions:
     x, y = get_short_cdf("homa%3.1f_%s" % (fraction, options.workload))
-    plt.plot(x, y, label="Homa %4.2f GB/sec" % (fraction * options.net_bw),
+    plt.plot(x, y, label="Homa %4.2f Gbps" % (fraction * options.gbps),
             color=homa_color, linestyle=styles.pop())
 x, y = get_short_cdf(unloaded_exp)
 plt.plot(x, y, label="Homa best case", color=unloaded_color)

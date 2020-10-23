@@ -42,7 +42,7 @@ servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
 
 if options.workload != "":
-    load_info = [[options.workload, options.net_bw]];
+    load_info = [[options.workload, options.gbps]];
 
 if not options.plot_only:
     try:
@@ -53,7 +53,7 @@ if not options.plot_only:
         # of priority levels.
         for workload, bw in load_info:
             options.workload = workload
-            options.net_bw = bw/2.0
+            options.gbps = bw/2.0
 
             o = copy.deepcopy(options);
             o.client_ports = 1
@@ -84,7 +84,7 @@ for workload, bw in load_info:
     set_unloaded("unloaded_" + workload)
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
-    title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
     ax = start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload,
             priorities[-1]))

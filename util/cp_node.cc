@@ -67,7 +67,7 @@ int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-double net_bw = 0.0;
+double net_gbps = 0.0;
 bool tcp_trunc = true;
 int port_receivers = 1;
 int port_threads = 1;
@@ -264,10 +264,10 @@ void print_help(const char *name)
 		"                      (default: %d)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --gbps            Target network utilization, including only message data,\n"
+		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
 		"                      not be sent to node-I (default: -1)\n"
-		"    --net-bw          Target network utilization, including only message data,\n"
-		"                      GB/s; 0 means send continuously (default: %.1f)\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
@@ -305,7 +305,7 @@ void print_help(const char *name)
 		"                      print has been invoked\n"
 		"     kfreeze          Freeze the kernel's internal timetrace\n"
 		"     print file       Dump timetrace information to file\n",
-		client_max, first_port, first_server, first_server, net_bw,
+		client_max, first_port, first_server, first_server, net_gbps,
 		client_ports, port_receivers, protocol,
 		server_nodes, server_ports, workload,
 		first_port, protocol, port_threads, server_ports);
@@ -1526,10 +1526,11 @@ client::client(int id)
 		exit(1);
 	}
 	dist_sample(points, &rand_gen, NUM_LENGTHS, request_lengths);
-	if (net_bw == 0.0)
+	if (net_gbps == 0.0)
 		request_intervals.push_back(0);
 	else {
-		double lambda = 1e09*net_bw/(dist_mean(points)*client_ports);
+		double lambda = 1e09*(net_gbps/8.0)
+				/(dist_mean(points)*client_ports);
 		double cycles_per_second = get_cycles_per_sec();
 		std::exponential_distribution<double> interval_dist(lambda);
 		for (int i = 0; i < NUM_INTERVALS; i++) {
@@ -1551,9 +1552,9 @@ client::client(int id)
 		interval_sum += request_intervals[i];
 	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
 	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
-			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
+			"rate %.2f K/sec, expected BW %.1f Gbps\n",
 			avg_length*1e-3, dist_mean(points)*1e-3, rate*1e-3,
-			avg_length*rate*1e-6);
+			avg_length*rate*8e-9);
 	kfreeze_count = 0;
 }
 
@@ -2442,9 +2443,9 @@ void server_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
 		double data = (double) (server_data - last_server_data);
-		log(NORMAL, "Servers: %.2f Kops/sec, %.2f MB/sec, "
+		log(NORMAL, "Servers: %.2f Kops/sec, %.2f Gbps, "
 				"avg. length %.1f bytes\n",
-				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
 				data/rpcs);
 		log(NORMAL, "RPCs per server: %s\n", details);
 	}
@@ -2508,10 +2509,10 @@ void client_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double data = (double) (client_data - last_client_data);
-		log(NORMAL, "Clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
+		log(NORMAL, "Clients: %.2f Kops/sec, %.2f Gbps, RTT (us) "
 				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
 				"%.1f bytes\n",
-				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
 				to_seconds(cdf_times[cdf_index/2])*1e06,
 				to_seconds(cdf_times[99*cdf_index/100])*1e06,
 				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
@@ -2572,7 +2573,7 @@ int client_cmd(std::vector<string> &words)
 	client_ports = 1;
 	first_port = 4000;
 	first_server = 1;
-	net_bw = 0.0;
+	net_gbps = 0.0;
 	port_receivers = 1;
 	protocol = "homa";
 	server_nodes = 1;
@@ -2595,12 +2596,12 @@ int client_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &first_server, option, "integer"))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--id") == 0) {
-			if (!parse(words, i+1, &id, option, "integer"))
+		} else if (strcmp(option, "--gbps") == 0) {
+			if (!parse(words, i+1, &net_gbps, option, "float"))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--net-bw") == 0) {
-			if (!parse(words, i+1, &net_bw, option, "float"))
+		} else if (strcmp(option, "--id") == 0) {
+			if (!parse(words, i+1, &id, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--no-trunc") == 0) {
@@ -2718,8 +2719,8 @@ int dump_times_cmd(std::vector<string> &words)
 			localtime(&now));
 	fprintf(f, "# Round-trip times measured by cp_node at %s\n",
 			time_buffer);
-	fprintf(f, "# --protocol %s, --workload %s, --net-bw %.1f --threads %d,\n",
-			protocol, workload, net_bw, client_ports);
+	fprintf(f, "# --protocol %s, --workload %s, --gpbs %.1f --threads %d,\n",
+			protocol, workload, net_gbps, client_ports);
 	fprintf(f, "# --server-nodes %d --server-ports %d, --client-max %d\n",
 			server_nodes, server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");

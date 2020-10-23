@@ -41,7 +41,7 @@ options.server_nodes = options.num_nodes - 1
 options.first_server = 1
 options.port_receivers = 1
 options.no_rtt_files = True
-options.net_bw = 0.0
+options.gbps = 0.0
 workloads = ["w1", "w2", "w3", "w4", "w5"]
 port_range = range(1,11)
 

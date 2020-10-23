@@ -154,12 +154,12 @@ if len(node["client_latency"]) == 0:
 log("Homa RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
 
 node = experiments["homa_1msg_tput"]["node-0"]
-if len(node["client_mbps"]) == 0:
+if len(node["client_gbps"]) == 0:
     raise Error("No Homa client throughput found")
-mbps = []
-for m in node["client_mbps"]:
-    mbps.append(2*m)
-log("Homa single message throughput (Mbps): %s" % (avg(mbps, "%.1f")))
+gbps = []
+for m in node["client_gbps"]:
+    gbps.append(2*m)
+log("Homa single message throughput (Gbps): %s" % (avg(gbps, "%.1f")))
 
 node = experiments["homa_client_rpc_tput"]["node-0"]
 if len(node["client_kops"]) == 0:
@@ -174,16 +174,16 @@ log("Homa server RPC throughput (Kops/sec): %s"
         % (avg(node["server_kops"], "%.2f")))
 
 node = experiments["homa_client_tput"]["node-0"]
-if len(node["client_mbps"]) == 0:
+if len(node["client_gbps"]) == 0:
     raise Error("No Homa client throughputs found")
-log("Homa client throughput (Mbps): %s"
-        % (avg(node["client_mbps"], "%.1f")))
+log("Homa client throughput (Gbps): %s"
+        % (avg(node["client_gbps"], "%.2f")))
 
 node = experiments["homa_server_tput"]["node-0"]
-if len(node["server_mbps"]) == 0:
+if len(node["server_gbps"]) == 0:
     raise Error("No Homa server throughputs found")
-log("Homa server throughput (Mbps): %s"
-        % (avg(node["server_mbps"], "%.1f")))
+log("Homa server throughput (Gbps): %s"
+        % (avg(node["server_gbps"], "%.2f")))
 
 node = experiments["tcp_latency"]["node-0"]
 if len(node["client_latency"]) == 0:
@@ -191,12 +191,12 @@ if len(node["client_latency"]) == 0:
 log("\nTCP RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
 
 node = experiments["tcp_1msg_tput"]["node-0"]
-if len(node["client_mbps"]) == 0:
+if len(node["client_gbps"]) == 0:
     raise Error("No TCP client throughput found")
-mbps = []
-for m in node["client_mbps"]:
-    mbps.append(2*m)
-log("TCP single message throughput (Mbps): %s" % (avg(mbps, "%.1f")))
+gbps = []
+for m in node["client_gbps"]:
+    gbps.append(2*m)
+log("TCP single message throughput (Gbps): %s" % (avg(gbps, "%.2f")))
 
 node = experiments["tcp_client_rpc_tput"]["node-0"]
 if len(node["client_kops"]) == 0:
@@ -209,11 +209,11 @@ if len(node["server_kops"]) == 0:
 log("TCP server RPC throughput (Kops/sec): %s" % (avg(node["server_kops"], "%.2f")))
 
 node = experiments["tcp_client_tput"]["node-0"]
-if len(node["client_mbps"]) == 0:
+if len(node["client_gbps"]) == 0:
     raise Error("No TCP client throughputs found")
-log("TCP client throughput (Mbps): %s" % (avg(node["client_mbps"], "%.1f")))
+log("TCP client throughput (Gbps): %s" % (avg(node["client_gbps"], "%.2f")))
 
 node = experiments["tcp_server_tput"]["node-0"]
-if len(node["server_mbps"]) == 0:
+if len(node["server_gbps"]) == 0:
     raise Error("No TCP server throughputs found")
-log("TCP server throughput (Mbps): %s" % (avg(node["server_mbps"], "%.1f")))
+log("TCP server throughput (Gbps): %s" % (avg(node["server_gbps"], "%.2f")))

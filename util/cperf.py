@@ -63,7 +63,7 @@ verbose = False
 # Defaults for command-line options, if the application doesn't specify its
 # own values.
 default_defaults = {
-    'net_bw':              0.0,
+    'gbps':                0.0,
     # Note: very large numbers for client_max hurt Homa throughput with
     # unlimited load (throttle queue inserts take a long time).
     'client_max':          200,
@@ -130,7 +130,7 @@ dctcp_color3 =   '#EAA668'
 unloaded_color = '#d62728'
 
 # Default bandwidths to use when running all of the workloads.
-load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
+load_info = [["w1", 1.4], ["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 
 # PyPlot color circle colors:
 pyplot_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -191,11 +191,11 @@ def get_parser(description, usage, defaults = {}):
             'below may include some that are not used by this particular '
             'benchmark', usage=usage, add_help=False,
             conflict_handler='resolve')
-    parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
-            metavar='B', default=defaults['net_bw'],
-            help='Generate a total of B Gbits/sec of bandwidth from each '
-            'client machine; 0 means run as fast as possible (default: %.2f)'
-            % (defaults['net_bw']))
+    parser.add_argument('-b', '--gbps', type=float, dest='gbps',
+            metavar='B', default=defaults['gbps'],
+            help='Generate a total of B Gbits/sec of bandwidth on the most '
+            'heavily loaded machines; 0 means run as fast as possible '
+            '(default: %.2f)' % (defaults['gbps']))
     parser.add_argument('--client-max', type=int, dest='client_max',
             metavar='count', default=defaults['client_max'],
             help='Maximum number of requests each client machine can have '
@@ -530,7 +530,7 @@ def run_experiment(name, clients, options):
                   client_max
                   client_ports
                   first_server
-                  net_bw
+                  gbps
                   port_receivers
                   protocol
                   seconds
@@ -556,14 +556,14 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa":
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f --client-max %d --protocol %s --id %d" % (
                     options.client_ports,
                     options.port_receivers,
                     options.server_ports,
                     options.workload,
                     num_servers,
                     first_server,
-                    options.net_bw,
+                    options.gbps,
                     options.client_max,
                     options.protocol,
                     id);
@@ -576,14 +576,14 @@ def run_experiment(name, clients, options):
                 trunc = ''
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f %s --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f %s --client-max %d --protocol %s --id %d" % (
                     options.tcp_client_ports,
                     options.tcp_port_receivers,
                     options.tcp_server_ports,
                     options.workload,
                     num_servers,
                     first_server,
-                    options.net_bw,
+                    options.gbps,
                     trunc,
                     options.client_max,
                     options.protocol,
@@ -647,7 +647,7 @@ def scan_log(file, node, experiments):
                     name, where
                   * Each value is dictionary indexed by node name, where
                   * Each value is a dictionary with keys such as client_kops,
-                    client_mbps, client_latency, server_kops, or server_Mbps,
+                    client_gbps, client_latency, server_kops, or server_Mbps,
                     each of which is
                   * A list of values measured at regular intervals for that node
     """
@@ -668,29 +668,45 @@ def scan_log(file, node, experiments):
         if re.match('.*Ending .* experiment', line):
             experiment = ""
         if experiment != "":
+            gbps = -1.0
             match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
-                        '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
+                        '([0-9.]+) Gbps.*P50 ([0-9.]+)', line)
             if match:
+                gbps = float(match.group(2))
+            else:
+                match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
+                            '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
+                if match:
+                    gbps = 8.0*float(match.group(2))
+            if gbps >= 0.0:
                 if not "client_kops" in node_data:
                     node_data["client_kops"] = []
                 node_data["client_kops"].append(float(match.group(1)))
-                if not "client_mbps" in node_data:
-                    node_data["client_mbps"] = []
-                node_data["client_mbps"].append(float(match.group(2)))
+                if not "client_gbps" in node_data:
+                    node_data["client_gbps"] = []
+                node_data["client_gbps"].append(gbps)
                 if not "client_latency" in node_data:
                     node_data["client_latency"] = []
                 node_data["client_latency"].append(float(match.group(3)))
                 continue
 
+            gbps = -1.0
             match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
-                    '([0-9.]+) MB/sec', line)
+                    '([0-9.]+) Gbps', line)
             if match:
+                gbps = float(match.group(2))
+            else:
+                match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+                            '([0-9.]+) MB/sec', line)
+                if match:
+                    gbps = 8.0*float(match.group(2))
+            if gbps >= 0.0:
                 if not "server_kops" in node_data:
                     node_data["server_kops"] = []
                 node_data["server_kops"].append(float(match.group(1)))
-                if not "server_mbps" in node_data:
-                    node_data["server_mbps"] = []
-                node_data["server_mbps"].append(float(match.group(2)))
+                if not "server_gbps" in node_data:
+                    node_data["server_gbps"] = []
+                node_data["server_gbps"].append(gbps)
                 continue
 
             match = re.match('.*Outstanding client RPCs: ([0-9.]+)', line)
@@ -739,28 +755,28 @@ def scan_logs():
         nodes["all"] = {}
 
         for type in ['client', 'server']:
-            mbps_key = type + "_mbps"
+            gbps_key = type + "_gbps"
             kops_key = type + "_kops"
             averages = []
             vlog("\n%ss for %s experiment:" % (type.capitalize(), name))
             for node in sorted(exp.keys()):
-                if not mbps_key in exp[node]:
+                if not gbps_key in exp[node]:
                     if name.startswith("unloaded"):
-                        exp[node][mbps_key] = [0.0]
+                        exp[node][gbps_key] = [0.0]
                         exp[node][kops_key] = [0.0]
                     else:
                         continue
-                mbps = exp[node][mbps_key]
-                avg = sum(mbps)/len(mbps)
-                vlog("%s: %.1f MB/sec (%s)" % (node, avg,
-                    ", ".join(map(lambda x: "%.1f" % (x), mbps))))
+                gbps = exp[node][gbps_key]
+                avg = sum(gbps)/len(gbps)
+                vlog("%s: %.2f Gbps (%s)" % (node, avg,
+                    ", ".join(map(lambda x: "%.1f" % (x), gbps))))
                 averages.append(avg)
                 nodes["all"][node] = 1
                 nodes[type][node] = 1
             if len(averages) > 0:
-                totals[mbps_key] = sum(averages)
-                vlog("%s average: %.1f MB/sec\n"
-                        % (type.capitalize(), totals[mbps_key]/len(averages)))
+                totals[gbps_key] = sum(averages)
+                vlog("%s average: %.2f Gbps\n"
+                        % (type.capitalize(), totals[gbps_key]/len(averages)))
 
             averages = []
             for node in sorted(exp.keys()):
@@ -779,17 +795,17 @@ def scan_logs():
                 vlog("%s average: %.1f Kops/sec"
                         % (type.capitalize(), totals[kops_key]/len(averages)))
 
-        log("\nClients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("\nClients for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["client"]),
-                totals["client_mbps"]/len(nodes["client"]),
+                totals["client_gbps"]/len(nodes["client"]),
                 totals["client_kops"]/len(nodes["client"])))
-        log("Servers for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("Servers for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["server"]),
-                totals["server_mbps"]/len(nodes["server"]),
+                totals["server_gbps"]/len(nodes["server"]),
                 totals["server_kops"]/len(nodes["server"])))
-        log("Overall for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("Overall for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["all"]),
-                (totals["client_mbps"] + totals["server_mbps"])/len(nodes["all"]),
+                (totals["client_gbps"] + totals["server_gbps"])/len(nodes["all"]),
                 (totals["client_kops"] + totals["server_kops"])/len(nodes["all"])))
 
         for node in sorted(exp.keys()):

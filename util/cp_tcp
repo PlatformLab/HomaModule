@@ -39,13 +39,13 @@ servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
 
 if options.workload != "":
-    load_info = [[options.workload, options.net_bw]];
+    load_info = [[options.workload, options.gbps]];
 
 # First, run all of the experiments
 if not options.plot_only:
     for workload, bw in load_info:
         options.workload = workload
-        options.net_bw = bw/2.0
+        options.gbps = bw/2.0
         unloaded_exp = "unloaded_" + workload;
         tcp_exp = "tcp_" + workload;
         try:
@@ -78,7 +78,7 @@ for workload, bw in load_info:
 
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
-    title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
     ax = start_slowdown_plot(title, 1000, tcp_exp)
     plot_slowdown(ax, tcp_exp, "p99", "TCP P99")
