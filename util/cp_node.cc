@@ -2008,17 +2008,25 @@ void homa_client::measure_unloaded(int count)
 			HOMA_MAX_MESSAGE_LENGTH);
 	int server = request_servers[0];
 	int slot;
+	uint64_t ms100 = get_cycles_per_sec()/10;
+	uint64_t end;
 	
-	/* Make one request for each size and distribution, just to warm
+	/* Make one request for each size in the distribution, just to warm
 	 * up the system.
 	 */
 	for (dist_point &point: dist)
 		measure_rtt(server, point.length, sender_buffer);
 	
-	/* Now do the real measurements.*/
+	/* Now do the real measurements. Stop with each size after 10
+	 * measurements if more than 0.1 second has elapsed (otherwise
+	 * this takes too long).
+	 */
 	slot = 0;
 	for (dist_point &point: dist) {
+		end = rdtsc() + ms100;
 		for (int i = 0; i < count; i++) {
+			if ((rdtsc() >= end) && (i >= 10))
+				break;
 			actual_lengths[slot] = point.length;
 			actual_rtts[slot] = measure_rtt(server, point.length,
 					sender_buffer);
