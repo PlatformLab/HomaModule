@@ -149,6 +149,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
+	spin_lock_init(&hsk->reaper_mutex);
 	INIT_LIST_HEAD(&hsk->ready_requests);
 	INIT_LIST_HEAD(&hsk->ready_responses);
 	INIT_LIST_HEAD(&hsk->request_interests);

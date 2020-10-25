@@ -68,7 +68,7 @@ int homa_init(struct homa *homa)
 	homa->num_grantable_peers = 0;
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
-	spin_lock_init(&homa->pacer_lock);
+	spin_lock_init(&homa->pacer_mutex);
 	homa->pacer_fifo_fraction = 50;
 	homa->pacer_fifo_count = 1;
 	spin_lock_init(&homa->throttle_lock);
@@ -411,13 +411,20 @@ int homa_rpc_reap(struct homa_sock *hsk)
 	int num_skbs = 0;
 	int num_rpcs = 0;
 	struct homa_rpc *rpc;
-	int i, result;
+	int i;
+	int result = 0;
+	
+	/* Make sure only one instance of this function executes at a
+	 * time for a given socket.
+	 */
+	if (!spin_trylock_bh(&hsk->reaper_mutex))
+		return 0;
 	
 	homa_sock_lock(hsk, "homa_rpc_reap");
 	if (atomic_read(&hsk->protect_count)) {
 		INC_METRIC(disabled_reaps, 1);
 		homa_sock_unlock(hsk);
-		return 0;
+		goto done;
 	}
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
@@ -497,6 +504,9 @@ release:
 		kfree(rpcs[i]);
 	}
 	tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
+	
+done:
+	spin_unlock_bh(&hsk->reaper_mutex);
 	return result;
 }
 

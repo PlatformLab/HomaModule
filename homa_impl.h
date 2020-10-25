@@ -972,7 +972,8 @@ struct homa_sock {
 	 */
 	struct homa_socktab_links server_links;
 	
-	/** @active_rpcs: List of all existing RPCs related to this socket,
+	/**
+	 * @active_rpcs: List of all existing RPCs related to this socket,
 	 * including both client and server RPCs. This list isn't strictly
 	 * needed, since RPCs are already in one of the hash tables below,
 	 * but it's more efficient for homa_timer to have this list
@@ -990,6 +991,13 @@ struct homa_sock {
 	
 	/** @dead_skbs: Total number of socket buffers in RPCs on dead_rpcs. */
 	int dead_skbs;
+	
+	/**
+	 * @reaper_mutex: Ensures that only one thread attempts to reap for
+	 * a given socket at a given time. Only used in "try" mode: never
+	 * block on this lock.
+	 */
+	struct spinlock reaper_mutex;
 	
 	/**
 	 * @ready_requests: Contains server RPCs in RPC_READY state that
@@ -1220,10 +1228,10 @@ struct homa {
 	int grant_nonfifo_left;
 	
 	/**
-	 * @pacer_lock: Ensures that only one instance of homa_pacer_xmit
-	 * runs at a time.
+	 * @pacer_mutex: Ensures that only one instance of homa_pacer_xmit
+	 * runs at a time. Only used in "try" mode: never block on this.
 	 */
-	struct spinlock pacer_lock __attribute__((aligned(CACHE_LINE_SIZE)));
+	struct spinlock pacer_mutex __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when

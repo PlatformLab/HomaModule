@@ -343,6 +343,26 @@ TEST_F(homa_utils, homa_rpc_reap__basics)
 	EXPECT_STREQ("12346 12347", dead_rpcs(&self->hsk));
 	EXPECT_EQ(4, self->hsk.dead_skbs);
 }
+TEST_F(homa_utils, homa_rpc_reap__reaper_mutex)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 5000, 2000);
+	homa_rpc_free(crpc1);
+	unit_log_clear();
+	EXPECT_STREQ("12345", dead_rpcs(&self->hsk));
+	
+	/* First try: reaper busy. */
+	mock_trylock_errors = 1;
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	unit_log_clear();
+	EXPECT_STREQ("12345", dead_rpcs(&self->hsk));
+	
+	/* Second try: reaper not busy. */
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk));
+	unit_log_clear();
+	EXPECT_STREQ("", dead_rpcs(&self->hsk));
+}
 TEST_F(homa_utils, homa_rpc_reap__protected)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,

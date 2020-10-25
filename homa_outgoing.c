@@ -758,7 +758,7 @@ void homa_pacer_xmit(struct homa *homa)
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
-	if (!spin_trylock_bh(&homa->pacer_lock))
+	if (!spin_trylock_bh(&homa->pacer_mutex))
 		return;
 	
 	/* Each iteration through the following loop sends one packet. We
@@ -865,7 +865,7 @@ void homa_pacer_xmit(struct homa *homa)
 		homa_rpc_unlock(rpc);
 	}
     done:
-	spin_unlock_bh(&homa->pacer_lock);
+	spin_unlock_bh(&homa->pacer_mutex);
 }
 
 /**
