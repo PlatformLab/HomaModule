@@ -2,6 +2,12 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (October 2020) Receive queue order. Experimented with ordering the
+  hsk->ready_requests and @hsk->ready_responses list to return short
+  messages first. Not clear that this provided any major benefits, and
+  it reduced throughput in some cases because of overheads in inserting
+  ready messages into the queues.
+
 * (October 2020) NIC queue estimation. Experimented with how much to
   underestimate network bandwidth. Answer: not much! The existing 5% margin
   of safety leaves bandwidth on the table, which impacts tail latency for
