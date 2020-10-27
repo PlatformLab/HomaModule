@@ -113,7 +113,7 @@ int homa_init(struct homa *homa)
 	homa->resend_interval = 10;
 	homa->timeout_resends = 5;
 	homa->reap_limit = 10;
-	homa->max_dead_buffs = 10000;
+	homa->dead_buffs_limit = 10000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 			"homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -383,6 +383,11 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	}
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
+	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
+		/* This update isn't thread-safe, but it's just a
+		 * statistic so it's OK if updates occasionally get missed.
+		 */
+		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 			rpc->hsk->client_port,
 			rpc->hsk->dead_skbs);

@@ -61,8 +61,9 @@ close, so round-trip latencies are at most a few tens of microseconds.
 Homa is not suitable for wide-area communication.
 .PP
 In order for Homa to achieve its low latency, network switches must be
-configured to enable priority queues in output ports and to obey the priority
-values specified as the PCP field in IEEE 802.1Q packet headers.
+configured to enable priority queues in output ports and to obey 3-bit
+priority values specified as the high-order bits of the DSCP field in
+IP packet headers.
 Homa assumes that 8 priority levels are available, but it can be
 configured to use fewer than this.
 .SH BASIC USAGE
@@ -147,6 +148,20 @@ detailed performance measurements to justify the change.
 (Read-only) The current version for unscheduled cutoffs; incremented
 automatically when unsched_cutoffs is modified.
 .TP
+.IR dead_buffs_limit
+When an RPC completes, Homa doesn't immediately free up the resources it used,
+since this could delay the application (e.g. if there are lots of
+packet buffers to free). Instead, Homa defers RPC "reaping" to a time
+when it is less likely to impact application performance, and it performs
+the reaping in small chunks (see
+.IR reap_limit ).
+However, under high-load conditions this could result
+in an accumulation of dead RPCs. If the total number of packet buffers in
+dead RPCs reaches the value of this parameter, then Homa reaps more
+aggressively (which could impact application performance) until the number
+of dead packet buffers drops below
+.I dead_buffs_limit .
+.TP
 .IR flags
 Individual bits can be set or cleared to control particular Homa behaviors.
 If the
@@ -189,18 +204,9 @@ log various state information to the system log, depending on the value.
 For details on the recognized values, consult the Homa code.
 .TP
 .IR max_dead_buffs
-When an RPC completes, Homa doesn't immediately free up the resources it used,
-since this could delay the application (e.g. if there are lots of
-packet buffers to free). Instead, Homa defers RPC "reaping" to a time
-when it is less likely to impact application performance, and it performs
-the reaping in small chunks (see
-.IR reap_limit ).
-However, under some conditions this could result
-in an accumulation of dead RPCs. If the total number of packet buffers in
-dead RPCs reaches the value of this parameter, then Homa reaps more
-aggressively (which could impact application performance) until the number
-of dead packet buffers drops below
-.I max_dead_buffs .
+This parameter is updated by Homa to reflect the largest number of packet
+buffers occupied by dead (but not yet reaped) RPCs in a single socket at
+a given time. It may be reset to zero to initiate a new calculation.
 .TP
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that

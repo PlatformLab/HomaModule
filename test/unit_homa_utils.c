@@ -296,6 +296,23 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
 			"wake_up_process pid 0", unit_log_get());
 }
+TEST_F(homa_utils, homa_rpc_free__dead_buffs)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 10000, 1000);
+	EXPECT_NE(NULL, crpc1);
+	homa_rpc_free(crpc1);
+	EXPECT_EQ(9, self->homa.max_dead_buffs);
+	EXPECT_EQ(9, self->hsk.dead_skbs);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid+1, 5000, 1000);
+	EXPECT_NE(NULL, crpc2);
+	homa_rpc_free(crpc2);
+	EXPECT_EQ(14, self->homa.max_dead_buffs);
+	EXPECT_EQ(14, self->hsk.dead_skbs);
+}
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,

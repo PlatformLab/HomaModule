@@ -2158,7 +2158,7 @@ TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 20000, 20000);
-	self->homa.max_dead_buffs = 10;
+	self->homa.dead_buffs_limit = 10;
 	self->homa.reap_limit = 5;
 	homa_rpc_free(crpc);
 	EXPECT_EQ(30, self->hsk.dead_skbs);

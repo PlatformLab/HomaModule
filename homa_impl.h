@@ -1431,12 +1431,21 @@ struct homa {
 	int reap_limit;
 	
 	/**
-	 * @max_dead_buffs: If the number of packet buffers in dead but
+	 * @dead_buffs_limit: If the number of packet buffers in dead but
 	 * not yet reaped RPCs is less than this number, then Homa reaps
 	 * RPCs in a way that minimizes impact on performance but may permit
 	 * dead RPCs to accumulate. If the number of dead packet buffers
 	 * exceeds this value, then Homa switches to a more aggressive approach
-	 * to reaping RPCs, which is more likely to impact performance.
+	 * to reaping RPCs, which is more likely to impact performance.   Set
+	 * externally via sysctl.
+	 */
+	int dead_buffs_limit;
+	
+	/**
+	 * @max_dead_buffs: The largest aggregate number of packet buffers
+	 * in dead (but not yet reaped) RPCs that has existed so far in a
+	 * single socket.  Readable via sysctl, and may be reset via sysctl
+	 * to begin recalculating.
 	 */
 	int max_dead_buffs;
 	

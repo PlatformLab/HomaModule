@@ -156,6 +156,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "dead_buffs_limit",
+		.data		= &homa_data.dead_buffs_limit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "flags",
 		.data		= &homa_data.flags,
 		.maxlen		= sizeof(int),
