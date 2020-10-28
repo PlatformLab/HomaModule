@@ -126,6 +126,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	int i;
 	
 	mutex_lock(&socktab->write_lock);
+	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
 	hsk->last_locker = "none";
 	atomic_set(&hsk->protect_count, 0);
