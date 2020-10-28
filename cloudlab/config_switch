@@ -24,7 +24,8 @@
 import sys
 
 # Ports to configure
-ports = range(1, 41)
+# ports = range(1, 41)
+ports = [7, 1, 36, 31, 22, 23, 17, 6, 24, 30]
 
 def config():
     # First, must enter "configure" mode
