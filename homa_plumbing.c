@@ -553,7 +553,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	elapsed = (get_cycles() - rpc->start_cycles)>>10;
 	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
-			&& (rpc->is_client) && !tt_frozen) {
+			&& (rpc->is_client) && (rpc->msgin.total_length < 200)
+			&& !tt_frozen) {
 		struct freeze_header freeze;
 		hsk->homa->temp[1] = 0;
 		tt_record4("Freezing because elapsed time is %d kcycles, "

@@ -13,7 +13,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* This file implements GSO (Generic Ssegmentation Offload) and GRO (Generic
+/* This file implements GSO (Generic Segmentation Offload) and GRO (Generic
  * Receive Offload) for Homa.
  */
 
@@ -205,7 +205,6 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	return result;
 }
 
-
 /**
  * homa_gro_complete() - This function is invoked just before a packet that
  * was held for GRO processing is passed up the network stack, in case the
@@ -225,26 +224,42 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
 	if (homa->gro_policy & HOMA_GRO_IDLE) {
-		int i, core, best;
-		__u64 best_time = ~0;
+		int i, core, best1, best2;
+		__u64 best1_time = ~0;
+		__u64 best2_time = ~0;
+		__u64 last_active;
+		
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no
 		 * core gets overloaded. We do that by checking the next several
 		 * cores in order after this one, and choosing the one that
-		 * has been idle the longest (hasn't done NAPI or SoftIRQ
-		 * processing for Homa).
+		 * hasn't done NAPI or SoftIRQ processing for Homa in the
+		 * longest time. Also, if HOMA_GRO_NO_TASK is set, compute
+		 * a second "best" core where we only consider cores that have
+		 * no runnable user tasks; if there is such a core, use this
+		 * in preference to the first "best".
 		 */
-		core = best = smp_processor_id();
+		core = best1 = smp_processor_id();
+		best2 = -1;
 		for (i = 0; i < 4; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
-			if (homa_cores[core]->last_active < best_time) {
-				best_time = homa_cores[core]->last_active;
-				best = core;
+			last_active = homa_cores[core]->last_active;
+			if (last_active < best2_time) {
+				if (idle_cpu(core)) {
+					best2_time = last_active;
+					best2 = core;
+				}
+				if (last_active < best1_time) {
+					best1_time = last_active;
+					best1 = core;
+				}
 			}
 		}
-		homa_set_softirq_cpu(skb, best);
+		if ((homa->gro_policy & HOMA_GRO_NO_TASKS) && (best2 >= 0))
+			best1 = best2;
+		homa_set_softirq_cpu(skb, best1);
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.

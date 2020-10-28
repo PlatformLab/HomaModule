@@ -46,6 +46,7 @@ int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
 int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
+int mock_cpu_idle = 0;
 int mock_import_single_range_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
@@ -334,6 +335,11 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 void icmp_send(struct sk_buff *skb, int type, int code, __be32 info)
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
+}
+
+int idle_cpu(int cpu)
+{
+	return mock_check_error(&mock_cpu_idle);
 }
 
 int import_single_range(int type, void __user *buf, size_t len,
@@ -1027,8 +1033,11 @@ void mock_teardown(void)
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
+	mock_cpu_idle = 0;
 	mock_cycles = 0;
 	mock_import_single_range_errors = 0;
+	mock_ip_queue_xmit_errors = 0;
+	mock_kmalloc_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_max_grants = 10;
 	mock_xmit_prios_offset = 0;

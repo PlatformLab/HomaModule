@@ -1520,7 +1520,8 @@ struct homa {
 	#define HOMA_GRO_BYPASS      1
         #define HOMA_GRO_SAME_CORE   2
         #define HOMA_GRO_IDLE        4
-        #define HOMA_GRO_NEXT        8
+        #define HOMA_GRO_NO_TASKS    8
+        #define HOMA_GRO_NEXT       16
         #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
 	
 	/**
