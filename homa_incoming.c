@@ -1251,13 +1251,9 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	if (hsk->dead_skbs > hsk->homa->dead_buffs_limit) {
 		/* Too many dead RPCs; must cleanup immediately. */
 		INC_METRIC(reap_too_many_dead, 1);
-		do {
-			if (!homa_rpc_reap(hsk))
-				break;
-
-			/* Give NAPI and SoftIRQ tasks a chance to run. */
-			schedule();
-		} while (hsk->dead_skbs > hsk->homa->dead_buffs_limit);
+		tt_record2("Forced reap for port %d, %d packets",
+				hsk->client_port, hsk->homa->avg_rpc_pkts);
+		homa_rpc_reap(hsk, hsk->homa->avg_rpc_pkts);
 	}
 	
 	/* Normally this loop only gets executed once, but we may have
@@ -1293,7 +1289,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 						atomic_long_read(&interest.id));
 				goto lock_rpc;
 			}
-			reaper_result = homa_rpc_reap(hsk);
+			reaper_result = homa_rpc_reap(hsk,
+					hsk->homa->reap_limit);
 			if (flags & HOMA_RECV_NONBLOCKING) {
 				result = ERR_PTR(-EAGAIN);
 				goto done;

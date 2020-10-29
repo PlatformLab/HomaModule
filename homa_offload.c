@@ -259,6 +259,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		}
 		if ((homa->gro_policy & HOMA_GRO_NO_TASKS) && (best2 >= 0))
 			best1 = best2;
+		tt_record2("homa_gro_complete scheduling softirq on core "
+				"%d, best2 %d", best1, best2);
 		homa_set_softirq_cpu(skb, best1);
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the

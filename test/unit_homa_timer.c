@@ -240,3 +240,54 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }
+TEST_F(homa_timer, homa_timer__update_avg_rpc_pkts)
+{
+	unit_log_clear();
+	homa_cores[1]->metrics.requests_received = 8000;
+	homa_cores[2]->metrics.requests_received = 2000;
+	homa_cores[3]->metrics.responses_received = 1000;
+	homa_cores[4]->metrics.responses_received = 4000;
+	homa_cores[1]->metrics.packets_sent[0] = 120000;
+	homa_cores[1]->metrics.packets_received[0] = 50000;
+	self->homa.last_rpcs = 5000;
+	self->homa.last_packets = 20000;
+	self->homa.timer_ticks = 15;
+	homa_timer(&self->homa);
+	EXPECT_EQ(15, self->homa.avg_rpc_pkts);
+	EXPECT_EQ(15000, self->homa.last_rpcs);
+	EXPECT_EQ(170000, self->homa.last_packets);
+}
+TEST_F(homa_timer, homa_timer__skip_update_wrong_timer_ticks)
+{
+	unit_log_clear();
+	homa_cores[1]->metrics.requests_received = 8000;
+	homa_cores[2]->metrics.requests_received = 2000;
+	homa_cores[3]->metrics.responses_received = 1000;
+	homa_cores[4]->metrics.responses_received = 4000;
+	homa_cores[1]->metrics.packets_sent[0] = 120000;
+	homa_cores[1]->metrics.packets_received[0] = 50000;
+	self->homa.last_rpcs = 5000;
+	self->homa.last_packets = 20000;
+	self->homa.timer_ticks = 0;
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, self->homa.avg_rpc_pkts);
+	EXPECT_EQ(5000, self->homa.last_rpcs);
+	EXPECT_EQ(20000, self->homa.last_packets);
+}
+TEST_F(homa_timer, homa_timer__skip_update_not_enough_rpcs)
+{
+	unit_log_clear();
+	homa_cores[1]->metrics.requests_received = 3000;
+	homa_cores[2]->metrics.requests_received = 2000;
+	homa_cores[3]->metrics.responses_received = 1000;
+	homa_cores[4]->metrics.responses_received = 4000;
+	homa_cores[1]->metrics.packets_sent[0] = 120000;
+	homa_cores[1]->metrics.packets_received[0] = 50000;
+	self->homa.last_rpcs = 9500;
+	self->homa.last_packets = 20000;
+	self->homa.timer_ticks = 15;
+	homa_timer(&self->homa);
+	EXPECT_EQ(0, self->homa.avg_rpc_pkts);
+	EXPECT_EQ(9500, self->homa.last_rpcs);
+	EXPECT_EQ(20000, self->homa.last_packets);
+}

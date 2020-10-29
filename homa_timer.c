@@ -196,6 +196,24 @@ void homa_timer(struct homa *homa)
 		 */
 		homa_abort_rpcs(homa, dead_peer->addr, 0, -ETIMEDOUT);
 	}
+	
+	if ((homa->timer_ticks & 0xf) == 0) {
+		int core;
+		__u64 packets, rpcs;
+		
+		rpcs = packets = 0;
+		for (core = 0; core < nr_cpu_ids; core++) {
+			struct homa_metrics *m = &homa_cores[core]->metrics;
+			rpcs += m->requests_received + m->responses_received;
+			packets += m->packets_sent[0] + m->packets_received[0];
+		}
+		if ((rpcs - homa->last_rpcs) > 1000) {
+			homa->avg_rpc_pkts = (packets - homa->last_packets)
+					/ (rpcs - homa->last_rpcs);
+			homa->last_packets = packets;
+			homa->last_rpcs = rpcs;
+		}
+	}
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
 //	tt_record("homa_timer finishing");

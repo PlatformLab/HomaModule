@@ -131,6 +131,9 @@ int homa_init(struct homa *homa)
 	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->timer_ticks = 0;
+	homa->avg_rpc_pkts = 0;
+	homa->last_rpcs = 0;
+	homa->last_packets = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
@@ -403,115 +406,118 @@ void homa_rpc_free(struct homa_rpc *rpc)
  * this function does a small chunk of work.
  * @hsk:   Homa socket that may contain dead RPCs. Must not be locked by the
  *         caller; this function will lock and release.
+ * @count: Number of buffers to free during this call.
  * 
- * Return: A return value of 0 means that we reaped everything we possibly
- *         could; calling again will do no work (there could be unreaped RPCs,
- *         but if so, reaping has been disabled for them).  A value greater than
+ * Return: A return value of 0 means that we ran out of work to do; calling
+ *         again will do no work (there could be unreaped RPCs, but if so,
+ *         reaping has been disabled for them).  A value greater than
  *         zero means there is still more reaping work to be done.
  */
-int homa_rpc_reap(struct homa_sock *hsk)
+int homa_rpc_reap(struct homa_sock *hsk, int count)
 {
-	struct sk_buff *skbs[hsk->homa->reap_limit];
-	struct homa_rpc *rpcs[hsk->homa->reap_limit];
-	int num_skbs = 0;
-	int num_rpcs = 0;
+#ifdef __UNIT_TEST__
+#define BATCH_MAX 3
+#else
+#define BATCH_MAX 20
+#endif
+	struct sk_buff *skbs[BATCH_MAX];
+	struct homa_rpc *rpcs[BATCH_MAX];
+	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
-	int i;
-	int result = 0;
+	int i, batch_size;
+	int result;
 	
-	/* Make sure only one instance of this function executes at a
-	 * time for a given socket.
-	 */
-	if (!spin_trylock_bh(&hsk->reaper_mutex))
-		return 0;
-	
-	homa_sock_lock(hsk, "homa_rpc_reap");
-	if (atomic_read(&hsk->protect_count)) {
-		INC_METRIC(disabled_reaps, 1);
-		homa_sock_unlock(hsk);
-		goto done;
-	}
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
 	
-	/* Collect buffers and freeable RPCs until either we hit our limit
-	 * or run out of RPCs.
+	/* Each iteration through the following loop will reap
+	 * BATCH_MAX skbs. 
 	 */
-//	tt_record2("Starting homa_rpc_reap, dead_skbs %d, port %d",
-//			hsk->dead_skbs, hsk->client_port);
-	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
-		if (rpc->dont_reap || (atomic_read(&rpc->grants_in_progress)
-				!= 0)) {
-			INC_METRIC(disabled_rpc_reaps, 1);
-			continue;
-		}
-//		if (rpc->msgout.packets)
-//			tt_record2("Reaping rpc msgout, id %d, peer 0x%x",
-//					rpc->id, ntohl(rpc->peer->addr));
-//		else
-//			tt_record2("Reaping rpc msgin, id %d, peer 0x%x",
-//					rpc->id, ntohl(rpc->peer->addr));
-		rpc->magic = 0;
-		if (rpc->msgout.length >= 0) {
-			while (rpc->msgout.packets) {
-				skbs[num_skbs] = rpc->msgout.packets;
-				rpc->msgout.packets = *homa_next_skb(
-						rpc->msgout.packets);
-				num_skbs++;
-				rpc->msgout.num_skbs--;
-				if (num_skbs >= hsk->homa->reap_limit)
-					goto release;
-			}
-		}
-		i = 0;
-		if (rpc->msgin.total_length >= 0) {
-			while (1) {
-				struct sk_buff *skb;
-				skb = skb_dequeue(
-						&rpc->msgin.packets);
-				if (!skb)
-					break;
-				skbs[num_skbs] = skb;
-				num_skbs++;
-				rpc->msgin.num_skbs--;
-				if (num_skbs >= hsk->homa->reap_limit)
-					goto release;
-			}
+	while (count > 0) {
+		batch_size = count;
+		if (batch_size > BATCH_MAX)
+			batch_size = BATCH_MAX;
+		count -= batch_size;
+		num_skbs = num_rpcs = 0;
+		
+		homa_sock_lock(hsk, "homa_rpc_reap");
+		if (atomic_read(&hsk->protect_count)) {
+			INC_METRIC(disabled_reaps, 1);
+			homa_sock_unlock(hsk);
+			return 0;
 		}
 		
-		/* If we get here, it means all packets have been removed
-		 * from the RPC.
+		/* Collect buffers and freeable RPCs. */
+		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
+			if (rpc->dont_reap || (atomic_read(
+					&rpc->grants_in_progress) != 0)) {
+				INC_METRIC(disabled_rpc_reaps, 1);
+				continue;
+			}
+			rpc->magic = 0;
+			if (rpc->msgout.length >= 0) {
+				while (rpc->msgout.packets) {
+					skbs[num_skbs] = rpc->msgout.packets;
+					rpc->msgout.packets = *homa_next_skb(
+							rpc->msgout.packets);
+					num_skbs++;
+					rpc->msgout.num_skbs--;
+					if (num_skbs >= batch_size)
+						goto release;
+				}
+			}
+			i = 0;
+			if (rpc->msgin.total_length >= 0) {
+				while (1) {
+					struct sk_buff *skb;
+					skb = skb_dequeue(&rpc->msgin.packets);
+					if (!skb)
+						break;
+					skbs[num_skbs] = skb;
+					num_skbs++;
+					rpc->msgin.num_skbs--;
+					if (num_skbs >= batch_size)
+						goto release;
+				}
+			}
+
+			/* If we get here, it means all packets have been
+			 *  removed from the RPC.
+			 */
+			rpcs[num_rpcs] = rpc;
+			num_rpcs++;
+			list_del_rcu(&rpc->dead_links);
+			if (num_rpcs >= batch_size)
+				goto release;
+		}
+
+		/* Free all of the collected resources; release the socket
+		 * lock while doing this.
 		 */
-		rpcs[num_rpcs] = rpc;
-		num_rpcs++;
-		list_del_rcu(&rpc->dead_links);
+	release:
+		hsk->dead_skbs -= num_skbs;
+		result = !list_empty(&hsk->dead_rpcs)
+				&& ((num_skbs + num_rpcs) != 0);
+		homa_sock_unlock(hsk);
+		for (i = 0; i < num_skbs; i++) {
+			kfree_skb(skbs[i]);
+		}
+		for (i = 0; i < num_rpcs; i++) {
+			UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
+			/* Lock and unlock the RPC before freeing it. This
+			 * is needed to deal with races where the last user
+			 * of the RPC (such as homa_ioc_reply) hasn't
+			 * unlocked it yet.
+			 */
+			homa_rpc_lock(rpcs[i]);
+			homa_rpc_unlock(rpcs[i]);
+			rpcs[i]->state = 0;
+			kfree(rpcs[i]);
+		}
+		tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
+		if (!result)
+			break;
 	}
-	
-	/* Free all of the collected resources; release the socket
-	 * lock while doing this.
-	 */
-release:
-	hsk->dead_skbs -= num_skbs;
-	result = !list_empty(&hsk->dead_rpcs) && ((num_skbs + num_rpcs) != 0);
-	homa_sock_unlock(hsk);
-	for (i = 0; i < num_skbs; i++) {
-		kfree_skb(skbs[i]);
-	}
-	for (i = 0; i < num_rpcs; i++) {
-		UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
-		/* Lock and unlock the RPC before freeing it. This is needed
-		 * to deal with races where the last user of the RPC (such
-		 * as homa_ioc_reply) hasn't unlocked it yet.
-		 */
-		homa_rpc_lock(rpcs[i]);
-		homa_rpc_unlock(rpcs[i]);
-		rpcs[i]->state = 0;
-		kfree(rpcs[i]);
-	}
-	tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
-	
-done:
-	spin_unlock_bh(&hsk->reaper_mutex);
 	return result;
 }
 
