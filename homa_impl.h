@@ -143,6 +143,13 @@ enum homa_packet_type {
 #define CACHE_LINE_SIZE 64
 
 /**
+ * define REAP_CHECK - Determines how frequently we check for excessive
+ * buildup of dead RPCs. It is a mask value applied to the current count
+ * of received DATA packets; when zero, the check occurs.
+ */
+#define REAP_CHECK 7
+
+/**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet. This must partially match the format of a TCP header so that
  * Homa can piggyback on TCP segmentation offload (and possibly other
@@ -1435,6 +1442,31 @@ struct homa {
 	int dead_buffs_limit;
 	
 	/**
+	 * @forced_reap_count: When reaping occurs because dead_buffs_limit
+	 * has been exceeded, this determines how many buffers to reap.
+	 * Computed dynamically by homa_timer based on workload.
+	 */
+	int forced_reap_count;
+	
+	/**
+	 * @last_rpcs: Cumulative total RPCs sent and/or received as of
+	 * the last time @forced_reap_count was recomputed.
+	 */
+	__u64 last_rpcs;
+	
+	/**
+	 * @last_sent: Cumulative total packets sent as of the last time
+	 * @forced_reap_count was recomputed.
+	 */
+	__u64 last_sent;
+	
+	/**
+	 * @last_received: Cumulative total packets received as of the last
+	 * time @forced_reap_count was recomputed.
+	 */
+	__u64 last_received;
+	
+	/**
 	 * @max_dead_buffs: The largest aggregate number of packet buffers
 	 * in dead (but not yet reaped) RPCs that has existed so far in a
 	 * single socket.  Readable via sysctl, and may be reset via sysctl
@@ -1515,31 +1547,13 @@ struct homa {
         #define HOMA_GRO_IDLE        4
         #define HOMA_GRO_NO_TASKS    8
         #define HOMA_GRO_NEXT       16
-        #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
+        #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE|HOMA_GRO_NO_TASKS
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
 	 * (may wraparound, which is safe).
 	 */
 	__u32 timer_ticks;
-
-	/**
-	 * @avg_rpc_pkts: average number of packets per RPC, computed from
-	 * recent RPCs (includes both client and server RPCs).
-	 */
-	__u32 avg_rpc_pkts;
-
-	/**
-	 * @rpcs: cumulative total of all RPCs sent or received,
-	 * as of the last time avg_rpc_pkts was computed.
-	 */
-	__u64 last_rpcs;
-
-	/**
-	 * @last_avg_packets: cumulative total of all packets sent or
-	 * received, as of the last time avg_rpc_pkts was computed.
-	 */
-	__u64 last_packets;
 
 	/**
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
@@ -2013,10 +2027,10 @@ struct homa_metrics {
 	__u64 reaper_dead_skbs;
 	
 	/**
-	 * @reap_too_many_dead: total number of times that homa_wait_for_message
+	 * @forced_reaps: total number of times that homa_wait_for_message
 	 * invoked the reaper because dead_skbs was too high.
 	 */
-	__u64 reap_too_many_dead;
+	__u64 forced_reaps;
 	
 	/**
 	 * @throttle_list_adds: total number of calls to homa_add_to_throttled.

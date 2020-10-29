@@ -78,7 +78,7 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 TEST_F(homa_outgoing, homa_fill_packets__message_too_long)
 {
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			(char *) 1000, 2000000);
+			(char *) 1000, HOMA_MAX_MESSAGE_LENGTH+100);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EINVAL, -PTR_ERR(skb));
 }

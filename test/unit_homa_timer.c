@@ -240,54 +240,66 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
 	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }
-TEST_F(homa_timer, homa_timer__update_avg_rpc_pkts)
+TEST_F(homa_timer, homa_timer__update_forced_reap_count)
 {
-	unit_log_clear();
-	homa_cores[1]->metrics.requests_received = 8000;
-	homa_cores[2]->metrics.requests_received = 2000;
-	homa_cores[3]->metrics.responses_received = 1000;
-	homa_cores[4]->metrics.responses_received = 4000;
-	homa_cores[1]->metrics.packets_sent[0] = 120000;
-	homa_cores[1]->metrics.packets_received[0] = 50000;
-	self->homa.last_rpcs = 5000;
-	self->homa.last_packets = 20000;
-	self->homa.timer_ticks = 15;
+	homa_cores[0]->metrics.requests_received = 1000;
+	homa_cores[1]->metrics.requests_received = 500;
+	homa_cores[2]->metrics.responses_received = 800;
+	homa_cores[1]->metrics.packets_sent[0] = 5000;
+	homa_cores[3]->metrics.packets_sent[0] = 2000;
+	homa_cores[1]->metrics.packets_received[0] = 1000;
+	homa_cores[2]->metrics.packets_received[0] = 6000;
+	homa_cores[3]->metrics.packets_received[0] = 4000;
+	self->homa.last_rpcs = 1290;
+	self->homa.last_sent = 1000;
+	self->homa.last_received = 2000;
+	self->homa.timer_ticks = 0x3f;
+	self->homa.forced_reap_count = 999;
 	homa_timer(&self->homa);
-	EXPECT_EQ(15, self->homa.avg_rpc_pkts);
-	EXPECT_EQ(15000, self->homa.last_rpcs);
-	EXPECT_EQ(170000, self->homa.last_packets);
+	EXPECT_EQ(15, self->homa.forced_reap_count);
+	EXPECT_EQ(2300, self->homa.last_rpcs);
+	EXPECT_EQ(7000, self->homa.last_sent);
+	EXPECT_EQ(11000, self->homa.last_received);
 }
-TEST_F(homa_timer, homa_timer__skip_update_wrong_timer_ticks)
+TEST_F(homa_timer, homa_timer__update_forced_reap_count__skip_wrong_tick)
 {
-	unit_log_clear();
-	homa_cores[1]->metrics.requests_received = 8000;
-	homa_cores[2]->metrics.requests_received = 2000;
-	homa_cores[3]->metrics.responses_received = 1000;
-	homa_cores[4]->metrics.responses_received = 4000;
-	homa_cores[1]->metrics.packets_sent[0] = 120000;
-	homa_cores[1]->metrics.packets_received[0] = 50000;
-	self->homa.last_rpcs = 5000;
-	self->homa.last_packets = 20000;
-	self->homa.timer_ticks = 0;
+	homa_cores[0]->metrics.requests_received = 1000;
+	homa_cores[1]->metrics.requests_received = 500;
+	homa_cores[2]->metrics.responses_received = 800;
+	homa_cores[1]->metrics.packets_sent[0] = 5000;
+	homa_cores[3]->metrics.packets_sent[0] = 2000;
+	homa_cores[1]->metrics.packets_received[0] = 1000;
+	homa_cores[2]->metrics.packets_received[0] = 6000;
+	homa_cores[3]->metrics.packets_received[0] = 4000;
+	self->homa.last_rpcs = 1290;
+	self->homa.last_sent = 1000;
+	self->homa.last_received = 2000;
+	self->homa.timer_ticks = 0x3e;
+	self->homa.forced_reap_count = 999;
 	homa_timer(&self->homa);
-	EXPECT_EQ(0, self->homa.avg_rpc_pkts);
-	EXPECT_EQ(5000, self->homa.last_rpcs);
-	EXPECT_EQ(20000, self->homa.last_packets);
+	EXPECT_EQ(999, self->homa.forced_reap_count);
+	EXPECT_EQ(1290, self->homa.last_rpcs);
+	EXPECT_EQ(1000, self->homa.last_sent);
+	EXPECT_EQ(2000, self->homa.last_received);
 }
-TEST_F(homa_timer, homa_timer__skip_update_not_enough_rpcs)
+TEST_F(homa_timer, homa_timer__update_forced_reap_count__skip_not_enough_data)
 {
-	unit_log_clear();
-	homa_cores[1]->metrics.requests_received = 3000;
-	homa_cores[2]->metrics.requests_received = 2000;
-	homa_cores[3]->metrics.responses_received = 1000;
-	homa_cores[4]->metrics.responses_received = 4000;
-	homa_cores[1]->metrics.packets_sent[0] = 120000;
-	homa_cores[1]->metrics.packets_received[0] = 50000;
-	self->homa.last_rpcs = 9500;
-	self->homa.last_packets = 20000;
-	self->homa.timer_ticks = 15;
+	homa_cores[0]->metrics.requests_received = 1000;
+	homa_cores[1]->metrics.requests_received = 500;
+	homa_cores[2]->metrics.responses_received = 800;
+	homa_cores[1]->metrics.packets_sent[0] = 5000;
+	homa_cores[3]->metrics.packets_sent[0] = 2000;
+	homa_cores[1]->metrics.packets_received[0] = 1000;
+	homa_cores[2]->metrics.packets_received[0] = 6000;
+	homa_cores[3]->metrics.packets_received[0] = 4000;
+	self->homa.last_rpcs = 1310;
+	self->homa.last_sent = 1000;
+	self->homa.last_received = 2000;
+	self->homa.timer_ticks = 0x3f;
+	self->homa.forced_reap_count = 999;
 	homa_timer(&self->homa);
-	EXPECT_EQ(0, self->homa.avg_rpc_pkts);
-	EXPECT_EQ(9500, self->homa.last_rpcs);
-	EXPECT_EQ(20000, self->homa.last_packets);
+	EXPECT_EQ(999, self->homa.forced_reap_count);
+	EXPECT_EQ(1310, self->homa.last_rpcs);
+	EXPECT_EQ(1000, self->homa.last_sent);
+	EXPECT_EQ(2000, self->homa.last_received);
 }

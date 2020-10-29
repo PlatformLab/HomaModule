@@ -113,7 +113,12 @@ int homa_init(struct homa *homa)
 	homa->resend_interval = 10;
 	homa->timeout_resends = 5;
 	homa->reap_limit = 10;
-	homa->dead_buffs_limit = 10000;
+	homa->dead_buffs_limit = 5000;
+	homa->forced_reap_count = 20;
+	homa->max_dead_buffs = 0;
+	homa->last_rpcs = 0;
+	homa->last_sent = 0;
+	homa->last_received = 0;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 			"homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -131,9 +136,6 @@ int homa_init(struct homa *homa)
 	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->timer_ticks = 0;
-	homa->avg_rpc_pkts = 0;
-	homa->last_rpcs = 0;
-	homa->last_packets = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
@@ -1363,9 +1365,9 @@ char *homa_print_metrics(struct homa *homa)
 				"calls\n",
 				m->reaper_dead_skbs);
 		homa_append_metric(homa,
-				"reap_too_many_dead        %15llu  "
-				"Reaps forced by dead RPC buildup\n",
-				m->reap_too_many_dead);
+				"forced_reaps              %15llu  "
+				"Reaps forced by accumulation of dead RPCs\n",
+				m->forced_reaps);
 		homa_append_metric(homa,
 				"throttle_list_adds        %15llu  "
 				"Calls to homa_add_to_throttled\n",

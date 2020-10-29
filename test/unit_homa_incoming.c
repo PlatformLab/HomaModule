@@ -597,6 +597,41 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
+TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
+{
+	struct homa_rpc *dead = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 20000);
+	homa_rpc_free(dead);
+	EXPECT_EQ(30, self->hsk.dead_skbs);
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->rpcid, 10000, 5000);
+	EXPECT_NE(NULL, srpc);
+	self->homa.dead_buffs_limit = 5;
+	self->homa.forced_reap_count = 12;
+	
+	/* First packet: not time to check. */
+	homa_cores[cpu_number]->metrics.packets_received[0] = 6;
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), &self->hsk);
+	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.forced_reaps);
+	
+	/* Second packet: must reap. */
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), &self->hsk);
+	EXPECT_EQ(18, self->hsk.dead_skbs);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.forced_reaps);
+	
+	/* Third packet: below the forced reap threshold. */
+	homa_cores[cpu_number]->metrics.packets_received[0] = 7;
+	self->homa.dead_buffs_limit = 20;
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), &self->hsk);
+	EXPECT_EQ(18, self->hsk.dead_skbs);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.forced_reaps);
+}
 TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -2152,22 +2187,6 @@ TEST_F(homa_incoming, homa_register_interests__return_from_ready_requests)
 	EXPECT_EQ(1, atomic_long_read(&self->interest.id));
 }
 
-TEST_F(homa_incoming, homa_wait_for_message__dead_buffs_exceeded)
-{
-	struct homa_rpc *rpc;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 20000, 20000);
-	self->homa.dead_buffs_limit = 10;
-	self->homa.reap_limit = 5;
-	homa_rpc_free(crpc);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-	
-	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_RESPONSE, 44);
-	EXPECT_EQ(EINVAL, -PTR_ERR(rpc));
-	EXPECT_EQ(10, self->hsk.dead_skbs);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.reap_too_many_dead);
-}
 TEST_F(homa_incoming, homa_wait_for_message__rpc_from_register_interests)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

@@ -588,13 +588,14 @@ TEST_F(homa_utils, homa_append_metric)
 
 TEST_F(homa_utils, homa_prios_changed__basics)
 {
-	set_cutoffs(&self->homa, 90, 80, 10000000, 60, 50, 40, 30, 0);
+	set_cutoffs(&self->homa, 90, 80, HOMA_MAX_MESSAGE_LENGTH*2, 60, 50,
+			40, 30, 0);
 	self->homa.num_priorities = 6;
 	homa_prios_changed(&self->homa);
 	EXPECT_EQ(0, self->homa.unsched_cutoffs[6]);
 	EXPECT_EQ(40, self->homa.unsched_cutoffs[5]);
 	EXPECT_EQ(60, self->homa.unsched_cutoffs[3]);
-	EXPECT_EQ(10000000, self->homa.unsched_cutoffs[2]);
+	EXPECT_EQ(HOMA_MAX_MESSAGE_LENGTH*2, self->homa.unsched_cutoffs[2]);
 	EXPECT_EQ(80, self->homa.unsched_cutoffs[1]);
 	EXPECT_EQ(INT_MAX, self->homa.unsched_cutoffs[0]);
 	EXPECT_EQ(1, self->homa.max_sched_prio);

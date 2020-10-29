@@ -326,9 +326,21 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	
 	switch (h->type) {
 	case DATA:
-		INC_METRIC(packets_received[DATA - DATA], 1);
 		if (homa_data_pkt(skb, rpc) != 0)
 			return;
+		INC_METRIC(packets_received[DATA - DATA], 1);
+		if (((homa_cores[smp_processor_id()]->
+				metrics.packets_received[0] & 0x7) == 0)
+				&& (hsk->dead_skbs
+				> hsk->homa->dead_buffs_limit)) {
+			INC_METRIC(forced_reaps, 1);
+			tt_record3("Forced reap for port %d, id %d, count %d",
+					hsk->client_port, rpc->id,
+					hsk->homa->forced_reap_count);
+			homa_rpc_unlock(rpc);
+			homa_rpc_reap(hsk, hsk->homa->forced_reap_count);
+			rpc = NULL;
+		}
 		break;
 	case GRANT:
 		INC_METRIC(packets_received[GRANT - DATA], 1);
@@ -388,7 +400,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			h->common.id, ntohl(rpc->peer->addr),
 			ntohl(h->seg.offset), ntohl(h->message_length));
-
+	
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
 			
@@ -1248,13 +1260,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	int error;
 	
 	homa_interest_init(&interest);
-	if (hsk->dead_skbs > hsk->homa->dead_buffs_limit) {
-		/* Too many dead RPCs; must cleanup immediately. */
-		INC_METRIC(reap_too_many_dead, 1);
-		tt_record2("Forced reap for port %d, %d packets",
-				hsk->client_port, hsk->homa->avg_rpc_pkts);
-		homa_rpc_reap(hsk, hsk->homa->avg_rpc_pkts);
-	}
 	
 	/* Normally this loop only gets executed once, but we may have
 	 * to start again under various special cases such as a "found"

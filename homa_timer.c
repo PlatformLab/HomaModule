@@ -197,21 +197,46 @@ void homa_timer(struct homa *homa)
 		homa_abort_rpcs(homa, dead_peer->addr, 0, -ETIMEDOUT);
 	}
 	
-	if ((homa->timer_ticks & 0xf) == 0) {
+	if ((homa->timer_ticks & 0x3f) == 0) {
+		/* Recompute homa->forced_reap_count. The overall idea
+		 * is to reap enough packets during each forced reap so that
+		 * we make gradual progress against the accumulated backlog.
+		 * This depends on how often forced reaps occur (once
+		 * every REAP_CHECK+1 input packets) and the number of
+		 * output packets generated for each input packet.
+		 */
 		int core;
-		__u64 packets, rpcs;
+		__u64 rpcs, out, in, delta_in, delta_out, tmp;
 		
-		rpcs = packets = 0;
+		out = in = rpcs = 0;
 		for (core = 0; core < nr_cpu_ids; core++) {
 			struct homa_metrics *m = &homa_cores[core]->metrics;
 			rpcs += m->requests_received + m->responses_received;
-			packets += m->packets_sent[0] + m->packets_received[0];
+			out += m->packets_sent[0];
+			in += m->packets_received[0];
 		}
-		if ((rpcs - homa->last_rpcs) > 1000) {
-			homa->avg_rpc_pkts = (packets - homa->last_packets)
-					/ (rpcs - homa->last_rpcs);
-			homa->last_packets = packets;
+		delta_in = in - homa->last_received;
+		delta_out = out - homa->last_sent;
+		
+		/* Don't recompute unless we've handled enough RPCs since
+		 * the last recomputation for meaningful statistics.
+		 */
+		if ((rpcs - homa->last_rpcs) >= 1000) {
+			if (delta_in == 0)
+				delta_in = 1;
+			tmp = REAP_CHECK + 1;
+			/* The "2" below is an arbitrary value, to make sure
+			 * we do better than break-even.
+			 */
+			homa->forced_reap_count = 2 +
+					tmp*(delta_in+delta_out)/delta_in;
+//			printk(KERN_NOTICE "New forced_reap_count %d, in %llu, "
+//					"out %llu",
+//					homa->forced_reap_count,
+//					delta_in, delta_out);
 			homa->last_rpcs = rpcs;
+			homa->last_sent = out;
+			homa->last_received = in;
 		}
 	}
 	end = get_cycles();
