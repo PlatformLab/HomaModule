@@ -396,14 +396,21 @@ if elapsed_secs != 0:
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "stale_generations", "generation_overflows",
-            "reap_too_many_dead"]:
+            "server_rpcs_unknown", "stale_generations", "generation_overflows"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
+    if total_messages > 0:
+        delta = float(deltas["reap_too_many_dead"])
+        frac = delta/total_messages
+        rate = delta/elapsed_secs
+        rate_info = ("(%s/s) " % (scale_number(rate)));
+        if 1 or frac > .001:
+            print("%-28s %14.1f%% %s %s" % ("reap_too_many_dead", frac*100,
+                    rate_info, docs["reap_too_many_dead"]))
     for symbol in ["pacer_lost_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
