@@ -2,6 +2,13 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (October 2020) Experimented with new GRO policy HOMA_GRO_NO_TASKS,
+  which attempts to avoid cores with active threads when picking cores
+  for SoftIRQ processing. This made almost no visible difference in
+  performance, and also depends on modifying the Linux kernel to
+  export a previously unexported function, so I removed it. It's
+  still available in repo commits, though.
+
 * (October 2020) Receive queue order. Experimented with ordering the
   hsk->ready_requests and @hsk->ready_responses list to return short
   messages first. Not clear that this provided any major benefits, and

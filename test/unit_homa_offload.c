@@ -177,22 +177,3 @@ TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 	homa_gro_complete(skb, 0);
 	EXPECT_EQ(2, skb->hash - 32);
 }
-TEST_F(homa_offload, homa_gro_complete__GRO_NO_TASKS)
-{
-	struct sk_buff *skb = self->gro_list;
-	homa->gro_policy = HOMA_GRO_IDLE|HOMA_GRO_NO_TASKS;
-	homa_cores[6]->last_active = 30;
-	homa_cores[7]->last_active = 25;
-	homa_cores[0]->last_active = 15;
-	homa_cores[1]->last_active = 20;
-	
-	cpu_number = 5;
-	mock_cpu_idle = 3;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(7, skb->hash - 32);
-	
-	mock_cpu_idle = 0xff;
-	cpu_number = 5;
-	homa_gro_complete(skb, 0);
-	EXPECT_EQ(0, skb->hash - 32);
-}

@@ -224,9 +224,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
 	
 	if (homa->gro_policy & HOMA_GRO_IDLE) {
-		int i, core, best1, best2;
-		__u64 best1_time = ~0;
-		__u64 best2_time = ~0;
+		int i, core, best;
+		__u64 best_time = ~0;
 		__u64 last_active;
 		
 		/* Pick a specific core to handle SoftIRQ processing for this
@@ -239,29 +238,18 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * no runnable user tasks; if there is such a core, use this
 		 * in preference to the first "best".
 		 */
-		core = best1 = smp_processor_id();
-		best2 = -1;
+		core = best = smp_processor_id();
 		for (i = 0; i < 4; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
 			last_active = homa_cores[core]->last_active;
-			if (last_active < best2_time) {
-				if (idle_cpu(core)) {
-					best2_time = last_active;
-					best2 = core;
-				}
-				if (last_active < best1_time) {
-					best1_time = last_active;
-					best1 = core;
-				}
+			if (last_active < best_time) {
+				best_time = last_active;
+				best = core;
 			}
 		}
-		if ((homa->gro_policy & HOMA_GRO_NO_TASKS) && (best2 >= 0))
-			best1 = best2;
-		tt_record2("homa_gro_complete scheduling softirq on core "
-				"%d, best2 %d", best1, best2);
-		homa_set_softirq_cpu(skb, best1);
+		homa_set_softirq_cpu(skb, best);
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
