@@ -2,6 +2,9 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Performance-related tasks:
+  * Perhaps limit the number of polling threads per socket, to solve
+    the problems with having lots of receiver threads?
+  * Move some reaping to the pacer? It has time to spare
   * Figure out why TCP W2 P99 gets worse with higher --client-max
   * See if turning off c-states allows shorter polling intervals?
   * Are Meltdown mitigations really disabled?
@@ -9,11 +12,6 @@ Notes for Homa implementation in Linux:
   * Consider reducing throttle_min_bytes to see if it helps region 1
     in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
-  * Order the queue of ready messages by size? May not matter for
-    existing benchmarks, but could matter more for real applications, where
-    long messages are likely to have longer service times.
-  * Modify code to reduce maximum rate of reaping, especially after large
-    bursts of deletions?
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
     >1 request per kernel call?
   * Analyze W5 performance with unlimited Homa message size (why is P99 bad

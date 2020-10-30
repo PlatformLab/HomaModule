@@ -1472,8 +1472,9 @@ handoff:
 		list_del(&interest->response_links);
 		interest->response_links.next = LIST_POISON1;
 	}
-	tt_record2("homa_rpc_ready handing off id %d to pid %d", rpc->id,
-			interest->thread->pid);
+	tt_record3("homa_rpc_ready handing off id %d to pid %d on core %d",
+			rpc->id, interest->thread->pid,
+			task_cpu(interest->thread));
 	homa_interest_set(interest, rpc);
 	wake_up_process(interest->thread);
 }
