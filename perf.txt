@@ -2,6 +2,22 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (October 2020) Polling performance impact. In isolation, polling saves
+  about 4 us RTT per RPC. In the workloads, it reduces short-message P50
+  up to 10 us, and P99 up to 25us (the impact is greater with light-tailed
+  workloads like W1 and W2). For W2, polling also improved throughput
+  by about 3%.
+
+* (October 2020) Polling problem: some workloads (like W5 with 30 MB
+  messages need a lot of receiving threads for occasional bursts where
+  several threads are tied up receiving very large messages. However,
+  this same number of receivers results in poor performance in W3,
+  because these additional threads spend a lot of time polling, which
+  wastes enough CPU time to impact the threads that actually have
+  work to do. One possibility: limit the number of polling threads per
+  socket? Right now it appears hard to configure polling for all
+  workloads.
+
 * (October 2020) Experimented with new GRO policy HOMA_GRO_NO_TASKS,
   which attempts to avoid cores with active threads when picking cores
   for SoftIRQ processing. This made almost no visible difference in
@@ -18,9 +34,9 @@ order.
 * (October 2020) NIC queue estimation. Experimented with how much to
   underestimate network bandwidth. Answer: not much! The existing 5% margin
   of safety leaves bandwidth on the table, which impacts tail latency for
-  large messages. Reduced it to 1%, which seems to be better across the
-  board. However, the tests were done with only 1 priority: need to recheck
-  when priorities are available again.
+  large messages. Reduced it to 1%, which helps large messages a lot (up to
+  2x reduction in latency). Impact on small messages is mixed (more get worse
+  than better), but the impact isn't large in either case.
 
 * (July 2020) P10 under load. Although Homa can provide 13.5 us RTTs under
   best-case conditions, this almost never occurs in practice. Even at low

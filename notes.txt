@@ -14,8 +14,6 @@ Notes for Homa implementation in Linux:
   * Modify cp_node's TCP to use multiple connections per client-server pair
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
     >1 request per kernel call?
-  * Analyze W5 performance with unlimited Homa message size (why is P99 bad
-    for small messages?)
   * Try measuring performance without polling in Homa?
 
 * Things to do:
