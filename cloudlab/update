@@ -20,7 +20,7 @@
 
 if [ $# -eq 0 ]; then
     # targets="ms0919.utah.cloudlab.us ms0903.utah.cloudlab.us"
-    targets="hp129.utah.cloudlab.us"
+    targets="hp196.utah.cloudlab.us"
 else
     targets=$*
 fi

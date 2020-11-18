@@ -20,6 +20,8 @@
 #ifndef _HOMA_IMPL_H
 #define _HOMA_IMPL_H
 
+#pragma GCC diagnostic ignored "-Wpointer-sign"
+#pragma GCC diagnostic ignored "-Wunused-variable"
 #include <linux/audit.h>
 #include <linux/icmp.h>
 #include <linux/if_vlan.h>
@@ -36,6 +38,8 @@
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
+#pragma GCC diagnostic warning "-Wpointer-sign"
+#pragma GCC diagnostic warning "-Wunused-variable"
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
 typedef unsigned int __poll_t;
@@ -1926,6 +1930,13 @@ struct homa_core {
 	__u64 last_active;
 	
 	/**
+	 * @merge_list: the most recent GRO list known to hold a Homa
+	 * packet available for merging into. NULL means no Homa packet has
+	 * been available for merging yet.
+	 */
+	struct list_head *merge_list;
+	
+	/**
 	 * @thread: the most recent thread to invoke a Homa system call
 	 * on this core, or NULL if none.
 	 */
@@ -2195,7 +2206,7 @@ extern int      homa_dointvec(struct ctl_table *table, int write,
 			void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
 			struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_err_handler(struct sk_buff *skb, u32 info);
+extern int      homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct sk_buff
                 *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			char __user *from, size_t len);
@@ -2213,7 +2224,8 @@ extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
-		**homa_gro_receive(struct sk_buff **head, struct sk_buff *skb);
+                *homa_gro_receive(struct list_head *gro_list,
+			struct sk_buff *skb);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
 		homa_hrtimer(struct hrtimer *timer);

@@ -1116,8 +1116,10 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  * packet, such as ICMP UNREACHABLE.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
+ * 
+ * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-void homa_err_handler(struct sk_buff *skb, u32 info) {
+int homa_err_handler(struct sk_buff *skb, u32 info) {
 	const struct iphdr *iph = (const struct iphdr *)skb->data;
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
@@ -1137,6 +1139,7 @@ void homa_err_handler(struct sk_buff *skb, u32 info) {
 				"info %x, ICMP type %d, ICMP code %d\n",
 				info, type, code);
 	}
+	return 0;
 }
 
 /**
@@ -1160,7 +1163,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	 * why...
 	 */
 	
-	sock_poll_wait(file, sk_sleep(sk), wait);
+	sock_poll_wait(file, sock, wait);
 	mask = POLLOUT | POLLWRNORM;
 	
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
@@ -1289,13 +1292,6 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_rpc_log_active(homa, log_topic);
 			log_topic = 0;
 		}
-		
-//		if (table->data == &homa_data.temp) {
-//			tt_debug_int64[0] = homa_data.temp[0];
-//			tt_debug_int64[1] = homa_data.temp[1];
-//			tt_debug_int64[2] = homa_data.temp[2];
-//			tt_debug_int64[3] = homa_data.temp[3];
-//		}
 	}
 	return result;
 }

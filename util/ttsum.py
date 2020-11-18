@@ -1,6 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/python3
 
-# Copyright (c) 2019 Stanford University
+# Copyright (c) 2019-2020 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -93,7 +93,7 @@ def scan(f, startingEvent):
             eventIntervals[thisEvent].append(thisEventInterval)
             # print('%s %s %s' % (thisEventTime, thisEventInterval, thisEvent))
         if startingEvent:
-            if string.find(thisEvent, startingEvent) >= 0:
+            if startingEvent in thisEvent:
                 # Reset variables to indicate that we are starting a new
                 # sequence of events from the starting event.
                 startTime = thisEventTime

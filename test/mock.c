@@ -18,8 +18,6 @@
  * kernel.
  */
 
-#include <stdio.h>
-
 #include "homa_impl.h"
 #include "ccutils.h"
 #include "mock.h"
@@ -46,6 +44,7 @@ int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
 int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
+int mock_cpu_idle = 0;
 int mock_import_single_range_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
@@ -326,6 +325,17 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode) {}
 
+void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
+		const struct ip_options *opt)
+{
+	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
+}
+
+int idle_cpu(int cpu)
+{
+	return mock_check_error(&mock_cpu_idle);
+}
+
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {
@@ -360,8 +370,7 @@ int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 	return 0;
 }
 
-int inet_getname(struct socket *sock, struct sockaddr *uaddr, int *uaddr_len,
-		int peer)
+int inet_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 {
 	return 0;
 }
@@ -401,7 +410,8 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
+int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
+		__u8 tos)
 {
 	char buffer[200];
 	const char *prefix = " ";

@@ -13,7 +13,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/* This file implements GSO (Generic Ssegmentation Offload) and GRO (Generic
+/* This file implements GSO (Generic Segmentation Offload) and GRO (Generic
  * Receive Offload) for Homa.
  */
 
@@ -82,16 +82,17 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  * unusual way: it simply aggregates all packets targeted to a particular
  * destination port, so that the entire bundle can get through the networking
  * stack in a single traversal.
- * @gro_list:   Pointer to pointer to first in list of packets that are being
- *              held for possible GRO merging.
+ * @gro_list:   Pointer to header for list of packets that are being
+ *              held for possible GRO merging. Note: this list contains
+ *              only packets matching a given hash.
  * @skb:        The newly arrived packet.
  * 
- * Return: If the return value is non-NULL, it refers to a link in
- * gro_list. The skb referred to by that link should be removed from the
- * list by the caller and passed up the stack immediately. This function
- * always returns NULL.
+ * Return: If the return value is non-NULL, it refers to an skb in
+ * gro_list. The skb will be removed from the list by the caller and
+ * passed up the stack immediately.
  */
-struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb)
+struct sk_buff *homa_gro_receive(struct list_head *gro_list,
+		struct sk_buff *skb)
 {
 	/* This function will do one of the following things:
 	 * 1. Merge skb with a packet in gro_list by appending it to
@@ -106,8 +107,9 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	struct data_header *h_new;
 //	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
-	struct sk_buff **pp;
 	struct iphdr *iph;
+	struct sk_buff *result = NULL;
+	struct homa_core *core;
 	
 	if (!pskb_may_pull(skb, 64))
 		tt_record("homa_gro_receive can't pull enough data "
@@ -137,70 +139,62 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		return ERR_PTR(-EINPROGRESS);
 	}
 	
-	/* Get access to the Homa header for the packet. I don't understand
-	 * why such ornate code is needed, but this mimics what TCP does.
+	/* The GRO mechanism tries to separate packets onto different
+	 * gro_lists by hash. This is bad for us, because we want to batch
+	 * packets together regardless of their RPCs. So, instead of
+	 * checking the list they gave us, check the last list where this
+	 * core added a Homa packet.
 	 */
-//	hdr_offset = skb_gro_offset(skb);
-//	hdr_end = hdr_offset + sizeof32(*h_new);
-//	h_new = (struct common_header *) skb_gro_header_fast(skb, hdr_offset);
-//	if (skb_gro_header_hard(skb, hdr_end)) {
-//		h_new = (struct common_header *) skb_gro_header_slow(skb, hdr_end,
-//				hdr_offset);
-//		if (unlikely(!h_new)) {
-//			/* Header not available in contiguous memory. */
-//			UNIT_LOG(";", "no header");
-//			goto flush;
-//		}
-//	}
-	
-	h_new->common.gro_count = 1;
-	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
-		struct iphdr *held_iph  = (struct iphdr *)
-				skb_network_header(held_skb);
-		struct common_header *h_held = (struct common_header *)
-				skb_transport_header(held_skb);
-		
-		/* Packets can be batched together as long as they are all
-		 * Homa packets, even if they are from different RPCs. Don't
-		 * use the same_flow mechanism that is normally used in
-		 * gro_receive, because it won't allow packets from different
-		 * sources to be aggregated.
-		 */
-		if (held_iph->protocol != IPPROTO_HOMA)
-			continue;
-		
-		/* Aggregate skb into held_skb. We don't update the length of
-		 * held_skb, because we'll eventually split it up and process
-		 * each skb independently.
-		 */
-		if (NAPI_GRO_CB(held_skb)->last == held_skb)
-			skb_shinfo(held_skb)->frag_list = skb;
-		else
-			NAPI_GRO_CB(held_skb)->last->next = skb;
-		NAPI_GRO_CB(held_skb)->last = skb;
-		skb->next = NULL;
-		NAPI_GRO_CB(skb)->same_flow = 1;
-		NAPI_GRO_CB(held_skb)->count++;
-		h_held->gro_count++;
-		if (h_held->gro_count >= homa->max_gro_skbs)
-			return pp;
-	        return NULL;
+	core = homa_cores[smp_processor_id()];
+	if (core->merge_list) {
+		/* Find any Homa packet on the list and merge with it. */
+		list_for_each_entry(held_skb, core->merge_list, list) {
+			struct iphdr *held_iph  = (struct iphdr *)
+					skb_network_header(held_skb);
+			
+			if (held_iph->protocol != IPPROTO_HOMA)
+				continue;
+
+			/* Aggregate skb into held_skb. We don't update the
+			 * length of held_skb because we'll eventually split
+			 * it up and process each skb independently.
+			 */
+			if (NAPI_GRO_CB(held_skb)->last == held_skb)
+				skb_shinfo(held_skb)->frag_list = skb;
+			else
+				NAPI_GRO_CB(held_skb)->last->next = skb;
+			NAPI_GRO_CB(held_skb)->last = skb;
+			skb->next = NULL;
+			NAPI_GRO_CB(skb)->same_flow = 1;
+			NAPI_GRO_CB(held_skb)->count++;
+			if ((NAPI_GRO_CB(held_skb)->count >= homa->max_gro_skbs)
+					&& (core->merge_list == gro_list)) {
+				/* Can only pass packets up the stack if they
+				 * are in the list that GRO thinks we're
+				 * searching; otherwise GRO state will get
+				 * messed up.
+				 */
+				result = held_skb;
+			}
+			goto done;
+		}
 	}
 	
 	/* There was no existing Homa packet that this packet could be
-	 * batched with, so this packet will now go on gro_list for future
-	 * packets to be batched with. If the packet is sent up the stack
-	 * before another packet arrives for batching, we want it to be
-	 * processed on this same core (it's faster that way, and if
-	 * batching doesn't occur it means we aren't heavily loaded; if
-	 * batching does occur, homa_gro_complete will pick a different
-	 * core).
+	 * batched with, so this packet will become the new merge_skb.
+	 * If the packet is sent up the stack before another packet
+	 * arrives for batching, we want it to be processed on this same
+	 * core (it's faster that way, and if batching doesn't occur it
+	 * means we aren't heavily loaded; if batching does occur,
+	 * homa_gro_complete will pick a different core).
 	 */
+	core->merge_list = gro_list;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, smp_processor_id());
-	return NULL;
+	
+    done:
+	return result;
 }
-
 
 /**
  * homa_gro_complete() - This function is invoked just before a packet that
@@ -218,25 +212,32 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			skb_transport_header(skb);
 //	struct data_header *d = (struct data_header *) h;
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-//			h->type, h->id, ntohl(d->seg.offset), h->gro_count);
+//			h->type, h->id, ntohl(d->seg.offset),
+//			NAPI_GRO_CB(skb)->count);
 	
 	if (homa->gro_policy & HOMA_GRO_IDLE) {
 		int i, core, best;
 		__u64 best_time = ~0;
+		__u64 last_active;
+		
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no
 		 * core gets overloaded. We do that by checking the next several
 		 * cores in order after this one, and choosing the one that
-		 * has been idle the longest (hasn't done NAPI or SoftIRQ
-		 * processing for Homa).
+		 * hasn't done NAPI or SoftIRQ processing for Homa in the
+		 * longest time. Also, if HOMA_GRO_NO_TASK is set, compute
+		 * a second "best" core where we only consider cores that have
+		 * no runnable user tasks; if there is such a core, use this
+		 * in preference to the first "best".
 		 */
 		core = best = smp_processor_id();
 		for (i = 0; i < 4; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
-			if (homa_cores[core]->last_active < best_time) {
-				best_time = homa_cores[core]->last_active;
+			last_active = homa_cores[core]->last_active;
+			if (last_active < best_time) {
+				best_time = last_active;
 				best = core;
 			}
 		}
