@@ -11,16 +11,17 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
 
-- Linux v4.16.10 is the primary development platform for this code. It is also
-  known to work with v4.15.0-38-generic;  other versions of Linux have not been
-  tested and may require code changes. If you get Homa working on other versions,
-  please let me know and/or submit pull requests for required code changes.
+- Linux v5.4.3 is the primary development platform for this code. In the past
+  it has run under 4.15.18;  other versions of Linux have not been tested and
+  may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
+  a day). If you get Homa working on other versions, please let me know and/or submit
+  pull requests for required code changes.
 
 - To build the module, type "make all"; then type "sudo insmod homa.ko" to install
   it, and "sudo rmmod homa" to remove an installed module.
   
 - A collection of man pages is available in the "man" subdirectory. The API for
-  Homa is quite different from TCP sockets.
+  Homa is different from TCP sockets.
 
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
@@ -42,6 +43,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page "homa.7".
      
 ## Significant recent improvements
+- November 2020: upgraded to Linux 5.4.3.
 - June 2020: implemented busy-waiting during homa_recv: shaves 2
   microseconds off latency.
 - June 2020: several fixes to prevent RPCs from getting "stuck",
