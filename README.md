@@ -3,6 +3,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
   Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
 
+- A paper on this implementation and its performance is currently under submission;
+  if you would like a pre-publication copy, send me email.
+
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
   measured (Homa's 99-th percentile latency is usually better than TCP's mean
