@@ -26,7 +26,7 @@ FIXTURE(homa_offload) {
 	struct homa homa;
 	__be32 ip;
 	struct data_header header;
-	struct sk_buff *gro_list;
+	struct list_head gro_list;
 };
 FIXTURE_SETUP(homa_offload)
 {
@@ -55,18 +55,17 @@ FIXTURE_SETUP(homa_offload)
 	NAPI_GRO_CB(skb2)->same_flow = 1;
 	NAPI_GRO_CB(skb2)->data_offset = sizeof32(struct data_header);
 	NAPI_GRO_CB(skb2)->last = skb2;
-	self->gro_list = skb;
-	skb->next = skb2;
-	skb2->next = NULL;
+	INIT_LIST_HEAD(&self->gro_list);
+	list_add_tail(&skb->list, &self->gro_list);
+	list_add_tail(&skb2->list, &self->gro_list);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_offload)
 {
-	while (self->gro_list) {
-		struct sk_buff *next = self->gro_list->next;
-		kfree_skb(self->gro_list);
-		self->gro_list = next;
-	}
+        struct sk_buff *skb, *tmp;
+	
+	list_for_each_entry_safe(skb, tmp, &self->gro_list, list)
+		kfree_skb(skb);
 	homa_destroy(&self->homa);
 	homa_destroy(homa);
 	unit_teardown();
@@ -99,7 +98,8 @@ TEST_F(homa_offload, homa_gro_receive__append)
 	NAPI_GRO_CB(skb)->same_flow = 1;
 	homa_gro_receive(&self->gro_list, skb2);
 	
-	unit_log_frag_list(self->gro_list->next, 1);
+	unit_log_frag_list(list_first_entry(&self->gro_list, struct sk_buff,
+			list)->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000; "
@@ -135,7 +135,8 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	NAPI_GRO_CB(skb3)->same_flow = 0;
 	EXPECT_NE(NULL, homa_gro_receive(&self->gro_list, skb3));
 	
-	unit_log_frag_list(self->gro_list->next, 1);
+	unit_log_frag_list(list_first_entry(&self->gro_list, struct sk_buff,
+			list)->next, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1001, "
 			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000; "
@@ -156,7 +157,8 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 
 TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 {
-	struct sk_buff *skb = self->gro_list;
+	struct sk_buff *skb = list_first_entry(&self->gro_list,
+			struct sk_buff, list);
 	homa->gro_policy = HOMA_GRO_IDLE;
 	homa_cores[6]->last_active = 30;
 	homa_cores[7]->last_active = 25;

@@ -18,8 +18,6 @@
  * kernel.
  */
 
-#include <stdio.h>
-
 #include "homa_impl.h"
 #include "ccutils.h"
 #include "mock.h"
@@ -332,7 +330,8 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode) {}
 
-void icmp_send(struct sk_buff *skb, int type, int code, __be32 info)
+void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
+		const struct ip_options *opt)
 {
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
@@ -376,8 +375,7 @@ int inet_dgram_connect(struct socket *sock, struct sockaddr *uaddr,
 	return 0;
 }
 
-int inet_getname(struct socket *sock, struct sockaddr *uaddr, int *uaddr_len,
-		int peer)
+int inet_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 {
 	return 0;
 }
@@ -417,7 +415,8 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
+int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
+		__u8 tos)
 {
 	char buffer[200];
 	const char *prefix = " ";

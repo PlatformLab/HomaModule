@@ -82,16 +82,16 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  * unusual way: it simply aggregates all packets targeted to a particular
  * destination port, so that the entire bundle can get through the networking
  * stack in a single traversal.
- * @gro_list:   Pointer to pointer to first in list of packets that are being
+ * @gro_list:   Pointer to header for list of packets that are being
  *              held for possible GRO merging.
  * @skb:        The newly arrived packet.
  * 
- * Return: If the return value is non-NULL, it refers to a link in
- * gro_list. The skb referred to by that link should be removed from the
- * list by the caller and passed up the stack immediately. This function
- * always returns NULL.
+ * Return: If the return value is non-NULL, it refers to an skb in
+ * gro_list. The skb will be removed from the list by the caller and
+ * passed up the stack immediately.
  */
-struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb)
+struct sk_buff *homa_gro_receive(struct list_head *gro_list,
+		struct sk_buff *skb)
 {
 	/* This function will do one of the following things:
 	 * 1. Merge skb with a packet in gro_list by appending it to
@@ -106,9 +106,8 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 	struct data_header *h_new;
 //	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
-	struct sk_buff **pp;
 	struct iphdr *iph;
-	struct sk_buff **result = NULL;
+	struct sk_buff *result = NULL;
 	
 	if (!pskb_may_pull(skb, 64))
 		tt_record("homa_gro_receive can't pull enough data "
@@ -138,24 +137,8 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		return ERR_PTR(-EINPROGRESS);
 	}
 	
-	/* Get access to the Homa header for the packet. I don't understand
-	 * why such ornate code is needed, but this mimics what TCP does.
-	 */
-//	hdr_offset = skb_gro_offset(skb);
-//	hdr_end = hdr_offset + sizeof32(*h_new);
-//	h_new = (struct common_header *) skb_gro_header_fast(skb, hdr_offset);
-//	if (skb_gro_header_hard(skb, hdr_end)) {
-//		h_new = (struct common_header *) skb_gro_header_slow(skb, hdr_end,
-//				hdr_offset);
-//		if (unlikely(!h_new)) {
-//			/* Header not available in contiguous memory. */
-//			UNIT_LOG(";", "no header");
-//			goto flush;
-//		}
-//	}
-	
 	h_new->common.gro_count = 1;
-	for (pp = gro_list; (held_skb = *pp) != NULL; pp = &held_skb->next) {
+	list_for_each_entry(held_skb, gro_list, list) {
 		struct iphdr *held_iph  = (struct iphdr *)
 				skb_network_header(held_skb);
 		struct common_header *h_held = (struct common_header *)
@@ -184,7 +167,7 @@ struct sk_buff **homa_gro_receive(struct sk_buff **gro_list, struct sk_buff *skb
 		NAPI_GRO_CB(held_skb)->count++;
 		h_held->gro_count++;
 		if (h_held->gro_count >= homa->max_gro_skbs)
-			result = pp;
+			result = held_skb;
 	        goto done;
 	}
 	

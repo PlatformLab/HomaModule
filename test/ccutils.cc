@@ -26,8 +26,6 @@
 #include <string>
 #include <unordered_map>
 
-#include <netinet/ip.h>
-
 #include "ccutils.h"
 
 /**

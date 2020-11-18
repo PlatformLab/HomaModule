@@ -26,7 +26,7 @@
 # (e.g. "update_linux 4 2" means node-2 through node-5 will be updated).
 # "first" defaults to 1.
 
-v=4.15.18+
+v=`uname -r`
 
 if [ $# -eq 2 ]; then
     first=$2
