@@ -19,6 +19,8 @@
 
 from cperf import *
 
+load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
+
 parser = get_parser(description=
         'Measures slowdown as a function of message size for Homa and TCP.',
         usage='%(prog)s [options]',

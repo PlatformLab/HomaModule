@@ -23,6 +23,8 @@ from cperf import *
 # Number of priority levels to try for each workload.
 priorities = [1, 2, 3, 4, 8]
 
+load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
+
 parser = get_parser(description=
         'Measures Homa slowdown as the number of available priority levels '
         'varies.',
