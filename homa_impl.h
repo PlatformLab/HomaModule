@@ -191,12 +191,7 @@ struct common_header {
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
 	
-	/**
-	 * @gro_count: value on the wire is undefined. Used only by
-	 * homa_offload.c (it counts the total number of packets aggregated
-	 * into this packet, including the top-level packet).
-	 */
-	__u16 gro_count;
+	__be16 unused3;
 	
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
@@ -2077,6 +2072,13 @@ struct homa_core {
 	 * handlers.
 	 */
 	__u64 last_active;
+	
+	/**
+	 * @merge_list: the most recent GRO list known to hold a Homa
+	 * packet available for merging into. NULL means no Homa packet has
+	 * been available for merging yet.
+	 */
+	struct list_head *merge_list;
 	
 	/**
 	 * @thread: the most recent thread to invoke a Homa system call
