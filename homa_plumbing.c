@@ -555,14 +555,22 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
 			&& (rpc->is_client) && (rpc->msgin.total_length < 500)
 			&& !tt_frozen) {
-		struct freeze_header freeze;
-		hsk->homa->temp[1] = 0;
-		tt_record4("Freezing because elapsed time is %d kcycles, "
-				"id %d, peer 0x%x, length %d",
+		tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
 				elapsed, rpc->id, ntohl(rpc->peer->addr),
 				rpc->msgin.total_length);
-		tt_freeze();
-		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		if (hsk->homa->temp[2] > 0) {
+			hsk->homa->temp[2]--;
+		} else {
+			struct freeze_header freeze;
+			hsk->homa->temp[1] = 0;
+			tt_record4("Freezing because elapsed time is %d "
+					"kcycles, id %d, peer 0x%x, length %d",
+					elapsed, rpc->id,
+					ntohl(rpc->peer->addr),
+					rpc->msgin.total_length);
+			tt_freeze();
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		}
 	}
 	
 	/* Must free the RPC lock before copying to user space (see
