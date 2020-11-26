@@ -1313,8 +1313,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		poll_start = get_cycles();
 		while (1) {
 			now = get_cycles();
-			if (now >= (poll_start + hsk->homa->poll_cycles))
-				break;
 			if (atomic_long_read(&interest.id)) {
 				tt_record3("received message while polling, "
 						"id %d, socket %d, pid %d",
@@ -1325,6 +1323,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				INC_METRIC(poll_cycles, now - poll_start);
 				goto lock_rpc;
 			}
+			if (now >= (poll_start + hsk->homa->poll_cycles))
+				break;
 			schedule();
 		}
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
@@ -1472,11 +1472,11 @@ handoff:
 		list_del(&interest->response_links);
 		interest->response_links.next = LIST_POISON1;
 	}
-	tt_record3("homa_rpc_ready handing off id %d to pid %d on core %d",
-			rpc->id, interest->thread->pid,
-			task_cpu(interest->thread));
 	homa_interest_set(interest, rpc);
 	wake_up_process(interest->thread);
+	tt_record3("homa_rpc_ready handed off id %d to pid %d on core %d",
+			rpc->id, interest->thread->pid,
+			task_cpu(interest->thread));
 }
 
 /**
