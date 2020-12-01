@@ -133,9 +133,9 @@ else:
 plot_slowdown(ax, "homa%3.1f_%s" % (fractions[0], options.workload), "p99",
         "Homa %4.2f Gbps" % (fractions[0] * options.gbps), color=homa_color)
 plot_slowdown(ax, "homa%3.1f_%s" % (fractions[1], options.workload), "p99",
-        "Homa %4.2f Gbps" % (fractions[1] * options.gbps), color=homa_color)
+        "Homa %4.2f Gbps" % (fractions[1] * options.gbps), color=homa_color2)
 plot_slowdown(ax, "homa%3.1f_%s" % (fractions[-1], options.workload), "p99",
-        "Homa %4.2f Gbps" % (fractions[-1] * options.gbps), color=homa_color2)
+        "Homa %4.2f Gbps" % (fractions[-1] * options.gbps), color=homa_color3)
 if options.workload == "w5":
     ax.legend(loc="upper right", prop={'size': 9})
 else:
