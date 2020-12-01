@@ -393,9 +393,9 @@ void homa_rpc_free(struct homa_rpc *rpc)
 		 * statistic so it's OK if updates occasionally get missed.
 		 */
 		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
-	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
-			rpc->hsk->client_port,
-			rpc->hsk->dead_skbs);
+//	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
+//			rpc->hsk->client_port,
+//			rpc->hsk->dead_skbs);
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
 }
