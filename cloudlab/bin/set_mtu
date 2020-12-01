@@ -20,7 +20,7 @@
 # set_mtu mtu
 
 # Names of the interfaces that must be configured (system-specific!)
-interfaces="ens1f1 vlan257"
+interfaces="ens1f1 vlan310"
 
 set -e
 for i in $interfaces; do
