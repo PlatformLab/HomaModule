@@ -14,9 +14,9 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
-# This cperf benchmark measures Homa slowdown as the number of available
-# priority levels is varied.
-# Type "cp_prios --help" for documentation.
+# This cperf benchmark measures Homa slowdown while varying one or more
+# aspects of Homa's configuration (such as duty cycle).
+# Type "cp_config --help" for documentation.
 
 from cperf import *
 
@@ -38,6 +38,9 @@ parser = get_parser(description=
             "tcp_client_ports":     4,
             "workload":             ""
         })
+parser.add_argument('-c', '--config', dest='config',
+        choices=['duty_cycle', 'fifo', 'prios', 'rtt_bytes'], required = True,
+        help='Aspect of configuration to change must be duty_cycle')
 options = parser.parse_args()
 init(options)
 servers = range(0, options.num_nodes)
@@ -46,13 +49,45 @@ clients = range(0, options.num_nodes)
 if options.workload != "":
     load_info = [[options.workload, options.gbps]];
 
+if options.config == 'duty_cycle':
+    specs = {
+        'parameter': '.net.homa.duty_cycle',
+        'values': [1000, 800, 600, 400],
+        'exp_name': 'duty',
+        'label': "duty_cycle %d"
+    }
+elif options.config == 'fifo':
+    specs = {
+        'parameter': '.net.homa.grant_fifo_fraction',
+        'values': [0, 100, 200, 400],
+        'parameter2': '.net.homa.pacer_fifo_fraction',
+        'values2': [0, 50, 100, 200],
+        'exp_name': 'fifo',
+        'label': "fifo_fraction %d"
+    }
+elif options.config == 'prios':
+    specs = {
+        'parameter': '.net.homa.num_priorities',
+        'values': [1, 2, 3, 4, 8],
+        'exp_name': 'prios',
+        'label': "%d priorities"
+    }
+elif options.config == 'rtt_bytes':
+    specs = {
+        'parameter': '.net.homa.rtt_bytes',
+        'values': [40000, 60000, 70000, 100000],
+        'exp_name': 'rttb',
+        'label': "rtt_bytes %d"
+    }
+
+old_value = get_sysctl_parameter(specs['parameter'])
 if not options.plot_only:
     try:
         # Start servers and measure unloaded latencies.
         start_servers(servers, options)
 
-        # For each workload, run a set of experiments with varying numbers
-        # of priority levels.
+        # For each workload, run a set of experiments with a different
+        # configurations.
         for workload, bw in load_info:
             options.workload = workload
             options.gbps = bw/2.0
@@ -66,16 +101,22 @@ if not options.plot_only:
             o.unloaded = 500
             run_experiment("unloaded_" + workload, range(0, 1), o)
 
-            for prios in priorities:
-                log("Configuring Homa for %d priority levels" % (prios))
-                set_sysctl_parameter(".net.homa.num_priorities", prios,
+            for i in range(0, len(specs['values'])):
+                value = specs['values'][i]
+                exp_name = "%s_%s_%s" % (workload, specs['exp_name'], value)
+                log("Setting %s = %s" % (specs['parameter'], value))
+                set_sysctl_parameter(specs['parameter'], value,
                         range(0, options.num_nodes))
-                run_experiment("homa_%s_%dprios" % (workload, prios), clients,
-                        options)
+                if 'parameter2' in specs:
+                    value2 = specs['values'][i]
+                    log("Setting %s = %s" % (specs['parameter2'], value2))
+                    set_sysctl_parameter(specs['parameter2'], value2,
+                            range(0, options.num_nodes))
+                run_experiment(exp_name, clients, options)
     except Exception as e:
         log(traceback.format_exc())
                    
-    set_sysctl_parameter(".net.homa.num_priorities", 8,
+    set_sysctl_parameter(specs['parameter'], old_value,
             range(0, options.num_nodes))
     log("Stopping nodes")
     stop_nodes()
@@ -88,19 +129,16 @@ for workload, bw in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, "homa_%s_%dprios" % (workload,
-            priorities[-1]))
-    colors = ['#985416', '#ff7f0e', '#d62728', '#9467bd', homa_color]
-    for prios in priorities:
-        if prios == 1:
-            label = "1 prio"
-        else:
-            label = "%d prios" % prios
-        plot_slowdown(ax, "homa_%s_%dprios" % (workload,prios), "p99", label,
-                color=colors.pop(0))
+    ax = start_slowdown_plot(title, 1000, "%s_%s_%s" % (workload,
+            specs['exp_name'], specs['values'][0]), y_label="P99 Slowdown")
+    for value in specs['values']:
+        exp_name = "%s_%s_%s" % (workload, specs['exp_name'], value)
+        label = specs['label'] % (value)
+        plot_slowdown(ax, exp_name, "p99", label)
     if workload == "w5":
         ax.legend(loc="upper right", prop={'size': 9})
     else:
         ax.legend(loc="upper left", prop={'size': 9})
     plt.tight_layout()
-    plt.savefig("%s/reports/prios_%s.pdf" % (options.log_dir, workload))
+    plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, specs['exp_name'], workload))
