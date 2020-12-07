@@ -143,6 +143,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
+	self->homa.grant_threshold = self->homa.rtt_bytes;
 	mock_sock_init(&self->hsk, &self->homa, 0, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
@@ -709,15 +710,15 @@ TEST_F(homa_incoming, homa_data_pkt__another_wrong_rpc_state)
 	EXPECT_EQ(600, crpc->msgin.bytes_remaining);
 	crpc->state = RPC_INCOMING;
 }
-TEST_F(homa_incoming, homa_data_pkt__send_grant)
+TEST_F(homa_incoming, homa_data_pkt__add_to_grantables)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100000, 1000);
 	EXPECT_NE(NULL, srpc);
-	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
-	EXPECT_EQ(11400, srpc->msgin.incoming);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_SUBSTR("id 12345", unit_log_get());
 }
 TEST_F(homa_incoming, homa_data_pkt__set_extra_incoming_for_short_message)
 {
@@ -1410,7 +1411,7 @@ TEST_F(homa_incoming, homa_check_grantable__move_upward_in_homa_list)
 			unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_send_grants__pick_message_to_grant)
+TEST_F(homa_incoming, homa_send_grants__max_incoming)
 {
 	struct homa_rpc *srpc1, *srpc2, *srpc3, *srpc4;
 	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
@@ -1446,6 +1447,35 @@ TEST_F(homa_incoming, homa_send_grants__pick_message_to_grant)
 	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 11400@1; xmit GRANT 11400@0", unit_log_get());
+}
+TEST_F(homa_incoming, homa_send_grants__grant_threshold)
+{
+	struct homa_rpc *srpc1, *srpc2, *srpc3, *srpc4;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 2, 30000, 100);
+	srpc3 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+2,
+			self->server_ip, self->client_port, 3, 40000, 100);
+	srpc4 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+3,
+			self->server_ip, self->client_port, 4, 50000, 100);
+	homa_send_grants(&self->homa);
+	
+	unit_log_clear();
+	srpc1->msgin.incoming = 11400;        /* 10000 bytes incoming */
+	srpc2->msgin.incoming = 15400;        /* 14000 incoming */
+	srpc3->msgin.incoming = 21400;        /* 20000 incoming */
+	srpc4->msgin.incoming = 6400;         /* 5000 incoming */
+	
+	self->homa.max_incoming = 100000;
+	self->homa.grant_increment = 12000;
+	self->homa.grant_threshold = 15000;
+	self->homa.rtt_bytes = 25000;
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 20000@3; "
+			"xmit GRANT 27400@2; "
+			"xmit GRANT 26400@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_send_grants__one_grant_per_peer)
 {
@@ -1636,43 +1666,79 @@ TEST_F(homa_incoming, homa_send_grants__MAX_GRANTS_exceeded)
 }
 TEST_F(homa_incoming, homa_send_grants__grant_fifo)
 {
-	struct homa_rpc *srpc1;
+	struct homa_rpc *srpc1, *srpc2;
 	self->homa.rtt_bytes = 10000;
 	self->homa.grant_increment = 5000;
 	self->homa.max_sched_prio = 3;
 	self->homa.grant_fifo_fraction = 100;
 	self->homa.grant_nonfifo_left = 6000;
 	self->homa.grant_nonfifo = 10000;
+	self->homa.max_overcommit = 1;
+	self->homa.max_incoming = 15000;
 	mock_cycles = ~0;
 	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
+			self->server_ip, self->client_port, 1, 30000, 100);
 	EXPECT_NE(NULL, srpc1);
 	EXPECT_EQ(10000, srpc1->msgin.incoming);
+	srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	EXPECT_NE(NULL, srpc2);
+	srpc2->msgin.incoming = 9000;
 	
 	/* First call: not time for FIFO grants yet. */
 	unit_log_clear();
 	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 15000@0", unit_log_get());
-	EXPECT_EQ(15000, srpc1->msgin.incoming);
+	EXPECT_STREQ("xmit GRANT 14000@1", unit_log_get());
+	EXPECT_EQ(14000, srpc2->msgin.incoming);
 	EXPECT_EQ(1000, self->homa.grant_nonfifo_left);
 	
 	/* Second call: time for a FIFO grant. */
 	unit_log_clear();
-	srpc1->msgin.incoming = 5000;
+	srpc2->msgin.incoming = 5000;
 	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 16400@3; xmit GRANT 11400@0", unit_log_get());
-	EXPECT_EQ(16400, srpc1->msgin.incoming);
+	EXPECT_STREQ("xmit GRANT 15000@3; xmit GRANT 11400@1", unit_log_get());
+	EXPECT_EQ(15000, srpc1->msgin.incoming);
+	EXPECT_EQ(11400, srpc2->msgin.incoming);
 	EXPECT_EQ(4600, self->homa.grant_nonfifo_left);
 	
 	/* Third call: time for a FIFO grant, but FIFO fraction is zero. */
 	unit_log_clear();
 	srpc1->msgin.incoming = 5000;
+	srpc2->msgin.incoming = 5000;
 	self->homa.grant_nonfifo_left = 1000;
 	self->homa.grant_fifo_fraction = 0;
 	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
-	EXPECT_EQ(11400, srpc1->msgin.incoming);
+	EXPECT_STREQ("xmit GRANT 11400@1", unit_log_get());
+	EXPECT_EQ(11400, srpc2->msgin.incoming);
 	EXPECT_EQ(4600, self->homa.grant_nonfifo_left);
+}
+TEST_F(homa_incoming, homa_send_grants__dont_grant_fifo_no_inactive_rpcs)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	self->homa.rtt_bytes = 10000;
+	self->homa.grant_increment = 5000;
+	self->homa.max_sched_prio = 3;
+	self->homa.grant_fifo_fraction = 100;
+	self->homa.grant_nonfifo_left = 1000;
+	self->homa.grant_nonfifo = 10000;
+	self->homa.max_overcommit = 2;
+	self->homa.max_incoming = 20000;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->client_port, 1, 30000, 100);
+	EXPECT_NE(NULL, srpc1);
+	srpc1->msgin.incoming = 10000;
+	srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip+1,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	EXPECT_NE(NULL, srpc2);
+	srpc2->msgin.incoming = 9000;
+
+	unit_log_clear();
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 14000@1", unit_log_get());
+	EXPECT_EQ(10000, srpc1->msgin.incoming);
+	EXPECT_EQ(14000, srpc2->msgin.incoming);
+	EXPECT_EQ(6000, self->homa.grant_nonfifo_left);
 }
 TEST_F(homa_incoming, homa_send_grants__grant_after_rpc_deleted)
 {

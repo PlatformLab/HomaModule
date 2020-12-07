@@ -163,6 +163,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "duty_cycle",
+		.data		= &homa_data.duty_cycle,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "flags",
 		.data		= &homa_data.flags,
 		.maxlen		= sizeof(int),
@@ -555,21 +562,27 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
 			&& (rpc->is_client) && (rpc->msgin.total_length < 500)
 			&& !tt_frozen) {
+		struct freeze_header freeze;
 		tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
 				elapsed, rpc->id, ntohl(rpc->peer->addr),
 				rpc->msgin.total_length);
-		if (hsk->homa->temp[2] > 0) {
-			hsk->homa->temp[2]--;
-		} else {
+		hsk->homa->temp[1] = 0;
+		tt_record4("Freezing because elapsed time is %d "
+				"kcycles, id %d, peer 0x%x, length %d",
+				elapsed, rpc->id,
+				ntohl(rpc->peer->addr),
+				rpc->msgin.total_length);
+		tt_freeze();
+		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+	}
+	if (hsk->homa->temp[2] >0 ) {
+		hsk->homa->temp[2]--;
+		if (hsk->homa->temp[2] == 0) {
 			struct freeze_header freeze;
-			hsk->homa->temp[1] = 0;
-			tt_record4("Freezing because elapsed time is %d "
-					"kcycles, id %d, peer 0x%x, length %d",
-					elapsed, rpc->id,
-					ntohl(rpc->peer->addr),
-					rpc->msgin.total_length);
+			tt_record("Freezing because temp[2] counted down");
 			tt_freeze();
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+			
 		}
 	}
 	

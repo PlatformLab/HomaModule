@@ -170,6 +170,16 @@ bit is set, Homa will not throttle output transmissions; packets will
 always be sent immediately. This could result in long transmit queues for
 the NIC, which defeats part of Homa's SRPT scheduling mechanism.
 .TP
+.IR duty_cycle
+Determines the maximum fraction of network bandwidth that a single RPC
+will be allowed to consume, in units of one-thousandth (e.g., 500 means 50%).
+The main reason for this parameter is that it also limits the fraction
+of a core that can be consumed by NAPI processing for a single incoming
+message. Without this limit, a large incoming message can completely
+consume one core for NAPI, which starves user threads on that core and
+can result in high tail latency for short messages served by those
+threads.
+.TP
 .IR grant_fifo_fraction
 When sending grants, Homa normally uses an SRPT policy, granting to the
 message(s) with the fewest remaining bytes. This parameter can be
@@ -325,16 +335,12 @@ reduces the likelihood of restarts (but doesn't completely eliminate the
 problem).
 .TP
 .IR rtt_bytes
-An integer value specifying the worst-case round-trip latency (assuming
-unloaded servers and network) between this host and any other host with
-which it will communicate using Homa.
-The time should be that to send a maximum-sized packet and receive
-a minimum-size packet, measured end-to-end in the source kernel and
-including all software overheads on both source and destination.
-The latency is specified in terms of the number of bytes that can be
-transmitted during this time.
-Overestimates are relatively harmless (they increase buffer
-space occupancy); underestimates can result in wasted link bandwidth.
+An estimate of the number of bytes that can be transmitted on the wire
+by a host in the time it takes that host to send a full-size packet to
+another host and receive back a grant packet. Used by Homa to ensure
+full network bandwidth utilization (or whatever is specified by the
+.IR duty_cycle
+parameter).
 .TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to

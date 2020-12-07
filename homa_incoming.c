@@ -780,6 +780,11 @@ void homa_send_grants(struct homa *homa)
 	struct homa_rpc *rpcs[MAX_GRANTS];
 	int num_grants = 0;
 	
+	/* Make a local copy of homa->grantable_peers, since that variable
+	 * could change during this function.
+	 */
+	int num_grantable_peers = homa->num_grantable_peers;
+	
 	if (list_empty(&homa->grantable_peers))
 		return;
 	
@@ -809,7 +814,7 @@ void homa_send_grants(struct homa *homa)
 				- candidate->msgin.bytes_remaining);
 		on_the_way = candidate->msgin.incoming - received;
 		available -= on_the_way;
-		if (on_the_way >= homa->rtt_bytes)
+		if (on_the_way >= homa->grant_threshold)
 			continue;
 		old_incoming = candidate->msgin.incoming;
 		new_grant = old_incoming + homa->grant_increment;
@@ -838,14 +843,13 @@ void homa_send_grants(struct homa *homa)
 		num_grants++;
 		grant->offset = htonl(new_grant);
 		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = homa->max_sched_prio + 1 -
-				homa->num_grantable_peers;
+		extra_levels = homa->max_sched_prio + 1 - num_grantable_peers;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
 		if (priority < 0)
 			priority = 0;
 		grant->priority = priority;
-		tt_record3("sent grant for id %llu, offset %d, priority %d",
+		tt_record3("sending grant for id %llu, offset %d, priority %d",
 				candidate->id, new_grant, priority);
 		if (new_grant == candidate->msgin.total_length) {
 			BUG_ON(candidate->msgin.extra_incoming != 0);
@@ -861,7 +865,8 @@ void homa_send_grants(struct homa *homa)
 	
 	if (homa->grant_nonfifo_left <= 0) {
 		homa->grant_nonfifo_left += homa->grant_nonfifo;
-		if (homa->grant_fifo_fraction)
+		if ((num_grantable_peers > homa->max_overcommit)
+				&& homa->grant_fifo_fraction)
 			homa_grant_fifo(homa);
 	}
 	
@@ -1503,4 +1508,9 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = homa->poll_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->poll_cycles = tmp;
+	
+	tmp = homa->rtt_bytes * homa->duty_cycle;
+	homa->grant_threshold = tmp/1000;
+	if (homa->grant_threshold > homa->rtt_bytes)
+		homa->grant_threshold = homa->rtt_bytes;
 }

@@ -107,6 +107,8 @@ int homa_init(struct homa *homa)
 #endif
 	homa->grant_increment = 0;
 	homa->grant_fifo_fraction = 50;
+	homa->duty_cycle = 800;
+	homa->grant_threshold = 0;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
 	homa->resend_ticks = 15;

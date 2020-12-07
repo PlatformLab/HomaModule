@@ -1225,7 +1225,7 @@ struct homa {
 	 * to the old message.
 	 */
 	int grant_nonfifo_left;
-	
+
 	/**
 	 * @pacer_mutex: Ensures that only one instance of homa_pacer_xmit
 	 * runs at a time. Only used in "try" mode: never block on this.
@@ -1306,13 +1306,10 @@ struct homa {
 	struct homa_peertab peers;
 	
 	/**
-	 * @rtt_bytes: A conservative estimate of the amount of data that
-	 * can be sent over the wire in the time it takes to send a full-size
-	 * data packet and receive back a grant. Homa tries to ensure
-	 * that there is at least this much data in transit (or authorized
-	 * via grants) for an incoming message at all times.  Set externally
-	 * via sysctl, but Homa will always round up to an even number of
-	 * full-size packets.
+	 * @rtt_bytes: An estimate of the amount of data that can be transmitted
+         * over the wire in the time it takes to send a full-size data packet
+         * and receive back a grant. Used to ensure full utilization of
+         * uplink bandwidth. Set externally via sysctl.
 	 */
 	int rtt_bytes;
 	
@@ -1391,6 +1388,25 @@ struct homa {
 	 * than the highest priority ones. Set externally via sysctl.
 	 */
 	int grant_fifo_fraction;
+        
+        /**
+         * @duty_cycle: Sets a limit on the fraction of network bandwidth that
+         * may be consumed by a single RPC in units of one-thousandth (1000
+         * means a single RPC can consume all of the incoming network
+         * bandwidth, 500 means half, and so on). This also determines the
+         * fraction of a core that can be consumed by NAPI when a large
+         * message is being received. Its main purpose is to keep NAPI from
+         * monopolizing a core so much that user threads starve. Set externally
+         * via sysctl.
+         */
+        int duty_cycle;
+        
+        /**
+         * @grant_threshold: A grant will not be sent for an RPC until
+         * the number of incoming bytes drops below this threshold. Computed
+         * from @rtt_bytes and @duty_cycle.
+         */
+        int grant_threshold;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
