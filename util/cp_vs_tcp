@@ -100,9 +100,8 @@ if not options.plot_only:
 
             if options.tcp:
                 options.protocol = "tcp"
-                do_ssh(["sudo", "sysctl",
-                        ".net.ipv4.tcp_congestion_control=cubic"],
-                        range(0, options.num_nodes))
+                set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                        "cubic", range(0, options.num_nodes))
                 start_servers(servers, options)
                 run_experiment(tcp_exp, clients, options)
 
