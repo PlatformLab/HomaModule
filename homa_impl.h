@@ -2088,13 +2088,20 @@ struct homa_core {
 	 * handlers.
 	 */
 	__u64 last_active;
+        
+        /**
+         * held_skb: last packet buffer known to be available for
+         * merging other packets into on this core (note: may not still
+         * be available), or NULL if none. 
+         */
+        struct sk_buff *held_skb;
 	
 	/**
-	 * @merge_list: the most recent GRO list known to hold a Homa
-	 * packet available for merging into. NULL means no Homa packet has
-	 * been available for merging yet.
+	 * @held_bucket: the index, within napi->gro_hash, of the list
+         * containing @held_skb; undefined if @held_skb is NULL. Used to
+         * verify that @held_skb is still available.
 	 */
-	struct list_head *merge_list;
+	int held_bucket;
 	
 	/**
 	 * @thread: the most recent thread to invoke a Homa system call

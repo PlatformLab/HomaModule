@@ -54,9 +54,15 @@ int homa_init(struct homa *homa)
 		}
 		first = (char *) (((__u64) core_memory + 0x3f) & ~0x3f);
 		for (i = 0; i < nr_cpu_ids; i++) {
-			homa_cores[i] = (struct homa_core *)
-					(first + i*aligned_size);
-			memset(homa_cores[i], 0, aligned_size);
+			struct homa_core *core;
+			core = (struct homa_core *) (first + i*aligned_size);
+			homa_cores[i] = core;
+			core->last_active = 0;
+			core->held_skb = NULL;
+			core->held_bucket = 0;
+			core->thread = NULL;
+			core->syscall_end_time = 0;
+			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
 	
@@ -88,7 +94,7 @@ int homa_init(struct homa *homa)
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
-	homa->poll_usecs = 100;
+	homa->poll_usecs = 30;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
 		homa->priority_map[i] = i;
@@ -135,7 +141,7 @@ int homa_init(struct homa *homa)
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 0;
 	homa->max_gso_size = 1000000;
-	homa->max_gro_skbs = 20;
+	homa->max_gro_skbs = 10;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);

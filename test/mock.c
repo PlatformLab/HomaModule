@@ -561,6 +561,15 @@ void mutex_unlock(struct mutex *lock)
 	mock_active_locks--;
 }
 
+int netif_receive_skb(struct sk_buff *skb)
+{
+	struct data_header *h = (struct data_header *)
+			skb_transport_header(skb);
+	unit_log_printf("; ", "netif_receive_skb, id %llu, offset %d",
+			h->common.id, ntohl(h->seg.offset));
+	return 0;
+}
+
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
@@ -970,6 +979,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	ip_hdr(skb)->saddr = saddr;
 	ip_hdr(skb)->protocol = IPPROTO_HOMA;
 	skb->_skb_refdst = 0;
+	skb->hash = 3;
 	return skb;
 }
 

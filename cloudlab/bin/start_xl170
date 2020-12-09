@@ -26,7 +26,6 @@ sudo sysctl /net/homa/rtt_bytes=70000
 sudo sysctl /net/homa/grant_increment=10000
 sudo sysctl /net/homa/max_gso_size=10000
 sudo sysctl /net/homa/num_priorities=8
-sudo sysctl /net/homa/poll_usecs=100
 # sudo sysctl /net/homa/pacer_fifo_fraction=0
 # sudo sysctl /net/homa/grant_fifo_fraction=0
 # sudo sysctl /net/homa/verbose=1

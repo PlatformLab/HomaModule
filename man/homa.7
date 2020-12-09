@@ -220,9 +220,8 @@ a given time. It may be reset to zero to initiate a new calculation.
 .TP
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that
-Homa will allow to accumulate at interrupt level before passing them
-to the softirq handler. At one point there was a theory that a low value might
-improve performance, but it doesn't seem to have any impact.
+Homa will allow to accumulate at driver level before passing them
+to the softirq handler.
 .TP
 .IR max_gso_size
 An integer value setting an upper limit on the size of an output packet,
