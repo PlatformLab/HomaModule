@@ -221,7 +221,8 @@ a given time. It may be reset to zero to initiate a new calculation.
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that
 Homa will allow to accumulate at driver level before passing them
-to the softirq handler.
+to the softirq handler. So far, performance generally seems to be
+best with this set to infinity.
 .TP
 .IR max_gso_size
 An integer value setting an upper limit on the size of an output packet,
