@@ -36,8 +36,8 @@ parser = get_parser(description=
             "workload":             ""
         })
 parser.add_argument('-c', '--config', dest='config',
-        choices=['duty_cycle', 'fifo', 'gro', 'poll', 'prios', 'receivers',
-                 'rtt_bytes', 'threads'],
+        choices=['duty_cycle', 'fifo', 'gro', 'max_gro', 'max_gso', 'poll',
+                'prios', 'receivers', 'rtt_bytes', 'threads'],
         required = True,
         help='Aspect of configuration to change')
 options = parser.parse_args()
@@ -69,8 +69,20 @@ elif options.config == 'gro':
             'value': value,
             'exp_name': name,
             'label': name})
+elif options.config == 'max_gro':
+    for count in [5, 10, 20, 100]:
+        specs.append({'param': '.net.homa.max_gro_skbs',
+            'value': count,
+                'exp_name': 'max_gro_%d' % (count),
+                'label': 'max_gro_skbs %d' % (count)})
+elif options.config == 'max_gso':
+    for count in [5000, 10000, 20000, 50000, 100000]:
+        specs.append({'param': '.net.homa.max_gso_size',
+            'value': count,
+                'exp_name': 'max_gso_%d' % (count),
+                'label': 'max_gso_size %d' % (count)})
 elif options.config == 'poll':
-    for poll in [0, 20, 50, 100, 200]:
+    for poll in [20, 30, 40, 50]:
         specs.append({'param': '.net.homa.poll_usecs',
                 'value': poll,
                 'exp_name': 'poll_%d' % (poll),
@@ -167,10 +179,13 @@ for workload, bw in load_info:
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
     ax = start_slowdown_plot(title, 1000, "%s_%s" % (
-            specs[0]['exp_name'], workload), y_label="P99 Slowdown")
+            specs[0]['exp_name'], workload), y_label=" Slowdown")
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)
-        plot_slowdown(ax, exp_name, "p99", spec['label'])
+        plot_slowdown(ax, exp_name, "p99", spec['label'] + ' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50')
     if workload == "w5":
         ax.legend(loc="upper right", prop={'size': 9})
     else:
