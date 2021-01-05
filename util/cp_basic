@@ -43,6 +43,9 @@ parser = get_parser(description=
             "port_receivers": 1,
             "server_ports":   6,
             "port_threads":   3})
+parser.add_argument('--dctcp', dest='dctcp', type=boolean,
+        default=False, help="Boolean value:: indicates whether measurements "
+                "should be run on DCTCP (default: false)")
 options = parser.parse_args()
 options.no_rtt_files = True
 init(options)
@@ -96,51 +99,70 @@ if not options.plot_only:
     o.client_max = 5
     run_experiment("homa_server_tput", range(1, options.num_nodes), o)
 
-    # TCP client latency (small messages, low load)
-    options.protocol = "tcp"
-    start_servers(range(1, options.num_nodes), options)
-    o = copy.deepcopy(options)
-    o.tcp_client_ports = 1
-    o.client_max = 1
-    o.server_nodes = 1
-    o.first_server  = 1
-    o.tcp_server_ports = 1
-    o.workload = "100"
-    o.num_servers = 1
-    o.first_server = 1
-    run_experiment("tcp_latency", range(0, 1), o)
+    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control")
+    for protocol in ["tcp", "dctcp"]:
+        if protocol == "dctcp":
+            if not options.dctcp:
+                continue
+            set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                        "dctcp", range(0, options.num_nodes))
+        else:
+            set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                        "cubic", range(0, options.num_nodes))
 
-    # TCP throughput with a single active (large) message
-    o.workload = "500000"
-    run_experiment("tcp_1msg_tput", range(0, 1), o)
+        # TCP/DCTCP client latency (small messages, low load)
+        options.protocol = "tcp"
+        start_servers(range(1, options.num_nodes), options)
+        o = copy.deepcopy(options)
+        o.tcp_client_ports = 1
+        o.client_max = 1
+        o.server_nodes = 1
+        o.first_server  = 1
+        o.tcp_server_ports = 1
+        o.workload = "100"
+        o.num_servers = 1
+        o.first_server = 1
+        run_experiment("%s_latency" % (protocol), range(0, 1), o)
 
-    # TCP client RPC throughput (single client, many servers, small messages)
-    o = copy.deepcopy(options)
-    o.workload = "100"
-    o.server_nodes = options.num_nodes-1
-    o.first_server = 1
-    o.client_max = 100
-    run_experiment("tcp_client_rpc_tput", range(0, 1), o)
+        # TCP/DCTCP throughput with a single active (large) message
+        o.workload = "500000"
+        run_experiment("%s_1msg_tput" % (protocol), range(0, 1), o)
 
-    # TCP client throughput (single client, many servers, large messages)
-    o.workload = "500000"
-    o.client_max = 20
-    run_experiment("tcp_client_tput", range(0, 1), o)
+        # TCP/DCTCP client RPC throughput (single client, many servers,
+        # small messages)
+        o = copy.deepcopy(options)
+        o.workload = "100"
+        o.server_nodes = options.num_nodes-1
+        o.first_server = 1
+        o.client_max = 100
+        run_experiment("%s_client_rpc_tput" % (protocol), range(0, 1), o)
 
-    # TCP server RPC throughput (single server, many clients, small messages)
-    start_servers(range(0, 1), options)
-    o = copy.deepcopy(options)
-    o.workload = "100"
-    o.server_nodes = 1
-    o.first_server = 0
-    o.client_max = 50
-    run_experiment("tcp_server_rpc_tput", range(1, options.num_nodes), o)
+        # TCP/DCTCP client throughput (single client, many servers,
+        # large messages)
+        o.workload = "500000"
+        o.client_max = 20
+        run_experiment("%s_client_tput" % (protocol), range(0, 1), o)
 
-    # TCP server throughput (single server, many clients, large messages)
-    o.workload = "500000"
-    o.client_max = 5
-    run_experiment("tcp_server_tput", range(1, options.num_nodes), o)
+        # TCP/DCTCP server RPC throughput (single server, many clients,
+        # small messages)
+        start_servers(range(0, 1), options)
+        o = copy.deepcopy(options)
+        o.workload = "100"
+        o.server_nodes = 1
+        o.first_server = 0
+        o.client_max = 50
+        run_experiment("%s_server_rpc_tput" % (protocol),
+                range(1, options.num_nodes), o)
 
+        # TCP/DCTCP server throughput (single server, many clients, large
+        # messages)
+        o.workload = "500000"
+        o.client_max = 5
+        run_experiment("%s_server_tput" % (protocol),
+                range(1, options.num_nodes), o)
+
+    set_sysctl_parameter("net.ipv4.tcp_congestion_control", congestion,
+            range(0, options.num_nodes))
     log("Stopping nodes")
     stop_nodes()
 
@@ -185,35 +207,46 @@ if len(node["server_gbps"]) == 0:
 log("Homa server throughput (Gbps): %s"
         % (avg(node["server_gbps"], "%.2f")))
 
-node = experiments["tcp_latency"]["node-0"]
-if len(node["client_latency"]) == 0:
-    raise Error("No TCP client latencies found")
-log("\nTCP RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
+for protocol in ["tcp", "dctcp"]:
+    if protocol == "dctcp":
+        if not options.dctcp:
+            break;
+        name = "DCTCP"
+    else:
+        name = "TCP"
+    node = experiments["%s_latency" % (protocol)]["node-0"]
+    if len(node["client_latency"]) == 0:
+        raise Error("No %s client latencies found" % (name))
+    log("\n%s RTT latency (us): %s" % (name, avg(node["client_latency"], "%.2f")))
 
-node = experiments["tcp_1msg_tput"]["node-0"]
-if len(node["client_gbps"]) == 0:
-    raise Error("No TCP client throughput found")
-gbps = []
-for m in node["client_gbps"]:
-    gbps.append(2*m)
-log("TCP single message throughput (Gbps): %s" % (avg(gbps, "%.2f")))
+    node = experiments["%s_1msg_tput" % (protocol)]["node-0"]
+    if len(node["client_gbps"]) == 0:
+        raise Error("No %s client throughput found" % (name))
+    gbps = []
+    for m in node["client_gbps"]:
+        gbps.append(2*m)
+    log("%s single message throughput (Gbps): %s" % (name, avg(gbps, "%.2f")))
 
-node = experiments["tcp_client_rpc_tput"]["node-0"]
-if len(node["client_kops"]) == 0:
-    raise Error("No TCP client RPC throughputs found")
-log("TCP client RPC throughput (Kops/sec): %s" % (avg(node["client_kops"], "%.2f")))
+    node = experiments["%s_client_rpc_tput" % (protocol)]["node-0"]
+    if len(node["client_kops"]) == 0:
+        raise Error("No %s client RPC throughputs found" % (name))
+    log("%s client RPC throughput (Kops/sec): %s" % (name,
+            avg(node["client_kops"], "%.2f")))
 
-node = experiments["tcp_server_rpc_tput"]["node-0"]
-if len(node["server_kops"]) == 0:
-    raise Error("No TCP server RPC throughputs found")
-log("TCP server RPC throughput (Kops/sec): %s" % (avg(node["server_kops"], "%.2f")))
+    node = experiments["%s_server_rpc_tput" % (protocol)]["node-0"]
+    if len(node["server_kops"]) == 0:
+        raise Error("No %s server RPC throughputs found" % (name))
+    log("%s server RPC throughput (Kops/sec): %s" % (name,
+            avg(node["server_kops"], "%.2f")))
 
-node = experiments["tcp_client_tput"]["node-0"]
-if len(node["client_gbps"]) == 0:
-    raise Error("No TCP client throughputs found")
-log("TCP client throughput (Gbps): %s" % (avg(node["client_gbps"], "%.2f")))
+    node = experiments["%s_client_tput" % (protocol)]["node-0"]
+    if len(node["client_gbps"]) == 0:
+        raise Error("No %s client throughputs found" % (name))
+    log("%s client throughput (Gbps): %s" % (name, avg(node["client_gbps"],
+            "%.2f")))
 
-node = experiments["tcp_server_tput"]["node-0"]
-if len(node["server_gbps"]) == 0:
-    raise Error("No TCP server throughputs found")
-log("TCP server throughput (Gbps): %s" % (avg(node["server_gbps"], "%.2f")))
+    node = experiments["%s_server_tput" % (protocol)]["node-0"]
+    if len(node["server_gbps"]) == 0:
+        raise Error("No %s server throughputs found" % (name))
+    log("%s server throughput (Gbps): %s" % (name, avg(node["server_gbps"],
+            "%.2f")))
