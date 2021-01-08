@@ -94,7 +94,7 @@ int homa_init(struct homa *homa)
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
 	homa->link_mbps = 10000;
-	homa->poll_usecs = 30;
+	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
 		homa->priority_map[i] = i;
@@ -140,7 +140,7 @@ int homa_init(struct homa *homa)
 	homa->max_nic_queue_ns = 2000;
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 0;
-	homa->max_gso_size = 1000000;
+	homa->max_gso_size = 10000;
 	homa->max_gro_skbs = 100;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->timer_ticks = 0;

@@ -22,9 +22,8 @@ sudo rmmod homa || true
 sudo insmod $homa
 sudo sysctl /net/homa/link_mbps=25000
 sudo sysctl /net/homa/max_nic_queue_ns=2000
-sudo sysctl /net/homa/rtt_bytes=70000
+sudo sysctl /net/homa/rtt_bytes=60000
 sudo sysctl /net/homa/grant_increment=10000
-sudo sysctl /net/homa/max_gso_size=10000
 sudo sysctl /net/homa/num_priorities=8
 # sudo sysctl /net/homa/pacer_fifo_fraction=0
 # sudo sysctl /net/homa/grant_fifo_fraction=0
