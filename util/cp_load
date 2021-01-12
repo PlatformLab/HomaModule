@@ -23,16 +23,7 @@ from cperf import *
 parser = get_parser(description=
         'Generates CDFS of short message latency as a function of load '
         'for Homa and TCP.',
-        usage='%(prog)s [options]',
-        defaults={
-            "server_ports":     3,
-            "port_threads":     3,
-            "client_ports":     3,
-            "port_receivers":   3,
-            "tcp_server_ports": 9,
-            "tcp_client_ports": 5,
-            "workload":         ""
-        })
+        usage='%(prog)s [options]')
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
         default=False, help="Boolean value:: true means run measurements "
                 "on DCTCP (default: false)")

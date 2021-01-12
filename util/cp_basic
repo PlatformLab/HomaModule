@@ -39,10 +39,12 @@ parser = get_parser(description=
         'Measures basic latency and single-machine throughput for Homa and TCP.',
         usage='%(prog)s [options]',
         defaults={
-            "client_ports":   9,
-            "port_receivers": 1,
-            "server_ports":   6,
-            "port_threads":   3})
+            "client_ports":     9,
+            "port_receivers":   1,
+            "server_ports":     6,
+            "port_threads":     3,
+            "tcp_client_ports": 9,
+            "tcp_server_ports": 16})
 parser.add_argument('--dctcp', dest='dctcp', type=boolean,
         default=False, help="Boolean value:: indicates whether measurements "
                 "should be run on DCTCP (default: false)")

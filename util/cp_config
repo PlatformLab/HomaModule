@@ -25,19 +25,11 @@ load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 parser = get_parser(description=
         'Measures Homa slowdown as the number of available priority levels '
         'varies.',
-        usage='%(prog)s [options]',
-        defaults={
-            "server_ports":         3,
-            "port_threads":         3,
-            "client_ports":         3,
-            "port_receivers":       2,
-            "tcp_server_ports":     9,
-            "tcp_client_ports":     4,
-            "workload":             ""
-        })
+        usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['duty_cycle', 'fifo', 'gro', 'max_gro', 'max_gso', 'poll',
-                'prios', 'receivers', 'rtt_bytes', 'threads'],
+        choices=['duty_cycle', 'fifo', 'gro', 'max_gro', 'max_gso',
+                'nic_queue', 'poll', 'ports', 'prios', 'receivers',
+                'rtt_bytes', 'throttle'],
         required = True,
         help='Aspect of configuration to change')
 options = parser.parse_args()
@@ -50,12 +42,14 @@ if options.workload != "":
 
 specs = [];
 if options.config == 'duty_cycle':
+    # Vary the duty_cycle configuration parameter
     for duty in [100, 80, 60, 40]:
         specs.append({'param': '.net.homa.duty_cycle',
                 'value': duty*10,
                 'exp_name': 'duty_%d' % (duty),
                 'label': '%d%% duty cycle' % (duty)})
 elif options.config == 'fifo':
+    # Vary the fraction of bandwidth reserved for the oldest message
     for fifo in [0, 5, 10, 20]:
         specs.append({'param': '.net.homa.grant_fifo_fraction',
                 'value': fifo*10,
@@ -64,36 +58,58 @@ elif options.config == 'fifo':
                 'exp_name': 'fifo_%d' % (fifo),
                 'label': '%d%% FIFO' % (fifo)})
 elif options.config == 'gro':
+    # Vary the GRO policy
     for value, name in [[0, 'none'], [6, 'normal'], [4, 'idle'], [8, 'next']]:
         specs.append({'param': '.net.homa.gro_policy',
             'value': value,
             'exp_name': name,
             'label': name})
 elif options.config == 'max_gro':
+    # Vary the number of skbs processed at once by GRO before forwarding
+    # to SoftIRQ
     for count in [5, 10, 20, 100]:
         specs.append({'param': '.net.homa.max_gro_skbs',
             'value': count,
                 'exp_name': 'max_gro_%d' % (count),
                 'label': 'max_gro_skbs %d' % (count)})
 elif options.config == 'max_gso':
+    # Vary the max_gso_size configuration parameter
     for count in [5000, 10000, 20000, 50000, 100000]:
         specs.append({'param': '.net.homa.max_gso_size',
             'value': count,
                 'exp_name': 'max_gso_%d' % (count),
                 'label': 'max_gso_size %d' % (count)})
+elif options.config == 'nic_queue':
+    # Vary the limit on an NIC queue length
+    for micros in [1, 2, 5, 10, 10000]:
+        specs.append({'param': '.net.homa.max_nic_queue_ns',
+                'value': micros*1000,
+                'exp_name': 'nic_%d' % (micros),
+                'label': 'nic queue %d us' % (micros)})
 elif options.config == 'poll':
-    for poll in [20, 30, 40, 50]:
+    # Vary the polling interval
+    for poll in [0, 20, 30, 40, 50]:
         specs.append({'param': '.net.homa.poll_usecs',
                 'value': poll,
                 'exp_name': 'poll_%d' % (poll),
                 'label': 'poll %d us' % (poll)})
+elif options.config == 'ports':
+    # Vary the numbers of server and client ports
+    for client, server in [[2, 2], [2, 3], [2, 4], [3, 3], [3, 2], [4, 2]]:
+        o = copy.deepcopy(options)
+        o.server_ports = server
+        o.client_ports = client
+        name = "s%dc%d" % (server, client)
+        specs.append({'options': o, 'exp_name': name, 'label': name})
 elif options.config == 'prios':
+    # Vary the number of available priority levels
     for priority in [1, 2, 3, 4, 8]:
         specs.append({'param': '.net.homa.num_priorities',
                 'value': priority,
                 'exp_name': 'prios_%d' % (priority),
                 'label': '%d prios' % (priority)})
 elif options.config == 'receivers':
+    # Vary the client thread configuration
     for ports, receivers in [[3, 2], [3, 3], [3, 4], [2, 3], [2, 4], [1, 5]]:
         o = copy.deepcopy(options)
         o.client_ports = ports
@@ -102,18 +118,19 @@ elif options.config == 'receivers':
         specs.append({'options': o, 'exp_name': "p%dr%d" % (ports, receivers),
                 'label': "%d ports %d rcvrs" % (ports, receivers)})
 elif options.config == 'rtt_bytes':
+    # Vary rtt_bytes
     for rtt in [40000, 60000, 70000, 100000]:
         specs.append({'param': '.net.homa.rtt_bytes',
                 'value': rtt,
                 'exp_name': 'rttb_%d' % (rtt),
                 'label': 'rtt_bytes %d' % (rtt)})
-elif options.config == 'threads':
-    for client, server in [[2, 2], [2, 3], [2, 4], [3, 3], [3, 2], [4, 2]]:
-        o = copy.deepcopy(options)
-        o.server_ports = server
-        o.client_ports = client
-        name = "s%dc%d" % (server, client)
-        specs.append({'options': o, 'exp_name': name, 'label': name})
+elif options.config == 'throttle':
+    # Vary the cuttoff for short messages that bypass the throttle mechanism
+    for cutoff in [100, 200, 500, 1000, 2000]:
+        specs.append({'param': '.net.homa.throttle_min_bytes',
+                'value': cutoff,
+                'exp_name': 'throttle_%d' % (cutoff),
+                'label': 'throttle_min_bytes %d' % (cutoff)})
 
 # Keys are parameter names, values are old values to restore.
 old_values = {}

@@ -60,30 +60,30 @@ log_file = 0
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
 
-# Defaults for command-line options, if the application doesn't specify its
-# own values.
+# Defaults for command-line options; assumes that servers and clients
+# share nodes.
 default_defaults = {
     'gbps':                0.0,
     # Note: very large numbers for client_max hurt Homa throughput with
     # unlimited load (throttle queue inserts take a long time).
     'client_max':          200,
-    'client_ports':        5,
+    'client_ports':        3,
     'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'mtu':                 0,
     'no_trunc':            '',
     'protocol':            'homa',
     'port_receivers':      3,
-    'port_threads':        2,
+    'port_threads':        3,
     'seconds':             5,
-    'server_ports':        9,
-    'tcp_client_ports':    9,
+    'server_ports':        3,
+    'tcp_client_ports':    4,
     'tcp_port_receivers':  1,
-    'tcp_server_ports':    15,
+    'tcp_server_ports':    8,
     'tcp_port_threads':    1,
     'unloaded':            0,
     'unsched':             0,
     'unsched_boost':       0.0,
-    'workload':            'w5'
+    'workload':            ''
 }
 
 # Keys are experiment names, and each value is the digested data for that
@@ -298,12 +298,26 @@ def init(options):
     verbose = options.verbose
     vlog("cperf starting at %s" % (date_time))
     s = ""
+
+    # Log configuration information, including options here as well
+    # as Homa's configuration parameters.
     opts = vars(options)
     for name in sorted(opts.keys()):
         if len(s) != 0:
             s += ", "
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
+    vlog("Homa configuration:")
+    for param in ['dead_buffs_limit', 'duty_cycle', 'grant_fifo_fraction',
+            'grant_increment', 'gro_policy', 'link_mbps', 'max_dead_buffs',
+            'max_gro_skbs', 'max_gso_size', 'max_nic_queue_ns',
+            'max_overcommit', 'num_priorities', 'pacer_fifo_fraction',
+            'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
+            'rtt_bytes', 'throttle_min_bytes', 'timeout_resends']:
+        result = subprocess.run(['sysctl', '-n', '.net.homa.' + param],
+                capture_output = True, encoding="utf-8");
+        vlog("  %-20s %s" % (param, result.stdout.rstrip()))
+
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
         do_ssh(["set_mtu", str(options.mtu)], range(0, options.num_nodes))
@@ -608,8 +622,12 @@ def run_experiment(name, clients, options):
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
         debug_delay = 0
-        # time.sleep(debug_delay)
-        # do_cmd("debug 240000000 480000000", clients);
+        if debug_delay > 0:
+            time.sleep(debug_delay)
+        if False and "dctcp" in name:
+            log("Setting debug info")
+            do_cmd("debug 2000 3000", clients)
+            log("Finished setting debug info")
         time.sleep(options.seconds - debug_delay)
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
@@ -624,8 +642,8 @@ def run_experiment(name, clients, options):
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
                 "%s/reports/%s.metrics" % (options.log_dir, name))
     do_cmd("stop senders", clients)
-    # if "homa" in name:
-        # do_cmd("tt print cp.tt", clients)
+    if False and "dctcp" in name:
+        do_cmd("tt print cp.tt", clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=1"], clients)

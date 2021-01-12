@@ -23,18 +23,7 @@ load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 
 parser = get_parser(description=
         'Measures slowdown as a function of message size for Homa and TCP.',
-        usage='%(prog)s [options]',
-        defaults={
-            "server_ports":         3,
-            "port_threads":         3,
-            "client_ports":         3,
-            "port_receivers":       2,
-            "tcp_server_ports":     8,
-            "tcp_port_threads":     1,
-            "tcp_client_ports":     4,
-            "tcp_receiver_threads": 1,
-            "workload":             ""
-        })
+        usage='%(prog)s [options]')
 parser.add_argument('--tcp', dest='tcp', type=boolean,
         default=True, help="Boolean value: indicates whether measurements "
                 "should be run on TCP (default: true)")

@@ -25,12 +25,7 @@ load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 parser = get_parser(description=
         'Measures Homa slowdown as the number of available priority levels '
         'varies.',
-        usage='%(prog)s [options]',
-        defaults={
-            "tcp_server_ports":     9,
-            "tcp_client_ports":     4,
-            "workload":             ""
-        })
+        usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
         choices=['cports', 'sports', 'threads'],
         required = True,
