@@ -519,11 +519,11 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct common_header, checksum);
-//	tt_record4("calling ip_queue_xmit: skb->len %d, gso_segs %d,"
-//			"gso_size %d, gso_type %d",
-//			skb->len, skb_shinfo(skb)->gso_segs,
-//			skb_shinfo(skb)->gso_size,
-//			skb_shinfo(skb)->gso_type);
+	tt_record4("calling ip_queue_xmit: skb->len %d, gso_segs %d,"
+			"gso_size %d, gso_type %d",
+			skb->len, skb_shinfo(skb)->gso_segs,
+			skb_shinfo(skb)->gso_size,
+			skb_shinfo(skb)->gso_type);
 
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
 //	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "

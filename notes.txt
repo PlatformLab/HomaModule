@@ -2,21 +2,29 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Performance-related tasks:
+  * Analyze 40-us W4 short message latency by writing a time-trace
+    analyzer that tracks NIC queue length.
   * Perhaps limit the number of polling threads per socket, to solve
     the problems with having lots of receiver threads?
   * Move some reaping to the pacer? It has time to spare
   * Figure out why TCP W2 P99 gets worse with higher --client-max
   * See if turning off c-states allows shorter polling intervals?
-  * Are Meltdown mitigations really disabled?
   * Consider a permanent reduction in rtt_bytes.
   * Consider reducing throttle_min_bytes to see if it helps region 1
     in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
     >1 request per kernel call?
-  * Try measuring performance without polling in Homa?
 
 * Things to do:
+  * Eliminate hot spots involving NAPI:
+    * Arrange for incoming bursts to be divided into batches where
+      alternate batches do their NAPI on 2 different cores.
+    * To do this, use TCP for Homa!
+      * Send Homa packets using TCP, and use different ports to force
+        different NAPI cores
+      * Interpose on the TCP packet reception hooks, and redirect
+        real TCP packets back to TCP.
   * Implement at-most-once semantics:
     * Don't delete server RPCs until acked by client.
     * On client, keep small set of completed RPCs in homa_peer
