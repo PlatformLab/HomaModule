@@ -2,6 +2,65 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (January 2021) Best-case short-message timelines (xl170 cluster).
+  Linux 4.15.18 numbers were measured in September 2020. All times are ns.
+
+                          5.4.80         4.15.18    Ratio
+                     Server   Client
+---------------------------------------------------------
+Send:
+  System call           360     360         240      1.50
+  homa_send/reply       620     870         420      1.77
+  IP/Driver             495     480         420      1.16
+  Total                1475    1710        1080      1.47
+Receive:
+  Interrupt->NAPI       560     500         530      1.00
+  NAPI                  560     675         420      1.47
+  Wakeup SoftIRQ        480     470         360      1.32
+  IP SoftIRQ            305     335         320      1.00
+  Homa SoftIRQ          455     190         240      1.34
+  Wakeup App             80     100         270      0.33
+  homa_recv             420     450         300      1.45
+  System Call           360     360         240      1.50
+  Total                3220    3080        2680      1.18
+NIC->NIC (1-way)       2805    2805        2540      1.10
+RTT Total             15100   15100       12600      1.20
+
+* (January 2021) Small-message latencies (usec) for different workloads and
+  protocols (xl170 cluster, 40 nodes, high load, MTU 3000, Linux 5.4.80):
+               W2             W3            W4            W5
+Homa  P50     30.9           41.9          46.8          55.4
+      P99     57.7           98.5         109.3         139.0
+DCTCP P50    106.7 (3.5x)   160.4 (3.8x)  159.1 (3.4x)  151.8 (2.7x)
+      P99   4812.1 (83x)   6361.7 (65x)   881.1 (8.1x)  991.2 (7.1x)
+TCP   P50    108.8 (3.5x)   192.7 (4.6x)  353.1 (7.5x)  385.7 (6.9x)
+      P99   4151.5 (72x)   5092.7 (52x)  2113.1 (19x)  4360.7 (31x)
+
+* (January 2021) Analyzed effects of various configuration parameters,
+  running on 40-node xl170 cluster with MTU 3000:
+  duty_cycle:      Reducing to 40% improves small message latency 25% in W4
+                   40% in W5
+  fifo_fraction:   No impact on small message P99 except W3 (10% degradation);
+                   previous measurements showed 2x improvement in P99 for
+                   largest messages with modified W4 workload.
+  gro_policy:      NORMAL always better; others 10-25% worse for short P99
+  max_gro_skbs:    Larger is better; reducing to 5 hurts short P99 10-15%
+  max_gso_size:    10K looks best; not much difference above that, 10-20%
+                   degradation of short P99 at 5K
+  nic_queue_ns:    5-10x degradation in short P99 when there is no limit;
+                   no clear winner for short P99 in 1-10 us range; however,
+                   shorter is better for P50 (1us slightly better than 2us)
+  poll_usecs:      0-50us all equal for W4 and W5; 50us better for W2 and W3
+                   (10-20% better short P99 than 0us).
+  ports:           Not much sensitivity: 3 server and 3 client looks good.
+  client threads:  Need 3 ports: W2 can't keep up with 1-2 ports, W3 can't
+                   keep up with 1 port. With 3 ports, 2 receivers has 1.5-2x
+                   lower short P99 for W2 and W3 than 4 receivers, but for
+                   W5 3 receivers is 10% better than 2. Best choice: 3p2r?
+  rtt_bytes:       60K is best, but not much sensitivity: 40K is < 10% worse
+  throttle_bytes:  Almost no noticeable difference from 100-2000; perhaps
+                   500 or 1000?
+
 * (October 2020) Polling performance impact. In isolation, polling saves
   about 4 us RTT per RPC. In the workloads, it reduces short-message P50
   up to 10 us, and P99 up to 25us (the impact is greater with light-tailed
@@ -285,8 +344,8 @@ Event                                                               Median
   * Tried disabling interrupts while the pacer is running, but this doesn't
    work: if a packet gets sent with interrupts disabled, the interrupts get
     reenabled someplace along the way, which can lead to deadlock. Also,
-    the VLAN driver uses "interrupts off" as a signal that it should polling
-    mode, which doesn't work.
+    the VLAN driver uses "interrupts off" as a signal that it should enter
+    polling mode, which doesn't work.
   * Tried calling homa_pacer_xmit from multiple places; this helps a bit
     (5-10%).
   * Tried making the pacer thread a high-priority real-time thread; this
