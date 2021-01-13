@@ -1004,7 +1004,7 @@ class tcp_server {
 	tcp_server(int port, int id, int num_threads);
 	~tcp_server();
 	void accept(int epoll_fd);
-	void read(int fd);
+	void read(int fd, int pid);
 	void server(int thread_id);
 	
 	/**
@@ -1228,7 +1228,7 @@ void tcp_server::server(int thread_id)
 				spin_lock lock_guard(&fd_locks[fd]);
 				if ((events[i].events & EPOLLIN) &&
 						(connections[fd] != NULL))
-					read(fd);
+					read(fd, pid);
 				if ((events[i].events & EPOLLOUT) &&
 						(connections[fd] != NULL)) {
 					if (connections[fd]->xmit())
@@ -1282,15 +1282,17 @@ void tcp_server::accept(int epoll_fd)
  * entire request has been read, sends an appropriate response.
  * @fd:        File descriptor for connection; connections must hold
  *             state information for this descriptor.
+ * @pid:       Pid for the thread (for messages).
  */
-void tcp_server::read(int fd)
+void tcp_server::read(int fd, int pid)
 {
 	int error = connections[fd]->read(epollet,
-			[this, fd](message_header *header) {
+			[this, fd, pid](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
-		tt("Received TCP request, cid 0x%08x, id %u, length %d",
-				header->cid, header->msg_id, header->length);
+		tt("Received TCP request, cid 0x%08x, id %u, length %d, pid %d",
+				header->cid, header->msg_id, header->length,
+				pid);
 		if ((header->freeze) && !time_trace::frozen) {
 			tt("Freezing timetrace because of request on "
 					"cid 0x%08x", header->cid);
@@ -1644,15 +1646,18 @@ void client::record(uint64_t end_time, message_header *header)
 	rtt = end_time - r->start_time;
 	r->active = false;
 	
+	int kcycles = rtt>>10;
 	tt("Received response, cid 0x%08x, id %u, length %d, "
-			"elapsed %d",
+			"rtt %d kcycles",
 			header->cid, header->msg_id,
-			header->length, rtt);
-	if ((rtt > debug[0]) && (rtt < debug[1]) && !time_trace::frozen) {
+			header->length, kcycles);
+	if ((kcycles > debug[0]) && (kcycles < debug[1])
+			&& (header->length < 1500) && !time_trace::frozen) {
 		freeze[header->cid.server] = 1;
 		tt("Freezing timetrace because of long RTT for "
-				"cid 0x%08x, id %u",
-				header->cid, header->msg_id);
+				"cid 0x%08x, id %u, length %d, kcycles %d",
+				header->cid, header->msg_id, header->length,
+				kcycles);
 		log(NORMAL, "Freezing timetrace because of long RTT for "
 				"cid 0x%08x, id %u",
 				int(header->cid), header->msg_id);
@@ -2049,7 +2054,7 @@ class tcp_client : public client {
     public:
 	tcp_client(int id);
 	virtual ~tcp_client();
-	void read(tcp_connection *connection);
+	void read(tcp_connection *connection, int pid);
 	void receiver(int id);
 	void sender(void);
 	
@@ -2240,6 +2245,7 @@ tcp_client::~tcp_client()
 void tcp_client::sender()
 {
 	char thread_name[50];
+	int pid = syscall(__NR_gettid);
 	
 	snprintf(thread_name, sizeof(thread_name), "C%d", id);
 	time_trace::thread_buffer thread_buffer(thread_name);
@@ -2295,9 +2301,9 @@ void tcp_client::sender()
 		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
 		size_t old_pending = connections[server]->pending();
-		tt("Sending TCP request, cid 0x%08x, id %u, length %d, freeze %d",
+		tt("Sending TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header.cid, header.msg_id, header.length,
-				header.freeze);
+				pid);
 		if ((!connections[server]->send_message(&header))
 				&& (old_pending == 0)) {
 			blocked.push_back(connections[server]);
@@ -2375,7 +2381,7 @@ void tcp_client::receiver(int receiver_id)
 			tcp_connection *connection = connections[fd];
 			if (events[i].events & EPOLLIN) {
 				spin_lock lock_guard(&fd_locks[fd]);
-				read(connection);
+				read(connection, pid);
 			}
 		}
 	}
@@ -2385,30 +2391,15 @@ void tcp_client::receiver(int receiver_id)
  * tcp_client::read() - Is available data from a TCP connection; if an
  * entire response has now been read, records statistics for that request.
  * @connection:  TCP connection that has data available to read.
+ * @pid:         Identifier for current process; used for messages.
  */
-void tcp_client::read(tcp_connection *connection)
+void tcp_client::read(tcp_connection *connection, int pid)
 {
-	int error = connection->read(epollet, [this](message_header *header) {
+	int error = connection->read(epollet, [this, pid]
+			(message_header *header) {
 		uint64_t end_time = rdtsc();
-//		uint32_t elapsed = end_time - header->start_time;
-//		tt("Received TCP response, cid 0x%08x, id %u, length %d, "
-//				"elapsed %d",
-//				header->cid, header->msg_id,
-//				header->length, elapsed);
-//		if ((header->length < 1500) && (elapsed > debug[0])
-//				&& (elapsed < debug[1])
-//				&& !time_trace::frozen) {
-//			freeze[header->cid.server] = 1;
-//			tt("Freezing timetrace because of long RTT for "
-//					"cid 0x%08x, id %u",
-//					header->cid, header->msg_id);
-//			log(NORMAL, "Freezing timetrace because of long RTT for "
-//					"cid 0x%08x, id %u",
-//					int(header->cid), header->msg_id);
-//			time_trace::freeze();
-//			kfreeze();
-//		}
 		record(end_time, header);
+		tt("Response for cid 0x%08x received by pid %d", pid);
 		bytes_rcvd[first_id[header->cid.server]
 				+ header->cid.server_port] += header->length;
 	});
@@ -2989,10 +2980,19 @@ int stop_cmd(std::vector<string> &words)
  * Return:  Nonzero means success, zero means there was an error.
  */
 int tt_cmd(std::vector<string> &words)
-{	
+{
+	if (words.size() < 2) {
+		printf("tt command requires an option\n");
+		return 0;
+	}
 	const char *option = words[1].c_str();
 	if (strcmp(option, "freeze") == 0) {
+		tt("Freezing timetrace because of tt freeze command");
 		time_trace::freeze();
+	} else if (strcmp(option, "freezeboth") == 0) {
+		tt("Freezing timetrace because of tt freezeboth command");
+		time_trace::freeze();
+		kfreeze();
 	} else if (strcmp(option, "kfreeze") == 0) {
 		kfreeze();
 	} else if (strcmp(option, "print") == 0) {
@@ -3007,7 +3007,8 @@ int tt_cmd(std::vector<string> &words)
 			return 0;
 		}
 	} else {
-		printf("Unknown option '%s'; must be freeze or print\n",
+		printf("Unknown option '%s'; must be freeze, freezeboth, "
+				"kfreeze or print\n",
 				option);
 		return 0;
 	}
@@ -3125,6 +3126,7 @@ void error_handler(int signal, siginfo_t* info, void* ucontext)
 
 int main(int argc, char** argv)
 {
+	time_trace::thread_buffer thread_buffer("main");
 	setlinebuf(stdout);
 	signal(SIGPIPE, SIG_IGN);
 	struct rlimit limits;
