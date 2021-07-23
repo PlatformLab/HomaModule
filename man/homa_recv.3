@@ -5,10 +5,8 @@ homa_recv \- receive a Homa message
 .nf
 .B #include <homa.h>
 .PP
-.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ,
-.BI "                  int " flags ", uint64_t *" id ,
-.BI "                  const struct sockaddr *" src_addr ", size_t " \
-*addrlen );
+.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ", int " flags ", const struct sockaddr *" src_addr ",
+.BI "                  size_t * " addrlen ", uint64_t *" id );
 .fi
 .SH DESCRIPTION
 The function
