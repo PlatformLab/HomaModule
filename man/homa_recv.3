@@ -67,10 +67,6 @@ buffer associated with
 Upon return,
 .I *addrlen
 is updated to contain the actual size of the source address.
-The returned address is truncated  if  the buffer provided is too small;
-in this case,
-.I *addrlen
-will return a value greater than its initial value.
 .PP
 For some settings of
 .I flags
@@ -130,7 +126,10 @@ did not refer to a Homa socket, or the argument
 did not contain either
 .BR HOMA_RECV_REQUEST " or " HOMA_RECV_RESPONSE ,
 or there was no outstanding request with an id matching
-.IR *id .
+.IR *id ,
+or there was not enough space at
+.I *src_addr
+to store the source address.
 .TP
 .B ENOTCONN
 No socket is bound to the destination port for the request.

@@ -62,17 +62,17 @@ extern "C"
 #define HOMAIOCFREEZE 1003104
 
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
-			const struct sockaddr *dest_addr, size_t addrlen,
-			uint64_t *id);
+                    const struct sockaddr *dest_addr, size_t addrlen,
+                    uint64_t *id);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
-			struct sockaddr *src_addr, size_t addrlen,
-			uint64_t *id);
+                    struct sockaddr *src_addr, size_t *addrlen,
+                    uint64_t *id);
 extern ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
-			const struct sockaddr *dest_addr, size_t addrlen,
-			void *response, size_t resplen);
+                    const struct sockaddr *dest_addr, size_t addrlen,
+                    void *response, size_t resplen);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
-			const struct sockaddr *dest_addr, size_t addrlen,
-			uint64_t id);
+                    const struct sockaddr *dest_addr, size_t addrlen,
+                    uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id);
 
 /**

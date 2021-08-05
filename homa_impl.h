@@ -1361,7 +1361,7 @@ struct homa {
 	 * priority levels less than i will not be used for unscheduled
 	 * packets. At least one entry in the array must have a value of
 	 * HOMA_MAX_MESSAGE_SIZE or greater (entry 0 is usually INT_MAX).
-	 *Set externally via sysctl.
+	 * Set externally via sysctl.
 	 */
 	int unsched_cutoffs[HOMA_MAX_PRIORITIES];
 	
@@ -1389,24 +1389,24 @@ struct homa {
 	 */
 	int grant_fifo_fraction;
         
-        /**
-         * @duty_cycle: Sets a limit on the fraction of network bandwidth that
-         * may be consumed by a single RPC in units of one-thousandth (1000
-         * means a single RPC can consume all of the incoming network
-         * bandwidth, 500 means half, and so on). This also determines the
-         * fraction of a core that can be consumed by NAPI when a large
-         * message is being received. Its main purpose is to keep NAPI from
-         * monopolizing a core so much that user threads starve. Set externally
-         * via sysctl.
-         */
-        int duty_cycle;
-        
-        /**
-         * @grant_threshold: A grant will not be sent for an RPC until
-         * the number of incoming bytes drops below this threshold. Computed
-         * from @rtt_bytes and @duty_cycle.
-         */
-        int grant_threshold;
+    /**
+     * @duty_cycle: Sets a limit on the fraction of network bandwidth that
+     * may be consumed by a single RPC in units of one-thousandth (1000
+     * means a single RPC can consume all of the incoming network
+     * bandwidth, 500 means half, and so on). This also determines the
+     * fraction of a core that can be consumed by NAPI when a large
+     * message is being received. Its main purpose is to keep NAPI from
+     * monopolizing a core so much that user threads starve. Set externally
+     * via sysctl.
+     */
+    int duty_cycle;
+
+    /**
+     * @grant_threshold: A grant will not be sent for an RPC until
+     * the number of incoming bytes drops below this threshold. Computed
+     * from @rtt_bytes and @duty_cycle.
+     */
+    int grant_threshold;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
@@ -1558,10 +1558,10 @@ struct homa {
 	 * want to know what they mean, read the code of homa_offload.c
 	 */
 	#define HOMA_GRO_BYPASS      1
-        #define HOMA_GRO_SAME_CORE   2
-        #define HOMA_GRO_IDLE        4
-        #define HOMA_GRO_NEXT        8
-        #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
+    #define HOMA_GRO_SAME_CORE   2
+    #define HOMA_GRO_IDLE        4
+    #define HOMA_GRO_NEXT        8
+    #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked

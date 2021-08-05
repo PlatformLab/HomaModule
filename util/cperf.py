@@ -34,6 +34,10 @@ import sys
 import time
 import traceback
 
+# Avoid Type 3 fonts (conferences don't tend to like them).
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
+
 if platform.system() != "Windows":
     import fcntl
 
@@ -1194,7 +1198,7 @@ def plot_slowdown(ax, experiment, percentile, label, **kwargs):
     ax.plot(x, y, label=label, **kwargs)
 
 def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
-        figsize=[5, 4], size=10):
+        figsize=[5, 4], size=10, xscale="log", yscale="log"):
     """
     Create a pyplot graph that will be display a complementary CDF with
     log axes.
@@ -1208,12 +1212,14 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     y_label:     Label for the y axis (empty means no label)
     figsize:     Dimensions of plot
     size:        Size to use for fonts
+    xscale:      Scale for x-axis: "linear" or "log"
+    yscale:      Scale for y-axis: "linear" or "log"
     """
     plt.figure(figsize=figsize)
     if title != "":
         plt.title(title, size=size)
     plt.axis()
-    plt.xscale("log")
+    plt.xscale(xscale)
     ax = plt.gca()
 
     # Round out the x-axis limits to even powers of 10.
@@ -1231,7 +1237,7 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     plt.tick_params(top=True, which="both", direction="in", labelsize=size,
             length=5)
 
-    plt.yscale("log")
+    plt.yscale(yscale)
     plt.ylim(min_y, 1.0)
     # plt.yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
     if x_label:

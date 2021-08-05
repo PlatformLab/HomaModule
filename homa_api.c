@@ -32,7 +32,9 @@
  *              HOMA_RECV_NONBLOCKING
  * @src_addr:   The sender's IP address will be returned here. If NULL, no
  *              address information is returned.
- * @addrlen:    Space available at @src_addr, in bytes.
+ * @addrlen:    Points to variable indicating space available at @src_addr,
+ *              in bytes. Will be overwritten with the actual size of
+ *              the address stored there.
  * @id:         Points to a unique RPC identifier, which is used both as
  *              an input and an output parameter. If the value is initially
  *              nonzero and the HOMA_RECV_RESPONSE flag is set, then a
@@ -46,12 +48,12 @@
  *              errno is set appropriately. 
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
-	        struct sockaddr *src_addr, size_t addrlen, uint64_t *id)
+	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
 	
-	if (src_addr && (addrlen < sizeof(struct sockaddr_in))) {
+	if (src_addr && (*addrlen < sizeof(struct sockaddr_in))) {
 		errno = EINVAL;
 		return -EINVAL;
 	}
@@ -60,8 +62,10 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	args.flags = flags;
 	args.id = *id;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
-	if (src_addr)
+	if (src_addr) {
 		*((struct sockaddr_in *) src_addr) = args.source_addr;
+        *addrlen = sizeof(struct sockaddr_in);
+    }
 	*id = args.id;
 	return result;
 }
