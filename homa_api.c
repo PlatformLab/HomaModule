@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -18,6 +18,7 @@
  */
 
 #include <errno.h>
+#include <stddef.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include "homa.h"
@@ -52,7 +53,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
-	
+
 	if (src_addr && (*addrlen < sizeof(struct sockaddr_in))) {
 		errno = EINVAL;
 		return -EINVAL;
@@ -64,8 +65,8 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	if (src_addr) {
 		*((struct sockaddr_in *) src_addr) = args.source_addr;
-        *addrlen = sizeof(struct sockaddr_in);
-    }
+		*addrlen = sizeof(struct sockaddr_in);
+	}
 	*id = args.id;
 	return result;
 }
@@ -94,13 +95,52 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 		uint64_t id)
 {
 	struct homa_args_reply_ipv4 args;
-	
+
 	if (dest_addr->sa_family != AF_INET) {
 		errno = EAFNOSUPPORT;
 		return -EAFNOSUPPORT;
 	}
 	args.response = (void *) response;
-	args.resplen = resplen;
+	args.iovec = NULL;
+		args.length = resplen;
+	args.dest_addr = *((struct sockaddr_in *) dest_addr);
+	args.id = id;
+	return ioctl(sockfd, HOMAIOCREPLY, &args);
+}
+
+/**
+ * homa_replyv() - Similar to homa_reply, except the response message can
+ * be divided among several chunks of memory.
+ * @sockfd:     File descriptor for the socket on which to send the message.
+ * @iov:        Pointer to array that describes the chunks of the response
+ *              message.
+ * @iovcnt:     Number of elements in @iov.
+ * @dest_addr:  Address of the RPC's client (returned by homa_recv when
+ *              the message was received).
+ * @addrlen:    Size of @dest_addr in bytes.
+ * @id:         Unique identifier for the request, as returned by homa_recv 
+ *              when the request was received.
+ * 
+ * @dest_addr and @id must correspond to a previously-received request
+ * for which no reply has yet been sent; if there is no such active request,
+ * then this function does nothing.
+ * 
+ * Return:      0 means the response has been accepted for delivery. If an
+ *              error occurred, -1 is returned and errno is set appropriately.
+ */
+ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
+		const struct sockaddr *dest_addr, size_t addrlen,
+		uint64_t id)
+{
+	struct homa_args_reply_ipv4 args;
+
+	if (dest_addr->sa_family != AF_INET) {
+		errno = EAFNOSUPPORT;
+		return -EAFNOSUPPORT;
+	}
+	args.response = NULL;
+	args.iovec = iov;
+	args.length = iovcnt;
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = id;
 	return ioctl(sockfd, HOMAIOCREPLY, &args);
@@ -131,7 +171,45 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 		return -EAFNOSUPPORT;
 	}
 	args.request = (void *) request;
-	args.reqlen = reqlen;
+	args.iovec = NULL;
+	args.length = reqlen;
+	args.dest_addr = *((struct sockaddr_in *) dest_addr);
+	args.id = 0;
+	result = ioctl(sockfd, HOMAIOCSEND, &args);
+	if (result >= 0)
+		*id = args.id;
+	return result;
+}
+
+/**
+ * homa_sendv() - Same as homa_send, except that the request message can
+ * be divided among multiple disjoint chunks of memory.
+ * @sockfd:     File descriptor for the socket on which to send the message.
+ * @iov:        Pointer to array that describes the chunks of the request
+ *              message.
+ * @iovcnt:     Number of elements in @iov.
+ * @dest_addr:  Address of server to which the request should be sent.
+ * @addrlen:    Size of @dest_addr in bytes.
+ * @id:         A unique identifier for the request will be returned here;
+ *              this can be used later to find the response for this request.
+ * 
+ * Return:      0 means the request has been accepted for delivery. If an
+ *              error occurred, -1 is returned and errno is set appropriately.
+ */
+int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
+		const struct sockaddr *dest_addr, size_t addrlen,
+		uint64_t *id)
+{
+	struct homa_args_send_ipv4 args;
+	int result;
+
+	if (dest_addr->sa_family != AF_INET) {
+errno = EAFNOSUPPORT;
+				return -EAFNOSUPPORT;
+	}
+	args.request = NULL;
+	args.iovec = iov;
+	args.length = iovcnt;
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);

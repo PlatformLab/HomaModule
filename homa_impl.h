@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -2378,7 +2378,7 @@ extern void     homa_dst_refresh(struct homa_peertab *peertab,
 extern int      homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-                    char __user *from, size_t len);
+                    struct iov_iter *iter);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
@@ -2466,7 +2466,7 @@ extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
-                    struct sockaddr_in *dest, void __user *buffer, size_t len);
+                    struct sockaddr_in *dest, struct iov_iter *iter);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
                     struct data_header *h);

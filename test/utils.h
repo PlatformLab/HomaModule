@@ -25,21 +25,23 @@ struct unit_hash;
 
 extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
-			__be32 client_ip, __be32 server_ip, int server_port,
-			int id, int req_length, int resp_length);
+                        __be32 client_ip, __be32 server_ip, int server_port,
+                        int id, int req_length, int resp_length);
 extern __be32        unit_get_in_addr(char *s);
+extern struct iov_iter
+                    *unit_iov_iter(void *buffer, size_t length);
 extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_active_ids(struct homa_sock *hsk);
 extern void          unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 extern void          unit_log_frag_list(struct sk_buff *skb, int verbose);
 extern void          unit_log_grantables(struct homa *homa);
 extern void          unit_log_message_out_packets(
-			struct homa_message_out *message, int verbose);
+                        struct homa_message_out *message, int verbose);
 extern struct homa_rpc
                     *unit_server_rpc(struct homa_sock *hsk, int state,
-			__be32 server_ip, __be32 client_ip, int client_port,
-			int id, int req_length, int resp_length);
+                        __be32 server_ip, __be32 client_ip, int client_port,
+                        int id, int req_length, int resp_length);
 extern void          unit_log_skb_list(struct sk_buff_head *packets,
-			int verbose);
+                        int verbose);
 extern void          unit_log_throttled(struct homa *homa);
 extern void          unit_teardown(void);

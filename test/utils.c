@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -57,7 +57,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
-			NULL, req_length);
+			unit_iov_iter(NULL, req_length));
 	homa_rpc_unlock(crpc);
 	if (!crpc)
 		return NULL;
@@ -376,8 +376,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	if (srpc->state == state)
 		return srpc;
 	homa_message_out_init(srpc, hsk->server_port,
-			homa_fill_packets(hsk, srpc->peer, (void *) 2000,
-			resp_length), resp_length);
+			homa_fill_packets(hsk, srpc->peer,
+			unit_iov_iter((void *) 2000, resp_length)), resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;
@@ -397,4 +397,25 @@ void unit_teardown(void)
 {
 	mock_teardown();
 	unit_log_clear();
+}
+
+/**
+ * Return an iov_iter corresponding to the arguments.
+ * \param buffer
+ *      First byte of data.
+ * \param length
+ *      Number of bytes of data.
+ * \param direction
+ *      WRITE means data will be copied out of the init, READ means data
+ *      will be copied into it.
+ */
+struct iov_iter *unit_iov_iter(void *buffer, size_t length)
+{
+    
+	static struct iovec iovec;
+	static struct iov_iter iter;
+	iovec.iov_base = buffer;
+	iovec.iov_len = length;
+	iov_iter_init(&iter, WRITE, &iovec, 1, length);
+	return &iter;
 }

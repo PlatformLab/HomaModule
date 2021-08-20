@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -46,6 +46,7 @@ int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
 int mock_cpu_idle = 0;
 int mock_import_single_range_errors = 0;
+int mock_import_iovec_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
@@ -210,11 +211,31 @@ int _cond_resched(void)
 	return 0;
 }
 
-size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
+size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
+	size_t bytes_left = bytes;
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_printf("; ", "_copy_from_iter copied %lu bytes", bytes);
+	if (bytes > iter->count) {
+		unit_log_printf("; ", "copy_from_iter needs %lu bytes, but "
+				"iov_iter has only %lu", bytes, iter->count);
+		return 0;
+	}
+	while (bytes_left > 0) {
+		struct iovec *iov = (struct iovec *) iter->iov;
+		__u64 int_base = (__u64) iov->iov_base;
+		size_t chunk_bytes = iov->iov_len;
+		if (chunk_bytes > bytes_left)
+			chunk_bytes = bytes_left;
+		unit_log_printf("; ", "_copy_from_iter %lu bytes at %llu",
+				chunk_bytes, int_base);
+		bytes_left -= chunk_bytes;
+		iter->count -= chunk_bytes;
+		iov->iov_base = (void *) (int_base + chunk_bytes);
+		iov->iov_len -= chunk_bytes;
+		if (iov->iov_len == 0)
+			iter->iov++;
+	}
 	return bytes;
 }
 
@@ -341,6 +362,25 @@ int idle_cpu(int cpu)
 	return mock_check_error(&mock_cpu_idle);
 }
 
+ssize_t import_iovec(int type, const struct iovec __user * uvector,
+		unsigned nr_segs, unsigned fast_segs,
+		struct iovec **iov, struct iov_iter *iter)
+{
+	ssize_t size;
+	unsigned i;
+
+	*iov = (struct iovec *) kmalloc(nr_segs*sizeof(struct iovec), GFP_KERNEL);
+	if (mock_check_error(&mock_import_iovec_errors))
+		return -EINVAL;
+	size = 0;
+	for (i = 0; i < nr_segs; i++) {
+		size += uvector[i].iov_len;
+		(*iov)[i] = uvector[i];
+	}
+	iov_iter_init(iter, type, *iov, nr_segs, size);
+	return size;
+}
+
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {
@@ -409,6 +449,18 @@ void init_wait_entry(struct wait_queue_entry *wq_entry, int flags) {}
 
 void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
 		struct lock_class_key *key) {}
+
+void iov_iter_init(struct iov_iter *i, unsigned int direction,
+			const struct iovec *iov, unsigned long nr_segs,
+			size_t count)
+{
+	direction &= READ | WRITE;
+	i->type = ITER_IOVEC | direction;
+	i->iov = iov;
+	i->nr_segs = nr_segs;
+	i->iov_offset = 0;
+	i->count = count;
+}
 
 void iov_iter_revert(struct iov_iter *i, size_t bytes)
 {
@@ -1045,6 +1097,7 @@ void mock_teardown(void)
 	mock_cpu_idle = 0;
 	mock_cycles = 0;
 	mock_import_single_range_errors = 0;
+	mock_import_iovec_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kmalloc_errors = 0;

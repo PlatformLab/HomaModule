@@ -34,6 +34,8 @@ FIXTURE(homa_plumbing) {
 	struct sockaddr_in server_addr;
 	struct data_header data;
 	int starting_skb_count;
+	struct iovec reply_vec[2];
+	struct iovec send_vec[2];
 	struct homa_args_recv_ipv4 recv_args;
 	struct homa_args_reply_ipv4 reply_args;
 	struct homa_args_send_ipv4 send_args;
@@ -67,12 +69,22 @@ FIXTURE_SETUP(homa_plumbing)
 	self->recv_args.len = sizeof(self->buffer);
 	self->recv_args.flags = HOMA_RECV_RESPONSE;
 	self->recv_args.id = 0;
-	self->reply_args.response = self->buffer;
-	self->reply_args.resplen = 1000;
+	self->reply_vec[0].iov_base = self->buffer;
+	self->reply_vec[0].iov_len = 100;
+	self->reply_vec[1].iov_base = self->buffer + 1000;
+	self->reply_vec[1].iov_len = 900;
+	self->reply_args.response = NULL;
+	self->reply_args.iovec = self->reply_vec;
+	self->reply_args.length = 2;
 	self->reply_args.dest_addr = self->client_addr;
 	self->reply_args.id = self->rpcid;
-	self->send_args.request = self->buffer;
-	self->send_args.reqlen = 200;
+	self->send_vec[0].iov_base = self->buffer;
+	self->send_vec[0].iov_len = 100;
+	self->send_vec[1].iov_base = self->buffer + 1000;
+	self->send_vec[1].iov_len = 100;
+	self->send_args.request = NULL;
+	self->send_args.iovec = self->send_vec;
+	self->send_args.length = 2;
 	self->send_args.dest_addr = self->server_addr;
 	self->send_args.id = 0;
 	unit_log_clear();
@@ -179,6 +191,18 @@ TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 		(unsigned long) &self->reply_args));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 }
+TEST_F(homa_plumbing, homa_ioc_reply__error_in_import_iovec)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->rpcid, 2000, 100);
+	unit_log_clear();
+	mock_import_iovec_errors = 1;
+	EXPECT_EQ(EINVAL, -homa_ioc_reply((struct sock *) &self->hsk,
+			(unsigned long) &self->reply_args));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_ioc_reply__cant_find_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
@@ -219,7 +243,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 			self->client_ip, self->server_ip, self->client_port,
 		        self->rpcid, 2000, 100);
 	unit_log_clear();
-	self->reply_args.resplen = 10000;
+	self->reply_args.length = 10000;
 	self->reply_args.response = (void *) 1000;
 	self->homa.rtt_bytes = 5000;
 	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
@@ -244,9 +268,15 @@ TEST_F(homa_plumbing, homa_ioc_send__bad_address_family)
 		(unsigned long) &self->send_args));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_ioc_send__error_in_import_iovec)
+{
+	mock_import_iovec_errors = 1;
+	EXPECT_EQ(EINVAL, -homa_ioc_send((struct sock *) &self->hsk,
+			(unsigned long) &self->send_args));
+}
 TEST_F(homa_plumbing, homa_ioc_send__error_in_homa_rpc_new_client)
 {
-	mock_kmalloc_errors = 1;
+	mock_kmalloc_errors = 2;
 	EXPECT_EQ(ENOMEM, -homa_ioc_send((struct sock *) &self->hsk,
 		(unsigned long) &self->send_args));
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -643,18 +643,23 @@ error:
 int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_reply_ipv4 args;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
+	struct iov_iter iter;
 	int err = 0;
 	struct homa_rpc *srpc;
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
+	size_t length;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
 		goto done;
 	}
-	tt_record4("homa_ioc_reply starting, id %llu, port %d, pid %d, "
-			"length %d",
-			args.id, hsk->client_port, current->pid, args.resplen);
+	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
+			args.id, hsk->client_port, current->pid);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -662,13 +667,30 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
+    
+	if (args.response != NULL) {
+		iovstack[0].iov_base = args.response;
+		iovstack[0].iov_len = args.length;
+		iov_iter_init(&iter, WRITE, iovstack, 1, args.length);
+	} else {
+		int status;
+		iov = iovstack;
+		status = import_iovec(WRITE, args.iovec, args.length,
+			ARRAY_SIZE(iovstack), &iov, &iter);
+		if (status < 0) {
+		    err = status;
+		    goto done;
+		}
+	}
+	length = iter.count;
+    
 	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
 			&hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
 		goto done;
 	}
-	skbs = homa_fill_packets(hsk, peer, args.response, args.resplen);
+	skbs = homa_fill_packets(hsk, peer, &iter);
 	if (IS_ERR(skbs)) {
 		err = PTR_ERR(skbs);
 		goto done;
@@ -688,7 +710,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	}
 	srpc->state = RPC_OUTGOING;
 
-	homa_message_out_init(srpc, hsk->server_port, skbs, args.resplen);
+	homa_message_out_init(srpc, hsk->server_port, skbs, length);
 	homa_xmit_data(srpc, false);
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
@@ -698,7 +720,8 @@ unlock:
 
 done:
 //	tt_record3("homa_ioc_reply finished, id %llu, port %d, length %d",
-//			args.id, hsk->client_port, args.resplen);
+//			args.id, hsk->client_port, args.length);
+	kfree(iov);
 	return err;
 }
 
@@ -713,6 +736,11 @@ done:
 int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_send_ipv4 args;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
+	struct iov_iter iter;
 	int err;
 	struct homa_rpc *crpc = NULL;
 			
@@ -723,18 +751,31 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	tt_record4("homa_ioc_send starting, target 0x%x:%d, id %u, length %d",
+	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
-			atomic64_read(&hsk->homa->next_outgoing_id),
-			args.reqlen);
+			atomic64_read(&hsk->homa->next_outgoing_id));
 	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
+    
+	if (args.request != NULL) {
+		iovstack[0].iov_base = args.request;
+		iovstack[0].iov_len = args.length;
+		iov_iter_init(&iter, WRITE, iovstack, 1, args.length);
+	} else {
+		int status;
+		iov = iovstack;
+		status = import_iovec(WRITE, args.iovec, args.length,
+				ARRAY_SIZE(iovstack), &iov, &iter);
+		if (status < 0) {
+			err = status;
+			goto error;
+		}
+	}
 	
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.request,
-			args.reqlen);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;
@@ -751,6 +792,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
 //			crpc->id, hsk->client_port, args.reqlen);
 	homa_rpc_unlock(crpc);
+	kfree(iov);
 	return 0;
 
     error:
@@ -758,6 +800,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(crpc);
 		homa_rpc_unlock(crpc);
 	}
+	kfree(iov);
 	return err;
 }
 

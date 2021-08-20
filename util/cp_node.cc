@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -79,6 +79,8 @@ bool verbose = false;
 std::string workload_string;
 const char *workload = "100";
 int unloaded = 0;
+bool client_iovec = false;
+bool server_iovec = false;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -267,6 +269,7 @@ void print_help(const char *name)
 		"    --gbps            Target network utilization, including only message data,\n"
 		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
+        "    --iovec           Use homa_sendv instead of homa_send\n"
 		"                      not be sent to node-I (default: -1)\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
@@ -294,6 +297,7 @@ void print_help(const char *name)
 		"    --level           Log level: either normal or verbose\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
+        "    --iovec           Use homa_replyv instead of homa_reply\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
@@ -985,8 +989,17 @@ void homa_server::server(void)
 			kfreeze();
 		}
 
-		result = homa_reply(fd, buffer, length,
-			(struct sockaddr *) &source, source_length, id);
+		if (server_iovec && (length > 20)) {
+		    struct iovec vec[2];
+		    vec[0].iov_base = buffer;
+		    vec[0].iov_len = 20;
+		    vec[1].iov_base = buffer + 20;
+		    vec[1].iov_len = length - 20;
+		    result = homa_replyv(fd, vec, 2, (struct sockaddr *) &source,
+				source_length, id);
+		} else
+		    result = homa_reply(fd, buffer, length,
+			    (struct sockaddr *) &source, source_length, id);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed: %s\n",
 					strerror(errno));
@@ -1850,6 +1863,11 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 				print_address(&server_addr));
 		exit(1);
 	}
+	if (static_cast<size_t>(length) < sizeof(*header)) {
+		log(NORMAL, "FATAL: response message contained %d bytes; "
+			"need at least %lu", length, sizeof(*header));
+		exit(1);
+	}
 	uint64_t end_time = rdtsc();
 	tt("Received response, cid 0x%08x, id %x, %d bytes",
 			header->cid, header->msg_id, length);
@@ -1874,6 +1892,7 @@ void homa_client::sender()
 		uint64_t now;
 		uint64_t rpc_id;
 		int server;
+		int status;
 		int slot = get_rinfo();
 		
 		/* Wait until (a) we have reached the next start time
@@ -1909,10 +1928,21 @@ void homa_client::sender()
 		header->msg_id = slot;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
-		int status = homa_send(fd, sender_buffer, header->length,
-			reinterpret_cast<struct sockaddr *>(
-			&server_addrs[server]),
-			sizeof(server_addrs[0]), &rpc_id);
+		if (client_iovec && (header->length > 20)) {
+			struct iovec vec[2];
+			vec[0].iov_base = sender_buffer;
+			vec[0].iov_len = 20;
+			vec[1].iov_base = sender_buffer + 20;
+			vec[1].iov_len = header->length - 20;
+			status = homa_sendv(fd, vec, 2,
+				reinterpret_cast<struct sockaddr *>(
+				&server_addrs[server]),	sizeof(server_addrs[0]),
+				&rpc_id);
+		} else
+			status = homa_send(fd, sender_buffer, header->length,
+                reinterpret_cast<struct sockaddr *>(
+                &server_addrs[server]),
+                sizeof(server_addrs[0]), &rpc_id);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2573,6 +2603,7 @@ void log_stats()
  */
 int client_cmd(std::vector<string> &words)
 {
+	client_iovec = false;
 	client_max = 1;
 	client_ports = 1;
 	first_port = 4000;
@@ -2608,6 +2639,8 @@ int client_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &id, option, "integer"))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--iovec") == 0) {
+			client_iovec = true;
 		} else if (strcmp(option, "--no-trunc") == 0) {
 			tcp_trunc = false;
 		} else if (strcmp(option, "--ports") == 0) {
@@ -2866,6 +2899,7 @@ int server_cmd(std::vector<string> &words)
         protocol = "homa";
 	port_threads = 1;
 	server_ports = 1;
+	server_iovec = false;
 	
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
@@ -2874,6 +2908,8 @@ int server_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &first_port, option, "integer"))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--iovec") == 0) {
+			server_iovec = true;
 		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;

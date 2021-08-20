@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -64,13 +64,16 @@ extern "C"
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t *id);
+extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
+                    const struct sockaddr *dest_addr, size_t addrlen,
+                    uint64_t *id);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
                     uint64_t *id);
-extern ssize_t homa_invoke(int sockfd, const void *request, size_t reqlen,
-                    const struct sockaddr *dest_addr, size_t addrlen,
-                    void *response, size_t resplen);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
+                    const struct sockaddr *dest_addr, size_t addrlen,
+                    uint64_t id);
+extern ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id);
@@ -80,10 +83,14 @@ extern int     homa_abort(int sockfd, uint64_t id);
  * betweeen homa_send and the HOMAIOCSEND ioctl. Assumes IPV4 addresses.
  */
 struct homa_args_send_ipv4 {
-	void *request;
-	size_t reqlen;
-	struct sockaddr_in dest_addr;
-	__u64 id;
+        // Exactly one of request and iovec will be non-null.
+        void *request;
+        const struct iovec *iovec;
+
+        // The number of bytes at *request, or the number of elements at *iovec.
+        size_t length;
+        struct sockaddr_in dest_addr;
+        __u64 id;
 };
 
 /**
@@ -91,11 +98,11 @@ struct homa_args_send_ipv4 {
  * betweeen homa_recv and the HOMAIOCRECV ioctl. Assumes IPV4 addresses.
  */
 struct homa_args_recv_ipv4 {
-	void *buf;
-	size_t len;
-	struct sockaddr_in source_addr;
-	int flags;
-	__u64 id;
+        void *buf;
+        size_t len;
+        struct sockaddr_in source_addr;
+        int flags;
+        __u64 id;
 };
 
 /* Flag bits for homa_recv (see man page for documentation): 
@@ -105,26 +112,18 @@ struct homa_args_recv_ipv4 {
 #define HOMA_RECV_NONBLOCKING   0x04
 
 /**
- * define homa_args_invoke_ipv4 - Structure that passes arguments and results
- * betweeen homa_invoke and the HOMAIOCINVOKE ioctl. Assumes IPV4 addresses.
- */
-struct homa_args_invoke_ipv4 {
-	void *request;
-	size_t reqlen;
-	struct sockaddr_in dest_addr;
-	void *response;
-	size_t resplen;
-};
-
-/**
  * define homa_args_reply_ipv4 - Structure that passes arguments and results
  * betweeen homa_reply and the HOMAIOCREPLY ioctl. Assumes IPV4 addresses.
  */
 struct homa_args_reply_ipv4 {
-	void *response;
-	size_t resplen;
-	struct sockaddr_in dest_addr;
-	__u64 id;
+        // Exactly one of response and iovec will be non-null.
+        void *response;
+        const struct iovec *iovec;
+
+        // The number of bytes at *response, or the number of elements at *iovec.
+        size_t length;
+        struct sockaddr_in dest_addr;
+        __u64 id;
 };
 
 /**

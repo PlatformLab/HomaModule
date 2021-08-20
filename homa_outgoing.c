@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -46,8 +46,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  * @hsk:     Socket via which these packets will be sent.
  * @peer:    Peer to which the packets will be sent (needed for things like
  *           the MTU).
- * @from:    Address of the user-space source buffer.
- * @len:     Number of bytes of user data.
+ * @iter:    Describes the location(s) of message data in user space.
  * 
  * Return:   Address of the first packet in a list of packets linked through
  *           homa_next_skb, or a negative errno if there was an error. No
@@ -56,7 +55,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  *           in the other fields.
  */
 struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-		char __user *buffer, size_t len)
+		struct iov_iter *iter)
 {
 	/* Note: this function is separate from homa_message_out_init
 	 * because it must be invoked without holding an RPC lock, and
@@ -69,8 +68,10 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 	int err, mtu, max_pkt_data, gso_size, max_gso_data;
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
+	size_t len = iter->count;
 
-	if (unlikely((len > HOMA_MAX_MESSAGE_LENGTH) || (len == 0))) {
+	if (unlikely((iter->count > HOMA_MAX_MESSAGE_LENGTH)
+			|| (iter->count == 0))) {
 		err = -EINVAL;
 		goto error;
 	}
@@ -152,14 +153,13 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			else
 				seg_size = max_pkt_data;
 			seg->segment_length = htonl(seg_size);
-			if (copy_from_user(skb_put(skb, seg_size), buffer,
-					seg_size)) {
+			if (copy_from_iter(skb_put(skb, seg_size), seg_size,
+					iter) != seg_size) {
 				err = -EFAULT;
 				kfree_skb(skb);
 				goto error;
 			}
 			bytes_left -= seg_size;
-			buffer += seg_size;
 			(skb_shinfo(skb)->gso_segs)++;
 			available -= seg_size;
 		} while ((available > 0) && (bytes_left > 0));
