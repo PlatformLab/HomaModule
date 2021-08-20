@@ -386,6 +386,9 @@ int import_single_range(int type, void __user *buf, size_t len,
 {
 	if (mock_check_error(&mock_import_single_range_errors))
 		return -EACCES;
+	iov->iov_base = buf;
+	iov->iov_len = len;
+	iov_iter_init(i, type, iov, 1, len);
 	return 0;
 }
 

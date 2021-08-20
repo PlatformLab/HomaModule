@@ -558,6 +558,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc = NULL;
 		goto error;
 	}
+	
+	/* Generate time traces on both ends for long elapsed times (used
+	 * for performance debugging).
+	 */
 	elapsed = (get_cycles() - rpc->start_cycles)>>10;
 	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
 			&& (rpc->is_client) && (rpc->msgin.total_length < 500)
@@ -586,9 +590,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		}
 	}
 	
-	/* Must free the RPC lock before copying to user space (see
-	 * sync.txt). Mark the RPC so we can still access the RPC
-	 * even without holding its lock.
+	/* Must release the RPC lock (and potentially free the RPC) before
+	 * copying to user space (see sync.txt). Mark the RPC so we can
+	 * still access the RPC even without holding its lock.
 	 */
 	rpc->dont_reap = true;
 	if (rpc->is_client)
@@ -669,19 +673,16 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	}
     
 	if (args.response != NULL) {
-		iovstack[0].iov_base = args.response;
-		iovstack[0].iov_len = args.length;
-		iov_iter_init(&iter, WRITE, iovstack, 1, args.length);
+		err = import_single_range(WRITE, args.response, args.length,
+				iovstack, &iter);
 	} else {
-		int status;
 		iov = iovstack;
-		status = import_iovec(WRITE, args.iovec, args.length,
+		err = import_iovec(WRITE, args.iovec, args.length,
 			ARRAY_SIZE(iovstack), &iov, &iter);
-		if (status < 0) {
-		    err = status;
-		    goto done;
-		}
 	}
+	if (err < 0)
+	    goto done;
+	err = 0;
 	length = iter.count;
     
 	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
@@ -761,19 +762,16 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	}
     
 	if (args.request != NULL) {
-		iovstack[0].iov_base = args.request;
-		iovstack[0].iov_len = args.length;
-		iov_iter_init(&iter, WRITE, iovstack, 1, args.length);
+		err = import_single_range(WRITE, args.request, args.length,
+				iovstack, &iter);
 	} else {
-		int status;
 		iov = iovstack;
-		status = import_iovec(WRITE, args.iovec, args.length,
+		err = import_iovec(WRITE, args.iovec, args.length,
 				ARRAY_SIZE(iovstack), &iov, &iter);
-		if (status < 0) {
-			err = status;
-			goto error;
-		}
 	}
+	if (err < 0)
+		goto error;
+	err = 0;
 	
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
 	if (IS_ERR(crpc)) {
