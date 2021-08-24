@@ -6,7 +6,7 @@ homa_recv \- receive a Homa message
 .B #include <homa.h>
 .PP
 .BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ", int " flags ", const struct sockaddr *" src_addr ",
-.BI "                  size_t * " addrlen ", uint64_t *" id );
+.BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" msglen );
 .fi
 .SH DESCRIPTION
 The function
@@ -19,18 +19,11 @@ The incoming message will be stored in the buffer pointed to by
 .IR buf .
 The argument
 .I len
-indicates the number of bytes available for the message; if the actual
-message is larger than
-.IR len ,
-then excess bytes will be discarded.
+indicates the number of bytes available for the message.
 .PP
-The arguments
-.IR flags " and " id
-select which messsage to receive and determine whether or
-not the call should block if an appropriate message isn't available.
-The argument
+The
 .IR flags
-is an ORed combination of the following values:
+argument is an ORed combination of the following values:
 .TP
 .B HOMA_RECV_REQUEST
 Any incoming request message may be returned.
@@ -43,19 +36,40 @@ If no appropriate message is available, the call will return immediately
 with an
 .B EAGAIN
 error, rather than blocking.
-.LP
-If the initial value of
+.TP
+.B HOMA_RECV_PARTIAL
+Do not delete the incoming message if
+.I buf
+was not large enough to hold all the (remaining) bytes of the message.
+.PP
+The desired message(s) can be specified in any or all of three different
+ways. First, if
+.I flags
+contains
+.B HOMA_RECV_REQUEST
+then any new request message may be returned.
+Second, if
+.I flags
+contains
+.B HOMA_RECV_RESPONSE
+then any new response message may be returned.
+Third, if
 .I *id
-is nonzero then a response message will be returned if and only if its
-id matches this value
-.RB ( HOMA_RECV_REQUEST
-is ignored in this case ).
+is nonzero then a message matching
+.I *id
+and
+.I *src_addr
+may be returned:
+if
+.I src_addr->sin_addr
+is zero, then the message must be a response with the
+given identifier; otherwise the message must be a previously-received
+request from the given source with the given identifier (this is used
+to continue reading a partially read request as described below).
 .PP
 The identifier for the received message is returned at
-.IR *id .
-If
-.I src_addr
-is not NULL, the source address for the message is placed in the buffer
+.IR *id
+and the source address for the message is placed in the buffer
 pointed to by
 .IR src_addr .
 The argument
@@ -67,6 +81,12 @@ buffer associated with
 Upon return,
 .I *addrlen
 is updated to contain the actual size of the source address.
+If
+.I
+msglen
+is non-NULL then the total length of the incoming message is
+written to
+.IR *msglen .
 .PP
 For some settings of
 .I flags
@@ -87,12 +107,49 @@ If the message is a request, then the caller must eventually invoke
 .BR homa_reply (3)
 to respond (Homa retains state for the request until
 .BR homa_reply (3)
-is invoked). 
+is invoked).
+.PP
+If the message is larger than
+.IR len ,
+then only the first
+.I len
+bytes will be returned; in this case,
+.BR homa_recv
+may be invoked again to read additional bytes. Each call returns the next
+unread bytes. Subsequent invocations of
+.B homa_recv
+must identify the message explicitly with
+.IR id
+and
+.I src_addr (the
+.B HOMA_RECV_REQUEST
+and
+.B HOMA_RECV_RESPONSE
+flags will not return messages that have already been partially read).
+When a response message is returned, the message is normally deleted,
+even if
+.I buf
+was too small to hold the entire message. However, if
+.B HOMA_RECV_PARTIAL
+is specified in
+.IR flags ,
+then the message will be retained if there isn't room in
+.IR buf
+for the entire message. The caller should invoke
+.B homa_recv
+repeatedly to read the remaining bytes. Once the entire message has
+been read, or
+.B homa_recv
+is invoked without specifying
+.BR HOMA_RECV_PARTIAL ,
+the message will be deleted. There is no need to specify
+.B HOMA_RECV_PARTIAL
+when receiving request messages, since requests are automatically
+retained until the corresponding responses have been sent.
 
 .SH RETURN VALUE
-On success, the return value is the size of the received message,
-which may be greater than
-.IR resplen .
+On success, the return value is the number of bytes stored at
+.IR buf .
 On error, \-1 is returned and
 .I errno
 is set appropriately.

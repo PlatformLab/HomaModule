@@ -79,7 +79,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		.incoming = htonl(10000),
 		.cutoff_version = 0,
 		.retransmit = 0,
-		.seg = {.offset = 0}
+		.seg = {.offset = 0,
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 	
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
@@ -340,8 +341,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,
-		.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
+	if (req_length < UNIT_TEST_DATA_PER_PACKET)
+		h.seg.segment_length = htonl(req_length);
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	homa_rpc_unlock(srpc);
 	if (!srpc)

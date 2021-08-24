@@ -31,43 +31,44 @@
  * @len:        Number of bytes available at @request.
  * @flags:      An ORed combination of bits such as HOMA_RECV_REQUEST and
  *              HOMA_RECV_NONBLOCKING
- * @src_addr:   The sender's IP address will be returned here. If NULL, no
- *              address information is returned.
+ * @src_addr:   If @id is non-null, specifies the desired source for an
+ *              RPC. Also used to return the sender's IP address.
  * @addrlen:    Points to variable indicating space available at @src_addr,
  *              in bytes. Will be overwritten with the actual size of
  *              the address stored there.
  * @id:         Points to a unique RPC identifier, which is used both as
  *              an input and an output parameter. If the value is initially
- *              nonzero and the HOMA_RECV_RESPONSE flag is set, then a
- *              response will not be returned unless it matches this id.
- *              This word is also used to return the id for the incoming
- *              message, whether request or response.
+ *              nonzero, then a message matching this id and @src_addr
+ *              may be returned. This word is also used to return the actual
+ *              id for the incoming message.
+ * @msglen:     If non-null, the total length of the message will be returned
+ *              here.
  * 
- * Return:      The total size of the incoming message. This may be larger
- *              than len, in which case the last bytes of the incoming message
- *              were discarded. If an error occurred, -1 is returned and
- *              errno is set appropriately. 
+ * Return:      The number of bytes of data returned at @buf. If an error
+ *              occurred, -1 is returned and errno is set appropriately. 
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
-	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id)
+	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
+		size_t *msglen)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
 
-	if (src_addr && (*addrlen < sizeof(struct sockaddr_in))) {
+	if (*addrlen < sizeof(struct sockaddr_in)) {
 		errno = EINVAL;
 		return -EINVAL;
 	}
 	args.buf = (void *) buf;
 	args.len = len;
+	args.source_addr = *((struct sockaddr_in *) src_addr);
 	args.flags = flags;
 	args.id = *id;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
-	if (src_addr) {
-		*((struct sockaddr_in *) src_addr) = args.source_addr;
-		*addrlen = sizeof(struct sockaddr_in);
-	}
+	*((struct sockaddr_in *) src_addr) = args.source_addr;
+	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.id;
+	if (msglen)
+		*msglen = args.len;
 	return result;
 }
 

@@ -69,7 +69,7 @@ extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
                     uint64_t *id);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
-                    uint64_t *id);
+                    uint64_t *id, size_t *msglen);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
@@ -99,6 +99,9 @@ struct homa_args_send_ipv4 {
  */
 struct homa_args_recv_ipv4 {
         void *buf;
+	
+	// Initially holds length of @buf; modified to return total
+	// message length.
         size_t len;
         struct sockaddr_in source_addr;
         int flags;
@@ -110,6 +113,7 @@ struct homa_args_recv_ipv4 {
 #define HOMA_RECV_REQUEST       0x01
 #define HOMA_RECV_RESPONSE      0x02
 #define HOMA_RECV_NONBLOCKING   0x04
+#define HOMA_RECV_PARTIAL       0x08
 
 /**
  * define homa_args_reply_ipv4 - Structure that passes arguments and results

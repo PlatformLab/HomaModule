@@ -545,14 +545,12 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	tt_record2("homa_ioc_recv starting, port %d, pid %d",
 			hsk->client_port, current->pid);
-	if (unlikely(copy_from_user(&args, (void *) arg,
-			sizeof(args))))
+	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
-	err = import_single_range(READ, args.buf, args.len, &iov,
-		&iter);		
+	err = import_single_range(READ, args.buf, args.len, &iov, &iter);
 	if (unlikely(err))
 		return err;
-	rpc = homa_wait_for_message(hsk, args.flags, args.id);
+	rpc = homa_wait_for_message(hsk, args.flags, args.id, &args.source_addr);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
 		rpc = NULL;
@@ -595,22 +593,23 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 * still access the RPC even without holding its lock.
 	 */
 	rpc->dont_reap = true;
-	if (rpc->is_client)
-		homa_rpc_free(rpc);
-	else
+	if (rpc->is_client) {
+		if ((args.len >= rpc->msgin.total_length)
+				|| !(args.flags & HOMA_RECV_PARTIAL))
+			homa_rpc_free(rpc);
+	} else {
 		rpc->state = RPC_IN_SERVICE;
+	}
 	homa_rpc_unlock(rpc);
 	
+	args.len = rpc->msgin.total_length;
 	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
-	if (unlikely(copy_to_user(
-			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
-			&args.source_addr, sizeof(args) -
-			offsetof(struct homa_args_recv_ipv4, source_addr)))) {
+	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
 		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args");
 		goto error;
@@ -621,7 +620,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
+	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
 			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
 			current->pid);

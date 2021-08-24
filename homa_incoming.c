@@ -39,6 +39,8 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 	msgin->priority = 0;
 	msgin->scheduled = length > incoming;
 	msgin->possibly_in_grant_queue = msgin->scheduled;
+	msgin->xfer_offset = 0;
+	msgin->xfer_skb = NULL;
 	if (length < HOMA_NUM_SMALL_COUNTS*64) {
 		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
 	} else if (length < HOMA_NUM_MEDIUM_COUNTS*1024) {
@@ -128,51 +130,49 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 }
 
 /**
- * homa_message_in_copy_data() - Extract the data from an incoming message
- * and copy it to buffer(s) in user space.
+ * homa_message_in_copy_data() - Extract data from an incoming message
+ * and copy it to buffer(s) in user space. If one call does not extract
+ * the entire message, the function can be called again to extract the
+ * next bytes.
  * @msgin:      The message whose data should be extracted.
  * @iter:       Describes the available buffer space at user-level; message
  *              data gets copied here.
- * @max_bytes:  Total amount of space available via iter.
+ * @max_bytes:  Total number of bytes of data to extract.
  * 
  * Return:      The number of bytes copied, or a negative errno.
  */
 int homa_message_in_copy_data(struct homa_message_in *msgin,
 		struct iov_iter *iter, int max_bytes)
 {
-	struct sk_buff *skb;
-	int offset;
 	int err;
 	int remaining = max_bytes;
 	
 	/* Do the right thing even if packets have overlapping ranges.
 	 * In practice, this shouldn't ever be necessary.
 	 */
-	offset = 0;
-	skb_queue_walk(&msgin->packets, skb) {
-		struct data_header *h = (struct data_header *) skb->data;
+	if (msgin->xfer_offset == 0)
+		msgin->xfer_skb = msgin->packets.next;
+	skb_queue_walk_from(&msgin->packets, msgin->xfer_skb) {
+		struct data_header *h =
+				(struct data_header *) msgin->xfer_skb->data;
 		int this_offset = ntohl(h->seg.offset);
-		int data_in_packet;
-		int this_size = msgin->total_length - offset;
-		
-		data_in_packet = skb->len - sizeof32(struct data_header);
-		if (this_size > data_in_packet) {
-			this_size = data_in_packet;
+		int this_size = ntohl(h->seg.segment_length);
+		if (msgin->xfer_offset != this_offset) {
+			BUG_ON(msgin->xfer_offset < this_offset);
+			this_size -= (msgin->xfer_offset - this_offset);
 		}
-		if (offset > this_offset) {
-			this_size -= (offset - this_offset);
-		}
-		if (this_size > remaining) {
-			this_size =  remaining;
-		}
-		err = skb_copy_datagram_iter(skb,
-				sizeof(*h) + (offset - this_offset),
+		if (this_size > remaining)
+			this_size = remaining;
+		if (unlikely(this_size <= 0))
+			continue;
+		err = skb_copy_datagram_iter(msgin->xfer_skb,
+				sizeof(*h) + (msgin->xfer_offset - this_offset),
 				iter, this_size);
 		if (err) {
 			return err;
 		}
 		remaining -= this_size;
-		offset += this_size;
+		msgin->xfer_offset += this_size;
 		if (remaining == 0) {
 			break;
 		}
@@ -1156,28 +1156,38 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
  * homa_register_interests() - Records information in various places so
  * that a thread will be woken up if an RPC that it cares about becomes
  * available.
- * @interest:   Used to record information about the messages this thread is
- *              waiting on. It's possible that this structure contains
- *              information left over from a previous call to this function
- *              (e.g. if homa_wait_for_message loops multiple times).
- * @hsk:        Socket on which relevant messages will arrive.  Must not be
- *              locked.
- * @flags:      Flags parameter from homa_recv; see manual entry for details. 
- * @id:         If non-zero, then a response message will not be returned
- *              unless its RPC id matches this. 
- * Return:      Either zero or a negative errno value. If a matching RPC
- *              is already available, information about it will be stored in
- *              interest. Regardless of return value, interest->sock_locked
- *              may be set.
+ * @interest:    Used to record information about the messages this thread is
+ *                waiting on. It's possible that this structure contains
+ *                information left over from a previous call to this function
+ *                (e.g. if homa_wait_for_message loops multiple times).
+ * @hsk:          Socket on which relevant messages will arrive.  Must not be
+ *                locked.
+ * @flags:        Flags parameter from homa_recv; see manual entry for details. 
+ * @id:           If non-zero, then a message will not be returned unless its
+ *                RPC id matches this.
+ * @client_addr:  Used in conjunction with @id to select a specific message.
+ *                If the host address is zero, then @id refers to an
+ *                outgoing request where we are the client; otherwise the
+ *                desired RPC is one where we are the server and this
+ *                identifies the client for the request.
+ * Return:        Either zero or a negative errno value. If a matching RPC
+ *                is already available, information about it will be stored in
+ *                interest.
  */
 int homa_register_interests(struct homa_interest *interest,
-		struct homa_sock *hsk, int flags, __u64 id)
+		struct homa_sock *hsk, int flags, __u64 id,
+		struct sockaddr_in *client_addr)
 {
 	struct homa_rpc *rpc = NULL;
 	
 	/* Need both the RPC lock and the socket lock to avoid races. */
 	if (id != 0) {
-		rpc = homa_find_client_rpc(hsk, id);
+		if (client_addr->sin_addr.s_addr == 0)
+			rpc = homa_find_client_rpc(hsk, id);
+		else
+			rpc = homa_find_server_rpc(hsk,
+					client_addr->sin_addr.s_addr,
+					ntohs(client_addr->sin_port), id);
 		if (rpc == NULL)
 			return -EINVAL;
 		if ((rpc->interest != NULL) && (rpc->interest != interest)) {
@@ -1196,7 +1206,7 @@ int homa_register_interests(struct homa_interest *interest,
 	}
 	
 	if (id != 0) {
-		if (rpc->state == RPC_READY) {
+		if ((rpc->state == RPC_READY)|| (rpc->state == RPC_IN_SERVICE)) {
 			interest->ready_rpc = rpc;
 			
 			/* Must also fill in interest->id; otherwise, some
@@ -1210,7 +1220,7 @@ int homa_register_interests(struct homa_interest *interest,
 		homa_rpc_unlock(rpc);
 	}
 	
-	if ((id == 0) && (flags & HOMA_RECV_RESPONSE)
+	if ((flags & HOMA_RECV_RESPONSE)
 			&& (interest->response_links.next == LIST_POISON1)) {
 		if (!list_empty(&hsk->ready_responses)) {
 			rpc = list_first_entry(
@@ -1248,16 +1258,21 @@ int homa_register_interests(struct homa_interest *interest,
 
 /**
  * @homa_wait_for_message() - Wait for an appropriate incoming message.
- * @hsk:     Socket where messages will arrive.
- * @flags:   Flags parameter from homa_recv; see manual entry for details.
- * @id:      If non-zero, then a response message will not be returned
- *           unless its RPC id matches this.
+ * @hsk:          Socket where messages will arrive.
+ * @flags:        Flags parameter from homa_recv; see manual entry for details.
+ * @id:           If non-zero, then a response message will not be returned
+ *                unless its RPC id matches this.
+ * @client_addr:  Used in conjunction with @id to select a specific message.
+ *                If the host address is zero, then @id refers to an
+ *                outgoing request where we are the client; otherwise the
+ *                desired RPC is one where we are the server and this
+ *                identifies the client for the request.
  *
  * Return:   Pointer to an RPC that matches @flags and @id, or a negative
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		__u64 id)
+		__u64 id, struct sockaddr_in *client_addr)
 {
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
@@ -1271,7 +1286,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	 * RPC gets deleted from underneath us or the socket is shut down.
 	 */
 	while (1) {
-		error = homa_register_interests(&interest, hsk, flags, id);
+		error = homa_register_interests(&interest, hsk, flags, id,
+				client_addr);
 		if (atomic_long_read(&interest.id)) {
 			if (interest.ready_rpc != NULL) {
 				result = interest.ready_rpc;

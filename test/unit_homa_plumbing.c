@@ -115,6 +115,28 @@ TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
 	EXPECT_EQ(EAGAIN, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
 }
+TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
+{
+	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 100, 200);
+	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
+			|HOMA_RECV_PARTIAL;
+	
+	// First call gets most of message.
+	self->recv_args.len = 150;
+	EXPECT_EQ(150, homa_ioc_recv((struct sock *) &self->hsk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	
+	// Second call gets remainder, deletes message.
+	self->recv_args.len = 200;
+	self->recv_args.source_addr.sin_addr.s_addr = 0;
+	EXPECT_EQ(50, homa_ioc_recv((struct sock *) &self->hsk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -145,6 +167,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(200, homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
+	EXPECT_EQ(200, self->recv_args.len);
 	EXPECT_EQ(12345, self->recv_args.id);
 	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -157,6 +180,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_REQUEST;
 	EXPECT_EQ(100, homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
+	EXPECT_EQ(100, self->recv_args.len);
 	EXPECT_EQ(12345, self->recv_args.id);
 	EXPECT_EQ(self->client_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));

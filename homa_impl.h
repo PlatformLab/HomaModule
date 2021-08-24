@@ -503,7 +503,7 @@ struct homa_message_in {
 	 */
 	int bytes_remaining;
 
-        /**
+	/**
 	 * @incoming: Total # of bytes of the message that the sender will
 	 * transmit without additional grants. Never larger than @total_length.
 	 * Note: this may not be modified without holding @homa->grantable_lock.
@@ -534,6 +534,20 @@ struct homa_message_in {
 	 * lock) when cleaning up the RPC.
 	 */
 	bool possibly_in_grant_queue;
+	
+	/**
+	 * The offset within the message of the next byte to be copied
+	 * out of the message to a user buffer.
+	 */
+	int xfer_offset;
+	
+	/**
+	 * The next buffer in @packets to consider when copying data out of
+	 * the message to a user buffer (all skbs before this one have
+	 * already been copied). NULL means we haven't yet transferred
+	 * any data.
+	 */
+	struct sk_buff *xfer_skb;
 	
 	/**
 	 * @birth: get_cycles time when this RPC was added to the grantable
@@ -2448,7 +2462,8 @@ extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
                     int noblock, int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
-                    struct homa_sock *hsk, int flags, __u64 id);
+                    struct homa_sock *hsk, int flags, __u64 id,
+		    struct sockaddr_in *client_addr);
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_grantable_locked(struct homa *homa,
                     struct homa_rpc *rpc);
@@ -2511,7 +2526,7 @@ extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
-                    __u64 id);
+                    __u64 id, struct sockaddr_in *client_addr);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
                     size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,

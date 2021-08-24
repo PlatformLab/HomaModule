@@ -64,7 +64,7 @@ void homa_server(int port)
 	struct sockaddr_in addr_in;
 	int message[1000000];
 	struct sockaddr_in source;
-    size_t source_length;
+	size_t source_length;
 	int length;
 	
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
@@ -88,10 +88,10 @@ void homa_server(int port)
 		int seed;
 		int result;
 		
-        source_length = sizeof(source);
+		source_length = sizeof(source);
 		length = homa_recv(fd, message, sizeof(message),
 			HOMA_RECV_REQUEST, (struct sockaddr *) &source,
-			&source_length, &id);
+			&source_length, &id, NULL);
 		if (length < 0) {
 			printf("homa_recv failed: %s\n", strerror(errno));
 			continue;
