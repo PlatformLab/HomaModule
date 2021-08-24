@@ -955,7 +955,7 @@ void homa_server::server(void)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	struct sockaddr_in source;
-    size_t source_length;
+	size_t source_length;
 	int length;
 	char thread_name[50];
 	
