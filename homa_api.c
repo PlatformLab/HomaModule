@@ -257,8 +257,8 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	int result;
 
 	if (dest_addr->sa_family != AF_INET) {
-errno = EAFNOSUPPORT;
-				return -EAFNOSUPPORT;
+		errno = EAFNOSUPPORT;
+		return -EAFNOSUPPORT;
 	}
 	args.request = NULL;
 	args.iovec = iov;
@@ -269,4 +269,19 @@ errno = EAFNOSUPPORT;
 	if (result >= 0)
 		*id = args.id;
 	return result;
+}
+
+/**
+ * homa_abort() - Remove all state associated with an outgoing RPC.
+ * @sockfd:     File descriptor for the socket associated with the RPC.
+ * @id:         Unique identifier for the RPC to abort (return value
+ *              from previous call to homa_send). Should be a client
+ *              RPC.
+ * 
+ * Return:      If an error occurred, -1 is returned and errno is set
+ *              appropriately. Otherwise zero is returned.
+ */
+int homa_abort(int sockfd, uint64_t id)
+{
+	return ioctl(sockfd, HOMAIOCABORT, (void *) id);
 }

@@ -814,6 +814,28 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 }
 
 /**
+ * homa_ioc_abort() - The top-level function for the ioctl that implements
+ * the homa_abort user-level API.
+ * @sk:       Socket for this request.
+ * @arg:      Used to pass information from user space; for this call,
+ *            it's the identifier of the RPC to abort.
+ *
+ * Return: 0 on success, otherwise a negative errno.
+ */
+int homa_ioc_abort(struct sock *sk, unsigned long arg) {
+	struct homa_sock *hsk = homa_sk(sk);
+	uint64_t id = (uint64_t) arg;
+	struct homa_rpc *rpc;
+	
+	rpc = homa_find_client_rpc(hsk, id);
+	if (rpc == NULL)
+		return -EINVAL;
+	homa_rpc_free(rpc);
+	homa_rpc_unlock(rpc);
+	return 0;
+}
+
+/**
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sk:    Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
@@ -850,6 +872,13 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(reply_calls, 1);
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
+		break;
+	case HOMAIOCABORT:
+		result = homa_ioc_abort(sk, arg);
+		core = homa_cores[smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(abort_calls, 1);
+		INC_METRIC(abort_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCFREEZE:
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, "

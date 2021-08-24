@@ -1794,6 +1794,18 @@ struct homa_metrics {
 	__u64 reply_calls;
 	
 	/**
+	 * @abort_cycles: total time spent executing the homa_ioc_abort
+	 * kernel call handler, as measured with get_cycles().
+	 */
+	__u64 abort_cycles;
+	
+	/**
+	 * @abort_calls: total number of invocations of the homa_ioc_abort
+	 * kernel call.
+	 */
+	__u64 abort_calls;
+	
+	/**
 	 * @grant_cycles: total time spent in homa_send_grants, as measured
 	 * with get_cycles().
 	 */
@@ -2415,6 +2427,7 @@ extern enum hrtimer_restart
                 homa_hrtimer(struct hrtimer *timer);
 extern int      homa_init(struct homa *homa);
 extern void     homa_incoming_sysctl_changed(struct homa *homa);
+extern int      homa_ioc_abort(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);

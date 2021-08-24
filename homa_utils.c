@@ -1194,6 +1194,14 @@ char *homa_print_metrics(struct homa *homa)
 				"Total invocations of reply kernel call\n",
 				m->reply_calls);
 		homa_append_metric(homa,
+				"abort_cycles              %15llu  "
+				"Time spent in homa_ioc_abort kernel call\n",
+				m->reply_cycles);
+		homa_append_metric(homa,
+				"abort_calls               %15llu  "
+				"Total invocations of abort kernel call\n",
+				m->reply_calls);
+		homa_append_metric(homa,
 				"grant_cycles              %15llu  "
 				"Time spent sending grants\n",
 				m->grant_cycles);
