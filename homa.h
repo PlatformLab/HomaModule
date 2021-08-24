@@ -70,6 +70,9 @@ extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
                     uint64_t *id, size_t *msglen);
+extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
+		    int flags, struct sockaddr *src_addr, size_t *addrlen,
+		    uint64_t *id, size_t *msglen);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
@@ -98,9 +101,11 @@ struct homa_args_send_ipv4 {
  * betweeen homa_recv and the HOMAIOCRECV ioctl. Assumes IPV4 addresses.
  */
 struct homa_args_recv_ipv4 {
+        // Exactly one of buf and iovec will be non-null.
         void *buf;
+        const struct iovec *iovec;
 	
-	// Initially holds length of @buf; modified to return total
+	// Initially holds length of @buf or @iovec; modified to return total
 	// message length.
         size_t len;
         struct sockaddr_in source_addr;

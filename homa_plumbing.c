@@ -536,7 +536,10 @@ int homa_disconnect(struct sock *sk, int flags) {
 int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_recv_ipv4 args;
-	struct iovec iov;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
 	struct iov_iter iter;
 	int err;
 	int result;
@@ -547,9 +550,16 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			hsk->client_port, current->pid);
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
-	err = import_single_range(READ, args.buf, args.len, &iov, &iter);
-	if (unlikely(err))
-		return err;
+	if (args.buf != NULL) {
+		err = import_single_range(READ, args.buf, args.len, iovstack,
+				&iter);
+	} else {
+		iov = iovstack;
+		err = import_iovec(READ, args.iovec, args.len,
+			ARRAY_SIZE(iovstack), &iov, &iter);
+	}
+	if (unlikely(err < 0))
+		goto error;
 	rpc = homa_wait_for_message(hsk, args.flags, args.id, &args.source_addr);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
@@ -625,6 +635,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
 			current->pid);
 	rpc->dont_reap = false;
+	kfree(iov);
 	return result;
 	
 error:
@@ -632,6 +643,7 @@ error:
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}
+	kfree(iov);
 	return err;
 }
 
@@ -680,7 +692,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 			ARRAY_SIZE(iovstack), &iov, &iter);
 	}
 	if (err < 0)
-	    goto done;
+		goto done;
 	err = 0;
 	length = iter.count;
     

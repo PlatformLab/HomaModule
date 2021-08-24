@@ -5,21 +5,37 @@ homa_recv \- receive a Homa message
 .nf
 .B #include <homa.h>
 .PP
-.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ", int " flags ", const struct sockaddr *" src_addr ",
+.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
+len ", int " flags ", const struct sockaddr *" src_addr ",
 .BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" msglen );
+.BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
+size_t " iovcnt ", int " flags , 
+.BI "                  const struct sockaddr *" src_addr ", size_t *" \
+addrlen ", uint64_t *" id ", size_t *" msglen );
 .fi
 .SH DESCRIPTION
-The function
+The functions
 .BR homa_recv ()
-waits for an incoming Homa message and returns it.
+and
+.BR homa_recvv()
+wait for an incoming Homa message and return its contents.
 The argument
 .I sockfd
 is the file descriptor of the receiving socket; this must be a Homa socket.
-The incoming message will be stored in the buffer pointed to by
-.IR buf .
-The argument
+.B homa_recv
+will store the message contents in a single contiguous buffer:
+.I buf
+provides the address of the buffer, and
 .I len
-indicates the number of bytes available for the message.
+specifies its length.
+.B homa_recvv
+will scatter the message contents across multiple buffers:
+.I iov
+provides the address of the first buffer descriptor, and
+.I iovcnt
+indicates how many buffer descriptors are present at
+.IR iov .
+Other than this distinction, the two functions behave identically.
 .PP
 The
 .IR flags
@@ -109,16 +125,13 @@ to respond (Homa retains state for the request until
 .BR homa_reply (3)
 is invoked).
 .PP
-If the message is larger than
-.IR len ,
-then only the first
-.I len
-bytes will be returned; in this case,
+If the message is larger than buffer space provided,
 .BR homa_recv
+or
+.BR homa_recvv
 may be invoked again to read additional bytes. Each call returns the next
-unread bytes. Subsequent invocations of
-.B homa_recv
-must identify the message explicitly with
+unread bytes. Subsequent invocations must identify the message
+explicitly with
 .IR id
 and
 .I src_addr (the
@@ -127,17 +140,17 @@ and
 .B HOMA_RECV_RESPONSE
 flags will not return messages that have already been partially read).
 When a response message is returned, the message is normally deleted,
-even if
-.I buf
-was too small to hold the entire message. However, if
+even if there wasn't enough buffer space to hold the entire message.
+However, if
 .B HOMA_RECV_PARTIAL
 is specified in
 .IR flags ,
-then the message will be retained if there isn't room in
-.IR buf
-for the entire message. The caller should invoke
+then the message will be retained if there wasn't enough room to
+return the entire message. The caller should invoke
 .B homa_recv
-repeatedly to read the remaining bytes. Once the entire message has
+or 
+.B homa_recvv
+again to read the remaining bytes. Once the entire message has
 been read, or
 .B homa_recv
 is invoked without specifying

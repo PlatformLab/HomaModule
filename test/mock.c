@@ -751,10 +751,33 @@ int sk_set_peek_off(struct sock *sk, int val)
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
-		struct iov_iter *to, int size)
+		struct iov_iter *iter, int size)
 {
-	unit_log_printf("; ", "skb_copy_datagram_iter ");
-	unit_log_data(NULL, from->data + offset, size);
+	size_t bytes_left = size;
+	if (bytes_left > iter->count) {
+		unit_log_printf("; ", "skb_copy_datagram_iter needs %lu bytes, "
+				"but iov_iter has only %lu",
+				bytes_left, iter->count);
+		return 0;
+	}
+	while (bytes_left > 0) {
+		struct iovec *iov = (struct iovec *) iter->iov;
+		__u64 int_base = (__u64) iov->iov_base;
+		size_t chunk_bytes = iov->iov_len;
+		if (chunk_bytes > bytes_left)
+			chunk_bytes = bytes_left;
+		unit_log_printf("; ",
+				"skb_copy_datagram_iter: %lu bytes to %llu: ",
+				chunk_bytes, int_base);
+		unit_log_data(NULL, from->data + offset + size - bytes_left,
+				chunk_bytes);
+		bytes_left -= chunk_bytes;
+		iter->count -= chunk_bytes;
+		iov->iov_base = (void *) (int_base + chunk_bytes);
+		iov->iov_len -= chunk_bytes;
+		if (iov->iov_len == 0)
+			iter->iov++;
+	}
 	return 0;
 }
 

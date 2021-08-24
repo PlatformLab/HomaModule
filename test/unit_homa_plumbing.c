@@ -39,6 +39,7 @@ FIXTURE(homa_plumbing) {
 	struct homa_args_recv_ipv4 recv_args;
 	struct homa_args_reply_ipv4 reply_args;
 	struct homa_args_send_ipv4 send_args;
+	struct iovec recv_vec[2];
 	char buffer[2000];
 };
 FIXTURE_SETUP(homa_plumbing)
@@ -66,6 +67,7 @@ FIXTURE_SETUP(homa_plumbing)
 			.incoming = htonl(10000), .retransmit = 0,
 			.seg={.offset = 0}};
 	self->recv_args.buf = self->buffer;
+	self->recv_args.iovec = NULL;
 	self->recv_args.len = sizeof(self->buffer);
 	self->recv_args.flags = HOMA_RECV_RESPONSE;
 	self->recv_args.id = 0;
@@ -87,6 +89,12 @@ FIXTURE_SETUP(homa_plumbing)
 	self->send_args.length = 2;
 	self->send_args.dest_addr = self->server_addr;
 	self->send_args.id = 0;
+	self->recv_vec[0].iov_base = (void *) 10000;
+	self->recv_vec[0].iov_len = 60;
+	self->recv_vec[1].iov_base = (void *)
+			(10000 + self->recv_vec[0].iov_len);
+	self->recv_vec[1].iov_len = sizeof(self->buffer) -
+			self->recv_vec[0].iov_len;
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_plumbing)
@@ -108,6 +116,39 @@ TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
 	EXPECT_EQ(ESHUTDOWN, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
 	self->hsk.shutdown = false;
+}
+TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
+{
+	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 100, 200);
+	
+	self->recv_args.buf = NULL;
+	self->recv_args.iovec = self->recv_vec;
+	self->recv_args.len = 2;
+	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+	unit_log_clear();
+	EXPECT_EQ(200, homa_ioc_recv((struct sock *) &self->hsk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(200, self->recv_args.len);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_SUBSTR("skb_copy_datagram_iter: 60 bytes to 10000: 0-59; "
+		"skb_copy_datagram_iter: 140 bytes to 10060: 60-199",
+		unit_log_get());
+}
+TEST_F(homa_plumbing, homa_ioc_recv__error_in_import_iovec)
+{
+	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 100, 200);
+	
+	self->recv_args.buf = NULL;
+	self->recv_args.iovec = self->recv_vec;
+	self->recv_args.len = 2;
+	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+	unit_log_clear();
+	mock_import_iovec_errors = 1;
+	EXPECT_EQ(EINVAL, -homa_ioc_recv((struct sock *) &self->hsk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
 {

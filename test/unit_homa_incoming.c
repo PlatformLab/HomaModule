@@ -288,12 +288,13 @@ TEST_F(homa_incoming, homa_message_in_copy_data__basics)
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			800, 303200), crpc);
 	unit_log_clear();
-	count = homa_message_in_copy_data(&crpc->msgin, NULL,
-			5000);
-	EXPECT_STREQ("skb_copy_datagram_iter 0-1399; "
-			"skb_copy_datagram_iter 101400-102399; "
-			"skb_copy_datagram_iter 202400-203199; "
-			"skb_copy_datagram_iter 303200-303999", unit_log_get());
+	count = homa_message_in_copy_data(&crpc->msgin,
+			unit_iov_iter((void *) 10000, 5000), 5000);
+	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 10000: 0-1399; "
+		"skb_copy_datagram_iter: 1000 bytes to 11400: 101400-102399; "
+		"skb_copy_datagram_iter: 800 bytes to 12400: 202400-203199; "
+		"skb_copy_datagram_iter: 800 bytes to 13200: 303200-303999", 
+		unit_log_get());
 	EXPECT_EQ(4000, count);
 }
 
@@ -310,23 +311,26 @@ TEST_F(homa_incoming, homa_message_in_copy_data__multiple_calls)
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 100000), crpc);
 	unit_log_clear();
-	count = homa_message_in_copy_data(&crpc->msgin, NULL,
-			600);
+	count = homa_message_in_copy_data(&crpc->msgin,
+			unit_iov_iter((void *) 10000, 5000), 600);
 	EXPECT_EQ(600, count);
-	EXPECT_STREQ("skb_copy_datagram_iter 0-599", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 600 bytes to 10000: 0-599",
+			unit_log_get());
 	
 	unit_log_clear();
-	count = homa_message_in_copy_data(&crpc->msgin, NULL,
-			1000);
+	count = homa_message_in_copy_data(&crpc->msgin,
+			unit_iov_iter((void *) 10000, 5000), 1000);
 	EXPECT_EQ(1000, count);
-	EXPECT_STREQ("skb_copy_datagram_iter 600-1399; "
-			"skb_copy_datagram_iter 100000-100199", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 800 bytes to 10000: 600-1399; "
+		"skb_copy_datagram_iter: 200 bytes to 10800: 100000-100199",
+		unit_log_get());
 	
 	unit_log_clear();
-	count = homa_message_in_copy_data(&crpc->msgin, NULL,
-			1000);
+	count = homa_message_in_copy_data(&crpc->msgin,
+			unit_iov_iter((void *) 10000, 5000), 1000);
 	EXPECT_EQ(800, count);
-	EXPECT_STREQ("skb_copy_datagram_iter 100200-100999", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 800 bytes to 10000: 100200-100999",
+			unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)
