@@ -132,3 +132,5 @@ pid ()
     ttgrep.py "pid $1" $2 > pid.tt
     less +G pid.tt
 }
+
+export GRPC_VERBOSITY=INFO
