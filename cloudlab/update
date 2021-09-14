@@ -20,7 +20,7 @@
 
 if [ $# -eq 0 ]; then
     # targets="ms0919.utah.cloudlab.us ms0903.utah.cloudlab.us"
-    targets="hp034.utah.cloudlab.us"
+    targets="hp040.utah.cloudlab.us"
 else
     targets=$*
 fi
@@ -34,6 +34,7 @@ for t in $targets; do
     rsync -rtv cloudlab/bin/ ouster@$t:bin/
     rsync -rtv cloudlab/bash_profile ouster@$t:.bash_profile
     rsync -rtv cloudlab/bashrc ouster@$t:.bashrc
+    rsync -rtv cloudlab/gdbinit ouste@$t:.gdbinit
     rsync -rtv ~/.ssh/cloudlab_rsa.pub ~/.ssh/cloudlab_rsa $t:.ssh/
     ssh $t 'if [ ! -e .ssh/id_rsa ]; then
         cp .ssh/cloudlab_rsa .ssh/id_rsa
