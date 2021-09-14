@@ -560,7 +560,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	if (unlikely(err < 0))
 		goto error;
-	rpc = homa_wait_for_message(hsk, args.flags, args.id, &args.source_addr);
+	rpc = homa_wait_for_message(hsk, args.flags, args.requestedId,
+			&args.source_addr);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
 		rpc = NULL;
@@ -607,18 +608,20 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		if ((args.len >= rpc->msgin.total_length)
 				|| !(args.flags & HOMA_RECV_PARTIAL))
 			homa_rpc_free(rpc);
+		args.type = HOMA_RECV_RESPONSE;
 	} else {
 		rpc->state = RPC_IN_SERVICE;
+		args.type = HOMA_RECV_REQUEST;
 	}
 	homa_rpc_unlock(rpc);
 	
 	args.len = rpc->msgin.total_length;
-	args.id = rpc->id;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
+	args.actualId = rpc->id;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
 		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args");

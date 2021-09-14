@@ -91,7 +91,7 @@ void homa_server(int port)
 		source_length = sizeof(source);
 		length = homa_recv(fd, message, sizeof(message),
 			HOMA_RECV_REQUEST, (struct sockaddr *) &source,
-			&source_length, &id, NULL);
+			&source_length, &id, NULL, NULL);
 		if (length < 0) {
 			printf("homa_recv failed: %s\n", strerror(errno));
 			continue;

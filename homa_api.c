@@ -43,13 +43,15 @@
  *              id for the incoming message.
  * @msglen:     If non-null, the total length of the message will be returned
  *              here.
+ * @type:       If non-null, the type of the message will be returned here
+ *              (HOMA_RECV_REQUEST or HOMA_RECV_RESPONSE).
  * 
  * Return:      The number of bytes of data returned at @buf. If an error
  *              occurred, -1 is returned and errno is set appropriately. 
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
-		size_t *msglen)
+		size_t *msglen, int *type)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
@@ -63,13 +65,17 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	args.len = len;
 	args.source_addr = *((struct sockaddr_in *) src_addr);
 	args.flags = flags;
-	args.id = *id;
+	args.requestedId = *id;
+	args.actualId = 0;
+	args.type = 0;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
 	*addrlen = sizeof(struct sockaddr_in);
-	*id = args.id;
+	*id = args.actualId;
 	if (msglen)
 		*msglen = args.len;
+	if (type)
+		*type = args.type;
 	return result;
 }
 
@@ -94,13 +100,15 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
  *              id for the incoming message.
  * @msglen:     If non-null, the total length of the message will be returned
  *              here.
+ * @type:       If non-null, the type of the message will be returned here
+ *              (HOMA_RECV_REQUEST or HOMA_RECV_RESPONSE).
  * 
  * Return:      The number of bytes of data returned at @buf. If an error
  *              occurred, -1 is returned and errno is set appropriately. 
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
-		size_t *msglen)
+		size_t *msglen, int *type)
 {
 	struct homa_args_recv_ipv4 args;
 	int result;
@@ -114,13 +122,17 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	args.len = iovcnt;
 	args.source_addr = *((struct sockaddr_in *) src_addr);
 	args.flags = flags;
-	args.id = *id;
+	args.requestedId = *id;
+	args.actualId = 0;
+	args.type = 0;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
 	*addrlen = sizeof(struct sockaddr_in);
-	*id = args.id;
+	*id = args.actualId;
 	if (msglen)
 		*msglen = args.len;
+	if (type)
+		*type = args.type;
 	return result;
 }
 
@@ -229,7 +241,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);
-	if (result >= 0)
+	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;
 }
@@ -266,7 +278,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);
-	if (result >= 0)
+	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;
 }

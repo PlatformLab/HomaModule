@@ -7,11 +7,12 @@ homa_recv \- receive a Homa message
 .PP
 .BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
 len ", int " flags ", const struct sockaddr *" src_addr ",
-.BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" msglen );
+.BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" \
+msglen ", int *" type );
 .BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
 size_t " iovcnt ", int " flags , 
 .BI "                  const struct sockaddr *" src_addr ", size_t *" \
-addrlen ", uint64_t *" id ", size_t *" msglen );
+addrlen ", uint64_t *" id ", size_t *" msglen ", int *" type );
 .fi
 .SH DESCRIPTION
 The functions
@@ -103,6 +104,14 @@ msglen
 is non-NULL then the total length of the incoming message is
 written to
 .IR *msglen .
+If
+.I type
+is non-NULL then the type of the incoming message (either
+.B HOMA_RECV_REQUEST
+or
+.BR HOMA_RECV_RESPONSE )
+is written to
+.IR *type .
 .PP
 For some settings of
 .I flags
@@ -165,7 +174,18 @@ On success, the return value is the number of bytes stored at
 .IR buf .
 On error, \-1 is returned and
 .I errno
-is set appropriately.
+is set appropriately. If
+.I *id
+is nonzero after an error return, it means that the error relates to
+that particular RPC. For response messages, this means that the RPC
+failed (e.g., if
+.B EHOSTUNREACH
+or
+.B ENOTCONN
+is returned). For request messages, this can happen after
+.B EFAULT
+errors (the kernel couldn't write to user space to return the message
+or other metadata associated with the system call).
 .SH ERRORS
 .TP
 .B EAGAIN

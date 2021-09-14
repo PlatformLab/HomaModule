@@ -70,7 +70,9 @@ FIXTURE_SETUP(homa_plumbing)
 	self->recv_args.iovec = NULL;
 	self->recv_args.len = sizeof(self->buffer);
 	self->recv_args.flags = HOMA_RECV_RESPONSE;
-	self->recv_args.id = 0;
+	self->recv_args.requestedId = 0;
+	self->recv_args.actualId = 0;
+	self->recv_args.type = 0;
 	self->reply_vec[0].iov_base = self->buffer;
 	self->reply_vec[0].iov_len = 100;
 	self->reply_vec[1].iov_base = self->buffer + 1000;
@@ -109,6 +111,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__cant_read_user_args)
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
+	EXPECT_EQ(0LU, self->recv_args.actualId);
 }
 TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
 {
@@ -155,6 +158,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(EAGAIN, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
+	EXPECT_EQ(0LU, self->recv_args.actualId);
 }
 TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 {
@@ -167,15 +171,17 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 	self->recv_args.len = 150;
 	EXPECT_EQ(150, homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
-	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(12345, self->recv_args.actualId);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	
 	// Second call gets remainder, deletes message.
 	self->recv_args.len = 200;
 	self->recv_args.source_addr.sin_addr.s_addr = 0;
+	self->recv_args.requestedId = 12345;
+	self->recv_args.actualId = 0;
 	EXPECT_EQ(50, homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
-	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(12345, self->recv_args.actualId);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
@@ -187,7 +193,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
-	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(12345, self->recv_args.actualId);
 	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -209,7 +215,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 	EXPECT_EQ(200, homa_ioc_recv((struct sock *) &self->hsk,
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(200, self->recv_args.len);
-	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(12345, self->recv_args.actualId);
+	EXPECT_EQ(HOMA_RECV_RESPONSE, self->recv_args.type);
 	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -222,7 +229,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 	EXPECT_EQ(100, homa_ioc_recv((struct sock *) &self->hsk,
 			(unsigned long) &self->recv_args));
 	EXPECT_EQ(100, self->recv_args.len);
-	EXPECT_EQ(12345, self->recv_args.id);
+	EXPECT_EQ(12345, self->recv_args.actualId);
+	EXPECT_EQ(HOMA_RECV_REQUEST, self->recv_args.type);
 	EXPECT_EQ(self->client_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
