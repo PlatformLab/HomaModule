@@ -43,10 +43,12 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 /**
  * homa_fill_packets() - Create one or more packets and fill them with
  * data from user space.
- * @hsk:     Socket via which these packets will be sent.
- * @peer:    Peer to which the packets will be sent (needed for things like
- *           the MTU).
- * @iter:    Describes the location(s) of message data in user space.
+ * @hsk:       Socket via which these packets will be sent.
+ * @peer:      Peer to which the packets will be sent (needed for things like
+ *             the MTU).
+ * @iter:      Describes the location(s) of message data in user space.
+ * @is_client: 1 means this is a request message (coming from the client);
+ *             0 means its a response. 
  * 
  * Return:   Address of the first packet in a list of packets linked through
  *           homa_next_skb, or a negative errno if there was an error. No
@@ -55,7 +57,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  *           in the other fields.
  */
 struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-		struct iov_iter *iter)
+		struct iov_iter *iter, int is_client)
 {
 	/* Note: this function is separate from homa_message_out_init
 	 * because it must be invoked without holding an RPC lock, and
@@ -138,6 +140,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		h = (struct data_header *) skb_put(skb,
 				sizeof(*h) - sizeof(struct data_segment));
 		h->common.type = DATA;
+		h->common.from_client = is_client;
 		h->message_length = htonl(len);
 		available = max_gso_data;
 		
@@ -328,10 +331,11 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 {
 	struct common_header *h = (struct common_header *) contents;
 	h->type = type;
+	h->sport = htons(rpc->hsk->port);
 	if (rpc->is_client) {
-		h->sport = htons(rpc->hsk->client_port);
+		h->from_client = 1;
 	} else {
-		h->sport = htons(rpc->hsk->server_port);
+		h->from_client = 0;
 	}
 	h->dport = htons(rpc->dport);
 	h->id = rpc->id;
@@ -408,9 +412,9 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 
 /**
  * homa_xmit_unknown() - Send an UNKNOWN packet to a peer.
- * @skb:   Buffer containing an incoming packet; identifies the peer to
- *         which the UNKNOWN packet should be sent.
- * @hsk:   Socket that should be used to send the UNKNOWN packet.
+ * @skb:         Buffer containing an incoming packet; identifies the peer to
+ *               which the UNKNOWN packet should be sent.
+ * @hsk:         Socket that should be used to send the UNKNOWN packet.
  */
 void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 {
@@ -431,6 +435,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.id = h->id;
 	unknown.common.generation = h->generation;
 	unknown.common.type = UNKNOWN;
+	unknown.common.from_client = h->from_client ^ 1;
 	peer = homa_peer_find(&hsk->homa->peers,
 			ip_hdr(skb)->saddr, &hsk->inet);
 	if (!IS_ERR(peer))
@@ -460,7 +465,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			printk(KERN_NOTICE "NULL homa pointer in homa_xmit_"
 				"data, state %d, shutdown %d, id %llu, socket %d",
 				rpc->state, rpc->hsk->shutdown, rpc->id,
-				rpc->hsk->client_port);
+				rpc->hsk->port);
 			BUG();
 		}
 		
@@ -828,8 +833,8 @@ void homa_pacer_xmit(struct homa *homa)
 		offset = homa_rpc_send_offset(rpc);
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, "
 				"port %d, offset %d, bytes_left",
-				rpc->id, rpc->hsk->client_port,
-				offset, rpc->msgout.length - offset);
+				rpc->id, rpc->hsk->port, offset,
+				rpc->msgout.length - offset);
 		homa_xmit_data(rpc, true);
 		if (!rpc->msgout.next_packet
 				|| (homa_data_offset(rpc->msgout.next_packet)

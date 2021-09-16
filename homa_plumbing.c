@@ -487,11 +487,10 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
+	printk(KERN_NOTICE "closing socket %d\n", hsk->port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
-	tt_record2("closed socket, client port %d, server port %d\n",
-			hsk->client_port, hsk->server_port);
+	tt_record1("closed socket, port %d\n", hsk->port);
 //	tt_freeze();
 }
 
@@ -547,7 +546,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_rpc *rpc = NULL;
 
 	tt_record2("homa_ioc_recv starting, port %d, pid %d",
-			hsk->client_port, current->pid);
+			hsk->port, current->pid);
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
 	if (args.buf != NULL) {
@@ -677,7 +676,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
-			args.id, hsk->client_port, current->pid);
+			args.id, hsk->port, current->pid);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -705,7 +704,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(peer);
 		goto done;
 	}
-	skbs = homa_fill_packets(hsk, peer, &iter);
+	skbs = homa_fill_packets(hsk, peer, &iter, 0);
 	if (IS_ERR(skbs)) {
 		err = PTR_ERR(skbs);
 		goto done;
@@ -725,7 +724,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	}
 	srpc->state = RPC_OUTGOING;
 
-	homa_message_out_init(srpc, hsk->server_port, skbs, length);
+	homa_message_out_init(srpc, hsk->port, skbs, length);
 	homa_xmit_data(srpc, false);
 	if (!srpc->msgout.next_packet) {
 		homa_rpc_free(srpc);
@@ -909,7 +908,7 @@ int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	homa_sock_init(hsk, homa);
-	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
+	printk(KERN_NOTICE "opened socket %d\n", hsk->port);
 	return 0;
 }
 

@@ -71,8 +71,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	struct data_header h = {
 		.common = {
 			.sport = htons(server_port),
-	                .dport = htons(hsk->client_port),
+	                .dport = htons(hsk->port),
 			.type = DATA,
+			.from_client = 0,
 			.id = id
 		},
 		.message_length = htonl(resp_length),
@@ -331,8 +332,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	struct data_header h = {
 		.common = {
 			.sport = htons(client_port),
-	                .dport = htons(hsk->server_port),
+	                .dport = htons(hsk->port),
 			.type = DATA,
+			.from_client = 1,
 			.id = id,
 			.generation = htons(1)
 		},
@@ -378,9 +380,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	homa_message_out_init(srpc, hsk->server_port,
-			homa_fill_packets(hsk, srpc->peer,
-			unit_iov_iter((void *) 2000, resp_length)), resp_length);
+	homa_message_out_init(srpc, hsk->port, homa_fill_packets(hsk,
+			srpc->peer, unit_iov_iter((void *) 2000, resp_length),
+			0), resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;

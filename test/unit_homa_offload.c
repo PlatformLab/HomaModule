@@ -38,7 +38,8 @@ FIXTURE_SETUP(homa_offload)
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
-			.type = DATA, .id = 1000, .generation = htons(1)},
+			.type = DATA, .from_client = 1, .id = 1000,
+			.generation = htons(1)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.retransmit = 0,

@@ -28,7 +28,7 @@ FIXTURE(homa_peertab) {
 FIXTURE_SETUP(homa_peertab)
 {
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_peertab_init(&self->peertab);
 }
 FIXTURE_TEARDOWN(homa_peertab)

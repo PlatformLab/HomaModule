@@ -58,5 +58,5 @@ extern struct sk_buff *
 extern void        mock_sock_destroy(struct homa_sock *hsk,
 			struct homa_socktab *socktab);
 extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
-			int client_port, int server_port);
+			int port);
 extern void        mock_teardown(void);

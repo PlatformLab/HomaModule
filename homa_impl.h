@@ -191,7 +191,13 @@ struct common_header {
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
 	
-	__be16 unused3;
+	/**
+	 * @from_client: 1 means sender of packet is RPC client;
+	 * 0 means server.
+	 */
+	__u8 from_client;
+	
+	__u8 unused3;
 	
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
@@ -972,25 +978,16 @@ struct homa_sock {
 	bool shutdown;
 	
 	/**
-	 * @server_port: Port number for receiving incoming RPC requests.
-	 * Must be assigned explicitly with bind; 0 means not bound yet.
+	 * Port number: identifies this socket uniquely among all
+	 * those on this node.
 	 */
-	__u16 server_port;
-	
-	/** @client_port: Port number to use for outgoing RPC requests. */
-	__u16 client_port;
+	__u16 port;
 	
 	/**
 	 * @client_socktab_links: Links this socket into the homa_socktab
-	 * based on client_port.
+	 * based on @port.
 	 */
-	struct homa_socktab_links client_links; 
-	
-	/**
-	 * @client_socktab_links: Links this socket into the homa_socktab
-	 * based on server_port. Invalid/unused if server_port is 0.
-	 */
-	struct homa_socktab_links server_links;
+	struct homa_socktab_links socktab_links;
 	
 	/**
 	 * @active_rpcs: List of all existing RPCs related to this socket,
@@ -2404,7 +2401,7 @@ extern void     homa_dst_refresh(struct homa_peertab *peertab,
 extern int      homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-                    struct iov_iter *iter);
+                    struct iov_iter *iter, int is_client);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc

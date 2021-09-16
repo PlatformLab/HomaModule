@@ -148,11 +148,11 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
 	self->homa.grant_threshold = self->homa.rtt_bytes;
-	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
-			.type = DATA, .id = self->rpcid,
+			.type = DATA, .from_client = 1, .id = self->rpcid,
 			.generation = htons(1)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
@@ -449,7 +449,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__non_data_packet_for_existing_server_rpc
 	struct resend_header resend = {.common = {
 		.sport = htons(self->client_port),
 		.dport = htons(self->server_port),
-		.type = RESEND, .id = self->rpcid,
+		.type = RESEND, .from_client = 1, .id = self->rpcid,
 	        .generation = htons(1)},
 		.offset = 0,
 		.length = 1000,
@@ -469,7 +469,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_client_rpc)
 	                .dport = htons(self->client_port),
 			.id = 99999,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND, .from_client = 0},
 		        .offset = htonl(11200),
 			.length = htonl(1000),
 			.priority = 3};
@@ -486,7 +486,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_server_rpc)
 	                .dport = htons(self->server_port),
 			.id = 99999,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND, .from_client = 1},
 		        .offset = htonl(11200),
 			.length = htonl(1000),
 			.priority = 3};
@@ -503,7 +503,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__dont_send_unknowns_except_for_resends)
 	                .dport = htons(self->client_port),
 			.id = 99999,
 			.generation = htons(1),
-			.type = GRANT},
+			.type = GRANT, .from_client = 0},
 		        .offset = htonl(11200),
 			.priority = 3};
 	mock_xmit_log_verbose = 1;
@@ -525,7 +525,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .generation = htons(1),
-			.type = GRANT}, .offset = htonl(11200),
+			.type = GRANT, .from_client = 0},
+			.offset = htonl(11200),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
@@ -536,7 +537,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__cutoffs_for_unknown_client_rpc)
 	struct homa_peer *peer;
 	struct cutoffs_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
-			.id = 99999, .generation = htons(1), .type = CUTOFFS},
+			.id = 99999, .generation = htons(1), .type = CUTOFFS,
+			.from_client = 0},
 		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
 			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
 			.cutoff_version = 400};
@@ -553,8 +555,9 @@ TEST_F(homa_incoming, homa_pkt_dispatch__resend_for_unknown_server_rpc)
 {
 	struct resend_header h = {{.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
-			.id = 99999, .generation = htons(1), .type = RESEND},
-		        .offset = 0, .length = 2000, .priority = 5};
+			.id = 99999, .generation = htons(1), .type = RESEND,
+			.from_client = 1},
+			.offset = 0, .length = 2000, .priority = 5};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_STREQ("xmit UNKNOWN", unit_log_get());
@@ -571,8 +574,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__future_generation_for_client_rpc)
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .generation = htons(2),
-			.type = GRANT}, .offset = htonl(11200),
-			.priority = 3};
+			.type = GRANT, .from_client = 0},
+			.offset = htonl(11200), .priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_EQ(10000, crpc->msgout.granted);
@@ -591,7 +594,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__past_generation_for_client_rpc)
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .generation = htons(2),
-			.type = GRANT}, .offset = htonl(11200),
+			.type = GRANT, .from_client = 0}, .offset = htonl(11200),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
@@ -627,8 +630,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.id = self->rpcid, .generation = htons(1),
-			.type = GRANT}, .offset = htonl(11200),
-			.priority = 3};
+			.type = GRANT, .from_client = 0},
+			.offset = htonl(11200), .priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_EQ(0, crpc->silent_ticks);
@@ -680,7 +683,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 	
 	struct common_header h = {.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
-			.id = self->rpcid, .generation = htons(1), .type = 99};
+			.id = self->rpcid, .generation = htons(1), .type = 99,
+			.from_client = 0};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h, 0, 0), &self->hsk);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.unknown_packet_types);
 }
@@ -939,8 +943,9 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	unit_log_clear();
 	
 	struct grant_header h = {{.sport = htons(srpc->dport),
-	                .dport = htons(self->hsk.server_port),
-			.id = srpc->id, .generation = htons(1), .type = GRANT},
+	                .dport = htons(self->hsk.port),
+			.id = srpc->id, .generation = htons(1), .type = GRANT,
+			.from_client = 1},
 		        .offset = htonl(12600),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
@@ -978,7 +983,8 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 	
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
-			.id = crpc->id, .generation = htons(1), .type = GRANT},
+			.id = crpc->id, .generation = htons(1), .type = GRANT,
+			.from_client = 0},
 		        .offset = htonl(25000),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
@@ -995,7 +1001,8 @@ TEST_F(homa_incoming, homa_grant_pkt__delete_server_rpc)
 
 	struct grant_header h = {{.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
-			.id = srpc->id, .generation = htons(1), .type = GRANT},
+			.id = srpc->id, .generation = htons(1), .type = GRANT,
+			.from_client = 1},
 		        .offset = htonl(25000),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
@@ -1009,7 +1016,8 @@ TEST_F(homa_incoming, homa_resend_pkt__server_sends_busy)
 	                .dport = htons(self->server_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND,
+			.from_client = 1},
 		        .offset = htonl(100),
 			.length = htonl(200),
 			.priority = 3};
@@ -1032,7 +1040,8 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND,
+			.from_client = 0},
 		        .offset = htonl(100),
 			.length = htonl(200),
 			.priority = 3};
@@ -1052,7 +1061,8 @@ TEST_F(homa_incoming, homa_resend_pkt__send_busy_instead_of_data)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND,
+			.from_client = 0},
 		        .offset = htonl(100),
 			.length = htonl(200),
 			.priority = 3};
@@ -1072,7 +1082,8 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND,
+			.from_client = 0},
 		        .offset = htonl(100),
 			.length = htonl(200),
 			.priority = 3};
@@ -1095,7 +1106,8 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 	                .dport = htons(self->server_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = RESEND},
+			.type = RESEND,
+			.from_client = 1},
 		        .offset = htonl(100),
 			.length = htonl(2000),
 			.priority = 4};
@@ -1120,7 +1132,8 @@ TEST_F(homa_incoming, homa_unknown_pkt__basics)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = UNKNOWN}};
+			.type = UNKNOWN,
+			.from_client = 0}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
@@ -1147,7 +1160,8 @@ TEST_F(homa_incoming, homa_unknown_pkt__rpc_ready)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = UNKNOWN}};
+			.type = UNKNOWN,
+			.from_client = 0}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
@@ -1166,7 +1180,8 @@ TEST_F(homa_incoming, homa_unknown_pkt__generation_overflow)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(~0),
-			.type = UNKNOWN}};
+			.type = UNKNOWN,
+			.from_client = 0}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
@@ -1188,7 +1203,8 @@ TEST_F(homa_incoming, homa_unknown_pkt__error)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = UNKNOWN}};
+			.type = UNKNOWN,
+			.from_client = 0}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 2000, 2000);
@@ -1208,7 +1224,8 @@ TEST_F(homa_incoming, homa_unknown_pkt__free_server_rpc)
 	                .dport = htons(self->server_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = UNKNOWN}};
+			.type = UNKNOWN,
+			.from_client = 1}};
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 100, 20000);
@@ -1233,7 +1250,8 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = CUTOFFS},
+			.type = CUTOFFS,
+			.from_client = 0},
 		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
 			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
 			.cutoff_version = 400};
@@ -1250,7 +1268,8 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	                .dport = htons(self->client_port),
 			.id = self->rpcid,
 			.generation = htons(1),
-			.type = CUTOFFS},
+			.type = CUTOFFS,
+			.from_client = 0},
 		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
 			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
 			.cutoff_version = 400};
@@ -2128,8 +2147,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__multiple_sockets)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid, 5000, 1600);
 	struct homa_rpc *crpc2, *crpc3;
-	mock_sock_init(&hsk1, &self->homa, 0, self->server_port);
-	mock_sock_init(&hsk2, &self->homa, 0, self->server_port+1);
+	mock_sock_init(&hsk1, &self->homa, self->server_port);
+	mock_sock_init(&hsk2, &self->homa, self->server_port+1);
 	crpc2 = unit_client_rpc(&hsk1, RPC_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->rpcid+3,
 			5000, 1600);

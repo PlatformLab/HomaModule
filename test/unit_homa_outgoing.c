@@ -43,8 +43,7 @@ FIXTURE_SETUP(homa_outgoing)
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	self->homa.cycles_per_kbyte = 1000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	mock_sock_init(&self->hsk, &self->homa, self->client_port,
-			self->server_port);
+	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 	self->server_addr.sin_family = AF_INET;
 	self->server_addr.sin_addr.s_addr = self->server_ip;
 	self->server_addr.sin_port = htons(self->server_port);
@@ -78,7 +77,8 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 TEST_F(homa_outgoing, homa_fill_packets__message_too_long)
 {
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+100));
+			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+100),
+			0);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EINVAL, -PTR_ERR(skb));
 }
@@ -87,7 +87,7 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_size_limit)
 	mock_net_device.gso_max_size = 10000;
 	self->homa.max_gso_size = 3000;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 5000));
+			unit_iov_iter((void *) 1000, 5000), 0);
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
@@ -131,7 +131,7 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_small_skb)
 {
 	mock_alloc_skb_errors = 1;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 500));
+			unit_iov_iter((void *) 1000, 500), 0);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
 }
@@ -140,7 +140,7 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_alloc_large_skb)
 	mock_alloc_skb_errors = 1;
 	mock_net_device.gso_max_size = 5000;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 5000));
+			unit_iov_iter((void *) 1000, 5000), 0);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
 }
@@ -180,7 +180,7 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_copy_data)
 {
 	mock_copy_data_errors = 2;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((char *) 1000, 3000));
+			unit_iov_iter((char *) 1000, 3000), 0);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
 }
@@ -188,7 +188,7 @@ TEST_F(homa_outgoing, homa_fill_packets__multiple_segs_per_skbuff)
 {
 	mock_net_device.gso_max_size = 5000;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 10000));
+			unit_iov_iter((void *) 1000, 10000), 0);
 	EXPECT_NE(NULL, skb);
 	EXPECT_STREQ("_copy_from_iter 1400 bytes at 1000; "
 			"_copy_from_iter 1400 bytes at 2400; "
@@ -242,7 +242,7 @@ TEST_F(homa_outgoing, homa_fill_packets__expand_last_segment)
 {
 	mock_net_device.gso_max_size = 5000;
 	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 1402));
+			unit_iov_iter((void *) 1000, 1402), 0);
 	EXPECT_NE(NULL, skb);
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
@@ -315,6 +315,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	struct homa_rpc *srpc;
 	struct grant_header h;
 	
+	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	EXPECT_NE(NULL, srpc);
@@ -406,7 +407,8 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 	                .dport = htons(self->server_port),
 			.id = 99999,
 			.generation = htons(1),
-			.type = GRANT},
+			.type = GRANT,
+			.from_client = 1},
 		        .offset = htonl(11200),
 			.priority = 3};
 	mock_xmit_log_verbose = 1;

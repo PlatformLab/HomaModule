@@ -57,12 +57,12 @@ FIXTURE_SETUP(homa_plumbing)
 	self->server_addr.sin_port = htons(self->server_port);
 	homa = &self->homa;
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
-			.type = DATA, .id = self->rpcid},
+			.type = DATA, .from_client = 1, .id = self->rpcid},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .retransmit = 0,
 			.seg={.offset = 0}};
@@ -500,7 +500,7 @@ TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
 {
 	struct sk_buff *skb, *skb2;
 	struct homa_sock sock2;
-	mock_sock_init(&sock2, &self->homa, 0, 0);
+	mock_sock_init(&sock2, &self->homa, 0);
 	homa_sock_bind(&self->homa.port_map, &sock2, self->server_port+1);
 	
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);

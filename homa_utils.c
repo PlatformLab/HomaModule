@@ -225,14 +225,14 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
-	skb = homa_fill_packets(hsk, crpc->peer, iter);
+	skb = homa_fill_packets(hsk, crpc->peer, iter, 1);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
 		tt_record1("error in homa_fill_packets: %d", err);
 		skb = NULL;
 		goto error;
 	}
-	homa_message_out_init(crpc, hsk->client_port, skb, length);
+	homa_message_out_init(crpc, hsk->port, skb, length);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->ready_links);

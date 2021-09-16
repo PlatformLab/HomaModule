@@ -259,7 +259,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	struct homa_rpc *rpc;
 	
 	/* Find and lock the RPC for this packet. */
-	if (ntohs(h->dport) < HOMA_MIN_CLIENT_PORT) {
+	if (h->from_client) {
 		/* We are the server for this RPC. */
 		if ((h->type == DATA)
 				&& !((struct data_header *) h)->retransmit) {
@@ -298,8 +298,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 					h->id & 0xffffffff, h->type,
 					ntohl(ip_hdr(skb)->saddr),
 					ntohs(h->sport));
-			if ((h->type != GRANT) || (ntohs(h->dport)
-					>= HOMA_MIN_CLIENT_PORT))
+			if ((h->type != GRANT) || !h->from_client)
 				INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
@@ -335,7 +334,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 				> hsk->homa->dead_buffs_limit)) {
 			INC_METRIC(forced_reaps, 1);
 			tt_record3("Forced reap for port %d, id %d, count %d",
-					hsk->client_port, rpc->id,
+					hsk->port, rpc->id,
 					hsk->homa->forced_reap_count);
 			homa_rpc_unlock(rpc);
 			homa_rpc_reap(hsk, hsk->homa->forced_reap_count);
@@ -1338,8 +1337,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				tt_record3("received message while polling, "
 						"id %d, socket %d, pid %d",
 						atomic_long_read(&interest.id),
-						hsk->client_port,
-						current->pid);
+						hsk->port, current->pid);
 				INC_METRIC(fast_wakeups, 1);
 				INC_METRIC(poll_cycles, now - poll_start);
 				goto lock_rpc;
@@ -1349,7 +1347,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			schedule();
 		}
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
-				hsk->client_port, current->pid);
+				hsk->port, current->pid);
 		INC_METRIC(poll_cycles, now - poll_start);
 		
 		/* Now it's time to sleep. */

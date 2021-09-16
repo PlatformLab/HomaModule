@@ -48,11 +48,11 @@ FIXTURE_SETUP(homa_utils)
 	self->server_addr.sin_addr.s_addr = self->server_ip;
 	self->server_addr.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
-			.type = DATA, .id = self->rpcid},
+			.type = DATA, .from_client = 1, .id = self->rpcid},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 		        .retransmit = 0,

@@ -102,13 +102,7 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 		hsk = links->sock;
 		scan->next = (struct homa_socktab_links *) hlist_next_rcu(
 				&links->hash_links);
-		if (links == &hsk->client_links)
-			return hsk;
-		
-		/* The current links are for the server port. Skip
-		 * them, so we return each socket exactly once (for its
-		 * client port).
-		 */
+		return hsk;
 	}
 }
 
@@ -132,7 +126,6 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
 	hsk->shutdown = false;
-	hsk->server_port = 0;
 	while (1) {
 		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {
 			homa->next_client_port = HOMA_MIN_CLIENT_PORT;
@@ -142,11 +135,11 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		}
 		homa->next_client_port++;
 	}
-	hsk->client_port = homa->next_client_port;
+	hsk->port = homa->next_client_port;
 	homa->next_client_port++;
-	hsk->client_links.sock = hsk;
-	hlist_add_head_rcu(&hsk->client_links.hash_links,
-			&socktab->buckets[homa_port_hash(hsk->client_port)]);
+	hsk->socktab_links.sock = hsk;
+	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
+			&socktab->buckets[homa_port_hash(hsk->port)]);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
@@ -183,7 +176,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_sock_unlock(hsk);
 		return;
 	}
-	printk(KERN_NOTICE "Shutting down socket %d", hsk->client_port);
+	printk(KERN_NOTICE "Shutting down socket %d", hsk->port);
 	
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
@@ -199,9 +192,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 */
 	hsk->shutdown = true;
 	mutex_lock(&hsk->homa->port_map.write_lock);
-	hlist_del_rcu(&hsk->client_links.hash_links);
-	if (hsk->server_port != 0)
-		hlist_del_rcu(&hsk->server_links.hash_links);
+	hlist_del_rcu(&hsk->socktab_links.hash_links);
 	mutex_unlock(&hsk->homa->port_map.write_lock);
 	homa_sock_unlock(hsk);
 	
@@ -258,12 +249,9 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 			result = -EADDRINUSE;
 		goto done;
 	}
-	if (hsk->server_port) {
-		hlist_del_rcu(&hsk->server_links.hash_links);
-	}
-	hsk->server_port = port;
-	hsk->server_links.sock = hsk;
-	hlist_add_head_rcu(&hsk->server_links.hash_links,
+	hlist_del_rcu(&hsk->socktab_links.hash_links);
+	hsk->port = port;
+	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
 			&socktab->buckets[homa_port_hash(port)]);
     done:
 	mutex_unlock(&socktab->write_lock);
@@ -273,8 +261,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 /**
  * homa_sock_find() - Returns the socket associated with a given port.
  * @socktab:    Hash table in which to perform lookup.
- * @port:       The port of interest; may be either a &homa_sock.client_port
- *              or a &homa_sock.server_port. Must not be 0.
+ * @port:       The port of interest.
  * Return:      The socket that owns @port, or NULL if none.
  * 
  * Note: this function uses RCU list-searching facilities, but it doesn't
@@ -288,7 +275,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 	hlist_for_each_entry_rcu(link, &socktab->buckets[homa_port_hash(port)],
 			hash_links) {
 		struct homa_sock *hsk = link->sock;
-		if ((hsk->client_port == port) || (hsk->server_port == port)) {
+		if (hsk->port == port) {
 			result = hsk;
 			break;
 		}
