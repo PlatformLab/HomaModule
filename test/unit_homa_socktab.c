@@ -60,7 +60,7 @@ TEST_F(homa_socktab, homa_socktab_start_scan)
 	struct homa_socktab_scan scan;
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_CLIENT_PORT+100);
+	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_DEFAULT_PORT+100);
 	EXPECT_EQ(&self->hsk, homa_socktab_start_scan(&self->homa.port_map,
 			&scan));
 	EXPECT_EQ(100, scan.current_bucket);
@@ -204,7 +204,7 @@ TEST_F(homa_socktab, homa_sock_bind)
 	
 	EXPECT_EQ(EINVAL, -homa_sock_bind(&self->homa.port_map, &self->hsk, 0));
 	EXPECT_EQ(EINVAL, -homa_sock_bind(&self->homa.port_map, &self->hsk,
-			HOMA_MIN_CLIENT_PORT + 100));
+			HOMA_MIN_DEFAULT_PORT + 100));
 	
 	EXPECT_EQ(EADDRINUSE, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			100));

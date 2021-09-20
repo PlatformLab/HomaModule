@@ -1082,12 +1082,12 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	struct sock *sk = (struct sock *) hsk;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
-	if ((port != 0) && (port >= HOMA_MIN_CLIENT_PORT))
+	if ((port != 0) && (port >= HOMA_MIN_DEFAULT_PORT))
 		homa->next_client_port = port;
 	homa_sock_init(hsk, homa);
 	if (port != 0)
 		homa->next_client_port = saved_port;
-	if (port < HOMA_MIN_CLIENT_PORT)
+	if (port < HOMA_MIN_DEFAULT_PORT)
 		homa_sock_bind(&homa->port_map, hsk, port);
 	sk->sk_data_ready = mock_data_ready;
 }

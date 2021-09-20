@@ -8,11 +8,11 @@ homa_recv \- receive a Homa message
 .BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
 len ", int " flags ", const struct sockaddr *" src_addr ",
 .BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" \
-msglen ", int *" type );
+msglen );
 .BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
 size_t " iovcnt ", int " flags , 
 .BI "                  const struct sockaddr *" src_addr ", size_t *" \
-addrlen ", uint64_t *" id ", size_t *" msglen ", int *" type );
+addrlen ", uint64_t *" id ", size_t *" msglen );
 .fi
 .SH DESCRIPTION
 The functions
@@ -104,37 +104,14 @@ msglen
 is non-NULL then the total length of the incoming message is
 written to
 .IR *msglen .
-If
-.I type
-is non-NULL then the type of the incoming message (either
-.B HOMA_RECV_REQUEST
-or
-.BR HOMA_RECV_RESPONSE )
-is written to
-.IR *type .
 .PP
-For some settings of
-.I flags
-and
-.IR *id ,
-the message returned may be either a request or a response.
-The port number stored in
-.I src_addr
-can be used to distinguish requests from responses.
-A port number of
-.B HOMA_MIN_CLIENT_PORT
-or greater indicates that the message is a request;
-a port number less than
-.B HOMA_MIN_CLIENT_PORT
-indicates that the message is a response.
-.PP
-If the message is a request, then the caller must eventually invoke
+If a message is a request, then the caller must eventually invoke
 .BR homa_reply (3)
 to respond (Homa retains state for the request until
 .BR homa_reply (3)
 is invoked).
 .PP
-If the message is larger than buffer space provided,
+If a request message is larger than buffer space provided,
 .BR homa_recv
 or
 .BR homa_recvv

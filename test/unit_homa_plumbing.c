@@ -216,7 +216,6 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(200, self->recv_args.len);
 	EXPECT_EQ(12345, self->recv_args.actualId);
-	EXPECT_EQ(HOMA_RECV_RESPONSE, self->recv_args.type);
 	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -230,7 +229,6 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 			(unsigned long) &self->recv_args));
 	EXPECT_EQ(100, self->recv_args.len);
 	EXPECT_EQ(12345, self->recv_args.actualId);
-	EXPECT_EQ(HOMA_RECV_REQUEST, self->recv_args.type);
 	EXPECT_EQ(self->client_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);

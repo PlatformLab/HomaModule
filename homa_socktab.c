@@ -127,8 +127,8 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->homa = homa;
 	hsk->shutdown = false;
 	while (1) {
-		if (homa->next_client_port < HOMA_MIN_CLIENT_PORT) {
-			homa->next_client_port = HOMA_MIN_CLIENT_PORT;
+		if (homa->next_client_port < HOMA_MIN_DEFAULT_PORT) {
+			homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 		}
 		if (!homa_sock_find(socktab, homa->next_client_port)) {
 			break;
@@ -239,7 +239,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	int result = 0;
 	struct homa_sock *owner;
 	
-	if ((port == 0) || (port >= HOMA_MIN_CLIENT_PORT)) {
+	if ((port == 0) || (port >= HOMA_MIN_DEFAULT_PORT)) {
 		return -EINVAL;
 	}
 	mutex_lock(&socktab->write_lock);

@@ -82,7 +82,7 @@ int homa_init(struct homa *homa)
 	homa->throttle_add = 0;
 	homa->throttle_min_bytes = 1000;
 	atomic_set(&homa->extra_incoming, 0);
-	homa->next_client_port = HOMA_MIN_CLIENT_PORT;
+	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa_socktab_init(&homa->port_map);
 	err = homa_peertab_init(&homa->peers);
 	if (err) {

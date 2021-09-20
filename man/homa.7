@@ -74,51 +74,40 @@ are not supported by Homa.
 Instead, Homa offers a set of library methods that support
 message-oriented communication.
 .PP
-For an application to initiate requests as a client, it opens a Homa
+For an application to send or receive Homa messages, it opens a Homa
 socket as shown in
 .B SYNOPSIS
-above, then invokes
-.BR homa_invoke (3).
-This will send a request message and wait for the response to arrive.
-Alternatively, the application can invoke
+above. Clients can then invoke
 .BR homa_send (3)
 to send a request, followed later by
 .BR homa_recv (3)
 to wait for the reply.
 Multiple requests may be initiated concurrently before waiting for any
 replies.
-The responses will not necessarily be received in the same order that the
+Responses will not necessarily be received in the same order that the
 requests were sent.
 .PP
-To act as server, an application first opens a Homa socket and then
-invokes
-.BR bind (2)
-to associate a server port number with the socket.
-The port number must not already being used by another socket, and must
-be less than
-.B HOMA_MIN_CLIENT_PORT
-(Homa automatically assigns a separate client port to each socket, which
-is used for outgoing requests; client port numbers are greater than or
-equal to
-.BR HOMA_MIN_CLIENT_PORT ).
-Once
-.BR bind (2)
-has completed successfully, the application can receive incoming
-requests by invoking
+Servers can receive incoming requests by invoking
 .BR homa_recv (3).
 For each request that it receives, the application must eventually
 invoke
 .BR homa_reply (3)
 to send a response.
+The same Homa socket can be used for issuing outgoing requests as
+client and receiving incoming requests as server.
 .PP
-Server sockets can also be used to send outgoing requests as described
-above for clients. If the same socket is used for both outgoing and
-incoming requests, then
-.BR homa_recv (3)
-may return either a request or a response packet.
-Requests and responses can be distinguished using the peer
-port number returned by
-.BR homa_recv (3).
+When a Homa socket is created, Homa assigns a default port number for
+the socket, which will be
+.B HOMA_MIN_DEFAULT_PORT
+or higher.  An application can request a port number less than
+.B HOMA_MIN_DEFAULT_PORT
+by invoking
+.BR bind (2).
+This will change the socket's port number to the given value, if it
+is not already in use. Note:
+.BR bind (2)
+should not be invoked on a Homa socket after sending or receiving
+any messages on that socket.
 .PP
 The
 .BR shutdown (2)

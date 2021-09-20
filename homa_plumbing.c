@@ -607,10 +607,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		if ((args.len >= rpc->msgin.total_length)
 				|| !(args.flags & HOMA_RECV_PARTIAL))
 			homa_rpc_free(rpc);
-		args.type = HOMA_RECV_RESPONSE;
 	} else {
 		rpc->state = RPC_IN_SERVICE;
-		args.type = HOMA_RECV_REQUEST;
 	}
 	homa_rpc_unlock(rpc);
 	

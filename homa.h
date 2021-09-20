@@ -43,12 +43,12 @@ extern "C"
 #define HOMA_MAX_MESSAGE_LENGTH 1000000
 
 /**
- * define HOMA_MIN_CLIENT_PORT - The 16-bit port space is divided into
+ * define HOMA_MIN_DEFAULT_PORT - The 16-bit port space is divided into
  * two nonoverlapping regions. Ports 1-32767 are reserved exclusively
  * for well-defined server ports. The remaining ports are used for client
  * ports; these are allocated automatically by Homa. Port 0 is reserved.
  */
-#define HOMA_MIN_CLIENT_PORT 0x8000
+#define HOMA_MIN_DEFAULT_PORT 0x8000
 
 /**
  * I/O control calls on Homa sockets. These particular values were
@@ -70,10 +70,10 @@ extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
                     uint64_t *id);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
-                    uint64_t *id, size_t *msglen, int *type);
+                    uint64_t *id, size_t *msglen);
 extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
 		    int flags, struct sockaddr *src_addr, size_t *addrlen,
-		    uint64_t *id, size_t *msglen, int *type);
+		    uint64_t *id, size_t *msglen);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
