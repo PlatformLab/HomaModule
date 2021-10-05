@@ -630,7 +630,7 @@ struct homa_interest {
 
 /**
  * homa_interest_init() - Fill in default values for all of the fields
- * of a struct homa_interest.
+ * of a struct homa_interest. Intended for testing.
  * @interest:   Struct to initialize.
  */
 static void inline homa_interest_init(struct homa_interest *interest)

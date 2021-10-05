@@ -1155,10 +1155,9 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
  * homa_register_interests() - Records information in various places so
  * that a thread will be woken up if an RPC that it cares about becomes
  * available.
- * @interest:    Used to record information about the messages this thread is
- *                waiting on. It's possible that this structure contains
- *                information left over from a previous call to this function
- *                (e.g. if homa_wait_for_message loops multiple times).
+ * @interest:     Used to record information about the messages this thread is
+ *                waiting on. The initial contents of the structure are
+ *                assumed to be undefined.
  * @hsk:          Socket on which relevant messages will arrive.  Must not be
  *                locked.
  * @flags:        Flags parameter from homa_recv; see manual entry for details. 
@@ -1179,6 +1178,13 @@ int homa_register_interests(struct homa_interest *interest,
 {
 	struct homa_rpc *rpc = NULL;
 	
+	interest->thread = current;
+	interest->ready_rpc = NULL;
+	atomic_long_set(&interest->id, 0);
+	interest->reg_rpc = NULL;
+	interest->request_links.next = LIST_POISON1;
+	interest->response_links.next = LIST_POISON1;
+	
 	/* Need both the RPC lock and the socket lock to avoid races. */
 	if (id != 0) {
 		if (client_addr->sin_addr.s_addr == 0)
@@ -1195,8 +1201,6 @@ int homa_register_interests(struct homa_interest *interest,
 		}
 	}
 	homa_sock_lock(hsk, "homa_register_interests");
-	if (atomic_long_read(&interest->id))
-		goto done;
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		if (rpc)
@@ -1219,8 +1223,7 @@ int homa_register_interests(struct homa_interest *interest,
 		homa_rpc_unlock(rpc);
 	}
 	
-	if ((flags & HOMA_RECV_RESPONSE)
-			&& (interest->response_links.next == LIST_POISON1)) {
+	if (flags & HOMA_RECV_RESPONSE) {
 		if (!list_empty(&hsk->ready_responses)) {
 			rpc = list_first_entry(
 					&hsk->ready_responses,
@@ -1235,8 +1238,7 @@ int homa_register_interests(struct homa_interest *interest,
 		list_add(&interest->response_links,
 				&hsk->response_interests);
 	}
-	if ((flags & HOMA_RECV_REQUEST)
-			&& (interest->request_links.next == LIST_POISON1)) {
+	if (flags & HOMA_RECV_REQUEST) {
 		if (!list_empty(&hsk->ready_requests)) {
 			rpc = list_first_entry(&hsk->ready_requests,
 					struct homa_rpc, ready_links);
@@ -1278,25 +1280,19 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	uint64_t poll_start, now;
 	int error;
 	
-	homa_interest_init(&interest);
-	
 	/* Normally this loop only gets executed once, but we may have
 	 * to start again under various special cases such as a "found"
-	 * RPC gets deleted from underneath us or the socket is shut down.
+	 * RPC gets deleted from underneath us.
 	 */
 	while (1) {
 		error = homa_register_interests(&interest, hsk, flags, id,
 				client_addr);
 		if (atomic_long_read(&interest.id)) {
-			if (interest.ready_rpc != NULL) {
-				result = interest.ready_rpc;
-				goto done;
-			}
-			goto lock_rpc;
+			goto got_error_or_rpc;
 		}
 		if (error < 0) {
 			result = ERR_PTR(error);
-			goto done;
+			goto got_error_or_rpc;
 		}
 		
 //		tt_record3("Preparing to poll, socket %d, flags 0x%x, pid %d",
@@ -1312,13 +1308,13 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				tt_record1("received message while reaping, "
 						"id %d",
 						atomic_long_read(&interest.id));
-				goto lock_rpc;
+				goto got_error_or_rpc;
 			}
 			reaper_result = homa_rpc_reap(hsk,
 					hsk->homa->reap_limit);
 			if (flags & HOMA_RECV_NONBLOCKING) {
 				result = ERR_PTR(-EAGAIN);
-				goto done;
+				goto got_error_or_rpc;
 			}
 			if (reaper_result == 0)
 				break;
@@ -1340,7 +1336,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 						hsk->port, current->pid);
 				INC_METRIC(fast_wakeups, 1);
 				INC_METRIC(poll_cycles, now - poll_start);
-				goto lock_rpc;
+				goto got_error_or_rpc;
 			}
 			if (now >= (poll_start + hsk->homa->poll_cycles))
 				break;
@@ -1360,66 +1356,74 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			INC_METRIC(blocked_cycles, get_cycles() - start);
 		}
 		__set_current_state(TASK_RUNNING);
-		
-		if (atomic_long_read(&interest.id)) {
-			INC_METRIC(slow_wakeups, 1);
-			tt_record2("homa_wait_for_message woke up, id %d, "
-					"pid %d",
-					atomic_long_read(&interest.id),
-					current->pid);
-			goto lock_rpc;
-		}
-		if (signal_pending(current)) {
-			result = ERR_PTR(-EINTR);
-			goto done;
-		}
-
-		/* Nothing happened (perhaps the socket was shut down?). Start
-		 * over; any problems will be discovered there.
-		 */
-		tt_record1("homa_wait_for_message woke up with no RPC, pid %d",
+		INC_METRIC(slow_wakeups, 1);
+		tt_record2("homa_wait_for_message woke up, id %d, "
+				"pid %d",
+				atomic_long_read(&interest.id),
 				current->pid);
-		continue;
 		
-lock_rpc:
-		/* We need to lookup and lock the RPC we're going to return:
-		 * it could have been deleted since it was recorded in
-		 * interest (see sync.txt for details)!
+got_error_or_rpc:
+		/* If we get here, it means we are probably ready to return,
+		 * either with an RPC or with an error.
+		 * 
+		 * First, clean up all of the interests. Must do this before
+		 * making any other decisions, because until we do, an incoming
+		 * message could still be passed to us. Note: if we went to
+		 * sleep, then this info was already cleaned up by whoever
+		 * woke us up. Also, values in the interest may change between
+		 * when we test them below and when we acquire the socket lock.
 		 */
-		if (interest.is_client)
-			result = homa_find_client_rpc(hsk,
-					atomic_long_read(&interest.id));
-		else
-			result = homa_find_server_rpc(hsk, interest.peer_addr,
-					interest.peer_port,
-					atomic_long_read(&interest.id));
-		if (result)
-			goto done;
+		if ((interest.reg_rpc)
+				|| (interest.request_links.next != LIST_POISON1)
+				|| (interest.response_links.next
+				!= LIST_POISON1)) {
+			homa_sock_lock(hsk, "homa_wait_for_message");
+			if (interest.reg_rpc)
+				interest.reg_rpc->interest = NULL;
+			if (interest.request_links.next != LIST_POISON1)
+				list_del(&interest.request_links);
+			if (interest.response_links.next != LIST_POISON1)
+				list_del(&interest.response_links);
+			homa_sock_unlock(hsk);
+		}
+		
+		/* Now check to see if we got a message to return (note that
+		 * the message could have arrived anytime up until we
+		 * reset the interest above).
+		 */
+		if (interest.ready_rpc)
+			return interest.ready_rpc;
+		if (atomic_long_read(&interest.id)) {
+			/* RPC isn't currently locked; lock it now. */
+			struct homa_rpc *rpc;
+			if (interest.is_client)
+				rpc = homa_find_client_rpc(hsk,
+						atomic_long_read(&interest.id));
+			else
+				rpc = homa_find_server_rpc(hsk,
+						interest.peer_addr,
+						interest.peer_port,
+						atomic_long_read(&interest.id));
+			if (rpc)
+				return rpc;
+			
+			/* If we get here, it means the RPC was deleted after
+			 * it was passed to us, so we don't have an RPC after
+			 * all.
+			 */
+			UNIT_LOG("; ", "RPC appears to have been deleted");
+		}
 
-		/* Looks like the RPC got deleted? Try again.*/
-		UNIT_LOG("; ", "RPC appears to have been deleted");
-		atomic_long_set(&interest.id, 0);
-		continue;
-	}
+		/* No message available: see if there is an error condition. */
+		if (IS_ERR(result))
+			return result;
+		if (signal_pending(current))
+			return ERR_PTR(-EINTR);
 
-done:
-	/* Clean up all of the interests. Note: if we went to sleep, then
-	 * this info was already cleaned up by whoever woke us up. Also,
-	 * values in the interest may change between when we test them below
-	 * and when we acquire the socket lock.
-	 */
-	if ((interest.reg_rpc) || (interest.request_links.next != LIST_POISON1)
-			|| (interest.response_links.next != LIST_POISON1)) {
-		homa_sock_lock(hsk, "homa_wait_for_message");
-		if (interest.reg_rpc)
-			interest.reg_rpc->interest = NULL;
-		if (interest.request_links.next != LIST_POISON1)
-			list_del(&interest.request_links);
-		if (interest.response_links.next != LIST_POISON1)
-			list_del(&interest.response_links);
-		homa_sock_unlock(hsk);
+                /* No message and no error after all (perhaps RPC was deleted);
+		 * try again.
+		 */
 	}
-	return result;
 }
 
 /**
@@ -1483,14 +1487,10 @@ handoff:
 		interest->reg_rpc->interest = NULL;
 		interest->reg_rpc = NULL;
 	}
-	if (interest->request_links.next != LIST_POISON1) {
+	if (interest->request_links.next != LIST_POISON1)
 		list_del(&interest->request_links);
-		interest->request_links.next = LIST_POISON1;
-	}
-	if (interest->response_links.next != LIST_POISON1) {
+	if (interest->response_links.next != LIST_POISON1)
 		list_del(&interest->response_links);
-		interest->response_links.next = LIST_POISON1;
-	}
 	homa_interest_set(interest, rpc);
 	wake_up_process(interest->thread);
 	tt_record3("homa_rpc_ready handed off id %d to pid %d on core %d",

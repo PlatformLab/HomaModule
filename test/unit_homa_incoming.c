@@ -159,7 +159,6 @@ FIXTURE_SETUP(homa_incoming)
 		        .retransmit = 0,
 			.seg = {.offset = 0, .segment_length = htonl(1400)}};
 	homa_message_in_init(&self->message, 10000, 10000);
-	homa_interest_init(&self->interest);
 	unit_log_clear();
 	delete_count = 0;
 }
@@ -2209,30 +2208,6 @@ TEST_F(homa_incoming, homa_register_interests__id_already_has_interest)
 	crpc->interest = NULL;
 	EXPECT_EQ(EINVAL, -result);
 }
-TEST_F(homa_incoming, homa_register_interests__rpc_interest_is_us)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 20000, 1600);
-	EXPECT_NE(NULL, crpc);
-	
-	crpc->interest = &self->interest;
-	int result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_RESPONSE, self->rpcid, &self->addr);
-	EXPECT_EQ(0, -result);
-	EXPECT_EQ(crpc, self->interest.ready_rpc);
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_incoming, homa_register_interests__interest_already_satisfied)
-{
-	int result;
-	atomic_long_set(&self->interest.id, 444);
-	self->hsk.shutdown = 1;
-	result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_RESPONSE, 0, &self->addr);
-	EXPECT_EQ(0, -result);
-	self->hsk.shutdown = 0;
-}
 TEST_F(homa_incoming, homa_register_interests__socket_shutdown)
 {
 	int result;
@@ -2241,6 +2216,21 @@ TEST_F(homa_incoming, homa_register_interests__socket_shutdown)
 			HOMA_RECV_RESPONSE, 0, &self->addr);
 	EXPECT_EQ(ESHUTDOWN, -result);
 	self->hsk.shutdown = 0;
+}
+TEST_F(homa_incoming, homa_register_interests__specified_rpc_ready)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	
+	int result = homa_register_interests(&self->interest, &self->hsk,
+			HOMA_RECV_REQUEST|HOMA_RECV_NONBLOCKING, crpc->id,
+			&self->addr);
+	EXPECT_EQ(0, result);
+	EXPECT_EQ(crpc->id, atomic_long_read(&self->interest.id));
+	EXPECT_EQ(crpc, self->interest.ready_rpc);
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__return_response_by_id)
 {
@@ -2272,20 +2262,6 @@ TEST_F(homa_incoming, homa_register_interests__return_request_by_id)
 	EXPECT_EQ(12345, atomic_long_read(&self->interest.id));
 	homa_rpc_unlock(srpc);
 }
-TEST_F(homa_incoming, homa_register_interests__already_in_response_interests)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 20000, 1600);
-	EXPECT_NE(NULL, crpc);
-	
-	list_add(&self->interest.response_links, &self->hsk.response_interests);
-	int result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING, 0,
-			&self->addr);
-	EXPECT_EQ(0, result);
-	EXPECT_EQ(0, atomic_long_read(&self->interest.id));
-}
 TEST_F(homa_incoming, homa_register_interests__return_from_ready_responses)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -2298,20 +2274,6 @@ TEST_F(homa_incoming, homa_register_interests__return_from_ready_responses)
 			&self->addr);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(12345, atomic_long_read(&self->interest.id));
-}
-TEST_F(homa_incoming, homa_register_interests__already_in_request_interests)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_READY,
-			self->client_ip, self->server_ip, self->client_port,
-		        1, 20000, 100);
-	EXPECT_NE(NULL, srpc);
-	
-	list_add(&self->interest.request_links, &self->hsk.request_interests);
-	int result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_REQUEST|HOMA_RECV_NONBLOCKING, 0,
-			&self->addr);
-	EXPECT_EQ(0, result);
-	EXPECT_EQ(0, atomic_long_read(&self->interest.id));
 }
 TEST_F(homa_incoming, homa_register_interests__return_from_ready_requests)
 {
@@ -2482,16 +2444,7 @@ TEST_F(homa_incoming, homa_wait_for_message__request_arrives_while_sleeping)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	homa_rpc_unlock(rpc);
 }
-TEST_F(homa_incoming, homa_wait_for_message__signal)
-{
-	struct homa_rpc *rpc;
-	
-	mock_signal_pending = 1;
-	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_REQUEST, 0,
-			&self->addr);
-	EXPECT_EQ(EINTR, -PTR_ERR(rpc));
-}
-TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_while_sleeping)
+TEST_F(homa_incoming, homa_wait_for_message__explicit_rpc_deleted_while_sleeping)
 {
 	struct homa_rpc *rpc;
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -2505,6 +2458,30 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_while_sleeping)
 	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_RESPONSE,
 			self->rpcid, &self->addr);
 	EXPECT_EQ(EINVAL, -PTR_ERR(rpc));
+}
+TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_after_matching)
+{
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid, 20000, 1600);
+	EXPECT_NE(NULL, crpc1);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->rpcid+1, 20000, 1600);
+	EXPECT_NE(NULL, crpc2);
+	unit_log_clear();
+	
+	hook_rpc = crpc1;
+	delete_count = 1;
+	mock_spin_lock_hook = delete_hook;
+	rpc = homa_wait_for_message(&self->hsk,
+			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING, 0,
+			&self->addr);
+	EXPECT_EQ(crpc2, rpc);
+	EXPECT_SUBSTR("RPC appears to have been deleted",
+			unit_log_get());
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__socket_shutdown_while_sleeping)
 {
@@ -2539,29 +2516,14 @@ TEST_F(homa_incoming, homa_wait_for_message__id_arrives_after_looping_back)
 	EXPECT_EQ(3, poll_hook3_count);
 	homa_rpc_unlock(rpc);
 }
-TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_after_matching)
+TEST_F(homa_incoming, homa_wait_for_message__signal)
 {
 	struct homa_rpc *rpc;
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid, 20000, 1600);
-	EXPECT_NE(NULL, crpc1);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid+1, 20000, 1600);
-	EXPECT_NE(NULL, crpc2);
-	unit_log_clear();
 	
-	hook_rpc = crpc1;
-	delete_count = 1;
-	mock_spin_lock_hook = delete_hook;
-	rpc = homa_wait_for_message(&self->hsk,
-			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING, 0,
+	mock_signal_pending = 1;
+	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_REQUEST, 0,
 			&self->addr);
-	EXPECT_EQ(crpc2, rpc);
-	EXPECT_SUBSTR("RPC appears to have been deleted",
-			unit_log_get());
-	homa_rpc_unlock(rpc);
+	EXPECT_EQ(EINTR, -PTR_ERR(rpc));
 }
 
 TEST_F(homa_incoming, homa_rpc_ready__interest_on_rpc)
