@@ -2270,10 +2270,12 @@ TEST_F(homa_incoming, homa_register_interests__return_from_ready_responses)
 	EXPECT_NE(NULL, crpc);
 	
 	int result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_RESPONSE|HOMA_RECV_NONBLOCKING, 0,
-			&self->addr);
+			HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE
+			|HOMA_RECV_NONBLOCKING, 0, &self->addr);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(12345, atomic_long_read(&self->interest.id));
+	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
+	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
 }
 TEST_F(homa_incoming, homa_register_interests__return_from_ready_requests)
 {
@@ -2283,10 +2285,12 @@ TEST_F(homa_incoming, homa_register_interests__return_from_ready_requests)
 	EXPECT_NE(NULL, srpc);
 	
 	int result = homa_register_interests(&self->interest, &self->hsk,
-			HOMA_RECV_REQUEST|HOMA_RECV_NONBLOCKING, 0,
-			&self->addr);
+			HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE
+			|HOMA_RECV_NONBLOCKING, 0, &self->addr);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(1, atomic_long_read(&self->interest.id));
+	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
+	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
 }
 
 TEST_F(homa_incoming, homa_wait_for_message__rpc_from_register_interests)

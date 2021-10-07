@@ -1,6 +1,22 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* How to distinguish client RPCs from server RPCs
+  * Use the low-order bit to indicate "I'm the server"
+    * But still need id and sockaddr to uniquely identify an RPC.
+    * Will break if machines have different "endian-ness"
+  * Have 2 different ids:
+    * Internal id, assigned by client; not visible to user apps
+    * User id: socket specific, and unique whether client or server;
+      no need for a sockaddr to make it unique.
+  * Combine the two?
+    * Internal ids are always even; these are also used as the client-side
+      user id
+    * On the server, a local id gets assigned, which is odd (to avoid
+      id conflicts
+    * Both this scheme and the previous one require an extra hash table
+      for each socket; server RPCs are present in two different tables.
+
 * Performance-related tasks:
   * Analyze 40-us W4 short message latency by writing a time-trace
     analyzer that tracks NIC queue length.

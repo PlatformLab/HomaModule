@@ -1234,7 +1234,8 @@ int homa_register_interests(struct homa_interest *interest,
 		/* Insert this thread at the *front* of the list;
 		 * we'll get better cache locality if we reuse
 		 * the same thread over and over, rather than
-		 * round-robining between threads.  Same below.*/
+		 * round-robining between threads.  Same below.
+		 */
 		list_add(&interest->response_links,
 				&hsk->response_interests);
 	}
@@ -1242,6 +1243,11 @@ int homa_register_interests(struct homa_interest *interest,
 		if (!list_empty(&hsk->ready_requests)) {
 			rpc = list_first_entry(&hsk->ready_requests,
 					struct homa_rpc, ready_links);
+			/* Make sure the interest isn't on the response list;
+			 * otherwise it might receive a second RPC.
+			 */
+			if (interest->response_links.next != LIST_POISON1)
+				list_del(&interest->response_links);
 			goto claim_rpc;
 		}
 		list_add(&interest->request_links, &hsk->request_interests);
@@ -1481,7 +1487,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 handoff:
 	/* We found a waiting thread. Wakeup the thread and cleanup its
 	 * interest info, so it won't have to acquire the socket lock
-	 * again.
+	 * again. This is also needed so no-one else attempts to give
+	 * this interest an RPC.
 	 */
 	if (interest->reg_rpc) {
 		interest->reg_rpc->interest = NULL;

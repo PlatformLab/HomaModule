@@ -586,8 +586,9 @@ struct homa_interest {
 	 * @id: Id of the RPC that was found, or zero if none. This variable
 	 * is used for synchronization, and must be set after the variables
 	 * below it. This variable and the others below are used later to
-	 * look up and lock the RPC. It isn't safe to pass the RPC itself:
-	 * the locking rules create a window where the RPC could be deleted.
+	 * look up and lock the RPC. It isn't always safe to pass the RPC
+	 * itself: the locking rules create a window where the RPC could be
+	 * deleted.
 	 */
 	atomic_long_t id;
 	
@@ -616,13 +617,14 @@ struct homa_interest {
 	struct homa_rpc *reg_rpc;
 	
 	/**
-	 * @req_links: For linking this object into
-	 * &homa_sock.request_interests.
+	 * @request_links: For linking this object into
+	 * &homa_sock.request_interests. The interest must not be linked
+	 * on either this list or @response_links if @id is nonzero.
 	 */
 	struct list_head request_links;
 	
 	/**
-	 * @req_links: For linking this object into
+	 * @response_links: For linking this object into
 	 * &homa_sock.request_interests.
 	 */
 	struct list_head response_links;
