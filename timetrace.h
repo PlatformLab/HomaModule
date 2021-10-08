@@ -90,6 +90,20 @@ struct tt_proc_file {
 	/* Index of the next entry to return from each tt_buffer. */
 	int pos[NR_CPUS];
 	
+	/* Oldest time such that we know the trace information is
+	 * complete (no entries older than this have been lost due
+	 * to trace buffer wrapping). This is most recent of the oldest
+	 * times in all the traces (a trace that has never wrapped has
+	 * an "oldest time" of 0). 0 means all remaining entries are
+	 * complete.
+	 */
+	uint64_t safe_time;
+	
+	/* True means we need to print a warning that early events may
+	 * not be complete.
+	 */
+	bool print_warning;
+	
 	/* Messages are collected here, so they can be dumped out to
 	 * user space in bulk.
 	 */
