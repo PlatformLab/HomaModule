@@ -328,17 +328,15 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		if (homa_data_pkt(skb, rpc) != 0)
 			return;
 		INC_METRIC(packets_received[DATA - DATA], 1);
-		if (((homa_cores[smp_processor_id()]->
-				metrics.packets_received[0] & 0x7) == 0)
-				&& (hsk->dead_skbs
-				> hsk->homa->dead_buffs_limit)) {
-			INC_METRIC(forced_reaps, 1);
-			tt_record3("Forced reap for port %d, id %d, count %d",
-					hsk->port, rpc->id,
-					hsk->homa->forced_reap_count);
-			homa_rpc_unlock(rpc);
-			homa_rpc_reap(hsk, hsk->homa->forced_reap_count);
-			rpc = NULL;
+		if (hsk->dead_skbs >= 2*hsk->homa->dead_buffs_limit) {
+			/* We get here if neither homa_wait_for_message
+			 * nor homa_timer can keep up with reaping dead
+			 * RPCs. See reap.txt for details.
+			 */
+			uint64_t start = get_cycles();
+			tt_record("homa_data_pkt calling homa_rpc_reap");
+			homa_rpc_reap(hsk, hsk->homa->reap_limit);
+			INC_METRIC(data_pkt_reap_cycles, get_cycles() - start);
 		}
 		break;
 	case GRANT:
@@ -1305,8 +1303,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 //				hsk->client_port, flags, current->pid);
 		
 	        /* There is no ready RPC so far. Clean up dead RPCs before
-		 * going to sleep (do at least a little cleanup even in
-		 * nonblocking mode).
+		 * going to sleep (or returning, if in nonblocking mode).
 		 */
 		while (1) {
 			int reaper_result;
@@ -1327,6 +1324,10 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			
 			/* Give NAPI and SoftIRQ tasks a chance to run. */
 			schedule();
+		}
+		if (flags & HOMA_RECV_NONBLOCKING) {
+			result = ERR_PTR(-EAGAIN);
+			goto got_error_or_rpc;
 		}
 		
 		/* Busy-wait for a while before going to sleep; this avoids
@@ -1481,7 +1482,8 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) hsk;
 	sk->sk_data_ready(sk);
-	tt_record1("homa_rpc_ready finished queuing id %d", rpc->id);
+	tt_record2("homa_rpc_ready finished queuing id %d for port %d",
+			rpc->id, hsk->port);
 	return;
 	
 handoff:

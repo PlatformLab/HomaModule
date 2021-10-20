@@ -146,10 +146,10 @@ void homa_timer(struct homa *homa)
 	cycles_t start, end;
 	struct homa_peer *dead_peer = NULL;
 	int rpc_count = 0;
+	int total_rpcs = 0;
 	
 	start = get_cycles();
 	homa->timer_ticks++;
-//	tt_record("homa_timer starting");
 
 	/* Scan all existing RPCs in all sockets.  The rcu_read_lock
 	 * below prevents sockets from being deleted during the scan.
@@ -157,12 +157,24 @@ void homa_timer(struct homa *homa)
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
+			/* If we get here, it means that homa_wait_for_message
+			 * isn't keeping up with RPC reaping, so we'll help
+			 * out.  See reap.txt for more info. */
+			uint64_t start = get_cycles();
+			tt_record("homa_timer calling homa_rpc_reap");
+			if (homa_rpc_reap(hsk, hsk->homa->reap_limit) == 0)
+				break;
+			INC_METRIC(timer_reap_cycles, get_cycles() - start);
+		}
+		
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
 		
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			total_rpcs++;
 			homa_rpc_lock(rpc);
 			if ((rpc->state == RPC_READY)
 					|| (rpc->state == RPC_IN_SERVICE)) {
@@ -197,48 +209,9 @@ void homa_timer(struct homa *homa)
 		homa_abort_rpcs(homa, dead_peer->addr, 0, -ETIMEDOUT);
 	}
 	
-	if ((homa->timer_ticks & 0x3f) == 0) {
-		/* Recompute homa->forced_reap_count. The overall idea
-		 * is to reap enough packets during each forced reap so that
-		 * we make gradual progress against the accumulated backlog.
-		 * This depends on how often forced reaps occur (once
-		 * every REAP_CHECK+1 input packets) and the number of
-		 * output packets generated for each input packet.
-		 */
-		int core;
-		__u64 rpcs, out, in, delta_in, delta_out, tmp;
-		
-		out = in = rpcs = 0;
-		for (core = 0; core < nr_cpu_ids; core++) {
-			struct homa_metrics *m = &homa_cores[core]->metrics;
-			rpcs += m->requests_received + m->responses_received;
-			out += m->packets_sent[0];
-			in += m->packets_received[0];
-		}
-		delta_in = in - homa->last_received;
-		delta_out = out - homa->last_sent;
-		
-		/* Don't recompute unless we've handled enough RPCs since
-		 * the last recomputation for meaningful statistics.
-		 */
-		if ((rpcs - homa->last_rpcs) >= 1000) {
-			if (delta_in == 0)
-				delta_in = 1;
-			tmp = REAP_CHECK + 1;
-			/* The "2" below is an arbitrary value, to make sure
-			 * we do better than break-even.
-			 */
-			homa->forced_reap_count = 2 +
-					tmp*(delta_in+delta_out)/delta_in;
-//			printk(KERN_NOTICE "New forced_reap_count %d, in %llu, "
-//					"out %llu",
-//					homa->forced_reap_count,
-//					delta_in, delta_out);
-			homa->last_rpcs = rpcs;
-			homa->last_sent = out;
-			homa->last_received = in;
-		}
-	}
+	if (total_rpcs > 0)
+		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
+
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
 //	tt_record("homa_timer finishing");

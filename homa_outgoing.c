@@ -832,7 +832,7 @@ void homa_pacer_xmit(struct homa *homa)
 		
 		offset = homa_rpc_send_offset(rpc);
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, "
-				"port %d, offset %d, bytes_left",
+				"port %d, offset %d, bytes_left %d",
 				rpc->id, rpc->hsk->port, offset,
 				rpc->msgout.length - offset);
 		homa_xmit_data(rpc, true);

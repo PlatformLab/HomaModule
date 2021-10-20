@@ -539,7 +539,8 @@ TEST_F(homa_incoming, homa_pkt_dispatch__cutoffs_for_unknown_client_rpc)
 			.id = 99999, .generation = htons(1), .type = CUTOFFS,
 			.from_client = 0},
 		        .unsched_cutoffs = {htonl(10), htonl(9), htonl(8),
-			htonl(7), htonl(6), htonl(5), htonl(4), htonl(3)},
+			htonl(7), htonl(6), htonl(5), htonl(4),
+			htonl(3)},
 			.cutoff_version = 400};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
@@ -647,29 +648,22 @@ TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
 			self->client_ip, self->server_ip, self->client_port,
 			self->rpcid, 10000, 5000);
 	EXPECT_NE(NULL, srpc);
-	self->homa.dead_buffs_limit = 5;
-	self->homa.forced_reap_count = 12;
+	self->homa.dead_buffs_limit = 16;
+	mock_cycles = ~0;
 	
-	/* First packet: not time to check. */
-	homa_cores[cpu_number]->metrics.packets_received[0] = 6;
+	/* First packet: below the threshold for reaps. */
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->hsk);
 	EXPECT_EQ(30, self->hsk.dead_skbs);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.forced_reaps);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.data_pkt_reap_cycles);
 	
 	/* Second packet: must reap. */
+	self->homa.dead_buffs_limit = 15;
+	self->homa.reap_limit = 10;
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->hsk);
-	EXPECT_EQ(18, self->hsk.dead_skbs);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.forced_reaps);
-	
-	/* Third packet: below the forced reap threshold. */
-	homa_cores[cpu_number]->metrics.packets_received[0] = 7;
-	self->homa.dead_buffs_limit = 20;
-	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
-			1400, 0), &self->hsk);
-	EXPECT_EQ(18, self->hsk.dead_skbs);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.forced_reaps);
+	EXPECT_EQ(20, self->hsk.dead_skbs);
+	EXPECT_NE(0, homa_cores[cpu_number]->metrics.data_pkt_reap_cycles);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 {
@@ -2353,7 +2347,7 @@ TEST_F(homa_incoming, homa_wait_for_message__id_arrives_while_polling)
 	EXPECT_EQ(0, self->hsk.dead_skbs);
 	homa_rpc_unlock(rpc);
 }
-TEST_F(homa_incoming, homa_wait_for_message__id_not_ready)
+TEST_F(homa_incoming, homa_wait_for_message__id_not_ready_nonblocking)
 {
 	struct homa_rpc *rpc;
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
@@ -2361,23 +2355,11 @@ TEST_F(homa_incoming, homa_wait_for_message__id_not_ready)
 			self->server_port, self->rpcid, 20000, 1600);
 	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->rpcid+1, 20000, 1600);
-	
-        /* Also, check to see that one round of reaping occurs before
-	 * returning.
-	 */
-	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->rpcid+2, 20000, 20000);
-	self->homa.reap_limit = 5;
-	homa_rpc_free(crpc3);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
-	
 	EXPECT_NE(NULL, crpc1);
 	
 	rpc = homa_wait_for_message(&self->hsk, HOMA_RECV_NONBLOCKING,
 			self->rpcid, &self->addr);
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
-	EXPECT_EQ(25, self->hsk.dead_skbs);
 }
 TEST_F(homa_incoming, homa_wait_for_message__id_arrives_while_sleeping)
 {

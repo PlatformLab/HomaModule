@@ -122,11 +122,7 @@ int homa_init(struct homa *homa)
 	homa->timeout_resends = 5;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;
-	homa->forced_reap_count = 20;
 	homa->max_dead_buffs = 0;
-	homa->last_rpcs = 0;
-	homa->last_sent = 0;
-	homa->last_received = 0;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 			"homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -413,7 +409,8 @@ void homa_rpc_free(struct homa_rpc *rpc)
  * RPCs for a given socket. For a large RPC, it can take a long time to
  * free all of its packet buffers, so we try to perform this work
  * off the critical path where it won't delay applications. Each call to
- * this function does a small chunk of work.
+ * this function does a small chunk of work. See the file reap.txt for
+ * more information.
  * @hsk:   Homa socket that may contain dead RPCs. Must not be locked by the
  *         caller; this function will lock and release.
  * @count: Number of buffers to free during this call.
@@ -453,6 +450,10 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		homa_sock_lock(hsk, "homa_rpc_reap");
 		if (atomic_read(&hsk->protect_count)) {
 			INC_METRIC(disabled_reaps, 1);
+			tt_record2("homa_rpc_reap returning: protect_count "
+					"%d, dead_skbs %d",
+					atomic_read(&hsk->protect_count),
+					hsk->dead_skbs);
 			homa_sock_unlock(hsk);
 			return 0;
 		}
@@ -524,7 +525,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			rpcs[i]->state = 0;
 			kfree(rpcs[i]);
 		}
-		tt_record2("reaped %d skbs, %d rpcs", num_skbs, num_rpcs);
+		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
+				num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);
 		if (!result)
 			break;
 	}
@@ -1213,6 +1215,14 @@ char *homa_print_metrics(struct homa *homa)
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",
 				m->timer_cycles);
+		homa_append_metric(homa,
+				"timer_reap_cycles         %15llu  "
+				"Time in homa_timer spent reaping RPCs\n",
+				m->timer_reap_cycles);
+		homa_append_metric(homa,
+				"data_pkt_reap_cycles      %15llu  "
+				"Time in homa_data_pkt spent reaping RPCs\n",
+				m->data_pkt_reap_cycles);
 		homa_append_metric(homa,
 				"pacer_cycles              %15llu  "
 				"Time spent in homa_pacer_main\n",

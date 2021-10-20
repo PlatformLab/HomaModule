@@ -1464,35 +1464,9 @@ struct homa {
 	 * RPCs in a way that minimizes impact on performance but may permit
 	 * dead RPCs to accumulate. If the number of dead packet buffers
 	 * exceeds this value, then Homa switches to a more aggressive approach
-	 * to reaping RPCs, which is more likely to impact performance.   Set
-	 * externally via sysctl.
+	 * to reaping RPCs. Set externally via sysctl.
 	 */
 	int dead_buffs_limit;
-	
-	/**
-	 * @forced_reap_count: When reaping occurs because dead_buffs_limit
-	 * has been exceeded, this determines how many buffers to reap.
-	 * Computed dynamically by homa_timer based on workload.
-	 */
-	int forced_reap_count;
-	
-	/**
-	 * @last_rpcs: Cumulative total RPCs sent and/or received as of
-	 * the last time @forced_reap_count was recomputed.
-	 */
-	__u64 last_rpcs;
-	
-	/**
-	 * @last_sent: Cumulative total packets sent as of the last time
-	 * @forced_reap_count was recomputed.
-	 */
-	__u64 last_sent;
-	
-	/**
-	 * @last_received: Cumulative total packets received as of the last
-	 * time @forced_reap_count was recomputed.
-	 */
-	__u64 last_received;
 	
 	/**
 	 * @max_dead_buffs: The largest aggregate number of packet buffers
@@ -1826,6 +1800,19 @@ struct homa_metrics {
 	 * get_cycles().
 	 */
 	__u64 timer_cycles;
+	
+	/**
+	 * @timer_reap_cycles: total time spent by homa_timer to reap dead
+	 * RPCs, as measured with get_cycles(). This time is included in
+	 * @timer_cycles.
+	 */
+	__u64 timer_reap_cycles;
+	
+	/**
+	 * @data_pkt_reap_cycles: total time spent by homa_data_pkt to reap
+	 * dead RPCs, as measured with get_cycles().
+	 */
+	__u64 data_pkt_reap_cycles;
 
 	/**
 	 * @pacer_cycles: total time spent executing in homa_pacer_main

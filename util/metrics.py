@@ -404,7 +404,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["pacer_lost_cycles"]:
+    for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
+            "data_pkt_reap_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue

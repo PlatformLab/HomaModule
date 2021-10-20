@@ -545,10 +545,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	uint64_t elapsed;
 	struct homa_rpc *rpc = NULL;
 
-	tt_record2("homa_ioc_recv starting, port %d, pid %d",
-			hsk->port, current->pid);
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
+	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
+			hsk->port, current->pid, args.flags);
 	if (args.buf != NULL) {
 		err = import_single_range(READ, args.buf, args.len, iovstack,
 				&iter);

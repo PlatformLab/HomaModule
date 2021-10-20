@@ -1,0 +1,44 @@
+This file discusses issues related to freeing resources for completed RPCs
+("reaping").
+
+* Most of the cost of reaping comes from freeing skbuffs; this can be
+  quite expensive for RPCs with long messages.
+
+* The natural time to reap is when homa_rpc_free is invoked to mark an
+  RPC completed, but this can result in severe performance hiccups. For
+  example, a server RPC is freed once the last packet of the response
+  has been transmitted, but this can happen in homa_softirq in response
+  to an incoming grant, and there may be other short messages waiting
+  to be processed. Freeing a long RPC could result in significant delay
+  for a subsequent short RPC.
+
+* Thus Homa doesn't reap immediately in homa_rpc_free. Instead, dead RPCs
+  are queued up and reaping occurs later, at a more convenient time where
+  it is less likely to impact latency. The challenge is to figure out how to
+  do this so that (a) we keep up with dead RPCs and (b) we minimize
+  the impact of reaping on latency.
+
+* The ideal time to reap is when threads are waiting for incoming messages
+  in homa_wait_for_message. The thread has nothing else to do, so reaping
+  can be performed with no latency impact on the application.  However,
+  if a machine is overloaded then it may never wait, so this mechanism
+  isn't always sufficient.
+
+* Homa now reaps in two other places, if homa_wait_for_message can't
+  keep up:
+  * If dead_buffs_limit dead skbs accumulate, then homa_timer will
+    reap to get down to that limit. However, it seems possible that
+    there may be cases where a single thread cannot keep up with all
+    the reaping to be done.
+  * If homa_timer can't keep up, then as a last resort, homa_pkt_dispatch
+    will reap a few buffers for every incoming data packet. This is undesirable
+    because it will impact Homa's performance.
+
+* Here are some approaches that have been tried and eventually abandoned:
+  * Occasionally when data packets arrive, reap if too much dead info has
+    accumulated. This will cause a latency impact. The amount to reap is
+    chosen dynamically (by homa_timer) to be as small as possible while
+    gradually working through the backlog. Unfortunately, the formula for
+    computing how much to reap was fragile and resulted in situations where
+    the backlog of dead RPCs grew without bound. This approach was abandoned
+    in October 2021.
