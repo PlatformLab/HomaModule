@@ -78,7 +78,7 @@ TEST_F(timetrace, tt_record__basics)
 
 TEST_F(timetrace, tt_record_buf__wraparound)
 {
-	char buffer[1000];
+	char buffer[100];
 	tt_buffer_size = 4;
 	tt_record("Message 1");
 	mock_cycles++;
@@ -109,7 +109,7 @@ TEST_F(timetrace, tt_proc_open__no_memory)
 	int err = -tt_proc_open(NULL, &self->file);
 	EXPECT_EQ(ENOMEM, err);
 }
-TEST_F(timetrace, tt_proc_open__mark_region_of_incomplete_events)
+TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 {
 	char buffer[1000];
 	tt_buffer_size = 4;
@@ -134,11 +134,7 @@ TEST_F(timetrace, tt_proc_open__mark_region_of_incomplete_events)
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
-	EXPECT_STREQ("1000 [C00] INTIAL TRACE ENTRIES MAY NOT BE COMPLETE\n"
-			"1000 [C03] Buf3\n"
-			"1100 [C01] Buf1\n"
-			"1150 [C00] ENTRIES FROM HERE ON ARE COMPLETE\n"
-			"1150 [C02] Buf2\n"
+	EXPECT_STREQ("1150 [C02] Buf2\n"
 			"1160 [C02] Buf2\n"
 			"1200 [C01] Buf1\n"
 			"1210 [C02] Buf2\n"

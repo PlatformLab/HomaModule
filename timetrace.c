@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2020 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -263,6 +263,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 {
 	struct tt_proc_file* pf;
 	struct tt_buffer* buffer;
+	__u64 start_time;
 	int result = 0;
 	int i;
 	
@@ -277,8 +278,6 @@ int tt_proc_open(struct inode *inode, struct file *file)
 		goto done;
 	}
 	pf->file = file;
-	pf->safe_time = 0;
-	pf->print_warning = false;
 	pf->leftover = NULL;
 	pf->num_leftover = 0;
 	
@@ -290,8 +289,12 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	 * nextIndex; this is convenient because it simplifies boundary
 	 * conditions in the code below.
 	 * 
-	 * At the same time, compute pf->safe_time.
+	 * At the same time, find the most recent "oldest time" from
+	 * any buffer that has wrapped around (data from earlier than
+	 * this isn't necessarily complete, since there may have been
+	 * events that were discarded).
 	 */
+	start_time = 0;
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
 		if (buffer->events[tt_buffer_size-1].format == NULL) {
@@ -301,24 +304,22 @@ int tt_proc_open(struct inode *inode, struct file *file)
 					& (tt_buffer_size-1);
 			struct tt_event *event = &buffer->events[index];
 			pf->pos[i] = index;
-			if (event->timestamp > pf->safe_time) {
-				pf->safe_time = event->timestamp;
+			if (event->timestamp > start_time) {
+				start_time = event->timestamp;
 			}
 		}
 	}
 	
-	/* See if any buffers have events before safe_time. 
+	/* Skip over all events before start_time, in order to make
+	 * sure that there's no missing data in what we print. 
 	 */
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
-		if ((buffer->events[pf->pos[i]].timestamp < pf->safe_time)
-				&& (buffer->events[pf->pos[i]].format != NULL)) {
-			pf->print_warning = true;
-			break;
+		while ((buffer->events[pf->pos[i]].timestamp < start_time)
+				&& (pf->pos[i] != buffer->next_index)) {
+			pf->pos[i] = (pf->pos[i] + 1) & (tt_buffer_size-1);
 		}
 	}
-	if (!pf->print_warning)
-		pf->safe_time = 0;
 	
 	file->private_data = pf;
 	
@@ -326,7 +327,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 		pf->num_leftover = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
 				"cpu_khz: %u\n", cpu_khz);
 		pf->leftover = pf->msg_storage;
-	}	
+	}
 	
 	done:
 	spin_unlock(&tt_lock);
@@ -414,33 +415,12 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		    goto flush;
 		}
 		
-		
 		/* Format one event. */
 		event = &(tt_buffers[current_core]->events[
 				pf->pos[current_core]]);
-		if (pf->print_warning) {
-			buffered += snprintf(pf->msg_storage + buffered,
-					tt_pf_storage - buffered,
-					"%llu [C00] INTIAL TRACE "
-					"ENTRIES MAY NOT BE COMPLETE\n",
-					event->timestamp);
-		}
-		pf->print_warning = false;
 		available = tt_pf_storage - buffered;
 		if (available == 0) {
 			goto flush;
-		}
-		if ((pf->safe_time != 0)
-				&& (event->timestamp >= pf->safe_time)) {
-			entry_length = snprintf(pf->msg_storage + buffered,
-				available,
-				"%lu [C00] ENTRIES FROM HERE ON ARE COMPLETE\n",
-				(long unsigned int) event->timestamp);
-			if (entry_length >= available)
-				goto flush;
-			buffered += entry_length;
-			available -= entry_length;
-			pf->safe_time = 0;
 		}
 		entry_length = snprintf(pf->msg_storage + buffered, available,
 				"%lu [C%02d] ",
