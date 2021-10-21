@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -257,9 +257,10 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
+	__u64 id = homa_local_id(h);
 	
 	/* Find and lock the RPC for this packet. */
-	if (h->from_client) {
+	if (!homa_is_client(id)) {
 		/* We are the server for this RPC. */
 		if ((h->type == DATA)
 				&& !((struct data_header *) h)->retransmit) {
@@ -277,10 +278,10 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			}
 		} else
 			rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
-					ntohs(h->sport), h->id);
+					ntohs(h->sport), id);
 			
 	} else {
-		rpc = homa_find_client_rpc(hsk, h->id);
+		rpc = homa_find_client_rpc(hsk, id);
 	}
 	if (unlikely(rpc == NULL)) {
 		if (hsk->homa->verbose) {
@@ -295,10 +296,10 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 				homa_xmit_unknown(skb, hsk);
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
-					h->id & 0xffffffff, h->type,
+					id, h->type,
 					ntohl(ip_hdr(skb)->saddr),
 					ntohs(h->sport));
-			if ((h->type != GRANT) || !h->from_client)
+			if ((h->type != GRANT) || homa_is_client(id))
 				INC_METRIC(unknown_rpcs, 1);
 			goto discard;
 		}
@@ -306,7 +307,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		__u16 pkt_generation = ntohs(h->generation);
 		BUG_ON(rpc->state == RPC_DEAD);
 		if (pkt_generation != rpc->generation) {
-			if (!rpc->is_client && (pkt_generation
+			if (!homa_is_client(rpc->id) && (pkt_generation
 					> rpc->generation))
 				rpc->generation = pkt_generation;
 			else {
@@ -354,7 +355,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
 		tt_record2("received BUSY for id %d, peer 0x%x",
-				h->id, ntohl(rpc->peer->addr));
+				id, ntohl(rpc->peer->addr));
 		/* Nothing to do for these packets except reset silent_ticks,
 		 * which happened above.
 		 */
@@ -395,12 +396,13 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	int incoming = ntohl(h->incoming);
 	
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
-			h->common.id, ntohl(rpc->peer->addr),
-			ntohl(h->seg.offset), ntohl(h->message_length));
+			homa_local_id(&h->common),
+			ntohl(rpc->peer->addr), ntohl(h->seg.offset),
+			ntohl(h->message_length));
 	
 	if (rpc->state != RPC_INCOMING) {
-		if (unlikely(!rpc->is_client || (rpc->state == RPC_READY))) {
-			
+		if (unlikely(!homa_is_client(rpc->id)
+				|| (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
 			return 0;			
 		}
@@ -485,7 +487,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
 	tt_record3("processing grant for id %llu, offset %d, priority %d",
-			h->common.id, ntohl(h->offset), h->priority);
+			homa_local_id(&h->common), ntohl(h->offset),
+			h->priority);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
@@ -496,7 +499,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
-		if (!rpc->msgout.next_packet && !rpc->is_client) {
+		if (!rpc->msgout.next_packet && !homa_is_client(rpc->id)) {
 			/* This is a server RPC that has been completely sent;
 			 * time to delete the RPC.
 			 */
@@ -520,10 +523,10 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
 	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
-			h->common.id, ntohl(h->offset), ntohl(h->length),
+			rpc->id, ntohl(h->offset), ntohl(h->length),
 			h->priority);
 
-	if (!rpc->is_client) {
+	if (!homa_is_client(rpc->id)) {
 		/* We are the server for this RPC. */
 		if (rpc->state != RPC_OUTGOING) {
 			tt_record2("sending BUSY from resend, id %d, state %d",
@@ -570,7 +573,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	int err;
 	tt_record3("Received unknown for id %llu, peer %x:%d", rpc->id,
 			ntohl(rpc->peer->addr), rpc->dport);
-	if (rpc->is_client) {
+	if (homa_is_client(rpc->id)) {
 		if (rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
 					"id %llu",
@@ -1082,7 +1085,7 @@ void homa_log_grantable_list(struct homa *homa)
 /**
  * homa_rpc_abort() - Terminate an RPC and arrange for an error to be returned
  * to the application.
- * @crpc:    RPC to be terminated. Must be a client RPC (@is_client != 0).
+ * @crpc:    RPC to be terminated. Must be a client RPC.
  * @error:   A negative errno value indicating the error that caused the abort.
  */
 void homa_rpc_abort(struct homa_rpc *crpc, int error)
@@ -1132,7 +1135,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 				homa_rpc_unlock(rpc);
 				continue;
 			}
-			if (rpc->is_client) {
+			if (homa_is_client(rpc->id)) {
 				homa_rpc_abort(rpc, error);
 			} else {
 				INC_METRIC(server_rpc_discards, 1);
@@ -1161,11 +1164,9 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
  * @flags:        Flags parameter from homa_recv; see manual entry for details. 
  * @id:           If non-zero, then a message will not be returned unless its
  *                RPC id matches this.
- * @client_addr:  Used in conjunction with @id to select a specific message.
- *                If the host address is zero, then @id refers to an
- *                outgoing request where we are the client; otherwise the
- *                desired RPC is one where we are the server and this
- *                identifies the client for the request.
+ * @client_addr:  Used in conjunction with @id to select a specific message
+ *                if we are server for id. If we're the client for id, then
+ *                id is already unique, so this argument is ignored.
  * Return:        Either zero or a negative errno value. If a matching RPC
  *                is already available, information about it will be stored in
  *                interest.
@@ -1185,7 +1186,7 @@ int homa_register_interests(struct homa_interest *interest,
 	
 	/* Need both the RPC lock and the socket lock to avoid races. */
 	if (id != 0) {
-		if (client_addr->sin_addr.s_addr == 0)
+		if (homa_is_client(id))
 			rpc = homa_find_client_rpc(hsk, id);
 		else
 			rpc = homa_find_server_rpc(hsk,
@@ -1403,7 +1404,7 @@ got_error_or_rpc:
 		if (atomic_long_read(&interest.id)) {
 			/* RPC isn't currently locked; lock it now. */
 			struct homa_rpc *rpc;
-			if (interest.is_client)
+			if (homa_is_client(atomic_long_read(&interest.id)))
 				rpc = homa_find_client_rpc(hsk,
 						atomic_long_read(&interest.id));
 			else
@@ -1457,7 +1458,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	}
 	
 	/* Second, check the interest list for this type of RPC. */
-	if (rpc->is_client) {
+	if (homa_is_client(rpc->id)) {
 		interest = list_first_entry_or_null(
 				&hsk->response_interests,
 				struct homa_interest, response_links);

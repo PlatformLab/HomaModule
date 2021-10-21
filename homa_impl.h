@@ -191,13 +191,7 @@ struct common_header {
 	/** @type: One of the values of &enum packet_type. */
 	__u8 type;
 	
-	/**
-	 * @from_client: 1 means sender of packet is RPC client;
-	 * 0 means server.
-	 */
-	__u8 from_client;
-	
-	__u8 unused3;
+	__u16 unused3;
 	
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
@@ -211,11 +205,11 @@ struct common_header {
 	__be16 generation;
 	
 	/**
-	 * @id: Identifier for the RPC associated with this packet; must
-	 * be unique among all those issued from the client port. Stored
-	 * in client host byte order.
+	 * @sender_id: the identifier of this RPC as used on the sender (i.e.,
+	 * if the low-order bit is set, then the sender is the server for
+	 * this RPC).
 	 */
-	__be64 id;
+	__be64 sender_id;
 } __attribute__((packed));
 
 /** 
@@ -605,12 +599,6 @@ struct homa_interest {
 	__u16 peer_port;
 	
 	/**
-	 * @is_client: True means that the matching RPC is a client RPC. Valid
-	 * only if @id is nonzero.
-	 */
-	bool is_client;
-	
-	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
 	 * NULL if none.
 	 */
@@ -692,9 +680,6 @@ struct homa_rpc {
 		RPC_DEAD                = 9
 	} state;
 	
-	/** @is_client: True means this is a client RPC, false means server. */
-	bool is_client;
-	
 	/** 
 	 * @dont_reap: True means data is still being copied out of the
 	 * RPC to a receiver, so it isn't safe to reap it yet.
@@ -720,7 +705,8 @@ struct homa_rpc {
 	
 	/**
 	 * @id: Unique identifier for the RPC among all those issued
-	 * from its port. Selected by the client.
+	 * from its port. The low-order bit indicates whether we are
+	 * server (1) or client (0) for this RPC.
 	 */
 	__u64 id;
 	
@@ -1193,7 +1179,9 @@ struct homa_peer {
  * unit tests.
  */
 struct homa {
-	/** @next_outgoing_id: Id to use for next outgoing RPC request.
+	/**
+	 * @next_outgoing_id: Id to use for next outgoing RPC request.
+	 * This is always even: it's used only to generate client-side ids.
 	 * Accessed without locks.
 	 */
 	atomic64_t next_outgoing_id;
@@ -2132,6 +2120,26 @@ struct homa_core {
 	struct homa_metrics metrics;
 };
 
+/**
+ * homa_is_client(): returns true if we are the client for a particular RPC,
+ * false if we are the server.
+ * @id:  Id of the RPC in question.
+ */
+static inline bool homa_is_client(__u64 id)
+{
+	return (id & 1) == 0;
+}
+
+/**
+ * homa_local_id(): returns the RPC identifier that we should use on this
+ * machine for a given incoming packet.
+ * @h:  Header for an incoming packet.
+ */
+static inline __u64 homa_local_id(struct common_header *h)
+{
+	return be64_to_cpu(h->sender_id) ^ 1;
+}
+
 #define homa_bucket_lock(bucket, type)                      \
 	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
 		__u64 start = get_cycles();                 \
@@ -2154,7 +2162,8 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
 	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
 	 */
-	return &hsk->client_rpc_buckets[id & (HOMA_CLIENT_RPC_BUCKETS - 1)];
+	return &hsk->client_rpc_buckets[(id >> 1)
+			& (HOMA_CLIENT_RPC_BUCKETS - 1)];
 }
 
 /**
@@ -2179,7 +2188,6 @@ inline static void homa_interest_set(struct homa_interest *interest,
 {
 	interest->peer_addr = rpc->peer->addr;
 	interest->peer_port = rpc->dport;
-	interest->is_client = rpc->is_client;
 	
 	/* Must set last for proper synchronization. */
 	atomic_long_set_release(&interest->id, rpc->id);
@@ -2231,7 +2239,8 @@ static inline struct homa_rpc_bucket *homa_server_rpc_bucket(
 	 * naturally distribute themselves across the hash space.
 	 * Thus we can use the id directly as hash.
 	 */
-	return &hsk->server_rpc_buckets[id & (HOMA_SERVER_RPC_BUCKETS - 1)];
+	return &hsk->server_rpc_buckets[(id >> 1)
+			& (HOMA_SERVER_RPC_BUCKETS - 1)];
 }
 
 /**
@@ -2390,7 +2399,7 @@ extern void     homa_dst_refresh(struct homa_peertab *peertab,
 extern int      homa_err_handler(struct sk_buff *skb, u32 info);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-                    struct iov_iter *iter, int is_client);
+                    struct iov_iter *iter);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -121,14 +121,14 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
-				h_new->common.id & 0xffffffff,
+				homa_local_id(&h_new->common),
 				ntohl(h_new->seg.offset),
 				iph->tos >> 5);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type %d, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
-				h_new->common.id & 0xffffffff,
+				homa_local_id(&h_new->common),
 				h_new->common.type, iph->tos >> 5);
 	
 	core->last_active = get_cycles();

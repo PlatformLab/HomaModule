@@ -73,8 +73,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			.sport = htons(server_port),
 	                .dport = htons(hsk->port),
 			.type = DATA,
-			.from_client = 0,
-			.id = id
+			.sender_id = cpu_to_be64(id ^ 1)
 		},
 		.message_length = htonl(resp_length),
 		.incoming = htonl(10000),
@@ -200,7 +199,8 @@ void unit_log_grantables(struct homa *homa)
 				grantable_links) {
 			unit_log_printf("; ", "%s from %s, id %lu, "
 					"remaining %d",
-					rpc->is_client ? "response" : "request",
+					homa_is_client(rpc->id) ? "response"
+					: "request",
 					homa_print_ipv4_addr(peer->addr),
 					(long unsigned int) rpc->id,
 					rpc->msgin.bytes_remaining);
@@ -300,7 +300,8 @@ void unit_log_throttled(struct homa *homa)
 		else
 			offset = rpc->msgout.length;
 		unit_log_printf("; ", "%s %lu, next_offset %d",
-				rpc->is_client ? "request" : "response",
+				homa_is_client(rpc->id) ? "request"
+				: "response",
 				(long unsigned int) rpc->id, offset);
 	}
 }
@@ -334,8 +335,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			.sport = htons(client_port),
 	                .dport = htons(hsk->port),
 			.type = DATA,
-			.from_client = 1,
-			.id = id,
+			.sender_id = cpu_to_be64(id ^ 1),
 			.generation = htons(1)
 		},
 		.message_length = htonl(req_length),
@@ -381,8 +381,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	if (srpc->state == state)
 		return srpc;
 	homa_message_out_init(srpc, hsk->port, homa_fill_packets(hsk,
-			srpc->peer, unit_iov_iter((void *) 2000, resp_length),
-			0), resp_length);
+			srpc->peer, unit_iov_iter((void *) 2000, resp_length)),
+			resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;

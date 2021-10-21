@@ -67,7 +67,7 @@ int homa_init(struct homa *homa)
 	}
 	
 	homa->pacer_kthread = NULL;
-	atomic64_set(&homa->next_outgoing_id, 1);
+	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_peers);
@@ -202,12 +202,11 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
-	crpc->id = atomic64_fetch_add(1, &hsk->homa->next_outgoing_id);
+	crpc->id = atomic64_fetch_add(2, &hsk->homa->next_outgoing_id);
 	crpc->generation = 1;
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
-	crpc->is_client = true;
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
@@ -221,7 +220,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
-	skb = homa_fill_packets(hsk, crpc->peer, iter, 1);
+	skb = homa_fill_packets(hsk, crpc->peer, iter);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
 		tt_record1("error in homa_fill_packets: %d", err);
@@ -281,15 +280,15 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 {
 	int err;
 	struct homa_rpc *srpc;
-	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk,
-			h->common.id);
+	__u64 id = homa_local_id(&h->common);
+	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	
 	/* Lock the bucket, and make sure no-one else has already created
 	 * the desired RPC.
 	 */
 	homa_bucket_lock(bucket, server);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
-		if ((srpc->id == h->common.id) && 
+		if ((srpc->id == id) && 
 				(srpc->dport == ntohs(h->common.sport)) &&
 				(srpc->peer->addr == source)) {
 			/* RPC already exists; just return it instead
@@ -308,7 +307,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->lock = &bucket->lock;
 	srpc->state = RPC_INCOMING;
-	srpc->is_client = false;
 	srpc->dont_reap = false;
 	atomic_set(&srpc->grants_in_progress, 0);
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
@@ -318,7 +316,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		goto error;
 	}
 	srpc->dport = ntohs(h->common.sport);
-	srpc->id = h->common.id;
+	srpc->id = id;
 	srpc->generation = ntohs(h->common.generation);
 	srpc->error = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
@@ -352,7 +350,7 @@ void homa_rpc_lock_slow(struct homa_rpc *rpc)
 {
 	__u64 start = get_cycles();
 	spin_lock_bh(rpc->lock);
-	if (rpc->is_client) {
+	if (homa_is_client(rpc->id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
 	} else {
@@ -583,7 +581,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  * @hsk:      Socket via which packet was received.
  * @saddr:    Address from which the packet was sent.
  * @sport:    Port at @saddr from which the packet was sent.
- * @id:       Unique identifier for the RPC.
+ * @id:       Unique identifier for the RPC (must have server bit set).
  * 
  * Return:    A pointer to the homa_rpc matching the arguments, or NULL
  *            if none. The RPC will be locked; the caller must eventually
@@ -612,7 +610,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
  */
 void homa_rpc_log(struct homa_rpc *rpc)
 {
-	char *type = (rpc->is_client) ? "Client" : "Server";
+	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
 	char *peer = homa_print_ipv4_addr(rpc->peer->addr);
 	
 	if (rpc->state == RPC_INCOMING)
@@ -726,7 +724,8 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-		ntohs(common->sport), ntohs(common->dport), common->id);
+		ntohs(common->sport), ntohs(common->dport),
+		be64_to_cpu(common->sender_id));
 	if (ntohs(common->generation) != 1)
 		used = homa_snprintf(buffer, buf_len, used, ", generation %d",
 				ntohs(common->generation));

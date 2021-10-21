@@ -118,6 +118,17 @@ so that it may no longer be used for either sending or receiving messages.
 If any threads are blocked waiting on the socket, they will be unblocked
 and their current operations will return
 .BR ESHUTDOWN .
+.SH IDENTIFIERS
+.PP
+When a client sends a request, Homa assigns a unique identifier
+to that message, which the client can use to receive the response.
+Client-side identifiers are always even (their low-order bit is 0).
+When a server receives a request, it also receives an identifier
+for that request, which must be presented when returning a response. The
+server-side identifier will be the same as the client-side
+identifier except that the low-order bit will be 1.
+When an application receives a message, it can determine whether it
+is a request or response by testing the low-order bit of its identifier.
 .SH SYSCTL PARAMETERS
 .PP
 Homa supports several parameters that can be set with

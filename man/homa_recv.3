@@ -76,17 +76,27 @@ is nonzero then a message matching
 .I *id
 and
 .I *src_addr
-may be returned:
-if
-.I src_addr->sin_addr
-is zero, then the message must be a response with the
-given identifier; otherwise the message must be a previously-received
-request from the given source with the given identifier (this is used
-to continue reading a partially read request as described below).
+may be returned: if the desired message is a request
+(the low-order bit of
+.I *id
+is 1), then
+.I *src_addr
+is used along with
+.I *id
+to specify the message; if the desired message is a response (the
+low-order bit of
+.I *id
+is 0), then
+.I *id
+already specifies the message uniquely, so
+.I *src_addr
+is ignored.
 .PP
 The identifier for the received message is returned at
-.IR *id
-and the source address for the message is placed in the buffer
+.IR *id ;
+its low-order bit indicates whether the message is a request (1)
+or response (0).
+The source address for the message is placed in the buffer
 pointed to by
 .IR src_addr .
 The argument
@@ -111,7 +121,7 @@ to respond (Homa retains state for the request until
 .BR homa_reply (3)
 is invoked).
 .PP
-If a request message is larger than buffer space provided,
+If a message is larger than buffer space provided,
 .BR homa_recv
 or
 .BR homa_recvv

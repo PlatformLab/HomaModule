@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2021, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -38,7 +38,8 @@ FIXTURE_SETUP(homa_offload)
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
-			.type = DATA, .from_client = 1, .id = 1000,
+			.type = DATA,
+			.sender_id = cpu_to_be64(1000),
 			.generation = htons(1)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
@@ -58,7 +59,7 @@ FIXTURE_SETUP(homa_offload)
 	NAPI_GRO_CB(self->skb)->count = 1;
         self->header.seg.offset = htonl(4000);
         self->header.common.dport = htons(88);
-        self->header.common.id = 1001;
+        self->header.common.sender_id = cpu_to_be64(1002);
 	self->skb2 = mock_skb_new(self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(self->skb2)->same_flow = 0;
 	NAPI_GRO_CB(self->skb2)->last = self->skb2;
@@ -121,7 +122,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	homa_cores[cpu_number]->held_bucket = 2;
 	
 	self->header.seg.offset = htonl(6000);
-	self->header.common.id = 1002;
+	self->header.common.sender_id = cpu_to_be64(1002);
 	skb = mock_skb_new(self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb));
@@ -130,7 +131,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
 	
 	self->header.seg.offset = htonl(7000);
-	self->header.common.id = 1003;
+	self->header.common.sender_id = cpu_to_be64(1004);
 	skb2 = mock_skb_new(self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb2)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb2));
@@ -142,7 +143,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, "
 			"message_length 10000, offset 6000, "
 			"data_length 1400, incoming 10000; "
-			"DATA from 196.168.0.1:40000, dport 88, id 1003, "
+			"DATA from 196.168.0.1:40000, dport 88, id 1004, "
 			"message_length 10000, offset 7000, "
 			"data_length 1400, incoming 10000",
 			unit_log_get());
@@ -169,7 +170,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 			&self->napi.gro_hash[3].list, skb)));
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
 	EXPECT_EQ(1, self->napi.gro_hash[2].count);
-	EXPECT_STREQ("netif_receive_skb, id 1001, offset 4000",
+	EXPECT_STREQ("netif_receive_skb, id 1002, offset 4000",
 			unit_log_get());
 	kfree_skb(self->skb2);
 	EXPECT_EQ(1, self->napi.gro_hash[2].count);

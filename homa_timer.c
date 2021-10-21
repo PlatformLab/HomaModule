@@ -108,7 +108,7 @@ resend:
 	homa_get_resend_range(&rpc->msgin, &resend);
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-	if (rpc->is_client) {
+	if (homa_is_client(rpc->id)) {
 		us = "client";
 		them = "server";
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "

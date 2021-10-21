@@ -621,7 +621,7 @@ int netif_receive_skb(struct sk_buff *skb)
 	struct data_header *h = (struct data_header *)
 			skb_transport_header(skb);
 	unit_log_printf("; ", "netif_receive_skb, id %llu, offset %d",
-			h->common.id, ntohl(h->seg.offset));
+			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
 	return 0;
 }
 

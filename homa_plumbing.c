@@ -572,7 +572,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 */
 	elapsed = (get_cycles() - rpc->start_cycles)>>10;
 	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
-			&& (rpc->is_client) && (rpc->msgin.total_length < 500)
+			&& homa_is_client(rpc->id)
+			&& (rpc->msgin.total_length < 500)
 			&& !tt_frozen) {
 		struct freeze_header freeze;
 		tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
@@ -603,7 +604,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 * still access the RPC even without holding its lock.
 	 */
 	rpc->dont_reap = true;
-	if (rpc->is_client) {
+	if (homa_is_client(rpc->id)) {
 		if ((args.len >= rpc->msgin.total_length)
 				|| !(args.flags & HOMA_RECV_PARTIAL))
 			homa_rpc_free(rpc);
@@ -621,7 +622,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	args.actualId = rpc->id;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
-		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args");
+		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args\n");
 		goto error;
 	}
 	
@@ -702,7 +703,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(peer);
 		goto done;
 	}
-	skbs = homa_fill_packets(hsk, peer, &iter, 0);
+	skbs = homa_fill_packets(hsk, peer, &iter);
 	if (IS_ERR(skbs)) {
 		err = PTR_ERR(skbs);
 		goto done;
@@ -1162,7 +1163,7 @@ int homa_softirq(struct sk_buff *skb) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
 					ntohl(saddr), ntohs(h->sport),
-					h->id, h->type);
+					homa_local_id(h), h->type);
 			first_packet = 0;
 		}
 		if (unlikely(h->type == FREEZE)) {
@@ -1174,7 +1175,8 @@ int homa_softirq(struct sk_buff *skb) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
 						ntohs(h->dport), ntohl(saddr),
-						ntohs(h->sport), h->id);
+						ntohs(h->sport),
+						homa_local_id(h));
 				tt_freeze();
 //				homa_rpc_log_active(homa, h->id);
 //				homa_log_grantable_list(homa);
@@ -1188,8 +1190,8 @@ int homa_softirq(struct sk_buff *skb) {
 		if (!hsk) {
 			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 			tt_record3("Discarding packet for unknown port %u, "
-					"id %llu, type %d", dport, h->id,
-					h->type);
+					"id %llu, type %d", dport,
+					homa_local_id(h), h->type);
 			goto discard;
 		}
 		

@@ -47,8 +47,6 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  * @peer:      Peer to which the packets will be sent (needed for things like
  *             the MTU).
  * @iter:      Describes the location(s) of message data in user space.
- * @is_client: 1 means this is a request message (coming from the client);
- *             0 means its a response. 
  * 
  * Return:   Address of the first packet in a list of packets linked through
  *           homa_next_skb, or a negative errno if there was an error. No
@@ -57,7 +55,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  *           in the other fields.
  */
 struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-		struct iov_iter *iter, int is_client)
+		struct iov_iter *iter)
 {
 	/* Note: this function is separate from homa_message_out_init
 	 * because it must be invoked without holding an RPC lock, and
@@ -140,7 +138,6 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		h = (struct data_header *) skb_put(skb,
 				sizeof(*h) - sizeof(struct data_segment));
 		h->common.type = DATA;
-		h->common.from_client = is_client;
 		h->message_length = htonl(len);
 		available = max_gso_data;
 		
@@ -219,7 +216,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 		h->common.sport = htons(sport);
 		h->common.dport = htons(rpc->dport);
 		homa_set_doff(h);
-		h->common.id = rpc->id;
+		h->common.sender_id = cpu_to_be64(rpc->id);
 		h->common.generation = htons(rpc->generation);
 		h->message_length = htonl(len);
 		h->cutoff_version = rpc->peer->cutoff_version;
@@ -332,13 +329,8 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	struct common_header *h = (struct common_header *) contents;
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
-	if (rpc->is_client) {
-		h->from_client = 1;
-	} else {
-		h->from_client = 0;
-	}
 	h->dport = htons(rpc->dport);
-	h->id = rpc->id;
+	h->sender_id = cpu_to_be64(rpc->id);
 	h->generation = htons(rpc->generation);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
@@ -426,16 +418,15 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 		printk(KERN_NOTICE "sending UNKNOWN to peer "
 				"%s:%d for id %llu",
 				homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-				ntohs(h->sport), h->id);
+				ntohs(h->sport), homa_local_id(h));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
 			ntohl(ip_hdr(skb)->saddr),
-			ntohs(h->sport), h->id);
+			ntohs(h->sport), homa_local_id(h));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
-	unknown.common.id = h->id;
+	unknown.common.sender_id = cpu_to_be64(homa_local_id(h));
 	unknown.common.generation = h->generation;
 	unknown.common.type = UNKNOWN;
-	unknown.common.from_client = h->from_client ^ 1;
 	peer = homa_peer_find(&hsk->homa->peers,
 			ip_hdr(skb)->saddr, &hsk->inet);
 	if (!IS_ERR(peer))
@@ -619,8 +610,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			else
 				h->incoming = htonl(offset + length);
 			tt_record3("retransmitting offset %d, length %d, id %d",
-					offset, length,
-					h->common.id & 0xffffffff);
+					offset, length, rpc->id);
 			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
 			__homa_xmit_data(new_skb, rpc, priority);
 			INC_METRIC(resent_packets, 1);
@@ -863,7 +853,8 @@ void homa_pacer_xmit(struct homa *homa)
 				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
 			}
 			homa_throttle_unlock(homa);
-			if (!rpc->msgout.next_packet && !rpc->is_client) {
+			if (!rpc->msgout.next_packet
+					&& !homa_is_client(rpc->id)) {
 				homa_rpc_free(rpc);
 			}
 		}

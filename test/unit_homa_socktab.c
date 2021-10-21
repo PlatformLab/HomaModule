@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,7 +30,7 @@ FIXTURE(homa_socktab) {
 	int client_port;
 	__be32 server_ip;
 	int server_port;
-	__u64 rpcid;
+	__u64 client_id;
 };
 FIXTURE_SETUP(homa_socktab)
 {
@@ -40,7 +40,7 @@ FIXTURE_SETUP(homa_socktab)
 	self->client_port = 40000;
 	self->server_ip = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
-	self->rpcid = 12345;
+	self->client_id = 1234;
 }
 FIXTURE_TEARDOWN(homa_socktab)
 {
@@ -152,10 +152,10 @@ TEST_F(homa_socktab, homa_sock_shutdown__basics)
 TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
 {
 	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
-			self->server_ip, self->server_port, self->rpcid,
+			self->server_ip, self->server_port, self->client_id,
 			20000, 1600);
 	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->rpcid+1,
+			self->server_ip, self->server_port, self->client_id+2,
 			5000, 5000);
 	self->hsk.shutdown = 1;
 	homa_sock_shutdown(&self->hsk);
@@ -166,10 +166,10 @@ TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
 TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
 {
 	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
-			self->server_ip, self->server_port, self->rpcid,
+			self->server_ip, self->server_port, self->client_id,
 			20000, 1600);
 	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
-			self->server_ip, self->server_port, self->rpcid+1,
+			self->server_ip, self->server_port, self->client_id+2,
 			5000, 5000);
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
