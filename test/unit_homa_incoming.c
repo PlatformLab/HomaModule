@@ -2288,6 +2288,33 @@ TEST_F(homa_incoming, homa_register_interests__return_from_ready_requests)
 	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
 	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
 }
+TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
+{
+	unit_server_rpc(&self->hsk, RPC_READY, self->client_ip,
+			self->server_ip, self->client_port,
+		        self->server_id, 20000, 100);
+	unit_server_rpc(&self->hsk, RPC_READY, self->client_ip,
+			self->server_ip, self->client_port,
+		        self->server_id+2, 20000, 100);
+	
+	// First time should call sk_data_ready (for 2nd RPC).
+	unit_log_clear();
+	int result = homa_register_interests(&self->interest, &self->hsk,
+			HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE
+			|HOMA_RECV_NONBLOCKING, 0, NULL);
+	EXPECT_EQ(0, result);
+	EXPECT_EQ(self->server_id, atomic_long_read(&self->interest.id));
+	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+	
+	// Second time shouldn't call sk_data_ready (no more RPCs).
+	unit_log_clear();
+	result = homa_register_interests(&self->interest, &self->hsk,
+			HOMA_RECV_REQUEST|HOMA_RECV_RESPONSE
+			|HOMA_RECV_NONBLOCKING, 0, NULL);
+	EXPECT_EQ(0, result);
+	EXPECT_EQ(self->server_id+2, atomic_long_read(&self->interest.id));
+	EXPECT_STREQ("", unit_log_get());
+}
 
 TEST_F(homa_incoming, homa_wait_for_message__rpc_from_register_interests)
 {

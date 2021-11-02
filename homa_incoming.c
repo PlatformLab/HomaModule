@@ -1136,13 +1136,17 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 				continue;
 			}
 			if (homa_is_client(rpc->id)) {
+				tt_record3("aborting client RPC: peer 0x%x, "
+						"id %u, error %d",
+						ntohl(rpc->peer->addr),
+						rpc->id, error);
 				homa_rpc_abort(rpc, error);
 			} else {
 				INC_METRIC(server_rpc_discards, 1);
-				tt_record2("discarding server RPC: peer 0x%x, "
-						"id %d",
+				tt_record3("discarding server RPC: peer 0x%x, "
+						"id %d, error %d",
 						ntohl(rpc->peer->addr),
-						rpc->id);
+						rpc->id, error);
 				homa_rpc_free(rpc);
 			}
 			homa_rpc_unlock(rpc);
@@ -1256,6 +1260,12 @@ int homa_register_interests(struct homa_interest *interest,
     claim_rpc:
 	homa_interest_set(interest, rpc);
 	list_del_init(&rpc->ready_links);
+	if (!list_empty(&hsk->ready_requests) ||
+			!list_empty(&hsk->ready_responses)) {
+		// There are still more RPCs available, so let Linux know.
+		struct sock *sk = (struct sock *) hsk;
+		sk->sk_data_ready(sk);
+	}
 	
     done:
 	homa_sock_unlock(hsk);
