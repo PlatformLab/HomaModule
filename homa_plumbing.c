@@ -598,14 +598,14 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			
 		}
 	}
-	
+
 	/* Must release the RPC lock (and potentially free the RPC) before
 	 * copying to user space (see sync.txt). Mark the RPC so we can
 	 * still access the RPC even without holding its lock.
 	 */
 	rpc->dont_reap = true;
 	if (homa_is_client(rpc->id)) {
-		if ((args.len >= rpc->msgin.total_length)
+		if ((args.len >= rpc->msgin.total_length) || rpc->error
 				|| !(args.flags & HOMA_RECV_PARTIAL))
 			homa_rpc_free(rpc);
 	} else {
@@ -640,7 +640,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	return result;
 	
 error:
-	tt_record1("homa_ioc_recv error %d", err);
+	tt_record2("homa_ioc_recv error %d, id %d", err, args.actualId);
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}

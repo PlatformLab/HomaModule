@@ -187,6 +187,21 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 	EXPECT_EQ(self->client_id, self->recv_args.actualId);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 100, 200);
+	crpc->error = -ETIMEDOUT;
+	self->recv_args.len = 100;
+	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
+			|HOMA_RECV_PARTIAL;
+	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv((struct sock *) &self->hsk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(self->client_id, self->recv_args.actualId);
+	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
