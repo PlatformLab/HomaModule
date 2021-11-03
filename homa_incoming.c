@@ -1326,10 +1326,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			}
 			reaper_result = homa_rpc_reap(hsk,
 					hsk->homa->reap_limit);
-			if (flags & HOMA_RECV_NONBLOCKING) {
-				result = ERR_PTR(-EAGAIN);
-				goto got_error_or_rpc;
-			}
 			if (reaper_result == 0)
 				break;
 			
