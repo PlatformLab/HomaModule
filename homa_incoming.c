@@ -1518,6 +1518,13 @@ handoff:
 	 * again. This is also needed so no-one else attempts to give
 	 * this interest an RPC.
 	 */
+		
+	/* The following line must be here, before resetting the interests,
+	 * in order to avoid a race with homa_wait_for_message (which
+	 * may not acquire the socket lock).
+	 */
+	homa_interest_set(interest, rpc);
+	wake_up_process(interest->thread);
 	if (interest->reg_rpc) {
 		interest->reg_rpc->interest = NULL;
 		interest->reg_rpc = NULL;
@@ -1526,8 +1533,6 @@ handoff:
 		list_del(&interest->request_links);
 	if (interest->response_links.next != LIST_POISON1)
 		list_del(&interest->response_links);
-	homa_interest_set(interest, rpc);
-	wake_up_process(interest->thread);
 	tt_record3("homa_rpc_ready handed off id %d to pid %d on core %d",
 			rpc->id, interest->thread->pid,
 			task_cpu(interest->thread));
