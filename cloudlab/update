@@ -19,8 +19,7 @@
 # arguments).
 
 if [ $# -eq 0 ]; then
-    # targets="ms0919.utah.cloudlab.us ms0903.utah.cloudlab.us"
-    targets="hp036.utah.cloudlab.us"
+    targets=`cat $HOME/.cloudlabNode`
 else
     targets=$*
 fi
