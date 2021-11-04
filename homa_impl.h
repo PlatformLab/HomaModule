@@ -786,6 +786,12 @@ struct homa_rpc {
 	 * since the last time a packet was received for this RPC.
 	 */
 	int silent_ticks;
+	
+	/**
+	 * @unknowns: Number of times the peer has sent us UNKNOWN
+	 * packets for this RPC.
+	 */
+	int unknowns;
 
 	/**
 	 * @magic: when the RPC is alive, this holds a distinct value that

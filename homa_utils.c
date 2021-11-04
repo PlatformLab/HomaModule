@@ -234,6 +234,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
+	crpc->unknowns = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	
 	/* Initialize fields that require locking. This allows the most
@@ -329,6 +330,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
+	srpc->unknowns = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
@@ -632,13 +634,17 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				rpc->msgout.length - offset,
 				rpc->msgout.granted,
 				rpc->msgin.bytes_remaining);
-	} else
-		printk(KERN_NOTICE "%s RPC %s, id %llu, peer %s:%d, "
+	} else {
+		char *queued = "";
+		if ((rpc->state == RPC_READY) && list_empty(&rpc->ready_links))
+			queued = " (not queued)";
+		printk(KERN_NOTICE "%s RPC %s%s, id %llu, peer %s:%d, "
 				"generation %d, incoming length %d, "
 				"outgoing length %d\n",
-				type, homa_symbol_for_state(rpc),
+				type, homa_symbol_for_state(rpc), queued,
 				rpc->id, peer, rpc->dport, rpc->generation,
 				rpc->msgin.total_length, rpc->msgout.length);
+	}
 }
 
 /**

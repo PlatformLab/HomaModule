@@ -571,9 +571,29 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	int err;
-	tt_record3("Received unknown for id %llu, peer %x:%d", rpc->id,
-			ntohl(rpc->peer->addr), rpc->dport);
+	rpc->unknowns++;
+	tt_record4("Received unknown #%d for id %llu, peer %x:%d",
+			rpc->unknowns, rpc->id, ntohl(rpc->peer->addr),
+			rpc->dport);
 	if (homa_is_client(rpc->id)) {
+		if (rpc->state == RPC_READY) {
+			/* The missing data packets apparently arrived while
+			 * the UNKNOWN was being transmitted.
+			 */
+			goto done;
+		}
+		
+		/* There is a race here: it's possible that the server
+		 * sent all of the remaining data packets before it sent
+		 * the UNKNOWN, but reordering has occurred so we process
+		 * the UNKNOWN first. To avoid unnecessary restarts, delay
+		 * resetarting until we've received two UNKNOWNs. This isn't
+		 * guaranteed to eliminate false restarts, but it makes them
+		 * much less likely.
+		 */
+		if (rpc->unknowns < 2)
+			goto done;
+		
 		if (rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
 					"id %llu",
@@ -582,28 +602,26 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		tt_record3("Restarting id %d to server 0x%x:%d",
 				rpc->id, ntohl(rpc->peer->addr), rpc->dport);
 		INC_METRIC(restarted_rpcs, 1);
-		if (rpc->state != RPC_READY) {
-			homa_remove_from_grantable(rpc->hsk->homa, rpc);
-			homa_message_in_destroy(&rpc->msgin);
-			err = homa_message_out_reset(rpc);
-			rpc->generation++;
-			if (rpc->generation == 0) {
-				INC_METRIC(generation_overflows, 1);
-				printk(KERN_WARNING "Aborting Homa RPC id %llu "
-						"to server %s:%d: generation "
-						"overflowed (EOVERFLOW)\n",
-						rpc->id,
-						homa_print_ipv4_addr(
-							rpc->peer->addr),
-						rpc->dport);
-				err = -EOVERFLOW;
-			}
-			if (err) {
-				homa_rpc_abort(rpc, err);
-			} else {
-				rpc->state = RPC_OUTGOING;
-				homa_xmit_data(rpc, false);
-			}
+		homa_remove_from_grantable(rpc->hsk->homa, rpc);
+		homa_message_in_destroy(&rpc->msgin);
+		err = homa_message_out_reset(rpc);
+		rpc->generation++;
+		if (rpc->generation == 0) {
+			INC_METRIC(generation_overflows, 1);
+			printk(KERN_WARNING "Aborting Homa RPC id %llu "
+					"to server %s:%d: generation "
+					"overflowed (EOVERFLOW)\n",
+					rpc->id,
+					homa_print_ipv4_addr(
+						rpc->peer->addr),
+					rpc->dport);
+			err = -EOVERFLOW;
+		}
+		if (err) {
+			homa_rpc_abort(rpc, err);
+		} else {
+			rpc->state = RPC_OUTGOING;
+			homa_xmit_data(rpc, false);
 		}
 	} else {
 		if (rpc->hsk->homa->verbose)
@@ -615,6 +633,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_rpc_free(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
 	}
+done:
 	kfree_skb(skb);
 }
 

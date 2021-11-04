@@ -1143,6 +1143,15 @@ TEST_F(homa_incoming, homa_unknown_pkt__basics)
 	unit_log_clear();
 	
 	mock_xmit_log_verbose = 1;
+	
+	/* Nothing happens on first call. */
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0), 
+			&self->hsk);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(2000, crpc->msgin.total_length);
+	EXPECT_STREQ("INCOMING", homa_symbol_for_state(crpc));
+	
+	/* Second call causes restart. */
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0), 
 			&self->hsk);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
@@ -1166,6 +1175,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__rpc_ready)
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 2000, 2000);
 	EXPECT_NE(NULL, crpc);
+	crpc->unknowns = 1;
 	EXPECT_STREQ("READY", homa_symbol_for_state(crpc));
 	unit_log_clear();
 	
@@ -1185,6 +1195,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__generation_overflow)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 2000, 2000);
 	EXPECT_NE(NULL, crpc);
+	crpc->unknowns = 1;
 	homa_xmit_data(crpc, true);
 	unit_log_clear();
 	
@@ -1207,6 +1218,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__error)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 2000, 2000);
 	EXPECT_NE(NULL, crpc);
+	crpc->unknowns = 1;
 	homa_xmit_data(crpc, true);
 	unit_log_clear();
 	
