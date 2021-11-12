@@ -1,6 +1,16 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Fixing deadlock over retransmission:
+  * Cycle through all of the RPCs for a peer?
+  * Don't send RESENDs once an RPC is known to be busy?  Risky: response
+    packet could get lost.
+  * Extra state variables per peer:
+    * resend_rpc: RPC of most recent resend
+  * In each timer interval, select highest priority RPC for resend
+    (longest time since resend?); only resend to that RPC in the next
+    interval.
+
 * Performance-related tasks:
   * Analyze 40-us W4 short message latency by writing a time-trace
     analyzer that tracks NIC queue length.

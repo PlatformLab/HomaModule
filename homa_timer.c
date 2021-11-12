@@ -31,6 +31,7 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	const char *us, *them;
 	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
+	struct homa_peer *peer;
 	
 	if ((rpc->state == RPC_OUTGOING)
 			&& (homa_rpc_send_offset(rpc) < rpc->msgout.granted)) {
@@ -51,20 +52,26 @@ int homa_check_timeout(struct homa_rpc *rpc)
 		return 0;
 	}
 
-	if (rpc->silent_ticks < homa->resend_ticks)
+	/* The -1 below is so that this RPC in considered in the
+	 * computation of peer->least_recent_rpc just before it reaches
+	 * homa->resend_ticks; the resend won't actually occur for
+	 * another tick.
+	 */
+	if (rpc->silent_ticks < (homa->resend_ticks-1))
 		return 0;
 	
-	if (rpc->peer->outstanding_resends
+	peer = rpc->peer;
+	if (peer->outstanding_resends
 			>= rpc->hsk->homa->timeout_resends) {
 		INC_METRIC(peer_timeouts, 1);
 		tt_record4("peer 0x%x timed out for RPC id %d, "
 				"state %d, outstanding_resends %d",
-				htonl(rpc->peer->addr),
+				htonl(peer->addr),
 				rpc->id, rpc->state,
-				rpc->peer->outstanding_resends);
+				peer->outstanding_resends);
 		if (homa->verbose)
 			printk(KERN_NOTICE "Homa peer %s timed out, id %llu",
-					homa_print_ipv4_addr(rpc->peer->addr),
+					homa_print_ipv4_addr(peer->addr),
 					rpc->id);
 		if (!tt_frozen) {
 			struct freeze_header freeze;
@@ -85,26 +92,48 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	 * a given peer at a time: if many RPCs need resends to the same peer,
 	 * it's almost certainly because the peer is overloaded, so we don't
 	 * want to add to its load by sending lots of resends; we just want to
-	 * make sure that it is still alive. Since homa_timer scans RPCs in
-	 * order of age, we will only send resends for the oldest RPC (thus
-	 * every RPC will eventually issue a resend if it really needs one
-	 * because of a packet loss). Note: if an RPC is at the front of the
-	 * peer's grantable list, we will send a resend for it even if we
-	 * have already sent one resend during this timer tick. If we don't,
-	 * a lost packet for that RPC could result in RPCs from that peer
-	 * getting "stuck".
+	 * make sure that it is still alive. However, if there are multiple
+	 * RPCs that need resends, we need to rotate between them, so that
+	 * every RPC eventually gets a resend. In earlier versions of Homa
+	 * we only sent to the oldest RPC, but this led to distributed
+	 * deadlocks in situations where the oldest RPC can't make progress
+	 * until some other RPC makes progress (e.g. a server is waiting
+	 * to receive one RPC before it replies to another, or some RPC is
+	 * first on @peer->grantable_rpcs, so it blocks transmissions of
+	 * other RPCs).
 	 */
-	if ((rpc->peer->most_recent_resend == homa->timer_ticks)
-			&& (rpc == list_first_entry(&rpc->peer->grantable_rpcs,
-			struct homa_rpc, grantable_links)))
-		goto resend;
-	if ((homa->timer_ticks - rpc->peer->most_recent_resend)
-			< homa->resend_interval)
-		return 0;
+	
+	/* First, collect information that will identify the RPC most
+	 * in need of a resend; this will be used during the *next*
+	 * homa_timer pass.
+	 */
+	if (peer->current_ticks != homa->timer_ticks) {
+		/* Reset info for this peer.*/
+		peer->resend_rpc = peer->least_recent_rpc;
+		peer->least_recent_rpc = NULL;
+		peer->least_recent_ticks = homa->timer_ticks;
+		peer->current_ticks = homa->timer_ticks;
+	}
+	
+	if ((rpc != peer->resend_rpc) ||
+			(homa->timer_ticks - rpc->peer->most_recent_resend)
+			< homa->resend_interval) {
+		/* We're not sending a resend to this RPC now. Update info
+		 * about the best RPC for the next resend. Note: the test
+		 * immediately below will handle wrap-around better than
+		 * a simple comparison.
+		 */
+	       if ((peer->least_recent_ticks - rpc->resend_timer_ticks) > 0) {
+		       peer->least_recent_rpc = rpc;
+		       peer->least_recent_ticks = rpc->resend_timer_ticks;
+	       }
+	       return 0;
+	}
+	
+	/* Issue a resend for this RPC. */
+	rpc->resend_timer_ticks = homa->timer_ticks;
 	rpc->peer->most_recent_resend = homa->timer_ticks;
 	rpc->peer->outstanding_resends++;
-
-resend:
 	homa_get_resend_range(&rpc->msgin, &resend);
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);

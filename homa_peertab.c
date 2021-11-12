@@ -163,6 +163,10 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	peer->outstanding_resends = 0;
 	peer->most_recent_resend = 0;
+	peer->least_recent_rpc = NULL;
+	peer->least_recent_ticks = 0;
+	peer->current_ticks = -1;
+	peer->resend_rpc = NULL;
 	INC_METRIC(peer_new_entries, 1);
 	
     done:
