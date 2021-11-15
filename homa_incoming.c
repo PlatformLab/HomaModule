@@ -69,12 +69,12 @@ void homa_message_in_destroy(struct homa_message_in *msgin)
 /**
  * homa_add_packet() - Add an incoming packet to the contents of a
  * partially received message.
- * @msgin: Overall information about the incoming message.
+ * @rpc:   Add the packet to the msgin for this RPC.
  * @skb:   The new packet. This function takes ownership of the packet
  *         and will free it, if it doesn't get added to msgin (because
  *         it provides no new data).
  */
-void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
+void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
 	int offset = ntohl(h->seg.offset);
@@ -86,14 +86,14 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 	int floor = 0;
 	
 	/* Any data with offset >= this is useless. */
-	int ceiling = msgin->total_length;
+	int ceiling = rpc->msgin.total_length;
 	
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
 	 * always will in practice, so work backwards from the end of the
 	 * list.
 	 */
-	skb_queue_reverse_walk(&msgin->packets, skb2) {
+	skb_queue_reverse_walk(&rpc->msgin.packets, skb2) {
 		struct data_header *h2 = (struct data_header *) skb2->data;
 		int offset2 = ntohl(h2->seg.offset);
 		int data_bytes2 = skb2->len - sizeof32(struct data_header);
@@ -124,9 +124,21 @@ void homa_add_packet(struct homa_message_in *msgin, struct sk_buff *skb)
 		kfree_skb(skb);
 		return;
 	}
-	__skb_insert(skb, skb2, skb2->next, &msgin->packets);
-	msgin->bytes_remaining -= (ceiling - floor);
-	msgin->num_skbs++;
+	if (h->retransmit) {
+		INC_METRIC(resent_packets_used, 1);
+//		if (!tt_frozen) {
+//			struct freeze_header freeze;
+//			tt_record2("Freezing because of lost packet, id %d, "
+//					"peer 0x%x",
+//					rpc->id, ntohl(rpc->peer->addr));
+//			homa_xmit_control(FREEZE, &freeze,
+//					sizeof(freeze), rpc);
+//			tt_freeze();
+//		}
+	}
+	__skb_insert(skb, skb2, skb2->next, &rpc->msgin.packets);
+	rpc->msgin.bytes_remaining -= (ceiling - floor);
+	rpc->msgin.num_skbs++;
 }
 
 /**
@@ -411,7 +423,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
 	}
-	homa_add_packet(&rpc->msgin, skb);
+	homa_add_packet(rpc, skb);
 	if (rpc->msgin.scheduled) {
 		homa_check_grantable(homa, rpc);
 	} else if (!rpc->msgin.extra_incoming  && rpc->msgin.bytes_remaining) {

@@ -1969,6 +1969,13 @@ struct homa_metrics {
 	__u64 redundant_packets;
 	
 	/**
+	 * @resent_packets_used: total number of times a resent packet was
+	 * actually incorporated into the message at the target (i.e. it
+	 * wasn't redundant).
+	 */
+	__u64 resent_packets_used;
+	
+	/**
 	 * @restarted_rpcs: total number of times a client restarted an
 	 * RPC because it received an UNKNOWN packet for it.
 	 */

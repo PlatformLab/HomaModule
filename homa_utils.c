@@ -1329,8 +1329,14 @@ char *homa_print_metrics(struct homa *homa)
 				"received\n",
 				m->redundant_packets);
 		homa_append_metric(homa,
+				"resent_packets_used       %15llu  "
+				"Retransmitted packets that were actually "
+				"needed\n",
+				m->resent_packets_used);
+		homa_append_metric(homa,
 				"restarted_rpcs            %15llu  "
-				"RPCs restarted because server discarded state\n",
+				"RPCs restarted because server discarded "
+				"state\n",
 				m->restarted_rpcs);
 		homa_append_metric(homa,
 				"peer_timeouts             %15llu  "
@@ -1342,7 +1348,8 @@ char *homa_print_metrics(struct homa *homa)
 				m->server_rpc_discards);
 		homa_append_metric(homa,
 				"server_rpcs_unknown       %15llu  "
-				"RPCs aborted by server because unknown to client\n",
+				"RPCs aborted by server because unknown to "
+				"client\n",
 				m->server_rpcs_unknown);
 		homa_append_metric(homa,
 				"client_lock_misses        %15llu  "
