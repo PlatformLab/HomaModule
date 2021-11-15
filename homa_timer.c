@@ -96,11 +96,11 @@ int homa_check_timeout(struct homa_rpc *rpc)
 	 * RPCs that need resends, we need to rotate between them, so that
 	 * every RPC eventually gets a resend. In earlier versions of Homa
 	 * we only sent to the oldest RPC, but this led to distributed
-	 * deadlocks in situations where the oldest RPC can't make progress
+	 * deadlock in situations where the oldest RPC can't make progress
 	 * until some other RPC makes progress (e.g. a server is waiting
 	 * to receive one RPC before it replies to another, or some RPC is
 	 * first on @peer->grantable_rpcs, so it blocks transmissions of
-	 * other RPCs).
+	 * other RPCs.
 	 */
 	
 	/* First, collect information that will identify the RPC most
@@ -119,11 +119,13 @@ int homa_check_timeout(struct homa_rpc *rpc)
 			(homa->timer_ticks - rpc->peer->most_recent_resend)
 			< homa->resend_interval) {
 		/* We're not sending a resend to this RPC now. Update info
-		 * about the best RPC for the next resend. Note: the test
-		 * immediately below will handle wrap-around better than
-		 * a simple comparison.
+		 * about the best RPC for the next resend. Note: comparing
+		 * values in the face of wrap-around and compiler
+		 * optimizations is tricky; don't change the comparison below
+		 * unless you're sure you know what you are doing.
 		 */
-	       if ((peer->least_recent_ticks - rpc->resend_timer_ticks) > 0) {
+	       if (!((peer->least_recent_ticks - rpc->resend_timer_ticks)
+			       & (1U<<31))) {
 		       peer->least_recent_rpc = rpc;
 		       peer->least_recent_ticks = rpc->resend_timer_ticks;
 	       }
