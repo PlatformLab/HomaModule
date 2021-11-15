@@ -809,8 +809,8 @@ struct homa_rpc {
 	int magic;
 
 	/**
-	 * @start_cycles: time (from get_cycles()) when this RPC was initiated
-	 * on the client. Used (sometimes) for testing.
+	 * @start_cycles: time (from get_cycles()) when this RPC was created.
+	 * Used (sometimes) for testing.
 	 */
 	uint64_t start_cycles;
 };
@@ -2411,8 +2411,7 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 
 extern void     homa_abort_rpcs(struct homa *homa, __be32 addr, int port,
                     int error);
-extern void     homa_add_packet(struct homa_message_in *msgin,
-                    struct sk_buff *skb);
+extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);

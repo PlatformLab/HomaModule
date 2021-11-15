@@ -791,7 +791,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
-	crpc->start_cycles = get_cycles();
 	homa_xmit_data(crpc, false);
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,

@@ -237,6 +237,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->unknowns = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
+	crpc->start_cycles = get_cycles();
 	
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
@@ -334,6 +335,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->unknowns = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
+	srpc->start_cycles = get_cycles();
 
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	return srpc;
@@ -630,12 +632,14 @@ void homa_rpc_log(struct homa_rpc *rpc)
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
 				"gen %d, out length %d, "
 				"left %d, granted %d, "
-				"in left %d\n",
+				"in left %d, resend_ticks %u, silent_ticks %d\n",
 				type, rpc->id, peer, rpc->dport,
 				rpc->generation, rpc->msgout.length,
 				rpc->msgout.length - offset,
 				rpc->msgout.granted,
-				rpc->msgin.bytes_remaining);
+				rpc->msgin.bytes_remaining,
+				rpc->resend_timer_ticks,
+				rpc->silent_ticks);
 	} else {
 		char *queued = "";
 		if ((rpc->state == RPC_READY) && list_empty(&rpc->ready_links))
