@@ -336,7 +336,7 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "socket", "grantable", "throttle"]:
+    for lock in ["client", "socket", "grantable", "throttle", "peer"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
@@ -418,4 +418,10 @@ if elapsed_secs != 0:
         print("%-28s %15.1f              List traversals per throttle "
                 "list insert" % ("checks_per_throttle_insert",
                 deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
+
+    if deltas["responses_received"] > 0:
+        print("%-28s %15.1f              ACK packets sent per 1000 client RPCs"
+                % ("acks_per_rpc", 1000.0 * deltas["packets_sent_ACK"]
+                / deltas["responses_received"]))
+
         

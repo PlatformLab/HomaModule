@@ -80,7 +80,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET),
+		        .ack = {0, 0, 0}}
 	};
 	
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
@@ -343,7 +344,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET),
+		        .ack = {0, 0, 0}}
 	};
 	if (req_length < UNIT_TEST_DATA_PER_PACKET)
 		h.seg.segment_length = htonl(req_length);
@@ -406,13 +408,10 @@ void unit_teardown(void)
 
 /**
  * Return an iov_iter corresponding to the arguments.
- * \param buffer
- *      First byte of data.
- * \param length
- *      Number of bytes of data.
- * \param direction
- *      WRITE means data will be copied out of the init, READ means data
- *      will be copied into it.
+ * @buffer:     First byte of data.
+ * @length:     Number of bytes of data.
+ * @direction:  WRITE means data will be copied out of the init, READ means
+ *              data will be copied into it.
  */
 struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 {
@@ -423,4 +422,18 @@ struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 	iovec.iov_len = length;
 	iov_iter_init(&iter, WRITE, &iovec, 1, length);
 	return &iter;
+}
+
+/**
+ * Returns a human-readable description of the fields in an ack.
+ * @ack:  The ack to stringify. 
+ */
+char *unit_ack_string(struct homa_ack *ack)
+{
+	static char buffer[1000];
+	snprintf(buffer, sizeof(buffer),
+			"client_port %d, server_port %d, client_id %llu",
+			ntohs(ack->client_port), ntohs(ack->server_port),
+			be64_to_cpu(ack->client_id));
+	return buffer;
 }

@@ -1029,6 +1029,12 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	case FREEZE:
 		header_size = sizeof(struct freeze_header);
 		break;
+	case NEED_ACK:
+		header_size = sizeof(struct need_ack_header);
+		break;
+	case ACK:
+		header_size = sizeof(struct ack_header);
+		break;
 	default:
 		header_size = sizeof(struct common_header);
 		break;

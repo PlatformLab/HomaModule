@@ -156,7 +156,7 @@ TEST_F(homa_outgoing, homa_fill_packets__set_gso_info)
 	EXPECT_NE(NULL, crpc);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
-	EXPECT_EQ(1408, skb_shinfo(crpc->msgout.packets)->gso_size);
+	EXPECT_EQ(1420, skb_shinfo(crpc->msgout.packets)->gso_size);
 	
 	// Second message: no GSO (message fits in one packet)
 	mock_net_device.gso_max_size = 10000;
@@ -185,6 +185,21 @@ TEST_F(homa_outgoing, homa_fill_packets__cant_copy_data)
 			unit_iov_iter((char *) 1000, 3000));
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_fill_packets__include_ack)
+{
+	self->peer->acks[0] = (struct homa_ack) {
+		.client_port = htons(100),
+		.server_port = htons(200),
+		.client_id = cpu_to_be64(1000)};
+	self->peer->num_acks = 1;
+	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
+			unit_iov_iter((char *) 1000, 500));
+	EXPECT_FALSE(IS_ERR(skb));
+	struct data_header *h = (struct data_header *) skb->data;
+	EXPECT_STREQ("client_port 100, server_port 200, client_id 1000",
+			unit_ack_string(&h->seg.ack));
+	homa_free_skbs(skb);
 }
 TEST_F(homa_outgoing, homa_fill_packets__multiple_segs_per_skbuff)
 {
@@ -249,7 +264,7 @@ TEST_F(homa_outgoing, homa_fill_packets__expand_last_segment)
 	unit_log_clear();
 	unit_log_filled_skbs(skb, 0);
 	EXPECT_STREQ("DATA 1400@0 2@1400", unit_log_get());
-	EXPECT_EQ(1416, skb->len - sizeof32(struct data_header)
+	EXPECT_EQ(1430, skb->len - sizeof32(struct data_header)
 			- sizeof32(struct data_segment));
 	homa_free_skbs(skb);
 }
@@ -934,25 +949,6 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 4, next_offset 1400", unit_log_get());
 	EXPECT_TRUE(list_empty(&crpc1->throttled_links));
-}
-TEST_F(homa_outgoing, homa_pacer_xmit__delete_rpc)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 100, 1000);
-	EXPECT_NE(NULL, srpc);
-	EXPECT_FALSE(list_empty(&self->hsk.active_rpcs));
-	homa_add_to_throttled(srpc);
-	self->homa.max_nic_queue_cycles = 2000;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
-	EXPECT_STREQ("xmit DATA 1000@0; homa_remove_from_grantable invoked",
-			unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_TRUE(list_empty(&self->hsk.active_rpcs));
 }
 
 /* Don't know how to unit test homa_pacer_stop... */

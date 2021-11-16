@@ -120,6 +120,7 @@ int homa_init(struct homa *homa)
 	homa->resend_ticks = 15;
 	homa->resend_interval = 10;
 	homa->timeout_resends = 5;
+	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;
 	homa->max_dead_buffs = 0;
@@ -235,6 +236,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
+	crpc->done_timer_ticks = 0;
 	crpc->unknowns = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_cycles = get_cycles();
@@ -283,7 +285,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 {
 	int err;
 	struct homa_rpc *srpc;
-	__u64 id = homa_local_id(&h->common);
+	__u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	
 	/* Lock the bucket, and make sure no-one else has already created
@@ -333,6 +335,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
+	srpc->done_timer_ticks = 0;
 	srpc->unknowns = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
@@ -363,6 +366,43 @@ void homa_rpc_lock_slow(struct homa_rpc *rpc)
 		INC_METRIC(server_lock_misses, 1);
 		INC_METRIC(server_lock_miss_cycles, get_cycles() - start);
 	}
+}
+
+/**
+ * homa_rpc_acked() - This function is invoked when an ack is received
+ * for an RPC; if the RPC still exists, is freed.
+ * @hsk:     Socket on which the ack was received. May or may not correspond
+ *           to the RPC, but can sometimes be used to avoid a socket lookup.
+ * @saddr:   Source address from which the act was received (the client
+ *           note for the RPC)
+ * @ack:     Information about an RPC from @saddr that may now be deleted safely.
+ */
+void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
+{
+	struct homa_rpc *rpc;
+	struct homa_sock *hsk2 = hsk;
+	__u64 id = homa_local_id(ack->client_id);
+	__u16 client_port = ntohs(ack->client_port);
+	__u16 server_port = ntohs(ack->server_port);
+	
+	if (hsk2->port != server_port) {
+		/* Without RCU, sockets other than hsk can be deleted
+		 * out from under us.
+		 */
+		rcu_read_lock();
+		hsk2 = homa_sock_find(&hsk->homa->port_map, server_port);
+		if (!hsk2)
+			goto done;
+	}
+	rpc = homa_find_server_rpc(hsk2, saddr, client_port, id);
+	if (rpc) {
+		homa_rpc_free(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	
+    done:
+	if (hsk->port != server_port)
+		rcu_read_unlock();
 }
 
 /**
@@ -815,7 +855,25 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	case FREEZE:
 		/* Nothing to add here. */
 		break;
+	case NEED_ACK:
+		/* Nothing to add here. */
+		break;
+	case ACK: {
+		struct ack_header *h = (struct ack_header *) skb->data;
+		int i, count;
+		count = ntohs(h->num_acks);
+		used = homa_snprintf(buffer, buf_len, used, ", acks");
+		for (i = 0; i < count; i++) {
+			used = homa_snprintf(buffer, buf_len, used,
+					" [cp %d, sp %d, id %llu]",
+					ntohs(h->acks[i].client_port),
+					ntohs(h->acks[i].server_port),
+					be64_to_cpu(h->acks[i].client_id));
+		}
+		break;
 	}
+	}
+		
 	buffer[buf_len-1] = 0;
 	return buffer;
 }
@@ -880,6 +938,13 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	case FREEZE:
 		snprintf(buffer, buf_len, "FREEZE");
+		break;
+	case NEED_ACK:
+		snprintf(buffer, buf_len, "NEED_ACK");
+		break;
+		break;
+	case ACK:
+		snprintf(buffer, buf_len, "ACK");
 		break;
 	default:
 		snprintf(buffer, buf_len, "unknown packet type %d",
@@ -949,7 +1014,7 @@ char *homa_symbol_for_state(struct homa_rpc *rpc)
 	}
 	
 	/* See safety comment in homa_symbol_for_type. */
-	snprintf(buffer, sizeof(buffer)-1, "UNKNOWN(%u)", rpc->state);
+	snprintf(buffer, sizeof(buffer)-1, "unknown(%u)", rpc->state);
 	buffer[sizeof(buffer)-1] = 0;
 	return buffer;
 }
@@ -978,6 +1043,10 @@ char *homa_symbol_for_type(uint8_t type)
 		return "CUTOFFS";
 	case FREEZE:
 		return "FREEZE";
+	case NEED_ACK:
+		return "NEED_ACK";
+	case ACK:
+		return "ACK";
 	}
 	
 	/* Using a static buffer can produce garbled text under concurrency,
@@ -985,7 +1054,7 @@ char *homa_symbol_for_type(uint8_t type)
 	 * bogus), (b) this is mostly for testing and debugging, and (c) the
 	 * code below ensures that the string cannot run past the end of the
 	 * buffer, so the code is safe. */
-	snprintf(buffer, sizeof(buffer)-1, "UNKNOWN(%u)", type);
+	snprintf(buffer, sizeof(buffer)-1, "unknown(%u)", type);
 	buffer[sizeof(buffer)-1] = 0;
 	return buffer;
 }
@@ -1376,6 +1445,14 @@ char *homa_print_metrics(struct homa *homa)
 				"Time lost waiting for socket locks\n",
 				m->socket_lock_miss_cycles);
 		homa_append_metric(homa,
+				"throttle_lock_misses      %15llu  "
+				"Throttle lock misses\n",
+				m->throttle_lock_misses);
+		homa_append_metric(homa,
+				"throttle_lock_miss_cycles %15llu  "
+				"Time lost waiting for throttle locks\n",
+				m->throttle_lock_miss_cycles);
+		homa_append_metric(homa,
 				"grantable_lock_misses     %15llu  "
 				"Grantable lock misses\n",
 				m->grantable_lock_misses);
@@ -1384,13 +1461,13 @@ char *homa_print_metrics(struct homa *homa)
 				"Time lost waiting for grantable lock\n",
 				m->grantable_lock_miss_cycles);
 		homa_append_metric(homa,
-				"throttle_lock_misses      %15llu  "
-				"Throttle lock misses\n",
-				m->throttle_lock_misses);
+				"peer_lock_misses          %15llu  "
+				"Peer lock misses\n",
+				m->peer_lock_misses);
 		homa_append_metric(homa,
-				"throttle_lock_miss_cycles %15llu  "
-				"Time lost waiting for throttle locks\n",
-				m->throttle_lock_miss_cycles);
+				"peer_lock_miss_cycles     %15llu  "
+				"Time lost waiting for peer locks\n",
+				m->peer_lock_miss_cycles);
 		homa_append_metric(homa,
 				"disabled_reaps            %15llu  "
 				"Reaper invocations that were disabled\n",
@@ -1430,6 +1507,16 @@ char *homa_print_metrics(struct homa *homa)
 				"FIFO grants to messages with no "
 				"outstanding grants\n",
 				m->fifo_grants_no_incoming);
+		homa_append_metric(homa,
+				"ack_overflows             %15llu  "
+				"Explicit ACKs sent because peer->acks was "
+				"full\n",
+				m->ack_overflows);
+		homa_append_metric(homa,
+				"ignored_need_acks         %15llu  "
+				"NEED_ACKs ignored because RPC result not "
+				"yet received\n",
+				m->ignored_need_acks);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

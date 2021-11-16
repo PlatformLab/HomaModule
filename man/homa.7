@@ -49,12 +49,8 @@ When a client issues a request, Homa will ensure that the request
 is received by the server and that the response is transmitted
 back to the client.
 A request fails only if Homa cannot maintain communication with the
-Homa transport module on the server.
-.PP
-Under some (rare) conditions, a Homa server may receive the same request
-multiple times.
-Homa assumes that application-level software will perform duplicate detection,
-if that is important for the application.
+Homa transport module on the server. Homa ensures at-most-once
+semantics for an RPC.
 .PP
 Home is intended for use between machines that are physically
 close, so round-trip latencies are at most a few tens of microseconds.
@@ -298,6 +294,16 @@ other work to do, so that this cost doesn't impact applications. This
 integer value specifies how many packet buffers Homa will free in a single
 call to the reaper; larger values may make the reaper more efficient, but
 they can also result in a larger delay for applications.
+.TP
+.IR request_ack_ticks
+Servers maintain state for an RPC until the client has acknowledged receipt
+of the complete response message. Clients piggyback these acks on
+data packets, but won't send acks if there is no traffic to the server.
+If the server doesn't receive an ack within
+.IR request_ack_ticks
+timer ticks, then it will request an explicit ack. Larger values for
+this parameter reduce packet traffic but cause RPC state to be held longer
+on servers.
 .TP
 .IR resend_interval
 An integer value specifying how frequently resend requests may be sent

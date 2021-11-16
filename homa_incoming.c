@@ -128,9 +128,13 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		INC_METRIC(resent_packets_used, 1);
 //		if (!tt_frozen) {
 //			struct freeze_header freeze;
-//			tt_record2("Freezing because of lost packet, id %d, "
-//					"peer 0x%x",
+//			printk(KERN_NOTICE "Freezing because of lost packet, "
+//					"id %llu, peer 0x%x",
 //					rpc->id, ntohl(rpc->peer->addr));
+//			tt_record3("Freezing because of lost packet, id %d, "
+//					"peer 0x%x, offset %d",
+//					rpc->id, ntohl(rpc->peer->addr),
+//					offset);
 //			homa_xmit_control(FREEZE, &freeze,
 //					sizeof(freeze), rpc);
 //			tt_freeze();
@@ -269,7 +273,17 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
-	__u64 id = homa_local_id(h);
+	__u64 id = homa_local_id(h->sender_id);
+	
+	/* If there is an ack in the packet, handle it. Must do this
+	 * before locking the packet's RPC, since we may need to acquire
+	 * (other) RPC locks to handle the acks.
+	 */
+	if (h->type == DATA) {
+		struct data_header *dh = (struct data_header *) h;
+		if (dh->seg.ack.client_id != 0)
+			homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &dh->seg.ack);
+	}
 	
 	/* Find and lock the RPC for this packet. */
 	if (!homa_is_client(id)) {
@@ -296,14 +310,8 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		rpc = homa_find_client_rpc(hsk, id);
 	}
 	if (unlikely(rpc == NULL)) {
-		if (hsk->homa->verbose) {
-			char buffer[200];
-			printk(KERN_NOTICE
-					"Incoming packet for unknown RPC: %s\n",
-					homa_print_packet(skb, buffer,
-					sizeof(buffer)));
-		}
-		if (h->type != CUTOFFS) {
+		if ((h->type != CUTOFFS) && (h->type != NEED_ACK)
+				&& (h->type != ACK)) {
 			if (h->type == RESEND)
 				homa_xmit_unknown(skb, hsk);
 			tt_record4("Discarding packet for unknown RPC, id %u, "
@@ -332,7 +340,9 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 				goto discard;
 			}
 		}
-		rpc->silent_ticks = 0;
+		if ((h->type == DATA) || (h->type == GRANT)
+				|| (h->type == BUSY))
+			rpc->silent_ticks = 0;
 		rpc->peer->outstanding_resends = 0;
 	}
 	
@@ -376,6 +386,15 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		INC_METRIC(packets_received[CUTOFFS - DATA], 1);
 		homa_cutoffs_pkt(skb, hsk);
 		break;
+	case NEED_ACK:
+		INC_METRIC(packets_received[NEED_ACK - DATA], 1);
+		homa_need_ack_pkt(skb, hsk, rpc);
+		break;
+	case ACK:
+		INC_METRIC(packets_received[ACK - DATA], 1);
+		homa_ack_pkt(skb, hsk, rpc);
+		rpc = NULL;
+		break;
 	default:
 		INC_METRIC(unknown_packet_types, 1);
 		goto discard;
@@ -408,7 +427,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	int incoming = ntohl(h->incoming);
 	
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
-			homa_local_id(&h->common),
+			homa_local_id(h->common.sender_id),
 			ntohl(rpc->peer->addr), ntohl(h->seg.offset),
 			ntohl(h->message_length));
 	
@@ -499,7 +518,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	struct grant_header *h = (struct grant_header *) skb->data;
 	
 	tt_record3("processing grant for id %llu, offset %d, priority %d",
-			homa_local_id(&h->common), ntohl(h->offset),
+			homa_local_id(h->common.sender_id), ntohl(h->offset),
 			h->priority);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
@@ -511,12 +530,6 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		}
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
-		if (!rpc->msgout.next_packet && !homa_is_client(rpc->id)) {
-			/* This is a server RPC that has been completely sent;
-			 * time to delete the RPC.
-			 */
-			homa_rpc_free(rpc);
-		}
 	}
 	kfree_skb(skb);
 }
@@ -559,8 +572,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
 		if (ntohl(h->length) == 0) {
-			/* This RESEND is from a server just trying to make
-			 * sure the client still cares about the RPC; return
+			/* This RESEND is from a server just trying to determine
+			 * whether the client still cares about the RPC; return
 			 * BUSY so the server doesn't time us out.
 			 */
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
@@ -606,7 +619,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		if (rpc->unknowns < 2)
 			goto done;
 		
-		if (rpc->hsk->homa->verbose)
+		if (1 || rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
 					"id %llu",
 					homa_print_ipv4_addr(rpc->peer->addr),
@@ -668,6 +681,95 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
 		peer->cutoff_version = h->cutoff_version;
 	}
+	kfree_skb(skb);
+}
+
+/**
+ * homa_need_ack_pkt() - Handler for incoming NEED_ACK packets
+ * @skb:     Incoming packet; size already verified large enough for header.
+ *           This function now owns the packet.
+ * @hsk:     Socket on which the packet was received.
+ * @rpc:     The RPC named in the packet header, or NULL if no such
+ *           RPC exists. The RPC has been locked by the caller.
+ */
+void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+		struct homa_rpc *rpc)
+{
+	struct common_header *h = (struct common_header *) skb->data;
+	struct ack_header ack;
+	struct homa_peer *peer;
+	
+	/* Return if it's not safe for the peer to purge its state
+	 * for this RPC, or if we can't find peer info.
+	 */
+	if (rpc != NULL) {
+		if (rpc->state != RPC_READY) {
+			tt_record4("Ignoring NEED_ACK for id %d, peer 0x%x,"
+					"state %d, bytes_remaining %d",
+					rpc->id, ntohl(rpc->peer->addr),
+					rpc->state, rpc->msgin.bytes_remaining);
+			goto done;
+		}
+		peer = rpc->peer;
+	} else {
+		peer = homa_peer_find(&hsk->homa->peers, ip_hdr(skb)->saddr,
+				&hsk->inet);
+		if (IS_ERR(peer))
+			goto done;
+	}
+	
+	/* Send an ACK for this RPC. At the same time, include all of the
+	 * other acks available for the peer. Note: can't use rpc below,
+	 * since it may be NULL.
+	 */
+	ack.common.type = ACK;
+	ack.common.sport = h->dport;
+	ack.common.dport = h->sport;
+	ack.common.sender_id = be64_to_cpu(homa_local_id(h->sender_id));
+	ack.common.generation = h->generation;
+	ack.num_acks = htons(homa_peer_get_acks(peer,
+			NUM_PEER_UNACKED_IDS, ack.acks));
+	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
+	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
+			"other acks", homa_local_id(h->sender_id),
+			ntohl(ip_hdr(skb)->saddr), ntohs(ack.num_acks));
+	
+    done:
+	kfree_skb(skb);
+}
+
+/**
+ * homa_ack_pkt() - Handler for incoming ACK packets
+ * @skb:     Incoming packet; size already verified large enough for header.
+ *           This function now owns the packet.
+ * @hsk:     Socket on which the packet was received.
+ * @rpc:     The RPC named in the packet header, or NULL if no such
+ *           RPC exists. The RPC has been locked by the caller; this
+ *           method takes ownership of the RPC and both frees and unlocks it.
+ */
+void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+		struct homa_rpc *rpc)
+{
+	struct ack_header *h = (struct ack_header *) skb->data;
+	int i, count;
+	
+	if (rpc != NULL) {
+		homa_rpc_free(rpc);
+		
+		/* It's awkward to unlock the RPC here, since we didn't
+		 * lock it, but this is necessary because homa_rpc_acked
+		 * may lock additional RPCs below and it isn't safe to hold
+		 * multiple RPC locks at once.
+		 */
+		homa_rpc_unlock(rpc);
+	}
+	
+	count = ntohs(h->num_acks);
+	for (i = 0; i < count; i++)
+		homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &h->acks[i]);
+	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
+			homa_local_id(h->common.sender_id),
+			ntohl(ip_hdr(skb)->saddr), count);
 	kfree_skb(skb);
 }
 
@@ -1474,7 +1576,8 @@ got_error_or_rpc:
 /**
  * @homa_rpc_ready: This function is called when the input message for
  * an RPC becomes complete. It marks the RPC as READY and either notifies
- * a waiting reader or queues the RPC.
+ * a waiting reader or queues the RPC. It also starts the process of acking
+ * the RPC to its server.
  * @rpc:                RPC that now has a complete input message;
  *                      must be locked. The caller must also have
  *                      locked the socket for this RPC.
@@ -1522,7 +1625,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	sk->sk_data_ready(sk);
 	tt_record2("homa_rpc_ready finished queuing id %d for port %d",
 			rpc->id, hsk->port);
-	return;
+	goto done;
 	
 handoff:
 	/* We found a waiting thread. Wakeup the thread and cleanup its
@@ -1548,6 +1651,11 @@ handoff:
 	tt_record3("homa_rpc_ready handed off id %d to pid %d on core %d",
 			rpc->id, interest->thread->pid,
 			task_cpu(interest->thread));
+
+done:
+	/* It's now safe to ACK this RPC. */
+	if (homa_is_client(rpc->id))
+		homa_peer_add_ack(rpc);
 }
 
 /**

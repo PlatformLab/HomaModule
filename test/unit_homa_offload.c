@@ -45,7 +45,8 @@ FIXTURE_SETUP(homa_offload)
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.retransmit = 0,
 			.seg = {.offset = htonl(2000),
-			.segment_length = htonl(1400)}};
+			        .segment_length = htonl(1400),
+	                        .ack = {0, 0, 0}}};
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
 		INIT_LIST_HEAD(&self->napi.gro_hash[i].list);
 		self->napi.gro_hash[i].count = 0;

@@ -289,6 +289,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "request_ack_ticks",
+		.data		= &homa_data.request_ack_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "resend_interval",
 		.data		= &homa_data.resend_interval,
 		.maxlen		= sizeof(int),
@@ -717,7 +724,6 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 	if (srpc->state != RPC_IN_SERVICE) {
-		homa_rpc_free(srpc);
 		err = -EINVAL;
 		goto unlock;
 	}
@@ -725,9 +731,6 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 
 	homa_message_out_init(srpc, hsk->port, skbs, length);
 	homa_xmit_data(srpc, false);
-	if (!srpc->msgout.next_packet) {
-		homa_rpc_free(srpc);
-	}
 unlock:
 	homa_rpc_unlock(srpc);
 
@@ -1162,7 +1165,7 @@ int homa_softirq(struct sk_buff *skb) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
 					ntohl(saddr), ntohs(h->sport),
-					homa_local_id(h), h->type);
+					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
 		if (unlikely(h->type == FREEZE)) {
@@ -1175,7 +1178,7 @@ int homa_softirq(struct sk_buff *skb) {
 						"port %d from 0x%x:%d, id %d",
 						ntohs(h->dport), ntohl(saddr),
 						ntohs(h->sport),
-						homa_local_id(h));
+						homa_local_id(h->sender_id));
 				tt_freeze();
 //				homa_rpc_log_active(homa, h->id);
 //				homa_log_grantable_list(homa);
@@ -1190,7 +1193,7 @@ int homa_softirq(struct sk_buff *skb) {
 			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 			tt_record3("Discarding packet for unknown port %u, "
 					"id %llu, type %d", dport,
-					homa_local_id(h), h->type);
+					homa_local_id(h->sender_id), h->type);
 			goto discard;
 		}
 		

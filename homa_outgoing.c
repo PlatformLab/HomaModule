@@ -153,6 +153,8 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			else
 				seg_size = max_pkt_data;
 			seg->segment_length = htonl(seg_size);
+			seg->ack.client_id = 0;
+			homa_peer_get_acks(peer, 1, &seg->ack);
 			if (copy_from_iter(skb_put(skb, seg_size), seg_size,
 					iter) != seg_size) {
 				err = -EFAULT;
@@ -418,13 +420,13 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 		printk(KERN_NOTICE "sending UNKNOWN to peer "
 				"%s:%d for id %llu",
 				homa_print_ipv4_addr(ip_hdr(skb)->saddr),
-				ntohs(h->sport), homa_local_id(h));
+				ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
 			ntohl(ip_hdr(skb)->saddr),
-			ntohs(h->sport), homa_local_id(h));
+			ntohs(h->sport), homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
-	unknown.common.sender_id = cpu_to_be64(homa_local_id(h));
+	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	unknown.common.generation = h->generation;
 	unknown.common.type = UNKNOWN;
 	peer = homa_peer_find(&hsk->homa->peers,
@@ -852,10 +854,6 @@ void homa_pacer_xmit(struct homa *homa)
 				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
 			}
 			homa_throttle_unlock(homa);
-			if (!rpc->msgout.next_packet
-					&& !homa_is_client(rpc->id)) {
-				homa_rpc_free(rpc);
-			}
 		}
 		homa_rpc_unlock(rpc);
 	}

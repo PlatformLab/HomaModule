@@ -23,6 +23,7 @@ struct unit_hash;
  */
 #define UNIT_TEST_DATA_PER_PACKET 1400
 
+extern char         *unit_ack_string(struct homa_ack *ack);
 extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
                         __be32 client_ip, __be32 server_ip, int server_port,

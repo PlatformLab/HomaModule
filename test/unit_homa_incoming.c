@@ -159,7 +159,8 @@ FIXTURE_SETUP(homa_incoming)
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 		        .retransmit = 0,
-			.seg = {.offset = 0, .segment_length = htonl(1400)}};
+			.seg = {.offset = 0, .segment_length = htonl(1400),
+				.ack = {0, 0, 0}}};
 	unit_log_clear();
 	delete_count = 0;
 }
@@ -448,6 +449,22 @@ TEST_F(homa_incoming, homa_get_resend_range__gap_at_beginning)
 	EXPECT_EQ(6200, ntohl(resend.length));
 }
 
+TEST_F(homa_incoming, homa_pkt_dispatch__handle_ack)
+{
+	struct homa_sock hsk;
+	mock_sock_init(&hsk, &self->homa, self->server_port);
+	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 3000);
+	self->data.seg.ack = (struct homa_ack) {
+			.client_port = htons(self->client_port),
+		       .server_port = htons(self->server_port),
+		       .client_id = cpu_to_be64(self->client_id)};
+	self->data.common.sender_id = cpu_to_be64(self->client_id+10);
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
+			1400, 0), &self->hsk);
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
+}
 TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc)
 {
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
@@ -666,7 +683,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
 	
-	struct grant_header h = {{.sport = htons(self->server_port),
+	struct grant_header h = {.common = {.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.generation = htons(1),
@@ -675,6 +692,15 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk);
 	EXPECT_EQ(0, crpc->silent_ticks);
+	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+	
+	/* Don't reset silent_ticks for some packet types. */
+	h.common.type = NEED_ACK;
+	crpc->silent_ticks = 5;
+	crpc->peer->outstanding_resends = 2;
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_EQ(5, crpc->silent_ticks);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
@@ -1026,25 +1052,6 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 			&self->hsk);
 	EXPECT_EQ(20000, crpc->msgout.granted);
 }
-TEST_F(homa_incoming, homa_grant_pkt__delete_server_rpc)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 100, 20000);
-	EXPECT_NE(NULL, srpc);
-	EXPECT_FALSE(list_empty(&self->hsk.active_rpcs));
-
-	struct grant_header h = {{.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
-			.sender_id = cpu_to_be64(self->client_id),
-			.generation = htons(1),
-			.type = GRANT},
-		        .offset = htonl(25000),
-			.priority = 3};
-	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
-			&self->hsk);
-	EXPECT_TRUE(list_empty(&self->hsk.active_rpcs));
-}
 
 TEST_F(homa_incoming, homa_resend_pkt__server_sends_busy)
 {
@@ -1317,6 +1324,125 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 			&self->hsk.inet);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(0, peer->cutoff_version);
+}
+	
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_ready)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 100, 3000);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	struct need_ack_header h = {.common = {
+			.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.generation = htons(1),
+			.type = NEED_ACK}};
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.packets_received[
+			NEED_ACK - DATA]);
+}	
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_ready)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 100, 3000);
+	EXPECT_NE(NULL, crpc);
+	crpc->peer->acks[0].client_port = htons(self->client_port);
+	crpc->peer->acks[0].server_port = htons(self->server_port);
+	crpc->peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
+	crpc->peer->num_acks = 1;
+	mock_xmit_log_verbose = 1;
+	struct need_ack_header h = {.common = {
+			.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.generation = htons(1),
+			.type = NEED_ACK}};
+	unit_log_clear();
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:40000, dport 99, id 1234, "
+			"acks [cp 40000, sp 99, id 1236]", unit_log_get());
+}
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
+{
+	struct homa_peer *peer = homa_peer_find(&self->homa.peers,
+			self->server_ip, &self->hsk.inet);
+	peer->acks[0].client_port = htons(self->client_port);
+	peer->acks[0].server_port = htons(self->server_port);
+	peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
+	peer->num_acks = 1;
+	mock_xmit_log_verbose = 1;
+	struct need_ack_header h = {.common = {
+			.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.generation = htons(1),
+			.type = NEED_ACK}};
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:40000, dport 99, id 1234, "
+			"acks [cp 40000, sp 99, id 1236]", unit_log_get());
+}
+	
+TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 5000);
+	EXPECT_NE(NULL, srpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	struct ack_header h = {.common = {
+			.sport = htons(self->client_port),
+	                .dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.generation = htons(1),
+			.type = ACK},
+			.num_acks = htons(0)};
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
+			&self->hsk);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.packets_received[
+			ACK - DATA]);
+}	
+TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
+{
+	struct homa_sock hsk1;
+	mock_sock_init(&hsk1, &self->homa, self->server_port);
+	struct homa_rpc *srpc1 = unit_server_rpc(&hsk1, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 5000);
+	struct homa_rpc *srpc2 = unit_server_rpc(&hsk1, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id+2, 100, 5000);
+	EXPECT_EQ(2, unit_list_length(&hsk1.active_rpcs));
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	struct ack_header h = {.common = {
+			.sport = htons(self->client_port + 1),
+	                .dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.generation = htons(1),
+			.type = ACK},
+			.num_acks = htons(2)};
+	h.acks[0] = (struct homa_ack) {.client_port = htons(self->client_port),
+	              .server_port = htons(self->server_port),
+	              .client_id = cpu_to_be64(self->server_id+5)};
+	h.acks[1] = (struct homa_ack) {.client_port = htons(self->client_port),
+	              .server_port = htons(self->server_port),
+	              .client_id = cpu_to_be64(self->server_id+1)};
+	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
+			&hsk1);
+	EXPECT_EQ(1, unit_list_length(&hsk1.active_rpcs));
+	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc1));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
 }
 
 TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
@@ -2661,6 +2787,25 @@ TEST_F(homa_incoming, homa_rpc_ready__queue_on_ready_requests)
 	homa_rpc_ready(srpc);
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+}
+TEST_F(homa_incoming, homa_rpc_ready__add_ack)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 20000, 100);
+	EXPECT_NE(NULL, srpc);
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	EXPECT_NE(NULL, crpc);
+	
+	/* Server RPCs don't get acked. */
+	homa_rpc_ready(srpc);
+	EXPECT_EQ(0, srpc->peer->num_acks);
+	
+	/* Client RPCs do get acked. */
+	homa_rpc_ready(crpc);
+	EXPECT_EQ(1, crpc->peer->num_acks);
 }
 
 TEST_F(homa_incoming, homa_incoming_sysctl_changed__grant_nonfifo)

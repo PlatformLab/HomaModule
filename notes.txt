@@ -1,15 +1,14 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Fixing deadlock over retransmission:
-  * Cycle through all of the RPCs for a peer?
-  * Don't send RESENDs once an RPC is known to be busy?  Risky: response
-    packet could get lost.
-  * Extra state variables per peer:
-    * resend_rpc: RPC of most recent resend
-  * In each timer interval, select highest priority RPC for resend
-    (longest time since resend?); only resend to that RPC in the next
-    interval.
+* Still to do for at-most-once semantics:
+  * Check comment at homa_incoming.c:573
+  * Separate MIN_PACKET_SIZE from MAX_HEADER_SIZE
+  * Eliminate rpc->unknowns
+  * Eliminate generation numbers?
+  * Reap most of a message before getting an ack? To do this, sender
+    must include "received offset" in grants; then sender can free
+    everything up to the latest received offset.
 
 * Performance-related tasks:
   * Analyze 40-us W4 short message latency by writing a time-trace
@@ -27,6 +26,8 @@ Notes for Homa implementation in Linux:
     >1 request per kernel call?
 
 * Things to do:
+  * Try more aggressive retries (e.g. if a missing packet is sufficiently
+    long ago, don't wait for timeout).
   * Eliminate hot spots involving NAPI:
     * Arrange for incoming bursts to be divided into batches where
       alternate batches do their NAPI on 2 different cores.
@@ -35,16 +36,6 @@ Notes for Homa implementation in Linux:
         different NAPI cores
       * Interpose on the TCP packet reception hooks, and redirect
         real TCP packets back to TCP.
-  * Implement at-most-once semantics:
-    * Don't delete server RPCs until acked by client.
-    * On client, keep small set of completed RPCs in homa_peer
-    * Send a few completed RPCs with each new RPC
-    * Make sequence numbers peer-specific
-    * State on server for each peer:
-      * Largest sequence number ever seen
-      * Smallest un-acked sequence number
-      * How to store bit map for gap?
-    * After implementing this, eliminate rpc->unknowns?
   * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in

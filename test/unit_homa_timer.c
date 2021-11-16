@@ -55,6 +55,38 @@ FIXTURE_TEARDOWN(homa_timer)
 	unit_teardown();
 }
 
+TEST_F(homa_timer, homa_check_timeout__request_ack)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 100);
+	self->homa.request_ack_ticks = 2;
+	
+	/* First call: do nothing (response not fully transmitted). */
+	homa_check_rpc(srpc);
+	EXPECT_EQ(0, srpc->done_timer_ticks);
+	
+	/* Second call: set done_timer_ticks. */
+	homa_xmit_data(srpc, false);
+	unit_log_clear();
+	homa_check_rpc(srpc);
+	EXPECT_EQ(100, srpc->done_timer_ticks);
+	EXPECT_STREQ("", unit_log_get());
+	
+	/* Third call: haven't hit request_ack_ticks yet. */
+	unit_log_clear();
+	self->homa.timer_ticks++;
+	homa_check_rpc(srpc);
+	EXPECT_EQ(100, srpc->done_timer_ticks);
+	EXPECT_STREQ("", unit_log_get());
+	
+	/* Fourth call: request ack. */
+	unit_log_clear();
+	self->homa.timer_ticks++;
+	homa_check_rpc(srpc);
+	EXPECT_EQ(100, srpc->done_timer_ticks);
+	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
+}
 TEST_F(homa_timer, homa_check_timeout__client_rpc__granted_bytes_not_sent)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -62,7 +94,7 @@ TEST_F(homa_timer, homa_check_timeout__client_rpc__granted_bytes_not_sent)
 			self->server_port, self->client_id, 5000, 200);
 	unit_log_clear();
 	crpc->silent_ticks = 10;
-	EXPECT_EQ(0, homa_check_timeout(crpc));
+	EXPECT_EQ(0, homa_check_rpc(crpc));
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -74,7 +106,7 @@ TEST_F(homa_timer, homa_check_timeout__all_granted_bytes_received)
 	unit_log_clear();
 	crpc->msgin.incoming = 1400;
 	crpc->silent_ticks = 10;
-	EXPECT_EQ(0, homa_check_timeout(crpc));
+	EXPECT_EQ(0, homa_check_rpc(crpc));
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -85,7 +117,7 @@ TEST_F(homa_timer, homa_check_timeout__client_rpc__all_granted_bytes_received_no
 			self->server_id, 5000, 5000);
 	srpc->msgin.incoming = 1400;
 	srpc->silent_ticks = 10;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_EQ(0, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -101,13 +133,13 @@ TEST_F(homa_timer, homa_check_timeout__resend_ticks_not_reached)
 	
 	/* First call: resend_ticks-1 not reached. */
 	crpc->silent_ticks = 1;
-	EXPECT_EQ(0, homa_check_timeout(crpc));
+	EXPECT_EQ(0, homa_check_rpc(crpc));
 	EXPECT_EQ(1, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 	
 	/* Second call: resend_ticks-1 reached. */
 	crpc->silent_ticks = 2;
-	EXPECT_EQ(1, homa_check_timeout(crpc));
+	EXPECT_EQ(1, homa_check_rpc(crpc));
 	EXPECT_EQ(2, crpc->silent_ticks);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
@@ -119,7 +151,7 @@ TEST_F(homa_timer, homa_check_timeout__peer_timeout)
 	unit_log_clear();
 	crpc->silent_ticks = self->homa.resend_ticks;
 	crpc->peer->outstanding_resends = self->homa.timeout_resends;
-	EXPECT_EQ(1, homa_check_timeout(crpc));
+	EXPECT_EQ(1, homa_check_rpc(crpc));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_timeouts);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
@@ -131,7 +163,7 @@ TEST_F(homa_timer, homa_check_timeout__server_rpc__state_not_incoming)
 	unit_log_clear();
 	srpc->silent_ticks = self->homa.resend_ticks;
 	srpc->msgout.granted = 0;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_EQ(self->homa.resend_ticks, srpc->silent_ticks);
 }
 TEST_F(homa_timer, homa_check_timeout__rollover_state_for_least_recent_rpc)
@@ -146,7 +178,7 @@ TEST_F(homa_timer, homa_check_timeout__rollover_state_for_least_recent_rpc)
 	srpc->peer->least_recent_ticks = 0;
 	srpc->peer->resend_rpc = NULL;
 	srpc->peer->current_ticks = self->homa.timer_ticks-1;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_EQ(srpc, srpc->peer->resend_rpc);
 	EXPECT_EQ(NULL, srpc->peer->least_recent_rpc);
 	EXPECT_EQ(self->homa.timer_ticks, srpc->peer->least_recent_ticks);
@@ -174,11 +206,11 @@ TEST_F(homa_timer, homa_check_timeout__compute_least_recent_rpc)
 	srpc3->silent_ticks = self->homa.resend_ticks;
 	srpc3->resend_timer_ticks = self->homa.timer_ticks - 3;
 	srpc->peer->current_ticks = self->homa.timer_ticks-1;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_EQ(srpc, srpc->peer->least_recent_rpc);
-	EXPECT_EQ(0, homa_check_timeout(srpc2));
+	EXPECT_EQ(0, homa_check_rpc(srpc2));
 	EXPECT_EQ(srpc2, srpc->peer->least_recent_rpc);
-	EXPECT_EQ(0, homa_check_timeout(srpc3));
+	EXPECT_EQ(0, homa_check_rpc(srpc3));
 	EXPECT_EQ(srpc2, srpc->peer->least_recent_rpc);
 	EXPECT_EQ(self->homa.timer_ticks - 10, srpc->peer->least_recent_ticks);
 	EXPECT_EQ(self->homa.timer_ticks, srpc->peer->current_ticks);
@@ -205,11 +237,11 @@ TEST_F(homa_timer, homa_check_timeout__least_recent_rpc_with_ticks_overflow)
 	srpc3->silent_ticks = self->homa.resend_ticks;
 	srpc3->resend_timer_ticks = 3;
 	srpc->peer->current_ticks = self->homa.timer_ticks-1;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_EQ(srpc, srpc->peer->least_recent_rpc);
-	EXPECT_EQ(0, homa_check_timeout(srpc2));
+	EXPECT_EQ(0, homa_check_rpc(srpc2));
 	EXPECT_EQ(srpc2, srpc->peer->least_recent_rpc);
-	EXPECT_EQ(0, homa_check_timeout(srpc3));
+	EXPECT_EQ(0, homa_check_rpc(srpc3));
 	EXPECT_EQ(srpc2, srpc->peer->least_recent_rpc);
 	EXPECT_EQ(-10, srpc->peer->least_recent_ticks);
 	EXPECT_EQ(self->homa.timer_ticks, srpc->peer->current_ticks);
@@ -226,7 +258,7 @@ TEST_F(homa_timer, homa_check_timeout__too_soon_for_another_resend)
 	srpc->peer->resend_rpc = srpc;
 	srpc->peer->most_recent_resend = self->homa.timer_ticks
 			- self->homa.resend_interval + 1;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_timer, homa_check_timeout__send_resend)
@@ -241,7 +273,7 @@ TEST_F(homa_timer, homa_check_timeout__send_resend)
 	srpc->peer->resend_rpc = srpc;
 	
 	/* First call: no resend, but choose this RPC for least_recent_rpc. */
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, srpc->peer->outstanding_resends);
 	EXPECT_EQ(srpc, srpc->peer->least_recent_rpc);
@@ -249,7 +281,7 @@ TEST_F(homa_timer, homa_check_timeout__send_resend)
 	/* Second call: issue resend. */
 	self->homa.timer_ticks++;
 	srpc->silent_ticks++;
-	EXPECT_EQ(0, homa_check_timeout(srpc));
+	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 	EXPECT_EQ(self->homa.timer_ticks, srpc->resend_timer_ticks);
 	EXPECT_EQ(self->homa.timer_ticks, srpc->peer->most_recent_resend);

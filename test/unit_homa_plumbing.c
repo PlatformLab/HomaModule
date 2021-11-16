@@ -315,17 +315,6 @@ TEST_F(homa_plumbing, homa_ioc_reply__error_in_homa_message_out_init)
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_ioc_reply__free_rpc)
-{
-	unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	EXPECT_EQ(0, -homa_ioc_reply((struct sock *) &self->hsk,
-			(unsigned long) &self->reply_args));
-	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
 TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,

@@ -73,9 +73,11 @@ extern void mock_rcu_read_unlock(void);
 struct homa_sock;
 struct homa_rpc;
 struct homa;
+struct homa_peer;
 
 /* Declarations used in this file, so they can't be made at the end. */
 extern void     homa_grantable_lock_slow(struct homa *homa);
+extern void     homa_peer_lock_slow(struct homa_peer *peer);
 extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern void     homa_sock_lock_slow(struct homa_sock *hsk);
 extern void     homa_throttle_lock_slow(struct homa *homa);
@@ -93,11 +95,13 @@ enum homa_packet_type {
 	BUSY               = 24,
 	CUTOFFS            = 25,
 	FREEZE             = 26,
-	BOGUS              = 27,      /* Used only in unit tests. */
+	NEED_ACK           = 27,
+	ACK                = 28,
+	BOGUS              = 29,      /* Used only in unit tests. */
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
-	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.q
+	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
 	 */
 };
 
@@ -125,7 +129,7 @@ enum homa_packet_type {
  * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
  * must be at least this long.
  */
-#define HOMA_MAX_HEADER 64
+#define HOMA_MAX_HEADER 90
 
 /**
  * define ETHERNET_MAX_PAYLOAD - A maximum length of an Ethernet packet,
@@ -145,6 +149,12 @@ enum homa_packet_type {
 
 /** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
 #define CACHE_LINE_SIZE 64
+
+/** 
+ * define NUM_PEER_UNACKED_IDS - The number of ids for unacked RPCs that
+ * can be stored in a struct homa_peer.
+ */
+#define NUM_PEER_UNACKED_IDS 5
 
 /**
  * struct common_header - Wire format for the first bytes in every Homa
@@ -205,6 +215,30 @@ struct common_header {
 	__be64 sender_id;
 } __attribute__((packed));
 
+/**
+ * struct homa_ack - Identifies an RPC that can be safely deleted by its
+ * server. After sending the response for an RPC, the server must retain its
+ * state for the RPC until it knows that the client has successfully
+ * received the entire response. An ack indicates this. Clients will
+ * piggyback acks on future data packets, but if a client doesn't send
+ * any data to the server, the server will eventually request an ack
+ * explicitly with a NEED_ACK packet, in which case the client will
+ * return an explicit ACK.
+ */
+struct homa_ack {
+	/** 
+	 * @id: The client's identifier for the RPC. 0 means this ack
+	 * is invalid.
+	 */
+	__be64 client_id;
+	
+	/** @client_port: The client-side port for the RPC. */
+	__be16 client_port;
+	
+	/** @server_port: The server-side port for the RPC. */
+	__be16 server_port;
+} __attribute__((packed));
+
 /** 
  * struct data_segment - Wire format for a chunk of data that is part of
  * a DATA packet. A single sk_buff can hold multiple data_segments in order
@@ -223,6 +257,11 @@ struct data_segment {
 	
 	/** @segment_length: Number of bytes of data in this segment. */
 	__be32 segment_length;
+	
+	/** @ack: If the @client_id field is nonzero, provides info about
+	 * an RPC that the recipient can now safely free.
+	 */
+	struct homa_ack ack;
 	
 	/** @data: the payload of this segment. */
 	char data[0];
@@ -406,6 +445,38 @@ struct freeze_header {
 } __attribute__((packed));
 _Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
 		"freeze_header too large");
+
+/**
+ * struct need_ack_header - Wire format for NEED_ACK packets.
+ * 
+ * These packets ask the recipient (a client) to return an ACK message if
+ * the packet's RPC is no longer active.
+ */
+struct need_ack_header {
+	/** @common: Fields common to all packet types. */
+	struct common_header common;
+} __attribute__((packed));
+_Static_assert(sizeof(struct need_ack_header) <= HOMA_MAX_HEADER,
+		"need_ack_header too large");
+
+/**
+ * struct ack_header - Wire format for ACK packets.
+ * 
+ * These packets are sent from a client to a server to indicate that
+ * a set of RPCs is no longer active on the client, so the server can
+ * free any state it may have for them.
+ */
+struct ack_header {
+	/** @common: Fields common to all packet types. */
+	struct common_header common;
+	
+	/** @num_acks: number of (leading) elements in @acks that are valid. */
+	__be16 num_acks;
+	
+	struct homa_ack acks[NUM_PEER_UNACKED_IDS];
+} __attribute__((packed));
+_Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
+		"ack_header too large");
 
 /**
  * struct homa_message_out - Describes a message (either request or response)
@@ -776,7 +847,8 @@ struct homa_rpc {
 	
 	/**
 	 * @silent_ticks: Number of times homa_timer has been invoked
-	 * since the last time a packet was received for this RPC.
+	 * since the last time a packet indicating progress was received
+	 * for this RPC, so we don't need to send a resend for a while.
 	 */
 	int silent_ticks;
 	
@@ -785,6 +857,14 @@ struct homa_rpc {
 	 * we sent a RESEND for this RPC.
 	 */
 	__u32 resend_timer_ticks;
+	
+	/**
+	 * @done_timer_ticks: The value of homa->timer_ticks the first
+	 * time we noticed that this (server) RPC is done (all response
+	 * packets have been transmitted), so we're ready for an ack.
+	 * Zero means we haven't reached that point yet.
+	 */
+	__u32 done_timer_ticks;
 	
 	/**
 	 * @unknowns: Number of times the peer has sent us UNKNOWN
@@ -1165,7 +1245,7 @@ struct homa_peer {
 	
 	/**
 	 * @outstanding_resends: the number of resend requests we have
-	 * send to this server (spaced @homa.resend_interval apart) since
+	 * sent to this server (spaced @homa.resend_interval apart) since
 	 * we received a packet from this peer.
 	 */
 	int outstanding_resends;
@@ -1190,9 +1270,9 @@ struct homa_peer {
 	__u32 least_recent_ticks;
 	
 	/**
-	 * The value of @homa->timer_ticks during the homa_timer pass when
-	 * @least_recent_rpc and @least_recent_ticks were computed. Used to
-	 * detect the start of a new homa_timer pass.
+	 * @current_ticks: the value of @homa->timer_ticks the last time
+	 * that @least_recent_rpc and @least_recent_ticks were computed.
+	 * Used to detect the start of a new homa_timer pass.
 	 */
 	__u32 current_ticks;
 	
@@ -1202,6 +1282,23 @@ struct homa_peer {
 	 * in the current pass, if it still needs one.
 	 */
 	struct homa_rpc *resend_rpc;
+	
+	/**
+	 * @num_acks: the number of (initial) entries in @acks that
+	 * currently hold valid information.
+	 */
+	int num_acks;
+	
+	/**
+	 * @acks: info about client RPCs whose results have been completely
+	 * received.
+	 */
+	struct homa_ack acks[NUM_PEER_UNACKED_IDS];
+	
+	/**
+	 * @ack_lock: used to synchronize access to @num_acks and @acks.
+	 */
+	struct spinlock ack_lock;
 };
 
 /**
@@ -1473,6 +1570,13 @@ struct homa {
 	int timeout_resends;
 	
 	/**
+	 * @request_ack_ticks: How many timer ticks we'll wait for the
+	 * client to ack an RPC before explicitly requesting an ack.
+	 * Set externally via sysctl.
+	 */
+	int request_ack_ticks;
+	
+	/**
 	 * @reap_limit: Maximum number of packet buffers to free in a
 	 * single call to home_rpc_reap.
 	 */
@@ -1538,8 +1642,8 @@ struct homa {
 	
 	/**
 	 * @max_gso_size: Maximum number of bytes that will be included
-	 * in a single output packet. Can be set externally via sysctl to
-	 * lower the limit already enforced by Linux. 
+	 * in a single output packet that Homa passes to Linux. Can be set
+	 * externally via sysctl to lower the limit already enforced by Linux. 
 	 */
 	int max_gso_size;
 	
@@ -2056,6 +2160,18 @@ struct homa_metrics {
 	__u64 grantable_lock_misses;
 
 	/**
+	 * @peer_lock_miss_cycles: total time spent waiting for peer
+	 * lock misses, measured by get_cycles().
+	 */
+	__u64 peer_lock_miss_cycles;
+
+	/**
+	 * @peer_lock_misses: total number of times that Homa had to wait
+	 * to acquire a peer lock.
+	 */
+	__u64 peer_lock_misses;
+
+	/**
 	 * @disabled_reaps: total number of times that the reaper couldn't
 	 * run at all because it was disabled.
 	 */
@@ -2108,6 +2224,19 @@ struct homa_metrics {
 	 * (everything granted had been received).
 	 */
 	__u64 fifo_grants_no_incoming;
+	
+	/**
+	 * @unacked_overflows: total number of times that homa_peer_add_ack
+	 * found insufficient space for the new id and hence had to send an
+	 * ACK message.
+	 */
+	__u64 ack_overflows;
+	
+	/**
+	 * @ignored_need_acks: total number of times that a NEED_ACK packet
+	 * was ignored because the RPC's result hadn't been fully received.
+	 */
+	__u64 ignored_need_acks;
 	
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
@@ -2170,13 +2299,17 @@ static inline bool homa_is_client(__u64 id)
 }
 
 /**
- * homa_local_id(): returns the RPC identifier that we should use on this
- * machine for a given incoming packet.
- * @h:  Header for an incoming packet.
+ * homa_local_id(): given an RPC identifier from an input packet (which
+ * is network-encoded), return the decoded id we should use for that
+ * RPC on this machine.
+ * @sender_id:  RPC id from an incoming packet, such as h->common.sender_id
  */
-static inline __u64 homa_local_id(struct common_header *h)
+static inline __u64 homa_local_id(__be64 sender_id)
 {
-	return be64_to_cpu(h->sender_id) ^ 1;
+	/* If the client bit was set on the sender side, it needs to be
+	 * removed here, and conversely.
+	 */
+	return be64_to_cpu(sender_id) ^ 1;
 }
 
 #define homa_bucket_lock(bucket, type)                      \
@@ -2322,6 +2455,27 @@ static inline void homa_sock_unlock(struct homa_sock *hsk) {
 }
 
 /**
+ * homa_peer_lock() - Acquire the lock for a peer's @unacked_lock. If the lock
+ * isn't immediately available, record stats on the waiting time.
+ * @peer:    Peer to lock.
+ */
+static inline void homa_peer_lock(struct homa_peer *peer)
+{
+	if (!spin_trylock_bh(&peer->ack_lock)) {
+		homa_peer_lock_slow(peer);
+	}
+}
+
+/**
+ * homa_peer_unlock() - Release the lock for a peer's @unacked_lock.
+ * @peer:   Peer to lock.
+ */
+static inline void homa_peer_unlock(struct homa_peer *peer)
+{
+	spin_unlock_bh(&peer->ack_lock);
+}
+
+/**
  * homa_protect_rpcs() - Ensures that no RPCs will be reaped for a given
  * socket until until homa_sock_unprotect is called. Typically
  * used by functions that want to scan the active RPCs for a socket
@@ -2411,6 +2565,8 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 
 extern void     homa_abort_rpcs(struct homa *homa, __be32 addr, int port,
                     int error);
+extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+		    struct homa_rpc *rpc);
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
@@ -2418,7 +2574,7 @@ extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
 extern void     homa_check_grantable(struct homa *homa, struct homa_rpc *rpc);
-extern int      homa_check_timeout(struct homa_rpc *rpc);
+extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
@@ -2480,6 +2636,8 @@ extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
                     size_t length, loff_t *offset);
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
+extern void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+		    struct homa_rpc *rpc);
 extern int      homa_offload_end(void);
 extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
@@ -2488,14 +2646,16 @@ extern void     homa_pacer_stop(struct homa *homa);
 extern void     homa_pacer_xmit(struct homa *homa);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
+extern void     homa_peer_add_ack(struct homa_rpc *rpc);
 extern struct homa_peer
                *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
                     struct inet_sock *inet);
+extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
+		    struct homa_ack *dst);
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
                     int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk);
-extern int      homa_softirq(struct sk_buff *skb);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
 extern char    *homa_print_ipv4_addr(__be32 addr);
@@ -2521,6 +2681,8 @@ extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
                     struct homa_sock *hsk);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
+extern void     homa_rpc_acked(struct homa_sock *hsk, __be32 saddr,
+		    struct homa_ack *ack);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern void     homa_rpc_log(struct homa_rpc *rpc);
@@ -2559,6 +2721,7 @@ extern struct homa_sock
 extern struct homa_sock
                *homa_socktab_start_scan(struct homa_socktab *socktab,
                     struct homa_socktab_scan *scan);
+extern int      homa_softirq(struct sk_buff *skb);
 extern void     homa_spin(int usecs);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
