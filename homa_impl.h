@@ -147,13 +147,6 @@ enum homa_packet_type {
 #define CACHE_LINE_SIZE 64
 
 /**
- * define REAP_CHECK - Determines how frequently we check for excessive
- * buildup of dead RPCs. It is a mask value applied to the current count
- * of received DATA packets; when zero, the check occurs.
- */
-#define REAP_CHECK 7
-
-/**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet. This must partially match the format of a TCP header so that
  * Homa can piggyback on TCP segmentation offload (and possibly other
