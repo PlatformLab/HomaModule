@@ -102,6 +102,7 @@ enum homa_packet_type {
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
 	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
+	 * 3. Add the header length to header_lengths in homa_plumbing.c.
 	 */
 };
 
@@ -126,8 +127,14 @@ enum homa_packet_type {
 #define HOMA_ETH_OVERHEAD 24
 
 /**
- * define HOMA_MAX_HEADER - Largest allowable Homa header.  All Homa packets
- * must be at least this long.
+ * define HOMA_MIN_PKT_LENGTH - Every Homa packet must be padded to at least
+ * this length to meet Ethernet frame size limitations. This number includes
+ * Homa headers and data, but not IP or Ethernet headers.
+ */
+#define HOMA_MIN_PKT_LENGTH 26
+
+/**
+ * define HOMA_MAX_HEADER - Number of bytes in the largest Homa header.
  */
 #define HOMA_MAX_HEADER 90
 
@@ -301,8 +308,11 @@ struct data_header {
 	struct data_segment seg;
 } __attribute__((packed));
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
-		"data_header too large");
-
+		"data_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
+		"data_header too small: Homa doesn't currently have code"
+		"to pad data packets");
 _Static_assert(((sizeof(struct data_header) - sizeof(struct data_segment))
 		& 0x3) == 0,
 		" data_header length not a multiple of 4 bytes (required "
@@ -333,7 +343,8 @@ struct grant_header {
 	__u8 priority;
 } __attribute__((packed));
 _Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
-		"grant_header too large");
+		"grant_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct resend_header - Wire format for RESEND packets.
@@ -371,7 +382,8 @@ struct resend_header {
 	__u8 priority;
 } __attribute__((packed));
 _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
-		"resend_header too large");
+		"resend_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct unknown_header - Wire format for UNKNOWN packets.
@@ -387,7 +399,8 @@ struct unknown_header {
 	struct common_header common;
 } __attribute__((packed));
 _Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
-		"unknown_header too large");
+		"unknown_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -400,7 +413,8 @@ struct busy_header {
 	struct common_header common;
 } __attribute__((packed));
 _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
-		"busy_header too large");
+		"busy_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct cutoffs_header - Wire format for CUTOFFS packets.
@@ -427,7 +441,8 @@ struct cutoffs_header {
 	__be16 cutoff_version;
 } __attribute__((packed));
 _Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
-		"cutoffs_header too large");
+		"cutoffs_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct freeze_header - Wire format for FREEZE packets.
@@ -440,7 +455,8 @@ struct freeze_header {
 	struct common_header common;
 } __attribute__((packed));
 _Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
-		"freeze_header too large");
+		"freeze_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct need_ack_header - Wire format for NEED_ACK packets.
@@ -453,7 +469,8 @@ struct need_ack_header {
 	struct common_header common;
 } __attribute__((packed));
 _Static_assert(sizeof(struct need_ack_header) <= HOMA_MAX_HEADER,
-		"need_ack_header too large");
+		"need_ack_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct ack_header - Wire format for ACK packets.
@@ -472,7 +489,8 @@ struct ack_header {
 	struct homa_ack acks[NUM_PEER_UNACKED_IDS];
 } __attribute__((packed));
 _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
-		"ack_header too large");
+		"ack_header too large for HOMA_MAX_HEADER; must "
+		"adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_message_out - Describes a message (either request or response)

@@ -468,14 +468,6 @@ TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 	unit_log_active_ids(&self->hsk);
 	EXPECT_STREQ("2001 3001 5001", unit_log_get());
 }
-TEST_F(homa_plumbing, homa_softirq__packet_too_short)
-{
-	struct sk_buff *skb;
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	skb->len = 12;
-	homa_softirq(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
 TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
 {
 	struct sk_buff *skb;
@@ -491,6 +483,26 @@ TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 	__skb_push(skb, 10);
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_softirq__packet_too_short)
+{
+	struct sk_buff *skb;
+	struct ack_header h;
+	h.common.type = ACK;
+	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
+	skb->len -= 1;
+	homa_softirq(skb);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
+}
+TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
+{
+	struct sk_buff *skb;
+	self->data.common.type = BOGUS;
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	homa_softirq(skb);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
 }
 TEST_F(homa_plumbing, homa_softirq__unknown_socket)
 {

@@ -255,19 +255,6 @@ TEST_F(homa_outgoing, homa_fill_packets__set_incoming)
 	h = (struct data_header *) skb_transport_header(skb);
 	EXPECT_EQ(10000, ntohl(h->incoming));
 }
-TEST_F(homa_outgoing, homa_fill_packets__expand_last_segment)
-{
-	mock_net_device.gso_max_size = 5000;
-	struct sk_buff *skb = homa_fill_packets(&self->hsk, self->peer,
-			unit_iov_iter((void *) 1000, 1402));
-	EXPECT_NE(NULL, skb);
-	unit_log_clear();
-	unit_log_filled_skbs(skb, 0);
-	EXPECT_STREQ("DATA 1400@0 2@1400", unit_log_get());
-	EXPECT_EQ(1430, skb->len - sizeof32(struct data_header)
-			- sizeof32(struct data_segment));
-	homa_free_skbs(skb);
-}
 
 TEST_F(homa_outgoing, homa_message_out_init__basics)
 {
@@ -359,17 +346,16 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 {
 	struct homa_rpc *srpc;
-	struct grant_header h;
+	struct busy_header h;
 	
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	EXPECT_NE(NULL, srpc);
-	
-	h.offset = htonl(12345);
-	h.priority = 4;
-	mock_xmit_log_verbose = 1;
-	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
-	EXPECT_SUBSTR("offset 12345, grant_prio 4", unit_log_get());
+	unit_log_clear();
+	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, 10, srpc));
+	EXPECT_STREQ("padded control packet with 16 bytes; "
+			"xmit unknown packet type 0",
+			unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
 {

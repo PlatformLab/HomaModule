@@ -361,6 +361,19 @@ static struct ctl_table homa_ctl_table[] = {
 	{}
 };
 
+/* Sizes of the headers for each Homa packet type, in bytes. */
+static __u16 header_lengths[] = {
+	sizeof32(struct data_header),
+	sizeof32(struct grant_header),
+	sizeof32(struct resend_header),
+	sizeof32(struct unknown_header),
+	sizeof32(struct busy_header),
+	sizeof32(struct cutoffs_header),
+	sizeof32(struct freeze_header),
+	sizeof32(struct need_ack_header),
+	sizeof32(struct ack_header)
+};
+
 /* Used to remove sysctl values when the module is unloaded. */
 static struct ctl_table_header *homa_ctl_header;
 
@@ -373,9 +386,12 @@ static int __init homa_load(void) {
 	
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
+			"data_segment %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u, flowi %u "
 			"tcp_sock %u homa_rpc %u\n",
 			sizeof32(struct data_header),
+			sizeof32(struct data_segment),
+			sizeof32(struct homa_ack),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),
 			sizeof32(struct iphdr),
@@ -1086,6 +1102,7 @@ int homa_softirq(struct sk_buff *skb) {
 	int first_packet = 1;
 	struct homa_sock *hsk;
 	int num_packets = 0;
+	int pull_length;
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
@@ -1132,28 +1149,18 @@ int homa_softirq(struct sk_buff *skb) {
 		next = skb->next;
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
-
-		/* Make sure the header is available at skb->data. One
-		 * complication: it's possible that the IP header hasn't
-		 * yet been removed (this happens for GRO packets on
-		 * the frag_list, since they aren't handled explicitly
-		 * by IP.
-		 */
-		header_offset = skb_transport_header(skb) - skb->data;
-		if (skb->len < (HOMA_MAX_HEADER + header_offset)) {
-			if (homa->verbose)
-				printk(KERN_WARNING "Homa packet from %s too "
-						"short: %d bytes\n",
-						homa_print_ipv4_addr(saddr),
-						skb->len - header_offset);
-			INC_METRIC(short_packets, 1);
-			goto discard;
-		}
 	
 		/* The code below makes the header available at skb->data, even
-		 * if the packet is fragmented.
+		 * if the packet is fragmented. One complication: it's possible
+		 * that the IP header hasn't yet been removed (this happens for
+		 * GRO packets on the frag_list, since they aren't handled
+		 * explicitly by IP.
 		 */
-		if (!pskb_may_pull(skb, HOMA_MAX_HEADER + header_offset)) {
+		header_offset = skb_transport_header(skb) - skb->data;
+		pull_length = HOMA_MAX_HEADER + header_offset;
+		if (pull_length > skb->len)
+			pull_length = skb->len;
+		if (!pskb_may_pull(skb, pull_length)) {
 			if (homa->verbose)
 				printk(KERN_NOTICE "Homa can't handle fragmented "
 						"packet (no space for header); "
@@ -1165,6 +1172,21 @@ int homa_softirq(struct sk_buff *skb) {
 			__skb_pull(skb, header_offset);
 		
 		h = (struct common_header *) skb->data;
+		if (unlikely((skb->len < sizeof(struct common_header))
+				|| (h->type < DATA)
+				|| (h->type >= BOGUS)
+				|| (skb->len < header_lengths[h->type-DATA]))) {
+			if (homa->verbose)
+				printk(KERN_WARNING
+						"Homa %s packet from %s too "
+						"short: %d bytes\n",
+						homa_symbol_for_type(h->type),
+						homa_print_ipv4_addr(saddr),
+						skb->len - header_offset);
+			INC_METRIC(short_packets, 1);
+			goto discard;
+		}
+		
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",

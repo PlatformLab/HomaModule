@@ -116,7 +116,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 	for (bytes_left = len, last_link = &first; bytes_left > 0; ) {
 		struct data_header *h;
 		struct data_segment *seg;
-		int available, last_pkt_length;
+		int available;
 		
 		/* The sizeof32(void*) creates extra space for homa_next_skb. */
 		skb = alloc_skb(gso_size + HOMA_SKB_EXTRA + sizeof32(void*),
@@ -167,13 +167,6 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		} while ((available > 0) && (bytes_left > 0));
 		h->incoming = htonl(((len - bytes_left) > unsched) ?
 				(len - bytes_left) : unsched);
-		
-		/* Make sure that the last segment won't result in a
-		 * packet that's too small.
-		 */
-		last_pkt_length = htonl(seg->segment_length) + sizeof32(*h);
-		if (unlikely(last_pkt_length < HOMA_MAX_HEADER))
-			skb_put(skb, HOMA_MAX_HEADER - last_pkt_length);
 		*last_link = skb;
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
@@ -305,9 +298,12 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
 	memcpy(h, contents, length);
-	extra_bytes = HOMA_MAX_HEADER - length;
-	if (extra_bytes > 0)
+	extra_bytes = HOMA_MIN_PKT_LENGTH - length;
+	if (extra_bytes > 0) {
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
+		UNIT_LOG(",", "padded control packet with %d bytes",
+				extra_bytes);
+	}
 	priority = hsk->homa->num_priorities-1;
 	set_priority(skb, hsk, priority);
 	skb->ooo_okay = 1;
@@ -528,9 +524,6 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 					sizeof32(struct data_header)
 					- sizeof32(struct data_segment));
 			__skb_put_data(new_skb, seg, sizeof32(*seg) + length);
-			if (unlikely(new_skb->len < HOMA_MAX_HEADER))
-					skb_put(new_skb, HOMA_MAX_HEADER
-					- new_skb->len);
 			h = ((struct data_header *) skb_transport_header(new_skb));
 			h->retransmit = 1;
 			if ((offset + length) <= rpc->msgout.granted)
