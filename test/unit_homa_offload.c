@@ -39,8 +39,7 @@ FIXTURE_SETUP(homa_offload)
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
 			.type = DATA,
-			.sender_id = cpu_to_be64(1000),
-			.generation = htons(1)},
+			.sender_id = cpu_to_be64(1000)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.retransmit = 0,

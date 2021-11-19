@@ -201,11 +201,7 @@ struct common_header {
 	 * the checksum in a TCP header (TSO may modify this?).*/
 	__be16 checksum;
 	
-	/**
-	 * @generation: the generation of the RPC this packet is associated
-	 * with.
-	 */
-	__be16 generation;
+	__u16 unused4;
 	
 	/**
 	 * @sender_id: the identifier of this RPC as used on the sender (i.e.,
@@ -754,7 +750,7 @@ struct homa_rpc {
 	 * @grants_in_progress: Count of active grant sends for this RPC;
 	 * it's not safe to reap the RPC unless this value is zero.
 	 * This variable is needed so that grantable_lock can be released
-	 * while sending grants to reduce contention.
+	 * while sending grants, to reduce contention.
 	 */
 	atomic_t grants_in_progress;
 	
@@ -773,13 +769,6 @@ struct homa_rpc {
 	 * server (1) or client (0) for this RPC.
 	 */
 	__u64 id;
-	
-	/**
-	 * @generation: Incremented each time the RPC is restarted. Used to
-	 * detect and discard packets from older generations so they don't
-	 * interfere with the current generation.
-	 */
-	__u16 generation;
 	
 	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has
@@ -865,12 +854,6 @@ struct homa_rpc {
 	 * Zero means we haven't reached that point yet.
 	 */
 	__u32 done_timer_ticks;
-	
-	/**
-	 * @unknowns: Number of times the peer has sent us UNKNOWN
-	 * packets for this RPC.
-	 */
-	int unknowns;
 
 	/**
 	 * @magic: when the RPC is alive, this holds a distinct value that
@@ -2028,19 +2011,6 @@ struct homa_metrics {
 	__u64 unknown_rpcs;
 	
 	/**
-	 * @stale_generations: total number of times an incoming packet was
-	 * discarded because it didn't have the most up-to-date generation
-	 * for the RPC.
-	 */
-	__u64 stale_generations;
-	
-	/**
-	 * @generation_overflows: total number of times an RPC had to be
-	 * aborted because its generation number wrapped back around to 0.
-	 */
-	__u64 generation_overflows;
-	
-	/**
 	 * @cant_create_server_rpc: total number of times a server discarded
 	 * an incoming packet because it couldn't create a homa_rpc object.
 	 */
@@ -2071,12 +2041,6 @@ struct homa_metrics {
 	 * wasn't redundant).
 	 */
 	__u64 resent_packets_used;
-	
-	/**
-	 * @restarted_rpcs: total number of times a client restarted an
-	 * RPC because it received an UNKNOWN packet for it.
-	 */
-	__u64 restarted_rpcs;
 
 	/**
 	 * @peer_timeouts: total number of times a peer (either client or
@@ -2631,7 +2595,6 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
                     struct sk_buff *skb, int len);
-extern int      homa_message_out_reset(struct homa_rpc *rpc);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
                     size_t length, loff_t *offset);

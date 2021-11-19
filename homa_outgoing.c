@@ -219,80 +219,12 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 		h->common.dport = htons(rpc->dport);
 		homa_set_doff(h);
 		h->common.sender_id = cpu_to_be64(rpc->id);
-		h->common.generation = htons(rpc->generation);
 		h->message_length = htonl(len);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
 		skb = *homa_next_skb(skb);
 	}
 	INC_METRIC(sent_msg_bytes, len);
-}
-
-/**
- * homa_message_out_reset() - Reset a homa_message_out to its initial state,
- * as if no packets had been sent. Data for the message is preserved.
- * @rpc:    RPC whose msgout must be reset. Must be a client RPC that was
- *          successfully initialized in the past, and some packets may have
- *          been transmitted since then. Must be locked by caller.
- * 
- * Return:  Zero for success, or a negative error status.
- */
-int homa_message_out_reset(struct homa_rpc *rpc)
-{
-	struct sk_buff *skb, *next;
-	struct sk_buff **last_link;
-	int err = 0;
-	struct homa_message_out *msgout = &rpc->msgout;
-	struct data_header *h;
-	
-	homa_remove_from_throttled(rpc);
-	
-	/* Copy all of the sk_buffs in the message. This is necessary because
-	 * some of the sk_buffs may already have been transmitted once;
-	 * retransmitting these is risky, because the underlying stack
-	 * layers make modifications that aren't idempotent (such as adding
-	 * additional headers).
-	 */
-	last_link = &msgout->packets;
-	for (skb = msgout->packets; skb != NULL; skb = next) {
-		struct sk_buff *new_skb;
-		int length = skb_tail_pointer(skb) - skb_transport_header(skb);
-		new_skb = alloc_skb(length + HOMA_IPV4_HEADER_LENGTH
-				+ HOMA_SKB_EXTRA, GFP_KERNEL);
-		if (unlikely(!new_skb)) {
-			err = -ENOMEM;
-			if (rpc->hsk->homa->verbose)
-				printk(KERN_NOTICE "homa_message_out_reset "
-					"couldn't allocate new skb");
-		} else {
-			skb_reserve(new_skb, HOMA_IPV4_HEADER_LENGTH
-				+ HOMA_SKB_EXTRA);
-			skb_reset_transport_header(new_skb);
-			__skb_put_data(new_skb, skb_transport_header(skb),
-					length);
-			skb_shinfo(new_skb)->gso_size =
-					skb_shinfo(skb)->gso_size;
-			skb_shinfo(new_skb)->gso_segs =
-					skb_shinfo(skb)->gso_segs;
-			skb_shinfo(new_skb)->gso_type =
-					skb_shinfo(skb)->gso_type;
-			h = ((struct data_header *)
-					skb_transport_header(new_skb));
-			h->retransmit = 0;
-			*last_link = new_skb;
-			last_link = homa_next_skb(new_skb);
-		}
-		next = *homa_next_skb(skb);
-		kfree_skb(skb);
-	}
-	*last_link = NULL;
-	
-	msgout->next_packet = msgout->packets;
-	msgout->granted = msgout->unscheduled;
-	if (msgout->granted > msgout->length)
-		msgout->granted = msgout->length;
-	
-	return err;
 }
 
 /**
@@ -333,7 +265,6 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
 	h->sender_id = cpu_to_be64(rpc->id);
-	h->generation = htons(rpc->generation);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
 
@@ -427,7 +358,6 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
-	unknown.common.generation = h->generation;
 	unknown.common.type = UNKNOWN;
 	peer = homa_peer_find(&hsk->homa->peers,
 			ip_hdr(skb)->saddr, &hsk->inet);
@@ -455,7 +385,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		int offset = homa_data_offset(skb);
 		
 		if (homa == NULL) {
-			printk(KERN_NOTICE "NULL homa pointer in homa_xmit_"
+			printk(KERN_ERR "NULL homa pointer in homa_xmit_"
 				"data, state %d, shutdown %d, id %llu, socket %d",
 				rpc->state, rpc->hsk->shutdown, rpc->id,
 				rpc->hsk->port);
@@ -507,7 +437,6 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	 * created.
 	 */
 	h->cutoff_version = rpc->peer->cutoff_version;
-	h->common.generation = htons(rpc->generation);
 	
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
 	dst_hold(dst);

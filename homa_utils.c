@@ -204,7 +204,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
 	crpc->id = atomic64_fetch_add(2, &hsk->homa->next_outgoing_id);
-	crpc->generation = 1;
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
@@ -237,7 +236,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->silent_ticks = 0;
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->done_timer_ticks = 0;
-	crpc->unknowns = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_cycles = get_cycles();
 	
@@ -322,7 +320,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
-	srpc->generation = ntohs(h->common.generation);
 	srpc->error = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
 			ntohl(h->incoming));
@@ -336,7 +333,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->silent_ticks = 0;
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->done_timer_ticks = 0;
-	srpc->unknowns = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
 
@@ -661,20 +657,18 @@ void homa_rpc_log(struct homa_rpc *rpc)
 	
 	if (rpc->state == RPC_INCOMING)
 		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
-				"generation %d, %d/%d bytes received, "
-				"incoming %d\n",
+				"%d/%d bytes received, incoming %d\n",
 				type, rpc->id, peer, rpc->dport,
-				rpc->generation, rpc->msgin.total_length
+				rpc->msgin.total_length
 				- rpc->msgin.bytes_remaining,
 				rpc->msgin.total_length, rpc->msgin.incoming);
 	else if (rpc->state == RPC_OUTGOING) {
 		int offset = homa_rpc_send_offset(rpc);
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
-				"gen %d, out length %d, "
-				"left %d, granted %d, "
+				"out length %d, left %d, granted %d, "
 				"in left %d, resend_ticks %u, silent_ticks %d\n",
 				type, rpc->id, peer, rpc->dport,
-				rpc->generation, rpc->msgout.length,
+				rpc->msgout.length,
 				rpc->msgout.length - offset,
 				rpc->msgout.granted,
 				rpc->msgin.bytes_remaining,
@@ -685,10 +679,9 @@ void homa_rpc_log(struct homa_rpc *rpc)
 		if ((rpc->state == RPC_READY) && list_empty(&rpc->ready_links))
 			queued = " (not queued)";
 		printk(KERN_NOTICE "%s RPC %s%s, id %llu, peer %s:%d, "
-				"generation %d, incoming length %d, "
-				"outgoing length %d\n",
+				"incoming length %d, outgoing length %d\n",
 				type, homa_symbol_for_state(rpc), queued,
-				rpc->id, peer, rpc->dport, rpc->generation,
+				rpc->id, peer, rpc->dport,
 				rpc->msgin.total_length, rpc->msgout.length);
 	}
 }
@@ -778,9 +771,6 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
 		ntohs(common->sport), ntohs(common->dport),
 		be64_to_cpu(common->sender_id));
-	if (ntohs(common->generation) != 1)
-		used = homa_snprintf(buffer, buf_len, used, ", generation %d",
-				ntohs(common->generation));
 	switch (common->type) {
 	case DATA: {
 		struct data_header *h = (struct data_header *)
@@ -1371,14 +1361,6 @@ char *homa_print_metrics(struct homa *homa)
 				"Non-grant packets discarded because RPC unknown\n",
 				m->unknown_rpcs);
 		homa_append_metric(homa,
-				"stale_generations         %15llu  "
-				"Packets discarded because of stale generation\n",
-				m->stale_generations);
-		homa_append_metric(homa,
-				"generation_overflows      %15llu  "
-				"RPCs aborted because of generation wrap-around\n",
-				m->generation_overflows);
-		homa_append_metric(homa,
 				"server_cant_create_rpcs   %15llu  "
 				"Packets discarded because server "
 				"couldn't create RPC\n",
@@ -1402,11 +1384,6 @@ char *homa_print_metrics(struct homa *homa)
 				"Retransmitted packets that were actually "
 				"needed\n",
 				m->resent_packets_used);
-		homa_append_metric(homa,
-				"restarted_rpcs            %15llu  "
-				"RPCs restarted because server discarded "
-				"state\n",
-				m->restarted_rpcs);
 		homa_append_metric(homa,
 				"peer_timeouts             %15llu  "
 				"Peers found to be nonresponsive\n",

@@ -390,15 +390,13 @@ if elapsed_secs != 0:
                 percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
                 percent = percent.ljust(12)
                 print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
-    for symbol in ["resent_packets", "resent_packets_used", "restarted_rpcs",
-            "unknown_rpcs",
+    for symbol in ["resent_packets", "resent_packets_used", "unknown_rpcs",
             "peer_kmalloc_errors", "peer_route_errors", "control_xmit_errors",
             "data_xmit_errors",
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "stale_generations", "generation_overflows",
-            "forced_reaps"]:
+            "server_rpcs_unknown", "forced_reaps"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs

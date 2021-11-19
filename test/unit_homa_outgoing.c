@@ -295,37 +295,6 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 }
 
-TEST_F(homa_outgoing, homa_message_out_reset__basics)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, RPC_OUTGOING,
-		self->client_ip, self->server_ip, self->server_port,
-		1111, 3000, 100);
-	EXPECT_NE(NULL, crpc);
-	homa_xmit_data(crpc, false);
-	EXPECT_EQ(NULL, crpc->msgout.next_packet);
-	crpc->msgout.granted = 0;
-	homa_message_out_reset(crpc);
-	EXPECT_EQ(3000, crpc->msgout.granted);
-	EXPECT_EQ(crpc->msgout.packets, crpc->msgout.next_packet);
-	unit_log_clear();
-	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 200@2800",
-			unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_reset__cant_allocate_skb)
-{
-	int err;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, RPC_OUTGOING,
-		self->client_ip, self->server_ip, self->server_port,
-		1111, 3000, 100);
-	EXPECT_NE(NULL, crpc);
-	mock_alloc_skb_errors = 2;
-	err = homa_message_out_reset(crpc);
-	EXPECT_EQ(ENOMEM, -err);
-	unit_log_clear();
-	unit_log_message_out_packets(&crpc->msgout, 0);
-	EXPECT_STREQ("DATA 1400@0; DATA 200@2800", unit_log_get());
-}
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)
 {
@@ -426,7 +395,6 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 	struct grant_header h = {{.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(99990),
-			.generation = htons(1),
 			.type = GRANT},
 		        .offset = htonl(11200),
 			.priority = 3};
@@ -552,19 +520,6 @@ TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
 	EXPECT_SUBSTR("cutoff_version 123", unit_log_get());
-}
-TEST_F(homa_outgoing, __homa_xmit_data__update_generation)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, unit_iov_iter((void *) 100, 1000));
-	EXPECT_NE(NULL, crpc);
-	homa_rpc_unlock(crpc);
-	crpc->generation = 4;
-	mock_xmit_log_verbose = 1;
-	unit_log_clear();
-	skb_get(crpc->msgout.packets);
-	__homa_xmit_data(crpc->msgout.packets, crpc, 4);
-	EXPECT_SUBSTR(", generation 4,", unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 {

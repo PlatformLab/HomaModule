@@ -288,8 +288,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	/* Find and lock the RPC for this packet. */
 	if (!homa_is_client(id)) {
 		/* We are the server for this RPC. */
-		if ((h->type == DATA)
-				&& !((struct data_header *) h)->retransmit) {
+		if (h->type == DATA) {
 			/* Create a new RPC if one doesn't already exist. */
 			rpc = homa_rpc_new_server(hsk, ip_hdr(skb)->saddr,
 					(struct data_header *) h);
@@ -311,9 +310,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 	if (unlikely(rpc == NULL)) {
 		if ((h->type != CUTOFFS) && (h->type != NEED_ACK)
-				&& (h->type != ACK)) {
-			if (h->type == RESEND)
-				homa_xmit_unknown(skb, hsk);
+				&& (h->type != ACK) && (h->type != RESEND)) {
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					id, h->type,
@@ -324,22 +321,6 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			goto discard;
 		}
 	} else {
-		__u16 pkt_generation = ntohs(h->generation);
-		BUG_ON(rpc->state == RPC_DEAD);
-		if (pkt_generation != rpc->generation) {
-			if (!homa_is_client(rpc->id) && (pkt_generation
-					> rpc->generation))
-				rpc->generation = pkt_generation;
-			else {
-				tt_record4("Discarding packet because of "
-						"stale generation: id %d, "
-						"peer 0x%x:%d, type %d",
-						rpc->id, ntohl(rpc->peer->addr),
-						ntohs(h->sport), h->type);
-				INC_METRIC(stale_generations, 1);
-				goto discard;
-			}
-		}
 		if ((h->type == DATA) || (h->type == GRANT)
 				|| (h->type == BUSY))
 			rpc->silent_ticks = 0;
@@ -539,7 +520,8 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
  * @skb:     Incoming packet; size already verified large enough for header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet; must
- *           be locked by caller.
+ *           be locked by caller, but may be NULL if there is no RPC matching
+ *           this packet
  * @hsk:     Socket on which the packet was received.
  */
 void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
@@ -547,6 +529,17 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
+	
+	if (rpc == NULL) {
+		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
+				"offset %d; responding with UNKNOWN",
+				homa_local_id(h->common.sender_id),
+				ntohl(ip_hdr(skb)->saddr),
+				ntohs(h->common.sport),
+				ntohl(h->offset));
+		homa_xmit_unknown(skb, hsk);
+		goto done;
+	}
 	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
 			rpc->id, ntohl(h->offset), ntohl(h->length),
 			h->priority);
@@ -595,59 +588,39 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
  */
 void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	int err;
-	rpc->unknowns++;
-	tt_record4("Received unknown #%d for id %llu, peer %x:%d",
-			rpc->unknowns, rpc->id, ntohl(rpc->peer->addr),
-			rpc->dport);
+	tt_record3("Received unknown for id %llu, peer %x:%d",
+			rpc->id, ntohl(rpc->peer->addr), rpc->dport);
 	if (homa_is_client(rpc->id)) {
-		if (rpc->state == RPC_READY) {
+		if ((rpc->state == RPC_READY) || (rpc->state == RPC_DEAD)) {
 			/* The missing data packets apparently arrived while
 			 * the UNKNOWN was being transmitted.
 			 */
 			goto done;
 		}
 		
-		/* There is a race here: it's possible that the server
-		 * sent all of the remaining data packets before it sent
-		 * the UNKNOWN, but reordering has occurred so we process
-		 * the UNKNOWN first. To avoid unnecessary restarts, delay
-		 * resetarting until we've received two UNKNOWNs. This isn't
-		 * guaranteed to eliminate false restarts, but it makes them
-		 * much less likely.
-		 */
-		if (rpc->unknowns < 2)
+		if (rpc->state == RPC_OUTGOING) {
+			/* It appears that everything we've already transmitted
+			 * has been lost; retransmit it.
+			 */
+			tt_record4("Restarting id %d to server 0x%x:%d, "
+					"lost %d bytes",
+					rpc->id, ntohl(rpc->peer->addr),
+					rpc->dport,
+					homa_rpc_send_offset(rpc));
+			homa_resend_data(rpc, 0, homa_rpc_send_offset(rpc),
+					homa_unsched_priority(rpc->hsk->homa,
+					rpc->peer, rpc->msgout.length));
 			goto done;
+		}
 		
-		if (1 || rpc->hsk->homa->verbose)
-			printk(KERN_NOTICE "Restarting rpc to server %s:%d, "
-					"id %llu",
-					homa_print_ipv4_addr(rpc->peer->addr),
-					rpc->dport, rpc->id);
-		tt_record3("Restarting id %d to server 0x%x:%d",
-				rpc->id, ntohl(rpc->peer->addr), rpc->dport);
-		INC_METRIC(restarted_rpcs, 1);
-		homa_remove_from_grantable(rpc->hsk->homa, rpc);
-		homa_message_in_destroy(&rpc->msgin);
-		err = homa_message_out_reset(rpc);
-		rpc->generation++;
-		if (rpc->generation == 0) {
-			INC_METRIC(generation_overflows, 1);
-			printk(KERN_WARNING "Aborting Homa RPC id %llu "
-					"to server %s:%d: generation "
-					"overflowed (EOVERFLOW)\n",
-					rpc->id,
-					homa_print_ipv4_addr(
-						rpc->peer->addr),
-					rpc->dport);
-			err = -EOVERFLOW;
-		}
-		if (err) {
-			homa_rpc_abort(rpc, err);
-		} else {
-			rpc->state = RPC_OUTGOING;
-			homa_xmit_data(rpc, false);
-		}
+		printk(KERN_ERR "Received unknown for RPC id %llu, peer %s:%d "
+				"in bogus state %d; discarding unknown\n",
+				rpc->id, homa_print_ipv4_addr(rpc->peer->addr),
+				rpc->dport, rpc->state);
+		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: "
+				"bad state %d",
+				rpc->id, ntohl(rpc->peer->addr), rpc->dport,
+				rpc->state);
 	} else {
 		if (rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Freeing rpc id %llu from client "
@@ -726,7 +699,6 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
 	ack.common.sender_id = be64_to_cpu(homa_local_id(h->sender_id));
-	ack.common.generation = h->generation;
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 			NUM_PEER_UNACKED_IDS, ack.acks));
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
