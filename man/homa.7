@@ -158,14 +158,6 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
-.IR flags
-Individual bits can be set or cleared to control particular Homa behaviors.
-If the
-.B HOMA_FLAG_DONT_THROTTLE
-bit is set, Homa will not throttle output transmissions; packets will
-always be sent immediately. This could result in long transmit queues for
-the NIC, which defeats part of Homa's SRPT scheduling mechanism.
-.TP
 .IR duty_cycle
 Determines the maximum fraction of network bandwidth that a single RPC
 will be allowed to consume, in units of one-thousandth (e.g., 500 means 50%).
@@ -175,6 +167,20 @@ message. Without this limit, a large incoming message can completely
 consume one core for NAPI, which starves user threads on that core and
 can result in high tail latency for short messages served by those
 threads.
+.TP
+.IR flags
+Individual bits can be set or cleared to control particular Homa behaviors.
+If the
+.B HOMA_FLAG_DONT_THROTTLE
+bit is set, Homa will not throttle output transmissions; packets will
+always be sent immediately. This could result in long transmit queues for
+the NIC, which defeats part of Homa's SRPT scheduling mechanism.
+.TP
+.IR freeze_type
+If this value is nonzero, it specifies one of several conditions under which
+Homa will freeze its internal timetrace. This is used for debugging and
+performance analysis; see the source code for the values currently
+supported.
 .TP
 .IR grant_fifo_fraction
 When sending grants, Homa normally uses an SRPT policy, granting to the

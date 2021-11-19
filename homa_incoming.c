@@ -126,19 +126,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	}
 	if (h->retransmit) {
 		INC_METRIC(resent_packets_used, 1);
-//		if (!tt_frozen) {
-//			struct freeze_header freeze;
-//			printk(KERN_NOTICE "Freezing because of lost packet, "
-//					"id %llu, peer 0x%x",
-//					rpc->id, ntohl(rpc->peer->addr));
-//			tt_record3("Freezing because of lost packet, id %d, "
-//					"peer 0x%x, offset %d",
-//					rpc->id, ntohl(rpc->peer->addr),
-//					offset);
-//			homa_xmit_control(FREEZE, &freeze,
-//					sizeof(freeze), rpc);
-//			tt_freeze();
-//		}
+		homa_freeze(rpc, PACKET_LOST, "Freezing because of lost "
+				"packet, id %d, peer 0x%x");
 	}
 	__skb_insert(skb, skb2, skb2->next, &rpc->msgin.packets);
 	rpc->msgin.bytes_remaining -= (ceiling - floor);
@@ -607,6 +596,8 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 					rpc->id, ntohl(rpc->peer->addr),
 					rpc->dport,
 					homa_rpc_send_offset(rpc));
+			homa_freeze(rpc, RESTART_RPC, "Freezing because of "
+					"RPC restart, id %d, peer 0x%x");
 			homa_resend_data(rpc, 0, homa_rpc_send_offset(rpc),
 					homa_unsched_priority(rpc->hsk->homa,
 					rpc->peer, rpc->msgout.length));

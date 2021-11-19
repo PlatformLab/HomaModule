@@ -34,7 +34,6 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer;
-//	uint64_t time_diff;
 	
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
@@ -83,20 +82,6 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	if (rpc->silent_ticks < (homa->resend_ticks-1))
 		return 0;
 	
-//	time_diff = (get_cycles() - rpc->start_cycles) >> 10;
-//	if ((rpc->hsk->homa->temp[3] != 0) && (time_diff >
-//			rpc->hsk->homa->temp[3]) && !tt_frozen) {
-//		struct freeze_header freeze;
-//		printk(KERN_NOTICE "RPC id %llu is still active after %llu "
-//				"kcycles\n", rpc->id, time_diff);
-//		tt_record3("Freezing because RPC id %d didn't finish in "
-//				"%d kcycles, start_cycles %d",
-//				rpc->id, time_diff, rpc->start_cycles);
-//		homa_xmit_control(FREEZE, &freeze,
-//				sizeof(freeze), rpc);
-//		tt_freeze();
-//	}
-	
 	peer = rpc->peer;
 	if (peer->outstanding_resends
 			>= rpc->hsk->homa->timeout_resends) {
@@ -110,16 +95,8 @@ int homa_check_rpc(struct homa_rpc *rpc)
 			printk(KERN_NOTICE "Homa peer %s timed out, id %llu",
 					homa_print_ipv4_addr(peer->addr),
 					rpc->id);
-//		if (!tt_frozen) {
-//			struct freeze_header freeze;
-//			tt_record2("Freezing because of peer timeout,"
-//					" id %d, peer 0x%x",
-//					rpc->id,
-//					htonl(peer->addr));
-//			homa_xmit_control(FREEZE, &freeze,
-//					sizeof(freeze), rpc);
-//			tt_freeze();
-//		}
+		homa_freeze(rpc, PEER_TIMEOUT, "Freezing because of peer "
+				"timeout, id %d, peer 0x%x");
 		peer->outstanding_resends = 0;
 		return 1;
 	}

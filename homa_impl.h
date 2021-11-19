@@ -1285,6 +1285,19 @@ struct homa_peer {
 };
 
 /**
+ * enum homa_freeze_type - The @type argument to homa_freeze must be
+ * one of these values.
+ */
+enum homa_freeze_type {
+	RESTART_RPC        = 1,
+	PEER_TIMEOUT       = 2,
+	SLOW_RPC           = 3,
+	COUNTDOWN          = 4,
+	SOCKET_CLOSE       = 5,
+	PACKET_LOST        = 6,
+};
+
+/**
  * struct homa - Overall information about the Homa protocol implementation.
  * 
  * There will typically only exist one of these at a time, except during
@@ -1697,6 +1710,12 @@ struct homa {
 	 * to trigger various behaviors.
 	 */
 	int flags;
+	
+	/**
+	 * @freeze_type: determines conditions under which the time trace
+	 * should be frozen. Set externally via sysctl.
+	 */
+	enum homa_freeze_type freeze_type;
 	
 	/**
 	 * @temp: the values in this array can be read and written with sysctl.
@@ -2539,7 +2558,6 @@ extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
 extern void     homa_check_grantable(struct homa *homa, struct homa_rpc *rpc);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
-extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -2564,6 +2582,8 @@ extern struct homa_rpc
                *homa_find_server_rpc(struct homa_sock *hsk, __be32 saddr,
                     __u16 sport, __u64 id);
 extern void     homa_free_skbs(struct sk_buff *skb);
+extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, 
+		    char *format);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
@@ -2626,6 +2646,7 @@ extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
                     int buf_len);
+extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
                     int count, int *eof, void *data);
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,

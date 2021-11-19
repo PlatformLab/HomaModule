@@ -146,6 +146,8 @@ int homa_init(struct homa *homa)
 	homa->metrics_capacity = 0;
 	homa->metrics_length = 0;
 	homa->metrics_active_opens = 0;
+	homa->flags = 0;
+	homa->freeze_type = 0;
 	homa_outgoing_sysctl_changed(homa);
 	homa_incoming_sysctl_changed(homa);
 	return 0;
@@ -1600,4 +1602,26 @@ void homa_throttle_lock_slow(struct homa *homa)
 	tt_record("ending wait for throttle lock");
 	INC_METRIC(throttle_lock_misses, 1);
 	INC_METRIC(throttle_lock_miss_cycles, get_cycles() - start);
+}
+
+/**
+ * homa_freeze() - Freezes the timetrace if a particular kind of freeze
+ * has been requested through sysctl.
+ * @rpc:      If we freeze our timetrace, we'll also send a freeze request
+ *            to the peer for this RPC.
+ * @type:     Condition that just occurred. If this doesn't match the
+ *            externally set "freeze_type" value, then we don't freeze.
+ * @format:   Format string used to generate a time trace record describing
+ *            the reason for the freeze; must include "id %d, peer 0x%x"
+ */
+void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
+{
+	if (type != rpc->hsk->homa->freeze_type)
+		return;
+	if (!tt_frozen) {
+		struct freeze_header freeze;
+		tt_record2(format, rpc->id, htonl(rpc->peer->addr));
+		tt_freeze();
+		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+	}
 }

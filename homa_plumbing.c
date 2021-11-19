@@ -177,6 +177,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "freeze_type",
+		.data		= &homa_data.freeze_type,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "grant_fifo_fraction",
 		.data		= &homa_data.grant_fifo_fraction,
 		.maxlen		= sizeof(int),
@@ -498,7 +505,8 @@ void homa_close(struct sock *sk, long timeout) {
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 	tt_record1("closed socket, port %d\n", hsk->port);
-//	tt_freeze();
+	if (hsk->homa->freeze_type == SOCKET_CLOSE)
+		tt_freeze();
 }
 
 /**
@@ -549,7 +557,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct iov_iter iter;
 	int err;
 	int result;
-	uint64_t elapsed;
 	struct homa_rpc *rpc = NULL;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
@@ -577,32 +584,29 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	/* Generate time traces on both ends for long elapsed times (used
 	 * for performance debugging).
 	 */
-	elapsed = (get_cycles() - rpc->start_cycles)>>10;
-	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
-			&& homa_is_client(rpc->id)
-			&& (rpc->msgin.total_length < 500)
-			&& !tt_frozen) {
-		struct freeze_header freeze;
-		tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
-				elapsed, rpc->id, ntohl(rpc->peer->addr),
-				rpc->msgin.total_length);
-		hsk->homa->temp[1] = 0;
-		tt_record4("Freezing because elapsed time is %d "
-				"kcycles, id %d, peer 0x%x, length %d",
-				elapsed, rpc->id,
-				ntohl(rpc->peer->addr),
-				rpc->msgin.total_length);
-		tt_freeze();
-		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
+		uint64_t elapsed = (get_cycles() - rpc->start_cycles)>>10;
+		if ((elapsed <= hsk->homa->temp[1])
+				&& (elapsed >= hsk->homa->temp[0])
+				&& homa_is_client(rpc->id)
+				&& (rpc->msgin.total_length < 500)) {
+			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
+					"length %d",
+					elapsed, rpc->id,
+					ntohl(rpc->peer->addr),
+					rpc->msgin.total_length);
+			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
+					"elapsed time for RPC id %d, peer 0x%x");
+		}
 	}
-	if (hsk->homa->temp[2] >0 ) {
-		hsk->homa->temp[2]--;
-		if (hsk->homa->temp[2] == 0) {
-			struct freeze_header freeze;
-			tt_record("Freezing because temp[2] counted down");
-			tt_freeze();
-			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-			
+	if (rpc->hsk->homa->freeze_type == COUNTDOWN) {
+		if (hsk->homa->temp[2] > 0) {
+			hsk->homa->temp[2]--;
+			if (hsk->homa->temp[2] == 0) {
+				homa_freeze(rpc, COUNTDOWN, "Freezing because "
+						"temp[2] counted down, id %d,"
+						"peer 0x%x");
+			}
 		}
 	}
 
