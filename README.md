@@ -16,6 +16,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   missing:
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
+ 
+ - Please contact me if you have any problems using this repo; I'm happy to
+   provide advice and support.
 
 - Linux v5.4.3 is the primary development platform for this code. In the past
   it has run under 4.15.18;  other versions of Linux have not been tested and
