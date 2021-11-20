@@ -1,10 +1,13 @@
 This repo contains an implementation of the Homa transport protocol as a Linux kernel module.
 
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
-  Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
+  Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564)
+  which appeared in SIGCOMM in August, 2018.
 
-- A paper on this implementation and its performance is currently under submission;
-  if you would like a pre-publication copy, send me email.
+- More information about this implementation and its performance are available in
+  the paper [A Linux Kernel Implementation of the Homa Transport
+  Protocol](https://www.usenix.org/system/files/atc21-ousterhout.pdf),
+  which appeared in the USENIX Annual Technical Conference in July, 2021.
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
@@ -19,6 +22,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
   a day). If you get Homa working on other versions, please let me know and/or submit
   pull requests for required code changes.
+  
+- There now exists support for using Homa with gRPC: see the
+  [GitHub repo](https://github.com/PlatformLab/grpc_homa).
 
 - To build the module, type "make all"; then type "sudo insmod homa.ko" to install
   it, and "sudo rmmod homa" to remove an installed module.
@@ -46,6 +52,11 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page "homa.7".
      
 ## Significant recent improvements
+- November 2021: changed semantics to at-most-once (servers can no
+  longer see multiple instances of the same RPC).
+- August 2021: added new versions of the Homa system calls that
+  support iovecs; in addition, incoming messages can be read
+  incrementally across several homa_recv calls.
 - November 2020: upgraded to Linux 5.4.3.
 - June 2020: implemented busy-waiting during homa_recv: shaves 2
   microseconds off latency.
