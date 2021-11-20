@@ -26,8 +26,22 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - There now exists support for using Homa with gRPC: see the
   [GitHub repo](https://github.com/PlatformLab/grpc_homa).
 
-- To build the module, type "make all"; then type "sudo insmod homa.ko" to install
-  it, and "sudo rmmod homa" to remove an installed module.
+- To build the module, type `make all`; then type `sudo insmod homa.ko` to install
+  it, and `sudo rmmod homa` to remove an installed module.
+  
+- For best Homa performance, you should make the following configuration
+  changes:
+  - Enable priority queues in your switches, selected by the 3
+    high-order bits of the DSCP field
+    in IP packet headers. You can use `sysctl` to configure Homa's use of
+    priorities (e.g., if you want it to use fewer than 8 levels). See the man
+    page `homa.7` for more info.
+  - Enable jumbo frames on your switches and on the Linux nodes.
+  - Set the `rtt_bytes` parameter via `sysctl` to match your network's latency
+    and bandwidth.
+  - It may also be useful to set other Linux networking parameters. As one
+    example, see the script  `cloudlab\bin\start_xl170`, which is what I
+    use to configure my test nodes.
   
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
@@ -36,20 +50,20 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   "make" in that subdirectory.
   
 - The subdirectory "util" contains an assortment of utility programs that
-  you may find useful in exercising Homa. Compile them by typing "make" in that
-  subdirectory. Most notable is the "cperf" family of programs, which will
+  you may find useful in exercising Homa. Compile them by typing `make` in that
+  subdirectory. Most notable is the `cperf` family of programs, which will
   run a variety of benchmarks on a cluster of nodes. The file cperf.py contains
   library functions for benchmarking, which are used by a variety of benchmarks
-  with names starting with "cp_".
+  with names starting with `cp_`.
   
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
      distribution of incoming messages. You can access these through the
-     file /proc/net/homa_metrics. The script "util/metrics.py" will
+     file `/proc/net/homa_metrics`. The script `util/metrics.py` will
      collect metrics and print out all the numbers that have changed
      since its last run.
    - Homa exports a collection of configuration parameters through the
-     sysctl mechanism. For details, see the man page "homa.7".
+     sysctl mechanism. For details, see the man page `homa.7`.
      
 ## Significant recent improvements
 - November 2021: changed semantics to at-most-once (servers can no
