@@ -30,6 +30,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/completion.h>
 #include <linux/proc_fs.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
@@ -39,6 +40,7 @@
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
+#include <net/gro.h>
 #pragma GCC diagnostic warning "-Wpointer-sign"
 #pragma GCC diagnostic warning "-Wunused-variable"
 
@@ -2703,7 +2705,7 @@ extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    char __user *optval, unsigned int optlen);
+                    sockptr_t optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char* format, ...)
@@ -2789,4 +2791,5 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	return peer->dst;
 }
 
+extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */

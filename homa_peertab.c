@@ -144,7 +144,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 			inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
 			inet->sk.sk_protocol, 0, addr, inet->inet_saddr,
 			0, 0, inet->sk.sk_uid);
-	security_sk_classify_flow(&inet->sk, &peer->flow);
+	security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
 	rt = ip_route_output_flow(sock_net(&inet->sk), &peer->flow.u.ip4,
 			&inet->sk);
 	if (IS_ERR(rt)) {
@@ -194,7 +194,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
 			sk->sk_protocol, 0, peer->addr, hsk->inet.inet_saddr,
 			0, 0, sk->sk_uid);
-	security_sk_classify_flow(sk, &peer->flow);
+	security_sk_classify_flow(sk, &peer->flow.u.__fl_common);
 	rt = ip_route_output_flow(sock_net(sk), &peer->flow.u.ip4, sk);
 	if (IS_ERR(rt)) {
 		/* Retain the existing dst if we can't create a new one. */

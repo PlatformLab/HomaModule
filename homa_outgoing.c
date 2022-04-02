@@ -651,7 +651,7 @@ int homa_pacer_main(void *transportInfo)
 		schedule();
 		__set_current_state(TASK_RUNNING);
 	}
-	do_exit(0);
+	kthread_complete_and_exit(&homa_pacer_kthread_done, 0);
 	return 0;
 }
 

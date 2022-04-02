@@ -46,10 +46,10 @@ struct tt_buffer *tt_buffers[NR_CPUS];
 /* Describes file operations implemented for reading timetraces
  * from /proc.
  */
-static const struct file_operations tt_fops = {
-	.open		= tt_proc_open,
-	.read		= tt_proc_read,
-	.release	= tt_proc_release
+static const struct proc_ops tt_pops = {
+	.proc_open		= tt_proc_open,
+	.proc_read		= tt_proc_read,
+	.proc_release	= tt_proc_release
 };
 
 /* Used to remove the /proc file during tt_destroy. */
@@ -118,7 +118,7 @@ int tt_init(char *proc_file, int *temp)
 		tt_buffers[i] = buffer;
 	}
 	
-	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_fops);
+	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
 	if (!tt_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/%s for timetrace "
 				"reading\n", proc_file);
