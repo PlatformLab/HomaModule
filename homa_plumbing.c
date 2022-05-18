@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -870,35 +870,35 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	int result;
 	__u64 start = get_cycles();
-	struct homa_core *core = homa_cores[smp_processor_id()];
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	if (current == core->thread)
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
 	
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(send_calls, 1);
 		INC_METRIC(send_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCRECV:
 		result = homa_ioc_recv(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(recv_calls, 1);
 		INC_METRIC(recv_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(reply_calls, 1);
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCABORT:
 		result = homa_ioc_abort(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(abort_calls, 1);
 		INC_METRIC(abort_cycles, core->syscall_end_time - start);
@@ -1106,7 +1106,7 @@ int homa_softirq(struct sk_buff *skb) {
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	homa_cores[smp_processor_id()]->last_active = start;
+	homa_cores[raw_smp_processor_id()]->last_active = start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {

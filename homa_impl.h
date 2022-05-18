@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -2552,7 +2552,7 @@ static inline void homa_throttle_unlock(struct homa *homa)
 }
 
 #define INC_METRIC(metric, count) \
-		(homa_cores[smp_processor_id()]->metrics.metric) += (count)
+		(homa_cores[raw_smp_processor_id()]->metrics.metric) += (count)
 
 extern struct homa_core *homa_cores[];
 

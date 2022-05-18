@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -164,7 +164,7 @@ static inline void tt_record4(const char* format, __u32 arg0, __u32 arg1,
 		__u32 arg2, __u32 arg3)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, arg2, arg3);
 #endif
 }
@@ -172,28 +172,28 @@ static inline void tt_record3(const char* format, __u32 arg0, __u32 arg1,
 		__u32 arg2)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, arg2, 0);
 #endif
 }
 static inline void tt_record2(const char* format, __u32 arg0, __u32 arg1)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, 0, 0);
 #endif
 }
 static inline void tt_record1(const char* format, __u32 arg0)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, 0, 0, 0);
 #endif
 }
 static inline void tt_record(const char* format)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			0, 0, 0, 0);
 #endif
 }
