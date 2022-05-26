@@ -1249,11 +1249,11 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     plt.plot([min_x, max_x*1.2], [0.5, 0.5], linestyle= (0, (5, 3)),
             color="red", clip_on=False)
     plt.text(max_x*1.3, 0.5, "P50", fontsize=16, horizontalalignment="left",
-            verticalalignment="center", color="red", size=size)
+            verticalalignment="center", color="red")
     plt.plot([min_x, max_x*1.2], [0.01, 0.01], linestyle= (0, (5, 3)),
             color="red", clip_on=False)
     plt.text(max_x*1.3, 0.01, "P99", fontsize=16, horizontalalignment="left",
-            verticalalignment="center", color="red", size=size)
+            verticalalignment="center", color="red")
 
 def get_short_cdf(experiment):
     """
