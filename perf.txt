@@ -44,7 +44,10 @@ TCP   P50    108.8 (3.5x)   192.7 (4.6x)  353.1 (7.5x)  385.7 (6.9x)
                    previous measurements showed 2x improvement in P99 for
                    largest messages with modified W4 workload.
   gro_policy:      NORMAL always better; others 10-25% worse for short P99
-  max_gro_skbs:    Larger is better; reducing to 5 hurts short P99 10-15%
+  max_gro_skbs:    Larger is better; reducing to 5 hurts short P99 10-15%.
+                   However, anecdotal experience suggests that very large
+                   values can cause long delays for things like sending
+                   grants, so perhaps 10 is best?
   max_gso_size:    10K looks best; not much difference above that, 10-20%
                    degradation of short P99 at 5K
   nic_queue_ns:    5-10x degradation in short P99 when there is no limit;
