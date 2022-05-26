@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -393,6 +393,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		
 		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
+				tt_record1("homa_xmit_data adding id %u to "
+						"throttle queue", rpc->id);
 				homa_add_to_throttled(rpc);
 				break;
 			}
@@ -410,6 +412,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		__homa_xmit_data(skb, rpc, priority);
 		force = false;
 	}
+	tt_record("homa_xmit_data returning");
 }
 
 /**
@@ -448,10 +451,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 			htonl(rpc->peer->addr), rpc->id);
 
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
-//	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
-//			"next_offset %d",
-//			h->common.id, ntohl(h->seg.offset), skb->len,
-//			rpc->msgout.next_offset);
+	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
+			"granted %d",
+			rpc->id, ntohl(h->seg.offset), skb->len,
+			rpc->msgout.granted);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 	}

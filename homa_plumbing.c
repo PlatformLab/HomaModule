@@ -750,6 +750,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	srpc->state = RPC_OUTGOING;
 
 	homa_message_out_init(srpc, hsk->port, skbs, length);
+	tt_record1("homa_ioc_reply calling homa_xmit_data for id %u",
+			srpc->id);
 	homa_xmit_data(srpc, false);
 unlock:
 	homa_rpc_unlock(srpc);
@@ -814,6 +816,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
+	tt_record1("homa_ioc_send calling homa_xmit_data for id %u",
+			crpc->id);
 	homa_xmit_data(crpc, false);
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
@@ -821,8 +825,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto error;
 	}
-//	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
-//			crpc->id, hsk->client_port, args.reqlen);
+	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
+			crpc->id, hsk->port, args.length);
 	homa_rpc_unlock(crpc);
 	kfree(iov);
 	return 0;
