@@ -1055,7 +1055,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels, size=size)
     if show_bot_label:
-        ax.set_xlabel("Message Length", size=size)
+        ax.set_xlabel("Message Length (bytes)", size=size)
     ax.set_ylabel(y_label, size=size)
     ax.grid(which="major", axis="y")
 
