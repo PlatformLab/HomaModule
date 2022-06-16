@@ -2273,13 +2273,6 @@ struct homa_core {
 	int held_bucket;
 	
 	/**
-	 * @merge_list: the most recent GRO list known to hold a Homa
-	 * packet available for merging into. NULL means no Homa packet has
-	 * been available for merging yet.
-	 */
-	struct list_head *merge_list;
-	
-	/**
 	 * @thread: the most recent thread to invoke a Homa system call
 	 * on this core, or NULL if none.
 	 */
