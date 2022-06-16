@@ -1,4 +1,4 @@
-.TH HOMA_REPLY 3 2019-02-15 "Homa" "Linux Programmer's Manual"
+.TH HOMA_REPLY 3 2021-08-24 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa_reply \- send a Homa response message
 .SH SYNOPSIS
@@ -7,6 +7,12 @@ homa_reply \- send a Homa response message
 .PP
 .BI "int homa_reply(int " sockfd ", const void *" response ", size_t " \
 resplen ,
+.BI "               const struct sockaddr *" dest_addr ", size_t " \
+addrlen  ,
+.BI "               uint64_t " id );>
+.PP
+.BI "int homa_replyv(int " sockfd ", const struct iovec *" iov ", size_t " \
+iovcnt ,
 .BI "               const struct sockaddr *" dest_addr ", size_t " \
 addrlen  ,
 .BI "               uint64_t " id );
@@ -20,9 +26,21 @@ The argument
 is the file descriptor of the sending socket; this must be a Homa socket.
 The response is stored in a buffer pointed to by
 .IR request .
-The argument 
-.I reqlen
-gives the length of the message in bytes, which must not exceed
+With
+.BR homa_reply
+the response message is stored in a single contiguous buffer pointed to by
+.IR response ,
+and the argument 
+.I resplen
+gives the length of the message in bytes.
+With
+.BR homa_replyv
+the response message consists of multiple disjoint chunks, specified
+by
+.I iovcnt
+descriptors at
+.IR iov .
+In either case the total message length must not exceed
 .BR HOMA_MAX_MESSAGE_LENGTH .
 The destination for the request is given by
 .I dest_addr
@@ -78,7 +96,7 @@ No memory available.
 The socked has been disabled using
 .BR shutdown (2).
 .SH SEE ALSO
-.BR homa_invoke (3),
+.BR homa_abort (3),
 .BR homa_recv (3),
 .BR homa_send (3),
 .BR homa (7)

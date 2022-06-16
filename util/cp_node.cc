@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -67,7 +67,7 @@ int first_port = 4000;
 int first_server = 1;
 bool is_server = false;
 int id = -1;
-double net_bw = 0.0;
+double net_gbps = 0.0;
 bool tcp_trunc = true;
 int port_receivers = 1;
 int port_threads = 1;
@@ -79,6 +79,8 @@ bool verbose = false;
 std::string workload_string;
 const char *workload = "100";
 int unloaded = 0;
+bool client_iovec = false;
+bool server_iovec = false;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -91,7 +93,8 @@ std::mt19937 rand_gen(
 struct conn_id {
 	/**
 	 * @client_port: the index (starting at 0) of the port within
-	 * the client (corresponds to a particular sending thread). 
+	 * the client (corresponds to a particular sending thread).
+	 * This will be the low byte returned by int().
 	 */
 	uint8_t client_port;
 	
@@ -263,10 +266,11 @@ void print_help(const char *name)
 		"                      (default: %d)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
 		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --gbps            Target network utilization, including only message data,\n"
+		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
+        "    --iovec           Use homa_sendv instead of homa_send\n"
 		"                      not be sent to node-I (default: -1)\n"
-		"    --net-bw          Target network utilization, including only message data,\n"
-		"                      GB/s; 0 means send continuously (default: %.1f)\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
@@ -293,6 +297,7 @@ void print_help(const char *name)
 		"    --level           Log level: either normal or verbose\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
+        "    --iovec           Use homa_replyv instead of homa_reply\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
@@ -304,7 +309,7 @@ void print_help(const char *name)
 		"                      print has been invoked\n"
 		"     kfreeze          Freeze the kernel's internal timetrace\n"
 		"     print file       Dump timetrace information to file\n",
-		client_max, first_port, first_server, first_server, net_bw,
+		client_max, first_port, first_server, first_server, net_gbps,
 		client_ports, port_receivers, protocol,
 		server_nodes, server_ports, workload,
 		first_port, protocol, port_threads, server_ports);
@@ -440,12 +445,6 @@ struct message_header {
 	
 	/** @freeze: true means the recipient should freeze its time trace. */
 	unsigned int freeze:1;
-	
-	/**
-	 * @start_time: the time when the client initiated the request.
-	 * This is the low-order 32 bits of a rdtsc value.
-	 */
-	uint32_t start_time;
 	
 	/**
 	 * @cid: uniquely identifies the connection between a client
@@ -954,8 +953,9 @@ homa_server::~homa_server()
  */
 void homa_server::server(void)
 {
-	int *message = reinterpret_cast<int *>(buffer);
+	message_header *header = reinterpret_cast<message_header *>(buffer);
 	struct sockaddr_in source;
+	size_t source_length;
 	int length;
 	char thread_name[50];
 	
@@ -966,9 +966,23 @@ void homa_server::server(void)
 		int result;
 		
 		while (1) {
-			length = homa_recv(fd, message, HOMA_MAX_MESSAGE_LENGTH,
-				HOMA_RECV_REQUEST, (struct sockaddr *) &source,
-				sizeof(source), &id);
+			source_length = sizeof(source);
+			if (server_iovec) {
+				struct iovec vec[2];
+				vec[0].iov_base = buffer;
+				vec[0].iov_len = 20;
+				vec[1].iov_base = buffer + 20;
+				vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
+				length = homa_recvv(fd, vec, 2,
+						HOMA_RECV_REQUEST,
+						(struct sockaddr *) &source,
+						&source_length, &id, NULL);
+			} else
+				length = homa_recv(fd, buffer,
+						HOMA_MAX_MESSAGE_LENGTH,
+						HOMA_RECV_REQUEST,
+						(struct sockaddr *) &source,
+						&source_length, &id, NULL);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
@@ -977,9 +991,28 @@ void homa_server::server(void)
 				log(NORMAL, "homa_recv failed: %s\n",
 						strerror(errno));
 		}
+		tt("Received Homa request, cid 0x%08x, id %u, length %d",
+				header->cid, header->msg_id, header->length);
+		if ((header->freeze) && !time_trace::frozen) {
+			tt("Freezing timetrace because of request on "
+					"cid 0x%08x", header->cid);
+			log(NORMAL, "Freezing timetrace because of request on "
+					"cid 0x%08x", int(header->cid));
+			time_trace::freeze();
+			kfreeze();
+		}
 
-		result = homa_reply(fd, message, length,
-			(struct sockaddr *) &source, sizeof(source), id);
+		if (server_iovec && (length > 20)) {
+		    struct iovec vec[2];
+		    vec[0].iov_base = buffer;
+		    vec[0].iov_len = 20;
+		    vec[1].iov_base = buffer + 20;
+		    vec[1].iov_len = length - 20;
+		    result = homa_replyv(fd, vec, 2, (struct sockaddr *) &source,
+				source_length, id);
+		} else
+		    result = homa_reply(fd, buffer, length,
+			    (struct sockaddr *) &source, source_length, id);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed: %s\n",
 					strerror(errno));
@@ -999,7 +1032,7 @@ class tcp_server {
 	tcp_server(int port, int id, int num_threads);
 	~tcp_server();
 	void accept(int epoll_fd);
-	void read(int fd);
+	void read(int fd, int pid);
 	void server(int thread_id);
 	
 	/**
@@ -1223,7 +1256,7 @@ void tcp_server::server(int thread_id)
 				spin_lock lock_guard(&fd_locks[fd]);
 				if ((events[i].events & EPOLLIN) &&
 						(connections[fd] != NULL))
-					read(fd);
+					read(fd, pid);
 				if ((events[i].events & EPOLLOUT) &&
 						(connections[fd] != NULL)) {
 					if (connections[fd]->xmit())
@@ -1277,15 +1310,17 @@ void tcp_server::accept(int epoll_fd)
  * entire request has been read, sends an appropriate response.
  * @fd:        File descriptor for connection; connections must hold
  *             state information for this descriptor.
+ * @pid:       Pid for the thread (for messages).
  */
-void tcp_server::read(int fd)
+void tcp_server::read(int fd, int pid)
 {
 	int error = connections[fd]->read(epollet,
-			[this, fd](message_header *header) {
+			[this, fd, pid](message_header *header) {
 		metrics.requests++;
 		metrics.data += header->length;
-		tt("Received TCP request, cid 0x%08x, id %u, length %d",
-				header->cid, header->msg_id, header->length);
+		tt("Received TCP request, cid 0x%08x, id %u, length %d, pid %d",
+				header->cid, header->msg_id, header->length,
+				pid);
 		if ((header->freeze) && !time_trace::frozen) {
 			tt("Freezing timetrace because of request on "
 					"cid 0x%08x", header->cid);
@@ -1318,10 +1353,28 @@ void tcp_server::read(int fd)
  */
 class client {
     public:
+	/**
+	 * struct rinfo - Holds information about a request that we will
+	 * want when we get the response.
+	 */
+	struct rinfo {
+		/** @start_time: rdtsc time when the request was sent. */
+		uint64_t start_time;
+
+		/**
+		 * @active: true means the request has been sent but
+		 * a response hasn't yet been received.
+		 */
+		bool active;
+		
+		rinfo() : start_time(0), active(false) {}
+	};
+	    
 	client(int id);
 	virtual ~client();
 	void check_completion(const char *protocol);
-	void record(int length, uint32_t rtt, conn_id cid);
+	int get_rinfo();
+	void record(uint64_t end_time, message_header *header);
 	virtual void stop_sender(void) {}
 	
 	/**
@@ -1329,6 +1382,15 @@ class client {
 	 * 0 for the first client.
 	 */
 	int id;
+	
+	/**
+	 * @rinfos: storage for more than enough rinfos to handle all of the
+	 * outstanding requests.
+	 */
+	std::vector<rinfo> rinfos;
+	
+	/** @last_rinfo: index into rinfos of last slot that was allocated. */
+	int last_rinfo;
 	    
 	/**
 	 * @receivers_running: number of receiving threads that have
@@ -1389,7 +1451,7 @@ class client {
 	 * times (measured in rdtsc cycles) for the most recent RPCs. Entries
 	 * in this array correspond to those in @actual_lengths.
 	 */
-	std::vector<uint32_t> actual_rtts;
+	std::vector<uint64_t> actual_rtts;
 
 	/**
 	 * define NUM_CLENT_STATS: number of records in actual_lengths
@@ -1451,6 +1513,8 @@ std::vector<client *> clients;
  */
 client::client(int id)
 	: id(id)
+        , rinfos()
+        , last_rinfo(0)
 	, receivers_running(0)
 	, request_servers()
 	, next_server(0)
@@ -1469,6 +1533,8 @@ client::client(int id)
         , total_rtt(0)
         , lag(0)
 {
+	rinfos.resize(2*client_port_max + 5);
+	
 	/* Precompute information about the requests this client will
 	 * generate. Pick a different prime number for the size of each
 	 * vector, so that they will wrap at different times, giving
@@ -1483,15 +1549,18 @@ client::client(int id)
 		int server = server_dist(rand_gen);
 		request_servers.push_back(server);
 	}
-	if (!dist_sample(workload, &rand_gen, NUM_LENGTHS, &request_lengths)) {
+	std::vector<dist_point> points = dist_get(workload,
+			HOMA_MAX_MESSAGE_LENGTH);
+	if (points.empty()) {
 		printf("FATAL: invalid workload '%s'\n", workload);
 		exit(1);
 	}
-	if (net_bw == 0.0)
+	dist_sample(points, &rand_gen, NUM_LENGTHS, request_lengths);
+	if (net_gbps == 0.0)
 		request_intervals.push_back(0);
 	else {
-		double lambda = 1e09*net_bw/(dist_mean(workload,
-				HOMA_MAX_MESSAGE_LENGTH)*client_ports);
+		double lambda = 1e09*(net_gbps/8.0)
+				/(dist_mean(points)*client_ports);
 		double cycles_per_second = get_cycles_per_sec();
 		std::exponential_distribution<double> interval_dist(lambda);
 		for (int i = 0; i < NUM_INTERVALS; i++) {
@@ -1513,10 +1582,9 @@ client::client(int id)
 		interval_sum += request_intervals[i];
 	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
 	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
-			"rate %.2f K/sec, expected BW %.1f MB/sec\n",
-			avg_length*1e-3, dist_mean(workload,
-			HOMA_MAX_MESSAGE_LENGTH)*1e-3, rate*1e-3,
-			avg_length*rate*1e-6);
+			"rate %.2f K/sec, expected BW %.1f Gbps\n",
+			avg_length*1e-3, dist_mean(points)*1e-3, rate*1e-3,
+			avg_length*rate*8e-9);
 	kfreeze_count = 0;
 }
 
@@ -1554,29 +1622,88 @@ void client::check_completion(const char *protocol)
 }
 
 /**
- * record() - Records statistics about a particular request.
- * @length:     Size of the request and response messages for the request,
- *              in bytes.
- * @rtt:        Total round-trip time to complete the request, in rdtsc cycles.
- * @conn_id:    Identifier for the connection over which the request was
- *              sent.
+ * get_rinfo() - Find an available rinfo slot and return its index in
+ * rinfos. 
  */
-void client::record(int length, uint32_t rtt, conn_id cid)
+int client::get_rinfo()
+{
+	int next = last_rinfo;
+	
+	while (true) {
+		next++;
+		if (next >= static_cast<int>(rinfos.size()))
+			next = 0;
+		if (!rinfos[next].active) {
+			rinfos[next].active = true;
+			last_rinfo = next;
+			return next;
+		}
+		if (next == last_rinfo) {
+			log(NORMAL, "FATAL: ran out of rinfos (%lu in use, "
+					"total_requests %ld, "
+					"total_responses %ld, last_rinfo %d)\n",
+					rinfos.size(), total_requests,
+				        total_responses.load(), last_rinfo);
+			exit(1);
+		}
+	}
+}
+
+/**
+ * record() - Records statistics about a particular request.
+ * @end_time:   Completion time for the request, in rdtsc cycles.
+ * @header:     The header from the response.
+ */
+void client::record(uint64_t end_time, message_header *header)
 {
 	int server_id;
 	int slot = total_responses.fetch_add(1) % NUM_CLIENT_STATS;
+	int64_t rtt;
 	
-	server_id = first_id[cid.server];
-	if (server_id == -1) {
-		log(NORMAL, "WARNING: response received from unknown "
-				"cid 0x%08x\n", (int) cid);
+	if (header->msg_id >= rinfos.size()) {
+		log(NORMAL, "ERROR: msg_id (%u) exceed rinfos.size (%lu)\n",
+			header->msg_id, rinfos.size());
 		return;
 	}
-	server_id += cid.server_port;
+	rinfo *r = &rinfos[header->msg_id];
+	if (!r->active) {
+		log(NORMAL, "ERROR: response arrived for inactive msg_id %u\n",
+			header->msg_id);
+		return;
+	}
+	rtt = end_time - r->start_time;
+	r->active = false;
+	
+	int kcycles = rtt>>10;
+	tt("Received response, cid 0x%08x, id %u, length %d, "
+			"rtt %d kcycles",
+			header->cid, header->msg_id,
+			header->length, kcycles);
+	if ((kcycles > debug[0]) && (kcycles < debug[1])
+			&& (header->length < 1500) && !time_trace::frozen) {
+		freeze[header->cid.server] = 1;
+		tt("Freezing timetrace because of long RTT for "
+				"cid 0x%08x, id %u, length %d, kcycles %d",
+				header->cid, header->msg_id, header->length,
+				kcycles);
+		log(NORMAL, "Freezing timetrace because of long RTT for "
+				"cid 0x%08x, id %u",
+				int(header->cid), header->msg_id);
+		time_trace::freeze();
+		kfreeze();
+	}
+	
+	server_id = first_id[header->cid.server];
+	if (server_id == -1) {
+		log(NORMAL, "WARNING: response received from unknown "
+				"cid 0x%08x\n", (int) header->cid);
+		return;
+	}
+	server_id += header->cid.server_port;
 	responses[server_id].fetch_add(1);
-	response_data += length;
+	response_data += header->length;
 	total_rtt += rtt;
-	actual_lengths[slot] = length;
+	actual_lengths[slot] = header->length;
 	actual_rtts[slot] = rtt;
 }
 
@@ -1590,7 +1717,7 @@ class homa_client : public client {
 	homa_client(int id);
 	virtual ~homa_client();
 	void measure_unloaded(int count);
-	uint32_t measure_rtt(int server, int length, char *buffer);
+	uint64_t measure_rtt(int server, int length, char *buffer);
 	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
@@ -1730,14 +1857,27 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	struct sockaddr_in server_addr;
+    size_t addr_length;
 	
 	rpc_id = 0;
 	int length;
 	do {
-		length = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
-				HOMA_RECV_RESPONSE,
-				(struct sockaddr *) &server_addr,
-				sizeof(server_addr), &rpc_id);
+		addr_length = sizeof(server_addr);
+		if (client_iovec) {
+			struct iovec vec[2];
+			vec[0].iov_base = buffer;
+			vec[0].iov_len = 20;
+			vec[1].iov_base = buffer + 20;
+			vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
+			length = homa_recvv(fd, vec, 2, HOMA_RECV_RESPONSE,
+					(struct sockaddr *) &server_addr,
+					&addr_length, &rpc_id, NULL);
+		} else
+			length = homa_recv(fd, buffer,
+					HOMA_MAX_MESSAGE_LENGTH,
+					HOMA_RECV_RESPONSE,
+					(struct sockaddr *) &server_addr,
+					&addr_length, &rpc_id, NULL);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)
@@ -1747,10 +1887,15 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 				print_address(&server_addr));
 		exit(1);
 	}
-	uint32_t end_time = rdtsc() & 0xffffffff;
+	if (static_cast<size_t>(length) < sizeof(*header)) {
+		log(NORMAL, "FATAL: response message contained %d bytes; "
+			"need at least %lu", length, sizeof(*header));
+		exit(1);
+	}
+	uint64_t end_time = rdtsc();
 	tt("Received response, cid 0x%08x, id %x, %d bytes",
 			header->cid, header->msg_id, length);
-	record(length, end_time - header->start_time, header->cid);
+	record(end_time, header);
 	return true;
 }
 
@@ -1771,6 +1916,8 @@ void homa_client::sender()
 		uint64_t now;
 		uint64_t rpc_id;
 		int server;
+		int status;
+		int slot = get_rinfo();
 		
 		/* Wait until (a) we have reached the next start time
 		 * and (b) there aren't too many requests outstanding.
@@ -1778,6 +1925,7 @@ void homa_client::sender()
 		while (1) {
 			if (exit_sender) {
 				sender_exited = true;
+				rinfos[slot].active = false;
 				return;
 			}
 			now = rdtsc();
@@ -1787,6 +1935,7 @@ void homa_client::sender()
 				break;
 		}
 		
+		rinfos[slot].start_time = now;
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
@@ -1797,16 +1946,27 @@ void homa_client::sender()
 			header->length = HOMA_MAX_MESSAGE_LENGTH;
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
-		header->start_time = now & 0xffffffff;
 		header->cid = server_ids[server];
 		header->cid.client_port = id;
 		header->freeze = freeze[header->cid.server];
+		header->msg_id = slot;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
-		int status = homa_send(fd, sender_buffer, header->length,
-			reinterpret_cast<struct sockaddr *>(
-			&server_addrs[server]),
-			sizeof(server_addrs[0]), &rpc_id);
+		if (client_iovec && (header->length > 20)) {
+			struct iovec vec[2];
+			vec[0].iov_base = sender_buffer;
+			vec[0].iov_len = 20;
+			vec[1].iov_base = sender_buffer + 20;
+			vec[1].iov_len = header->length - 20;
+			status = homa_sendv(fd, vec, 2,
+				reinterpret_cast<struct sockaddr *>(
+				&server_addrs[server]),	sizeof(server_addrs[0]),
+				&rpc_id);
+		} else
+			status = homa_send(fd, sender_buffer, header->length,
+                reinterpret_cast<struct sockaddr *>(
+                &server_addrs[server]),
+                sizeof(server_addrs[0]), &rpc_id);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -1857,12 +2017,13 @@ void homa_client::receiver(int receiver_id)
  *
  * Return:       Round-trip time to service the request, in rdtsc cycles. 
  */
-uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
+uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
 	uint64_t rpc_id;
 	struct sockaddr_in server_addr;
+	size_t addr_length;
 	int status;
 
 	header->length = length;
@@ -1873,7 +2034,6 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 	header->cid = server_ids[server];
 	header->cid.client_port = id;
 	start = rdtsc();
-	header->start_time = start & 0xffffffff;
 	status = homa_send(fd, buffer, header->length,
 		reinterpret_cast<struct sockaddr *>(
 		&server_addrs[server]),
@@ -1885,10 +2045,11 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 		exit(1);
 	}
 	do {
+		addr_length = sizeof(server_addr);
 		status = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_RESPONSE,
 				(struct sockaddr *) &server_addr,
-				sizeof(server_addr), &rpc_id);
+				&addr_length, &rpc_id, NULL);
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
 		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
@@ -1896,7 +2057,7 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 				print_address(&server_addr));
 		exit(1);
 	}
-	return (rdtsc() - start) & 0xffffffff;
+	return rdtsc() - start;
 }
 
 /**
@@ -1909,20 +2070,28 @@ uint32_t homa_client::measure_rtt(int server, int length, char *buffer)
 void homa_client::measure_unloaded(int count)
 {
 	std::vector<dist_point> dist = dist_get(workload,
-			HOMA_MAX_MESSAGE_LENGTH, .0025);
+			HOMA_MAX_MESSAGE_LENGTH);
 	int server = request_servers[0];
 	int slot;
+	uint64_t ms100 = get_cycles_per_sec()/10;
+	uint64_t end;
 	
-	/* Make one request for each size and distribution, just to warm
+	/* Make one request for each size in the distribution, just to warm
 	 * up the system.
 	 */
 	for (dist_point &point: dist)
 		measure_rtt(server, point.length, sender_buffer);
 	
-	/* Now do the real measurements.*/
+	/* Now do the real measurements. Stop with each size after 10
+	 * measurements if more than 0.1 second has elapsed (otherwise
+	 * this takes too long).
+	 */
 	slot = 0;
 	for (dist_point &point: dist) {
+		end = rdtsc() + ms100;
 		for (int i = 0; i < count; i++) {
+			if ((rdtsc() >= end) && (i >= 10))
+				break;
 			actual_lengths[slot] = point.length;
 			actual_rtts[slot] = measure_rtt(server, point.length,
 					sender_buffer);
@@ -1945,7 +2114,7 @@ class tcp_client : public client {
     public:
 	tcp_client(int id);
 	virtual ~tcp_client();
-	void read(tcp_connection *connection);
+	void read(tcp_connection *connection, int pid);
 	void receiver(int id);
 	void sender(void);
 	
@@ -2136,6 +2305,7 @@ tcp_client::~tcp_client()
 void tcp_client::sender()
 {
 	char thread_name[50];
+	int pid = syscall(__NR_gettid);
 	
 	snprintf(thread_name, sizeof(thread_name), "C%d", id);
 	time_trace::thread_buffer thread_buffer(thread_name);
@@ -2150,13 +2320,16 @@ void tcp_client::sender()
 	while (1) {
 		uint64_t now;
 		int server;
+		int slot = get_rinfo();
 		
 		/* Wait until (a) we have reached the next start time
 		 * and (b) there aren't too many requests outstanding.
 		 */
 		while (1) {
-			if (stop)
+			if (stop) {
+				rinfos[slot].active = false;
 				return;
+			}
 			now = rdtsc();
 			if ((now >= next_start)
 					&& ((total_requests - total_responses)
@@ -2174,6 +2347,7 @@ void tcp_client::sender()
 				next_blocked++;
 		}
 		
+		rinfos[slot].start_time = now;
 		server = request_servers[next_server];
 		next_server++;
 		if (next_server >= request_servers.size())
@@ -2182,15 +2356,14 @@ void tcp_client::sender()
 		header.length = request_lengths[next_length];
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
-		header.start_time = now & 0xffffffff;
 		header.cid = server_ids[server];
 		header.cid.client_port = id;
-		header.msg_id = message_id.fetch_add(1);
+		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
 		size_t old_pending = connections[server]->pending();
-		tt("Sending TCP request, cid 0x%08x, id %u, length %d, freeze %d",
+		tt("Sending TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header.cid, header.msg_id, header.length,
-				header.freeze);
+				pid);
 		if ((!connections[server]->send_message(&header))
 				&& (old_pending == 0)) {
 			blocked.push_back(connections[server]);
@@ -2268,7 +2441,7 @@ void tcp_client::receiver(int receiver_id)
 			tcp_connection *connection = connections[fd];
 			if (events[i].events & EPOLLIN) {
 				spin_lock lock_guard(&fd_locks[fd]);
-				read(connection);
+				read(connection, pid);
 			}
 		}
 	}
@@ -2278,31 +2451,15 @@ void tcp_client::receiver(int receiver_id)
  * tcp_client::read() - Is available data from a TCP connection; if an
  * entire response has now been read, records statistics for that request.
  * @connection:  TCP connection that has data available to read.
+ * @pid:         Identifier for current process; used for messages.
  */
-void tcp_client::read(tcp_connection *connection)
+void tcp_client::read(tcp_connection *connection, int pid)
 {
-	int error = connection->read(epollet, [this](message_header *header) {
-		uint32_t end_time = rdtsc() & 0xffffffff;
-		uint32_t elapsed = end_time - header->start_time;
-		tt("Received TCP response, cid 0x%08x, id %u, length %d, "
-				"elapsed %d",
-				header->cid, header->msg_id,
-				header->length, elapsed);
-		if ((header->length < 1500) && (elapsed > debug[0])
-				&& (elapsed < debug[1])
-				&& !time_trace::frozen) {
-			freeze[header->cid.server] = 1;
-			tt("Freezing timetrace because of long RTT for "
-					"cid 0x%08x, id %u",
-					header->cid, header->msg_id);
-			log(NORMAL, "Freezing timetrace because of long RTT for "
-					"cid 0x%08x, id %u",
-					int(header->cid), header->msg_id);
-			time_trace::freeze();
-			kfreeze();
-		}
-		record(header->length, end_time - header->start_time,
-				header->cid);
+	int error = connection->read(epollet, [this, pid]
+			(message_header *header) {
+		uint64_t end_time = rdtsc();
+		record(end_time, header);
+		tt("Response for cid 0x%08x received by pid %d", pid);
 		bytes_rcvd[first_id[header->cid.server]
 				+ header->cid.server_port] += header->length;
 	});
@@ -2345,9 +2502,9 @@ void server_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
 		double data = (double) (server_data - last_server_data);
-		log(NORMAL, "Servers: %.2f Kops/sec, %.2f MB/sec, "
+		log(NORMAL, "Servers: %.2f Kops/sec, %.2f Gbps, "
 				"avg. length %.1f bytes\n",
-				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
 				data/rpcs);
 		log(NORMAL, "RPCs per server: %s\n", details);
 	}
@@ -2411,10 +2568,10 @@ void client_stats(uint64_t now)
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double data = (double) (client_data - last_client_data);
-		log(NORMAL, "Clients: %.2f Kops/sec, %.2f MB/sec, RTT (us) "
+		log(NORMAL, "Clients: %.2f Kops/sec, %.2f Gbps, RTT (us) "
 				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
 				"%.1f bytes\n",
-				rpcs/(1000.0*elapsed), data/(1e06*elapsed),
+				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
 				to_seconds(cdf_times[cdf_index/2])*1e06,
 				to_seconds(cdf_times[99*cdf_index/100])*1e06,
 				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
@@ -2471,11 +2628,12 @@ void log_stats()
  */
 int client_cmd(std::vector<string> &words)
 {
+	client_iovec = false;
 	client_max = 1;
 	client_ports = 1;
 	first_port = 4000;
 	first_server = 1;
-	net_bw = 0.0;
+	net_gbps = 0.0;
 	port_receivers = 1;
 	protocol = "homa";
 	server_nodes = 1;
@@ -2498,14 +2656,16 @@ int client_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &first_server, option, "integer"))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--gbps") == 0) {
+			if (!parse(words, i+1, &net_gbps, option, "float"))
+				return 0;
+			i++;
 		} else if (strcmp(option, "--id") == 0) {
 			if (!parse(words, i+1, &id, option, "integer"))
 				return 0;
 			i++;
-		} else if (strcmp(option, "--net-bw") == 0) {
-			if (!parse(words, i+1, &net_bw, option, "float"))
-				return 0;
-			i++;
+		} else if (strcmp(option, "--iovec") == 0) {
+			client_iovec = true;
 		} else if (strcmp(option, "--no-trunc") == 0) {
 			tcp_trunc = false;
 		} else if (strcmp(option, "--ports") == 0) {
@@ -2621,8 +2781,8 @@ int dump_times_cmd(std::vector<string> &words)
 			localtime(&now));
 	fprintf(f, "# Round-trip times measured by cp_node at %s\n",
 			time_buffer);
-	fprintf(f, "# --protocol %s, --workload %s, --net-bw %.1f --threads %d,\n",
-			protocol, workload, net_bw, client_ports);
+	fprintf(f, "# --protocol %s, --workload %s, --gpbs %.1f --threads %d,\n",
+			protocol, workload, net_gbps, client_ports);
 	fprintf(f, "# --server-nodes %d --server-ports %d, --client-max %d\n",
 			server_nodes, server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");
@@ -2671,10 +2831,11 @@ int info_cmd(std::vector<string> &words)
 				words[2].c_str());
 		return 0;
 	}
+	std::vector<dist_point> points = dist_get(workload,
+			HOMA_MAX_MESSAGE_LENGTH);
 	printf("Workload %s: mean %.1f bytes, overhead %.3f\n",
-			workload,
-			dist_mean(workload, HOMA_MAX_MESSAGE_LENGTH),
-			dist_overhead(workload, mtu, HOMA_MAX_MESSAGE_LENGTH));
+			workload, dist_mean(points),
+			dist_overhead(points, mtu));
 	return 1;
 }
 
@@ -2763,6 +2924,7 @@ int server_cmd(std::vector<string> &words)
         protocol = "homa";
 	port_threads = 1;
 	server_ports = 1;
+	server_iovec = false;
 	
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
@@ -2771,6 +2933,8 @@ int server_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &first_port, option, "integer"))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--iovec") == 0) {
+			server_iovec = true;
 		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;
@@ -2882,10 +3046,19 @@ int stop_cmd(std::vector<string> &words)
  * Return:  Nonzero means success, zero means there was an error.
  */
 int tt_cmd(std::vector<string> &words)
-{	
+{
+	if (words.size() < 2) {
+		printf("tt command requires an option\n");
+		return 0;
+	}
 	const char *option = words[1].c_str();
 	if (strcmp(option, "freeze") == 0) {
+		tt("Freezing timetrace because of tt freeze command");
 		time_trace::freeze();
+	} else if (strcmp(option, "freezeboth") == 0) {
+		tt("Freezing timetrace because of tt freezeboth command");
+		time_trace::freeze();
+		kfreeze();
 	} else if (strcmp(option, "kfreeze") == 0) {
 		kfreeze();
 	} else if (strcmp(option, "print") == 0) {
@@ -2900,7 +3073,8 @@ int tt_cmd(std::vector<string> &words)
 			return 0;
 		}
 	} else {
-		printf("Unknown option '%s'; must be freeze or print\n",
+		printf("Unknown option '%s'; must be freeze, freezeboth, "
+				"kfreeze or print\n",
 				option);
 		return 0;
 	}
@@ -3018,6 +3192,7 @@ void error_handler(int signal, siginfo_t* info, void* ucontext)
 
 int main(int argc, char** argv)
 {
+	time_trace::thread_buffer thread_buffer("main");
 	setlinebuf(stdout);
 	signal(SIGPIPE, SIG_IGN);
 	struct rlimit limits;

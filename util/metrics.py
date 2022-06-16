@@ -336,7 +336,7 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "socket", "grantable", "throttle"]:
+    for lock in ["client", "socket", "grantable", "throttle", "peer"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
@@ -367,14 +367,18 @@ if elapsed_secs != 0:
         print("Packets received:   %5.3f M/sec" % (
                 1e-6*packets_received/elapsed_secs))
         print("Packets sent:       %5.3f M/sec" % (
-                1e-6*packets_received/elapsed_secs))
+                1e-6*packets_sent/elapsed_secs))
         print("Core efficiency:    %5.3f M packets/sec/core "
                 "(sent & received combined)" % (
                 1e-6*(packets_sent + packets_received)/elapsed_secs
                 /total_cores_used))
-        print("                    %5.2f Gbps/core (goodput)" % (
+        print("                   %5.2f  Gbps/core (goodput)" % (
                 8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
                 /(total_cores_used * elapsed_secs)))
+    if deltas["throttled_cycles"] != 0:
+        throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
+        print("Pacer throughput:  %5.2f  Gbps" % (
+                deltas["pacer_bytes"]*8e-09/throttled_secs))
  
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
@@ -386,22 +390,36 @@ if elapsed_secs != 0:
                 percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
                 percent = percent.ljust(12)
                 print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
-    for symbol in ["resent_packets", "restarted_rpcs", "unknown_rpcs",
+    for symbol in ["resent_packets", "resent_packets_used", "unknown_rpcs",
             "peer_kmalloc_errors", "peer_route_errors", "control_xmit_errors",
             "data_xmit_errors",
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
-            "client_peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "stale_generations", "generation_overflows",
-            "reap_too_many_dead"]:
+            "peer_timeouts", "server_rpc_discards",
+            "server_rpcs_unknown", "forced_reaps"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
+    for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
+            "data_pkt_reap_cycles"]:
+        delta = deltas[symbol]
+        if delta == 0 or time_delta == 0:
+            continue
+        percent = "(%.1f%%)" % (100.0*delta/time_delta)
+        percent = percent.ljust(12)
+        print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
+
     if deltas["throttle_list_adds"] > 0:
         print("%-28s %15.1f              List traversals per throttle "
                 "list insert" % ("checks_per_throttle_insert",
                 deltas["throttle_list_checks"]/deltas["throttle_list_adds"]))
+
+    if deltas["responses_received"] > 0:
+        print("%-28s %15.1f              ACK packets sent per 1000 client RPCs"
+                % ("acks_per_rpc", 1000.0 * deltas["packets_sent_ACK"]
+                / deltas["responses_received"]))
+
         

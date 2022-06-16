@@ -81,6 +81,7 @@ def scan(f, startingEvent):
         thisEventTime = float(match.group(2))*1000.0
         thisEventInterval = float(match.group(3))*1000.0
         thisEvent = match.group(4)
+        rawEvent = thisEvent
         if options.noNumbers:
             thisEvent = re.sub('0x[0-9a-f]+', '?', thisEvent)
             thisEvent = re.sub('[0-9]+', '?', thisEvent)
@@ -93,7 +94,7 @@ def scan(f, startingEvent):
             eventIntervals[thisEvent].append(thisEventInterval)
             # print('%s %s %s' % (thisEventTime, thisEventInterval, thisEvent))
         if startingEvent:
-            if startingEvent in thisEvent:
+            if startingEvent in rawEvent:
                 # Reset variables to indicate that we are starting a new
                 # sequence of events from the starting event.
                 startTime = thisEventTime

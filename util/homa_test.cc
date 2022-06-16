@@ -125,8 +125,9 @@ void test_close()
 {
 	int result, fd;
 	int message[100000];
-	struct sockaddr source;
 	uint64_t id = 0;
+	struct sockaddr_in addr;
+	size_t addr_length = sizeof(addr);
 
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -136,7 +137,7 @@ void test_close()
 	}
 	std::thread thread(close_fd, fd);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&source, sizeof(source), &id);
+			(struct sockaddr *) &addr, &addr_length, &id, NULL);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
 	} else {
@@ -160,7 +161,6 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request)
 	size_t total = 0;
 #define PRINT_INTERVAL 1000
 	char buffer[length];
-	struct sockaddr_in src_addr;
 	ssize_t received;
 	uint64_t start = rdtsc();
 
@@ -180,9 +180,11 @@ void test_fill_memory(int fd, struct sockaddr *dest, char *request)
 	total = 0;
 	for (int i = 1; i <= count; i++) {
 		id = 0;
+		struct sockaddr_in addr;
+		size_t addr_length = sizeof(addr);
 		received = homa_recv(fd, buffer, length, HOMA_RECV_RESPONSE,
-				(struct sockaddr *) &src_addr,
-				sizeof(src_addr), &id);
+				(struct sockaddr *) &addr, &addr_length, &id,
+				NULL);
 		if (received < 0) {
 			printf("Error in homa_recv for id %lu: %s\n",
 				id, strerror(errno));
@@ -213,6 +215,7 @@ void test_invoke(int fd, struct sockaddr *dest, char *request)
 	uint64_t id = 0;
 	char response[1000000];
 	struct sockaddr_in server_addr;
+	size_t addr_length;
 	int status;
 	ssize_t resp_length;
 
@@ -224,9 +227,10 @@ void test_invoke(int fd, struct sockaddr *dest, char *request)
 	} else {
 		printf("Homa_send succeeded, id %lu\n", id);
 	}
+	addr_length = sizeof(server_addr);
 	resp_length = homa_recv(fd, response, sizeof(response),
 		HOMA_RECV_RESPONSE, (struct sockaddr *) &server_addr,
-		sizeof(server_addr), &id);
+		&addr_length, &id, NULL);
 	if (resp_length < 0) {
 		printf("Error in homa_recv: %s\n",
 			strerror(errno));
@@ -283,6 +287,7 @@ void test_poll(int fd, char *request)
 		.revents = 0
 	};
 	struct sockaddr_in source;
+	size_t source_length;
 	struct sockaddr_in addr;
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
@@ -305,8 +310,10 @@ void test_poll(int fd, char *request)
 		return;
 	}
 	
+	source_length = sizeof(source);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_REQUEST,
-			(struct sockaddr *) &source, sizeof(source), &id);
+			(struct sockaddr *) &source, &source_length, &id,
+			NULL);
 	if (result < 0) {
 		printf("homa_recv failed: %s\n", strerror(errno));
 	} else {
@@ -353,11 +360,12 @@ void test_rtt(int fd, struct sockaddr *dest, char *request)
 {
 	uint64_t id;
 	char response[1000000];
-	struct sockaddr_in server_addr;
 	int status;
 	ssize_t resp_length;
 	uint64_t start;
 	uint64_t times[count];
+	struct sockaddr_in addr;
+	size_t addr_length;
 
 	for (int i = -10; i < count; i++) {
 		start = rdtsc();
@@ -368,9 +376,10 @@ void test_rtt(int fd, struct sockaddr *dest, char *request)
 					strerror(errno));
 			return;
 		}
+		addr_length = sizeof(addr);
 		resp_length = homa_recv(fd, response, sizeof(response),
-			HOMA_RECV_RESPONSE, (struct sockaddr *) &server_addr,
-			sizeof(server_addr), &id);
+				HOMA_RECV_RESPONSE, (struct sockaddr *) &addr,
+				&addr_length, &id, NULL);
 		if (i >= 0)
 			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
@@ -416,13 +425,15 @@ void test_shutdown(int fd)
 {
 	int result;
 	int message[100000];
-	struct sockaddr source;
 	uint64_t id = 0;
+	struct sockaddr_in addr;
+	size_t addr_length;
 
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
+	addr_length = sizeof(addr);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&source, sizeof(source), &id);
+			(struct sockaddr *) &addr, &addr_length, &id, NULL);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
 	} else {
@@ -431,8 +442,9 @@ void test_shutdown(int fd)
 	}
 	
 	/* Make sure that future reads also fail. */
+	addr_length = sizeof(addr);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&source, sizeof(source), &id);
+			(struct sockaddr *) &addr, &addr_length, &id, NULL);
 	if (result < 0) {
 		printf("Second homa_recv call also failed: %s\n",
 			strerror(errno));
@@ -487,8 +499,11 @@ void test_stream(int fd, struct sockaddr *dest)
 	 */
 	while (1){
 		id = 0;
+		struct sockaddr_in addr;
+		size_t addr_length = sizeof(addr);
 		resp_length = homa_recv(fd, response, sizeof(response),
-			HOMA_RECV_RESPONSE, NULL, 0, &id);
+				HOMA_RECV_RESPONSE, (struct sockaddr *) &addr,
+				&addr_length, &id, NULL);
 		if (resp_length < 0) {
 			printf("Error in homa_recv: %s\n",
 					strerror(errno));

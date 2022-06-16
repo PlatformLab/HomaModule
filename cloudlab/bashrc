@@ -2,9 +2,11 @@
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
 
-PATH=~/homaModule/util:~/homaModule/perf:~/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/opt/gradle-7.3/bin:/ouster/install/bin:~/homaModule/util:~/homaModule/perf:~/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/x86_64-linux-gnu
+
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
 # If not running interactively, don't do anything
 [ -z "$PS1" ] && return
@@ -87,6 +89,7 @@ fi
 alias ll='ls -l'
 alias la='ls -A'
 #alias l='ls -CF'
+alias jdebug='java -Xdebug -Xrunjdwp:transport=dt_socket,server=y,address=9000'
 
 # enable programmable completion features (you don't need to enable
 # this, if it's already enabled in /etc/bash.bashrc and /etc/profile
@@ -132,3 +135,5 @@ pid ()
     ttgrep.py "pid $1" $2 > pid.tt
     less +G pid.tt
 }
+
+export GRPC_VERBOSITY=INFO

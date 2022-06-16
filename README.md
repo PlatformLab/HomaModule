@@ -1,7 +1,13 @@
 This repo contains an implementation of the Homa transport protocol as a Linux kernel module.
 
 - For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
-  Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564).
+  Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564)
+  which appeared in SIGCOMM in August, 2018.
+
+- More information about this implementation and its performance are available in
+  the paper [A Linux Kernel Implementation of the Homa Transport
+  Protocol](https://www.usenix.org/system/files/atc21-ousterhout.pdf),
+  which appeared in the USENIX Annual Technical Conference in July, 2021.
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
@@ -10,38 +16,65 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   missing:
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
+ 
+ - Please contact me if you have any problems using this repo; I'm happy to
+   provide advice and support.
 
-- Linux v4.16.10 is the primary development platform for this code. It is also
-  known to work with v4.15.0-38-generic;  other versions of Linux have not been
-  tested and may require code changes. If you get Homa working on other versions,
-  please let me know and/or submit pull requests for required code changes.
+- Linux v5.4.3 is the primary development platform for this code. In the past
+  it has run under 4.15.18;  other versions of Linux have not been tested and
+  may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
+  a day). If you get Homa working on other versions, please let me know and/or submit
+  pull requests for required code changes.
+  
+- There now exists support for using Homa with gRPC: see the
+  [GitHub repo](https://github.com/PlatformLab/grpc_homa).
 
-- To build the module, type "make all"; then type "sudo insmod homa.ko" to install
-  it, and "sudo rmmod homa" to remove an installed module.
+- To build the module, type `make all`; then type `sudo insmod homa.ko` to install
+  it, and `sudo rmmod homa` to remove an installed module.
+  
+- For best Homa performance, you should make the following configuration
+  changes:
+  - Enable priority queues in your switches, selected by the 3
+    high-order bits of the DSCP field
+    in IP packet headers. You can use `sysctl` to configure Homa's use of
+    priorities (e.g., if you want it to use fewer than 8 levels). See the man
+    page `homa.7` for more info.
+  - Enable jumbo frames on your switches and on the Linux nodes.
+  - Set the `rtt_bytes` parameter via `sysctl` to match your network's latency
+    and bandwidth.
+  - It may also be useful to set other Linux networking parameters. As one
+    example, see the script  `cloudlab\bin\start_xl170`, which is what I
+    use to configure my test nodes.
   
 - A collection of man pages is available in the "man" subdirectory. The API for
-  Homa is quite different from TCP sockets.
+  Homa is different from TCP sockets.
 
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
   
 - The subdirectory "util" contains an assortment of utility programs that
-  you may find useful in exercising Homa. Compile them by typing "make" in that
-  subdirectory. Most notable is the "cperf" family of programs, which will
+  you may find useful in exercising Homa. Compile them by typing `make` in that
+  subdirectory. Most notable is the `cperf` family of programs, which will
   run a variety of benchmarks on a cluster of nodes. The file cperf.py contains
   library functions for benchmarking, which are used by a variety of benchmarks
-  with names starting with "cp_".
+  with names starting with `cp_`.
   
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
      distribution of incoming messages. You can access these through the
-     file /proc/net/homa_metrics. The script "util/metrics.py" will
+     file `/proc/net/homa_metrics`. The script `util/metrics.py` will
      collect metrics and print out all the numbers that have changed
      since its last run.
    - Homa exports a collection of configuration parameters through the
-     sysctl mechanism. For details, see the man page "homa.7".
+     sysctl mechanism. For details, see the man page `homa.7`.
      
 ## Significant recent improvements
+- November 2021: changed semantics to at-most-once (servers can no
+  longer see multiple instances of the same RPC).
+- August 2021: added new versions of the Homa system calls that
+  support iovecs; in addition, incoming messages can be read
+  incrementally across several homa_recv calls.
+- November 2020: upgraded to Linux 5.4.3.
 - June 2020: implemented busy-waiting during homa_recv: shaves 2
   microseconds off latency.
 - June 2020: several fixes to prevent RPCs from getting "stuck",

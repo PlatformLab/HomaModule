@@ -1,33 +1,37 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Cleanups still needed:
-  * Problem with grants: whether or not to keep on grantable list after
-    fully granted.
-  * Return UNKNOWN in homa_softirq if socket isn't known.
-
 * Performance-related tasks:
+  * Analyze 40-us W4 short message latency by writing a time-trace
+    analyzer that tracks NIC queue length.
+  * Perhaps limit the number of polling threads per socket, to solve
+    the problems with having lots of receiver threads?
+  * Move some reaping to the pacer? It has time to spare
+  * Figure out why TCP W2 P99 gets worse with higher --client-max
   * See if turning off c-states allows shorter polling intervals?
-  * Are Meltdown mitigations really disabled?
   * Consider a permanent reduction in rtt_bytes.
   * Consider reducing throttle_min_bytes to see if it helps region 1
     in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
-  * Implement new benchmark that segregates clients and servers on
-    different machines
-  * Order the queue of ready messages by size? May not matter for
-    existing benchmarks, but could matter more for real applications, where
-    long messages are likely to have longer service times.
-  * Check out "-w 500000": Homa has less throughput than TCP.
-  * Modify code to reduce maximum rate of reaping, especially after large
-    bursts of deletions?
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
     >1 request per kernel call?
-  * Analyze W5 performance with unlimited Homa message size (why is P99 bad
-    for small messages?)
-  * Try measuring performance without polling in Homa?
 
 * Things to do:
+  * Refactor homa_recv again: assume that if id != 0 then the desired message
+    is a response (never need to consider src_addr).
+  * Reap most of a message before getting an ack? To do this, sender
+    must include "received offset" in grants; then sender can free
+    everything up to the latest received offset.
+  * Try more aggressive retries (e.g. if a missing packet is sufficiently
+    long ago, don't wait for timeout).
+  * Eliminate hot spots involving NAPI:
+    * Arrange for incoming bursts to be divided into batches where
+      alternate batches do their NAPI on 2 different cores.
+    * To do this, use TCP for Homa!
+      * Send Homa packets using TCP, and use different ports to force
+        different NAPI cores
+      * Interpose on the TCP packet reception hooks, and redirect
+        real TCP packets back to TCP.
   * Consider replacing grantable list with a heap?
   * Unimplemented interface functions.
   * Learn about CONFIG_COMPAT and whether it needs to be supported in
@@ -40,8 +44,6 @@ Notes for Homa implementation in Linux:
     * Socket not supported on server (or server process ends while
       processing request).
     * Server timeout
-  * Figure out what to do with byte order for 64-bit entities like RPC ids.
-    There is no htonll, for some reason.
   * Is it safe to use non-locking skb queue functions?
   * Is the RCU usage for sockets safe? In particular, how long is it safe
     to use a homa_sock returned by homa_find_socket? Could it be deleted from
@@ -55,7 +57,6 @@ Notes for Homa implementation in Linux:
   * Clean up ports and ips in unit_homa_incoming.c
   * Plug into Linux capability mechanism (man(7) capabilities)
   * Don't return any errors on sends?
-  * Need to return errors to apps.
   * Homa-RAMCloud doesn't retransmit bytes if it transmitted other bytes
     recently; should HomaModule do the same? Otherwise, will retransmit
     for requests whose service time is just about equal to the resend timer.

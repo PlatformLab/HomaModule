@@ -163,6 +163,12 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	peer->outstanding_resends = 0;
 	peer->most_recent_resend = 0;
+	peer->least_recent_rpc = NULL;
+	peer->least_recent_ticks = 0;
+	peer->current_ticks = -1;
+	peer->resend_rpc = NULL;
+	peer->num_acks = 0;
+	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
 	
     done:
@@ -262,4 +268,80 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 	peer->unsched_cutoffs[5] = c5;
 	peer->unsched_cutoffs[6] = c6;
 	peer->unsched_cutoffs[7] = c7;
+}
+
+/**
+ * homa_peer_lock_slow() - This function implements the slow path for
+ * acquiring a peer's @unacked_lock. It is invoked when the lock isn't
+ * immediately available. It waits for the lock, but also records statistics
+ * about the waiting time.
+ * @peer:    Peer to  lock.
+ */
+void homa_peer_lock_slow(struct homa_peer *peer)
+{
+	__u64 start = get_cycles();
+	tt_record("beginning wait for peer lock");
+	spin_lock_bh(&peer->ack_lock);
+	tt_record("ending wait for peer lock");
+	INC_METRIC(peer_lock_misses, 1);
+	INC_METRIC(peer_lock_miss_cycles, get_cycles() - start);
+}
+
+/**
+ * homa_peer_add_ack() - Add a given RPC to the list of unacked
+ * RPCs for its server. Once this method has been invoked, it's safe
+ * to delete the RPC, since it will eventually be acked to the server.
+ * @rpc:    Client RPC that has now completed.
+ */
+void homa_peer_add_ack(struct homa_rpc *rpc)
+{
+	struct homa_peer *peer = rpc->peer;
+	struct ack_header ack;
+	
+	homa_peer_lock(peer);
+	if (peer->num_acks < NUM_PEER_UNACKED_IDS) {
+		peer->acks[peer->num_acks].client_id = cpu_to_be64(rpc->id);
+		peer->acks[peer->num_acks].client_port = htons(rpc->hsk->port);
+		peer->acks[peer->num_acks].server_port = htons(rpc->dport);
+		peer->num_acks++;
+		homa_peer_unlock(peer);
+		return;
+	}
+	
+	/* The peer has filled up; send an ACK message to empty it. The
+	 * RPC in the message header will also be considered ACKed.
+	 */
+	INC_METRIC(ack_overflows, 1);
+	memcpy(ack.acks, peer->acks, sizeof(peer->acks));
+	ack.num_acks = htons(peer->num_acks);
+	peer->num_acks = 0;
+	homa_peer_unlock(peer);
+	homa_xmit_control(ACK, &ack, sizeof(ack), rpc);
+}
+
+/**
+ * homa_peer_get_acks() - Copy acks out of a peer, and remove them from the
+ * peer.
+ * @peer:    Peer to check for possible unacked RPCs.
+ * @count:   Maximum number of acks to return.
+ * @dst:     The acks are copied to this location.
+ * 
+ * Return:   The number of acks extracted from the peer (<= count).
+ */
+int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
+{	
+	/* Don't waste time acquiring the lock if there are no ids available. */
+	if (peer->num_acks == 0)
+		return 0;
+	
+	homa_peer_lock(peer);
+	
+	if (count > peer->num_acks)
+		count = peer->num_acks;
+	memcpy(dst, &peer->acks[peer->num_acks - count],
+			count * sizeof(peer->acks[0]));
+	peer->num_acks -= count;
+	
+	homa_peer_unlock(peer);
+	return count;
 }

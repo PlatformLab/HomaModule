@@ -24,12 +24,18 @@ FIXTURE(homa_peertab) {
 	struct homa homa;
 	struct homa_sock hsk;
 	struct homa_peertab peertab;
+	__be32 client_ip;
+	__be32 server_ip;
+	int server_port;
 };
 FIXTURE_SETUP(homa_peertab)
 {
 	homa_init(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0, 0);
+	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_peertab_init(&self->peertab);
+	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_port = 99;
 }
 FIXTURE_TEARDOWN(homa_peertab)
 {
@@ -45,6 +51,11 @@ static int dead_count(struct homa_peertab *peertab)
 	list_for_each(pos, &peertab->dead_dsts)
 		count++;
 	return count;
+}
+
+static void peer_spinlock_hook(void)
+{
+	mock_cycles += 1000;
 }
 
 TEST_F(homa_peertab, homa_peer_find__basics)
@@ -201,4 +212,116 @@ TEST_F(homa_peertab, homa_unsched_priority)
 	EXPECT_EQ(5, homa_unsched_priority(&self->homa, &peer, 10));
 	EXPECT_EQ(4, homa_unsched_priority(&self->homa, &peer, 200));
 	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
+}
+
+TEST_F(homa_peertab, homa_peer_lock_slow)
+{
+	mock_cycles = 10000;
+	struct homa_peer *peer = homa_peer_find(&self->peertab, 444,
+			&self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	
+	homa_peer_lock(peer);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_misses);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_miss_cycles);
+	homa_peer_unlock(peer);
+	
+	mock_trylock_errors = 1;
+	mock_spin_lock_hook = peer_spinlock_hook;
+	homa_peer_lock(peer);
+	mock_spin_lock_hook = peer_spinlock_hook;
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_lock_misses);
+	EXPECT_EQ(1000, homa_cores[cpu_number]->metrics.peer_lock_miss_cycles);
+	homa_peer_unlock(peer);
+}
+
+TEST_F(homa_peertab, homa_peer_add_ack)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+		self->client_ip, self->server_ip, self->server_port,
+		101, 100, 100);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+		self->client_ip, self->server_ip, self->server_port,
+		102, 100, 100);
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+		self->client_ip, self->server_ip, self->server_port,
+		103, 100, 100);
+	struct homa_peer *peer = crpc1->peer;
+	EXPECT_EQ(0, peer->num_acks);
+	
+	/* Initialize 3 acks in the peer. */
+	peer->acks[0] = (struct homa_ack) {
+			.client_port = htons(1000),
+			.server_port = htons(self->server_port),
+			.client_id = cpu_to_be64(90)};
+	peer->acks[1] = (struct homa_ack) {
+			.client_port = htons(1001),
+			.server_port = htons(self->server_port),
+			.client_id = cpu_to_be64(91)};
+	peer->acks[2] = (struct homa_ack) {
+			.client_port = htons(1002),
+			.server_port = htons(self->server_port),
+			.client_id = cpu_to_be64(92)};
+	peer->num_acks = 3;
+	
+	/* Add one RPC to unacked (fits). */
+	homa_peer_add_ack(crpc1);
+	EXPECT_EQ(4, peer->num_acks);
+	EXPECT_STREQ("client_port 32768, server_port 99, client_id 101",
+			unit_ack_string(&peer->acks[3]));
+	
+	/* Add another RPC to unacked (also fits). */
+	homa_peer_add_ack(crpc2);
+	EXPECT_EQ(5, peer->num_acks);
+	EXPECT_STREQ("client_port 32768, server_port 99, client_id 102",
+			unit_ack_string(&peer->acks[4]));
+	
+	/* Third RPC overflows, triggers ACK transmission. */
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	homa_peer_add_ack(crpc3);
+	EXPECT_EQ(0, peer->num_acks);
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 103, acks "
+			"[cp 1000, sp 99, id 90] [cp 1001, sp 99, id 91] "
+			"[cp 1002, sp 99, id 92] [cp 32768, sp 99, id 101] "
+			"[cp 32768, sp 99, id 102]",
+			unit_log_get());
+}
+
+TEST_F(homa_peertab, homa_peer_get_acks)
+{
+	struct homa_peer *peer = homa_peer_find(&self->peertab, 444,
+			&self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ(0, peer->num_acks);
+	
+	// First call: nothing available.
+	struct homa_ack acks[2];
+	EXPECT_EQ(0, homa_peer_get_acks(peer, 2, acks));
+	
+	// Second call: retrieve 2 out of 3.
+	peer->acks[0] = (struct homa_ack) {
+			.client_port = htons(4000),
+			.server_port = htons(5000),
+			.client_id = cpu_to_be64(100)};
+	peer->acks[1] = (struct homa_ack) {
+			.client_port = htons(4001),
+			.server_port = htons(5001),
+			.client_id = cpu_to_be64(101)};
+	peer->acks[2] = (struct homa_ack) {
+			.client_port = htons(4002),
+			.server_port = htons(5002),
+			.client_id = cpu_to_be64(102)};
+	peer->num_acks = 3;
+	EXPECT_EQ(2, homa_peer_get_acks(peer, 2, acks));
+	EXPECT_STREQ("client_port 4001, server_port 5001, client_id 101",
+			unit_ack_string(&acks[0]));
+	EXPECT_STREQ("client_port 4002, server_port 5002, client_id 102",
+			unit_ack_string(&acks[1]));
+	EXPECT_EQ(1, peer->num_acks);
+	
+	// Third call: retrieve final id.
+	EXPECT_EQ(1, homa_peer_get_acks(peer, 2, acks));
+	EXPECT_STREQ("client_port 4000, server_port 5000, client_id 100",
+			unit_ack_string(&acks[0]));
 }

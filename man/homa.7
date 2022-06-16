@@ -49,20 +49,17 @@ When a client issues a request, Homa will ensure that the request
 is received by the server and that the response is transmitted
 back to the client.
 A request fails only if Homa cannot maintain communication with the
-Homa transport module on the server.
-.PP
-Under some (rare) conditions, a Homa server may receive the same request
-multiple times.
-Homa assumes that application-level software will perform duplicate detection,
-if that is important for the application.
+Homa transport module on the server. Homa ensures at-most-once
+semantics for an RPC.
 .PP
 Home is intended for use between machines that are physically
 close, so round-trip latencies are at most a few tens of microseconds.
 Homa is not suitable for wide-area communication.
 .PP
 In order for Homa to achieve its low latency, network switches must be
-configured to enable priority queues in output ports and to obey the priority
-values specified as the PCP field in IEEE 802.1Q packet headers.
+configured to enable priority queues in output ports and to obey 3-bit
+priority values specified as the high-order bits of the DSCP field in
+IP packet headers.
 Homa assumes that 8 priority levels are available, but it can be
 configured to use fewer than this.
 .SH BASIC USAGE
@@ -73,51 +70,40 @@ are not supported by Homa.
 Instead, Homa offers a set of library methods that support
 message-oriented communication.
 .PP
-For an application to initiate requests as a client, it opens a Homa
+For an application to send or receive Homa messages, it opens a Homa
 socket as shown in
 .B SYNOPSIS
-above, then invokes
-.BR homa_invoke (3).
-This will send a request message and wait for the response to arrive.
-Alternatively, the application can invoke
+above. Clients can then invoke
 .BR homa_send (3)
 to send a request, followed later by
 .BR homa_recv (3)
 to wait for the reply.
 Multiple requests may be initiated concurrently before waiting for any
 replies.
-The responses will not necessarily be received in the same order that the
+Responses will not necessarily be received in the same order that the
 requests were sent.
 .PP
-To act as server, an application first opens a Homa socket and then
-invokes
-.BR bind (2)
-to associate a server port number with the socket.
-The port number must not already being used by another socket, and must
-be less than
-.B HOMA_MIN_CLIENT_PORT
-(Homa automatically assigns a separate client port to each socket, which
-is used for outgoing requests; client port numbers are greater than or
-equal to
-.BR HOMA_MIN_CLIENT_PORT ).
-Once
-.BR bind (2)
-has completed successfully, the application can receive incoming
-requests by invoking
+Servers can receive incoming requests by invoking
 .BR homa_recv (3).
 For each request that it receives, the application must eventually
 invoke
 .BR homa_reply (3)
 to send a response.
+The same Homa socket can be used for issuing outgoing requests as
+client and receiving incoming requests as server.
 .PP
-Server sockets can also be used to send outgoing requests as described
-above for clients. If the same socket is used for both outgoing and
-incoming requests, then
-.BR homa_recv (3)
-may return either a request or a response packet.
-Requests and responses can be distinguished using the peer
-port number returned by
-.BR homa_recv (3).
+When a Homa socket is created, Homa assigns a default port number for
+the socket, which will be
+.B HOMA_MIN_DEFAULT_PORT
+or higher.  An application can request a port number less than
+.B HOMA_MIN_DEFAULT_PORT
+by invoking
+.BR bind (2).
+This will change the socket's port number to the given value, if it
+is not already in use. Note:
+.BR bind (2)
+should not be invoked on a Homa socket after sending or receiving
+any messages on that socket.
 .PP
 The
 .BR shutdown (2)
@@ -128,6 +114,17 @@ so that it may no longer be used for either sending or receiving messages.
 If any threads are blocked waiting on the socket, they will be unblocked
 and their current operations will return
 .BR ESHUTDOWN .
+.SH IDENTIFIERS
+.PP
+When a client sends a request, Homa assigns a unique identifier
+to that message, which the client can use to receive the response.
+Client-side identifiers are always even (their low-order bit is 0).
+When a server receives a request, it also receives an identifier
+for that request, which must be presented when returning a response. The
+server-side identifier will be the same as the client-side
+identifier except that the low-order bit will be 1.
+When an application receives a message, it can determine whether it
+is a request or response by testing the low-order bit of its identifier.
 .SH SYSCTL PARAMETERS
 .PP
 Homa supports several parameters that can be set with
@@ -147,6 +144,30 @@ detailed performance measurements to justify the change.
 (Read-only) The current version for unscheduled cutoffs; incremented
 automatically when unsched_cutoffs is modified.
 .TP
+.IR dead_buffs_limit
+When an RPC completes, Homa doesn't immediately free up the resources it used,
+since this could delay the application (e.g. if there are lots of
+packet buffers to free). Instead, Homa defers RPC "reaping" to a time
+when it is less likely to impact application performance, and it performs
+the reaping in small chunks (see
+.IR reap_limit ).
+However, under high-load conditions this could result
+in an accumulation of dead RPCs. If the total number of packet buffers in
+dead RPCs reaches the value of this parameter, then Homa reaps more
+aggressively (which could impact application performance) until the number
+of dead packet buffers drops below
+.I dead_buffs_limit .
+.TP
+.IR duty_cycle
+Determines the maximum fraction of network bandwidth that a single RPC
+will be allowed to consume, in units of one-thousandth (e.g., 500 means 50%).
+The main reason for this parameter is that it also limits the fraction
+of a core that can be consumed by NAPI processing for a single incoming
+message. Without this limit, a large incoming message can completely
+consume one core for NAPI, which starves user threads on that core and
+can result in high tail latency for short messages served by those
+threads.
+.TP
 .IR flags
 Individual bits can be set or cleared to control particular Homa behaviors.
 If the
@@ -154,6 +175,23 @@ If the
 bit is set, Homa will not throttle output transmissions; packets will
 always be sent immediately. This could result in long transmit queues for
 the NIC, which defeats part of Homa's SRPT scheduling mechanism.
+.TP
+.IR freeze_type
+If this value is nonzero, it specifies one of several conditions under which
+Homa will freeze its internal timetrace. This is used for debugging and
+performance analysis; see the source code for the values currently
+supported.
+.TP
+.IR grant_fifo_fraction
+When sending grants, Homa normally uses an SRPT policy, granting to the
+message(s) with the fewest remaining bytes. This parameter can be
+used to reserve some of the bandwidth for the oldest message,
+in order to prevent very large messages from starving.
+The value specifies the fraction of scheduled bandwidth that it reserves
+for the oldest message, specified in thousandths (e.g., 100 means that 10%
+of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
+value can provide significant benefits for the largest messages under very high
+loads, but for most loads its effect is negligible.
 .TP
 .IR grant_increment
 An integer value; each grant issued by a Homa receiver will allow the sender
@@ -178,24 +216,15 @@ log various state information to the system log, depending on the value.
 For details on the recognized values, consult the Homa code.
 .TP
 .IR max_dead_buffs
-When an RPC completes, Homa doesn't immediately free up the resources it used,
-since this could delay the application (e.g. if there are lots of
-packet buffers to free). Instead, Homa defers RPC "reaping" to a time
-when it is less likely to impact application performance, and it performs
-the reaping in small chunks (see
-.IR reap_limit ).
-However, under some conditions this could result
-in an accumulation of dead RPCs. If the total number of packet buffers in
-dead RPCs reaches the value of this parameter, then Homa reaps more
-aggressively (which could impact application performance) until the number
-of dead packet buffers drops below
-.I max_dead_buffs .
+This parameter is updated by Homa to reflect the largest number of packet
+buffers occupied by dead (but not yet reaped) RPCs in a single socket at
+a given time. It may be reset to zero to initiate a new calculation.
 .TP
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that
-Homa will allow to accumulate at interrupt level before passing them
-to the softirq handler. At one point there was a theory that a low value might
-improve performance, but it doesn't seem to have any impact.
+Homa will allow to accumulate at driver level before passing them
+to the softirq handler. So far, performance generally seems to be
+best with this set to infinity.
 .TP
 .IR max_gso_size
 An integer value setting an upper limit on the size of an output packet,
@@ -238,6 +267,17 @@ The number of priority levels that Homa will use; Homa will use this many
 consecutive priority level starting with 0 (before priority mapping).
 Must not be more than 8.
 .TP
+.IR pacer_fifo_fraction
+When the pacer is choosing which message to transmit next, it normally picks
+the one with the fewest remaining bytes. However, it occasionally chooses
+the oldest message in order to prevent very large messages from starving.
+This value determines how frequently it picks the oldest message, specified
+in thousandths (e.g., 100 means that 10% of the time it picks the oldest).
+As of October 2020, it is hard to find situations where this value matters;
+however, under very extreme loads a small value does provide benefit for
+the largest messages, when used with
+.I grant_fifo_fraction.
+.TP
 .IR poll_usecs
 When a thread waits for an incoming message, Homa first busy-waits for a
 short amount of time before putting the thread to sleep. If a message arrives
@@ -261,6 +301,16 @@ integer value specifies how many packet buffers Homa will free in a single
 call to the reaper; larger values may make the reaper more efficient, but
 they can also result in a larger delay for applications.
 .TP
+.IR request_ack_ticks
+Servers maintain state for an RPC until the client has acknowledged receipt
+of the complete response message. Clients piggyback these acks on
+data packets, but won't send acks if there is no traffic to the server.
+If the server doesn't receive an ack within
+.IR request_ack_ticks
+timer ticks, then it will request an explicit ack. Larger values for
+this parameter reduce packet traffic but cause RPC state to be held longer
+on servers.
+.TP
 .IR resend_interval
 An integer value specifying how frequently resend requests may be sent
 to a given peer (regardless of how many RPCs are outstanding to that
@@ -279,36 +329,30 @@ Homa will begin issuing resend requests for an RPC once this many ticks have
 elapsed without receiving expected data from the peer; the exact timing and
 spacing of those requests is determined by
 .IR resend_interval .
-The general
-idea is to send the first resend request relatively quickly, in order to
-minimize the delay caused by lost packets. However, if a peer still doesn't
-respond, it probably means the peer is overloaded; sending a lot of resends
-will just make the problem
-worse. It's unlikely that multiple packets get lost in a short time
-interval, so it's OK to pay extra time if that's what really happened.
-.TP
-.IR rpc_discard_ticks
-If this much time elapses on a server without receiving any packets
-related to an RPC from the client, then the server assumes that the client
-no longer cares about the RPC, and the server discards its state. This
-is in units of "ticks" (see 
-.I resend_ticks
-above). This value should be chosen in conjunction with
-.I resend_ticks
-and
-.IR resend_interval .
+The original plan was to send the first resend request relatively quickly,
+in order to minimize the delay caused by lost packets, then space out
+additional resends to minimize extra work created for an already-overloaded
+peer. However, as of October 2020, small values of
+.IR resend_ticks
+result in fairly frequent RPC restarts.  The problem is that a short message
+can get detoured on the slow path through ksoftirq, so that it takes one or
+more 4 ms time slices before it is processed by Homa. Meantime, with a low
+value of
+.IR resend_ticks ,
+the client issues a RESEND. Since the message has not yet been processed on the
+server, it sends UNKNOWN, causing the client to restart. A larger value of
+.IR
+resend_ticks
+reduces the likelihood of restarts (but doesn't completely eliminate the
+problem).
 .TP
 .IR rtt_bytes
-An integer value specifying the worst-case round-trip latency (assuming
-unloaded servers and network) between this host and any other host with
-which it will communicate using Homa.
-The time should be that to send a maximum-sized packet and receive
-a minimum-size packet, measured end-to-end in the source kernel and
-including all software overheads on both source and destination.
-The latency is specified in terms of the number of bytes that can be
-transmitted during this time.
-Overestimates are relatively harmless (they increase buffer
-space occupancy); underestimates can result in wasted link bandwidth.
+An estimate of the number of bytes that can be transmitted on the wire
+by a host in the time it takes that host to send a full-size packet to
+another host and receive back a grant packet. Used by Homa to ensure
+full network bandwidth utilization (or whatever is specified by the
+.IR duty_cycle
+parameter).
 .TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to

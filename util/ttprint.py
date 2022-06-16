@@ -63,6 +63,8 @@ for line in f:
     if first_time == 0.0:
         first_time = this_time
         prev_time = this_time
+        print('%9.3f us (+%8.3f us) [C00] First event has timestamp %s '
+                '(cpu_ghz %.15f)' % (0, 0, match.group(1), cpu_ghz))
     print('%9.3f us (+%8.3f us) %s' % (
             (this_time - first_time)/(1000.0 *cpu_ghz),
             (this_time - prev_time)/(1000.0 * cpu_ghz), this_event))

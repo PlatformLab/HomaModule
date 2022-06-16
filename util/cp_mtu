@@ -23,22 +23,13 @@ from cperf import *
 parser = get_parser(description=
         'Generates small-message latency CDFs as a function of MTU for '
         'Homa and TCP.',
-        usage='%(prog)s [options]',
-        defaults={
-            "server_ports":     3,
-            "port_threads":     3,
-            "client_ports":     3,
-            "port_receivers":   3,
-            "tcp_server_ports": 9,
-            "tcp_client_ports": 5,
-            "workload":         ""
-        })
+        usage='%(prog)s [options]'})
 parser.add_argument('-w', '--workload', dest='workload',
         metavar='W', required = True,
         help='Workload to use for benchmark: w1-w5 or number')
 options = parser.parse_args()
 init(options)
-options.net_bw = options.net_bw/2.0
+options.gbps = options.gbps/2.0
 servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
 mtus = [1500, 3000, 6000, 9000]
@@ -54,7 +45,7 @@ if not options.plot_only:
         start_servers(servers, options)
 
         o = copy.deepcopy(options)
-        o.net_bw = 0.0
+        o.gbps = 0.0
         o.client_ports = 1
         o.client_max = 1
         o.server_ports = 1

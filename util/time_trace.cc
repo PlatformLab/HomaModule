@@ -130,6 +130,23 @@ time_trace::print_internal(std::string *s, FILE *f)
 		    current[i] = (current[i] + 1) % buffer::BUFFER_SIZE;
 		}
 	}
+	
+	// Output an initial (synthetic) record with the starting time.
+	if (s != NULL) {
+		char message[1000];
+		snprintf(message, sizeof(message),
+				"%9.3f us (+%8.3f us) [C0]   First event "
+				"has timestamp %lu (cpu_ghz %.15f)",
+				0.0, 0.0, start_time,
+				get_cycles_per_sec()*1e-9);
+		s->append(message);
+	}
+	if (f != NULL) {
+		fprintf(f, "%9.3f us (+%8.3f us) [C0]   First event "
+				"has timestamp %lu (cpu_ghz %.15f)\n",
+				0.0, 0.0, start_time,
+				get_cycles_per_sec()*1e-9);
+	}
 
 	/* Each iteration through this loop processes one event (the one with
 	 * the earliest timestamp).
@@ -164,10 +181,8 @@ time_trace::print_internal(std::string *s, FILE *f)
 				buffer->name.c_str());
 		double micros = to_seconds(event->timestamp - start_time) *1e6;
 		if (s != NULL) {
-			if (s->length() != 0)
-				s->append("\n");
 			snprintf(message, sizeof(message),
-					"%9.3f us (+%8.3f us) %-8s ",
+					"\n%9.3f us (+%8.3f us) %-6s ",
 					micros, micros - prev_micros, core_id);
 			s->append(message);
 			snprintf(message, sizeof(message), event->format,
@@ -176,7 +191,7 @@ time_trace::print_internal(std::string *s, FILE *f)
 			s->append(message);
 		}
 		if (f != NULL) {
-			fprintf(f, "%9.3f us (+%8.3f us) %-8s ", micros,
+			fprintf(f, "%9.3f us (+%8.3f us) %-6s ", micros,
 					micros - prev_micros, core_id);
 			fprintf(f, event->format, event->arg0, event->arg1,
 					event->arg2, event->arg3);

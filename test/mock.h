@@ -21,11 +21,13 @@ extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern cycles_t    mock_cycles;
+extern int         mock_import_iovec_errors;
 extern int         mock_import_single_range_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern int         mock_kmalloc_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
+extern int         mock_max_grants;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
@@ -56,5 +58,5 @@ extern struct sk_buff *
 extern void        mock_sock_destroy(struct homa_sock *hsk,
 			struct homa_socktab *socktab);
 extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
-			int client_port, int server_port);
+			int port);
 extern void        mock_teardown(void);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -82,7 +82,7 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  * unusual way: it simply aggregates all packets targeted to a particular
  * destination port, so that the entire bundle can get through the networking
  * stack in a single traversal.
- * @gro_list:   Pointer to header for list of packets that are being
+ * @held_list:  Pointer to header for list of packets that are being
  *              held for possible GRO merging. Note: this list contains
  *              only packets matching a given hash.
  * @skb:        The newly arrived packet.
@@ -91,7 +91,7 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  * gro_list. The skb will be removed from the list by the caller and
  * passed up the stack immediately.
  */
-struct sk_buff *homa_gro_receive(struct list_head *gro_list,
+struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		struct sk_buff *skb)
 {
 	/* This function will do one of the following things:
@@ -109,7 +109,8 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	struct sk_buff *held_skb;
 	struct iphdr *iph;
 	struct sk_buff *result = NULL;
-	struct homa_core *core;
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
+	__u32 hash;
 	
 	if (!pskb_may_pull(skb, 64))
 		tt_record("homa_gro_receive can't pull enough data "
@@ -120,17 +121,17 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
-				h_new->common.id & 0xffffffff,
+				homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset),
 				iph->tos >> 5);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type %d, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
-				h_new->common.id & 0xffffffff,
+				homa_local_id(h_new->common.sender_id),
 				h_new->common.type, iph->tos >> 5);
 	
-	homa_cores[smp_processor_id()]->last_active = get_cycles();
+	core->last_active = get_cycles();
 	
 	if (homa->gro_policy & HOMA_GRO_BYPASS) {
 		homa_softirq(skb);
@@ -143,16 +144,22 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	 * gro_lists by hash. This is bad for us, because we want to batch
 	 * packets together regardless of their RPCs. So, instead of
 	 * checking the list they gave us, check the last list where this
-	 * core added a Homa packet.
+	 * core added a Homa packet (if there is such a list).
 	 */
-	core = homa_cores[smp_processor_id()];
-	if (core->merge_list) {
-		/* Find any Homa packet on the list and merge with it. */
-		list_for_each_entry(held_skb, core->merge_list, list) {
-			struct iphdr *held_iph  = (struct iphdr *)
-					skb_network_header(held_skb);
-			
-			if (held_iph->protocol != IPPROTO_HOMA)
+	hash = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
+	if (core->held_skb) {
+		/* Reverse-engineer the location of the napi_struct, so we
+		 * can verify that held_skb is still valid.
+		 */
+		struct gro_list *gro_list = container_of(held_list,
+				struct gro_list, list);
+		struct napi_struct *napi = container_of(gro_list,
+				struct napi_struct, gro_hash[hash]);
+		
+		/* Make sure that core->held_skb is on the list. */
+		list_for_each_entry(held_skb,
+				&napi->gro_hash[core->held_bucket].list, list) {
+			if (held_skb != core->held_skb)
 				continue;
 
 			/* Aggregate skb into held_skb. We don't update the
@@ -167,14 +174,24 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 			skb->next = NULL;
 			NAPI_GRO_CB(skb)->same_flow = 1;
 			NAPI_GRO_CB(held_skb)->count++;
-			if ((NAPI_GRO_CB(held_skb)->count >= homa->max_gro_skbs)
-					&& (core->merge_list == gro_list)) {
-				/* Can only pass packets up the stack if they
-				 * are in the list that GRO thinks we're
-				 * searching; otherwise GRO state will get
-				 * messed up.
+			if (NAPI_GRO_CB(held_skb)->count >= homa->max_gro_skbs) {
+				/* Push this batch up through the SoftIRQ
+				 * layer. This code is a hack, needed because
+				 * returning skb as result is no longer
+				 * sufficient (as of 5.4.80) to push it up
+				 * the stack; the packet just gets queued on
+				 * napi->rx_list. This code basically steals
+				 * the packet from dev_gro_receive and
+				 * pushes it upward.
 				 */
-				result = held_skb;
+				skb_list_del_init(held_skb);
+				homa_gro_complete(held_skb, 0);
+				netif_receive_skb(held_skb);
+				napi->gro_hash[core->held_bucket].count--;
+				if (napi->gro_hash[core->held_bucket].count == 0)
+					__clear_bit(core->held_bucket,
+							&napi->gro_bitmask);
+				result = ERR_PTR(-EINPROGRESS);
 			}
 			goto done;
 		}
@@ -188,11 +205,13 @@ struct sk_buff *homa_gro_receive(struct list_head *gro_list,
 	 * means we aren't heavily loaded; if batching does occur,
 	 * homa_gro_complete will pick a different core).
 	 */
-	core->merge_list = gro_list;
+	core->held_skb = skb;
+	core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
-		homa_set_softirq_cpu(skb, smp_processor_id());
+		homa_set_softirq_cpu(skb, raw_smp_processor_id());
 	
     done:
+	homa_check_pacer(homa, 1);
 	return result;
 }
 
@@ -212,7 +231,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			skb_transport_header(skb);
 //	struct data_header *d = (struct data_header *) h;
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-//			h->type, h->id, ntohl(d->seg.offset),
+//			h->type, h->sender_id, ntohl(d->seg.offset),
 //			NAPI_GRO_CB(skb)->count);
 	
 	if (homa->gro_policy & HOMA_GRO_IDLE) {
@@ -230,7 +249,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * no runnable user tasks; if there is such a core, use this
 		 * in preference to the first "best".
 		 */
-		core = best = smp_processor_id();
+		core = best = raw_smp_processor_id();
 		for (i = 0; i < 4; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
@@ -246,7 +265,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
 		 */
-		int target = smp_processor_id() + 1;
+		int target = raw_smp_processor_id() + 1;
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;
 		homa_set_softirq_cpu(skb, target);

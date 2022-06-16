@@ -34,6 +34,10 @@ import sys
 import time
 import traceback
 
+# Avoid Type 3 fonts (conferences don't tend to like them).
+matplotlib.rcParams['pdf.fonttype'] = 42
+matplotlib.rcParams['ps.fonttype'] = 42
+
 if platform.system() != "Windows":
     import fcntl
 
@@ -60,28 +64,30 @@ log_file = 0
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
 
-# Defaults for command-line options, if the application doesn't specify its
-# own values.
+# Defaults for command-line options; assumes that servers and clients
+# share nodes.
 default_defaults = {
-    'net_bw':              0.0,
-    'client_max':          2000,
-    'client_ports':        5,
+    'gbps':                0.0,
+    # Note: very large numbers for client_max hurt Homa throughput with
+    # unlimited load (throttle queue inserts take a long time).
+    'client_max':          200,
+    'client_ports':        3,
     'log_dir':             'logs/' + time.strftime('%Y%m%d%H%M%S'),
     'mtu':                 0,
     'no_trunc':            '',
     'protocol':            'homa',
     'port_receivers':      3,
-    'port_threads':        2,
+    'port_threads':        3,
     'seconds':             5,
-    'server_ports':        9,
-    'tcp_client_ports':    9,
+    'server_ports':        3,
+    'tcp_client_ports':    4,
     'tcp_port_receivers':  1,
-    'tcp_server_ports':    15,
+    'tcp_server_ports':    8,
     'tcp_port_threads':    1,
     'unloaded':            0,
     'unsched':             0,
     'unsched_boost':       0.0,
-    'workload':            'w5'
+    'workload':            ''
 }
 
 # Keys are experiment names, and each value is the digested data for that
@@ -120,15 +126,15 @@ tcp_color =      '#00B000'
 tcp_color2 =     '#5BD15B'
 tcp_color3 =     '#96E296'
 homa_color =     '#1759BB'
-homa_color2 =    '#4287EC'
-homa_color3 =    '#96BCF4'
+homa_color2 =    '#6099EE'
+homa_color3 =    '#A6C6F6'
 dctcp_color =    '#7A4412'
 dctcp_color2 =   '#CB701D'
 dctcp_color3 =   '#EAA668'
 unloaded_color = '#d62728'
 
 # Default bandwidths to use when running all of the workloads.
-load_info = [["w1", 0.18], ["w2", 0.4], ["w3", 1.8], ["w4", 2.4], ["w5", 2.4]]
+load_info = [["w1", 1.4], ["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
 
 # PyPlot color circle colors:
 pyplot_colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
@@ -189,11 +195,11 @@ def get_parser(description, usage, defaults = {}):
             'below may include some that are not used by this particular '
             'benchmark', usage=usage, add_help=False,
             conflict_handler='resolve')
-    parser.add_argument('-b', '--net-bw', type=float, dest='net_bw',
-            metavar='B', default=defaults['net_bw'],
-            help='Generate a total of B Gbits/sec of bandwidth from each '
-            'client machine; 0 means run as fast as possible (default: %.2f)'
-            % (defaults['net_bw']))
+    parser.add_argument('-b', '--gbps', type=float, dest='gbps',
+            metavar='B', default=defaults['gbps'],
+            help='Generate a total of B Gbits/sec of bandwidth on the most '
+            'heavily loaded machines; 0 means run as fast as possible '
+            '(default: %.2f)' % (defaults['gbps']))
     parser.add_argument('--client-max', type=int, dest='client_max',
             metavar='count', default=defaults['client_max'],
             help='Maximum number of requests each client machine can have '
@@ -296,12 +302,26 @@ def init(options):
     verbose = options.verbose
     vlog("cperf starting at %s" % (date_time))
     s = ""
+
+    # Log configuration information, including options here as well
+    # as Homa's configuration parameters.
     opts = vars(options)
     for name in sorted(opts.keys()):
         if len(s) != 0:
             s += ", "
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
+    vlog("Homa configuration:")
+    for param in ['dead_buffs_limit', 'duty_cycle', 'grant_fifo_fraction',
+            'grant_increment', 'gro_policy', 'link_mbps', 'max_dead_buffs',
+            'max_gro_skbs', 'max_gso_size', 'max_nic_queue_ns',
+            'max_overcommit', 'num_priorities', 'pacer_fifo_fraction',
+            'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
+            'rtt_bytes', 'throttle_min_bytes', 'timeout_resends']:
+        result = subprocess.run(['sysctl', '-n', '.net.homa.' + param],
+                capture_output = True, encoding="utf-8");
+        vlog("  %-20s %s" % (param, result.stdout.rstrip()))
+
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
         do_ssh(["set_mtu", str(options.mtu)], range(0, options.num_nodes))
@@ -402,7 +422,10 @@ def stop_nodes():
     for id, popen in homa_prios.items():
         subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no",
                 "node-%d" % id, "sudo", "pkill", "homa_prio"])
-        popen.wait(5.0)
+        try:
+            popen.wait(5.0)
+        except subprocess.TimeoutExpired:
+            log("Timeout killing homa_prio on node-%d" % (id))
     for node in active_nodes.values():
         node.stdin.write("exit\n")
         try:
@@ -525,7 +548,7 @@ def run_experiment(name, clients, options):
                   client_max
                   client_ports
                   first_server
-                  net_bw
+                  gbps
                   port_receivers
                   protocol
                   seconds
@@ -551,14 +574,14 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa":
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f --client-max %d --protocol %s --id %d" % (
                     options.client_ports,
                     options.port_receivers,
                     options.server_ports,
                     options.workload,
                     num_servers,
                     first_server,
-                    options.net_bw,
+                    options.gbps,
                     options.client_max,
                     options.protocol,
                     id);
@@ -571,14 +594,14 @@ def run_experiment(name, clients, options):
                 trunc = ''
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--net-bw %.3f %s --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f %s --client-max %d --protocol %s --id %d" % (
                     options.tcp_client_ports,
                     options.tcp_port_receivers,
                     options.tcp_server_ports,
                     options.workload,
                     num_servers,
                     first_server,
-                    options.net_bw,
+                    options.gbps,
                     trunc,
                     options.client_max,
                     options.protocol,
@@ -602,9 +625,14 @@ def run_experiment(name, clients, options):
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
-        time.sleep(2)
-        # do_cmd("debug 5000000 7000000", clients);
-        time.sleep(options.seconds - 2)
+        debug_delay = 0
+        if debug_delay > 0:
+            time.sleep(debug_delay)
+        if False and "dctcp" in name:
+            log("Setting debug info")
+            do_cmd("debug 2000 3000", clients)
+            log("Finished setting debug info")
+        time.sleep(options.seconds - debug_delay)
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
@@ -618,6 +646,8 @@ def run_experiment(name, clients, options):
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
                 "%s/reports/%s.metrics" % (options.log_dir, name))
     do_cmd("stop senders", clients)
+    if False and "dctcp" in name:
+        do_cmd("tt print cp.tt", clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=3"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=2"], clients)
     # do_ssh(["sudo", "sysctl", ".net.homa.log_topic=1"], clients)
@@ -639,7 +669,7 @@ def scan_log(file, node, experiments):
                     name, where
                   * Each value is dictionary indexed by node name, where
                   * Each value is a dictionary with keys such as client_kops,
-                    client_mbps, client_latency, server_kops, or server_Mbps,
+                    client_gbps, client_latency, server_kops, or server_Mbps,
                     each of which is
                   * A list of values measured at regular intervals for that node
     """
@@ -660,29 +690,45 @@ def scan_log(file, node, experiments):
         if re.match('.*Ending .* experiment', line):
             experiment = ""
         if experiment != "":
+            gbps = -1.0
             match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
-                        '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
+                        '([0-9.]+) Gbps.*P50 ([0-9.]+)', line)
             if match:
+                gbps = float(match.group(2))
+            else:
+                match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
+                            '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
+                if match:
+                    gbps = 8.0*float(match.group(2))
+            if gbps >= 0.0:
                 if not "client_kops" in node_data:
                     node_data["client_kops"] = []
                 node_data["client_kops"].append(float(match.group(1)))
-                if not "client_mbps" in node_data:
-                    node_data["client_mbps"] = []
-                node_data["client_mbps"].append(float(match.group(2)))
+                if not "client_gbps" in node_data:
+                    node_data["client_gbps"] = []
+                node_data["client_gbps"].append(gbps)
                 if not "client_latency" in node_data:
                     node_data["client_latency"] = []
                 node_data["client_latency"].append(float(match.group(3)))
                 continue
 
+            gbps = -1.0
             match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
-                    '([0-9.]+) MB/sec', line)
+                    '([0-9.]+) Gbps', line)
             if match:
+                gbps = float(match.group(2))
+            else:
+                match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+                            '([0-9.]+) MB/sec', line)
+                if match:
+                    gbps = 8.0*float(match.group(2))
+            if gbps >= 0.0:
                 if not "server_kops" in node_data:
                     node_data["server_kops"] = []
                 node_data["server_kops"].append(float(match.group(1)))
-                if not "server_mbps" in node_data:
-                    node_data["server_mbps"] = []
-                node_data["server_mbps"].append(float(match.group(2)))
+                if not "server_gbps" in node_data:
+                    node_data["server_gbps"] = []
+                node_data["server_gbps"].append(gbps)
                 continue
 
             match = re.match('.*Outstanding client RPCs: ([0-9.]+)', line)
@@ -731,28 +777,28 @@ def scan_logs():
         nodes["all"] = {}
 
         for type in ['client', 'server']:
-            mbps_key = type + "_mbps"
+            gbps_key = type + "_gbps"
             kops_key = type + "_kops"
             averages = []
             vlog("\n%ss for %s experiment:" % (type.capitalize(), name))
             for node in sorted(exp.keys()):
-                if not mbps_key in exp[node]:
+                if not gbps_key in exp[node]:
                     if name.startswith("unloaded"):
-                        exp[node][mbps_key] = [0.0]
+                        exp[node][gbps_key] = [0.0]
                         exp[node][kops_key] = [0.0]
                     else:
                         continue
-                mbps = exp[node][mbps_key]
-                avg = sum(mbps)/len(mbps)
-                vlog("%s: %.1f MB/sec (%s)" % (node, avg,
-                    ", ".join(map(lambda x: "%.1f" % (x), mbps))))
+                gbps = exp[node][gbps_key]
+                avg = sum(gbps)/len(gbps)
+                vlog("%s: %.2f Gbps (%s)" % (node, avg,
+                    ", ".join(map(lambda x: "%.1f" % (x), gbps))))
                 averages.append(avg)
                 nodes["all"][node] = 1
                 nodes[type][node] = 1
             if len(averages) > 0:
-                totals[mbps_key] = sum(averages)
-                vlog("%s average: %.1f MB/sec\n"
-                        % (type.capitalize(), totals[mbps_key]/len(averages)))
+                totals[gbps_key] = sum(averages)
+                vlog("%s average: %.2f Gbps\n"
+                        % (type.capitalize(), totals[gbps_key]/len(averages)))
 
             averages = []
             for node in sorted(exp.keys()):
@@ -771,17 +817,17 @@ def scan_logs():
                 vlog("%s average: %.1f Kops/sec"
                         % (type.capitalize(), totals[kops_key]/len(averages)))
 
-        log("\nClients for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("\nClients for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["client"]),
-                totals["client_mbps"]/len(nodes["client"]),
+                totals["client_gbps"]/len(nodes["client"]),
                 totals["client_kops"]/len(nodes["client"])))
-        log("Servers for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("Servers for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["server"]),
-                totals["server_mbps"]/len(nodes["server"]),
+                totals["server_gbps"]/len(nodes["server"]),
                 totals["server_kops"]/len(nodes["server"])))
-        log("Overall for %s experiment: %d nodes, %.1f MB/sec, %.1f Kops/sec "
+        log("Overall for %s experiment: %d nodes, %.2f Gbps, %.1f Kops/sec "
                 "(avg per node)" % (name, len(nodes["all"]),
-                (totals["client_mbps"] + totals["server_mbps"])/len(nodes["all"]),
+                (totals["client_gbps"] + totals["server_gbps"])/len(nodes["all"]),
                 (totals["client_kops"] + totals["server_kops"])/len(nodes["all"])))
 
         for node in sorted(exp.keys()):
@@ -802,6 +848,7 @@ def scan_logs():
             log("Average rate of backed-up RPCs: %.1f%%"
                     % (100.0*sum(backups)/len(backups)))
     log("")
+
 def read_rtts(file, rtts):
     """
     Read a file generated by cp_node's "dump_times" command and add its
@@ -836,10 +883,7 @@ def read_rtts(file, rtts):
 
 def get_buckets(rtts, total):
     """
-    Computes a reasonable set of the buckets for histogramming the information
-    in rtts. We don't want super-small buckets because the statistics will be
-    bad, so this method merges several message sizes if needed to ensure
-    that each bucket has a reasonable number of messages.
+    Generates buckets for histogramming the information in rtts.
 
     rtts:     A collection of message rtts, as returned by read_rtts
     total:    Total number of samples in rtts
@@ -848,19 +892,10 @@ def get_buckets(rtts, total):
               fraction of all messages with that length or smaller.
     """
     buckets = []
-    min_size = total//400
-    cur_bucket_count = 0
     cumulative = 0
     for length in sorted(rtts.keys()):
-        samples = len(rtts[length])
-        cur_bucket_count += samples
-        cumulative += samples
-        if cur_bucket_count >= min_size:
-            buckets.append([length, cumulative/total])
-            cur_bucket_count = 0
-        last_length = length
-    if cur_bucket_count != 0:
-        buckets[-1] = [last_length, 1.0]
+        cumulative += len(rtts[length])
+        buckets.append([length, cumulative/total])
     return buckets
 
 def set_unloaded(experiment):
@@ -970,10 +1005,10 @@ def get_digest(experiment):
     f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
     f.write("# Digested data for %s experiment, run at %s\n"
             % (experiment, date_time))
-    f.write("# length cum_frac  samples     p50      p99     p999   "
+    f.write("# length  cum_frac  samples     p50      p99     p999   "
             "s50    s99    s999\n")
     for i in range(len(digest["lengths"])):
-        f.write(" %7d %8.3f %8d %7.1f %8.1f %8.1f %5.1f %6.1f %7.1f\n"
+        f.write(" %7d %9.6f %8d %7.1f %8.1f %8.1f %5.1f %6.1f %7.1f\n"
                 % (digest["lengths"][i], digest["cum_frac"][i],
                 digest["counts"][i], digest["p50"][i], digest["p99"][i],
                 digest["p999"][i], digest["slow_50"][i],
@@ -984,7 +1019,8 @@ def get_digest(experiment):
     return digest
 
 def start_slowdown_plot(title, max_y, x_experiment, size=10,
-        show_top_label=True, show_bot_label=True, figsize=[6,4]):
+        show_top_label=True, show_bot_label=True, figsize=[6,4],
+        y_label="Slowdown"):
     """
     Create a pyplot graph that will be used for slowdown data. Returns the
     Axes object for the plot.
@@ -998,6 +1034,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     show_top_label:  True means display title text for upper x-axis
     show_bot_label:  True means display title text for lower x-axis
     figsize:         Dimensions of plot
+    y_label:         Label for the y-axis
     """
 
     fig = plt.figure(figsize=figsize)
@@ -1018,8 +1055,8 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.set_yticks(ticks)
     ax.set_yticklabels(labels, size=size)
     if show_bot_label:
-        ax.set_xlabel("Message Length", size=size)
-    ax.set_ylabel("Slowdown", size=size)
+        ax.set_xlabel("Message Length (bytes)", size=size)
+    ax.set_ylabel(y_label, size=size)
     ax.grid(which="major", axis="y")
 
     top_axis = ax.twiny()
@@ -1161,7 +1198,7 @@ def plot_slowdown(ax, experiment, percentile, label, **kwargs):
     ax.plot(x, y, label=label, **kwargs)
 
 def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
-        figsize=[5, 4], size=10):
+        figsize=[5, 4], size=10, xscale="log", yscale="log"):
     """
     Create a pyplot graph that will be display a complementary CDF with
     log axes.
@@ -1175,12 +1212,15 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     y_label:     Label for the y axis (empty means no label)
     figsize:     Dimensions of plot
     size:        Size to use for fonts
+    xscale:      Scale for x-axis: "linear" or "log"
+    yscale:      Scale for y-axis: "linear" or "log"
     """
     plt.figure(figsize=figsize)
     if title != "":
         plt.title(title, size=size)
     plt.axis()
-    plt.xscale("log")
+    plt.xscale(xscale)
+    ax = plt.gca()
 
     # Round out the x-axis limits to even powers of 10.
     exp = math.floor(math.log(min_x , 10))
@@ -1188,10 +1228,16 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     exp = math.ceil(math.log(max_x, 10))
     max_x = 10**exp
     plt.xlim(min_x, max_x)
+    ticks = []
+    tick = min_x
+    while tick <= max_x:
+        ticks.append(tick)
+        tick = tick*10
+    plt.xticks(ticks)
     plt.tick_params(top=True, which="both", direction="in", labelsize=size,
             length=5)
 
-    plt.yscale("log")
+    plt.yscale(yscale)
     plt.ylim(min_y, 1.0)
     # plt.yticks([1, 10, 100, 1000], ["1", "10", "100", "1000"])
     if x_label:
@@ -1203,11 +1249,11 @@ def start_cdf_plot(title, min_x, max_x, min_y, x_label, y_label,
     plt.plot([min_x, max_x*1.2], [0.5, 0.5], linestyle= (0, (5, 3)),
             color="red", clip_on=False)
     plt.text(max_x*1.3, 0.5, "P50", fontsize=16, horizontalalignment="left",
-            verticalalignment="center", color="red", size=size)
+            verticalalignment="center", color="red")
     plt.plot([min_x, max_x*1.2], [0.01, 0.01], linestyle= (0, (5, 3)),
             color="red", clip_on=False)
     plt.text(max_x*1.3, 0.01, "P99", fontsize=16, horizontalalignment="left",
-            verticalalignment="center", color="red", size=size)
+            verticalalignment="center", color="red")
 
 def get_short_cdf(experiment):
     """

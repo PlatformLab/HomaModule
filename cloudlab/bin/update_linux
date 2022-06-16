@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2022 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -26,7 +26,10 @@
 # (e.g. "update_linux 4 2" means node-2 through node-5 will be updated).
 # "first" defaults to 1.
 
-v=`uname -r`
+
+#v=`uname -r`
+v=5.4.80+
+#v=5.17.7+
 
 if [ $# -eq 2 ]; then
     first=$2

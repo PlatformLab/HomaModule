@@ -24,6 +24,17 @@
 import sys
 
 # Ports to configure
+nodes = [196, 181, 161, 180, 172, 177, 197, 188, 178, 176]
+ports = []
+prev_switch = -1
+for node in nodes:
+    switch = (node-1)//40
+    if (switch != prev_switch) and (prev_switch >= 0):
+        print("Multiple switches: rack-%d and rack-%d" % (switch, prev_switch),
+                file=sys.stderr)
+    prev_switch = switch
+    ports.append(node - 40*switch)
+ports.sort()
 ports = range(1, 41)
 
 def config():

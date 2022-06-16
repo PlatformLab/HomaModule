@@ -21,17 +21,11 @@
 from cperf import *
 
 parser = get_parser(description=
-        'Measures slowdown as a function of message size for Homa and TCP.',
-        usage='%(prog)s [options]',
-        defaults={
-            "server_ports":     3,
-            "port_threads":     3,
-            "client_ports":     3,
-            "port_receivers":   3,
-            "tcp_server_ports": 8,
-            "tcp_client_ports": 4,
-            "workload":         ""
-        })
+        'Measures slowdown as a function of message size for TCP or DCTCP.',
+        usage='%(prog)s [options]')
+parser.add_argument('--dctcp', dest='dctcp', type=boolean,
+        default=False, help="Boolean value:: indicates whether measurements "
+                "should be run on DCTCP (default: false)")
 options = parser.parse_args()
 # options.no_trunc = True
 init(options)
@@ -39,15 +33,31 @@ servers = range(0, options.num_nodes)
 clients = range(0, options.num_nodes)
 
 if options.workload != "":
-    load_info = [[options.workload, options.net_bw]];
+    load_info = [[options.workload, options.gbps]];
+
+if options.dctcp:
+    prot = "dctcp"
+    label = "DCTCP"
+    color = dctcp_color
+else:
+    prot = "tcp"
+    label = "DCTCP"
+    color = tcp_color
 
 # First, run all of the experiments
 if not options.plot_only:
+    congestion = get_sysctl_parameter("net.ipv4.tcp_congestion_control")
+    if options.dctcp:
+        set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                        "dctcp", range(0, options.num_nodes))
+    else:
+        set_sysctl_parameter("net.ipv4.tcp_congestion_control",
+                    "cubic", range(0, options.num_nodes))
     for workload, bw in load_info:
         options.workload = workload
-        options.net_bw = bw/2.0
+        options.gbps = bw/2.0
         unloaded_exp = "unloaded_" + workload;
-        tcp_exp = "tcp_" + workload;
+        exp = "%s_%s" % (prot, workload);
         try:
             options.protocol = "tcp"
             start_servers(servers, options)
@@ -60,11 +70,13 @@ if not options.plot_only:
             o.first_server = 1
             o.unloaded = 500
             run_experiment(unloaded_exp, range(0, 1), o)
-            run_experiment(tcp_exp, clients, options)
+            run_experiment(exp, clients, options)
             do_cmd("tt print cp.tt", clients)
         except Exception as e:
             log(traceback.format_exc())
 
+    set_sysctl_parameter("net.ipv4.tcp_congestion_control", congestion,
+            range(0, options.num_nodes))
     log("Stopping nodes")
     stop_nodes()
     scan_logs()
@@ -72,17 +84,26 @@ if not options.plot_only:
 # Generate plots and reports
 for workload, bw in load_info:
     unloaded_exp = "unloaded_" + workload;
-    tcp_exp = "tcp_" + workload;
+    exp = "%s_%s" % (prot, workload);
 
     set_unloaded(unloaded_exp)
 
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
-    title = "%s %d nodes, %.2f GB/s" % (workload.capitalize(),
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, tcp_exp)
-    plot_slowdown(ax, tcp_exp, "p99", "TCP P99")
-    plot_slowdown(ax, tcp_exp, "p50", "TCP P50")
+    ax = start_slowdown_plot(title, 1000, exp)
+    plot_slowdown(ax, exp, "p99", "%s P99" % (prot))
+    plot_slowdown(ax, exp, "p50", "%s P50" % (prot))
     ax.legend()
     plt.tight_layout()
-    plt.savefig("%s/reports/tcp_%s.pdf" % (options.log_dir, workload))
+    plt.savefig("%s/reports/%s_%s.pdf" % (options.log_dir, prot, workload))
+
+    # Generate CDF of small-message RTTs.
+    log("Generating short message CDF for %s" % (workload))
+    x, y = get_short_cdf(exp)
+    start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
+            "Cumulative Fraction Short Messages")
+    plt.plot(x, y, label=label, color=color)
+    plt.legend(loc="upper right", prop={'size': 9})
+    plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))

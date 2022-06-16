@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2021 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -46,6 +46,7 @@ int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
 int mock_cpu_idle = 0;
 int mock_import_single_range_errors = 0;
+int mock_import_iovec_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
@@ -78,6 +79,11 @@ int mock_xmit_log_verbose = 0;
  * whenever it is invoked.
  */
 int mock_log_rcu_sched = 0;
+
+/* The maximum number of grants that can be issued in one call to
+ * homa_send_grants.
+ */
+int mock_max_grants = 10;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
@@ -205,11 +211,31 @@ int _cond_resched(void)
 	return 0;
 }
 
-size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *i)
+size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
+	size_t bytes_left = bytes;
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
-	unit_log_printf("; ", "_copy_from_iter copied %lu bytes", bytes);
+	if (bytes > iter->count) {
+		unit_log_printf("; ", "copy_from_iter needs %lu bytes, but "
+				"iov_iter has only %lu", bytes, iter->count);
+		return 0;
+	}
+	while (bytes_left > 0) {
+		struct iovec *iov = (struct iovec *) iter->iov;
+		__u64 int_base = (__u64) iov->iov_base;
+		size_t chunk_bytes = iov->iov_len;
+		if (chunk_bytes > bytes_left)
+			chunk_bytes = bytes_left;
+		unit_log_printf("; ", "_copy_from_iter %lu bytes at %llu",
+				chunk_bytes, int_base);
+		bytes_left -= chunk_bytes;
+		iter->count -= chunk_bytes;
+		iov->iov_base = (void *) (int_base + chunk_bytes);
+		iov->iov_len -= chunk_bytes;
+		if (iov->iov_len == 0)
+			iter->iov++;
+	}
 	return bytes;
 }
 
@@ -336,11 +362,33 @@ int idle_cpu(int cpu)
 	return mock_check_error(&mock_cpu_idle);
 }
 
+ssize_t import_iovec(int type, const struct iovec __user * uvector,
+		unsigned nr_segs, unsigned fast_segs,
+		struct iovec **iov, struct iov_iter *iter)
+{
+	ssize_t size;
+	unsigned i;
+
+	*iov = (struct iovec *) kmalloc(nr_segs*sizeof(struct iovec), GFP_KERNEL);
+	if (mock_check_error(&mock_import_iovec_errors))
+		return -EINVAL;
+	size = 0;
+	for (i = 0; i < nr_segs; i++) {
+		size += uvector[i].iov_len;
+		(*iov)[i] = uvector[i];
+	}
+	iov_iter_init(iter, type, *iov, nr_segs, size);
+	return size;
+}
+
 int import_single_range(int type, void __user *buf, size_t len,
 		struct iovec *iov, struct iov_iter *i)
 {
 	if (mock_check_error(&mock_import_single_range_errors))
 		return -EACCES;
+	iov->iov_base = buf;
+	iov->iov_len = len;
+	iov_iter_init(i, type, iov, 1, len);
 	return 0;
 }
 
@@ -404,6 +452,18 @@ void init_wait_entry(struct wait_queue_entry *wq_entry, int flags) {}
 
 void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
 		struct lock_class_key *key) {}
+
+void iov_iter_init(struct iov_iter *i, unsigned int direction,
+			const struct iovec *iov, unsigned long nr_segs,
+			size_t count)
+{
+	direction &= READ | WRITE;
+	i->type = ITER_IOVEC | direction;
+	i->iov = iov;
+	i->nr_segs = nr_segs;
+	i->iov_offset = 0;
+	i->count = count;
+}
 
 void iov_iter_revert(struct iov_iter *i, size_t bytes)
 {
@@ -556,6 +616,15 @@ void mutex_unlock(struct mutex *lock)
 	mock_active_locks--;
 }
 
+int netif_receive_skb(struct sk_buff *skb)
+{
+	struct data_header *h = (struct data_header *)
+			skb_transport_header(skb);
+	unit_log_printf("; ", "netif_receive_skb, id %llu, offset %d",
+			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
+	return 0;
+}
+
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
@@ -682,10 +751,33 @@ int sk_set_peek_off(struct sock *sk, int val)
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
-		struct iov_iter *to, int size)
+		struct iov_iter *iter, int size)
 {
-	unit_log_printf("; ", "skb_copy_datagram_iter ");
-	unit_log_data(NULL, from->data + offset, size);
+	size_t bytes_left = size;
+	if (bytes_left > iter->count) {
+		unit_log_printf("; ", "skb_copy_datagram_iter needs %lu bytes, "
+				"but iov_iter has only %lu",
+				bytes_left, iter->count);
+		return 0;
+	}
+	while (bytes_left > 0) {
+		struct iovec *iov = (struct iovec *) iter->iov;
+		__u64 int_base = (__u64) iov->iov_base;
+		size_t chunk_bytes = iov->iov_len;
+		if (chunk_bytes > bytes_left)
+			chunk_bytes = bytes_left;
+		unit_log_printf("; ",
+				"skb_copy_datagram_iter: %lu bytes to %llu: ",
+				chunk_bytes, int_base);
+		unit_log_data(NULL, from->data + offset + size - bytes_left,
+				chunk_bytes);
+		bytes_left -= chunk_bytes;
+		iter->count -= chunk_bytes;
+		iov->iov_base = (void *) (int_base + chunk_bytes);
+		iov->iov_len -= chunk_bytes;
+		if (iov->iov_len == 0)
+			iter->iov++;
+	}
 	return 0;
 }
 
@@ -937,6 +1029,12 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	case FREEZE:
 		header_size = sizeof(struct freeze_header);
 		break;
+	case NEED_ACK:
+		header_size = sizeof(struct need_ack_header);
+		break;
+	case ACK:
+		header_size = sizeof(struct ack_header);
+		break;
 	default:
 		header_size = sizeof(struct common_header);
 		break;
@@ -965,6 +1063,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	ip_hdr(skb)->saddr = saddr;
 	ip_hdr(skb)->protocol = IPPROTO_HOMA;
 	skb->_skb_refdst = 0;
+	skb->hash = 3;
 	return skb;
 }
 
@@ -981,25 +1080,21 @@ int mock_skb_count(void)
  * part, and mocks out the non-Homa-specific parts.
  * @hsk:          Storage area to be initialized.\
  * @homa:         Overall information about the Homa protocol.
- * @client_port:  Client-side port number to use for the socket, or 0 to
+ * @port:         Port number to use for the socket, or 0 to
  *                use default.
- * @server_port:  Server-side port number to use for the socket (or 0).
  */
-void mock_sock_init(struct homa_sock *hsk, struct homa *homa,
-		int client_port, int server_port)
+void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
 	struct sock *sk = (struct sock *) hsk;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
-	if (client_port != 0) {
-		saved_port = homa->next_client_port;
-		homa->next_client_port = client_port;
-	}
+	if ((port != 0) && (port >= HOMA_MIN_DEFAULT_PORT))
+		homa->next_client_port = port;
 	homa_sock_init(hsk, homa);
-	if (client_port != 0)
+	if (port != 0)
 		homa->next_client_port = saved_port;
-	if (server_port != 0)
-		homa_sock_bind(&homa->port_map, hsk, server_port);
+	if (port < HOMA_MIN_DEFAULT_PORT)
+		homa_sock_bind(&homa->port_map, hsk, port);
 	sk->sk_data_ready = mock_data_ready;
 }
 
@@ -1027,9 +1122,14 @@ void mock_teardown(void)
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
+	mock_cpu_idle = 0;
 	mock_cycles = 0;
 	mock_import_single_range_errors = 0;
+	mock_import_iovec_errors = 0;
+	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
+	mock_kmalloc_errors = 0;
+	mock_max_grants = 10;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;

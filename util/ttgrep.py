@@ -50,7 +50,7 @@ def scan(f, string):
         time = float(match.group(1))
         interval = float(match.group(2))
         event = match.group(3)
-        if string not in event:
+        if (string not in event) and ("Freez" not in event):
             continue
         if startTime == 0.0:
             startTime = time

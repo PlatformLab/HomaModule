@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -156,11 +156,39 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "dead_buffs_limit",
+		.data		= &homa_data.dead_buffs_limit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "duty_cycle",
+		.data		= &homa_data.duty_cycle,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "flags",
 		.data		= &homa_data.flags,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "freeze_type",
+		.data		= &homa_data.freeze_type,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "grant_fifo_fraction",
+		.data		= &homa_data.grant_fifo_fraction,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "grant_increment",
@@ -186,6 +214,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "log_topic",
 		.data		= &log_topic,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "pacer_fifo_fraction",
+		.data		= &homa_data.pacer_fifo_fraction,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -223,7 +258,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.data		= &homa_data.max_overcommit,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_sched_prio",
@@ -261,6 +296,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "request_ack_ticks",
+		.data		= &homa_data.request_ack_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "resend_interval",
 		.data		= &homa_data.resend_interval,
 		.maxlen		= sizeof(int),
@@ -270,13 +312,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "resend_ticks",
 		.data		= &homa_data.resend_ticks,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec
-	},
-	{
-		.procname	= "rpc_discard_ticks",
-		.data		= &homa_data.rpc_discard_ticks,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
@@ -326,6 +361,19 @@ static struct ctl_table homa_ctl_table[] = {
 	{}
 };
 
+/* Sizes of the headers for each Homa packet type, in bytes. */
+static __u16 header_lengths[] = {
+	sizeof32(struct data_header),
+	sizeof32(struct grant_header),
+	sizeof32(struct resend_header),
+	sizeof32(struct unknown_header),
+	sizeof32(struct busy_header),
+	sizeof32(struct cutoffs_header),
+	sizeof32(struct freeze_header),
+	sizeof32(struct need_ack_header),
+	sizeof32(struct ack_header)
+};
+
 /* Used to remove sysctl values when the module is unloaded. */
 static struct ctl_table_header *homa_ctl_header;
 
@@ -338,9 +386,12 @@ static int __init homa_load(void) {
 	
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
+			"data_segment %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u, flowi %u "
 			"tcp_sock %u homa_rpc %u\n",
 			sizeof32(struct data_header),
+			sizeof32(struct data_segment),
+			sizeof32(struct homa_ack),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),
 			sizeof32(struct iphdr),
@@ -466,12 +517,12 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	printk(KERN_NOTICE "closing socket %d\n", hsk->client_port);
+	printk(KERN_NOTICE "closing socket %d\n", hsk->port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
-	tt_record2("closed socket, client port %d, server port %d\n",
-			hsk->client_port, hsk->server_port);
-//	tt_freeze();
+	tt_record1("closed socket, port %d\n", hsk->port);
+	if (hsk->homa->freeze_type == SOCKET_CLOSE)
+		tt_freeze();
 }
 
 /**
@@ -515,65 +566,90 @@ int homa_disconnect(struct sock *sk, int flags) {
 int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_recv_ipv4 args;
-	struct iovec iov;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
 	struct iov_iter iter;
 	int err;
 	int result;
-	uint64_t elapsed;
 	struct homa_rpc *rpc = NULL;
 
-	tt_record2("homa_ioc_recv starting, port %d, pid %d",
-			hsk->client_port, current->pid);
-	if (unlikely(copy_from_user(&args, (void *) arg,
-			sizeof(args))))
+	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
 		return -EFAULT;
-	err = import_single_range(READ, args.buf, args.len, &iov,
-		&iter);		
-	if (unlikely(err))
-		return err;
-	rpc = homa_wait_for_message(hsk, args.flags, args.id);
+	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
+			hsk->port, current->pid, args.flags);
+	if (args.buf != NULL) {
+		err = import_single_range(READ, args.buf, args.len, iovstack,
+				&iter);
+	} else {
+		iov = iovstack;
+		err = import_iovec(READ, args.iovec, args.len,
+			ARRAY_SIZE(iovstack), &iov, &iter);
+	}
+	if (unlikely(err < 0))
+		goto error;
+	rpc = homa_wait_for_message(hsk, args.flags, args.requestedId,
+			&args.source_addr);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
 		rpc = NULL;
 		goto error;
 	}
-	elapsed = get_cycles() - rpc->start_cycles;
-	if ((elapsed <= hsk->homa->temp[1]) && (elapsed >= hsk->homa->temp[0])
-			&& (rpc->msgin.total_length < 500) && (rpc->is_client)
-			&& !tt_frozen) {
-		struct freeze_header freeze;
-		hsk->homa->temp[1] = 0;
-		tt_record4("Freezing because elapsed time is %d cycles, "
-				"id %d, peer 0x%x, length %d",
-				elapsed, rpc->id, ntohl(rpc->peer->addr),
-				rpc->msgin.total_length);
-		tt_freeze();
-		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-	}
 	
-	/* Must free the RPC lock before copying to user space (see
-	 * sync.txt). Mark the RPC so we can still access the RPC
-	 * even without holding its lock.
+	/* Generate time traces on both ends for long elapsed times (used
+	 * for performance debugging).
+	 */
+	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
+		uint64_t elapsed = (get_cycles() - rpc->start_cycles)>>10;
+		if ((elapsed <= hsk->homa->temp[1])
+				&& (elapsed >= hsk->homa->temp[0])
+				&& homa_is_client(rpc->id)
+				&& (rpc->msgin.total_length < 500)) {
+			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
+					"length %d",
+					elapsed, rpc->id,
+					ntohl(rpc->peer->addr),
+					rpc->msgin.total_length);
+			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
+					"elapsed time for RPC id %d, peer 0x%x");
+		}
+	}
+	if (rpc->hsk->homa->freeze_type == COUNTDOWN) {
+		if (hsk->homa->temp[2] > 0) {
+			hsk->homa->temp[2]--;
+			if (hsk->homa->temp[2] == 0) {
+				homa_freeze(rpc, COUNTDOWN, "Freezing because "
+						"temp[2] counted down, id %d,"
+						"peer 0x%x");
+			}
+		}
+	}
+
+	/* Must release the RPC lock (and potentially free the RPC) before
+	 * copying to user space (see sync.txt). Mark the RPC so we can
+	 * still access the RPC even without holding its lock.
 	 */
 	rpc->dont_reap = true;
-	if (rpc->is_client)
-		homa_rpc_free(rpc);
-	else
+	if (homa_is_client(rpc->id)) {
+		if ((args.len >= rpc->msgin.total_length) || rpc->error
+				|| !(args.flags & HOMA_RECV_PARTIAL))
+			homa_rpc_free(rpc);
+	} else {
 		rpc->state = RPC_IN_SERVICE;
+	}
 	homa_rpc_unlock(rpc);
 	
-	args.id = rpc->id;
+	args.len = rpc->msgin.total_length;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
-	if (unlikely(copy_to_user(
-			&((struct homa_args_recv_ipv4 *) arg)->source_addr,
-			&args.source_addr, sizeof(args) -
-			offsetof(struct homa_args_recv_ipv4, source_addr)))) {
+	args.actualId = rpc->id;
+	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
-		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args");
+		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args\n");
 		goto error;
 	}
 	
@@ -582,18 +658,20 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 	
-	result = homa_message_in_copy_data(&rpc->msgin, &iter, args.len);
+	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
 			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
 			current->pid);
 	rpc->dont_reap = false;
+	kfree(iov);
 	return result;
 	
 error:
-	tt_record1("homa_ioc_recv error %d", err);
+	tt_record2("homa_ioc_recv error %d, id %d", err, args.actualId);
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}
+	kfree(iov);
 	return err;
 }
 
@@ -608,17 +686,23 @@ error:
 int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_reply_ipv4 args;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
+	struct iov_iter iter;
 	int err = 0;
 	struct homa_rpc *srpc;
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
+	size_t length;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
 		goto done;
 	}
 	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
-			args.id, hsk->client_port, current->pid);
+			args.id, hsk->port, current->pid);
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
@@ -626,13 +710,27 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
+    
+	if (args.response != NULL) {
+		err = import_single_range(WRITE, args.response, args.length,
+				iovstack, &iter);
+	} else {
+		iov = iovstack;
+		err = import_iovec(WRITE, args.iovec, args.length,
+			ARRAY_SIZE(iovstack), &iov, &iter);
+	}
+	if (err < 0)
+		goto done;
+	err = 0;
+	length = iter.count;
+    
 	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
 			&hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
 		goto done;
 	}
-	skbs = homa_fill_packets(hsk, peer, args.response, args.resplen);
+	skbs = homa_fill_packets(hsk, peer, &iter);
 	if (IS_ERR(skbs)) {
 		err = PTR_ERR(skbs);
 		goto done;
@@ -646,23 +744,22 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 	if (srpc->state != RPC_IN_SERVICE) {
-		homa_rpc_free(srpc);
 		err = -EINVAL;
 		goto unlock;
 	}
 	srpc->state = RPC_OUTGOING;
 
-	homa_message_out_init(srpc, hsk->server_port, skbs, args.resplen);
+	homa_message_out_init(srpc, hsk->port, skbs, length);
+	tt_record1("homa_ioc_reply calling homa_xmit_data for id %u",
+			srpc->id);
 	homa_xmit_data(srpc, false);
-	if (!srpc->msgout.next_packet) {
-		homa_rpc_free(srpc);
-	}
 unlock:
 	homa_rpc_unlock(srpc);
 
 done:
 //	tt_record3("homa_ioc_reply finished, id %llu, port %d, length %d",
-//			args.id, hsk->client_port, args.resplen);
+//			args.id, hsk->client_port, args.length);
+	kfree(iov);
 	return err;
 }
 
@@ -677,6 +774,11 @@ done:
 int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_send_ipv4 args;
+	struct iovec iovstack[UIO_FASTIOV];
+    
+	// Must be freed at the end of this function.
+	struct iovec *iov = NULL;
+	struct iov_iter iter;
 	int err;
 	struct homa_rpc *crpc = NULL;
 			
@@ -687,24 +789,35 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	tt_record4("homa_ioc_send starting, target 0x%x:%d, id %u, pid %d",
+	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
 			ntohl(args.dest_addr.sin_addr.s_addr),
 			ntohs(args.dest_addr.sin_port),
-			atomic64_read(&hsk->homa->next_outgoing_id),
-			current->pid);
+			atomic64_read(&hsk->homa->next_outgoing_id));
 	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
+    
+	if (args.request != NULL) {
+		err = import_single_range(WRITE, args.request, args.length,
+				iovstack, &iter);
+	} else {
+		iov = iovstack;
+		err = import_iovec(WRITE, args.iovec, args.length,
+				ARRAY_SIZE(iovstack), &iov, &iter);
+	}
+	if (err < 0)
+		goto error;
+	err = 0;
 	
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, args.request,
-			args.reqlen);
+	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
 		crpc = NULL;
 		goto error;
 	}
-	crpc->start_cycles = get_cycles();
+	tt_record1("homa_ioc_send calling homa_xmit_data for id %u",
+			crpc->id);
 	homa_xmit_data(crpc, false);
 
 	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
@@ -712,9 +825,10 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -EFAULT;
 		goto error;
 	}
-//	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
-//			crpc->id, hsk->client_port, args.reqlen);
+	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
+			crpc->id, hsk->port, args.length);
 	homa_rpc_unlock(crpc);
+	kfree(iov);
 	return 0;
 
     error:
@@ -722,7 +836,30 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		homa_rpc_free(crpc);
 		homa_rpc_unlock(crpc);
 	}
+	kfree(iov);
 	return err;
+}
+
+/**
+ * homa_ioc_abort() - The top-level function for the ioctl that implements
+ * the homa_abort user-level API.
+ * @sk:       Socket for this request.
+ * @arg:      Used to pass information from user space; for this call,
+ *            it's the identifier of the RPC to abort.
+ *
+ * Return: 0 on success, otherwise a negative errno.
+ */
+int homa_ioc_abort(struct sock *sk, unsigned long arg) {
+	struct homa_sock *hsk = homa_sk(sk);
+	uint64_t id = (uint64_t) arg;
+	struct homa_rpc *rpc;
+	
+	rpc = homa_find_client_rpc(hsk, id);
+	if (rpc == NULL)
+		return -EINVAL;
+	homa_rpc_free(rpc);
+	homa_rpc_unlock(rpc);
+	return 0;
 }
 
 /**
@@ -737,31 +874,38 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	int result;
 	__u64 start = get_cycles();
-	struct homa_core *core = homa_cores[smp_processor_id()];
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	if (current == core->thread)
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
 	
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(send_calls, 1);
 		INC_METRIC(send_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCRECV:
 		result = homa_ioc_recv(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(recv_calls, 1);
 		INC_METRIC(recv_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(reply_calls, 1);
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
+		break;
+	case HOMAIOCABORT:
+		result = homa_ioc_abort(sk, arg);
+		core = homa_cores[raw_smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(abort_calls, 1);
+		INC_METRIC(abort_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCFREEZE:
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, "
@@ -789,7 +933,7 @@ int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	homa_sock_init(hsk, homa);
-	printk(KERN_NOTICE "opened socket %d\n", hsk->client_port);
+	printk(KERN_NOTICE "opened socket %d\n", hsk->port);
 	return 0;
 }
 
@@ -962,10 +1106,11 @@ int homa_softirq(struct sk_buff *skb) {
 	int first_packet = 1;
 	struct homa_sock *hsk;
 	int num_packets = 0;
+	int pull_length;
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	homa_cores[smp_processor_id()]->last_active = start;
+	homa_cores[raw_smp_processor_id()]->last_active = start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
@@ -1008,28 +1153,18 @@ int homa_softirq(struct sk_buff *skb) {
 		next = skb->next;
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
-
-		/* Make sure the header is available at skb->data. One
-		 * complication: it's possible that the IP header hasn't
-		 * yet been removed (this happens for GRO packets on
-		 * the frag_list, since they aren't handled explicitly
-		 * by IP.
-		 */
-		header_offset = skb_transport_header(skb) - skb->data;
-		if (skb->len < (HOMA_MAX_HEADER + header_offset)) {
-			if (homa->verbose)
-				printk(KERN_WARNING "Homa packet from %s too "
-						"short: %d bytes\n",
-						homa_print_ipv4_addr(saddr),
-						skb->len - header_offset);
-			INC_METRIC(short_packets, 1);
-			goto discard;
-		}
 	
 		/* The code below makes the header available at skb->data, even
-		 * if the packet is fragmented.
+		 * if the packet is fragmented. One complication: it's possible
+		 * that the IP header hasn't yet been removed (this happens for
+		 * GRO packets on the frag_list, since they aren't handled
+		 * explicitly by IP.
 		 */
-		if (!pskb_may_pull(skb, HOMA_MAX_HEADER + header_offset)) {
+		header_offset = skb_transport_header(skb) - skb->data;
+		pull_length = HOMA_MAX_HEADER + header_offset;
+		if (pull_length > skb->len)
+			pull_length = skb->len;
+		if (!pskb_may_pull(skb, pull_length)) {
 			if (homa->verbose)
 				printk(KERN_NOTICE "Homa can't handle fragmented "
 						"packet (no space for header); "
@@ -1041,11 +1176,26 @@ int homa_softirq(struct sk_buff *skb) {
 			__skb_pull(skb, header_offset);
 		
 		h = (struct common_header *) skb->data;
+		if (unlikely((skb->len < sizeof(struct common_header))
+				|| (h->type < DATA)
+				|| (h->type >= BOGUS)
+				|| (skb->len < header_lengths[h->type-DATA]))) {
+			if (homa->verbose)
+				printk(KERN_WARNING
+						"Homa %s packet from %s too "
+						"short: %d bytes\n",
+						homa_symbol_for_type(h->type),
+						homa_print_ipv4_addr(saddr),
+						skb->len - header_offset);
+			INC_METRIC(short_packets, 1);
+			goto discard;
+		}
+		
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
 					ntohl(saddr), ntohs(h->sport),
-					h->id, h->type);
+					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
 		if (unlikely(h->type == FREEZE)) {
@@ -1057,7 +1207,8 @@ int homa_softirq(struct sk_buff *skb) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
 						ntohs(h->dport), ntohl(saddr),
-						ntohs(h->sport), h->id);
+						ntohs(h->sport),
+						homa_local_id(h->sender_id));
 				tt_freeze();
 //				homa_rpc_log_active(homa, h->id);
 //				homa_log_grantable_list(homa);
@@ -1069,16 +1220,10 @@ int homa_softirq(struct sk_buff *skb) {
 		dport = ntohs(h->dport);
 		hsk = homa_sock_find(&homa->port_map, dport);
 		if (!hsk) {
-			/* Eventually should return an error result to sender if
-			 * it is a client.
-			 */
-			if (homa->verbose)
-				printk(KERN_NOTICE "Homa packet from %s "
-					"referred to unknown port %u\n",
-					homa_print_ipv4_addr(saddr), dport);
+			icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
 			tt_record3("Discarding packet for unknown port %u, "
-					"id %llu, type %d", dport, h->id,
-					h->type);
+					"id %llu, type %d", dport,
+					homa_local_id(h->sender_id), h->type);
 			goto discard;
 		}
 		
@@ -1090,7 +1235,6 @@ discard:
 	}
 	
 	homa_send_grants(homa);
-	check_pacer(homa, 1);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }
@@ -1124,7 +1268,14 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
 	
-	if (type == ICMP_DEST_UNREACH) {
+	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
+		struct common_header *h;
+		char *icmp = (char *) icmp_hdr(skb);
+		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
+		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
+				+ iph->ihl*4);
+		homa_abort_rpcs(homa, iph->daddr, htons(h->dport), -ENOTCONN);
+	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
 		if (code == ICMP_PROT_UNREACH)
 			error = -EPROTONOSUPPORT;
@@ -1132,7 +1283,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
 				ntohl(iph->saddr), ntohl(iph->daddr));
-		homa_peer_abort(homa, iph->daddr, error);
+		homa_abort_rpcs(homa, iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)
 			printk(KERN_NOTICE "homa_err_handler invoked with "

@@ -1,0 +1,228 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2020 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark measures Homa slowdown while varying one or more
+# aspects of Homa's configuration (such as duty cycle).
+# Type "cp_config --help" for documentation.
+
+from cperf import *
+
+load_info = [["w2", 3.2], ["w3", 14], ["w4", 20], ["w5", 20]]
+
+parser = get_parser(description=
+        'Measures Homa slowdown as the number of available priority levels '
+        'varies.',
+        usage='%(prog)s [options]')
+parser.add_argument('-c', '--config', dest='config',
+        choices=['duty_cycle', 'fifo', 'gro', 'max_gro', 'max_gso',
+                'nic_queue', 'poll', 'ports', 'prios', 'receivers',
+                'rtt_bytes', 'throttle'],
+        required = True,
+        help='Aspect of configuration to change')
+options = parser.parse_args()
+init(options)
+servers = range(0, options.num_nodes)
+clients = range(0, options.num_nodes)
+
+if options.workload != "":
+    load_info = [[options.workload, options.gbps]]
+
+specs = [];
+if options.config == 'duty_cycle':
+    # Vary the duty_cycle configuration parameter
+    for duty in [100, 80, 60, 40]:
+        specs.append({'param': '.net.homa.duty_cycle',
+                'value': duty*10,
+                'exp_name': 'duty_%d' % (duty),
+                'label': '%d%% duty cycle' % (duty)})
+elif options.config == 'fifo':
+    # Vary the fraction of bandwidth reserved for the oldest message
+    for fifo in [0, 5, 10, 20]:
+        specs.append({'param': '.net.homa.grant_fifo_fraction',
+                'value': fifo*10,
+                'param2': '.net.homa.pacer_fifo_fraction',
+                'value2': fifo*10,
+                'exp_name': 'fifo_%d' % (fifo),
+                'label': '%d%% FIFO' % (fifo)})
+elif options.config == 'gro':
+    # Vary the GRO policy
+    for value, name in [[0, 'none'], [6, 'normal'], [4, 'idle'], [8, 'next']]:
+        specs.append({'param': '.net.homa.gro_policy',
+            'value': value,
+            'exp_name': name,
+            'label': name})
+elif options.config == 'max_gro':
+    # Vary the number of skbs processed at once by GRO before forwarding
+    # to SoftIRQ
+    for count in [5, 10, 20, 100]:
+        specs.append({'param': '.net.homa.max_gro_skbs',
+            'value': count,
+                'exp_name': 'max_gro_%d' % (count),
+                'label': 'max_gro_skbs %d' % (count)})
+elif options.config == 'max_gso':
+    # Vary the max_gso_size configuration parameter
+    for count in [5000, 10000, 20000, 50000, 100000]:
+        specs.append({'param': '.net.homa.max_gso_size',
+            'value': count,
+                'exp_name': 'max_gso_%d' % (count),
+                'label': 'max_gso_size %d' % (count)})
+elif options.config == 'nic_queue':
+    # Vary the limit on an NIC queue length
+    for micros in [1, 2, 5, 10, 10000]:
+        specs.append({'param': '.net.homa.max_nic_queue_ns',
+                'value': micros*1000,
+                'exp_name': 'nic_%d' % (micros),
+                'label': 'nic queue %d us' % (micros)})
+elif options.config == 'poll':
+    # Vary the polling interval
+    for poll in [0, 20, 30, 40, 50]:
+        specs.append({'param': '.net.homa.poll_usecs',
+                'value': poll,
+                'exp_name': 'poll_%d' % (poll),
+                'label': 'poll %d us' % (poll)})
+elif options.config == 'ports':
+    # Vary the numbers of server and client ports
+    for client, server in [[2, 2], [2, 3], [2, 4], [3, 3], [3, 2], [4, 2]]:
+        o = copy.deepcopy(options)
+        o.server_ports = server
+        o.client_ports = client
+        name = "s%dc%d" % (server, client)
+        specs.append({'options': o, 'exp_name': name, 'label': name})
+elif options.config == 'prios':
+    # Vary the number of available priority levels
+    for priority in [1, 2, 3, 4, 8]:
+        specs.append({'param': '.net.homa.num_priorities',
+                'value': priority,
+                'exp_name': 'prios_%d' % (priority),
+                'label': '%d prios' % (priority)})
+elif options.config == 'receivers':
+    # Vary the client thread configuration
+    for ports, receivers in [[3, 2], [3, 3], [3, 4], [2, 3], [2, 4], [1, 5]]:
+        o = copy.deepcopy(options)
+        o.client_ports = ports
+        o.port_receivers = receivers
+        name = "%d ports %d rcvrs" % (ports, receivers)
+        specs.append({'options': o, 'exp_name': "p%dr%d" % (ports, receivers),
+                'label': "%d ports %d rcvrs" % (ports, receivers)})
+elif options.config == 'rtt_bytes':
+    # Vary rtt_bytes
+    for rtt in [40000, 60000, 70000, 100000]:
+        specs.append({'param': '.net.homa.rtt_bytes',
+                'value': rtt,
+                'exp_name': 'rttb_%d' % (rtt),
+                'label': 'rtt_bytes %d' % (rtt)})
+elif options.config == 'throttle':
+    # Vary the cuttoff for short messages that bypass the throttle mechanism
+    for cutoff in [100, 200, 500, 1000, 2000]:
+        specs.append({'param': '.net.homa.throttle_min_bytes',
+                'value': cutoff,
+                'exp_name': 'throttle_%d' % (cutoff),
+                'label': 'throttle_min_bytes %d' % (cutoff)})
+
+# Keys are parameter names, values are old values to restore.
+old_values = {}
+if not options.plot_only:
+    try:
+        # Start servers and measure unloaded latencies.
+        start_servers(servers, options)
+
+        # For each workload, run a set of experiments with a different
+        # configurations.
+        for workload, bw in load_info:
+            o = copy.deepcopy(options)
+            o.workload = workload
+            o.client_ports = 1
+            o.client_max = 1
+            o.server_ports = 1
+            o.server_nodes = 1
+            o.first_server = 1
+            o.unloaded = 500
+            run_experiment("unloaded_" + workload, range(0, 1), o)
+
+            for spec in specs:
+                o = options;
+                exp_name = "%s_%s" % (spec['exp_name'], workload)
+                if 'param' in spec:
+                    name = spec['param']
+                    value = spec['value']
+                    if name not in old_values:
+                        old_values[name] = get_sysctl_parameter(name);
+                    log("Setting %s = %s" % (name, value))
+                    set_sysctl_parameter(name, value,
+                            range(0, options.num_nodes))
+                if 'param2' in spec:
+                    name = spec['param2']
+                    value = spec['value2']
+                    if name not in old_values:
+                        old_values[name] = get_sysctl_parameter(name);
+                    log("Setting %s = %s" % (name, value))
+                    set_sysctl_parameter(name, value,
+                            range(0, options.num_nodes))
+                if 'options' in spec:
+                    o = spec['options']
+                o.workload = workload
+                o.gbps = bw/2.0
+                start_servers(servers, o)
+                run_experiment(exp_name, clients, o)
+    except Exception as e:
+        log(traceback.format_exc())
+                   
+    for name, value in old_values.items():
+        print("Restoring %s to %s" % (name, value))
+        set_sysctl_parameter(name, value, range(0, options.num_nodes))
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+# Generate plots and reports
+for workload, bw in load_info:
+    set_unloaded("unloaded_" + workload)
+
+    # Generate slowdown plot.
+    log("Generating slowdown plot for %s" % (workload))
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, bw)
+    ax = start_slowdown_plot(title, 1000, "%s_%s" % (
+            specs[0]['exp_name'], workload), y_label=" Slowdown")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p99", spec['label'] + ' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50')
+    if workload == "w5":
+        ax.legend(loc="upper right", prop={'size': 9})
+    else:
+        ax.legend(loc="upper left", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, options.config, workload))
+
+    # Generate CDF of small-message RTTs.
+    log("Generating short message CDFs for %s" % (workload))
+    title = "%s %d nodes" % (workload.capitalize(), options.num_nodes)
+    start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
+            "Cumulative Fraction of Short Messages")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        x, y = get_short_cdf(exp_name)
+        plt.plot(x, y, label=spec['label'])
+    x, y = get_short_cdf("unloaded_" + workload)
+    plt.plot(x, y, label="Homa best case")
+
+    plt.legend(loc="upper right", prop={'size': 9})
+    plt.savefig("%s/reports/%s_%s_cdfs.pdf" %
+            (options.log_dir, options.config, workload))

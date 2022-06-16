@@ -1,38 +1,46 @@
-.TH HOMA_RECV 3 2019-02-15 "Homa" "Linux Programmer's Manual"
+.TH HOMA_RECV 3 2021-08-24 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa_recv \- receive a Homa message
 .SH SYNOPSIS
 .nf
 .B #include <homa.h>
 .PP
-.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " len ,
-.BI "                  int " flags ", uint64_t *" id ,
-.BI "                  const struct sockaddr *" src_addr ", size_t " \
-*addrlen );
+.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
+len ", int " flags ", const struct sockaddr *" src_addr ",
+.BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" \
+msglen );
+.BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
+size_t " iovcnt ", int " flags , 
+.BI "                  const struct sockaddr *" src_addr ", size_t *" \
+addrlen ", uint64_t *" id ", size_t *" msglen );
 .fi
 .SH DESCRIPTION
-The function
+The functions
 .BR homa_recv ()
-waits for an incoming Homa message and returns it.
+and
+.BR homa_recvv()
+wait for an incoming Homa message and return its contents.
 The argument
 .I sockfd
 is the file descriptor of the receiving socket; this must be a Homa socket.
-The incoming message will be stored in the buffer pointed to by
-.IR buf .
-The argument
+.B homa_recv
+will store the message contents in a single contiguous buffer:
+.I buf
+provides the address of the buffer, and
 .I len
-indicates the number of bytes available for the message; if the actual
-message is larger than
-.IR len ,
-then excess bytes will be discarded.
+specifies its length.
+.B homa_recvv
+will scatter the message contents across multiple buffers:
+.I iov
+provides the address of the first buffer descriptor, and
+.I iovcnt
+indicates how many buffer descriptors are present at
+.IR iov .
+Other than this distinction, the two functions behave identically.
 .PP
-The arguments
-.IR flags " and " id
-select which messsage to receive and determine whether or
-not the call should block if an appropriate message isn't available.
-The argument
+The
 .IR flags
-is an ORed combination of the following values:
+argument is an ORed combination of the following values:
 .TP
 .B HOMA_RECV_REQUEST
 Any incoming request message may be returned.
@@ -45,19 +53,50 @@ If no appropriate message is available, the call will return immediately
 with an
 .B EAGAIN
 error, rather than blocking.
-.LP
-If the initial value of
+.TP
+.B HOMA_RECV_PARTIAL
+Do not delete the incoming message if
+.I buf
+was not large enough to hold all the (remaining) bytes of the message.
+.PP
+The desired message(s) can be specified in any or all of three different
+ways. First, if
+.I flags
+contains
+.B HOMA_RECV_REQUEST
+then any new request message may be returned.
+Second, if
+.I flags
+contains
+.B HOMA_RECV_RESPONSE
+then any new response message may be returned.
+Third, if
 .I *id
-is nonzero then a response message will be returned if and only if its
-id matches this value
-.RB ( HOMA_RECV_REQUEST
-is ignored in this case ).
+is nonzero then a message matching
+.I *id
+and
+.I *src_addr
+may be returned: if the desired message is a request
+(the low-order bit of
+.I *id
+is 1), then
+.I *src_addr
+is used along with
+.I *id
+to specify the message; if the desired message is a response (the
+low-order bit of
+.I *id
+is 0), then
+.I *id
+already specifies the message uniquely, so
+.I *src_addr
+is ignored.
 .PP
 The identifier for the received message is returned at
-.IR *id .
-If
-.I src_addr
-is not NULL, the source address for the message is placed in the buffer
+.IR *id ;
+its low-order bit indicates whether the message is a request (1)
+or response (0).
+The source address for the message is placed in the buffer
 pointed to by
 .IR src_addr .
 The argument
@@ -69,39 +108,71 @@ buffer associated with
 Upon return,
 .I *addrlen
 is updated to contain the actual size of the source address.
-The returned address is truncated  if  the buffer provided is too small;
-in this case,
-.I *addrlen
-will return a value greater than its initial value.
+If
+.I
+msglen
+is non-NULL then the total length of the incoming message is
+written to
+.IR *msglen .
 .PP
-For some settings of
-.I flags
-and
-.IR *id ,
-the message returned may be either a request or a response.
-The port number stored in
-.I src_addr
-can be used to distinguish requests from responses.
-A port number of
-.B HOMA_MIN_CLIENT_PORT
-or greater indicates that the message is a request;
-a port number less than
-.B HOMA_MIN_CLIENT_PORT
-indicates that the message is a response.
-.PP
-If the message is a request, then the caller must eventually invoke
+If a message is a request, then the caller must eventually invoke
 .BR homa_reply (3)
 to respond (Homa retains state for the request until
 .BR homa_reply (3)
-is invoked). 
+is invoked).
+.PP
+If a message is larger than buffer space provided,
+.BR homa_recv
+or
+.BR homa_recvv
+may be invoked again to read additional bytes. Each call returns the next
+unread bytes. Subsequent invocations must identify the message
+explicitly with
+.IR id
+and
+.I src_addr (the
+.B HOMA_RECV_REQUEST
+and
+.B HOMA_RECV_RESPONSE
+flags will not return messages that have already been partially read).
+When a response message is returned, the message is normally deleted,
+even if there wasn't enough buffer space to hold the entire message.
+However, if
+.B HOMA_RECV_PARTIAL
+is specified in
+.IR flags ,
+then the message will be retained if there wasn't enough room to
+return the entire message. The caller should invoke
+.B homa_recv
+or 
+.B homa_recvv
+again to read the remaining bytes. Once the entire message has
+been read, or
+.B homa_recv
+is invoked without specifying
+.BR HOMA_RECV_PARTIAL ,
+the message will be deleted. There is no need to specify
+.B HOMA_RECV_PARTIAL
+when receiving request messages, since requests are automatically
+retained until the corresponding responses have been sent.
 
 .SH RETURN VALUE
-On success, the return value is the size of the received message,
-which may be greater than
-.IR resplen .
+On success, the return value is the number of bytes stored at
+.IR buf .
 On error, \-1 is returned and
 .I errno
-is set appropriately.
+is set appropriately. If
+.I *id
+is nonzero after an error return, it means that the error relates to
+that particular RPC. For response messages, this means that the RPC
+failed (e.g., if
+.B EHOSTUNREACH
+or
+.B ENOTCONN
+is returned). For request messages, this can happen after
+.B EFAULT
+errors (the kernel couldn't write to user space to return the message
+or other metadata associated with the system call).
 .SH ERRORS
 .TP
 .B EAGAIN
@@ -132,7 +203,13 @@ did not refer to a Homa socket, or the argument
 did not contain either
 .BR HOMA_RECV_REQUEST " or " HOMA_RECV_RESPONSE ,
 or there was no outstanding request with an id matching
-.IR *id .
+.IR *id ,
+or there was not enough space at
+.I *src_addr
+to store the source address.
+.TP
+.B ENOTCONN
+No socket is bound to the destination port for the request.
 .TP
 .B EPROTONOSUPPORT
 The destination machine does not support the Homa protocol.
@@ -141,13 +218,13 @@ The destination machine does not support the Homa protocol.
 No memory available.
 .TP
 .B ESHUTDOWN
-The socked has been disabled using
+The socket has been disabled using
 .BR shutdown (2).
 .TP
 .B ETIMEDOUT
 The destination server did not respond to protocol requests.
 .SH SEE ALSO
-.BR homa_invoke (3),
+.BR homa_abort (3),
 .BR homa_reply (3),
 .BR homa_send (3),
 .BR homa (7)
