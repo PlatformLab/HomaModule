@@ -14,7 +14,9 @@ CINCLUDES := -I. \
 	    -I$(KERNEL_DIR)/arch/x86/include/generated/uapi \
 	    -I$(KERNEL_DIR)/include/uapi \
 	    -I$(KERNEL_DIR)/include/generated/uapi \
-	    -include $(KERNEL_DIR)/include/linux/kconfig.h
+	    -include $(KERNEL_DIR)/include/linux/kconfig.h \
+	    -include $(KERNEL_DIR)/include/linux/compiler-version.h \
+	    -include $(KERNEL_DIR)/include/linux/compiler_types.h
 CCINCLUDES := -I. \
 	    -I.. \
 	    -I$(KERNEL_DIR)/arch/x86/include \
@@ -29,7 +31,7 @@ DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
 	     -D KBUILD_MODNAME='"homa"'
 
-WARNS :=     -Wall -Werror -Wundef -Wno-trigraphs -Wno-sign-compare
+WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wno-strict-aliasing
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS)
 	

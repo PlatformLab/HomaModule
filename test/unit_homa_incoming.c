@@ -28,7 +28,7 @@ struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
 void ready_hook(void)
 {
-	if (current->state == TASK_RUNNING)
+	if (task_is_running(current))
 		return;
 	homa_rpc_ready(hook_rpc);
 	unit_log_printf("; ",

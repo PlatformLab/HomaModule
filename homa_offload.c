@@ -109,7 +109,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct sk_buff *held_skb;
 	struct iphdr *iph;
 	struct sk_buff *result = NULL;
-	struct homa_core *core = homa_cores[smp_processor_id()];
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
 	
 	if (!pskb_may_pull(skb, 64))
@@ -208,7 +208,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	core->held_skb = skb;
 	core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
-		homa_set_softirq_cpu(skb, smp_processor_id());
+		homa_set_softirq_cpu(skb, raw_smp_processor_id());
 	
     done:
 	homa_check_pacer(homa, 1);
@@ -249,7 +249,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * no runnable user tasks; if there is such a core, use this
 		 * in preference to the first "best".
 		 */
-		core = best = smp_processor_id();
+		core = best = raw_smp_processor_id();
 		for (i = 0; i < 4; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
@@ -265,7 +265,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
 		 */
-		int target = smp_processor_id() + 1;
+		int target = raw_smp_processor_id() + 1;
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;
 		homa_set_softirq_cpu(skb, target);

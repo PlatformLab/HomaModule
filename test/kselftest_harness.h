@@ -58,7 +58,7 @@
  * kernel header files and user-level header files. To avoid these conflicts,
  * this file must be very careful about what headers it includes.
  * This file also contains several other changes, such as:
- *   - All tests run in a single process, rather than forging a child process
+ *   - All tests run in a single process, rather than forking a child process
  *     for each test.
  *   - Several unit test files can be compiled separately but linked together
  *     into a single test suite (see KSELFTEST_NOT_MAIN #define).
@@ -67,10 +67,11 @@
 //#include <stdint.h>
 #include <stdio.h>
 //#include <stdlib.h>
-#include <string.h>
+//#include <string.h>
 
 extern void abort(void);
 extern void _exit(int status);
+extern int strcmp(const char *s1, const char *s2);
 
 
 /* Utilities exposed to the test definitions */

@@ -206,11 +206,6 @@ void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
-int _cond_resched(void)
-{
-	return 0;
-}
-
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
 	size_t bytes_left = bytes;
@@ -273,16 +268,6 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 	((char *)(to))[n] = 0;
 	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
 	return 0;
-}
-
-bool csum_and_copy_from_iter_full(void *addr, size_t bytes, __wsum *csum,
-			       struct iov_iter *i)
-{
-	if (mock_check_error(&mock_copy_data_errors))
-		return false;
-	unit_log_printf("; ", "csum_and_copy_from_iter_full copied %lu bytes",
-			bytes);
-	return true;
 }
 
 unsigned long _copy_from_user(void *to, const void __user *from,
@@ -448,9 +433,7 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 
 void inet_unregister_protosw(struct inet_protosw *p) {}
 
-void init_wait_entry(struct wait_queue_entry *wq_entry, int flags) {}
-
-void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
+void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 		struct lock_class_key *key) {}
 
 void iov_iter_init(struct iov_iter *i, unsigned int direction,
@@ -458,7 +441,7 @@ void iov_iter_init(struct iov_iter *i, unsigned int direction,
 			size_t count)
 {
 	direction &= READ | WRITE;
-	i->type = ITER_IOVEC | direction;
+	i->iter_type = ITER_IOVEC | direction;
 	i->iov = iov;
 	i->nr_segs = nr_segs;
 	i->iov_offset = 0;
@@ -470,8 +453,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
-		__u8 tos)
+int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
 	const char *prefix = " ";
@@ -495,6 +477,16 @@ int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
 	unit_log_printf("; ", "xmit %s", buffer);
 	kfree_skb(skb);
 	return 0;
+}
+
+unsigned int ipv4_mtu(const struct dst_entry *dst)
+{
+	return mock_mtu;
+}
+
+unsigned int ip6_mtu(const struct dst_entry *dst)
+{
+	return mock_mtu;
 }
 
 struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
@@ -538,7 +530,7 @@ void kfree(const void *block)
 	free((void *) block);
 }
 
-void kfree_skb(struct sk_buff *skb)
+void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 {
 	skb->users.refs.counter--;
 	if (skb->users.refs.counter > 0)
@@ -558,7 +550,7 @@ void kfree_skb(struct sk_buff *skb)
 	free(skb);
 }
 
-void *__kmalloc(size_t size, gfp_t flags)
+void *mock_kmalloc(size_t size, gfp_t flags)
 {
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
@@ -631,14 +623,14 @@ long prepare_to_wait_event(struct wait_queue_head *wq_head,
 	return 0;
 }
 
-int printk(const char *s, ...)
+int _printk(const char *fmt, ...)
 {
 	return 0;
 }
 
 struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 				   struct proc_dir_entry *parent,
-				   const struct file_operations *proc_fops)
+				   const struct proc_ops *proc_ops)
 {
 	struct proc_dir_entry *entry = malloc(40);
 	if (!entry) {
@@ -718,6 +710,8 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	return 1;
 }
 
+void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
+
 struct ctl_table_header *register_net_sysctl(struct net *net,
 	const char *path, struct ctl_table *table)
 {
@@ -741,7 +735,7 @@ void schedule(void)
 		unit_log_printf("; ", "schedule");
 }
 
-void security_sk_classify_flow(struct sock *sk, struct flowi *fl) {}
+void security_sk_classify_flow(struct sock *sk, struct flowi_common *flic) {}
 
 void sk_common_release(struct sock *sk) {}
 
@@ -809,7 +803,7 @@ int sock_common_getsockopt(struct socket *sock, int level, int optname,
 }
 
 int sock_common_setsockopt(struct socket *sock, int level, int optname,
-		char __user *optval, unsigned int optlen)
+		sockptr_t optval, unsigned int optlen)
 {
 	return 0;
 }
@@ -882,6 +876,8 @@ void *vmalloc(size_t size)
 	unit_hash_set(vmallocs_in_use, block, "used");
 	return block;
 }
+
+void wait_for_completion(struct completion *x) {}
 
 long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
 		long timeout)

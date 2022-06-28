@@ -86,23 +86,23 @@ struct tt_buffer {
 struct tt_proc_file {
 	/* Identifies a particular open file. */
 	struct file* file;
-	
+
 	/* Index of the next entry to return from each tt_buffer. */
 	int pos[NR_CPUS];
-	
+
 	/* Messages are collected here, so they can be dumped out to
 	 * user space in bulk.
 	 */
 #define TT_PF_BUF_SIZE 4000
 	char msg_storage[TT_PF_BUF_SIZE];
-	
-	/* If the previous call to tt_proc_read ended up with extra
-	 * information in msg_storage that it couldn't copy to user
-	 * space, the variables below describe it. If there were
-	 * no leftovers, num_leftover is zero.
+
+	/* Number of bytes in msg_storage currently available to
+	 * copy to application.
 	 */
-	char *leftover;
-	int num_leftover;
+	int bytes_available;
+
+	/* Address of next byte in msg_storage to copy to application. */
+	char *next_byte;
 };
 
 extern void   tt_destroy(void);
@@ -119,6 +119,7 @@ extern int       tt_proc_open(struct inode *inode, struct file *file);
 extern ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
 			size_t length, loff_t *offset);
 extern int       tt_proc_release(struct inode *inode, struct file *file);
+extern loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
 extern struct    tt_buffer *tt_buffers[];
 extern int       tt_buffer_size;
 extern atomic_t  tt_freeze_count;
@@ -164,7 +165,7 @@ static inline void tt_record4(const char* format, __u32 arg0, __u32 arg1,
 		__u32 arg2, __u32 arg3)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, arg2, arg3);
 #endif
 }
@@ -172,28 +173,28 @@ static inline void tt_record3(const char* format, __u32 arg0, __u32 arg1,
 		__u32 arg2)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, arg2, 0);
 #endif
 }
 static inline void tt_record2(const char* format, __u32 arg0, __u32 arg1)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, 0, 0);
 #endif
 }
 static inline void tt_record1(const char* format, __u32 arg0)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, 0, 0, 0);
 #endif
 }
 static inline void tt_record(const char* format)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[smp_processor_id()], get_cycles(), format,
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			0, 0, 0, 0);
 #endif
 }

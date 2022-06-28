@@ -19,7 +19,9 @@
 
 #include "homa_impl.h"
 
+#ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
+#endif
 MODULE_AUTHOR("John Ousterhout");
 MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
@@ -137,9 +139,10 @@ static struct net_protocol homa_protocol = {
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
 static const struct proc_ops homa_metrics_pops = {
-	.proc_open		= homa_metrics_open,
-	.proc_read		= homa_metrics_read,
-	.proc_release	= homa_metrics_release,
+	.proc_open         = homa_metrics_open,
+	.proc_read         = homa_metrics_read,
+	.proc_lseek        = homa_metrics_lseek,
+	.proc_release      = homa_metrics_release,
 };
 
 /* Used to remove /proc/net/homa_metrics when the module is unloaded. */
@@ -872,35 +875,35 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	int result;
 	__u64 start = get_cycles();
-	struct homa_core *core = homa_cores[smp_processor_id()];
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	if (current == core->thread)
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
 	
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(send_calls, 1);
 		INC_METRIC(send_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCRECV:
 		result = homa_ioc_recv(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(recv_calls, 1);
 		INC_METRIC(recv_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(reply_calls, 1);
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCABORT:
 		result = homa_ioc_abort(sk, arg);
-		core = homa_cores[smp_processor_id()];
+		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(abort_calls, 1);
 		INC_METRIC(abort_cycles, core->syscall_end_time - start);
@@ -1108,7 +1111,7 @@ int homa_softirq(struct sk_buff *skb) {
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	homa_cores[smp_processor_id()]->last_active = start;
+	homa_cores[raw_smp_processor_id()]->last_active = start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
@@ -1373,6 +1376,20 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 		return -EFAULT;
 	*offset += copied;
 	return copied;
+}
+
+
+/**
+ * homa_metrics_lseek() - This function is invoked to handle seeks on
+ * /proc/net/homa_metrics. Right now seeks are ignored: the file must be
+ * read sequentially.
+ * @file:    Information about the file being read.
+ * @offset:  Distance to seek, in bytes
+ * @whence:  Starting point from which to measure the distance to seek.
+ */
+loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
+{
+	return 0;
 }
 
 /**
