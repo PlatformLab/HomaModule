@@ -22,6 +22,22 @@
 
 #pragma GCC diagnostic ignored "-Wpointer-sign"
 #pragma GCC diagnostic ignored "-Wunused-variable"
+
+#include <linux/bug.h>
+#ifdef __UNIT_TEST__
+#undef WARN
+#define WARN(condition, format...)
+
+#undef WARN_ON
+#define WARN_ON(condition) ({						\
+	int __ret_warn_on = !!(condition);				\
+	unlikely(__ret_warn_on);					\
+})
+
+#undef WARN_ON_ONCE
+#define WARN_ON_ONCE(condition) WARN_ON(condition)
+#endif
+
 #include <linux/audit.h>
 #include <linux/icmp.h>
 #include <linux/if_vlan.h>
@@ -30,6 +46,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/completion.h>
 #include <linux/proc_fs.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
@@ -39,6 +56,7 @@
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
+#include <net/gro.h>
 #pragma GCC diagnostic warning "-Wpointer-sign"
 #pragma GCC diagnostic warning "-Wunused-variable"
 
@@ -64,6 +82,11 @@ extern void mock_rcu_read_unlock(void);
 
 #undef current
 #define current current_task
+
+#define kthread_complete_and_exit(comp, code)
+
+#define kmalloc mock_kmalloc
+extern void *mock_kmalloc(size_t size, gfp_t flags);
 #endif
 
 #include "homa.h"
@@ -2633,6 +2656,8 @@ extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
                     struct sk_buff *skb, int len);
+extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
+		    int whence);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
                     size_t length, loff_t *offset);
@@ -2703,7 +2728,7 @@ extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    char __user *optval, unsigned int optlen);
+                    sockptr_t optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char* format, ...)
@@ -2789,4 +2814,5 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	return peer->dst;
 }
 
+extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */

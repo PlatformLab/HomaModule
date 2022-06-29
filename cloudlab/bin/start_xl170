@@ -3,6 +3,9 @@
 # Usage:
 # start_xl170 [mod_file]
 
+# Network interface name
+ni=ens1f1np1
+
 set -e
 rps=1
 limit_rss=0
@@ -29,7 +32,7 @@ sudo sysctl /net/homa/num_priorities=8
 # sudo sysctl /net/homa/grant_fifo_fraction=0
 # sudo sysctl /net/homa/verbose=1
 sudo cpupower frequency-set -g performance
-sudo ethtool -C ens1f1 adaptive-rx off rx-usecs 5 rx-frames 1 || true
+sudo ethtool -C $ni adaptive-rx off rx-usecs 5 rx-frames 1 || true
 # sudo sysctl .net.core.netdev_budget=300
 # sudo sysctl .net.ipv4.tcp_congestion_control=cubic
 
@@ -40,23 +43,23 @@ rm -f ~/.homa_metrics
 if [ $rps -eq 1 ]; then
     echo Turning on RPS/RFS
     sudo sysctl -w net.core.rps_sock_flow_entries=32768
-    for f in /sys/class/net/ens1f1/queues/rx-*/rps_flow_cnt; do
+    for f in /sys/class/net/$ni/queues/rx-*/rps_flow_cnt; do
         sudo bash -c "echo 2048 > $f"
         done
-    for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
+    for f in /sys/class/net/$ni/queues/rx-*/rps_cpus; do
         sudo bash -c "echo fffff > $f"
         done
-    sudo ethtool -K ens1f1 ntuple on
+    sudo ethtool -K $ni ntuple on
 else 
     echo Turning off RPS/RFS
     sudo sysctl -w net.core.rps_sock_flow_entries=0
-    for f in /sys/class/net/ens1f1/queues/rx-*/rps_flow_cnt; do
+    for f in /sys/class/net/$ni/queues/rx-*/rps_flow_cnt; do
         sudo bash -c "echo 0 > $f"
         done
-    for f in /sys/class/net/ens1f1/queues/rx-*/rps_cpus; do
+    for f in /sys/class/net/$ni/queues/rx-*/rps_cpus; do
         sudo bash -c "echo 00000 > $f"
         done
-    sudo ethtool -K ens1f1 ntuple off
+    sudo ethtool -K $ni ntuple off
 fi
 
 if false; then
@@ -66,7 +69,7 @@ if [ $limit_rss -eq 1 ]; then
     echo Limiting RSS channels
     sudo bash -c "echo 16 > /proc/irq/117/smp_affinity_list"
     sudo bash -c "echo 18 > /proc/irq/118/smp_affinity_list"
-    sudo ethtool -L ens1f1 combined 2
+    sudo ethtool -L $ni combined 2
 else
     echo Using all RSS channels
     # Note: the first line below corresponds to device
@@ -91,6 +94,6 @@ else
     sudo bash -c "echo 17 > /proc/irq/123/smp_affinity_list"
     sudo bash -c "echo 18 > /proc/irq/124/smp_affinity_list"
     sudo bash -c "echo 19 > /proc/irq/125/smp_affinity_list"
-    sudo ethtool -L ens1f1 combined 20
+    sudo ethtool -L $ni combined 20
 fi
 fi

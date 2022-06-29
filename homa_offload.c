@@ -112,9 +112,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
 	
-	if (!pskb_may_pull(skb, 64))
-		tt_record("homa_gro_receive can't pull enough data "
-				"from packet for trace");
+//      The test below is overly conservative except for data packets.
+//	if (!pskb_may_pull(skb, 64))
+//		tt_record("homa_gro_receive can't pull enough data "
+//				"from packet for trace");
 	iph = (struct iphdr *) skb_network_header(skb);
 	h_new = (struct data_header *) skb_transport_header(skb);
 	if (h_new->common.type == 20)

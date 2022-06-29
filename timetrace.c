@@ -46,10 +46,11 @@ struct tt_buffer *tt_buffers[NR_CPUS];
 /* Describes file operations implemented for reading timetraces
  * from /proc.
  */
-static const struct file_operations tt_fops = {
-	.open		= tt_proc_open,
-	.read		= tt_proc_read,
-	.release	= tt_proc_release
+static const struct proc_ops tt_pops = {
+	.proc_open              = tt_proc_open,
+	.proc_read              = tt_proc_read,
+	.proc_lseek             = tt_proc_lseek,
+	.proc_release           = tt_proc_release
 };
 
 /* Used to remove the /proc file during tt_destroy. */
@@ -118,7 +119,7 @@ int tt_init(char *proc_file, int *temp)
 		tt_buffers[i] = buffer;
 	}
 	
-	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_fops);
+	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
 	if (!tt_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/%s for timetrace "
 				"reading\n", proc_file);
@@ -252,7 +253,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 }
 
 /**
- * tt_proc_open() - This function is invoked when a /proc file is
+ * tt_proc_open() - This function is invoked when /proc/timetrace is
  * opened to read timetrace info.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
@@ -261,7 +262,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
  */
 int tt_proc_open(struct inode *inode, struct file *file)
 {
-	struct tt_proc_file* pf;
+	struct tt_proc_file* pf = NULL;
 	struct tt_buffer* buffer;
 	__u64 start_time;
 	int result = 0;
@@ -278,8 +279,8 @@ int tt_proc_open(struct inode *inode, struct file *file)
 		goto done;
 	}
 	pf->file = file;
-	pf->leftover = NULL;
-	pf->num_leftover = 0;
+	pf->bytes_available = 0;
+	pf->next_byte = pf->msg_storage;
 	
 	atomic_inc(&tt_freeze_count);
 	
@@ -324,9 +325,8 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	file->private_data = pf;
 	
 	if (!tt_test_no_khz) {
-		pf->num_leftover = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
+		pf->bytes_available = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
 				"cpu_khz: %u\n", cpu_khz);
-		pf->leftover = pf->msg_storage;
 	}
 	
 	done:
@@ -336,7 +336,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 
 /**
  * tt_proc_read() - This function is invoked to handle read kernel calls on
- * /proc files.
+ * /proc/timetrace.
  * @file:    Information about the file being read.
  * @buffer:  Address in user space of the buffer in which data from the file
  *           should be returned.
@@ -353,50 +353,27 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	/* # bytes of data that have accumulated in pf->msg_storage but
 	 * haven't been copied to user space yet.
 	 */
-	int buffered;
-	int copied_to_user;
-	int result = 0;
+	int copied_to_user = 0;
 	struct tt_proc_file *pf = file->private_data;
 	
 	spin_lock(&tt_lock);
 	if ((pf == NULL) || (pf->file != file)) {
 		printk(KERN_ERR "tt_metrics_read found damaged "
 				"private_data: 0x%p\n", file->private_data);
-		result = -EINVAL;
+		copied_to_user = -EINVAL;
 		goto done;
 	}
 	
-	if (!init) {
-		result = 0;
+	if (!init)
 		goto done;
-	}
-	
-	/* Check for leftovers from a previous call. */
-	copied_to_user = 0;
-	if (pf->num_leftover > 0) {
-		copied_to_user = pf->num_leftover;
-		if (copied_to_user > length)
-			copied_to_user = length;
-		if (copy_to_user(user_buf, pf->leftover, copied_to_user) != 0) {
-			copied_to_user = -EFAULT;
-			goto done;
-		}
-		pf->leftover += copied_to_user;
-		pf->num_leftover -= copied_to_user;
-		if (pf->num_leftover > 0) {
-			result = copied_to_user;
-			goto done;
-		}
-	}
 	
 	/* Each iteration through this loop processes one event (the one
 	 * with the earliest timestamp). We buffer data until pf->msg_storage
 	 * is full, then copy to user space and repeat.
 	 */
-	buffered = 0;
 	while (true) {
 		struct tt_event *event;
-		int entry_length, bytes_to_copy, available, i;
+		int entry_length, chunk_size, available, i, failed_to_copy;
 		int current_core = -1;
 		__u64 earliest_time = ~0;
 
@@ -418,23 +395,24 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		/* Format one event. */
 		event = &(tt_buffers[current_core]->events[
 				pf->pos[current_core]]);
-		available = tt_pf_storage - buffered;
+		available = tt_pf_storage - (pf->next_byte + pf->bytes_available
+				- pf->msg_storage);
 		if (available == 0) {
 			goto flush;
 		}
-		entry_length = snprintf(pf->msg_storage + buffered, available,
-				"%lu [C%02d] ",
+		entry_length = snprintf(pf->next_byte + pf->bytes_available,
+				available, "%lu [C%02d] ",
 				(long unsigned int) event->timestamp,
 			        current_core);
 		if (available >= entry_length)
-			entry_length += snprintf(
-					pf->msg_storage + buffered + entry_length,
+			entry_length += snprintf(pf->next_byte
+					+ pf->bytes_available + entry_length,
 					available - entry_length,
 					event->format, event->arg0,
 					event->arg1, event->arg2, event->arg3);
 		if (entry_length >= available) {
 			/* Not enough room for this entry. */
-			if (buffered == 0) {
+			if (pf->bytes_available == 0) {
 				/* Even a full buffer isn't enough for
 				 * this entry; truncate the entry. */
 				entry_length = available - 1;
@@ -443,42 +421,57 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			}
 		}
 		/* Replace terminating null character with newline. */
-		pf->msg_storage[buffered + entry_length] = '\n';
-		buffered += entry_length + 1;
+		pf->next_byte[pf->bytes_available + entry_length] = '\n';
+		pf->bytes_available += entry_length + 1;
 		pf->pos[current_core] = (pf->pos[current_core] + 1)
 				& (tt_buffer_size-1);
 		continue;
 		
 		flush:
-		bytes_to_copy = buffered;
-		if (bytes_to_copy > (length - copied_to_user)) {
-			bytes_to_copy = length - copied_to_user;
+		chunk_size = pf->bytes_available;
+		if (chunk_size > (length - copied_to_user)) {
+			chunk_size = length - copied_to_user;
 		}
-		if (bytes_to_copy > 0) {
-			if (copy_to_user(user_buf + copied_to_user,
-					pf->msg_storage, bytes_to_copy) != 0) {
+		if (chunk_size == 0)
+			goto done;
+		failed_to_copy = copy_to_user(user_buf + copied_to_user,
+				pf->next_byte, chunk_size);
+		chunk_size -= failed_to_copy;
+		pf->bytes_available -= chunk_size;
+		if (pf->bytes_available == 0)
+			pf->next_byte = pf->msg_storage;
+		else
+			pf->next_byte += chunk_size;
+		copied_to_user += chunk_size;
+		if (failed_to_copy != 0) {
+			if (copied_to_user == 0)
 				copied_to_user = -EFAULT;
-				goto done;
-			}
-		}
-		copied_to_user += bytes_to_copy;
-		buffered -= bytes_to_copy;
-		if ((copied_to_user == length) || (current_core < 0)) {
-			pf->num_leftover = buffered;
-			pf->leftover = pf->msg_storage + bytes_to_copy;
-			break;
+			goto done;
 		}
 	}
-	result = copied_to_user;
 	
 	done:
 	spin_unlock(&tt_lock);
-	return result;
+	return copied_to_user;
+}
+
+
+/**
+ * tt_proc_lseek() - This function is invoked to handle seeks on
+ * /proc/timetrace. Right now seeks are ignored: the file must be
+ * read sequentially.
+ * @file:    Information about the file being read.
+ * @offset:  Distance to seek, in bytes
+ * @whence:  Starting point from which to measure the distance to seek.
+ */
+loff_t tt_proc_lseek(struct file *file, loff_t offset, int whence)
+{
+	return 0;
 }
 
 /**
  * tt_proc_release() - This function is invoked when the last reference to
- * an open /proc/net/homa_metrics is closed.  It performs cleanup.
+ * an open /proc/timetrace is closed.  It performs cleanup.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
  * 

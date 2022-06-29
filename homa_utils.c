@@ -25,6 +25,8 @@ struct homa_core *homa_cores[NR_CPUS];
 /* Points to block of memory holding all homa_cores; used to free it. */
 char *core_memory;
 
+struct completion homa_pacer_kthread_done;
+
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
@@ -67,6 +69,7 @@ int homa_init(struct homa *homa)
 	}
 	
 	homa->pacer_kthread = NULL;
+	init_completion(&homa_pacer_kthread_done);
 	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
@@ -162,6 +165,7 @@ void homa_destroy(struct homa *homa)
 	int i;
 	if (homa->pacer_kthread) {
 		homa_pacer_stop(homa);
+		wait_for_completion(&homa_pacer_kthread_done);
 	}
 	
 	/* The order of the following 2 statements matters! */

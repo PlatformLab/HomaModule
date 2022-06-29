@@ -234,9 +234,12 @@ void homa_timer(struct homa *homa)
 			rpc_count++;
 			if (rpc_count >= 10) {
 				/* Give other kernel threads a chance to run
-				 * on this core.
+				 * on this core. Must release the RCU read lock
+				 * while doing this.
 				 */
+				rcu_read_unlock();
 				schedule();
+				rcu_read_lock();
 				rpc_count = 0;
 			}
 		}

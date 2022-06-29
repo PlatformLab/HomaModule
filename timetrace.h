@@ -86,23 +86,23 @@ struct tt_buffer {
 struct tt_proc_file {
 	/* Identifies a particular open file. */
 	struct file* file;
-	
+
 	/* Index of the next entry to return from each tt_buffer. */
 	int pos[NR_CPUS];
-	
+
 	/* Messages are collected here, so they can be dumped out to
 	 * user space in bulk.
 	 */
 #define TT_PF_BUF_SIZE 4000
 	char msg_storage[TT_PF_BUF_SIZE];
-	
-	/* If the previous call to tt_proc_read ended up with extra
-	 * information in msg_storage that it couldn't copy to user
-	 * space, the variables below describe it. If there were
-	 * no leftovers, num_leftover is zero.
+
+	/* Number of bytes in msg_storage currently available to
+	 * copy to application.
 	 */
-	char *leftover;
-	int num_leftover;
+	int bytes_available;
+
+	/* Address of next byte in msg_storage to copy to application. */
+	char *next_byte;
 };
 
 extern void   tt_destroy(void);
@@ -119,6 +119,7 @@ extern int       tt_proc_open(struct inode *inode, struct file *file);
 extern ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
 			size_t length, loff_t *offset);
 extern int       tt_proc_release(struct inode *inode, struct file *file);
+extern loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
 extern struct    tt_buffer *tt_buffers[];
 extern int       tt_buffer_size;
 extern atomic_t  tt_freeze_count;

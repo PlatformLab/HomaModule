@@ -19,7 +19,9 @@
 
 #include "homa_impl.h"
 
+#ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
+#endif
 MODULE_AUTHOR("John Ousterhout");
 MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
@@ -133,14 +135,14 @@ static struct net_protocol homa_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler,
 	.no_policy =	1,
-	.netns_ok =	1,
 };
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
-static const struct file_operations homa_metrics_fops = {
-	.open		= homa_metrics_open,
-	.read		= homa_metrics_read,
-	.release	= homa_metrics_release,
+static const struct proc_ops homa_metrics_pops = {
+	.proc_open         = homa_metrics_open,
+	.proc_read         = homa_metrics_read,
+	.proc_lseek        = homa_metrics_lseek,
+	.proc_release      = homa_metrics_release,
 };
 
 /* Used to remove /proc/net/homa_metrics when the module is unloaded. */
@@ -377,6 +379,8 @@ static __u16 header_lengths[] = {
 /* Used to remove sysctl values when the module is unloaded. */
 static struct ctl_table_header *homa_ctl_header;
 
+static DECLARE_COMPLETION(timer_thread_done);
+
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
  * Return: 0 on success, otherwise a negative errno.
@@ -416,7 +420,7 @@ static int __init homa_load(void) {
 	if (status)
 		goto out_cleanup;
 	metrics_dir_entry = proc_create("homa_metrics", S_IRUGO,
-			init_net.proc_net, &homa_metrics_fops);
+			init_net.proc_net, &homa_metrics_pops);
 	if (!metrics_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/net/homa_metrics\n");
 		status = -ENOMEM;
@@ -475,6 +479,7 @@ static void __exit homa_unload(void) {
 		wake_up_process(timer_kthread);
 	if (homa_offload_end() != 0)
 		printk(KERN_ERR "Homa couldn't stop offloads\n");
+	wait_for_completion(&timer_thread_done);
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
@@ -947,7 +952,7 @@ int homa_socket(struct sock *sk)
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
-    char __user *optval, unsigned int optlen) {
+    sockptr_t optval, unsigned int optlen) {
 	printk(KERN_WARNING "unimplemented setsockopt invoked on Homa socket:"
 			" level %d, optname %d, optlen %d\n",
 			level, optname, optlen);
@@ -1377,6 +1382,20 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 	return copied;
 }
 
+
+/**
+ * homa_metrics_lseek() - This function is invoked to handle seeks on
+ * /proc/net/homa_metrics. Right now seeks are ignored: the file must be
+ * read sequentially.
+ * @file:    Information about the file being read.
+ * @offset:  Distance to seek, in bytes
+ * @whence:  Starting point from which to measure the distance to seek.
+ */
+loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
+{
+	return 0;
+}
+
 /**
  * homa_metrics_release() - This function is invoked when the last reference to
  * an open /proc/net/homa_metrics is closed.  It performs cleanup.
@@ -1469,15 +1488,14 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 int homa_timer_main(void *transportInfo)
 {
 	struct homa *homa = (struct homa *) transportInfo;
-	struct timespec ts;
+	u64 nsec;
 	ktime_t tick_interval;
 	struct hrtimer hrtimer;
 	
 	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer.function = &homa_hrtimer;
-	ts.tv_nsec = 1000000;                   /* 1 ms */
-	ts.tv_sec = 0;
-	tick_interval = timespec_to_ktime(ts);
+	nsec = 1000000;                   /* 1 ms */
+	tick_interval = ns_to_ktime(nsec);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		if (!exiting) {
@@ -1490,6 +1508,6 @@ int homa_timer_main(void *transportInfo)
 		homa_timer(homa);
 	}
 	hrtimer_cancel(&hrtimer);
-	do_exit(0);
+	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }

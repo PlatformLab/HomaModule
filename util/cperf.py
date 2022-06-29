@@ -644,7 +644,9 @@ def run_experiment(name, clients, options):
             subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
             f.close()
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
-                "%s/reports/%s.metrics" % (options.log_dir, name))
+                "%s/reports/%s-%d.metrics" % (options.log_dir, name, first_server))
+        shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, clients[0]),
+                "%s/reports/%s-%d.metrics" % (options.log_dir, name, clients[0]))
     do_cmd("stop senders", clients)
     if False and "dctcp" in name:
         do_cmd("tt print cp.tt", clients)

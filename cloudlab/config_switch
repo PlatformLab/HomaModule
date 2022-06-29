@@ -24,7 +24,7 @@
 import sys
 
 # Ports to configure
-nodes = [196, 181, 161, 180, 172, 177, 197, 188, 178, 176]
+nodes = [153, 126, 121, 127, 135, 130, 152, 160, 138, 140]
 ports = []
 prev_switch = -1
 for node in nodes:
@@ -35,7 +35,7 @@ for node in nodes:
     prev_switch = switch
     ports.append(node - 40*switch)
 ports.sort()
-ports = range(1, 41)
+# ports = range(1, 41)
 
 def config():
     # First, must enter "configure" mode
