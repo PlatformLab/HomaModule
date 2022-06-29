@@ -20,11 +20,12 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- Linux v5.4.3 is the primary development platform for this code. In the past
-  it has run under 4.15.18;  other versions of Linux have not been tested and
+- Linux v5.17.7 is the primary development platform for this code. In the past
+  it has run under 5.4.3 and 4.15.18; you can access these versions with branches
+  named linux_5.4.3 and linux_4.15.18. Other versions of Linux have not been tested and
   may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
-  a day). If you get Homa working on other versions, please let me know and/or submit
-  pull requests for required code changes.
+  a day). If you get Homa working on some other version, please submit a
+  pull request for the required code changes.
   
 - There now exists support for using Homa with gRPC: see the
   [GitHub repo](https://github.com/PlatformLab/grpc_homa).
@@ -69,6 +70,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
      
 ## Significant recent improvements
+- June 2022: upgraded to Linux 5.17.7.
 - November 2021: changed semantics to at-most-once (servers can no
   longer see multiple instances of the same RPC).
 - August 2021: added new versions of the Homa system calls that
