@@ -4,7 +4,7 @@
 # start_xl170 [mod_file]
 
 # Network interface name
-ni=eno49np0
+ni=ens1f1np1
 
 set -e
 rps=1
