@@ -327,6 +327,10 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			 * RPCs. See reap.txt for details.
 			 */
 			uint64_t start = get_cycles();
+
+			/* Must unlock to avoid self-deadlock in rpc_reap. */
+			homa_rpc_unlock(rpc);
+			rpc = NULL;
 			tt_record("homa_data_pkt calling homa_rpc_reap");
 			homa_rpc_reap(hsk, hsk->homa->reap_limit);
 			INC_METRIC(data_pkt_reap_cycles, get_cycles() - start);
