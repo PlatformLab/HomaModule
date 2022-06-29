@@ -112,9 +112,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
 	
-	if (!pskb_may_pull(skb, 64))
-		tt_record("homa_gro_receive can't pull enough data "
-				"from packet for trace");
+//      The test below is overly conservative except for data packets.
+//	if (!pskb_may_pull(skb, 64))
+//		tt_record("homa_gro_receive can't pull enough data "
+//				"from packet for trace");
 	iph = (struct iphdr *) skb_network_header(skb);
 	h_new = (struct data_header *) skb_transport_header(skb);
 	if (h_new->common.type == 20)
@@ -231,7 +232,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			skb_transport_header(skb);
 //	struct data_header *d = (struct data_header *) h;
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-//			h->type, h->id, ntohl(d->seg.offset),
+//			h->type, h->sender_id, ntohl(d->seg.offset),
 //			NAPI_GRO_CB(skb)->count);
 	
 	if (homa->gro_policy & HOMA_GRO_IDLE) {
