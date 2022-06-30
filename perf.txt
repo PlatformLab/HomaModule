@@ -2,9 +2,34 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (June 2022) Short-message timelines (xl170 clusters, "cp_node client
+  --workload 100 --port-receivers 0"). All times are ns (data excludes
+  client-side recv->send turnaround time). Most of the difference
+  seems to be in kernel call time and NIC->NIC time. Also, note that
+  the 5.4.80 times have improved considerably from January 2021; there
+  appears to be at least 1 us variation in RTT from machine to machine.
+                            5.17.7             5.4.80      
+                        Server   Client    Server   Client
+----------------------------------------------------------
+Send:  
+  homa_send/reply         461      588       468      534
+  IP/Driver               514      548       508      522
+  Total                   975     1136      1475     1056
+Receive:
+  Interrupt->Homa GRO     923     1003       789      815
+  GRO                     200      227       193      201
+  Wakeup SoftIRQ          601      480       355      347
+  IP SoftIRQ              361      441       400      361
+  Homa SoftIRQ            702      469       588      388
+  Wakeup App               94      106        87       53
+  homa_recv               447      562       441      588
+  Total                  3328     3288      2853     2753
+Recv -> send kcall        682                220
+NIC->NIC (round-trip)             6361               5261
+RTT Total                        15770              13618
+
 * (January 2021) Best-case short-message timelines (xl170 cluster).
   Linux 4.15.18 numbers were measured in September 2020. All times are ns.
-
                           5.4.80         4.15.18    Ratio
                      Server   Client
 ---------------------------------------------------------
