@@ -377,7 +377,7 @@ dead and abort all RPCs involving that peer with
 An array of 8 integer values. The nth element specifies the largest
 message size, in bytes, for which priority level n will be used.
 Starting with index 
-.I max_prio
+.IR num_priorities \(en1
 and working backwards, values should be monotonically increasing.
 An entry greater than or equal to
 .B HOMA_MAX_MESSAGE_LENGTH

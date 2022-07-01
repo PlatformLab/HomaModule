@@ -612,10 +612,11 @@ struct homa_message_in {
         int incoming;
 	
 	/**
-	 * @extra_incoming: the number of bytes in this message that have
-	 * been (or will be) received when the containing RPC is not on
-	 * the grantable list. Used to update homa->extra_incoming once
-	 * the message has been fully received.
+	 * @extra_incoming: zero unless this message is not on the grantable
+	 * list; in that case it contains the number of bytes in this message
+	 * that are incoming (i.e. either unscheduled or granted). Used to
+	 * update homa->extra_incoming once the message has been fully
+	 * received.
 	 */
 	int extra_incoming;
 	
