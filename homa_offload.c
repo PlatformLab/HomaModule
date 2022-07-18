@@ -234,8 +234,56 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 //			h->type, h->sender_id, ntohl(d->seg.offset),
 //			NAPI_GRO_CB(skb)->count);
-	
-	if (homa->gro_policy & HOMA_GRO_IDLE) {
+
+#define CORES_TO_CHECK 4
+	if (homa->gro_policy & HOMA_GRO_IDLE_NEW) {
+		/* Pick a specific core to handle SoftIRQ processing for this
+		 * group of packets. This policy scans the next several cores
+		 * in order after this, trying to find one that is not
+		 * already busy with SoftIRQ processing, and that doesn't appear
+		 * to be active with NAPI/GRO processing either. If there
+		 * is no such core, just rotate among the next cores.
+		 */
+		int i;
+		int candidate = raw_smp_processor_id();
+		int this_core = candidate;
+		__u64 now = get_cycles();
+		struct homa_core *core;
+		for (i = CORES_TO_CHECK; i > 0; i--) {
+			candidate++;
+			if (unlikely(candidate >= nr_cpu_ids))
+				candidate = 0;
+			core = homa_cores[candidate];
+			if (!core->softirq_busy && ((core->last_gro
+					+ homa->gro_busy_cycles) < now)) {
+				tt_record1("homa_gro_complete chose core %d "
+						"with IDLE_NEW policy",
+						candidate);
+				break;
+			}
+		}
+		if (i <= 0) {
+			/* All of the candidates appear to be busy; just
+			 * rotate among them.
+			 */
+			int offset = homa_cores[candidate]->softirq_offset;
+			offset += 1;
+			if (offset > CORES_TO_CHECK)
+				offset = 1;
+			homa_cores[candidate]->softirq_offset = offset;
+			candidate = this_core
+					+ homa_cores[candidate]->softirq_offset;
+			while (candidate >= nr_cpu_ids) {
+				candidate -= nr_cpu_ids;
+			}
+			tt_record1("homa_gro_complete chose core %d with "
+					"IDLE_NEW policy (all cores busy)",
+					candidate);
+		}
+		homa_cores[candidate]->softirq_busy = 1;
+		homa_cores[this_core]->last_gro = now;
+		homa_set_softirq_cpu(skb, candidate);
+	} else if (homa->gro_policy & HOMA_GRO_IDLE) {
 		int i, core, best;
 		__u64 best_time = ~0;
 		__u64 last_active;
@@ -245,13 +293,10 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * core gets overloaded. We do that by checking the next several
 		 * cores in order after this one, and choosing the one that
 		 * hasn't done NAPI or SoftIRQ processing for Homa in the
-		 * longest time. Also, if HOMA_GRO_NO_TASK is set, compute
-		 * a second "best" core where we only consider cores that have
-		 * no runnable user tasks; if there is such a core, use this
-		 * in preference to the first "best".
+		 * longest time.
 		 */
 		core = best = raw_smp_processor_id();
-		for (i = 0; i < 4; i++) {
+		for (i = 0; i < CORES_TO_CHECK; i++) {
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
@@ -262,6 +307,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			}
 		}
 		homa_set_softirq_cpu(skb, best);
+		tt_record1("homa_gro_complete chose core %d with IDLE policy",
+				best);
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
@@ -270,6 +317,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;
 		homa_set_softirq_cpu(skb, target);
+		tt_record1("homa_gro_complete chose core %d with NEXT policy",
+				target);
 	}
 	
 	return 0;

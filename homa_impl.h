@@ -1707,10 +1707,25 @@ struct homa {
 	 * want to know what they mean, read the code of homa_offload.c
 	 */
 	#define HOMA_GRO_BYPASS      1
-    #define HOMA_GRO_SAME_CORE   2
-    #define HOMA_GRO_IDLE        4
-    #define HOMA_GRO_NEXT        8
-    #define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE
+	#define HOMA_GRO_SAME_CORE   2
+	#define HOMA_GRO_IDLE        4
+	#define HOMA_GRO_NEXT        8
+	#define HOMA_GRO_IDLE_NEW    16
+	#define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE_NEW
+
+	/*
+	 * @gro_busy_usecs: try not to schedule SoftIRQ processing on a core
+	 * if it has handled Homa packets at GRO level in the last
+	 * gro_busy_us microseconds (improve load balancing by avoiding
+	 * hot spots). Set externally via sysctl.
+	 */
+	int gro_busy_usecs;
+	
+	/**
+	 * @gro_busy_cycles: Same as gro_busy_usecs, except in units
+	 * of get_cycles().
+	 */
+	int gro_busy_cycles;
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -2281,6 +2296,28 @@ struct homa_core {
 	 * handlers.
 	 */
 	__u64 last_active;
+	
+	/**
+	 * @last_gro: the last time (in get_cycle() units) that Homa
+	 * processed packets at GRO(NAPI) level on this core. Used to
+	 * avoid assigning SoftIRQ handlers to this core when it has
+	 * been used recently for GRO.
+	 */
+	__u64 last_gro;
+	
+	/**
+	 * @softirq_busy: nonzero means that packets have been assigned
+	 * to this core for SoftIRQ processing, but the processing is not
+	 * yet complete.
+	 */
+	__s8 softirq_busy;
+	
+	/**
+	 * @softirq_offset: used when rotating SoftIRQ assignment among
+	 * the next cores; contains an offset to add to the current core
+	 * to produce the core for SoftIRQ.
+	 */
+	__s8 softirq_offset;
         
         /**
          * held_skb: last packet buffer known to be available for

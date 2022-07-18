@@ -192,6 +192,43 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	kfree_skb(self->skb);
 }
 
+TEST_F(homa_offload, homa_gro_complete__GRO_IDLE_NEW)
+{
+	homa->gro_policy = HOMA_GRO_IDLE_NEW;
+	mock_cycles = 1000;
+	homa->gro_busy_cycles = 100;
+	cpu_number = 5;
+	homa_cores[6]->softirq_busy = 1;
+	homa_cores[6]->last_gro = 0;
+	homa_cores[7]->softirq_busy = 0;
+	homa_cores[7]->last_gro = 901;
+	homa_cores[0]->softirq_busy = 1;
+	homa_cores[0]->last_gro = 0;
+	homa_cores[1]->softirq_busy = 0;
+	homa_cores[1]->last_gro = 899;
+	homa_cores[2]->softirq_busy = 0;
+	homa_cores[2]->last_gro = 0;
+	
+	// Avoid busy cores.
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(1, self->skb->hash - 32);
+	EXPECT_EQ(1, homa_cores[1]->softirq_busy);
+	
+	// All cores busy; must rotate.
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(6, self->skb->hash - 32);
+	EXPECT_EQ(1, homa_cores[1]->softirq_offset);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(7, self->skb->hash - 32);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(0, self->skb->hash - 32);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(1, self->skb->hash - 32);
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(6, self->skb->hash - 32);
+	EXPECT_EQ(1, homa_cores[1]->softirq_offset);
+}
+
 TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 {
 	homa->gro_policy = HOMA_GRO_IDLE;

@@ -1650,6 +1650,10 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = (tmp*cpu_khz)/1000;
 	homa->poll_cycles = tmp;
 	
+	tmp = homa->gro_busy_usecs;
+	tmp = (tmp*cpu_khz)/1000;
+	homa->gro_busy_cycles = tmp;
+	
 	tmp = homa->rtt_bytes * homa->duty_cycle;
 	homa->grant_threshold = tmp/1000;
 	if (homa->grant_threshold > homa->rtt_bytes)

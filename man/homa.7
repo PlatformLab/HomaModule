@@ -206,6 +206,14 @@ transmits full-size packets.
 An integer value that determines how Homa processes incoming packets
 at the GRO level. See code in homa_offload.c for more details.
 .TP
+.IR gro_busy_usecs
+An integer value. Under some
+.IR gro_policy
+settings, Homa will try not to assign SoftIRQ processing to a core if
+it has had GRO-level activity in the last
+.IR gro_busy_usecs
+microseconds (in order to avoid hot spots that degrade load balancing).
+.TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.

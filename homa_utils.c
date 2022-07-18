@@ -60,6 +60,9 @@ int homa_init(struct homa *homa)
 			core = (struct homa_core *) (first + i*aligned_size);
 			homa_cores[i] = core;
 			core->last_active = 0;
+			core->last_gro = 0;
+			core->softirq_busy = 0;
+			core->softirq_offset = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;
 			core->thread = NULL;
@@ -143,6 +146,7 @@ int homa_init(struct homa *homa)
 	homa->max_gso_size = 10000;
 	homa->max_gro_skbs = 10;
 	homa->gro_policy = HOMA_GRO_NORMAL;
+	homa->gro_busy_usecs = 10;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;

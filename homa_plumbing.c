@@ -200,6 +200,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "gro_busy_us",
+		.data		= &homa_data.gro_busy_usecs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "gro_policy",
 		.data		= &homa_data.gro_policy,
 		.maxlen		= sizeof(int),
@@ -1156,6 +1163,13 @@ int homa_softirq(struct sk_buff *skb) {
 
 	for (skb = packets; skb != NULL; skb = next) {
 		next = skb->next;
+		if (next == NULL) {
+			/* Once we're down to a single packet to process,
+			 * it's OK for GRO to start assigning us more
+			 * work.
+			 */
+			homa_cores[raw_smp_processor_id()]->softirq_busy = 0;
+		}
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
 	
