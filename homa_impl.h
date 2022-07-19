@@ -1558,24 +1558,24 @@ struct homa {
 	 */
 	int grant_fifo_fraction;
         
-    /**
-     * @duty_cycle: Sets a limit on the fraction of network bandwidth that
-     * may be consumed by a single RPC in units of one-thousandth (1000
-     * means a single RPC can consume all of the incoming network
-     * bandwidth, 500 means half, and so on). This also determines the
-     * fraction of a core that can be consumed by NAPI when a large
-     * message is being received. Its main purpose is to keep NAPI from
-     * monopolizing a core so much that user threads starve. Set externally
-     * via sysctl.
-     */
-    int duty_cycle;
+	/**
+	 * @duty_cycle: Sets a limit on the fraction of network bandwidth that
+	 * may be consumed by a single RPC in units of one-thousandth (1000
+	 * means a single RPC can consume all of the incoming network
+	 * bandwidth, 500 means half, and so on). This also determines the
+	 * fraction of a core that can be consumed by NAPI when a large
+	 * message is being received. Its main purpose is to keep NAPI from
+	 * monopolizing a core so much that user threads starve. Set externally
+	 * via sysctl.
+	 */
+	int duty_cycle;
 
-    /**
-     * @grant_threshold: A grant will not be sent for an RPC until
-     * the number of incoming bytes drops below this threshold. Computed
-     * from @rtt_bytes and @duty_cycle.
-     */
-    int grant_threshold;
+	/**
+	 * @grant_threshold: A grant will not be sent for an RPC until
+	 * the number of incoming bytes drops below this threshold. Computed
+	 * from @rtt_bytes and @duty_cycle.
+	 */
+	int grant_threshold;
 	
 	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
