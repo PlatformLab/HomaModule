@@ -274,8 +274,13 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 	 */
 	if (h->type == DATA) {
 		struct data_header *dh = (struct data_header *) h;
-		if (dh->seg.ack.client_id != 0)
+		if (dh->seg.ack.client_id != 0) {
+			/* homa_rpc_acked may attempt to lock the RPC, so
+			 * make sure we don't have an RPC locked.
+			 */
+			homa_lcache_release(lcache);
 			homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &dh->seg.ack);
+		}
 	}
 	
 	/* Find and lock the RPC for this packet. */
@@ -930,6 +935,10 @@ void homa_send_grants(struct homa *homa)
 		available -= new_grant - candidate->msgin.incoming;
 		if (available < 0)
 			break;
+		tt_record4("new grant for id %d: offset %d, received %d, "
+				"on the way %d",
+				candidate->id, new_grant, received,
+				on_the_way);
 		
 		/* The following line is needed to prevent spurious resends.
 		 * Without it, if the timer fires right after we send the
