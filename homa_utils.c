@@ -144,7 +144,7 @@ int homa_init(struct homa *homa)
 	homa->cycles_per_kbyte = 0;
 	homa->verbose = 0;
 	homa->max_gso_size = 10000;
-	homa->max_gro_skbs = 10;
+	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->gro_busy_usecs = 10;
 	homa->timer_ticks = 0;
