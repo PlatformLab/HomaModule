@@ -102,8 +102,13 @@ for i in range(1, len(patterns)):
     if i not in rpc:
       continue
     elapsed.append(rpc[i] - rpc[0])
-    if (i-1) in rpc:
-      deltas.append(rpc[i] - rpc[i-1])
+    prev = i - 1
+    while not prev in rpc:
+        prev -= 1
+    deltas.append(rpc[i] - rpc[prev])
+  if len(elapsed) == 0:
+    print("%-30s (no events)" % (patterns[i]["name"]))
+    continue
   elapsed = sorted(elapsed)
   deltas = sorted(deltas)
   print("%-30s Avg %6.1f us (+%6.1f us)  P90 %6.1fus (+%6.1f us)" % (

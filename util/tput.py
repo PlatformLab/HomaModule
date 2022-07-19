@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
 """
-Analyzes softirq wakeup times in a timetrace.
-Usage: softirq.py [tt_file]
+Analyzes throughput of message arrivals in a timetrace.
+Usage: tput.py [tt_file]
 
 The existing timetrace is in tt_file (or stdin in tt_file is omitted).
 """
