@@ -521,6 +521,7 @@ TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
 	homa_sock_bind(&self->homa.port_map, &sock2, self->server_port+1);
 	
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	self->data.common.sender_id += 2;
 	self->data.common.dport = htons(self->server_port+1);
 	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	skb_shinfo(skb)->frag_list = skb2;

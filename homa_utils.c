@@ -61,7 +61,7 @@ int homa_init(struct homa *homa)
 			homa_cores[i] = core;
 			core->last_active = 0;
 			core->last_gro = 0;
-			core->softirq_busy = 0;
+			atomic_set(&core->softirq_backlog, 0);
 			core->softirq_offset = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;

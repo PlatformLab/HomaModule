@@ -228,11 +228,11 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {	
-//	struct common_header *h = (struct common_header *)
-//			skb_transport_header(skb);
-//	struct data_header *d = (struct data_header *) h;
+	struct common_header *h = (struct common_header *)
+			skb_transport_header(skb);
+	struct data_header *d = (struct data_header *) h;
 //	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-//			h->type, h->sender_id, ntohl(d->seg.offset),
+//			h->type, homa_local_id(h->sender_id), ntohl(d->seg.offset),
 //			NAPI_GRO_CB(skb)->count);
 
 #define CORES_TO_CHECK 4
@@ -245,8 +245,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * is no such core, just rotate among the next cores.
 		 */
 		int i;
-		int candidate = raw_smp_processor_id();
-		int this_core = candidate;
+		int this_core = raw_smp_processor_id();
+		int candidate = this_core;
 		__u64 now = get_cycles();
 		struct homa_core *core;
 		for (i = CORES_TO_CHECK; i > 0; i--) {
@@ -254,33 +254,36 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			if (unlikely(candidate >= nr_cpu_ids))
 				candidate = 0;
 			core = homa_cores[candidate];
-			if (!core->softirq_busy && ((core->last_gro
-					+ homa->gro_busy_cycles) < now)) {
-				tt_record1("homa_gro_complete chose core %d "
-						"with IDLE_NEW policy",
-						candidate);
-				break;
-			}
+			if (atomic_read(&core->softirq_backlog)  > 0)
+				continue;
+			if ((core->last_gro + homa->gro_busy_cycles) > now)
+				continue;
+			tt_record3("homa_gro_complete chose core %d for id %d "
+					"offset %d with IDLE_NEW policy",
+					candidate, homa_local_id(h->sender_id),
+					ntohl(d->seg.offset));
+			break;
 		}
 		if (i <= 0) {
 			/* All of the candidates appear to be busy; just
 			 * rotate among them.
 			 */
-			int offset = homa_cores[candidate]->softirq_offset;
+			int offset = homa_cores[this_core]->softirq_offset;
 			offset += 1;
 			if (offset > CORES_TO_CHECK)
 				offset = 1;
-			homa_cores[candidate]->softirq_offset = offset;
-			candidate = this_core
-					+ homa_cores[candidate]->softirq_offset;
+			homa_cores[this_core]->softirq_offset = offset;
+			candidate = this_core + offset;
 			while (candidate >= nr_cpu_ids) {
 				candidate -= nr_cpu_ids;
 			}
-			tt_record1("homa_gro_complete chose core %d with "
-					"IDLE_NEW policy (all cores busy)",
-					candidate);
+			tt_record3("homa_gro_complete chose core %d for id %d "
+					"offset %d with IDLE_NEW policy "
+					"(all cores busy)",
+					candidate, homa_local_id(h->sender_id),
+					ntohl(d->seg.offset));
 		}
-		homa_cores[candidate]->softirq_busy = 1;
+		atomic_inc(&homa_cores[candidate]->softirq_backlog);
 		homa_cores[this_core]->last_gro = now;
 		homa_set_softirq_cpu(skb, candidate);
 	} else if (homa->gro_policy & HOMA_GRO_IDLE) {
@@ -307,8 +310,10 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			}
 		}
 		homa_set_softirq_cpu(skb, best);
-		tt_record1("homa_gro_complete chose core %d with IDLE policy",
-				best);
+		tt_record3("homa_gro_complete chose core %d for id %d "
+				"offset %d with IDLE policy",
+				best, homa_local_id(h->sender_id),
+				ntohl(d->seg.offset));
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
@@ -317,8 +322,10 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;
 		homa_set_softirq_cpu(skb, target);
-		tt_record1("homa_gro_complete chose core %d with NEXT policy",
-				target);
+		tt_record3("homa_gro_complete chose core %d for id %d "
+				"offset %d with NEXT policy",
+				target, homa_local_id(h->sender_id),
+				ntohl(d->seg.offset));
 	}
 	
 	return 0;

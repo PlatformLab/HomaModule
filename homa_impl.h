@@ -2306,18 +2306,18 @@ struct homa_core {
 	__u64 last_gro;
 	
 	/**
-	 * @softirq_busy: nonzero means that packets have been assigned
-	 * to this core for SoftIRQ processing, but the processing is not
-	 * yet complete.
+	 * @softirq_backlog: the number of batches of packets that have
+	 * been queued for SoftIRQ processing on this core but haven't
+	 * yet been processed.
 	 */
-	__s8 softirq_busy;
+	atomic_t softirq_backlog;
 	
 	/**
 	 * @softirq_offset: used when rotating SoftIRQ assignment among
 	 * the next cores; contains an offset to add to the current core
 	 * to produce the core for SoftIRQ.
 	 */
-	__s8 softirq_offset;
+	int softirq_offset;
         
         /**
          * held_skb: last packet buffer known to be available for

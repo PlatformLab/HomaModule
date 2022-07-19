@@ -18,6 +18,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_lcache.h"
 
 #ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
@@ -1119,10 +1120,12 @@ int homa_softirq(struct sk_buff *skb) {
 	struct homa_sock *hsk;
 	int num_packets = 0;
 	int pull_length;
+	struct homa_lcache lcache;
 	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
 	homa_cores[raw_smp_processor_id()]->last_active = start;
+	homa_lcache_init(&lcache);
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
@@ -1163,13 +1166,6 @@ int homa_softirq(struct sk_buff *skb) {
 
 	for (skb = packets; skb != NULL; skb = next) {
 		next = skb->next;
-		if (next == NULL) {
-			/* Once we're down to a single packet to process,
-			 * it's OK for GRO to start assigning us more
-			 * work.
-			 */
-			homa_cores[raw_smp_processor_id()]->softirq_busy = 0;
-		}
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
 	
@@ -1246,14 +1242,16 @@ int homa_softirq(struct sk_buff *skb) {
 			goto discard;
 		}
 		
-		homa_pkt_dispatch(skb, hsk);
+		homa_pkt_dispatch(skb, hsk, &lcache);
 		continue;
 		
 discard:
 		kfree_skb(skb);
 	}
 	
+	homa_lcache_release(&lcache);
 	homa_send_grants(homa);
+	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }
