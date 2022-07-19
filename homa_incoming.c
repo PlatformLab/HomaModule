@@ -17,6 +17,7 @@
  * both receiving information for those messages and sending grants. */
 
 #include "homa_impl.h"
+#include "homa_lcache.h"
 
 /**
  * homa_message_in_init() - Constructor for homa_message_in.
@@ -255,10 +256,13 @@ void homa_get_resend_range(struct homa_message_in *msgin,
  * @hsk:        Homa socket that owns the packet's destination port. This socket
  *              is not locked, but its existence is ensured for the life
  *              of this method.
+ * @lcache:     Used to manage RPC locks; must be properly initialized by
+ *              the caller, may be modified here.
  *
  * Return:  None.
  */
-void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
+void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
+		struct homa_lcache *lcache)
 {
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
@@ -275,29 +279,38 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 	
 	/* Find and lock the RPC for this packet. */
-	if (!homa_is_client(id)) {
-		/* We are the server for this RPC. */
-		if (h->type == DATA) {
-			/* Create a new RPC if one doesn't already exist. */
-			rpc = homa_rpc_new_server(hsk, ip_hdr(skb)->saddr,
-					(struct data_header *) h);
-			if (IS_ERR(rpc)) {
-				printk(KERN_WARNING "homa_pkt_dispatch "
-						"couldn't create server rpc: "
-						"error %lu",
-						-PTR_ERR(rpc));
-				INC_METRIC(server_cant_create_rpcs, 1);
-				rpc = NULL;
-				goto discard;
-			}
-		} else
-			rpc = homa_find_server_rpc(hsk, ip_hdr(skb)->saddr,
-					ntohs(h->sport), id);
-			
-	} else {
-		rpc = homa_find_client_rpc(hsk, id);
+	rpc = homa_lcache_get(lcache, id, ip_hdr(skb)->saddr, ntohs(h->sport));
+	if (!rpc) {
+		/* To avoid deadlock, must release old RPC before locking new. */
+		homa_lcache_release(lcache);
+		if (!homa_is_client(id)) {
+			/* We are the server for this RPC. */
+			if (h->type == DATA) {
+				/* Create a new RPC if one doesn't already exist. */
+				rpc = homa_rpc_new_server(hsk,
+						ip_hdr(skb)->saddr,
+						(struct data_header *) h);
+				if (IS_ERR(rpc)) {
+					printk(KERN_WARNING "homa_pkt_dispatch "
+							"couldn't create "
+							"server rpc: error %lu",
+							-PTR_ERR(rpc));
+					INC_METRIC(server_cant_create_rpcs, 1);
+					rpc = NULL;
+					goto discard;
+				}
+			} else
+				rpc = homa_find_server_rpc(hsk,
+						ip_hdr(skb)->saddr,
+						ntohs(h->sport), id);
+
+		} else {
+			rpc = homa_find_client_rpc(hsk, id);
+		}
+		if (rpc)
+			homa_lcache_save(lcache, rpc);
 	}
-	if (unlikely(rpc == NULL)) {
+	if (unlikely(!rpc)) {
 		if ((h->type != CUTOFFS) && (h->type != NEED_ACK)
 				&& (h->type != ACK) && (h->type != RESEND)) {
 			tt_record4("Discarding packet for unknown RPC, id %u, "
@@ -318,7 +331,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 	
 	switch (h->type) {
 	case DATA:
-		if (homa_data_pkt(skb, rpc) != 0)
+		if (homa_data_pkt(skb, rpc, lcache) != 0)
 			return;
 		INC_METRIC(packets_received[DATA - DATA], 1);
 		if (hsk->dead_skbs >= 2*hsk->homa->dead_buffs_limit) {
@@ -329,7 +342,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 			uint64_t start = get_cycles();
 
 			/* Must unlock to avoid self-deadlock in rpc_reap. */
-			homa_rpc_unlock(rpc);
+			homa_lcache_release(lcache);
 			rpc = NULL;
 			tt_record("homa_data_pkt calling homa_rpc_reap");
 			homa_rpc_reap(hsk, hsk->homa->reap_limit);
@@ -366,21 +379,16 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
 		break;
 	case ACK:
 		INC_METRIC(packets_received[ACK - DATA], 1);
-		homa_ack_pkt(skb, hsk, rpc);
-		rpc = NULL;
+		homa_ack_pkt(skb, hsk, rpc, lcache);
 		break;
 	default:
 		INC_METRIC(unknown_packet_types, 1);
 		goto discard;
 	}
-	goto done;
+	return;
 	
     discard:
 	kfree_skb(skb);
-    
-    done:
-	if (rpc)
-		homa_rpc_unlock(rpc);
 }
 
 /**
@@ -388,13 +396,15 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk)
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
+ * @lcache:  @rpc must be stored here; released if needed to unlock @rpc.
  * 
  * Return: Zero means the function completed successfully. Nonzero means
  * that the RPC had to be unlocked and deleted because the socket has been
  * shut down; the caller should not access the RPC anymore. Note: this method
  * may change the RPC's state to RPC_READY.
  */
-int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+		struct homa_lcache *lcache)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
@@ -438,7 +448,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 */
 			homa_message_in_destroy(&rpc->msgin);
 			homa_sock_unlock(rpc->hsk);
-			homa_rpc_unlock(rpc);
+			homa_lcache_release(lcache);
 			kfree(rpc);
 			return 1;
 		}
@@ -711,24 +721,19 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
  *           This function now owns the packet.
  * @hsk:     Socket on which the packet was received.
  * @rpc:     The RPC named in the packet header, or NULL if no such
- *           RPC exists. The RPC has been locked by the caller; this
- *           method takes ownership of the RPC and both frees and unlocks it.
+ *           RPC exists. The RPC has been locked by the caller and
+ *           recorded in @lcache.
+ * @lcache:  Will be released here to unlock the RPC.
  */
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
-		struct homa_rpc *rpc)
+		struct homa_rpc *rpc, struct homa_lcache *lcache)
 {
 	struct ack_header *h = (struct ack_header *) skb->data;
 	int i, count;
 	
 	if (rpc != NULL) {
 		homa_rpc_free(rpc);
-		
-		/* It's awkward to unlock the RPC here, since we didn't
-		 * lock it, but this is necessary because homa_rpc_acked
-		 * may lock additional RPCs below and it isn't safe to hold
-		 * multiple RPC locks at once.
-		 */
-		homa_rpc_unlock(rpc);
+		homa_lcache_release(lcache);
 	}
 	
 	count = ntohs(h->num_acks);

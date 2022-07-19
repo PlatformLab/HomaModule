@@ -2,6 +2,9 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * Performance-related tasks:
+  * Refactor granting to replace extra_incoming with total_incoming.
+    I think the current approach may undercount incoming bytes (it won't
+    include bytes in messages that are too low priority to receive grants).
   * Analyze 40-us W4 short message latency by writing a time-trace
     analyzer that tracks NIC queue length.
   * Perhaps limit the number of polling threads per socket, to solve

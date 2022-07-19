@@ -36,6 +36,7 @@ CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS)
 	
 TEST_SRCS :=  unit_homa_incoming.c \
+	      unit_homa_lcache.c \
 	      unit_homa_offload.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peertab.c \

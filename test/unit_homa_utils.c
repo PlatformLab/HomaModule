@@ -161,7 +161,7 @@ TEST_F(homa_utils, homa_rpc_new_server__normal)
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
 	homa_data_pkt(mock_skb_new(self->client_ip, &self->data.common,
-			1400, 0), srpc);
+			1400, 0), srpc, NULL);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_free(srpc);

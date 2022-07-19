@@ -97,6 +97,7 @@ struct homa_sock;
 struct homa_rpc;
 struct homa;
 struct homa_peer;
+struct homa_lcache;
 
 /* Declarations used in this file, so they can't be made at the end. */
 extern void     homa_grantable_lock_slow(struct homa *homa);
@@ -2628,7 +2629,7 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 extern void     homa_abort_rpcs(struct homa *homa, __be32 addr, int port,
                     int error);
 extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_rpc *rpc);
+		    struct homa_rpc *rpc, struct homa_lcache *lcache);
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
@@ -2643,7 +2644,8 @@ extern void     homa_close(struct sock *sock, long timeout);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
-extern int      homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern int      homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+		    struct homa_lcache *lcache);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
@@ -2719,7 +2721,8 @@ extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
                     int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
-extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk);
+extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
+		    struct homa_lcache *lcache);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
 extern char    *homa_print_ipv4_addr(__be32 addr);
