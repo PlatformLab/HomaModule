@@ -1,13 +1,15 @@
 This repo contains an implementation of the Homa transport protocol as a Linux kernel module.
 
-- For details on the protocol, see the paper [Homa: A Receiver-Driven Low-Latency
-  Transport Protocol Using Network Priorities](https://dl.acm.org/citation.cfm?id=3230564)
-  which appeared in SIGCOMM in August, 2018.
+- For more information on Homa in general, see the [Homa
+  Wiki](https://homa-transport.atlassian.net/wiki/spaces/HOMA).
 
 - More information about this implementation and its performance are available in
   the paper [A Linux Kernel Implementation of the Homa Transport
   Protocol](https://www.usenix.org/system/files/atc21-ousterhout.pdf),
   which appeared in the USENIX Annual Technical Conference in July, 2021.
+  
+- A synopsis of the protocol implemented by this module is available in
+  [protocol.md](https://github.com/PlatformLab/HomaModule/blob/master/protocol.md).
 
 - As of August 2020, Homa has complete functionality for running real applications,
   and its tail latency is more than 10x better than TCP for all workloads I have
