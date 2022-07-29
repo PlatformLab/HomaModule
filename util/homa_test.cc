@@ -128,7 +128,7 @@ void test_close()
 	uint64_t id = 0;
 	sockaddr_in_union addr;
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n",
 			strerror(errno));
@@ -280,13 +280,13 @@ void test_poll(int fd, char *request)
 	};
 	sockaddr_in_union source;
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
-	addr.in4.sin_addr.s_addr = inet_addr("127.0.0.1");
-	addr.in4.sin_port = htons(500);
+	addr.in6.sin6_family = AF_INET6;
+	addr.in6.sin6_addr = in6addr_loopback;
+	addr.in6.sin6_port = htons(500);
 
 	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n",
-				ntohl(addr.in4.sin_port), strerror(errno));
+				ntohs(addr.in6.sin6_port), strerror(errno));
 		return;
 	}
 
@@ -307,7 +307,7 @@ void test_poll(int fd, char *request)
 		printf("homa_recv failed: %s\n", strerror(errno));
 	} else {
 		printf("homa_recv returned %d bytes from port %d\n",
-				result, ntohs(source.in4.sin_port));
+				result, ntohs(source.in6.sin6_port));
 	}
 }
 
@@ -577,7 +577,7 @@ void test_tcp(char *server_name, int port)
 	int buffer[250000];
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -586,14 +586,14 @@ void test_tcp(char *server_name, int port)
 		exit(1);
 	}
 	dest = matching_addresses->ai_addr;
-	((struct sockaddr_in *) dest)->sin_port = htons(port);
+	((struct sockaddr_in6 *) dest)->sin6_port = htons(port);
 
-	int stream = socket(PF_INET, SOCK_STREAM, 0);
+	int stream = socket(AF_INET6, SOCK_STREAM, 0);
 	if (stream == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
 		exit(1);
 	}
-	if (connect(stream, dest, sizeof(struct sockaddr_in)) == -1) {
+	if (connect(stream, dest, sizeof(struct sockaddr_in6)) == -1) {
 		printf("Couldn't connect to %s:%d: %s\n", server_name, port,
 				strerror(errno));
 		exit(1);
@@ -643,7 +643,7 @@ void test_tcpstream(char *server_name, int port)
 	double elapsed, rate;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -652,14 +652,14 @@ void test_tcpstream(char *server_name, int port)
 		return;
 	}
 	dest = matching_addresses->ai_addr;
-	((struct sockaddr_in *) dest)->sin_port = htons(port);
+	((struct sockaddr_in6 *) dest)->sin6_port = htons(port);
 
-	int fd = socket(PF_INET, SOCK_STREAM, 0);
+	int fd = socket(AF_INET6, SOCK_STREAM, 0);
 	if (fd == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
 		return;
 	}
-	if (connect(fd, dest, sizeof(struct sockaddr_in)) == -1) {
+	if (connect(fd, dest, sizeof(struct sockaddr_in6)) == -1) {
 		printf("Couldn't connect to %s:%d: %s\n", server_name, port,
 				strerror(errno));
 		return;
@@ -702,15 +702,15 @@ void test_udpclose()
 	sockaddr_in_union address;
 	char buffer[1000];
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	int fd = socket(AF_INET6, SOCK_DGRAM, 0);
 	if (fd < 0) {
 		printf("Couldn't open UDP socket: %s\n",
 			strerror(errno));
 		exit(1);
 	}
-	address.in4.sin_family = AF_INET;
-	address.in4.sin_addr.s_addr = htonl(INADDR_ANY);
-	address.in4.sin_port = 0;
+	address.in6.sin6_family = AF_INET6;
+	address.in6.sin6_addr = in6addr_any;
+	address.in6.sin6_port = 0;
 	int result = bind(fd,
 		&address.sa,
 		sizeof(address));
@@ -803,7 +803,7 @@ int main(int argc, char** argv)
 	}
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(host, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -811,13 +811,13 @@ int main(int argc, char** argv)
 				host, gai_strerror(status));
 		exit(1);
 	}
-	dest.in4 = *(struct sockaddr_in*)matching_addresses->ai_addr;
-	dest.in4.sin_port = htons(port);
+	dest.in6 = *(struct sockaddr_in6*)matching_addresses->ai_addr;
+	dest.in6.sin6_port = htons(port);
 	int *ibuf = reinterpret_cast<int *>(buffer);
 	ibuf[0] = ibuf[1] = length;
 	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}

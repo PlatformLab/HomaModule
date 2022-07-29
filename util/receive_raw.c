@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 		protocol = IPPROTO_HOMA;
 	}
 
-	fd = socket(AF_INET, SOCK_RAW, protocol);
+	fd = socket(AF_INET6, SOCK_RAW, protocol);
 	if (fd < 0) {
 		printf("Couldn't open raw socket: %s\n", strerror(errno));
 		exit(1);

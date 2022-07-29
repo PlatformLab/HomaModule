@@ -59,10 +59,10 @@ int main(int argc, char** argv) {
 		printf("Couldn't set SO_REUSEADDR: %s\n", strerror(errno));
 		exit(1);
 	}
-	bindAddress.in4.sin_family = AF_INET;
-	bindAddress.in4.sin_port = htons(port);
-	bindAddress.in4.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(fd, &bindAddress.sa, sizeof(bindAddress.in4))
+	bindAddress.in6.sin6_family = AF_INET6;
+	bindAddress.in6.sin6_port = htons(port);
+	bindAddress.in6.sin6_addr = in6addr_any;
+	if (bind(fd, &bindAddress.sa, sizeof(bindAddress.in6))
 	    != 0) {
 		printf("Couldn't bind to port %d\n: %s\n", port, strerror(errno));
 		exit(1);

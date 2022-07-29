@@ -30,6 +30,8 @@
 
 #include "homa.h"
 
+#include "test_utils.h"
+
 int main(int argc, char** argv) {
 	int fd, status;
 	struct addrinfo *result;
@@ -38,7 +40,6 @@ int main(int argc, char** argv) {
 	char *host;
 	int protocol;
 	sockaddr_in_union *addr;
-	uint8_t *bytes;
 
 	if (argc < 3) {
 		printf("Usage: %s hostName contents [protocol]\n", argv[0]);
@@ -58,7 +59,7 @@ int main(int argc, char** argv) {
 	}
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET6;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(host, "80", &hints, &result);
 	if (status != 0) {
@@ -67,11 +68,9 @@ int main(int argc, char** argv) {
 		exit(1);
 	}
 	addr = (sockaddr_in_union*) result->ai_addr;
-	bytes = (uint8_t *) &addr->in4.sin_addr;
-	printf("Destination address: %x (%d.%d.%d.%d)\n", addr->in4.sin_addr.s_addr,
-		bytes[0], bytes[1], bytes[2], bytes[3]);
+	printf("Destination address: %s\n", print_address(addr));
 
-	fd = socket(AF_INET, SOCK_RAW, protocol);
+	fd = socket(AF_INET6, SOCK_RAW, protocol);
 	if (fd < 0) {
 		printf("Couldn't open raw socket: %s\n", strerror(errno));
 		exit(1);

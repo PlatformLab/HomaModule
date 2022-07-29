@@ -419,7 +419,7 @@ void kfreeze()
 	kfreeze_count++;
 	if (kfreeze_count > 1)
 		return;
-	int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	int fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "ERROR: kfreeze couldn't open Homa socket: %s\n",
 				strerror(errno));
@@ -484,7 +484,7 @@ void init_server_addrs(void)
 			continue;
 		snprintf(host, sizeof(host), "node-%d", node);
 		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = AF_INET;
+		hints.ai_family = AF_INET6;
 		hints.ai_socktype = SOCK_DGRAM;
 		int status = getaddrinfo(host, NULL, &hints,
 				&matching_addresses);
@@ -501,7 +501,7 @@ void init_server_addrs(void)
 			first_id.push_back(-1);
 		first_id.push_back((int) server_addrs.size());
 		for (int thread = 0; thread < server_ports; thread++) {
-			dest->in4.sin_port = htons(first_port + thread);
+			dest->in6.sin6_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
 			server_ids.emplace_back(node, thread, id, 0);
 		}
@@ -1100,7 +1100,7 @@ tcp_server::tcp_server(int port, int id, int num_threads)
         , stop(false)
 {
 	memset(connections, 0, sizeof(connections));
-	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
+	listen_fd = socket(AF_INET6, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		log(NORMAL, "FATAL: couldn't open server socket: %s\n",
 				strerror(errno));
@@ -1121,9 +1121,9 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 		exit(1);
 	}
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
-	addr.in4.sin_port = htons(port);
-	addr.in4.sin_addr.s_addr = INADDR_ANY;
+	addr.in6.sin6_family = AF_INET6;
+	addr.in6.sin6_port = htons(port);
+	addr.in6.sin6_addr = in6addr_any;
 	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))
 			== -1) {
 		log(NORMAL, "FATAL: couldn't bind to port %d: %s\n", port,
@@ -1769,7 +1769,7 @@ homa_client::homa_client(int id)
         , receiving_threads()
         , sending_thread()
 {
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
 		exit(1);
@@ -2188,7 +2188,7 @@ tcp_client::tcp_client(int id)
 	}
 
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
-		int fd = socket(PF_INET, SOCK_STREAM, 0);
+		int fd = socket(AF_INET6, SOCK_STREAM, 0);
 		if (fd == -1) {
 			log(NORMAL, "FATAL: couldn't open TCP client "
 					"socket: %s\n",
@@ -2222,7 +2222,7 @@ tcp_client::tcp_client(int id)
 			exit(1);
 		}
 		connections.emplace_back(new tcp_connection(fd, i,
-				ntohs(addr.in4.sin_port), server_addrs[i]));
+				ntohs(addr.in6.sin6_port), server_addrs[i]));
 		connections[connections.size()-1]->set_epoll_events(epoll_fd,
 				EPOLLIN|epollet);
 	}
@@ -2947,7 +2947,7 @@ int server_cmd(std::vector<string> &words)
 			sockaddr_in_union addr_in;
 			int fd, j, port;
 
-			fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+			fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 			if (fd < 0) {
 				log(NORMAL, "FATAL: couldn't open Homa socket: "
 						"%s\n",
@@ -2957,8 +2957,8 @@ int server_cmd(std::vector<string> &words)
 
 			port = first_port + i;
 			memset(&addr_in, 0, sizeof(addr_in));
-			addr_in.in4.sin_family = AF_INET;
-			addr_in.in4.sin_port = htons(port);
+			addr_in.in6.sin6_family = AF_INET6;
+			addr_in.in6.sin6_port = htons(port);
 			if (bind(fd, (struct sockaddr *) &addr_in,
 					sizeof(addr_in)) != 0) {
 				log(NORMAL, "FATAL: couldn't bind socket "

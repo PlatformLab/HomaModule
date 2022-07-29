@@ -66,16 +66,16 @@ void homa_server(int port)
 	sockaddr_in_union source;
 	int length;
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 		return;
 	}
 
 	memset(&addr_in, 0, sizeof(addr_in));
-	addr_in.in4.sin_family = AF_INET;
-	addr_in.in4.sin_port = htons(port);
-	if (bind(fd, &addr_in.sa, sizeof(addr_in.in4)) != 0) {
+	addr_in.in6.sin6_family = AF_INET6;
+	addr_in.in6.sin6_port = htons(port);
+	if (bind(fd, &addr_in.sa, sizeof(addr_in.in6)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n", port,
 				strerror(errno));
 		return;
@@ -220,7 +220,7 @@ void tcp_connection(int fd, sockaddr_in_union source)
  */
 void tcp_server(int port)
 {
-	int listen_fd = socket(PF_INET, SOCK_STREAM, 0);
+	int listen_fd = socket(AF_INET6, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		printf("Couldn't open server socket: %s\n", strerror(errno));
 		exit(1);
@@ -233,10 +233,10 @@ void tcp_server(int port)
 		exit(1);
 	}
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
-	addr.in4.sin_port = htons(port);
-	addr.in4.sin_addr.s_addr = INADDR_ANY;
-	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr.in4), sizeof(addr.in4))
+	addr.in6.sin6_family = AF_INET6;
+	addr.in6.sin6_port = htons(port);
+	addr.in6.sin6_addr = in6addr_any;
+	if (bind(listen_fd, &addr.sa, sizeof(addr.in6))
 			== -1) {
 		printf("Couldn't bind to port %d: %s\n", port, strerror(errno));
 		exit(1);
