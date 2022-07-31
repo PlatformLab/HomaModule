@@ -118,12 +118,19 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 //				"from packet for trace");
 	iph = (struct iphdr *) skb_network_header(skb);
 	h_new = (struct data_header *) skb_transport_header(skb);
-	if (h_new->common.type == 20)
+	if (h_new->common.type == DATA)
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset),
+				iph->tos >> 5);
+	else if (h_new->common.type == GRANT)
+		tt_record4("homa_gro_receive got grant from 0x%x "
+				"id %llu, offset %d, priority %d",
+				ntohl(ip_hdr(skb)->saddr),
+				homa_local_id(h_new->common.sender_id),
+				ntohl(((struct grant_header *) h_new)->offset),
 				iph->tos >> 5);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
