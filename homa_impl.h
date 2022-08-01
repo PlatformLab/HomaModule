@@ -1776,6 +1776,13 @@ struct homa {
 	enum homa_freeze_type freeze_type;
 	
 	/**
+	 * @sync_freeze: nonzero means that on completion of the next
+	 * client RPC we should freeze our timetrace and also the peer's.
+	 * Then clear this back to zero again.
+	 */
+	int sync_freeze;
+	
+	/**
 	 * @temp: the values in this array can be read and written with sysctl.
 	 * They have no officially defined purpose, and are available for
 	 * short-term use during testing.

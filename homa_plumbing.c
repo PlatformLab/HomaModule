@@ -334,6 +334,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "sync_freeze",
+		.data		= &homa_data.sync_freeze,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "temp",
 		.data		= homa_data.temp,
 		.maxlen		= sizeof(homa_data.temp),
@@ -628,14 +635,15 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 					"elapsed time for RPC id %d, peer 0x%x");
 		}
 	}
-	if (rpc->hsk->homa->freeze_type == COUNTDOWN) {
-		if (hsk->homa->temp[2] > 0) {
-			hsk->homa->temp[2]--;
-			if (hsk->homa->temp[2] == 0) {
-				homa_freeze(rpc, COUNTDOWN, "Freezing because "
-						"temp[2] counted down, id %d,"
-						"peer 0x%x");
-			}
+	if (rpc->hsk->homa->sync_freeze) {
+		rpc->hsk->homa->sync_freeze = 0;
+		if (!tt_frozen) {
+			struct freeze_header freeze;
+			tt_record2("Freezing timetrace because of "
+					"sync_freeze, id %d, peer 0x%x",
+					rpc->id, htonl(rpc->peer->addr));
+			tt_freeze();
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		}
 	}
 

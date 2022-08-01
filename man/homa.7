@@ -362,6 +362,14 @@ full network bandwidth utilization (or whatever is specified by the
 .IR duty_cycle
 parameter).
 .TP
+.IR sync_freeze
+If a nonzero value is written into this parameter, then upon completion
+of the next client RPC issued from this machine, Homa will will clear
+this parameter back to 0, then freeze the
+local timetrace and also the timetrace of the server for the RPC. This
+is useful during debugging to extract timetraces for the same interval
+on multiple machines.
+.TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to
 output queue throttling.
