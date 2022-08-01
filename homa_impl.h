@@ -1335,9 +1335,8 @@ enum homa_freeze_type {
 	RESTART_RPC        = 1,
 	PEER_TIMEOUT       = 2,
 	SLOW_RPC           = 3,
-	COUNTDOWN          = 4,
-	SOCKET_CLOSE       = 5,
-	PACKET_LOST        = 6,
+	SOCKET_CLOSE       = 4,
+	PACKET_LOST        = 5,
 };
 
 /**
