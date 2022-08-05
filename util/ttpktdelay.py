@@ -355,8 +355,9 @@ def parse_tt(tt, server):
 
         # Incoming data (SoftIRQ level)
         if "incoming data packet, id" in line:
-            data_softirq[pktid] = time
-            data_softirq_start[pktid] = softirq_start[core]
+            if core in softirq_start:
+                data_softirq[pktid] = time
+                data_softirq_start[pktid] = softirq_start[core]
 
         # Outgoing grant
         if "sending grant for id" in line:
@@ -374,8 +375,9 @@ def parse_tt(tt, server):
 
         # Incoming grant (SoftIRQ level)
         if "processing grant for id" in line:
-            grant_softirq[pktid] = time
-            grant_softirq_start[pktid] = softirq_start[core]
+            if core in softirq_start:
+                grant_softirq[pktid] = time
+                grant_softirq_start[pktid] = softirq_start[core]
     
     return {
         'data_send': data_send,

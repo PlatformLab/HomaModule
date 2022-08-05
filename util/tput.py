@@ -2,7 +2,7 @@
 
 """
 Analyzes throughput of message arrivals in a timetrace.
-Usage: tput.py [tt_file]
+Usage: tput.py [--verbose] [tt_file]
 
 The existing timetrace is in tt_file (or stdin in tt_file is omitted).
 """
@@ -16,6 +16,10 @@ import re
 import string
 import sys
 
+verbose = False
+if (len(sys.argv) >= 2) and (sys.argv[1] == "--verbose"):
+  verbose = True
+  sys.argv.pop(1)
 if len(sys.argv) == 2:
     f = open(sys.argv[1])
 elif len(sys.argv) == 1:
@@ -24,19 +28,13 @@ else:
     print("Usage: %s [tt_file]" % (sys.argv[0]))
     sys.exit(1)
 
-# Info for each RPC, keyed by id:
+# Keys are RPC ids, values are dictionaries containing the following fields:
 # start: time offset 0 received
+# grant: time the first grant was sent
+# grant_offset: offset in last data packet after first grant
 # end: time last packet received
-# offset: offset of the last packet
+# offset: highest offset in any packet received for the RPC
 rpcs = {}
-
-# For each core, time of the last trace record seen, if it was a
-# gro_receive, otherwise no entry.
-last_gro = {}
-
-# Time gap between gro_receive traces that are consecutive in trace
-# for a given core
-gaps = []
 
 for line in f:
     match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\]', line)
@@ -45,46 +43,75 @@ for line in f:
     time = float(match.group(1))
     core = match.group(2)
 
+    match = re.match('.*sending grant for id ([0-9]+)',
+        line)
+    if match:
+      id = match.group(1)
+      if id in rpcs and not 'grant' in rpcs[id]:
+        rpcs[id]['grant'] = time
+        rpcs[id]['grant_offset'] = rpcs[id]['offset']
+
     match = re.match('.*homa_gro_receive got packet .* id ([0-9]+), '
-            'offset ([0-9]+)', line)
+        'offset ([0-9]+)', line)
     if match:
         id = match.group(1)
         offset = int(match.group(2))
-        if not id in rpcs:
-            rpcs[id] = {'offset': 0}
-        if offset == 0:
-            rpcs[id]['start'] = time
-            rpcs[id]['offset'] = 0
-        else:
-            rpcs[id]['end'] = time
-            if offset > rpcs[id]['offset']:
-                rpcs[id]['offset'] = offset
-        if core in last_gro:
-            gap = time - last_gro[core]
-            if gap < 1.0:
-                gaps.append(gap)
-        last_gro[core] = time
-    else:
-        if core in last_gro:
-            del last_gro[core]
+        if (not id in rpcs) and (offset == 0):
+          rpcs[id] = {'offset': 0, 'start': time}
+        if id in rpcs:
+          rpcs[id]['end'] = time
+          if offset > rpcs[id]['offset']:
+              rpcs[id]['offset'] = offset
+
+    match = re.match('.*incoming data packet, id ([0-9]+), .* offset '
+        '([0-9]+)/([0-9]+)', line)
+    if match:
+      id = match.group(1)
+      length = int(match.group(3))
+      if id in rpcs:
+        rpcs[id]['length'] = length
 
 total_bytes = 0
+total_bytes2 = 0
 total_time = 0
+total_time2 = 0
 tputs = []
-for id in rpcs:
-    if (not 'start' in rpcs[id]) or (not 'end' in rpcs[id]):
+tputs2 = []
+for id in sorted(rpcs.keys()):
+    rpc = rpcs[id]
+    if (not 'start' in rpc) or (not 'end' in rpc):
         continue
-    if rpcs[id]['offset'] < 300000:
+    if rpc['offset'] < 300000:
         continue
-    bytes = rpcs[id]['offset'] - 700
-    time = rpcs[id]['end'] - rpcs[id]['start']
+    bytes = rpc['offset']
+    time = rpc['end'] - rpc['start']
     tput = bytes*8.0/time/1000
     tputs.append(tput)
     total_bytes += bytes
     total_time += time
+ 
+    # Compute separate statistics for throughput after sending the first
+    # grant (this eliminates time waiting for the message to become highest
+    # priority)
+    if 'grant' in rpc:
+      bytes2 = rpc['offset'] - rpc['grant_offset']
+      time2 = rpc['end'] - rpc['grant']
+      tput2 = bytes2*8.0/time2/1000
+      tputs2.append(tput2)
+      total_bytes2 += bytes2
+      total_time2 += time2
 
-tputs.sort();
-print("Messages >= 300KB %d" % (len(tputs)))
+      if verbose:
+        print("%9.3f: id %s, grant at %9.3f, offset grant_offset %d, "
+            "last_offset %d at %9.3f, tput %.1f, tput2 %.1f" % (
+            rpc['start'], id, rpc['grant'], rpc['grant_offset'], rpc['offset'],
+            rpc['end'], tput, tput2))
+
+tputs.sort()
+if verbose:
+  print("")
+print("Messages >= 300KB: %d" % (len(tputs)))
+print("Entire messages:")
 print("Minimum tput: %4.1f Gbps" % (tputs[0]))
 print("Median tput:  %4.1f Gbps" % (tputs[len(tputs)//2]))
 print("P90 tput:     %4.1f Gbps" % (tputs[len(tputs)*9//10]))
@@ -92,12 +119,11 @@ print("P99 tput:     %4.1f Gbps" % (tputs[len(tputs)*99//100]))
 print("Maximum tput: %4.1f Gbps" % (tputs[-1]))
 print("Average tput: %4.1f Gbps" % (total_bytes*8.0/total_time/1000))
 
-
-gaps.sort();
-print("\nAdjacent homa_gro_receive traces within 1 us: %d" % (len(gaps)))
-print("Minimum gap: %5.3f usec" % (gaps[0]))
-print("Median gap:  %5.3f usec" % (gaps[len(gaps)//2]))
-print("P90 gap:     %5.3f usec" % (gaps[len(gaps)*9//10]))
-print("P99 gap:     %5.3f usec" % (gaps[len(gaps)*99//100]))
-print("Maximum gap: %5.3f usec" % (gaps[-1]))
-print("Average gap: %5.3f usec" % (sum(gaps)/len(gaps)))
+tputs2.sort()
+print("\nMessage data after first grant:")
+print("Minimum tput: %4.1f Gbps" % (tputs2[0]))
+print("Median tput:  %4.1f Gbps" % (tputs2[len(tputs2)//2]))
+print("P90 tput:     %4.1f Gbps" % (tputs2[len(tputs2)*9//10]))
+print("P99 tput:     %4.1f Gbps" % (tputs2[len(tputs2)*99//100]))
+print("Maximum tput: %4.1f Gbps" % (tputs2[-1]))
+print("Average tput: %4.1f Gbps" % (total_bytes2*8.0/total_time2/1000))
