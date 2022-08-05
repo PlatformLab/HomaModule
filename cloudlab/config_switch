@@ -24,7 +24,7 @@
 import sys
 
 # Ports to configure
-nodes = [153, 126, 121, 127, 135, 130, 152, 160, 138, 140]
+nodes = [104, 102]
 ports = []
 prev_switch = -1
 for node in nodes:
@@ -79,7 +79,10 @@ def reset():
         print("interface ethernet 1/%d no traffic-class 1 congestion-control"
                 % (port))
 
-if (len(sys.argv) == 2) and (sys.argv[1] == "reset"):
-    reset()
+if len(sys.argv) > 1:
+    if sys.argv[1] == "reset":
+        reset()
+    else:
+        print("Usage: config_switch [reset]", file=sys.stderr)
 else:
     config()
