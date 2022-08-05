@@ -2,6 +2,95 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (August 2022) Found problem with Mellanox driver that explains the
+  page_pool_alloc_pages_slow delays in the item below.
+  * The driver keeps a cache of "free" pages, organized as a FIFO
+    queue with a size limit.
+  * The page for a packet buffer gets added to the queue when the
+    packet is received, but with a nonzero reference count.
+  * The reference count is to committed when the skbuff is released.
+  * If the page gets to the front of the queue with a nonzero reference
+    count, it can't be allocated. Instead, a new page is allocated,
+    which is slower. Furthermore, this will result in excess pages,
+    eventually causing the queue to overflow; at that point, the excess
+    pages will be freed back to Linux, which is slow.
+  * Homa likes to keep around large numbers of buffers around for
+    significant time periods; as a result, it triggers the slow path
+    frequently, especiall for large messages.
+
+* (August 2022) 2-node performance is problematic. Ran experiments with
+  the following client cp_node command:
+  cp_node client --ports 3 --server-ports 3 --client-max 10 --workload 500000
+  With max_window = rtt_bytes = 60000, throughput is only about 10 Gbps
+  on xl170 nodes. ttpktdelay output shows one-way times commonly 30us or
+  more, which means Homa can't keep enough grants outstanding for full
+  bandwidth. The overheads are spread across many places:
+
+  IP:        IP stack, from calling ip_queue_xmit to NIC wakeup
+  Net:       Additional time until homa_gro_receive gets packet
+  GRO Other: Time until end of GRO batch
+  GRO Gap:   Delay after GRO packet processing until SoftIRQ handoff
+  Wakeup:    Delay until homa_softirq starts
+  SoftIRQ:   Time in homa_softirq until packet is processed
+  Total:     End-to-end time from calling ip_queue_xmit to homa_softirq
+             handler for packet
+
+  Data packet lifetime (us), client -> server:
+  Pctile   IP     Net  GRO Other GRO Gap  Wakeup  SoftIRQ   Total
+    0     0.5     4.6        0.0     0.2     1.0      0.1     7.3
+   10     0.6    10.3        0.0     5.7     2.0      0.2    21.0
+   30     0.7    12.4        0.4     6.3     2.1      1.9    27.0
+   50     0.7    15.3        1.0     6.6     2.2      3.3    32.2
+   70     0.8    18.2        2.0     8.1     2.3      3.8    45.3
+   90     1.0    33.9        4.9    31.3     2.5      4.8    62.8
+   99     1.4    56.5       20.7    48.5    17.7     17.5    85.6
+  100    16.0    74.3       31.0    61.9    28.3     24.4   111.0
+
+  Grant lifetime (us), client -> server:
+  Pctile   IP     Net  GRO Other GRO Gap  Wakeup  SoftIRQ   Total
+    0     1.7     2.6        0.0     0.3     1.0      0.0     7.6
+   10     2.4     5.3        0.0     0.5     1.5      0.1    12.1
+   30     2.5    10.3        0.0     6.1     2.1      0.1    23.3
+   50     2.6    12.7        0.5     6.5     2.2      0.2    28.1
+   70     2.8    16.5        1.1     7.2     2.3      0.3    38.1
+   90     3.4    31.7        3.5    22.6     2.5      3.1    56.2
+   99     4.6    54.1       17.7    48.4    17.5      4.3    78.5
+  100    54.9    67.5       28.4    61.9    28.3     21.9    98.3
+
+  Additional client-side statistics:
+  Pre NAPI:   usecs from interrupt entry to NAPI handler
+  GRO Total:  usecs from NAPI handler entry to last homa_gro_receive
+  Batch:      number of packets processed in one interrupt
+  Gap:        usecs from last homa_gro_receive call to SoftIRQ handoff
+
+  Pctile   Pre NAPI    GRO  Batch     Gap
+    0           0.7    0.4      0     0.2
+   10           0.7    0.6      0     0.3
+   30           0.8    0.7      1     0.4
+   50           0.8    1.5      2     6.6
+   70           1.0    2.6      3     7.0
+   90           2.7    4.9      4     7.5
+   99           6.4    8.0      7    34.2
+  100          21.7   23.9     12    48.2
+
+  In looking over samples of long delays, there are two common issues that
+  affect multiple metrics:
+  * page_pool_alloc_pages_slow; affects:
+    P90/99 Net, P90/99 GRO Gap, P99 SoftIRQ wakeup
+  * unidentified 14-17 us gaps in homa_xmit_data, homa_gro_receive,
+    homa_data_pkt, and other places:
+    affects P99 GRO Other, P99 SoftIRQ, P99 GRO
+
+  In addition, I found the following smaller problems:
+  * unknown gaps before homa_gro_complete of 20-30 us, affects:
+    P90 SoftIRQ wakeup
+    Is this related to the "unidentified 14-17 us gaps" above?
+  * net_rx_action sometimes slow to start; affects:
+    Wakeup
+  * large batch size affects:
+    P90 SoftIRQ
+
+
 * (June 2022) Short-message timelines (xl170 clusters, "cp_node client
   --workload 100 --port-receivers 0"). All times are ns (data excludes
   client-side recv->send turnaround time). Most of the difference
@@ -96,7 +185,7 @@ TCP   P50    108.8 (3.5x)   192.7 (4.6x)  353.1 (7.5x)  385.7 (6.9x)
   by about 3%.
 
 * (October 2020) Polling problem: some workloads (like W5 with 30 MB
-  messages need a lot of receiving threads for occasional bursts where
+  messages) need a lot of receiving threads for occasional bursts where
   several threads are tied up receiving very large messages. However,
   this same number of receivers results in poor performance in W3,
   because these additional threads spend a lot of time polling, which
