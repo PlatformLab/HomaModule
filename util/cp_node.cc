@@ -944,7 +944,7 @@ homa_server::~homa_server()
 {
 	shutdown(fd, SHUT_RDWR);
 	close(fd);
-	delete buffer;
+	delete[] buffer;
 	thread.join();
 }
 
@@ -1815,7 +1815,7 @@ homa_client::~homa_client()
 	}
 	shutdown(fd, SHUT_RDWR);
 	close(fd);
-	delete sender_buffer;
+	delete[] sender_buffer;
 	if (sending_thread)
 		sending_thread->join();
 	for (char *buffer: receiver_buffers)
