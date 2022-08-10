@@ -46,10 +46,10 @@ struct tt_buffer *tt_buffers[NR_CPUS];
 /* Describes file operations implemented for reading timetraces
  * from /proc.
  */
-static const struct file_operations tt_fops = {
-	.open		= tt_proc_open,
-	.read		= tt_proc_read,
-	.release	= tt_proc_release
+static const struct proc_ops tt_fops = {
+	.proc_open		= tt_proc_open,
+	.proc_read		= tt_proc_read,
+	.proc_release	= tt_proc_release
 };
 
 /* Used to remove the /proc file during tt_destroy. */

@@ -161,6 +161,19 @@ struct rps_sock_flow_table *rps_sock_flow_table
 		= (struct rps_sock_flow_table *) sock_flow_table;
 __u32 rps_cpu_mask = 0x1f;
 
+#ifdef CONFIG_DEBUG_LIST
+extern bool __list_add_valid(struct list_head *new,
+				struct list_head *prev,
+				struct list_head *next)
+{
+	return true;
+}
+extern bool __list_del_entry_valid(struct list_head *entry)
+{
+	return true;
+}
+#endif
+
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
@@ -205,11 +218,6 @@ void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
 }
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
-
-int _cond_resched(void)
-{
-	return 0;
-}
 
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
@@ -470,8 +478,7 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
-int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
-		__u8 tos)
+int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
 	const char *prefix = " ";
@@ -638,7 +645,7 @@ int printk(const char *s, ...)
 
 struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 				   struct proc_dir_entry *parent,
-				   const struct file_operations *proc_fops)
+				   const struct proc_ops *proc_fops)
 {
 	struct proc_dir_entry *entry = malloc(40);
 	if (!entry) {
@@ -717,6 +724,8 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	mock_active_locks++;
 	return 1;
 }
+
+void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
 
 struct ctl_table_header *register_net_sysctl(struct net *net,
 	const char *path, struct ctl_table *table)
@@ -809,7 +818,7 @@ int sock_common_getsockopt(struct socket *sock, int level, int optname,
 }
 
 int sock_common_setsockopt(struct socket *sock, int level, int optname,
-		char __user *optval, unsigned int optlen)
+		sockptr_t optval, unsigned int optlen)
 {
 	return 0;
 }
