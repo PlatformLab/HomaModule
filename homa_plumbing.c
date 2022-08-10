@@ -19,7 +19,9 @@
 
 #include "homa_impl.h"
 
+#ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
+#endif
 MODULE_AUTHOR("John Ousterhout");
 MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
@@ -137,10 +139,10 @@ static struct net_protocol homa_protocol = {
 };
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
-static const struct file_operations homa_metrics_fops = {
-	.open		= homa_metrics_open,
-	.read		= homa_metrics_read,
-	.release	= homa_metrics_release,
+static const struct proc_ops homa_metrics_fops = {
+	.proc_open		= homa_metrics_open,
+	.proc_read		= homa_metrics_read,
+	.proc_release	= homa_metrics_release,
 };
 
 /* Used to remove /proc/net/homa_metrics when the module is unloaded. */
@@ -947,7 +949,7 @@ int homa_socket(struct sock *sk)
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
-    char __user *optval, unsigned int optlen) {
+    sockptr_t optval, unsigned int optlen) {
 	printk(KERN_WARNING "unimplemented setsockopt invoked on Homa socket:"
 			" level %d, optname %d, optlen %d\n",
 			level, optname, optlen);
@@ -1469,7 +1471,7 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 int homa_timer_main(void *transportInfo)
 {
 	struct homa *homa = (struct homa *) transportInfo;
-	struct timespec ts;
+	struct timespec64 ts;
 	ktime_t tick_interval;
 	struct hrtimer hrtimer;
 	
@@ -1477,7 +1479,7 @@ int homa_timer_main(void *transportInfo)
 	hrtimer.function = &homa_hrtimer;
 	ts.tv_nsec = 1000000;                   /* 1 ms */
 	ts.tv_sec = 0;
-	tick_interval = timespec_to_ktime(ts);
+	tick_interval = timespec64_to_ktime(ts);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		if (!exiting) {

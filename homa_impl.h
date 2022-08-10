@@ -2703,7 +2703,7 @@ extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    char __user *optval, unsigned int optlen);
+                    sockptr_t optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char* format, ...)
