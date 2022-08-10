@@ -112,16 +112,16 @@ extern void     homa_throttle_lock_slow(struct homa *homa);
  * See the xxx_header structs below for more information about each type.
  */
 enum homa_packet_type {
-	DATA               = 20,
-	GRANT              = 21,
-	RESEND             = 22,
-	UNKNOWN            = 23,
-	BUSY               = 24,
-	CUTOFFS            = 25,
-	FREEZE             = 26,
-	NEED_ACK           = 27,
-	ACK                = 28,
-	BOGUS              = 29,      /* Used only in unit tests. */
+	DATA               = 0x14,
+	GRANT              = 0x15,
+	RESEND             = 0x16,
+	UNKNOWN            = 0x17,
+	BUSY               = 0x18,
+	CUTOFFS            = 0x19,
+	FREEZE             = 0x1a,
+	NEED_ACK           = 0x1b,
+	ACK                = 0x1c,
+	BOGUS              = 0x1d,      /* Used only in unit tests. */
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change BOGUS so it is the highest opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
