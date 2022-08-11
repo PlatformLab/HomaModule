@@ -238,11 +238,19 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 {
 	int result = 0;
 	struct homa_sock *owner;
+	if (port == 0) {
+		// Homa sockets already are bound to "random" ports, so there
+		// is no need to assign a new one. This codepath is needed for
+		// applications that expect to bind a homa port to a specific
+		// IP address, with automatic port assignment.
+		return result;
+	}
 	
-	if ((port == 0) || (port >= HOMA_MIN_DEFAULT_PORT)) {
+	if (port >= HOMA_MIN_DEFAULT_PORT) {
 		return -EINVAL;
 	}
 	mutex_lock(&socktab->write_lock);
+
 	owner = homa_sock_find(socktab, port);
 	if (owner != NULL) {
 		if (owner != hsk)
