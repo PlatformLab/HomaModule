@@ -30,7 +30,7 @@ MODULE_VERSION("0.01");
 /* Homa's protocol number within the IP protocol space (this is not an
  * officially allocated slot).
  */
-#define IPPROTO_HOMA 140
+#define IPPROTO_HOMA 0xFD
 
 /* Not yet sure what these variables are for */
 long sysctl_homa_mem[3] __read_mostly;
