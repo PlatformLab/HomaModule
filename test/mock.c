@@ -305,7 +305,7 @@ void dst_release(struct dst_entry *dst)
 void finish_wait(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
-void get_random_bytes(void *buf, int nbytes)
+void get_random_bytes(void *buf, size_t nbytes)
 {
 	memset(buf, 0, nbytes);
 }
