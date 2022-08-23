@@ -1,7 +1,6 @@
 # Makefile to run unit tests for Homa
 
 KERNEL_DIR := /lib/modules/$(shell uname -r)/build
-SELF_TEST_DIR := /home/ouster/remote/homaLinux/tools/testing/selftests
 PERL ?= perl
 ARCH ?= x86
 	
@@ -33,7 +32,7 @@ DEFS :=      -D__KERNEL__ \
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wno-strict-aliasing
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
-CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS)
+CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 	
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_lcache.c \
@@ -89,7 +88,7 @@ all: run_tests
 	g++ -E $(CCFLAGS) $< -o $@
 	
 unit: $(OBJS)
-	g++ $(CFLAGS) $^ -o $@
+	g++ $(CFLAGS) $^ -o $@ -lasan
 	
 run_tests: unit
 	./unit
