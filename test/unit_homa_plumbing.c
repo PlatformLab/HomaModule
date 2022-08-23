@@ -542,6 +542,21 @@ TEST_F(homa_plumbing, homa_softirq__multiple_packets_same_socket)
 	homa_softirq(skb);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_softirq__update_total_incoming)
+{
+	struct sk_buff *skb, *skb2;
+
+	self->data.seg.segment_length = htonl(1400);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.seg.offset = htonl(1400);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	skb_shinfo(skb2)->frag_list = skb;
+	skb->next = NULL;
+	homa_softirq(skb2);
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("1235", unit_log_get());
+	EXPECT_EQ(7200, atomic_read(&self->homa.total_incoming));
+}
 
 TEST_F(homa_plumbing, homa_metrics_open)
 {

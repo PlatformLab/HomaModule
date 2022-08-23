@@ -607,19 +607,13 @@ struct homa_message_in {
 
 	/**
 	 * @incoming: Total # of bytes of the message that the sender will
-	 * transmit without additional grants. Never larger than @total_length.
-	 * Note: this may not be modified without holding @homa->grantable_lock.
+	 * transmit without additional grants. Set to -1 on initialization,
+	 * then set to the incoming field from the first data packet (unsched.
+	 * bytes); after that, updated only when grants are sent. Never larger
+	 * than @total_length. Note: this may not be modified without holding
+	 * @homa->grantable_lock.
 	 */
         int incoming;
-	
-	/**
-	 * @extra_incoming: zero unless this message is not on the grantable
-	 * list; in that case it contains the number of bytes in this message
-	 * that are incoming (i.e. either unscheduled or granted). Used to
-	 * update homa->extra_incoming once the message has been fully
-	 * received.
-	 */
-	int extra_incoming;
 	
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
@@ -1368,13 +1362,12 @@ struct homa {
 	 * @num_grantable_peers.
 	 */
 	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
-	
+
 	/**
 	 * @grantable_peers: Contains all homa_peers for which there are
-	 * RPCs that require grants (or have required them in the past)
-	 * and for which not all the data has been received. The list is
-	 * sorted in priority order (the rpc with the fewest bytes_remaining
-	 * is the first one on the first peer's list).
+	 * RPCs that have not been fully granted. The list is sorted in
+	 * priority order (the rpc with the fewest bytes_remaining is the
+	 * first one on the first peer's list).
 	 */
 	struct list_head grantable_peers;
 	
@@ -1447,12 +1440,14 @@ struct homa {
 	int throttle_min_bytes;
 	
 	/**
-	 * @extra_incoming: sum of all the @extra_incoming fields in all
-	 * homa_message_in structures. This is an upper bound on the
-	 * amount of switch buffer space that could be occupied by RPCs
-	 * not in @grantable_peers. 
+	 * @total_incoming: the total number of bytes that we expect to receive
+	 * (across all messages) even if we don't send out any more grants
+	 * (includes granted but unreceived bytes, plus unreceived unscheduled
+	 * bytes that we know about). This can potentially be negative, if
+	 * a peer sends more bytes than granted (see synchronization note in
+	 * homa_send_grants for why we have to allow this possibility).
 	 */
-	atomic_t extra_incoming __attribute__((aligned(CACHE_LINE_SIZE)));
+	atomic_t total_incoming __attribute__((aligned(CACHE_LINE_SIZE)));
 	
 	/**
 	 * @next_client_port: A client port number to consider for the
@@ -1480,6 +1475,13 @@ struct homa {
          * uplink bandwidth. Set externally via sysctl.
 	 */
 	int rtt_bytes;
+	
+	/**
+	 * @max_grant_window: if nonzero, determines the maximum number
+	 * of granted-but-not-yet-received bytes for a message (may be
+	 * greater than rtt_bytes). This feature is currently for
+	 * experimentation only. Set externally via sysctl.*/
+	int max_grant_window;
 	
 	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
@@ -1544,11 +1546,11 @@ struct homa {
 	int cutoff_version;
 	
 	/**
-	 * @grant_increment: Each grant sent by a Homa receiver will allow
-	 * this many additional bytes to be sent by the receiver. Set
+	 * @fifo_grant_increment: how many additional bytes to grant in
+	 * a "pity" grant sent to the oldest outstanding message. Set
 	 * externally via sysctl.
 	 */
-	int grant_increment;
+	int fifo_grant_increment;
 	
 	/**
 	 * @grant_fifo_fraction: The fraction (in thousandths) of granted
@@ -1585,7 +1587,7 @@ struct homa {
 	/**
 	 * @max_incoming: This value is computed from max_overcommit, and
 	 * is the limit on how many bytes are currently permitted to be
-	 * transmitted to us.
+	 * granted but not yet received, cumulative across all messages.
 	 */
 	int max_incoming;
 	
@@ -2651,7 +2653,7 @@ extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
 extern int      homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
-		    struct homa_lcache *lcache);
+		    struct homa_lcache *lcache, int *delta);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
@@ -2676,7 +2678,7 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
-extern void     homa_grant_fifo(struct homa *homa);
+extern int      homa_grant_fifo(struct homa *homa);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
@@ -2697,8 +2699,7 @@ extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
                     struct iov_iter *iter, int max_bytes);
 extern void     homa_message_in_destroy(struct homa_message_in *msgin);
-extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
-                    int incoming);
+extern void     homa_message_in_init(struct homa_message_in *msgin, int length);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
                     struct sk_buff *skb, int len);
@@ -2728,7 +2729,7 @@ extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
                     int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_lcache *lcache);
+		    struct homa_lcache *lcache, int *delta);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
 extern char    *homa_print_ipv4_addr(__be32 addr);

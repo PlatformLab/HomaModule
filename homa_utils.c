@@ -87,7 +87,7 @@ int homa_init(struct homa *homa)
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
 	homa->throttle_add = 0;
 	homa->throttle_min_bytes = 1000;
-	atomic_set(&homa->extra_incoming, 0);
+	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa_socktab_init(&homa->port_map);
 	err = homa_peertab_init(&homa->peers);
@@ -99,6 +99,7 @@ int homa_init(struct homa *homa)
 	
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
+	homa->max_grant_window = 0;
 	homa->link_mbps = 10000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
@@ -117,7 +118,7 @@ int homa_init(struct homa *homa)
 #else
 	homa->cutoff_version = 1;
 #endif
-	homa->grant_increment = 0;
+	homa->fifo_grant_increment = 0;
 	homa->grant_fifo_fraction = 50;
 	homa->duty_cycle = 800;
 	homa->grant_threshold = 0;
@@ -332,8 +333,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
 	srpc->error = 0;
-	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
-			ntohl(h->incoming));
+	homa_message_in_init(&srpc->msgin, ntohl(h->message_length));
 	srpc->msgout.length = -1;
 	srpc->msgout.num_skbs = 0;
 	srpc->active_links.next = LIST_POISON1;
@@ -420,6 +420,7 @@ void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
  */
 void homa_rpc_free(struct homa_rpc *rpc)
 {
+	int incoming;
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
 	
@@ -451,6 +452,13 @@ void homa_rpc_free(struct homa_rpc *rpc)
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
 //			rpc->hsk->dead_skbs);
+	
+	/* If the RPC had incoming bytes, remove them from the global count. */
+	incoming = rpc->msgin.incoming - (rpc->msgin.total_length
+			- rpc->msgin.bytes_remaining);
+	if (incoming != 0)
+		atomic_add(-incoming, &rpc->hsk->homa->total_incoming);
+	
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
 }
@@ -561,9 +569,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		result = !list_empty(&hsk->dead_rpcs)
 				&& ((num_skbs + num_rpcs) != 0);
 		homa_sock_unlock(hsk);
-		for (i = 0; i < num_skbs; i++) {
+		for (i = 0; i < num_skbs; i++)
 			kfree_skb(skbs[i]);
-		}
 		for (i = 0; i < num_rpcs; i++) {
 			UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
 			/* Lock and unlock the RPC before freeing it. This
@@ -574,6 +581,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			homa_rpc_lock(rpcs[i]);
 			homa_rpc_unlock(rpcs[i]);
 			rpcs[i]->state = 0;
+			tt_record1("finished reaping rpc id %d", rpcs[i]->id);
 			kfree(rpcs[i]);
 		}
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",

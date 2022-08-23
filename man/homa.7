@@ -159,6 +159,8 @@ of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
 .IR duty_cycle
+.I (Note: this feature has been temporarily removed, so this parameter
+.I is currently ignored)
 Determines the maximum fraction of network bandwidth that a single RPC
 will be allowed to consume, in units of one-thousandth (e.g., 500 means 50%).
 The main reason for this parameter is that it also limits the fraction
@@ -167,6 +169,12 @@ message. Without this limit, a large incoming message can completely
 consume one core for NAPI, which starves user threads on that core and
 can result in high tail latency for short messages served by those
 threads.
+.TP
+.IR fifo_grant_increment
+An integer value. When Homa decides to issue a grant to the oldest message
+(because of
+.IR grant_fifo_fraction )
+it will grant this many additional bytes.
 .TP
 .IR flags
 Individual bits can be set or cleared to control particular Homa behaviors.
@@ -193,15 +201,6 @@ of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
 .TP
-.IR grant_increment
-An integer value; each grant issued by a Homa receiver will allow the sender
-to transmit at least this many additional bytes. Larger values result in
-fewer grant packets, which reduces overhead, but they also result in
-greater buffer occupancy. Reducing
-.I grant_increment
-below the amount of data in a full-size packet has no impact: Homa always
-transmits full-size packets.
-.TP
 .IR gro_policy
 An integer value that determines how Homa processes incoming packets
 at the GRO level. See code in homa_offload.c for more details.
@@ -227,6 +226,15 @@ For details on the recognized values, consult the Homa code.
 This parameter is updated by Homa to reflect the largest number of packet
 buffers occupied by dead (but not yet reaped) RPCs in a single socket at
 a given time. It may be reset to zero to initiate a new calculation.
+.TP
+.IR max_grant_window
+A nonzero value for this parameter enables an experimental new approach to
+sending grants that allows more than
+.I rtt_bytes
+of outstanding grants for messages in some situations. It's not ready
+for production use; read the code of the
+.I homa_send_grants
+method if you want to learn more about it.
 .TP
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that

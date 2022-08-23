@@ -194,8 +194,8 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "grant_increment",
-		.data		= &homa_data.grant_increment,
+		.procname	= "fifo_grant_increment",
+		.data		= &homa_data.fifo_grant_increment,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -241,6 +241,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "max_grant_window",
+		.data		= &homa_data.max_grant_window,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_gro_skbs",
@@ -1130,6 +1137,11 @@ int homa_softirq(struct sk_buff *skb) {
 	int pull_length;
 	struct homa_lcache lcache;
 	
+	/* Accumulates changes to homa->incoming, to avoid repeated
+	 * updates to this shared variable.
+	 */
+	int incoming_delta = 0;
+	
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
 	homa_cores[raw_smp_processor_id()]->last_active = start;
@@ -1250,7 +1262,7 @@ int homa_softirq(struct sk_buff *skb) {
 			goto discard;
 		}
 		
-		homa_pkt_dispatch(skb, hsk, &lcache);
+		homa_pkt_dispatch(skb, hsk, &lcache, &incoming_delta);
 		continue;
 		
 discard:
@@ -1258,6 +1270,7 @@ discard:
 	}
 	
 	homa_lcache_release(&lcache);
+	atomic_add(incoming_delta, &homa->total_incoming);
 	homa_send_grants(homa);
 	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
 	INC_METRIC(softirq_cycles, get_cycles() - start);

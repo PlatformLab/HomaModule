@@ -155,13 +155,14 @@ TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
 
 TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
+	int incoming_delta = 0;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	EXPECT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
 	homa_data_pkt(mock_skb_new(self->client_ip, &self->data.common,
-			1400, 0), srpc, NULL);
+			1400, 0), srpc, NULL, &incoming_delta);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	homa_rpc_free(srpc);
@@ -382,6 +383,17 @@ TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 	unit_log_clear();
 	homa_rpc_free(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
+}
+TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 20000);
+	EXPECT_NE(NULL, crpc);
+	unit_log_clear();
+	atomic_set(&self->homa.total_incoming, 10000);
+	homa_rpc_free(crpc);
+	EXPECT_EQ(1400, atomic_read(&self->homa.total_incoming));
 }
 
 TEST_F(homa_utils, homa_rpc_free_rcu)

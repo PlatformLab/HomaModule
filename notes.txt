@@ -1,10 +1,25 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Refactor of granting mechanism:
+  * Eliminate grant_increment: change to fifo_grant_increment instead
+  * grant_non_fifo may need to grant to a message that is also receiving
+    regular grants
+  * What if a message receives data beyond incoming, which completes the
+    message?
+
 * Performance-related tasks:
-  * Refactor granting to replace extra_incoming with total_incoming.
-    I think the current approach may undercount incoming bytes (it won't
-    include bytes in messages that are too low priority to receive grants).
+  * Rework FIFO granting so that it doesn't consider homa->max_overcommit
+    (just find the oldest message that doesn't have a pity grant)? Also,
+    it doesn't look like homa_grant_fifo is keeping track of pity grants
+    precisely; perhaps add another RPC field for this?
+  * Re-implement the duty-cycle mechanism. Use a generalized pacer to
+    control grants:
+    * Parameters:
+      * Allowable throughput
+      * Max accumulation of credits
+    * Methods:
+      * Request (current time, amount) (possibly 2 stages: isItOk and doIt?)
   * Analyze 40-us W4 short message latency by writing a time-trace
     analyzer that tracks NIC queue length.
   * Perhaps limit the number of polling threads per socket, to solve

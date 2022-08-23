@@ -50,6 +50,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	int bytes_received;
 	struct sockaddr_in server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
+	int incoming_delta = 0;
 	
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = server_ip;
@@ -88,7 +89,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	h.seg.segment_length = htonl(this_size);
 	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
-			crpc, NULL);
+			crpc, NULL, &incoming_delta);
+	atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	if (crpc->state == state)
 		return crpc;
 	if (state == RPC_INCOMING)
@@ -104,8 +106,10 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
+		int incoming_delta = 0;
 		homa_data_pkt(mock_skb_new(server_ip, &h.common,
-				this_size , 0), crpc, NULL);
+				this_size , 0), crpc, NULL, &incoming_delta);
+		atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	}
 	EXPECT_EQ(RPC_READY, crpc->state);
 	if (crpc->state == state)
@@ -331,6 +335,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	        int req_length, int resp_length)
 {
 	int bytes_received;
+	int incoming_delta = 0;
 	struct data_header h = {
 		.common = {
 			.sport = htons(client_port),
@@ -355,7 +360,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
-			srpc, NULL);
+			srpc, NULL, &incoming_delta);
+	atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	if (srpc->state == state)
 		return srpc;
 	if (state == RPC_INCOMING)
@@ -371,8 +377,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
+		incoming_delta = 0;
 		homa_data_pkt(mock_skb_new(client_ip, &h.common,
-				this_size , 0), srpc, NULL);
+				this_size , 0), srpc, NULL, &incoming_delta);
+		atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	}
 	EXPECT_EQ(RPC_READY, srpc->state);
 	if (srpc->state == state)
