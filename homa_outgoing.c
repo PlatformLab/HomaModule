@@ -388,8 +388,12 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			BUG();
 		}
 		
-		if (offset >= rpc->msgout.granted)
+		if (offset >= rpc->msgout.granted) {
+			tt_record3("homa_xmit_data stopping at offset %d "
+					"for id %u: granted is %d",
+					offset, rpc->id, rpc->msgout.granted);
 			break;
+		}
 		
 		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
@@ -445,10 +449,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct common_header, checksum);
-	tt_record4("calling ip_queue_xmit: skb->len %d, gso_segs %d, "
-			"peer 0x%x, id %d",
-			skb->len, skb_shinfo(skb)->gso_segs,
-			htonl(rpc->peer->addr), rpc->id);
+	tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, id %d, "
+			"offset %d",
+			skb->len, htonl(rpc->peer->addr), rpc->id,
+			ntohl(h->seg.offset));
 
 	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
