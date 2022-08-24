@@ -115,7 +115,7 @@ TEST_F(homa_utils, homa_rpc_new_client__normal)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_FALSE(IS_ERR(crpc));
+	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 	homa_rpc_unlock(crpc);
 }
@@ -157,7 +157,7 @@ TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
-	EXPECT_FALSE(IS_ERR(srpc));
+	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
 	homa_data_pkt(mock_skb_new(self->client_ip, &self->data.common,
@@ -170,7 +170,7 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 {
 	struct homa_rpc *srpc1 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
-	EXPECT_FALSE(IS_ERR(srpc1));
+	ASSERT_FALSE(IS_ERR(srpc1));
 	if (srpc1->active_links.next == LIST_POISON1)
 		list_add_tail_rcu(&srpc1->active_links,
 				&srpc1->hsk->active_rpcs);
@@ -180,7 +180,7 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 			+ 2*HOMA_SERVER_RPC_BUCKETS);
 	struct homa_rpc *srpc2 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
-	EXPECT_FALSE(IS_ERR(srpc2));
+	ASSERT_FALSE(IS_ERR(srpc2));
 	if (srpc2->active_links.next == LIST_POISON1)
 		list_add_tail_rcu(&srpc2->active_links,
 				&srpc2->hsk->active_rpcs);
@@ -191,7 +191,7 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 			- 2*HOMA_SERVER_RPC_BUCKETS);
 	struct homa_rpc *srpc3 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
-	EXPECT_FALSE(IS_ERR(srpc3));
+	ASSERT_FALSE(IS_ERR(srpc3));
 	if (srpc3->active_links.next == LIST_POISON1)
 		list_add_tail_rcu(&srpc3->active_links,
 				&srpc3->hsk->active_rpcs);
@@ -220,11 +220,12 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	mock_cycles = ~0;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
+	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 	homa_rpc_unlock(crpc);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
-	EXPECT_FALSE(IS_ERR(srpc));
+	ASSERT_FALSE(IS_ERR(srpc));
 	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
 	homa_rpc_unlock(srpc);
 	
@@ -250,6 +251,7 @@ TEST_F(homa_utils, homa_rpc_acked__basics)
 	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
+	ASSERT_NE(NULL, srpc);
 	struct homa_ack ack = {.client_port = htons(self->client_port),
 			.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->client_id)};
@@ -264,6 +266,7 @@ TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
+	ASSERT_NE(NULL, srpc);
 	struct homa_ack ack = {.client_port = htons(self->client_port),
 			.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->client_id)};
@@ -278,6 +281,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
+	ASSERT_NE(NULL, srpc);
 	struct homa_ack ack = {.client_port = htons(self->client_port),
 			.server_port = htons(self->server_port+1),
 			.client_id = cpu_to_be64(self->client_id)};
@@ -292,6 +296,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
+	ASSERT_NE(NULL, srpc);
 	struct homa_ack ack = {.client_port = htons(self->client_port),
 			.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->client_id+10)};
@@ -306,7 +311,7 @@ TEST_F(homa_utils, homa_rpc_free__basics)
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_peers));
-	EXPECT_NE(NULL, crpc);
+	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_free(crpc);
@@ -322,6 +327,7 @@ TEST_F(homa_utils, homa_rpc_free__already_dead)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	homa_rpc_free(crpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked",
@@ -335,6 +341,7 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	homa_rpc_free(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
@@ -345,6 +352,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
 	atomic_long_set(&interest.id, 0);
 	interest.reg_rpc = crpc;
 	crpc->interest = &interest;
@@ -359,14 +367,14 @@ TEST_F(homa_utils, homa_rpc_free__dead_buffs)
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 1000);
-	EXPECT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc1);
 	homa_rpc_free(crpc1);
 	EXPECT_EQ(9, self->homa.max_dead_buffs);
 	EXPECT_EQ(9, self->hsk.dead_skbs);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 5000, 1000);
-	EXPECT_NE(NULL, crpc2);
+	ASSERT_NE(NULL, crpc2);
 	homa_rpc_free(crpc2);
 	EXPECT_EQ(14, self->homa.max_dead_buffs);
 	EXPECT_EQ(14, self->hsk.dead_skbs);
@@ -375,7 +383,7 @@ TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_NE(NULL, crpc);
+	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	homa_add_to_throttled(crpc);
 	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
@@ -404,6 +412,9 @@ TEST_F(homa_utils, homa_rpc_reap__basics)
 	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+4, 2000, 100);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	ASSERT_NE(NULL, crpc3);
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
 	homa_rpc_free(crpc3);
@@ -422,6 +433,7 @@ TEST_F(homa_utils, homa_rpc_reap__protected)
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 5000, 2000);
+	ASSERT_NE(NULL, crpc1);
 	homa_rpc_free(crpc1);
 	unit_log_clear();
 	homa_protect_rpcs(&self->hsk);
@@ -437,6 +449,8 @@ TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 1000, 2000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
 	unit_log_clear();
@@ -458,6 +472,8 @@ TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			RPC_INCOMING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 1000, 2000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
 	unit_log_clear();
@@ -476,6 +492,7 @@ TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_READY,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
+	ASSERT_NE(NULL, srpc1);
 	homa_rpc_free(srpc1);
 	EXPECT_EQ(8, self->hsk.dead_skbs);
 	unit_log_clear();
@@ -493,6 +510,7 @@ TEST_F(homa_utils, homa_rpc_send_offset__no_msgout)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
+	ASSERT_NE(NULL, srpc);
 	EXPECT_EQ(0, homa_rpc_send_offset(srpc));
 }
 TEST_F(homa_utils, homa_rpc_send_offset__msgout_fully_transmitted)
@@ -500,6 +518,7 @@ TEST_F(homa_utils, homa_rpc_send_offset__msgout_fully_transmitted)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 5000, 200);
+	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(5000, homa_rpc_send_offset(crpc));
 }
 TEST_F(homa_utils, homa_rpc_send_offset__msgout_partly_transmitted)
@@ -507,6 +526,7 @@ TEST_F(homa_utils, homa_rpc_send_offset__msgout_partly_transmitted)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
+	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_rpc_send_offset(crpc));
 	crpc->msgout.next_packet = *homa_next_skb(crpc->msgout.next_packet);
 	EXPECT_EQ(1400, homa_rpc_send_offset(crpc));
@@ -519,7 +539,7 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	atomic64_set(&self->homa.next_outgoing_id, 3);
 	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_FALSE(IS_ERR(crpc1));
+	ASSERT_FALSE(IS_ERR(crpc1));
 	homa_rpc_unlock(crpc1);
 	atomic64_set(&self->homa.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
 	self->iovec.iov_base = (void *) 2000;
@@ -527,7 +547,7 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
 	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_FALSE(IS_ERR(crpc2));
+	ASSERT_FALSE(IS_ERR(crpc2));
 	homa_rpc_unlock(crpc2);
 	atomic64_set(&self->homa.next_outgoing_id,
 			3 + 10*HOMA_CLIENT_RPC_BUCKETS);
@@ -536,7 +556,7 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
 	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_FALSE(IS_ERR(crpc3));
+	ASSERT_FALSE(IS_ERR(crpc3));
 	homa_rpc_unlock(crpc3);
 	atomic64_set(&self->homa.next_outgoing_id, 40);
 	self->iovec.iov_base = (void *) 2000;
@@ -544,7 +564,7 @@ TEST_F(homa_utils, homa_find_client_rpc)
 	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
 	struct homa_rpc *crpc4 = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, &self->iter);
-	EXPECT_FALSE(IS_ERR(crpc4));
+	ASSERT_FALSE(IS_ERR(crpc4));
 	homa_rpc_unlock(crpc4);
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));
 	homa_rpc_unlock(crpc1);
@@ -566,21 +586,21 @@ TEST_F(homa_utils, homa_find_server_rpc)
 	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
-	EXPECT_NE(NULL, srpc1);
+	ASSERT_NE(NULL, srpc1);
 	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id + 30*HOMA_SERVER_RPC_BUCKETS,
 			10000, 100);
-	EXPECT_NE(NULL, srpc2);
+	ASSERT_NE(NULL, srpc2);
 	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port+1,
 			self->server_id + 10*HOMA_SERVER_RPC_BUCKETS,
 			10000, 100);
-	EXPECT_NE(NULL, srpc3);
+	ASSERT_NE(NULL, srpc3);
 	struct homa_rpc *srpc4 = unit_server_rpc(&self->hsk, RPC_INCOMING,
 			self->client_ip, self->server_ip, self->client_port+1,
 			self->server_id + 4, 10000, 100);
-	EXPECT_NE(NULL, srpc4);
+	ASSERT_NE(NULL, srpc4);
 	EXPECT_EQ(srpc1, homa_find_server_rpc(&self->hsk, self->client_ip,
 			self->client_port, srpc1->id));
 	homa_rpc_unlock(srpc1);

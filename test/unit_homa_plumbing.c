@@ -192,6 +192,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
+	ASSERT_NE(NULL, crpc);
 	crpc->error = -ETIMEDOUT;
 	self->recv_args.len = 100;
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
@@ -382,6 +383,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
+	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_ioc_abort((struct sock *) &self->hsk,
 			(unsigned long) self->client_id));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
