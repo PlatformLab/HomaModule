@@ -59,9 +59,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
 			unit_iov_iter(NULL, req_length));
-	homa_rpc_unlock(crpc);
-	if (!crpc)
+	if (IS_ERR(crpc))
 		return NULL;
+	homa_rpc_unlock(crpc);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, saved_id);
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
