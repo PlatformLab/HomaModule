@@ -348,7 +348,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_EQ(expected, measured): expected == measured
  */
 #define ASSERT_EQ(expected, seen) \
-	__EXPECT(expected, seen, ==, 1)
+	__EXPECT(expected, seen, ==, return)
 
 /**
  * ASSERT_NE(expected, seen)
@@ -359,7 +359,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_NE(expected, measured): expected != measured
  */
 #define ASSERT_NE(expected, seen) \
-	__EXPECT(expected, seen, !=, 1)
+	__EXPECT(expected, seen, !=, return)
 
 /**
  * ASSERT_LT(expected, seen)
@@ -370,7 +370,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_LT(expected, measured): expected < measured
  */
 #define ASSERT_LT(expected, seen) \
-	__EXPECT(expected, seen, <, 1)
+	__EXPECT(expected, seen, <, return)
 
 /**
  * ASSERT_LE(expected, seen)
@@ -381,7 +381,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_LE(expected, measured): expected <= measured
  */
 #define ASSERT_LE(expected, seen) \
-	__EXPECT(expected, seen, <=, 1)
+	__EXPECT(expected, seen, <=, return)
 
 /**
  * ASSERT_GT(expected, seen)
@@ -392,7 +392,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_GT(expected, measured): expected > measured
  */
 #define ASSERT_GT(expected, seen) \
-	__EXPECT(expected, seen, >, 1)
+	__EXPECT(expected, seen, >, return)
 
 /**
  * ASSERT_GE(expected, seen)
@@ -403,7 +403,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_GE(expected, measured): expected >= measured
  */
 #define ASSERT_GE(expected, seen) \
-	__EXPECT(expected, seen, >=, 1)
+	__EXPECT(expected, seen, >=, return)
 
 /**
  * ASSERT_NULL(seen)
@@ -413,7 +413,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_NULL(measured): NULL == measured
  */
 #define ASSERT_NULL(seen) \
-	__EXPECT(NULL, seen, ==, 1)
+	__EXPECT(NULL, seen, ==, return)
 
 /**
  * ASSERT_TRUE(seen)
@@ -444,7 +444,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_STREQ(expected, measured): !strcmp(expected, measured)
  */
 #define ASSERT_STREQ(expected, seen) \
-	__EXPECT_STR(expected, seen, ==, 1)
+	__EXPECT_STR(expected, seen, ==, return)
 
 /**
  * ASSERT_STRNE(expected, seen)
@@ -455,7 +455,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_STRNE(expected, measured): strcmp(expected, measured)
  */
 #define ASSERT_STRNE(expected, seen) \
-	__EXPECT_STR(expected, seen, !=, 1)
+	__EXPECT_STR(expected, seen, !=, return)
 
 /**
  * ASSERT_SUBSTR(expected, seen)
@@ -466,7 +466,7 @@ extern int strcmp(const char *s1, const char *s2);
  * ASSERT_SUBSTR(expected, measured): strstr(measured, expected) != NULL
  */
 #define ASSERT_SUBSTR(expected, seen) \
-	__EXPECT_SUBSTR(expected, seen, 1)
+	__EXPECT_SUBSTR(expected, seen, return)
 
 /**
  * EXPECT_EQ(expected, seen)
@@ -477,7 +477,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_EQ(expected, measured): expected == measured
  */
 #define EXPECT_EQ(expected, seen) \
-	__EXPECT(expected, seen, ==, 0)
+	__EXPECT(expected, seen, ==, NULL)
 
 /**
  * EXPECT_NE(expected, seen)
@@ -488,7 +488,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_NE(expected, measured): expected != measured
  */
 #define EXPECT_NE(expected, seen) \
-	__EXPECT(expected, seen, !=, 0)
+	__EXPECT(expected, seen, !=, NULL)
 
 /**
  * EXPECT_LT(expected, seen)
@@ -499,7 +499,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_LT(expected, measured): expected < measured
  */
 #define EXPECT_LT(expected, seen) \
-	__EXPECT(expected, seen, <, 0)
+	__EXPECT(expected, seen, <, NULL)
 
 /**
  * EXPECT_LE(expected, seen)
@@ -510,7 +510,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_LE(expected, measured): expected <= measured
  */
 #define EXPECT_LE(expected, seen) \
-	__EXPECT(expected, seen, <=, 0)
+	__EXPECT(expected, seen, <=, NULL)
 
 /**
  * EXPECT_GT(expected, seen)
@@ -521,7 +521,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_GT(expected, measured): expected > measured
  */
 #define EXPECT_GT(expected, seen) \
-	__EXPECT(expected, seen, >, 0)
+	__EXPECT(expected, seen, >, NULL)
 
 /**
  * EXPECT_GE(expected, seen)
@@ -532,7 +532,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_GE(expected, measured): expected >= measured
  */
 #define EXPECT_GE(expected, seen) \
-	__EXPECT(expected, seen, >=, 0)
+	__EXPECT(expected, seen, >=, NULL)
 
 /**
  * EXPECT_NULL(seen)
@@ -542,7 +542,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_NULL(measured): NULL == measured
  */
 #define EXPECT_NULL(seen) \
-	__EXPECT(NULL, seen, ==, 0)
+	__EXPECT(NULL, seen, ==, NULL)
 
 /**
  * EXPECT_TRUE(seen)
@@ -573,7 +573,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_STREQ(expected, measured): !strcmp(expected, measured)
  */
 #define EXPECT_STREQ(expected, seen) \
-	__EXPECT_STR(expected, seen, ==, 0)
+	__EXPECT_STR(expected, seen, ==, NULL)
 
 /**
  * EXPECT_STRNE(expected, seen)
@@ -584,7 +584,7 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_STRNE(expected, measured): strcmp(expected, measured)
  */
 #define EXPECT_STRNE(expected, seen) \
-	__EXPECT_STR(expected, seen, !=, 0)
+	__EXPECT_STR(expected, seen, !=, NULL)
 
 /**
  * EXPECT_SUBSTR(expected, seen)
@@ -595,25 +595,13 @@ extern int strcmp(const char *s1, const char *s2);
  * EXPECT_SUBSTR(expected, measured): strstr(measured, expected) != NULL
  */
 #define EXPECT_SUBSTR(expected, seen) \
-	__EXPECT_SUBSTR(expected, seen, 0)
-
-#if 0
-/* Support an optional handler after and ASSERT_* or EXPECT_*.  The approach is
- * not thread-safe, but it should be fine in most sane test scenarios.
- *
- * Using __bail(), which optionally abort()s, is the easiest way to early
- * return while still providing an optional block to the API consumer.
- */
-#define OPTIONAL_HANDLER(_assert) \
-	for (; _metadata->trigger; _metadata->trigger = \
-			__bail(_assert, _metadata->no_print, _metadata->step))
-#endif
+	__EXPECT_SUBSTR(expected, seen, NULL)
 
 #define __INC_STEP(_metadata) \
 	if (_metadata->passed && _metadata->step < 255) \
 		_metadata->step++;
 
-#define __EXPECT(_expected, _seen, _t, _assert) do { \
+#define __EXPECT(_expected, _seen, _t, return_or_NULL) do { \
 	/* Avoid multiple evaluation of the cases */ \
 	__typeof__(_expected) __exp = (_expected); \
 	__typeof__(_seen) __seen = (_seen); \
@@ -627,10 +615,11 @@ extern int strcmp(const char *s1, const char *s2);
 		__current_test->passed = 0; \
 		/* Ensure the optional handler is triggered */ \
 		__current_test->trigger = 1; \
+		return_or_NULL; \
 	} \
-} while (0); /* OPTIONAL_HANDLER(_assert) */
+} while (0)
 
-#define __EXPECT_STR(_expected, _seen, _t, _assert) do { \
+#define __EXPECT_STR(_expected, _seen, _t, return_or_NULL) do { \
 	const char *__exp = (_expected); \
 	const char *__seen = (_seen); \
 	__INC_STEP(_metadata); \
@@ -638,10 +627,11 @@ extern int strcmp(const char *s1, const char *s2);
 		__TH_LOG("Expected '%s' %s '%s'.", __exp, #_t, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
+		return_or_NULL; \
 	} \
-} while (0); /* OPTIONAL_HANDLER(_assert) */
+} while (0)
 
-#define __EXPECT_SUBSTR(_expected, _seen, _assert) do { \
+#define __EXPECT_SUBSTR(_expected, _seen, return_or_NULL) do { \
 	const char *__exp = (_expected); \
 	const char *__seen = (_seen); \
 	__INC_STEP(_metadata); \
@@ -649,8 +639,9 @@ extern int strcmp(const char *s1, const char *s2);
 		__TH_LOG("Expected '%s' in '%s'.", __exp, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
+		return_or_NULL; \
 	} \
-} while (0); /* OPTIONAL_HANDLER(_assert) */
+} while (0)
 
 /* Contains all the information for test execution and status checking. */
 struct __test_metadata {
