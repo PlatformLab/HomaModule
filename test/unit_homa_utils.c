@@ -342,7 +342,7 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 }
 TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 {
-	struct homa_interest interest;
+	struct homa_interest interest = {};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
@@ -353,7 +353,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"wake_up_process pid 0", unit_log_get());
+			"wake_up_process pid -1", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_free__dead_buffs)
 {
