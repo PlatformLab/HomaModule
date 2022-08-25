@@ -496,6 +496,7 @@ void init_server_addrs(void)
 		}
 		dest = reinterpret_cast<struct sockaddr_in *>
 				(matching_addresses->ai_addr);
+		freeaddrinfo(matching_addresses);
 		while (((int) first_id.size()) < node)
 			first_id.push_back(-1);
 		first_id.push_back((int) server_addrs.size());
