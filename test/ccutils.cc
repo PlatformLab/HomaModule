@@ -40,7 +40,7 @@ struct unit_hash {
  */
 
 /* Accumulates data passed to unit_log_printf */
-static std::string log;
+static std::string unit_log;
 
 /**
  * unit_hash_erase() - Remove an entry from hash table, if it exists.
@@ -115,7 +115,7 @@ int unit_hash_size(struct unit_hash *hash)
  */
 void unit_log_clear(void)
 {
-	log.clear();
+	unit_log.clear();
 }
 
 /**
@@ -149,8 +149,8 @@ void unit_fill_data(unsigned char *data, int length, int first_value)
  */
 void unit_log_add_separator(char *sep)
 {
-	if (!log.empty())
-		log.append(sep);
+	if (!unit_log.empty())
+		unit_log.append(sep);
 }
 
 /**
@@ -198,7 +198,7 @@ void unit_log_data(const char *separator, unsigned char *data, int length)
  */
 int unit_log_empty(void)
 {
-	return log.empty() ? 1 : 0;
+	return unit_log.empty() ? 1 : 0;
 }
 
 /**
@@ -206,7 +206,7 @@ int unit_log_empty(void)
  */
 const char *unit_log_get(void)
 {
-	return log.c_str();
+	return unit_log.c_str();
 }
 
 /**
@@ -221,8 +221,8 @@ void unit_log_printf(const char *separator, const char* format, ...)
 	va_list ap;
 	va_start(ap, format);
 	
-	if (!log.empty() && (separator != NULL))
-		log.append(separator);
+	if (!unit_log.empty() && (separator != NULL))
+		unit_log.append(separator);
 	    
 	// We're not really sure how big of a buffer will be necessary.
 	// Try 1K, if not the return value will tell us how much is necessary.
@@ -235,7 +235,7 @@ void unit_log_printf(const char *separator, const char* format, ...)
 		int length = vsnprintf(buf, buf_size, format, aq);
 		assert(length >= 0); // old glibc versions returned -1
 		if (length < buf_size) {
-			log.append(buf, length);
+			unit_log.append(buf, length);
 			break;
 		}
 		buf_size = length + 1;
