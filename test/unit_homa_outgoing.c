@@ -234,7 +234,6 @@ TEST_F(homa_outgoing, homa_fill_packets__set_incoming)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000, 10000));
 	ASSERT_FALSE(IS_ERR(crpc));
-	ASSERT_NE(NULL, crpc);
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 0);
