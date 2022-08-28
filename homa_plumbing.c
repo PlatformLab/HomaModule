@@ -585,7 +585,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_recv_ipv4 args;
 	struct iovec iovstack[UIO_FASTIOV];
-    
+
 	// Must be freed at the end of this function.
 	struct iovec *iov = NULL;
 	struct iov_iter iter;
@@ -706,7 +706,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_reply_ipv4 args;
 	struct iovec iovstack[UIO_FASTIOV];
-    
+
 	// Must be freed at the end of this function.
 	struct iovec *iov = NULL;
 	struct iov_iter iter;
@@ -729,7 +729,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
-    
+
 	if (args.response != NULL) {
 		err = import_single_range(WRITE, args.response, args.length,
 				iovstack, &iter);
@@ -742,7 +742,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	err = 0;
 	length = iter.count;
-    
+
 	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
 			&hsk->inet);
 	if (IS_ERR(peer)) {
@@ -794,7 +794,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_args_send_ipv4 args;
 	struct iovec iovstack[UIO_FASTIOV];
-    
+
 	// Must be freed at the end of this function.
 	struct iovec *iov = NULL;
 	struct iov_iter iter;
@@ -816,7 +816,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
-    
+
 	if (args.request != NULL) {
 		err = import_single_range(WRITE, args.request, args.length,
 				iovstack, &iter);
@@ -1283,7 +1283,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  * packet, such as ICMP UNREACHABLE.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
- * 
+ *
  * Return: zero, or a negative errno if the error couldn't be handled here.
  */
 int homa_err_handler(struct sk_buff *skb, u32 info) {
@@ -1323,7 +1323,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
  * @sock:  A Homa socket, associated with @file.
  * @wait:  This table will be registered with the socket, so that it
  *         is notified when the socket's ready state changes.
- * 
+ *
  * Return: A mask of bits such as EPOLLIN, which indicate the current
  *         state of the socket.
  */
@@ -1351,7 +1351,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  * opened.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
- * 
+ *
  * Return: always 0.
  */
 int homa_metrics_open(struct inode *inode, struct file *file)
@@ -1419,8 +1419,8 @@ loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
  * an open /proc/net/homa_metrics is closed.  It performs cleanup.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
- * 
- * Return: always 0. 
+ *
+ * Return: always 0.
  */
 int homa_metrics_release(struct inode *inode, struct file *file)
 {
@@ -1439,8 +1439,8 @@ int homa_metrics_release(struct inode *inode, struct file *file)
  * @buffer:   Address in user space of the input/output data.
  * @lenp:     Not exactly sure.
  * @ppos:     Not exactly sure.
- * 
- * Return: 0 for success, nonzero for error. 
+ *
+ * Return: 0 for success, nonzero for error.
  */
 int homa_dointvec(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
@@ -1488,7 +1488,7 @@ int homa_dointvec(struct ctl_table *table, int write,
  * homa_hrtimer() - This function is invoked by the hrtimer mechanism to
  * wake up the timer thread. Runs at IRQ level.
  * @timer:   The timer that triggered; not used.
- * 
+ *
  * Return:   Always HRTIMER_RESTART.
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
