@@ -155,6 +155,8 @@ static inline __u64 tt_rdtsc(void)
 		(ntohl((x).in6_u.u6_addr32[3])) : \
 		ntohl((x).in6_u.u6_addr32[1]))
 
+#define ip4_as_u32(x) ntohl(x.s_addr)
+
 /**
  * tt_recordN(): record an event, along with N parameters.
  *

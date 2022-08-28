@@ -134,6 +134,9 @@ enum homa_packet_type {
 /** define HOMA_IPV6_HEADER_LENGTH - Size of IP header (V6). */
 #define HOMA_IPV6_HEADER_LENGTH 40
 
+/** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
+#define HOMA_IPV4_HEADER_LENGTH 20
+
 /**
  * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
  * beginning of each sk_buff, before the IP header. This includes room for a
@@ -2670,7 +2673,9 @@ extern int      homa_dointvec(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
                     struct homa_peer *peer, struct homa_sock *hsk);
-extern int      homa_err_handler(struct sk_buff *skb, struct inet6_skb_parm *, u8,  u8,  int,  __be32);
+extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
+extern int      homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *
+                    , u8,  u8,  int,  __be32);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
                     struct iov_iter *iter);
@@ -2869,6 +2874,34 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(&hsk->homa->peers, peer, hsk);
 	return peer->dst;
+}
+
+/* Like iphdr, but using 'struct in_addr' for the saddr and daddr fields */
+struct ipv4hdr {
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+	__u8    ihl:4,
+                version:4;
+#elif defined (__BIG_ENDIAN_BITFIELD)
+	__u8    version:4,
+		ihl:4;
+#else
+#error  "Please fix <asm/byteorder.h>"
+#endif
+	__u8    tos;
+	__be16  tot_len;
+	__be16  id;
+	__be16  frag_off;
+	__u8    ttl;
+	__u8    protocol;
+	__sum16 check;
+	struct in_addr  saddr;
+	struct in_addr  daddr;
+	/*The options start here. */
+};
+
+static inline struct ipv4hdr *ipv4_hdr(struct sk_buff *skb)
+{
+	return  (struct ipv4hdr *)ip_hdr(skb);
 }
 
 extern struct completion homa_pacer_kthread_done;

@@ -127,7 +127,7 @@ struct inet_protosw homa_protosw = {
 /* This structure is used by IP to deliver incoming Homa packets to us. */
 static struct inet6_protocol homa_protocol = {
 	.handler =	homa_softirq,
-	.err_handler =	homa_err_handler,
+	.err_handler =	homa_err_handler_v6,
 	.flags =        INET6_PROTO_NOPOLICY,
 };
 
@@ -1304,14 +1304,57 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 }
 
 /**
- * homa_err_handler() - Invoked by IP to handle an incoming error
+ * homa_err_handler_v4() - Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
  * @skb:   The incoming packet.
  * @info:  Information about the error that occurred?
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-int homa_err_handler(struct sk_buff *skb, struct inet6_skb_parm *opt,
+int homa_err_handler_v4(struct sk_buff *skb, u32 info)
+{
+	const struct ipv4hdr *iph = (const struct ipv4hdr *)skb->data;
+	int type = icmp_hdr(skb)->type;
+	int code = icmp_hdr(skb)->code;
+	struct in6_addr mapped_ip = {};
+	mapped_ip.in6_u.u6_addr32[2] = htonl(0xffff);
+
+	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
+		struct common_header *h;
+		char *icmp = (char *) icmp_hdr(skb);
+		iph = (struct ipv4hdr *) (icmp + sizeof(struct icmphdr));
+		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
+				+ iph->ihl*4);
+		mapped_ip.in6_u.u6_addr32[3] = iph->daddr.s_addr;
+		homa_abort_rpcs(homa, &mapped_ip, htons(h->dport), -ENOTCONN);
+	} else if (type == ICMP_DEST_UNREACH) {
+		int error;
+		if (code == ICMP_PROT_UNREACH)
+			error = -EPROTONOSUPPORT;
+		else
+			error = -EHOSTUNREACH;
+		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
+				ip4_as_u32(iph->saddr), ip4_as_u32(iph->daddr));
+		mapped_ip.in6_u.u6_addr32[3] = iph->daddr.s_addr;
+		homa_abort_rpcs(homa, &mapped_ip, 0, error);
+	} else {
+		if (homa->verbose)
+			printk(KERN_NOTICE "homa_err_handler_v4 invoked with "
+				"info %x, ICMP type %d, ICMP code %d\n",
+				info, type, code);
+	}
+	return 0;
+}
+
+/**
+ * homa_err_handler_v6() - Invoked by IP to handle an incoming error
+ * packet, such as ICMP UNREACHABLE.
+ * @skb:   The incoming packet.
+ * @info:  Information about the error that occurred?
+ *
+ * Return: zero, or a negative errno if the error couldn't be handled here.
+ */
+int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
@@ -1334,7 +1377,7 @@ int homa_err_handler(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		homa_abort_rpcs(homa, &iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)
-			printk(KERN_NOTICE "homa_err_handler invoked with "
+			printk(KERN_NOTICE "homa_err_handler_v6 invoked with "
 				"info %x, ICMP type %d, ICMP code %d\n",
 				info, type, code);
 	}
