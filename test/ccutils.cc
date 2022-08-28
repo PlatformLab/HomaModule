@@ -65,7 +65,7 @@ void unit_hash_free(struct unit_hash *hash)
  * unit_hash_get() - Retrieve a value from hash table.
  * @hash:       The hash table
  * @key:        Key for the desired entry
- * 
+ *
  * Return:      The value of the entry corresponding to @key, or NULL
  *              if no such entry exists.
  */
@@ -124,18 +124,18 @@ void unit_log_clear(void)
  * @data:         Address of first byte of data.
  * @length:       Total amount of data, in bytes.
  * @first_value:  Value to store and first 4 bytes of data.
- * 
+ *
  * The data area is treated as an array of integers, and filled in with
  * consecutive values starting with first_value. If there are are extra
  * bytes at the end, they are initialized with single-byte values.
  */
 void unit_fill_data(unsigned char *data, int length, int first_value)
-{ 
+{
 	int i;
 	for (i = 0; i <= length-4; i += 4) {
 		*reinterpret_cast<int32_t *>(data + i) = first_value + i;
 	}
-	
+
 	/* Fill in extra bytes with low-order-2-decimal-digits. */
 	for ( ; i < length; i += 1) {
 		data[i] = (first_value + i) % 100;
@@ -159,7 +159,7 @@ void unit_log_add_separator(char *sep)
  *             string will be output before the data as a separator.
  * @data:      Address of first byte of data.
  * @length:    Total amount of data, in bytes.
- * 
+ *
  * This function assumes that the data was written by unit_fill_data.
  */
 void unit_log_data(const char *separator, unsigned char *data, int length)
@@ -186,7 +186,7 @@ void unit_log_data(const char *separator, unsigned char *data, int length)
 	}
 	unit_log_printf(separator, "%d-%d", range_start, expected_next-1);
 	separator = " ";
-	
+
 	for ( ; i < length; i += 1) {
 		unit_log_printf(separator, "%d", data[i]);
 		separator = " ";
@@ -220,10 +220,10 @@ void unit_log_printf(const char *separator, const char* format, ...)
 {
 	va_list ap;
 	va_start(ap, format);
-	
+
 	if (!unit_log.empty() && (separator != NULL))
 		unit_log.append(separator);
-	    
+
 	// We're not really sure how big of a buffer will be necessary.
 	// Try 1K, if not the return value will tell us how much is necessary.
 	int buf_size = 1024;
