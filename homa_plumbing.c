@@ -125,7 +125,13 @@ struct inet_protosw homa_protosw = {
 };
 
 /* This structure is used by IP to deliver incoming Homa packets to us. */
-static struct inet6_protocol homa_protocol = {
+static struct net_protocol homa_protocol = {
+	.handler =	homa_softirq,
+	.err_handler =	homa_err_handler_v4,
+	.no_policy =     1,
+};
+
+static struct inet6_protocol homav6_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler_v6,
 	.flags =        INET6_PROTO_NOPOLICY,
@@ -406,13 +412,16 @@ static int __init homa_load(void) {
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
 			"data_segment %u, ack %u, "
-			"grant_header %u, peer %u, ipv6_hdr %u, flowi6 %u "
+			"grant_header %u, peer %u, ip_hdr %u flowi %u "
+			"ipv6_hdr %u, flowi6 %u "
 			"tcp_sock %u homa_rpc %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
 			sizeof32(struct homa_ack),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),
+			sizeof32(struct iphdr),
+			sizeof32(struct flowi),
 			sizeof32(struct ipv6hdr),
 			sizeof32(struct flowi6),
 			sizeof32(struct tcp_sock),
@@ -423,10 +432,17 @@ static int __init homa_load(void) {
 		    status);
 		goto out;
 	}
+	inet_register_protosw(&homa_protosw);
 	inet6_register_protosw(&homa_protosw);
-	status = inet6_add_protocol(&homa_protocol, IPPROTO_HOMA);
+	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		printk(KERN_ERR "inet_add_protocol failed in homa_load: %d\n",
+		    status);
+		goto out_cleanup;
+	}
+	status = inet6_add_protocol(&homav6_protocol, IPPROTO_HOMA);
+	if (status != 0) {
+		printk(KERN_ERR "inet6_add_protocol failed in homa_load: %d\n",
 		    status);
 		goto out_cleanup;
 	}
@@ -474,7 +490,9 @@ out_cleanup:
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
-	inet6_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet_unregister_protosw(&homa_protosw);
+	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 	inet6_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 out:
@@ -498,7 +516,7 @@ static void __exit homa_unload(void) {
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
-	inet6_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 	inet6_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 }
