@@ -389,9 +389,12 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_IN_SERVICE;
 	if (srpc->state == state)
 		return srpc;
-	homa_message_out_init(srpc, hsk->port, homa_fill_packets(hsk,
-			srpc->peer, unit_iov_iter((void *) 2000, resp_length)),
-			resp_length);
+	struct sk_buff *skb = homa_fill_packets(
+		hsk, srpc->peer, unit_iov_iter((void *) 2000, resp_length));
+	if (IS_ERR(skb)) {
+		goto error;
+	}
+	homa_message_out_init(srpc, hsk->port, skb, resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;
