@@ -81,6 +81,28 @@ const struct proto_ops homa_proto_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 };
 
+const struct proto_ops homav6_proto_ops = {
+	.family		   = PF_INET,
+	.owner		   = THIS_MODULE,
+	.release	   = inet_release,
+	.bind		   = homa_bind,
+	.connect	   = inet_dgram_connect,
+	.socketpair	   = sock_no_socketpair,
+	.accept		   = sock_no_accept,
+	.getname	   = inet_getname,
+	.poll		   = homa_poll,
+	.ioctl		   = inet_ioctl,
+	.listen		   = sock_no_listen,
+	.shutdown	   = homa_shutdown,
+	.setsockopt	   = sock_common_setsockopt,
+	.getsockopt	   = sock_common_getsockopt,
+	.sendmsg	   = inet_sendmsg,
+	.recvmsg	   = inet_recvmsg,
+	.mmap		   = sock_no_mmap,
+	.sendpage	   = sock_no_sendpage,
+	.set_peek_off	   = sk_set_peek_off,
+};
+
 /* This structure also defines functions that handle various operations
  * on Homa sockets. However, these functions are lower-level than those
  * in homa_proto_ops: they are specific to the PF_INET6 protocol family,
@@ -88,6 +110,34 @@ const struct proto_ops homa_proto_ops = {
  * Most of these functions have Homa-specific implementations.
  */
 struct proto homa_prot = {
+	.name		   = "HOMA",
+	.owner		   = THIS_MODULE,
+	.close		   = homa_close,
+	.connect	   = ip4_datagram_connect,
+	.disconnect	   = homa_disconnect,
+	.ioctl		   = homa_ioctl,
+	.init		   = homa_socket,
+	.destroy	   = 0,
+	.setsockopt	   = homa_setsockopt,
+	.getsockopt	   = homa_getsockopt,
+	.sendmsg	   = homa_sendmsg,
+	.recvmsg	   = homa_recvmsg,
+	.sendpage	   = homa_sendpage,
+	.backlog_rcv       = homa_backlog_rcv,
+	.release_cb	   = ip4_datagram_release_cb,
+	.hash		   = homa_hash,
+	.unhash		   = homa_unhash,
+	.rehash		   = homa_rehash,
+	.get_port	   = homa_get_port,
+	.memory_allocated  = &homa_memory_allocated,
+	.sysctl_mem	   = sysctl_homa_mem,
+	.sysctl_wmem	   = &sysctl_homa_wmem_min,
+	.sysctl_rmem	   = &sysctl_homa_rmem_min,
+	.obj_size	   = sizeof(struct homa_sock),
+	.diag_destroy	   = homa_diag_destroy,
+};
+
+struct proto homav6_prot = {
 	.name		   = "HOMAv6",
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
@@ -121,6 +171,14 @@ struct inet_protosw homa_protosw = {
 	.protocol          = IPPROTO_HOMA,
 	.prot              = &homa_prot,
 	.ops               = &homa_proto_ops,
+	.flags             = INET_PROTOSW_REUSE,
+};
+
+struct inet_protosw homav6_protosw = {
+	.type              = SOCK_DGRAM,
+	.protocol          = IPPROTO_HOMA,
+	.prot              = &homav6_prot,
+	.ops               = &homav6_proto_ops,
 	.flags             = INET_PROTOSW_REUSE,
 };
 
@@ -428,12 +486,18 @@ static int __init homa_load(void) {
 			sizeof32(struct homa_rpc));
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
-		printk(KERN_ERR "proto_register failed in homa_init: %d\n",
+		printk(KERN_ERR "proto_register failed for homa_prot: %d\n",
+		    status);
+		goto out;
+	}
+	status = proto_register(&homav6_prot, 1);
+	if (status != 0) {
+		printk(KERN_ERR "proto_register failed for homav6_prot: %d\n",
 		    status);
 		goto out;
 	}
 	inet_register_protosw(&homa_protosw);
-	inet6_register_protosw(&homa_protosw);
+	inet6_register_protosw(&homav6_protosw);
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		printk(KERN_ERR "inet_add_protocol failed in homa_load: %d\n",
@@ -493,8 +557,9 @@ out_cleanup:
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
-	inet6_unregister_protosw(&homa_protosw);
+	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
+	proto_unregister(&homav6_prot);
 out:
 	return status;
 }
@@ -516,9 +581,12 @@ static void __exit homa_unload(void) {
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
+	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
-	inet6_unregister_protosw(&homa_protosw);
+	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
+	proto_unregister(&homav6_prot);
 }
 
 module_init(homa_load);
@@ -538,12 +606,17 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
 	sockaddr_in_union *addr_in = (sockaddr_in_union *) addr;
-
-	if (addr_len < sizeof(struct sockaddr_in6)) {
-		return -EINVAL;
-	}
-	if (addr_in->in6.sin6_family != AF_INET6) {
+	if (unlikely(addr->sa_family != sock->sk->sk_family)) {
 		return -EAFNOSUPPORT;
+	}
+	if (addr_in->in6.sin6_family == AF_INET6) {
+		if (addr_len < sizeof(struct sockaddr_in6)) {
+			return -EINVAL;
+		}
+	} else if (addr_in->in4.sin_family == AF_INET) {
+		if (addr_len < sizeof(struct sockaddr_in)) {
+			return -EINVAL;
+		}
 	}
 	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->in6.sin6_port));
 }
@@ -627,6 +700,11 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	if (unlikely(err < 0))
 		goto error;
+	if (unlikely(args.id && args.source_addr.in6.sin6_family &&
+			args.source_addr.sa.sa_family != sk->sk_family)) {
+		err = -EAFNOSUPPORT;
+		goto error;
+	}
 	rpc = homa_wait_for_message(hsk, args.flags, args.id,
 			&args.source_addr);
 	if (IS_ERR(rpc)) {
@@ -746,7 +824,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	if (unlikely(args.dest_addr.in6.sin6_family != AF_INET6)) {
+	if (unlikely(args.dest_addr.in6.sin6_family &&
+			args.dest_addr.in6.sin6_family != sk->sk_family)) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
@@ -833,7 +912,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 			ip6_as_u32(args.dest_addr.in6.sin6_addr),
 			ntohs(args.dest_addr.in6.sin6_port),
 			atomic64_read(&hsk->homa->next_outgoing_id));
-	if (unlikely(args.dest_addr.in6.sin6_family != AF_INET6)) {
+	if (unlikely(args.dest_addr.in6.sin6_family &&
+			args.dest_addr.in6.sin6_family != sk->sk_family)) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}

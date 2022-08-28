@@ -1206,6 +1206,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	if (port < HOMA_MIN_DEFAULT_PORT)
 		homa_sock_bind(&homa->port_map, hsk, port);
 	sk->sk_data_ready = mock_data_ready;
+	sk->sk_family = AF_INET6;
 	hsk->inet.pinet6 = &hsk_pinfo;
 }
 

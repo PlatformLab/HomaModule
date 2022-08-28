@@ -178,6 +178,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 	// Second call gets remainder, deletes message.
 	self->recv_args.length = 200;
 	memset(&self->recv_args.source_addr, 0, sizeof(self->recv_args.source_addr));
+	self->recv_args.source_addr.in6.sin6_family = AF_INET6;
 	self->recv_args.id = self->client_id;
 	EXPECT_EQ(50, homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
