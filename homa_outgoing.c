@@ -308,7 +308,11 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	set_priority(skb, hsk, priority);
 	skb->ooo_okay = 1;
 	skb_get(skb);
-	result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0, NULL, 0, priority);
+	if (hsk->inet.sk.sk_family == AF_INET6) {
+		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0, NULL, 0, priority);
+	} else {
+		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
+	}
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
 
@@ -449,12 +453,21 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct common_header, checksum);
-	tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, id %d, "
-			"offset %d",
-			skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
-			htonl(h->seg.offset));
+	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
+		tt_record4("calling ip6_xmit: skb->len %d, peer 0x%x, id %d, "
+				"offset %d",
+				skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
+				htonl(h->seg.offset));
 
-	err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6, 0, NULL, 0, priority);
+		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6, 0, NULL, 0, priority);
+	} else {
+		tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, id %d, "
+				"offset %d",
+				skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
+				htonl(h->seg.offset));
+
+		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
+	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
 			"granted %d",
 			rpc->id, ntohl(h->seg.offset), skb->len,
