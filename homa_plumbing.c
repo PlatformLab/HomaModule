@@ -1231,7 +1231,6 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0
  */
 int homa_softirq(struct sk_buff *skb) {
-	const struct in6_addr *saddr;
 	struct common_header *h;
 	struct sk_buff *packets, *short_packets, *next;
 	struct sk_buff **prev_link, **short_link;
@@ -1293,8 +1292,8 @@ int homa_softirq(struct sk_buff *skb) {
 	packets = short_packets;
 
 	for (skb = packets; skb != NULL; skb = next) {
+		const struct in6_addr saddr = skb_ipv6_saddr(skb);
 		next = skb->next;
-		saddr = &ipv6_hdr(skb)->saddr;
 		num_packets++;
 
 		/* The code below makes the header available at skb->data, even
@@ -1328,7 +1327,7 @@ int homa_softirq(struct sk_buff *skb) {
 						"Homa %s packet from %s too "
 						"short: %d bytes\n",
 						homa_symbol_for_type(h->type),
-						homa_print_ipv6_addr(saddr),
+						homa_print_ipv6_addr(&saddr),
 						skb->len - header_offset);
 			INC_METRIC(short_packets, 1);
 			goto discard;
@@ -1337,7 +1336,7 @@ int homa_softirq(struct sk_buff *skb) {
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
-					ip6_as_u32(*saddr), ntohs(h->sport),
+					ip6_as_u32(saddr), ntohs(h->sport),
 					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
@@ -1349,7 +1348,7 @@ int homa_softirq(struct sk_buff *skb) {
 			if (!tt_frozen) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
-						ntohs(h->dport), ip6_as_u32(*saddr),
+						ntohs(h->dport), ip6_as_u32(saddr),
 						ntohs(h->sport),
 						homa_local_id(h->sender_id));
 				tt_freeze();

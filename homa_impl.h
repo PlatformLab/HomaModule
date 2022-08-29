@@ -2920,5 +2920,10 @@ static inline struct in6_addr ip4to6(struct in_addr ip4)
 	return ret;
 }
 
+static inline struct in6_addr skb_ipv6_saddr(struct sk_buff *skb)
+{
+	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ipv4_hdr(skb)->saddr);
+}
+
 extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */

@@ -346,21 +346,21 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	struct common_header *h = (struct common_header *) skb->data;
 	struct unknown_header unknown;
 	struct homa_peer *peer;
+	struct in6_addr saddr = skb_ipv6_saddr(skb);
 
 	if (hsk->homa->verbose)
 		printk(KERN_NOTICE "sending UNKNOWN to peer "
 				"%s:%d for id %llu",
-				homa_print_ipv6_addr(&ipv6_hdr(skb)->saddr),
+				homa_print_ipv6_addr(&saddr),
 				ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
-			ip6_as_u32(ipv6_hdr(skb)->saddr),
+			ip6_as_u32(saddr),
 			ntohs(h->sport), homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	unknown.common.type = UNKNOWN;
-	peer = homa_peer_find(&hsk->homa->peers,
-			&ipv6_hdr(skb)->saddr, &hsk->inet);
+	peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);
 	if (!IS_ERR(peer))
 		 __homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
 }
