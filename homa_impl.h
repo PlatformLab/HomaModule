@@ -2696,7 +2696,10 @@ extern int      homa_grant_fifo(struct homa *homa);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
-               *homa_gro_receive(struct list_head *gro_list,
+               *homa_gro_receive_v4(struct list_head *gro_list,
+                    struct sk_buff *skb);
+extern struct sk_buff
+               *homa_gro_receive_v6(struct list_head *gro_list,
                     struct sk_buff *skb);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart

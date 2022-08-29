@@ -82,6 +82,16 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+static struct sk_buff *homa_gro_receive(struct list_head *gro_list,
+                    struct sk_buff *skb)
+{
+	if (testing_ipv6()) {
+		return homa_gro_receive_v6(gro_list, skb);
+	} else {
+		return homa_gro_receive_v4(gro_list, skb);
+	}
+}
+
 TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 {
 	struct sk_buff *skb;

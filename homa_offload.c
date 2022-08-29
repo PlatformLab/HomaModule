@@ -19,10 +19,18 @@
 
 #include "homa_impl.h"
 
-static const struct net_offload homa_offload = {
+static const struct net_offload homa_offload_v4 = {
 	.callbacks = {
 		.gso_segment	=	NULL,
-		.gro_receive	=	homa_gro_receive,
+		.gro_receive	=	homa_gro_receive_v4,
+		.gro_complete	=	homa_gro_complete,
+	},
+};
+
+static const struct net_offload homa_offload_v6 = {
+	.callbacks = {
+		.gso_segment	=	NULL,
+		.gro_receive	=	homa_gro_receive_v6,
 		.gro_complete	=	homa_gro_complete,
 	},
 };
@@ -36,7 +44,9 @@ extern struct homa *homa;
  */
 int homa_offload_init(void)
 {
-	return inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	int res1 = inet_add_offload(&homa_offload_v4, IPPROTO_HOMA);
+	int res2 = inet6_add_offload(&homa_offload_v6, IPPROTO_HOMA);
+	return res1 ? res1 : res2;
 }
 
 /**
@@ -47,7 +57,9 @@ int homa_offload_init(void)
  */
 int homa_offload_end(void)
 {
-	return inet6_del_offload(&homa_offload, IPPROTO_HOMA);
+	int res1 = inet_del_offload(&homa_offload_v4, IPPROTO_HOMA);
+	int res2 = inet6_del_offload(&homa_offload_v6, IPPROTO_HOMA);
+	return res1 ? res1 : res2;
 }
 
 /**
@@ -91,8 +103,8 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  * gro_list. The skb will be removed from the list by the caller and
  * passed up the stack immediately.
  */
-struct sk_buff *homa_gro_receive(struct list_head *held_list,
-		struct sk_buff *skb)
+static struct sk_buff *homa_gro_receive_common(struct list_head *held_list,
+		struct sk_buff *skb, int priority)
 {
 	/* This function will do one of the following things:
 	 * 1. Merge skb with a packet in gro_list by appending it to
@@ -104,40 +116,37 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	struct data_header *h_new;
 //	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
-	struct ipv6hdr *iph;
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
+	struct data_header *h_new = (struct data_header *) skb_transport_header(skb);
 
 //      The test below is overly conservative except for data packets.
 //	if (!pskb_may_pull(skb, 64))
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
-	iph = (struct ipv6hdr *) skb_network_header(skb);
-	h_new = (struct data_header *) skb_transport_header(skb);
 	if (h_new->common.type == DATA)
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset),
-				iph->priority);
+				priority);
 	else if (h_new->common.type == GRANT)
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
 				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
-				iph->priority);
+				priority);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
 				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
-				h_new->common.type, iph->priority);
+				h_new->common.type, priority);
 
 	core->last_active = get_cycles();
 
@@ -221,6 +230,20 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
     done:
 	homa_check_pacer(homa, 1);
 	return result;
+}
+
+struct sk_buff *homa_gro_receive_v4(struct list_head *held_list,
+		struct sk_buff *skb)
+{
+	struct iphdr *iph = (struct iphdr *) skb_network_header(skb);
+	return homa_gro_receive_common(held_list, skb, iph->tos >> 5);
+}
+
+struct sk_buff *homa_gro_receive_v6(struct list_head *held_list,
+		struct sk_buff *skb)
+{
+	struct ipv6hdr *iph = (struct ipv6hdr *) skb_network_header(skb);
+	return homa_gro_receive_common(held_list, skb, iph->priority);
 }
 
 /**
