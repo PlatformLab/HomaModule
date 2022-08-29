@@ -1154,7 +1154,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
 
-	ip_size = sizeof(struct ipv6hdr);
+	ip_size = testing_ipv6() ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(data_size + shinfo_size);
@@ -1169,8 +1169,15 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	p = skb_put(skb, extra_bytes);
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
-	ipv6_hdr(skb)->saddr = *saddr;
-	ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
+	if (testing_ipv6()) {
+		ipv6_hdr(skb)->version = 6;
+		ipv6_hdr(skb)->saddr = *saddr;
+		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
+	} else {
+		ip_hdr(skb)->version = 4;
+		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
+		ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	}
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
 	return skb;
