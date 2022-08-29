@@ -760,9 +760,15 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	args.length = (rpc->msgin.total_length >= 0) ? rpc->msgin.total_length
 			: 0;
 	memset(&args.source_addr, 0, sizeof(args.source_addr));
-	args.source_addr.in6.sin6_family = AF_INET6;
-	args.source_addr.in6.sin6_port = htons(rpc->dport);
-	args.source_addr.in6.sin6_addr = rpc->peer->addr;
+	if (sk->sk_family == AF_INET6) {
+		args.source_addr.in6.sin6_family = AF_INET6;
+		args.source_addr.in6.sin6_port = htons(rpc->dport);
+		args.source_addr.in6.sin6_addr = rpc->peer->addr;
+	} else {
+		args.source_addr.in4.sin_family = AF_INET;
+		args.source_addr.in4.sin_port = htons(rpc->dport);
+		args.source_addr.in4.sin_addr.s_addr = ip6_as_u32(rpc->peer->addr);
+	}
 	args.id = rpc->id;
 	args.completion_cookie = rpc->completion_cookie;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
@@ -814,6 +820,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
 	size_t length;
+	struct in6_addr canonical_dest;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
@@ -824,6 +831,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
+	canonical_dest = canonical_ipv6_addr(&args.dest_addr);
 	if (unlikely(args.dest_addr.in6.sin6_family &&
 			args.dest_addr.in6.sin6_family != sk->sk_family)) {
 		err = -EAFNOSUPPORT;
@@ -843,8 +851,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	err = 0;
 	length = iter.count;
 
-	peer = homa_peer_find(&hsk->homa->peers, &args.dest_addr.in6.sin6_addr,
-			&hsk->inet);
+	peer = homa_peer_find(&hsk->homa->peers, &canonical_dest, &hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
 		goto done;
@@ -855,7 +862,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 
-	srpc = homa_find_server_rpc(hsk, &args.dest_addr.in6.sin6_addr,
+	srpc = homa_find_server_rpc(hsk, &canonical_dest,
 			ntohs(args.dest_addr.in6.sin6_port), args.id);
 	if (!srpc) {
 		homa_free_skbs(skbs);
@@ -1292,7 +1299,7 @@ int homa_softirq(struct sk_buff *skb) {
 	packets = short_packets;
 
 	for (skb = packets; skb != NULL; skb = next) {
-		const struct in6_addr saddr = skb_ipv6_saddr(skb);
+		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 		next = skb->next;
 		num_packets++;
 

@@ -2920,7 +2920,18 @@ static inline struct in6_addr ip4to6(struct in_addr ip4)
 	return ret;
 }
 
-static inline struct in6_addr skb_ipv6_saddr(struct sk_buff *skb)
+static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
+{
+	if (addr) {
+		return (addr->sa.sa_family == AF_INET6)
+			? addr->in6.sin6_addr
+			: ip4to6(addr->in4.sin_addr);
+	} else {
+		return in6addr_any;
+	}
+}
+
+static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
 	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ipv4_hdr(skb)->saddr);
 }

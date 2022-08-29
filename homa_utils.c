@@ -208,6 +208,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	struct homa_rpc_bucket *bucket;
 	struct sk_buff *skb = NULL;
 	size_t length = iter->count;
+	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 
 	crpc = (struct homa_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
@@ -222,7 +223,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
-			&dest->in6.sin6_addr, &hsk->inet);
+			&dest_addr_as_ipv6, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);

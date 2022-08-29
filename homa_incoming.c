@@ -262,6 +262,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 		struct homa_lcache *lcache, int *delta)
 {
 	struct common_header *h = (struct common_header *) skb->data;
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_rpc *rpc;
 	__u64 id = homa_local_id(h->sender_id);
 
@@ -276,12 +277,12 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			 * make sure we don't have an RPC locked.
 			 */
 			homa_lcache_release(lcache);
-			homa_rpc_acked(hsk, &ipv6_hdr(skb)->saddr, &dh->seg.ack);
+			homa_rpc_acked(hsk, &saddr, &dh->seg.ack);
 		}
 	}
 
 	/* Find and lock the RPC for this packet. */
-	rpc = homa_lcache_get(lcache, id, &ipv6_hdr(skb)->saddr, ntohs(h->sport));
+	rpc = homa_lcache_get(lcache, id, &saddr, ntohs(h->sport));
 	if (!rpc) {
 		/* To avoid deadlock, must release old RPC before locking new. */
 		homa_lcache_release(lcache);
@@ -290,7 +291,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			if (h->type == DATA) {
 				/* Create a new RPC if one doesn't already exist. */
 				rpc = homa_rpc_new_server(hsk,
-						&ipv6_hdr(skb)->saddr,
+						&saddr,
 						(struct data_header *) h);
 				if (IS_ERR(rpc)) {
 					printk(KERN_WARNING "homa_pkt_dispatch "
@@ -303,7 +304,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 				}
 			} else
 				rpc = homa_find_server_rpc(hsk,
-						&ipv6_hdr(skb)->saddr,
+						&saddr,
 						ntohs(h->sport), id);
 
 		} else {
@@ -318,7 +319,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					id, h->type,
-					ip6_as_u32(ipv6_hdr(skb)->saddr),
+					ip6_as_u32(saddr),
 					ntohs(h->sport));
 			if ((h->type != GRANT) || homa_is_client(id))
 				INC_METRIC(unknown_rpcs, 1);
@@ -547,13 +548,14 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		struct homa_sock *hsk)
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct busy_header busy;
 
 	if (rpc == NULL) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
 				"offset %d; responding with UNKNOWN",
 				homa_local_id(h->common.sender_id),
-				ip6_as_u32(ipv6_hdr(skb)->saddr),
+				ip6_as_u32(saddr),
 				ntohs(h->common.sport),
 				ntohl(h->offset));
 		homa_xmit_unknown(skb, hsk);
@@ -664,10 +666,11 @@ done:
  */
 void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 {
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	int i;
 	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
 	struct homa_peer *peer = homa_peer_find(&hsk->homa->peers,
-		&ipv6_hdr(skb)->saddr, &hsk->inet);
+		&saddr, &hsk->inet);
 
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
@@ -690,6 +693,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		struct homa_rpc *rpc)
 {
 	struct common_header *h = (struct common_header *) skb->data;
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct ack_header ack;
 	struct homa_peer *peer;
 
@@ -706,7 +710,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		}
 		peer = rpc->peer;
 	} else {
-		peer = homa_peer_find(&hsk->homa->peers, &ipv6_hdr(skb)->saddr,
+		peer = homa_peer_find(&hsk->homa->peers, &saddr,
 				&hsk->inet);
 		if (IS_ERR(peer))
 			goto done;
@@ -725,7 +729,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
 			"other acks", homa_local_id(h->sender_id),
-			ip6_as_u32(ipv6_hdr(skb)->saddr), ntohs(ack.num_acks));
+			ip6_as_u32(saddr), ntohs(ack.num_acks));
 
     done:
 	kfree_skb(skb);
@@ -745,6 +749,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		struct homa_rpc *rpc, struct homa_lcache *lcache)
 {
 	struct ack_header *h = (struct ack_header *) skb->data;
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	int i, count;
 
 	if (rpc != NULL) {
@@ -754,10 +759,10 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 
 	count = ntohs(h->num_acks);
 	for (i = 0; i < count; i++)
-		homa_rpc_acked(hsk, &ipv6_hdr(skb)->saddr, &h->acks[i]);
+		homa_rpc_acked(hsk, &saddr, &h->acks[i]);
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 			homa_local_id(h->common.sender_id),
-			ip6_as_u32(ipv6_hdr(skb)->saddr), count);
+			ip6_as_u32(saddr), count);
 	kfree_skb(skb);
 }
 
@@ -1392,6 +1397,7 @@ int homa_register_interests(struct homa_interest *interest,
 		const sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *rpc = NULL;
+	struct in6_addr client_addr_as_ipv6 = canonical_ipv6_addr(client_addr);
 
 	interest->thread = current;
 	interest->ready_rpc = NULL;
@@ -1406,7 +1412,7 @@ int homa_register_interests(struct homa_interest *interest,
 			rpc = homa_find_client_rpc(hsk, id);
 		else
 			rpc = homa_find_server_rpc(hsk,
-					&client_addr->in6.sin6_addr,
+					&client_addr_as_ipv6,
 					ntohs(client_addr->in6.sin6_port), id);
 		if (rpc == NULL)
 			return -EINVAL;

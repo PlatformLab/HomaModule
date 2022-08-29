@@ -346,7 +346,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	struct common_header *h = (struct common_header *) skb->data;
 	struct unknown_header unknown;
 	struct homa_peer *peer;
-	struct in6_addr saddr = skb_ipv6_saddr(skb);
+	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
 	if (hsk->homa->verbose)
 		printk(KERN_NOTICE "sending UNKNOWN to peer "
