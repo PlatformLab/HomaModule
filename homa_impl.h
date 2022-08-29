@@ -2904,5 +2904,18 @@ static inline struct ipv4hdr *ipv4_hdr(struct sk_buff *skb)
 	return  (struct ipv4hdr *)ip_hdr(skb);
 }
 
+static inline bool skb_is_ipv6(const struct sk_buff *skb)
+{
+	return ipv6_hdr(skb)->version == 6;
+}
+
+static inline struct in6_addr ip4to6(struct in_addr ip4)
+{
+	struct in6_addr ret = {};
+	ret.in6_u.u6_addr32[2] = htonl(0xffff);
+	ret.in6_u.u6_addr32[3] = ip4.s_addr;
+	return ret;
+}
+
 extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */

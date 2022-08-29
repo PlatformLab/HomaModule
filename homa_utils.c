@@ -797,11 +797,17 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	int used = 0;
 	struct common_header *common = (struct common_header *) skb->data;
+	struct in6_addr addr;
+	if (skb_is_ipv6(skb)) {
+		addr = ipv6_hdr(skb)->saddr;
+	} else {
+		addr = ip4to6(ipv4_hdr(skb)->saddr);
+	}
 
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
-		homa_print_ipv6_addr(&ipv6_hdr(skb)->saddr),
+		homa_print_ipv6_addr(&addr),
 		ntohs(common->sport), ntohs(common->dport),
 		be64_to_cpu(common->sender_id));
 	switch (common->type) {
