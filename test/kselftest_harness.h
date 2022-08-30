@@ -350,12 +350,14 @@ extern int strcmp(const char *s1, const char *s2);
 #define ASSERT_EQ(expected, seen) \
 	__EXPECT(expected, seen, ==, return)
 
+#define INET6_ADDRSTRLEN 46
+
 #define EXPECT_EQ_IP(a, b) \
 	do { \
 		struct in6_addr _a1 = (a), _a2 = (b); \
-		char buf1[128], buf2[128]; \
-		strcpy(buf1, homa_print_ipv6_addr(&_a1)); \
-		strcpy(buf2, homa_print_ipv6_addr(&_a2)); \
+		char buf1[INET6_ADDRSTRLEN+2], buf2[INET6_ADDRSTRLEN+2]; \
+		strncpy(buf1, homa_print_ipv6_addr(&_a1), sizeof(buf1)); \
+		strncpy(buf2, homa_print_ipv6_addr(&_a2), sizeof(buf2)); \
 		EXPECT_STREQ(buf1, buf2); \
 	} while(0)
 /**

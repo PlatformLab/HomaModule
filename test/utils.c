@@ -147,7 +147,6 @@ struct in6_addr unit_get_in_addr(char *s)
 		ret.s6_addr32[2] = htonl(0x0000ffff);
 	} else {
 		int inet_pton(int af, const char *src, void *dst);
-		// char buf[INET6_ADDRSTRLEN];
 		int res = inet_pton(AF_INET6, s, &ret);
 		if (res <= 0) {
 			abort();

@@ -2915,6 +2915,7 @@ static inline bool skb_is_ipv6(const struct sk_buff *skb)
 static inline struct in6_addr ip4to6(struct in_addr ip4)
 {
 	struct in6_addr ret = {};
+	if (ip4.s_addr == INADDR_ANY) return in6addr_any;
 	ret.in6_u.u6_addr32[2] = htonl(0xffff);
 	ret.in6_u.u6_addr32[3] = ip4.s_addr;
 	return ret;
@@ -2935,6 +2936,32 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
 	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ipv4_hdr(skb)->saddr);
 }
+
+static inline bool is_mapped_ipv4(const struct in6_addr x)
+{
+	return ((x.in6_u.u6_addr32[0] == 0) &&
+		(x.in6_u.u6_addr32[1] == 0) &&
+		(x.in6_u.u6_addr32[2] == htonl(0xffff)));
+}
+
+// tt_record uses 32 bit arguments. For mapped addresses just extract the 32-bit
+// IPv4 address, in the general case take the lower half of the upper half
+// of the 128 bit IPv6 address, and hope that is unique :-(
+
+static inline __be32 ip6_as_u32(const struct in6_addr x)
+{
+	if (is_mapped_ipv4(x)) {
+		return x.in6_u.u6_addr32[3];
+	} else {
+		return x.in6_u.u6_addr32[2];
+	}
+}
+
+static inline __be32 ip4_as_u32(struct in_addr x)
+{
+	return ntohl(x.s_addr);
+}
+
 
 extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */
