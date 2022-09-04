@@ -51,15 +51,15 @@ FIXTURE_SETUP(homa_plumbing)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->client_addr.in6.sin6_family = AF_INET6;
 	self->client_addr.in6.sin6_addr = self->client_ip[0];
 	self->client_addr.in6.sin6_port = htons(self->client_port);
-	self->server_addr.in6.sin6_family = AF_INET6;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
 	homa = &self->homa;
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
+	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
+	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
@@ -178,7 +178,6 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 	// Second call gets remainder, deletes message.
 	self->recv_args.length = 200;
 	memset(&self->recv_args.source_addr, 0, sizeof(self->recv_args.source_addr));
-	self->recv_args.source_addr.in6.sin6_family = AF_INET6;
 	self->recv_args.id = self->client_id;
 	EXPECT_EQ(50, homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
@@ -290,7 +289,8 @@ TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
-	self->reply_args.dest_addr.in6.sin6_family = AF_INET+1;
+	int family = (self->hsk.inet.sk.sk_family == AF_INET) ? AF_INET6 : AF_INET;
+	self->reply_args.dest_addr.in6.sin6_family = family;
 	EXPECT_EQ(EAFNOSUPPORT, -homa_ioc_reply(&self->hsk.inet.sk,
 			(unsigned long) &self->reply_args));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
@@ -356,7 +356,8 @@ TEST_F(homa_plumbing, homa_ioc_send__cant_read_user_args)
 }
 TEST_F(homa_plumbing, homa_ioc_send__bad_address_family)
 {
-	self->send_args.dest_addr.in6.sin6_family = AF_INET + 1;
+	int family = (self->hsk.inet.sk.sk_family == AF_INET) ? AF_INET6 : AF_INET;
+	self->send_args.dest_addr.in6.sin6_family = family;
 	EXPECT_EQ(EAFNOSUPPORT, -homa_ioc_send(&self->hsk.inet.sk,
 			(unsigned long) &self->send_args));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));

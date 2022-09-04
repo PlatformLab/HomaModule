@@ -91,7 +91,10 @@ unit: $(OBJS)
 	g++ $(CFLAGS) $^ -o $@ -lasan
 
 run_tests: unit
-	./unit
+	echo "Testing IPv6..."
+	IPV6=1 ./unit
+	echo "Testing IPv4..."
+	IPV6=0 ./unit
 
 clean:
 	rm -f unit $(CLEANS)
