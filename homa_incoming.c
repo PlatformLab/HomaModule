@@ -807,8 +807,15 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 		 * adjust its position in the list.
 		 */
 		candidate = list_prev_entry(rpc, grantable_links);
-		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
+		/* Fewer remaining bytes wins: */
+		if (candidate->msgin.bytes_remaining < msgin->bytes_remaining)
 			goto position_peer;
+		/* Tie-Breaker: oldest wins */
+		if (candidate->msgin.bytes_remaining == msgin->bytes_remaining) {
+			if (candidate->msgin.birth <= msgin->birth) {
+				goto position_peer;
+			}
+		}
 		__list_del_entry(&candidate->grantable_links);
 		list_add(&candidate->grantable_links, &rpc->grantable_links);
 	}
