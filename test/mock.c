@@ -437,7 +437,17 @@ int inet_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
 	return 0;
 }
 
+int inet6_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
+{
+	return 0;
+}
+
 int inet_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	return 0;
+}
+
+int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 {
 	return 0;
 }
@@ -456,6 +466,11 @@ int inet6_register_protosw(struct inet_protosw *p)
 }
 
 int inet_release(struct socket *sock)
+{
+	return 0;
+}
+
+int inet6_release(struct socket *sock)
 {
 	return 0;
 }
