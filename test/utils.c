@@ -44,7 +44,7 @@
  *                 received. The RPC is not locked.
  */
 struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
-		struct in_addr * client_ip, struct in_addr * server_ip,
+		struct in6_addr * client_ip, struct in6_addr * server_ip,
 		int server_port, int id, int req_length, int resp_length)
 {
 	return unit_client_rpc_cookie(hsk, state, client_ip, server_ip,
@@ -52,7 +52,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 }
 
 struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
-		struct in_addr *client_ip, struct in_addr *server_ip,
+		struct in6_addr *client_ip, struct in6_addr *server_ip,
 		int server_port, int id, int req_length, int resp_length,
 		uint64_t completion_cookie)
 {
@@ -61,9 +61,9 @@ struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
 	int incoming_delta = 0;
 
-	server_addr.in4.sin_family = AF_INET;
-	server_addr.in4.sin_addr = *server_ip;
-	server_addr.in4.sin_port =  htons(server_port);
+	server_addr.in6.sin6_family = AF_INET6;
+	server_addr.in6.sin6_addr = *server_ip;
+	server_addr.in6.sin6_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
@@ -138,12 +138,20 @@ struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
  *              s couldn't be parsed properly then 0 is returned.
  *
  */
-struct in_addr unit_get_in_addr(char *s)
+struct in6_addr unit_get_in_addr(char *s)
 {
-	struct in_addr ret = {};
+	struct in6_addr ret = {};
 	unsigned int a, b, c, d;
 	if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-		ret.s_addr = htonl((a<<24) + (b<<16) + (c<<8) + d);
+		ret.s6_addr32[3] = htonl((a<<24) + (b<<16) + (c<<8) + d);
+		ret.s6_addr32[2] = htonl(0x0000ffff);
+	} else {
+		int inet_pton(int af, const char *src, void *dst);
+		// char buf[INET6_ADDRSTRLEN];
+		int res = inet_pton(AF_INET6, s, &ret);
+		if (res <= 0) {
+			abort();
+		}
 	}
 	return ret;
 }
@@ -216,7 +224,7 @@ void unit_log_grantables(struct homa *homa)
 					"remaining %d",
 					homa_is_client(rpc->id) ? "response"
 					: "request",
-					homa_print_ipv4_addr(&peer->addr),
+					homa_print_ipv6_addr(&peer->addr),
 					(long unsigned int) rpc->id,
 					rpc->msgin.bytes_remaining);
 		}
@@ -341,7 +349,7 @@ void unit_log_throttled(struct homa *homa)
  *                 The RPC is not locked.
  */
 struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
-		struct in_addr * client_ip, struct in_addr * server_ip, int client_port, int id,
+		struct in6_addr * client_ip, struct in6_addr * server_ip, int client_port, int id,
 	        int req_length, int resp_length)
 {
 	int bytes_received;

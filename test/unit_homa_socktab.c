@@ -26,9 +26,9 @@
 FIXTURE(homa_socktab) {
 	struct homa homa;
 	struct homa_sock hsk;
-	struct in_addr client_ip[1];
+	struct in6_addr client_ip[1];
 	int client_port;
-	struct in_addr server_ip[1];
+	struct in6_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 };

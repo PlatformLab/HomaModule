@@ -24,7 +24,7 @@ extern struct homa *homa;
 
 FIXTURE(homa_offload) {
 	struct homa homa;
-	struct in_addr ip[1];
+	struct in6_addr ip[1];
 	struct data_header header;
 	struct napi_struct napi;
 	struct sk_buff *skb, *skb2;

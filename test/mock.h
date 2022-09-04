@@ -53,7 +53,7 @@ extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);
 extern struct sk_buff *
-                   mock_skb_new(struct in_addr *saddr, struct common_header *h,
+                   mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 			int extra_bytes, int first_value);
 extern void        mock_sock_destroy(struct homa_sock *hsk,
 			struct homa_socktab *socktab);

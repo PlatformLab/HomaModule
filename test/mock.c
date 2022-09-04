@@ -136,7 +136,7 @@ int mock_xmit_prios_offset = 0;
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
  */
-#define MOCK_MTU (UNIT_TEST_DATA_PER_PACKET + HOMA_IPV4_HEADER_LENGTH \
+#define MOCK_MTU (UNIT_TEST_DATA_PER_PACKET + HOMA_IPV6_HEADER_LENGTH \
 		+ sizeof(struct data_header))
 int mock_mtu = MOCK_MTU;
 
@@ -1110,7 +1110,7 @@ void mock_rcu_read_unlock(void)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_new(struct in_addr *saddr, struct common_header *h,
+struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;
@@ -1169,8 +1169,8 @@ struct sk_buff *mock_skb_new(struct in_addr *saddr, struct common_header *h,
 	p = skb_put(skb, extra_bytes);
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
-	ip_hdr(skb)->saddr = saddr->s_addr;
-	ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	ipv6_hdr(skb)->saddr = *saddr;
+	ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
 	return skb;

@@ -21,9 +21,9 @@
 #include "utils.h"
 
 FIXTURE(homa_timer) {
-	struct in_addr client_ip[1];
+	struct in6_addr client_ip[1];
 	int client_port;
-	struct in_addr server_ip[1];
+	struct in6_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
@@ -39,9 +39,9 @@ FIXTURE_SETUP(homa_timer)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->server_addr.in4.sin_family = AF_INET;
-	self->server_addr.in4.sin_addr = *self->server_ip;
-	self->server_addr.in4.sin_port =  htons(self->server_port);
+	self->server_addr.in6.sin6_family = AF_INET;
+	self->server_addr.in6.sin6_addr = *self->server_ip;
+	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;

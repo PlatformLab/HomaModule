@@ -27,8 +27,8 @@ FIXTURE(homa_lcache) {
 	struct homa_sock hsk;
 	struct homa_rpc *crpc;
 	struct homa_rpc *srpc;
-	struct in_addr client_ip[2];
-	struct in_addr server_ip[1];
+	struct in6_addr client_ip[2];
+	struct in6_addr server_ip[1];
 };
 FIXTURE_SETUP(homa_lcache)
 {

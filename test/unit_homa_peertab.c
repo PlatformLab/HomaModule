@@ -20,16 +20,17 @@
 #include "mock.h"
 #include "utils.h"
 
-struct in_addr ip1111[1];
-struct in_addr ip2222[1];
-struct in_addr ip3333[1];
+struct in6_addr ip1111[1];
+struct in6_addr ip2222[1];
+struct in6_addr ip3333[1];
+
 
 FIXTURE(homa_peertab) {
 	struct homa homa;
 	struct homa_sock hsk;
 	struct homa_peertab peertab;
-	struct in_addr client_ip[1];
-	struct in_addr server_ip[1];
+	struct in6_addr client_ip[1];
+	struct in6_addr server_ip[1];
 	int server_port;
 };
 FIXTURE_SETUP(homa_peertab)
@@ -39,9 +40,9 @@ FIXTURE_SETUP(homa_peertab)
 	homa_peertab_init(&self->peertab);
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
-	ip1111[0] = unit_get_in_addr("1.1.1.1");
-	ip2222[0] = unit_get_in_addr("2.2.2.2");
-	ip3333[0] = unit_get_in_addr("3.3.3.3");
+	ip1111[0] = unit_get_in_addr("1::1:1:1");
+	ip2222[0] = unit_get_in_addr("2::2:2:2");
+	ip3333[0] = unit_get_in_addr("3::3:3:3");
 	self->server_port = 99;
 }
 FIXTURE_TEARDOWN(homa_peertab)

@@ -24,9 +24,9 @@
 #define N(x) htonl(x)
 
 FIXTURE(homa_utils) {
-	struct in_addr client_ip[1];
+	struct in6_addr client_ip[1];
 	int client_port;
-	struct in_addr server_ip[1];
+	struct in6_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
@@ -46,9 +46,9 @@ FIXTURE_SETUP(homa_utils)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->server_addr.in4.sin_family = AF_INET;
-	self->server_addr.in4.sin_addr = *self->server_ip;
-	self->server_addr.in4.sin_port =  htons(self->server_port);
+	self->server_addr.in6.sin6_family = AF_INET;
+	self->server_addr.in6.sin6_addr = *self->server_ip;
+	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->data = (struct data_header){.common = {
@@ -634,17 +634,17 @@ TEST_F(homa_utils, homa_print_ipv4_addr)
 	char *p1, *p2;
 	int i;
 
-	struct in_addr test_addr1 = unit_get_in_addr("192.168.0.1");
-	struct in_addr test_addr2 = unit_get_in_addr("1.2.3.4");
-	struct in_addr test_addr3 = unit_get_in_addr("5.6.7.8");
-	p1 = homa_print_ipv4_addr(&test_addr1);
-	p2 = homa_print_ipv4_addr(&test_addr2);
+	struct in6_addr test_addr1 = unit_get_in_addr("192.168.0.1");
+	struct in6_addr test_addr2 = unit_get_in_addr("1.2.3.4");
+	struct in6_addr test_addr3 = unit_get_in_addr("5.6.7.8");
+	p1 = homa_print_ipv6_addr(&test_addr1);
+	p2 = homa_print_ipv6_addr(&test_addr2);
 	EXPECT_STREQ("192.168.0.1", p1);
 	EXPECT_STREQ("1.2.3.4", p2);
 
 	/* Make sure buffers eventually did reused. */
 	for (i = 0; i < 20; i++)
-		homa_print_ipv4_addr(&test_addr3);
+		homa_print_ipv6_addr(&test_addr3);
 	EXPECT_STREQ("5.6.7.8", p1);
 }
 

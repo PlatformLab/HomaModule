@@ -352,10 +352,10 @@ extern int strcmp(const char *s1, const char *s2);
 
 #define EXPECT_EQ_IP(a, b) \
 	do { \
-		struct in_addr _a1 = (a), _a2 = (b); \
+		struct in6_addr _a1 = (a), _a2 = (b); \
 		char buf1[128], buf2[128]; \
-		strcpy(buf1, homa_print_ipv4_addr(&_a1)); \
-		strcpy(buf2, homa_print_ipv4_addr(&_a2)); \
+		strcpy(buf1, homa_print_ipv6_addr(&_a1)); \
+		strcpy(buf2, homa_print_ipv6_addr(&_a2)); \
 		EXPECT_STREQ(buf1, buf2); \
 	} while(0)
 /**

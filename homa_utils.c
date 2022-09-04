@@ -762,7 +762,25 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 	next_buf++;
 	if (next_buf >= NUM_BUFS)
 		next_buf = 0;
+#ifdef __UNIT_TEST__
+	struct in6_addr zero = {};
+	if (ipv6_addr_equal(addr, &zero)) {
+		snprintf(buffer, BUF_SIZE, "0.0.0.0");
+	} else if ((addr->s6_addr32[0] == 0) &&
+		(addr->s6_addr32[1] == 0) &&
+		(addr->s6_addr32[2] == htonl(0x0000ffff))) {
+		__u32 a2 = ntohl(addr->s6_addr32[3]);
+		snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
+				(a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
+	} else {
+		const char *inet_ntop(int, const void *, char *, size_t);
+		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE);
+		buffer[0] = '[';
+		strcat(buffer, "]");
+	}
+#else
 	snprintf(buffer, BUF_SIZE, "%pI6", addr);
+#endif
 	return buffer;
 }
 
