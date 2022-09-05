@@ -36,7 +36,7 @@ extern struct homa *homa;
  */
 int homa_offload_init(void)
 {
-	return inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	return inet6_add_offload(&homa_offload, IPPROTO_HOMA);
 }
 
 /**
@@ -47,7 +47,7 @@ int homa_offload_init(void)
  */
 int homa_offload_end(void)
 {
-	return inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	return inet6_del_offload(&homa_offload, IPPROTO_HOMA);
 }
 
 /**
@@ -107,7 +107,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct data_header *h_new;
 //	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
-	struct iphdr *iph;
+	struct ipv6hdr *iph;
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
@@ -116,28 +116,28 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 //	if (!pskb_may_pull(skb, 64))
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
-	iph = (struct iphdr *) skb_network_header(skb);
+	iph = (struct ipv6hdr *) skb_network_header(skb);
 	h_new = (struct data_header *) skb_transport_header(skb);
 	if (h_new->common.type == DATA)
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ip4_as_u32(ipv4_hdr(skb)->saddr),
+				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset),
-				iph->tos >> 5);
+				iph->priority);
 	else if (h_new->common.type == GRANT)
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ip4_as_u32(ipv4_hdr(skb)->saddr),
+				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
-				iph->tos >> 5);
+				iph->priority);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
-				ip4_as_u32(ipv4_hdr(skb)->saddr),
+				ip6_as_u32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
-				h_new->common.type, iph->tos >> 5);
+				h_new->common.type, iph->priority);
 
 	core->last_active = get_cycles();
 

@@ -131,8 +131,8 @@ enum homa_packet_type {
 	 */
 };
 
-/** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
-#define HOMA_IPV4_HEADER_LENGTH 20
+/** define HOMA_IPV6_HEADER_LENGTH - Size of IP header (V6). */
+#define HOMA_IPV6_HEADER_LENGTH 40
 
 /**
  * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
@@ -688,7 +688,7 @@ struct homa_interest {
 	 * @peer_addr: IP address of the peer for the matching RPC. Valid
 	 * only if @id is nonzero.
 	 */
-	struct in_addr peer_addr;
+	struct in6_addr peer_addr;
 
 	/**
 	 * @peer_port: Port of the peer for the matching RPC. Valid
@@ -1180,7 +1180,7 @@ struct homa_dead_dst {
 #define HOMA_PEERTAB_BUCKETS (1 << HOMA_PEERTAB_BUCKET_BITS)
 
 /**
- * struct homa_peertab - A hash table that maps from IPV4 addresses
+ * struct homa_peertab - A hash table that maps from IPV6 addresses
  * to homa_peer objects. Entries are gradually added to this table,
  * but they are never removed except when the entire table is deleted.
  * We can't safely delete because results returned by homa_peer_find
@@ -1215,11 +1215,11 @@ struct homa_peertab {
  * have communicated with (either as client or server).
  */
 struct homa_peer {
-	/** @daddr: IPV4 address for the machine. */
-	struct in_addr addr;
+	/** @daddr: IPV6 address for the machine. */
+	struct in6_addr addr;
 
 	/** @flow: Addressing info needed to send packets. */
-	struct flowi flow;
+	struct flowi6 flow;
 
 	/**
 	 * @dst: Used to route packets to this peer; we own a reference
@@ -1472,7 +1472,7 @@ struct homa {
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated
-	 * with; indexed by host IPV4 address.
+	 * with; indexed by host IPV6 address.
 	 */
 	struct homa_peertab peers;
 
@@ -2642,7 +2642,7 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 #define UNIT_LOG(...)
 #endif
 
-extern void     homa_abort_rpcs(struct homa *homa, const struct in_addr *addr, int port,
+extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr, int port,
                     int error);
 extern void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
@@ -2670,14 +2670,14 @@ extern int      homa_dointvec(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
                     struct homa_peer *peer, struct homa_sock *hsk);
-extern int      homa_err_handler(struct sk_buff *skb, u32 info);
+extern int      homa_err_handler(struct sk_buff *skb, struct inet6_skb_parm *, u8,  u8,  int,  __be32);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
                     struct iov_iter *iter);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
-               *homa_find_server_rpc(struct homa_sock *hsk, const struct in_addr *saddr,
+               *homa_find_server_rpc(struct homa_sock *hsk, const struct in6_addr *saddr,
                     __u16 sport, __u64 id);
 extern void     homa_free_skbs(struct sk_buff *skb);
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
@@ -2730,7 +2730,7 @@ extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern void     homa_peer_add_ack(struct homa_rpc *rpc);
 extern struct homa_peer
-               *homa_peer_find(struct homa_peertab *peertab, const struct in_addr *addr,
+               *homa_peer_find(struct homa_peertab *peertab, const struct in6_addr *addr,
                     struct inet_sock *inet);
 extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
 		    struct homa_ack *dst);
@@ -2741,7 +2741,7 @@ extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_lcache *lcache, int *delta);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
-extern char    *homa_print_ipv4_addr(const struct in_addr *addr);
+extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
@@ -2765,7 +2765,7 @@ extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
                     struct homa_sock *hsk);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
-extern void     homa_rpc_acked(struct homa_sock *hsk, const struct in_addr *saddr,
+extern void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		    struct homa_ack *ack);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
@@ -2775,7 +2775,7 @@ extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
                     const sockaddr_in_union *dest, struct iov_iter *iter);
 extern struct homa_rpc
-               *homa_rpc_new_server(struct homa_sock *hsk, const struct in_addr *source,
+               *homa_rpc_new_server(struct homa_sock *hsk, const struct in6_addr *source,
                     struct data_header *h);
 extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
@@ -2785,7 +2785,7 @@ extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    sockptr_t optval, unsigned int optlen);
+                    sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char* format, ...)
@@ -2869,34 +2869,6 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(&hsk->homa->peers, peer, hsk);
 	return peer->dst;
-}
-
-/* Like iphdr, but using 'struct in_addr' for the saddr and daddr fields */
-struct ipv4hdr {
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8    ihl:4,
-                version:4;
-#elif defined (__BIG_ENDIAN_BITFIELD)
-	__u8    version:4,
-		ihl:4;
-#else
-#error  "Please fix <asm/byteorder.h>"
-#endif
-	__u8    tos;
-	__be16  tot_len;
-	__be16  id;
-	__be16  frag_off;
-	__u8    ttl;
-	__u8    protocol;
-	__sum16 check;
-	struct in_addr  saddr;
-	struct in_addr  daddr;
-	/*The options start here. */
-};
-
-static inline struct ipv4hdr *ipv4_hdr(struct sk_buff *skb)
-{
-	return  (struct ipv4hdr *)ip_hdr(skb);
 }
 
 extern struct completion homa_pacer_kthread_done;

@@ -56,11 +56,11 @@ static int log_topic;
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
  * to implement top-level system calls. Many of these operations can
- * be implemented by PF_INET functions that are independent of the
+ * be implemented by PF_INET6 functions that are independent of the
  * Homa protocol.
  */
 const struct proto_ops homa_proto_ops = {
-	.family		   = PF_INET,
+	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
 	.release	   = inet_release,
 	.bind		   = homa_bind,
@@ -83,15 +83,15 @@ const struct proto_ops homa_proto_ops = {
 
 /* This structure also defines functions that handle various operations
  * on Homa sockets. However, these functions are lower-level than those
- * in homa_proto_ops: they are specific to the PF_INET protocol family,
+ * in homa_proto_ops: they are specific to the PF_INET6 protocol family,
  * and in many cases they are invoked by functions in homa_proto_ops.
  * Most of these functions have Homa-specific implementations.
  */
 struct proto homa_prot = {
-	.name		   = "HOMA",
+	.name		   = "HOMAv6",
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
-	.connect	   = ip4_datagram_connect,
+	.connect	   = ip6_datagram_connect,
 	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
@@ -102,7 +102,7 @@ struct proto homa_prot = {
 	.recvmsg	   = homa_recvmsg,
 	.sendpage	   = homa_sendpage,
 	.backlog_rcv       = homa_backlog_rcv,
-	.release_cb	   = ip4_datagram_release_cb,
+	.release_cb	   = ip6_datagram_release_cb,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.rehash		   = homa_rehash,
@@ -125,10 +125,10 @@ struct inet_protosw homa_protosw = {
 };
 
 /* This structure is used by IP to deliver incoming Homa packets to us. */
-static struct net_protocol homa_protocol = {
+static struct inet6_protocol homa_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler,
-	.no_policy =	1,
+	.flags =        INET6_PROTO_NOPOLICY,
 };
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
@@ -406,15 +406,15 @@ static int __init homa_load(void) {
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
 			"data_segment %u, ack %u, "
-			"grant_header %u, peer %u, ip_hdr %u, flowi %u "
+			"grant_header %u, peer %u, ipv6_hdr %u, flowi6 %u "
 			"tcp_sock %u homa_rpc %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
 			sizeof32(struct homa_ack),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),
-			sizeof32(struct iphdr),
-			sizeof32(struct flowi),
+			sizeof32(struct ipv6hdr),
+			sizeof32(struct flowi6),
 			sizeof32(struct tcp_sock),
 			sizeof32(struct homa_rpc));
 	status = proto_register(&homa_prot, 1);
@@ -423,8 +423,8 @@ static int __init homa_load(void) {
 		    status);
 		goto out;
 	}
-	inet_register_protosw(&homa_protosw);
-	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet6_register_protosw(&homa_protosw);
+	status = inet6_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		printk(KERN_ERR "inet_add_protocol failed in homa_load: %d\n",
 		    status);
@@ -474,8 +474,8 @@ out_cleanup:
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
-	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-	inet_unregister_protosw(&homa_protosw);
+	inet6_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet6_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 out:
 	return status;
@@ -498,8 +498,8 @@ static void __exit homa_unload(void) {
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
 	homa_destroy(homa);
-	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-	inet_unregister_protosw(&homa_protosw);
+	inet6_del_protocol(&homa_protocol, IPPROTO_HOMA);
+	inet6_unregister_protosw(&homa_protosw);
 	proto_unregister(&homa_prot);
 }
 
@@ -508,7 +508,7 @@ module_exit(homa_unload);
 
 /**
  * homa_bind() - Implements the bind system call for Homa sockets: associates
- * a well-known service port with a socket. Unlike other AF_INET protocols,
+ * a well-known service port with a socket. Unlike other AF_INET6 protocols,
  * there is no need to invoke this system call for sockets that are only
  * used as clients.
  * @sock:     Socket on which the system call was invoked.
@@ -521,13 +521,13 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 	struct homa_sock *hsk = homa_sk(sock->sk);
 	sockaddr_in_union *addr_in = (sockaddr_in_union *) addr;
 
-	if (addr_len < sizeof(struct sockaddr_in)) {
+	if (addr_len < sizeof(struct sockaddr_in6)) {
 		return -EINVAL;
 	}
-	if (addr_in->in4.sin_family != AF_INET) {
+	if (addr_in->in6.sin6_family != AF_INET6) {
 		return -EAFNOSUPPORT;
 	}
-	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->in4.sin_port));
+	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->in6.sin6_port));
 }
 
 /**
@@ -629,7 +629,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
 					"length %d",
 					elapsed, rpc->id,
-					ip4_as_u32(rpc->peer->addr),
+					ip6_as_u32(rpc->peer->addr),
 					rpc->msgin.total_length);
 			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
 					"elapsed time for RPC id %d, peer 0x%x");
@@ -641,7 +641,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			struct freeze_header freeze;
 			tt_record2("Freezing timetrace because of "
 					"sync_freeze, id %d, peer 0x%x",
-					rpc->id, ip4_as_u32(rpc->peer->addr));
+					rpc->id, ip6_as_u32(rpc->peer->addr));
 			tt_freeze();
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		}
@@ -663,11 +663,10 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	args.length = (rpc->msgin.total_length >= 0) ? rpc->msgin.total_length
 			: 0;
-	args.source_addr.in4.sin_family = AF_INET;
-	args.source_addr.in4.sin_port = htons(rpc->dport);
-	args.source_addr.in4.sin_addr.s_addr = rpc->peer->addr.s_addr;
-	memset(args.source_addr.in4.sin_zero, 0,
-			sizeof(args.source_addr.in4.sin_zero));
+	memset(&args.source_addr, 0, sizeof(args.source_addr));
+	args.source_addr.in6.sin6_family = AF_INET6;
+	args.source_addr.in6.sin6_port = htons(rpc->dport);
+	args.source_addr.in6.sin6_addr = rpc->peer->addr;
 	args.id = rpc->id;
 	args.completion_cookie = rpc->completion_cookie;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
@@ -683,7 +682,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
-			rpc->id & 0xffffffff, ip4_as_u32(rpc->peer->addr), result,
+			rpc->id & 0xffffffff, ip6_as_u32(rpc->peer->addr), result,
 			current->pid);
 	rpc->dont_reap = false;
 	kfree(iov);
@@ -729,7 +728,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	if (unlikely(args.dest_addr.in4.sin_family != AF_INET)) {
+	if (unlikely(args.dest_addr.in6.sin6_family != AF_INET6)) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
@@ -747,7 +746,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	err = 0;
 	length = iter.count;
 
-	peer = homa_peer_find(&hsk->homa->peers, &args.dest_addr.in4.sin_addr,
+	peer = homa_peer_find(&hsk->homa->peers, &args.dest_addr.in6.sin6_addr,
 			&hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
@@ -759,8 +758,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 
-	srpc = homa_find_server_rpc(hsk, &args.dest_addr.in4.sin_addr,
-			ntohs(args.dest_addr.in4.sin_port), args.id);
+	srpc = homa_find_server_rpc(hsk, &args.dest_addr.in6.sin6_addr,
+			ntohs(args.dest_addr.in6.sin6_port), args.id);
 	if (!srpc) {
 		homa_free_skbs(skbs);
 		err = -EINVAL;
@@ -813,10 +812,10 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	if (unlikely(err))
 //		return err;
 	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
-			ip4_as_u32(args.dest_addr.in4.sin_addr),
-			ntohs(args.dest_addr.in4.sin_port),
+			ip6_as_u32(args.dest_addr.in6.sin6_addr),
+			ntohs(args.dest_addr.in6.sin6_port),
 			atomic64_read(&hsk->homa->next_outgoing_id));
-	if (unlikely(args.dest_addr.in4.sin_family != AF_INET)) {
+	if (unlikely(args.dest_addr.in6.sin6_family != AF_INET6)) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
@@ -986,7 +985,7 @@ int homa_socket(struct sock *sk)
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname,
-    sockptr_t optval, unsigned int optlen) {
+    sockptr_t unused, unsigned int optlen) {
 	printk(KERN_WARNING "unimplemented setsockopt invoked on Homa socket:"
 			" level %d, optname %d, optlen %d\n",
 			level, optname, optlen);
@@ -1036,7 +1035,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
  * Return:    0 on success, otherwise a negative errno.
  */
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		 int noblock, int flags, int *addr_len) {
+		 int nonblocking, int flags, int *addr_len) {
 	/* Homa doesn't support the usual read-write kernel calls; must
 	 * invoke operations through ioctls in order to manipulate RPC ids.
 	 */
@@ -1134,7 +1133,7 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0
  */
 int homa_softirq(struct sk_buff *skb) {
-	struct in_addr saddr;
+	const struct in6_addr *saddr;
 	struct common_header *h;
 	struct sk_buff *packets, *short_packets, *next;
 	struct sk_buff **prev_link, **short_link;
@@ -1197,7 +1196,7 @@ int homa_softirq(struct sk_buff *skb) {
 
 	for (skb = packets; skb != NULL; skb = next) {
 		next = skb->next;
-		saddr.s_addr = ip_hdr(skb)->saddr;
+		saddr = &ipv6_hdr(skb)->saddr;
 		num_packets++;
 
 		/* The code below makes the header available at skb->data, even
@@ -1231,7 +1230,7 @@ int homa_softirq(struct sk_buff *skb) {
 						"Homa %s packet from %s too "
 						"short: %d bytes\n",
 						homa_symbol_for_type(h->type),
-						homa_print_ipv4_addr(&saddr),
+						homa_print_ipv6_addr(saddr),
 						skb->len - header_offset);
 			INC_METRIC(short_packets, 1);
 			goto discard;
@@ -1240,7 +1239,7 @@ int homa_softirq(struct sk_buff *skb) {
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
-					ip4_as_u32(saddr), ntohs(h->sport),
+					ip6_as_u32(*saddr), ntohs(h->sport),
 					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
@@ -1252,7 +1251,7 @@ int homa_softirq(struct sk_buff *skb) {
 			if (!tt_frozen) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
-						ntohs(h->dport), ip4_as_u32(saddr),
+						ntohs(h->dport), ip6_as_u32(*saddr),
 						ntohs(h->sport),
 						homa_local_id(h->sender_id));
 				tt_freeze();
@@ -1312,17 +1311,17 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
  */
-int homa_err_handler(struct sk_buff *skb, u32 info) {
-	const struct ipv4hdr *iph = (const struct ipv4hdr *)skb->data;
-	int type = icmp_hdr(skb)->type;
-	int code = icmp_hdr(skb)->code;
+int homa_err_handler(struct sk_buff *skb, struct inet6_skb_parm *opt,
+			u8 type,  u8 code,  int offset,  __be32 info)
+{
+	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
 
 	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
 		struct common_header *h;
 		char *icmp = (char *) icmp_hdr(skb);
-		iph = (struct ipv4hdr *) (icmp + sizeof(struct icmphdr));
+		iph = (struct ipv6hdr *) (icmp + sizeof(struct icmphdr));
 		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
-				+ iph->ihl*4);
+				+ HOMA_IPV6_HEADER_LENGTH);
 		homa_abort_rpcs(homa, &iph->daddr, htons(h->dport), -ENOTCONN);
 	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
@@ -1331,7 +1330,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-				ip4_as_u32(iph->saddr), ip4_as_u32(iph->daddr));
+				ip6_as_u32(iph->saddr), ip6_as_u32(iph->daddr));
 		homa_abort_rpcs(homa, &iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)

@@ -144,7 +144,16 @@ static inline __u64 tt_rdtsc(void)
 	return (((__u64)hi << 32) | lo);
 }
 
-#define ip4_as_u32(x) ntohl(x.s_addr)
+#define is_mapped_ipv4(x) (!(x).in6_u.u6_addr32[0] && \
+			!(x).in6_u.u6_addr32[1] && \
+			(ntohl((x).in6_u.u6_addr32[2]) == 0xfff))
+
+// tt_record uses 32 bit arguments. For mapped addresses just extract the 32-bit
+// IPv4 address, in the general case take the lower half of the upper half
+// of the 128 bit IPv6 address, and hope that is unique :-(
+#define ip6_as_u32(x) (is_mapped_ipv4(x) ? \
+		(ntohl((x).in6_u.u6_addr32[3])) : \
+		ntohl((x).in6_u.u6_addr32[1]))
 
 /**
  * tt_recordN(): record an event, along with N parameters.

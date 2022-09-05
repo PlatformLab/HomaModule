@@ -79,7 +79,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 	dst = homa_get_dst(peer, hsk);
 	mtu = dst_mtu(dst);
 
-	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
+	max_pkt_data = mtu - HOMA_IPV6_HEADER_LENGTH - sizeof(struct data_header);
 	if (len <= max_pkt_data) {
 		unsched = max_gso_data = len;
 		gso_size = mtu;
@@ -95,7 +95,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		if (bufs_per_gso == 0) {
 			bufs_per_gso = 1;
 			mtu = gso_size;
-			max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH
+			max_pkt_data = mtu - HOMA_IPV6_HEADER_LENGTH
 					- sizeof(struct data_header);
 		}
 		max_gso_data = bufs_per_gso * max_pkt_data;
@@ -129,11 +129,11 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 				&& (max_gso_data > max_pkt_data))) {
 			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
 					+ max_pkt_data;
-			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;
+			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV6;
 		}
 		skb_shinfo(skb)->gso_segs = 0;
 
-		skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
+		skb_reserve(skb, HOMA_IPV6_HEADER_LENGTH + HOMA_SKB_EXTRA);
 		skb_reset_transport_header(skb);
 		h = (struct data_header *) skb_put(skb,
 				sizeof(*h) - sizeof(struct data_segment));
@@ -294,7 +294,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	dst_hold(dst);
 	skb_dst_set(skb, dst);
 
-	skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
+	skb_reserve(skb, HOMA_IPV6_HEADER_LENGTH + HOMA_SKB_EXTRA);
 	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
 	memcpy(h, contents, length);
@@ -308,11 +308,11 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	set_priority(skb, hsk, priority);
 	skb->ooo_okay = 1;
 	skb_get(skb);
-	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
+	result = ip6_xmit((struct sock *) hsk, skb, &peer->flow, 0, NULL, 0, priority);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
 
-		/* It appears that ip_queue_xmit frees skbuffs after
+		/* It appears that ip6_xmit frees skbuffs after
 		 * errors; the following code is to raise an alert if
 		 * this isn't actually the case. The extra skb_get above
 		 * and kfree_skb below are needed to do the check
@@ -321,7 +321,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		 * a bogus "reference count").
 		 */
 		if (refcount_read(&skb->users) > 1)
-			printk(KERN_NOTICE "ip_queue_xmit didn't free "
+			printk(KERN_NOTICE "ip6_xmit didn't free "
 					"Homa control packet after error\n");
 	}
 	kfree_skb(skb);
@@ -346,17 +346,17 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	if (hsk->homa->verbose)
 		printk(KERN_NOTICE "sending UNKNOWN to peer "
 				"%s:%d for id %llu",
-				homa_print_ipv4_addr(&ipv4_hdr(skb)->saddr),
+				homa_print_ipv6_addr(&ipv6_hdr(skb)->saddr),
 				ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
-			ip4_as_u32(ipv4_hdr(skb)->saddr),
+			ip6_as_u32(ipv6_hdr(skb)->saddr),
 			ntohs(h->sport), homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	unknown.common.type = UNKNOWN;
 	peer = homa_peer_find(&hsk->homa->peers,
-			&ipv4_hdr(skb)->saddr, &hsk->inet);
+			&ipv6_hdr(skb)->saddr, &hsk->inet);
 	if (!IS_ERR(peer))
 		 __homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
 }
@@ -451,10 +451,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->csum_offset = offsetof(struct common_header, checksum);
 	tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, id %d, "
 			"offset %d",
-			skb->len, ip4_as_u32(rpc->peer->addr), rpc->id,
+			skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
 			htonl(h->seg.offset));
 
-	err = ip_queue_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow);
+	err = ip6_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow, 0, NULL, 0, priority);
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
 			"granted %d",
 			rpc->id, ntohl(h->seg.offset), skb->len,
@@ -516,7 +516,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			 * a clean sk_buff.
 			 */
 			new_skb = alloc_skb(length + sizeof(struct data_header)
-					+ HOMA_IPV4_HEADER_LENGTH
+					+ HOMA_IPV6_HEADER_LENGTH
 					+ HOMA_SKB_EXTRA, GFP_KERNEL);
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
@@ -524,7 +524,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 						"couldn't allocate skb\n");
 				continue;
 			}
-			skb_reserve(new_skb, HOMA_IPV4_HEADER_LENGTH
+			skb_reserve(new_skb, HOMA_IPV6_HEADER_LENGTH
 				+ HOMA_SKB_EXTRA);
 			skb_reset_transport_header(new_skb);
 			__skb_put_data(new_skb, skb_transport_header(skb),
@@ -590,11 +590,11 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 
 	segs = skb_shinfo(skb)->gso_segs;
 	bytes = skb->tail - skb->transport_header;
-	bytes += HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
+	bytes += HOMA_IPV6_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
 	if (segs > 0)
 		bytes += (segs - 1) * (sizeof32(struct data_header)
 				- sizeof32(struct data_segment)
-				+ HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER
+				+ HOMA_IPV6_HEADER_LENGTH + HOMA_VLAN_HEADER
 				+ HOMA_ETH_OVERHEAD);
 	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
 	while (1) {

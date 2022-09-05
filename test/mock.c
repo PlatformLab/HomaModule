@@ -391,7 +391,17 @@ int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
+int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
+{
+	return 0;
+}
+
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
+{
+	return 0;
+}
+
+int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
 	return 0;
 }
@@ -401,7 +411,17 @@ int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 	return 0;
 }
 
+int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
+{
+	return 0;
+}
+
 int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
+{
+	return 0;
+}
+
+int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
 {
 	return 0;
 }
@@ -430,6 +450,11 @@ int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 
 void inet_register_protosw(struct inet_protosw *p) {}
 
+int inet6_register_protosw(struct inet_protosw *p)
+{
+	return 0;
+}
+
 int inet_release(struct socket *sock)
 {
 	return 0;
@@ -441,6 +466,8 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 }
 
 void inet_unregister_protosw(struct inet_protosw *p) {}
+
+void inet6_unregister_protosw(struct inet_protosw *p) {}
 
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 		struct lock_class_key *key) {}
@@ -460,6 +487,46 @@ void iov_iter_init(struct iov_iter *i, unsigned int direction,
 void iov_iter_revert(struct iov_iter *i, size_t bytes)
 {
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
+}
+
+int  ip6_xmit(const struct sock *sk, struct sk_buff *skb,
+		struct flowi6 *, __u32,  struct ipv6_txoptions *, int,  u32)
+{
+	char buffer[200];
+	const char *prefix = " ";
+	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
+		kfree_skb(skb);
+		return -ENETDOWN;
+	}
+	if (mock_xmit_prios_offset == 0)
+		prefix = "";
+	mock_xmit_prios_offset += snprintf(
+			mock_xmit_prios + mock_xmit_prios_offset,
+			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
+			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>5);
+	if (mock_xmit_log_verbose)
+		homa_print_packet(skb, buffer, sizeof(buffer));
+	else
+		homa_print_packet_short(skb, buffer, sizeof(buffer));
+	unit_log_printf("; ", "xmit %s", buffer);
+	kfree_skb(skb);
+	return 0;
+	return 0;
+}
+
+unsigned int my_dst_mtu(const struct dst_entry *)
+{
+	return 1500;
+}
+
+
+int ip6_datagram_connect(struct sock *, struct sockaddr *, int)
+{
+	return 0;
+}
+
+void ip6_datagram_release_cb(struct sock *sk)
+{
 }
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
@@ -496,6 +563,29 @@ unsigned int ipv4_mtu(const struct dst_entry *dst)
 unsigned int ip6_mtu(const struct dst_entry *dst)
 {
 	return mock_mtu;
+}
+
+struct dst_entry *ip6_dst_lookup_flow(
+		struct net *net, const struct sock *sk, struct flowi6 *fl6,
+		const struct in6_addr *final_dst)
+{
+	if (mock_check_error(&mock_route_errors))
+		return ERR_PTR(-EHOSTUNREACH);
+
+	struct rtable *route;
+	route = malloc(sizeof(struct rtable));
+	if (!route) {
+		FAIL("malloc failed");
+		return ERR_PTR(-ENOMEM);
+	}
+	route->dst.__refcnt.counter = 1;
+	route->dst.ops = &mock_dst_ops;
+	route->dst.dev = &mock_net_device;
+	route->dst.obsolete = 0;
+	if (!routes_in_use)
+		routes_in_use = unit_hash_new();
+	unit_hash_set(routes_in_use, route, "used");
+	return &route->dst;
 }
 
 struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
