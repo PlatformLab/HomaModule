@@ -21,9 +21,9 @@
 #include "utils.h"
 
 FIXTURE(homa_outgoing) {
-	__be32 client_ip;
+	struct in_addr client_ip[1];
 	int client_port;
-	__be32 server_ip;
+	struct in_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
@@ -34,9 +34,9 @@ FIXTURE(homa_outgoing) {
 };
 FIXTURE_SETUP(homa_outgoing)
 {
-	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
@@ -47,10 +47,10 @@ FIXTURE_SETUP(homa_outgoing)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 	self->server_addr.in4.sin_family = AF_INET;
-	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_addr = self->server_ip[0];
 	self->server_addr.in4.sin_port = htons(self->server_port);
 	self->peer = homa_peer_find(&self->homa.peers,
-			self->server_addr.in4.sin_addr.s_addr, &self->hsk.inet);
+			&self->server_addr.in4.sin_addr, &self->hsk.inet);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)

@@ -104,7 +104,7 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
  *              indefinitely: peer entries are never deleted except in
  *              homa_peertab_destroy.
  */
-struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
+struct homa_peer *homa_peer_find(struct homa_peertab *peertab, const struct in_addr *addr,
 	struct inet_sock *inet)
 {
 	/* Note: this function uses RCU operators to ensure safety even
@@ -112,10 +112,10 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	 */
 	struct homa_peer *peer;
 	struct rtable *rt;
-	__u32 bucket = hash_32(addr, HOMA_PEERTAB_BUCKET_BITS);
+	__u32 bucket = hash_32(addr->s_addr, HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 			peertab_links) {
-		if (peer->addr == addr) {
+		if (peer->addr.s_addr == addr->s_addr) {
 			return peer;
 		}
 		INC_METRIC(peer_hash_links, 1);
@@ -130,7 +130,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	spin_lock_bh(&peertab->write_lock);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 			peertab_links) {
-		if (peer->addr == addr)
+		if (peer->addr.s_addr == addr->s_addr)
 			goto done;
 	}
 	peer = kmalloc(sizeof(*peer), GFP_ATOMIC);
@@ -139,10 +139,10 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 		INC_METRIC(peer_kmalloc_errors, 1);
 		goto done;
 	}
-	peer->addr = addr;
+	peer->addr = *addr;
 	flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
 			inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
-			inet->sk.sk_protocol, 0, addr, inet->inet_saddr,
+			inet->sk.sk_protocol, 0, addr->s_addr, inet->inet_saddr,
 			0, 0, inet->sk.sk_uid);
 	security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
 	rt = ip_route_output_flow(sock_net(&inet->sk), &peer->flow.u.ip4,
@@ -192,7 +192,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 	spin_lock_bh(&peertab->write_lock);
 	flowi4_init_output(&peer->flow.u.ip4, sk->sk_bound_dev_if,
 			sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
-			sk->sk_protocol, 0, peer->addr, hsk->inet.inet_saddr,
+			sk->sk_protocol, 0, peer->addr.s_addr, hsk->inet.inet_saddr,
 			0, 0, sk->sk_uid);
 	security_sk_classify_flow(sk, &peer->flow.u.__fl_common);
 	rt = ip_route_output_flow(sock_net(sk), &peer->flow.u.ip4, sk);

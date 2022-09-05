@@ -201,7 +201,7 @@ void homa_destroy(struct homa *homa)
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		sockaddr_in_union *dest, struct iov_iter *iter)
+		const sockaddr_in_union *dest, struct iov_iter *iter)
 {
 	int err;
 	struct homa_rpc *crpc;
@@ -222,7 +222,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
-			dest->in4.sin_addr.s_addr, &hsk->inet);
+			&dest->in4.sin_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
@@ -292,7 +292,7 @@ error:
  *          @hsk->active_rpcs.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
-		__be32 source, struct data_header *h)
+		const struct in_addr *source, struct data_header *h)
 {
 	int err;
 	struct homa_rpc *srpc;
@@ -306,7 +306,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) &&
 				(srpc->dport == ntohs(h->common.sport)) &&
-				(srpc->peer->addr == source)) {
+				(srpc->peer->addr.s_addr == source->s_addr)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
@@ -386,7 +386,7 @@ void homa_rpc_lock_slow(struct homa_rpc *rpc)
  *           note for the RPC)
  * @ack:     Information about an RPC from @saddr that may now be deleted safely.
  */
-void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
+void homa_rpc_acked(struct homa_sock *hsk, const struct in_addr *saddr, struct homa_ack *ack)
 {
 	struct homa_rpc *rpc;
 	struct homa_sock *hsk2 = hsk;
@@ -651,14 +651,14 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *            unlock it by invoking homa_unlock_server_rpc.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-		__be32 saddr, __u16 sport, __u64 id)
+		const struct in_addr *saddr, __u16 sport, __u64 id)
 {
 	struct homa_rpc *srpc;
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	homa_bucket_lock(bucket, server);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) && (srpc->dport == sport) &&
-				(srpc->peer->addr == saddr)) {
+				(srpc->peer->addr.s_addr == saddr->s_addr)) {
 			return srpc;
 		}
 	}
@@ -674,7 +674,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 void homa_rpc_log(struct homa_rpc *rpc)
 {
 	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
-	char *peer = homa_print_ipv4_addr(rpc->peer->addr);
+	char *peer = homa_print_ipv4_addr(&rpc->peer->addr);
 
 	if (rpc->state == RPC_INCOMING)
 		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
@@ -756,13 +756,13 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
  * for snprintf et al., because the kernel's version of snprintf isn't
  * available in Homa's unit test environment.
  */
-char *homa_print_ipv4_addr(__be32 addr)
+char *homa_print_ipv4_addr(const struct in_addr *addr)
 {
-#define NUM_BUFS 4
-#define BUF_SIZE 30
+#define NUM_BUFS (1 << 2)
+#define BUF_SIZE 64
 	static char buffers[NUM_BUFS][BUF_SIZE];
 	static int next_buf = 0;
-	__u32 a2 = ntohl(addr);
+	__u32 a2 = ntohl(addr->s_addr);
 	char *buffer = buffers[next_buf];
 	next_buf++;
 	if (next_buf >= NUM_BUFS)
@@ -789,7 +789,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
-		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
+		homa_print_ipv4_addr(&ipv4_hdr(skb)->saddr),
 		ntohs(common->sport), ntohs(common->dport),
 		be64_to_cpu(common->sender_id));
 	switch (common->type) {
@@ -1639,7 +1639,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		return;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
-		tt_record2(format, rpc->id, htonl(rpc->peer->addr));
+		tt_record2(format, rpc->id, ip4_as_u32(rpc->peer->addr));
 		tt_freeze();
 		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}

@@ -144,6 +144,8 @@ static inline __u64 tt_rdtsc(void)
 	return (((__u64)hi << 32) | lo);
 }
 
+#define ip4_as_u32(x) ntohl(x.s_addr)
+
 /**
  * tt_recordN(): record an event, along with N parameters.
  *

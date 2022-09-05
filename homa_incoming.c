@@ -276,12 +276,12 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			 * make sure we don't have an RPC locked.
 			 */
 			homa_lcache_release(lcache);
-			homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &dh->seg.ack);
+			homa_rpc_acked(hsk, &ipv4_hdr(skb)->saddr, &dh->seg.ack);
 		}
 	}
 
 	/* Find and lock the RPC for this packet. */
-	rpc = homa_lcache_get(lcache, id, ip_hdr(skb)->saddr, ntohs(h->sport));
+	rpc = homa_lcache_get(lcache, id, &ipv4_hdr(skb)->saddr, ntohs(h->sport));
 	if (!rpc) {
 		/* To avoid deadlock, must release old RPC before locking new. */
 		homa_lcache_release(lcache);
@@ -290,7 +290,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			if (h->type == DATA) {
 				/* Create a new RPC if one doesn't already exist. */
 				rpc = homa_rpc_new_server(hsk,
-						ip_hdr(skb)->saddr,
+						&ipv4_hdr(skb)->saddr,
 						(struct data_header *) h);
 				if (IS_ERR(rpc)) {
 					printk(KERN_WARNING "homa_pkt_dispatch "
@@ -303,7 +303,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 				}
 			} else
 				rpc = homa_find_server_rpc(hsk,
-						ip_hdr(skb)->saddr,
+						&ipv4_hdr(skb)->saddr,
 						ntohs(h->sport), id);
 
 		} else {
@@ -318,7 +318,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					id, h->type,
-					ntohl(ip_hdr(skb)->saddr),
+					ip4_as_u32(ipv4_hdr(skb)->saddr),
 					ntohs(h->sport));
 			if ((h->type != GRANT) || homa_is_client(id))
 				INC_METRIC(unknown_rpcs, 1);
@@ -366,7 +366,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
 		tt_record2("received BUSY for id %d, peer 0x%x",
-				id, ntohl(rpc->peer->addr));
+				id, ip4_as_u32(rpc->peer->addr));
 		/* Nothing to do for these packets except reset silent_ticks,
 		 * which happened above.
 		 */
@@ -417,7 +417,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			homa_local_id(h->common.sender_id),
-			ntohl(rpc->peer->addr), ntohl(h->seg.offset),
+			ip4_as_u32(rpc->peer->addr), ntohl(h->seg.offset),
 			ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
@@ -553,7 +553,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
 				"offset %d; responding with UNKNOWN",
 				homa_local_id(h->common.sender_id),
-				ntohl(ip_hdr(skb)->saddr),
+				ip4_as_u32(ipv4_hdr(skb)->saddr),
 				ntohs(h->common.sport),
 				ntohl(h->offset));
 		homa_xmit_unknown(skb, hsk);
@@ -608,7 +608,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	tt_record3("Received unknown for id %llu, peer %x:%d",
-			rpc->id, ntohl(rpc->peer->addr), rpc->dport);
+			rpc->id, ip4_as_u32(rpc->peer->addr), rpc->dport);
 	if (homa_is_client(rpc->id)) {
 		if ((rpc->state == RPC_READY) || (rpc->state == RPC_DEAD)) {
 			/* The missing data packets apparently arrived while
@@ -623,7 +623,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 */
 			tt_record4("Restarting id %d to server 0x%x:%d, "
 					"lost %d bytes",
-					rpc->id, ntohl(rpc->peer->addr),
+					rpc->id, ip4_as_u32(rpc->peer->addr),
 					rpc->dport,
 					homa_rpc_send_offset(rpc));
 			homa_freeze(rpc, RESTART_RPC, "Freezing because of "
@@ -636,18 +636,18 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 
 		printk(KERN_ERR "Received unknown for RPC id %llu, peer %s:%d "
 				"in bogus state %d; discarding unknown\n",
-				rpc->id, homa_print_ipv4_addr(rpc->peer->addr),
+				rpc->id, homa_print_ipv4_addr(&rpc->peer->addr),
 				rpc->dport, rpc->state);
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: "
 				"bad state %d",
-				rpc->id, ntohl(rpc->peer->addr), rpc->dport,
+				rpc->id, ip4_as_u32(rpc->peer->addr), rpc->dport,
 				rpc->state);
 	} else {
 		if (rpc->hsk->homa->verbose)
 			printk(KERN_NOTICE "Freeing rpc id %llu from client "
 					"%s:%d: unknown to client",
 					rpc->id,
-					homa_print_ipv4_addr(rpc->peer->addr),
+					homa_print_ipv4_addr(&rpc->peer->addr),
 					rpc->dport);
 		homa_rpc_free(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
@@ -667,7 +667,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	int i;
 	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
 	struct homa_peer *peer = homa_peer_find(&hsk->homa->peers,
-		ip_hdr(skb)->saddr, &hsk->inet);
+		&ipv4_hdr(skb)->saddr, &hsk->inet);
 
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
@@ -700,13 +700,13 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		if (rpc->state != RPC_READY) {
 			tt_record4("Ignoring NEED_ACK for id %d, peer 0x%x,"
 					"state %d, bytes_remaining %d",
-					rpc->id, ntohl(rpc->peer->addr),
+					rpc->id, ip4_as_u32(rpc->peer->addr),
 					rpc->state, rpc->msgin.bytes_remaining);
 			goto done;
 		}
 		peer = rpc->peer;
 	} else {
-		peer = homa_peer_find(&hsk->homa->peers, ip_hdr(skb)->saddr,
+		peer = homa_peer_find(&hsk->homa->peers, &ipv4_hdr(skb)->saddr,
 				&hsk->inet);
 		if (IS_ERR(peer))
 			goto done;
@@ -725,7 +725,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
 			"other acks", homa_local_id(h->sender_id),
-			ntohl(ip_hdr(skb)->saddr), ntohs(ack.num_acks));
+			ip4_as_u32(ipv4_hdr(skb)->saddr), ntohs(ack.num_acks));
 
     done:
 	kfree_skb(skb);
@@ -754,10 +754,10 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 
 	count = ntohs(h->num_acks);
 	for (i = 0; i < count; i++)
-		homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &h->acks[i]);
+		homa_rpc_acked(hsk, &ipv4_hdr(skb)->saddr, &h->acks[i]);
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 			homa_local_id(h->common.sender_id),
-			ntohl(ip_hdr(skb)->saddr), count);
+			ip4_as_u32(ipv4_hdr(skb)->saddr), count);
 	kfree_skb(skb);
 }
 
@@ -1222,7 +1222,7 @@ void homa_log_grantable_list(struct homa *homa)
 		hlist_for_each_entry_rcu(peer, &homa->peers.buckets[bucket],
 				peertab_links) {
 			printk(KERN_NOTICE "Checking peer %s\n",
-					homa_print_ipv4_addr(peer->addr));
+					homa_print_ipv4_addr(&peer->addr));
 			if (list_empty(&peer->grantable_rpcs))
 				continue;
 			count = 0;
@@ -1234,7 +1234,7 @@ void homa_log_grantable_list(struct homa *homa)
 				homa_rpc_log(rpc);
 			}
 			printk(KERN_NOTICE "Peer %s has %d grantable RPCs\n",
-					homa_print_ipv4_addr(peer->addr),
+					homa_print_ipv4_addr(&peer->addr),
 					count);
 			list_for_each_entry(peer2, &homa->grantable_peers,
 					grantable_links) {
@@ -1243,7 +1243,7 @@ void homa_log_grantable_list(struct homa *homa)
 			}
 			printk(KERN_NOTICE "Peer %s has grantable RPCs but "
 					"isn't on homa->grantable_peers\n",
-					homa_print_ipv4_addr(peer->addr));
+					homa_print_ipv4_addr(&peer->addr));
 			next_peer:
 			continue;
 		}
@@ -1277,7 +1277,7 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
  *	     targeted at this server port.
  * @error:   Negative errno value indicating the reason for the abort.
  */
-void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
+void homa_abort_rpcs(struct homa *homa, const struct in_addr *addr, int port, int error)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -1295,7 +1295,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 			continue;
 		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				active_links) {
-			if (rpc->peer->addr != addr)
+			if (rpc->peer->addr.s_addr != addr->s_addr)
 				continue;
 			if ((port != 0) && (rpc->dport != port))
 				continue;
@@ -1307,7 +1307,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 			if (homa_is_client(rpc->id)) {
 				tt_record3("aborting client RPC: peer 0x%x, "
 						"id %u, error %d",
-						ntohl(rpc->peer->addr),
+						ip4_as_u32(rpc->peer->addr),
 						rpc->id, error);
 				if (rpc->state != RPC_READY)
 					homa_rpc_abort(rpc, error);
@@ -1315,7 +1315,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 				INC_METRIC(server_rpc_discards, 1);
 				tt_record3("discarding server RPC: peer 0x%x, "
 						"id %d, error %d",
-						ntohl(rpc->peer->addr),
+						ip4_as_u32(rpc->peer->addr),
 						rpc->id, error);
 				homa_rpc_free(rpc);
 			}
@@ -1354,7 +1354,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 		}
 		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, "
 				"peer 0x%x, error %d",
-				rpc->id, hsk->port, ntohl(rpc->peer->addr),
+				rpc->id, hsk->port, ip4_as_u32(rpc->peer->addr),
 				error);
 		if (error) {
 			if (rpc->state != RPC_READY)
@@ -1389,7 +1389,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  */
 int homa_register_interests(struct homa_interest *interest,
 		struct homa_sock *hsk, int flags, __u64 id,
-		sockaddr_in_union *client_addr)
+		const sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *rpc = NULL;
 
@@ -1406,7 +1406,7 @@ int homa_register_interests(struct homa_interest *interest,
 			rpc = homa_find_client_rpc(hsk, id);
 		else
 			rpc = homa_find_server_rpc(hsk,
-					client_addr->in4.sin_addr.s_addr,
+					&client_addr->in4.sin_addr,
 					ntohs(client_addr->in4.sin_port), id);
 		if (rpc == NULL)
 			return -EINVAL;
@@ -1500,7 +1500,7 @@ int homa_register_interests(struct homa_interest *interest,
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		__u64 id, sockaddr_in_union *client_addr)
+		__u64 id, const sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
@@ -1627,7 +1627,7 @@ got_error_or_rpc:
 						atomic_long_read(&interest.id));
 			else
 				rpc = homa_find_server_rpc(hsk,
-						interest.peer_addr,
+						&interest.peer_addr,
 						interest.peer_port,
 						atomic_long_read(&interest.id));
 			if (rpc)

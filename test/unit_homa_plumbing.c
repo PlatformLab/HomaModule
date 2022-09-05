@@ -23,9 +23,9 @@
 extern struct homa *homa;
 
 FIXTURE(homa_plumbing) {
-	__be32 client_ip;
+	struct in_addr client_ip[1];
 	int client_port;
-	__be32 server_ip;
+	struct in_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
@@ -45,17 +45,17 @@ FIXTURE(homa_plumbing) {
 };
 FIXTURE_SETUP(homa_plumbing)
 {
-	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
 	self->client_addr.in4.sin_family = AF_INET;
-	self->client_addr.in4.sin_addr.s_addr = self->client_ip;
+	self->client_addr.in4.sin_addr = self->client_ip[0];
 	self->client_addr.in4.sin_port = htons(self->client_port);
 	self->server_addr.in4.sin_family = AF_INET;
-	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_addr = self->server_ip[0];
 	self->server_addr.in4.sin_port = htons(self->server_port);
 	homa = &self->homa;
 	homa_init(&self->homa);
@@ -177,7 +177,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 
 	// Second call gets remainder, deletes message.
 	self->recv_args.length = 200;
-	self->recv_args.source_addr.in4.sin_addr.s_addr = 0;
+	memset(&self->recv_args.source_addr, 0, sizeof(self->recv_args.source_addr));
 	self->recv_args.id = self->client_id;
 	EXPECT_EQ(50, homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
@@ -197,7 +197,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
 	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.in4.sin_addr.s_addr);
+	EXPECT_EQ_IP(*self->server_ip, self->recv_args.source_addr.in4.sin_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
@@ -205,12 +205,13 @@ TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
+	ASSERT_NE(NULL, crpc);
 	crpc->error = -ETIMEDOUT;
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.in4.sin_addr.s_addr);
+	EXPECT_EQ_IP(*self->server_ip, self->recv_args.source_addr.in4.sin_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
@@ -232,7 +233,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(200, self->recv_args.length);
 	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.in4.sin_addr.s_addr);
+	EXPECT_EQ_IP(*self->server_ip, self->recv_args.source_addr.in4.sin_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
@@ -260,7 +261,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 			(unsigned long) &self->recv_args));
 	EXPECT_EQ(100, self->recv_args.length);
 	EXPECT_EQ(self->server_id, self->recv_args.id);
-	EXPECT_EQ(self->client_ip, self->recv_args.source_addr.in4.sin_addr.s_addr);
+	EXPECT_EQ_IP(*self->client_ip, self->recv_args.source_addr.in4.sin_addr);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 }

@@ -44,8 +44,17 @@
  *                 received. The RPC is not locked.
  */
 struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
-		__be32 client_ip, __be32 server_ip, int server_port, int id,
-	        int req_length, int resp_length)
+		struct in_addr * client_ip, struct in_addr * server_ip,
+		int server_port, int id, int req_length, int resp_length)
+{
+	return unit_client_rpc_cookie(hsk, state, client_ip, server_ip,
+			server_port, id, req_length, resp_length, 0);
+}
+
+struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
+		struct in_addr *client_ip, struct in_addr *server_ip,
+		int server_port, int id, int req_length, int resp_length,
+		uint64_t completion_cookie)
 {
 	int bytes_received;
 	sockaddr_in_union server_addr;
@@ -53,7 +62,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	int incoming_delta = 0;
 
 	server_addr.in4.sin_family = AF_INET;
-	server_addr.in4.sin_addr.s_addr = server_ip;
+	server_addr.in4.sin_addr = *server_ip;
 	server_addr.in4.sin_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
@@ -129,13 +138,14 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
  *              s couldn't be parsed properly then 0 is returned.
  *
  */
-__be32 unit_get_in_addr(char *s)
+struct in_addr unit_get_in_addr(char *s)
 {
+	struct in_addr ret = {};
 	unsigned int a, b, c, d;
 	if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-		return htonl((a<<24) + (b<<16) + (c<<8) + d);
+		ret.s_addr = htonl((a<<24) + (b<<16) + (c<<8) + d);
 	}
-	return 0;
+	return ret;
 }
 
 /**
@@ -206,7 +216,7 @@ void unit_log_grantables(struct homa *homa)
 					"remaining %d",
 					homa_is_client(rpc->id) ? "response"
 					: "request",
-					homa_print_ipv4_addr(peer->addr),
+					homa_print_ipv4_addr(&peer->addr),
 					(long unsigned int) rpc->id,
 					rpc->msgin.bytes_remaining);
 		}
@@ -331,7 +341,7 @@ void unit_log_throttled(struct homa *homa)
  *                 The RPC is not locked.
  */
 struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
-		__be32 client_ip, __be32 server_ip, int client_port, int id,
+		struct in_addr * client_ip, struct in_addr * server_ip, int client_port, int id,
 	        int req_length, int resp_length)
 {
 	int bytes_received;

@@ -1020,7 +1020,7 @@ void mock_rcu_read_unlock(void)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
+struct sk_buff *mock_skb_new(struct in_addr *saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;
@@ -1064,7 +1064,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
 
-	ip_size = sizeof(struct iphdr);
+	ip_size = sizeof(struct ipv6hdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(data_size + shinfo_size);
@@ -1079,7 +1079,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	p = skb_put(skb, extra_bytes);
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
-	ip_hdr(skb)->saddr = saddr;
+	ip_hdr(skb)->saddr = saddr->s_addr;
 	ip_hdr(skb)->protocol = IPPROTO_HOMA;
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
@@ -1104,6 +1104,7 @@ int mock_skb_count(void)
  */
 void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
+	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = (struct sock *) hsk;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
@@ -1115,6 +1116,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	if (port < HOMA_MIN_DEFAULT_PORT)
 		homa_sock_bind(&homa->port_map, hsk, port);
 	sk->sk_data_ready = mock_data_ready;
+	hsk->inet.pinet6 = &hsk_pinfo;
 }
 
 /**

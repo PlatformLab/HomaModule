@@ -27,19 +27,25 @@ FIXTURE(homa_lcache) {
 	struct homa_sock hsk;
 	struct homa_rpc *crpc;
 	struct homa_rpc *srpc;
+	struct in_addr client_ip[2];
+	struct in_addr server_ip[1];
 };
 FIXTURE_SETUP(homa_lcache)
 {
 	homa_lcache_init(&self->cache);
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	self->crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, unit_get_in_addr("196.168.0.1"),
-			unit_get_in_addr("1.2.3.4"), 99, 1234, 1000, 1000);
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.2");
+	self->crpc = unit_client_rpc(&self->hsk, RPC_READY,
+			self->client_ip,
+			self->server_ip,
+			99, 1234, 1000, 1000);
 	self->srpc = unit_server_rpc(&self->hsk, RPC_READY,
-			unit_get_in_addr("196.168.0.1"),
-			unit_get_in_addr("1.2.3.4"), 40000,
-			1235, 1000, 1000);
+			self->client_ip,
+			self->server_ip,
+			40000, 1235, 1000, 1000);
 }
 FIXTURE_TEARDOWN(homa_lcache)
 {
@@ -78,16 +84,15 @@ TEST_F(homa_lcache, homa_lcache_release)
 
 TEST_F(homa_lcache, homa_lcache_get)
 {
-	__be32 client_addr = unit_get_in_addr("196.168.0.1");
-	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, client_addr,
+	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, self->client_ip,
 			40000) == NULL);
 	homa_lcache_save(&self->cache, self->srpc);
 	EXPECT_EQ(self->srpc, homa_lcache_get(&self->cache, 1235,
-			client_addr, 40000));
-	EXPECT_TRUE(homa_lcache_get(&self->cache, 1237, client_addr,
+			self->client_ip, 40000));
+	EXPECT_TRUE(homa_lcache_get(&self->cache, 1237, self->client_ip,
 			40000) == NULL);
-	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, client_addr+1,
+	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, self->client_ip+1,
 			40000) == NULL);
-	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, client_addr,
+	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, self->client_ip,
 			40001) == NULL);
 }

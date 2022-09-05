@@ -24,7 +24,7 @@ extern struct homa *homa;
 
 FIXTURE(homa_offload) {
 	struct homa homa;
-	__be32 ip;
+	struct in_addr ip[1];
 	struct data_header header;
 	struct napi_struct napi;
 	struct sk_buff *skb, *skb2;
@@ -35,7 +35,7 @@ FIXTURE_SETUP(homa_offload)
 	int i;
 	homa_init(&self->homa);
 	homa_init(homa);
-	self->ip = unit_get_in_addr("196.168.0.1");
+	self->ip[0] = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
 			.type = DATA,

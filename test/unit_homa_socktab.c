@@ -26,9 +26,9 @@
 FIXTURE(homa_socktab) {
 	struct homa homa;
 	struct homa_sock hsk;
-	__be32 client_ip;
+	struct in_addr client_ip[1];
 	int client_port;
-	__be32 server_ip;
+	struct in_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 };
@@ -36,9 +36,9 @@ FIXTURE_SETUP(homa_socktab)
 {
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
 }

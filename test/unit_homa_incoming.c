@@ -116,9 +116,9 @@ void shutdown_hook(void)
 }
 
 FIXTURE(homa_incoming) {
-	__be32 client_ip;
+	struct in_addr client_ip[5];
 	int client_port;
-	__be32 server_ip;
+	struct in_addr server_ip[2];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
@@ -133,17 +133,22 @@ FIXTURE(homa_incoming) {
 };
 FIXTURE_SETUP(homa_incoming)
 {
-	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
+	self->client_ip[1] = unit_get_in_addr("197.168.0.1");
+	self->client_ip[2] = unit_get_in_addr("198.168.0.1");
+	self->client_ip[3] = unit_get_in_addr("199.168.0.1");
+	self->client_ip[4] = unit_get_in_addr("200.168.0.1");
 	self->client_port = 40000;
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
+	self->server_ip[1] = unit_get_in_addr("2.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
 	self->server_addr.in4.sin_family = AF_INET;
-	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_addr = self->server_ip[0];
 	self->server_addr.in4.sin_port =  htons(self->server_port);
 	self->addr.in4.sin_family = AF_INET;
-	self->addr.in4.sin_addr.s_addr = 0;
+	self->addr.in4.sin_addr.s_addr = INADDR_ANY;
 	self->addr.in4.sin_port =  0;
 	homa_init(&self->homa);
 	self->homa.num_priorities = 1;
@@ -460,6 +465,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__handle_ack)
 {
 	struct homa_sock hsk;
 	mock_sock_init(&hsk, &self->homa, self->server_port);
+	//mock_sock_init(&self->hsk, &self->homa, 0);
 	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
@@ -492,7 +498,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_server_rpc)
 	self->data.seg.offset = htonl(1400);
 	self->data.common.sender_id = cpu_to_be64(self->client_id);
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
-			1400, 0),&self->hsk, &self->lcache,
+			1400, 0), &self->hsk, &self->lcache,
 			&self->incoming_delta);
 	EXPECT_EQ(7200, srpc->msgin.bytes_remaining);
 }
@@ -2474,7 +2480,7 @@ TEST_F(homa_incoming, homa_register_interests__return_request_by_id)
 		        self->server_id, 20000, 100);
 	ASSERT_NE(NULL, srpc);
 
-	self->addr.in4.sin_addr.s_addr = self->client_ip;
+	self->addr.in4.sin_addr = *self->client_ip;
 	self->addr.in4.sin_port = htons(self->client_port);
 	int result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECV_NONBLOCKING, self->server_id, &self->addr);
