@@ -48,6 +48,21 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - It may also be useful to set other Linux networking parameters. As one
     example, see the script  `cloudlab\bin\start_xl170`, which is what I
     use to configure my test nodes.
+    
+- NIC support for TSO: Homa can use TCP Segmentation Offload (TSO) in order
+  to send large messages more efficiently. To do this, it uses a header format
+  that matches TCP's headers closely enough to take advantage of TSO support in NICs.
+  It is not clear that this approach will work with all NICs, but the following
+  NICs are known to work:
+  - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
+  - Intel E810 (ice), XXV710 (i40e)
+  
+  Please let me know if you find other NICs that work (or NICs that don't work).
+  If the NIC doesn't support TSO for Homa, then you'll need to use `sysctl` to
+  ensure that `max_gso_size` is the same as the maximum packet size (if it is
+  larger, then messages larger than the packet size will hang: outgoing packets
+  will be dropped by the NIC, but smaller retry packets get through, so Homa
+  will keep retrying over and over).
   
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
