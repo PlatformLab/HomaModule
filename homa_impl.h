@@ -807,6 +807,7 @@ struct homa_rpc {
 	 * server (1) or client (0) for this RPC.
 	 */
 	__u64 id;
+	__u64 completion_cookie;
 
 	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has

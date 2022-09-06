@@ -216,6 +216,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
 	crpc->id = atomic64_fetch_add(2, &hsk->homa->next_outgoing_id);
+	crpc->completion_cookie = 0;
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
@@ -332,6 +333,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
+	srpc->completion_cookie = 0;
 	srpc->error = 0;
 	homa_message_in_init(&srpc->msgin, ntohl(h->message_length));
 	srpc->msgout.length = -1;

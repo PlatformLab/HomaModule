@@ -47,6 +47,14 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 		__be32 client_ip, __be32 server_ip, int server_port, int id,
 	        int req_length, int resp_length)
 {
+	return unit_client_rpc_cookie(hsk, state, client_ip, server_ip,
+			server_port, id, req_length, resp_length, 0);
+}
+
+struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
+		__be32 client_ip, __be32 server_ip, int server_port, int id,
+	        int req_length, int resp_length, uint64_t completion_cookie)
+{
 	int bytes_received;
 	struct sockaddr_in server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
@@ -61,6 +69,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			unit_iov_iter(NULL, req_length));
 	if (IS_ERR(crpc))
 		return NULL;
+	EXPECT_EQ(crpc->completion_cookie, 0);
+	crpc->completion_cookie = completion_cookie;
 	homa_rpc_unlock(crpc);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, saved_id);
@@ -356,6 +366,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	if (IS_ERR(srpc))
 		return NULL;
+	EXPECT_EQ(srpc->completion_cookie, 0);
 	homa_rpc_unlock(srpc);
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)

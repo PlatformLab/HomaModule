@@ -228,8 +228,12 @@ TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 {
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
+	const uint64_t oatmeal = 0x6F61746D65616C00;
+	const uint64_t raisins = 0x72616973696E7300;
+	uint64_t best_cookie = oatmeal + raisins;
+	unit_client_rpc_cookie(&self->hsk, RPC_READY, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			100, 200, best_cookie);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
@@ -237,6 +241,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 	EXPECT_EQ(self->client_id, self->recv_args.actualId);
 	EXPECT_EQ(self->server_ip, self->recv_args.source_addr.sin_addr.s_addr);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(self->recv_args.completion_cookie, best_cookie);
 }
 TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 {

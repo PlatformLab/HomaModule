@@ -673,6 +673,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	memset(args.source_addr.sin_zero, 0,
 			sizeof(args.source_addr.sin_zero));
 	args.actualId = rpc->id;
+	args.completion_cookie = rpc->completion_cookie;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
 		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args\n");
@@ -842,6 +843,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
+	crpc->completion_cookie = args.completion_cookie;
 	tt_record1("homa_ioc_send calling homa_xmit_data for id %u",
 			crpc->id);
 	homa_xmit_data(crpc, false);

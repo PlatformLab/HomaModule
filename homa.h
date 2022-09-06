@@ -64,16 +64,16 @@ extern "C"
 
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
                     const struct sockaddr *dest_addr, size_t addrlen,
-                    uint64_t *id);
+                    uint64_t *id, uint64_t completion_cookie);
 extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
                     const struct sockaddr *dest_addr, size_t addrlen,
-                    uint64_t *id);
+                    uint64_t *id, uint64_t completion_cookie);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
-                    uint64_t *id, size_t *msglen);
+                    uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
 extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
                     int flags, struct sockaddr *src_addr, size_t *addrlen,
-                    uint64_t *id, size_t *msglen);
+                    uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
@@ -95,6 +95,7 @@ struct homa_args_send_ipv4 {
         size_t length;
         struct sockaddr_in dest_addr;
         __u64 id;
+        __u64 completion_cookie;
 };
 
 /**
@@ -111,9 +112,10 @@ struct homa_args_recv_ipv4 {
         size_t len;
         struct sockaddr_in source_addr;
         int flags;
+        int type;
         __u64 requestedId;
         __u64 actualId;
-        int type;
+        __u64 completion_cookie;
 };
 
 /* Flag bits for homa_recv (see man page for documentation):

@@ -14,11 +14,16 @@
  */
 
 /* This file contains functions that implement the Homa API visible to
- * applications. It's intended to be part of the user-level run-time library.
+ * applications. It is intended to be part of the user-level run-time library.
  */
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stddef.h>
+#include <stdio.h>
+#ifndef NDEBUG
+#include <stdlib.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include "homa.h"
@@ -49,9 +54,9 @@
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
-		size_t *msglen)
+		size_t *msglen, uint64_t *completion_cookie)
 {
-	struct homa_args_recv_ipv4 args;
+	struct homa_args_recv_ipv4 args = {};
 	int result;
 
 	if (*addrlen < sizeof(struct sockaddr_in)) {
@@ -69,8 +74,18 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
 	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
-	if (msglen)
+	if (msglen) {
 		*msglen = args.len;
+	}
+	if (completion_cookie) {
+		*completion_cookie = args.completion_cookie;
+	} else if (args.completion_cookie) {
+		fprintf(stderr, "Lost completion_cookie 0x%"PRIx64"\n",
+				(uint64_t)args.completion_cookie);
+#ifndef NDEBUG
+		abort();
+#endif
+	}
 	return result;
 }
 
@@ -101,9 +116,9 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
-		size_t *msglen)
+		size_t *msglen, uint64_t *completion_cookie)
 {
-	struct homa_args_recv_ipv4 args;
+	struct homa_args_recv_ipv4 args = {};
 	int result;
 
 	if (*addrlen < sizeof(struct sockaddr_in)) {
@@ -122,8 +137,18 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
 	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
-	if (msglen)
+	if (msglen) {
 		*msglen = args.len;
+	}
+	if (completion_cookie) {
+		*completion_cookie = args.completion_cookie;
+	} else if (args.completion_cookie) {
+		fprintf(stderr, "Lost completion_cookie 0x%"PRIx64"\n",
+				(uint64_t)args.completion_cookie);
+#ifndef NDEBUG
+		abort();
+#endif
+	}
 	return result;
 }
 
@@ -150,7 +175,7 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 		const struct sockaddr *dest_addr, size_t addrlen,
 		uint64_t id)
 {
-	struct homa_args_reply_ipv4 args;
+	struct homa_args_reply_ipv4 args = {};
 
 	if (dest_addr->sa_family != AF_INET) {
 		errno = EAFNOSUPPORT;
@@ -188,7 +213,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 		const struct sockaddr *dest_addr, size_t addrlen,
 		uint64_t id)
 {
-	struct homa_args_reply_ipv4 args;
+	struct homa_args_reply_ipv4 args = {};
 
 	if (dest_addr->sa_family != AF_INET) {
 		errno = EAFNOSUPPORT;
@@ -211,15 +236,16 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
+ * @completion_cookie value to be delivered upon RPC completion.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *request, size_t reqlen,
 		const struct sockaddr *dest_addr, size_t addrlen,
-		uint64_t *id)
+		uint64_t *id, uint64_t completion_cookie)
 {
-	struct homa_args_send_ipv4 args;
+	struct homa_args_send_ipv4 args = {};
 	int result;
 
 	if (dest_addr->sa_family != AF_INET) {
@@ -231,6 +257,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 	args.length = reqlen;
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
+	args.completion_cookie = completion_cookie;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;
@@ -248,15 +275,16 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
  * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
+ * @completion_cookie value to be delivered upon RPC completion.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 		const struct sockaddr *dest_addr, size_t addrlen,
-		uint64_t *id)
+		uint64_t *id, uint64_t completion_cookie)
 {
-	struct homa_args_send_ipv4 args;
+	struct homa_args_send_ipv4 args = {};
 	int result;
 
 	if (dest_addr->sa_family != AF_INET) {
@@ -268,6 +296,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.length = iovcnt;
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = 0;
+	args.completion_cookie = completion_cookie;
 	result = ioctl(sockfd, HOMAIOCSEND, &args);
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;

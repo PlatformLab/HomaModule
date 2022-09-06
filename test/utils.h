@@ -28,6 +28,11 @@ extern struct homa_rpc
                     *unit_client_rpc(struct homa_sock *hsk, int state,
                         __be32 client_ip, __be32 server_ip, int server_port,
                         int id, int req_length, int resp_length);
+extern struct homa_rpc
+                    *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
+                        __be32 client_ip, __be32 server_ip, int server_port,
+                        int id, int req_length, int resp_length,
+			uint64_t completion_cookie);
 extern __be32        unit_get_in_addr(char *s);
 extern struct iov_iter
                     *unit_iov_iter(void *buffer, size_t length);
