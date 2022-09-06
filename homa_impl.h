@@ -1222,7 +1222,7 @@ struct homa_peer {
 	struct in6_addr addr;
 
 	/** @flow: Addressing info needed to send packets. */
-	struct flowi6 flow;
+	struct flowi flow;
 
 	/**
 	 * @dst: Used to route packets to this peer; we own a reference

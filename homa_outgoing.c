@@ -308,7 +308,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	set_priority(skb, hsk, priority);
 	skb->ooo_okay = 1;
 	skb_get(skb);
-	result = ip6_xmit((struct sock *) hsk, skb, &peer->flow, 0, NULL, 0, priority);
+	result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0, NULL, 0, priority);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
 
@@ -454,7 +454,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 			skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
 			htonl(h->seg.offset));
 
-	err = ip6_xmit((struct sock *) rpc->hsk, skb, &rpc->peer->flow, 0, NULL, 0, priority);
+	err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6, 0, NULL, 0, priority);
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
 			"granted %d",
 			rpc->id, ntohl(h->seg.offset), skb->len,

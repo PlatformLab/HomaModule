@@ -145,30 +145,48 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, const struct in6_
 	}
 	peer->addr = *addr;
 	memset(&peer->flow, 0, sizeof(peer->flow));
-	peer->flow.flowi6_oif = inet->sk.sk_bound_dev_if;
-	peer->flow.flowi6_iif = LOOPBACK_IFINDEX;
-	peer->flow.flowi6_mark = inet->sk.sk_mark;
-	peer->flow.flowi6_scope = RT_SCOPE_UNIVERSE;
-	peer->flow.flowi6_proto = inet->sk.sk_protocol;
-	peer->flow.flowi6_flags = 0;
-	peer->flow.flowi6_secid = 0;
-	peer->flow.flowi6_tun_key.tun_id = 0;
-	peer->flow.flowi6_uid = inet->sk.sk_uid;
-	peer->flow.daddr = peer->addr;
-	peer->flow.saddr = inet->pinet6->saddr;
-	peer->flow.fl6_dport = 0;
-	peer->flow.fl6_sport = 0;
-	peer->flow.flowlabel = inet->pinet6->flow_label;
-	peer->flow.mp_hash = 0;
-	peer->flow.__fl_common.flowic_tos = inet->tos;
-	peer->flow.flowlabel = ip6_make_flowinfo(inet->tos, 0);
-	security_sk_classify_flow(&inet->sk, flowi6_to_flowi_common(&peer->flow));
-	dst = ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk, &peer->flow, NULL);
-	if (IS_ERR(dst)) {
-		kfree(peer);
-		peer = (struct homa_peer *) PTR_ERR(dst);
-		INC_METRIC(peer_route_errors, 1);
-		goto done;
+	if (inet->sk.sk_family == AF_INET) {
+		struct rtable *rt;
+		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
+				inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
+				inet->sk.sk_protocol, 0, addr->in6_u.u6_addr32[3], inet->inet_saddr,
+				0, 0, inet->sk.sk_uid);
+		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(&inet->sk), &peer->flow.u.ip4,
+				&inet->sk);
+		if (IS_ERR(rt)) {
+			kfree(peer);
+			peer = (struct homa_peer *) PTR_ERR(rt);
+			INC_METRIC(peer_route_errors, 1);
+			goto done;
+		}
+		dst = &rt->dst;
+	} else {
+		peer->flow.u.ip6.flowi6_oif = inet->sk.sk_bound_dev_if;
+		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
+		peer->flow.u.ip6.flowi6_mark = inet->sk.sk_mark;
+		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+		peer->flow.u.ip6.flowi6_proto = inet->sk.sk_protocol;
+		peer->flow.u.ip6.flowi6_flags = 0;
+		peer->flow.u.ip6.flowi6_secid = 0;
+		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
+		peer->flow.u.ip6.flowi6_uid = inet->sk.sk_uid;
+		peer->flow.u.ip6.daddr = peer->addr;
+		peer->flow.u.ip6.saddr = inet->pinet6->saddr;
+		peer->flow.u.ip6.fl6_dport = 0;
+		peer->flow.u.ip6.fl6_sport = 0;
+		peer->flow.u.ip6.flowlabel = inet->pinet6->flow_label;
+		peer->flow.u.ip6.mp_hash = 0;
+		peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
+		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
+		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
+		dst = ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk, &peer->flow.u.ip6, NULL);
+		if (IS_ERR(dst)) {
+			kfree(peer);
+			peer = (struct homa_peer *) PTR_ERR(dst);
+			INC_METRIC(peer_route_errors, 1);
+			goto done;
+		}
 	}
 	peer->dst = dst;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 0;
@@ -208,26 +226,41 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 
 	spin_lock_bh(&peertab->write_lock);
 	memset(&peer->flow, 0, sizeof(peer->flow));
-	peer->flow.flowi6_oif = sk->sk_bound_dev_if;
-	peer->flow.flowi6_iif = LOOPBACK_IFINDEX;
-	peer->flow.flowi6_mark = sk->sk_mark;
-	peer->flow.flowi6_scope = RT_SCOPE_UNIVERSE;
-	peer->flow.flowi6_proto = sk->sk_protocol;
-	peer->flow.flowi6_flags = 0;
-	peer->flow.flowi6_secid = 0;
-	peer->flow.flowi6_tun_key.tun_id = 0;
-	peer->flow.flowi6_uid = sk->sk_uid;
-	peer->flow.daddr = peer->addr;
-	peer->flow.saddr = hsk->inet.pinet6->saddr;
-	peer->flow.fl6_dport = 0;
-	peer->flow.fl6_sport = 0;
-	peer->flow.flowlabel = hsk->inet.pinet6->flow_label;
-	peer->flow.mp_hash = 0;
-	peer->flow.__fl_common.flowic_tos = hsk->inet.tos;
-	peer->flow.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
-	security_sk_classify_flow(sk, flowi6_to_flowi_common(&peer->flow));
+	if (sk->sk_family == AF_INET) {
+		struct rtable *rt;
+		flowi4_init_output(&peer->flow.u.ip4, sk->sk_bound_dev_if,
+				sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
+				sk->sk_protocol, 0, peer->addr.in6_u.u6_addr32[3], hsk->inet.inet_saddr,
+				0, 0, sk->sk_uid);
+		security_sk_classify_flow(sk, &peer->flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(sk), &peer->flow.u.ip4, sk);
+		if (IS_ERR(rt)) {
+			dst = (void *)rt;
+		} else {
+			dst = &rt->dst;
+		}
+	} else {
+		peer->flow.u.ip6.flowi6_oif = sk->sk_bound_dev_if;
+		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
+		peer->flow.u.ip6.flowi6_mark = sk->sk_mark;
+		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+		peer->flow.u.ip6.flowi6_proto = sk->sk_protocol;
+		peer->flow.u.ip6.flowi6_flags = 0;
+		peer->flow.u.ip6.flowi6_secid = 0;
+		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
+		peer->flow.u.ip6.flowi6_uid = sk->sk_uid;
+		peer->flow.u.ip6.daddr = peer->addr;
+		peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
+		peer->flow.u.ip6.fl6_dport = 0;
+		peer->flow.u.ip6.fl6_sport = 0;
+		peer->flow.u.ip6.flowlabel = hsk->inet.pinet6->flow_label;
+		peer->flow.u.ip6.mp_hash = 0;
+		peer->flow.u.ip6.__fl_common.flowic_tos = hsk->inet.tos;
+		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
+		security_sk_classify_flow(sk, &peer->flow.u.__fl_common);
 
-	dst = ip6_dst_lookup_flow(sock_net(sk), sk, &peer->flow, NULL);
+		dst = ip6_dst_lookup_flow(sock_net(sk), sk, &peer->flow.u.ip6, NULL);
+	}
 	if (IS_ERR(dst)) {
 		/* Retain the existing dst if we can't create a new one. */
 		if (hsk->homa->verbose)
