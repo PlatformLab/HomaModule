@@ -605,11 +605,11 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
 			hsk->port, current->pid, args.flags);
 	if (args.buf != NULL) {
-		err = import_single_range(READ, args.buf, args.len, iovstack,
+		err = import_single_range(READ, args.buf, args.length, iovstack,
 				&iter);
 	} else {
 		iov = iovstack;
-		err = import_iovec(READ, args.iovec, args.len,
+		err = import_iovec(READ, args.iovec, args.length,
 			ARRAY_SIZE(iovstack), &iov, &iter);
 	}
 	if (unlikely(err < 0))
@@ -658,7 +658,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 */
 	rpc->dont_reap = true;
 	if (homa_is_client(rpc->id)) {
-		if ((args.len >= rpc->msgin.total_length) || rpc->error
+		if ((args.length >= rpc->msgin.total_length) || rpc->error
 				|| !(args.flags & HOMA_RECV_PARTIAL))
 			homa_rpc_free(rpc);
 	} else {
@@ -666,8 +666,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	homa_rpc_unlock(rpc);
 
-	args.len = rpc->msgin.total_length;
-	args.len = rpc->msgin.total_length > 0 ? rpc->msgin.total_length : 0;
+	args.length = rpc->msgin.total_length > 0 ? rpc->msgin.total_length : 0;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
