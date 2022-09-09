@@ -354,7 +354,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 	unit_log_clear();
 	EXPECT_EQ(0, homa_xmit_control(BUSY, &h, 10, srpc));
 	EXPECT_STREQ("padded control packet with 16 bytes; "
-			"xmit unknown packet type 0",
+			"xmit unknown packet type 0x0",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)

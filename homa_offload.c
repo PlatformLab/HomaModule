@@ -134,7 +134,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				iph->tos >> 5);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
-				"id %llu, type %d, priority %d",
+				"id %llu, type 0x%x, priority %d",
 				ntohl(ip_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				h_new->common.type, iph->tos >> 5);

@@ -956,7 +956,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		snprintf(buffer, buf_len, "ACK");
 		break;
 	default:
-		snprintf(buffer, buf_len, "unknown packet type %d",
+		snprintf(buffer, buf_len, "unknown packet type 0x%x",
 				common->type);
 		break;
 	}
