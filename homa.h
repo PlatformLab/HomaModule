@@ -64,22 +64,22 @@ extern "C"
 #define HOMAIOCFREEZE 1003106
 
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
-                    const struct sockaddr *dest_addr, size_t addrlen,
+                    const struct sockaddr *dest_addr,
                     uint64_t *id, uint64_t completion_cookie);
 extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-                    const struct sockaddr *dest_addr, size_t addrlen,
+                    const struct sockaddr *dest_addr,
                     uint64_t *id, uint64_t completion_cookie);
 extern ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
-                    struct sockaddr *src_addr, size_t *addrlen,
+                    struct sockaddr *src_addr,
                     uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
 extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
-                    int flags, struct sockaddr *src_addr, size_t *addrlen,
+                    int flags, struct sockaddr *src_addr,
                     uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
 extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
-                    const struct sockaddr *dest_addr, size_t addrlen,
+                    const struct sockaddr *dest_addr,
                     uint64_t id);
 extern ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-                    const struct sockaddr *dest_addr, size_t addrlen,
+                    const struct sockaddr *dest_addr,
                     uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id);
 extern int     homa_cancel(int sockfd, uint64_t id);

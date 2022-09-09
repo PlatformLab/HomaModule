@@ -38,9 +38,6 @@
  *              HOMA_RECV_NONBLOCKING
  * @src_addr:   If @id is non-null, specifies the desired source for an
  *              RPC. Also used to return the sender's IP address.
- * @addrlen:    Points to variable indicating space available at @src_addr,
- *              in bytes. Will be overwritten with the actual size of
- *              the address stored there.
  * @id:         Points to a unique RPC identifier, which is used both as
  *              an input and an output parameter. If the value is initially
  *              nonzero, then a message matching this id and @src_addr
@@ -53,16 +50,12 @@
  *              occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
-	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
+	        struct sockaddr *src_addr, uint64_t *id,
 		size_t *msglen, uint64_t *completion_cookie)
 {
 	struct homa_args_recv_ipv4 args = {};
 	int result;
 
-	if (*addrlen < sizeof(struct sockaddr_in)) {
-		errno = EINVAL;
-		return -EINVAL;
-	}
 	args.buf = (void *) buf;
 	args.iovec = NULL;
 	args.length = length;
@@ -72,7 +65,6 @@ ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
 	args.actualId = 0;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
-	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
 	if (msglen) {
 		*msglen = args.length;
@@ -100,9 +92,6 @@ ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
  *              HOMA_RECV_NONBLOCKING
  * @src_addr:   If @id is non-null, specifies the desired source for an
  *              RPC. Also used to return the sender's IP address.
- * @addrlen:    Points to variable indicating space available at @src_addr,
- *              in bytes. Will be overwritten with the actual size of
- *              the address stored there.
  * @id:         Points to a unique RPC identifier, which is used both as
  *              an input and an output parameter. If the value is initially
  *              nonzero, then a message matching this id and @src_addr
@@ -115,16 +104,12 @@ ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
  *              occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
-	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
+	        struct sockaddr *src_addr, uint64_t *id,
 		size_t *msglen, uint64_t *completion_cookie)
 {
 	struct homa_args_recv_ipv4 args = {};
 	int result;
 
-	if (*addrlen < sizeof(struct sockaddr_in)) {
-		errno = EINVAL;
-		return -EINVAL;
-	}
 	args.buf = NULL;
 	args.iovec = iov;
 	args.length = iovcnt;
@@ -135,7 +120,6 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	args.type = 0;
 	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*((struct sockaddr_in *) src_addr) = args.source_addr;
-	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
 	if (msglen) {
 		*msglen = args.length;
@@ -160,7 +144,6 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
  * @resplen:    Number of bytes at @response.
  * @dest_addr:  Address of the RPC's client (returned by homa_recv when
  *              the message was received).
- * @addrlen:    Size of @dest_addr in bytes.
  * @id:         Unique identifier for the request, as returned by homa_recv
  *              when the request was received.
  *
@@ -172,7 +155,7 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
-		const struct sockaddr *dest_addr, size_t addrlen,
+		const struct sockaddr *dest_addr,
 		uint64_t id)
 {
 	struct homa_args_reply_ipv4 args = {};
@@ -198,7 +181,6 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
  * @iovcnt:     Number of elements in @iov.
  * @dest_addr:  Address of the RPC's client (returned by homa_recv when
  *              the message was received).
- * @addrlen:    Size of @dest_addr in bytes.
  * @id:         Unique identifier for the request, as returned by homa_recv
  *              when the request was received.
  *
@@ -210,7 +192,7 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-		const struct sockaddr *dest_addr, size_t addrlen,
+		const struct sockaddr *dest_addr,
 		uint64_t id)
 {
 	struct homa_args_reply_ipv4 args = {};
@@ -233,7 +215,6 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * @request:    First byte of buffer containing the request message.
  * @reqlen:     Number of bytes at @request.
  * @dest_addr:  Address of server to which the request should be sent.
- * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
  * @completion_cookie value to be delivered upon RPC completion.
@@ -242,7 +223,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *request, size_t reqlen,
-		const struct sockaddr *dest_addr, size_t addrlen,
+		const struct sockaddr *dest_addr,
 		uint64_t *id, uint64_t completion_cookie)
 {
 	struct homa_args_send_ipv4 args = {};
@@ -272,7 +253,6 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
  *              message.
  * @iovcnt:     Number of elements in @iov.
  * @dest_addr:  Address of server to which the request should be sent.
- * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
  * @completion_cookie value to be delivered upon RPC completion.
@@ -281,7 +261,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-		const struct sockaddr *dest_addr, size_t addrlen,
+		const struct sockaddr *dest_addr,
 		uint64_t *id, uint64_t completion_cookie)
 {
 	struct homa_args_send_ipv4 args = {};
