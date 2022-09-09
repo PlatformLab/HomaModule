@@ -118,7 +118,7 @@ int homa_init(struct homa *homa)
 #else
 	homa->cutoff_version = 1;
 #endif
-	homa->fifo_grant_increment = 0;
+	homa->fifo_grant_increment = 10000;
 	homa->grant_fifo_fraction = 50;
 	homa->duty_cycle = 800;
 	homa->grant_threshold = 0;
