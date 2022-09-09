@@ -68,7 +68,7 @@ extern int     homa_send(int sockfd, const void *request, size_t reqlen,
 extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t *id, uint64_t completion_cookie);
-extern ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
+extern ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
                     struct sockaddr *src_addr, size_t *addrlen,
                     uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
 extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
@@ -109,7 +109,7 @@ struct homa_args_recv_ipv4 {
 
         // Initially holds length of @buf or @iovec; modified to return total
         // message length.
-        size_t len;
+        size_t length;
         struct sockaddr_in source_addr;
         int flags;
         __u64 requestedId;

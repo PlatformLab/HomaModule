@@ -34,7 +34,7 @@
  * @sockfd:            File descriptor for the socket on which to receive the
  *                     message.
  * @buf:               First byte of buffer for the incoming message.
- * @len:               Number of bytes available at @request.
+ * @length:            Number of bytes available at @request.
  * @flags:             An ORed combination of bits such as HOMA_RECV_REQUEST and
  *                     HOMA_RECV_NONBLOCKING
  * @src_addr:          If @id is non-null, specifies the desired source for an
@@ -55,7 +55,7 @@
  * Return:             The number of bytes of data returned at @buf. If an error
  *                     occurred, -1 is returned and errno is set appropriately.
  */
-ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
+ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
 		size_t *msglen, uint64_t *completion_cookie)
 {
@@ -68,7 +68,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	}
 	args.buf = (void *) buf;
 	args.iovec = NULL;
-	args.len = len;
+	args.length = length;
 	args.source_addr = *((struct sockaddr_in *) src_addr);
 	args.flags = flags;
 	args.requestedId = *id;
@@ -78,7 +78,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
 	if (msglen)
-		*msglen = args.len;
+		*msglen = args.length;
 	if (completion_cookie)
 		*completion_cookie = args.completion_cookie;
 	return result;
@@ -125,7 +125,7 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	}
 	args.buf = NULL;
 	args.iovec = iov;
-	args.len = iovcnt;
+	args.length = iovcnt;
 	args.source_addr = *((struct sockaddr_in *) src_addr);
 	args.flags = flags;
 	args.requestedId = *id;
@@ -135,7 +135,7 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	*addrlen = sizeof(struct sockaddr_in);
 	*id = args.actualId;
 	if (msglen)
-		*msglen = args.len;
+		*msglen = args.length;
 	if (completion_cookie)
 		*completion_cookie = args.completion_cookie;
 	return result;
@@ -172,7 +172,7 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 	}
 	args.response = (void *) response;
 	args.iovec = NULL;
-		args.length = resplen;
+	args.length = resplen;
 	args.dest_addr = *((struct sockaddr_in *) dest_addr);
 	args.id = id;
 	return ioctl(sockfd, HOMAIOCREPLY, &args);
