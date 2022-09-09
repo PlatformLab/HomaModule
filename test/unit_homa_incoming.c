@@ -122,8 +122,8 @@ FIXTURE(homa_incoming) {
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
-	struct sockaddr_in server_addr;
-	struct sockaddr_in addr;
+	sockaddr_in_union server_addr;
+	sockaddr_in_union addr;
 	struct homa homa;
 	struct homa_sock hsk;
 	struct data_header data;
@@ -139,12 +139,12 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->server_addr.sin_family = AF_INET;
-	self->server_addr.sin_addr.s_addr = self->server_ip;
-	self->server_addr.sin_port =  htons(self->server_port);
-	self->addr.sin_family = AF_INET;
-	self->addr.sin_addr.s_addr = 0;
-	self->addr.sin_port =  0;
+	self->server_addr.in4.sin_family = AF_INET;
+	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_port =  htons(self->server_port);
+	self->addr.in4.sin_family = AF_INET;
+	self->addr.in4.sin_addr.s_addr = 0;
+	self->addr.in4.sin_port =  0;
 	homa_init(&self->homa);
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
@@ -2336,8 +2336,8 @@ TEST_F(homa_incoming, homa_register_interests__return_request_by_id)
 		        self->server_id, 20000, 100);
 	ASSERT_NE(NULL, srpc);
 
-	self->addr.sin_addr.s_addr = self->client_ip;
-	self->addr.sin_port = htons(self->client_port);
+	self->addr.in4.sin_addr.s_addr = self->client_ip;
+	self->addr.in4.sin_port = htons(self->client_port);
 	int result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECV_NONBLOCKING, self->server_id, &self->addr);
 	EXPECT_EQ(0, result);

@@ -182,7 +182,7 @@ void seed_buffer(void *buffer, size_t length, int seed)
  * strings, so callers don't have to worry about allocating space, even if
  * several addresses are in use at once. This function is also thread-safe.
  */
-const char *print_address(struct sockaddr_in *addr)
+const char *print_address(sockaddr_in_union *addr)
 {
 #define BUF_SIZE 50
 #define NUM_BUFFERS 16
@@ -191,16 +191,16 @@ const char *print_address(struct sockaddr_in *addr)
 
 	char *buffer = buffers[next_buffer.fetch_add(1)
 		& (NUM_BUFFERS-1)];
-	if (addr->sin_family != AF_INET) {
+	if (addr->in4.sin_family != AF_INET) {
 		snprintf(buffer, BUF_SIZE, "Unknown family %d",
-				addr->sin_family);
+				addr->in4.sin_family);
 		return buffer;
 	}
-	uint8_t *ipaddr = (uint8_t *) &addr->sin_addr;
+	uint8_t *ipaddr = (uint8_t *) &addr->in4.sin_addr;
 	if ((buffer - &buffers[0][0]) > NUM_BUFFERS*BUF_SIZE)
 		printf("Buffer pointer corrupted!\n");
 	snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
-		ipaddr[2], ipaddr[3], ntohs(addr->sin_port));
+		ipaddr[2], ipaddr[3], ntohs(addr->in4.sin_port));
 	return buffer;
 }
 

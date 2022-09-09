@@ -29,7 +29,7 @@ FIXTURE(homa_outgoing) {
 	__u64 server_id;
 	struct homa homa;
 	struct homa_sock hsk;
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 	struct homa_peer *peer;
 };
 FIXTURE_SETUP(homa_outgoing)
@@ -46,11 +46,11 @@ FIXTURE_SETUP(homa_outgoing)
 	self->homa.cycles_per_kbyte = 1000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
-	self->server_addr.sin_family = AF_INET;
-	self->server_addr.sin_addr.s_addr = self->server_ip;
-	self->server_addr.sin_port = htons(self->server_port);
+	self->server_addr.in4.sin_family = AF_INET;
+	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_port = htons(self->server_port);
 	self->peer = homa_peer_find(&self->homa.peers,
-			self->server_addr.sin_addr.s_addr, &self->hsk.inet);
+			self->server_addr.in4.sin_addr.s_addr, &self->hsk.inet);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)

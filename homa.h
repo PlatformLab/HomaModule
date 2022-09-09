@@ -63,62 +63,65 @@ extern "C"
 #define HOMAIOCCANCEL 1003105
 #define HOMAIOCFREEZE 1003106
 
-extern int     homa_send(int sockfd, const void *request, size_t reqlen,
-                    const struct sockaddr *dest_addr,
-                    uint64_t *id, uint64_t completion_cookie);
-extern int     homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-                    const struct sockaddr *dest_addr,
-                    uint64_t *id, uint64_t completion_cookie);
-extern ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
-                    struct sockaddr *src_addr,
-                    uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
-extern ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt,
-                    int flags, struct sockaddr *src_addr,
-                    uint64_t *id, size_t *msglen, uint64_t *completion_cookie);
-extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
-                    const struct sockaddr *dest_addr,
-                    uint64_t id);
-extern ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-                    const struct sockaddr *dest_addr,
-                    uint64_t id);
-extern int     homa_abort(int sockfd, uint64_t id);
-extern int     homa_cancel(int sockfd, uint64_t id);
+/**
+ * This is smaller and easier to use than sockaddr_storage.
+ */
+typedef union sockaddr_in_union {
+        struct sockaddr sa;
+        struct sockaddr_in in4;
+        struct sockaddr_in6 in6;
+} sockaddr_in_union;
 
 /**
- * define homa_args_send_ipv4 - Structure that passes arguments and results
- * betweeen homa_send and the HOMAIOCSEND ioctl. Assumes IPV4 addresses.
+ * define homa_send_args - Structure that passes arguments and results
+ * betweeen homa_send and the HOMAIOCSEND ioctl.
  */
-struct homa_args_send_ipv4 {
-        // Exactly one of request and iovec will be non-null.
-        void *request;
+struct homa_send_args {
+        // Exactly one of message_buf and iovec will be non-null.
+        void *message_buf;
         const struct iovec *iovec;
 
         // The number of bytes at *request, or the number of elements at *iovec.
         size_t length;
-        struct sockaddr_in dest_addr;
-        __u64 id;
+        sockaddr_in_union dest_addr;
+        int flags;
         __u64 completion_cookie;
+        __u64 id;
+
+        __u64 _pad[7];
 };
+#if !defined(__cplusplus)
+_Static_assert(sizeof(struct homa_send_args) >= 128, "homa_send_args shrunk");
+_Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
+#endif
 
 /**
- * define homa_args_recv_ipv4 - Structure that passes arguments and results
- * betweeen homa_recv and the HOMAIOCRECV ioctl. Assumes IPV4 addresses.
+ * define homa_recv_args - Structure that passes arguments and results
+ * betweeen homa_recv and the HOMAIOCRECV ioctl.
+ *
+ * Ideally this should have the exact same layout as homa_reply_args.
+ * Therefore new members should be added at the end of the padding,
+ * not at the beginning.
  */
-struct homa_args_recv_ipv4 {
-        // Exactly one of buf and iovec will be non-null.
-        void *buf;
+struct homa_recv_args {
+        // Exactly one of message_buf and iovec will be non-null.
+        void *message_buf;
         const struct iovec *iovec;
 
         // Initially holds length of @buf or @iovec; modified to return total
         // message length.
         size_t length;
-        struct sockaddr_in source_addr;
+        sockaddr_in_union source_addr;
         int flags;
-        int type;
-        __u64 requestedId;
-        __u64 actualId;
         __u64 completion_cookie;
+        __u64 id;
+
+        __u64 _pad[7];
 };
+#if !defined(__cplusplus)
+_Static_assert(sizeof(struct homa_recv_args) >= 128, "homa_recv_args shrunk");
+_Static_assert(sizeof(struct homa_recv_args) <= 128, "homa_recv_args grew");
+#endif
 
 /* Flag bits for homa_recv (see man page for documentation):
  */
@@ -128,19 +131,31 @@ struct homa_args_recv_ipv4 {
 #define HOMA_RECV_PARTIAL       0x08
 
 /**
- * define homa_args_reply_ipv4 - Structure that passes arguments and results
- * betweeen homa_reply and the HOMAIOCREPLY ioctl. Assumes IPV4 addresses.
+ * define homa_reply_args - Structure that passes arguments and results
+ * betweeen homa_reply and the HOMAIOCREPLY ioctl.
+ *
+ * Ideally this should have the exact same layout as homa_recv_args.
+ * Therefore new members should be added at the beginning of the padding,
+ * not at the end.
  */
-struct homa_args_reply_ipv4 {
-        // Exactly one of response and iovec will be non-null.
-        void *response;
+struct homa_reply_args {
+        // Exactly one of message_buf and iovec will be non-null.
+        void *message_buf;
         const struct iovec *iovec;
 
         // The number of bytes at *response, or the number of elements at *iovec.
         size_t length;
-        struct sockaddr_in dest_addr;
+        sockaddr_in_union dest_addr;
+        int flags;
+        __u64 completion_cookie;
         __u64 id;
+
+        __u64 _pad[7];
 };
+#if !defined(__cplusplus)
+_Static_assert(sizeof(struct homa_reply_args) >= 128, "homa_reply_args shrunk");
+_Static_assert(sizeof(struct homa_reply_args) <= 128, "homa_reply_args grew");
+#endif
 
 /**
  * Meanings of the bits in Homa's flag word, which can be set using
@@ -152,6 +167,36 @@ struct homa_args_reply_ipv4 {
  * immediately.
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
+
+extern ssize_t homa_recv(int fd, struct homa_recv_args *args);
+
+extern ssize_t homa_reply(int fd, struct homa_reply_args *args);
+
+extern ssize_t homa_send(int fd, struct homa_send_args *args);
+
+extern int     homa_abort(int sockfd, uint64_t id);
+
+extern int     homa_cancel(int sockfd, uint64_t id);
+
+extern int     homa_send_helper(int sockfd, const void *request, size_t reqlen,
+                    const sockaddr_in_union *dest_addr, uint64_t *id,
+                    uint64_t completion_cookie);
+extern int     homa_sendv_helper(int sockfd, const struct iovec *iov,
+                    int iovcnt, const sockaddr_in_union *dest_addr,
+                    uint64_t *id, uint64_t completion_cookie);
+extern ssize_t homa_recv_helper(int sockfd, void *buf, size_t len, int flags,
+                    sockaddr_in_union *src_addr, uint64_t *id,
+                    size_t *msglen, uint64_t *completion_cookie_p);
+extern ssize_t homa_recvv_helper(int sockfd, const struct iovec *iov,
+                    int iovcnt, int flags, sockaddr_in_union *src_addr,
+                    uint64_t *id, size_t *msglen,
+                    uint64_t *completion_cookie_p);
+extern ssize_t homa_reply_helper(int sockfd, const void *response,
+                    size_t resplen, const sockaddr_in_union *dest_addr,
+                    uint64_t id);
+extern ssize_t homa_replyv_helper(int sockfd, const struct iovec *iov,
+                    int iovcnt, const sockaddr_in_union *dest_addr,
+                    uint64_t id);
 
 #ifdef __cplusplus
 }

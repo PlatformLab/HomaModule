@@ -130,7 +130,7 @@ struct conn_id {
  * @server_addrs: Internet addresses for each of the server threads available
  * to receive a Homa RPC.
  */
-std::vector<struct sockaddr_in> server_addrs;
+std::vector<sockaddr_in_union> server_addrs;
 
 /**
  * @server_ids: for each entry in @server_addrs, a connection identifier
@@ -270,7 +270,7 @@ void print_help(const char *name)
 		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
 		"                      not be sent to node-I (default: -1)\n"
-        "    --iovec           Use homa_sendv instead of homa_send\n"
+        "    --iovec           Use homa_sendv_helper instead of homa_send_helper\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
@@ -478,7 +478,7 @@ void init_server_addrs(void)
 		char host[100];
 		struct addrinfo hints;
 		struct addrinfo *matching_addresses;
-		struct sockaddr_in *dest;
+		sockaddr_in_union *dest;
 
 		if (node == id)
 			continue;
@@ -494,14 +494,14 @@ void init_server_addrs(void)
 					host, gai_strerror(status));
 			exit(1);
 		}
-		dest = reinterpret_cast<struct sockaddr_in *>
+		dest = reinterpret_cast<sockaddr_in_union *>
 				(matching_addresses->ai_addr);
 		freeaddrinfo(matching_addresses);
 		while (((int) first_id.size()) < node)
 			first_id.push_back(-1);
 		first_id.push_back((int) server_addrs.size());
 		for (int thread = 0; thread < server_ports; thread++) {
-			dest->sin_port = htons(first_port + thread);
+			dest->in4.sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
 			server_ids.emplace_back(node, thread, id, 0);
 		}
@@ -550,7 +550,7 @@ class spin_lock {
 class tcp_connection {
     public:
 	tcp_connection(int fd, uint32_t epoll_id, int port,
-			struct sockaddr_in peer);
+			sockaddr_in_union peer);
 	size_t pending();
 	int read(bool loop, std::function<void (message_header *header)> func);
 	bool send_message(message_header *header);
@@ -575,7 +575,7 @@ class tcp_connection {
 	/**
 	 * @peer: Address of the machine on the other end of this connection.
 	 */
-	struct sockaddr_in peer;
+	sockaddr_in_union peer;
 
 	/**
 	 * @bytes_received: nonzero means we have read part of an incoming
@@ -626,7 +626,7 @@ class tcp_connection {
  * @peer:      Address of the machine we're reading from; used for messages.
  */
 tcp_connection::tcp_connection(int fd, uint32_t epoll_id, int port,
-		struct sockaddr_in peer)
+		sockaddr_in_union peer)
 	: fd(fd)
 	, epoll_id(epoll_id)
         , port(port)
@@ -956,7 +956,7 @@ homa_server::~homa_server()
 void homa_server::server(void)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
-	struct sockaddr_in source;
+	sockaddr_in_union source;
 	int length;
 	char thread_name[50];
 
@@ -973,22 +973,20 @@ void homa_server::server(void)
 				vec[0].iov_len = 20;
 				vec[1].iov_base = buffer + 20;
 				vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
-				length = homa_recvv(fd, vec, 2,
+				length = homa_recvv_helper(fd, vec, 2,
 						HOMA_RECV_REQUEST,
-						(struct sockaddr *) &source,
-						&id, NULL, NULL);
+						&source, &id, NULL, NULL);
 			} else
-				length = homa_recv(fd, buffer,
+				length = homa_recv_helper(fd, buffer,
 						HOMA_MAX_MESSAGE_LENGTH,
 						HOMA_RECV_REQUEST,
-						(struct sockaddr *) &source,
-						&id, NULL, NULL);
+						&source, &id, NULL, NULL);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
 				return;
 			else if ((errno != EINTR) && (errno != EAGAIN))
-				log(NORMAL, "homa_recv failed: %s\n",
+				log(NORMAL, "homa_recv_helper failed: %s\n",
 						strerror(errno));
 		}
 		tt("Received Homa request, cid 0x%08x, id %u, length %d",
@@ -1008,11 +1006,9 @@ void homa_server::server(void)
 		    vec[0].iov_len = 20;
 		    vec[1].iov_base = buffer + 20;
 		    vec[1].iov_len = length - 20;
-		    result = homa_replyv(fd, vec, 2, (struct sockaddr *) &source,
-				id);
+		    result = homa_replyv_helper(fd, vec, 2,  &source, id);
 		} else
-		    result = homa_reply(fd, buffer, length,
-			    (struct sockaddr *) &source, id);
+		    result = homa_reply_helper(fd, buffer, length, &source, id);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed: %s\n",
 					strerror(errno));
@@ -1124,10 +1120,10 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 				strerror(errno));
 		exit(1);
 	}
-	struct sockaddr_in addr;
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(port);
-	addr.sin_addr.s_addr = INADDR_ANY;
+	sockaddr_in_union addr;
+	addr.in4.sin_family = AF_INET;
+	addr.in4.sin_port = htons(port);
+	addr.in4.sin_addr.s_addr = INADDR_ANY;
 	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))
 			== -1) {
 		log(NORMAL, "FATAL: couldn't bind to port %d: %s\n", port,
@@ -1277,7 +1273,7 @@ void tcp_server::server(int thread_id)
 void tcp_server::accept(int epoll_fd)
 {
 	int fd;
-	struct sockaddr_in client_addr;
+	sockaddr_in_union client_addr;
 	socklen_t addr_len = sizeof(client_addr);
 
 	fd = ::accept4(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
@@ -1856,7 +1852,7 @@ void homa_client::stop_sender(void)
 bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 
 	rpc_id = 0;
 	int length;
@@ -1867,20 +1863,19 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 			vec[0].iov_len = 20;
 			vec[1].iov_base = buffer + 20;
 			vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
-			length = homa_recvv(fd, vec, 2, HOMA_RECV_RESPONSE,
-					(struct sockaddr *) &server_addr,
-					&rpc_id, NULL, NULL);
+			length = homa_recvv_helper(fd, vec, 2, HOMA_RECV_RESPONSE,
+					&server_addr, &rpc_id, NULL, NULL);
 		} else
-			length = homa_recv(fd, buffer,
+			length = homa_recv_helper(fd, buffer,
 					HOMA_MAX_MESSAGE_LENGTH,
 					HOMA_RECV_RESPONSE,
-					(struct sockaddr *) &server_addr,
+					&server_addr,
 					&rpc_id, NULL, NULL);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)
 			return false;
-		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
+		log(NORMAL, "FATAL: error in homa_recv_helper: %s (id %lu, server %s)\n",
 				strerror(errno), rpc_id,
 				print_address(&server_addr));
 		exit(1);
@@ -1956,17 +1951,13 @@ void homa_client::sender()
 			vec[0].iov_len = 20;
 			vec[1].iov_base = sender_buffer + 20;
 			vec[1].iov_len = header->length - 20;
-			status = homa_sendv(fd, vec, 2,
-				reinterpret_cast<struct sockaddr *>(
-				&server_addrs[server]),
-				&rpc_id, 0);
+			status = homa_sendv_helper(fd, vec, 2,
+				&server_addrs[server], &rpc_id, 0);
 		} else
-			status = homa_send(fd, sender_buffer, header->length,
-                reinterpret_cast<struct sockaddr *>(
-                &server_addrs[server]),
-                &rpc_id, 0);
+			status = homa_send_helper(fd, sender_buffer, header->length,
+                &server_addrs[server], &rpc_id, 0);
 		if (status < 0) {
-			log(NORMAL, "FATAL: error in homa_send: %s (request "
+			log(NORMAL, "FATAL: error in homa_send_helper: %s (request "
 					"length %d)\n", strerror(errno),
 					header->length);
 			exit(1);
@@ -2020,7 +2011,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
 	uint64_t rpc_id;
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 	int status;
 
 	header->length = length;
@@ -2031,24 +2022,21 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 	header->cid = server_ids[server];
 	header->cid.client_port = id;
 	start = rdtsc();
-	status = homa_send(fd, buffer, header->length,
-		reinterpret_cast<struct sockaddr *>(
-		&server_addrs[server]),
-		&rpc_id, 0);
+	status = homa_send_helper(fd, buffer, header->length,
+		&server_addrs[server], &rpc_id, 0);
 	if (status < 0) {
-		log(NORMAL, "FATAL: error in homa_send: %s (request "
+		log(NORMAL, "FATAL: error in homa_send_helper: %s (request "
 				"length %d)\n", strerror(errno),
 				header->length);
 		exit(1);
 	}
 	do {
-		status = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
+		status = homa_recv_helper(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_RESPONSE,
-				(struct sockaddr *) &server_addr,
-				&rpc_id, NULL, NULL);
+				&server_addr, &rpc_id, NULL, NULL);
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
-		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
+		log(NORMAL, "FATAL: error in homa_recv_helper: %s (id %lu, server %s)\n",
 				strerror(errno), rpc_id,
 				print_address(&server_addr));
 		exit(1);
@@ -2225,7 +2213,7 @@ tcp_client::tcp_client(int id)
 					strerror(errno));
 			exit(1);
 		}
-		struct sockaddr_in addr;
+		sockaddr_in_union addr;
 		socklen_t length = sizeof(addr);
 		if (getsockname(fd, reinterpret_cast<struct sockaddr *>(&addr),
 				&length)) {
@@ -2234,7 +2222,7 @@ tcp_client::tcp_client(int id)
 			exit(1);
 		}
 		connections.emplace_back(new tcp_connection(fd, i,
-				ntohs(addr.sin_port), server_addrs[i]));
+				ntohs(addr.in4.sin_port), server_addrs[i]));
 		connections[connections.size()-1]->set_epoll_events(epoll_fd,
 				EPOLLIN|epollet);
 	}
@@ -2956,7 +2944,7 @@ int server_cmd(std::vector<string> &words)
 
 	if (strcmp(protocol, "homa") == 0) {
 		for (int i = 0; i < server_ports; i++) {
-			struct sockaddr_in addr_in;
+			sockaddr_in_union addr_in;
 			int fd, j, port;
 
 			fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
@@ -2969,8 +2957,8 @@ int server_cmd(std::vector<string> &words)
 
 			port = first_port + i;
 			memset(&addr_in, 0, sizeof(addr_in));
-			addr_in.sin_family = AF_INET;
-			addr_in.sin_port = htons(port);
+			addr_in.in4.sin_family = AF_INET;
+			addr_in.in4.sin_port = htons(port);
 			if (bind(fd, (struct sockaddr *) &addr_in,
 					sizeof(addr_in)) != 0) {
 				log(NORMAL, "FATAL: couldn't bind socket "

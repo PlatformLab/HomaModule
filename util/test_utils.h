@@ -18,6 +18,8 @@
 
 #include <netinet/in.h>
 
+#include "homa.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -31,7 +33,7 @@ extern int     get_int(const char *s, const char *msg);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern const char*
-               print_address(struct sockaddr_in *addr);
+               print_address(sockaddr_in_union *addr);
 extern double  to_seconds(uint64_t cycles);
 
 /**

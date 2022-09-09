@@ -35,6 +35,7 @@
  * @id:            Id for the RPC (0 means use default).
  * @req_length:    Amount of data in the request.
  * @resp_length:   Amount of data in the response.
+ * @cookie:        Cookie to deliver with the completed rpc.
  *
  * Return:         The properly initialized homa_client_rpc, or NULL if
  *                 there was an error. If @state is RPC_OUTGOING, no data
@@ -56,13 +57,13 @@ struct homa_rpc *unit_client_rpc_cookie(struct homa_sock *hsk, int state,
 	        int req_length, int resp_length, uint64_t completion_cookie)
 {
 	int bytes_received;
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
 	int incoming_delta = 0;
 
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_addr.s_addr = server_ip;
-	server_addr.sin_port =  htons(server_port);
+	server_addr.in4.sin_family = AF_INET;
+	server_addr.in4.sin_addr.s_addr = server_ip;
+	server_addr.in4.sin_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
 	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,

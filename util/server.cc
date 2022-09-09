@@ -61,9 +61,9 @@ bool validate = false;
 void homa_server(int port)
 {
 	int fd;
-	struct sockaddr_in addr_in;
+	sockaddr_in_union addr_in;
 	int message[1000000];
-	struct sockaddr_in source;
+	sockaddr_in_union source;
 	int length;
 
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
@@ -73,9 +73,9 @@ void homa_server(int port)
 	}
 
 	memset(&addr_in, 0, sizeof(addr_in));
-	addr_in.sin_family = AF_INET;
-	addr_in.sin_port = htons(port);
-	if (bind(fd, (struct sockaddr *) &addr_in, sizeof(addr_in)) != 0) {
+	addr_in.in4.sin_family = AF_INET;
+	addr_in.in4.sin_port = htons(port);
+	if (bind(fd, &addr_in.sa, sizeof(addr_in.in4)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n", port,
 				strerror(errno));
 		return;
@@ -87,11 +87,11 @@ void homa_server(int port)
 		int seed;
 		int result;
 
-		length = homa_recv(fd, message, sizeof(message),
-			HOMA_RECV_REQUEST, (struct sockaddr *) &source,
+		length = homa_recv_helper(fd, message, sizeof(message),
+			HOMA_RECV_REQUEST, &source,
 			&id, NULL, NULL);
 		if (length < 0) {
-			printf("homa_recv failed: %s\n", strerror(errno));
+			printf("homa_recv_helper failed: %s\n", strerror(errno));
 			continue;
 		}
 		if (validate) {
@@ -112,8 +112,7 @@ void homa_server(int port)
 		/* Second word of the message indicates how large a
 		 * response to send.
 		 */
-		result = homa_reply(fd, message, message[1],
-			(struct sockaddr *) &source, id);
+		result = homa_reply_helper(fd, message, message[1], &source, id);
 		if (result < 0) {
 			printf("Homa_reply failed: %s\n", strerror(errno));
 		}
@@ -142,7 +141,7 @@ void print_help(const char *name)
  *                will arrive.
  * @client_addr:  Information about the client (for messages).
  */
-void tcp_connection(int fd, struct sockaddr_in source)
+void tcp_connection(int fd, sockaddr_in_union source)
 {
 	int flag = 1;
 	char buffer[1000000];
@@ -233,17 +232,17 @@ void tcp_server(int port)
 			strerror(errno));
 		exit(1);
 	}
-	struct sockaddr_in addr;
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(port);
-	addr.sin_addr.s_addr = INADDR_ANY;
-	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))
+	sockaddr_in_union addr;
+	addr.in4.sin_family = AF_INET;
+	addr.in4.sin_port = htons(port);
+	addr.in4.sin_addr.s_addr = INADDR_ANY;
+	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr.in4), sizeof(addr.in4))
 			== -1) {
 		printf("Couldn't bind to port %d: %s\n", port, strerror(errno));
 		exit(1);
 	}
 	while (1) {
-		struct sockaddr_in client_addr;
+		sockaddr_in_union client_addr;
 		socklen_t addr_len = sizeof(client_addr);
 		if (listen(listen_fd, 1000) == -1) {
 			printf("Couldn't listen on socket: %s", strerror(errno));

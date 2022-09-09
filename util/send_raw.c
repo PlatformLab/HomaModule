@@ -28,7 +28,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-#include "../homa.h"
+#include "homa.h"
 
 int main(int argc, char** argv) {
 	int fd, status;
@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
 	char *message;
 	char *host;
 	int protocol;
-	struct sockaddr_in *addr;
+	sockaddr_in_union *addr;
 	uint8_t *bytes;
 
 	if (argc < 3) {
@@ -66,9 +66,9 @@ int main(int argc, char** argv) {
 				host, gai_strerror(status));
 		exit(1);
 	}
-	addr = (struct sockaddr_in*) result->ai_addr;
-	bytes = (uint8_t *) &addr->sin_addr;
-	printf("Destination address: %x (%d.%d.%d.%d)\n", addr->sin_addr.s_addr,
+	addr = (sockaddr_in_union*) result->ai_addr;
+	bytes = (uint8_t *) &addr->in4.sin_addr;
+	printf("Destination address: %x (%d.%d.%d.%d)\n", addr->in4.sin_addr.s_addr,
 		bytes[0], bytes[1], bytes[2], bytes[3]);
 
 	fd = socket(AF_INET, SOCK_RAW, protocol);

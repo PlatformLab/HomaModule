@@ -2746,7 +2746,7 @@ extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
                     int noblock, int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
                     struct homa_sock *hsk, int flags, __u64 id,
-		    struct sockaddr_in *client_addr);
+		    sockaddr_in_union *client_addr);
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_grantable_locked(struct homa *homa,
                     struct homa_rpc *rpc);
@@ -2766,7 +2766,7 @@ extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
-                    struct sockaddr_in *dest, struct iov_iter *iter);
+                    sockaddr_in_union *dest, struct iov_iter *iter);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk, __be32 source,
                     struct data_header *h);
@@ -2812,7 +2812,7 @@ extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
-                    __u64 id, struct sockaddr_in *client_addr);
+                    __u64 id, sockaddr_in_union *client_addr);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
                     size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
