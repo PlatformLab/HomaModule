@@ -100,7 +100,9 @@ or higher.  An application can request a port number less than
 by invoking
 .BR bind (2).
 This will change the socket's port number to the given value, if it
-is not already in use. Note:
+is not already in use. If a port of 0 is specified, then the call
+does nothing (the socket will continue to use its existing port number).
+Note:
 .BR bind (2)
 should not be invoked on a Homa socket after sending or receiving
 any messages on that socket.

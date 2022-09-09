@@ -230,7 +230,9 @@ void homa_sock_destroy(struct homa_sock *hsk)
  * was a previous server port assignment for @hsk, it is abandoned.
  * @socktab:   Hash table in which the binding will be recorded.
  * @hsk:       Homa socket.
- * @port:      Desired server port for @hsk.
+ * @port:      Desired server port for @hsk. If 0, then this call
+ *             becomes a no-op: the socket will continue to use
+ *             its randomly assigned client port.
  * 
  * Return:  0 for success, otherwise a negative errno.
  */
@@ -240,10 +242,13 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	int result = 0;
 	struct homa_sock *owner;
 	
-	if ((port == 0) || (port >= HOMA_MIN_DEFAULT_PORT)) {
+	if (port == 0)
+		return result;
+	if (port >= HOMA_MIN_DEFAULT_PORT) {
 		return -EINVAL;
 	}
 	mutex_lock(&socktab->write_lock);
+
 	owner = homa_sock_find(socktab, port);
 	if (owner != NULL) {
 		if (owner != hsk)

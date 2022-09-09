@@ -202,7 +202,8 @@ TEST_F(homa_socktab, homa_sock_bind)
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(&self->homa.port_map, &hsk2, 100));
 	
-	EXPECT_EQ(EINVAL, -homa_sock_bind(&self->homa.port_map, &self->hsk, 0));
+	EXPECT_EQ(0, -homa_sock_bind(&self->homa.port_map, &self->hsk, 0));
+	EXPECT_EQ(HOMA_MIN_DEFAULT_PORT, self->hsk.port);
 	EXPECT_EQ(EINVAL, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			HOMA_MIN_DEFAULT_PORT + 100));
 	
