@@ -354,9 +354,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	if (req_length < UNIT_TEST_DATA_PER_PACKET)
 		h.seg.segment_length = htonl(req_length);
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
-	homa_rpc_unlock(srpc);
-	if (!srpc)
+	if (IS_ERR(srpc))
 		return NULL;
+	homa_rpc_unlock(srpc);
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
