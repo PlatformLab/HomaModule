@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,7 +30,7 @@ CEXTERN void          unit_hash_free(struct unit_hash *hash);
 CEXTERN void         *unit_hash_get(struct unit_hash *hash, const void *key);
 CEXTERN struct unit_hash *
                       unit_hash_new(void);
-CEXTERN void          unit_hash_set(struct unit_hash *hash, const void *key, 
+CEXTERN void          unit_hash_set(struct unit_hash *hash, const void *key,
 				void *value);
 CEXTERN int           unit_hash_size(struct unit_hash *hash);
 CEXTERN void          unit_log_add_separator(char *sep);

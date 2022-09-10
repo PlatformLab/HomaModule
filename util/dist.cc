@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,7 +30,7 @@
  * @fixed:        If a uniform workload has been requested, this variable
  *                will be filled in with the fixed size for that workload;
  *                otherwise the value will be set to 0.
- * 
+ *
  * Return:        If @name refers to a valid (non-uniform) workload, the
  *                return value will be appended to the first point in
  *                the array for that workload.  Otherwise the return value
@@ -40,7 +40,7 @@ dist_point *dist_lookup(const char *dist, int *fixed)
 {
 	char *end;
 	int length;
-	
+
 	/* First check for a fixed-size distribution. */
 	length = strtol(dist, &end, 10);
 	if ((length != 0) && (*end == 0)) {
@@ -48,7 +48,7 @@ dist_point *dist_lookup(const char *dist, int *fixed)
 		return NULL;
 	}
 	*fixed = 0;
-	
+
 	if (strcmp(dist, "w1") == 0) {
 		return w1;
 	} else if (strcmp(dist, "w2") == 0) {
@@ -59,7 +59,7 @@ dist_point *dist_lookup(const char *dist, int *fixed)
 		return w4;
 	} else if (strcmp(dist, "w5") == 0) {
 		return w5;
-	} 
+	}
 	return NULL;
 }
 
@@ -70,7 +70,7 @@ dist_point *dist_lookup(const char *dist, int *fixed)
  * @rand_gen:     Random number generator to use in generating samples.
  * @num_samples:  How many samples to generate.
  * @sizes:        The generated samples are appended to this vector.
- * 
+ *
  * Return:        Non-zero means success; zero means dist isn't a valid
  *                workload name.
  */
@@ -78,7 +78,7 @@ void dist_sample(std::vector<dist_point> &points, std::mt19937 *rand_gen,
 		int num_samples, std::vector<int> &sizes)
 {
 	std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
-	
+
 	for (int i = 0; i < num_samples; i++) {
 		double cdf_fraction = uniform_dist(*rand_gen);
 		for (dist_point &p: points) {
@@ -94,14 +94,14 @@ void dist_sample(std::vector<dist_point> &points, std::mt19937 *rand_gen,
  * dist_mean() - Returns the mean value in a distribution.
  * @points:      Specifies the distribution to use (previous result
  *               from dist_get).
- * 
+ *
  * Return:  the mean value, or a negative value if dist isn't a valid
  *          workload name.
  */
 double dist_mean(std::vector<dist_point> &points)
 {
 	double mean, prev_fraction;
-	
+
 	mean = 0;
 	prev_fraction = 0.0;
 	for (dist_point &p: points) {
@@ -114,7 +114,7 @@ double dist_mean(std::vector<dist_point> &points)
 
 /**
  * dist_get() - Returns a distribution, potentially merging buckets to
- * reduce the total number of points. 
+ * reduce the total number of points.
  * @dist:        Name of the desired distribution, using the same syntax
  *               as for dist_sample.
  * @max_length:  Assume that any lengths longer than this value will
@@ -141,7 +141,7 @@ std::vector<dist_point> dist_get(const char *dist, int max_length,
 	int length, buck_short;
 	dist_point *points, *prev;
 	double last_buck_fraction;
-	
+
 	points = dist_lookup(dist, &length);
 	if (length != 0) {
 		result.emplace_back(length, 1.0);
@@ -188,13 +188,13 @@ std::vector<dist_point> dist_get(const char *dist, int max_length,
  * packets (such as grants) that are required in the normal case.
  * @length:   Number of bytes in the message payload.
  * @mtu:      Maximum size of an Ethernet payload.
- * 
- * Return:    Total overhead bytes for a message of the given length. 
+ *
+ * Return:    Total overhead bytes for a message of the given length.
  */
 int dist_msg_overhead(int length, int mtu)
 {
 	int packet_data, packets, grants, common;
-	
+
 	/* Sizes of various sources of overhead. */
 	int preamble = 8;
 	int ether = 18;
@@ -204,7 +204,7 @@ int dist_msg_overhead(int length, int mtu)
 	int homa_grant = 33;
 	int unsched = 70000;
 	int grant_increment = 10000;
-	
+
 	packet_data = mtu - (ip + homa_data);
 	packets = (length + packet_data - 1)/packet_data;
 	if (length <= unsched)
@@ -228,7 +228,7 @@ int dist_msg_overhead(int length, int mtu)
 double dist_overhead(std::vector<dist_point> &points, int mtu)
 {
 	double overhead, prev_fraction;
-	
+
 	overhead = 0.0;
 	prev_fraction = 0.0;
 	for (dist_point &p: points) {
@@ -1987,7 +1987,7 @@ dist_point w4[] = {
 	{895802, 0.97136},
 	{917977, 0.97173},
 	{940700, 0.9721},
-	
+
 	/* Alternate form that doesn't flatten out when the maximum message
 	 * size is 1000000.
 	 */

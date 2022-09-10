@@ -22,7 +22,7 @@
 /**
  * homa_peertab_init() - Constructor for homa_peertabs.
  * @peertab:  The object to initialize; previous contents are discarded.
- * 
+ *
  * Return:    0 in the normal case, or a negative errno if there was a problem.
  */
 int homa_peertab_init(struct homa_peertab *peertab)
@@ -58,7 +58,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	struct hlist_node *next;
 	if (!peertab->buckets)
 		return;
-	
+
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
 				peertab_links) {
@@ -98,7 +98,7 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
  * @peertab:    Peer table in which to perform lookup.
  * @addr:       IPV4 address of the desired host.
  * @inet:       Socket that will be used for sending packets.
- * 
+ *
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. The caller can retain this pointer
  *              indefinitely: peer entries are never deleted except in
@@ -120,9 +120,9 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 		}
 		INC_METRIC(peer_hash_links, 1);
 	}
-	
+
 	/* No existing entry; create a new one.
-	 * 
+	 *
 	 * Note: after we acquire the lock, we have to check again to
 	 * make sure the entry still doesn't exist after grabbing
 	 * the lock (it might have been created by a concurrent invocation
@@ -170,7 +170,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	peer->num_acks = 0;
 	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
-	
+
     done:
 	spin_unlock_bh(&peertab->write_lock);
 	return peer;
@@ -188,7 +188,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 {
 	struct rtable *rt;
 	struct sock *sk = &hsk->inet.sk;
-	
+
 	spin_lock_bh(&peertab->write_lock);
 	flowi4_init_output(&peer->flow.u.ip4, sk->sk_bound_dev_if,
 			sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
@@ -213,7 +213,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			dst_release(peer->dst);
 		} else {
 			__u64 now = get_cycles();
-			
+
 			dead->dst = peer->dst;
 			dead->gc_time = now + (cpu_khz<<7);
 			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
@@ -230,7 +230,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
  * @homa:     Overall data about the Homa protocol implementation.
  * @peer:     The destination of the message.
  * @length:   Number of bytes in the message.
- * 
+ *
  * Return:    A priority level.
  */
 int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
@@ -248,7 +248,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
  * homa_peer_set_cutoffs() - Set the cutoffs for unscheduled priorities in
  * a peer object. This is a convenience function used primarily by unit tests.
  * @peer:   Homa_peer object whose cutoffs should be set.
- * @c0:     Largest message size that will use priority 0. 
+ * @c0:     Largest message size that will use priority 0.
  * @c1:     Largest message size that will use priority 1.
  * @c2:     Largest message size that will use priority 2.
  * @c3:     Largest message size that will use priority 3.
@@ -297,7 +297,7 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
 {
 	struct homa_peer *peer = rpc->peer;
 	struct ack_header ack;
-	
+
 	homa_peer_lock(peer);
 	if (peer->num_acks < NUM_PEER_UNACKED_IDS) {
 		peer->acks[peer->num_acks].client_id = cpu_to_be64(rpc->id);
@@ -307,7 +307,7 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
 		homa_peer_unlock(peer);
 		return;
 	}
-	
+
 	/* The peer has filled up; send an ACK message to empty it. The
 	 * RPC in the message header will also be considered ACKed.
 	 */
@@ -325,23 +325,23 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
  * @peer:    Peer to check for possible unacked RPCs.
  * @count:   Maximum number of acks to return.
  * @dst:     The acks are copied to this location.
- * 
+ *
  * Return:   The number of acks extracted from the peer (<= count).
  */
 int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
-{	
+{
 	/* Don't waste time acquiring the lock if there are no ids available. */
 	if (peer->num_acks == 0)
 		return 0;
-	
+
 	homa_peer_lock(peer);
-	
+
 	if (count > peer->num_acks)
 		count = peer->num_acks;
 	memcpy(dst, &peer->acks[peer->num_acks - count],
 			count * sizeof(peer->acks[0]));
 	peer->num_acks -= count;
-	
+
 	homa_peer_unlock(peer);
 	return count;
 }

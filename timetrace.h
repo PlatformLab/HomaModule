@@ -45,7 +45,7 @@ struct tt_event {
 	 * entry has never been occupied.
 	 */
 	const char* format;
-	
+
 	/**
 	 * Up to 4 additional arguments that may be referenced by
 	 * @format when printing out this event.

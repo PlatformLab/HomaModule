@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2022 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -903,10 +903,10 @@ def get_buckets(rtts, total):
 def set_unloaded(experiment):
     """
     Compute the optimal RTTs for each message size.
-    
+
     experiment:   Name of experiment that measured RTTs under low load
     """
-    
+
     # Find (or generate) unloaded data for comparison.
     files = sorted(glob.glob("%s/%s-*.rtts" % (log_dir, experiment)))
     if len(files) == 0:
@@ -958,7 +958,7 @@ def get_digest(experiment):
         sys.stdout.write("#")
         sys.stdout.flush()
     print("")
-    
+
     if len(unloaded_p50) == 0:
         raise Exception("No unloaded data: must invoked set_unloaded")
 
@@ -1075,7 +1075,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
         top_axis.set_xlabel("Cumulative % of Messages", size=size)
     top_axis.xaxis.set_label_position('top')
 
-    if x_experiment != None: 
+    if x_experiment != None:
         # Generate x-axis labels
         ticks = []
         labels = []
@@ -1107,7 +1107,7 @@ def cdf_xaxis(ax, x_values, counts, num_ticks, size=10):
     """
     Generate labels for an x-axis that is scaled nonlinearly to reflect
     a particular distribution of samples.
-    
+
     ax:       matplotlib Axes object for the plot
     x:        List of x-values
     counts:   List giving the number of samples for each point in x
@@ -1137,7 +1137,7 @@ def cdf_xaxis(ax, x_values, counts, num_ticks, size=10):
             target_count = (total*tick)/(num_ticks-1)
     ax.set_xticks(ticks)
     ax.set_xticklabels(labels, size=size)
-        
+
 
 def make_histogram(x, y, init=None, after=True):
     """

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -127,7 +127,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
 {
 	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
-	
+
 	self->recv_args.buf = NULL;
 	self->recv_args.iovec = self->recv_vec;
 	self->recv_args.len = 2;
@@ -145,7 +145,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__error_in_import_iovec)
 {
 	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
-	
+
 	self->recv_args.buf = NULL;
 	self->recv_args.iovec = self->recv_vec;
 	self->recv_args.len = 2;
@@ -169,14 +169,14 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
 			|HOMA_RECV_PARTIAL;
-	
+
 	// First call gets most of message.
 	self->recv_args.len = 150;
 	EXPECT_EQ(150, homa_ioc_recv(&self->hsk.inet.sk,
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(self->client_id, self->recv_args.actualId);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	
+
 	// Second call gets remainder, deletes message.
 	self->recv_args.len = 200;
 	self->recv_args.source_addr.sin_addr.s_addr = 0;
@@ -405,7 +405,7 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 TEST_F(homa_plumbing, homa_softirq__reorder_incoming_packets)
 {
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
-	
+
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
@@ -429,7 +429,7 @@ TEST_F(homa_plumbing, homa_softirq__reorder_incoming_packets)
 TEST_F(homa_plumbing, homa_softirq__reorder_short_packet_at_front)
 {
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
-	
+
 	self->data.common.sender_id = cpu_to_be64(200);
 	self->data.message_length = htonl(200);
 	skb = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
@@ -453,7 +453,7 @@ TEST_F(homa_plumbing, homa_softirq__reorder_short_packet_at_front)
 TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 {
 	struct sk_buff *skb, *skb2, *skb3;
-	
+
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
@@ -521,7 +521,7 @@ TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
 	struct homa_sock sock2;
 	mock_sock_init(&sock2, &self->homa, 0);
 	homa_sock_bind(&self->homa.port_map, &sock2, self->server_port+1);
-	
+
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	self->data.common.sender_id += 2;
 	self->data.common.dport = htons(self->server_port+1);
@@ -564,7 +564,7 @@ TEST_F(homa_plumbing, homa_metrics_open)
 {
 	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
 	EXPECT_NE(NULL, self->homa.metrics);
-	
+
 	strcpy(self->homa.metrics, "12345");
 	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
 	EXPECT_EQ(5, strlen(self->homa.metrics));
@@ -581,12 +581,12 @@ TEST_F(homa_plumbing, homa_metrics_read__basics)
 	EXPECT_EQ(5, homa_metrics_read(NULL, buffer, 5, &offset));
 	EXPECT_STREQ("_copy_to_user copied 5 bytes", unit_log_get());
 	EXPECT_EQ(15, offset);
-	
+
 	unit_log_clear();
 	EXPECT_EQ(11, homa_metrics_read(NULL, buffer, 1000, &offset));
 	EXPECT_STREQ("_copy_to_user copied 11 bytes", unit_log_get());
 	EXPECT_EQ(26, offset);
-	
+
 	unit_log_clear();
 	EXPECT_EQ(0, homa_metrics_read(NULL, buffer, 1000, &offset));
 	EXPECT_STREQ("", unit_log_get());
@@ -609,7 +609,7 @@ TEST_F(homa_plumbing, homa_metrics_release)
 	self->homa.metrics_active_opens = 2;
 	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
 	EXPECT_EQ(1, self->homa.metrics_active_opens);
-	
+
 	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
 	EXPECT_EQ(0, self->homa.metrics_active_opens);
 }

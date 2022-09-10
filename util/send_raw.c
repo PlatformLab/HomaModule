@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 	int protocol;
 	struct sockaddr_in *addr;
 	uint8_t *bytes;
-	
+
 	if (argc < 3) {
 		printf("Usage: %s hostName contents [protocol]\n", argv[0]);
 		exit(1);
@@ -56,7 +56,7 @@ int main(int argc, char** argv) {
 	} else {
 		protocol = IPPROTO_HOMA;
 	}
-	
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
@@ -70,13 +70,13 @@ int main(int argc, char** argv) {
 	bytes = (uint8_t *) &addr->sin_addr;
 	printf("Destination address: %x (%d.%d.%d.%d)\n", addr->sin_addr.s_addr,
 		bytes[0], bytes[1], bytes[2], bytes[3]);
-	
+
 	fd = socket(AF_INET, SOCK_RAW, protocol);
 	if (fd < 0) {
 		printf("Couldn't open raw socket: %s\n", strerror(errno));
 		exit(1);
 	}
-	
+
 	status = sendto(fd, message, strlen(message), 0, result->ai_addr,
 			result->ai_addrlen);
 	if (status < 0) {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -30,13 +30,13 @@ struct dist_point {
 	 * sizeof(message_header).
 	 */
 	int length;
-	
+
 	/**
 	 * @fraction: fraction of all messages that are this size
 	 * or smaller.
 	 */
 	double fraction;
-	
+
 	dist_point(int length, double fraction)
 		: length(length), fraction(fraction)
 	{}

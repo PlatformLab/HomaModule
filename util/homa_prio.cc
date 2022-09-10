@@ -1,4 +1,4 @@
-/* Copyright (c) 2020 Stanford University
+/* Copyright (c) 2020-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -50,26 +50,26 @@ Msg_Type log_level = NORMAL;
 extern void log(Msg_Type type, const char *format, ...)
 	__attribute__((format(printf, 2, 3)));
 
-/** 
+/**
  * struct interval -  Keeps statistics for a range of message sizes
  *  (corresponds to a single line of the homa_metrics file).
  */
 struct interval {
 	/** @max_size: largest message size (in bytes) in this interval. */
 	int max_size;
-	
+
 	/**
 	 * @total_bytes: total number of bytes (over all time) in incoming
 	 * messages in this size range.
 	 */
 	int64_t total_bytes;
-	
+
 	/**
 	 * @total_messages: an estimate of the total number of messages
 	 * in this interval (exact statistics are not kept).
 	 */
 	int64_t total_messages;
-	
+
 	/**
 	 * @unsched_bytes: estimate of the total unscheduled bytes in
 	 * incoming messages in this range (it's an estimate because we
@@ -77,7 +77,7 @@ struct interval {
 	 * that).
 	 */
 	int64_t unsched_bytes;
-	
+
 	interval(int max_size, int64_t total_bytes, int64_t total_messages)
 		: max_size(max_size)
 		, total_bytes(total_bytes)
@@ -93,14 +93,14 @@ struct metrics {
 	 * increasing order of message length.
 	 */
 	std::vector<interval> intervals;
-	
+
 	/* Homa metrics with the same name. */
 	int64_t large_msg_count;
 	int64_t large_msg_bytes;
-	
+
 	/** @total_bytes: total bytes received across all message sizes. */
 	int64_t total_bytes;
-	
+
 	/**
 	 * @estimated_msgs: total number of messages received (only an
 	 * estimate; exact counts aren't kept).
@@ -167,7 +167,7 @@ void print_help(const char *name)
  * get_param() - Read a Homa sysctl value.
  * @name:   Name of the desired parameter.
  * @value:  The value of the parameters stored here.
- * 
+ *
  * Return:  True for success, false means the file couldn't be read or
  *          didn't contain an integer value (errors are logged after failures)
  */
@@ -189,7 +189,7 @@ bool get_param(const char *name, int *value)
 		return false;
 	}
 	f.close();
-	
+
 	char *end;
 	*value = strtol(line.c_str(), &end, 10);
 	if (end == line.c_str()) {
@@ -233,7 +233,7 @@ void read_metrics(const char *path, metrics *metrics)
 		const char *s;
 		std::string value;
 		char *end;
-		
+
 		size_t index = line.find(" ");
 		if (index == std::string::npos)
 			goto bad_line;
@@ -243,7 +243,7 @@ void read_metrics(const char *path, metrics *metrics)
 				&& (strcmp(s, "large_msg_bytes") != 0)
 				&& (strcmp(s, "large_msg_count") != 0))
 			continue;
-		
+
 		// Extract the count.
 		index = line.find_first_not_of(" ", index+1);
 		if (index == std::string::npos)
@@ -255,7 +255,7 @@ void read_metrics(const char *path, metrics *metrics)
 				value.c_str(), line.c_str());
 			continue;
 		}
-		
+
 		// Record data about the line.
 		if (symbol[0] == 'm') {
 			s += 10;
@@ -266,7 +266,7 @@ void read_metrics(const char *path, metrics *metrics)
 						"number\n", symbol.c_str());
 				continue;
 			}
-			
+
 			/* See whether (a) there is an existing entry to
 			 * increment, or (b) we need to add a new entry.
 			 */
@@ -312,7 +312,7 @@ void read_metrics(const char *path, metrics *metrics)
 			metrics->total_bytes += count;
 		}
 		continue;
-		
+
 	    bad_line:
 		log(NORMAL, "Couldn't parse line of metrics file: '%s'\n",
 				line.c_str());
@@ -337,7 +337,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 {
 	int64_t total_bytes, total_unsched_bytes;
 	int prev_size;
-	
+
 	// Compute the unscheduled bytes received over the interval.
 	total_bytes = 0;
 	total_unsched_bytes = 0;
@@ -361,7 +361,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 	}
 	total_bytes += diff->large_msg_bytes;
 	total_unsched_bytes += diff->large_msg_count * rtt_bytes;
-	
+
 	// Divide priorities between scheduled and unscheduled packets.
 	int64_t unsched_prios = unsched;
 	if (unsched == 0) {
@@ -383,7 +383,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 			"%.1f MB unsched (%.1f%%), %ld unsched priorities\n",
 			total_messages, total_mb, unsched_mb,
 			100.0*unsched_mb/total_mb, unsched_prios);
-	
+
 	// Compute cutoffs for unscheduled priorities.
 	int64_t bytes_per_prio;
 	if (unsched_prios < num_priorities)
@@ -409,7 +409,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 			if (next_cutoff_bytes >= total_unsched_bytes)
 				break;
 		}
-		
+
 	}
 	for ( ; next_cutoff >= 0; next_cutoff--)
 		cutoffs[next_cutoff] = HOMA_MAX_MESSAGE_LENGTH;
@@ -448,10 +448,10 @@ void install_cutoffs(int cutoffs[8])
  * @prev:    Cumulative metrics gathered earlier
  * @cur:     Cumulative metrics gathered more recently
  * @diff:    Will be modified to hold all the changes between @prev and @cur
- * 
+ *
  * Return:   True means the difference was computed successfully; false means
  *           the metrics didn't have the same structure, so a difference
- *           it doesn't make sense. 
+ *           it doesn't make sense.
  */
 bool diff_metrics(metrics *prev, metrics *cur, metrics *diff)
 {
@@ -554,7 +554,7 @@ bool parse_double(const char **argv, int i, double *value)
 {
 	double num;
 	char *end;
-	
+
 	if (argv[i+1] == NULL) {
 		printf("No value provided for %s\n", argv[i]);
 		return false;
@@ -583,7 +583,7 @@ bool parse_int(const char **argv, int i, int *value)
 {
 	int num;
 	char *end;
-	
+
 	if (argv[i+1] == NULL) {
 		printf("No value provided for %s\n", argv[i]);
 		return false;
@@ -599,7 +599,7 @@ bool parse_int(const char **argv, int i, int *value)
 }
 
 int main(int argc, const char** argv)
-{	
+{
 	/* Parse arguments. */
 	for (int i = 1; i < argc; i++) {
 		const char *option = argv[i];
@@ -648,7 +648,7 @@ int main(int argc, const char** argv)
 			exit(1);
 		}
 	}
-	
+
 	metrics m[2];
 	metrics *prev_metrics = &m[0];
 	metrics *cur_metrics = &m[1];
@@ -677,7 +677,7 @@ int main(int argc, const char** argv)
 			log(NORMAL, "get_param failed for rtt_bytes\n");
 			continue;
 		}
-		
+
 		// Don't update the cutoffs until we've collected enough
 		// data to provide reasonable statistics.
 		if ((diff.total_messages < min_messages) ||
@@ -686,7 +686,7 @@ int main(int argc, const char** argv)
 		metrics *tmp = prev_metrics;
 		prev_metrics = cur_metrics;
 		cur_metrics = tmp;
-		
+
 		if (num_priorities != prev_num_priorities) {
 			log(NORMAL, "\n");
 			log(NORMAL, "num_priorities changed from %d to %d\n",
@@ -699,7 +699,7 @@ int main(int argc, const char** argv)
 			prev_num_priorities = num_priorities;
 			continue;
 		}
-		
+
 		int deciles[9];
 		get_deciles(&diff, deciles);
 		log(NORMAL, "\n");

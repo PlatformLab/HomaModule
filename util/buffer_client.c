@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
 #define BUFFER_SIZE 4096
 	char buffer[BUFFER_SIZE];
 	int bytesSent;
-	
+
 	if (argc < 3) {
 		printf("Usage: %s hostName port\n", argv[0]);
 		exit(1);
@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
 				argv[2]);
 		exit(1);
 	}
-	
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
 				host, gai_strerror(status));
 		exit(1);
 	}
-	
+
 	while (1) {
 		fd = socket(PF_INET, SOCK_STREAM, 0);
 		if (fd < 0) {

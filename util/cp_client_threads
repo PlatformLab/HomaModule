@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2022 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -76,7 +76,7 @@ for workload in workloads:
             raise Error("No client RPC throughput found for experiment %s"
                     % (exp))
         tput[workload].append(sum(readings)/len(readings))
-        
+
 # print(tput)
 fig, (ax1, ax2) = plt.subplots(2, figsize=[4, 5])
 fig.suptitle("%s Single-Client Throughput" % (options.protocol.capitalize()),

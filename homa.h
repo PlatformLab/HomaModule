@@ -116,7 +116,7 @@ struct homa_args_recv_ipv4 {
         int type;
 };
 
-/* Flag bits for homa_recv (see man page for documentation): 
+/* Flag bits for homa_recv (see man page for documentation):
  */
 #define HOMA_RECV_REQUEST       0x01
 #define HOMA_RECV_RESPONSE      0x02

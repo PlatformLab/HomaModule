@@ -43,9 +43,9 @@
  *              id for the incoming message.
  * @msglen:     If non-null, the total length of the message will be returned
  *              here.
- * 
+ *
  * Return:      The number of bytes of data returned at @buf. If an error
- *              occurred, -1 is returned and errno is set appropriately. 
+ *              occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
@@ -95,9 +95,9 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
  *              id for the incoming message.
  * @msglen:     If non-null, the total length of the message will be returned
  *              here.
- * 
+ *
  * Return:      The number of bytes of data returned at @buf. If an error
- *              occurred, -1 is returned and errno is set appropriately. 
+ *              occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
@@ -136,13 +136,13 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
  * @dest_addr:  Address of the RPC's client (returned by homa_recv when
  *              the message was received).
  * @addrlen:    Size of @dest_addr in bytes.
- * @id:         Unique identifier for the request, as returned by homa_recv 
+ * @id:         Unique identifier for the request, as returned by homa_recv
  *              when the request was received.
- * 
+ *
  * @dest_addr and @id must correspond to a previously-received request
  * for which no reply has yet been sent; if there is no such active request,
  * then this function does nothing.
- * 
+ *
  * Return:      0 means the response has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
@@ -174,13 +174,13 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
  * @dest_addr:  Address of the RPC's client (returned by homa_recv when
  *              the message was received).
  * @addrlen:    Size of @dest_addr in bytes.
- * @id:         Unique identifier for the request, as returned by homa_recv 
+ * @id:         Unique identifier for the request, as returned by homa_recv
  *              when the request was received.
- * 
+ *
  * @dest_addr and @id must correspond to a previously-received request
  * for which no reply has yet been sent; if there is no such active request,
  * then this function does nothing.
- * 
+ *
  * Return:      0 means the response has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
@@ -211,7 +211,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
- * 
+ *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
@@ -221,7 +221,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 {
 	struct homa_args_send_ipv4 args;
 	int result;
-	
+
 	if (dest_addr->sa_family != AF_INET) {
 		errno = EAFNOSUPPORT;
 		return -EAFNOSUPPORT;
@@ -248,7 +248,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
  * @addrlen:    Size of @dest_addr in bytes.
  * @id:         A unique identifier for the request will be returned here;
  *              this can be used later to find the response for this request.
- * 
+ *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
@@ -280,7 +280,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
  * @id:         Unique identifier for the RPC to abort (return value
  *              from previous call to homa_send). Should be a client
  *              RPC.
- * 
+ *
  * Return:      If an error occurred, -1 is returned and errno is set
  *              appropriately. Otherwise zero is returned.
  */

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,7 +20,7 @@
  *
  * Usage:
  * server [options]
- * 
+ *
  * Type "server --help" for documenation on the options.
  */
 
@@ -66,13 +66,13 @@ void homa_server(int port)
 	struct sockaddr_in source;
 	size_t source_length;
 	int length;
-	
+
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 		return;
 	}
-	
+
 	memset(&addr_in, 0, sizeof(addr_in));
 	addr_in.sin_family = AF_INET;
 	addr_in.sin_port = htons(port);
@@ -87,7 +87,7 @@ void homa_server(int port)
 		uint64_t id = 0;
 		int seed;
 		int result;
-		
+
 		source_length = sizeof(source);
 		length = homa_recv(fd, message, sizeof(message),
 			HOMA_RECV_REQUEST, (struct sockaddr *) &source,
@@ -150,7 +150,7 @@ void tcp_connection(int fd, struct sockaddr_in source)
 	char buffer[1000000];
 	int cur_length = 0;
 	bool streaming = false;
-	
+
 	int *int_buffer = reinterpret_cast<int*>(buffer);
 	if (verbose)
 		printf("New TCP socket from %s\n", print_address(&source));
@@ -166,7 +166,7 @@ void tcp_connection(int fd, struct sockaddr_in source)
 		}
 		if (result == 0)
 			break;
-		
+
 		/* The connection can be used in two modes. If the first
 		 * word received is -1, then the connection is in streaming
 		 * mode: we just read bytes and throw them away. If the
@@ -267,12 +267,12 @@ void tcp_server(int port)
 int main(int argc, char** argv) {
 	int next_arg;
 	int num_ports = 1;
-	
+
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
 		exit(0);
 	}
-	
+
 	for (next_arg = 1; next_arg < argc; next_arg++) {
 		if (strcmp(argv[next_arg], "--help") == 0) {
 			print_help(argv[0]);
@@ -305,11 +305,11 @@ int main(int argc, char** argv) {
 			exit(1);
 		}
 	}
-	
+
 	for (int i = 0; i < num_ports; i++) {
 		std::thread thread(homa_server, port+i);
 		thread.detach();
 	}
-	
+
 	tcp_server(port);
 }

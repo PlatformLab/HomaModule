@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -62,25 +62,25 @@ TEST_F(homa_timer, homa_check_timeout__request_ack)
 			self->server_id, 100, 100);
 	ASSERT_NE(NULL, srpc);
 	self->homa.request_ack_ticks = 2;
-	
+
 	/* First call: do nothing (response not fully transmitted). */
 	homa_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
-	
+
 	/* Second call: set done_timer_ticks. */
 	homa_xmit_data(srpc, false);
 	unit_log_clear();
 	homa_check_rpc(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("", unit_log_get());
-	
+
 	/* Third call: haven't hit request_ack_ticks yet. */
 	unit_log_clear();
 	self->homa.timer_ticks++;
 	homa_check_rpc(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("", unit_log_get());
-	
+
 	/* Fourth call: request ack. */
 	unit_log_clear();
 	self->homa.timer_ticks++;
@@ -135,13 +135,13 @@ TEST_F(homa_timer, homa_check_timeout__resend_ticks_not_reached)
 	self->homa.resend_ticks = 3;
 	crpc->msgout.granted = 0;
 	crpc->peer->outstanding_resends = self->homa.timeout_resends + 10;
-	
+
 	/* First call: resend_ticks-1 not reached. */
 	crpc->silent_ticks = 1;
 	EXPECT_EQ(0, homa_check_rpc(crpc));
 	EXPECT_EQ(1, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
-	
+
 	/* Second call: resend_ticks-1 reached. */
 	crpc->silent_ticks = 2;
 	EXPECT_EQ(1, homa_check_rpc(crpc));
@@ -287,13 +287,13 @@ TEST_F(homa_timer, homa_check_timeout__send_resend)
 	srpc->silent_ticks = self->homa.resend_ticks-1;
 	srpc->resend_timer_ticks = self->homa.timer_ticks - 10;
 	srpc->peer->resend_rpc = srpc;
-	
+
 	/* First call: no resend, but choose this RPC for least_recent_rpc. */
 	EXPECT_EQ(0, homa_check_rpc(srpc));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, srpc->peer->outstanding_resends);
 	EXPECT_EQ(srpc, srpc->peer->least_recent_rpc);
-	
+
 	/* Second call: issue resend. */
 	self->homa.timer_ticks++;
 	srpc->silent_ticks++;
@@ -328,7 +328,7 @@ TEST_F(homa_timer, homa_timer__basics)
 	homa_timer(&self->homa);
 	EXPECT_EQ(3, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
-	
+
 	/* Timeout the peer. */
 	unit_log_clear();
 	crpc->peer->outstanding_resends = self->homa.timeout_resends;
@@ -345,12 +345,12 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 	ASSERT_NE(NULL, dead);
 	homa_rpc_free(dead);
 	EXPECT_EQ(30, self->hsk.dead_skbs);
-	
+
 	// First call to homa_timer: not enough dead skbs.
 	self->homa.dead_buffs_limit = 31;
 	homa_timer(&self->homa);
 	EXPECT_EQ(30, self->hsk.dead_skbs);
-	
+
 	// Second call to homa_timer: must reap.
 	self->homa.dead_buffs_limit = 15;
 	homa_timer(&self->homa);

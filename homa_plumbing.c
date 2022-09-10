@@ -407,7 +407,7 @@ static DECLARE_COMPLETION(timer_thread_done);
  */
 static int __init homa_load(void) {
 	int status;
-	
+
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
 			"data_segment %u, ack %u, "
@@ -454,13 +454,13 @@ static int __init homa_load(void) {
 		status = -ENOMEM;
 		goto out_cleanup;
 	}
-	
+
 	status = homa_offload_init();
 	if (status != 0) {
 		printk(KERN_ERR "Homa couldn't init offloads\n");
 		goto out_cleanup;
 	}
-	
+
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
@@ -469,9 +469,9 @@ static int __init homa_load(void) {
 		timer_kthread = NULL;
 		goto out_cleanup;
 	}
-	
+
 	tt_init("timetrace", homa->temp);
-	
+
 	return 0;
 
 out_cleanup:
@@ -492,9 +492,9 @@ out:
 static void __exit homa_unload(void) {
 	printk(KERN_NOTICE "Homa module unloading\n");
 	exiting = true;
-	
+
 	tt_destroy();
-	
+
 	if (timer_kthread)
 		wake_up_process(timer_kthread);
 	if (homa_offload_end() != 0)
@@ -621,7 +621,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc = NULL;
 		goto error;
 	}
-	
+
 	/* Generate time traces on both ends for long elapsed times (used
 	 * for performance debugging).
 	 */
@@ -665,7 +665,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		rpc->state = RPC_IN_SERVICE;
 	}
 	homa_rpc_unlock(rpc);
-	
+
 	args.len = rpc->msgin.total_length;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
@@ -678,12 +678,12 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args\n");
 		goto error;
 	}
-	
+
 	if (rpc->error) {
 		err = rpc->error;
 		goto error;
 	}
-	
+
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
 			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
@@ -691,7 +691,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	rpc->dont_reap = false;
 	kfree(iov);
 	return result;
-	
+
 error:
 	tt_record2("homa_ioc_recv error %d, id %d", err, args.actualId);
 	if (rpc != NULL) {
@@ -761,7 +761,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(skbs);
 		goto done;
 	}
-	
+
 	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
 			ntohs(args.dest_addr.sin_port), args.id);
 	if (!srpc) {
@@ -807,7 +807,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct iov_iter iter;
 	int err;
 	struct homa_rpc *crpc = NULL;
-			
+
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
 		goto error;
@@ -835,7 +835,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	if (err < 0)
 		goto error;
 	err = 0;
-	
+
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
@@ -879,7 +879,7 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
 	uint64_t id = (uint64_t) arg;
 	struct homa_rpc *rpc;
-	
+
 	rpc = homa_find_client_rpc(hsk, id);
 	if (rpc == NULL)
 		return -EINVAL;
@@ -903,7 +903,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	if (current == core->thread)
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
-	
+
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
@@ -1134,12 +1134,12 @@ int homa_softirq(struct sk_buff *skb) {
 	int num_packets = 0;
 	int pull_length;
 	struct homa_lcache lcache;
-	
+
 	/* Accumulates changes to homa->incoming, to avoid repeated
 	 * updates to this shared variable.
 	 */
 	int incoming_delta = 0;
-	
+
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
 	homa_cores[raw_smp_processor_id()]->last_active = start;
@@ -1157,14 +1157,14 @@ int homa_softirq(struct sk_buff *skb) {
 		}
 	}
 	last = start;
-	
+
 	/* skb may actually contain many distinct packets, linked through
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. First, pull
 	 * out all the short packets into a separate list, then splice this
 	 * list into the front of the packet list, so that all the short
 	 * packets will get served first.
 	 */
-	
+
 	skb->next = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	packets = skb;
@@ -1186,7 +1186,7 @@ int homa_softirq(struct sk_buff *skb) {
 		next = skb->next;
 		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
-	
+
 		/* The code below makes the header available at skb->data, even
 		 * if the packet is fragmented. One complication: it's possible
 		 * that the IP header hasn't yet been removed (this happens for
@@ -1207,7 +1207,7 @@ int homa_softirq(struct sk_buff *skb) {
 		}
 		if (header_offset)
 			__skb_pull(skb, header_offset);
-		
+
 		h = (struct common_header *) skb->data;
 		if (unlikely((skb->len < sizeof(struct common_header))
 				|| (h->type < DATA)
@@ -1223,7 +1223,7 @@ int homa_softirq(struct sk_buff *skb) {
 			INC_METRIC(short_packets, 1);
 			goto discard;
 		}
-		
+
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
@@ -1249,7 +1249,7 @@ int homa_softirq(struct sk_buff *skb) {
 			}
 			goto discard;
 		}
-		
+
 		dport = ntohs(h->dport);
 		hsk = homa_sock_find(&homa->port_map, dport);
 		if (!hsk) {
@@ -1259,14 +1259,14 @@ int homa_softirq(struct sk_buff *skb) {
 					homa_local_id(h->sender_id), h->type);
 			goto discard;
 		}
-		
+
 		homa_pkt_dispatch(skb, hsk, &lcache, &incoming_delta);
 		continue;
-		
+
 discard:
 		kfree_skb(skb);
 	}
-	
+
 	homa_lcache_release(&lcache);
 	atomic_add(incoming_delta, &homa->total_incoming);
 	homa_send_grants(homa);
@@ -1303,7 +1303,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 	const struct iphdr *iph = (const struct iphdr *)skb->data;
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
-	
+
 	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
 		struct common_header *h;
 		char *icmp = (char *) icmp_hdr(skb);
@@ -1344,15 +1344,15 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	       struct poll_table_struct *wait) {
 	struct sock *sk = sock->sk;
 	__poll_t mask;
-	
+
 	/* It seems to be standard practice for poll functions *not* to
 	 * acquire the socket lock, so we don't do it here; not sure
 	 * why...
 	 */
-	
+
 	sock_poll_wait(file, sock, wait);
 	mask = POLLOUT | POLLWRNORM;
-	
+
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
 			!list_empty(&homa_sk(sk)->ready_responses))
 		mask |= POLLIN | POLLRDNORM;
@@ -1401,7 +1401,7 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 		size_t length, loff_t *offset)
 {
 	size_t copied;
-	
+
 	if (*offset >= homa->metrics_length)
 		return 0;
 	copied = homa->metrics_length - *offset;
@@ -1466,7 +1466,7 @@ int homa_dointvec(struct ctl_table *table, int write,
 		 */
 		homa_incoming_sysctl_changed(homa);
 		homa_outgoing_sysctl_changed(homa);
-		
+
 		/* For this value, only call the method when this
 		 * particular value was written (don't want to increment
 		 * cutoff_version otherwise).
@@ -1475,7 +1475,7 @@ int homa_dointvec(struct ctl_table *table, int write,
 				|| (table->data == &homa_data.num_priorities)) {
 			homa_prios_changed(homa);
 		}
-		
+
 		/* Handle the special value log_topic by invoking a function
 		 * to print information to the log.
 		 */
@@ -1522,7 +1522,7 @@ int homa_timer_main(void *transportInfo)
 	u64 nsec;
 	ktime_t tick_interval;
 	struct hrtimer hrtimer;
-	
+
 	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer.function = &homa_hrtimer;
 	nsec = 1000000;                   /* 1 ms */

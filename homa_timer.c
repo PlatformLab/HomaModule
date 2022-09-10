@@ -34,7 +34,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer;
-	
+
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
 			&& (rpc->msgout.next_packet == NULL)) {
@@ -54,7 +54,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 			}
 		}
 	}
-	
+
 	if ((rpc->state == RPC_OUTGOING)
 			&& (homa_rpc_send_offset(rpc) < rpc->msgout.granted)) {
 		/* There are granted bytes that we haven't transmitted, so
@@ -63,7 +63,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		rpc->silent_ticks = 0;
 		return 0;
 	}
-	
+
 	if ((rpc->state == RPC_INCOMING) && ((rpc->msgin.total_length
 			- rpc->msgin.bytes_remaining)
 			>= rpc->msgin.incoming)) {
@@ -81,7 +81,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	 */
 	if (rpc->silent_ticks < (homa->resend_ticks-1))
 		return 0;
-	
+
 	peer = rpc->peer;
 	if (peer->outstanding_resends
 			>= rpc->hsk->homa->timeout_resends) {
@@ -116,7 +116,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	 * first on @peer->grantable_rpcs, so it blocks transmissions of
 	 * other RPCs.
 	 */
-	
+
 	/* First, collect information that will identify the RPC most
 	 * in need of a resend; this will be used during the *next*
 	 * homa_timer pass.
@@ -128,7 +128,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		peer->least_recent_ticks = homa->timer_ticks;
 		peer->current_ticks = homa->timer_ticks;
 	}
-	
+
 	if ((rpc != peer->resend_rpc) ||
 			(homa->timer_ticks - rpc->peer->most_recent_resend)
 			< homa->resend_interval) {
@@ -145,7 +145,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	       }
 	       return 0;
 	}
-	
+
 	/* Issue a resend for this RPC. */
 	rpc->resend_timer_ticks = homa->timer_ticks;
 	rpc->peer->most_recent_resend = homa->timer_ticks;
@@ -192,7 +192,7 @@ void homa_timer(struct homa *homa)
 	struct homa_peer *dead_peer = NULL;
 	int rpc_count = 0;
 	int total_rpcs = 0;
-	
+
 	start = get_cycles();
 	homa->timer_ticks++;
 
@@ -212,10 +212,10 @@ void homa_timer(struct homa *homa)
 				break;
 			INC_METRIC(timer_reap_cycles, get_cycles() - start);
 		}
-		
+
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
-		
+
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
@@ -256,7 +256,7 @@ void homa_timer(struct homa *homa)
 		 */
 		homa_abort_rpcs(homa, dead_peer->addr, 0, -ETIMEDOUT);
 	}
-	
+
 	if (total_rpcs > 0)
 		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
 

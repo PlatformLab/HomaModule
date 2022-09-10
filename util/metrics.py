@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2019-2020 Stanford University
+# Copyright (c) 2019-2022 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -332,7 +332,7 @@ if elapsed_secs != 0:
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
     print("App/syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
- 
+
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
@@ -346,7 +346,7 @@ if elapsed_secs != 0:
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
                 cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
- 
+
     total_messages = float(deltas["requests_received"]
             + deltas["responses_received"])
     if total_messages > 0.0:
@@ -358,7 +358,7 @@ if elapsed_secs != 0:
                 - sleep_percent))
         print("Arrival while polling:   %4.1f%%" % (poll_percent))
         print("Arrival while sleeping:  %4.1f%%" % (sleep_percent))
- 
+
     print("\nMiscellaneous:")
     print("--------------")
     if packets_received > 0:
@@ -379,7 +379,7 @@ if elapsed_secs != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
         print("Pacer throughput:  %5.2f  Gbps" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
- 
+
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
     for symbol in ["requests_queued", "responses_queued"]:
@@ -422,4 +422,3 @@ if elapsed_secs != 0:
                 % ("acks_per_rpc", 1000.0 * deltas["packets_sent_ACK"]
                 / deltas["responses_received"]))
 
-        

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2022 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -179,7 +179,7 @@ if not options.plot_only:
                 run_experiment(exp_name, clients, o)
     except Exception as e:
         log(traceback.format_exc())
-                   
+
     for name, value in old_values.items():
         print("Restoring %s to %s" % (name, value))
         set_sysctl_parameter(name, value, range(0, options.num_nodes))

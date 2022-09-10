@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -113,24 +113,24 @@ TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 {
 	char buffer[1000];
 	tt_buffer_size = 4;
-	
+
 	tt_record_buf(tt_buffers[0], 1500, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1600, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1700, "Buf0", 0, 0, 0, 0);
-	
+
 	tt_record_buf(tt_buffers[1], 1000, "Buf1", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1100, "Buf1", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1200, "Buf1", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1300, "Buf1", 0, 0, 0, 0);
-	
+
 	tt_record_buf(tt_buffers[2], 1100, "Buf2", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[2], 1150, "Buf2", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[2], 1160, "Buf2", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[2], 1210, "Buf2", 0, 0, 0, 0);
-	
+
 	tt_record_buf(tt_buffers[3], 1000, "Buf3", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[3], 1400, "Buf3", 0, 0, 0, 0);
-	
+
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
@@ -212,7 +212,7 @@ TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 	tt_record_buf(tt_buffers[3], 1600, "Buf3", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1700, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1800, "Buf1", 0, 0, 0, 0);
-	
+
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
 	tt_proc_release(NULL, &self->file);
@@ -269,14 +269,14 @@ TEST_F(timetrace, tt_proc_release__bogus_file)
 TEST_F(timetrace, tt_proc_release__unfreeze)
 {
 	struct file file2;
-	
+
 	tt_buffer_size = 4;
 	tt_record_buf(tt_buffers[1], 1000, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1100, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1200, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1300, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1400, "Buf0", 0, 0, 0, 0);
-	
+
 	tt_freeze();
 	tt_proc_open(NULL, &self->file);
 	EXPECT_EQ(2, tt_freeze_count.counter);
@@ -284,13 +284,13 @@ TEST_F(timetrace, tt_proc_release__unfreeze)
 	tt_proc_open(NULL, &file2);
 	EXPECT_EQ(3, tt_freeze_count.counter);
 	EXPECT_TRUE(tt_frozen);
-	
+
 	tt_proc_release(NULL, &self->file);
 	EXPECT_EQ(2, tt_freeze_count.counter);
 	EXPECT_TRUE(tt_frozen);
 	EXPECT_NE(NULL, tt_buffers[1]->events[3].format);
 	EXPECT_EQ(2, tt_buffers[1]->next_index);
-	
+
 	tt_proc_release(NULL, &file2);
 	EXPECT_EQ(0, tt_freeze_count.counter);
 	EXPECT_FALSE(tt_frozen);

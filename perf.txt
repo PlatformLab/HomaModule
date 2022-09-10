@@ -97,10 +97,10 @@ order.
   seems to be in kernel call time and NIC->NIC time. Also, note that
   the 5.4.80 times have improved considerably from January 2021; there
   appears to be at least 1 us variation in RTT from machine to machine.
-                            5.17.7             5.4.80      
+                            5.17.7             5.4.80
                         Server   Client    Server   Client
 ----------------------------------------------------------
-Send:  
+Send:
   homa_send/reply         461      588       468      534
   IP/Driver               514      548       508      522
   Total                   975     1136      1475     1056
@@ -392,7 +392,7 @@ Event                                                               Median
     threads happened (randomly) to get busy on that core the same time,
     and they completely monopolized the core.
   * (March 2020) Linux switches threads between cores very frequently when
-    threads sleep (2/3 of the time in experiments today). 
+    threads sleep (2/3 of the time in experiments today).
 
 * (Feb. 2020) The pacer can potentially be a severe performance bottleneck
   (a single thread cannot keep the network utilized with packets that are

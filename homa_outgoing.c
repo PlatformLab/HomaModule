@@ -47,7 +47,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  * @peer:      Peer to which the packets will be sent (needed for things like
  *             the MTU).
  * @iter:      Describes the location(s) of message data in user space.
- * 
+ *
  * Return:   Address of the first packet in a list of packets linked through
  *           homa_next_skb, or a negative errno if there was an error. No
  *           fields are set in the packet headers except for type, incoming,
@@ -75,10 +75,10 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		err = -EINVAL;
 		goto error;
 	}
-	
+
 	dst = homa_get_dst(peer, hsk);
 	mtu = dst_mtu(dst);
-	
+
 	max_pkt_data = mtu - HOMA_IPV4_HEADER_LENGTH - sizeof(struct data_header);
 	if (len <= max_pkt_data) {
 		unsched = max_gso_data = len;
@@ -89,7 +89,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		gso_size = peer->dst->dev->gso_max_size;
 		if (gso_size > hsk->homa->max_gso_size)
 			gso_size = hsk->homa->max_gso_size;
-		
+
 		/* Round gso_size down to an even # of mtus. */
 		bufs_per_gso = gso_size/mtu;
 		if (bufs_per_gso == 0) {
@@ -100,14 +100,14 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		}
 		max_gso_data = bufs_per_gso * max_pkt_data;
 		gso_size = bufs_per_gso * mtu;
-		
+
 		/* Round unscheduled bytes *up* to an even number of gsos. */
 		unsched = hsk->homa->rtt_bytes + max_gso_data - 1;
 		unsched -= unsched % max_gso_data;
 		if (unsched > len)
 			unsched = len;
 	}
-	
+
 	/* Copy message data from user space and form sk_buffs. Each
 	 * sk_buff may contain multiple data_segments, each of which will
 	 * turn into a separate packet, using either TSO in the NIC or
@@ -117,7 +117,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		struct data_header *h;
 		struct data_segment *seg;
 		int available;
-		
+
 		/* The sizeof32(void*) creates extra space for homa_next_skb. */
 		skb = alloc_skb(gso_size + HOMA_SKB_EXTRA + sizeof32(void*),
 				GFP_KERNEL);
@@ -132,7 +132,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV4;
 		}
 		skb_shinfo(skb)->gso_segs = 0;
-			
+
 		skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
 		skb_reset_transport_header(skb);
 		h = (struct data_header *) skb_put(skb,
@@ -140,7 +140,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		h->common.type = DATA;
 		h->message_length = htonl(len);
 		available = max_gso_data;
-		
+
 		/* Each iteration of the following loop adds one segment
 		 * to the buffer.
 		 */
@@ -172,7 +172,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 		*last_link = NULL;
 	}
 	return first;
-	
+
     error:
 	homa_free_skbs(first);
 	return ERR_PTR(err);
@@ -200,7 +200,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int sport, struct sk_buff *skb,
 		rpc->msgout.granted = rpc->msgout.length;
 	rpc->msgout.sched_priority = 0;
 	rpc->msgout.init_cycles = get_cycles();
-	
+
 	/* Must scan the packets to fill in header fields that weren't
 	 * known when the packets were allocated.
 	 */
@@ -246,7 +246,7 @@ void homa_message_out_destroy(struct homa_message_out *msgout)
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
  *             the fields of common_header except type, will be set from this.
- * 
+ *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
  */
@@ -270,7 +270,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
  * @length:    Length of @contents.
  * @peer:      Destination to which the packet will be sent.
  * @hsk:       Socket via which the packet will be sent.
- * 
+ *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
  */
@@ -282,7 +282,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	int result, priority;
 	struct dst_entry *dst;
 	struct sk_buff *skb;
-	
+
 	/* Allocate the same size sk_buffs as for the smallest data
          * packets (better reuse of sk_buffs?).
 	 */
@@ -293,7 +293,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		return -ENOBUFS;
 	dst_hold(dst);
 	skb_dst_set(skb, dst);
-	
+
 	skb_reserve(skb, HOMA_IPV4_HEADER_LENGTH + HOMA_SKB_EXTRA);
 	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
@@ -311,7 +311,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	result = ip_queue_xmit((struct sock *) hsk, skb, &peer->flow);
 	if (unlikely(result != 0)) {
 		INC_METRIC(control_xmit_errors, 1);
-		
+
 		/* It appears that ip_queue_xmit frees skbuffs after
 		 * errors; the following code is to raise an alert if
 		 * this isn't actually the case. The extra skb_get above
@@ -379,7 +379,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		struct sk_buff *skb = rpc->msgout.next_packet;
 		struct homa *homa = rpc->hsk->homa;
 		int offset = homa_data_offset(skb);
-		
+
 		if (homa == NULL) {
 			printk(KERN_ERR "NULL homa pointer in homa_xmit_"
 				"data, state %d, shutdown %d, id %llu, socket %d",
@@ -387,14 +387,14 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 				rpc->hsk->port);
 			BUG();
 		}
-		
+
 		if (offset >= rpc->msgout.granted) {
 			tt_record3("homa_xmit_data stopping at offset %d "
 					"for id %u: granted is %d",
 					offset, rpc->id, rpc->msgout.granted);
 			break;
 		}
-		
+
 		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to "
@@ -403,7 +403,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 				break;
 			}
 		}
-		
+
 		if (offset < rpc->msgout.unscheduled) {
 			priority = homa_unsched_priority(homa, rpc->peer,
 					rpc->msgout.length);
@@ -411,7 +411,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			priority = rpc->msgout.sched_priority;
 		}
 		rpc->msgout.next_packet = *homa_next_skb(skb);
-		
+
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
 		force = false;
@@ -440,7 +440,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	 * created.
 	 */
 	h->cutoff_version = rpc->peer->cutoff_version;
-	
+
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
 	dst_hold(dst);
 	skb_dst_set(skb, dst);
@@ -481,10 +481,10 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		int priority)
 {
 	struct sk_buff *skb;
-	
+
 	if (end <= start)
 		return;
-	
+
 	/* The nested loop below scans each data_segment in each
 	 * packet, looking for those that overlap the range of
 	 * interest.
@@ -496,7 +496,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		int offset, length, count;
 		struct data_segment *seg;
 		struct data_header *h;
-		
+
 		count = skb_shinfo(skb)->gso_segs;
 		if (count < 1)
 			count = 1;
@@ -506,12 +506,12 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			seg = (struct data_segment *) (skb->head + seg_offset);
 			offset = ntohl(seg->offset);
 			length = ntohl(seg->segment_length);
-			
+
 			if (end <= offset)
 				return;
 			if ((offset + length) <= start)
 				continue;
-			
+
 			/* This segment must be retransmitted. Copy it into
 			 * a clean sk_buff.
 			 */
@@ -556,7 +556,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 void homa_outgoing_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
-		
+
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!
 	 */
@@ -587,7 +587,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
 	__u64 idle, new_idle, clock;
 	int cycles_for_packet, segs, bytes;
-	
+
 	segs = skb_shinfo(skb)->gso_segs;
 	bytes = skb->tail - skb->transport_header;
 	bytes += HOMA_IPV4_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
@@ -614,7 +614,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 			new_idle = clock + cycles_for_packet;
 		} else
 			new_idle = idle + cycles_for_packet;
-		
+
 		/* This method must be thread-safe. */
 		if (atomic64_cmpxchg_relaxed(&homa->link_idle_time, idle,
 				new_idle) == idle)
@@ -633,15 +633,15 @@ int homa_pacer_main(void *transportInfo)
 {
 	cycles_t start;
 	struct homa *homa = (struct homa *) transportInfo;
-	
+
 	while (1) {
 		if (homa->pacer_exit) {
 			break;
 		}
-		
+
 		start = get_cycles();
 		homa_pacer_xmit(homa);
-		
+
 		/* Sleep this thread if the throttled list is empty. Even
 		 * if the throttled list isn't empty, call the scheduler
 		 * to give other processes a chance to run (if we don't,
@@ -679,13 +679,13 @@ void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
         int i;
-	
+
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
 	if (!spin_trylock_bh(&homa->pacer_mutex))
 		return;
-	
+
 	/* Each iteration through the following loop sends one packet. We
 	 * limit the number of passes through this loop in order to cap the
 	 * time spent in one call to this function (see note in
@@ -694,7 +694,7 @@ void homa_pacer_xmit(struct homa *homa)
 	for (i = 0; i < 5; i++) {
 		__u64 idle_time, now;
 		int offset;
-		
+
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = get_cycles();
 		idle_time = atomic64_read(&homa->link_idle_time);
@@ -712,7 +712,7 @@ void homa_pacer_xmit(struct homa *homa)
 		 * but we transmit anyway so we don't starve (see perf.text
 		 * for more info).
 		 */
-		
+
 		/* Lock the first throttled RPC. This may not be possible
 		 * because we have to hold throttle_lock while locking
 		 * the RPC; that means we can't wait for the RPC lock because
@@ -726,7 +726,7 @@ void homa_pacer_xmit(struct homa *homa)
 		if (homa->pacer_fifo_count <= 0) {
 			__u64 oldest = ~0;
 			struct homa_rpc *cur;
-			
+
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
 			list_for_each_entry_rcu(cur, &homa->throttled_rpcs,
@@ -749,7 +749,7 @@ void homa_pacer_xmit(struct homa *homa)
 			break;
 		}
 		homa_throttle_unlock(homa);
-		
+
 		offset = homa_rpc_send_offset(rpc);
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, "
 				"port %d, offset %d, bytes_left %d",
@@ -831,7 +831,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 			throttled_links) {
 		int bytes_left_cand;
 		checks++;
-	
+
 		/* Watch out: the pacer might have just transmitted the last
 		 * packet from candidate.
 		 */
@@ -881,7 +881,7 @@ void homa_log_throttled(struct homa *homa)
 	struct homa_rpc *rpc;
 	int rpcs = 0;
 	int64_t bytes = 0;
-	
+
 	printk(KERN_NOTICE "Printing throttled list\n");
 	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {

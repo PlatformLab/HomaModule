@@ -30,7 +30,7 @@ struct completion homa_pacer_kthread_done;
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
- * 
+ *
  * Return:  0 on success, or a negative errno if there was an error. Even
  *          if an error occurs, it is safe (and necessary) to call
  *          homa_destroy at some point.
@@ -42,7 +42,7 @@ int homa_init(struct homa *homa)
 	int i, err;
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 			"homa_init assumes at least 8 priority levels");
-	
+
 	/* Initialize core-specific info (if no-one else has already done it),
 	 * making sure that each core has private cache lines.
 	 */
@@ -70,7 +70,7 @@ int homa_init(struct homa *homa)
 			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
-	
+
 	homa->pacer_kthread = NULL;
 	init_completion(&homa_pacer_kthread_done);
 	atomic64_set(&homa->next_outgoing_id, 2);
@@ -96,7 +96,7 @@ int homa_init(struct homa *homa)
 			-err);
 		return err;
 	}
-	
+
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
 	homa->max_grant_window = 0;
@@ -173,7 +173,7 @@ void homa_destroy(struct homa *homa)
 		homa_pacer_stop(homa);
 		wait_for_completion(&homa_pacer_kthread_done);
 	}
-	
+
 	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(&homa->port_map);
 	homa_peertab_destroy(&homa->peers);
@@ -195,10 +195,10 @@ void homa_destroy(struct homa *homa)
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
  * @iter:     Describes the location(s) of request message data in user space.
- * 
+ *
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. The RPC will be locked; the
- *            caller must eventually unlock it. 
+ *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		struct sockaddr_in *dest, struct iov_iter *iter)
@@ -208,11 +208,11 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	struct homa_rpc_bucket *bucket;
 	struct sk_buff *skb = NULL;
 	size_t length = iter->count;
-	
+
 	crpc = (struct homa_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
 		return ERR_PTR(-ENOMEM);
-	
+
 	/* Initialize fields that don't require the socket lock. */
 	crpc->hsk = hsk;
 	crpc->id = atomic64_fetch_add(2, &hsk->homa->next_outgoing_id);
@@ -250,7 +250,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->done_timer_ticks = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_cycles = get_cycles();
-	
+
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
 	 * to be performed without holding locks. Also, can't hold spin
@@ -267,9 +267,9 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	hlist_add_head(&crpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&crpc->active_links, &hsk->active_rpcs);
 	homa_sock_unlock(hsk);
-	
+
 	return crpc;
-	
+
 error:
 	homa_free_skbs(skb);
 	kfree(crpc);
@@ -283,7 +283,7 @@ error:
  * @source: IP address (network byte order) of the RPC's client.
  * @h:      Header for the first data packet received for this RPC; used
  *          to initialize the RPC.
- * 
+ *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
  *          to h, then it is returned instead of creating a new RPC.
@@ -297,13 +297,13 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	struct homa_rpc *srpc;
 	__u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
-	
+
 	/* Lock the bucket, and make sure no-one else has already created
 	 * the desired RPC.
 	 */
 	homa_bucket_lock(bucket, server);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
-		if ((srpc->id == id) && 
+		if ((srpc->id == id) &&
 				(srpc->dport == ntohs(h->common.sport)) &&
 				(srpc->peer->addr == source)) {
 			/* RPC already exists; just return it instead
@@ -312,7 +312,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 			return srpc;
 		}
 	}
-	
+
 	/* Initialize fields that don't require the socket lock. */
 	srpc = (struct homa_rpc *) kmalloc(sizeof(*srpc), GFP_KERNEL);
 	if (!srpc) {
@@ -391,7 +391,7 @@ void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
 	__u64 id = homa_local_id(ack->client_id);
 	__u16 client_port = ntohs(ack->client_port);
 	__u16 server_port = ntohs(ack->server_port);
-	
+
 	if (hsk2->port != server_port) {
 		/* Without RCU, sockets other than hsk can be deleted
 		 * out from under us.
@@ -406,7 +406,7 @@ void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	
+
     done:
 	if (hsk->port != server_port)
 		rcu_read_unlock();
@@ -423,7 +423,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	int incoming;
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
-	
+
 	/* Before doing anything else, unlink the input message from
 	 * homa->grantable_msgs. This will synchronize to ensure that
 	 * homa_manage_grants doesn't access this RPC after destruction
@@ -431,7 +431,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 */
 	rpc->state = RPC_DEAD;
 	homa_remove_from_grantable(rpc->hsk->homa, rpc);
-	
+
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
 	homa_sock_lock(rpc->hsk, "homa_rpc_free");
 	__hlist_del(&rpc->hash_links);
@@ -452,13 +452,13 @@ void homa_rpc_free(struct homa_rpc *rpc)
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
 //			rpc->hsk->dead_skbs);
-	
+
 	/* If the RPC had incoming bytes, remove them from the global count. */
 	incoming = rpc->msgin.incoming - (rpc->msgin.total_length
 			- rpc->msgin.bytes_remaining);
 	if (incoming != 0)
 		atomic_add(-incoming, &rpc->hsk->homa->total_incoming);
-	
+
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
 }
@@ -473,7 +473,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
  * @hsk:   Homa socket that may contain dead RPCs. Must not be locked by the
  *         caller; this function will lock and release.
  * @count: Number of buffers to free during this call.
- * 
+ *
  * Return: A return value of 0 means that we ran out of work to do; calling
  *         again will do no work (there could be unreaped RPCs, but if so,
  *         reaping has been disabled for them).  A value greater than
@@ -492,12 +492,12 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	struct homa_rpc *rpc;
 	int i, batch_size;
 	int result;
-	
+
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);
-	
+
 	/* Each iteration through the following loop will reap
-	 * BATCH_MAX skbs. 
+	 * BATCH_MAX skbs.
 	 */
 	while (count > 0) {
 		batch_size = count;
@@ -505,7 +505,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			batch_size = BATCH_MAX;
 		count -= batch_size;
 		num_skbs = num_rpcs = 0;
-		
+
 		homa_sock_lock(hsk, "homa_rpc_reap");
 		if (atomic_read(&hsk->protect_count)) {
 			INC_METRIC(disabled_reaps, 1);
@@ -516,7 +516,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			homa_sock_unlock(hsk);
 			return 0;
 		}
-		
+
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 			if (rpc->dont_reap || (atomic_read(
@@ -596,7 +596,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
  * homa_rpc_send_offset() - Return the offset of the first unsent byte of a
  * message.
  * @rpc:      RPC whose msgout will be examined.
- * 
+ *
  * Return:    The first unsent byte for rpc->msgout (0 if the msgout
  *            hasn't been initialized, message length if all bytes have been
  *            sent).
@@ -604,7 +604,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 int homa_rpc_send_offset(struct homa_rpc *rpc)
 {
 	struct sk_buff *pkt = rpc->msgout.next_packet;
-	
+
 	if (rpc->msgout.length < 0)
 		return 0;
 	if (!pkt)
@@ -617,7 +617,7 @@ int homa_rpc_send_offset(struct homa_rpc *rpc)
  * a packet belongs to, if there is any. Thread-safe without socket lock.
  * @hsk:      Socket via which packet was received.
  * @id:       Unique identifier for the RPC.
- * 
+ *
  * Return:    A pointer to the homa_rpc for this id, or NULL if none.
  *            The RPC will be locked; the caller must eventually unlock it
  *            by invoking homa_unlock_client_rpc.
@@ -643,7 +643,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  * @saddr:    Address from which the packet was sent.
  * @sport:    Port at @saddr from which the packet was sent.
  * @id:       Unique identifier for the RPC (must have server bit set).
- * 
+ *
  * Return:    A pointer to the homa_rpc matching the arguments, or NULL
  *            if none. The RPC will be locked; the caller must eventually
  *            unlock it by invoking homa_unlock_server_rpc.
@@ -673,7 +673,7 @@ void homa_rpc_log(struct homa_rpc *rpc)
 {
 	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
 	char *peer = homa_print_ipv4_addr(rpc->peer->addr);
-	
+
 	if (rpc->state == RPC_INCOMING)
 		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
 				"%d/%d bytes received, incoming %d\n",
@@ -718,14 +718,14 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
 	int count = 0;
-	
+
 	printk("Logging active Homa RPCs:\n");
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
-		
+
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
@@ -744,12 +744,12 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
  * @addr:    Address to convert, in network byte order.
- * 
+ *
  * Return:   The converted value. Values are stored in static memory, so
  *           the caller need not free. This also means that storage is
  *           eventually reused (there are enough buffers to accommodate
  *           multiple "active" values).
- * 
+ *
  * Note: Homa uses this function, rather than the %pI4 format specifier
  * for snprintf et al., because the kernel's version of snprintf isn't
  * available in Homa's unit test environment.
@@ -776,14 +776,14 @@ char *homa_print_ipv4_addr(__be32 addr)
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
  * @buf_len: Number of bytes available at @buffer.
- * 
+ *
  * Return:   @buffer
  */
 char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	int used = 0;
 	struct common_header *common = (struct common_header *) skb->data;
-	
+
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
@@ -882,7 +882,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	}
-		
+
 	buffer[buf_len-1] = 0;
 	return buffer;
 }
@@ -894,7 +894,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
  * @skb:     Packet whose information should be printed.
  * @buffer:  Buffer in which to generate the string.
  * @buf_len: Number of bytes available at @buffer.
- * 
+ *
  * Return:   @buffer
  */
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
@@ -907,7 +907,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		struct data_segment *seg;
 		int bytes_left, used, i;
 		int seg_length = ntohl(h->seg.segment_length);
-		
+
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				h->retransmit ? " retrans" : "",
 				seg_length, ntohl(h->seg.offset));
@@ -942,7 +942,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	case BUSY:
 		snprintf(buffer, buf_len, "BUSY");
 		break;
-	case CUTOFFS: 
+	case CUTOFFS:
 		snprintf(buffer, buf_len, "CUTOFFS");
 		break;
 	case FREEZE:
@@ -977,20 +977,20 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
  *            followed by values for the various substitutions requested
  *            in @format
  * @ ...
- * 
+ *
  * Return:    The number of characters now occupied in @buffer, not
- *            including the terminating null character. 
+ *            including the terminating null character.
  */
 int homa_snprintf(char *buffer, int size, int used, const char* format, ...)
 {
 	int new_chars;
-	
+
 	va_list ap;
 	va_start(ap, format);
-	
+
 	if (used >= (size-1))
 		return used;
-	
+
 	new_chars = vsnprintf(buffer + used, size - used, format, ap);
 	if (new_chars < 0)
 		return used;
@@ -1003,7 +1003,7 @@ int homa_snprintf(char *buffer, int size, int used, const char* format, ...)
  * homa_symbol_for_state() - Returns a printable string describing an
  * RPC state.
  * @rpc:  RPC whose state should be returned in printable form.
- * 
+ *
  * Return: A static string holding the current state of @rpc.
  */
 char *homa_symbol_for_state(struct homa_rpc *rpc)
@@ -1021,7 +1021,7 @@ char *homa_symbol_for_state(struct homa_rpc *rpc)
 	case RPC_DEAD:
 		return "DEAD";
 	}
-	
+
 	/* See safety comment in homa_symbol_for_type. */
 	snprintf(buffer, sizeof(buffer)-1, "unknown(%u)", rpc->state);
 	buffer[sizeof(buffer)-1] = 0;
@@ -1031,7 +1031,7 @@ char *homa_symbol_for_state(struct homa_rpc *rpc)
 /**
  * homa_symbol_for_type() - Returns a printable string describing a packet type.
  * @type:  A value from those defined by &homa_packet_type.
- * 
+ *
  * Return: A static string holding the packet type corresponding to @type.
  */
 char *homa_symbol_for_type(uint8_t type)
@@ -1057,7 +1057,7 @@ char *homa_symbol_for_type(uint8_t type)
 	case ACK:
 		return "ACK";
 	}
-	
+
 	/* Using a static buffer can produce garbled text under concurrency,
 	 * but (a) it's unlikely (this code only executes if the opcode is
 	 * bogus), (b) this is mostly for testing and debugging, and (c) the
@@ -1081,7 +1081,7 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 	char *new_buffer;
 	size_t new_chars;
 	va_list ap;
-	
+
 	if (!homa->metrics) {
 #ifdef __UNIT_TEST__
 		homa->metrics_capacity =  30;
@@ -1096,7 +1096,7 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 		}
 		homa->metrics_length = 0;
 	}
-	
+
 	/* May have to execute this loop multiple times if we run out
 	 * of space in homa->metrics; each iteration expands the storage,
 	 * until eventually it is large enough.
@@ -1109,7 +1109,7 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
 		va_end(ap);
 		if ((homa->metrics_length + new_chars) < homa->metrics_capacity)
 			break;
-		
+
 		/* Not enough room; expand buffer capacity. */
 		homa->metrics_capacity *= 2;
 		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
@@ -1130,13 +1130,13 @@ void homa_append_metric(struct homa *homa, const char* format, ...)
  * generate a human-readable string describing all of them.
  * @homa:    Overall data about the Homa protocol implementation;
  *           the formatted string will be stored in homa->metrics.
- * 
- * Return:   The formatted string. 
+ *
+ * Return:   The formatted string.
  */
 char *homa_print_metrics(struct homa *homa)
 {
 	int core, i, lower = 0;
-	
+
 	homa->metrics_length = 0;
 	homa_append_metric(homa,
 			"rdtsc_cycles         %20llu  "
@@ -1534,15 +1534,15 @@ char *homa_print_metrics(struct homa *homa)
 void homa_prios_changed(struct homa *homa)
 {
 	int i;
-	
+
 	if (homa->num_priorities > HOMA_MAX_PRIORITIES)
 		homa->num_priorities = HOMA_MAX_PRIORITIES;
-	
+
 	/* This guarantees that we will choose priority 0 if nothing else
 	 * in the cutoff array matches.
 	 */
 	homa->unsched_cutoffs[0] = INT_MAX;
-	
+
 	for (i = HOMA_MAX_PRIORITIES-1; ; i--) {
 		if (i >= homa->num_priorities) {
 			homa->unsched_cutoffs[i] = 0;

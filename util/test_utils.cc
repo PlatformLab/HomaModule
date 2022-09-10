@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -35,7 +35,7 @@
  * is printed.
  * @buffer:   Buffer to check
  * @length:   Number of bytes in buffer
- * 
+ *
  * Return: the seed value that was used to generate the buffer.
  */
 int check_buffer(void *buffer, size_t length)
@@ -44,7 +44,7 @@ int check_buffer(void *buffer, size_t length)
 	int num_ints = (length + sizeof(int) - 1)/sizeof(int);
 	int seed = int_buffer[0];
 	int i;
-	
+
 	for (i = 0; i < num_ints; i++) {
 		if (int_buffer[i] != seed + i) {
 			printf("Bad value at index %d in "
@@ -59,7 +59,7 @@ int check_buffer(void *buffer, size_t length)
 
 /**
  * get_cycles_per_sec(): calibrate the RDTSC timer.
- * 
+ *
  * Return: the number of RDTSC clock ticks per second.
  */
 double get_cycles_per_sec()
@@ -68,7 +68,7 @@ double get_cycles_per_sec()
 	if (cps != 0) {
 		return cps;
 	}
-	
+
 	// Take parallel time readings using both rdtsc and gettimeofday.
 	// After 10ms have elapsed, take the ratio between these readings.
 
@@ -164,7 +164,7 @@ void seed_buffer(void *buffer, size_t length, int seed)
 	int *int_buffer = (int *) buffer;
 	int num_ints = (length + sizeof(int) - 1)/sizeof(int);
 	int i;
-	
+
 	for (i = 0; i < num_ints; i++) {
 		int_buffer[i] = seed + i;
 	}
@@ -175,9 +175,9 @@ void seed_buffer(void *buffer, size_t length, int seed)
  * @addr:    The address to print
  * @buffer:  Where to store the human readable description.
  * @size:    Number of bytes available in buffer.
- * 
+ *
  * Return:   The address of the human-readable string (buffer).
- * 
+ *
  * This function keeps a collection of static buffers to hold the printable
  * strings, so callers don't have to worry about allocating space, even if
  * several addresses are in use at once. This function is also thread-safe.
@@ -188,7 +188,7 @@ const char *print_address(struct sockaddr_in *addr)
 #define NUM_BUFFERS 16
 	static char buffers[NUM_BUFFERS][BUF_SIZE];
 	static std::atomic<int> next_buffer = 0;
-	
+
 	char *buffer = buffers[next_buffer.fetch_add(1)
 		& (NUM_BUFFERS-1)];
 	if (addr->sin_family != AF_INET) {
@@ -209,7 +209,7 @@ const char *print_address(struct sockaddr_in *addr)
  * to_seconds() - Given an elapsed time measured in cycles, return a
  * floating-point number giving the corresponding time in seconds.
  * @cycles:    Difference between the results of two calls to rdtsc.
- * 
+ *
  * Return:     The time in seconds corresponding to cycles.
  */
 double to_seconds(uint64_t cycles)

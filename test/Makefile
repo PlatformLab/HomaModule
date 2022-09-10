@@ -3,7 +3,7 @@
 KERNEL_DIR := /lib/modules/$(shell uname -r)/build
 PERL ?= perl
 ARCH ?= x86
-	
+
 CINCLUDES := -I. \
 	    -I.. \
 	    -I$(KERNEL_DIR)/arch/x86/include \
@@ -24,7 +24,7 @@ CCINCLUDES := -I. \
 	    -I$(KERNEL_DIR)/arch/x86/include/uapi \
 	    -I$(KERNEL_DIR)/arch/x86/include/generated/uapi \
 	    -I$(KERNEL_DIR)/include/uapi \
-	    -I$(KERNEL_DIR)/include/generated/uapi 
+	    -I$(KERNEL_DIR)/include/generated/uapi
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
@@ -33,7 +33,7 @@ DEFS :=      -D__KERNEL__ \
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare -Wno-strict-aliasing
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
-	
+
 TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_lcache.c \
 	      unit_homa_offload.c \
@@ -45,7 +45,7 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_utils.c \
 	      unit_timetrace.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
-	
+
 HOMA_SRCS :=  homa_incoming.c \
 	      homa_offload.c \
 	      homa_outgoing.c \
@@ -56,16 +56,16 @@ HOMA_SRCS :=  homa_incoming.c \
 	      homa_utils.c \
 	      timetrace.c
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
-	
+
 OTHER_SRCS := ccutils.cc \
 	      main.c \
 	      mock.c \
 	      utils.c
-	      
+
 OTHER_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(OTHER_SRCS)))
-	
+
 OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(OTHER_OBJS)
-	
+
 CLEANS = unit $(OBJS) *.d .deps
 
 all: run_tests
@@ -73,7 +73,7 @@ all: run_tests
 # This seems to be the only way to disable the built-in implicit rules
 # for %:%.c and %:%.cc.
 .SUFFIXES:
-	
+
 %.o: ../%.c
 	cc -c $(CFLAGS) $< -o $@
 %.e: ../%.c
@@ -86,16 +86,16 @@ all: run_tests
 	g++ -c $(CCFLAGS) $< -o $@
 %.e: %.cc
 	g++ -E $(CCFLAGS) $< -o $@
-	
+
 unit: $(OBJS)
 	g++ $(CFLAGS) $^ -o $@ -lasan
-	
+
 run_tests: unit
 	./unit
 
 clean:
 	rm -f unit $(CLEANS)
-	
+
 # This magic (along with the -MD gcc option) automatically generates makefile
 # dependencies for header files included from C source files we compile,
 # and keeps those dependencies up-to-date every time we recompile.
@@ -109,4 +109,4 @@ clean:
 # prints the value of a make variable.
 print-%:
 	@echo $* = $($*)
-	
+

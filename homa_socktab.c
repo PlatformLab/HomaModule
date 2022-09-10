@@ -40,7 +40,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
-	
+
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk !=  NULL;
 			hsk = homa_socktab_next(&scan)) {
 		homa_sock_destroy(hsk);
@@ -118,7 +118,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = &homa->port_map;
 	int i;
-	
+
 	mutex_lock(&socktab->write_lock);
 	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
@@ -171,14 +171,14 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
-	
+
 	homa_sock_lock(hsk, "homa_socket_shutdown");
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		return;
 	}
 	printk(KERN_NOTICE "Shutting down socket %d", hsk->port);
-	
+
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
 	 * 1. Set @shutdown; this ensures that no new RPCs will be created for
@@ -196,20 +196,20 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
 	mutex_unlock(&hsk->homa->port_map.write_lock);
 	homa_sock_unlock(hsk);
-	
+
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 		homa_rpc_lock(rpc);
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	
+
 	homa_sock_lock(hsk, "homa_socket_shutdown #2");
 	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
-	
+
 	while (!list_empty(&hsk->dead_rpcs))
 		homa_rpc_reap(hsk, 1000);
 }
@@ -233,7 +233,7 @@ void homa_sock_destroy(struct homa_sock *hsk)
  * @port:      Desired server port for @hsk. If 0, then this call
  *             becomes a no-op: the socket will continue to use
  *             its randomly assigned client port.
- * 
+ *
  * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
@@ -241,7 +241,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 {
 	int result = 0;
 	struct homa_sock *owner;
-	
+
 	if (port == 0)
 		return result;
 	if (port >= HOMA_MIN_DEFAULT_PORT) {
@@ -270,7 +270,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
  * @socktab:    Hash table in which to perform lookup.
  * @port:       The port of interest.
  * Return:      The socket that owns @port, or NULL if none.
- * 
+ *
  * Note: this function uses RCU list-searching facilities, but it doesn't
  * call rcu_read_lock. The caller should do that, if the caller cares (this
  * way, the caller's use of the socket will also be protected).

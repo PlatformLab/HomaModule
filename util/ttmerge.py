@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2019-2020 Stanford University
+# Copyright (c) 2019-2022 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -37,7 +37,7 @@ import sys
 # first:     Timestamp of first entry
 # offset:    How much to add to times in this file so they align
 #            with times in the other files
-# time:      Time of the current line, adjusted by offset 
+# time:      Time of the current line, adjusted by offset
 # suffix:    Everything on the current line after the times
 files = []
 

@@ -42,7 +42,7 @@ int homa_offload_init(void)
 /**
  * homa_offload_end() - Disables GRO and GSO for Homa; typically invoked
  * during Homa module unloading.
- * 
+ *
  * Return: nonzero means error.
  */
 int homa_offload_end(void)
@@ -62,7 +62,7 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
 	struct rps_sock_flow_table *sock_flow_table;
 	int hash;
-	
+
 	sock_flow_table = rcu_dereference(rps_sock_flow_table);
 	if (sock_flow_table == NULL)
 		return;
@@ -86,7 +86,7 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
  *              held for possible GRO merging. Note: this list contains
  *              only packets matching a given hash.
  * @skb:        The newly arrived packet.
- * 
+ *
  * Return: If the return value is non-NULL, it refers to an skb in
  * gro_list. The skb will be removed from the list by the caller and
  * passed up the stack immediately.
@@ -111,7 +111,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
-	
+
 //      The test below is overly conservative except for data packets.
 //	if (!pskb_may_pull(skb, 64))
 //		tt_record("homa_gro_receive can't pull enough data "
@@ -138,16 +138,16 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				ntohl(ip_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				h_new->common.type, iph->tos >> 5);
-	
+
 	core->last_active = get_cycles();
-	
+
 	if (homa->gro_policy & HOMA_GRO_BYPASS) {
 		homa_softirq(skb);
-		
+
 		/* This return value indicates that we have freed skb. */
 		return ERR_PTR(-EINPROGRESS);
 	}
-	
+
 	/* The GRO mechanism tries to separate packets onto different
 	 * gro_lists by hash. This is bad for us, because we want to batch
 	 * packets together regardless of their RPCs. So, instead of
@@ -163,7 +163,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				struct gro_list, list);
 		struct napi_struct *napi = container_of(gro_list,
 				struct napi_struct, gro_hash[hash]);
-		
+
 		/* Make sure that core->held_skb is on the list. */
 		list_for_each_entry(held_skb,
 				&napi->gro_hash[core->held_bucket].list, list) {
@@ -204,7 +204,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			goto done;
 		}
 	}
-	
+
 	/* There was no existing Homa packet that this packet could be
 	 * batched with, so this packet will become the new merge_skb.
 	 * If the packet is sent up the stack before another packet
@@ -217,7 +217,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, raw_smp_processor_id());
-	
+
     done:
 	homa_check_pacer(homa, 1);
 	return result;
@@ -231,10 +231,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
  * @skb:     The packet for which GRO processing is now finished.
  * @hoffset: Offset within the packet of the transport header.
  *
- * Return:   Always returns 0, signifying success. 
+ * Return:   Always returns 0, signifying success.
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
-{	
+{
 	struct common_header *h = (struct common_header *)
 			skb_transport_header(skb);
 	struct data_header *d = (struct data_header *) h;
@@ -297,7 +297,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		int i, core, best;
 		__u64 best_time = ~0;
 		__u64 last_active;
-		
+
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no
 		 * core gets overloaded. We do that by checking the next several
@@ -334,6 +334,6 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 				target, homa_local_id(h->sender_id),
 				ntohl(d->seg.offset));
 	}
-	
+
 	return 0;
 }

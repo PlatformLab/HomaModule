@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -44,10 +44,10 @@ int main(int argc, char** argv) {
 		printf("Not enough space in buffer for complete timetrace.\n");
 	}
 	buffer[length-1] = 0;
-	
+
 	double cps = get_cycles_per_sec();
 	printf("Cycles per second: %g\n", cps);
-	
+
 	// Scan through the records in the buffer. For each record, replace
 	// the timestamp with more detailed information in ns, and output
 	// the modified record.
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
 		ns = (1e09 * (double)(stamp - start_time)) / cps;
 		delta_ns = (1e09 * (double)(stamp - prev_time)) / cps;
 		printf("%8.1f ns (+%6.1f ns):", ns, delta_ns);
-		
+
 		for (current = stamp_end;
 				(*current != 0) && (*current != '\n');
 				current++) {

@@ -73,7 +73,7 @@ static inline void homa_lcache_release(struct homa_lcache *lc)
  * @id:    Id of the desired RPC
  * @addr:  Address of the peer machine for this RPC.
  * @port:  Peer's port for the RPC
- * 
+ *
  * Return: if @lc has a cached lock for @id, return the corresponding
  * RPC, otherwise return NULL.
  */

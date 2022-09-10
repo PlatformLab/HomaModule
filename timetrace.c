@@ -32,7 +32,7 @@ extern int        tt_linux_homa_temp_default[];
 extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
-extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1); 
+extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 #endif
 
 /* Separate buffers for each core: this eliminates the need for
@@ -95,14 +95,14 @@ bool tt_test_no_khz = false;
  * @temp:      Pointer to homa's "temp" configuration parameters, which
  *             we should make available to the kernel. NULL means no
  *             such variables available.
- * 
+ *
  * Return :    0 means success, anything else means an error occurred (a
  *             log message will be printed to describe the error).
  */
 int tt_init(char *proc_file, int *temp)
 {
 	int i;
-	
+
 	if (init) {
 		return 0;
 	}
@@ -118,19 +118,19 @@ int tt_init(char *proc_file, int *temp)
 		memset(buffer, 0, sizeof(*buffer));
 		tt_buffers[i] = buffer;
 	}
-	
+
 	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
 	if (!tt_dir_entry) {
 		printk(KERN_ERR "couldn't create /proc/%s for timetrace "
 				"reading\n", proc_file);
 		goto error;
 	}
-	
+
 	spin_lock_init(&tt_lock);
 	tt_freeze_count.counter = 0;
 	tt_frozen = false;
 	init = true;
-	
+
 #ifdef TT_KERNEL
 	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = tt_buffers[i];
@@ -141,9 +141,9 @@ int tt_init(char *proc_file, int *temp)
 	if (temp)
 		tt_linux_homa_temp = temp;
 #endif
-	
+
 	return 0;
-	
+
 	error:
 	for (i = 0; i < nr_cpu_ids; i++) {
 		kfree(tt_buffers[i]);
@@ -169,7 +169,7 @@ void tt_destroy(void)
 		tt_buffers[i] = NULL;
 	}
 	tt_freeze_count.counter = 1;
-	
+
 #ifdef TT_KERNEL
 	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
 	for (i = 0; i < nr_cpu_ids; i++) {
@@ -182,7 +182,7 @@ void tt_destroy(void)
 	}
 	tt_linux_homa_temp = tt_linux_homa_temp_default;
 #endif
-	
+
 	spin_unlock(&tt_lock);
 }
 
@@ -257,7 +257,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
  * opened to read timetrace info.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
- * 
+ *
  * Return:    0 for success, else a negative errno.
  */
 int tt_proc_open(struct inode *inode, struct file *file)
@@ -267,7 +267,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	__u64 start_time;
 	int result = 0;
 	int i;
-	
+
 	spin_lock(&tt_lock);
 	if (!init) {
 		result = -EINVAL;
@@ -281,15 +281,15 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	pf->file = file;
 	pf->bytes_available = 0;
 	pf->next_byte = pf->msg_storage;
-	
+
 	atomic_inc(&tt_freeze_count);
-	
+
 	/* Find the oldest event in each trace. This will be events[0]
 	 * if we never completely filled the buffer, otherwise
 	 * events[nextIndex+1]. This means we don't print the entry at
 	 * nextIndex; this is convenient because it simplifies boundary
 	 * conditions in the code below.
-	 * 
+	 *
 	 * At the same time, find the most recent "oldest time" from
 	 * any buffer that has wrapped around (data from earlier than
 	 * this isn't necessarily complete, since there may have been
@@ -310,9 +310,9 @@ int tt_proc_open(struct inode *inode, struct file *file)
 			}
 		}
 	}
-	
+
 	/* Skip over all events before start_time, in order to make
-	 * sure that there's no missing data in what we print. 
+	 * sure that there's no missing data in what we print.
 	 */
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
@@ -321,14 +321,14 @@ int tt_proc_open(struct inode *inode, struct file *file)
 			pf->pos[i] = (pf->pos[i] + 1) & (tt_buffer_size-1);
 		}
 	}
-	
+
 	file->private_data = pf;
-	
+
 	if (!tt_test_no_khz) {
 		pf->bytes_available = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
 				"cpu_khz: %u\n", cpu_khz);
 	}
-	
+
 	done:
 	spin_unlock(&tt_lock);
 	return result;
@@ -349,13 +349,13 @@ int tt_proc_open(struct inode *inode, struct file *file)
  */
 ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		size_t length, loff_t *offset)
-{	
+{
 	/* # bytes of data that have accumulated in pf->msg_storage but
 	 * haven't been copied to user space yet.
 	 */
 	int copied_to_user = 0;
 	struct tt_proc_file *pf = file->private_data;
-	
+
 	spin_lock(&tt_lock);
 	if ((pf == NULL) || (pf->file != file)) {
 		printk(KERN_ERR "tt_metrics_read found damaged "
@@ -363,10 +363,10 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		copied_to_user = -EINVAL;
 		goto done;
 	}
-	
+
 	if (!init)
 		goto done;
-	
+
 	/* Each iteration through this loop processes one event (the one
 	 * with the earliest timestamp). We buffer data until pf->msg_storage
 	 * is full, then copy to user space and repeat.
@@ -391,7 +391,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		    /* None of the traces have any more events to process. */
 		    goto flush;
 		}
-		
+
 		/* Format one event. */
 		event = &(tt_buffers[current_core]->events[
 				pf->pos[current_core]]);
@@ -426,7 +426,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		pf->pos[current_core] = (pf->pos[current_core] + 1)
 				& (tt_buffer_size-1);
 		continue;
-		
+
 		flush:
 		chunk_size = pf->bytes_available;
 		if (chunk_size > (length - copied_to_user)) {
@@ -449,7 +449,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			goto done;
 		}
 	}
-	
+
 	done:
 	spin_unlock(&tt_lock);
 	return copied_to_user;
@@ -474,25 +474,25 @@ loff_t tt_proc_lseek(struct file *file, loff_t offset, int whence)
  * an open /proc/timetrace is closed.  It performs cleanup.
  * @inode:    The inode corresponding to the file.
  * @file:     Information about the open file.
- * 
- * Return: 0 for success, or a negative errno if there was an error. 
+ *
+ * Return: 0 for success, or a negative errno if there was an error.
  */
 int tt_proc_release(struct inode *inode, struct file *file)
 {
 	int i;
-	
+
 	struct tt_proc_file *pf = file->private_data;
 	if ((pf == NULL) || (pf->file != file)) {
 		printk(KERN_ERR "tt_metrics_release found damaged "
 				"private_data: 0x%p\n", file->private_data);
 		return -EINVAL;
 	}
-	
+
 	kfree(pf);
 	file->private_data = NULL;
-	
+
 	spin_lock(&tt_lock);
-		
+
 	if (init) {
 		if (tt_frozen && (atomic_read(&tt_freeze_count) == 2)) {
 			atomic_dec(&tt_freeze_count);
@@ -511,7 +511,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 		}
 		atomic_dec(&tt_freeze_count);
 	}
-	
+
 	spin_unlock(&tt_lock);
 	return 0;
 }

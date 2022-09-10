@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -51,7 +51,7 @@ FIXTURE_SETUP(homa_offload)
 		self->napi.gro_hash[i].count = 0;
 	}
 	self->napi.gro_bitmask = 0;
-				
+
 	self->skb = mock_skb_new(self->ip, &self->header.common, 1400,
 			self->header.seg.offset);
 	NAPI_GRO_CB(self->skb)->same_flow = 0;
@@ -74,7 +74,7 @@ FIXTURE_SETUP(homa_offload)
 FIXTURE_TEARDOWN(homa_offload)
 {
         struct sk_buff *skb, *tmp;
-	
+
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
 		kfree_skb(skb);
 	homa_destroy(&self->homa);
@@ -120,7 +120,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	int same_flow;
 	homa_cores[cpu_number]->held_skb = self->skb2;
 	homa_cores[cpu_number]->held_bucket = 2;
-	
+
 	self->header.seg.offset = htonl(6000);
 	self->header.common.sender_id = cpu_to_be64(1002);
 	skb = mock_skb_new(self->ip, &self->header.common, 1400, 0);
@@ -129,7 +129,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
-	
+
 	self->header.seg.offset = htonl(7000);
 	self->header.common.sender_id = cpu_to_be64(1004);
 	skb2 = mock_skb_new(self->ip, &self->header.common, 1400, 0);
@@ -138,7 +138,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
 	EXPECT_EQ(1, same_flow);
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
-	
+
 	unit_log_frag_list(self->skb2, 1);
 	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, "
 			"message_length 10000, offset 6000, "
@@ -151,7 +151,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 {
 	struct sk_buff *skb;
-	
+
 	// First packet: fits below the limit.
 	homa->max_gro_skbs = 3;
 	homa_cores[cpu_number]->held_skb = self->skb2;
@@ -161,7 +161,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	homa_gro_receive(&self->napi.gro_hash[3].list, skb);
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
 	EXPECT_EQ(2, self->napi.gro_hash[2].count);
-	
+
 	// Second packet hits the limit.
 	self->header.common.sport = htons(40001);
 	skb = mock_skb_new(self->ip, &self->header.common, 1400, 0);
@@ -175,7 +175,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	kfree_skb(self->skb2);
 	EXPECT_EQ(1, self->napi.gro_hash[2].count);
 	EXPECT_EQ(6, self->napi.gro_bitmask);
-	
+
 	// Third packet also hits the limit for skb, causing the bucket
 	// to become empty.
 	homa->max_gro_skbs = 2;
@@ -208,12 +208,12 @@ TEST_F(homa_offload, homa_gro_complete__GRO_IDLE_NEW)
 	homa_cores[1]->last_gro = 899;
 	atomic_set(&homa_cores[2]->softirq_backlog, 0);
 	homa_cores[2]->last_gro = 0;
-	
+
 	// Avoid busy cores.
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(1, self->skb->hash - 32);
 	EXPECT_EQ(1, atomic_read(&homa_cores[1]->softirq_backlog));
-	
+
 	// All cores busy; must rotate.
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(6, self->skb->hash - 32);
@@ -237,16 +237,16 @@ TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 	homa_cores[0]->last_active = 20;
 	homa_cores[1]->last_active = 15;
 	homa_cores[2]->last_active = 10;
-	
+
 	cpu_number = 5;
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(1, self->skb->hash - 32);
-	
+
 	homa_cores[6]->last_active = 5;
 	cpu_number = 5;
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(6, self->skb->hash - 32);
-	
+
 	cpu_number = 6;
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(2, self->skb->hash - 32);

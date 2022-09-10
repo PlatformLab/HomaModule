@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
 	char buffer[BUF_SIZE];
 	struct ip* ip_header = (struct ip *) buffer;
 	int header_length;
-	
+
 	if (argc >= 2) {
 		protocol = strtol(argv[1], NULL, 10);
 		if (protocol == 0) {
@@ -50,13 +50,13 @@ int main(int argc, char** argv) {
 	} else {
 		protocol = IPPROTO_HOMA;
 	}
-	
+
 	fd = socket(AF_INET, SOCK_RAW, protocol);
 	if (fd < 0) {
 		printf("Couldn't open raw socket: %s\n", strerror(errno));
 		exit(1);
 	}
-	
+
 	while (1) {
 		size = recvfrom(fd, buffer, BUF_SIZE, 0,  NULL, 0);
 		if (size < 0) {

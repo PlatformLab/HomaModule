@@ -804,7 +804,7 @@ static int test_harness_run(int __attribute__((unused)) argc,
 	unsigned int count = 0;
 	unsigned int pass_count = 0;
 	int argi = 1;
-	
+
 	for (argi = 1; argi < argc; argi++) {
 		if ((strcmp(argv[argi], "-v") == 0) ||
 			(strcmp(argv[argi], "--verbose") == 0)) {

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -76,7 +76,7 @@ void send_fd(int fd, struct sockaddr *addr, char *request)
 {
 	uint64_t id;
 	int status;
-	
+
 	sleep(1);
 	status = homa_send(fd, request, length, addr, sizeof(*addr), &id);
 	if (status < 0) {
@@ -292,16 +292,16 @@ void test_poll(int fd, char *request)
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	addr.sin_port = htons(500);
-	
+
 	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n",
 				ntohl(addr.sin_port), strerror(errno));
 		return;
 	}
-	
+
 	std::thread thread(send_fd, fd, (struct sockaddr *) &addr, request);
 	thread.detach();
-	
+
 	result = poll(&poll_info, 1, -1);
 	if (result > 0) {
 		printf("Poll succeeded with mask 0x%x\n", poll_info.revents);
@@ -309,7 +309,7 @@ void test_poll(int fd, char *request)
 		printf("Poll failed: %s\n", strerror(errno));
 		return;
 	}
-	
+
 	source_length = sizeof(source);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_REQUEST,
 			(struct sockaddr *) &source, &source_length, &id,
@@ -440,7 +440,7 @@ void test_shutdown(int fd)
 		printf("Error in homa_recv: %s\n",
 			strerror(errno));
 	}
-	
+
 	/* Make sure that future reads also fail. */
 	addr_length = sizeof(addr);
 	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
@@ -472,7 +472,7 @@ void test_stream(int fd, struct sockaddr *dest)
 	int64_t bytes_sent = 0;
 	int64_t start_bytes = 0;
 	double rate;
-	
+
 	if (count > MAX_RPCS) {
 		printf("Count too large; reducing from %d to %d\n", count,
 				MAX_RPCS);
@@ -492,7 +492,7 @@ void test_stream(int fd, struct sockaddr *dest)
 			return;
 		}
 	}
-	
+
 	/* Each iteration through the following the loop waits for a
 	 * response to an outstanding request, then initiates a new
 	 * request.
@@ -521,7 +521,7 @@ void test_stream(int fd, struct sockaddr *dest)
 		bytes_sent += length;
 		if (bytes_sent > 1001000000)
 			break;
-		
+
 		/* Don't start timing until we've sent a few bytes to warm
 		 * everything up.
 		 */
@@ -535,7 +535,7 @@ void test_stream(int fd, struct sockaddr *dest)
 			end_cycles - start_cycles);
 	printf("Homa throughput using %d concurrent %d byte messages: "
 			"%.2f GB/sec\n", count, length, rate*1e-09);
-	
+
 	for (i = 0; i < count; i++)
 		free(buffers[i]);
 }
@@ -597,7 +597,7 @@ void test_tcp(char *server_name, int port)
 	struct sockaddr *dest;
 	int status, i;
 	int buffer[250000];
-	
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
@@ -609,7 +609,7 @@ void test_tcp(char *server_name, int port)
 	}
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
-	
+
 	int stream = socket(PF_INET, SOCK_STREAM, 0);
 	if (stream == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
@@ -622,21 +622,21 @@ void test_tcp(char *server_name, int port)
 	}
 	int flag = 1;
 	setsockopt(stream, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
-	
+
 	/* Warm up. */
 	buffer[0] = length;
 	buffer[1] = length;
 	seed_buffer(&buffer[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 	for (i = 0; i < 10; i++)
 		tcp_ping(stream, buffer, length);
-	
+
 	uint64_t times[count+1];
 	for (i = 0; i < count; i++) {
 		times[i] = rdtsc();
 		tcp_ping(stream, buffer, length);
 	}
 	times[count] = rdtsc();
-	
+
 	for (i = 0; i < count; i++) {
 		times[i] = times[i+1] - times[i];
 	}
@@ -663,7 +663,7 @@ void test_tcpstream(char *server_name, int port)
 	int64_t start_bytes = 0;
 	uint64_t start_cycles = 0;
 	double elapsed, rate;
-	
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
@@ -675,7 +675,7 @@ void test_tcpstream(char *server_name, int port)
 	}
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
-	
+
 	int fd = socket(PF_INET, SOCK_STREAM, 0);
 	if (fd == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
@@ -689,7 +689,7 @@ void test_tcpstream(char *server_name, int port)
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 	buffer[0] = -1;
-	
+
 	while (1) {
 		if (write(fd, buffer, length) != length) {
 			printf("Socket write failed: %s\n", strerror(errno));
@@ -698,7 +698,7 @@ void test_tcpstream(char *server_name, int port)
 		bytes_sent += length;
 		if (bytes_sent > 1010000000)
 			break;
-		
+
 		/* Don't start timing until we've sent a few bytes to warm
 		 * everything up.
 		 */
@@ -706,7 +706,7 @@ void test_tcpstream(char *server_name, int port)
 			start_bytes = bytes_sent;
 			start_cycles = rdtsc();
 		}
-		
+
 	}
 	elapsed = to_seconds(rdtsc() - start_cycles);
 	rate = ((double) bytes_sent - start_bytes) / elapsed;
@@ -760,12 +760,12 @@ int main(int argc, char** argv)
 	struct addrinfo hints;
 	char *host, *port_name;
 	char buffer[HOMA_MAX_MESSAGE_LENGTH];
-	
+
 	if ((argc >= 2) && (strcmp(argv[1], "--help") == 0)) {
 		print_help(argv[0]);
 		exit(0);
 	}
-	
+
 	if (argc < 3) {
 		printf("Usage: %s host:port [options] op op ...\n", argv[0]);
 		exit(1);
@@ -823,7 +823,7 @@ int main(int argc, char** argv)
 			exit(1);
 		}
 	}
-	
+
 	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
@@ -838,12 +838,12 @@ int main(int argc, char** argv)
 	int *ibuf = reinterpret_cast<int *>(buffer);
 	ibuf[0] = ibuf[1] = length;
 	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
-	
+
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}
-	
+
 	for ( ; nextArg < argc; nextArg++) {
 		if (strcmp(argv[nextArg], "close") == 0) {
 			test_close();

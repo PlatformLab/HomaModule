@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -61,19 +61,19 @@ static void peer_spinlock_hook(void)
 TEST_F(homa_peertab, homa_peer_find__basics)
 {
 	struct homa_peer *peer, *peer2;
-	
+
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
-	
+
 	peer2 = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	EXPECT_EQ(peer, peer2);
-	
+
 	peer2 = homa_peer_find(&self->peertab, 22222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
-	
+
 	EXPECT_EQ(2, homa_cores[cpu_number]->metrics.peer_new_entries);
 }
 
@@ -92,7 +92,7 @@ TEST_F(homa_peertab, homa_peertab_init__vmalloc_failed)
 	struct homa_peertab table;
 	mock_vmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_peertab_init(&table));
-	
+
 	/* Make sure destroy is safe after failed init. */
 	homa_peertab_destroy(&table);
 }
@@ -108,7 +108,7 @@ TEST_F(homa_peertab, homa_peertab_gc_dsts)
 	mock_cycles = 100000000;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
 	EXPECT_EQ(3, dead_count(&self->peertab));
-	
+
 	homa_peertab_gc_dsts(&self->peertab, 150000000);
 	EXPECT_EQ(2, dead_count(&self->peertab));
 	homa_peertab_gc_dsts(&self->peertab, ~0);
@@ -118,7 +118,7 @@ TEST_F(homa_peertab, homa_peertab_gc_dsts)
 TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 {
 	struct homa_peer *peer;
-	
+
 	test_data = self;
 	mock_spin_lock_hook = peer_lock_hook;
 	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
@@ -128,21 +128,21 @@ TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 {
 	struct homa_peer *peer;
-	
+
 	mock_kmalloc_errors = 1;
 	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
-	
+
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_kmalloc_errors);
 }
 TEST_F(homa_peertab, homa_peer_find__route_error)
 {
 	struct homa_peer *peer;
-	
+
 	mock_route_errors = 1;
 	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
-	
+
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_route_errors);
 }
 
@@ -153,7 +153,7 @@ TEST_F(homa_peertab, homa_dst_refresh__basics)
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
-	
+
 	old_dst = homa_get_dst(peer, &self->hsk);
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
 	EXPECT_NE(old_dst, peer->dst);
@@ -166,7 +166,7 @@ TEST_F(homa_peertab, homa_dst_refresh__routing_error)
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
-	
+
 	old_dst = homa_get_dst(peer, &self->hsk);
 	mock_route_errors = 1;
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
@@ -181,7 +181,7 @@ TEST_F(homa_peertab, homa_dst_refresh__malloc_error)
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
-	
+
 	old_dst = homa_get_dst(peer, &self->hsk);
 	mock_kmalloc_errors = 1;
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
@@ -194,7 +194,7 @@ TEST_F(homa_peertab, homa_dst_refresh__free_old_dsts)
 	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(11111, peer->addr);
-	
+
 	mock_cycles = 0;
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
@@ -208,7 +208,7 @@ TEST_F(homa_peertab, homa_unsched_priority)
 {
 	struct homa_peer peer;
 	homa_peer_set_cutoffs(&peer, INT_MAX, 0, 0, INT_MAX, 200, 100, 0, 0);
-	
+
 	EXPECT_EQ(5, homa_unsched_priority(&self->homa, &peer, 10));
 	EXPECT_EQ(4, homa_unsched_priority(&self->homa, &peer, 200));
 	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
@@ -220,12 +220,12 @@ TEST_F(homa_peertab, homa_peer_lock_slow)
 	struct homa_peer *peer = homa_peer_find(&self->peertab, 444,
 			&self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	
+
 	homa_peer_lock(peer);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_misses);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_miss_cycles);
 	homa_peer_unlock(peer);
-	
+
 	mock_trylock_errors = 1;
 	mock_spin_lock_hook = peer_spinlock_hook;
 	homa_peer_lock(peer);
@@ -248,7 +248,7 @@ TEST_F(homa_peertab, homa_peer_add_ack)
 		103, 100, 100);
 	struct homa_peer *peer = crpc1->peer;
 	EXPECT_EQ(0, peer->num_acks);
-	
+
 	/* Initialize 3 acks in the peer. */
 	peer->acks[0] = (struct homa_ack) {
 			.client_port = htons(1000),
@@ -263,19 +263,19 @@ TEST_F(homa_peertab, homa_peer_add_ack)
 			.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(92)};
 	peer->num_acks = 3;
-	
+
 	/* Add one RPC to unacked (fits). */
 	homa_peer_add_ack(crpc1);
 	EXPECT_EQ(4, peer->num_acks);
 	EXPECT_STREQ("client_port 32768, server_port 99, client_id 101",
 			unit_ack_string(&peer->acks[3]));
-	
+
 	/* Add another RPC to unacked (also fits). */
 	homa_peer_add_ack(crpc2);
 	EXPECT_EQ(5, peer->num_acks);
 	EXPECT_STREQ("client_port 32768, server_port 99, client_id 102",
 			unit_ack_string(&peer->acks[4]));
-	
+
 	/* Third RPC overflows, triggers ACK transmission. */
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
@@ -294,11 +294,11 @@ TEST_F(homa_peertab, homa_peer_get_acks)
 			&self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(0, peer->num_acks);
-	
+
 	// First call: nothing available.
 	struct homa_ack acks[2];
 	EXPECT_EQ(0, homa_peer_get_acks(peer, 2, acks));
-	
+
 	// Second call: retrieve 2 out of 3.
 	peer->acks[0] = (struct homa_ack) {
 			.client_port = htons(4000),
@@ -319,7 +319,7 @@ TEST_F(homa_peertab, homa_peer_get_acks)
 	EXPECT_STREQ("client_port 4002, server_port 5002, client_id 102",
 			unit_ack_string(&acks[1]));
 	EXPECT_EQ(1, peer->num_acks);
-	
+
 	// Third call: retrieve final id.
 	EXPECT_EQ(1, homa_peer_get_acks(peer, 2, acks));
 	EXPECT_STREQ("client_port 4000, server_port 5000, client_id 100",

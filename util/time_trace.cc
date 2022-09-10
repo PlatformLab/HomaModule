@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2020 Stanford University
+/* Copyright (c) 2014-2022 Stanford University
  *
  * Permission to use, copy, modify, and distribute this software for any purpose
  * with or without fee is hereby granted, provided that the above copyright
@@ -75,9 +75,9 @@ void
 time_trace::print_internal(std::string *s, FILE *f)
 {
 	std::vector<time_trace::buffer*> buffers;
-	
+
 	freeze();
-	
+
 	/* Make a copy of thread_buffers in order to avoid potential
 	 * synchronization issues with new threads modifying it.
 	 */
@@ -130,7 +130,7 @@ time_trace::print_internal(std::string *s, FILE *f)
 		    current[i] = (current[i] + 1) % buffer::BUFFER_SIZE;
 		}
 	}
-	
+
 	// Output an initial (synthetic) record with the starting time.
 	if (s != NULL) {
 		char message[1000];

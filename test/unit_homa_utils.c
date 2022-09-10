@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -84,7 +84,7 @@ FIXTURE_TEARDOWN(homa_utils)
  * @c6:     New value for homa->unsched_cutoffs[6]
  * @c7:     New value for homa->unsched_cutoffs[7]
  */
-static void set_cutoffs(struct homa *homa, int c0, int c1, int c2, 
+static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 		int c3, int c4, int c5, int c6, int c7)
 {
 	homa->unsched_cutoffs[0] = c0;
@@ -100,7 +100,7 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 /**
  * dead_rpcs() - Logs the ids for all of the RPCS in hsk->dead_rpcs.
  * @hsk:  Homa socket to check for dead RPCs.
- * 
+ *
  * Return: the contents of the unit test log.
  */
 static const char *dead_rpcs(struct homa_sock *hsk)
@@ -229,7 +229,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	ASSERT_FALSE(IS_ERR(srpc));
 	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
 	homa_rpc_unlock(srpc);
-	
+
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_lock_misses);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_lock_miss_cycles);
 	homa_rpc_lock_slow(crpc);
@@ -242,7 +242,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_lock_misses);
 	EXPECT_NE(0, homa_cores[cpu_number]->metrics.server_lock_miss_cycles);
-	
+
 }
 
 TEST_F(homa_utils, homa_rpc_acked__basics)
@@ -258,7 +258,7 @@ TEST_F(homa_utils, homa_rpc_acked__basics)
 			.client_id = cpu_to_be64(self->client_id)};
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
 	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
-	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));	
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
 }
 TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 {
@@ -273,7 +273,7 @@ TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 			.client_id = cpu_to_be64(self->client_id)};
 	homa_rpc_acked(&self->hsk, self->client_ip, &ack);
 	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
-	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));	
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
 }
 TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 {
@@ -288,7 +288,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 			.client_id = cpu_to_be64(self->client_id)};
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
 	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
-	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));	
+	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
 }
 TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 {
@@ -302,7 +302,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 			.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->client_id+10)};
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
-	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));	
+	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
 	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
 }
 
@@ -633,12 +633,12 @@ TEST_F(homa_utils, homa_print_ipv4_addr)
 {
 	char *p1, *p2;
 	int i;
-	
+
 	p1 = homa_print_ipv4_addr(unit_get_in_addr("192.168.0.1"));
 	p2 = homa_print_ipv4_addr(htonl((1<<24) + (2<<16) + (3<<8) + 4));
 	EXPECT_STREQ("192.168.0.1", p1);
 	EXPECT_STREQ("1.2.3.4", p2);
-	
+
 	/* Make sure buffers eventually did reused. */
 	for (i = 0; i < 20; i++)
 		homa_print_ipv4_addr(unit_get_in_addr("5.6.7.8"));
@@ -653,13 +653,13 @@ TEST_F(homa_utils, homa_snprintf)
 			"Test message with values: %d and %d", 100, 1000);
 	EXPECT_EQ(38, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000", buffer);
-	
+
 	used = homa_snprintf(buffer, sizeof32(buffer), used,
 			"; plus: %d", 123456);
 	EXPECT_EQ(49, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
 			buffer);
-	
+
 	used = homa_snprintf(buffer, sizeof32(buffer), used,
 			"more text, none of which fits");
 	EXPECT_EQ(49, used);
@@ -673,12 +673,12 @@ TEST_F(homa_utils, homa_append_metric)
 	homa_append_metric(&self->homa,  "x: %d, y: %d", 10, 20);
 	EXPECT_EQ(12, self->homa.metrics_length);
 	EXPECT_STREQ("x: 10, y: 20", self->homa.metrics);
-	
+
 	homa_append_metric(&self->homa, ", z: %d", 12345);
 	EXPECT_EQ(22, self->homa.metrics_length);
 	EXPECT_STREQ("x: 10, y: 20, z: 12345", self->homa.metrics);
 	EXPECT_EQ(30, self->homa.metrics_capacity);
-	
+
 	homa_append_metric(&self->homa, ", q: %050d", 88);
 	EXPECT_EQ(77, self->homa.metrics_length);
 	EXPECT_STREQ("x: 10, y: 20, z: 12345, "

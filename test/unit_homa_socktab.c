@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -132,19 +132,19 @@ TEST_F(homa_socktab, homa_sock_shutdown__basics)
 	client2 = hsk2.port;
 	mock_sock_init(&hsk3, &self->homa, 0);
 	client3 = hsk3.port;
-	
+
 	EXPECT_EQ(&hsk2, homa_sock_find(&self->homa.port_map, client2));
 	EXPECT_EQ(&hsk2, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(&hsk3, homa_sock_find(&self->homa.port_map, client3));
-	
+
 	homa_sock_shutdown(&hsk2);
-	
+
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client2));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(&hsk3, homa_sock_find(&self->homa.port_map, client3));
-	
+
 	homa_sock_shutdown(&hsk3);
-	
+
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client2));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client3));
@@ -201,20 +201,20 @@ TEST_F(homa_socktab, homa_sock_bind)
 	struct homa_sock hsk2;
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(&self->homa.port_map, &hsk2, 100));
-	
+
 	EXPECT_EQ(0, -homa_sock_bind(&self->homa.port_map, &self->hsk, 0));
 	EXPECT_EQ(HOMA_MIN_DEFAULT_PORT, self->hsk.port);
 	EXPECT_EQ(EINVAL, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			HOMA_MIN_DEFAULT_PORT + 100));
-	
+
 	EXPECT_EQ(EADDRINUSE, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			100));
 	EXPECT_EQ(0, -homa_sock_bind(&self->homa.port_map, &hsk2,
 			100));
-	
+
 	EXPECT_EQ(0, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			110));
-	
+
 	EXPECT_EQ(&self->hsk, homa_sock_find(&self->homa.port_map, 110));
 	EXPECT_EQ(0, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			120));
@@ -250,7 +250,7 @@ TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
 	mock_sock_init(&hsk4, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(&self->homa.port_map, &hsk4,
 			5*HOMA_SOCKTAB_BUCKETS + 13));
-	
+
 	EXPECT_EQ(&self->hsk, homa_sock_find(&self->homa.port_map,
 			13));
 	EXPECT_EQ(&hsk2, homa_sock_find(&self->homa.port_map,
@@ -259,7 +259,7 @@ TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
 			3*HOMA_SOCKTAB_BUCKETS + 13));
 	EXPECT_EQ(&hsk4, homa_sock_find(&self->homa.port_map,
 			5*HOMA_SOCKTAB_BUCKETS + 13));
-	
+
 	homa_sock_destroy(&hsk2);
 	homa_sock_destroy(&hsk3);
 	homa_sock_destroy(&hsk4);
@@ -268,12 +268,12 @@ TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
 TEST_F(homa_socktab, homa_sock_lock_slow)
 {
 	mock_cycles = ~0;
-	
+
 	homa_sock_lock(&self->hsk, "unit test");
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.socket_lock_misses);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
-	
+
 	mock_trylock_errors = 1;
 	homa_sock_lock(&self->hsk, "unit test");
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.socket_lock_misses);

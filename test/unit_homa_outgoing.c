@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -63,11 +63,11 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 {
 	struct homa_rpc *srpc;
 	struct grant_header h;
-	
+
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
-	
+
 	h.offset = htonl(12345);
 	h.priority = 4;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -157,7 +157,7 @@ TEST_F(homa_outgoing, homa_fill_packets__set_gso_info)
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	EXPECT_EQ(1420, skb_shinfo(crpc->msgout.packets)->gso_size);
-	
+
 	// Second message: no GSO (message fits in one packet)
 	mock_net_device.gso_max_size = 10000;
 	self->homa.max_gso_size = 4200;
@@ -167,7 +167,7 @@ TEST_F(homa_outgoing, homa_fill_packets__set_gso_info)
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	EXPECT_EQ(0, skb_shinfo(crpc->msgout.packets)->gso_size);
-	
+
 	// Third message: GSO limit is one packet
 	mock_net_device.gso_max_size = 10000;
 	self->homa.max_gso_size = 1000;
@@ -287,13 +287,13 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 {
 	struct homa_rpc *srpc;
 	struct grant_header h;
-	
+
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			10000, 10000);
 	ASSERT_NE(NULL, srpc);
-	
+
 	h.offset = htonl(12345);
 	h.priority = 4;
 	h.common.sender_id = cpu_to_be64(self->client_id);
@@ -308,13 +308,13 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 {
 	struct homa_rpc *crpc;
 	struct grant_header h;
-	
+
 	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			100, 10000);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
-	
+
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
@@ -329,11 +329,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 {
 	struct homa_rpc *srpc;
 	struct grant_header h;
-	
+
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
-	
+
 	h.common.type = GRANT;
 	h.offset = htonl(12345);
 	h.priority = 4;
@@ -347,7 +347,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 {
 	struct homa_rpc *srpc;
 	struct busy_header h;
-	
+
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
@@ -361,11 +361,11 @@ TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
 {
 	struct homa_rpc *srpc;
 	struct grant_header h;
-	
+
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
-	
+
 	h.offset = htonl(12345);
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
@@ -436,7 +436,7 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 	ASSERT_FALSE(IS_ERR(crpc1));
 	homa_rpc_unlock(crpc1);
 	unit_log_clear();
-	
+
 	crpc1->msgout.granted = 1000;
 	homa_xmit_data(crpc1, false);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
@@ -454,7 +454,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	atomic64_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	
+
 	homa_xmit_data(crpc1, false);
 	EXPECT_STREQ("xmit DATA 1400@0; "
 			"xmit DATA 1400@1400; "
@@ -473,7 +473,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	homa_rpc_unlock(crpc1);
 	ASSERT_FALSE(IS_ERR(crpc2));
 	homa_rpc_unlock(crpc2);
-	
+
 	/* First, get an RPC on the throttled list. */
 	atomic64_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 3000;
@@ -482,7 +482,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 2, next_offset 2800", unit_log_get());
-	
+
 	/* Now force transmission. */
 	unit_log_clear();
 	homa_xmit_data(crpc2, true);
@@ -518,7 +518,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	unit_log_clear();
 	dst = crpc->peer->dst;
 	old_refcount = dst->__refcnt.counter;
-	
+
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
 	EXPECT_STREQ("xmit DATA 1000@0", unit_log_get());
@@ -560,20 +560,20 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 			"incoming 11200, RETRANSMIT",
 			unit_log_get());
 	EXPECT_STREQ("2 2 2", mock_xmit_prios);
-	
+
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 1500, 1500, 3);
 	EXPECT_STREQ("", unit_log_get());
-	
+
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 2800, 4200, 3);
 	EXPECT_STREQ("xmit DATA retrans 1400@2800", unit_log_get());
 	EXPECT_STREQ("3", mock_xmit_prios);
-	
+
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	mock_xmit_log_verbose = 0;
@@ -581,7 +581,7 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	EXPECT_STREQ("xmit DATA retrans 1400@2800; "
 			"xmit DATA retrans 1400@4200", unit_log_get());
 	EXPECT_STREQ("7 7", mock_xmit_prios);
-	
+
 	unit_log_clear();
 	mock_xmit_log_verbose = 0;
 	homa_resend_data(crpc, 16000, 17000, 7);
@@ -599,11 +599,11 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_SUBSTR("incoming 10000", unit_log_get());
-	
+
 	unit_log_clear();
 	homa_resend_data(crpc, 9800, 10000, 2);
 	EXPECT_SUBSTR("incoming 11200", unit_log_get());
-	
+
 	unit_log_clear();
 	homa_resend_data(crpc, 15500, 16500, 2);
 	EXPECT_SUBSTR("incoming 16000", unit_log_get());
@@ -614,15 +614,15 @@ TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
 	self->homa.link_mbps = 10000;
 	homa_outgoing_sysctl_changed(&self->homa);
 	EXPECT_EQ(808, self->homa.cycles_per_kbyte);
-	
+
 	self->homa.link_mbps = 1000;
 	homa_outgoing_sysctl_changed(&self->homa);
 	EXPECT_EQ(8080, self->homa.cycles_per_kbyte);
-	
+
 	self->homa.link_mbps = 40000;
 	homa_outgoing_sysctl_changed(&self->homa);
 	EXPECT_EQ(202, self->homa.cycles_per_kbyte);
-	
+
 	self->homa.max_nic_queue_ns = 200;
 	cpu_khz = 2000000;
 	homa_outgoing_sysctl_changed(&self->homa);
@@ -774,7 +774,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	ASSERT_FALSE(IS_ERR(crpc3));
 	homa_rpc_unlock(crpc3);
 	homa_add_to_throttled(crpc3);
-	
+
 	/* First attempt: pacer_fifo_count doesn't reach zero. */
 	self->homa.max_nic_queue_cycles = 1300;
 	self->homa.pacer_fifo_count = 200;
@@ -791,7 +791,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 			"request 2, next_offset 0; "
 			"request 6, next_offset 0", unit_log_get());
 	EXPECT_EQ(50, self->homa.pacer_fifo_count);
-	
+
 	/* Second attempt: pacer_fifo_count reaches zero. */
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	unit_log_clear();
@@ -916,13 +916,13 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 	homa_rpc_unlock(crpc3);
 	homa_rpc_unlock(crpc4);
 	homa_rpc_unlock(crpc5);
-	
+
 	/* Basics: add one RPC. */
 	homa_add_to_throttled(crpc1);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request 2, next_offset 0", unit_log_get());
-	
+
 	/* Check priority ordering. */
 	homa_add_to_throttled(crpc2);
 	homa_add_to_throttled(crpc3);
@@ -935,7 +935,7 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 		"request 10, next_offset 0; "
 		"request 8, next_offset 0; "
 		"request 6, next_offset 0", unit_log_get());
-	
+
 	/* Don't reinsert if already present. */
 	homa_add_to_throttled(crpc1);
 	unit_log_clear();
@@ -960,15 +960,15 @@ TEST_F(homa_outgoing, homa_add_to_throttled__inc_metrics)
 	homa_rpc_unlock(crpc1);
 	homa_rpc_unlock(crpc2);
 	homa_rpc_unlock(crpc3);
-	
+
 	homa_add_to_throttled(crpc1);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_adds);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.throttle_list_checks);
-	
+
 	homa_add_to_throttled(crpc2);
 	EXPECT_EQ(2, homa_cores[cpu_number]->metrics.throttle_list_adds);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_checks);
-	
+
 	homa_add_to_throttled(crpc3);
 	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_adds);
 	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_checks);
@@ -980,16 +980,16 @@ TEST_F(homa_outgoing, homa_remove_from_throttled)
 			&self->server_addr, unit_iov_iter((void *) 1000, 5000));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
-	
+
 	homa_add_to_throttled(crpc);
 	EXPECT_FALSE(list_empty(&self->homa.throttled_rpcs));
-	
+
 	// First attempt will remove.
 	unit_log_clear();
 	homa_remove_from_throttled(crpc);
 	EXPECT_TRUE(list_empty(&self->homa.throttled_rpcs));
 	EXPECT_STREQ("removing id 2 from throttled list", unit_log_get());
-	
+
 	// Second attempt: nothing to do.
 	unit_log_clear();
 	homa_remove_from_throttled(crpc);

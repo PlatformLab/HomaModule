@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -27,7 +27,7 @@
 
 int main(int argc, char** argv) {
 	int gbytes, i, j;
-	
+
 	if (argc != 2) {
 		printf("Usage: %s gbytes\n", argv[0]);
 		exit(1);
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
 				argv[1]);
 		exit(1);
 	}
-	
+
 	// Each iteration through the following loop allocates 10^9 bytes
 	// of memory and fills it with random values.
 	for (i = 0; i < gbytes; i++) {
