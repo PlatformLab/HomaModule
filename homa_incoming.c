@@ -75,14 +75,14 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	int offset = ntohl(h->seg.offset);
 	int data_bytes = ntohl(h->seg.segment_length);
 	struct sk_buff *skb2;
-	
+
 	/* Any data from the packet with offset less than this is
 	 * of no value.*/
 	int floor = 0;
-	
+
 	/* Any data with offset >= this is useless. */
 	int ceiling = rpc->msgin.total_length;
-	
+
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
 	 * always will in practice, so work backwards from the end of the
@@ -97,8 +97,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 			break;
 		}
 		ceiling = offset2;
-	} 
-		
+	}
+
 	/* New packet goes right after skb2 (which may refer to the header).
 	 * Packets shouldn't overlap in byte ranges, but the code below
 	 * assumes they might, so it computes how many non-overlapping bytes
@@ -138,7 +138,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
  * @iter:       Describes the available buffer space at user-level; message
  *              data gets copied here.
  * @max_bytes:  Total number of bytes of data to extract.
- * 
+ *
  * Return:      The number of bytes copied, or a negative errno.
  */
 int homa_message_in_copy_data(struct homa_message_in *msgin,
@@ -146,7 +146,7 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 {
 	int err;
 	int remaining = max_bytes;
-	
+
 	/* Do the right thing even if packets have overlapping ranges.
 	 * In practice, this shouldn't ever be necessary.
 	 */
@@ -195,7 +195,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	int missing_bytes;
 	/* This will eventually be the top of the first missing range. */
 	int end_offset;
-	
+
 	if (msgin->total_length < 0) {
 		/* Haven't received any data for this message; request
 		 * retransmission of just the first packet (the sender
@@ -206,7 +206,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		resend->length = htonl(100);
 		return;
 	}
-	
+
 	missing_bytes = msgin->bytes_remaining
 			- (msgin->total_length - msgin->incoming);
 	if (missing_bytes == 0) {
@@ -215,7 +215,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		return;
 	}
 	end_offset = msgin->incoming;
-	
+
 	/* Basic idea: walk backwards through the message's packets until
 	 * we have accounted for all missing bytes; this will identify
 	 * the first missing range.
@@ -237,7 +237,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		}
 		end_offset = offset;
 	}
-	
+
 	/* The first packet(s) are missing. */
 	resend->offset = 0;
 	resend->length = htonl(missing_bytes);
@@ -264,7 +264,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 	struct common_header *h = (struct common_header *) skb->data;
 	struct homa_rpc *rpc;
 	__u64 id = homa_local_id(h->sender_id);
-	
+
 	/* If there is an ack in the packet, handle it. Must do this
 	 * before locking the packet's RPC, since we may need to acquire
 	 * (other) RPC locks to handle the acks.
@@ -279,7 +279,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &dh->seg.ack);
 		}
 	}
-	
+
 	/* Find and lock the RPC for this packet. */
 	rpc = homa_lcache_get(lcache, id, ip_hdr(skb)->saddr, ntohs(h->sport));
 	if (!rpc) {
@@ -330,7 +330,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			rpc->silent_ticks = 0;
 		rpc->peer->outstanding_resends = 0;
 	}
-	
+
 	switch (h->type) {
 	case DATA:
 		if (homa_data_pkt(skb, rpc, lcache, delta) != 0)
@@ -388,7 +388,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 		goto discard;
 	}
 	return;
-	
+
     discard:
 	kfree_skb(skb);
 }
@@ -401,7 +401,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
  * @lcache:  @rpc must be stored here; released if needed to unlock @rpc.
  * @delta:   Pointer to a value that will be incremented or decremented
  *           to accumulate changes that need to be made to homa->total_incoming.
- * 
+ *
  * Return: Zero means the function completed successfully. Nonzero means
  * that the RPC had to be unlocked and deleted because the socket has been
  * shut down; the caller should not access the RPC anymore. Note: this method
@@ -414,17 +414,17 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct data_header *h = (struct data_header *) skb->data;
 	int incoming = ntohl(h->incoming);
 	int old_remaining;
-	
+
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			homa_local_id(h->common.sender_id),
 			ntohl(rpc->peer->addr), ntohl(h->seg.offset),
 			ntohl(h->message_length));
-	
+
 	if (rpc->state != RPC_INCOMING) {
 		if (unlikely(!homa_is_client(rpc->id)
 				|| (rpc->state == RPC_READY))) {
 			kfree_skb(skb);
-			return 0;			
+			return 0;
 		}
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length));
 		INC_METRIC(responses_received, 1);
@@ -438,14 +438,14 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		rpc->msgin.scheduled = rpc->msgin.total_length > incoming;
 		rpc->msgin.possibly_in_grant_queue = rpc->msgin.scheduled;
 	}
-	
+
 	/* Incorporate the packet, and subtract the net gain in bytes
 	 * from homa->total_incoming.
 	 */
 	old_remaining = rpc->msgin.bytes_remaining;
 	homa_add_packet(rpc, skb);
 	*delta -= old_remaining - rpc->msgin.bytes_remaining;
-	
+
 	if (rpc->msgin.scheduled) {
 		homa_check_grantable(homa, rpc);
 	}
@@ -468,7 +468,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			kfree(rpc);
 			return 1;
 		}
-			
+
 		list_add_tail_rcu(&rpc->active_links, &rpc->hsk->active_rpcs);
 		if (rpc->msgin.bytes_remaining == 0)
 			homa_rpc_ready(rpc);
@@ -494,7 +494,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		if (jiffies != rpc->peer->last_update_jiffies) {
 			struct cutoffs_header h2;
 			int i;
-			
+
 			for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
 				h2.unsched_cutoffs[i] =
 						htonl(homa->unsched_cutoffs[i]);
@@ -516,7 +516,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
-	
+
 	tt_record3("processing grant for id %llu, offset %d, priority %d",
 			homa_local_id(h->common.sender_id), ntohl(h->offset),
 			h->priority);
@@ -548,7 +548,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
 	struct busy_header busy;
-	
+
 	if (rpc == NULL) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
 				"offset %d; responding with UNKNOWN",
@@ -594,7 +594,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 				ntohl(h->offset) + ntohl(h->length),
 				h->priority);
 	}
-		
+
     done:
 	kfree_skb(skb);
 }
@@ -616,7 +616,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 */
 			goto done;
 		}
-		
+
 		if (rpc->state == RPC_OUTGOING) {
 			/* It appears that everything we've already transmitted
 			 * has been lost; retransmit it.
@@ -633,7 +633,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 					rpc->peer, rpc->msgout.length));
 			goto done;
 		}
-		
+
 		printk(KERN_ERR "Received unknown for RPC id %llu, peer %s:%d "
 				"in bogus state %d; discarding unknown\n",
 				rpc->id, homa_print_ipv4_addr(rpc->peer->addr),
@@ -668,7 +668,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
 	struct homa_peer *peer = homa_peer_find(&hsk->homa->peers,
 		ip_hdr(skb)->saddr, &hsk->inet);
-	
+
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
 		for (i = 1; i <HOMA_MAX_PRIORITIES; i++)
@@ -692,7 +692,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	struct common_header *h = (struct common_header *) skb->data;
 	struct ack_header ack;
 	struct homa_peer *peer;
-	
+
 	/* Return if it's not safe for the peer to purge its state
 	 * for this RPC, or if we can't find peer info.
 	 */
@@ -711,7 +711,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		if (IS_ERR(peer))
 			goto done;
 	}
-	
+
 	/* Send an ACK for this RPC. At the same time, include all of the
 	 * other acks available for the peer. Note: can't use rpc below,
 	 * since it may be NULL.
@@ -726,7 +726,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
 			"other acks", homa_local_id(h->sender_id),
 			ntohl(ip_hdr(skb)->saddr), ntohs(ack.num_acks));
-	
+
     done:
 	kfree_skb(skb);
 }
@@ -746,12 +746,12 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	struct ack_header *h = (struct ack_header *) skb->data;
 	int i, count;
-	
+
 	if (rpc != NULL) {
 		homa_rpc_free(rpc);
 		homa_lcache_release(lcache);
 	}
-	
+
 	count = ntohs(h->num_acks);
 	for (i = 0; i < count; i++)
 		homa_rpc_acked(hsk, ip_hdr(skb)->saddr, &h->acks[i]);
@@ -776,7 +776,7 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_peer *peer = rpc->peer;
 	struct homa_peer *peer_cand;
 	struct homa_message_in *msgin = &rpc->msgin;
-	
+
 	/* No need to do anything unless this message is ready for more
 	 * grants.
 	 */
@@ -784,7 +784,7 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 			- rpc->msgin.bytes_remaining)) >= homa->rtt_bytes)
 			|| (rpc->msgin.incoming >= rpc->msgin.total_length))
 		return;
-	
+
 	homa_grantable_lock(homa);
 	/* Note: must check incoming again: it might have changed. */
 	if ((rpc->state == RPC_DEAD) || (rpc->msgin.incoming
@@ -792,7 +792,7 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 		homa_grantable_unlock(homa);
 		return;
 	}
-	
+
 	/* Make sure this message is in the right place in the grantable_rpcs
 	 * list for its peer.
 	 */
@@ -818,12 +818,19 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 		 * adjust its position in the list.
 		 */
 		candidate = list_prev_entry(rpc, grantable_links);
-		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
+		/* Fewer remaining bytes wins: */
+		if (candidate->msgin.bytes_remaining < msgin->bytes_remaining)
 			goto position_peer;
+		/* Tie-breaker: oldest wins */
+		if (candidate->msgin.bytes_remaining == msgin->bytes_remaining) {
+			if (candidate->msgin.birth <= msgin->birth) {
+				goto position_peer;
+			}
+		}
 		__list_del_entry(&candidate->grantable_links);
 		list_add(&candidate->grantable_links, &rpc->grantable_links);
 	}
-	
+
     position_peer:
 	/* At this point rpc is positioned correctly on the list for its peer.
 	 * However, the peer may need to be added to, or moved upward on,
@@ -836,8 +843,12 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 				grantable_links) {
 			candidate = list_first_entry(&peer_cand->grantable_rpcs,
 					struct homa_rpc, grantable_links);
-			if (candidate->msgin.bytes_remaining
-					> msgin->bytes_remaining) {
+			if ((candidate->msgin.bytes_remaining
+					> msgin->bytes_remaining)
+					|| ((candidate->msgin.bytes_remaining
+					== msgin->bytes_remaining)
+					&& (candidate->msgin.birth
+					> msgin->birth))) {
 				list_add_tail(&peer->grantable_links,
 						&peer_cand->grantable_links);
 				goto done;
@@ -853,12 +864,15 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 			peer, grantable_links);
 		candidate = list_first_entry(&prev_peer->grantable_rpcs,
 				struct homa_rpc, grantable_links);
-		if (candidate->msgin.bytes_remaining <= msgin->bytes_remaining)
+		if ((candidate->msgin.bytes_remaining < msgin->bytes_remaining)
+				|| ((candidate->msgin.bytes_remaining
+				== msgin->bytes_remaining)
+				&& (candidate->msgin.birth <= msgin->birth)))
 			goto done;
 		__list_del_entry(&prev_peer->grantable_links);
 		list_add(&prev_peer->grantable_links, &peer->grantable_links);
 	}
-				
+
     done:
 	homa_grantable_unlock(homa);
 }
@@ -889,7 +903,7 @@ void homa_send_grants(struct homa *homa)
 	struct homa_peer *peer, *temp;
 	int rank, i, window;
 	__u64 start;
-	
+
 	/* The variables below keep track of grants we need to send;
 	 * don't send any until the very end, and release the lock
 	 * first.
@@ -903,13 +917,13 @@ void homa_send_grants(struct homa *homa)
 	struct grant_header grants[MAX_GRANTS];
 	struct homa_rpc *rpcs[MAX_GRANTS];
 	int num_grants = 0;
-	
+
 	/* How many more bytes we can grant before hitting the limit. */
 	int available = homa->max_incoming - atomic_read(&homa->total_incoming);
-	
+
 	/* Total bytes in additional grants that we've given out so far. */
 	int granted_bytes = 0;
-	
+
 	/* Make a local copy of homa->grantable_peers, since that variable
 	 * could change during this function.
 	 */
@@ -917,7 +931,7 @@ void homa_send_grants(struct homa *homa)
 	if ((num_grantable_peers == 0) || (available <= 0)) {
 		return;
 	}
-	
+
 	/* Compute the window (how much granted-but-not-received data there
 	 * can be for each message. This will always be at least rtt_bytes,
 	 * but if there aren't enough messages to consume all of
@@ -946,10 +960,10 @@ void homa_send_grants(struct homa *homa)
 		if (window < homa->rtt_bytes)
 			window = homa->rtt_bytes;
 	}
-	
+
 	start = get_cycles();
 	homa_grantable_lock(homa);
-	
+
 	/* Figure out which messages should receive additional grants. Consider
 	 * only a single (highest-priority) entry for each peer.
 	 */
@@ -963,7 +977,7 @@ void homa_send_grants(struct homa *homa)
 		rank++;
 		candidate = list_first_entry(&peer->grantable_rpcs,
 				struct homa_rpc, grantable_links);
-		
+
 		/* Tricky synchronization issue: homa_data_pkt may be
 		 * updating bytes_remaining while we're working here.
 		 * So, we only read it once, right now, and we only
@@ -989,7 +1003,7 @@ void homa_send_grants(struct homa *homa)
 			increment = available;
 			new_grant = candidate->msgin.incoming + increment;
 		}
-		
+
 		/* The following line is needed to prevent spurious resends.
 		 * Without it, if the timer fires right after we send the
 		 * grant, it might think the RPC is slow and request a
@@ -997,7 +1011,7 @@ void homa_send_grants(struct homa *homa)
 		 * because there's no granted data).
 		 */
 		candidate->silent_ticks = 0;
-		
+
 		/* Create a grant for this message. */
 		candidate->msgin.incoming = new_grant;
 		granted_bytes += increment;
@@ -1023,17 +1037,17 @@ void homa_send_grants(struct homa *homa)
 		if (num_grants == MAX_GRANTS)
 			break;
 	}
-	
+
 	if (homa->grant_nonfifo_left <= 0) {
 		homa->grant_nonfifo_left += homa->grant_nonfifo;
 		if ((num_grantable_peers > homa->max_overcommit)
 				&& homa->grant_fifo_fraction)
 			granted_bytes += homa_grant_fifo(homa);
 	}
-	
+
 	atomic_add(granted_bytes, &homa->total_incoming);
 	homa_grantable_unlock(homa);
-	
+
 	/* By sending grants without holding grantable_lock here, we reduce
 	 * contention on that lock significantly. This only works because
 	 * rpc->grants_in_progress keeps the RPC from being deleted out from
@@ -1064,10 +1078,10 @@ int homa_grant_fifo(struct homa *homa)
 	struct homa_peer *peer;
 	struct grant_header grant;
 	int granted;
-	
+
 	oldest = NULL;
 	oldest_birth = ~0;
-	
+
 	/* Find the oldest message that doesn't currently have an
 	 * outstanding "pity grant".
 	 */
@@ -1075,10 +1089,10 @@ int homa_grant_fifo(struct homa *homa)
 		list_for_each_entry(candidate, &peer->grantable_rpcs,
 				grantable_links) {
 			int received, on_the_way;
-			
+
 			if (candidate->msgin.birth >= oldest_birth)
 				continue;
-			
+
 			received = (candidate->msgin.total_length
 					- candidate->msgin.bytes_remaining);
 			on_the_way = candidate->msgin.incoming - received;
@@ -1098,7 +1112,7 @@ int homa_grant_fifo(struct homa *homa)
 	if ((oldest->msgin.total_length - oldest->msgin.bytes_remaining)
 			== oldest->msgin.incoming)
 		INC_METRIC(fifo_grants_no_incoming, 1);
-	
+
 	oldest->silent_ticks = 0;
 	granted = homa->fifo_grant_increment;
 	oldest->msgin.incoming += granted;
@@ -1137,7 +1151,7 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 	list_del_init(&rpc->grantable_links);
 	if (rpc != head)
 		return;
-	
+
 	/* The removed RPC was at the front of the peer's list. This means
 	 * we may have to adjust the position of the peer in Homa's list,
 	 * or perhaps remove it.
@@ -1147,7 +1161,7 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 		list_del_init(&peer->grantable_links);
 		return;
 	}
-	
+
 	/* The peer may have to move down in Homa's list (removal of
 	 * an RPC can't cause the peer to move up).
 	 */
@@ -1201,7 +1215,7 @@ void homa_log_grantable_list(struct homa *homa)
 	int bucket, count;
 	struct homa_peer *peer, *peer2;
 	struct homa_rpc *rpc;
-	
+
 	printk(KERN_NOTICE "Logging Homa grantable list\n");
 	homa_grantable_lock(homa);
 	for (bucket = 0; bucket < HOMA_PEERTAB_BUCKETS; bucket++) {
@@ -1268,7 +1282,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc, *tmp;
-	
+
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
@@ -1321,7 +1335,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
  *                assumed to be undefined.
  * @hsk:          Socket on which relevant messages will arrive.  Must not be
  *                locked.
- * @flags:        Flags parameter from homa_recv; see manual entry for details. 
+ * @flags:        Flags parameter from homa_recv; see manual entry for details.
  * @id:           If non-zero, then a message will not be returned unless its
  *                RPC id matches this.
  * @client_addr:  Used in conjunction with @id to select a specific message
@@ -1336,14 +1350,14 @@ int homa_register_interests(struct homa_interest *interest,
 		struct sockaddr_in *client_addr)
 {
 	struct homa_rpc *rpc = NULL;
-	
+
 	interest->thread = current;
 	interest->ready_rpc = NULL;
 	atomic_long_set(&interest->id, 0);
 	interest->reg_rpc = NULL;
 	interest->request_links.next = LIST_POISON1;
 	interest->response_links.next = LIST_POISON1;
-	
+
 	/* Need both the RPC lock and the socket lock to avoid races. */
 	if (id != 0) {
 		if (homa_is_client(id))
@@ -1366,11 +1380,11 @@ int homa_register_interests(struct homa_interest *interest,
 			homa_rpc_unlock(rpc);
 		return -ESHUTDOWN;
 	}
-	
+
 	if (id != 0) {
 		if ((rpc->state == RPC_READY)|| (rpc->state == RPC_IN_SERVICE)) {
 			interest->ready_rpc = rpc;
-			
+
 			/* Must also fill in interest->id; otherwise, some
 			 * other RPC might also get assigned to this interest
 			 * when we release the socket lock.
@@ -1381,7 +1395,7 @@ int homa_register_interests(struct homa_interest *interest,
 		interest->reg_rpc = rpc;
 		homa_rpc_unlock(rpc);
 	}
-	
+
 	if (flags & HOMA_RECV_RESPONSE) {
 		if (!list_empty(&hsk->ready_responses)) {
 			rpc = list_first_entry(
@@ -1412,7 +1426,7 @@ int homa_register_interests(struct homa_interest *interest,
 		list_add(&interest->request_links, &hsk->request_interests);
 	}
 	goto done;
-	
+
     claim_rpc:
 	homa_interest_set(interest, rpc);
 	list_del_init(&rpc->ready_links);
@@ -1422,7 +1436,7 @@ int homa_register_interests(struct homa_interest *interest,
 		struct sock *sk = (struct sock *) hsk;
 		sk->sk_data_ready(sk);
 	}
-	
+
     done:
 	homa_sock_unlock(hsk);
 	return 0;
@@ -1450,7 +1464,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	struct homa_interest interest;
 	uint64_t poll_start, now;
 	int error;
-	
+
 	/* Normally this loop only gets executed once, but we may have
 	 * to start again under various special cases such as a "found"
 	 * RPC gets deleted from underneath us.
@@ -1465,10 +1479,10 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			result = ERR_PTR(error);
 			goto got_error_or_rpc;
 		}
-		
+
 //		tt_record3("Preparing to poll, socket %d, flags 0x%x, pid %d",
 //				hsk->client_port, flags, current->pid);
-		
+
 	        /* There is no ready RPC so far. Clean up dead RPCs before
 		 * going to sleep (or returning, if in nonblocking mode).
 		 */
@@ -1484,7 +1498,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 					hsk->homa->reap_limit);
 			if (reaper_result == 0)
 				break;
-			
+
 			/* Give NAPI and SoftIRQ tasks a chance to run. */
 			schedule();
 		}
@@ -1492,7 +1506,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			result = ERR_PTR(-EAGAIN);
 			goto got_error_or_rpc;
 		}
-		
+
 		/* Busy-wait for a while before going to sleep; this avoids
 		 * context-switching overhead to wake up.
 		 */
@@ -1515,7 +1529,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
 				hsk->port, current->pid);
 		INC_METRIC(poll_cycles, now - poll_start);
-		
+
 		/* Now it's time to sleep. */
 		set_current_state(TASK_INTERRUPTIBLE);
 		tt_record1("homa_wait_for_message sleeping, pid %d",
@@ -1531,11 +1545,11 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				"pid %d",
 				atomic_long_read(&interest.id),
 				current->pid);
-		
+
 got_error_or_rpc:
 		/* If we get here, it means we are probably ready to return,
 		 * either with an RPC or with an error.
-		 * 
+		 *
 		 * First, clean up all of the interests. Must do this before
 		 * making any other decisions, because until we do, an incoming
 		 * message could still be passed to us. Note: if we went to
@@ -1556,7 +1570,7 @@ got_error_or_rpc:
 				list_del(&interest.response_links);
 			homa_sock_unlock(hsk);
 		}
-		
+
 		/* Now check to see if we got a message to return (note that
 		 * the message could have arrived anytime up until we
 		 * reset the interest above).
@@ -1576,7 +1590,7 @@ got_error_or_rpc:
 						atomic_long_read(&interest.id));
 			if (rpc)
 				return rpc;
-			
+
 			/* If we get here, it means the RPC was deleted after
 			 * it was passed to us, so we don't have an RPC after
 			 * all.
@@ -1610,16 +1624,16 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	struct homa_interest *interest;
 	struct homa_sock *hsk = rpc->hsk;
 	struct sock *sk;
-	
+
 	rpc->state = RPC_READY;
-	
+
 	/* First, see if someone is interested in this RPC specifically.
 	 */
 	if (rpc->interest) {
 		interest = rpc->interest;
 		goto handoff;
 	}
-	
+
 	/* Second, check the interest list for this type of RPC. */
 	if (homa_is_client(rpc->id)) {
 		interest = list_first_entry_or_null(
@@ -1638,25 +1652,25 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 		list_add_tail(&rpc->ready_links, &hsk->ready_requests);
 		INC_METRIC(requests_queued, 1);
 	}
-	
+
 	/* If we get here, no-one is waiting for the RPC, so it has been
 	 * queued.
 	 */
-	
+
 	/* Notify the poll mechanism. */
 	sk = (struct sock *) hsk;
 	sk->sk_data_ready(sk);
 	tt_record2("homa_rpc_ready finished queuing id %d for port %d",
 			rpc->id, hsk->port);
 	goto done;
-	
+
 handoff:
 	/* We found a waiting thread. Wakeup the thread and cleanup its
 	 * interest info, so it won't have to acquire the socket lock
 	 * again. This is also needed so no-one else attempts to give
 	 * this interest an RPC.
 	 */
-		
+
 	/* The following line must be here, before resetting the interests,
 	 * in order to avoid a race with homa_wait_for_message (which
 	 * may not acquire the socket lock).
@@ -1689,9 +1703,9 @@ done:
 void homa_incoming_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
-	
+
 	homa->max_incoming = homa->max_overcommit * homa->rtt_bytes;
-	
+
 	if (homa->grant_fifo_fraction > 500)
 		homa->grant_fifo_fraction = 500;
 	tmp = homa->grant_fifo_fraction;
@@ -1699,18 +1713,18 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 		tmp = (1000*homa->fifo_grant_increment)/tmp
 				- homa->fifo_grant_increment;
 	homa->grant_nonfifo = tmp;
-		
+
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!
 	 */
 	tmp = homa->poll_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->poll_cycles = tmp;
-	
+
 	tmp = homa->gro_busy_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->gro_busy_cycles = tmp;
-	
+
 	tmp = homa->rtt_bytes * homa->duty_cycle;
 	homa->grant_threshold = tmp/1000;
 	if (homa->grant_threshold > homa->rtt_bytes)
