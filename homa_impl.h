@@ -68,6 +68,7 @@ typedef unsigned int __poll_t;
 #define spin_unlock mock_spin_unlock
 extern void mock_spin_unlock(spinlock_t *lock);
 
+#undef get_cycles
 #define get_cycles mock_get_cycles
 extern cycles_t mock_get_cycles(void);
 

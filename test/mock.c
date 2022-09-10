@@ -109,13 +109,13 @@ static struct unit_hash *routes_in_use = NULL;
  */
 static struct unit_hash *vmallocs_in_use = NULL;
 
-/* The number of locks that have been acquired but not yet released. 
+/* The number of locks that have been acquired but not yet released.
  * Should be 0 at the end of each test.
  */
 static int mock_active_locks = 0;
 
 /* The number of times rcu_read_lock has been called minus the number
- * of times rcu_read_unlock has been called. 
+ * of times rcu_read_unlock has been called.
  * Should be 0 at the end of each test.
  */
 static int mock_active_rcu_locks = 0;
@@ -282,6 +282,11 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 	return 0;
 }
 
+void __copy_overflow(int size, unsigned long count)
+{
+	abort();
+}
+
 void do_exit(long error_code)
 {
 	while(1) {}
@@ -305,7 +310,11 @@ void dst_release(struct dst_entry *dst)
 void finish_wait(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,18,0)
 void get_random_bytes(void *buf, int nbytes)
+#else
+void get_random_bytes(void *buf, size_t nbytes)
+#endif
 {
 	memset(buf, 0, nbytes);
 }
@@ -578,6 +587,20 @@ int kthread_stop(struct task_struct *k)
 	return 0;
 }
 
+#ifdef CONFIG_DEBUG_LIST
+bool __list_add_valid(struct list_head *new,
+		struct list_head *prev,
+		struct list_head *next)
+{
+	return true;
+}
+
+bool __list_del_entry_valid(struct list_head *entry)
+{
+	return true;
+}
+#endif
+
 void __local_bh_enable_ip(unsigned long ip, unsigned int cnt) {}
 
 void lock_sock_nested(struct sock *sk, int subclass)
@@ -595,7 +618,7 @@ ssize_t __modver_version_show(struct module_attribute *a,
 void __mutex_init(struct mutex *lock, const char *name,
 			 struct lock_class_key *key)
 {
-	
+
 }
 
 void mutex_lock(struct mutex *lock)
@@ -658,7 +681,7 @@ void proc_remove(struct proc_dir_entry *de)
 	}
 	unit_hash_erase(proc_files_in_use, de);
 	free(de);
-	
+
 }
 
 int proto_register(struct proto *prot, int alloc_slab)
@@ -907,9 +930,9 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
  * return.
  * @errorMask:  Address of a variable containing a bit mask, indicating
  *              which of the next calls should result in errors.
- * 
+ *
  * Return:      zero means the function should behave normally; 1 means return
- *              an eror 
+ *              an eror
  */
 int mock_check_error(int *errorMask)
 {
@@ -948,7 +971,7 @@ cycles_t mock_get_cycles(void)
 		uint32_t lo, hi;
 		__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
 		return (((uint64_t)hi << 32) | lo);
-	} 
+	}
 	return mock_cycles;
 }
 
@@ -993,7 +1016,7 @@ void mock_rcu_read_unlock(void)
  *                the header.
  * @first_value:  Determines the data contents: the first __u32 will have
  *                this value, and each successive __u32 will increment by 4.
- * 
+ *
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
@@ -1002,7 +1025,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 {
 	int header_size, ip_size, data_size, shinfo_size;
 	unsigned char *p;
-	
+
 	switch (h->type) {
 	case DATA:
 		header_size = sizeof(struct data_header);
@@ -1040,7 +1063,7 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	if (!buffs_in_use)
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
-	
+
 	ip_size = sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
@@ -1139,41 +1162,41 @@ void mock_teardown(void)
 	mock_xmit_log_verbose = 0;
 	mock_mtu = MOCK_MTU;
 	mock_net_device.gso_max_size = MOCK_MTU;
-	
+
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)
 		FAIL(" %u sk_buff(s) still in use after test", count);
 	unit_hash_free(buffs_in_use);
 	buffs_in_use = NULL;
-	
+
 	count = unit_hash_size(kmallocs_in_use);
 	if (count > 0)
 		FAIL(" %u kmalloced block(s) still allocated after test", count);
 	unit_hash_free(kmallocs_in_use);
 	kmallocs_in_use = NULL;
-	
+
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)
 		FAIL(" %u proc file(s) still allocated after test", count);
 	unit_hash_free(proc_files_in_use);
 	proc_files_in_use = NULL;
-	
+
 	count = unit_hash_size(routes_in_use);
 	if (count > 0)
 		FAIL(" %u route(s) still allocated after test", count);
 	unit_hash_free(routes_in_use);
 	routes_in_use = NULL;
-	
+
 	count = unit_hash_size(vmallocs_in_use);
 	if (count > 0)
 		FAIL(" %u vmalloced block(s) still allocated after test", count);
 	unit_hash_free(vmallocs_in_use);
 	vmallocs_in_use = NULL;
-	
+
 	if (mock_active_locks != 0)
 		FAIL(" %d locks still locked after test", mock_active_locks);
 	mock_active_locks = 0;
-	
+
 	if (mock_active_rcu_locks != 0)
 		FAIL(" %d rcu_read_locks still active after test",
 				mock_active_rcu_locks);
