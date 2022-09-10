@@ -35,7 +35,7 @@
  * @id:            Id for the RPC (0 means use default).
  * @req_length:    Amount of data in the request.
  * @resp_length:   Amount of data in the response.
- * 
+ *
  * Return:         The properly initialized homa_client_rpc, or NULL if
  *                 there was an error. If @state is RPC_OUTGOING, no data
  *                 will have been sent yet.  If @state is RPC_INCOMING, then
@@ -51,7 +51,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	struct sockaddr_in server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
 	int incoming_delta = 0;
-	
+
 	server_addr.sin_family = AF_INET;
 	server_addr.sin_addr.s_addr = server_ip;
 	server_addr.sin_port =  htons(server_port);
@@ -84,7 +84,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET),
 		        .ack = {0, 0, 0}}
 	};
-	
+
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	h.seg.segment_length = htonl(this_size);
@@ -114,7 +114,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	EXPECT_EQ(RPC_READY, crpc->state);
 	if (crpc->state == state)
 		return crpc;
-	
+
 	/* The desired state doesn't exist. */
     error:
 	homa_rpc_free(crpc);
@@ -124,10 +124,10 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 /**
  * unit_get_in_addr - Parse a string into an IPV4 host addresss
  * @s:          IPV4 host specification such as 192.168.0.1
- * 
+ *
  * Return:      The in_addr (in network order) corresponding to @s. IF
  *              s couldn't be parsed properly then 0 is returned.
- * 
+ *
  */
 __be32 unit_get_in_addr(char *s)
 {
@@ -176,7 +176,7 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 {
 	struct sk_buff *frag;
 	char buffer[200];
-	
+
 	for (frag = skb_shinfo(skb)->frag_list; frag != NULL;
 			frag = frag->next) {
 		if (verbose) {
@@ -224,16 +224,16 @@ void unit_log_grantables(struct homa *homa)
  * @message:     Message containing the packets.
  * @verbose:     If non-zero, use homa_print_packet for each packet;
  *               otherwise use homa_print_packet_short.
- * 
+ *
  * This function also checks to be sure that homa->num_grantable matches
  * the actual number of entries in the list, and generates additional
- * log output if it doesn't. 
+ * log output if it doesn't.
  */
 void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 {
 	struct sk_buff *skb;
 	char buffer[200];
-	
+
 	for (skb = message->packets; skb != NULL; skb = *homa_next_skb(skb)) {
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
@@ -256,7 +256,7 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 void unit_log_filled_skbs(struct sk_buff *skb, int verbose)
 {
 	char buffer[400];
-	
+
 	while (skb != NULL) {
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
@@ -279,7 +279,7 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 {
 	struct sk_buff *skb;
 	char buffer[200];
-	
+
 	skb_queue_walk(packets, skb) {
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
@@ -322,7 +322,7 @@ void unit_log_throttled(struct homa *homa)
  * @id:            Id for the RPC.
  * @req_length:    Amount of data in the request.
  * @resp_length:   Amount of data in the response.
- * 
+ *
  * Return:         The properly initialized homa_server_rpc, or NULL if
  *                 there was an error. If state is RPC_INCOMING, then
  *                 one packet of data will have been received for the RPC;
@@ -398,7 +398,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	srpc->state = RPC_OUTGOING;
 	if (srpc->state == state)
 		return srpc;
-	
+
 	/* The desired state doesn't exist. */
     error:
 	homa_rpc_free(srpc);
@@ -425,7 +425,7 @@ void unit_teardown(void)
  */
 struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 {
-    
+
 	static struct iovec iovec;
 	static struct iov_iter iter;
 	iovec.iov_base = buffer;
@@ -436,7 +436,7 @@ struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 
 /**
  * Returns a human-readable description of the fields in an ack.
- * @ack:  The ack to stringify. 
+ * @ack:  The ack to stringify.
  */
 char *unit_ack_string(struct homa_ack *ack)
 {
