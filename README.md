@@ -7,7 +7,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   the paper [A Linux Kernel Implementation of the Homa Transport
   Protocol](https://www.usenix.org/system/files/atc21-ousterhout.pdf),
   which appeared in the USENIX Annual Technical Conference in July, 2021.
-  
+
 - A synopsis of the protocol implemented by this module is available in
   [protocol.md](https://github.com/PlatformLab/HomaModule/blob/master/protocol.md).
 
@@ -18,23 +18,25 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   missing:
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
- 
+
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- Linux v5.17.7 is the primary development platform for this code. In the past
+- The head is known to work under Linux 5.17.5 and 5.18. In the past
   it has run under 5.4.3 and 4.15.18; you can access these versions with branches
-  named linux_5.4.3 and linux_4.15.18. Other versions of Linux have not been tested and
+  named linux_5.4.3 and linux_4.15.18. These older branches are out of date
+  feature-wise: recent commits have not been back-ported to them.
+  Other versions of Linux have not been tested and
   may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
   a day). If you get Homa working on some other version, please submit a
   pull request for the required code changes.
-  
+
 - There now exists support for using Homa with gRPC: see the
   [GitHub repo](https://github.com/PlatformLab/grpc_homa).
 
 - To build the module, type `make all`; then type `sudo insmod homa.ko` to install
   it, and `sudo rmmod homa` to remove an installed module.
-  
+
 - For best Homa performance, you should make the following configuration
   changes:
   - Enable priority queues in your switches, selected by the 3
@@ -48,7 +50,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - It may also be useful to set other Linux networking parameters. As one
     example, see the script  `cloudlab\bin\start_xl170`, which is what I
     use to configure my test nodes.
-    
+
 - NIC support for TSO: Homa can use TCP Segmentation Offload (TSO) in order
   to send large messages more efficiently. To do this, it uses a header format
   that matches TCP's headers closely enough to take advantage of TSO support in NICs.
@@ -56,27 +58,27 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   NICs are known to work:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
   - Intel E810 (ice), XXV710 (i40e)
-  
+
   Please let me know if you find other NICs that work (or NICs that don't work).
   If the NIC doesn't support TSO for Homa, then you'll need to use `sysctl` to
   ensure that `max_gso_size` is the same as the maximum packet size (if it is
   larger, then messages larger than the packet size will hang: outgoing packets
   will be dropped by the NIC, but smaller retry packets get through, so Homa
   will keep retrying over and over).
-  
+
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
 
 - The subdirectory "test" contains unit tests, which you can run by typing
   "make" in that subdirectory.
-  
+
 - The subdirectory "util" contains an assortment of utility programs that
   you may find useful in exercising Homa. Compile them by typing `make` in that
   subdirectory. Most notable is the `cperf` family of programs, which will
   run a variety of benchmarks on a cluster of nodes. The file cperf.py contains
   library functions for benchmarking, which are used by a variety of benchmarks
   with names starting with `cp_`.
-  
+
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
      distribution of incoming messages. You can access these through the
@@ -85,7 +87,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      since its last run.
    - Homa exports a collection of configuration parameters through the
      sysctl mechanism. For details, see the man page `homa.7`.
-     
+
 ## Significant recent improvements
 - June 2022: upgraded to Linux 5.17.7.
 - November 2021: changed semantics to at-most-once (servers can no
