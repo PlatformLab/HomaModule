@@ -389,15 +389,23 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) self->client_id));
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, self->client_id, false));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_ioc_cancel__basics)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 200);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, self->client_id, true));
+	EXPECT_EQ(RPC_READY, crpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
-	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) 99));
+	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, 99, false));
 }
 
 TEST_F(homa_plumbing, homa_softirq__basics)

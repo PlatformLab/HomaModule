@@ -317,3 +317,8 @@ int homa_abort(int sockfd, uint64_t id)
 {
 	return ioctl(sockfd, HOMAIOCABORT, (void *) id);
 }
+
+int homa_cancel(int sockfd, uint64_t id)
+{
+	return ioctl(sockfd, HOMAIOCCANCEL, (void *) id);
+}

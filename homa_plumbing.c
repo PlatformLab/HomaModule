@@ -667,6 +667,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	homa_rpc_unlock(rpc);
 
 	args.len = rpc->msgin.total_length;
+	args.len = rpc->msgin.total_length > 0 ? rpc->msgin.total_length : 0;
 	args.source_addr.sin_family = AF_INET;
 	args.source_addr.sin_port = htons(rpc->dport);
 	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
@@ -873,21 +874,39 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
  * the homa_abort user-level API.
  * @sk:       Socket for this request.
  * @arg:      Used to pass information from user space; for this call,
- *            it's the identifier of the RPC to abort.
+ *            it's the identifier of the RPC to abort. A value of -1 in "soft"
+ *            mode cancels all pending client RPCs, similarly to calling
+ *            shutdown on the socket, but ensuring all completion cookies are
+ *            delivered.
+ * @soft:     If true, indicates that the completion cookie(s) should still be
+ *            delivered to the application.
  *
  * Return: 0 on success, otherwise a negative errno.
  */
-int homa_ioc_abort(struct sock *sk, unsigned long arg) {
+int homa_ioc_abort(struct sock *sk, unsigned long arg, bool soft) {
+	int ret = 0;
 	struct homa_sock *hsk = homa_sk(sk);
 	uint64_t id = (uint64_t) arg;
 	struct homa_rpc *rpc;
+	if (soft && arg == -1) {
+		homa_abort_rpcs(homa, 0, 0, -ECANCELED);
+		return 0;
+	}
 
 	rpc = homa_find_client_rpc(hsk, id);
 	if (rpc == NULL)
 		return -EINVAL;
-	homa_rpc_free(rpc);
+	if (soft) {
+		if (rpc->state == RPC_READY) {
+			ret = -EALREADY;
+		} else {
+			homa_rpc_abort(rpc, -ECANCELED);
+		}
+	} else {
+		homa_rpc_free(rpc);
+	}
 	homa_rpc_unlock(rpc);
-	return 0;
+	return ret;
 }
 
 /**
@@ -929,7 +948,8 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	case HOMAIOCABORT:
-		result = homa_ioc_abort(sk, arg);
+	case HOMAIOCCANCEL:
+		result = homa_ioc_abort(sk, arg, cmd == HOMAIOCCANCEL);
 		core = homa_cores[raw_smp_processor_id()];
 		core->syscall_end_time = get_cycles();
 		INC_METRIC(abort_calls, 1);

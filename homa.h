@@ -60,7 +60,8 @@ extern "C"
 #define HOMAIOCRECV   1003102
 #define HOMAIOCREPLY  1003103
 #define HOMAIOCABORT  1003104
-#define HOMAIOCFREEZE 1003105
+#define HOMAIOCCANCEL 1003105
+#define HOMAIOCFREEZE 1003106
 
 extern int     homa_send(int sockfd, const void *request, size_t reqlen,
                     const struct sockaddr *dest_addr, size_t addrlen,
@@ -81,6 +82,7 @@ extern ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id);
+extern int     homa_cancel(int sockfd, uint64_t id);
 
 /**
  * define homa_args_send_ipv4 - Structure that passes arguments and results

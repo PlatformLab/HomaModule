@@ -1272,7 +1272,9 @@ void homa_rpc_abort(struct homa_rpc *crpc, int error)
  * homa_abort_rpcs() - Abort all RPCs to/from a particular peer.
  * @homa:    Overall data about the Homa protocol implementation.
  * @addr:    Address (network order) of the destination whose RPCs are
- *           to be aborted.
+ *           to be aborted. If this is 0, then we are aborting all pending
+ *           client RPCs in order to deliver their completion cookies back to
+ *           the application.
  * @port:    If nonzero, then RPCs will only be aborted if they were
  *	     targeted at this server port.
  * @error:   Negative errno value indicating the reason for the abort.
@@ -1295,7 +1297,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 			continue;
 		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
 				active_links) {
-			if (rpc->peer->addr != addr)
+			if (addr && rpc->peer->addr != addr)
 				continue;
 			if ((port != 0) && (rpc->dport != port))
 				continue;
@@ -1311,7 +1313,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 						ntohl(rpc->peer->addr),
 						rpc->id, error);
 				homa_rpc_abort(rpc, error);
-			} else {
+			} else if (addr) {
 				INC_METRIC(server_rpc_discards, 1);
 				tt_record3("discarding server RPC: peer 0x%x, "
 						"id %d, error %d",
