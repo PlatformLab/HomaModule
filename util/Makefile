@@ -31,7 +31,7 @@ cp_node: cp_node.o dist.o time_trace.o $(LIB_OBJS)
 %.o: %.c test_utils.h ../homa.h
 	cc -c $(CFLAGS) $< -o $@
 
-homa_api.o: ../homa_api.c
+homa_api.o: ../homa_api.c ../homa.h
 	cc -c $(CFLAGS) $< -o $@
 
 clean:
