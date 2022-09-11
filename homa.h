@@ -51,19 +51,6 @@ extern "C"
 #define HOMA_MIN_DEFAULT_PORT 0x8000
 
 /**
- * I/O control calls on Homa sockets. These particular values were
- * chosen somewhat randomly, and probably need to be reconsidered to
- * make sure they don't conflict with anything else.
- */
-
-#define HOMAIOCSEND   1003101
-#define HOMAIOCRECV   1003102
-#define HOMAIOCREPLY  1003103
-#define HOMAIOCABORT  1003104
-#define HOMAIOCCANCEL 1003105
-#define HOMAIOCFREEZE 1003106
-
-/**
  * This is smaller and easier to use than sockaddr_storage.
  */
 typedef union sockaddr_in_union {
@@ -167,6 +154,18 @@ _Static_assert(sizeof(struct homa_reply_args) <= 128, "homa_reply_args grew");
  * immediately.
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
+
+/**
+ * I/O control calls on Homa sockets. These are mapped into the
+ * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
+ */
+
+#define HOMAIOCSEND   _IOWR(0x89, 0xe0, struct homa_send_args)
+#define HOMAIOCRECV   _IOWR(0x89, 0xe1, struct homa_recv_args)
+#define HOMAIOCREPLY  _IOWR(0x89, 0xe2, struct homa_reply_args)
+#define HOMAIOCABORT  _IO(0x89, 0xe3)
+#define HOMAIOCCANCEL _IO(0x89, 0xe4)
+#define HOMAIOCFREEZE _IO(0x89, 0xef)
 
 extern ssize_t homa_recv(int fd, struct homa_recv_args *args);
 
