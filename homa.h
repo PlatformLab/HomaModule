@@ -34,7 +34,7 @@ extern "C"
 /* Homa's protocol number within the IP protocol space (this is not an
  * officially allocated slot).
  */
-#define IPPROTO_HOMA 140
+#define IPPROTO_HOMA 0xFD
 
 /**
  * define HOMA_MAX_MESSAGE_LENGTH - Maximum bytes of payload in a Homa
