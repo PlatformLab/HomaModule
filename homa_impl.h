@@ -809,6 +809,13 @@ struct homa_rpc {
 	__u64 id;
 
 	/**
+	 * @completion_cookie: Only used on clients. Contains identifying
+	 * information about the RPC provided by the application; returned to
+	 * the application with the RPC's result.
+	 */
+	__u64 completion_cookie;
+
+	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has
 	 * failed and the value is a negative errno that describes the
 	 * problem.

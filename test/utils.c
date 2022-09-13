@@ -356,6 +356,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
 	if (IS_ERR(srpc))
 		return NULL;
+	EXPECT_EQ(srpc->completion_cookie, 0);
 	homa_rpc_unlock(srpc);
 	homa_data_pkt(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)

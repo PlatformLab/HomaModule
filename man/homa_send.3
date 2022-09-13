@@ -5,17 +5,15 @@ homa_send \- send a request message
 .nf
 .B #include <homa.h>
 .PP
-.BI "int homa_send(int " sockfd ", const void *" request ", size_t " \
-reqlen ,
-.BI "              const struct sockaddr *" dest_addr ", size_t " \
-addrlen  ,
-.BI "              uint64_t *" id );
+.BI "int homa_send(int " sockfd ", const void *" request ", size_t " reqlen \
+", const struct sockaddr *" dest_addr ",
+.BI "              size_t " addrlen  ", uint64_t *" id ", uint64_t " \
+"completion_cookie" );
 .PP
 .BI "int homa_sendv(int " sockfd ", const struct iovec *" iov ", size_t " \
-iovcnt ,
-.BI "              const struct sockaddr *" dest_addr ", size_t " \
-addrlen  ,
-.BI "              uint64_t *" id );
+iovcnt ", const struct sockaddr *" dest_addr ,
+.BI "              size_t " addrlen  ", uint64_t *" id ", uint64_t " \
+"completion_cookie" );
 .fi
 .SH DESCRIPTION
 The function
@@ -28,7 +26,7 @@ With
 .BR homa_send
 the request message is stored in a single contiguous buffer pointed to by
 .IR request ,
-and the argument 
+and the argument
 .I reqlen
 gives the length of the message in bytes.
 With
@@ -52,6 +50,13 @@ The identifier is unique among all requests issued on
 .IR sockfd ,
 and can be used to match the request with a response returned later by
 .BR homa_reply (3).
+The
+.I completion_cookie
+argument provides application-specific identifying information about the RPC,
+such as the address of a data structure used to mange the
+RPC; it will be returned by
+.BR homa_recv
+when the RPC completes.
 .PP
 This function returns as soon as the message has been queued for
 transmission.

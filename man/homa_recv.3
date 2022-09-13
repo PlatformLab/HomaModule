@@ -8,11 +8,12 @@ homa_recv \- receive a Homa message
 .BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
 len ", int " flags ", const struct sockaddr *" src_addr ",
 .BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" \
-msglen );
+msglen ", uint64_t *" completion_cookie );
 .BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
-size_t " iovcnt ", int " flags , 
+size_t " iovcnt ", int " flags ,
 .BI "                  const struct sockaddr *" src_addr ", size_t *" \
-addrlen ", uint64_t *" id ", size_t *" msglen );
+addrlen ", uint64_t *" id ", size_t *" msglen ,
+.BI "                  uint64_t *" completion_cookie );
 .fi
 .SH DESCRIPTION
 The functions
@@ -114,6 +115,15 @@ msglen
 is non-NULL then the total length of the incoming message is
 written to
 .IR *msglen .
+If
+.IR completion_cookie
+is non_NULL, then the completion cookie for the RPC will be
+written to
+.IR *completion_cookie .
+If the message is a request, the completion cookie will be 0.
+If the message is a response, the completion cookie will be the
+value passed to
+.IR homa_send .
 .PP
 If a message is a request, then the caller must eventually invoke
 .BR homa_reply (3)
@@ -144,7 +154,7 @@ is specified in
 then the message will be retained if there wasn't enough room to
 return the entire message. The caller should invoke
 .B homa_recv
-or 
+or
 .B homa_recvv
 again to read the remaining bytes. Once the entire message has
 been read, or

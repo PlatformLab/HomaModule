@@ -978,13 +978,13 @@ void homa_server::server(void)
 				length = homa_recvv(fd, vec, 2,
 						HOMA_RECV_REQUEST,
 						(struct sockaddr *) &source,
-						&source_length, &id, NULL);
+						&source_length, &id, NULL, NULL);
 			} else
 				length = homa_recv(fd, buffer,
 						HOMA_MAX_MESSAGE_LENGTH,
 						HOMA_RECV_REQUEST,
 						(struct sockaddr *) &source,
-						&source_length, &id, NULL);
+						&source_length, &id, NULL, NULL);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
@@ -1873,13 +1873,13 @@ bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
 			vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
 			length = homa_recvv(fd, vec, 2, HOMA_RECV_RESPONSE,
 					(struct sockaddr *) &server_addr,
-					&addr_length, &rpc_id, NULL);
+					&addr_length, &rpc_id, NULL, NULL);
 		} else
 			length = homa_recv(fd, buffer,
 					HOMA_MAX_MESSAGE_LENGTH,
 					HOMA_RECV_RESPONSE,
 					(struct sockaddr *) &server_addr,
-					&addr_length, &rpc_id, NULL);
+					&addr_length, &rpc_id, NULL, NULL);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)
@@ -1963,12 +1963,12 @@ void homa_client::sender()
 			status = homa_sendv(fd, vec, 2,
 				reinterpret_cast<struct sockaddr *>(
 				&server_addrs[server]),	sizeof(server_addrs[0]),
-				&rpc_id);
+				&rpc_id, 0);
 		} else
 			status = homa_send(fd, sender_buffer, header->length,
                 reinterpret_cast<struct sockaddr *>(
                 &server_addrs[server]),
-                sizeof(server_addrs[0]), &rpc_id);
+                sizeof(server_addrs[0], 0), &rpc_id, 0);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2039,7 +2039,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 	status = homa_send(fd, buffer, header->length,
 		reinterpret_cast<struct sockaddr *>(
 		&server_addrs[server]),
-		sizeof(server_addrs[0]), &rpc_id);
+		sizeof(server_addrs[0]), &rpc_id, 0);
 	if (status < 0) {
 		log(NORMAL, "FATAL: error in homa_send: %s (request "
 				"length %d)\n", strerror(errno),
@@ -2051,7 +2051,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 		status = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
 				HOMA_RECV_RESPONSE,
 				(struct sockaddr *) &server_addr,
-				&addr_length, &rpc_id, NULL);
+				&addr_length, &rpc_id, NULL, NULL);
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
 		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
