@@ -31,26 +31,7 @@
 /**
  * homa_recv() - Wait for an incoming message (either request or response)
  * and return it.
- * @sockfd:     File descriptor for the socket on which to receive the message.
- * @buf:        First byte of buffer for the incoming message.
- * @len:        Number of bytes available at @request.
- * @flags:      An ORed combination of bits such as HOMA_RECV_REQUEST and
- *              HOMA_RECV_NONBLOCKING
- * @src_addr:   If @id is non-null, specifies the desired source for an
- *              RPC. Also used to return the sender's IP address.
- * @addrlen:    Points to variable indicating space available at @src_addr,
- *              in bytes. Will be overwritten with the actual size of
- *              the address stored there.
- * @id:         Points to a unique RPC identifier, which is used both as
- *              an input and an output parameter. If the value is initially
- *              nonzero, then a message matching this id and @src_addr
- *              may be returned. This word is also used to return the actual
- *              id for the incoming message.
- * @msglen:     If non-null, the total length of the message will be returned
- *              here.
- *
- * Return:      The number of bytes of data returned at @buf. If an error
- *              occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
@@ -84,28 +65,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t len, int flags,
 /**
  * homa_recvv() - Similar to homa_recv except the message data can be
  * scattered across multiple target buffers.
- * @sockfd:     File descriptor for the socket on which to receive the message.
- * @iov:        Pointer to array that describes the chunks of the response
- *              message.
- * @iovcnt:     Number of elements in @iov.
- * @flags:      An ORed combination of bits such as HOMA_RECV_REQUEST and
- *              HOMA_RECV_NONBLOCKING
- * @src_addr:   If @id is non-null, specifies the desired source for an
- *              RPC. Also used to return the sender's IP address.
- * @addrlen:    Points to variable indicating space available at @src_addr,
- *              in bytes. Will be overwritten with the actual size of
- *              the address stored there.
- * @id:         Points to a unique RPC identifier, which is used both as
- *              an input and an output parameter. If the value is initially
- *              nonzero, then a message matching this id and @src_addr
- *              may be returned. This word is also used to return the actual
- *              id for the incoming message.
- * @msglen:     If non-null, the total length of the message will be returned
- *              here.
- * @complet
- *
- * Return:      The number of bytes of data returned at @buf. If an error
- *              occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	        struct sockaddr *src_addr, size_t *addrlen, uint64_t *id,
@@ -139,21 +99,7 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 /**
  * homa_reply() - Send a response message for an RPC previously received
  * with a call to homa_recv.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @response:   First byte of buffer containing the response message.
- * @resplen:    Number of bytes at @response.
- * @dest_addr:  Address of the RPC's client (returned by homa_recv when
- *              the message was received).
- * @addrlen:    Size of @dest_addr in bytes.
- * @id:         Unique identifier for the request, as returned by homa_recv
- *              when the request was received.
- *
- * @dest_addr and @id must correspond to a previously-received request
- * for which no reply has yet been sent; if there is no such active request,
- * then this function does nothing.
- *
- * Return:      0 means the response has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 		const struct sockaddr *dest_addr, size_t addrlen,
@@ -176,22 +122,7 @@ ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 /**
  * homa_replyv() - Similar to homa_reply, except the response message can
  * be divided among several chunks of memory.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @iov:        Pointer to array that describes the chunks of the response
- *              message.
- * @iovcnt:     Number of elements in @iov.
- * @dest_addr:  Address of the RPC's client (returned by homa_recv when
- *              the message was received).
- * @addrlen:    Size of @dest_addr in bytes.
- * @id:         Unique identifier for the request, as returned by homa_recv
- *              when the request was received.
- *
- * @dest_addr and @id must correspond to a previously-received request
- * for which no reply has yet been sent; if there is no such active request,
- * then this function does nothing.
- *
- * Return:      0 means the response has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 		const struct sockaddr *dest_addr, size_t addrlen,
@@ -213,17 +144,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 
 /**
  * homa_send() - Send a request message to initiate an RPC.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @request:    First byte of buffer containing the request message.
- * @reqlen:     Number of bytes at @request.
- * @dest_addr:  Address of server to which the request should be sent.
- * @addrlen:    Size of @dest_addr in bytes.
- * @id:         A unique identifier for the request will be returned here;
- *              this can be used later to find the response for this request.
- * @completion_cookie value to be delivered upon RPC completion.
- *
- * Return:      0 means the request has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 int homa_send(int sockfd, const void *request, size_t reqlen,
 		const struct sockaddr *dest_addr, size_t addrlen,
@@ -251,18 +172,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 /**
  * homa_sendv() - Same as homa_send, except that the request message can
  * be divided among multiple disjoint chunks of memory.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @iov:        Pointer to array that describes the chunks of the request
- *              message.
- * @iovcnt:     Number of elements in @iov.
- * @dest_addr:  Address of server to which the request should be sent.
- * @addrlen:    Size of @dest_addr in bytes.
- * @id:         A unique identifier for the request will be returned here;
- *              this can be used later to find the response for this request.
- * @completion_cookie value to be delivered upon RPC completion.
- *
- * Return:      0 means the request has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
+ * See the man page for documentation of this API.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 		const struct sockaddr *dest_addr, size_t addrlen,
@@ -289,13 +199,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 
 /**
  * homa_abort() - Remove all state associated with an outgoing RPC.
- * @sockfd:     File descriptor for the socket associated with the RPC.
- * @id:         Unique identifier for the RPC to abort (return value
- *              from previous call to homa_send). Should be a client
- *              RPC.
- *
- * Return:      If an error occurred, -1 is returned and errno is set
- *              appropriately. Otherwise zero is returned.
+ * See the man page for documentation of this API.
  */
 int homa_abort(int sockfd, uint64_t id)
 {
