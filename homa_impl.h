@@ -2948,7 +2948,7 @@ static inline bool is_mapped_ipv4(const struct in6_addr x)
 // IPv4 address, in the general case take the lower half of the upper half
 // of the 128 bit IPv6 address, and hope that is unique :-(
 
-static inline __be32 ip6_as_u32(const struct in6_addr x)
+static inline __be32 ip6_as_be32(const struct in6_addr x)
 {
 	if (is_mapped_ipv4(x)) {
 		return x.in6_u.u6_addr32[3];
@@ -2957,7 +2957,7 @@ static inline __be32 ip6_as_u32(const struct in6_addr x)
 	}
 }
 
-static inline __be32 ip4_as_u32(struct in_addr x)
+static inline __be32 ip4_as_be32(struct in_addr x)
 {
 	return ntohl(x.s_addr);
 }

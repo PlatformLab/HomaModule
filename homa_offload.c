@@ -130,21 +130,21 @@ static struct sk_buff *homa_gro_receive_common(struct list_head *held_list,
 	if (h_new->common.type == DATA)
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ip6_as_u32(ipv6_hdr(skb)->saddr),
+				ip6_as_be32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset),
 				priority);
 	else if (h_new->common.type == GRANT)
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ip6_as_u32(ipv6_hdr(skb)->saddr),
+				ip6_as_be32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
 				priority);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
-				ip6_as_u32(ipv6_hdr(skb)->saddr),
+				ip6_as_be32(ipv6_hdr(skb)->saddr),
 				homa_local_id(h_new->common.sender_id),
 				h_new->common.type, priority);
 

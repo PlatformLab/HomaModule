@@ -354,7 +354,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 				homa_print_ipv6_addr(&saddr),
 				ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
-			ip6_as_u32(saddr),
+			ip6_as_be32(saddr),
 			ntohs(h->sport), homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
@@ -456,14 +456,14 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		tt_record4("calling ip6_xmit: skb->len %d, peer 0x%x, id %d, "
 				"offset %d",
-				skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
+				skb->len, ip6_as_be32(rpc->peer->addr), rpc->id,
 				htonl(h->seg.offset));
 
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6, 0, NULL, 0, priority);
 	} else {
 		tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, id %d, "
 				"offset %d",
-				skb->len, ip6_as_u32(rpc->peer->addr), rpc->id,
+				skb->len, ip6_as_be32(rpc->peer->addr), rpc->id,
 				htonl(h->seg.offset));
 
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);

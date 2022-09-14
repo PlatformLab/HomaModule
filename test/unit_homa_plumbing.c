@@ -61,8 +61,8 @@ FIXTURE_SETUP(homa_plumbing)
 	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	if (self->hsk.inet.sk.sk_family == AF_INET) {
-		self->client_addr.in4.sin_addr.s_addr = ip6_as_u32(self->client_addr.in6.sin6_addr);
-		self->server_addr.in4.sin_addr.s_addr = ip6_as_u32(self->server_addr.in6.sin6_addr);
+		self->client_addr.in4.sin_addr.s_addr = ip6_as_be32(self->client_addr.in6.sin6_addr);
+		self->server_addr.in4.sin_addr.s_addr = ip6_as_be32(self->server_addr.in6.sin6_addr);
 	}
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {

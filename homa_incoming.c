@@ -319,7 +319,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					id, h->type,
-					ip6_as_u32(saddr),
+					ip6_as_be32(saddr),
 					ntohs(h->sport));
 			if ((h->type != GRANT) || homa_is_client(id))
 				INC_METRIC(unknown_rpcs, 1);
@@ -367,7 +367,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 	case BUSY:
 		INC_METRIC(packets_received[BUSY - DATA], 1);
 		tt_record2("received BUSY for id %d, peer 0x%x",
-				id, ip6_as_u32(rpc->peer->addr));
+				id, ip6_as_be32(rpc->peer->addr));
 		/* Nothing to do for these packets except reset silent_ticks,
 		 * which happened above.
 		 */
@@ -418,7 +418,7 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			homa_local_id(h->common.sender_id),
-			ip6_as_u32(rpc->peer->addr), ntohl(h->seg.offset),
+			ip6_as_be32(rpc->peer->addr), ntohl(h->seg.offset),
 			ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
@@ -555,7 +555,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
 				"offset %d; responding with UNKNOWN",
 				homa_local_id(h->common.sender_id),
-				ip6_as_u32(saddr),
+				ip6_as_be32(saddr),
 				ntohs(h->common.sport),
 				ntohl(h->offset));
 		homa_xmit_unknown(skb, hsk);
@@ -610,7 +610,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	tt_record3("Received unknown for id %llu, peer %x:%d",
-			rpc->id, ip6_as_u32(rpc->peer->addr), rpc->dport);
+			rpc->id, ip6_as_be32(rpc->peer->addr), rpc->dport);
 	if (homa_is_client(rpc->id)) {
 		if ((rpc->state == RPC_READY) || (rpc->state == RPC_DEAD)) {
 			/* The missing data packets apparently arrived while
@@ -625,7 +625,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			 */
 			tt_record4("Restarting id %d to server 0x%x:%d, "
 					"lost %d bytes",
-					rpc->id, ip6_as_u32(rpc->peer->addr),
+					rpc->id, ip6_as_be32(rpc->peer->addr),
 					rpc->dport,
 					homa_rpc_send_offset(rpc));
 			homa_freeze(rpc, RESTART_RPC, "Freezing because of "
@@ -642,7 +642,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 				rpc->dport, rpc->state);
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: "
 				"bad state %d",
-				rpc->id, ip6_as_u32(rpc->peer->addr), rpc->dport,
+				rpc->id, ip6_as_be32(rpc->peer->addr), rpc->dport,
 				rpc->state);
 	} else {
 		if (rpc->hsk->homa->verbose)
@@ -704,7 +704,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		if (rpc->state != RPC_READY) {
 			tt_record4("Ignoring NEED_ACK for id %d, peer 0x%x,"
 					"state %d, bytes_remaining %d",
-					rpc->id, ip6_as_u32(rpc->peer->addr),
+					rpc->id, ip6_as_be32(rpc->peer->addr),
 					rpc->state, rpc->msgin.bytes_remaining);
 			goto done;
 		}
@@ -729,7 +729,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
 			"other acks", homa_local_id(h->sender_id),
-			ip6_as_u32(saddr), ntohs(ack.num_acks));
+			ip6_as_be32(saddr), ntohs(ack.num_acks));
 
     done:
 	kfree_skb(skb);
@@ -762,7 +762,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		homa_rpc_acked(hsk, &saddr, &h->acks[i]);
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 			homa_local_id(h->common.sender_id),
-			ip6_as_u32(saddr), count);
+			ip6_as_be32(saddr), count);
 	kfree_skb(skb);
 }
 
@@ -1312,7 +1312,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr, int port, i
 			if (homa_is_client(rpc->id)) {
 				tt_record3("aborting client RPC: peer 0x%x, "
 						"id %u, error %d",
-						ip6_as_u32(rpc->peer->addr),
+						ip6_as_be32(rpc->peer->addr),
 						rpc->id, error);
 				if (rpc->state != RPC_READY)
 					homa_rpc_abort(rpc, error);
@@ -1320,7 +1320,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr, int port, i
 				INC_METRIC(server_rpc_discards, 1);
 				tt_record3("discarding server RPC: peer 0x%x, "
 						"id %d, error %d",
-						ip6_as_u32(rpc->peer->addr),
+						ip6_as_be32(rpc->peer->addr),
 						rpc->id, error);
 				homa_rpc_free(rpc);
 			}
@@ -1359,7 +1359,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 		}
 		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, "
 				"peer 0x%x, error %d",
-				rpc->id, hsk->port, ip6_as_u32(rpc->peer->addr),
+				rpc->id, hsk->port, ip6_as_be32(rpc->peer->addr),
 				error);
 		if (error) {
 			if (rpc->state != RPC_READY)

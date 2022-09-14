@@ -725,7 +725,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
 					"length %d",
 					elapsed, rpc->id,
-					ip6_as_u32(rpc->peer->addr),
+					ip6_as_be32(rpc->peer->addr),
 					rpc->msgin.total_length);
 			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
 					"elapsed time for RPC id %d, peer 0x%x");
@@ -737,7 +737,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			struct freeze_header freeze;
 			tt_record2("Freezing timetrace because of "
 					"sync_freeze, id %d, peer 0x%x",
-					rpc->id, ip6_as_u32(rpc->peer->addr));
+					rpc->id, ip6_as_be32(rpc->peer->addr));
 			tt_freeze();
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		}
@@ -768,7 +768,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		args.source_addr.in4.sin_family = AF_INET;
 		args.source_addr.in4.sin_port = htons(rpc->dport);
 
-		args.source_addr.in4.sin_addr.s_addr = ip6_as_u32(rpc->peer->addr);
+		args.source_addr.in4.sin_addr.s_addr =
+			ip6_as_be32(rpc->peer->addr);
 	}
 	args.id = rpc->id;
 	args.completion_cookie = rpc->completion_cookie;
@@ -785,8 +786,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
-			rpc->id & 0xffffffff, ip6_as_u32(rpc->peer->addr), result,
-			current->pid);
+			rpc->id & 0xffffffff, ip6_as_be32(rpc->peer->addr),
+			result, current->pid);
 	rpc->dont_reap = false;
 	kfree(iov);
 	return result;
@@ -917,7 +918,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	if (unlikely(err))
 //		return err;
 	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
-			ip6_as_u32(args.dest_addr.in6.sin6_addr),
+			ip6_as_be32(args.dest_addr.in6.sin6_addr),
 			ntohs(args.dest_addr.in6.sin6_port),
 			atomic64_read(&hsk->homa->next_outgoing_id));
 	if (unlikely(args.dest_addr.in6.sin6_family &&
@@ -1344,7 +1345,7 @@ int homa_softirq(struct sk_buff *skb) {
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
-					ip6_as_u32(saddr), ntohs(h->sport),
+					ip6_as_be32(saddr), ntohs(h->sport),
 					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
@@ -1356,7 +1357,8 @@ int homa_softirq(struct sk_buff *skb) {
 			if (!tt_frozen) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
-						ntohs(h->dport), ip6_as_u32(saddr),
+						ntohs(h->dport),
+						ip6_as_be32(saddr),
 						ntohs(h->sport),
 						homa_local_id(h->sender_id));
 				tt_freeze();
@@ -1439,7 +1441,8 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-				ip4_as_u32(iph->saddr), ip4_as_u32(iph->daddr));
+				ip4_as_be32(iph->saddr),
+				ip4_as_be32(iph->daddr));
 		mapped_ip.in6_u.u6_addr32[3] = iph->daddr.s_addr;
 		homa_abort_rpcs(homa, &mapped_ip, 0, error);
 	} else {
@@ -1478,7 +1481,8 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-				ip6_as_u32(iph->saddr), ip6_as_u32(iph->daddr));
+				ip6_as_be32(iph->saddr),
+				ip6_as_be32(iph->daddr));
 		homa_abort_rpcs(homa, &iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)

@@ -1658,7 +1658,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		return;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
-		tt_record2(format, rpc->id, ip6_as_u32(rpc->peer->addr));
+		tt_record2(format, rpc->id, ip6_as_be32(rpc->peer->addr));
 		tt_freeze();
 		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}
