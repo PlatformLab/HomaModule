@@ -1037,7 +1037,7 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
  *              which of the next calls should result in errors.
  *
  * Return:      zero means the function should behave normally; 1 means return
- *              an eror
+ *              an error
  */
 int mock_check_error(int *errorMask)
 {
