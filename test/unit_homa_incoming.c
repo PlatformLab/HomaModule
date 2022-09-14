@@ -2213,6 +2213,7 @@ TEST_F(homa_incoming, homa_abort_rpcs__basics)
 	EXPECT_EQ(2, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(RPC_READY, crpc1->state);
 	EXPECT_EQ(EPROTONOSUPPORT, -crpc1->error);
+	EXPECT_EQ(RPC_READY, crpc2->state);
 	EXPECT_EQ(0, -crpc2->error);
 	EXPECT_EQ(RPC_OUTGOING, crpc3->state);
 }
@@ -2245,6 +2246,28 @@ TEST_F(homa_incoming, homa_abort_rpcs__multiple_sockets)
 	EXPECT_EQ(2, unit_list_length(&hsk1.active_rpcs));
 	EXPECT_EQ(2, unit_list_length(&hsk1.ready_responses));
 }
+TEST_F(homa_incoming, homa_abort_rpcs__select_addr)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip+1,
+			self->server_port, self->client_id+2, 5000, 1600);
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip+2,
+			self->server_port, self->client_id+4, 5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	ASSERT_NE(NULL, crpc3);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->server_ip, self->server_port,
+			-ENOTCONN);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
+	EXPECT_EQ(RPC_READY, crpc1->state);
+	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
+	EXPECT_EQ(RPC_OUTGOING, crpc3->state);
+}
 TEST_F(homa_incoming, homa_abort_rpcs__select_port)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
@@ -2268,6 +2291,121 @@ TEST_F(homa_incoming, homa_abort_rpcs__select_port)
 	EXPECT_EQ(RPC_OUTGOING, crpc2->state);
 	EXPECT_EQ(RPC_READY, crpc3->state);
 	EXPECT_EQ(ENOTCONN, -crpc3->error);
+}
+TEST_F(homa_incoming, homa_abort_rpcs__any_port)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port+1, self->client_id+2, 5000, 1600);
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+4, 5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	ASSERT_NE(NULL, crpc3);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	EXPECT_EQ(RPC_READY, crpc1->state);
+	EXPECT_EQ(RPC_READY, crpc2->state);
+	EXPECT_EQ(RPC_READY, crpc3->state);
+}
+TEST_F(homa_incoming, homa_abort_rpcs__ignore_dead_rpcs)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_free(crpc);
+	EXPECT_EQ(RPC_DEAD, crpc->state);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	EXPECT_EQ(0, crpc->error);
+}
+TEST_F(homa_incoming, homa_abort_rpcs__ignore_ready_client_rpc)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_READY, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
+	EXPECT_EQ(0, crpc->error);
+}
+TEST_F(homa_incoming, homa_abort_rpcs__free_server_rpc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_READY,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 20000, 100);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+	homa_abort_rpcs(&self->homa, self->client_ip, 0, 0);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+}
+
+TEST_F(homa_incoming, homa_abort_sock_rpcs__basics)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port+1, self->client_id+2, 5000, 1600);
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 20000, 100);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+	homa_abort_sock_rpcs(&self->hsk, -ENOTCONN);
+	EXPECT_EQ(RPC_READY, crpc1->state);
+	EXPECT_EQ(-ENOTCONN, crpc1->error);
+	EXPECT_EQ(RPC_READY, crpc2->state);
+	EXPECT_EQ(-ENOTCONN, crpc2->error);
+	EXPECT_EQ(RPC_INCOMING, srpc->state);
+}
+TEST_F(homa_incoming, homa_abort_sock_rpcs__socket_shutdown)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	unit_log_clear();
+	self->hsk.shutdown = 1;
+	homa_abort_sock_rpcs(&self->hsk, -ENOTCONN);
+	self->hsk.shutdown = 0;
+	EXPECT_EQ(RPC_OUTGOING, crpc1->state);
+}
+TEST_F(homa_incoming, homa_abort_sock_rpcs__rpc_already_dead)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_free(crpc);
+	EXPECT_EQ(RPC_DEAD, crpc->state);
+	unit_log_clear();
+	homa_abort_sock_rpcs(&self->hsk, -ENOTCONN);
+	EXPECT_EQ(0, crpc->error);
+}
+TEST_F(homa_incoming, homa_abort_sock_rpcs__free_rpcs)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 1600);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port+1, self->client_id+2, 5000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+	homa_abort_sock_rpcs(&self->hsk, 0);
+	EXPECT_EQ(RPC_DEAD, crpc1->state);
+	EXPECT_EQ(RPC_DEAD, crpc2->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 
 TEST_F(homa_incoming, homa_register_interests__bogus_id)

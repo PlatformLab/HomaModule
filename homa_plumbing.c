@@ -867,22 +867,37 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
  * homa_ioc_abort() - The top-level function for the ioctl that implements
  * the homa_abort user-level API.
  * @sk:       Socket for this request.
- * @arg:      Used to pass information from user space; for this call,
- *            it's the identifier of the RPC to abort.
+ * @arg:      Used to pass information from user space.
  *
  * Return: 0 on success, otherwise a negative errno.
  */
 int homa_ioc_abort(struct sock *sk, unsigned long arg) {
+	int ret = 0;
 	struct homa_sock *hsk = homa_sk(sk);
-	uint64_t id = (uint64_t) arg;
+	struct homa_args_abort_ipv4 args;
 	struct homa_rpc *rpc;
 
-	rpc = homa_find_client_rpc(hsk, id);
+	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
+		return -EFAULT;
+
+	if (args.id == 0) {
+		homa_abort_sock_rpcs(hsk, -args.error);
+		return 0;
+	}
+
+	rpc = homa_find_client_rpc(hsk, args.id);
 	if (rpc == NULL)
 		return -EINVAL;
-	homa_rpc_free(rpc);
+	if (args.error == 0) {
+		homa_rpc_free(rpc);
+	} else {
+		if (rpc->state == RPC_READY)
+			ret = -EALREADY;
+		else
+			homa_rpc_abort(rpc, -args.error);
+	}
 	homa_rpc_unlock(rpc);
-	return 0;
+	return ret;
 }
 
 /**

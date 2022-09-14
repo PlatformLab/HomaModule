@@ -198,10 +198,11 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 }
 
 /**
- * homa_abort() - Remove all state associated with an outgoing RPC.
+ * homa_abort() - Terminate the execution of an RPC.
  * See the man page for documentation of this API.
  */
-int homa_abort(int sockfd, uint64_t id)
+int homa_abort(int sockfd, uint64_t id, int error)
 {
-	return ioctl(sockfd, HOMAIOCABORT, (void *) id);
+	struct homa_args_abort_ipv4 args = {id, error};
+	return ioctl(sockfd, HOMAIOCABORT, &args);
 }

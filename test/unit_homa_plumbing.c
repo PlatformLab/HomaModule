@@ -394,19 +394,61 @@ TEST_F(homa_plumbing, homa_ioc_send__successful_send)
 
 TEST_F(homa_plumbing, homa_ioc_abort__basics)
 {
+	struct homa_args_abort_ipv4 args = {self->client_id, 0};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			RPC_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) self->client_id));
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_ioc_abort__cant_read_user_args)
+{
+	struct homa_args_abort_ipv4 args = {self->client_id, 0};
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_ioc_abort(&self->hsk.inet.sk,
+			(unsigned long) &args));
+}
+TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
+{
+	struct homa_args_abort_ipv4 args = {0, ECANCELED};
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 200);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 200);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
+	EXPECT_EQ(RPC_READY, crpc1->state);
+	EXPECT_EQ(-ECANCELED, crpc1->error);
+	EXPECT_EQ(RPC_READY, crpc2->state);
+	EXPECT_EQ(-ECANCELED, crpc2->error);
+	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_ioc_abort__complete_rpc)
+{
+	struct homa_args_abort_ipv4 args = {self->client_id, ECANCELED};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 200);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
+	EXPECT_EQ(RPC_READY, crpc->state);
+	EXPECT_EQ(-ECANCELED, crpc->error);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+
+	// Try again, now that the RPC is already finished.
+	EXPECT_EQ(-EALREADY, homa_ioc_abort(&self->hsk.inet.sk,
+			(unsigned long) &args));
+}
 TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
+	struct homa_args_abort_ipv4 args = {99, 0};
 	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) 99));
+			(unsigned long) &args));
 }
 
 TEST_F(homa_plumbing, homa_softirq__basics)

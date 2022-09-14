@@ -1300,8 +1300,7 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 			if ((port != 0) && (rpc->dport != port))
 				continue;
 			homa_rpc_lock(rpc);
-			if ((rpc->state == RPC_DEAD)
-					|| (rpc->state == RPC_READY)) {
+			if (rpc->state == RPC_DEAD) {
 				homa_rpc_unlock(rpc);
 				continue;
 			}
@@ -1310,7 +1309,8 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 						"id %u, error %d",
 						ntohl(rpc->peer->addr),
 						rpc->id, error);
-				homa_rpc_abort(rpc, error);
+				if (rpc->state != RPC_READY)
+					homa_rpc_abort(rpc, error);
 			} else {
 				INC_METRIC(server_rpc_discards, 1);
 				tt_record3("discarding server RPC: peer 0x%x, "
@@ -1323,6 +1323,48 @@ void homa_abort_rpcs(struct homa *homa, __be32 addr, int port, int error)
 		}
 		homa_unprotect_rpcs(hsk);
 	}
+	rcu_read_unlock();
+}
+
+/**
+ * homa_abort_rpcs() - Abort all outgoing (client-side) RPCs on a given socket.
+ * @hsk:         Socket whose RPCs should be aborted.
+ * @error:       Zero means that the aborted RPCs should be freed immediately.
+ *               A nonzero value means that the RPCs should be marked
+ *               complete, so that they can be returned to the application;
+ *               this value (a negative errno) will be returned from
+ *               homa_recv.
+ */
+void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
+{
+	struct homa_rpc *rpc, *tmp;
+
+	rcu_read_lock();
+	if (list_empty(&hsk->active_rpcs))
+		goto done;
+	if (!homa_protect_rpcs(hsk))
+		goto done;
+	list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs, active_links) {
+		if (!homa_is_client(rpc->id))
+			continue;
+		homa_rpc_lock(rpc);
+		if (rpc->state == RPC_DEAD) {
+			homa_rpc_unlock(rpc);
+			continue;
+		}
+		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, "
+				"peer 0x%x, error %d",
+				rpc->id, hsk->port, ntohl(rpc->peer->addr),
+				error);
+		if (error) {
+			if (rpc->state != RPC_READY)
+				homa_rpc_abort(rpc, error);
+		} else
+			homa_rpc_free(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	homa_unprotect_rpcs(hsk);
+	done:
 	rcu_read_unlock();
 }
 

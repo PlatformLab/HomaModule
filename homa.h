@@ -80,7 +80,7 @@ extern ssize_t homa_reply(int sockfd, const void *response, size_t resplen,
 extern ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
                     const struct sockaddr *dest_addr, size_t addrlen,
                     uint64_t id);
-extern int     homa_abort(int sockfd, uint64_t id);
+extern int     homa_abort(int sockfd, uint64_t id, int error);
 
 /**
  * define homa_args_send_ipv4 - Structure that passes arguments and results
@@ -137,6 +137,15 @@ struct homa_args_reply_ipv4 {
         size_t length;
         struct sockaddr_in dest_addr;
         __u64 id;
+};
+
+/**
+ * define homa_args_abort_ipv4 - Structure that passes arguments and results
+ * betweeen homa_abort and the HOMAIOCABORT ioctl.
+ */
+struct homa_args_abort_ipv4 {
+        uint64_t id;
+	int error;
 };
 
 /**

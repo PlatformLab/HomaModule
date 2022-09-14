@@ -2644,6 +2644,7 @@ extern void unit_log_printf(const char *separator, const char* format, ...)
 
 extern void     homa_abort_rpcs(struct homa *homa, __be32 addr, int port,
                     int error);
+extern void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_rpc *rpc, struct homa_lcache *lcache);
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
