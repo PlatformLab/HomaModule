@@ -51,18 +51,6 @@ extern "C"
 #define HOMA_MIN_DEFAULT_PORT 0x8000
 
 /**
- * I/O control calls on Homa sockets. These particular values were
- * chosen somewhat randomly, and probably need to be reconsidered to
- * make sure they don't conflict with anything else.
- */
-
-#define HOMAIOCSEND   1003101
-#define HOMAIOCRECV   1003102
-#define HOMAIOCREPLY  1003103
-#define HOMAIOCABORT  1003104
-#define HOMAIOCFREEZE 1003105
-
-/**
  * Holds either an IPv4 or IPv6 address (smaller and easier to use than
  * sockaddr_storage).
  */
@@ -246,10 +234,16 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
 
-extern ssize_t homa_recvp(int fd, struct homa_recv_args *args);
-extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);
-extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
-extern int     homa_abortp(int fd, struct homa_abort_args *args);
+/**
+ * I/O control calls on Homa sockets. These are mapped into the
+ * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
+ */
+
+#define HOMAIOCSEND   _IOWR(0x89, 0xe0, struct homa_send_args)
+#define HOMAIOCRECV   _IOWR(0x89, 0xe1, struct homa_recv_args)
+#define HOMAIOCREPLY  _IOWR(0x89, 0xe2, struct homa_reply_args)
+#define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
+#define HOMAIOCFREEZE _IO(0x89, 0xef)
 
 extern int     homa_send(int sockfd, const void *message_buf,
 		    size_t reqlen, const sockaddr_in_union *dest_addr,
