@@ -5,30 +5,34 @@ homa_recv \- receive a Homa message
 .nf
 .B #include <homa.h>
 .PP
-.BI "ssize_t homa_recv(int " sockfd ", const void *" buf ", size_t " \
-len ", int " flags ", const struct sockaddr *" src_addr ",
-.BI "                  size_t * " addrlen ", uint64_t *" id ", size_t *" \
-msglen ", uint64_t *" completion_cookie );
+.BI "ssize_t homa_recv(int " sockfd ", const void *" message_buf ", size_t " \
+length ", int " flags ,
+.BI "                  const sockaddr_in_union *" src_addr ", uint64_t *" \
+id ", size_t *" msglen ,
+.BI "                  uint64_t *" completion_cookie );
 .BI "ssize_t homa_recvv(int " sockfd ", const struct iovec *" iov ", \
 size_t " iovcnt ", int " flags ,
-.BI "                  const struct sockaddr *" src_addr ", size_t *" \
-addrlen ", uint64_t *" id ", size_t *" msglen ,
+.BI "                  const sockaddr_in_union *" src_addr ", uint64_t *" id \
+", size_t *" msglen ,
 .BI "                  uint64_t *" completion_cookie );
+.PP
+.BI "ssize_t homa_recvp(int " sockfd ", struct homa_recv_args *" args );
 .fi
 .SH DESCRIPTION
 The functions
-.BR homa_recv ()
+.BR homa_recv (),
+.BR homa_recvv(),
 and
-.BR homa_recvv()
+.BR homa_recvp()
 wait for an incoming Homa message and return its contents.
 The argument
 .I sockfd
-is the file descriptor of the receiving socket; this must be a Homa socket.
+is the file descriptor of a Homa socket on which to receive the message.
 .B homa_recv
 will store the message contents in a single contiguous buffer:
-.I buf
+.I message_buf
 provides the address of the buffer, and
-.I len
+.I length
 specifies its length.
 .B homa_recvv
 will scatter the message contents across multiple buffers:
@@ -57,7 +61,7 @@ error, rather than blocking.
 .TP
 .B HOMA_RECV_PARTIAL
 Do not delete the incoming message if
-.I buf
+.I message_buf
 was not large enough to hold all the (remaining) bytes of the message.
 .PP
 The desired message(s) can be specified in any or all of three different
@@ -97,18 +101,25 @@ The identifier for the received message is returned at
 .IR *id ;
 its low-order bit indicates whether the message is a request (1)
 or response (0).
-The source address for the message is placed in the buffer
+The source address for the received message is returned in the buffer
 pointed to by
-.IR src_addr .
-The argument
-.I addrlen
-is a value-result argument.
-Before the call, it should be initialized to the size of the
-buffer associated with
-.IR src_addr .
-Upon return,
-.I *addrlen
-is updated to contain the actual size of the source address.
+.IR src_addr ,
+which can hold either an IPv4 or IPv6 address:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+typedef union sockaddr_in_union {
+    struct sockaddr sa;
+    struct sockaddr_in in4;
+    struct sockaddr_in6 in6;
+} sockaddr_in_union;
+.EE
+.vs +2
+.ps +1
+.in
+.PP
 If
 .I
 msglen
@@ -166,9 +177,67 @@ the message will be deleted. There is no need to specify
 when receiving request messages, since requests are automatically
 retained until the corresponding responses have been sent.
 
+.B homa_recvp
+is similar to
+.B homa_recv
+and
+.B homa_recvv
+except that the arguments and return values are all packed into a
+structure:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_recv_args {
+    void *message_buf;
+    const struct iovec *iovec;
+    size_t length;
+    sockaddr_in_union source_addr;
+    int flags;
+    uint64_t id;
+    uint64_t completion_cookie;
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The
+.I message_buf
+and
+.I iovec
+fields indicate where the incoming message should be stored; exactly one of
+these should be non-null.
+The
+.I length
+field is initially set to indicate the size of
+.I message_buf
+or
+.IR iovec ;
+it is also used to return the total length of the received message.
+The address from which the message was sent will be returned in
+.IR source_addr .
+.I flags
+field has the same meaning as in
+.BR homa_recv .
+The
+.I id
+field is treated the same way as
+.I *id
+in
+.BR homa_recv ;
+its intial value is used to filter incoming messages, and it is also
+used to return the identifier of the received message.
+If the received message is a response,
+.I completion_cookie
+is used to return the value specified when the request was sent;
+otherwise it will be zero.
+
+
 .SH RETURN VALUE
 On success, the return value is the number of bytes stored at
-.IR buf .
+.IR message_buf .
 On error, \-1 is returned and
 .I errno
 is set appropriately. If

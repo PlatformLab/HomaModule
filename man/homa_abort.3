@@ -6,9 +6,30 @@ homa_abort \- terminate an outgoing RPC
 .B #include <homa.h>
 .PP
 .BI "int homa_abort(int " sockfd ", uint64_t " id ", int " error );
+.PP
+.BI "int homa_abortp(int " sockfd ", struct homa_abort_args *" args );
 .fi
 .SH DESCRIPTION
-Cancels the execution of one (or all) outgoing RPCs.
+These two functions will cancel the execution of one (or all) outgoing RPCs.
+They behave identically except that
+.BR homa_abort
+receives its arguments as separate parameters, whereas
+.BR homa_abortp
+packs all of the arguments into a structure:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_abort_args {
+    uint64_t id;
+    int error;
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
 The
 .I id
 argument contains the identifier for an RPC; if this RPC is active on

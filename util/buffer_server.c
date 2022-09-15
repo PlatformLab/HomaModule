@@ -31,10 +31,12 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#include "homa.h"
+
 int main(int argc, char** argv) {
 	int fd, port;
 	int optval = 1;
-	struct sockaddr_in bindAddress;
+	sockaddr_in_union bindAddress;
 
 	if (argc < 2) {
 		printf("Usage: %s port\n", argv[0]);
@@ -57,10 +59,10 @@ int main(int argc, char** argv) {
 		printf("Couldn't set SO_REUSEADDR: %s\n", strerror(errno));
 		exit(1);
 	}
-	bindAddress.sin_family = AF_INET;
-	bindAddress.sin_port = htons(port);
-	bindAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(fd, (struct sockaddr *) &bindAddress, sizeof(bindAddress))
+	bindAddress.in4.sin_family = AF_INET;
+	bindAddress.in4.sin_port = htons(port);
+	bindAddress.in4.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(fd, &bindAddress.sa, sizeof(bindAddress.in4))
 	    != 0) {
 		printf("Couldn't bind to port %d\n: %s\n", port, strerror(errno));
 		exit(1);

@@ -5,8 +5,8 @@ homa_reply \- send a Homa response message
 .nf
 .B #include <homa.h>
 .PP
-.BI "int homa_reply(int " sockfd ", const void *" response ", size_t " \
-resplen ,
+.BI "int homa_reply(int " sockfd ", const void *" message_buf ", size_t " \
+length ,
 .BI "               const struct sockaddr *" dest_addr ", size_t " \
 addrlen  ,
 .BI "               uint64_t " id );>
@@ -16,22 +16,25 @@ iovcnt ,
 .BI "               const struct sockaddr *" dest_addr ", size_t " \
 addrlen  ,
 .BI "               uint64_t " id );
+.PP
+.BI "ssize_t homa_replyp(int " sockfd ", struct homa_reply_args *" args );
 .fi
 .SH DESCRIPTION
-The function
-.BR homa_reply ()
-transmits a response message using the Homa transport protocol.
+The functions
+.BR homa_reply ,
+.BR homa_replyv ,
+and
+.BR homa_replyp
+transmit a response message using the Homa transport protocol.
 The argument
 .I sockfd
-is the file descriptor of the sending socket; this must be a Homa socket.
-The response is stored in a buffer pointed to by
-.IR request .
+is the file descriptor of a Homa socket to use for sending the response.
 With
 .BR homa_reply
 the response message is stored in a single contiguous buffer pointed to by
-.IR response ,
-and the argument 
-.I resplen
+.IR message_buf ,
+and the argument
+.I length
 gives the length of the message in bytes.
 With
 .BR homa_replyv
@@ -42,13 +45,27 @@ descriptors at
 .IR iov .
 In either case the total message length must not exceed
 .BR HOMA_MAX_MESSAGE_LENGTH .
-The destination for the request is given by
-.I dest_addr
-and
-.I addrlen .
+The destination for the response is given by
+.I dest_addr ,
+which can hold either an IPv4 or an IPv6 address:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+typedef union sockaddr_in_union {
+    struct sockaddr sa;
+    struct sockaddr_in in4;
+    struct sockaddr_in6 in6;
+} sockaddr_in_union;
+.EE
+.vs +2
+.ps +1
+.in
+.PP
 The argument
 .I id
-is an identifier previously returned by 
+is an identifier previously returned by
 .BR homa_recv (3);
 along with
 .IR dest_addr ,
@@ -59,6 +76,49 @@ returns (successfully) without doing anything.
 .PP
 This function returns as soon as the response has been queued for
 transmission.
+.PP
+.B homa_replyp
+is similar to
+.B homa_reply
+and
+.B homa_replyv
+except that the arguments and return values are all packed into a
+structure:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_reply_args {
+    void *message_buf;
+    const struct iovec *iovec;
+    size_t length;
+    sockaddr_in_union dest_addr;
+    uint64_t id;
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The
+.I message_buf
+and
+.I iovec
+fields indicate where the outgoing message is stored; exactly one of
+these should be non-null.
+The
+.I length
+field is initially set to indicate the size of
+.I message_buf
+or
+.IR iovec .
+The
+.I dest_addr
+and
+.I id
+fields have the same meanings as in
+.BR homa_reply .
 
 .SH RETURN VALUE
 On success, the return value is 0.

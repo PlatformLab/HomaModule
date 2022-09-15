@@ -519,15 +519,15 @@ module_exit(homa_unload);
 int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
-	struct sockaddr_in *addr_in = (struct sockaddr_in *) addr;
+	sockaddr_in_union *addr_in = (sockaddr_in_union *) addr;
 
-	if (addr_len < sizeof(*addr_in)) {
+	if (addr_len < sizeof(struct sockaddr_in)) {
 		return -EINVAL;
 	}
-	if (addr_in->sin_family != AF_INET) {
+	if (addr_in->in4.sin_family != AF_INET) {
 		return -EAFNOSUPPORT;
 	}
-	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->sin_port));
+	return homa_sock_bind(&homa->port_map, hsk, ntohs(addr_in->in4.sin_port));
 }
 
 /**
@@ -585,7 +585,7 @@ int homa_disconnect(struct sock *sk, int flags) {
  */
 int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_args_recv_ipv4 args;
+	struct homa_recv_args args;
 	struct iovec iovstack[UIO_FASTIOV];
 
 	// Must be freed at the end of this function.
@@ -599,9 +599,9 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		return -EFAULT;
 	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
 			hsk->port, current->pid, args.flags);
-	if (args.buf != NULL) {
-		err = import_single_range(READ, args.buf, args.length, iovstack,
-				&iter);
+	if (args.message_buf != NULL) {
+		err = import_single_range(READ, args.message_buf, args.length,
+				iovstack, &iter);
 	} else {
 		iov = iovstack;
 		err = import_iovec(READ, args.iovec, args.length,
@@ -609,7 +609,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	if (unlikely(err < 0))
 		goto error;
-	rpc = homa_wait_for_message(hsk, args.flags, args.requestedId,
+	rpc = homa_wait_for_message(hsk, args.flags, args.id,
 			&args.source_addr);
 	if (IS_ERR(rpc)) {
 		err = PTR_ERR(rpc);
@@ -661,13 +661,14 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	}
 	homa_rpc_unlock(rpc);
 
-	args.length = rpc->msgin.total_length;
-	args.source_addr.sin_family = AF_INET;
-	args.source_addr.sin_port = htons(rpc->dport);
-	args.source_addr.sin_addr.s_addr = rpc->peer->addr;
-	memset(args.source_addr.sin_zero, 0,
-			sizeof(args.source_addr.sin_zero));
-	args.actualId = rpc->id;
+	args.length = (rpc->msgin.total_length >= 0) ? rpc->msgin.total_length
+			: 0;
+	args.source_addr.in4.sin_family = AF_INET;
+	args.source_addr.in4.sin_port = htons(rpc->dport);
+	args.source_addr.in4.sin_addr.s_addr = rpc->peer->addr;
+	memset(args.source_addr.in4.sin_zero, 0,
+			sizeof(args.source_addr.in4.sin_zero));
+	args.id = rpc->id;
 	args.completion_cookie = rpc->completion_cookie;
 	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
 		err = -EFAULT;
@@ -689,7 +690,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	return result;
 
 error:
-	tt_record2("homa_ioc_recv error %d, id %d", err, args.actualId);
+	tt_record2("homa_ioc_recv error %d, id %d", err, args.id);
 	if (rpc != NULL) {
 		rpc->dont_reap = false;
 	}
@@ -707,7 +708,7 @@ error:
  */
 int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_args_reply_ipv4 args;
+	struct homa_reply_args args;
 	struct iovec iovstack[UIO_FASTIOV];
 
 	// Must be freed at the end of this function.
@@ -728,13 +729,13 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
-	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
+	if (unlikely(args.dest_addr.in4.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto done;
 	}
 
-	if (args.response != NULL) {
-		err = import_single_range(WRITE, args.response, args.length,
+	if (args.message_buf != NULL) {
+		err = import_single_range(WRITE, args.message_buf, args.length,
 				iovstack, &iter);
 	} else {
 		iov = iovstack;
@@ -746,7 +747,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	err = 0;
 	length = iter.count;
 
-	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.sin_addr.s_addr,
+	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.in4.sin_addr.s_addr,
 			&hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
@@ -758,8 +759,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 
-	srpc = homa_find_server_rpc(hsk, args.dest_addr.sin_addr.s_addr,
-			ntohs(args.dest_addr.sin_port), args.id);
+	srpc = homa_find_server_rpc(hsk, args.dest_addr.in4.sin_addr.s_addr,
+			ntohs(args.dest_addr.in4.sin_port), args.id);
 	if (!srpc) {
 		homa_free_skbs(skbs);
 		err = -EINVAL;
@@ -795,7 +796,7 @@ done:
  */
 int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_args_send_ipv4 args;
+	struct homa_send_args args;
 	struct iovec iovstack[UIO_FASTIOV];
 
 	// Must be freed at the end of this function.
@@ -812,16 +813,16 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 //	if (unlikely(err))
 //		return err;
 	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
-			ntohl(args.dest_addr.sin_addr.s_addr),
-			ntohs(args.dest_addr.sin_port),
+			ntohl(args.dest_addr.in4.sin_addr.s_addr),
+			ntohs(args.dest_addr.in4.sin_port),
 			atomic64_read(&hsk->homa->next_outgoing_id));
-	if (unlikely(args.dest_addr.sin_family != AF_INET)) {
+	if (unlikely(args.dest_addr.in4.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
 
-	if (args.request != NULL) {
-		err = import_single_range(WRITE, args.request, args.length,
+	if (args.message_buf != NULL) {
+		err = import_single_range(WRITE, args.message_buf, args.length,
 				iovstack, &iter);
 	} else {
 		iov = iovstack;
@@ -843,7 +844,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 			crpc->id);
 	homa_xmit_data(crpc, false);
 
-	if (unlikely(copy_to_user(&((struct homa_args_send_ipv4 *) arg)->id,
+	if (unlikely(copy_to_user(&((struct homa_send_args *) arg)->id,
 			&crpc->id, sizeof(crpc->id)))) {
 		err = -EFAULT;
 		goto error;
@@ -874,7 +875,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 	int ret = 0;
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_args_abort_ipv4 args;
+	struct homa_abort_args args;
 	struct homa_rpc *rpc;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))

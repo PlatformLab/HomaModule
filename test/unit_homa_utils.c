@@ -32,7 +32,7 @@ FIXTURE(homa_utils) {
 	__u64 server_id;
 	struct homa homa;
 	struct homa_sock hsk;
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 	struct data_header data;
 	struct homa_rpc *crpc;
 	struct iovec iovec;
@@ -46,9 +46,9 @@ FIXTURE_SETUP(homa_utils)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->server_addr.sin_family = AF_INET;
-	self->server_addr.sin_addr.s_addr = self->server_ip;
-	self->server_addr.sin_port =  htons(self->server_port);
+	self->server_addr.in4.sin_family = AF_INET;
+	self->server_addr.in4.sin_addr.s_addr = self->server_ip;
+	self->server_addr.in4.sin_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->data = (struct data_header){.common = {

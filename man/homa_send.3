@@ -5,29 +5,34 @@ homa_send \- send a request message
 .nf
 .B #include <homa.h>
 .PP
-.BI "int homa_send(int " sockfd ", const void *" request ", size_t " reqlen \
-", const struct sockaddr *" dest_addr ",
-.BI "              size_t " addrlen  ", uint64_t *" id ", uint64_t " \
+.BI "int homa_send(int " sockfd ", const void *" message_buf ", size_t " length \
+", const sockaddr_in_union *" dest_addr ",
+.BI "              uint64_t *" id ", uint64_t " \
 "completion_cookie" );
 .PP
 .BI "int homa_sendv(int " sockfd ", const struct iovec *" iov ", size_t " \
-iovcnt ", const struct sockaddr *" dest_addr ,
-.BI "              size_t " addrlen  ", uint64_t *" id ", uint64_t " \
+iovcnt ", const sockaddr_in_union *" dest_addr ,
+.BI "              uint64_t *" id ", uint64_t " \
 "completion_cookie" );
+.PP
+.BI "ssize_t homa_sendp(int " sockfd ", struct homa_send_args *" args );
 .fi
 .SH DESCRIPTION
-The function
-.BR homa_send ()
-transmits a request message using the Homa transport protocol.
+The functions
+.BR homa_send ,
+.BR homa_sendv ,
+and
+.BR homa_sendp
+will transmit a request message using the Homa transport protocol.
 The argument
 .I sockfd
 is the file descriptor of the sending socket; this must be a Homa socket.
 With
 .BR homa_send
 the request message is stored in a single contiguous buffer pointed to by
-.IR request ,
+.IR message_buf ,
 and the argument
-.I reqlen
+.I length
 gives the length of the message in bytes.
 With
 .BR homa_sendv
@@ -39,35 +44,98 @@ descriptors at
 In either case, the total message length must not exceed
 .BR HOMA_MAX_MESSAGE_LENGTH .
 The destination socket for the request is given by
-.I dest_addr
-and
-.I addrlen .
+.IR dest_addr ,
+which can hold either an IPv4 or IPv6 address:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+typedef union sockaddr_in_union {
+    struct sockaddr sa;
+    struct sockaddr_in in4;
+    struct sockaddr_in6 in6;
+} sockaddr_in_union;
+.EE
+.vs +2
+.ps +1
+.in
+.PP
 If
 .I id
 is not NULL, an identifier for the request is returned at
 .IR *id.
-The identifier is unique among all requests issued on
+The identifier will be unique among all requests issued on
 .IR sockfd ,
 and can be used to match the request with a response returned later by
 .BR homa_reply (3).
 The
 .I completion_cookie
 argument provides application-specific identifying information about the RPC,
-such as the address of a data structure used to mange the
+such as the address of a data structure used to manage the
 RPC; it will be returned by
 .BR homa_recv
 when the RPC completes.
 .PP
 This function returns as soon as the message has been queued for
 transmission.
+.PP
+.B homa_sendp
+is similar to
+.B homa_send
+and
+.B homa_sendv
+except that the arguments and return values are all packed into a
+structure:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_send_args {
+    void *message_buf;
+    const struct iovec *iovec;
+    size_t length;
+    sockaddr_in_union dest_addr;
+    uint64_t completion_cookie;
+    uint64_t id;
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The
+.I message_buf
+and
+.I iovec
+fields indicate where the outgoing message is stored; exactly one of
+these should be non-null.
+The
+.I length
+field is initially set to indicate the size of
+.I message_buf
+or
+.IR iovec .
+The
+.I dest_addr
+and
+.I completion_cookie
+fields have the same meanings as in
+.BR homa_reply ,
+and
+.I id
+is used to return the identifier for the new RPC.
 
 .SH RETURN VALUE
-On success, the return value is 0 and an identifier for the reqest
-is stored at
+On success, the return value is 0 and an identifier for the request
+is stored in
 .I *id
 (if
 .I id
-is not NULL). The  identifier can be used later to match the request
+is not NULL) or
+.IR args->id.
+The  identifier can be used later to match the request
 with the corresponding response, using
 .BR homa_reply (3).
 On error, \-1 is returned and

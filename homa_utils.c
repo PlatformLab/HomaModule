@@ -201,7 +201,7 @@ void homa_destroy(struct homa *homa)
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		struct sockaddr_in *dest, struct iov_iter *iter)
+		sockaddr_in_union *dest, struct iov_iter *iter)
 {
 	int err;
 	struct homa_rpc *crpc;
@@ -222,13 +222,13 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers,
-			dest->sin_addr.s_addr, &hsk->inet);
+			dest->in4.sin_addr.s_addr, &hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
 		goto error;
 	}
-	crpc->dport = ntohs(dest->sin_port);
+	crpc->dport = ntohs(dest->in4.sin_port);
 	crpc->completion_cookie = 0;
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;

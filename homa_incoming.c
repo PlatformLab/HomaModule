@@ -1389,7 +1389,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  */
 int homa_register_interests(struct homa_interest *interest,
 		struct homa_sock *hsk, int flags, __u64 id,
-		struct sockaddr_in *client_addr)
+		sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *rpc = NULL;
 
@@ -1406,8 +1406,8 @@ int homa_register_interests(struct homa_interest *interest,
 			rpc = homa_find_client_rpc(hsk, id);
 		else
 			rpc = homa_find_server_rpc(hsk,
-					client_addr->sin_addr.s_addr,
-					ntohs(client_addr->sin_port), id);
+					client_addr->in4.sin_addr.s_addr,
+					ntohs(client_addr->in4.sin_port), id);
 		if (rpc == NULL)
 			return -EINVAL;
 		if ((rpc->interest != NULL) && (rpc->interest != interest)) {
@@ -1500,7 +1500,7 @@ int homa_register_interests(struct homa_interest *interest,
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		__u64 id, struct sockaddr_in *client_addr)
+		__u64 id, sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
