@@ -368,6 +368,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 		        self->server_id, 2000, 100);
 	unit_log_clear();
 	self->reply_args.length = 10000;
+	self->reply_args.iovec = NULL;
 	self->reply_args.message_buf = (void *) 1000;
 	self->homa.rtt_bytes = 5000;
 	EXPECT_EQ(0, -homa_ioc_reply(&self->hsk.inet.sk,
