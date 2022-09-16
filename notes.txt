@@ -1,13 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-API changes to support ABI stability, pave the way for IPv6 support
-* Exposed (and revised) ioctl structures such as homa_recv_args.
-* Added new functions such as homa_recvp that take all args in
-  a single struct.
-* Replaced struct sockaddr_in with sockaddr_in_union, eliminated
-  address length fields.
-
 * Refactor of granting mechanism:
   * Eliminate grant_increment: change to fifo_grant_increment instead
   * grant_non_fifo may need to grant to a message that is also receiving

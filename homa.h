@@ -245,6 +245,11 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
+extern ssize_t homa_recvp(int fd, struct homa_recv_args *args);
+extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);
+extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
+extern int     homa_abortp(int fd, struct homa_abort_args *args);
+
 extern int     homa_send(int sockfd, const void *message_buf,
 		    size_t reqlen, const sockaddr_in_union *dest_addr,
 		    uint64_t *id, uint64_t completion_cookie);
