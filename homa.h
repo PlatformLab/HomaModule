@@ -216,7 +216,8 @@ struct homa_abort_args {
 	 */
 	int error;
 
-	uint64_t _pad[2];
+	int _pad1;
+	uint64_t _pad2[2];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
