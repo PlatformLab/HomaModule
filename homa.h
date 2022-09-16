@@ -55,9 +55,9 @@ extern "C"
  * sockaddr_storage).
  */
 typedef union sockaddr_in_union {
-        struct sockaddr sa;
-        struct sockaddr_in in4;
-        struct sockaddr_in6 in6;
+	struct sockaddr sa;
+	struct sockaddr_in in4;
+	struct sockaddr_in6 in6;
 } sockaddr_in_union;
 
 /**
@@ -66,22 +66,22 @@ typedef union sockaddr_in_union {
  */
 struct homa_send_args {
 	/** @message_buf: First byte of outgoing message. */
-        void *message_buf;
+	void *message_buf;
 
 	/**
 	 * @iovec: Describes outgoing message in multiple disjoint pieces.
 	 * Exactly one of this or @message_buf must be non-null.
 	 */
-        const struct iovec *iovec;
+	const struct iovec *iovec;
 
-        /**
+	/**
 	 * @length: The number of bytes at *request, or the number of elements
 	 * at *iovec.
 	 */
-        size_t length;
+	size_t length;
 
 	/** @dest_addr: Address of server to which request will be sent. */
-        sockaddr_in_union dest_addr;
+	sockaddr_in_union dest_addr;
 
 	uint32_t _pad1;
 
@@ -90,12 +90,12 @@ struct homa_send_args {
 	 * RPC completes. Typically used by locate app-specific info
 	 * about the RPC.
 	 */
-        uint64_t completion_cookie;
+	uint64_t completion_cookie;
 
 	/** @id: The identifier for the new RPC is returned here. */
-        uint64_t id;
+	uint64_t id;
 
-        uint64_t _pad2[2];
+	uint64_t _pad2[2];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_send_args) >= 88, "homa_send_args shrunk");
@@ -112,34 +112,34 @@ _Static_assert(sizeof(struct homa_send_args) <= 88, "homa_send_args grew");
  */
 struct homa_recv_args {
 	/** @message_buf: Where to store incoming message. */
-        void *message_buf;
+	void *message_buf;
 
 	/**
 	 * @iovec: Describes store message in multiple disjoint pieces.
 	 * Exactly one of this or @message_buf must be non-null.
 	 */
-        const struct iovec *iovec;
+	const struct iovec *iovec;
 
 	/**
 	 * @length: Initially holds length of @buf or @iovec; modified to
 	 * return total message length.
 	 */
-        size_t length;
+	size_t length;
 
 	/** @source_addr: Address of the sender of the message. */
-        sockaddr_in_union source_addr;
+	sockaddr_in_union source_addr;
 
 	/**
 	 * @flags: OR-ed combination of bits that control the operation.
 	 * see the man page for details.
 	 */
-        int flags;
+	int flags;
 
 	/**
 	 * @id: Initially specifies the id of the desired RPC, or 0 if
 	 * any RPC is OK; used to return the actual id received.
 	 */
-        uint64_t id;
+	uint64_t id;
 
 	/**
 	 * @completion_cookie: If the incoming message is a response,
@@ -147,9 +147,9 @@ struct homa_recv_args {
 	 * request was sent. For incoming requests, this will always
 	 * be zero.
 	 */
-        uint64_t completion_cookie;
+	uint64_t completion_cookie;
 
-        uint64_t _pad[2];
+	uint64_t _pad[2];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_recv_args) >= 88, "homa_recv_args shrunk");
@@ -173,29 +173,29 @@ _Static_assert(sizeof(struct homa_recv_args) <= 88, "homa_recv_args grew");
  */
 struct homa_reply_args {
 	/** @message_buf: Where to store incoming message. */
-        void *message_buf;
+	void *message_buf;
 
 	/**
 	 * @iovec: Describes store message in multiple disjoint pieces.
 	 * Exactly one of this or @message_buf must be non-null.
 	 */
-        const struct iovec *iovec;
+	const struct iovec *iovec;
 
 	/**
 	 * @length: Initially holds length of @buf or @iovec; modified to
 	 * return total message length.
 	 */
-        size_t length;
+	size_t length;
 
 	/** @dest_addr: Address of client to which response will be sent. */
-        sockaddr_in_union dest_addr;
+	sockaddr_in_union dest_addr;
 
 	uint32_t _pad1;
 
 	/** @id: Identifier of the RPC to respond to. */
-        uint64_t id;
+	uint64_t id;
 
-        uint64_t _pad2[2];
+	uint64_t _pad2[2];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_reply_args) >= 80, "homa_reply_args shrunk");
@@ -208,7 +208,7 @@ _Static_assert(sizeof(struct homa_reply_args) <= 80, "homa_reply_args grew");
  */
 struct homa_abort_args {
 	/** @id: Id of RPC to abort, or zero to abort all RPCs on socket. */
-        uint64_t id;
+	uint64_t id;
 
 	/**
 	 * @error: Zero means destroy and free RPCs; nonzero means complete
@@ -216,7 +216,7 @@ struct homa_abort_args {
 	 */
 	int error;
 
-        uint64_t _pad[2];
+	uint64_t _pad[2];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
@@ -251,24 +251,24 @@ extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
 extern int     homa_abortp(int fd, struct homa_abort_args *args);
 
 extern int     homa_send(int sockfd, const void *message_buf,
-		    size_t reqlen, const sockaddr_in_union *dest_addr,
-		    uint64_t *id, uint64_t completion_cookie);
+		size_t reqlen, const sockaddr_in_union *dest_addr,
+		uint64_t *id, uint64_t completion_cookie);
 extern int     homa_sendv(int sockfd, const struct iovec *iov,
-                    int iovcnt, const sockaddr_in_union *dest_addr,
-                    uint64_t *id, uint64_t completion_cookie);
+		int iovcnt, const sockaddr_in_union *dest_addr,
+		uint64_t *id, uint64_t completion_cookie);
 extern ssize_t homa_recv(int sockfd, void *message_buf, size_t length,
-		    int flags, sockaddr_in_union *src_addr, uint64_t *id,
-                    size_t *msglen, uint64_t *completion_cookie_p);
+		int flags, sockaddr_in_union *src_addr, uint64_t *id,
+		size_t *msglen, uint64_t *completion_cookie_p);
 extern ssize_t homa_recvv(int sockfd, const struct iovec *iov,
-                    int iovcnt, int flags, sockaddr_in_union *src_addr,
-                    uint64_t *id, size_t *msglen,
-                    uint64_t *completion_cookie_p);
+		int iovcnt, int flags, sockaddr_in_union *src_addr,
+		uint64_t *id, size_t *msglen,
+		uint64_t *completion_cookie_p);
 extern ssize_t homa_reply(int sockfd, const void *message_buf,
-                    size_t length, const sockaddr_in_union *dest_addr,
-                    uint64_t id);
+		size_t length, const sockaddr_in_union *dest_addr,
+		uint64_t id);
 extern ssize_t homa_replyv(int sockfd, const struct iovec *iov,
-                    int iovcnt, const sockaddr_in_union *dest_addr,
-                    uint64_t id);
+		int iovcnt, const sockaddr_in_union *dest_addr,
+		uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id, int error);
 
 #ifdef __cplusplus
