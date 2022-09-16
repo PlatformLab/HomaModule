@@ -234,6 +234,11 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
 
+extern ssize_t homa_recvp(int fd, struct homa_recv_args *args);
+extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);
+extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
+extern int     homa_abortp(int fd, struct homa_abort_args *args);
+
 /**
  * I/O control calls on Homa sockets. These are mapped into the
  * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
