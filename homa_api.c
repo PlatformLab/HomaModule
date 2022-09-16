@@ -115,7 +115,7 @@ ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
 	args.source_addr = *src_addr;
 	args.flags = flags;
 	args.id = *id;
-	result = homa_recvp(sockfd, &args);
+	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*src_addr = args.source_addr;
 	*id = args.id;
 	if (msglen) {
@@ -171,7 +171,7 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	args.source_addr = *src_addr;
 	args.flags = flags;
 	args.id = *id;
-	result = homa_recvp(sockfd, &args);
+	result = ioctl(sockfd, HOMAIOCRECV, &args);
 	*src_addr = args.source_addr;
 	*id = args.id;
 	if (msglen) {
@@ -216,7 +216,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 	args.length = length;
 	args.dest_addr = *dest_addr;
 	args.id = id;
-	return homa_replyp(sockfd, &args);
+	return ioctl(sockfd, HOMAIOCREPLY, &args);
 }
 
 /**
@@ -247,7 +247,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.length = iovcnt;
 	args.dest_addr = *dest_addr;
 	args.id = id;
-	return homa_replyp(sockfd, &args);
+	return ioctl(sockfd, HOMAIOCREPLY, &args);
 }
 
 /**
@@ -277,7 +277,7 @@ int homa_send(int sockfd, const void *request, size_t reqlen,
 	args.dest_addr = *dest_addr;
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
-	result = homa_sendp(sockfd, &args);
+	result = ioctl(sockfd, HOMAIOCSEND, &args);;
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;
@@ -312,7 +312,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.dest_addr = *dest_addr;
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
-	result = homa_sendp(sockfd, &args);
+	result = ioctl(sockfd, HOMAIOCSEND, &args);;
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;
