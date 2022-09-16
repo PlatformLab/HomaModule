@@ -698,7 +698,12 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	if ((args.message_buf && args.iovec)
 		|| (args.flags & ~HOMA_RECV_VALID_FLAGS)
 		|| args._pad[0]
-		|| args._pad[1]) {
+		|| args._pad[1]
+		|| args._pad[2]
+		|| args._pad[3]
+		|| args._pad[4]
+		|| args._pad[5]
+		|| args._pad[6]) {
 		return -EINVAL;
 	}
 	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
@@ -845,7 +850,12 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	if ((args.message_buf && args.iovec)
 		|| (args.flags & ~HOMA_REPLY_VALID_FLAGS)
 		|| args._pad[0]
-		|| args._pad[1]) {
+		|| args._pad[1]
+		|| args._pad[2]
+		|| args._pad[3]
+		|| args._pad[4]
+		|| args._pad[5]
+		|| args._pad[6]) {
 		return -EINVAL;
 	}
 	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
@@ -938,7 +948,12 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	if ((args.message_buf && args.iovec)
 		|| (args.flags & ~HOMA_SEND_VALID_FLAGS)
 		|| args._pad[0]
-		|| args._pad[1]) {
+		|| args._pad[1]
+		|| args._pad[2]
+		|| args._pad[3]
+		|| args._pad[4]
+		|| args._pad[5]
+		|| args._pad[6]) {
 		return -EINVAL;
 	}
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);

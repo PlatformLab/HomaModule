@@ -95,12 +95,12 @@ struct homa_send_args {
 	 */
 	uint64_t completion_cookie;
 
-	uint64_t _pad[2];
+	uint64_t _pad[7];
 };
 
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_send_args) >= 88, "homa_send_args shrunk");
-_Static_assert(sizeof(struct homa_send_args) <= 88, "homa_send_args grew");
+_Static_assert(sizeof(struct homa_send_args) >= 128, "homa_send_args shrunk");
+_Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
 #endif
 
 #define HOMA_SEND_VALID_FLAGS 0
@@ -152,11 +152,11 @@ struct homa_recv_args {
 	 */
 	uint64_t completion_cookie;
 
-	uint64_t _pad[2];
+	uint64_t _pad[7];
 };
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recv_args) >= 88, "homa_recv_args shrunk");
-_Static_assert(sizeof(struct homa_recv_args) <= 88, "homa_recv_args grew");
+_Static_assert(sizeof(struct homa_recv_args) >= 128, "homa_recv_args shrunk");
+_Static_assert(sizeof(struct homa_recv_args) <= 128, "homa_recv_args grew");
 #endif
 
 /* Flag bits for homa_recv (see man page for documentation):
@@ -198,13 +198,13 @@ struct homa_reply_args {
 
 	/** @id: Identifier of the RPC to respond to. */
 	uint64_t id;
-	//uint64_t completion_cookie;
+	uint64_t completion_cookie;
 
-	uint64_t _pad[2];
+	uint64_t _pad[7];
 };
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_reply_args) >= 80, "homa_reply_args shrunk");
-_Static_assert(sizeof(struct homa_reply_args) <= 80, "homa_reply_args grew");
+_Static_assert(sizeof(struct homa_reply_args) >= 128, "homa_reply_args shrunk");
+_Static_assert(sizeof(struct homa_reply_args) <= 128, "homa_reply_args grew");
 #endif
 
 #define HOMA_REPLY_VALID_FLAGS 0

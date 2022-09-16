@@ -8,7 +8,7 @@
 int main(int argc, char *argv[], char *envp[])
 {
 	int homa_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
-	char buf[1];
+	char buf[999999];
 	sockaddr_in_union addr = {};
 	uint64_t id;
 
