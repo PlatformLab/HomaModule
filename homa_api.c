@@ -64,7 +64,7 @@ ssize_t homa_replyp(int sockfd, struct homa_reply_args *args) {
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_sendp(int sockfd, struct homa_send_args *args) {
-	return ioctl(sockfd, HOMAIOCSEND, args);
+	return ioctl(sockfd, HOMAIOCSEND_BENCH, args);
 }
 
 /**

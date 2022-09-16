@@ -252,6 +252,9 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 #define HOMAIOCREPLY  _IOWR(0x89, 0xe2, struct homa_reply_args)
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
+#define HOMAIOCSEND_BENCH   _IOWR(0x89, 0xe4, struct homa_send_args)
+#define HOMAIOCRECV_BENCH   _IOWR(0x89, 0xe5, struct homa_recv_args)
+#define HOMAIOCREPLY_BENCH  _IOWR(0x89, 0xe6, struct homa_reply_args)
 
 extern ssize_t homa_recvp(int fd, struct homa_recv_args *args);
 extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);

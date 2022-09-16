@@ -670,6 +670,9 @@ int homa_disconnect(struct sock *sk, int flags) {
 	return -ENOSYS;
 }
 
+// Useful for single-threaded benchmarking of ioctl code.
+static bool ioc_bench;
+
 /**
  * homa_ioc_recv() - The top-level function for the ioctl that implements
  * the homa_recv user-level API.
@@ -720,6 +723,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		err = -EAFNOSUPPORT;
 		goto error;
 	}
+	if (ioc_bench) { err = 0; goto error;}
 	rpc = homa_wait_for_message(hsk, args.flags, args.id,
 			&args.source_addr);
 	if (IS_ERR(rpc)) {
@@ -878,6 +882,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	err = 0;
 	length = iter.count;
+	if (ioc_bench) { goto done;}
 
 	peer = homa_peer_find(&hsk->homa->peers, &canonical_dest, &hsk->inet);
 	if (IS_ERR(peer)) {
@@ -978,6 +983,7 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		goto error;
 	err = 0;
 
+	if (ioc_bench) { goto error;}
 	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
 	if (IS_ERR(crpc)) {
 		err = PTR_ERR(crpc);
@@ -1065,6 +1071,7 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	if (current == core->thread)
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
 
+	ioc_bench = false;
 	switch (cmd) {
 	case HOMAIOCSEND:
 		result = homa_ioc_send(sk, arg);
@@ -1099,6 +1106,30 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 				"pid %d", current->pid);
 		tt_freeze();
 		result = 0;
+		break;
+	case HOMAIOCSEND_BENCH:
+		ioc_bench = true;
+		result = homa_ioc_send(sk, arg);
+		core = homa_cores[raw_smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(send_calls, 1);
+		INC_METRIC(send_cycles, core->syscall_end_time - start);
+		break;
+	case HOMAIOCRECV_BENCH:
+		ioc_bench = true;
+		result = homa_ioc_recv(sk, arg);
+		core = homa_cores[raw_smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(recv_calls, 1);
+		INC_METRIC(recv_cycles, core->syscall_end_time - start);
+		break;
+	case HOMAIOCREPLY_BENCH:
+		ioc_bench = true;
+		result = homa_ioc_reply(sk, arg);
+		core = homa_cores[raw_smp_processor_id()];
+		core->syscall_end_time = get_cycles();
+		INC_METRIC(reply_calls, 1);
+		INC_METRIC(reply_cycles, core->syscall_end_time - start);
 		break;
 	default:
 		printk(KERN_NOTICE "Unknown Homa ioctl: %d\n", cmd);
