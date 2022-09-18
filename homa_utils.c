@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -208,6 +208,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	struct homa_rpc_bucket *bucket;
 	struct sk_buff *skb = NULL;
 	size_t length = iter->count;
+	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 
 	crpc = (struct homa_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
@@ -221,14 +222,14 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->state = RPC_OUTGOING;
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
-	crpc->peer = homa_peer_find(&hsk->homa->peers,
-			dest->in4.sin_addr.s_addr, &hsk->inet);
+	crpc->peer = homa_peer_find(&hsk->homa->peers, &dest_addr_as_ipv6,
+			&hsk->inet);
 	if (unlikely(IS_ERR(crpc->peer))) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
 		goto error;
 	}
-	crpc->dport = ntohs(dest->in4.sin_port);
+	crpc->dport = ntohs(dest->in6.sin6_port);
 	crpc->completion_cookie = 0;
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
@@ -292,7 +293,7 @@ error:
  *          @hsk->active_rpcs.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
-		__be32 source, struct data_header *h)
+		const struct in6_addr *source, struct data_header *h)
 {
 	int err;
 	struct homa_rpc *srpc;
@@ -306,7 +307,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) &&
 				(srpc->dport == ntohs(h->common.sport)) &&
-				(srpc->peer->addr == source)) {
+				ipv6_addr_equal(&srpc->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
@@ -386,7 +387,8 @@ void homa_rpc_lock_slow(struct homa_rpc *rpc)
  *           note for the RPC)
  * @ack:     Information about an RPC from @saddr that may now be deleted safely.
  */
-void homa_rpc_acked(struct homa_sock *hsk, __be32 saddr, struct homa_ack *ack)
+void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
+		struct homa_ack *ack)
 {
 	struct homa_rpc *rpc;
 	struct homa_sock *hsk2 = hsk;
@@ -651,14 +653,14 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *            unlock it by invoking homa_unlock_server_rpc.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-		__be32 saddr, __u16 sport, __u64 id)
+		const struct in6_addr *saddr, __u16 sport, __u64 id)
 {
 	struct homa_rpc *srpc;
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	homa_bucket_lock(bucket, server);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) && (srpc->dport == sport) &&
-				(srpc->peer->addr == saddr)) {
+				ipv6_addr_equal(&srpc->peer->addr, saddr)) {
 			return srpc;
 		}
 	}
@@ -674,7 +676,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 void homa_rpc_log(struct homa_rpc *rpc)
 {
 	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
-	char *peer = homa_print_ipv4_addr(rpc->peer->addr);
+	char *peer = homa_print_ipv6_addr(&rpc->peer->addr);
 
 	if (rpc->state == RPC_INCOMING)
 		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
@@ -743,32 +745,44 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 }
 
 /**
- * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
- * representation.
+ * homa_print_ipv6_addr() - Convert an IPv6 address to a human-readable string
+ * representation. IPv4-mapped addresses are printed in IPv4 syntax.
  * @addr:    Address to convert, in network byte order.
  *
  * Return:   The converted value. Values are stored in static memory, so
  *           the caller need not free. This also means that storage is
  *           eventually reused (there are enough buffers to accommodate
  *           multiple "active" values).
- *
- * Note: Homa uses this function, rather than the %pI4 format specifier
- * for snprintf et al., because the kernel's version of snprintf isn't
- * available in Homa's unit test environment.
  */
-char *homa_print_ipv4_addr(__be32 addr)
+char *homa_print_ipv6_addr(const struct in6_addr *addr)
 {
-#define NUM_BUFS 4
-#define BUF_SIZE 30
+#define NUM_BUFS (1 << 2)
+#define BUF_SIZE 64
 	static char buffers[NUM_BUFS][BUF_SIZE];
 	static int next_buf = 0;
-	__u32 a2 = ntohl(addr);
 	char *buffer = buffers[next_buf];
 	next_buf++;
 	if (next_buf >= NUM_BUFS)
 		next_buf = 0;
-	snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
-			(a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
+#ifdef __UNIT_TEST__
+	struct in6_addr zero = {};
+	if (ipv6_addr_equal(addr, &zero)) {
+		snprintf(buffer, BUF_SIZE, "0.0.0.0");
+	} else if ((addr->s6_addr32[0] == 0) &&
+		(addr->s6_addr32[1] == 0) &&
+		(addr->s6_addr32[2] == htonl(0x0000ffff))) {
+		__u32 a2 = ntohl(addr->s6_addr32[3]);
+		snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
+				(a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
+	} else {
+		const char *inet_ntop(int, const void *, char *, size_t);
+		inet_ntop(AF_INET6, addr, buffer + 1, BUF_SIZE);
+		buffer[0] = '[';
+		strcat(buffer, "]");
+	}
+#else
+	snprintf(buffer, BUF_SIZE, "%pI6", addr);
+#endif
 	return buffer;
 }
 
@@ -785,11 +799,12 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	int used = 0;
 	struct common_header *common = (struct common_header *) skb->data;
+	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
-		homa_print_ipv4_addr(ip_hdr(skb)->saddr),
+		homa_print_ipv6_addr(&saddr),
 		ntohs(common->sport), ntohs(common->dport),
 		be64_to_cpu(common->sender_id));
 	switch (common->type) {
@@ -1639,7 +1654,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		return;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
-		tt_record2(format, rpc->id, htonl(rpc->peer->addr));
+		tt_record2(format, rpc->id, ip6_as_be32(rpc->peer->addr));
 		tt_freeze();
 		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}

@@ -462,6 +462,28 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
+struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
+		struct flowi6 *fl6, const struct in6_addr *final_dst)
+{
+	if (mock_check_error(&mock_route_errors))
+		return ERR_PTR(-EHOSTUNREACH);
+
+	struct rtable *route;
+	route = malloc(sizeof(struct rtable));
+	if (!route) {
+		FAIL("malloc failed");
+		return ERR_PTR(-ENOMEM);
+	}
+	route->dst.__refcnt.counter = 1;
+	route->dst.ops = &mock_dst_ops;
+	route->dst.dev = &mock_net_device;
+	route->dst.obsolete = 0;
+	if (!routes_in_use)
+		routes_in_use = unit_hash_new();
+	unit_hash_set(routes_in_use, route, "used");
+	return &route->dst;
+}
+
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
 	char buffer[200];
@@ -1020,7 +1042,7 @@ void mock_rcu_read_unlock(void)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
+struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;
@@ -1079,8 +1101,15 @@ struct sk_buff *mock_skb_new(__be32 saddr, struct common_header *h,
 	p = skb_put(skb, extra_bytes);
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
-	ip_hdr(skb)->saddr = saddr;
-	ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	if (testing_ipv6()) {
+		ipv6_hdr(skb)->version = 6;
+		ipv6_hdr(skb)->saddr = *saddr;
+		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
+	} else {
+		ip_hdr(skb)->version = 4;
+		ip_hdr(skb)->saddr = saddr->in6_u.u6_addr32[3];
+		ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	}
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
 	return skb;
@@ -1104,6 +1133,7 @@ int mock_skb_count(void)
  */
 void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
+	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = (struct sock *) hsk;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
@@ -1115,6 +1145,8 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	if (port < HOMA_MIN_DEFAULT_PORT)
 		homa_sock_bind(&homa->port_map, hsk, port);
 	sk->sk_data_ready = mock_data_ready;
+	sk->sk_family = testing_ipv6() ? AF_INET6 : AF_INET;
+	hsk->inet.pinet6 = &hsk_pinfo;
 }
 
 /**

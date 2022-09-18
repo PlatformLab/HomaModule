@@ -78,10 +78,10 @@ static inline void homa_lcache_release(struct homa_lcache *lc)
  * RPC, otherwise return NULL.
  */
 static inline struct homa_rpc *homa_lcache_get(struct homa_lcache *lc,
-		__u64 id, __be32 addr, __u16 port)
+		__u64 id, const struct in6_addr *addr, __u16 port)
 {
 	if ((lc->rpc != NULL) && (lc->rpc->id == id)
-			&& (lc->rpc->peer->addr == addr)
+			&& ipv6_addr_equal(&lc->rpc->peer->addr, addr)
 			&& (lc->rpc->dport == port))
 		return lc->rpc;
 	return NULL;

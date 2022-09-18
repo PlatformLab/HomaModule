@@ -629,7 +629,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
 					"length %d",
 					elapsed, rpc->id,
-					ntohl(rpc->peer->addr),
+					ip6_as_be32(rpc->peer->addr),
 					rpc->msgin.total_length);
 			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
 					"elapsed time for RPC id %d, peer 0x%x");
@@ -641,7 +641,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			struct freeze_header freeze;
 			tt_record2("Freezing timetrace because of "
 					"sync_freeze, id %d, peer 0x%x",
-					rpc->id, htonl(rpc->peer->addr));
+					rpc->id, ip6_as_be32(rpc->peer->addr));
 			tt_freeze();
 			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 		}
@@ -665,7 +665,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 			: 0;
 	args.source_addr.in4.sin_family = AF_INET;
 	args.source_addr.in4.sin_port = htons(rpc->dport);
-	args.source_addr.in4.sin_addr.s_addr = rpc->peer->addr;
+	args.source_addr.in4.sin_addr.s_addr = ip6_as_be32(rpc->peer->addr);
 	memset(args.source_addr.in4.sin_zero, 0,
 			sizeof(args.source_addr.in4.sin_zero));
 	args.id = rpc->id;
@@ -683,7 +683,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
-			rpc->id & 0xffffffff, ntohl(rpc->peer->addr), result,
+			rpc->id & 0xffffffff, ip6_as_be32(rpc->peer->addr), result,
 			current->pid);
 	rpc->dont_reap = false;
 	kfree(iov);
@@ -719,6 +719,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	struct homa_peer *peer;
 	struct sk_buff *skbs;
 	size_t length;
+	struct in6_addr canonical_dest;
 
 	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
 		err = -EFAULT;
@@ -729,6 +730,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 //	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
 //	if (unlikely(err))
 //		return err;
+	canonical_dest = canonical_ipv6_addr(&args.dest_addr);
 	if (unlikely(args.dest_addr.in4.sin_family != AF_INET)) {
 		err = -EAFNOSUPPORT;
 		goto done;
@@ -747,8 +749,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 	err = 0;
 	length = iter.count;
 
-	peer = homa_peer_find(&hsk->homa->peers, args.dest_addr.in4.sin_addr.s_addr,
-			&hsk->inet);
+	peer = homa_peer_find(&hsk->homa->peers, &canonical_dest, &hsk->inet);
 	if (IS_ERR(peer)) {
 		err = PTR_ERR(peer);
 		goto done;
@@ -759,7 +760,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 
-	srpc = homa_find_server_rpc(hsk, args.dest_addr.in4.sin_addr.s_addr,
+	srpc = homa_find_server_rpc(hsk, &canonical_dest,
 			ntohs(args.dest_addr.in4.sin_port), args.id);
 	if (!srpc) {
 		homa_free_skbs(skbs);
@@ -1134,7 +1135,6 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  * Return: Always 0
  */
 int homa_softirq(struct sk_buff *skb) {
-	__be32 saddr;
 	struct common_header *h;
 	struct sk_buff *packets, *short_packets, *next;
 	struct sk_buff **prev_link, **short_link;
@@ -1196,8 +1196,8 @@ int homa_softirq(struct sk_buff *skb) {
 	packets = short_packets;
 
 	for (skb = packets; skb != NULL; skb = next) {
+		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 		next = skb->next;
-		saddr = ip_hdr(skb)->saddr;
 		num_packets++;
 
 		/* The code below makes the header available at skb->data, even
@@ -1231,7 +1231,7 @@ int homa_softirq(struct sk_buff *skb) {
 						"Homa %s packet from %s too "
 						"short: %d bytes\n",
 						homa_symbol_for_type(h->type),
-						homa_print_ipv4_addr(saddr),
+						homa_print_ipv6_addr(&saddr),
 						skb->len - header_offset);
 			INC_METRIC(short_packets, 1);
 			goto discard;
@@ -1240,7 +1240,7 @@ int homa_softirq(struct sk_buff *skb) {
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, "
 					"id %llu, type %d",
-					ntohl(saddr), ntohs(h->sport),
+					ip6_as_be32(saddr), ntohs(h->sport),
 					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
@@ -1252,7 +1252,8 @@ int homa_softirq(struct sk_buff *skb) {
 			if (!tt_frozen) {
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
-						ntohs(h->dport), ntohl(saddr),
+						ntohs(h->dport),
+						ip6_as_be32(saddr),
 						ntohs(h->sport),
 						homa_local_id(h->sender_id));
 				tt_freeze();
@@ -1316,6 +1317,8 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 	const struct iphdr *iph = (const struct iphdr *)skb->data;
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
+	const struct in6_addr daddr = skb_is_ipv6(skb) ? ipv6_hdr(skb)->daddr
+			: ip4to6(ipv4_hdr(skb)->daddr);
 
 	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
 		struct common_header *h;
@@ -1323,7 +1326,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
 		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
 				+ iph->ihl*4);
-		homa_abort_rpcs(homa, iph->daddr, htons(h->dport), -ENOTCONN);
+		homa_abort_rpcs(homa, &daddr, htons(h->dport), -ENOTCONN);
 	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
 		if (code == ICMP_PROT_UNREACH)
@@ -1332,7 +1335,7 @@ int homa_err_handler(struct sk_buff *skb, u32 info) {
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
 				ntohl(iph->saddr), ntohl(iph->daddr));
-		homa_abort_rpcs(homa, iph->daddr, 0, error);
+		homa_abort_rpcs(homa, &daddr, 0, error);
 	} else {
 		if (homa->verbose)
 			printk(KERN_NOTICE "homa_err_handler invoked with "

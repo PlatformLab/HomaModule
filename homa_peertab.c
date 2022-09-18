@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020, Stanford University
+/* Copyright (c) 2019-2022, Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -73,8 +73,8 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 /**
  * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
  * safe to do so.
- * @peertab        The table in which to free entries.
- * @now            Current time, in get_cycles units; entries with expiration
+ * @peertab:       The table in which to free entries.
+ * @now:           Current time, in get_cycles units; entries with expiration
  *                 dates no later than this will be freed. Specify ~0 to
  *                 free all entries.
  */
@@ -96,7 +96,8 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
  * homa_peer_find() - Returns the peer associated with a given host; creates
  * a new homa_peer if one doesn't already exist.
  * @peertab:    Peer table in which to perform lookup.
- * @addr:       IPV4 address of the desired host.
+ * @addr:       Address of the desired host: IPv4 addresses are represented
+ *              as IPv4-mapped IPv6 addresses.
  * @inet:       Socket that will be used for sending packets.
  *
  * Return:      The peer associated with @addr, or a negative errno if an
@@ -104,18 +105,22 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
  *              indefinitely: peer entries are never deleted except in
  *              homa_peertab_destroy.
  */
-struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
-	struct inet_sock *inet)
+struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
+		const struct in6_addr *addr, struct inet_sock *inet)
 {
 	/* Note: this function uses RCU operators to ensure safety even
 	 * if a concurrent call is adding a new entry.
 	 */
 	struct homa_peer *peer;
-	struct rtable *rt;
-	__u32 bucket = hash_32(addr, HOMA_PEERTAB_BUCKET_BITS);
+	struct dst_entry *dst;
+	// Should use siphash or jhash here:
+	__u32 bucket = hash_32(addr->in6_u.u6_addr32[0], HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32(addr->in6_u.u6_addr32[1], HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32(addr->in6_u.u6_addr32[2], HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32(addr->in6_u.u6_addr32[3], HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 			peertab_links) {
-		if (peer->addr == addr) {
+		if (ipv6_addr_equal(&peer->addr, addr)) {
 			return peer;
 		}
 		INC_METRIC(peer_hash_links, 1);
@@ -124,13 +129,13 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 	/* No existing entry; create a new one.
 	 *
 	 * Note: after we acquire the lock, we have to check again to
-	 * make sure the entry still doesn't exist after grabbing
-	 * the lock (it might have been created by a concurrent invocation
-	 * of this function). */
+	 * make sure the entry still doesn't exist (it might have been
+	 * created by a concurrent invocation of this function).
+	 */
 	spin_lock_bh(&peertab->write_lock);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 			peertab_links) {
-		if (peer->addr == addr)
+		if (ipv6_addr_equal(&peer->addr, addr))
 			goto done;
 	}
 	peer = kmalloc(sizeof(*peer), GFP_ATOMIC);
@@ -139,21 +144,15 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 		INC_METRIC(peer_kmalloc_errors, 1);
 		goto done;
 	}
-	peer->addr = addr;
-	flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
-			inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
-			inet->sk.sk_protocol, 0, addr, inet->inet_saddr,
-			0, 0, inet->sk.sk_uid);
-	security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
-	rt = ip_route_output_flow(sock_net(&inet->sk), &peer->flow.u.ip4,
-			&inet->sk);
-	if (IS_ERR(rt)) {
+	peer->addr = *addr;
+	dst = homa_peer_get_dst(peer, inet);
+	if (IS_ERR(dst)) {
 		kfree(peer);
-		peer = (struct homa_peer *) PTR_ERR(rt);
+		peer = (struct homa_peer *) PTR_ERR(dst);
 		INC_METRIC(peer_route_errors, 1);
 		goto done;
 	}
-	peer->dst = &rt->dst;
+	peer->dst = dst;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = INT_MAX;
 	peer->cutoff_version = 0;
@@ -186,21 +185,15 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab, __be32 addr,
 void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 		struct homa_sock *hsk)
 {
-	struct rtable *rt;
-	struct sock *sk = &hsk->inet.sk;
+	struct dst_entry *dst;
 
 	spin_lock_bh(&peertab->write_lock);
-	flowi4_init_output(&peer->flow.u.ip4, sk->sk_bound_dev_if,
-			sk->sk_mark, hsk->inet.tos, RT_SCOPE_UNIVERSE,
-			sk->sk_protocol, 0, peer->addr, hsk->inet.inet_saddr,
-			0, 0, sk->sk_uid);
-	security_sk_classify_flow(sk, &peer->flow.u.__fl_common);
-	rt = ip_route_output_flow(sock_net(sk), &peer->flow.u.ip4, sk);
-	if (IS_ERR(rt)) {
+	dst = homa_peer_get_dst(peer, &hsk->inet);
+	if (IS_ERR(dst)) {
 		/* Retain the existing dst if we can't create a new one. */
 		if (hsk->homa->verbose)
 			printk(KERN_NOTICE "homa_refresh couldn't recreate "
-					"dst: error %ld", PTR_ERR(rt));
+					"dst: error %ld", PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
 	} else {
 		struct homa_dead_dst *dead = (struct homa_dead_dst *)
@@ -219,7 +212,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
 			homa_peertab_gc_dsts(peertab, now);
 		}
-		peer->dst = &rt->dst;
+		peer->dst = dst;
 	}
 	spin_unlock_bh(&peertab->write_lock);
 }
@@ -242,6 +235,55 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			return i;
 	}
 	/* Can't ever get here */
+}
+
+/**
+ * homa_peer_get_dst() - Find an appropriate dst structure (either IPv4
+ * or IPv6) for a peer.
+ * @peer:   The peer for which a dst is needed. Note: this peer's flow
+ *          struct will be overwritten.
+ * @inet:   Socket that will be used for sending packets.
+ * Return:  The dst structure (or an ERR_PTR).
+ */
+struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
+		struct inet_sock *inet)
+{
+	memset(&peer->flow, 0, sizeof(peer->flow));
+	if (inet->sk.sk_family == AF_INET) {
+		struct rtable *rt;
+		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
+				inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
+				inet->sk.sk_protocol, 0,
+				peer->addr.in6_u.u6_addr32[3], inet->inet_saddr,
+				0, 0, inet->sk.sk_uid);
+		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(&inet->sk),
+				&peer->flow.u.ip4, &inet->sk);
+		if (IS_ERR(rt))
+			return (struct dst_entry *)(PTR_ERR(rt));
+		return &rt->dst;
+	} else {
+		peer->flow.u.ip6.flowi6_oif = inet->sk.sk_bound_dev_if;
+		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
+		peer->flow.u.ip6.flowi6_mark = inet->sk.sk_mark;
+		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+		peer->flow.u.ip6.flowi6_proto = inet->sk.sk_protocol;
+		peer->flow.u.ip6.flowi6_flags = 0;
+		peer->flow.u.ip6.flowi6_secid = 0;
+		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
+		peer->flow.u.ip6.flowi6_uid = inet->sk.sk_uid;
+		peer->flow.u.ip6.daddr = peer->addr;
+		peer->flow.u.ip6.saddr = inet->pinet6->saddr;
+		peer->flow.u.ip6.fl6_dport = 0;
+		peer->flow.u.ip6.fl6_sport = 0;
+		peer->flow.u.ip6.flowlabel = inet->pinet6->flow_label;
+		peer->flow.u.ip6.mp_hash = 0;
+		peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
+		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
+		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
+		return ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk,
+				&peer->flow.u.ip6, NULL);
+	}
 }
 
 /**

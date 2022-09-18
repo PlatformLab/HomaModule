@@ -21,27 +21,27 @@
 #include "utils.h"
 
 FIXTURE(homa_timer) {
-	__be32 client_ip;
+	struct in6_addr client_ip[1];
 	int client_port;
-	__be32 server_ip;
+	struct in6_addr server_ip[1];
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
-	struct sockaddr_in server_addr;
+	sockaddr_in_union server_addr;
 	struct homa homa;
 	struct homa_sock hsk;
 };
 FIXTURE_SETUP(homa_timer)
 {
-	self->client_ip = unit_get_in_addr("196.168.0.1");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	self->server_addr.sin_family = AF_INET;
-	self->server_addr.sin_addr.s_addr = self->server_ip;
-	self->server_addr.sin_port =  htons(self->server_port);
+	self->server_addr.in6.sin6_family = AF_INET;
+	self->server_addr.in6.sin6_addr = *self->server_ip;
+	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;

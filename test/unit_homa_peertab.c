@@ -20,12 +20,16 @@
 #include "mock.h"
 #include "utils.h"
 
+struct in6_addr ip1111[1];
+struct in6_addr ip2222[1];
+struct in6_addr ip3333[1];
+
 FIXTURE(homa_peertab) {
 	struct homa homa;
 	struct homa_sock hsk;
 	struct homa_peertab peertab;
-	__be32 client_ip;
-	__be32 server_ip;
+	struct in6_addr client_ip[1];
+	struct in6_addr server_ip[1];
 	int server_port;
 };
 FIXTURE_SETUP(homa_peertab)
@@ -33,8 +37,11 @@ FIXTURE_SETUP(homa_peertab)
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_peertab_init(&self->peertab);
-	self->client_ip = unit_get_in_addr("196.168.0.1");
-	self->server_ip = unit_get_in_addr("1.2.3.4");
+	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
+	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
+	ip1111[0] = unit_get_in_addr("1::1:1:1");
+	ip2222[0] = unit_get_in_addr("2::2:2:2");
+	ip3333[0] = unit_get_in_addr("3::3:3:3");
 	self->server_port = 99;
 }
 FIXTURE_TEARDOWN(homa_peertab)
@@ -62,16 +69,16 @@ TEST_F(homa_peertab, homa_peer_find__basics)
 {
 	struct homa_peer *peer, *peer2;
 
-	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ(11111, peer->addr);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
 
-	peer2 = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer2 = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	EXPECT_EQ(peer, peer2);
 
-	peer2 = homa_peer_find(&self->peertab, 22222, &self->hsk.inet);
+	peer2 = homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
 
 	EXPECT_EQ(2, homa_cores[cpu_number]->metrics.peer_new_entries);
@@ -83,7 +90,7 @@ static void peer_lock_hook(void) {
 	mock_spin_lock_hook = NULL;
 	/* Creates a peer with the same address as the one being created
 	 * by the main test function below. */
-	conflicting_peer = homa_peer_find(&test_data->peertab, 444,
+	conflicting_peer = homa_peer_find(&test_data->peertab, ip3333,
 		&test_data->hsk.inet);
 }
 
@@ -100,7 +107,7 @@ TEST_F(homa_peertab, homa_peertab_init__vmalloc_failed)
 TEST_F(homa_peertab, homa_peertab_gc_dsts)
 {
 	struct homa_peer *peer;
-	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	mock_cycles = 0;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
 	mock_cycles = 50000000;
@@ -121,7 +128,7 @@ TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 
 	test_data = self;
 	mock_spin_lock_hook = peer_lock_hook;
-	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_NE(NULL, conflicting_peer);
 	EXPECT_EQ(conflicting_peer, peer);
 }
@@ -130,7 +137,7 @@ TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 	struct homa_peer *peer;
 
 	mock_kmalloc_errors = 1;
-	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_kmalloc_errors);
@@ -140,7 +147,7 @@ TEST_F(homa_peertab, homa_peer_find__route_error)
 	struct homa_peer *peer;
 
 	mock_route_errors = 1;
-	peer = homa_peer_find(&self->peertab, 444, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_route_errors);
@@ -150,9 +157,9 @@ TEST_F(homa_peertab, homa_dst_refresh__basics)
 {
 	struct homa_peer *peer;
 	struct dst_entry *old_dst;
-	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ(11111, peer->addr);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	old_dst = homa_get_dst(peer, &self->hsk);
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
@@ -163,9 +170,9 @@ TEST_F(homa_peertab, homa_dst_refresh__routing_error)
 {
 	struct homa_peer *peer;
 	struct dst_entry *old_dst;
-	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ(11111, peer->addr);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	old_dst = homa_get_dst(peer, &self->hsk);
 	mock_route_errors = 1;
@@ -178,9 +185,9 @@ TEST_F(homa_peertab, homa_dst_refresh__malloc_error)
 {
 	struct homa_peer *peer;
 	struct dst_entry *old_dst;
-	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ(11111, peer->addr);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	old_dst = homa_get_dst(peer, &self->hsk);
 	mock_kmalloc_errors = 1;
@@ -191,9 +198,9 @@ TEST_F(homa_peertab, homa_dst_refresh__malloc_error)
 TEST_F(homa_peertab, homa_dst_refresh__free_old_dsts)
 {
 	struct homa_peer *peer;
-	peer = homa_peer_find(&self->peertab, 11111, &self->hsk.inet);
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
-	EXPECT_EQ(11111, peer->addr);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	mock_cycles = 0;
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
@@ -217,7 +224,7 @@ TEST_F(homa_peertab, homa_unsched_priority)
 TEST_F(homa_peertab, homa_peer_lock_slow)
 {
 	mock_cycles = 10000;
-	struct homa_peer *peer = homa_peer_find(&self->peertab, 444,
+	struct homa_peer *peer = homa_peer_find(&self->peertab, ip3333,
 			&self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 
@@ -290,7 +297,7 @@ TEST_F(homa_peertab, homa_peer_add_ack)
 
 TEST_F(homa_peertab, homa_peer_get_acks)
 {
-	struct homa_peer *peer = homa_peer_find(&self->peertab, 444,
+	struct homa_peer *peer = homa_peer_find(&self->peertab, ip3333,
 			&self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ(0, peer->num_acks);
