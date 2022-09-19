@@ -125,6 +125,8 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->last_locker = "none";
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
+	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
+			? HOMA_IPV4_HEADER_LENGTH : HOMA_IPV6_HEADER_LENGTH;
 	hsk->shutdown = false;
 	while (1) {
 		if (homa->next_client_port < HOMA_MIN_DEFAULT_PORT) {

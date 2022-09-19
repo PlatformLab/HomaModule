@@ -31,7 +31,6 @@ FIXTURE(homa_outgoing) {
 	struct homa_sock hsk;
 	sockaddr_in_union server_addr;
 	struct homa_peer *peer;
-	int ip_header_length;
 };
 FIXTURE_SETUP(homa_outgoing)
 {
@@ -52,8 +51,6 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_addr.in6.sin6_port = htons(self->server_port);
 	self->peer = homa_peer_find(&self->homa.peers,
 			&self->server_addr.in6.sin6_addr, &self->hsk.inet);
-	self->ip_header_length = testing_ipv6() ? HOMA_IPV6_HEADER_LENGTH
-			: HOMA_IPV4_HEADER_LENGTH;
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)
@@ -120,7 +117,7 @@ TEST_F(homa_outgoing, homa_fill_packets__max_gso_data)
 TEST_F(homa_outgoing, homa_fill_packets__gso_max_less_than_mtu)
 {
 	mock_net_device.gso_max_size = 6000;
-	self->homa.max_gso_size = 2000 + self->ip_header_length
+	self->homa.max_gso_size = 2000 + self->hsk.ip_header_length
 			+ sizeof(struct data_header);
 	mock_mtu = 3000;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -637,7 +634,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 			500 - sizeof(struct data_header)
-			- self->ip_header_length
+			- self->hsk.ip_header_length
 			- HOMA_VLAN_HEADER - HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
@@ -653,12 +650,12 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 TEST_F(homa_outgoing, homa_check_nic_queue__multiple_packets_gso)
 {
 	mock_mtu = 500 - sizeof(struct data_header)
-			- self->ip_header_length - HOMA_VLAN_HEADER
+			- self->hsk.ip_header_length - HOMA_VLAN_HEADER
 			- HOMA_ETH_OVERHEAD;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 			1200 - 3 *(sizeof(struct data_header)
-			+ self->ip_header_length + HOMA_VLAN_HEADER
+			+ self->hsk.ip_header_length + HOMA_VLAN_HEADER
 			+ HOMA_ETH_OVERHEAD)));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
@@ -676,7 +673,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr,  unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->ip_header_length - HOMA_VLAN_HEADER
+			- self->hsk.ip_header_length - HOMA_VLAN_HEADER
 			- HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
@@ -694,7 +691,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->ip_header_length - HOMA_VLAN_HEADER
+			- self->hsk.ip_header_length - HOMA_VLAN_HEADER
 			- HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
@@ -712,7 +709,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->ip_header_length - HOMA_VLAN_HEADER
+			- self->hsk.ip_header_length - HOMA_VLAN_HEADER
 			- HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);

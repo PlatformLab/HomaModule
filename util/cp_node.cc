@@ -81,6 +81,7 @@ const char *workload = "100";
 int unloaded = 0;
 bool client_iovec = false;
 bool server_iovec = false;
+int inet_family = AF_INET;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -270,7 +271,8 @@ void print_help(const char *name)
 		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
 		"                      not be sent to node-I (default: -1)\n"
-        "    --iovec           Use homa_sendv instead of homa_send\n"
+                "    --iovec           Use homa_sendv instead of homa_send\n"
+                "    --ipv6            Use IPv6 instead of IPv4\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
@@ -298,7 +300,8 @@ void print_help(const char *name)
 		"    --level           Log level: either normal or verbose\n\n"
 		"server [options]      Start serving requests on one or more ports\n"
 		"    --first-port      Lowest port number to use (default: %d)\n"
-        "    --iovec           Use homa_replyv instead of homa_reply\n"
+                "    --iovec           Use homa_replyv instead of homa_reply\n"
+                "    --ipv6            Use IPv6 instead of IPv4\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
@@ -484,7 +487,7 @@ void init_server_addrs(void)
 			continue;
 		snprintf(host, sizeof(host), "node-%d", node);
 		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = AF_INET;
+		hints.ai_family = inet_family;
 		hints.ai_socktype = SOCK_DGRAM;
 		int status = getaddrinfo(host, NULL, &hints,
 				&matching_addresses);
@@ -1100,7 +1103,7 @@ tcp_server::tcp_server(int port, int id, int num_threads)
         , stop(false)
 {
 	memset(connections, 0, sizeof(connections));
-	listen_fd = socket(PF_INET, SOCK_STREAM, 0);
+	listen_fd = socket(inet_family, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		log(NORMAL, "FATAL: couldn't open server socket: %s\n",
 				strerror(errno));
@@ -1121,11 +1124,16 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 		exit(1);
 	}
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
-	addr.in4.sin_port = htons(port);
-	addr.in4.sin_addr.s_addr = INADDR_ANY;
-	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr))
-			== -1) {
+	if (inet_family == AF_INET) {
+		addr.in4.sin_family = AF_INET;
+		addr.in4.sin_port = htons(port);
+		addr.in4.sin_addr.s_addr = INADDR_ANY;
+	} else {
+		addr.in6.sin6_family = AF_INET6;
+		addr.in6.sin6_port = htons(port);
+		addr.in6.sin6_addr = in6addr_any;
+	}
+	if (bind(listen_fd, &addr.sa, sizeof(addr)) == -1) {
 		log(NORMAL, "FATAL: couldn't bind to port %d: %s\n", port,
 				strerror(errno));
 		exit(1);
@@ -1276,8 +1284,7 @@ void tcp_server::accept(int epoll_fd)
 	sockaddr_in_union client_addr;
 	socklen_t addr_len = sizeof(client_addr);
 
-	fd = ::accept4(listen_fd, reinterpret_cast<sockaddr *>(&client_addr),
-			&addr_len, SOCK_NONBLOCK);
+	fd = ::accept4(listen_fd, &client_addr.sa, &addr_len, SOCK_NONBLOCK);
 	if (fd < 0) {
 		if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
 			return;
@@ -1769,7 +1776,7 @@ homa_client::homa_client(int id)
         , receiving_threads()
         , sending_thread()
 {
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
 		exit(1);
@@ -2188,7 +2195,7 @@ tcp_client::tcp_client(int id)
 	}
 
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
-		int fd = socket(PF_INET, SOCK_STREAM, 0);
+		int fd = socket(inet_family, SOCK_STREAM, 0);
 		if (fd == -1) {
 			log(NORMAL, "FATAL: couldn't open TCP client "
 					"socket: %s\n",
@@ -2617,6 +2624,7 @@ int client_cmd(std::vector<string> &words)
 	client_ports = 1;
 	first_port = 4000;
 	first_server = 1;
+	inet_family = AF_INET;
 	net_gbps = 0.0;
 	port_receivers = 1;
 	protocol = "homa";
@@ -2650,6 +2658,8 @@ int client_cmd(std::vector<string> &words)
 			i++;
 		} else if (strcmp(option, "--iovec") == 0) {
 			client_iovec = true;
+		} else if (strcmp(option, "--ipv6") == 0) {
+			inet_family = AF_INET6;
 		} else if (strcmp(option, "--no-trunc") == 0) {
 			tcp_trunc = false;
 		} else if (strcmp(option, "--ports") == 0) {
@@ -2905,6 +2915,7 @@ int log_cmd(std::vector<string> &words)
 int server_cmd(std::vector<string> &words)
 {
 	first_port = 4000;
+	inet_family = AF_INET;
         protocol = "homa";
 	port_threads = 1;
 	server_ports = 1;
@@ -2919,6 +2930,8 @@ int server_cmd(std::vector<string> &words)
 			i++;
 		} else if (strcmp(option, "--iovec") == 0) {
 			server_iovec = true;
+		} else if (strcmp(option, "--ipv6") == 0) {
+			inet_family = AF_INET6;
 		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;
@@ -2947,7 +2960,7 @@ int server_cmd(std::vector<string> &words)
 			sockaddr_in_union addr_in;
 			int fd, j, port;
 
-			fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+			fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 			if (fd < 0) {
 				log(NORMAL, "FATAL: couldn't open Homa socket: "
 						"%s\n",
@@ -2957,10 +2970,14 @@ int server_cmd(std::vector<string> &words)
 
 			port = first_port + i;
 			memset(&addr_in, 0, sizeof(addr_in));
-			addr_in.in4.sin_family = AF_INET;
-			addr_in.in4.sin_port = htons(port);
-			if (bind(fd, (struct sockaddr *) &addr_in,
-					sizeof(addr_in)) != 0) {
+			if (inet_family == AF_INET) {
+				addr_in.in4.sin_family = AF_INET;
+				addr_in.in4.sin_port = htons(port);
+			} else {
+				addr_in.in6.sin6_family = AF_INET6;
+				addr_in.in6.sin6_port = htons(port);
+			}
+			if (bind(fd, &addr_in.sa, sizeof(addr_in)) != 0) {
 				log(NORMAL, "FATAL: couldn't bind socket "
 						"to Homa port %d: %s\n", port,
 						strerror(errno));

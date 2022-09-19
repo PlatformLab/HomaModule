@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <arpa/inet.h>
 
 #include <algorithm>
 #include <atomic>
@@ -184,23 +185,34 @@ void seed_buffer(void *buffer, size_t length, int seed)
  */
 const char *print_address(sockaddr_in_union *addr)
 {
-#define BUF_SIZE 50
-#define NUM_BUFFERS 16
+
+// Avoid cache line conflicts:
+#define BUF_SIZE 64
+// Must be a power of 2:
+#define NUM_BUFFERS (1 << 4)
+	// Should use inet_ntop here....
 	static char buffers[NUM_BUFFERS][BUF_SIZE];
 	static std::atomic<int> next_buffer = 0;
 
 	char *buffer = buffers[next_buffer.fetch_add(1)
 		& (NUM_BUFFERS-1)];
-	if (addr->in4.sin_family != AF_INET) {
-		snprintf(buffer, BUF_SIZE, "Unknown family %d",
-				addr->in4.sin_family);
-		return buffer;
-	}
-	uint8_t *ipaddr = (uint8_t *) &addr->in4.sin_addr;
 	if ((buffer - &buffers[0][0]) > NUM_BUFFERS*BUF_SIZE)
 		printf("Buffer pointer corrupted!\n");
-	snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
-		ipaddr[2], ipaddr[3], ntohs(addr->in4.sin_port));
+	if (addr->in4.sin_family == AF_INET) {
+		uint8_t *ipaddr = (uint8_t *) &addr->in4.sin_addr;
+		snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u:%u", ipaddr[0], ipaddr[1],
+				ipaddr[2], ipaddr[3], ntohs(addr->in4.sin_port));
+	} else if (addr->in6.sin6_family == AF_INET6) {
+		char port[BUF_SIZE];
+		snprintf(port, BUF_SIZE, "]:%u", ntohs(addr->in6.sin6_port));
+		inet_ntop(addr->in6.sin6_family, &addr->in6.sin6_addr,
+				buffer + 1, sizeof(addr->in6.sin6_addr));
+		buffer[0] = '[';
+		strncat(buffer, port, BUF_SIZE);
+	} else {
+		snprintf(buffer, BUF_SIZE, "Unknown family %d",
+				addr->in6.sin6_family);
+	}
 	return buffer;
 }
 

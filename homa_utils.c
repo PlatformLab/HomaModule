@@ -201,7 +201,7 @@ void homa_destroy(struct homa *homa)
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		sockaddr_in_union *dest, struct iov_iter *iter)
+		const sockaddr_in_union *dest, struct iov_iter *iter)
 {
 	int err;
 	struct homa_rpc *crpc;

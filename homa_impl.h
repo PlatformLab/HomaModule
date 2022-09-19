@@ -1083,10 +1083,16 @@ struct homa_sock {
 	bool shutdown;
 
 	/**
-	 * Port number: identifies this socket uniquely among all
+	 * @port: Port number: identifies this socket uniquely among all
 	 * those on this node.
 	 */
 	__u16 port;
+
+	/**
+	 * @ip_header_length: Length of IP headers for this socket (depends
+	 * on IPv4 vs. IPv6).
+	 */
+	int ip_header_length;
 
 	/**
 	 * @client_socktab_links: Links this socket into the homa_socktab
@@ -1219,7 +1225,10 @@ struct homa_peertab {
  * have communicated with (either as client or server).
  */
 struct homa_peer {
-	/** @addr: IPv6 address for the machine. */
+	/**
+	 * @addr: IPv6 address for the machine (IPv4 addresses are stored
+	 * as IPv4-mapped IPv6 addresses).
+	 */
 	struct in6_addr addr;
 
 	/** @flow: Addressing info needed to send packets. */
@@ -2673,7 +2682,9 @@ extern int      homa_dointvec(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
                     struct homa_peer *peer, struct homa_sock *hsk);
-extern int      homa_err_handler(struct sk_buff *skb, u32 info);
+extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
+extern int      homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *
+                    , u8,  u8,  int,  __be32);
 extern struct sk_buff
                *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
                     struct iov_iter *iter);
@@ -2779,7 +2790,7 @@ extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
-                    sockaddr_in_union *dest, struct iov_iter *iter);
+                    const sockaddr_in_union *dest, struct iov_iter *iter);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk,
 			const struct in6_addr *source, struct data_header *h);
@@ -2791,7 +2802,7 @@ extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    sockptr_t optval, unsigned int optlen);
+                    sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char* format, ...)
@@ -2825,7 +2836,7 @@ extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
-                    __u64 id, sockaddr_in_union *client_addr);
+                    __u64 id, const sockaddr_in_union *client_addr);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
                     size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
@@ -2951,7 +2962,7 @@ static inline __be32 ip6_as_be32(const struct in6_addr x)
 	if (is_mapped_ipv4(x)) {
 		return x.in6_u.u6_addr32[3];
 	} else {
-		return x.in6_u.u6_addr32[2];
+		return x.in6_u.u6_addr32[3];
 	}
 }
 
@@ -2959,8 +2970,6 @@ static inline __be32 ip4_as_be32(struct in_addr x)
 {
 	return ntohl(x.s_addr);
 }
-
-#define testing_ipv6() false
 
 extern struct completion homa_pacer_kthread_done;
 #endif /* _HOMA_IMPL_H */

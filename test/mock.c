@@ -135,15 +135,14 @@ int mock_xmit_prios_offset = 0;
 /* Maximum packet size allowed by "network" (see homa_message_out_init;
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
+ * Set by mock_sock_init.
  */
-#define MOCK_MTU (UNIT_TEST_DATA_PER_PACKET + HOMA_IPV4_HEADER_LENGTH \
-		+ sizeof(struct data_header))
-int mock_mtu = MOCK_MTU;
+int mock_mtu = 0;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
-		.gso_max_size = MOCK_MTU};
+		.gso_max_size = 0};
 
 static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
@@ -386,22 +385,64 @@ int import_single_range(int type, void __user *buf, size_t len,
 	return 0;
 }
 
-int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
+int inet6_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
 	return 0;
 }
+
+int inet6_add_protocol(const struct inet6_protocol *prot, unsigned char num)
+{
+	return 0;
+}
+
+int inet6_del_offload(const struct net_offload *prot, unsigned char protocol)
+{
+	return 0;
+}
+
+int inet6_del_protocol(const struct inet6_protocol *prot, unsigned char num)
+{
+	return 0;
+}
+
+int inet6_getname(struct socket *sock, struct sockaddr *uaddr, int peer)
+{
+	return 0;
+}
+
+int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	return 0;
+}
+
+int inet6_register_protosw(struct inet_protosw *p)
+{
+	return 0;
+}
+
+int inet6_release(struct socket *sock)
+{
+	return 0;
+}
+
+void inet6_unregister_protosw(struct inet_protosw *p) {}
 
 int inet_add_offload(const struct net_offload *prot, unsigned char protocol)
 {
 	return 0;
 }
 
-int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
+int inet_add_protocol(const struct net_protocol *prot, unsigned char num)
 {
 	return 0;
 }
 
 int inet_del_offload(const struct net_offload *prot, unsigned char protocol)
+{
+	return 0;
+}
+
+int inet_del_protocol(const struct net_protocol *prot, unsigned char num)
 {
 	return 0;
 }
@@ -462,6 +503,15 @@ void iov_iter_revert(struct iov_iter *i, size_t bytes)
 	unit_log_printf("; ", "iov_iter_revert %lu", bytes);
 }
 
+int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
+{
+	return 0;
+}
+
+void ip6_datagram_release_cb(struct sock *sk)
+{
+}
+
 struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		struct flowi6 *fl6, const struct in6_addr *final_dst)
 {
@@ -482,6 +532,36 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		routes_in_use = unit_hash_new();
 	unit_hash_set(routes_in_use, route, "used");
 	return &route->dst;
+}
+
+unsigned int ip6_mtu(const struct dst_entry *dst)
+{
+	return mock_mtu;
+}
+
+int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
+	     __u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
+{
+	char buffer[200];
+	const char *prefix = " ";
+	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
+		kfree_skb(skb);
+		return -ENETDOWN;
+	}
+	if (mock_xmit_prios_offset == 0)
+		prefix = "";
+	mock_xmit_prios_offset += snprintf(
+			mock_xmit_prios + mock_xmit_prios_offset,
+			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
+			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>5);
+	if (mock_xmit_log_verbose)
+		homa_print_packet(skb, buffer, sizeof(buffer));
+	else
+		homa_print_packet_short(skb, buffer, sizeof(buffer));
+	unit_log_printf("; ", "xmit %s", buffer);
+	kfree_skb(skb);
+	return 0;
+	return 0;
 }
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
@@ -511,11 +591,6 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 }
 
 unsigned int ipv4_mtu(const struct dst_entry *dst)
-{
-	return mock_mtu;
-}
-
-unsigned int ip6_mtu(const struct dst_entry *dst)
 {
 	return mock_mtu;
 }
@@ -954,7 +1029,7 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
  *              which of the next calls should result in errors.
  *
  * Return:      zero means the function should behave normally; 1 means return
- *              an eror
+ *              an error
  */
 int mock_check_error(int *errorMask)
 {
@@ -1086,7 +1161,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
 
-	ip_size = sizeof(struct iphdr);
+	ip_size = testing_ipv6() ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(data_size + shinfo_size);
@@ -1147,6 +1222,9 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = testing_ipv6() ? AF_INET6 : AF_INET;
 	hsk->inet.pinet6 = &hsk_pinfo;
+	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
+		+ sizeof(struct data_header);
+	mock_net_device.gso_max_size = mock_mtu;
 }
 
 /**
@@ -1192,8 +1270,8 @@ void mock_teardown(void)
 	mock_signal_pending = 0;
 	mock_spin_lock_hook = NULL;
 	mock_xmit_log_verbose = 0;
-	mock_mtu = MOCK_MTU;
-	mock_net_device.gso_max_size = MOCK_MTU;
+	mock_mtu = 0;
+	mock_net_device.gso_max_size = 0;
 
 	int count = unit_hash_size(buffs_in_use);
 	if (count > 0)

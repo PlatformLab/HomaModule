@@ -159,15 +159,15 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		them = "server";
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "
 				"offset %d",
-				rpc->id, ip6_as_be32(rpc->peer->addr), rpc->dport,
-				ntohl(resend.offset));
+				rpc->id, ip6_as_be32(rpc->peer->addr),
+				rpc->dport, ntohl(resend.offset));
 	} else {
 		us = "server";
 		them = "client";
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d "
 				"offset %d",
-				rpc->id, ip6_as_be32(rpc->peer->addr), rpc->dport,
-				ntohl(resend.offset));
+				rpc->id, ip6_as_be32(rpc->peer->addr),
+				rpc->dport, ntohl(resend.offset));
 	}
 	if (homa->verbose) {
 		printk(KERN_NOTICE "Homa %s RESEND to %s %s:%d for id %llu, "

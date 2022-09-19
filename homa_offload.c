@@ -36,7 +36,9 @@ extern struct homa *homa;
  */
 int homa_offload_init(void)
 {
-	return inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	int res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
+	int res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+	return res1 ? res1 : res2;
 }
 
 /**
@@ -47,7 +49,9 @@ int homa_offload_init(void)
  */
 int homa_offload_end(void)
 {
-	return inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	int res1 = inet_del_offload(&homa_offload, IPPROTO_HOMA);
+	int res2 = inet6_del_offload(&homa_offload, IPPROTO_HOMA);
+	return res1 ? res1 : res2;
 }
 
 /**
@@ -104,40 +108,43 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	struct data_header *h_new;
 //	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
-	struct iphdr *iph;
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
+	struct data_header *h_new = (struct data_header *)
+			skb_transport_header(skb);
+	int priority;
+	__u32 saddr;
+	if (skb_is_ipv6(skb)) {
+		priority = ((struct ipv6hdr *) skb_network_header(skb))->priority;
+		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
+	} else {
+		priority = ((struct iphdr *) skb_network_header(skb))->tos >> 5;
+		saddr = ntohl(ip_hdr(skb)->saddr);
+	}
 
 //      The test below is overly conservative except for data packets.
 //	if (!pskb_may_pull(skb, 64))
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
-	iph = (struct iphdr *) skb_network_header(skb);
-	h_new = (struct data_header *) skb_transport_header(skb);
 	if (h_new->common.type == DATA)
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ntohl(ip_hdr(skb)->saddr),
-				homa_local_id(h_new->common.sender_id),
-				ntohl(h_new->seg.offset),
-				iph->tos >> 5);
+				saddr, homa_local_id(h_new->common.sender_id),
+				ntohl(h_new->seg.offset), priority);
 	else if (h_new->common.type == GRANT)
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
-				ntohl(ip_hdr(skb)->saddr),
-				homa_local_id(h_new->common.sender_id),
+				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
-				iph->tos >> 5);
+				priority);
 	else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
-				ntohl(ip_hdr(skb)->saddr),
-				homa_local_id(h_new->common.sender_id),
-				h_new->common.type, iph->tos >> 5);
+				saddr, homa_local_id(h_new->common.sender_id),
+				h_new->common.type, priority);
 
 	core->last_active = get_cycles();
 

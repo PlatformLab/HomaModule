@@ -89,8 +89,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
-- September 2022: Added completion cookies to the Homa API. This is an
-  incompatible interface change.
+- September 2022: Added support for IPv6, as well as completion cookies.
+  This required small but incompatible changes to the API.
+  Many thanks to Dan Manjarres for contributing these
+  improvements.
 - September 2022: Homa now works on Linux 5.18 as well as 5.17.7
 - June 2022: upgraded to Linux 5.17.7.
 - November 2021: changed semantics to at-most-once (servers can no

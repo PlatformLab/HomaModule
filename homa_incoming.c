@@ -317,7 +317,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 			tt_record4("Discarding packet for unknown RPC, id %u, "
 					"type %d, peer 0x%x:%d",
 					id, h->type,
-					ntohl(ip_hdr(skb)->saddr),
+					ip6_as_be32(saddr),
 					ntohs(h->sport));
 			if ((h->type != GRANT) || homa_is_client(id))
 				INC_METRIC(unknown_rpcs, 1);
@@ -546,13 +546,14 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		struct homa_sock *hsk)
 {
 	struct resend_header *h = (struct resend_header *) skb->data;
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct busy_header busy;
 
 	if (rpc == NULL) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, "
 				"offset %d; responding with UNKNOWN",
 				homa_local_id(h->common.sender_id),
-				ntohl(ip_hdr(skb)->saddr),
+				ip6_as_be32(saddr),
 				ntohs(h->common.sport),
 				ntohl(h->offset));
 		homa_xmit_unknown(skb, hsk);
@@ -725,7 +726,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
 			"other acks", homa_local_id(h->sender_id),
-			ntohl(ip_hdr(skb)->saddr), ntohs(ack.num_acks));
+			ip6_as_be32(saddr), ntohs(ack.num_acks));
 
     done:
 	kfree_skb(skb);
@@ -1503,7 +1504,7 @@ int homa_register_interests(struct homa_interest *interest,
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		__u64 id, sockaddr_in_union *client_addr)
+		__u64 id, const sockaddr_in_union *client_addr)
 {
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
