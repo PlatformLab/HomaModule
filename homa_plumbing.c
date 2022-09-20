@@ -771,7 +771,6 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	} else {
 		args.source_addr.in4.sin_family = AF_INET;
 		args.source_addr.in4.sin_port = htons(rpc->dport);
-
 		args.source_addr.in4.sin_addr.s_addr =
 			ip6_as_be32(rpc->peer->addr);
 	}
