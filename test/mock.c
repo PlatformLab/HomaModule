@@ -350,6 +350,13 @@ void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
 
+void icmp6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info,
+		const struct in6_addr *force_saddr,
+		const struct inet6_skb_parm *parm)
+{
+	unit_log_printf("; ", "icmp6_send type %d, code %d", type, code);
+}
+
 int idle_cpu(int cpu)
 {
 	return mock_check_error(&mock_cpu_idle);
