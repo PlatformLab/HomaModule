@@ -2962,7 +2962,8 @@ static inline __be32 ip6_as_be32(const struct in6_addr x)
 	if (is_mapped_ipv4(x)) {
 		return x.in6_u.u6_addr32[3];
 	} else {
-		return x.in6_u.u6_addr32[3];
+		return x.in6_u.u6_addr32[3] ? x.in6_u.u6_addr32[3]
+				: x.in6_u.u6_addr32[1];
 	}
 }
 
