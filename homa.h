@@ -203,7 +203,7 @@ _Static_assert(sizeof(struct homa_reply_args) <= 80, "homa_reply_args grew");
 #endif
 
 /**
- * define homa_args_abort_ipv4 - Structure that passes arguments and results
+ * define homa_abort_args - Structure that passes arguments and results
  * between user space and the HOMAIOCABORT ioctl.
  */
 struct homa_abort_args {
