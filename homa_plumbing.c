@@ -632,7 +632,6 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
  */
 void homa_close(struct sock *sk, long timeout) {
 	struct homa_sock *hsk = homa_sk(sk);
-	printk(KERN_NOTICE "closing socket %d\n", hsk->port);
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 	tt_record1("closed socket, port %d\n", hsk->port);
@@ -1120,7 +1119,6 @@ int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	homa_sock_init(hsk, homa);
-	printk(KERN_NOTICE "opened socket %d\n", hsk->port);
 	return 0;
 }
 
@@ -1221,6 +1219,7 @@ int homa_hash(struct sock *sk) {
  * @sk:    Socket for the operation
  */
 void homa_unhash(struct sock *sk) {
+	return;
 	printk(KERN_WARNING "unimplemented unhash invoked on Homa socket\n");
 }
 

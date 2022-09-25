@@ -179,7 +179,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_sock_unlock(hsk);
 		return;
 	}
-	printk(KERN_NOTICE "Shutting down socket %d", hsk->port);
 
 	/* The order of cleanup is very important, because there could be
 	 * active operations that hold RPC locks but not the socket lock.
