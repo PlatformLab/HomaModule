@@ -208,7 +208,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
 				self->recv_args.source_addr.in6.sin6_addr);
 	} else {
 		EXPECT_EQ_IP(*self->server_ip,
-				ip4to6(self->recv_args.source_addr.in4.sin_addr));
+				ip4to6(self->recv_args.source_addr.in4
+				.sin_addr.s_addr));
 	}
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -228,7 +229,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 				self->recv_args.source_addr.in6.sin6_addr);
 	} else {
 		EXPECT_EQ_IP(*self->server_ip,
-				ip4to6(self->recv_args.source_addr.in4.sin_addr));
+				ip4to6(self->recv_args.source_addr.in4
+				.sin_addr.s_addr));
 	}
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -256,7 +258,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 				self->recv_args.source_addr.in6.sin6_addr);
 	} else {
 		EXPECT_EQ_IP(*self->server_ip,
-				ip4to6(self->recv_args.source_addr.in4.sin_addr));
+				ip4to6(self->recv_args.source_addr.in4
+				.sin_addr.s_addr));
 	}
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -290,7 +293,8 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 				self->recv_args.source_addr.in6.sin6_addr);
 	} else {
 		EXPECT_EQ_IP(*self->client_ip,
-				ip4to6(self->recv_args.source_addr.in4.sin_addr));
+				ip4to6(self->recv_args.source_addr.in4
+				.sin_addr.s_addr));
 	}
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);

@@ -2888,45 +2888,17 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	return peer->dst;
 }
 
-/* Like iphdr, but using 'struct in_addr' for the saddr and daddr fields */
-struct ipv4hdr {
-#if defined(__LITTLE_ENDIAN_BITFIELD)
-	__u8    ihl:4,
-                version:4;
-#elif defined (__BIG_ENDIAN_BITFIELD)
-	__u8    version:4,
-		ihl:4;
-#else
-#error  "Please fix <asm/byteorder.h>"
-#endif
-	__u8    tos;
-	__be16  tot_len;
-	__be16  id;
-	__be16  frag_off;
-	__u8    ttl;
-	__u8    protocol;
-	__sum16 check;
-	struct in_addr  saddr;
-	struct in_addr  daddr;
-	/*The options start here. */
-};
-
-static inline struct ipv4hdr *ipv4_hdr(struct sk_buff *skb)
-{
-	return  (struct ipv4hdr *)ip_hdr(skb);
-}
-
 static inline bool skb_is_ipv6(const struct sk_buff *skb)
 {
 	return ipv6_hdr(skb)->version == 6;
 }
 
-static inline struct in6_addr ip4to6(struct in_addr ip4)
+static inline struct in6_addr ip4to6(__be32 ip4)
 {
 	struct in6_addr ret = {};
-	if (ip4.s_addr == INADDR_ANY) return in6addr_any;
+	if (ip4 == INADDR_ANY) return in6addr_any;
 	ret.in6_u.u6_addr32[2] = htonl(0xffff);
-	ret.in6_u.u6_addr32[3] = ip4.s_addr;
+	ret.in6_u.u6_addr32[3] = ip4;
 	return ret;
 }
 
@@ -2935,7 +2907,7 @@ static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
 	if (addr) {
 		return (addr->sa.sa_family == AF_INET6)
 			? addr->in6.sin6_addr
-			: ip4to6(addr->in4.sin_addr);
+			: ip4to6(addr->in4.sin_addr.s_addr);
 	} else {
 		return in6addr_any;
 	}
@@ -2943,7 +2915,7 @@ static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
 
 static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
-	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ipv4_hdr(skb)->saddr);
+	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ip_hdr(skb)->saddr);
 }
 
 static inline bool is_mapped_ipv4(const struct in6_addr x)

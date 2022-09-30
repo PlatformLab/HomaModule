@@ -13,7 +13,12 @@ Notes for Homa implementation in Linux:
   * grant_non_fifo may need to grant to a message that is also receiving
     regular grants
   * What if a message receives data beyond incoming, which completes the
-    message?
+    message?a
+
+* Pinning memory: see mm.h and mm/gup.c
+  * get_user_page
+  * get_user_pages
+  * pin_user_page (not sure the difference from get_user_page)
 
 * Performance-related tasks:
   * Rework FIFO granting so that it doesn't consider homa->max_overcommit

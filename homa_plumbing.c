@@ -1467,7 +1467,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
-	const struct ipv4hdr *iph = (const struct ipv4hdr *)ip_hdr(skb);
+	const struct iphdr *iph = ip_hdr(skb);
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
@@ -1475,7 +1475,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
 		struct common_header *h;
 		char *icmp = (char *) icmp_hdr(skb);
-		iph = (struct ipv4hdr *) (icmp + sizeof(struct icmphdr));
+		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
 		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
 				+ iph->ihl*4);
 		homa_abort_rpcs(homa, &saddr, htons(h->dport), -ENOTCONN);
@@ -1486,8 +1486,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-				ip4_as_be32(iph->saddr),
-				ip4_as_be32(iph->daddr));
+				iph->saddr, iph->daddr);
 		homa_abort_rpcs(homa, &saddr, 0, error);
 	} else {
 			printk(KERN_NOTICE "homa_err_handler_v4 invoked with "
