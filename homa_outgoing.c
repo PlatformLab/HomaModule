@@ -613,12 +613,11 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 
 	segs = skb_shinfo(skb)->gso_segs;
 	bytes = skb->tail - skb->transport_header;
-	bytes += HOMA_IPV6_HEADER_LENGTH + HOMA_VLAN_HEADER + HOMA_ETH_OVERHEAD;
+	bytes += HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD;
 	if (segs > 0)
 		bytes += (segs - 1) * (sizeof32(struct data_header)
 				- sizeof32(struct data_segment)
-				+ HOMA_IPV6_HEADER_LENGTH + HOMA_VLAN_HEADER
-				+ HOMA_ETH_OVERHEAD);
+				+ HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD);
 	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
 	while (1) {
 		clock = get_cycles();

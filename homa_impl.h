@@ -40,7 +40,6 @@
 
 #include <linux/audit.h>
 #include <linux/icmp.h>
-#include <linux/if_vlan.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/module.h>
@@ -145,9 +144,6 @@ enum homa_packet_type {
  */
 #define HOMA_SKB_EXTRA 40
 
-/** define HOMA_VLAN_HEADER - Number of bytes in an Ethernet VLAN header. */
-#define HOMA_VLAN_HEADER 20
-
 /**
  * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for CRC,
  * preamble, and inter-packet gap.
@@ -167,7 +163,7 @@ enum homa_packet_type {
 #define HOMA_MAX_HEADER 90
 
 /**
- * define ETHERNET_MAX_PAYLOAD - A maximum length of an Ethernet packet,
+ * define ETHERNET_MAX_PAYLOAD - Maximum length of an Ethernet packet,
  * excluding preamble, frame delimeter, VLAN header, CRC, and interpacket gap;
  * i.e. all of this space is available for Homa.
  */
