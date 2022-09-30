@@ -75,12 +75,12 @@ struct homa_send_args {
 	const struct iovec *iovec;
 
 	/**
-	 * @length: The number of bytes at *request, or the number of elements
-	 * at *iovec.
+	 * @length: The number of bytes at *message_buf, or the number of
+	 * elements at *iovec.
 	 */
 	size_t length;
 
-	/** @dest_addr: Address of server to which request will be sent. */
+	/** @dest_addr: Address of server to which message_buf will be sent. */
 	sockaddr_in_union dest_addr;
 
 	uint32_t _pad1;
@@ -122,8 +122,8 @@ struct homa_recv_args {
 	const struct iovec *iovec;
 
 	/**
-	 * @length: Initially holds length of @buf or @iovec; modified to
-	 * return total message length.
+	 * @length: Initially holds length of @message_buf or @iovec; modified
+	 * to return total message length.
 	 */
 	size_t length;
 
@@ -184,8 +184,8 @@ struct homa_reply_args {
 	const struct iovec *iovec;
 
 	/**
-	 * @length: Initially holds length of @buf or @iovec; modified to
-	 * return total message length.
+	 * @length: Initially holds length of @message_buf or @iovec; modified
+	 * to return total message length.
 	 */
 	size_t length;
 
@@ -255,7 +255,7 @@ extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
 extern int     homa_abortp(int fd, struct homa_abort_args *args);
 
 extern int     homa_send(int sockfd, const void *message_buf,
-		size_t reqlen, const sockaddr_in_union *dest_addr,
+		size_t length, const sockaddr_in_union *dest_addr,
 		uint64_t *id, uint64_t completion_cookie);
 extern int     homa_sendv(int sockfd, const struct iovec *iov,
 		int iovcnt, const sockaddr_in_union *dest_addr,

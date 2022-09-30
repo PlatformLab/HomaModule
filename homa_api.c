@@ -81,7 +81,7 @@ int homa_abortp(int sockfd, struct homa_abort_args *args) {
  * response) and return it.
  * @sockfd:            File descriptor for the socket on which to receive the
  *                     message.
- * @buf:               First byte of buffer for the incoming message.
+ * message_bufbuf:     First byte of buffer for the incoming message.
  * @length:            Number of bytes available at @request.
  * @flags:             An ORed combination of bits such as HOMA_RECV_REQUEST and
  *                     HOMA_RECV_NONBLOCKING
@@ -99,17 +99,18 @@ int homa_abortp(int sockfd, struct homa_abort_args *args) {
  * @completion_cookie: If non-null, the completion cookie specified when
  *                     homa_send was invoked will be stored here.
  *
- * Return:             The number of bytes of data returned at @buf. If an error
- *                     occurred, -1 is returned and errno is set appropriately.
+ * Return:             The number of bytes of data returned at @message_buf. If
+ *                     an error occurred, -1 is returned and errno is set
+ *                     appropriately.
  */
-ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
+ssize_t homa_recv(int sockfd, void *message_buf, size_t length, int flags,
 	        sockaddr_in_union *src_addr, uint64_t *id, size_t *msglen,
 		uint64_t *completion_cookie)
 {
 	struct homa_recv_args args = {};
 	int result;
 
-	args.message_buf = buf;
+	args.message_buf = message_buf;
 	args.iovec = NULL;
 	args.length = length;
 	args.source_addr = *src_addr;
@@ -155,8 +156,9 @@ ssize_t homa_recv(int sockfd, void *buf, size_t length, int flags,
  * @completion_cookie: If non-null, the completion cookie specified when
  *                     homa_send was invoked will be stored here.
  *
- * Return:             The number of bytes of data returned at @buf. If an error
- *                     occurred, -1 is returned and errno is set appropriately.
+ * Return:             The number of bytes of data returned through @iov. If an
+ *                     error occurred, -1 is returned and errno is set
+ *                     appropriately.
  */
 ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 	        sockaddr_in_union *src_addr, uint64_t *id, size_t *msglen,
@@ -254,8 +256,8 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * homa_send() - Send a request message to initiate an RPC.
  * @sockfd:            File descriptor for the socket on which to send the
  *                     message.
- * @request:           First byte of buffer containing the request message.
- * @reqlen:            Number of bytes at @request.
+ * @message_buf:       First byte of buffer containing the request message.
+ * @length:            Number of bytes at @message_buf.
  * @dest_addr:         Address of server to which the request should be sent.
  * @id:                A unique identifier for the request will be returned
  *                     here; this can be used later to find the response for
@@ -265,15 +267,15 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
-int homa_send(int sockfd, const void *request, size_t reqlen,
+int homa_send(int sockfd, const void *message_buf, size_t length,
 		const sockaddr_in_union *dest_addr, uint64_t *id,
 		uint64_t completion_cookie)
 {
 	struct homa_send_args args = {};
 	int result;
-	args.message_buf = (void *) request;
+	args.message_buf = (void *) message_buf;
 	args.iovec = NULL;
-	args.length = reqlen;
+	args.length = length;
 	args.dest_addr = *dest_addr;
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
