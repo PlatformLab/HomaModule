@@ -49,7 +49,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 				tt_record4("Sent NEED_ACK for RPC id %d to "
 						"peer 0x%x, port %d, ticks %d",
 						rpc->id,
-						ip6_as_be32(rpc->peer->addr),
+						tt_addr(rpc->peer->addr),
 						rpc->dport, homa->timer_ticks
 						- rpc->done_timer_ticks);
 			}
@@ -89,8 +89,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		INC_METRIC(peer_timeouts, 1);
 		tt_record4("peer 0x%x timed out for RPC id %d, "
 				"state %d, outstanding_resends %d",
-				ip6_as_be32(peer->addr),
-				rpc->id, rpc->state,
+				tt_addr(peer->addr), rpc->id, rpc->state,
 				peer->outstanding_resends);
 		if (homa->verbose)
 			printk(KERN_NOTICE "Homa peer %s timed out, id %llu",
@@ -159,14 +158,14 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		them = "server";
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "
 				"offset %d",
-				rpc->id, ip6_as_be32(rpc->peer->addr),
+				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, ntohl(resend.offset));
 	} else {
 		us = "server";
 		them = "client";
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d "
 				"offset %d",
-				rpc->id, ip6_as_be32(rpc->peer->addr),
+				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, ntohl(resend.offset));
 	}
 	if (homa->verbose) {

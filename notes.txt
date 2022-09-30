@@ -3,9 +3,7 @@ Notes for Homa implementation in Linux:
 
 * IPv6 issues:
   * Figure out testing_ipv6().
-  * Clean up inline functions at the end of homa_impl.h
   * Remove HOMA_VLAN_HEADER
-  * Reverse sense of inet6_as_be32
   * Verify that priorities work.
 
 * Refactor of granting mechanism:

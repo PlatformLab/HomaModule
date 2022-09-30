@@ -2641,6 +2641,92 @@ static inline void homa_throttle_unlock(struct homa *homa)
 	spin_unlock_bh(&homa->throttle_lock);
 }
 
+/** skb_is_ipv6() - Return true if the packet is encapsulated with IPv6,
+ *  false otherwise (presumably it's IPv4).
+ */
+static inline bool skb_is_ipv6(const struct sk_buff *skb)
+{
+	return ipv6_hdr(skb)->version == 6;
+}
+
+/**
+ * Given an IPv4 address, return an equivalent IPv6 address (an IPv4-mapped
+ * one)
+ * @ip4: IPv4 address, in network byte order.
+ */
+static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
+{
+	struct in6_addr ret = {};
+	if (ip4 == INADDR_ANY) return in6addr_any;
+	ret.in6_u.u6_addr32[2] = htonl(0xffff);
+	ret.in6_u.u6_addr32[3] = ip4;
+	return ret;
+}
+
+/**
+ * ipv6_to_ipv4() - Given an IPv6 address produced by ipv4_to_ipv6, return
+ * the original IPv4 address (in network byte order).
+ * @ip6:  IPv6 address; assumed to be a mapped IPv4 address.
+ */
+static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
+{
+	return ip6.in6_u.u6_addr32[3];
+}
+
+/**
+ * skb_canonical_ipv6_addr() - Convert a socket address to the "standard"
+ * form used in Homa, which is always an IPv6 address; if the original address
+ * was IPv4, convert it to an IPv4-mapped IPv6 address.
+ * @addr:   Address to canonicalize.
+ */
+static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
+{
+	if (addr) {
+		return (addr->sa.sa_family == AF_INET6)
+			? addr->in6.sin6_addr
+			: ipv4_to_ipv6(addr->in4.sin_addr.s_addr);
+	} else {
+		return in6addr_any;
+	}
+}
+
+/**
+ * skb_canonical_ipv6_saddr() - Given a packet buffer, return its source
+ * address in the "standard" form used in Homa, which is always an IPv6
+ * address; if the original address was IPv4, convert it to an IPv4-mapped
+ * IPv6 address.
+ * @skb:   The source address will be extracted from this packet buffer.
+ */
+static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
+{
+	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ipv4_to_ipv6(
+			ip_hdr(skb)->saddr);
+}
+
+/**
+ * is_mapped_ipv4() - Return true if an IPv6 address is actually an
+ * IPv4-mapped address, false otherwise.
+ * @x:  The address to check.
+ */
+static inline bool is_mapped_ipv4(const struct in6_addr x)
+{
+	return ((x.in6_u.u6_addr32[0] == 0) &&
+		(x.in6_u.u6_addr32[1] == 0) &&
+		(x.in6_u.u6_addr32[2] == htonl(0xffff)));
+}
+
+/**
+ * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
+ * provide a unique identifier for the address in a timetrace record.
+ * @x:  Address (either IPv6 or IPv4-mapped IPv6)
+ */
+static inline __be32 tt_addr(const struct in6_addr x)
+{
+	return is_mapped_ipv4(x) ? x.in6_u.u6_addr32[3]
+			: (x.in6_u.u6_addr32[3] ? x.in6_u.u6_addr32[3]
+			: x.in6_u.u6_addr32[1]);
+}
+
 #define INC_METRIC(metric, count) \
 		(homa_cores[raw_smp_processor_id()]->metrics.metric) += (count)
 
@@ -2886,62 +2972,6 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(&hsk->homa->peers, peer, hsk);
 	return peer->dst;
-}
-
-static inline bool skb_is_ipv6(const struct sk_buff *skb)
-{
-	return ipv6_hdr(skb)->version == 6;
-}
-
-static inline struct in6_addr ip4to6(__be32 ip4)
-{
-	struct in6_addr ret = {};
-	if (ip4 == INADDR_ANY) return in6addr_any;
-	ret.in6_u.u6_addr32[2] = htonl(0xffff);
-	ret.in6_u.u6_addr32[3] = ip4;
-	return ret;
-}
-
-static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
-{
-	if (addr) {
-		return (addr->sa.sa_family == AF_INET6)
-			? addr->in6.sin6_addr
-			: ip4to6(addr->in4.sin_addr.s_addr);
-	} else {
-		return in6addr_any;
-	}
-}
-
-static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
-{
-	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ip4to6(ip_hdr(skb)->saddr);
-}
-
-static inline bool is_mapped_ipv4(const struct in6_addr x)
-{
-	return ((x.in6_u.u6_addr32[0] == 0) &&
-		(x.in6_u.u6_addr32[1] == 0) &&
-		(x.in6_u.u6_addr32[2] == htonl(0xffff)));
-}
-
-// tt_record uses 32 bit arguments. For mapped addresses just extract the 32-bit
-// IPv4 address, in the general case take the lower half of the upper half
-// of the 128 bit IPv6 address, and hope that is unique :-(
-
-static inline __be32 ip6_as_be32(const struct in6_addr x)
-{
-	if (is_mapped_ipv4(x)) {
-		return x.in6_u.u6_addr32[3];
-	} else {
-		return x.in6_u.u6_addr32[3] ? x.in6_u.u6_addr32[3]
-				: x.in6_u.u6_addr32[1];
-	}
-}
-
-static inline __be32 ip4_as_be32(struct in_addr x)
-{
-	return ntohl(x.s_addr);
 }
 
 extern struct completion homa_pacer_kthread_done;

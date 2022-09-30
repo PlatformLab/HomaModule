@@ -1,6 +1,8 @@
 # Makefile to run unit tests for Homa
 
 KERNEL_DIR := /lib/modules/$(shell uname -r)/build
+CC ?= gcc
+CXX ?= g++
 PERL ?= perl
 ARCH ?= x86
 
@@ -75,20 +77,20 @@ all: run_tests
 .SUFFIXES:
 
 %.o: ../%.c
-	cc -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) $< -o $@
 %.e: ../%.c
-	cc -E $(CFLAGS) $< -o $@
+	$(CC) -E $(CFLAGS) $< -o $@
 %.o: %.c
-	cc -c $(CFLAGS) $< -o $@
+	$(CC) -c $(CFLAGS) $< -o $@
 %.e: %.c
-	cc -E $(CFLAGS) $< -o $@
+	$(CC) -E $(CFLAGS) $< -o $@
 %.o: %.cc
-	g++ -c $(CCFLAGS) $< -o $@
+	$(CXX) -c $(CCFLAGS) $< -o $@
 %.e: %.cc
-	g++ -E $(CCFLAGS) $< -o $@
+	$(CXX) -E $(CCFLAGS) $< -o $@
 
 unit: $(OBJS)
-	g++ $(CFLAGS) $^ -o $@ -lasan
+	$(CXX) $(CFLAGS) $^ -o $@ -lasan
 
 run_tests: unit
 	echo "Testing IPv6..."
