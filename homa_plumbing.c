@@ -1693,6 +1693,8 @@ int homa_dointvec(struct ctl_table *table, int write,
 				tt_freeze();
 			} else if (log_topic == 4)
 				homa_log_throttled(homa);
+			else if (log_topic == 5)
+				tt_printk();
 			else
 				homa_rpc_log_active(homa, log_topic);
 			log_topic = 0;

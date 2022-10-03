@@ -32,6 +32,8 @@ extern int        tt_linux_homa_temp_default[];
 extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
+extern void       (*tt_linux_printk)(void);
+extern void       tt_linux_skip_printk(void);
 extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 #endif
 
@@ -138,6 +140,7 @@ int tt_init(char *proc_file, int *temp)
 	tt_linux_buffer_mask = TT_BUF_SIZE-1;
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
+	tt_linux_printk = tt_printk;
 	if (temp)
 		tt_linux_homa_temp = temp;
 #endif
@@ -176,6 +179,7 @@ void tt_destroy(void)
 		tt_linux_buffers[i] = NULL;
 	}
 	tt_linux_inc_metrics = tt_linux_skip_metrics;
+	tt_linux_printk = tt_linux_skip_printk;
 	for (i = 0; i < 100; i++) {
 		tt_debug_int64[i] = 0;
 		tt_debug_ptr[i] = 0;
@@ -253,6 +257,52 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 }
 
 /**
+ * tt_find_oldest() - This function is invoked when printing out the
+ * Timetrace: it finds the oldest event to print from each trace.
+ * This will be events[0] if we never completely filled the buffer,
+ * otherwise events[nextIndex+1]. This means we don't print the entry at
+ * nextIndex; this is convenient because it simplifies boundary checks
+ * later on while printing records. In addition, if any buffer has
+ * wrapped around, then events with times less than the oldest in that
+ * buffer will be skipped (data from earlier than this is not necessarily
+ * complete, since there may have been events that were discarded).
+ * @pos:   Array with NPOS elements; will be filled in with the oldest
+ *         index in the trace for each core.
+ */
+void tt_find_oldest(int *pos)
+{
+	struct tt_buffer* buffer;
+	int i;
+	__u64 start_time = 0;
+
+	for (i = 0; i < nr_cpu_ids; i++) {
+		buffer = tt_buffers[i];
+		if (buffer->events[tt_buffer_size-1].format == NULL) {
+			pos[i] = 0;
+		} else {
+			int index = (buffer->next_index + 1)
+					& (tt_buffer_size-1);
+			struct tt_event *event = &buffer->events[index];
+			pos[i] = index;
+			if (event->timestamp > start_time) {
+				start_time = event->timestamp;
+			}
+		}
+	}
+
+	/* Skip over all events before start_time, in order to make
+	 * sure that there's no missing data in what we print.
+	 */
+	for (i = 0; i < nr_cpu_ids; i++) {
+		buffer = tt_buffers[i];
+		while ((buffer->events[pos[i]].timestamp < start_time)
+				&& (pos[i] != buffer->next_index)) {
+			pos[i] = (pos[i] + 1) & (tt_buffer_size-1);
+		}
+	}
+}
+
+/**
  * tt_proc_open() - This function is invoked when /proc/timetrace is
  * opened to read timetrace info.
  * @inode:    The inode corresponding to the file.
@@ -263,10 +313,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 int tt_proc_open(struct inode *inode, struct file *file)
 {
 	struct tt_proc_file* pf = NULL;
-	struct tt_buffer* buffer;
-	__u64 start_time;
 	int result = 0;
-	int i;
 
 	spin_lock(&tt_lock);
 	if (!init) {
@@ -283,45 +330,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	pf->next_byte = pf->msg_storage;
 
 	atomic_inc(&tt_freeze_count);
-
-	/* Find the oldest event in each trace. This will be events[0]
-	 * if we never completely filled the buffer, otherwise
-	 * events[nextIndex+1]. This means we don't print the entry at
-	 * nextIndex; this is convenient because it simplifies boundary
-	 * conditions in the code below.
-	 *
-	 * At the same time, find the most recent "oldest time" from
-	 * any buffer that has wrapped around (data from earlier than
-	 * this isn't necessarily complete, since there may have been
-	 * events that were discarded).
-	 */
-	start_time = 0;
-	for (i = 0; i < nr_cpu_ids; i++) {
-		buffer = tt_buffers[i];
-		if (buffer->events[tt_buffer_size-1].format == NULL) {
-			pf->pos[i] = 0;
-		} else {
-			int index = (buffer->next_index + 1)
-					& (tt_buffer_size-1);
-			struct tt_event *event = &buffer->events[index];
-			pf->pos[i] = index;
-			if (event->timestamp > start_time) {
-				start_time = event->timestamp;
-			}
-		}
-	}
-
-	/* Skip over all events before start_time, in order to make
-	 * sure that there's no missing data in what we print.
-	 */
-	for (i = 0; i < nr_cpu_ids; i++) {
-		buffer = tt_buffers[i];
-		while ((buffer->events[pf->pos[i]].timestamp < start_time)
-				&& (pf->pos[i] != buffer->next_index)) {
-			pf->pos[i] = (pf->pos[i] + 1) & (tt_buffer_size-1);
-		}
-	}
-
+	tt_find_oldest(pf->pos);
 	file->private_data = pf;
 
 	if (!tt_test_no_khz) {
@@ -514,6 +523,70 @@ int tt_proc_release(struct inode *inode, struct file *file)
 
 	spin_unlock(&tt_lock);
 	return 0;
+}
+
+/**
+ * tt_printk() - Print the contents of the timetrace to the system log.
+ * Useful in situations where the system is too unstable to extract a
+ * timetrace by reading /proc/timetrace.
+ */
+void tt_printk(void)
+{
+	/* Index of the next entry to return from each tt_buffer.
+	 * This array is too large to allocate on the stack, and we don't
+	 * want to allocate space dynamically (this function could be
+	 * called at a point where the world is going to hell). So,
+	 * allocate the array statically, and only allow one concurrent
+	 * call to this function.
+	 */
+	static int pos[NR_CPUS];
+	static atomic_t active;
+
+	if (atomic_xchg(&active, 1)) {
+		printk(KERN_NOTICE "concurrent call to tt_printk aborting\n");
+		return;
+	}
+	if (!init)
+		return;
+	atomic_inc(&tt_freeze_count);
+	tt_find_oldest(pos);
+
+	/* Each iteration of this loop printk's one event. */
+	while (true) {
+		struct tt_event *event;
+		int i;
+		int current_core = -1;
+		__u64 earliest_time = ~0;
+		char msg[200];
+
+		/* Check all the traces to find the earliest available event. */
+		for (i = 0; i < nr_cpu_ids; i++) {
+			struct tt_buffer *buffer = tt_buffers[i];
+			event = &buffer->events[pos[i]];
+			if ((pos[i] != buffer->next_index)
+					&& (event->timestamp < earliest_time)) {
+			    current_core = i;
+			    earliest_time = event->timestamp;
+			}
+		}
+		if (current_core < 0) {
+		    /* None of the traces have any more events to process. */
+		    break;
+		}
+		event = &(tt_buffers[current_core]->events[
+				pos[current_core]]);
+		pos[current_core] = (pos[current_core] + 1)
+				& (tt_buffer_size-1);
+
+		snprintf(msg, sizeof(msg), event->format, event->arg0,
+				event->arg1, event->arg2, event->arg3);
+		printk(KERN_NOTICE  "%lu [C%02d] %s\n",
+				(long unsigned int) event->timestamp,
+				current_core, msg);
+	}
+
+	atomic_dec(&tt_freeze_count);
+	atomic_set(&active, 0);
 }
 
 /**

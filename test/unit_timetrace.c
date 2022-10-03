@@ -97,21 +97,9 @@ TEST_F(timetrace, tt_record_buf__wraparound)
 			"1004 [C01] Message 5\n", buffer);
 }
 
-TEST_F(timetrace, tt_proc_open__not_initialized)
+TEST_F(timetrace, tt_find_oldest)
 {
-	tt_destroy();
-	int err = -tt_proc_open(NULL, &self->file);
-	EXPECT_EQ(EINVAL, err);
-}
-TEST_F(timetrace, tt_proc_open__no_memory)
-{
-	mock_kmalloc_errors = 1;
-	int err = -tt_proc_open(NULL, &self->file);
-	EXPECT_EQ(ENOMEM, err);
-}
-TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
-{
-	char buffer[1000];
+	int pos[NR_CPUS];
 	tt_buffer_size = 4;
 
 	tt_record_buf(tt_buffers[0], 1500, "Buf0", 0, 0, 0, 0);
@@ -131,18 +119,24 @@ TEST_F(timetrace, tt_proc_open__compute_start_time_and_skip_events)
 	tt_record_buf(tt_buffers[3], 1000, "Buf3", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[3], 1400, "Buf3", 0, 0, 0, 0);
 
-	tt_proc_open(NULL, &self->file);
-	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
-	tt_proc_release(NULL, &self->file);
-	EXPECT_STREQ("1150 [C02] Buf2\n"
-			"1160 [C02] Buf2\n"
-			"1200 [C01] Buf1\n"
-			"1210 [C02] Buf2\n"
-			"1300 [C01] Buf1\n"
-			"1400 [C03] Buf3\n"
-			"1500 [C00] Buf0\n"
-			"1600 [C00] Buf0\n"
-			"1700 [C00] Buf0\n", buffer);
+	tt_find_oldest(pos);
+	EXPECT_EQ(0, pos[0]);
+	EXPECT_EQ(2, pos[1]);
+	EXPECT_EQ(1, pos[2]);
+	EXPECT_EQ(1, pos[3]);
+}
+
+TEST_F(timetrace, tt_proc_open__not_initialized)
+{
+	tt_destroy();
+	int err = -tt_proc_open(NULL, &self->file);
+	EXPECT_EQ(EINVAL, err);
+}
+TEST_F(timetrace, tt_proc_open__no_memory)
+{
+	mock_kmalloc_errors = 1;
+	int err = -tt_proc_open(NULL, &self->file);
+	EXPECT_EQ(ENOMEM, err);
 }
 TEST_F(timetrace, tt_proc_open__increment_frozen)
 {
