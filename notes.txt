@@ -2,9 +2,8 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * IPv6 issues:
-  * Figure out testing_ipv6().
-  * Remove HOMA_VLAN_HEADER
   * Verify that priorities work.
+  * See if error checking made syscalls slower.
 
 * Refactor of granting mechanism:
   * Eliminate grant_increment: change to fifo_grant_increment instead

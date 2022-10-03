@@ -221,6 +221,50 @@ TEST_F(homa_peertab, homa_unsched_priority)
 	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
 }
 
+TEST_F(homa_peertab, homa_peer_get_dst_ipv4)
+{
+	struct dst_entry *dst;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	struct homa_peer *peer = homa_peer_find(&self->peertab,
+			&self->client_ip[0], &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+
+	dst = homa_peer_get_dst(peer, &self->hsk.inet);
+	ASSERT_NE(NULL, dst);
+	dst_release(dst);
+	EXPECT_STREQ("196.168.0.1",
+				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
+}
+TEST_F(homa_peertab, homa_peer_get_dst_ipv6)
+{
+	char buffer[30];
+	__u32 addr;
+	struct dst_entry *dst;
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	struct homa_peer *peer = homa_peer_find(&self->peertab, &ip1111[0],
+			&self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+
+	dst = homa_peer_get_dst(peer, &self->hsk.inet);
+	ASSERT_NE(NULL, dst);
+	dst_release(dst);
+	addr = ntohl(peer->flow.u.ip4.daddr);
+	snprintf(buffer, sizeof(buffer), "%u.%u.%u.%u", (addr >> 24) & 0xff,
+			(addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
+	EXPECT_STREQ("[1::1:1:1]",
+			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
+}
+
 TEST_F(homa_peertab, homa_peer_lock_slow)
 {
 	mock_cycles = 10000;

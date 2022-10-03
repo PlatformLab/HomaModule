@@ -2840,6 +2840,7 @@ extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_lcache *lcache, int *delta);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
+extern char    *homa_print_ipv4_addr(__be32 addr);
 extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);

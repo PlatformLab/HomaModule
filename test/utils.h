@@ -48,4 +48,3 @@ extern void          unit_log_skb_list(struct sk_buff_head *packets,
                         int verbose);
 extern void          unit_log_throttled(struct homa *homa);
 extern void          unit_teardown(void);
-extern bool          testing_ipv6(void);

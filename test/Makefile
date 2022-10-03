@@ -93,10 +93,16 @@ unit: $(OBJS)
 	$(CXX) $(CFLAGS) $^ -o $@ -lasan
 
 run_tests: unit
-	echo "Testing IPv6..."
-	IPV6=1 ./unit
-	echo "Testing IPv4..."
-	IPV6=0 ./unit
+	./unit
+
+# The target below shouldn't be needed: theoretically, any code that is
+# sensitive to IPv4 vs. IPv6 should be tested explicitly, regardless of
+# the --ipv4 argument.
+test_both: unit
+	@echo "Testing with IPv4 default:"
+	./unit --ipv4
+	@echo "Testing with IPv6 default:"
+	./unit
 
 clean:
 	rm -f unit $(CLEANS)

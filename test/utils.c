@@ -457,17 +457,3 @@ char *unit_ack_string(struct homa_ack *ack)
 			be64_to_cpu(ack->client_id));
 	return buffer;
 }
-
-bool testing_ipv6(void)
-{
-	static bool cached;
-	static bool cached_result;
-	if (cached) return cached_result;
-	char *getenv(const char *name);
-	const char *ipv6_string = getenv("IPV6");
-	if (ipv6_string && !strcmp(ipv6_string, "1")) {
-		cached_result = true;
-	}
-	cached = true;
-	return cached_result;
-}

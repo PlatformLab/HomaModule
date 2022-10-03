@@ -121,6 +121,18 @@ TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)
 	homa_sock_destroy(&hsk2);
 	homa_sock_destroy(&hsk3);
 }
+TEST_F(homa_socktab, homa_sock_init__ip_header_length)
+{
+	struct homa_sock hsk_v4, hsk_v6;
+	mock_ipv6 = false;
+	mock_sock_init(&hsk_v4, &self->homa, 0);
+	mock_ipv6 = true;
+	mock_sock_init(&hsk_v6, &self->homa, 0);
+	EXPECT_EQ(HOMA_IPV4_HEADER_LENGTH, hsk_v4.ip_header_length);
+	EXPECT_EQ(HOMA_IPV6_HEADER_LENGTH, hsk_v6.ip_header_length);
+	homa_sock_destroy(&hsk_v4);
+	homa_sock_destroy(&hsk_v6);
+}
 
 
 TEST_F(homa_socktab, homa_sock_shutdown__basics)

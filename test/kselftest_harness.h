@@ -318,20 +318,6 @@ extern int strcmp(const char *s1, const char *s2);
 		FIXTURE_DATA(fixture_name) __attribute__((unused)) *self)
 
 /**
- * TEST_HARNESS_MAIN - Simple wrapper to run the test harness
- *
- * .. code-block:: c
- *
- *     TEST_HARNESS_MAIN
- *
- * Use once to append a main() to the test file.
- */
-#define TEST_HARNESS_MAIN \
-	int main(int argc, char **argv) { \
-		return test_harness_run(argc, argv); \
-	}
-
-/**
  * DOC: operators
  *
  * Operators for use in TEST() and TEST_F().
@@ -728,18 +714,6 @@ unsigned int __test_count;
 unsigned int __fixture_count;
 int __constructor_order;
 static int __verbose = 0;
-static char * __helpMessage =
-	"This program runs unit tests written in the Linux kernel kselftest "
-	"style.\n"
-	"    Usage: %s options test_name test_name ...\n"
-	"The following options are supported:\n"
-	"    --verbose or -v   Print the names of all tests as they run "
-	"(default:\n"
-	"                      print only tests that fail)\n"
-	"    --help or -h      Print this message\n"
-	"If one or more test_name arguments are provided, then only those "
-	"tests are\n"
-	"run; if no test names are provided, then all tests are run.\n";
 
 void __run_test(struct __test_metadata *t)
 {
@@ -806,39 +780,30 @@ void __run_test(struct __test_metadata *t)
 			t->name);
 }
 
+/**
+ * test_harness_run() - Run tests
+ * @argc:    Number of elements in argv; if > 0, then only tests with names
+ *           matching one of the elements in argv will be executed.
+ * @argv:    Test names.
+ * @verbose: Nonzero means print all test names as they run; zero means print
+ *           only for test failures.
+ */
 static int test_harness_run(int __attribute__((unused)) argc,
-			    char __attribute__((unused)) **argv)
+			    char __attribute__((unused)) **argv,
+			    int verbose)
 {
 	struct __test_metadata *t;
 	int ret = 0;
 	unsigned int count = 0;
 	unsigned int pass_count = 0;
-	int argi = 1;
+	__verbose = verbose;
 
-	for (argi = 1; argi < argc; argi++) {
-		if ((strcmp(argv[argi], "-v") == 0) ||
-			(strcmp(argv[argi], "--verbose") == 0)) {
-			__verbose = 1;
-		} else if ((strcmp(argv[argi], "-h") == 0) ||
-			(strcmp(argv[argi], "--help") == 0)) {
-			printf(__helpMessage, argv[0]);
-			return 0;
-		} else if (argv[argi][0] == '-') {
-			printf("Unknown option %s; type '%s --help' for help\n",
-				argv[argi], argv[0]);
-			return 1;
-		} else {
-			break;
-		}
-	}
-
-	/* TODO(wad) add optional arguments similar to gtest. */
-	printf("[==========] Running %u tests from %u test cases.\n",
+	printf("[==========] %u tests available from %u test cases.\n",
 	       __test_count, __fixture_count + 1);
 	for (t = __test_list; t; t = t->next) {
-		if (argi < argc) {
+		if (argc > 0) {
 			int i;
-			for (i = argi; i < argc; i++) {
+			for (i = 0; i < argc; i++) {
 				if (strcmp(argv[i], t->name) == 0)
 					break;
 			}

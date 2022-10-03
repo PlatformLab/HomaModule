@@ -47,6 +47,7 @@ int mock_copy_to_user_errors = 0;
 int mock_cpu_idle = 0;
 int mock_import_single_range_errors = 0;
 int mock_import_iovec_errors = 0;
+int mock_ip6_xmit_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
 int mock_route_errors = 0;
@@ -124,6 +125,14 @@ static int mock_active_rcu_locks = 0;
  * return actual clock time.
  */
 cycles_t mock_cycles = 0;
+
+/* Indicates whether we should be simulation IPv6 or IPv4 in the
+ * current test. Can be overridden by a test.
+ */
+bool mock_ipv6 = true;
+
+/* The value to use for mock_ipv6 in each test unless overridden. */
+bool mock_ipv6_default;
 
 /* Linux's idea of the current CPU number. */
 int cpu_number = 1;
@@ -551,7 +560,7 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 {
 	char buffer[200];
 	const char *prefix = " ";
-	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
+	if (mock_check_error(&mock_ip6_xmit_errors)) {
 		kfree_skb(skb);
 		return -ENETDOWN;
 	}
@@ -567,7 +576,6 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 		homa_print_packet_short(skb, buffer, sizeof(buffer));
 	unit_log_printf("; ", "xmit %s", buffer);
 	kfree_skb(skb);
-	return 0;
 	return 0;
 }
 
@@ -1168,7 +1176,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		buffs_in_use = unit_hash_new();
 	unit_hash_set(buffs_in_use, skb, "used");
 
-	ip_size = testing_ipv6() ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
+	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(data_size + shinfo_size);
@@ -1183,7 +1191,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	p = skb_put(skb, extra_bytes);
 	unit_fill_data(p, extra_bytes, first_value);
 	skb->users.refs.counter = 1;
-	if (testing_ipv6()) {
+	if (mock_ipv6) {
 		ipv6_hdr(skb)->version = 6;
 		ipv6_hdr(skb)->saddr = *saddr;
 		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
@@ -1219,6 +1227,8 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	struct sock *sk = (struct sock *) hsk;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
+	sk->sk_data_ready = mock_data_ready;
+	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	if ((port != 0) && (port >= HOMA_MIN_DEFAULT_PORT))
 		homa->next_client_port = port;
 	homa_sock_init(hsk, homa);
@@ -1226,8 +1236,6 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 		homa->next_client_port = saved_port;
 	if (port < HOMA_MIN_DEFAULT_PORT)
 		homa_sock_bind(&homa->port_map, hsk, port);
-	sk->sk_data_ready = mock_data_ready;
-	sk->sk_family = testing_ipv6() ? AF_INET6 : AF_INET;
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct data_header);
@@ -1260,8 +1268,10 @@ void mock_teardown(void)
 	mock_copy_to_user_errors = 0;
 	mock_cpu_idle = 0;
 	mock_cycles = 0;
+	mock_ipv6 = mock_ipv6_default;
 	mock_import_single_range_errors = 0;
 	mock_import_iovec_errors = 0;
+	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kmalloc_errors = 0;

@@ -113,6 +113,81 @@ FIXTURE_TEARDOWN(homa_plumbing)
 	homa = NULL;
 }
 
+TEST_F(homa_plumbing, homa_bind__version_mismatch)
+{
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	struct sockaddr addr = {};
+	addr.sa_family = AF_INET6;
+	struct socket sock = {};
+	sock.sk = &self->hsk.inet.sk;
+	int result = homa_bind(&sock, &addr, sizeof(addr));
+	EXPECT_EQ(EAFNOSUPPORT, -result);
+}
+TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
+{
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	sockaddr_in_union addr = {};
+	addr.in6.sin6_family = AF_INET6;
+	struct socket sock = {};
+	sock.sk = &self->hsk.inet.sk;
+	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
+	EXPECT_EQ(EINVAL, -result);
+}
+TEST_F(homa_plumbing, homa_bind__ipv6_ok)
+{
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	sockaddr_in_union addr = {};
+	addr.in6.sin6_family = AF_INET6;
+	addr.in6.sin6_port = htons(123);
+	struct socket sock = {};
+	sock.sk = &self->hsk.inet.sk;
+	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
+	EXPECT_EQ(0, -result);
+	EXPECT_EQ(123, self->hsk.port);
+}
+TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
+{
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	sockaddr_in_union addr = {};
+	addr.in4.sin_family = AF_INET;
+	struct socket sock = {};
+	sock.sk = &self->hsk.inet.sk;
+	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
+	EXPECT_EQ(EINVAL, -result);
+}
+TEST_F(homa_plumbing, homa_bind__ipv4_ok)
+{
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	sockaddr_in_union addr = {};
+	addr.in4.sin_family = AF_INET;
+	addr.in4.sin_port = htons(345);
+	struct socket sock = {};
+	sock.sk = &self->hsk.inet.sk;
+	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
+	EXPECT_EQ(0, -result);
+	EXPECT_EQ(345, self->hsk.port);
+}
+
 TEST_F(homa_plumbing, homa_ioc_recv__cant_read_user_args)
 {
 	mock_copy_data_errors = 1;
@@ -244,8 +319,13 @@ TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
+TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv4)
 {
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
 	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
@@ -253,14 +333,29 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion)
 		(unsigned long) &self->recv_args));
 	EXPECT_EQ(200, self->recv_args.length);
 	EXPECT_EQ(self->client_id, self->recv_args.id);
-	if (self->hsk.inet.sk.sk_family == AF_INET6) {
-		EXPECT_EQ_IP(*self->server_ip,
-				self->recv_args.source_addr.in6.sin6_addr);
-	} else {
-		EXPECT_EQ_IP(*self->server_ip,
-				ipv4_to_ipv6(self->recv_args.source_addr.in4
-				.sin_addr.s_addr));
-	}
+	EXPECT_EQ(AF_INET, self->recv_args.source_addr.in4.sin_family);
+	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
+			self->recv_args.source_addr.in4.sin_addr.s_addr));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv6)
+{
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
+
+	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, &server_ip6,
+			self->server_port, self->client_id, 100, 200);
+	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
+		(unsigned long) &self->recv_args));
+	EXPECT_EQ(200, self->recv_args.length);
+	EXPECT_EQ(self->client_id, self->recv_args.id);
+	EXPECT_EQ(AF_INET6, self->recv_args.source_addr.in6.sin6_family);
+	EXPECT_STREQ("[1::3:5:7]", homa_print_ipv6_addr(
+			&self->recv_args.source_addr.in6.sin6_addr));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
@@ -600,17 +695,35 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
 }
-TEST_F(homa_plumbing, homa_softirq__unknown_socket)
+TEST_F(homa_plumbing, homa_softirq__unknown_socket_ipv4)
 {
 	struct sk_buff *skb;
 	self->data.common.dport = htons(100);
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	if (testing_ipv6())
-		EXPECT_STREQ("icmp6_send type 1, code 4", unit_log_get());
-	else
-		EXPECT_STREQ("icmp_send type 3, code 3", unit_log_get());
+	EXPECT_STREQ("icmp_send type 3, code 3", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__unknown_socket_ipv6)
+{
+	struct sk_buff *skb;
+	self->data.common.dport = htons(100);
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	homa_softirq(skb);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_STREQ("icmp6_send type 1, code 4", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
 {

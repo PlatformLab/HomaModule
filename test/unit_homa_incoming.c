@@ -2480,7 +2480,7 @@ TEST_F(homa_incoming, homa_register_interests__return_request_by_id)
 		        self->server_id, 20000, 100);
 	ASSERT_NE(NULL, srpc);
 
-	if (testing_ipv6()) {
+	if (mock_ipv6) {
 		self->addr.in6.sin6_family = AF_INET6;
 		self->addr.in6.sin6_addr = *self->client_ip;
 		self->addr.in6.sin6_port = htons(self->client_port);

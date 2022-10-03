@@ -357,10 +357,15 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 			"xmit unknown packet type 0x0",
 			unit_log_get());
 }
-TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
+TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 {
 	struct homa_rpc *srpc;
 	struct grant_header h;
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 
 	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -370,6 +375,28 @@ TEST_F(homa_outgoing, __homa_xmit_control__ip_queue_xmit_error)
 	h.priority = 4;
 	mock_xmit_log_verbose = 1;
 	mock_ip_queue_xmit_errors = 1;
+	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
+}
+TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
+{
+	struct homa_rpc *srpc;
+	struct grant_header h;
+
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+
+	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+		self->server_ip, self->client_port, 1111, 10000, 10000);
+	ASSERT_NE(NULL, srpc);
+
+	h.offset = htonl(12345);
+	h.priority = 4;
+	mock_xmit_log_verbose = 1;
+	mock_ip6_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
@@ -525,14 +552,36 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
 	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
 }
-TEST_F(homa_outgoing, __homa_xmit_data__transmit_error)
+TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 {
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 2000, 1000));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	mock_ip_queue_xmit_errors = 1;
+	skb_get(crpc->msgout.packets);
+	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
+}
+TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
+{
+	// Make sure the test uses IPv6.
+	mock_ipv6 = true;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, unit_iov_iter((void *) 2000, 1000));
+	ASSERT_FALSE(IS_ERR(crpc));
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	mock_ip6_xmit_errors = 1;
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
@@ -634,7 +683,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 			500 - sizeof(struct data_header)
-			- self->hsk.ip_header_length
+			- HOMA_IPV6_HEADER_LENGTH
 			- HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
@@ -654,7 +703,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__multiple_packets_gso)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 			1200 - 3 *(sizeof(struct data_header)
-			+ self->hsk.ip_header_length + HOMA_ETH_OVERHEAD)));
+			+ HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD)));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
@@ -671,7 +720,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr,  unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->hsk.ip_header_length - HOMA_ETH_OVERHEAD));
+			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
@@ -688,7 +737,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->hsk.ip_header_length - HOMA_ETH_OVERHEAD));
+			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	unit_log_clear();
@@ -705,7 +754,7 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr, unit_iov_iter((void *) 1000,
 		        500 - sizeof(struct data_header)
-			- self->hsk.ip_header_length - HOMA_ETH_OVERHEAD));
+			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD));
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_unlock(crpc);
 	unit_log_clear();

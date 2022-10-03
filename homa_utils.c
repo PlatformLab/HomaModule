@@ -745,6 +745,36 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 }
 
 /**
+ * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
+ * representation.
+ * @addr:    Address to convert, in network byte order.
+ *
+ * Return:   The converted value. Values are stored in static memory, so
+ *           the caller need not free. This also means that storage is
+ *           eventually reused (there are enough buffers to accommodate
+ *           multiple "active" values).
+ *
+ * Note: Homa uses this function, rather than the %pI4 format specifier
+ * for snprintf et al., because the kernel's version of snprintf isn't
+ * available in Homa's unit test environment.
+ */
+char *homa_print_ipv4_addr(__be32 addr)
+{
+#define NUM_BUFS_IPV4 4
+#define BUF_SIZE_IPV4 30
+	static char buffers[NUM_BUFS_IPV4][BUF_SIZE_IPV4];
+	static int next_buf = 0;
+	__u32 a2 = ntohl(addr);
+	char *buffer = buffers[next_buf];
+	next_buf++;
+	if (next_buf >= NUM_BUFS_IPV4)
+		next_buf = 0;
+	snprintf(buffer, BUF_SIZE_IPV4, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
+			(a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
+	return buffer;
+}
+
+/**
  * homa_print_ipv6_addr() - Convert an IPv6 address to a human-readable string
  * representation. IPv4-mapped addresses are printed in IPv4 syntax.
  * @addr:    Address to convert, in network byte order.
