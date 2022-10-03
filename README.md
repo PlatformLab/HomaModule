@@ -16,6 +16,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   measured (Homa's 99-th percentile latency is usually better than TCP's mean
   latency). Here is a list of the most significant functionality that is still
   missing:
+  - The incast optimization from Section 3.6 of the SIGCOMM paper has not
+    been implemented yet. If you would like to test Homa under large incasts,
+    let me know and I will implement this feature.
   - Socket buffer memory management needs more work. Large numbers of large
     messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
 
