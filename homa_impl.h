@@ -625,14 +625,6 @@ struct homa_message_in {
 	bool scheduled;
 
 	/**
-	 * @possibly_in_grant_queue: True means this RPC may be linked
-	 * into peer->grantable_rpcs. Zero means it can't possibly be in
-	 * the list, so no need to check (which means acquiring a global
-	 * lock) when cleaning up the RPC.
-	 */
-	bool possibly_in_grant_queue;
-
-	/**
 	 * The offset within the message of the next byte to be copied
 	 * out of the message to a user buffer.
 	 */

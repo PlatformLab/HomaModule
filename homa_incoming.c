@@ -33,7 +33,6 @@ void homa_message_in_init(struct homa_message_in *msgin, int length)
 	msgin->incoming = -1;
 	msgin->priority = 0;
 	msgin->scheduled = 0;
-	msgin->possibly_in_grant_queue = 0;
 	msgin->xfer_offset = 0;
 	msgin->xfer_skb = NULL;
 	if (length < HOMA_NUM_SMALL_COUNTS*64) {
@@ -435,7 +434,6 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		rpc->msgin.incoming = incoming;
 		*delta += incoming;
 		rpc->msgin.scheduled = rpc->msgin.total_length > incoming;
-		rpc->msgin.possibly_in_grant_queue = rpc->msgin.scheduled;
 	}
 
 	/* Incorporate the packet, and subtract the net gain in bytes
@@ -1146,7 +1144,6 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
 
-	rpc->msgin.possibly_in_grant_queue = 0;
 	head =  list_first_entry(&peer->grantable_rpcs,
 			struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
@@ -1192,17 +1189,25 @@ void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 void homa_remove_from_grantable(struct homa *homa, struct homa_rpc *rpc)
 {
 	UNIT_LOG("; ", "homa_remove_from_grantable invoked");
-	if (rpc->msgin.total_length >= 0) {
-		if (rpc->msgin.possibly_in_grant_queue) {
-			homa_grantable_lock(homa);
-			if (!list_empty(&rpc->grantable_links)) {
-				homa_remove_grantable_locked(homa, rpc);
-				homa_grantable_unlock(homa);
-				homa_send_grants(homa);
-			} else
-				homa_grantable_unlock(homa);
-		}
-	}
+	/* In order to determine for sure whether an RPC is in the
+	 * grantable_rpcs we would need to acquire homa_grantable_lock,
+	 * which is expensive because it's global. Howevever, we can
+	 * check whether the RPC is queued without acquiring the lock,
+	 * and if it's not, then we don't need to acquire the lock (the
+	 * RPC can't get added to the queue without locking it, and we own
+	 * the RPC's lock). If it is in the queue, then we have to require
+	 * homa_grantable_lock and check again (it could have gotten
+	 * removed in the meantime).
+	 */
+	if (list_empty(&rpc->grantable_links))
+		return;
+	homa_grantable_lock(homa);
+	if (!list_empty(&rpc->grantable_links)) {
+		homa_remove_grantable_locked(homa, rpc);
+		homa_grantable_unlock(homa);
+		homa_send_grants(homa);
+	} else
+		homa_grantable_unlock(homa);
 }
 
 /**

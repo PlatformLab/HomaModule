@@ -1813,20 +1813,29 @@ TEST_F(homa_incoming, homa_send_grants__remove_from_grantable)
 			self->server_ip, self->client_port, 3, 30000, 100);
 	srpc3 = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->client_port, 5, 20000, 100);
-	EXPECT_EQ(1, srpc1->msgin.possibly_in_grant_queue);
 	atomic_set(&self->homa.total_incoming, 0);
 	self->homa.max_incoming = 3000;
 	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 9600; "
+			"request from 196.168.0.1, id 5, remaining 18600; "
+			"request from 197.168.0.1, id 3, remaining 28600",
+			unit_log_get());
 
 	/* First attempt grants to one message per host. */
+	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 11000@1; xmit GRANT 11400@0", unit_log_get());
-	unit_log_clear();
-	EXPECT_EQ(0, srpc1->msgin.possibly_in_grant_queue);
 	EXPECT_EQ(11000, srpc1->msgin.incoming);
 	EXPECT_EQ(11400, srpc2->msgin.incoming);
+	unit_log_clear();
+	unit_log_grantables(&self->homa);
+	EXPECT_STREQ("request from 196.168.0.1, id 5, remaining 18600; "
+			"request from 197.168.0.1, id 3, remaining 28600",
+			unit_log_get());
 
 	/* Second attempt will now get second message from host. */
+	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 10600@1", unit_log_get());
 	EXPECT_EQ(10600, srpc3->msgin.incoming);
@@ -2144,8 +2153,11 @@ TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 
-	/* Second time: not on the list. */
+	/* Second time: not on the list (make sure it doesn't attempt to
+	 * acquire homa_grantable_lock). */
+	homa_grantable_lock(&self->homa);
 	homa_remove_from_grantable(&self->homa, srpc);
+	homa_grantable_unlock(&self->homa);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
