@@ -163,7 +163,7 @@ int unit_list_length(struct list_head *head)
 }
 
 /**
- * unit_log_active_ids() - Appended to the test log a list of the active
+ * unit_log_active_ids() - Append to the test log a list of the active
  * RPC ids for a given socket, in order.
  * @hsk:   Socket whose active RPC ids should be logged.
  */
@@ -172,6 +172,29 @@ void unit_log_active_ids(struct homa_sock *hsk)
 	struct homa_rpc *rpc;
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
 		unit_log_printf(" ", "%llu", rpc->id);
+}
+
+/**
+ * unit_log_hashed_rpcs() - And to the test log a list of the RPC ids
+ * all RPCs present in the hash table for a socket.
+ * @hsk:    Socket whose hashed RPCs should be logged.
+ */
+void unit_log_hashed_rpcs(struct homa_sock *hsk)
+{
+	int i;
+	struct homa_rpc *rpc;
+	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {
+		hlist_for_each_entry_rcu(rpc, &hsk->client_rpc_buckets[i].rpcs,
+				hash_links) {
+			unit_log_printf(" ", "%llu", rpc->id);
+		}
+	}
+	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++) {
+		hlist_for_each_entry_rcu(rpc, &hsk->server_rpc_buckets[i].rpcs,
+				hash_links) {
+			unit_log_printf(" ", "%llu", rpc->id);
+		}
+	}
 }
 
 /**

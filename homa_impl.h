@@ -607,11 +607,10 @@ struct homa_message_in {
 
 	/**
 	 * @incoming: Total # of bytes of the message that the sender will
-	 * transmit without additional grants. Set to -1 on initialization,
-	 * then set to the incoming field from the first data packet (unsched.
-	 * bytes); after that, updated only when grants are sent. Never larger
-	 * than @total_length. Note: this may not be modified without holding
-	 * @homa->grantable_lock.
+	 * transmit without additional grants. Initialized to the number of
+	 * unscheduled bytes; after that, updated only when grants are sent.
+	 * Never larger than @total_length. Note: once initialized, this
+	 * may not be modified without holding @homa->grantable_lock.
 	 */
         int incoming;
 
@@ -836,6 +835,12 @@ struct homa_rpc {
 	struct hlist_node hash_links;
 
 	/**
+	 * @ready_links: Used to link this object into
+	 * &homa_sock.ready_requests or &homa_sock.ready_responses.
+	 */
+	struct list_head ready_links;
+
+	/**
 	 * @active_links: For linking this object into @hsk->active_rpcs.
 	 * The next field will be LIST_POISON1 if this RPC hasn't yet been
 	 * linked into @hsk->active_rpcs. Access with RCU.
@@ -850,12 +855,6 @@ struct homa_rpc {
 	 * msgin is complete, or NULL if none.
 	 */
 	struct homa_interest *interest;
-
-	/**
-	 * @ready_links: Used to link this object into
-	 * &homa_sock.ready_requests or &homa_sock.ready_responses.
-	 */
-	struct list_head ready_links;
 
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
@@ -2747,7 +2746,7 @@ extern void     homa_close(struct sock *sock, long timeout);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
-extern int      homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		    struct homa_lcache *lcache, int *delta);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
@@ -2795,8 +2794,8 @@ extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
                     struct iov_iter *iter, int max_bytes);
-extern void     homa_message_in_destroy(struct homa_message_in *msgin);
-extern void     homa_message_in_init(struct homa_message_in *msgin, int length);
+extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
+		    int incoming);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
                     struct sk_buff *skb, int len);

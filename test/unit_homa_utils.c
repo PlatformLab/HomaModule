@@ -172,9 +172,6 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 	struct homa_rpc *srpc1 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	ASSERT_FALSE(IS_ERR(srpc1));
-	if (srpc1->active_links.next == LIST_POISON1)
-		list_add_tail_rcu(&srpc1->active_links,
-				&srpc1->hsk->active_rpcs);
 	homa_rpc_unlock(srpc1);
 	self->data.common.sender_id = cpu_to_be64(
 			be64_to_cpu(self->data.common.sender_id)
@@ -182,9 +179,6 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 	struct homa_rpc *srpc2 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	ASSERT_FALSE(IS_ERR(srpc2));
-	if (srpc2->active_links.next == LIST_POISON1)
-		list_add_tail_rcu(&srpc2->active_links,
-				&srpc2->hsk->active_rpcs);
 	homa_rpc_unlock(srpc2);
 	EXPECT_NE(srpc2, srpc1);
 	self->data.common.sender_id = cpu_to_be64(
@@ -193,9 +187,6 @@ TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 	struct homa_rpc *srpc3 = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	ASSERT_FALSE(IS_ERR(srpc3));
-	if (srpc3->active_links.next == LIST_POISON1)
-		list_add_tail_rcu(&srpc3->active_links,
-				&srpc3->hsk->active_rpcs);
 	homa_rpc_unlock(srpc3);
 	EXPECT_EQ(srpc3, srpc1);
 }
@@ -215,6 +206,28 @@ TEST_F(homa_utils, homa_rpc_new_server__addr_error)
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
+TEST_F(homa_utils, homa_rpc_new_server__socket_shutdown)
+{
+	self->hsk.shutdown = 1;
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_utils, homa_rpc_new_server__make_rpc_ready)
+{
+	self->data.message_length = N(1400);
+	self->data.seg.segment_length = N(1400);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	ASSERT_FALSE(IS_ERR(srpc));
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(RPC_READY, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	homa_rpc_free(srpc);
+}
 
 TEST_F(homa_utils, homa_rpc_lock_slow)
 {
@@ -227,7 +240,6 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data);
 	ASSERT_FALSE(IS_ERR(srpc));
-	list_add_tail_rcu(&srpc->active_links, &srpc->hsk->active_rpcs);
 	homa_rpc_unlock(srpc);
 
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_lock_misses);
@@ -242,7 +254,6 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_lock_misses);
 	EXPECT_NE(0, homa_cores[cpu_number]->metrics.server_lock_miss_cycles);
-
 }
 
 TEST_F(homa_utils, homa_rpc_acked__basics)
@@ -347,22 +358,6 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
 }
-TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
-{
-	struct homa_interest interest = {};
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 100);
-	ASSERT_NE(NULL, crpc);
-	atomic_long_set(&interest.id, 0);
-	interest.reg_rpc = crpc;
-	crpc->interest = &interest;
-	unit_log_clear();
-	homa_rpc_free(crpc);
-	EXPECT_EQ(NULL, interest.reg_rpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; "
-			"wake_up_process pid -1", unit_log_get());
-}
 TEST_F(homa_utils, homa_rpc_free__dead_buffs)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
@@ -380,17 +375,21 @@ TEST_F(homa_utils, homa_rpc_free__dead_buffs)
 	EXPECT_EQ(14, self->homa.max_dead_buffs);
 	EXPECT_EQ(14, self->hsk.dead_skbs);
 }
-TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
+TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 {
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc));
-	homa_rpc_unlock(crpc);
-	homa_add_to_throttled(crpc);
-	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
+	struct homa_interest interest = {};
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 100);
+	ASSERT_NE(NULL, crpc);
+	atomic_long_set(&interest.id, 0);
+	interest.reg_rpc = crpc;
+	crpc->interest = &interest;
 	unit_log_clear();
 	homa_rpc_free(crpc);
-	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
+	EXPECT_EQ(NULL, interest.reg_rpc);
+	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+			"wake_up_process pid -1", unit_log_get());
 }
 TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
 {
@@ -402,6 +401,18 @@ TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
 	atomic_set(&self->homa.total_incoming, 10000);
 	homa_rpc_free(crpc);
 	EXPECT_EQ(1400, atomic_read(&self->homa.total_incoming));
+}
+TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, &self->iter);
+	ASSERT_FALSE(IS_ERR(crpc));
+	homa_rpc_unlock(crpc);
+	homa_add_to_throttled(crpc);
+	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
+	unit_log_clear();
+	homa_rpc_free(crpc);
+	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
 }
 
 TEST_F(homa_utils, homa_rpc_free_rcu)

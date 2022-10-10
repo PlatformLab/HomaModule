@@ -242,9 +242,9 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		goto error;
 	}
 	homa_message_out_init(crpc, hsk->port, skb, length);
+	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
-	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->silent_ticks = 0;
@@ -280,7 +280,10 @@ error:
 
 /**
  * homa_rpc_new_server() - Allocate and construct a server RPC (one that is
- * used to manage an incoming request).
+ * used to manage an incoming request). If the initial data packet contains
+ * the entire incoming message, then the RPC will be put in READY state (and
+ * it will be added to the socket's ready list). This is done here, while we
+ * have the socket locked, to avoid acquiring the socket lock a second time.
  * @hsk:    Socket that owns this RPC.
  * @source: IP address (network byte order) of the RPC's client.
  * @h:      Header for the first data packet received for this RPC; used
@@ -289,14 +292,12 @@ error:
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
  *          to h, then it is returned instead of creating a new RPC.
- *          If a new RPC is created, it is not yet linked into
- *          @hsk->active_rpcs.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		const struct in6_addr *source, struct data_header *h)
 {
 	int err;
-	struct homa_rpc *srpc;
+	struct homa_rpc *srpc = NULL;
 	__u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 
@@ -329,19 +330,19 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
 	if (unlikely(IS_ERR(srpc->peer))) {
 		err = PTR_ERR(srpc->peer);
-		kfree(srpc);
 		goto error;
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
 	srpc->completion_cookie = 0;
 	srpc->error = 0;
-	homa_message_in_init(&srpc->msgin, ntohl(h->message_length));
+	srpc->msgin.total_length = -1;
+	srpc->msgin.num_skbs = 0;
 	srpc->msgout.length = -1;
 	srpc->msgout.num_skbs = 0;
-	srpc->active_links.next = LIST_POISON1;
-	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->ready_links);
+	INIT_LIST_HEAD(&srpc->dead_links);
+	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->silent_ticks = 0;
@@ -350,11 +351,25 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
 
+	/* Initialize fields that require socket to be locked. */
+	homa_sock_lock(hsk, "homa_rpc_new_server");
+	if (hsk->shutdown) {
+		homa_sock_unlock(hsk);
+		err = -ESHUTDOWN;
+		goto error;
+	}
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
+	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
+	if (ntohl(h->seg.segment_length) >= ntohl(h->message_length))
+		homa_rpc_ready(srpc);
+	homa_sock_unlock(hsk);
+	INC_METRIC(requests_received, 1);
 	return srpc;
 
 error:
 	spin_unlock_bh(&bucket->lock);
+	if (srpc)
+		kfree(srpc);
 	return ERR_PTR(err);
 }
 
@@ -424,7 +439,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
  */
 void homa_rpc_free(struct homa_rpc *rpc)
 {
-	int incoming;
+	int delta;
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
 
@@ -440,28 +455,30 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	homa_sock_lock(rpc->hsk, "homa_rpc_free");
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
+	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
+	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
+	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
+		/* This update isn't thread-safe; it's just a
+		 * statistic so it's OK if updates occasionally get
+		 * missed.
+		 */
+		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 	__list_del_entry(&rpc->ready_links);
 	if (rpc->interest != NULL) {
 		rpc->interest->reg_rpc = NULL;
 		wake_up_process(rpc->interest->thread);
 		rpc->interest = NULL;
 	}
-	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
-	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
-	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
-		/* This update isn't thread-safe, but it's just a
-		 * statistic so it's OK if updates occasionally get missed.
-		 */
-		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
 //			rpc->hsk->dead_skbs);
 
 	/* If the RPC had incoming bytes, remove them from the global count. */
-	incoming = rpc->msgin.incoming - (rpc->msgin.total_length
-			- rpc->msgin.bytes_remaining);
-	if (incoming != 0)
-		atomic_add(-incoming, &rpc->hsk->homa->total_incoming);
+	delta = (rpc->msgin.total_length < 0) ? 0
+			: (rpc->msgin.incoming - (rpc->msgin.total_length
+			- rpc->msgin.bytes_remaining));
+	if (delta != 0)
+		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);

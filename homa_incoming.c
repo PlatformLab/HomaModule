@@ -23,16 +23,19 @@
  * homa_message_in_init() - Constructor for homa_message_in.
  * @msgin:        Structure to initialize.
  * @length:       Total number of bytes in message.
+ * @incoming:     The number of unscheduled bytes the sender is planning
+ *                to transmit.
  */
-void homa_message_in_init(struct homa_message_in *msgin, int length)
+void homa_message_in_init(struct homa_message_in *msgin, int length,
+		int incoming)
 {
 	msgin->total_length = length;
 	skb_queue_head_init(&msgin->packets);
 	msgin->num_skbs = 0;
 	msgin->bytes_remaining = length;
-	msgin->incoming = -1;
+	msgin->incoming = (incoming > length) ? length : incoming;
 	msgin->priority = 0;
-	msgin->scheduled = 0;
+	msgin->scheduled = length > incoming;
 	msgin->xfer_offset = 0;
 	msgin->xfer_skb = NULL;
 	if (length < HOMA_NUM_SMALL_COUNTS*64) {
@@ -43,21 +46,6 @@ void homa_message_in_init(struct homa_message_in *msgin, int length)
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
-}
-
-/**
- * homa_message_in_destroy() - Destructor for homa_message_in.
- * @msgin:       Structure to clean up.
- */
-void homa_message_in_destroy(struct homa_message_in *msgin)
-{
-	struct sk_buff *skb, *next;
-	if (msgin->total_length < 0)
-		return;
-	skb_queue_walk_safe(&msgin->packets, skb, next)
-		kfree_skb(skb);
-	__skb_queue_head_init(&msgin->packets);
-	msgin->total_length = -1;
 }
 
 /**
@@ -331,8 +319,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 
 	switch (h->type) {
 	case DATA:
-		if (homa_data_pkt(skb, rpc, lcache, delta) != 0)
-			return;
+		homa_data_pkt(skb, rpc, lcache, delta);
 		INC_METRIC(packets_received[DATA - DATA], 1);
 		if (hsk->dead_skbs >= 2*hsk->homa->dead_buffs_limit) {
 			/* We get here if neither homa_wait_for_message
@@ -405,12 +392,11 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
  * shut down; the caller should not access the RPC anymore. Note: this method
  * may change the RPC's state to RPC_READY.
  */
-int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		struct homa_lcache *lcache, int *delta)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
-	int incoming = ntohl(h->incoming);
 	int old_remaining;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
@@ -419,66 +405,41 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			ntohl(h->message_length));
 
 	if (rpc->state != RPC_INCOMING) {
-		if (unlikely(!homa_is_client(rpc->id)
-				|| (rpc->state == RPC_READY))) {
-			kfree_skb(skb);
-			return 0;
+		if (homa_is_client(rpc->id)) {
+			if (unlikely(rpc->state != RPC_OUTGOING))
+				goto discard;
+			INC_METRIC(responses_received, 1);
+			rpc->state = RPC_INCOMING;
+		} else {
+			if (unlikely(rpc->msgin.total_length >= 0))
+				goto discard;
 		}
-		homa_message_in_init(&rpc->msgin, ntohl(h->message_length));
-		INC_METRIC(responses_received, 1);
-		rpc->state = RPC_INCOMING;
-	}
-	if (rpc->msgin.incoming < 0) {
-		if (incoming > rpc->msgin.total_length)
-			incoming = rpc->msgin.total_length;
-		rpc->msgin.incoming = incoming;
-		*delta += incoming;
-		rpc->msgin.scheduled = rpc->msgin.total_length > incoming;
 	}
 
-	/* Incorporate the packet, and subtract the net gain in bytes
-	 * from homa->total_incoming.
-	 */
+	if (rpc->msgin.total_length < 0) {
+		/* First data packet for message; initialize. */
+		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
+				ntohl(h->incoming));
+		*delta += rpc->msgin.incoming;
+	}
+
 	old_remaining = rpc->msgin.bytes_remaining;
 	homa_add_packet(rpc, skb);
 	*delta -= old_remaining - rpc->msgin.bytes_remaining;
 
-	if (rpc->msgin.scheduled) {
-		homa_check_grantable(homa, rpc);
-	}
-	if (rpc->active_links.next == LIST_POISON1) {
-		/* This is the first packet of a server RPC, so we have to
-		 * add the RPC to @hsk->active_rpcs. We do it here, rather
-		 * than in homa_rpc_new_server, so we can acquire the socket
-		 * lock just once to both add the RPC to active_rpcs and
-		 * also add the RPC to the ready list, if appropriate.
-		 */
-		INC_METRIC(requests_received, 1);
-		homa_sock_lock(rpc->hsk, "homa_data_pkt (first)");
-		if (rpc->hsk->shutdown) {
-			/* Unsafe to add new RPCs to a socket after shutdown
-			 * has begun; destroy the new RPC.
-			 */
-			homa_message_in_destroy(&rpc->msgin);
-			homa_sock_unlock(rpc->hsk);
-			homa_lcache_release(lcache);
-			kfree(rpc);
-			return 1;
-		}
+	if (rpc->msgin.bytes_remaining == 0) {
+		homa_remove_from_grantable(homa, rpc);
+		homa_sock_lock(rpc->hsk, "homa_data_pkt");
 
-		list_add_tail_rcu(&rpc->active_links, &rpc->hsk->active_rpcs);
-		if (rpc->msgin.bytes_remaining == 0)
+		/* This check is needed for the special case where
+		 * homa_rpc_new_server already made the RPC ready.
+		 */
+		if (rpc->state == RPC_INCOMING)
 			homa_rpc_ready(rpc);
 		homa_sock_unlock(rpc->hsk);
-	} else {
-		if (rpc->msgin.bytes_remaining == 0) {
-			homa_remove_from_grantable(homa, rpc);
-			homa_sock_lock(rpc->hsk, "homa_data_pkt (not first)");
-			if (!rpc->hsk->shutdown)
-				homa_rpc_ready(rpc);
-			homa_sock_unlock(rpc->hsk);
-		}
-	}
+	} else if (rpc->msgin.scheduled)
+		homa_check_grantable(homa, rpc);
+
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
 		 * to resend CUTOFFS packets if one gets lost, but we don't
@@ -501,7 +462,10 @@ int homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			rpc->peer->last_update_jiffies = jiffies;
 		}
 	}
-	return 0;
+	return;
+
+    discard:
+	kfree_skb(skb);
 }
 
 /**
