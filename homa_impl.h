@@ -963,7 +963,7 @@ struct homa_socktab {
 	 * for socket lookups (RCU is used instead). Also used to
 	 * synchronize port allocation.
 	 */
-	struct mutex write_lock;
+	struct spinlock write_lock;
 
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains

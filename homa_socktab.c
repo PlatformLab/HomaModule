@@ -26,7 +26,7 @@
 void homa_socktab_init(struct homa_socktab *socktab)
 {
 	int i;
-	mutex_init(&socktab->write_lock);
+	spin_lock_init(&socktab->write_lock);
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++) {
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
 	}
@@ -119,7 +119,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	struct homa_socktab *socktab = &homa->port_map;
 	int i;
 
-	mutex_lock(&socktab->write_lock);
+	spin_lock_bh(&socktab->write_lock);
 	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
 	hsk->last_locker = "none";
@@ -160,7 +160,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		spin_lock_init(&bucket->lock);
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-	mutex_unlock(&socktab->write_lock);
+	spin_unlock_bh(&socktab->write_lock);
 }
 
 /**
@@ -193,9 +193,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * See sync.txt for additional information about locking.
 	 */
 	hsk->shutdown = true;
-	mutex_lock(&hsk->homa->port_map.write_lock);
+	spin_lock_bh(&hsk->homa->port_map.write_lock);
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
-	mutex_unlock(&hsk->homa->port_map.write_lock);
+	spin_unlock_bh(&hsk->homa->port_map.write_lock);
 	homa_sock_unlock(hsk);
 
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
@@ -248,7 +248,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	if (port >= HOMA_MIN_DEFAULT_PORT) {
 		return -EINVAL;
 	}
-	mutex_lock(&socktab->write_lock);
+	spin_lock_bh(&socktab->write_lock);
 
 	owner = homa_sock_find(socktab, port);
 	if (owner != NULL) {
@@ -262,7 +262,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
 			&socktab->buckets[homa_port_hash(port)]);
     done:
-	mutex_unlock(&socktab->write_lock);
+	spin_unlock_bh(&socktab->write_lock);
 	return result;
 }
 
