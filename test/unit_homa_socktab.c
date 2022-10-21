@@ -234,6 +234,12 @@ TEST_F(homa_socktab, homa_sock_bind)
 	EXPECT_EQ(&self->hsk, homa_sock_find(&self->homa.port_map, 120));
 	homa_sock_destroy(&hsk2);
 }
+TEST_F(homa_socktab, homa_sock_bind__socket_shutdown)
+{
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_EQ(ESHUTDOWN, -homa_sock_bind(&self->homa.port_map, &self->hsk,
+			100));
+}
 
 TEST_F(homa_socktab, homa_sock_find__basics)
 {

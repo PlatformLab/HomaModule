@@ -167,7 +167,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
  * homa_sock_shutdown() - Disable a socket so that it can no longer
  * be used for either sending or receiving messages. Any system calls
  * currently waiting to send or receive messages will be aborted.
- * @hsk:       Socket to shut down. Must be locked by caller.
+ * @hsk:       Socket to shut down.
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
 {
@@ -248,7 +248,12 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	if (port >= HOMA_MIN_DEFAULT_PORT) {
 		return -EINVAL;
 	}
+	homa_sock_lock(hsk, "homa_sock_bind");
 	spin_lock_bh(&socktab->write_lock);
+	if (hsk->shutdown) {
+		result = -ESHUTDOWN;
+		goto done;
+	}
 
 	owner = homa_sock_find(socktab, port);
 	if (owner != NULL) {
@@ -263,6 +268,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 			&socktab->buckets[homa_port_hash(port)]);
     done:
 	spin_unlock_bh(&socktab->write_lock);
+	homa_sock_unlock(hsk);
 	return result;
 }
 
