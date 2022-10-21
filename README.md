@@ -60,7 +60,11 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   It is not clear that this approach will work with all NICs, but the following
   NICs are known to work:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
-  - Intel E810 (ice), XXV710 (i40e)
+  
+  There have been reports of problems with the following NICs (these have not
+  yet been explored thoroughly enough to know whether the problems are
+  insurmountable):
+  - Intel E810 (ice), XXV710 (i40e), XL710
 
   Please let me know if you find other NICs that work (or NICs that don't work).
   If the NIC doesn't support TSO for Homa, then you'll need to use `sysctl` to
