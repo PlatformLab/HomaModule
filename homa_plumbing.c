@@ -654,9 +654,7 @@ void homa_close(struct sock *sk, long timeout) {
  */
 int homa_shutdown(struct socket *sock, int how)
 {
-	lock_sock(sock->sk);
 	homa_sock_shutdown(homa_sk(sock->sk));
-	release_sock(sock->sk);
 	return 0;
 }
 
