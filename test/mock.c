@@ -1224,7 +1224,7 @@ int mock_skb_count(void)
 void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
 	static struct ipv6_pinfo hsk_pinfo;
-	struct sock *sk = (struct sock *) hsk;
+	struct sock *sk = &hsk->sock;
 	int saved_port = homa->next_client_port;
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;

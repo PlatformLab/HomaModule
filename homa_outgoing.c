@@ -36,8 +36,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 	 * whenever a packet's VLAN priority differed from the previous
 	 * packet. So, now we use the DSCP field in the IP header instead.
 	 */
-	((struct inet_sock *) hsk)->tos =
-			hsk->homa->priority_map[priority]<<5;
+	hsk->inet.tos = hsk->homa->priority_map[priority]<<5;
 }
 
 /**

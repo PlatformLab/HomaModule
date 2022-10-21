@@ -1036,8 +1036,20 @@ struct homa_rpc_bucket {
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
-	/** @inet: Generic socket data; must be the first field. */
-	struct inet_sock inet;
+	/* Info for other network layers. Note: IPv6 info (struct ipv6_pinfo
+	 * comes at the very end of the struct, *after* Homa's data, if this
+	 * socket uses IPv6).
+	 */
+	union {
+		/** @sock: generic socket data; must be the first field. */
+		struct sock sock;
+
+		/**
+		 * @inet: generic Internet socket data; must also be the
+		 first field (contains sock as its first member).
+		 */
+		struct inet_sock inet;
+	};
 
 	/**
 	 * @lock: Must be held when modifying fields such as interests

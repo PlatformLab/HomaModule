@@ -161,7 +161,11 @@ struct proto homav6_prot = {
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
-	.obj_size	   = sizeof(struct homa_sock),
+
+	/* IPv6 data comes *after* Homa's data, and isn't included in
+	 * struct homa_sock.
+	 */
+	.obj_size	   = sizeof(struct homa_sock) + sizeof(struct ipv6_pinfo),
 	.diag_destroy	   = homa_diag_destroy,
 };
 

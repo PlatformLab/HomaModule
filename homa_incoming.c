@@ -1447,8 +1447,7 @@ int homa_register_interests(struct homa_interest *interest,
 	if (!list_empty(&hsk->ready_requests) ||
 			!list_empty(&hsk->ready_responses)) {
 		// There are still more RPCs available, so let Linux know.
-		struct sock *sk = (struct sock *) hsk;
-		sk->sk_data_ready(sk);
+		hsk->sock.sk_data_ready(&hsk->sock);
 	}
 
     done:
@@ -1637,7 +1636,6 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 {
 	struct homa_interest *interest;
 	struct homa_sock *hsk = rpc->hsk;
-	struct sock *sk;
 
 	rpc->state = RPC_READY;
 
@@ -1672,8 +1670,7 @@ void homa_rpc_ready(struct homa_rpc *rpc)
 	 */
 
 	/* Notify the poll mechanism. */
-	sk = (struct sock *) hsk;
-	sk->sk_data_ready(sk);
+	hsk->sock.sk_data_ready(&hsk->sock);
 	tt_record2("homa_rpc_ready finished queuing id %d for port %d",
 			rpc->id, hsk->port);
 	goto done;
