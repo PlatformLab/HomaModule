@@ -8,7 +8,7 @@ order.
     queue with a size limit.
   * The page for a packet buffer gets added to the queue when the
     packet is received, but with a nonzero reference count.
-  * The reference count is to committed when the skbuff is released.
+  * The reference count is decremented when the skbuff is released.
   * If the page gets to the front of the queue with a nonzero reference
     count, it can't be allocated. Instead, a new page is allocated,
     which is slower. Furthermore, this will result in excess pages,
@@ -16,7 +16,7 @@ order.
     pages will be freed back to Linux, which is slow.
   * Homa likes to keep around large numbers of buffers around for
     significant time periods; as a result, it triggers the slow path
-    frequently, especiall for large messages.
+    frequently, especially for large messages.
 
 * (August 2022) 2-node performance is problematic. Ran experiments with
   the following client cp_node command:
@@ -89,7 +89,6 @@ order.
     Wakeup
   * large batch size affects:
     P90 SoftIRQ
-
 
 * (June 2022) Short-message timelines (xl170 clusters, "cp_node client
   --workload 100 --port-receivers 0"). All times are ns (data excludes
