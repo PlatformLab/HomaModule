@@ -33,7 +33,10 @@ extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
 extern void       (*tt_linux_printk)(void);
-extern void       tt_linux_skip_printk(void);
+extern void       (*tt_linux_dbg1)(char *msg, ...);
+extern void       (*tt_linux_dbg2)(char *msg, ...);
+extern void       (*tt_linux_dbg3)(char *msg, ...);
+extern void       tt_linux_nop(void);
 extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 #endif
 
@@ -141,6 +144,9 @@ int tt_init(char *proc_file, int *temp)
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
 	tt_linux_printk = tt_printk;
+	tt_linux_dbg1 = tt_dbg1;
+	tt_linux_dbg2 = tt_dbg2;
+	tt_linux_dbg3 = tt_dbg3;
 	if (temp)
 		tt_linux_homa_temp = temp;
 #endif
@@ -179,7 +185,10 @@ void tt_destroy(void)
 		tt_linux_buffers[i] = NULL;
 	}
 	tt_linux_inc_metrics = tt_linux_skip_metrics;
-	tt_linux_printk = tt_linux_skip_printk;
+	tt_linux_printk = tt_linux_nop;
+	tt_linux_dbg1 = (void (*)(char *, ...)) tt_linux_nop;
+	tt_linux_dbg2 = (void (*)(char *, ...)) tt_linux_nop;
+	tt_linux_dbg3 = (void (*)(char *, ...)) tt_linux_nop;
 	for (i = 0; i < 100; i++) {
 		tt_debug_int64[i] = 0;
 		tt_debug_ptr[i] = 0;
@@ -587,6 +596,30 @@ void tt_printk(void)
 
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
+}
+
+/**
+ * tt_dbg1() - Invoked by the Linux kernel for various temporary debugging
+ * purposes. Arguments are defined as needed for a specific situation.
+ */
+void tt_dbg1(char *msg, ...)
+{
+}
+
+/**
+ * tt_dbg2() - Invoked by the Linux kernel for various temporary debugging
+ * purposes. Arguments are defined as needed for a specific situation.
+ */
+void tt_dbg2(char *msg, ...)
+{
+}
+
+/**
+ * tt_dbg3() - Invoked by the Linux kernel for various temporary debugging
+ * purposes. Arguments are defined as needed for a specific situation.
+ */
+void tt_dbg3(char *msg, ...)
+{
 }
 
 /**

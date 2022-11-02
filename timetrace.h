@@ -115,6 +115,9 @@ extern void   tt_record_buf(struct tt_buffer* buffer, __u64 timestamp,
 /* Private methods and variables: exposed so they can be accessed
  * by unit tests.
  */
+extern void      tt_dbg1(char *msg, ...);
+extern void      tt_dbg2(char *msg, ...);
+extern void      tt_dbg3(char *msg, ...);
 extern void      tt_find_oldest(int *pos);
 extern void      tt_printk(void);
 extern int       tt_proc_open(struct inode *inode, struct file *file);
