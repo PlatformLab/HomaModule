@@ -114,3 +114,20 @@ for i in range(1, len(patterns)):
   print("%-30s Avg %6.1f us (+%6.1f us)  P90 %6.1fus (+%6.1f us)" % (
       patterns[i]["name"], sum(elapsed)/len(elapsed), sum(deltas)/len(deltas),
       elapsed[9*len(elapsed)//10], deltas[9*len(deltas)//10]))
+
+print("\nTotal RPCs: %d" % (len(rpcs)))
+avg_rpcs = 0
+last = len(patterns)-1
+for id in rpcs:
+  rpc = rpcs[id]
+  if 0 in rpc:
+    start = rpc[0]
+  else:
+    start = 0
+  if last in rpc:
+    end = rpc[last]
+  else:
+    end = time
+  avg_rpcs += (end - start) / time
+  # print("RPC id %d: %.1f (%8.3f -> %8.3f)" % (id, end - start, start, end))
+print("Average active RPCS: %.1f" % (avg_rpcs))

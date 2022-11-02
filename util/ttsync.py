@@ -74,7 +74,7 @@ def parse_tt(tt, server):
         if not pktid in packets:
             packets[pktid] = {}
 
-        if "Finished queueing packet:" in line:
+        if "calling ip_queue_xmit:" in line:
             packets[pktid]["send"] = time
             sent += 1
 
@@ -116,11 +116,17 @@ if verbose:
     print("Found %d packets from client to server, %d from server to client" % (
             len(c_to_s), len(s_to_c)), file=sys.stderr)
 
-min_rtt = (c_to_s[0] + s_to_c[0])
-offset = min_rtt/2 - c_to_s[0]
+min_rtt = (c_to_s[5*len(c_to_s)//100] + s_to_c[5*len(s_to_c)//100])
+print("RTT: P0 %.1f us, P5 %.1f us, P10 %.1fus, P20 %.1f us, P50 %.1f us" % (
+        c_to_s[0] + s_to_c[0], min_rtt,
+        c_to_s[10*len(c_to_s)//100] + s_to_c[10*len(s_to_c)//100],
+        c_to_s[20*len(c_to_s)//100] + s_to_c[20*len(s_to_c)//100],
+        c_to_s[50*len(c_to_s)//100] + s_to_c[50*len(s_to_c)//100]),
+        file=sys.stderr)
+offset = min_rtt/2 - c_to_s[5*len(c_to_s)//100]
 
 if verbose:
-    print("Minimum RTT: %.1f us, server clock offset: %.1fus" % (
+    print("Server clock offset (assuming %.1f us RTT): %.1fus" % (
             min_rtt, offset), file=sys.stderr)
     print("Client->server packet delays: min %.1f us, P50 %.1f us, "
             "P90 %.1f us, P99 %.1f us" % (

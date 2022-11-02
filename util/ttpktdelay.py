@@ -72,7 +72,7 @@ def dict_diffs(dict1, dict2):
     for key in dict1:
         if key in dict2:
             diffs.append(dict2[key] - dict1[key])
-    return diffs 
+    return diffs
 
 def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
     """
@@ -86,7 +86,7 @@ def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
     msg:         human-readable text describing the interval
     num_samples: number of events to print
     """
-    
+
     if len(delays) == 0:
         print("No delays available for %s" % (msg))
         return
@@ -136,7 +136,7 @@ def print_samples2(events, pct, msg, fmt, num_samples):
     fmt:         printf-style format string for printing a value
     num_samples: number of events to print
     """
-    
+
     if len(events) == 0:
         print("No events available for %s" % (msg))
         return
@@ -307,7 +307,7 @@ def parse_tt(tt, server):
                         grant_handoff[pktid] = time
                 data_handoff_ids[core] = []
                 grant_handoff_ids[core] = []
-            
+
             # homa_softirq invocation time
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'homa_softirq: first packet', line)
@@ -315,7 +315,7 @@ def parse_tt(tt, server):
                 time = float(match.group(1))
                 core = int(match.group(2))
                 softirq_start[core] = time
-            
+
             # common_interrupt invocation time
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'irq common_interrupt starting', line)
@@ -339,7 +339,7 @@ def parse_tt(tt, server):
             data_send[pktid] = time
 
         # Data packet passed to NIC
-        if "mlx sent homa data packet" in line:
+        if "Finished queueing packet" in line:
             data_mlx[pktid] = time
 
         # Incoming data packet processed by Homa GRO
@@ -378,7 +378,7 @@ def parse_tt(tt, server):
             if core in softirq_start:
                 grant_softirq[pktid] = time
                 grant_softirq_start[pktid] = softirq_start[core]
-    
+
     return {
         'data_send': data_send,
         'data_mlx': data_mlx,
@@ -401,7 +401,7 @@ def parse_tt(tt, server):
         'gro_counts': gro_counts,
         'gro_gaps': gro_gaps,
     }
-    
+
 
 client = parse_tt(client_trace, False)
 server = parse_tt(server_trace, True)
@@ -478,7 +478,7 @@ if len(sc_data_net) == 0:
     exit(1)
 rtt = cs_data_net[0] + sc_data_net[0]
 clock_offset = cs_data_net[0] - rtt/2
-print("Minimum Network RTT: %.1f us, clock offset %.1f us" % (rtt, clock_offset)) 
+print("Minimum Network RTT: %.1f us, clock offset %.1f us" % (rtt, clock_offset))
 
 # Adjust cross-machine times to reflect clock offset.
 for list in [cs_data_net, cs_grant_net, cs_data_total, cs_grant_total]:
