@@ -46,7 +46,6 @@ static inline void homa_lcache_save(struct homa_lcache *lc,
 		struct homa_rpc *rpc)
 {
 	if (lc->rpc) {
-		tt_record1("homa_lcache_save releasing id %d", lc->rpc->id);
 		homa_rpc_unlock(lc->rpc);
 	}
 	lc->rpc = rpc;
@@ -60,7 +59,6 @@ static inline void homa_lcache_save(struct homa_lcache *lc,
 static inline void homa_lcache_release(struct homa_lcache *lc)
 {
 	if (lc->rpc) {
-		tt_record1("homa_lcache_release releasing id %d", lc->rpc->id);
 		homa_rpc_unlock(lc->rpc);
 	}
 	lc->rpc = NULL;

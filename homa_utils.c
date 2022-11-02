@@ -602,7 +602,6 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			homa_rpc_lock(rpcs[i]);
 			homa_rpc_unlock(rpcs[i]);
 			rpcs[i]->state = 0;
-			tt_record1("finished reaping rpc id %d", rpcs[i]->id);
 			kfree(rpcs[i]);
 		}
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
