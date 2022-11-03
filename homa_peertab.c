@@ -276,7 +276,6 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 		peer->flow.u.ip6.saddr = inet->pinet6->saddr;
 		peer->flow.u.ip6.fl6_dport = 0;
 		peer->flow.u.ip6.fl6_sport = 0;
-		peer->flow.u.ip6.flowlabel = inet->pinet6->flow_label;
 		peer->flow.u.ip6.mp_hash = 0;
 		peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
 		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
