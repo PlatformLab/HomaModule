@@ -2,6 +2,23 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (November 2022) Compared "cp_node client --workload 500000" performance
+  on c6525-100g cluster (24-core AMD 7402P processors @ 2.8 Ghz, 100 Gbps
+  networking) vs. xl170 cluster (10-core Intel E5-2640v4 @ 2.4 Ghz, 25 Gbps
+  networking):
+                                          Intel/25Gbps     AMD/100Gbps
+  -----------------------------------------------------------------------
+  Packet size                             1500B            9000B
+  Overall throughput (each direction)     3.4 Gbps         6.7-7.5 Gbps
+  Stats from ttrpcs.py:
+      Xmit/receive tput                   11 Gbps          30-50 Gbps
+      Copy to/from user space             36-54 Gbps       30-110 Gbps
+      RTT for first grant                 28-32 us         56-70 us
+  Stats from ttpktdelay.py:
+      SoftIRQ Wakeup (P50/P90)            6/30 us          14/23 us
+      Minimum network RTT                 5.5 us           8 us
+  RTT with 100B messages                  17 us            28 us
+
 * (August 2022) Found problem with Mellanox driver that explains the
   page_pool_alloc_pages_slow delays in the item below.
   * The driver keeps a cache of "free" pages, organized as a FIFO
