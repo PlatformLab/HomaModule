@@ -118,7 +118,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	int priority;
 	__u32 saddr;
 	if (skb_is_ipv6(skb)) {
-		priority = ((struct ipv6hdr *) skb_network_header(skb))->priority;
+		priority = ipv6_hdr(skb)->priority;
 		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
 	} else {
 		priority = ((struct iphdr *) skb_network_header(skb))->tos >> 5;

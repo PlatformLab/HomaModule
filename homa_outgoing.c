@@ -304,13 +304,14 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 				extra_bytes);
 	}
 	priority = hsk->homa->num_priorities-1;
-	set_priority(skb, hsk, priority);
 	skb->ooo_okay = 1;
 	skb_get(skb);
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				NULL, 0, priority);
+				NULL, hsk->homa->priority_map[priority] << 4, 0);
 	} else {
+		/* This will find its way to the DSCP field in the IPv4 hdr. */
+		hsk->inet.tos = hsk->homa->priority_map[priority]<<5;
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 	}
 	if (unlikely(result != 0)) {
@@ -446,8 +447,6 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 			skb_transport_header(skb);
 	struct dst_entry *dst;
 
-	set_priority(skb, rpc->hsk, priority);
-
 	/* Update info that may have changed since the message was initially
 	 * created.
 	 */
@@ -466,15 +465,16 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 				"offset %d",
 				skb->len, tt_addr(rpc->peer->addr), rpc->id,
 				ntohl(h->seg.offset));
-
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-				0, NULL, 0, priority);
+				0, NULL,
+				rpc->hsk->homa->priority_map[priority] << 4, 0);
 	} else {
 		tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, "
 				"id %d, offset %d",
 				skb->len, tt_addr(rpc->peer->addr), rpc->id,
 				htonl(h->seg.offset));
 
+		rpc->hsk->inet.tos = rpc->hsk->homa->priority_map[priority]<<5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
 	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "

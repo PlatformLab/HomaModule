@@ -569,7 +569,7 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	mock_xmit_prios_offset += snprintf(
 			mock_xmit_prios + mock_xmit_prios_offset,
 			sizeof(mock_xmit_prios) - mock_xmit_prios_offset,
-			"%s%d", prefix, ((struct inet_sock *) sk)->tos>>5);
+			"%s%d", prefix, tclass >> 4);
 	if (mock_xmit_log_verbose)
 		homa_print_packet(skb, buffer, sizeof(buffer));
 	else
