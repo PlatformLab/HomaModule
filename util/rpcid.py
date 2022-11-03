@@ -153,7 +153,7 @@ def analyze_rpc(id, client_num, server_num):
         if "mlx packet info" in line:
             track_nic_queue(line, time)
 
-        if ("enqueue_to_backlog complete" in line) and (core == gro_core):
+        if ("enqueue_to_backlog" in line) and (core == gro_core):
             server_info += sfmt % ("NAPI", gap)
             add_stat("server NAPI", gap)
             gro_core = -1
@@ -245,7 +245,7 @@ def analyze_rpc(id, client_num, server_num):
         if "mlx packet info" in line:
             track_nic_queue(line, time)
 
-        if ("enqueue_to_backlog complete" in line) and (core == gro_core):
+        if ("enqueue_to_backlog" in line) and (core == gro_core):
             print(cfmt % ("NAPI", time - last))
             add_stat("client NAPI", time - last)
             gro_core = -1
@@ -343,7 +343,7 @@ if len(sys.argv) == 1:
     print(cfmt % ("wakeup thread", avg_stat("client wakeup")))
     print(cfmt % ("ioc_recv", avg_stat("client ioc_recv")))
     print(cfmt % ("total", avg_stat("total")))
-    
+
     print("\nServer Averages:")
     print(cfmt % ("(interrupt)", avg_stat("server (interrupt)")))
     print(cfmt % ("NAPI", avg_stat("server NAPI")))

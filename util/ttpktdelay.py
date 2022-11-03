@@ -62,16 +62,22 @@ def percentile2(list, pct, format):
         i = len(list) - 1
     return format % (list[i][0])
 
-def dict_diffs(dict1, dict2):
+def dict_diffs(dict1, dict2, msg=None):
     """
     Return a list consisting of the differences between elements in
     dict2 and those in dict1 with matching keys (ignore elements that
-    appear in only one dict).
+    appear in only one dict). If msg is specified, then negative
+    differences should be ignored and an error message should be printed;
+    msg provides info about the dictionaries being diffed.
     """
     diffs = []
     for key in dict1:
         if key in dict2:
-            diffs.append(dict2[key] - dict1[key])
+            if msg and dict2[key] < dict1[key]:
+                print("Skipping out of order diff for %s, id %s: %9.3f "
+                        "< %9.3f" % (msg, key, dict2[key], dict1[key]))
+            else:
+                diffs.append(dict2[key] - dict1[key])
     return diffs
 
 def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
@@ -285,7 +291,7 @@ def parse_tt(tt, server):
 
             # Batch of packets has been handed off to SoftIRQ
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
-                    'enqueue_to_backlog complete', line)
+                    'enqueue_to_backlog', line)
             if match:
                 time = float(match.group(1))
                 core = int(match.group(2))
@@ -410,10 +416,14 @@ server = parse_tt(server_trace, True)
 
 # Delays for data packets and grants passing through the IP stack
 # on a single machine.
-client_data_xmit = sorted(dict_diffs(client['data_send'], client['data_mlx']))
-client_grant_xmit = sorted(dict_diffs(client['grant_send'], client['grant_mlx']))
-server_data_xmit = sorted(dict_diffs(server['data_send'], server['data_mlx']))
-server_grant_xmit = sorted(dict_diffs(server['grant_send'], server['grant_mlx']))
+client_data_xmit = sorted(dict_diffs(client['data_send'], client['data_mlx'],
+        "client data_send -> data_mlx"))
+client_grant_xmit = sorted(dict_diffs(client['grant_send'], client['grant_mlx'],
+        "client grant_send -> grant_mlx"))
+server_data_xmit = sorted(dict_diffs(server['data_send'], server['data_mlx'],
+        "server data_send -> data_mlx"))
+server_grant_xmit = sorted(dict_diffs(server['grant_send'], server['grant_mlx'],
+        "server grant_send -> grant_mlx"))
 
 # Delays for data packets and grants from NIC on one machine to start of
 # NAPI-level process on the other. These differences have not been compensated
@@ -425,43 +435,43 @@ sc_grant_net = sorted(dict_diffs(server['grant_send'], client['grant_gro']))
 
 # Additional GRO processing after this packet (other packets in batch)
 client_data_gro_last = sorted(dict_diffs(client['data_gro'],
-        client['data_gro_last']))
+        client['data_gro_last'], "client data_gro -> data_gro_last"))
 client_grant_gro_last = sorted(dict_diffs(client['grant_gro'],
-        client['grant_gro_last']))
+        client['grant_gro_last'], "client grant_gro -> grant_gro_last"))
 server_data_gro_last = sorted(dict_diffs(server['data_gro'],
-        server['data_gro_last']))
+        server['data_gro_last'], "server data_gro -> data_gro_last"))
 server_grant_gro_last = sorted(dict_diffs(server['grant_gro'],
-        server['grant_gro_last']))
+        server['grant_gro_last'], "server grant_gro -> grant_gro_last"))
 
 # Delays from last GRO packet to SoftIRQ handoff
 client_data_handoff = sorted(dict_diffs(client['data_gro_last'],
-        client['data_handoff']))
+        client['data_handoff'], "client data_gro_last -> data_handoff"))
 client_grant_handoff = sorted(dict_diffs(client['grant_gro_last'],
-        client['grant_handoff']))
+        client['grant_handoff'], "client grant_gro_last -> grant_handoff"))
 server_data_handoff = sorted(dict_diffs(server['data_gro_last'],
-        server['data_handoff']))
+        server['data_handoff'], "server data_gro_last -> data_handoff"))
 server_grant_handoff = sorted(dict_diffs(server['grant_gro_last'],
-        server['grant_handoff']))
+        server['grant_handoff'], "server grant_gro_last -> grant_handoff"))
 
 # Delays from SoftIRQ handoff until homa_softirq starts
 client_data_softirq_start = sorted(dict_diffs(client['data_handoff'],
-        client['data_softirq_start']))
+        client['data_softirq_start'], "client data_handoff -> softirq_start"))
 client_grant_softirq_start = sorted(dict_diffs(client['grant_handoff'],
-        client['grant_softirq_start']))
+        client['grant_softirq_start'], "client grant_handoff -> softirq_start"))
 server_data_softirq_start = sorted(dict_diffs(server['data_handoff'],
-        server['data_softirq_start']))
+        server['data_softirq_start'], "server data_handoff -> softirq_start"))
 server_grant_softirq_start = sorted(dict_diffs(server['grant_handoff'],
-        server['grant_softirq_start']))
+        server['grant_softirq_start'], "server grant_handoff -> softirq_start"))
 
 # Delays from SoftIRQ start until the desired packet is processed
 client_data_softirq = sorted(dict_diffs(client['data_softirq_start'],
-        client['data_softirq']))
+        client['data_softirq'], "client data_softirq_start -> data_softirq"))
 client_grant_softirq = sorted(dict_diffs(client['grant_softirq_start'],
-        client['grant_softirq']))
+        client['grant_softirq'], "client grant_softirq_start -> grant_softirq"))
 server_data_softirq = sorted(dict_diffs(server['data_softirq_start'],
-        server['data_softirq']))
+        server['data_softirq'], "server data_softirq_start -> data_softirq"))
 server_grant_softirq = sorted(dict_diffs(server['grant_softirq_start'],
-        server['grant_softirq']))
+        server['grant_softirq'], "server grant_softirq_start -> grant_softirq"))
 
 # Total delays (ip_queue_xmit to SoftIRQ)
 cs_data_total = sorted(dict_diffs(client['data_send'], server['data_softirq']))

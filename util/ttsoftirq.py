@@ -34,7 +34,7 @@ for line in f:
     time = float(match.group(1))
     core = int(match.group(2))
 
-    match = re.match('.*enqueue_to_backlog complete, cpu ([0-9]+)', line)
+    match = re.match('.*enqueue_to_backlog.* cpu ([0-9]+)', line)
     if match:
         dest = int(match.group(1))
         queued[dest] = time
