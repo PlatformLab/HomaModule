@@ -800,6 +800,8 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 		goto error;
 	}
 
+	tt_record2("starting data copy to user space for id %d, length %d",
+			rpc->id, rpc->msgin.total_length);
 	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
 			rpc->id & 0xffffffff, tt_addr(rpc->peer->addr),
@@ -890,6 +892,8 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		err = PTR_ERR(skbs);
 		goto done;
 	}
+	tt_record2("data copied into response message for id %d, length %d",
+			args.id, args.length);
 
 	srpc = homa_find_server_rpc(hsk, &canonical_dest,
 			ntohs(args.dest_addr.in6.sin6_port), args.id);
@@ -985,6 +989,8 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 		crpc = NULL;
 		goto error;
 	}
+	tt_record2("data copied into request message for id %d, length %d",
+			crpc->id, crpc->msgout.length);
 	crpc->completion_cookie = args.completion_cookie;
 	tt_record1("homa_ioc_send calling homa_xmit_data for id %u",
 			crpc->id);
