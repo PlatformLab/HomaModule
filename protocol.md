@@ -19,7 +19,7 @@ additional metadata such as the total length of the message and the
 total number of bytes of the message that the sender will transmit
 without additional grants.
 
-**GRANT**: sent by receivers to authorize the sender to transmi additional
+**GRANT**: sent by receivers to authorize the sender to transmit additional
 bytes of the message. Contains the total number of (leading) bytes of the message
 the sender is now permitted to transmit, along with the priority level to use in
 future DATA packets for this message.
