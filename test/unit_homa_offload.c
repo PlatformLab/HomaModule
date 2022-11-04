@@ -14,6 +14,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_lcache.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -24,6 +25,7 @@ extern struct homa *homa;
 
 FIXTURE(homa_offload) {
 	struct homa homa;
+	struct homa_sock hsk;
 	struct in6_addr ip;
 	struct data_header header;
 	struct napi_struct napi;
@@ -34,7 +36,10 @@ FIXTURE_SETUP(homa_offload)
 {
 	int i;
 	homa_init(&self->homa);
-	homa_init(homa);
+	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
+	self->homa.grant_threshold = self->homa.rtt_bytes;
+	homa = &self->homa;
+	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
 			.sport = htons(40000), .dport = htons(99),
@@ -78,10 +83,47 @@ FIXTURE_TEARDOWN(homa_offload)
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
 		kfree_skb(skb);
 	homa_destroy(&self->homa);
-	homa_destroy(homa);
+	homa = NULL;
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
+{
+	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
+	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
+	int client_port = 40000;
+	__u64 client_id = 1234;
+	__u64 server_id = 1235;
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+			&client_ip, &server_ip, client_port, server_id, 100,
+			20000);
+	ASSERT_NE(NULL, srpc);
+	homa_xmit_data(srpc, false);
+	unit_log_clear();
+
+	struct grant_header h = {{.sport = htons(srpc->dport),
+	                .dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(client_id),
+			.type = GRANT},
+		        .offset = htonl(12600),
+			.priority = 3};
+	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
+	struct sk_buff *result = homa_gro_receive(&self->empty_list,
+			mock_skb_new(&client_ip, &h.common, 0, 0));
+	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
+	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
+
+	unit_log_clear();
+	h.offset = htonl(14000);
+	self->homa.gro_policy = 0;
+	struct sk_buff *skb = mock_skb_new(&client_ip, &h.common, 0, 0);
+	result = homa_gro_receive(&self->empty_list, skb);
+	EXPECT_EQ(NULL, result);
+	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_STREQ("", unit_log_get());
+	kfree_skb(skb);
+}
 TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 {
 	struct sk_buff *skb;

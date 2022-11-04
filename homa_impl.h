@@ -1724,15 +1724,17 @@ struct homa {
 	/* Bits that can be specified for gro_policy. These were created for
 	 * testing, in order to evaluate various possible policies; you almost
 	 * certainly should not use any value other than HOMA_GRO_NORMAL.
-	 * The meaning of the bits is also somewhat complicated; if you really
-	 * want to know what they mean, read the code of homa_offload.c
+	 * If you want to know what the bits mean, read the code of
+	 * homa_offload.c.
 	 */
-	#define HOMA_GRO_BYPASS      1
-	#define HOMA_GRO_SAME_CORE   2
-	#define HOMA_GRO_IDLE        4
-	#define HOMA_GRO_NEXT        8
-	#define HOMA_GRO_IDLE_NEW    16
-	#define HOMA_GRO_NORMAL      HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE_NEW
+	#define HOMA_GRO_BYPASS          1
+	#define HOMA_GRO_SAME_CORE       2
+	#define HOMA_GRO_IDLE            4
+	#define HOMA_GRO_NEXT            8
+	#define HOMA_GRO_IDLE_NEW       16
+	#define HOMA_GRO_FAST_GRANTS    32
+	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE_NEW \
+			|HOMA_GRO_FAST_GRANTS)
 
 	/*
 	 * @gro_busy_usecs: try not to schedule SoftIRQ processing on a core

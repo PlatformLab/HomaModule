@@ -134,13 +134,25 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset), priority);
-	else if (h_new->common.type == GRANT)
+	else if (h_new->common.type == GRANT) {
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
 				priority);
-	else
+		/* The following optimization handles grants here at NAPI
+		 * level, bypassing the SoftIRQ mechanism (and avoiding the
+		 * delay of handing off to a different core). This makes
+		 * a significant difference in throughput for large
+		 * messages, especially when the system is loaded.
+		 */
+		if (homa->gro_policy & HOMA_GRO_FAST_GRANTS) {
+			homa_softirq(skb);
+
+			/* Indicates that we have freed skb. */
+			return ERR_PTR(-EINPROGRESS);
+		}
+	} else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
