@@ -65,6 +65,12 @@ link bandwidth of the sender if the system is unloaded. If the number of
 unscheduled bytes does not represent an integral number of full DATA packets,
 the sender rounds it up to the next full packet boundary; likewise for grants.
 
+Note: in networks with nonuniform round-trip times (e.g. most datacenter
+fabrics), `rtt_bytes` should be calculated on a peer-to-peer basis to
+reflect the round-trip times between that pair of machines. This feature
+is not currently implemented: Homa uses a single value of `rtt_bytes` for
+all peers.
+
 Once the server has received the request, it passes that message up to
 the application. Eventually the application returns a response message,
 which the server transmits back to the client using the same protocol
