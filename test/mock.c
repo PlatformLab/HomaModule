@@ -931,6 +931,12 @@ void *skb_put(struct sk_buff *skb, unsigned int len)
 	return result;
 }
 
+struct sk_buff *skb_segment(struct sk_buff *head_skb,
+		netdev_features_t features)
+{
+	return NULL;
+}
+
 int sock_common_getsockopt(struct socket *sock, int level, int optname,
 		char __user *optval, int __user *optlen)
 {

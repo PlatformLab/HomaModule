@@ -2794,6 +2794,9 @@ extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
                *homa_gro_receive(struct list_head *gro_list,
                     struct sk_buff *skb);
+extern struct sk_buff
+               *homa_gso_segment(struct sk_buff *skb,
+		    netdev_features_t features);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
                 homa_hrtimer(struct hrtimer *timer);

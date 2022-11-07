@@ -18,6 +18,13 @@ Notes for Homa implementation in Linux:
   * pin_user_page (not sure the difference from get_user_page)
 
 * Performance-related tasks:
+  * Implement sk_buff caching for output buffers:
+    * Allocation is slow (2-10 us on AMD processors; check on Intel?)
+    * Large buffers exceed KMALLOC_MAX_CACHE_SIZE, so they aren't cached
+      in slabs
+    * Keep free lists in Homa for different sizes (e.g. pre-GSO and GSO),
+      append output buffers there
+    * Can recycle an sk_buff by calling build_skb_around().
   * Rework FIFO granting so that it doesn't consider homa->max_overcommit
     (just find the oldest message that doesn't have a pity grant)? Also,
     it doesn't look like homa_grant_fifo is keeping track of pity grants

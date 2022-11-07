@@ -21,7 +21,7 @@
 
 static const struct net_offload homa_offload = {
 	.callbacks = {
-		.gso_segment	=	NULL,
+		.gso_segment	=	homa_gso_segment,
 		.gro_receive	=	homa_gro_receive,
 		.gro_complete	=	homa_gro_complete,
 	},
@@ -78,6 +78,30 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 		rcu_read_unlock();
 	}
 	__skb_set_sw_hash(skb, hash, false);
+}
+
+/**
+ * homa_gso_segment() - Split up a large outgoing Homa packet (larger than MTU)
+ * into multiple smaller packets.
+ * @skb:       Packet to split.
+ * @features:  Passed through to skb_segment.
+ * Return: A list of packets, or NULL if for the packet couldn't be split.
+ */
+struct sk_buff *homa_gso_segment(struct sk_buff *skb,
+		netdev_features_t features)
+{
+	struct sk_buff *segs;
+	tt_record2("homa_gso_segment invoked, frags %d, headlen %d",
+			skb_shinfo(skb)->nr_frags, skb_headlen(skb));
+
+	/* This is needed to separate header info (which is replicated
+	 * in each segment) from data, which is divided among the segments.
+	 */
+	__skb_pull(skb, sizeof(struct data_header)
+			- sizeof(struct data_segment));
+	segs = skb_segment(skb, features);
+	tt_record("homa_gso_segment returning");
+	return segs;
 }
 
 /**

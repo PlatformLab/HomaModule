@@ -2,6 +2,11 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (November 2022) Software GSO is very slow (17 usec on AMD EPYC processors,
+  breaking 64K into 9K jumbo frames. The main problem appears to be sk_buff
+  allocation, which takes multiple usecs because the packet buffers are too
+  large to be cached in the slab allocator.
+
 * (November 2022) Compared "cp_node client --workload 500000" performance
   on c6525-100g cluster (24-core AMD 7402P processors @ 2.8 Ghz, 100 Gbps
   networking) vs. xl170 cluster (10-core Intel E5-2640v4 @ 2.4 Ghz, 25 Gbps

@@ -60,18 +60,19 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   It is not clear that this approach will work with all NICs, but the following
   NICs are known to work:
   - Mellanox ConnectX-4, ConnectX-5, and ConnectX-6
-  
+
   There have been reports of problems with the following NICs (these have not
   yet been explored thoroughly enough to know whether the problems are
   insurmountable):
   - Intel E810 (ice), XXV710 (i40e), XL710
 
   Please let me know if you find other NICs that work (or NICs that don't work).
-  If the NIC doesn't support TSO for Homa, then you'll need to use `sysctl` to
-  ensure that `max_gso_size` is the same as the maximum packet size (if it is
-  larger, then messages larger than the packet size will hang: outgoing packets
-  will be dropped by the NIC, but smaller retry packets get through, so Homa
-  will keep retrying over and over).
+  If the NIC doesn't support TSO for Homa, then Homa will perform segmentation
+  in software, but that's quite a bit slower. If for some reason software
+  GSO doesn't work (it's fairly new in Homa), then messages larger than the
+  maximum packet size may hang or result in very poor performance. If this
+  happens, you'll need to use `sysctl` to ensure that `max_gso_size` is the
+  same as the maximum packet size.
 
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
@@ -96,6 +97,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- November 2022: Implemented software GSO for Homa.
 - September 2022: Added support for IPv6, as well as completion cookies.
   This required small but incompatible changes to the API.
   Many thanks to Dan Manjarres for contributing these

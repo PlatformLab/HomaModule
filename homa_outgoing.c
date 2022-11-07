@@ -129,6 +129,7 @@ struct sk_buff *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
 			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
 					+ max_pkt_data;
 			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV6;
+//			skb_shinfo(skb)->gso_type = 0xd;  // Force software GSO
 		}
 		skb_shinfo(skb)->gso_segs = 0;
 
