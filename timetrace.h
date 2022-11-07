@@ -204,5 +204,15 @@ static inline void tt_record(const char* format)
 #endif
 }
 
+static inline __u32 tt_hi(void *p)
+{
+	return ((__u64) p) >> 32;
+}
+
+static inline __u32 tt_lo(void *p)
+{
+	return ((__u64) p) & 0xffffffff;
+}
+
 #endif // HOMA_TIMETRACE_H
 
