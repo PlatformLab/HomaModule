@@ -476,7 +476,7 @@ static int __init homa_load(void) {
 			"data_segment %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u flowi %u "
 			"ipv6_hdr %u, flowi6 %u "
-			"tcp_sock %u homa_rpc %u\n",
+			"tcp_sock %u homa_rpc %u sk_buff %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
 			sizeof32(struct homa_ack),
@@ -487,7 +487,8 @@ static int __init homa_load(void) {
 			sizeof32(struct ipv6hdr),
 			sizeof32(struct flowi6),
 			sizeof32(struct tcp_sock),
-			sizeof32(struct homa_rpc));
+			sizeof32(struct homa_rpc),
+			sizeof32(struct sk_buff));
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed for homa_prot: %d\n",
@@ -992,8 +993,6 @@ int homa_ioc_send(struct sock *sk, unsigned long arg) {
 	tt_record2("data copied into request message for id %d, length %d",
 			crpc->id, crpc->msgout.length);
 	crpc->completion_cookie = args.completion_cookie;
-	tt_record1("homa_ioc_send calling homa_xmit_data for id %u",
-			crpc->id);
 	homa_xmit_data(crpc, false);
 
 	if (unlikely(copy_to_user(&((struct homa_send_args *) arg)->id,
