@@ -160,6 +160,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		spin_lock_init(&bucket->lock);
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
+	memset(&hsk->buffer_pool, 0, sizeof(hsk->buffer_pool));
 	spin_unlock_bh(&socktab->write_lock);
 }
 
@@ -210,6 +211,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
+
+	homa_pool_destroy(&hsk->buffer_pool);
 
 	while (!list_empty(&hsk->dead_rpcs))
 		homa_rpc_reap(hsk, 1000);

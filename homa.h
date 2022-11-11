@@ -43,6 +43,20 @@ extern "C"
 #define HOMA_MAX_MESSAGE_LENGTH 1000000
 
 /**
+ * define HOMA_BPAGE_SIZE - Number of bytes in pages used for receive
+ * buffers. Must be power of two.
+ */
+#define HOMA_BPAGE_SHIFT 16
+#define HOMA_BPAGE_SIZE (1 << HOMA_BPAGE_SHIFT)
+
+/**
+ * define HOMA_MAX_BPAGES: The largest number of bpages that will be required
+ * to store an incoming message.
+ */
+#define HOMA_MAX_BPAGES ((HOMA_MAX_MESSAGE_LENGTH + HOMA_BPAGE_SIZE - 1) \
+		>> HOMA_BPAGE_SHIFT)
+
+/**
  * define HOMA_MIN_DEFAULT_PORT - The 16-bit port space is divided into
  * two nonoverlapping regions. Ports 1-32767 are reserved exclusively
  * for well-defined server ports. The remaining ports are used for client
@@ -104,7 +118,29 @@ _Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
 #endif
 
 /**
- * define homa_recv_args - Used to pass arguments and results between
+ * struct homa_buf_ptrs - Used to pass information to user space about
+ * a particular buffer region for a particular incoming message.
+ */
+struct homa_buf_ptrs {
+	/**
+	 * @buffer: First byte of storage for the buffer. If this isn't
+	 * the last buffer in a message then it contains HOMA_BPAGE_SIZE
+	 * bytes; otherwise it contains the remaining bytes in the message.
+	 */
+	void *buffer;
+
+	/**
+	 * @ref_count: Pointer to an integer that must be atomically
+	 * decremented by the application when it has finished reading
+	 * the buffered data (allows the kernel to reclaim buffer space).
+	 * The type below is int because different atomic types are
+	 * required for user-level and kernel.
+	 */
+	int *ref_count;
+};
+
+/**
+ * struct homa_recv_args - Used to pass arguments and results between
  * user space and the HOMAIOCRECV ioctl.
  *
  * Ideally this should have the exact same layout as homa_reply_args.
@@ -166,7 +202,7 @@ _Static_assert(sizeof(struct homa_recv_args) <= 128, "homa_recv_args grew");
 #define HOMA_RECV_VALID_FLAGS   0x0F
 
 /**
- * define homa_reply_args - Structure that passes arguments and results
+ * struct homa_reply_args - Structure that passes arguments and results
  * between user space and the HOMAIOCREPLY ioctl.
  *
  * Ideally this should have the exact same layout as homa_recv_args.
@@ -206,7 +242,7 @@ _Static_assert(sizeof(struct homa_reply_args) <= 128, "homa_reply_args grew");
 #endif
 
 /**
- * define homa_abort_args - Structure that passes arguments and results
+ * struct homa_abort_args - Structure that passes arguments and results
  * between user space and the HOMAIOCABORT ioctl.
  */
 struct homa_abort_args {

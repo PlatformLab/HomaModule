@@ -46,6 +46,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
+	msgin->num_buffers = 0;
 }
 
 /**
@@ -1740,4 +1741,8 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	homa->grant_threshold = tmp/1000;
 	if (homa->grant_threshold > homa->rtt_bytes)
 		homa->grant_threshold = homa->rtt_bytes;
+
+	tmp = homa->bpage_lease_usecs;
+	tmp = (tmp*cpu_khz)/1000;
+	homa->bpage_lease_cycles = tmp;
 }

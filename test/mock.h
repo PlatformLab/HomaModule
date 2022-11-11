@@ -34,6 +34,7 @@ extern int         mock_max_grants;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
+extern int         mock_pin_pages_errors;
 extern int         mock_route_errors;
 extern void        (*mock_schedule_hook)(void);
 extern int         mock_spin_lock_held;

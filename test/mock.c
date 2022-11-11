@@ -50,6 +50,7 @@ int mock_import_iovec_errors = 0;
 int mock_ip6_xmit_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
 int mock_kmalloc_errors = 0;
+int mock_pin_pages_errors = 0;
 int mock_route_errors = 0;
 int mock_spin_lock_held = 0;
 int mock_trylock_errors = 0;
@@ -95,6 +96,11 @@ static struct unit_hash *buffs_in_use = NULL;
  * kmalloc but not yet freed by kfree. Reset for each test.
  */
 static struct unit_hash *kmallocs_in_use = NULL;
+
+/* The number of pages that have been pinned, minus the number that
+ * have been unpinned. Reset for each test.
+ */
+static int pages_pinned = 0;
 
 /* Keeps track of all the results returned by proc_create that have not
  * yet been closed by calling proc_remove. Reset for each test.
@@ -752,6 +758,21 @@ int netif_receive_skb(struct sk_buff *skb)
 	return 0;
 }
 
+long pin_user_pages(unsigned long start, unsigned long nr_pages,
+		unsigned int gup_flags, struct page **pages,
+		struct vm_area_struct **vmas)
+{
+	if (mock_check_error(&mock_pin_pages_errors)) {
+		if (nr_pages > 2) {
+			pages_pinned += nr_pages - 2;
+			return nr_pages - 2;
+		} else
+			return 0;
+	}
+	pages_pinned += nr_pages;
+	return nr_pages;
+}
+
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
@@ -990,6 +1011,11 @@ void tasklet_init(struct tasklet_struct *t,
 		void (*func)(unsigned long), unsigned long data) {}
 
 void tasklet_kill(struct tasklet_struct *t) {}
+
+void unpin_user_pages(struct page **pages, unsigned long npages)
+{
+	pages_pinned -= npages;
+}
 
 void unregister_net_sysctl_table(struct ctl_table_header *header) {}
 
@@ -1280,7 +1306,7 @@ void mock_teardown(void)
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
-	mock_kmalloc_errors = 0;
+	mock_pin_pages_errors = 0;
 	mock_max_grants = 10;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
@@ -1307,6 +1333,10 @@ void mock_teardown(void)
 		FAIL(" %u kmalloced block(s) still allocated after test", count);
 	unit_hash_free(kmallocs_in_use);
 	kmallocs_in_use = NULL;
+
+	if (pages_pinned > 0)
+		FAIL(" %d pages still pinned after test", pages_pinned);
+	pages_pinned = 0;
 
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)

@@ -213,6 +213,13 @@ static struct proc_dir_entry *metrics_dir_entry = NULL;
 /* Used to configure sysctl access to Homa configuration parameters.*/
 static struct ctl_table homa_ctl_table[] = {
 	{
+		.procname	= "bpage_lease_usecs",
+		.data		= &homa_data.bpage_lease_usecs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -476,7 +483,8 @@ static int __init homa_load(void) {
 			"data_segment %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u flowi %u "
 			"ipv6_hdr %u, flowi6 %u "
-			"tcp_sock %u homa_rpc %u sk_buff %u\n",
+			"tcp_sock %u homa_rpc %u sk_buff %u NR_CPUS %u "
+			"nr_cpu_ids %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
 			sizeof32(struct homa_ack),
@@ -488,7 +496,9 @@ static int __init homa_load(void) {
 			sizeof32(struct flowi6),
 			sizeof32(struct tcp_sock),
 			sizeof32(struct homa_rpc),
-			sizeof32(struct sk_buff));
+			sizeof32(struct sk_buff),
+			NR_CPUS,
+			nr_cpu_ids);
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed for homa_prot: %d\n",

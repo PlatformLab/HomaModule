@@ -15,7 +15,7 @@ Homa is a network transport protocol for communication within a datacenter.
 Its most important benefit is that if offers exceptionally low latency
 for small messages, even in the presence of high network loads.
 It also has several other advantages over TCP; for a full rationale,
-see "Homa: A Receiver-Driven Low-Latency Transport Protocol Using 
+see "Homa: A Receiver-Driven Low-Latency Transport Protocol Using
 Network Priorities,"
 .I Proceedings of ACM SIGCOMM
 .IR 2019 ,
@@ -137,10 +137,16 @@ To access a particular parameter, prepend
 to the value shown below.
 The parameters are also visible as files in the directory
 .IR /proc/sys/net/homa .
-Most of these parameters are intended only for use in Homa testing;
+Most of these parameters are intended only for use in Homa testing
+and tuning;
 the default values should work fine in production. It's probably a
 bad idea to change any of these unless you are sure you have made
 detailed performance measurements to justify the change.
+.TP
+.I bpage_lease_usecs
+The amount of time (in microseconds) that a given core can own a page in
+a receive buffer pool before its ownership can be revoked by a different
+core.
 .TP
 .I cutoff_version
 (Read-only) The current version for unscheduled cutoffs; incremented
@@ -333,7 +339,7 @@ on servers.
 An integer value specifying how frequently resend requests may be sent
 to a given peer (regardless of how many RPCs are outstanding to that
 peer). This is in units
-of "ticks" (see 
+of "ticks" (see
 .I resend_ticks
 below). This value and
 .I timeout_resends
@@ -402,7 +408,7 @@ dead and abort all RPCs involving that peer with
 .IR unsched_cutoffs
 An array of 8 integer values. The nth element specifies the largest
 message size, in bytes, for which priority level n will be used.
-Starting with index 
+Starting with index
 .IR num_priorities \(en1
 and working backwards, values should be monotonically increasing.
 An entry greater than or equal to

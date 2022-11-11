@@ -188,6 +188,13 @@ enum homa_packet_type {
 #define NUM_PEER_UNACKED_IDS 5
 
 /**
+ * struct homa_cache_line - An object whose size equals that of a cache line.
+ */
+struct homa_cache_line {
+	char bytes[64];
+};
+
+/**
  * struct common_header - Wire format for the first bytes in every Homa
  * packet. This must partially match the format of a TCP header so that
  * Homa can piggyback on TCP segmentation offload (and possibly other
@@ -624,14 +631,14 @@ struct homa_message_in {
 	bool scheduled;
 
 	/**
-	 * The offset within the message of the next byte to be copied
-	 * out of the message to a user buffer.
+	 * @xfer_offset: The offset within the message of the next byte to be
+	 * copied out of the message to a user buffer.
 	 */
 	int xfer_offset;
 
 	/**
-	 * The next buffer in @packets to consider when copying data out of
-	 * the message to a user buffer (all skbs before this one have
+	 * @xfer_skb: The next buffer in @packets to consider when copying data
+	 * out of the message to a user buffer (all skbs before this one have
 	 * already been copied). NULL means we haven't yet transferred
 	 * any data.
 	 */
@@ -642,6 +649,15 @@ struct homa_message_in {
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	__u64 birth;
+
+	/**
+	 * @num_buffers: The number of entries in @buffers used for this
+	 * message (0 means buffers not allocated yet).
+	 */
+	int num_buffers;
+
+	/** @buffers: Describes buffer space allocated for this message. */
+	struct homa_buf_ptrs buffers[HOMA_MAX_BPAGES];
 };
 
 /**
@@ -1033,6 +1049,154 @@ struct homa_rpc_bucket {
 };
 
 /**
+ * struct homa_bpage - Contains information about a single page in
+ * a buffer pool. Note: this information is stored in user memory, so
+ * it needs to be managed so that a misbehaving user program can't cause
+ * kernel crashes (it's OK if a misbehaving program causes the buffer pool
+ * to misbehave, such as running out of space, as long as it doesn't cause
+ * a kernel crash).
+ */
+struct homa_bpage {
+	union {
+		/**
+		 * @cache_line: Ensures that each homa_bpage object
+		 * is exactly one cache line long.
+		 */
+		struct homa_cache_line cache_line;
+		struct {
+			/** @lock: to synchronize shared access. Must never
+			 * wait for this lock, since a faulty user program
+			 * could leave it locked.
+			 */
+			struct spinlock lock;
+
+			/**
+			 * @refs: Number of messages with data in this page.
+			 * The kernel increments this when allocating buffer
+			 * space for a message, and the app decrements it when
+			 * done with a message.
+			 */
+			atomic_t refs;
+
+			/**
+			 * @owner: kernel core that currently owns this page
+			 * (< 0 if none).
+			 */
+			int owner;
+
+			/**
+			 * @expiration: time (in get_cycles units) after
+			 * which it's OK to steal this page from its current
+			 * owner.
+			 */
+			__u64 expiration;
+		};
+	};
+};
+_Static_assert(sizeof(struct homa_bpage) == sizeof(struct homa_cache_line),
+		"homa_bpage overflowed a cache line");
+
+/**
+ * struct homa_pool_core - Holds core-specific data for a homa_pool (a bpage
+ * out of which that core is allocating small chunks).
+ */
+struct homa_pool_core {
+	union {
+		/**
+		 * @cache_line: Ensures that each object is exactly one
+		 * cache line long.
+		 */
+		struct homa_cache_line cache_line;
+		struct {
+			/**
+			 * @page_hint: Index of bpage in pool->descriptors,
+			 * which may be owned by this core. If so, we'll use it
+			 * for allocating partial pages.
+			 */
+			int page_hint;
+
+			/**
+			 * @allocated: if the page given by @page_hint is
+			 * owned by this core, this variable gives the number of
+			 * (initial) bytes that have already been allocated
+			 * from the page.
+			 */
+			int allocated;
+		};
+	};
+};
+_Static_assert(sizeof(struct homa_pool_core) == sizeof(struct homa_cache_line),
+		"homa_pool_core overflowed a cache line");
+
+/**
+ * struct homa_pool - Describes a pool of buffer space for incoming
+ * messages for a particular socket; managed by homa_pool.c. The pool is
+ * divided up into "bpages", which are a multiple of the hardware page size.
+ * A bpage may be owned by a particular core so that it can more efficiently
+ * allocate space for small messages.
+ */
+struct homa_pool {
+	/**
+	 * @region: beginning of the pool's region (in the app's virtual
+	 * memory). Initial portion is used for bpage metadata shared
+	 * with the application, and the remainder is divided into pages.
+	 * 0 means the pool hasn't yet been initialized.
+	 */
+	char *region;
+
+	/**
+	 * @homa: shared information about the Homa driver.
+	 */
+	struct homa *homa;
+
+	/**
+	 * @descriptors: contains @num_pages entries (same address as @region).
+	 * Pages for this are pinned in memory.
+	 */
+	struct homa_bpage *descriptors;
+
+	/**
+	 * @pinned: info about pages pinned for @descriptors; used to
+	 * unpin them. This memory is kmalloc-ed.
+	 */
+	struct page **pinned;
+
+	/** @page0: address in @region of the bpage with index 0. */
+	char *bpage0;
+
+	/** @num_bpages: total number of bpages in the pool. */
+	int num_bpages;
+
+	/**
+	 * @active_pages: the number of bpages (always the lowest ones)
+	 * that are currently being used for allocation.  Varies slowly
+	 * depending on active buffer usage. The goal is to keep this
+	 * number small to minimize memory footprint, while keeping it
+	 * large enough so that many pages are free at any given time
+	 * (so allocation is efficient).
+	 */
+	atomic_t active_pages;
+
+	/**
+	 * @next_scan: index of the next page to check while searching for
+	 * a free bpage.
+	 */
+	atomic_t next_scan;
+
+	/**
+	 * @free_bpages_found: the number of pages successfully allocated
+	 * so far in the current scan (i.e. since @next_scan was set to 0).
+	 */
+	atomic_t free_bpages_found;
+
+	/** @cores: core-specific info; dynamically allocated. */
+	struct homa_pool_core *cores;
+
+	/** @num_cores: number of elements in @cores. */
+	int num_cores;
+};
+
+/**
  * struct homa_sock - Information about an open socket.
  */
 struct homa_sock {
@@ -1156,6 +1320,11 @@ struct homa_sock {
 	 * the socket lock.
 	 */
 	struct homa_rpc_bucket server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
+
+	/**
+	 * @buffer_pool: used to allocate buffer space for incoming messages.
+	 */
+	struct homa_pool buffer_pool;
 };
 
 /**
@@ -1800,9 +1969,21 @@ struct homa {
 	/**
 	 * @sync_freeze: nonzero means that on completion of the next
 	 * client RPC we should freeze our timetrace and also the peer's.
-	 * Then clear this back to zero again.
+	 * Then clear this back to zero again. Set externally via sysctl.
 	 */
 	int sync_freeze;
+
+	/**
+	 * @bpage_lease_usecs: how long a core can own a bpage (microseconds)
+	 * before its ownership can be revoked to reclaim the page.
+	 */
+	int bpage_lease_usecs;
+
+	/**
+	 * @bpage_lease_cycles: The value of @bpage_lease_usecs in get_cycles
+	 * units.
+	 */
+	int bpage_lease_cycles;
 
 	/**
 	 * @temp: the values in this array can be read and written with sysctl.
@@ -2848,6 +3029,15 @@ extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_lcache *lcache, int *delta);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
+extern int      homa_pool_allocate(struct homa_rpc *rpc);
+extern void     homa_pool_destroy(struct homa_pool *pool);
+extern void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
+		    int *available);
+extern int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
+		    int *pages, int leave_locked);
+extern int      homa_pool_init(struct homa_pool *pool, struct homa *homa,
+		    void *buf_region, __u64 region_size);
+extern void     homa_pool_release_buffers(struct homa_rpc *rpc);
 extern char    *homa_print_ipv4_addr(__be32 addr);
 extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 extern char    *homa_print_metrics(struct homa *homa);
