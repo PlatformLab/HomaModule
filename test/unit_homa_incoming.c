@@ -482,6 +482,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__handle_ack)
 			1400, 0), &self->hsk, &self->lcache,
 			&self->incoming_delta);
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
+	homa_sock_shutdown(&hsk);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__new_server_rpc)
 {
@@ -1341,6 +1342,7 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 	EXPECT_EQ(1, unit_list_length(&hsk1.active_rpcs));
 	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc1));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
+	homa_sock_shutdown(&hsk1);
 }
 
 TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
@@ -2230,6 +2232,8 @@ TEST_F(homa_incoming, homa_abort_rpcs__multiple_sockets)
 	EXPECT_EQ(RPC_READY, crpc3->state);
 	EXPECT_EQ(2, unit_list_length(&hsk1.active_rpcs));
 	EXPECT_EQ(2, unit_list_length(&hsk1.ready_responses));
+	homa_sock_shutdown(&hsk1);
+	homa_sock_shutdown(&hsk2);
 }
 TEST_F(homa_incoming, homa_abort_rpcs__select_addr)
 {

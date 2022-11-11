@@ -87,6 +87,10 @@ TEST_F(homa_socktab, homa_socktab_next__basics)
 	EXPECT_EQ(first_port+5, hsk->port);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
+	homa_sock_destroy(&hsk1);
+	homa_sock_destroy(&hsk2);
+	homa_sock_destroy(&hsk3);
+	homa_sock_destroy(&hsk4);
 }
 TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 {
@@ -108,6 +112,8 @@ TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 	EXPECT_EQ(first_port, hsk->port);
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
+	homa_sock_destroy(&hsk1);
+	homa_sock_destroy(&hsk3);
 }
 
 TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)

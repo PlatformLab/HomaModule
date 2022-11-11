@@ -270,6 +270,7 @@ TEST_F(homa_utils, homa_rpc_acked__basics)
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
 	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
+	homa_sock_destroy(&hsk);
 }
 TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 {
@@ -285,6 +286,7 @@ TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 	homa_rpc_acked(&self->hsk, self->client_ip, &ack);
 	EXPECT_EQ(0, unit_list_length(&hsk.active_rpcs));
 	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc));
+	homa_sock_destroy(&hsk);
 }
 TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 {
@@ -300,6 +302,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
 	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
 	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
+	homa_sock_destroy(&hsk);
 }
 TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 {
@@ -315,6 +318,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
 	EXPECT_EQ(1, unit_list_length(&hsk.active_rpcs));
 	EXPECT_STREQ("OUTGOING", homa_symbol_for_state(srpc));
+	homa_sock_destroy(&hsk);
 }
 
 TEST_F(homa_utils, homa_rpc_free__basics)
