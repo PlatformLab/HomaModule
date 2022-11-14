@@ -118,28 +118,6 @@ _Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
 #endif
 
 /**
- * struct homa_buf_ptrs - Used to pass information to user space about
- * a particular buffer region for a particular incoming message.
- */
-struct homa_buf_ptrs {
-	/**
-	 * @buffer: First byte of storage for the buffer. If this isn't
-	 * the last buffer in a message then it contains HOMA_BPAGE_SIZE
-	 * bytes; otherwise it contains the remaining bytes in the message.
-	 */
-	void *buffer;
-
-	/**
-	 * @ref_count: Pointer to an integer that must be atomically
-	 * decremented by the application when it has finished reading
-	 * the buffered data (allows the kernel to reclaim buffer space).
-	 * The type below is int because different atomic types are
-	 * required for user-level and kernel.
-	 */
-	int *ref_count;
-};
-
-/**
  * struct homa_recv_args - Used to pass arguments and results between
  * user space and the HOMAIOCRECV ioctl.
  *

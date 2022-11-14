@@ -480,6 +480,9 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
+	if (rpc->msgin.total_length)
+		homa_pool_release_buffers(&rpc->hsk->buffer_pool,
+				rpc->msgin.num_buffers, rpc->msgin.buffers);
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
@@ -1577,6 +1580,11 @@ char *homa_print_metrics(struct homa *homa)
 				"NEED_ACKs ignored because RPC result not "
 				"yet received\n",
 				m->ignored_need_acks);
+		homa_append_metric(homa,
+				"bpage_reuses              %15llu  "
+				"Buffer page could be reused because ref "
+				"count was zero\n",
+				m->bpage_reuses);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

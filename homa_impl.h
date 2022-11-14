@@ -656,8 +656,11 @@ struct homa_message_in {
 	 */
 	int num_buffers;
 
-	/** @buffers: Describes buffer space allocated for this message. */
-	struct homa_buf_ptrs buffers[HOMA_MAX_BPAGES];
+	/** @buffers: Describes buffer space allocated for this message.
+	 * Each entry is an offset from the start of the buffer region.
+	 * All but the last pointer refer to areas of size HOMA_BPAGE_SIZE.
+	 */
+	__u32 buffers[HOMA_MAX_BPAGES];
 };
 
 /**
@@ -1144,28 +1147,16 @@ struct homa_pool {
 	 */
 	char *region;
 
+	/** @num_bpages: total number of bpages in the pool. */
+	int num_bpages;
+
 	/**
 	 * @homa: shared information about the Homa driver.
 	 */
 	struct homa *homa;
 
-	/**
-	 * @descriptors: contains @num_pages entries (same address as @region).
-	 * Pages for this are pinned in memory.
-	 */
+	/** @descriptors: kmalloced area containing one entry for each bpage. */
 	struct homa_bpage *descriptors;
-
-	/**
-	 * @pinned: info about pages pinned for @descriptors; used to
-	 * unpin them. This memory is kmalloc-ed.
-	 */
-	struct page **pinned;
-
-	/** @page0: address in @region of the bpage with index 0. */
-	char *bpage0;
-
-	/** @num_bpages: total number of bpages in the pool. */
-	int num_bpages;
 
 	/**
 	 * @active_pages: the number of bpages (always the lowest ones)
@@ -2333,21 +2324,18 @@ struct homa_metrics {
 	 * @peer_timeouts: total number of times a peer (either client or
 	 * server) was found to be nonresponsive, resulting in RPC aborts.
 	 */
-
 	__u64 peer_timeouts;
 
 	/**
 	 * @server_rpc_discards: total number of times an RPC was aborted on
 	 * the server side because of a timeout.
 	 */
-
 	__u64 server_rpc_discards;
 
 	/**
 	 * @server_rpcs_unknown: total number of times an RPC was aborted on
 	 * the server side because it is no longer known to the client.
 	 */
-
 	__u64 server_rpcs_unknown;
 
 	/**
@@ -2488,6 +2476,13 @@ struct homa_metrics {
 	 * was ignored because the RPC's result hadn't been fully received.
 	 */
 	__u64 ignored_need_acks;
+
+	/**
+	 * @bpage_resuses: total number of times that, when an owned page
+	 * reached the end, it could be reused because all existing
+	 * allocations had been released.
+	 */
+	__u64 bpage_reuses;
 
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
@@ -3037,7 +3032,8 @@ extern int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 		    int *pages, int leave_locked);
 extern int      homa_pool_init(struct homa_pool *pool, struct homa *homa,
 		    void *buf_region, __u64 region_size);
-extern void     homa_pool_release_buffers(struct homa_rpc *rpc);
+extern void     homa_pool_release_buffers(struct homa_pool *pool,
+		    int num_buffers, __u32 *buffers);
 extern char    *homa_print_ipv4_addr(__be32 addr);
 extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 extern char    *homa_print_metrics(struct homa *homa);

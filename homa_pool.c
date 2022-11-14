@@ -31,52 +31,25 @@
 int homa_pool_init(struct homa_pool *pool, struct homa *homa,
 		void *region, __u64 region_size)
 {
-	/* Initial (over)estimate assumes no space used for descriptors. */
-	int num_bpages = region_size/HOMA_BPAGE_SIZE;
-	int descriptor_bytes;
-	int i, result, pinned_pages;
+	int i, result;
 
 	if (((__u64) region) & ~PAGE_MASK)
 		return -EINVAL;
-	pool->pinned = NULL;
 	pool->cores = NULL;
 	pool->region = (char *) region;
-	pool->homa = homa;
-	pool->descriptors = (struct homa_bpage *) region;
-	descriptor_bytes = ((num_bpages * sizeof(struct homa_bpage))
-			+ ~PAGE_MASK) & PAGE_MASK;
-	pool->bpage0 = region + descriptor_bytes;
-	pool->num_bpages = (region_size - descriptor_bytes) >> HOMA_BPAGE_SHIFT;
+	pool->num_bpages = region_size >> HOMA_BPAGE_SHIFT;
 	if (pool->num_bpages < MIN_ACTIVE) {
 		result = -EINVAL;
 		goto error;
 	}
-	atomic_set(&pool->active_pages, MIN_ACTIVE);
-	atomic_set(&pool->next_scan, 0);
-	atomic_set(&pool->free_bpages_found, 0);
-
-	/* Pin the descriptor array in memory so we can reference it
-	 * directly, without access checks.
-	 */
-	pinned_pages = (pool->bpage0 - pool->region)/PAGE_SIZE;
-	pool->pinned = kmalloc(pinned_pages * sizeof(*pool->pinned), GFP_ATOMIC);
-	if (!pool->pinned) {
+	pool->homa = homa;
+	pool->descriptors = (struct homa_bpage *) kmalloc(
+			pool->num_bpages * sizeof(struct homa_bpage),
+			GFP_ATOMIC);
+	if (!pool->descriptors) {
 		result = -ENOMEM;
 		goto error;
 	}
-	result = pin_user_pages((unsigned long) pool->region, pinned_pages,
-			FOLL_WRITE | FOLL_LONGTERM, pool->pinned, NULL);
-	if (result < 0)
-		goto error;
-	if (result < pinned_pages) {
-		printk(KERN_WARNING "homa_pool_init pinned only %d pages, "
-				"needed %d", result, pinned_pages);
-		unpin_user_pages(pool->pinned, result);
-		result = -EFAULT;
-		goto error;
-	}
-
-	/* Initial page descriptors. */
 	for (i = 0; i < pool->num_bpages; i++) {
 		struct homa_bpage *bp = &pool->descriptors[i];
 		spin_lock_init(&bp->lock);
@@ -84,12 +57,14 @@ int homa_pool_init(struct homa_pool *pool, struct homa *homa,
 		bp->owner = -1;
 		bp->expiration = 0;
 	}
+	atomic_set(&pool->active_pages, MIN_ACTIVE);
+	atomic_set(&pool->next_scan, 0);
+	atomic_set(&pool->free_bpages_found, 0);
 
 	/* Allocate and initialize core-specific data. */
 	pool->cores = (struct homa_pool_core *) kmalloc(nr_cpu_ids *
 			sizeof(struct homa_pool_core), GFP_ATOMIC);
 	if (!pool->cores) {
-		unpin_user_pages(pool->pinned, pinned_pages);
 		result = -ENOMEM;
 		goto error;
 	}
@@ -102,10 +77,8 @@ int homa_pool_init(struct homa_pool *pool, struct homa *homa,
 	return 0;
 
 	error:
-	if (pool->pinned) {
-		unpin_user_pages(pool->pinned, pinned_pages);
-		kfree(pool->pinned);
-	}
+	if (pool->descriptors)
+		kfree(pool->descriptors);
 	if (pool->cores)
 		kfree(pool->cores);
 	pool->region = NULL;
@@ -121,10 +94,8 @@ void homa_pool_destroy(struct homa_pool *pool)
 {
 	if (!pool->region)
 		return;
-	unpin_user_pages(pool->pinned,
-			(pool->bpage0 - pool->region) >> PAGE_SHIFT);
+	kfree(pool->descriptors);
 	kfree(pool->cores);
-	kfree(pool->pinned);
 	pool->region = NULL;
 }
 
@@ -165,12 +136,14 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, int *pages,
 					active = pool->num_bpages;
 				atomic_set(&pool->active_pages, active);
 			} else {
-				if ((2*free > active) && (active > MIN_ACTIVE)) {
+				if (2*free > active) {
 					/* > 50% of pages free; shrink active
-					 * pool.
+					 * pool by 10%.
 					 */
-					active--;
-					atomic_set(&pool->active_pages, active);
+					active -= active/10;
+					atomic_set(&pool->active_pages,
+							(active >= MIN_ACTIVE)
+							? active : MIN_ACTIVE);
 				}
 				atomic_set(&pool->free_bpages_found, 0);
 				atomic_set(&pool->next_scan, 0);
@@ -230,11 +203,11 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, int *pages,
  */
 int homa_pool_allocate(struct homa_rpc *rpc)
 {
-	struct homa_pool *pool = &rpc->hsk->buffer_pool;
 	int full_pages, partial, pages[HOMA_MAX_BPAGES], i, core_id;
-	struct homa_buf_ptrs *next_buf = rpc->msgin.buffers;
+	struct homa_pool *pool = &rpc->hsk->buffer_pool;
 	struct homa_pool_core *core;
 	struct homa_bpage *bpage;
+	__u64 now = get_cycles();
 
 	if (!pool->region)
 		return -1;
@@ -244,12 +217,8 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	if (unlikely(full_pages)) {
 		if (homa_pool_get_pages(pool, full_pages, pages, 0) != 0)
 			return -1;
-		for (i = 0; i < full_pages; i++) {
-			next_buf->buffer = pool->bpage0
-					+ (pages[i] << HOMA_BPAGE_SHIFT);
-			next_buf->ref_count = (int *) &pool->descriptors[i].refs;
-			next_buf++;
-		}
+		for (i = 0; i < full_pages; i++)
+			rpc->msgin.buffers[i] = pages[i] << HOMA_BPAGE_SHIFT;
 	}
 	rpc->msgin.num_buffers = full_pages;
 
@@ -268,31 +237,39 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 		 */
 		goto new_page;
 	}
-	if (bpage->owner == core_id) {
-		if (core->allocated + partial <= HOMA_BPAGE_SIZE) {
-			atomic_inc(&bpage->refs);
-			spin_unlock_bh(&bpage->lock);
-			goto allocate_partial;
-		}
-		bpage->owner = -1;
+	if (bpage->owner != core_id) {
+		spin_unlock_bh(&bpage->lock);
+		goto new_page;
 	}
+	if ((core->allocated + partial) > HOMA_BPAGE_SIZE) {
+		if (atomic_read(&bpage->refs) > 0) {
+			bpage->owner = -1;
+			spin_unlock_bh(&bpage->lock);
+			goto new_page;
+		}
+		/* Bpage is totally free, so we can reuse it. */
+		core->allocated = 0;
+		INC_METRIC(bpage_reuses, 1);
+	}
+	bpage->expiration = now + pool->homa->bpage_lease_cycles;
+	atomic_inc(&bpage->refs);
 	spin_unlock_bh(&bpage->lock);
+	goto allocate_partial;
 
 	/* Can't use the current page; get another one. */
 	new_page:
 	if (homa_pool_get_pages(pool, 1, pages, 1) != 0) {
-		homa_pool_release_buffers(rpc);
+		homa_pool_release_buffers(pool, rpc->msgin.num_buffers,
+				rpc->msgin.buffers);
 		rpc->msgin.num_buffers = 0;
 		return -1;
 	}
 	core->page_hint = pages[0];
 	core->allocated = 0;
-	bpage = &pool->descriptors[pages[0]];
 
 	allocate_partial:
-	next_buf->buffer = pool->bpage0 + (core->page_hint << HOMA_BPAGE_SHIFT)
-			+ core->allocated;
-	next_buf->ref_count = (int *) &bpage->refs;
+	rpc->msgin.buffers[rpc->msgin.num_buffers] = core->allocated
+			+ (core->page_hint << HOMA_BPAGE_SHIFT);
 	rpc->msgin.num_buffers++;
 	core->allocated += partial;
 	return 0;
@@ -323,24 +300,26 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 	*available = (bpage_index < (rpc->msgin.num_buffers-1))
 			? HOMA_BPAGE_SIZE - bpage_offset
 			: rpc->msgin.total_length - offset;
-	return ((char *) rpc->msgin.buffers[bpage_index].buffer) + bpage_offset;
+	return rpc->hsk->buffer_pool.region + rpc->msgin.buffers[bpage_index]
+			+ bpage_offset;
 }
 
 /**
- * homa_pool_release_buffers() - Release all of the buffer space allocated
- * for a message. Normally the releasing happens in the application; this
- * function if only invoked in situations where the buffer information will
- * not be passed to the application, such as after errors.
- * @rpc:   RPC whose incoming message buffer space should be released.
+ * homa_pool_release_buffers() - Release buffer space so that it can be
+ * reused
+ * @pool:         Pool that the buffer space belongs to.
+ * @num_buffers:  How many buffers to release.
+ * @buffers:      Points to @num_buffers values, each of which is an offset
+ *                from the start of the pool to the buffer to be released.
  */
-void homa_pool_release_buffers(struct homa_rpc *rpc)
+void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
+		__u32 *buffers)
 {
 	int i;
 
-	if (rpc->msgin.total_length == 0)
-		return;
-	for (i = 0; i < rpc->msgin.num_buffers; i++) {
-		atomic_dec((atomic_t *) rpc->msgin.buffers[i].ref_count);
+	for (i = 0; i < num_buffers; i++) {
+		__u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
+		if (bpage_index < pool->num_bpages)
+			 atomic_dec(&pool->descriptors[bpage_index].refs);
 	}
-	rpc->msgin.num_buffers = 0;
 }

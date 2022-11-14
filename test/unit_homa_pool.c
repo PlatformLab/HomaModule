@@ -20,7 +20,6 @@
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
-#include <sys/mman.h>
 
 #define REGION_SIZE (1024*HOMA_BPAGE_SIZE)
 
@@ -37,8 +36,7 @@ FIXTURE_SETUP(homa_pool)
 {
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	self->buffer_region = mmap(NULL, REGION_SIZE, PROT_READ|PROT_WRITE,
-			MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	self->buffer_region = (void *) 0x1000000;
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
 	cur_pool = &self->hsk.buffer_pool;
@@ -48,7 +46,6 @@ FIXTURE_TEARDOWN(homa_pool)
 {
 	cur_pool = NULL;
 	homa_destroy(&self->homa);
-	munmap(self->buffer_region, REGION_SIZE);
 	unit_teardown();
 }
 
@@ -71,9 +68,9 @@ TEST_F(homa_pool, homa_pool_init__basics)
 	struct homa_pool *pool = &self->hsk.buffer_pool;
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-	EXPECT_EQ(99, pool->num_bpages);
-	EXPECT_EQ(8192, pool->bpage0 - pool->region);
+	EXPECT_EQ(100, pool->num_bpages);
 	EXPECT_EQ(4, atomic_read(&pool->active_pages));
+	EXPECT_EQ(0, atomic_read(&pool->next_scan));
 	EXPECT_EQ(-1, pool->descriptors[98].owner);
 }
 TEST_F(homa_pool, homa_pool_init__region_not_page_aligned)
@@ -87,16 +84,10 @@ TEST_F(homa_pool, homa_pool_init__region_too_small)
 	EXPECT_EQ(EINVAL, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
 			self->buffer_region, 3*HOMA_BPAGE_SIZE));
 }
-TEST_F(homa_pool, homa_pool_init__cant_allocate_pinned_pages)
+TEST_F(homa_pool, homa_pool_init__cant_allocate_descriptors)
 {
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
-			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-}
-TEST_F(homa_pool, homa_pool_init__cant_pin_pages)
-{
-	mock_pin_pages_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 }
 TEST_F(homa_pool, homa_pool_init__cant_allocate_core_info)
@@ -136,6 +127,7 @@ TEST_F(homa_pool, homa_pool_get_pages__no_buffer_space)
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, pool->num_bpages);
 	atomic_set(&pool->next_scan, pool->num_bpages);
+	atomic_set(&pool->free_bpages_found, 0);
 	EXPECT_EQ(-1, homa_pool_get_pages(pool, 2, pages, 0));
 }
 TEST_F(homa_pool, homa_pool_get_pages__grow_active_pool)
@@ -146,6 +138,7 @@ TEST_F(homa_pool, homa_pool_get_pages__grow_active_pool)
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 5);
 	atomic_set(&pool->next_scan, 5);
+	atomic_set(&pool->free_bpages_found, 1);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(5, pages[0]);
 	EXPECT_EQ(6, pages[1]);
@@ -157,13 +150,27 @@ TEST_F(homa_pool, homa_pool_get_pages__shrink_active_pool)
 	int pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-	atomic_set(&pool->active_pages, 10);
-	atomic_set(&pool->next_scan, 12);
-	atomic_set(&pool->free_bpages_found, 6);
+	atomic_set(&pool->active_pages, 20);
+	atomic_set(&pool->next_scan, 22);
+	atomic_set(&pool->free_bpages_found, 11);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(0, pages[0]);
 	EXPECT_EQ(1, pages[1]);
-	EXPECT_EQ(9, atomic_read(&pool->active_pages));
+	EXPECT_EQ(18, atomic_read(&pool->active_pages));
+}
+TEST_F(homa_pool, homa_pool_get_pages__dont_shrink_below_MIN_ACTIVE)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	int pages[10];
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 100*HOMA_BPAGE_SIZE));
+	atomic_set(&pool->active_pages, 4);
+	atomic_set(&pool->next_scan, 4);
+	atomic_set(&pool->free_bpages_found, 3);
+	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
+	EXPECT_EQ(0, pages[0]);
+	EXPECT_EQ(1, pages[1]);
+	EXPECT_EQ(4, atomic_read(&pool->active_pages));
 }
 TEST_F(homa_pool, homa_pool_get_pages__basic_wraparound)
 {
@@ -267,17 +274,52 @@ TEST_F(homa_pool, homa_pool_allocate__basics)
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
 	EXPECT_EQ(3, crpc->msgin.num_buffers);
-	EXPECT_EQ(pool->bpage0, crpc->msgin.buffers[0].buffer);
-	EXPECT_EQ((int *) &pool->descriptors[0].refs,
-			crpc->msgin.buffers[0].ref_count);
+	EXPECT_EQ(0, crpc->msgin.buffers[0]);
 	EXPECT_EQ(-1, pool->descriptors[0].owner);
-	EXPECT_EQ(pool->bpage0 + 2*HOMA_BPAGE_SIZE,
-			crpc->msgin.buffers[2].buffer);
-	EXPECT_EQ((int *) &pool->descriptors[2].refs,
-			crpc->msgin.buffers[2].ref_count);
+	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.buffers[2]);
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(150000 - 2*HOMA_BPAGE_SIZE,
 			pool->cores[cpu_number].allocated);
+}
+TEST_F(homa_pool, homa_pool_allocate__out_of_buffer_space)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 5*HOMA_BPAGE_SIZE));
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+	atomic_set(&pool->descriptors[1].refs, 1);
+	atomic_set(&pool->descriptors[2].refs, 1);
+	atomic_set(&pool->descriptors[3].refs, 1);
+	atomic_set(&pool->descriptors[4].refs, 1);
+
+	EXPECT_EQ(1, -homa_pool_allocate(crpc));
+	EXPECT_EQ(0, crpc->msgin.num_buffers);
+}
+TEST_F(homa_pool, homa_pool_allocate__owned_page_locked)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 100*HOMA_BPAGE_SIZE));
+	atomic_set(&pool->next_scan, 2);
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			4000, 98, 1000, 2000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
+	crpc->msgin.num_buffers = 0;
+        mock_trylock_errors = 1;
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(1, crpc->msgin.num_buffers);
+	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
+	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
+	EXPECT_EQ(1, pool->descriptors[2].owner);
+	EXPECT_EQ(1, pool->descriptors[3].owner);
 }
 TEST_F(homa_pool, homa_pool_allocate__reuse_owned_page)
 {
@@ -302,52 +344,6 @@ TEST_F(homa_pool, homa_pool_allocate__reuse_owned_page)
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(5000, pool->cores[cpu_number].allocated);
 }
-TEST_F(homa_pool, homa_pool_allocate__owned_page_locked)
-{
-	struct homa_pool *pool = &self->hsk.buffer_pool;
-	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
-			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-	atomic_set(&pool->next_scan, 2);
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
-			4000, 98, 1000, 2000);
-	ASSERT_NE(NULL, crpc);
-
-	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
-	crpc->msgin.num_buffers = 0;
-        mock_trylock_errors = 1;
-	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(1, crpc->msgin.num_buffers);
-	EXPECT_EQ(pool->bpage0 + 3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0].buffer);
-	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
-	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
-	EXPECT_EQ(1, pool->descriptors[2].owner);
-	EXPECT_EQ(1, pool->descriptors[3].owner);
-}
-TEST_F(homa_pool, homa_pool_allocate__not_enough_space_in_owned_page)
-{
-	struct homa_pool *pool = &self->hsk.buffer_pool;
-	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
-			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-	atomic_set(&pool->next_scan, 2);
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
-			4000, 98, 1000, 2000);
-	ASSERT_NE(NULL, crpc);
-
-	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
-	crpc->msgin.num_buffers = 0;
-	pool->cores[cpu_number].allocated = HOMA_BPAGE_SIZE-1900;
-	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(1, crpc->msgin.num_buffers);
-	EXPECT_EQ(pool->bpage0 + 3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0].buffer);
-	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
-	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
-	EXPECT_EQ(-1, pool->descriptors[2].owner);
-	EXPECT_EQ(1, pool->descriptors[3].owner);
-}
 TEST_F(homa_pool, homa_pool_allocate__cant_allocate_partial_bpage)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
@@ -367,6 +363,49 @@ TEST_F(homa_pool, homa_pool_allocate__cant_allocate_partial_bpage)
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[4].refs));
 }
+TEST_F(homa_pool, homa_pool_allocate__not_enough_space_in_owned_page)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 100*HOMA_BPAGE_SIZE));
+	atomic_set(&pool->next_scan, 2);
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			4000, 98, 1000, 2000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
+	crpc->msgin.num_buffers = 0;
+	pool->cores[cpu_number].allocated = HOMA_BPAGE_SIZE-1900;
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(1, crpc->msgin.num_buffers);
+	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
+	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
+	EXPECT_EQ(-1, pool->descriptors[2].owner);
+	EXPECT_EQ(1, pool->descriptors[3].owner);
+}
+TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 100*HOMA_BPAGE_SIZE));
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			4000, 98, 1000, 2000);
+	ASSERT_NE(NULL, crpc);
+	pool->cores[cpu_number].page_hint = 2;
+	pool->cores[cpu_number].allocated = HOMA_BPAGE_SIZE-1900;
+	pool->descriptors[2].owner = cpu_number;
+
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
+	EXPECT_EQ(1, crpc->msgin.num_buffers);
+	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
+	EXPECT_EQ(cpu_number, pool->descriptors[2].owner);
+}
 
 TEST_F(homa_pool, homa_pool_get_buffer__basics)
 {
@@ -382,10 +421,10 @@ TEST_F(homa_pool, homa_pool_get_buffer__basics)
 	ASSERT_NE(NULL, crpc);
 	buffer = homa_pool_get_buffer(crpc, HOMA_BPAGE_SIZE + 1000, &available);
 	EXPECT_EQ(HOMA_BPAGE_SIZE - 1000, available);
-	EXPECT_EQ((void *) (pool->bpage0 + HOMA_BPAGE_SIZE + 1000), buffer);
+	EXPECT_EQ((void *) (pool->region + HOMA_BPAGE_SIZE + 1000), buffer);
 	buffer = homa_pool_get_buffer(crpc, 2*HOMA_BPAGE_SIZE + 100, &available);
 	EXPECT_EQ((150000 & (HOMA_BPAGE_SIZE-1)) - 100, available);
-	EXPECT_EQ((void *) (pool->bpage0 + 2*HOMA_BPAGE_SIZE + 100), buffer);
+	EXPECT_EQ((void *) (pool->region + 2*HOMA_BPAGE_SIZE + 100), buffer);
 }
 TEST_F(homa_pool, homa_pool_get_buffer__cant_allocate_buffers)
 {
@@ -417,14 +456,8 @@ TEST_F(homa_pool, homa_pool_release_buffers)
 	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(2, atomic_read(&pool->descriptors[2].refs));
 
-	homa_pool_release_buffers(crpc1);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[2].refs));
-	EXPECT_EQ(0, crpc1->msgin.num_buffers);
-
-	/* Make sure repeated releases are safe. */
-	homa_pool_release_buffers(crpc1);
+	homa_pool_release_buffers(pool, crpc1->msgin.num_buffers,
+			crpc1->msgin.buffers);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(1, atomic_read(&pool->descriptors[2].refs));

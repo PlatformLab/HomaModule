@@ -406,6 +406,22 @@ TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(1400, atomic_read(&self->homa.total_incoming));
 }
+TEST_F(homa_utils, homa_rpc_free__release_buffers)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa, (void *) 0x1000000,
+			100*HOMA_BPAGE_SIZE));
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			RPC_INCOMING, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(0, homa_pool_allocate(crpc));
+	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	homa_rpc_free(crpc);
+	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
+}
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
