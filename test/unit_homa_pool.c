@@ -405,6 +405,7 @@ TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
 	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
 	EXPECT_EQ(cpu_number, pool->descriptors[2].owner);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.bpage_reuses);
 }
 
 TEST_F(homa_pool, homa_pool_get_buffer__basics)

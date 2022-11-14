@@ -1142,18 +1142,43 @@ int homa_socket(struct sock *sk)
 /**
  * homa_setsockopt() - Implements the getsockopt system call for Homa sockets.
  * @sk:      Socket on which the system call was invoked.
- * @level:   ??
+ * @level:   Level at which the operation should be handled; will always
+ *           be IPPROTO_HOMA.
  * @optname: Identifies a particular setsockopt operation.
- * @optval:  Address in user space of the the new value for the option.
+ * @optval:  Address in user space of information about the option.
  * @optlen:  Number of bytes of data at @optval.
  * Return:   0 on success, otherwise a negative errno.
  */
-int homa_setsockopt(struct sock *sk, int level, int optname,
-    sockptr_t optval, unsigned int optlen) {
-	printk(KERN_WARNING "unimplemented setsockopt invoked on Homa socket:"
-			" level %d, optname %d, optlen %d\n",
-			level, optname, optlen);
-	return -EINVAL;
+int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
+		unsigned int optlen)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	struct homa_set_buf_args args;
+	__u64 start = get_cycles();
+	int ret;
+
+	if ((level != IPPROTO_HOMA) || (optname != SO_HOMA_SET_BUF)
+			|| (optlen != sizeof(struct homa_set_buf_args)))
+		return -EINVAL;
+
+	if (copy_from_sockptr(&args, optval, optlen))
+		return -EFAULT;
+	printk(KERN_NOTICE "homa_ioc_set_buf: args.start 0x%llx, args.length 0x%lx\n",
+			(uint64_t) args.start, args.length);
+
+	/* Do a trivial test to make sure we can at least write the first
+	 * page of the region.
+	 */
+	if (copy_to_user(args.start, &args, sizeof(args)))
+		return -EFAULT;
+
+	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_SET_BUF");
+	ret = homa_pool_init(&hsk->buffer_pool, hsk->homa, args.start,
+			args.length);
+	homa_sock_unlock(hsk);
+	INC_METRIC(so_set_buf_calls, 1);
+	INC_METRIC(so_set_buf_cycles, get_cycles() - start);
+	return ret;
 
 }
 

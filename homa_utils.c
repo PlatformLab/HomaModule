@@ -1360,6 +1360,14 @@ char *homa_print_metrics(struct homa *homa)
 				"Total invocations of abort kernel call\n",
 				m->reply_calls);
 		homa_append_metric(homa,
+				"so_set_buf_cycles         %15llu  "
+				"Time spent in setsockopt SO_HOMA_SET_BUF\n",
+				m->so_set_buf_cycles);
+		homa_append_metric(homa,
+				"so_set_buf_calls          %15llu  "
+				"Total invocations of setsockopt SO_HOMA_SET_BUF\n",
+				m->so_set_buf_calls);
+		homa_append_metric(homa,
 				"grant_cycles              %15llu  "
 				"Time spent sending grants\n",
 				m->grant_cycles);

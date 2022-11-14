@@ -9,13 +9,13 @@ SRCS := homa.7 \
 PDFS := $(patsubst %.7,%.pdf,$(patsubst %.3,%.pdf,$(SRCS)))
 
 all: $(PDFS)
-	
+
 clean:
 	rm -f *.pdf
 
 %.pdf: %.3
 	pdfroff -man $< > $@
-	
+
 %.pdf: %.7
 	pdfroff -man $< > $@
 

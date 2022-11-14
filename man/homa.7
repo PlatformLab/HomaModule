@@ -127,6 +127,80 @@ server-side identifier will be the same as the client-side
 identifier except that the low-order bit will be 1.
 When an application receives a message, it can determine whether it
 is a request or response by testing the low-order bit of its identifier.
+.SH RECEIVE BUFFERS
+.PP
+Homa handles buffer space for incoming messages (for both requests and responses)
+differently than TCP and other Unix I/O. Instead of specifying a
+buffer when
+.B recvmsg
+is invoked, an application
+provides Homa with a large pool of buffer space in advance (using
+.BR setsockopt ,
+see below). Homa allocates
+space from this pool as messages arrive, and
+.B recvmsg
+returns information about the space that was allocated. When the application
+has finished processing the incoming message, it uses the next
+.B recvmsg
+operation to pass information about the buffer(s) back to Homa so that
+Homa can reclaim the buffer space for future
+messages. This approach provides a significant performance advantage, since it
+allows Homa to copy message data out to user space as packets for the message
+are received, rather than waiting to start the copy until the entire message
+is complete.
+.PP
+Buffering must be set up using
+.B setsockopt
+before the first call to
+.B recvmsg
+(see below).
+.SH SOCKET OPTIONS
+Homa sockets support a single socket option,
+.BR SO_HOMA_SET_BUF ,
+which is used to specify the buffer pool to use for a particular socket;
+.B setsockopt
+should be invoked with this option exactly once per socket, before the
+first call to
+.B recvmsg .
+The
+.I level
+argument to
+.B setsockopt
+must be
+.BR IPPROTO_HOMA ,
+and the
+.I optval
+and
+.I optlen
+arguments must refer to a struct of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_set_buf_args {
+    void *start;
+    size_t length;
+};
+.EE
+.vs +2
+.ps +1
+.in
+The
+.I start
+field is the address of the beginning of a contiguous buffer region (which
+must be page-aligned), and
+.I length
+provides the total number of bytes in the region.
+The length should typically be
+large (tens of MB?), and the buffer space will typically be allocated as an
+.IR mmap ped
+region with no backing file. Homa will try to concentrate its buffer
+usage in the first pages of the region, only using the higher addresses
+if needed. The region length represents the maximum amount of incoming
+message data that can be buffered for this socket; if space runs out
+then Homa will defer receiving new messages for the socket until some
+of the buffer space has been returned.
 .SH SYSCTL PARAMETERS
 .PP
 Homa supports several parameters that can be set with

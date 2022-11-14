@@ -42,6 +42,7 @@ FIXTURE(homa_plumbing) {
 	struct homa_send_args send_args;
 	struct iovec recv_vec[2];
 	char buffer[2000];
+	sockptr_t optval;
 };
 FIXTURE_SETUP(homa_plumbing)
 {
@@ -104,6 +105,8 @@ FIXTURE_SETUP(homa_plumbing)
 			(10000 + self->recv_vec[0].iov_len);
 	self->recv_vec[1].iov_len = sizeof(self->buffer) -
 			self->recv_vec[0].iov_len;
+	self->optval.user = (void *) 0x100000;
+	self->optval.is_kernel = 0;
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_plumbing)
@@ -582,6 +585,55 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 	struct homa_abort_args args = {99, 0};
 	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk,
 			(unsigned long) &args));
+}
+
+TEST_F(homa_plumbing, homa_set_sock_opt__bad_level)
+{
+	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, 0, 0,
+		self->optval, sizeof(struct homa_set_buf_args)));
+}
+TEST_F(homa_plumbing, homa_set_sock_opt__bad_optname)
+{
+	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
+		self->optval, sizeof(struct homa_set_buf_args)));
+}
+TEST_F(homa_plumbing, homa_set_sock_opt__bad_optlen)
+{
+	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SET_BUF, self->optval,
+			sizeof(struct homa_set_buf_args) - 1));
+}
+TEST_F(homa_plumbing, homa_set_sock_opt__copy_from_sockptr_fails)
+{
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SET_BUF, self->optval,
+			sizeof(struct homa_set_buf_args)));
+}
+TEST_F(homa_plumbing, homa_set_sock_opt__copy_to_user_fails)
+{
+	struct homa_set_buf_args args = {(void *) 0x100000, 5*HOMA_BPAGE_SIZE};
+	self->optval.user = &args;
+	mock_copy_to_user_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SET_BUF, self->optval,
+			sizeof(struct homa_set_buf_args)));
+}
+TEST_F(homa_plumbing, homa_set_sock_opt__success)
+{
+	struct homa_set_buf_args args;
+	char buffer[5000];
+
+	args.start = (void *) (((__u64) (buffer + PAGE_SIZE - 1))
+			& ~(PAGE_SIZE - 1));
+	args.length = 5*HOMA_BPAGE_SIZE;
+	self->optval.user = &args;
+	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SET_BUF, self->optval,
+			sizeof(struct homa_set_buf_args)));
+	EXPECT_EQ(args.start, self->hsk.buffer_pool.region);
+	EXPECT_EQ(5, self->hsk.buffer_pool.num_bpages);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.so_set_buf_calls);
 }
 
 TEST_F(homa_plumbing, homa_softirq__basics)

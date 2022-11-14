@@ -241,6 +241,18 @@ _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
 _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 #endif
 
+/** define SO_HOMA_SET_BUF: setsockopt option for specifying buffer region. */
+#define SO_HOMA_SET_BUF 10
+
+/** struct homa_set_buf - setsockopt argument for SO_HOMA_SET_BUF. */
+struct homa_set_buf_args {
+	/** @start: First byte of buffer region. */
+	void *start;
+
+	/** @length: Total number of bytes available at @start. */
+	size_t length;
+};
+
 /**
  * Meanings of the bits in Homa's flag word, which can be set using
  * "sysctl /net/homa/flags".

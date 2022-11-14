@@ -2164,6 +2164,18 @@ struct homa_metrics {
 	__u64 abort_calls;
 
 	/**
+	 * @so_set_buf_cycles: total time spent executing the homa_ioc_set_buf
+	 * kernel call handler, as measured with get_cycles().
+	 */
+	__u64 so_set_buf_cycles;
+
+	/**
+	 * @so_set_buf_calls: total number of invocations of the homa_ioc_set_buf
+	 * kernel call.
+	 */
+	__u64 so_set_buf_calls;
+
+	/**
 	 * @grant_cycles: total time spent in homa_send_grants, as measured
 	 * with get_cycles().
 	 */

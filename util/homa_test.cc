@@ -34,6 +34,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/types.h>
 
 #include <thread>
@@ -399,6 +400,31 @@ void test_send(int fd, const sockaddr_in_union *dest, char *request)
 	} else {
 		printf("Homa_send succeeded, id %lu\n", id);
 	}
+}
+
+/**
+ * test_set_buf() - Invoke homa_set_buf on a Homa socket.
+ * @fd:       Homa socket.
+ */
+void test_set_buf(int fd)
+{
+	int status;
+	char *region = (char *) mmap(NULL, 64*HOMA_BPAGE_SIZE,
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	struct homa_set_buf_args arg;
+
+	if (region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
+		return;
+	}
+
+	arg.start = region;
+	arg.length = 64*HOMA_BPAGE_SIZE;
+	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+			sizeof(arg));
+	if (status < 0)
+		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+				strerror(errno));
 }
 
 /**
@@ -841,6 +867,8 @@ int main(int argc, char** argv)
 			test_rtt(fd, &dest, buffer);
 		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
 			test_shutdown(fd);
+		} else if (strcmp(argv[nextArg], "set_buf") == 0) {
+			test_set_buf(fd);
 		} else if (strcmp(argv[nextArg], "stream") == 0) {
 			test_stream(fd, &dest);
 		} else if (strcmp(argv[nextArg], "tcp") == 0) {
