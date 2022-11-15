@@ -46,6 +46,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
+	msgin->copied_out = 0;
 	msgin->num_buffers = 0;
 }
 
@@ -166,6 +167,63 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
 		}
 	}
 	return max_bytes - remaining;
+}
+
+/**
+ * homa_copy_to_user() - Copy as much data as possible from incoming
+ * packet buffers to buffers in user space.
+ * @rpc:     RPC for which data should be copied.
+ * Return:   Zero for success or a negative errno if there is an error.
+ */
+int homa_copy_to_user(struct homa_rpc *rpc)
+{
+	int result = 0;
+
+	/* Allocate buffer space for this message if it hasn't yet been done. */
+	if (rpc->msgin.num_buffers == 0) {
+		result = homa_pool_allocate(rpc);
+		if (result < 0)
+			return -ENOMEM;
+	}
+
+	/* Each iteration processes one packet from msgin.packets. */
+	while (true) {
+		struct sk_buff *skb = skb_peek(&rpc->msgin.packets);
+		int offset_in_pkt, to_copy;
+		struct data_header *h;
+
+		if (!skb)
+			break;
+		h = (struct data_header *) skb->data;
+		offset_in_pkt = rpc->msgin.copied_out - ntohl(h->seg.offset);
+		if (offset_in_pkt < 0) {
+			/* No gaps are allowed in the data that has been
+			 * copied out; wait for more packets to arrive.
+			 */
+			break;
+		}
+		to_copy = ntohl(h->seg.segment_length) - offset_in_pkt;
+		while (to_copy > 0) {
+			void *user_addr;
+			int chunk_size;
+
+			user_addr = homa_pool_get_buffer(rpc,
+					rpc->msgin.copied_out, &chunk_size);
+			if (chunk_size > to_copy)
+				chunk_size = to_copy;
+			if (copy_to_user(user_addr, h->seg.data + offset_in_pkt,
+					chunk_size)) {
+				result = -EFAULT;
+				break;
+			}
+			rpc->msgin.copied_out += chunk_size;
+			offset_in_pkt += chunk_size;
+			to_copy -= chunk_size;
+		}
+		skb_dequeue(&rpc->msgin.packets);
+		kfree_skb(skb);
+	}
+	return result;
 }
 
 /**

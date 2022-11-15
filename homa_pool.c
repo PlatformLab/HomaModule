@@ -18,6 +18,17 @@
 /* Pools must always have at least this many active pages. */
 #define MIN_ACTIVE 4
 
+/* When running unit tests, allow HOMA_BPAGE_SIZE and HOMA_BPAGE_SHIFT
+ * to be overriden.
+ */
+#ifdef __UNIT_TEST__
+#include "mock.h"
+#undef HOMA_BPAGE_SIZE
+#define HOMA_BPAGE_SIZE mock_bpage_size
+#undef HOMA_BPAGE_SHIFT
+#define HOMA_BPAGE_SHIFT mock_bpage_shift
+#endif
+
 /**
  * homa_pool_init() - Initialize a homa_pool; any previous contents of the
  * objects are overwritten.

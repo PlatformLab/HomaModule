@@ -86,6 +86,17 @@ int mock_log_rcu_sched = 0;
  */
 int mock_max_grants = 10;
 
+/* A zero value means that copy_to_user will actually copy bytes to
+ * the destination address; nonzero means it logs without copying.
+ */
+int mock_copy_to_user_dont_copy = 0;
+
+/* HOMA_BPAGE_SIZE will evaluate to this. */
+int mock_bpage_size = 0x10000;
+
+/* HOMA_BPAGE_SHIFT will evaluate to this. */
+int mock_bpage_shift = 16;
+
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
  */
@@ -272,8 +283,10 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	if (mock_check_error(&mock_copy_to_user_errors))
 		return -1;
-	memcpy(to, from, n);
-	((char *)(to))[n] = 0;
+	if (!mock_copy_to_user_dont_copy) {
+		memcpy(to, from, n);
+		((char *)(to))[n] = 0;
+	}
 	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
 	return 0;
 }
@@ -1281,6 +1294,9 @@ void mock_teardown(void)
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_max_grants = 10;
+	mock_copy_to_user_dont_copy = 0;
+	mock_bpage_size = 0x10000;
+	mock_bpage_shift = 16;
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
 	mock_log_rcu_sched = 0;

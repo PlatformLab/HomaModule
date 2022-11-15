@@ -17,7 +17,10 @@
 
 extern int         cpu_number;
 extern int         mock_alloc_skb_errors;
+extern             int mock_bpage_size;
+extern             int mock_bpage_shift;
 extern int         mock_copy_data_errors;
+extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern cycles_t    mock_cycles;

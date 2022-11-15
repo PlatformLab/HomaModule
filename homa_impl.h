@@ -596,7 +596,9 @@ struct homa_message_in {
 	 * is sorted in order of offset (head is lowest offset), but
 	 * packets can be received out of order, so there may be times
 	 * when there are holes in the list. Packets in this list contain
-	 * exactly one data_segment.
+	 * exactly one data_segment. Packets on this list are removed from
+	 * this list and freed once all of their data has been copied
+	 * out to a user buffer.
 	 */
 	struct sk_buff_head packets;
 
@@ -630,6 +632,7 @@ struct homa_message_in {
 	 */
 	bool scheduled;
 
+
 	/**
 	 * @xfer_offset: The offset within the message of the next byte to be
 	 * copied out of the message to a user buffer.
@@ -649,6 +652,11 @@ struct homa_message_in {
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	__u64 birth;
+	/**
+	 * @copied_out: All of the bytes of the message with offset less
+	 * than this value have been copied to user-space buffers.
+	 */
+	int copied_out;
 
 	/**
 	 * @num_buffers: The number of entries in @buffers used for this
@@ -2945,6 +2953,7 @@ extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
 extern void     homa_close(struct sock *sock, long timeout);
+extern int      homa_copy_to_user(struct homa_rpc *rpc);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
