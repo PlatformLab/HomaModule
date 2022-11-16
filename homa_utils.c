@@ -221,6 +221,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
+	crpc->flags = 0;
 	crpc->dont_reap = false;
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers, &dest_addr_as_ipv6,
@@ -326,6 +327,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->lock = &bucket->lock;
 	srpc->state = RPC_INCOMING;
+	srpc->flags = 0;
 	srpc->dont_reap = false;
 	atomic_set(&srpc->grants_in_progress, 0);
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);

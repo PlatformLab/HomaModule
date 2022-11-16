@@ -177,53 +177,95 @@ int homa_message_in_copy_data(struct homa_message_in *msgin,
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
 {
-	int result = 0;
+#ifdef __UNIT_TEST__
+#define MAX_CHUNKS 3
+#else
+#define MAX_CHUNKS 10
+#endif
+	/* Each element of this array describes one copy from an skb
+	 * to user space. Note: the same skb can appear in multiple
+	 * consecutive elements.
+	 */
+	struct {
+		char *src;
+		char *dst;
+		int length;
+		struct sk_buff *skb_to_free;
+	} chunks[MAX_CHUNKS];
+	int error = 0;
+	int n = 0;             /* Number of filled entries in chunks. */
 
-	/* Allocate buffer space for this message if it hasn't yet been done. */
-	if (rpc->msgin.num_buffers == 0) {
-		result = homa_pool_allocate(rpc);
-		if (result < 0)
-			return -ENOMEM;
-	}
-
-	/* Each iteration processes one packet from msgin.packets. */
+	/* Tricky note: we can't hold the RPC lock while we're actually
+	 * copying to user space, because (a) it's illegal to hold a spinlock
+	 * while copying to user space and (b) we'd like for homa_softirq
+	 * to add more packets to the RPC while we're copying these out.
+	 * So, collect a bunch of chunks to copy, then release the lock,
+	 * copy them, and reacquire the lock.
+	 */
 	while (true) {
 		struct sk_buff *skb = skb_peek(&rpc->msgin.packets);
-		int offset_in_pkt, to_copy;
+		int skb_offset, skb_bytes, buf_bytes;
 		struct data_header *h;
+		int i;
 
-		if (!skb)
-			break;
+		if (!skb || (rpc->msgin.copied_out == rpc->msgin.total_length))
+			goto copy_out;
 		h = (struct data_header *) skb->data;
-		offset_in_pkt = rpc->msgin.copied_out - ntohl(h->seg.offset);
-		if (offset_in_pkt < 0) {
+		skb_offset = rpc->msgin.copied_out - ntohl(h->seg.offset);
+		if (skb_offset < 0) {
 			/* No gaps are allowed in the data that has been
 			 * copied out; wait for more packets to arrive.
 			 */
-			break;
+			goto copy_out;
 		}
-		to_copy = ntohl(h->seg.segment_length) - offset_in_pkt;
-		while (to_copy > 0) {
-			void *user_addr;
-			int chunk_size;
+		chunks[n].src = h->seg.data + skb_offset;
+		chunks[n].dst = homa_pool_get_buffer(rpc,
+				rpc->msgin.copied_out, &buf_bytes);
+		if (chunks[n].dst == NULL) {
+			error = -ENOMEM;
+			goto copy_out;
+		}
+		skb_bytes = ntohl(h->seg.segment_length) - skb_offset;
+		if (skb_bytes <= buf_bytes) {
+			chunks[n].length = skb_bytes;
+			chunks[n].skb_to_free = skb;
+			skb_dequeue(&rpc->msgin.packets);
+			rpc->msgin.num_skbs--;
+		} else {
+			chunks[n].length = buf_bytes;
+			chunks[n].skb_to_free = NULL;
+		}
+		rpc->msgin.copied_out += chunks[n].length;
+		n++;
+		if (n < MAX_CHUNKS)
+			continue;
 
-			user_addr = homa_pool_get_buffer(rpc,
-					rpc->msgin.copied_out, &chunk_size);
-			if (chunk_size > to_copy)
-				chunk_size = to_copy;
-			if (copy_to_user(user_addr, h->seg.data + offset_in_pkt,
-					chunk_size)) {
-				result = -EFAULT;
-				break;
+		copy_out:
+		if (n == 0)
+			break;
+		rpc->flags |= RPC_COPYING_TO_USER;
+		homa_rpc_unlock(rpc);
+		for (i = 0; i < n; i++) {
+			/* Note: if an error occurs we still have to process
+			 * the remaining chunks in order to free all of the
+			 * skbs. But, we don't need to copy any more data
+			 * after an error.
+			 */
+			if (!error) {
+				if (copy_to_user(chunks[i].dst, chunks[i].src,
+						chunks[i].length))
+					error = -EFAULT;
 			}
-			rpc->msgin.copied_out += chunk_size;
-			offset_in_pkt += chunk_size;
-			to_copy -= chunk_size;
+			if (chunks[i].skb_to_free)
+				kfree_skb(chunks[i].skb_to_free);
 		}
-		skb_dequeue(&rpc->msgin.packets);
-		kfree_skb(skb);
+		n = 0;
+		homa_rpc_lock(rpc);
+		rpc->flags &= ~RPC_COPYING_TO_USER;
+		if (error)
+			break;
 	}
-	return result;
+	return error;
 }
 
 /**

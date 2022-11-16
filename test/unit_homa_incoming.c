@@ -400,17 +400,28 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 			unit_log_get());
 	EXPECT_EQ(crpc->msgin.total_length, crpc->msgin.copied_out);
 	EXPECT_EQ(NULL, skb_peek(&crpc->msgin.packets));
+	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
-TEST_F(homa_incoming, homa_copy_to_user__no_buffer_pool_available)
+TEST_F(homa_incoming, homa_copy_to_user__message_data_exceeds_length)
 {
 	struct homa_rpc *crpc;
 
+	mock_bpage_size = 2048;
+	mock_bpage_shift = 11;
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
+			(void *) 0x1000000, 100*HOMA_BPAGE_SIZE));
 	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			1000, 4000);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(12, -homa_copy_to_user(crpc));
-	EXPECT_EQ(0, crpc->msgin.copied_out);
+	crpc->msgin.total_length = 1000;
+
+	unit_log_clear();
+	mock_copy_to_user_dont_copy = 1;
+	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	EXPECT_STREQ("_copy_to_user copied 1000 bytes", unit_log_get());
+	EXPECT_EQ(1000, crpc->msgin.copied_out);
+	EXPECT_EQ(1, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_copy_to_user__gap_in_packets)
 {
@@ -434,6 +445,18 @@ TEST_F(homa_incoming, homa_copy_to_user__gap_in_packets)
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
 	EXPECT_EQ(1400, crpc->msgin.copied_out);
+	EXPECT_EQ(1, crpc->msgin.num_skbs);
+}
+TEST_F(homa_incoming, homa_copy_to_user__no_buffer_pool_available)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 4000);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(12, -homa_copy_to_user(crpc));
+	EXPECT_EQ(0, crpc->msgin.copied_out);
 }
 TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 {
@@ -447,12 +470,51 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 			self->server_ip, self->server_port, self->client_id,
 			1000, 4000);
 	ASSERT_NE(NULL, crpc);
+	self->data.message_length = htonl(4000);
+	self->data.seg.offset = htonl(1400);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 101000), crpc, NULL, &self->incoming_delta);
+	self->data.seg.offset = htonl(2800);
+	self->data.seg.segment_length = htonl(1200);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 101000), crpc, NULL, &self->incoming_delta);
 
 	unit_log_clear();
-	mock_copy_to_user_errors = 1;
+	mock_copy_to_user_errors = 2;
+	mock_copy_to_user_dont_copy = 1;
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, crpc->msgin.copied_out);
+	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
+	EXPECT_EQ(2800, crpc->msgin.copied_out);
+	EXPECT_EQ(1, crpc->msgin.num_skbs);
+}
+TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
+{
+	struct homa_rpc *crpc;
+
+	mock_bpage_size = 512;
+	mock_bpage_shift = 9;
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
+			(void *) 0x1000000, 100*HOMA_BPAGE_SIZE));
+	crpc = unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 4000);
+	ASSERT_NE(NULL, crpc);
+	self->data.message_length = htonl(4000);
+	self->data.seg.segment_length = htonl(3000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			3000, 101000), crpc, NULL, &self->incoming_delta);
+
+	unit_log_clear();
+	mock_copy_to_user_dont_copy = 1;
+	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	EXPECT_STREQ("_copy_to_user copied 512 bytes; "
+			"_copy_to_user copied 512 bytes; "
+			"_copy_to_user copied 512 bytes; "
+			"_copy_to_user copied 512 bytes; "
+			"_copy_to_user copied 512 bytes; "
+			"_copy_to_user copied 440 bytes", unit_log_get());
+	EXPECT_EQ(3000, crpc->msgin.copied_out);
+	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
 
 TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)

@@ -603,7 +603,7 @@ struct homa_message_in {
 	struct sk_buff_head packets;
 
 	/**
-	 * @num_skbs:  Total number of buffers in @packets. Will be 0 if
+	 * @num_skbs: Number of buffers currently in @packets. Will be 0 if
 	 * @total_length is less than 0.
 	 */
 	int num_skbs;
@@ -795,6 +795,27 @@ struct homa_rpc {
 		RPC_IN_SERVICE          = 8,
 		RPC_DEAD                = 9
 	} state;
+
+	/**
+	 * @flags: Additional state information: an OR'ed combination of
+	 * various single-bit flags. See below for definitions.
+	 */
+	int flags;
+
+	/* Valid bits for @flags:
+	 * RPC_PKTS_READY -        The RPC has input packets ready to be
+	 *                         copied to user space.
+	 * RPC_COPYING_TO_USER -   Data is being copied from this RPC to
+	 *                         user space; the RPC must not be reaped.
+	 * RPC_HANDING_OFF -       This RPC is in the process of being
+	 *                         handed off to a waiting thread; it must
+	 *                         not be reaped.
+	 * RPC_ERROR -             A fatal error has occurred for this RPC.
+	 */
+#define RPC_PKTS_READY        1
+#define RPC_COPYING_TO_USER   2
+#define RPC_HANDING_OFF       4
+#define RPC_ERROR             8
 
 	/**
 	 * @dont_reap: True means data is still being copied out of the
