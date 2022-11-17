@@ -64,7 +64,7 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 	struct homa_rpc *srpc;
 	struct grant_header h;
 
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
@@ -289,7 +289,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	struct grant_header h;
 
 	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			10000, 10000);
 	ASSERT_NE(NULL, srpc);
@@ -309,7 +309,7 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 	struct homa_rpc *crpc;
 	struct grant_header h;
 
-	crpc = unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			100, 10000);
 	ASSERT_NE(NULL, crpc);
@@ -330,7 +330,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 	struct homa_rpc *srpc;
 	struct grant_header h;
 
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
@@ -348,7 +348,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 	struct homa_rpc *srpc;
 	struct busy_header h;
 
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
@@ -367,7 +367,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 
@@ -389,7 +389,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 
-	srpc = unit_server_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
 

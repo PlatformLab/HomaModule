@@ -288,13 +288,13 @@ TEST_F(homa_peertab, homa_peer_lock_slow)
 
 TEST_F(homa_peertab, homa_peer_add_ack)
 {
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 		self->client_ip, self->server_ip, self->server_port,
 		101, 100, 100);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 		self->client_ip, self->server_ip, self->server_port,
 		102, 100, 100);
-	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk, RPC_OUTGOING,
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 		self->client_ip, self->server_ip, self->server_port,
 		103, 100, 100);
 	struct homa_peer *peer = crpc1->peer;

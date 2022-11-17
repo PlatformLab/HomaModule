@@ -94,7 +94,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	int client_port = 40000;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_OUTGOING,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			&client_ip, &server_ip, client_port, server_id, 100,
 			20000);
 	ASSERT_NE(NULL, srpc);

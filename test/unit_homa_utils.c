@@ -260,7 +260,7 @@ TEST_F(homa_utils, homa_rpc_acked__basics)
 {
 	struct homa_sock hsk;
 	mock_sock_init(&hsk, &self->homa, self->server_port);
-	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
+	struct homa_rpc *srpc = unit_server_rpc(&hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
 	ASSERT_NE(NULL, srpc);
@@ -276,7 +276,7 @@ TEST_F(homa_utils, homa_rpc_acked__lookup_socket)
 {
 	struct homa_sock hsk;
 	mock_sock_init(&hsk, &self->homa, self->server_port);
-	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
+	struct homa_rpc *srpc = unit_server_rpc(&hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
 	ASSERT_NE(NULL, srpc);
@@ -292,7 +292,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_socket)
 {
 	struct homa_sock hsk;
 	mock_sock_init(&hsk, &self->homa, self->server_port);
-	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
+	struct homa_rpc *srpc = unit_server_rpc(&hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
 	ASSERT_NE(NULL, srpc);
@@ -308,7 +308,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 {
 	struct homa_sock hsk;
 	mock_sock_init(&hsk, &self->homa, self->server_port);
-	struct homa_rpc *srpc = unit_server_rpc(&hsk, RPC_OUTGOING,
+	struct homa_rpc *srpc = unit_server_rpc(&hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
 	ASSERT_NE(NULL, srpc);
@@ -324,7 +324,7 @@ TEST_F(homa_utils, homa_rpc_acked__no_such_rpc)
 TEST_F(homa_utils, homa_rpc_free__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_peers));
 	ASSERT_NE(NULL, crpc);
@@ -341,7 +341,7 @@ TEST_F(homa_utils, homa_rpc_free__basics)
 TEST_F(homa_utils, homa_rpc_free__already_dead)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
@@ -355,7 +355,7 @@ TEST_F(homa_utils, homa_rpc_free__already_dead)
 TEST_F(homa_utils, homa_rpc_free__state_ready)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
@@ -365,14 +365,14 @@ TEST_F(homa_utils, homa_rpc_free__state_ready)
 TEST_F(homa_utils, homa_rpc_free__dead_buffs)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 1000);
 	ASSERT_NE(NULL, crpc1);
 	homa_rpc_free(crpc1);
 	EXPECT_EQ(9, self->homa.max_dead_buffs);
 	EXPECT_EQ(9, self->hsk.dead_skbs);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 5000, 1000);
 	ASSERT_NE(NULL, crpc2);
 	homa_rpc_free(crpc2);
@@ -383,7 +383,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 {
 	struct homa_interest interest = {};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
 	ASSERT_NE(NULL, crpc);
 	atomic_long_set(&interest.id, 0);
@@ -398,7 +398,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
@@ -413,7 +413,7 @@ TEST_F(homa_utils, homa_rpc_free__release_buffers)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa, (void *) 0x1000000,
 			100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 
@@ -438,7 +438,7 @@ TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 TEST_F(homa_utils, homa_rpc_free_rcu)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 	homa_rpc_free(crpc);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
@@ -447,13 +447,13 @@ TEST_F(homa_utils, homa_rpc_free_rcu)
 TEST_F(homa_utils, homa_rpc_reap__basics)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 5000, 2000);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 5000, 100);
 	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+4, 2000, 100);
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
@@ -474,7 +474,7 @@ TEST_F(homa_utils, homa_rpc_reap__basics)
 TEST_F(homa_utils, homa_rpc_reap__protected)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 5000, 2000);
 	ASSERT_NE(NULL, crpc1);
 	homa_rpc_free(crpc1);
@@ -487,10 +487,10 @@ TEST_F(homa_utils, homa_rpc_reap__protected)
 TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 2000);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 1000, 2000);
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
@@ -510,10 +510,10 @@ TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 2000);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, self->client_ip, self->server_ip,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 1000, 2000);
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
@@ -532,7 +532,7 @@ TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 }
 TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 {
-	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_READY,
+	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
 	ASSERT_NE(NULL, srpc1);
@@ -550,7 +550,7 @@ TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
 
 TEST_F(homa_utils, homa_rpc_send_offset__no_msgout)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_INCOMING,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
 	ASSERT_NE(NULL, srpc);
@@ -559,7 +559,7 @@ TEST_F(homa_utils, homa_rpc_send_offset__no_msgout)
 TEST_F(homa_utils, homa_rpc_send_offset__msgout_fully_transmitted)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 5000, 200);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(5000, homa_rpc_send_offset(crpc));
@@ -567,7 +567,7 @@ TEST_F(homa_utils, homa_rpc_send_offset__msgout_fully_transmitted)
 TEST_F(homa_utils, homa_rpc_send_offset__msgout_partly_transmitted)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_rpc_send_offset(crpc));
@@ -626,21 +626,21 @@ TEST_F(homa_utils, homa_find_client_rpc)
 
 TEST_F(homa_utils, homa_find_server_rpc)
 {
-	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, RPC_INCOMING,
+	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
 	ASSERT_NE(NULL, srpc1);
-	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, RPC_INCOMING,
+	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id + 30*HOMA_SERVER_RPC_BUCKETS,
 			10000, 100);
 	ASSERT_NE(NULL, srpc2);
-	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk, RPC_INCOMING,
+	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port+1,
 			self->server_id + 10*HOMA_SERVER_RPC_BUCKETS,
 			10000, 100);
 	ASSERT_NE(NULL, srpc3);
-	struct homa_rpc *srpc4 = unit_server_rpc(&self->hsk, RPC_INCOMING,
+	struct homa_rpc *srpc4 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port+1,
 			self->server_id + 4, 10000, 100);
 	ASSERT_NE(NULL, srpc4);

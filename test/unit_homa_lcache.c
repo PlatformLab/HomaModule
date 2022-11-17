@@ -38,11 +38,11 @@ FIXTURE_SETUP(homa_lcache)
 	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_ip[0] = unit_get_in_addr("196.168.0.2");
-	self->crpc = unit_client_rpc(&self->hsk, RPC_READY,
+	self->crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip,
 			self->server_ip,
 			99, 1234, 1000, 1000);
-	self->srpc = unit_server_rpc(&self->hsk, RPC_READY,
+	self->srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip,
 			self->server_ip,
 			40000, 1235, 1000, 1000);

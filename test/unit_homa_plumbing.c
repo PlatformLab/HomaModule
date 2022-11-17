@@ -207,7 +207,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
 {
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 
 	self->recv_args.message_buf = NULL;
@@ -225,7 +225,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__error_in_import_iovec)
 {
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 
 	self->recv_args.message_buf = NULL;
@@ -247,7 +247,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 {
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
 			|HOMA_RECV_PARTIAL;
@@ -271,7 +271,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
 TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	ASSERT_NE(NULL, crpc);
 	crpc->error = -ETIMEDOUT;
@@ -294,7 +294,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
 TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_READY, self->client_ip, self->server_ip,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	ASSERT_NE(NULL, crpc);
 	crpc->error = -ETIMEDOUT;
@@ -314,7 +314,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
 {
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	mock_copy_to_user_errors = 1;
@@ -329,7 +329,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv4)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, self->server_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
@@ -349,7 +349,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv6)
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
 
-	unit_client_rpc(&self->hsk, RPC_READY, self->client_ip, &server_ip6,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, &server_ip6,
 			self->server_port, self->client_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
 	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
@@ -366,7 +366,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
 	const uint64_t oatmeal = 0x6F61746D65616C00;
 	const uint64_t raisins = 0x72616973696E7300;
 	uint64_t best_cookie = oatmeal + raisins;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, RPC_READY,
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 200);
 	crpc->completion_cookie = best_cookie;
@@ -378,7 +378,7 @@ TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
 }
 TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_READY,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 100, 200);
 	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_REQUEST;
@@ -400,13 +400,13 @@ TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
 
 TEST_F(homa_plumbing, homa_ioc_reply__basics)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
 	EXPECT_EQ(0, -homa_ioc_reply(&self->hsk.inet.sk,
 			(unsigned long) &self->reply_args));
-	EXPECT_NE(RPC_IN_SERVICE, srpc->state);
+	EXPECT_NE(UNIT_IN_SERVICE, srpc->state);
 	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_ioc_reply__cant_read_user_args)
@@ -417,7 +417,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__cant_read_user_args)
 }
 TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
@@ -430,7 +430,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
 }
 TEST_F(homa_plumbing, homa_ioc_reply__error_in_import_iovec)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
@@ -442,7 +442,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__error_in_import_iovec)
 }
 TEST_F(homa_plumbing, homa_ioc_reply__cant_find_rpc)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
@@ -453,7 +453,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__cant_find_rpc)
 }
 TEST_F(homa_plumbing, homa_ioc_reply__error_in_homa_message_out_init)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
@@ -465,7 +465,7 @@ TEST_F(homa_plumbing, homa_ioc_reply__error_in_homa_message_out_init)
 }
 TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
 {
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, RPC_IN_SERVICE,
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	unit_log_clear();
@@ -532,7 +532,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 {
 	struct homa_abort_args args = {self->client_id, 0};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
@@ -550,10 +550,10 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 {
 	struct homa_abort_args args = {0, ECANCELED};
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
@@ -568,7 +568,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__complete_rpc)
 {
 	struct homa_abort_args args = {self->client_id, ECANCELED};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_OUTGOING, self->client_ip, self->server_ip,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));

@@ -28,7 +28,7 @@
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.
- * @state:         Desired state for the RPC: RPC_OUTGOING, etc.
+ * @state:         Desired state for the RPC.
  * @client_ip:     Client's IP address.
  * @server_ip:     Server's IP address.
  * @server_port:   Port number on the server.
@@ -37,15 +37,12 @@
  * @resp_length:   Amount of data in the response.
  *
  * Return:         The properly initialized homa_client_rpc, or NULL if
- *                 there was an error. If @state is RPC_OUTGOING, no data
- *                 will have been sent yet.  If @state is RPC_INCOMING, then
- *                 one packet of data will have been received for the RPC;
- *                 if @state is RPC_READY the entire RPC will have been
- *                 received. The RPC is not locked.
+ *                 there was an error. The RPC is not locked.
  */
-struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
-		struct in6_addr *client_ip, struct in6_addr *server_ip,
-		int server_port, int id, int req_length, int resp_length)
+struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
+		enum unit_rpc_state state, struct in6_addr *client_ip,
+		struct in6_addr *server_ip, int server_port, int id,
+		int req_length, int resp_length)
 {
 	int bytes_received;
 	sockaddr_in_union server_addr;
@@ -65,7 +62,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, saved_id);
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
-	if (state == RPC_OUTGOING)
+	if (state == UNIT_OUTGOING)
 		return crpc;
 	crpc->msgout.next_packet = NULL;
 
@@ -91,13 +88,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
 			crpc, NULL, &incoming_delta);
 	atomic_add(incoming_delta, &hsk->homa->total_incoming);
-	if (crpc->state == state)
+	if (state == UNIT_RCVD_ONE_PKT)
 		return crpc;
-	if (state == RPC_INCOMING)
-		/* Can't get to RPC_INCOMING state for responses that
-		 * fit in a single packet.
-		 */
-		goto error;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
 			bytes_received < resp_length;
 			bytes_received += UNIT_TEST_DATA_PER_PACKET) {
@@ -111,12 +103,9 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk, int state,
 				this_size , 0), crpc, NULL, &incoming_delta);
 		atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	}
-	EXPECT_EQ(RPC_READY, crpc->state);
-	if (crpc->state == state)
+	if (state == UNIT_RCVD_MSG)
 		return crpc;
-
-	/* The desired state doesn't exist. */
-    error:
+	FAIL("unit_client_rpc received unexpected state %d", state);
 	homa_rpc_free(crpc);
 	return NULL;
 }
@@ -347,7 +336,7 @@ void unit_log_throttled(struct homa *homa)
  * unit_server_rpc() - Create a homa_server_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.
- * @state:         Desired state for the RPC: RPC_INCOMING, etc.
+ * @state:         Desired state for the RPC.
  * @client_ip:     Client's IP address.
  * @server_ip:     Server's IP address.
  * @client_port:   Port number that the client used.
@@ -356,15 +345,12 @@ void unit_log_throttled(struct homa *homa)
  * @resp_length:   Amount of data in the response.
  *
  * Return:         The properly initialized homa_server_rpc, or NULL if
- *                 there was an error. If state is RPC_INCOMING, then
- *                 one packet of data will have been received for the RPC;
- *                 otherwise the entire RPC will have been received. If
- *                 state is RPC_OUTGOING, no data will have been sent yet.
- *                 The RPC is not locked.
+ *                 there was an error. The RPC is not locked.
  */
-struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
-		struct in6_addr *client_ip, struct in6_addr *server_ip,
-		int client_port, int id, int req_length, int resp_length)
+struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
+		enum unit_rpc_state state, struct in6_addr *client_ip,
+		struct in6_addr *server_ip, int client_port, int id,
+		int req_length, int resp_length)
 {
 	int bytes_received;
 	int incoming_delta = 0;
@@ -395,13 +381,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
 			srpc, NULL, &incoming_delta);
 	atomic_add(incoming_delta, &hsk->homa->total_incoming);
-	if (srpc->state == state)
+	if (state == UNIT_RCVD_ONE_PKT)
 		return srpc;
-	if (state == RPC_INCOMING)
-		/* Can't get to RPC_INCOMING state for messages that require
-		 * only a single packet.
-		 */
-		goto error;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
 			bytes_received < req_length;
 			bytes_received += UNIT_TEST_DATA_PER_PACKET) {
@@ -415,12 +396,11 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 				this_size , 0), srpc, NULL, &incoming_delta);
 		atomic_add(incoming_delta, &hsk->homa->total_incoming);
 	}
-	EXPECT_EQ(RPC_READY, srpc->state);
-	if (srpc->state == state)
+	if (state == UNIT_RCVD_MSG)
 		return srpc;
 	list_del_init(&srpc->ready_links);
 	srpc->state = RPC_IN_SERVICE;
-	if (srpc->state == state)
+	if (state == UNIT_IN_SERVICE)
 		return srpc;
 	struct sk_buff *skb = homa_fill_packets(
 		hsk, srpc->peer, unit_iov_iter((void *) 2000, resp_length));
@@ -429,10 +409,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk, int state,
 	}
 	homa_message_out_init(srpc, hsk->port, skb, resp_length);
 	srpc->state = RPC_OUTGOING;
-	if (srpc->state == state)
+	if (state == UNIT_OUTGOING)
 		return srpc;
+	FAIL("unit_server_rpc received unexpected state %d", state);
 
-	/* The desired state doesn't exist. */
     error:
 	homa_rpc_free(srpc);
 	return NULL;

@@ -268,7 +268,7 @@ TEST_F(homa_pool, homa_pool_allocate__basics)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 
@@ -287,7 +287,7 @@ TEST_F(homa_pool, homa_pool_allocate__out_of_buffer_space)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 5*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 	atomic_set(&pool->descriptors[1].refs, 1);
@@ -305,7 +305,7 @@ TEST_F(homa_pool, homa_pool_allocate__owned_page_locked)
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->next_scan, 2);
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc);
 
@@ -328,11 +328,11 @@ TEST_F(homa_pool, homa_pool_allocate__reuse_owned_page)
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->next_scan, 2);
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc1);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 100, 1000, 3000);
 	ASSERT_NE(NULL, crpc2);
 
@@ -353,7 +353,7 @@ TEST_F(homa_pool, homa_pool_allocate__cant_allocate_partial_bpage)
 	atomic_set(&pool->active_pages, 5);
 	atomic_set(&pool->next_scan, 2);
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000, 5*HOMA_BPAGE_SIZE + 100);
 	ASSERT_NE(NULL, crpc);
 
@@ -370,7 +370,7 @@ TEST_F(homa_pool, homa_pool_allocate__not_enough_space_in_owned_page)
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->next_scan, 2);
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc);
 
@@ -392,7 +392,7 @@ TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000, 2000);
 	ASSERT_NE(NULL, crpc);
 	pool->cores[cpu_number].page_hint = 2;
@@ -417,7 +417,7 @@ TEST_F(homa_pool, homa_pool_get_buffer__basics)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 	buffer = homa_pool_get_buffer(crpc, HOMA_BPAGE_SIZE + 1000, &available);
@@ -430,7 +430,7 @@ TEST_F(homa_pool, homa_pool_get_buffer__basics)
 TEST_F(homa_pool, homa_pool_get_buffer__cant_allocate_buffers)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(-1, homa_pool_allocate(crpc));
@@ -443,11 +443,11 @@ TEST_F(homa_pool, homa_pool_release_buffers)
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc1);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			RPC_INCOMING, &self->client_ip, &self->server_ip,
+			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	2000);
 	ASSERT_NE(NULL, crpc2);
 

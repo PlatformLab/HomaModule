@@ -169,10 +169,10 @@ TEST_F(homa_socktab, homa_sock_shutdown__basics)
 }
 TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
 {
-	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			20000, 1600);
-	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
+	unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id+2,
 			5000, 5000);
 	self->hsk.shutdown = 1;
@@ -183,10 +183,10 @@ TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
 }
 TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
 {
-	unit_client_rpc(&self->hsk, RPC_INCOMING, self->client_ip,
+	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			20000, 1600);
-	unit_client_rpc(&self->hsk, RPC_OUTGOING, self->client_ip,
+	unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id+2,
 			5000, 5000);
 	homa_sock_shutdown(&self->hsk);
