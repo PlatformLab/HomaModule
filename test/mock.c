@@ -1349,4 +1349,6 @@ void mock_teardown(void)
 		FAIL(" %d rcu_read_locks still active after test",
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;
+
+	unit_hook_set(NULL);
 }
