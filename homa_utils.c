@@ -221,8 +221,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->lock = &bucket->lock;
 	crpc->state = RPC_OUTGOING;
-	crpc->flags = 0;
-	crpc->dont_reap = false;
+	atomic_set(&crpc->flags, 0);
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(&hsk->homa->peers, &dest_addr_as_ipv6,
 			&hsk->inet);
@@ -282,10 +281,9 @@ error:
 
 /**
  * homa_rpc_new_server() - Allocate and construct a server RPC (one that is
- * used to manage an incoming request). If the initial data packet contains
- * the entire incoming message, then the RPC will be put in READY state (and
- * it will be added to the socket's ready list). This is done here, while we
- * have the socket locked, to avoid acquiring the socket lock a second time.
+ * used to manage an incoming request). If appropriate, the RPC will also
+ * be handed off (we do it here, while we have the socket locked, to avoid
+ * acquiring the socket lock a second time).
  * @hsk:    Socket that owns this RPC.
  * @source: IP address (network byte order) of the RPC's client.
  * @h:      Header for the first data packet received for this RPC; used
@@ -327,8 +325,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->lock = &bucket->lock;
 	srpc->state = RPC_INCOMING;
-	srpc->flags = 0;
-	srpc->dont_reap = false;
+	atomic_set(&srpc->flags, 0);
 	atomic_set(&srpc->grants_in_progress, 0);
 	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
 	if (unlikely(IS_ERR(srpc->peer))) {
@@ -363,8 +360,10 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
-	if (ntohl(h->seg.segment_length) >= ntohl(h->message_length))
-		homa_rpc_ready(srpc);
+	if (ntohl(h->seg.offset) == 0) {
+		atomic_or(RPC_PKTS_READY, &srpc->flags);
+		homa_rpc_handoff(srpc);
+	}
 	homa_sock_unlock(hsk);
 	INC_METRIC(requests_received, 1);
 	return srpc;
@@ -546,8 +545,10 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
-			if (rpc->dont_reap || (atomic_read(
-					&rpc->grants_in_progress) != 0)) {
+			if ((atomic_read(&rpc->flags)
+					& (RPC_HANDING_OFF|RPC_COPYING_TO_USER))
+					|| (atomic_read(&rpc->grants_in_progress)
+					!= 0)) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;
 			}
@@ -720,12 +721,9 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				rpc->resend_timer_ticks,
 				rpc->silent_ticks);
 	} else {
-		char *queued = "";
-		if ((rpc->state == RPC_READY) && list_empty(&rpc->ready_links))
-			queued = " (not queued)";
-		printk(KERN_NOTICE "%s RPC %s%s, id %llu, peer %s:%d, "
+		printk(KERN_NOTICE "%s RPC %s, id %llu, peer %s:%d, "
 				"incoming length %d, outgoing length %d\n",
-				type, homa_symbol_for_state(rpc), queued,
+				type, homa_symbol_for_state(rpc),
 				rpc->id, peer, rpc->dport,
 				rpc->msgin.total_length, rpc->msgout.length);
 	}
@@ -1083,8 +1081,6 @@ char *homa_symbol_for_state(struct homa_rpc *rpc)
 		return "OUTGOING";
 	case RPC_INCOMING:
 		return "INCOMING";
-	case RPC_READY:
-		return "READY";
 	case RPC_IN_SERVICE:
 		return "IN_SERVICE";
 	case RPC_DEAD:

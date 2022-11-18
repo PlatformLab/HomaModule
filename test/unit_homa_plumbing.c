@@ -191,212 +191,212 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	EXPECT_EQ(345, self->hsk.port);
 }
 
-TEST_F(homa_plumbing, homa_ioc_recv__cant_read_user_args)
-{
-	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(0LU, self->recv_args.id);
-}
-TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
-{
-	self->hsk.shutdown = true;
-	EXPECT_EQ(ESHUTDOWN, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	self->hsk.shutdown = false;
-}
-TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
-{
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-
-	self->recv_args.message_buf = NULL;
-	self->recv_args.iovec = self->recv_vec;
-	self->recv_args.length = 2;
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	unit_log_clear();
-	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(200, self->recv_args.length);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_SUBSTR("skb_copy_datagram_iter: 60 bytes to 10000: 0-59; "
-		"skb_copy_datagram_iter: 140 bytes to 10060: 60-199",
-		unit_log_get());
-}
-TEST_F(homa_plumbing, homa_ioc_recv__error_in_import_iovec)
-{
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-
-	self->recv_args.message_buf = NULL;
-	self->recv_args.iovec = self->recv_vec;
-	self->recv_args.length = 2;
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	unit_log_clear();
-	mock_import_iovec_errors = 1;
-	EXPECT_EQ(EINVAL, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
-{
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	EXPECT_EQ(EAGAIN, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(0LU, self->recv_args.id);
-}
-TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
-{
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
-			|HOMA_RECV_PARTIAL;
-
-	// First call gets most of message.
-	self->recv_args.length = 150;
-	EXPECT_EQ(150, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-
-	// Second call gets remainder, deletes message.
-	self->recv_args.length = 200;
-	memset(&self->recv_args.source_addr, 0, sizeof(self->recv_args.source_addr));
-	self->recv_args.id = self->client_id;
-	EXPECT_EQ(50, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-	ASSERT_NE(NULL, crpc);
-	crpc->error = -ETIMEDOUT;
-	self->recv_args.length = 100;
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
-			|HOMA_RECV_PARTIAL;
-	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	if (self->hsk.inet.sk.sk_family == AF_INET6) {
-		EXPECT_EQ_IP(*self->server_ip,
-				self->recv_args.source_addr.in6.sin6_addr);
-	} else {
-		EXPECT_EQ_IP(*self->server_ip,
-				ipv4_to_ipv6(self->recv_args.source_addr.in4
-				.sin_addr.s_addr));
-	}
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-	ASSERT_NE(NULL, crpc);
-	crpc->error = -ETIMEDOUT;
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	if (self->hsk.inet.sk.sk_family == AF_INET6) {
-		EXPECT_EQ_IP(*self->server_ip,
-				self->recv_args.source_addr.in6.sin6_addr);
-	} else {
-		EXPECT_EQ_IP(*self->server_ip,
-				ipv4_to_ipv6(self->recv_args.source_addr.in4
-				.sin_addr.s_addr));
-	}
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
-{
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	mock_copy_to_user_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv4)
-{
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
-
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 200);
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(200, self->recv_args.length);
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(AF_INET, self->recv_args.source_addr.in4.sin_family);
-	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
-			self->recv_args.source_addr.in4.sin_addr.s_addr));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv6)
-{
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
-	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
-
-	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, &server_ip6,
-			self->server_port, self->client_id, 100, 200);
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(200, self->recv_args.length);
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(AF_INET6, self->recv_args.source_addr.in6.sin6_family);
-	EXPECT_STREQ("[1::3:5:7]", homa_print_ipv6_addr(
-			&self->recv_args.source_addr.in6.sin6_addr));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
-{
-	const uint64_t oatmeal = 0x6F61746D65616C00;
-	const uint64_t raisins = 0x72616973696E7300;
-	uint64_t best_cookie = oatmeal + raisins;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, self->server_ip, self->server_port,
-			self->client_id, 100, 200);
-	crpc->completion_cookie = best_cookie;
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
-	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
-		(unsigned long) &self->recv_args));
-	EXPECT_EQ(self->client_id, self->recv_args.id);
-	EXPECT_EQ(best_cookie, self->recv_args.completion_cookie);
-}
-TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 100, 200);
-	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_REQUEST;
-	EXPECT_EQ(100, homa_ioc_recv(&self->hsk.inet.sk,
-			(unsigned long) &self->recv_args));
-	EXPECT_EQ(100, self->recv_args.length);
-	EXPECT_EQ(self->server_id, self->recv_args.id);
-	if (self->hsk.inet.sk.sk_family == AF_INET6) {
-		EXPECT_EQ_IP(*self->client_ip,
-				self->recv_args.source_addr.in6.sin6_addr);
-	} else {
-		EXPECT_EQ_IP(*self->client_ip,
-				ipv4_to_ipv6(self->recv_args.source_addr.in4
-				.sin_addr.s_addr));
-	}
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-}
+//TEST_F(homa_plumbing, homa_ioc_recv__cant_read_user_args)
+//{
+//	mock_copy_data_errors = 1;
+//	EXPECT_EQ(EFAULT, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(0LU, self->recv_args.id);
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__socket_shutdown)
+//{
+//	self->hsk.shutdown = true;
+//	EXPECT_EQ(ESHUTDOWN, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	self->hsk.shutdown = false;
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__use_iovec)
+//{
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//
+//	self->recv_args.message_buf = NULL;
+//	self->recv_args.iovec = self->recv_vec;
+//	self->recv_args.length = 2;
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	unit_log_clear();
+//	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(200, self->recv_args.length);
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//	EXPECT_SUBSTR("skb_copy_datagram_iter: 60 bytes to 10000: 0-59; "
+//		"skb_copy_datagram_iter: 140 bytes to 10060: 60-199",
+//		unit_log_get());
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__error_in_import_iovec)
+//{
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//
+//	self->recv_args.message_buf = NULL;
+//	self->recv_args.iovec = self->recv_vec;
+//	self->recv_args.length = 2;
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	unit_log_clear();
+//	mock_import_iovec_errors = 1;
+//	EXPECT_EQ(EINVAL, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__error_in_homa_wait_for_message)
+//{
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	EXPECT_EQ(EAGAIN, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(0LU, self->recv_args.id);
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__HOMA_RECV_PARTIAL)
+//{
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
+//			|HOMA_RECV_PARTIAL;
+//
+//	// First call gets most of message.
+//	self->recv_args.length = 150;
+//	EXPECT_EQ(150, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+//
+//	// Second call gets remainder, deletes message.
+//	self->recv_args.length = 200;
+//	memset(&self->recv_args.source_addr, 0, sizeof(self->recv_args.source_addr));
+//	self->recv_args.id = self->client_id;
+//	EXPECT_EQ(50, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__free_after_error_with_partial)
+//{
+//	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+//			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//	ASSERT_NE(NULL, crpc);
+//	crpc->error = -ETIMEDOUT;
+//	self->recv_args.length = 100;
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE
+//			|HOMA_RECV_PARTIAL;
+//	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	if (self->hsk.inet.sk.sk_family == AF_INET6) {
+//		EXPECT_EQ_IP(*self->server_ip,
+//				self->recv_args.source_addr.in6.sin6_addr);
+//	} else {
+//		EXPECT_EQ_IP(*self->server_ip,
+//				ipv4_to_ipv6(self->recv_args.source_addr.in4
+//				.sin_addr.s_addr));
+//	}
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__rpc_has_error)
+//{
+//	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+//			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//	ASSERT_NE(NULL, crpc);
+//	crpc->error = -ETIMEDOUT;
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	EXPECT_EQ(ETIMEDOUT, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	if (self->hsk.inet.sk.sk_family == AF_INET6) {
+//		EXPECT_EQ_IP(*self->server_ip,
+//				self->recv_args.source_addr.in6.sin6_addr);
+//	} else {
+//		EXPECT_EQ_IP(*self->server_ip,
+//				ipv4_to_ipv6(self->recv_args.source_addr.in4
+//				.sin_addr.s_addr));
+//	}
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__cant_update_user_arguments)
+//{
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	mock_copy_to_user_errors = 1;
+//	EXPECT_EQ(EFAULT, -homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv4)
+//{
+//	// Make sure the test uses IPv4.
+//	mock_ipv6 = false;
+//	homa_sock_destroy(&self->hsk);
+//	mock_sock_init(&self->hsk, &self->homa, 0);
+//
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+//			self->server_port, self->client_id, 100, 200);
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(200, self->recv_args.length);
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	EXPECT_EQ(AF_INET, self->recv_args.source_addr.in4.sin_family);
+//	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
+//			self->recv_args.source_addr.in4.sin_addr.s_addr));
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__client_normal_completion_ipv6)
+//{
+//	// Make sure the test uses IPv6.
+//	mock_ipv6 = true;
+//	homa_sock_destroy(&self->hsk);
+//	mock_sock_init(&self->hsk, &self->homa, 0);
+//	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
+//
+//	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip, &server_ip6,
+//			self->server_port, self->client_id, 100, 200);
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(200, self->recv_args.length);
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	EXPECT_EQ(AF_INET6, self->recv_args.source_addr.in6.sin6_family);
+//	EXPECT_STREQ("[1::3:5:7]", homa_print_ipv6_addr(
+//			&self->recv_args.source_addr.in6.sin6_addr));
+//	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__completion_cookie)
+//{
+//	const uint64_t oatmeal = 0x6F61746D65616C00;
+//	const uint64_t raisins = 0x72616973696E7300;
+//	uint64_t best_cookie = oatmeal + raisins;
+//	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
+//			self->client_ip, self->server_ip, self->server_port,
+//			self->client_id, 100, 200);
+//	crpc->completion_cookie = best_cookie;
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_RESPONSE;
+//	EXPECT_EQ(200, homa_ioc_recv(&self->hsk.inet.sk,
+//		(unsigned long) &self->recv_args));
+//	EXPECT_EQ(self->client_id, self->recv_args.id);
+//	EXPECT_EQ(best_cookie, self->recv_args.completion_cookie);
+//}
+//TEST_F(homa_plumbing, homa_ioc_recv__server_normal_completion)
+//{
+//	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
+//			self->client_ip, self->server_ip, self->client_port,
+//		        self->server_id, 100, 200);
+//	self->recv_args.flags = HOMA_RECV_NONBLOCKING|HOMA_RECV_REQUEST;
+//	EXPECT_EQ(100, homa_ioc_recv(&self->hsk.inet.sk,
+//			(unsigned long) &self->recv_args));
+//	EXPECT_EQ(100, self->recv_args.length);
+//	EXPECT_EQ(self->server_id, self->recv_args.id);
+//	if (self->hsk.inet.sk.sk_family == AF_INET6) {
+//		EXPECT_EQ_IP(*self->client_ip,
+//				self->recv_args.source_addr.in6.sin6_addr);
+//	} else {
+//		EXPECT_EQ_IP(*self->client_ip,
+//				ipv4_to_ipv6(self->recv_args.source_addr.in4
+//				.sin_addr.s_addr));
+//	}
+//	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+//	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+//}
 
 TEST_F(homa_plumbing, homa_ioc_reply__basics)
 {
@@ -558,27 +558,9 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
 	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
-	EXPECT_EQ(RPC_READY, crpc1->state);
 	EXPECT_EQ(-ECANCELED, crpc1->error);
-	EXPECT_EQ(RPC_READY, crpc2->state);
 	EXPECT_EQ(-ECANCELED, crpc2->error);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_abort__complete_rpc)
-{
-	struct homa_abort_args args = {self->client_id, ECANCELED};
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 10000, 200);
-	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
-	EXPECT_EQ(RPC_READY, crpc->state);
-	EXPECT_EQ(-ECANCELED, crpc->error);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-
-	// Try again, now that the RPC is already finished.
-	EXPECT_EQ(-EALREADY, homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) &args));
 }
 TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
@@ -664,6 +646,7 @@ TEST_F(homa_plumbing, homa_softirq__reorder_incoming_packets)
 	skb3->next = skb4;
 	skb4->next = NULL;
 	homa_softirq(skb);
+	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
 	EXPECT_STREQ("201 301 2001 5001", unit_log_get());
 }
@@ -688,6 +671,7 @@ TEST_F(homa_plumbing, homa_softirq__reorder_short_packet_at_front)
 	skb3->next = skb4;
 	skb4->next = NULL;
 	homa_softirq(skb);
+	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
 	EXPECT_STREQ("201 301 4001 5001", unit_log_get());
 }
@@ -708,6 +692,7 @@ TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 	skb2->next = skb3;
 	skb3->next = NULL;
 	homa_softirq(skb);
+	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
 	EXPECT_STREQ("2001 3001 5001", unit_log_get());
 }
@@ -817,6 +802,7 @@ TEST_F(homa_plumbing, homa_softirq__update_total_incoming)
 	skb_shinfo(skb2)->frag_list = skb;
 	skb->next = NULL;
 	homa_softirq(skb2);
+	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
 	EXPECT_STREQ("1235", unit_log_get());
 	EXPECT_EQ(7200, atomic_read(&self->homa.total_incoming));

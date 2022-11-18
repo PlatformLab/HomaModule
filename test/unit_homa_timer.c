@@ -119,6 +119,7 @@ TEST_F(homa_timer, homa_check_timeout__client_rpc__all_granted_bytes_received_no
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 5000, 5000);
 	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
 	srpc->msgin.incoming = 1400;
 	srpc->silent_ticks = 10;
 	EXPECT_EQ(0, homa_check_rpc(srpc));
@@ -335,7 +336,7 @@ TEST_F(homa_timer, homa_timer__basics)
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_timeouts);
-	EXPECT_EQ(RPC_READY, crpc->state);
+	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {

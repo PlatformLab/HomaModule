@@ -774,7 +774,7 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 	 * copying to user space (see sync.txt). Mark the RPC so we can
 	 * still access the RPC even without holding its lock.
 	 */
-	rpc->dont_reap = true;
+	atomic_or(RPC_COPYING_TO_USER, &rpc->flags);
 	if (homa_is_client(rpc->id)) {
 		if ((args.length >= rpc->msgin.total_length) || rpc->error
 				|| !(args.flags & HOMA_RECV_PARTIAL))
@@ -813,19 +813,19 @@ int homa_ioc_recv(struct sock *sk, unsigned long arg) {
 
 	tt_record2("starting data copy to user space for id %d, length %d",
 			rpc->id, rpc->msgin.total_length);
-	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
+//	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
+	result = rpc->msgin.total_length;
 	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
-			rpc->id & 0xffffffff, tt_addr(rpc->peer->addr),
+			rpc->id, tt_addr(rpc->peer->addr),
 			result, current->pid);
-	rpc->dont_reap = false;
+	atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
 	kfree(iov);
-	return result;
+	return 0;
 
 error:
 	tt_record2("homa_ioc_recv error %d, id %d", err, args.id);
-	if (rpc != NULL) {
-		rpc->dont_reap = false;
-	}
+	if (rpc != NULL)
+		atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
 	kfree(iov);
 	return err;
 }
@@ -1056,10 +1056,7 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 	if (args.error == 0) {
 		homa_rpc_free(rpc);
 	} else {
-		if (rpc->state == RPC_READY)
-			ret = -EALREADY;
-		else
-			homa_rpc_abort(rpc, -args.error);
+		homa_rpc_abort(rpc, -args.error);
 	}
 	homa_rpc_unlock(rpc);
 	return ret;

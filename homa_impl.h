@@ -632,21 +632,6 @@ struct homa_message_in {
 	 */
 	bool scheduled;
 
-
-	/**
-	 * @xfer_offset: The offset within the message of the next byte to be
-	 * copied out of the message to a user buffer.
-	 */
-	int xfer_offset;
-
-	/**
-	 * @xfer_skb: The next buffer in @packets to consider when copying data
-	 * out of the message to a user buffer (all skbs before this one have
-	 * already been copied). NULL means we haven't yet transferred
-	 * any data.
-	 */
-	struct sk_buff *xfer_skb;
-
 	/**
 	 * @birth: get_cycles time when this RPC was added to the grantable
 	 * list. Invalid if RPC isn't in the grantable list.
@@ -684,35 +669,18 @@ struct homa_interest {
 	struct task_struct *thread;
 
 	/**
-	 * @rpc: If non-null, it identifies the RPC given by @id and
-	 * @peer_addr, and that RPC is locked. Only set by
-	 * homa_register_interests. This is a shortcut so
-	 * homa_wait_for_message doesn't need to relock the RPC.
+	 * @ready_rpc: This is actually a (struct homa_rpc *) identifying the
+	 * RPC that was found; NULL if no RPC has been found yet. This
+	 * variable is used for synchronization to handoff the RPC, and
+	 * must be set only after @locked is set.
 	 */
-	struct homa_rpc *ready_rpc;
+	atomic_long_t ready_rpc;
 
 	/**
-	 * @id: Id of the RPC that was found, or zero if none. This variable
-	 * is used for synchronization, and must be set after the variables
-	 * below it. This variable and the others below are used later to
-	 * look up and lock the RPC. It isn't always safe to pass the RPC
-	 * itself: the locking rules create a window where the RPC could be
-	 * deleted.
+	 * @locked: Nonzero means that @ready_rpc is locked; only valid
+	 * if @ready_rpc is non-NULL.
 	 */
-	atomic_long_t id;
-
-	/**
-	 * @peer_addr: IP address of the peer for the matching RPC. Valid
-	 * only if @id is nonzero. IPv4 addresses are stored as IPv4-mapped
-	 * IPv6 addresses.
-	 */
-	struct in6_addr peer_addr;
-
-	/**
-	 * @peer_port: Port of the peer for the matching RPC. Valid
-	 * only if @id is nonzero.
-	 */
-	__u16 peer_port;
+	int locked;
 
 	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
@@ -736,14 +704,14 @@ struct homa_interest {
 
 /**
  * homa_interest_init() - Fill in default values for all of the fields
- * of a struct homa_interest. Intended for testing.
+ * of a struct homa_interest.
  * @interest:   Struct to initialize.
  */
 static void inline homa_interest_init(struct homa_interest *interest)
 {
 	interest->thread = current;
-	interest->ready_rpc = NULL;
-	atomic_long_set(&interest->id, 0);
+	atomic_long_set(&interest->ready_rpc, 0);
+	interest->locked = 0;
 	interest->reg_rpc = NULL;
 	interest->request_links.next = LIST_POISON1;
 	interest->response_links.next = LIST_POISON1;
@@ -772,9 +740,6 @@ struct homa_rpc {
 	 * @RPC_INCOMING:     The RPC is waiting for data @msgin to be received
 	 *                    from the peer; at least one packet has already
 	 *                    been received.
-	 * @RPC_READY:        @msgin is now complete; the next step is for
-	 *                    the message to be read from the socket by the
-	 *                    application.
 	 * @RPC_IN_SERVICE:   Used only for server RPCs: the request message
 	 *                    has been read from the socket, but the response
 	 *                    message has not yet been presented to the kernel.
@@ -783,24 +748,25 @@ struct homa_rpc {
 	 *                    structure may be accessed in this state.
 	 *
 	 * Client RPCs pass through states in the following order:
-	 * RPC_OUTGOING, RPC_INCOMING, RPC_READY, RPC_DEAD.
+	 * RPC_OUTGOING, RPC_INCOMING, RPC_DEAD.
 	 *
 	 * Server RPCs pass through states in the following order:
-	 * RPC_INCOMING, RPC_READY, RPC_IN_SERVICE, RPC_OUTGOING, RPC_DEAD.
+	 * RPC_INCOMING, RPC_IN_SERVICE, RPC_OUTGOING, RPC_DEAD.
 	 */
 	enum {
 		RPC_OUTGOING            = 5,
 		RPC_INCOMING            = 6,
-		RPC_READY               = 7,
 		RPC_IN_SERVICE          = 8,
 		RPC_DEAD                = 9
 	} state;
 
 	/**
 	 * @flags: Additional state information: an OR'ed combination of
-	 * various single-bit flags. See below for definitions.
+	 * various single-bit flags. See below for definitions. Must be
+	 * manipulated with atomic operations because some of the manipulations
+	 * occur without holding the RPC lock.
 	 */
-	int flags;
+	atomic_t flags;
 
 	/* Valid bits for @flags:
 	 * RPC_PKTS_READY -        The RPC has input packets ready to be
@@ -810,18 +776,10 @@ struct homa_rpc {
 	 * RPC_HANDING_OFF -       This RPC is in the process of being
 	 *                         handed off to a waiting thread; it must
 	 *                         not be reaped.
-	 * RPC_ERROR -             A fatal error has occurred for this RPC.
 	 */
 #define RPC_PKTS_READY        1
 #define RPC_COPYING_TO_USER   2
 #define RPC_HANDING_OFF       4
-#define RPC_ERROR             8
-
-	/**
-	 * @dont_reap: True means data is still being copied out of the
-	 * RPC to a receiver, so it isn't safe to reap it yet.
-	 */
-	bool dont_reap;
 
 	/**
 	 * @grants_in_progress: Count of active grant sends for this RPC;
@@ -1304,14 +1262,16 @@ struct homa_sock {
 	int dead_skbs;
 
 	/**
-	 * @ready_requests: Contains server RPCs in RPC_READY state that
-	 * have not yet been claimed. The head is oldest, i.e. next to return.
+	 * @ready_requests: Contains server RPCs whose request message is
+	 * in a state requiring attention from  a user process. The head is
+	 * oldest, i.e. next to return.
 	 */
 	struct list_head ready_requests;
 
 	/**
-	 * @ready_responses: Contains client RPCs in RPC_READY state that
-	 * have not yet been claimed. The head is oldest, i.e. next to return.
+	 * @ready_responses: Contains client RPCs whose response message is
+	 * in a state requiring attention from a user process. The head is
+	 * oldest, i.e. next to return.
 	 */
 	struct list_head ready_responses;
 
@@ -2658,22 +2618,6 @@ static inline int homa_data_offset(struct sk_buff *skb)
 			->seg.offset);
 }
 
-/*
- * homa_interest_set() - Assign a particular RPC to a particular interest;
- * this synchronizes with a thread waiting for the RPC.
- * @interest:  Interest to fill in.
- * @rpc:       RPC to assign to @interest.
- */
-inline static void homa_interest_set(struct homa_interest *interest,
-		struct homa_rpc *rpc)
-{
-	interest->peer_addr = rpc->peer->addr;
-	interest->peer_port = rpc->dport;
-
-	/* Must set last for proper synchronization. */
-	atomic_long_set_release(&interest->id, rpc->id);
-}
-
 /**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
  * @skb:     Socket buffer containing private link field.
@@ -2954,8 +2898,11 @@ extern struct homa_core *homa_cores[];
 extern void unit_log_printf(const char *separator, const char* format, ...)
 		__attribute__((format(printf, 2, 3)));
 #define UNIT_LOG unit_log_printf
+extern void unit_hook(char *id);
+#define UNIT_HOOK(msg) unit_hook(msg)
 #else
 #define UNIT_LOG(...)
+#define UNIT_HOOK(msg)
 #endif
 
 extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
@@ -3027,8 +2974,6 @@ extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
-extern int      homa_message_in_copy_data(struct homa_message_in *msgin,
-                    struct iov_iter *iter, int max_bytes);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 		    int incoming);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
@@ -3105,6 +3050,7 @@ extern void     homa_rpc_acked(struct homa_sock *hsk,
 			const struct in6_addr *saddr, struct homa_ack *ack);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
+extern void     homa_rpc_handoff(struct homa_rpc *rpc);
 extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
@@ -3113,7 +3059,6 @@ extern struct homa_rpc
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk,
 			const struct in6_addr *source, struct data_header *h);
-extern void     homa_rpc_ready(struct homa_rpc *rpc);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
 extern int      homa_rpc_send_offset(struct homa_rpc *rpc);
 extern void     homa_send_grants(struct homa *homa);

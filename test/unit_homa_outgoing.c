@@ -293,6 +293,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 			self->server_ip, self->client_port, self->server_id,
 			10000, 10000);
 	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
 
 	h.offset = htonl(12345);
 	h.priority = 4;
@@ -333,6 +334,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
 
 	h.common.type = GRANT;
 	h.offset = htonl(12345);
@@ -370,6 +372,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
 
 	h.offset = htonl(12345);
 	h.priority = 4;
@@ -392,6 +395,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
 	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
 
 	h.offset = htonl(12345);
 	h.priority = 4;

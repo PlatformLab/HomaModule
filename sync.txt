@@ -67,3 +67,9 @@ This file describes the synchronization strategy used for Homa.
   mechanism via the function homa_protect_rpcs; this function prevents RPC
   reaping for a socket. RPCs can still be deleted, but their memory won't go
   away until homa_unprotect_rpcs is invoked.
+
+* There are also a few places where Homa is doing something related to an
+  RPC (such as copying message data to user space) and needs the RPC to stay
+  around, but it isn't holding the RPC lock. In this situations, Homa sets
+  a bit in rpc->flags and homa_rpc_reap will not reap RPCs with any of these
+  flags set.

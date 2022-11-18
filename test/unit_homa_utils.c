@@ -215,7 +215,7 @@ TEST_F(homa_utils, homa_rpc_new_server__socket_shutdown)
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_utils, homa_rpc_new_server__make_rpc_ready)
+TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 {
 	self->data.message_length = N(1400);
 	self->data.seg.segment_length = N(1400);
@@ -223,9 +223,23 @@ TEST_F(homa_utils, homa_rpc_new_server__make_rpc_ready)
 			self->client_ip, &self->data);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
-	EXPECT_EQ(RPC_READY, srpc->state);
+	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	homa_rpc_free(srpc);
+}
+TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
+{
+	self->data.message_length = N(2800);
+	self->data.seg.offset = N(1400);
+	self->data.seg.segment_length = N(1400);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	ASSERT_FALSE(IS_ERR(srpc));
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(RPC_INCOMING, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
 	homa_rpc_free(srpc);
 }
 
@@ -386,7 +400,7 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 100);
 	ASSERT_NE(NULL, crpc);
-	atomic_long_set(&interest.id, 0);
+	atomic_long_set(&interest.ready_rpc, 0);
 	interest.reg_rpc = crpc;
 	crpc->interest = &interest;
 	unit_log_clear();
@@ -484,7 +498,7 @@ TEST_F(homa_utils, homa_rpc_reap__protected)
 	homa_unprotect_rpcs(&self->hsk);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
+TEST_F(homa_utils, homa_rpc_reap__skip_rpc_because_of_flags)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
@@ -497,13 +511,13 @@ TEST_F(homa_utils, homa_rpc_reap__dont_reap_flag)
 	homa_rpc_free(crpc1);
 	homa_rpc_free(crpc2);
 	unit_log_clear();
-	crpc1->dont_reap = true;
+	atomic_or(RPC_COPYING_TO_USER, &crpc1->flags);
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, 3));
 	EXPECT_STREQ("reaped 1236", unit_log_get());
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 3));
 	EXPECT_STREQ("", unit_log_get());
-	crpc1->dont_reap = false;
+	atomic_andnot(RPC_COPYING_TO_USER, &crpc1->flags);
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 3));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 }
