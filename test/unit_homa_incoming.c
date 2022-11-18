@@ -338,7 +338,7 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 			800, 303200), crpc, NULL, &self->incoming_delta);
 
 	unit_log_clear();
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 1400 bytes; "
 			"_copy_to_user copied 648 bytes; "
@@ -365,7 +365,7 @@ TEST_F(homa_incoming, homa_copy_to_user__message_data_exceeds_length)
 	crpc->msgin.total_length = 1000;
 
 	unit_log_clear();
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 1000 bytes", unit_log_get());
 	EXPECT_EQ(1000, crpc->msgin.copied_out);
@@ -389,7 +389,7 @@ TEST_F(homa_incoming, homa_copy_to_user__gap_in_packets)
 			1400, 101000), crpc, NULL, &self->incoming_delta);
 
 	unit_log_clear();
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
 	EXPECT_EQ(1400, crpc->msgin.copied_out);
@@ -429,7 +429,7 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 
 	unit_log_clear();
 	mock_copy_to_user_errors = 2;
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
 	EXPECT_EQ(2800, crpc->msgin.copied_out);
@@ -453,7 +453,7 @@ TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 			3000, 101000), crpc, NULL, &self->incoming_delta);
 
 	unit_log_clear();
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("_copy_to_user copied 512 bytes; "
 			"_copy_to_user copied 512 bytes; "
@@ -2729,7 +2729,7 @@ TEST_F(homa_incoming, homa_wait_for_message__copy_to_user)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
 			(char *) 0x1000000, 100*HOMA_BPAGE_SIZE));
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	unit_log_clear();
 
 	hook_hsk = &self->hsk;
@@ -2770,7 +2770,7 @@ TEST_F(homa_incoming, homa_wait_for_message__message_complete)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
 			(char *) 0x1000000, 100*HOMA_BPAGE_SIZE));
-	mock_copy_to_user_dont_copy = 1;
+	mock_copy_to_user_dont_copy = -1;
 	unit_log_clear();
 
 	hook_hsk = &self->hsk;

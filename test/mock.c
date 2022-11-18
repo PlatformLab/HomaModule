@@ -87,7 +87,9 @@ int mock_log_rcu_sched = 0;
 int mock_max_grants = 10;
 
 /* A zero value means that copy_to_user will actually copy bytes to
- * the destination address; nonzero means it logs without copying.
+ * the destination address; if nonzero, then 0 bits determine which
+ * copies actually occur (bit 0 for the first copy, etc., just like
+ * error masks).
  */
 int mock_copy_to_user_dont_copy = 0;
 
@@ -283,10 +285,8 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	if (mock_check_error(&mock_copy_to_user_errors))
 		return -1;
-	if (!mock_copy_to_user_dont_copy) {
+	if (!mock_check_error(&mock_copy_to_user_dont_copy))
 		memcpy(to, from, n);
-		((char *)(to))[n] = 0;
-	}
 	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
 	return 0;
 }

@@ -56,6 +56,7 @@ TEST_F(timetrace, tt_freeze)
 TEST_F(timetrace, tt_record__basics)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	tt_record("Message with no args");
 	mock_cycles++;
 	tt_record1("Message with 1 arg: %d", 99);
@@ -79,6 +80,7 @@ TEST_F(timetrace, tt_record__basics)
 TEST_F(timetrace, tt_record_buf__wraparound)
 {
 	char buffer[100];
+	memset(buffer, 0, sizeof(buffer));
 	tt_buffer_size = 4;
 	tt_record("Message 1");
 	mock_cycles++;
@@ -165,6 +167,7 @@ TEST_F(timetrace, tt_proc_read__uninitialized)
 TEST_F(timetrace, tt_proc_read__nothing_to_read)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	buffer[0] = 0;
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, 20, 0);
@@ -174,6 +177,7 @@ TEST_F(timetrace, tt_proc_read__nothing_to_read)
 TEST_F(timetrace, tt_proc_read__leftovers)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 100;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB CCCC DDDD EEEE FFFF "
@@ -197,6 +201,7 @@ TEST_F(timetrace, tt_proc_read__leftovers)
 TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	tt_record_buf(tt_buffers[0], 1000, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1100, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[1], 1200, "Buf1", 0, 0, 0, 0);
@@ -223,6 +228,7 @@ TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 25;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB", 0, 0, 0, 0);
@@ -240,6 +246,7 @@ TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 {
 	char buffer[1000];
+	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 20;
 	tt_record_buf(tt_buffers[0], 1000,
 			"AAAA BBBB CCCC DDDD", 0, 0, 0, 0);
