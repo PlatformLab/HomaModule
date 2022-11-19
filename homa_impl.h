@@ -637,6 +637,7 @@ struct homa_message_in {
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	__u64 birth;
+
 	/**
 	 * @copied_out: All of the bytes of the message with offset less
 	 * than this value have been copied to user-space buffers.
@@ -647,7 +648,7 @@ struct homa_message_in {
 	 * @num_buffers: The number of entries in @buffers used for this
 	 * message (0 means buffers not allocated yet).
 	 */
-	int num_buffers;
+	__u32 num_buffers;
 
 	/** @buffers: Describes buffer space allocated for this message.
 	 * Each entry is an offset from the start of the buffer region.
@@ -2116,18 +2117,17 @@ struct homa_metrics {
 	__u64 send_calls;
 
 	/**
-	 * @recv_cycles: total time spent executing the homa_ioc_recv
-	 * kernel call handler (including time when the thread is blocked),
-	 * as measured with get_cycles().
+	 * @recvmsg_cycles: total time spent executing homa_recvmsg (including
+	 * time when the thread is blocked), as measured with get_cycles().
 	 */
-	__u64 recv_cycles;
+	__u64 recvmsg_cycles;
 
-	/** @recv_calls: total number of invocations of the recv kernel call. */
-	__u64 recv_calls;
+	/** @recvmsg_calls: total number of invocations of homa_recvmsg. */
+	__u64 recvmsg_calls;
 
 	/**
 	 * @blocked_cycles: total time threads spend in blocked state
-	 * while executing the homa_ioc_recv kernel call handler.
+	 * while executing the homa_recvmsg kernel call handler.
 	 */
 	__u64 blocked_cycles;
 
@@ -2968,7 +2968,6 @@ extern enum hrtimer_restart
 extern int      homa_init(struct homa *homa);
 extern void     homa_incoming_sysctl_changed(struct homa *homa);
 extern int      homa_ioc_abort(struct sock *sk, unsigned long arg);
-extern int      homa_ioc_recv(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_reply(struct sock *sk, unsigned long arg);
 extern int      homa_ioc_send(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
@@ -3016,7 +3015,7 @@ extern void     homa_pool_destroy(struct homa_pool *pool);
 extern void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 		    int *available);
 extern int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
-		    int *pages, int leave_locked);
+		    __u32 *pages, int leave_locked);
 extern int      homa_pool_init(struct homa_pool *pool, struct homa *homa,
 		    void *buf_region, __u64 region_size);
 extern void     homa_pool_release_buffers(struct homa_pool *pool,

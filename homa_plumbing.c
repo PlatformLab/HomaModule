@@ -483,7 +483,9 @@ static int __init homa_load(void) {
 			"data_segment %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u flowi %u "
 			"ipv6_hdr %u, flowi6 %u "
-			"tcp_sock %u homa_rpc %u sk_buff %u NR_CPUS %u "
+			"tcp_sock %u homa_rpc %u sk_buff %u "
+			"rcvmsg_control %u sockaddr_in_union %u "
+			"HOMA_MAX_BPAGES %u NR_CPUS %u "
 			"nr_cpu_ids %u\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
@@ -497,6 +499,9 @@ static int __init homa_load(void) {
 			sizeof32(struct tcp_sock),
 			sizeof32(struct homa_rpc),
 			sizeof32(struct sk_buff),
+			sizeof32(struct homa_recvmsg_control),
+			sizeof32(sockaddr_in_union),
+			HOMA_MAX_BPAGES,
 			NR_CPUS,
 			nr_cpu_ids);
 	status = proto_register(&homa_prot, 1);
@@ -680,154 +685,6 @@ int homa_shutdown(struct socket *sock, int how)
 int homa_disconnect(struct sock *sk, int flags) {
 	printk(KERN_WARNING "unimplemented disconnect invoked on Homa socket\n");
 	return -ENOSYS;
-}
-
-/**
- * homa_ioc_recv() - The top-level function for the ioctl that implements
- * the homa_recv user-level API.
- * @sk:       Socket for this request.
- * @arg:      Used to pass information from/to user space.
- *
- * Return: 0 on success, otherwise a negative errno.
- */
-int homa_ioc_recv(struct sock *sk, unsigned long arg) {
-	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_recv_args args;
-	struct iovec iovstack[UIO_FASTIOV];
-
-	// Must be freed at the end of this function.
-	struct iovec *iov = NULL;
-	struct iov_iter iter;
-	int err;
-	int result;
-	struct homa_rpc *rpc = NULL;
-
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
-		return -EFAULT;
-	if ((args.message_buf && args.iovec)
-		|| (args.flags & ~HOMA_RECV_VALID_FLAGS)
-		|| args._pad[0]
-		|| args._pad[1]
-		|| args._pad[2]
-		|| args._pad[3]
-		|| args._pad[4]
-		|| args._pad[5]
-		|| args._pad[6]) {
-		return -EINVAL;
-	}
-	tt_record3("homa_ioc_recv starting, port %d, pid %d, flags %d",
-			hsk->port, current->pid, args.flags);
-	if (args.message_buf != NULL) {
-		err = import_single_range(READ, args.message_buf, args.length,
-				iovstack, &iter);
-	} else {
-		iov = iovstack;
-		err = import_iovec(READ, args.iovec, args.length,
-			ARRAY_SIZE(iovstack), &iov, &iter);
-	}
-	if (unlikely(err < 0))
-		goto error;
-	if (unlikely(args.id && args.source_addr.in6.sin6_family &&
-			args.source_addr.sa.sa_family != sk->sk_family)) {
-		err = -EAFNOSUPPORT;
-		goto error;
-	}
-	rpc = homa_wait_for_message(hsk, args.flags, args.id,
-			&args.source_addr);
-	if (IS_ERR(rpc)) {
-		err = PTR_ERR(rpc);
-		rpc = NULL;
-		goto error;
-	}
-
-	/* Generate time traces on both ends for long elapsed times (used
-	 * for performance debugging).
-	 */
-	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
-		uint64_t elapsed = (get_cycles() - rpc->start_cycles)>>10;
-		if ((elapsed <= hsk->homa->temp[1])
-				&& (elapsed >= hsk->homa->temp[0])
-				&& homa_is_client(rpc->id)
-				&& (rpc->msgin.total_length < 500)) {
-			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
-					"length %d",
-					elapsed, rpc->id,
-					tt_addr(rpc->peer->addr),
-					rpc->msgin.total_length);
-			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
-					"elapsed time for RPC id %d, peer 0x%x");
-		}
-	}
-	if (rpc->hsk->homa->sync_freeze) {
-		rpc->hsk->homa->sync_freeze = 0;
-		if (!tt_frozen) {
-			struct freeze_header freeze;
-			tt_record2("Freezing timetrace because of "
-					"sync_freeze, id %d, peer 0x%x",
-					rpc->id, tt_addr(rpc->peer->addr));
-			tt_freeze();
-			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-		}
-	}
-
-	/* Must release the RPC lock (and potentially free the RPC) before
-	 * copying to user space (see sync.txt). Mark the RPC so we can
-	 * still access the RPC even without holding its lock.
-	 */
-	atomic_or(RPC_COPYING_TO_USER, &rpc->flags);
-	if (homa_is_client(rpc->id)) {
-		if ((args.length >= rpc->msgin.total_length) || rpc->error
-				|| !(args.flags & HOMA_RECV_PARTIAL))
-			homa_rpc_free(rpc);
-	} else {
-		rpc->state = RPC_IN_SERVICE;
-	}
-	homa_rpc_unlock(rpc);
-
-	args.length = (rpc->msgin.total_length >= 0) ? rpc->msgin.total_length
-			: 0;
-	memset(&args.source_addr, 0, sizeof(args.source_addr));
-	if (sk->sk_family == AF_INET6) {
-		args.source_addr.in6.sin6_family = AF_INET6;
-		args.source_addr.in6.sin6_port = htons(rpc->dport);
-		args.source_addr.in6.sin6_addr = rpc->peer->addr;
-	} else {
-		args.source_addr.in4.sin_family = AF_INET;
-		args.source_addr.in4.sin_port = htons(rpc->dport);
-
-		args.source_addr.in4.sin_addr.s_addr = ipv6_to_ipv4(
-				rpc->peer->addr);
-	}
-	args.id = rpc->id;
-	args.completion_cookie = rpc->completion_cookie;
-	if (unlikely(copy_to_user((void *) arg, &args, sizeof(args)))) {
-		err = -EFAULT;
-		printk(KERN_NOTICE "homa_ioc_recv couldn't copy back args\n");
-		goto error;
-	}
-
-	if (rpc->error) {
-		err = rpc->error;
-		goto error;
-	}
-
-	tt_record2("starting data copy to user space for id %d, length %d",
-			rpc->id, rpc->msgin.total_length);
-//	result = homa_message_in_copy_data(&rpc->msgin, &iter, iter.count);
-	result = rpc->msgin.total_length;
-	tt_record4("homa_ioc_recv finished, id %u, peer 0x%x, length %d, pid %d",
-			rpc->id, tt_addr(rpc->peer->addr),
-			result, current->pid);
-	atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
-	kfree(iov);
-	return 0;
-
-error:
-	tt_record2("homa_ioc_recv error %d, id %d", err, args.id);
-	if (rpc != NULL)
-		atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
-	kfree(iov);
-	return err;
 }
 
 /**
@@ -1086,13 +943,6 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(send_calls, 1);
 		INC_METRIC(send_cycles, core->syscall_end_time - start);
 		break;
-	case HOMAIOCRECV:
-		result = homa_ioc_recv(sk, arg);
-		core = homa_cores[raw_smp_processor_id()];
-		core->syscall_end_time = get_cycles();
-		INC_METRIC(recv_calls, 1);
-		INC_METRIC(recv_cycles, core->syscall_end_time - start);
-		break;
 	case HOMAIOCREPLY:
 		result = homa_ioc_reply(sk, arg);
 		core = homa_cores[raw_smp_processor_id()];
@@ -1213,19 +1063,147 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
 /**
  * homa_recvmsg() - Receive a message from a Homa socket.
  * @sk:          Socket on which the system call was invoked.
- * @msg:         Describes where to copy the message data.
- * @len:         Bytes of space still left at msg.
- * @nonblocking: Non-zero means MSG_DONTWAIT was specified
- * @flags:       Flags from system call, not including MSG_DONTWAIT
- * @addr_len:    Store the length of the caller address here.
- * Return:       0 on success, otherwise a negative errno.
+ * @msg:         Controlling information for the receive.
+ * @len:         Total bytes of space available in msg->msg_iov; not used.
+ * @nonblocking: Non-zero means MSG_DONTWAIT was specified (ignored: use
+ *               HOMA_RECVMSG_NONBLOCKING instead).
+ * @flags:       Flags from system call, not including MSG_DONTWAIT; ignored.
+ * @addr_len:    Store the length of the sender address here. Not used
+ *               (we use homa_recvmsg_control instead).
+ * Return:       The length of the message on success, otherwise a negative
+ *               errno.
  */
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		 int nonblocking, int flags, int *addr_len) {
-	/* Homa doesn't support the usual read-write kernel calls; must
-	 * invoke operations through ioctls in order to manipulate RPC ids.
+		 int nonblocking, int flags, int *addr_len)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	struct homa_recvmsg_control control;
+	__u64 start = get_cycles();
+	struct homa_rpc *rpc;
+	__u64 finish;
+	int result;
+
+	INC_METRIC(recvmsg_calls, 1);
+	if (msg->msg_controllen != sizeof(control)) {
+		result = -EINVAL;
+		goto done;
+	}
+	if (unlikely(copy_from_user(&control, msg->msg_control,
+			sizeof(control)))) {
+		result = -EFAULT;
+		goto done;
+	}
+	if (control._pad) {
+		result = -EINVAL;
+		goto done;
+	}
+	if (unlikely(control.id && !homa_is_client(control.id)
+			&& (control.source_addr.sa.sa_family != sk->sk_family))) {
+		result = -EINVAL;
+		goto done;
+	}
+	tt_record3("homa_recvmsg starting, port %d, pid %d, flags %d",
+			hsk->port, current->pid, control.flags);
+
+	if ((control.num_buffers > HOMA_MAX_BPAGES)
+			|| (control.flags & ~HOMA_RECVMSG_VALID_FLAGS)) {
+		result = -EINVAL;
+		goto done;
+	}
+	homa_pool_release_buffers(&hsk->buffer_pool, control.num_buffers,
+			control.buffers);
+
+	rpc = homa_wait_for_message(hsk, control.flags, control.id,
+			&control.source_addr);
+	if (IS_ERR(rpc)) {
+		/* If we get here, it means there was an error that prevented
+		 * us from finding an RPC to return. If there's an error in
+		 * the RPC itself we won't get here.
+		 */
+		result = PTR_ERR(rpc);
+		goto done;
+	}
+	result = rpc->error ? rpc->error : rpc->msgin.total_length;
+
+	/* Generate time traces on both ends for long elapsed times (used
+	 * for performance debugging).
 	 */
-	return -EINVAL;
+	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
+		uint64_t elapsed = (get_cycles() - rpc->start_cycles)>>10;
+		if ((elapsed <= hsk->homa->temp[1])
+				&& (elapsed >= hsk->homa->temp[0])
+				&& homa_is_client(rpc->id)
+				&& (rpc->msgin.total_length < 500)) {
+			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
+					"length %d",
+					elapsed, rpc->id,
+					tt_addr(rpc->peer->addr),
+					rpc->msgin.total_length);
+			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
+					"elapsed time for RPC id %d, peer 0x%x");
+		}
+	}
+	if (rpc->hsk->homa->sync_freeze) {
+		rpc->hsk->homa->sync_freeze = 0;
+		if (!tt_frozen) {
+			struct freeze_header freeze;
+			tt_record2("Freezing timetrace because of "
+					"sync_freeze, id %d, peer 0x%x",
+					rpc->id, tt_addr(rpc->peer->addr));
+			tt_freeze();
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		}
+	}
+
+	/* Collect result information. */
+	control.id = rpc->id;
+	control.completion_cookie = rpc->completion_cookie;
+	if (likely(rpc->msgin.total_length >= 0)) {
+		control.length = rpc->msgin.total_length;
+		control.num_buffers = rpc->msgin.num_buffers;
+		memcpy(control.buffers, rpc->msgin.buffers,
+				sizeof(control.buffers));
+	} else {
+		control.length = 0;
+		control.num_buffers = 0;
+	}
+	memset(&control.source_addr, 0, sizeof(control.source_addr));
+	if (sk->sk_family == AF_INET6) {
+		control.source_addr.in6.sin6_family = AF_INET6;
+		control.source_addr.in6.sin6_port = htons(rpc->dport);
+		control.source_addr.in6.sin6_addr = rpc->peer->addr;
+	} else {
+		control.source_addr.in4.sin_family = AF_INET;
+		control.source_addr.in4.sin_port = htons(rpc->dport);
+		control.source_addr.in4.sin_addr.s_addr = ipv6_to_ipv4(
+				rpc->peer->addr);
+	}
+	/* This indicates that the application now owns the buffers, so
+	 * we won't free them in homa_rpc_free.
+	 */
+	rpc->msgin.num_buffers = 0;
+
+	/* Must release the RPC lock (and potentially free the RPC) before
+	 * copying the results back to user space.
+	 */
+	if (homa_is_client(rpc->id)) {
+		homa_peer_add_ack(rpc);
+		homa_rpc_free(rpc);
+	} else {
+		rpc->state = RPC_IN_SERVICE;
+	}
+	homa_rpc_unlock(rpc);
+
+	if (unlikely(copy_to_user(msg->msg_control, &control, sizeof(control)))) {
+		/* Note: in this case the message's buffers will be leaked. */
+		printk(KERN_NOTICE "homa_recvmsg couldn't copy back args\n");
+		result = -EFAULT;
+	}
+done:
+	finish = get_cycles();
+	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
+	INC_METRIC(recvmsg_cycles, finish - start);
+	return result;
 }
 
 /**

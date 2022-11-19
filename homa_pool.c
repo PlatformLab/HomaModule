@@ -122,7 +122,7 @@ void homa_pool_destroy(struct homa_pool *pool)
  *                set). Otherwises the pages are left unowned.
  * Return: 0 for success, -1 if there wasn't enough free space in the pool.
 */
-int homa_pool_get_pages(struct homa_pool *pool, int num_pages, int *pages,
+int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		int set_owner)
 {
 	int alloced = 0;
@@ -214,8 +214,9 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, int *pages,
  */
 int homa_pool_allocate(struct homa_rpc *rpc)
 {
-	int full_pages, partial, pages[HOMA_MAX_BPAGES], i, core_id;
 	struct homa_pool *pool = &rpc->hsk->buffer_pool;
+	int full_pages, partial, i, core_id;
+	__u32 pages[HOMA_MAX_BPAGES];
 	struct homa_pool_core *core;
 	struct homa_bpage *bpage;
 	__u64 now = get_cycles();
@@ -317,7 +318,7 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 
 /**
  * homa_pool_release_buffers() - Release buffer space so that it can be
- * reused
+ * reused. This method may be invoked without holding any locks.
  * @pool:         Pool that the buffer space belongs to.
  * @num_buffers:  How many buffers to release.
  * @buffers:      Points to @num_buffers values, each of which is an offset
@@ -328,6 +329,8 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 {
 	int i;
 
+	if (!pool->region)
+		return;
 	for (i = 0; i < num_buffers; i++) {
 		__u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
 		if (bpage_index < pool->num_bpages)

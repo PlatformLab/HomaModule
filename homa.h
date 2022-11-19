@@ -180,6 +180,74 @@ _Static_assert(sizeof(struct homa_recv_args) <= 128, "homa_recv_args grew");
 #define HOMA_RECV_VALID_FLAGS   0x0F
 
 /**
+ * struct homa_recvmsg_control - Provides information needed by Homa's
+ * recvmsg; passed to recvmsg using the msg_control field.
+ */
+struct homa_recvmsg_control {
+
+	/**
+	 * @id: (in/out) Initially specifies the id of the desired RPC, or 0
+	 * if any RPC is OK; returns the actual id received.
+	 */
+	uint64_t id;
+
+	/**
+	 * @completion_cookie: (out) If the incoming message is a response,
+	 * this will return the completion cookie specified when the
+	 * request was sent. For requests this will always be zero.
+	 */
+	uint64_t completion_cookie;
+
+	/** @length: (out) Total number of bytes in the incoming message. */
+	size_t length;
+
+	/**
+	 * @source_addr: (in/out) Used as input to request messages only from
+	 * a specific peer (only if id so specifies); returns the address of
+	 * of the message sender. Note: we can't use the msg_name field from
+	 * struct msghdr because it is out only, not in/out.
+	 */
+	sockaddr_in_union source_addr;
+
+	/**
+	 * @flags: (in) OR-ed combination of bits that control the operation.
+	 * See below for values.
+	 */
+	int flags;
+
+	/**
+	 * @num_buffers: (in/out) Number of valid entries in @buffer_offsets.
+	 * Passes in buffers from previous messages that can now be
+	 * recycled; returns buffers from the new message.
+	 */
+	uint32_t num_buffers;
+
+	/**
+	 * @buffers: (in/out) Each entry is a buffer pointer, specified as an
+	 * offset within the buffer pool. Input values are buffers from previous
+	 * messages that can now be recycled. Return values describe the
+	 * incoming message: all of the buffers except the last one have
+	 * HOMA_BPAGE_SIZE bytes of data and are page-aligned.
+	 */
+	uint32_t buffers[HOMA_MAX_BPAGES];
+
+	uint32_t _pad;
+};
+#if !defined(__cplusplus)
+_Static_assert(sizeof(struct homa_recvmsg_control) >= 128,
+		"homa_recvmsg_control shrunk");
+_Static_assert(sizeof(struct homa_recvmsg_control) <= 128,
+		"homa_recvmsg_control grew");
+#endif
+
+/* Flag bits for homa_recvmsg_control.flags (see man page for documentation):
+ */
+#define HOMA_RECVMSG_REQUEST       0x01
+#define HOMA_RECVMSG_RESPONSE      0x02
+#define HOMA_RECVMSG_NONBLOCKING   0x04
+#define HOMA_RECVMSG_VALID_FLAGS   0x07
+
+/**
  * struct homa_reply_args - Structure that passes arguments and results
  * between user space and the HOMAIOCREPLY ioctl.
  *

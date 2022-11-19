@@ -108,7 +108,7 @@ TEST_F(homa_pool, homa_pool_destroy__idempotent)
 TEST_F(homa_pool, homa_pool_get_pages__basics)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
@@ -122,7 +122,7 @@ TEST_F(homa_pool, homa_pool_get_pages__basics)
 TEST_F(homa_pool, homa_pool_get_pages__no_buffer_space)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, pool->num_bpages);
@@ -133,7 +133,7 @@ TEST_F(homa_pool, homa_pool_get_pages__no_buffer_space)
 TEST_F(homa_pool, homa_pool_get_pages__grow_active_pool)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 5);
@@ -147,7 +147,7 @@ TEST_F(homa_pool, homa_pool_get_pages__grow_active_pool)
 TEST_F(homa_pool, homa_pool_get_pages__shrink_active_pool)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 20);
@@ -161,7 +161,7 @@ TEST_F(homa_pool, homa_pool_get_pages__shrink_active_pool)
 TEST_F(homa_pool, homa_pool_get_pages__dont_shrink_below_MIN_ACTIVE)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 4);
@@ -175,7 +175,7 @@ TEST_F(homa_pool, homa_pool_get_pages__dont_shrink_below_MIN_ACTIVE)
 TEST_F(homa_pool, homa_pool_get_pages__basic_wraparound)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 10);
@@ -190,7 +190,7 @@ TEST_F(homa_pool, homa_pool_get_pages__basic_wraparound)
 TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	atomic_set(&pool->active_pages, 10);
@@ -205,7 +205,7 @@ TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	mock_spin_lock_hook = steal_bpages_hook;
@@ -216,7 +216,7 @@ TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	pool->descriptors[0].owner = 5;
@@ -230,7 +230,7 @@ TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10];
+	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	self->homa.bpage_lease_cycles = 1000;
@@ -243,7 +243,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 TEST_F(homa_pool, homa_pool_get_pages__storage_exhausted_after_bpages_allocated)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-	int pages[10], i;
+	__u32 pages[10], i;
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	pool->num_bpages = 5;
@@ -440,6 +440,8 @@ TEST_F(homa_pool, homa_pool_get_buffer__cant_allocate_buffers)
 TEST_F(homa_pool, homa_pool_release_buffers)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
+	char *saved_region;
+
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
@@ -462,4 +464,12 @@ TEST_F(homa_pool, homa_pool_release_buffers)
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(1, atomic_read(&pool->descriptors[2].refs));
+
+	/* Ignore requests if pool not initialized. */
+	saved_region = pool->region;
+	pool->region = NULL;
+	homa_pool_release_buffers(pool, crpc1->msgin.num_buffers,
+			crpc1->msgin.buffers);
+	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
+	pool->region = saved_region;
 }

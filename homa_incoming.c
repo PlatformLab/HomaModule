@@ -1427,7 +1427,7 @@ int homa_register_interests(struct homa_interest *interest,
 	}
 
 	interest->locked = 0;
-	if (flags & HOMA_RECV_RESPONSE) {
+	if (flags & HOMA_RECVMSG_RESPONSE) {
 		if (!list_empty(&hsk->ready_responses)) {
 			rpc = list_first_entry(
 					&hsk->ready_responses,
@@ -1443,7 +1443,7 @@ int homa_register_interests(struct homa_interest *interest,
 		list_add(&interest->response_links,
 				&hsk->response_interests);
 	}
-	if (flags & HOMA_RECV_REQUEST) {
+	if (flags & HOMA_RECVMSG_REQUEST) {
 		if (!list_empty(&hsk->ready_requests)) {
 			rpc = list_first_entry(&hsk->ready_requests,
 					struct homa_rpc, ready_links);
@@ -1548,7 +1548,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			/* Give NAPI and SoftIRQ tasks a chance to run. */
 			schedule();
 		}
-		if (flags & HOMA_RECV_NONBLOCKING) {
+		tt_record1("Checking nonblocking, flags %d", flags);
+		if (flags & HOMA_RECVMSG_NONBLOCKING) {
 			result = ERR_PTR(-EAGAIN);
 			goto found_rpc;
 		}
@@ -1718,8 +1719,6 @@ thread_waiting:
 	 */
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	interest->locked = 0;
-	atomic_long_set_release(&interest->ready_rpc, (long) rpc);
-	wake_up_process(interest->thread);
 	if (interest->reg_rpc) {
 		interest->reg_rpc->interest = NULL;
 		interest->reg_rpc = NULL;
@@ -1731,6 +1730,8 @@ thread_waiting:
 	tt_record3("homa_rpc_handoff handed off id %d to pid %d on core %d",
 			rpc->id, interest->thread->pid,
 			task_cpu(interest->thread));
+	atomic_long_set_release(&interest->ready_rpc, (long) rpc);
+	wake_up_process(interest->thread);
 }
 
 /**

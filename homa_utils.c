@@ -235,6 +235,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
+	crpc->msgin.num_buffers = 0;
 	skb = homa_fill_packets(hsk, crpc->peer, iter);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
@@ -339,6 +340,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->msgin.total_length = -1;
 	srpc->msgin.num_skbs = 0;
 	srpc->msgout.length = -1;
+	srpc->msgin.num_buffers = 0;
 	srpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
@@ -481,7 +483,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
-	if (rpc->msgin.total_length)
+	if (unlikely(rpc->msgin.num_buffers))
 		homa_pool_release_buffers(&rpc->hsk->buffer_pool,
 				rpc->msgin.num_buffers, rpc->msgin.buffers);
 
@@ -1330,16 +1332,16 @@ char *homa_print_metrics(struct homa *homa)
 				"Total invocations of send kernel call\n",
 				m->send_calls);
 		homa_append_metric(homa,
-				"recv_cycles               %15llu  "
-				"Time spent in homa_ioc_recv kernel call\n",
-				m->recv_cycles - m->blocked_cycles);
+				"recvmsg_cycles            %15llu  "
+				"Unblocked time spent in recvmsg kernel call\n",
+				m->recvmsg_cycles - m->blocked_cycles);
 		homa_append_metric(homa,
-				"recv_calls                %15llu  "
-				"Total invocations of recv kernel call\n",
-				m->recv_calls);
+				"recvmsg_calls             %15llu  "
+				"Total invocations of recvmsg kernel call\n",
+				m->recvmsg_calls);
 		homa_append_metric(homa,
 				"blocked_cycles            %15llu  "
-				"Time spent blocked in homa_ioc_recv\n",
+				"Time spent blocked in homa_recvmsg\n",
 				m->blocked_cycles);
 		homa_append_metric(homa,
 				"reply_cycles              %15llu  "
@@ -1393,7 +1395,7 @@ char *homa_print_metrics(struct homa *homa)
 				"homa_cycles               %15llu  "
 				"Total time in all Homa-related functions\n",
 				m->softirq_cycles + m->napi_cycles +
-				m->send_cycles + m->recv_cycles +
+				m->send_cycles + m->recvmsg_cycles +
 				m->reply_cycles - m->blocked_cycles +
 				m->timer_cycles + m->pacer_cycles);
 		homa_append_metric(homa,
