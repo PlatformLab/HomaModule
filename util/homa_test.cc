@@ -717,6 +717,43 @@ void test_tcpstream(char *server_name, int port)
 	printf("TCP throughput using %d byte buffers: %.2f GB/sec\n",
 			length, rate*1e-09);
 }
+/**
+ * test_tmp() - Placeholder for temporary tests used for debugging, etc.
+ * @fd:     Fd for Homa socket.
+ * @count:  --count commdand-line argument.
+ */
+void test_tmp(int fd, int count)
+{
+	struct msghdr h;
+	char addr[20];
+	struct homa_recvmsg_control control;
+	struct iovec vecs[2];
+	char buffer1[10], buffer2[20];
+
+	vecs[0].iov_base = buffer1;
+	vecs[0].iov_len = sizeof(buffer1);
+	vecs[1].iov_base = buffer2;
+	vecs[1].iov_len = sizeof(buffer2);
+
+	strcpy(addr, "Input sockaddr");
+
+	h.msg_name = &addr;
+	h.msg_namelen = sizeof(addr);
+	h.msg_iov = vecs;
+	h.msg_iovlen = 2;
+	h.msg_control = &control;
+	h.msg_controllen = sizeof(control);
+
+	memset(&control, 0, sizeof(control));
+	control.flags = HOMA_RECVMSG_REQUEST | HOMA_RECVMSG_REQUEST
+			| HOMA_RECVMSG_NONBLOCKING;
+
+	int result = recvmsg(fd, &h, 0);
+	printf("recvmsg returned %d, addr %p, namelen %d, control %p, "
+			"addr_out %s, errno %d\n",
+			result, &addr, sizeof32(addr), &control, addr, errno);
+	return;
+}
 
 /**
  * test_udpclose() - Close a UDP socket while a thread is waiting on it.
@@ -875,6 +912,8 @@ int main(int argc, char** argv)
 			test_tcp(host, port);
 		} else if (strcmp(argv[nextArg], "tcpstream") == 0) {
 			test_tcpstream(host, port);
+		} else if (strcmp(argv[nextArg], "tmp") == 0) {
+			test_tmp(fd, count);
 		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
 			test_udpclose();
 		} else {
