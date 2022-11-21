@@ -3032,8 +3032,7 @@ extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
                     int noblock, int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
-                    struct homa_sock *hsk, int flags, __u64 id,
-		    const sockaddr_in_union *client_addr);
+                    struct homa_sock *hsk, int flags, __u64 id);
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_grantable_locked(struct homa *homa,
                     struct homa_rpc *rpc);
@@ -3099,7 +3098,7 @@ extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
-                    __u64 id, const sockaddr_in_union *client_addr);
+                    __u64 id);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
                     size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,

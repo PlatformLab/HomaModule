@@ -1329,7 +1329,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
  *               A nonzero value means that the RPCs should be marked
  *               complete, so that they can be returned to the application;
  *               this value (a negative errno) will be returned from
- *               homa_recv.
+ *               recvmsg.
  */
 void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 {
@@ -1372,33 +1372,25 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  *                assumed to be undefined.
  * @hsk:          Socket on which relevant messages will arrive.  Must not be
  *                locked.
- * @flags:        Flags parameter from homa_recv; see manual entry for details.
- * @id:           If non-zero, then a message will not be returned unless its
- *                RPC id matches this.
- * @client_addr:  Used in conjunction with @id to select a specific message
- *                if we are server for id. If we're the client for id, then
- *                id is already unique, so this argument is ignored.
+ * @flags:        Flags field from homa_recvmsg_control; see manual entry for
+ *                details.
+ * @id:           If non-zero, then the caller is interested in receiving
+ *                the response for this RPC (@id must be a client request).
  * Return:        Either zero or a negative errno value. If a matching RPC
  *                is already available, information about it will be stored in
  *                interest.
  */
 int homa_register_interests(struct homa_interest *interest,
-		struct homa_sock *hsk, int flags, __u64 id,
-		const sockaddr_in_union *client_addr)
+		struct homa_sock *hsk, int flags, __u64 id)
 {
-	struct in6_addr client_addr_as_ipv6;
 	struct homa_rpc *rpc = NULL;
 
-	client_addr_as_ipv6 = canonical_ipv6_addr(client_addr);
 	homa_interest_init(interest);
 	interest->locked = 1;
 	if (id != 0) {
-		if (homa_is_client(id))
-			rpc = homa_find_client_rpc(hsk, id);
-		else
-			rpc = homa_find_server_rpc(hsk,
-					&client_addr_as_ipv6,
-					ntohs(client_addr->in6.sin6_port), id);
+		if (!homa_is_client(id))
+			return -EINVAL;
+		rpc = homa_find_client_rpc(hsk, id);
 		if (rpc == NULL)
 			return -EINVAL;
 		if ((rpc->interest != NULL) && (rpc->interest != interest)) {
@@ -1486,20 +1478,16 @@ int homa_register_interests(struct homa_interest *interest,
  * that matches the parameters. Various other activities can occur while
  * waiting, such as reaping dead RPCs and copying data to user space.
  * @hsk:          Socket where messages will arrive.
- * @flags:        Flags parameter from homa_recv; see manual entry for details.
- * @id:           If non-zero, then a response message will not be returned
- *                unless its RPC id matches this.
- * @client_addr:  Used in conjunction with @id to select a specific message.
- *                If the host address is zero, then @id refers to an
- *                outgoing request where we are the client; otherwise the
- *                desired RPC is one where we are the server and this
- *                identifies the client for the request.
+ * @flags:        Flags field from homa_recvmsg_control; see manual entry for
+ *                details.
+ * @id:           If non-zero, then a response message matching this id may
+ *                be returned (@id must refer to a client request).
  *
  * Return:   Pointer to an RPC that matches @flags and @id, or a negative
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		__u64 id, const sockaddr_in_union *client_addr)
+		__u64 id)
 {
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
@@ -1514,8 +1502,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	 * before we have an RPC with a complete message.
 	 */
 	while (1) {
-		error = homa_register_interests(&interest, hsk, flags, id,
-				client_addr);
+		error = homa_register_interests(&interest, hsk, flags, id);
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (rpc) {
 			goto found_rpc;

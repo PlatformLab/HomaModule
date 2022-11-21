@@ -193,13 +193,13 @@ ssize_t homa_recvv(int sockfd, const struct iovec *iov, int iovcnt, int flags,
 
 /**
  * homa_reply() - Send a response message for an RPC previously received
- * with a call to homa_recv.
+ * with a call to recvmsg.
  * @sockfd:     File descriptor for the socket on which to send the message.
  * @response:   First byte of buffer containing the response message.
  * @resplen:    Number of bytes at @response.
- * @dest_addr:  Address of the RPC's client (returned by homa_recv when
+ * @dest_addr:  Address of the RPC's client (returned by recvmsg when
  *              the message was received).
- * @id:         Unique identifier for the request, as returned by homa_recv
+ * @id:         Unique identifier for the request, as returned by recvmsg
  *              when the request was received.
  *
  * @dest_addr and @id must correspond to a previously-received request
@@ -228,9 +228,9 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  * @iov:        Pointer to array that describes the chunks of the response
  *              message.
  * @iovcnt:     Number of elements in @iov.
- * @dest_addr:  Address of the RPC's client (returned by homa_recv when
+ * @dest_addr:  Address of the RPC's client (returned by recvmsg when
  *              the message was received).
- * @id:         Unique identifier for the request, as returned by homa_recv
+ * @id:         Unique identifier for the request, as returned by recvmsg
  *              when the request was received.
  *
  * @dest_addr and @id must correspond to a previously-received request
@@ -262,7 +262,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * @id:                A unique identifier for the request will be returned
  *                     here; this can be used later to find the response for
  *                     this request.
- * @completion_cookie: Value to be returned by homa_recv when RPC completes.
+ * @completion_cookie: Value to be returned by recvmsg when RPC completes.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
@@ -297,7 +297,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  * @id:                A unique identifier for the request will be returned
  *                     here; this can be used later to find the response for
  *                     this request.
- * @completion_cookie: Value to be returned by homa_recv when RPC completes.
+ * @completion_cookie: Value to be returned by recvmsg when RPC completes.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
@@ -327,9 +327,9 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
  *              from previous call to homa_send). 0 means abort all client
  *              RPCs on this socket.
  * @error:      0 means that the aborted RPCs should be destroyed
- *              immediately (they will never be returned by homa_recv).
+ *              immediately (they will never be returned by recvmsg).
  *              Nonzero means that the RPCs should be moved to the
- *              completed state; homa_recv will return an error for these
+ *              completed state; recvmsg will return an error for these
  *              RPCs, with @error as the errno value.
  *
  * Return:      If an error occurred, -1 is returned and errno is set

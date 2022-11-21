@@ -1065,11 +1065,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
  * @sk:          Socket on which the system call was invoked.
  * @msg:         Controlling information for the receive.
  * @len:         Total bytes of space available in msg->msg_iov; not used.
- * @nonblocking: Non-zero means MSG_DONTWAIT was specified (ignored: use
- *               HOMA_RECVMSG_NONBLOCKING instead).
+ * @nonblocking: Non-zero means MSG_DONTWAIT was specified.
  * @flags:       Flags from system call, not including MSG_DONTWAIT; ignored.
- * @addr_len:    Store the length of the sender address here. Not used
- *               (we use homa_recvmsg_control instead).
+ * @addr_len:    Store the length of the sender address here
  * Return:       The length of the message on success, otherwise a negative
  *               errno.
  */
@@ -1093,12 +1091,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		result = -EFAULT;
 		goto done;
 	}
-	if (control._pad) {
-		result = -EINVAL;
-		goto done;
-	}
-	if (unlikely(control.id && !homa_is_client(control.id)
-			&& (control.source_addr.sa.sa_family != sk->sk_family))) {
+	if (control._pad[0] || control._pad[1]) {
 		result = -EINVAL;
 		goto done;
 	}
@@ -1113,8 +1106,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	homa_pool_release_buffers(&hsk->buffer_pool, control.num_buffers,
 			control.buffers);
 
-	rpc = homa_wait_for_message(hsk, control.flags, control.id,
-			&control.source_addr);
+	rpc = homa_wait_for_message(hsk, nonblocking
+			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
+			: control.flags, control.id);
 	if (IS_ERR(rpc)) {
 		/* If we get here, it means there was an error that prevented
 		 * us from finding an RPC to return. If there's an error in
@@ -1159,24 +1153,25 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	control.id = rpc->id;
 	control.completion_cookie = rpc->completion_cookie;
 	if (likely(rpc->msgin.total_length >= 0)) {
-		control.length = rpc->msgin.total_length;
 		control.num_buffers = rpc->msgin.num_buffers;
 		memcpy(control.buffers, rpc->msgin.buffers,
 				sizeof(control.buffers));
 	} else {
-		control.length = 0;
 		control.num_buffers = 0;
 	}
-	memset(&control.source_addr, 0, sizeof(control.source_addr));
 	if (sk->sk_family == AF_INET6) {
-		control.source_addr.in6.sin6_family = AF_INET6;
-		control.source_addr.in6.sin6_port = htons(rpc->dport);
-		control.source_addr.in6.sin6_addr = rpc->peer->addr;
+		struct sockaddr_in6 *in6 = msg->msg_name;
+		in6->sin6_family = AF_INET6;
+		in6->sin6_port = htons(rpc->dport);
+		in6->sin6_addr = rpc->peer->addr;
+		*addr_len = sizeof(*in6);
 	} else {
-		control.source_addr.in4.sin_family = AF_INET;
-		control.source_addr.in4.sin_port = htons(rpc->dport);
-		control.source_addr.in4.sin_addr.s_addr = ipv6_to_ipv4(
+		struct sockaddr_in *in4 = msg->msg_name;
+		in4->sin_family = AF_INET;
+		in4->sin_port = htons(rpc->dport);
+		in4->sin_addr.s_addr = ipv6_to_ipv4(
 				rpc->peer->addr);
+		*addr_len = sizeof(*in4);
 	}
 	/* This indicates that the application now owns the buffers, so
 	 * we won't free them in homa_rpc_free.

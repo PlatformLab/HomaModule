@@ -103,7 +103,7 @@ struct homa_send_args {
 	uint64_t id;
 
 	/**
-	 * @completion_cookie: Will be returned by homa_recv when the
+	 * @completion_cookie: Will be returned by recvmsg when the
 	 * RPC completes. Typically used to locate app-specific info
 	 * about the RPC.
 	 */
@@ -198,17 +198,6 @@ struct homa_recvmsg_control {
 	 */
 	uint64_t completion_cookie;
 
-	/** @length: (out) Total number of bytes in the incoming message. */
-	size_t length;
-
-	/**
-	 * @source_addr: (in/out) Used as input to request messages only from
-	 * a specific peer (only if id so specifies); returns the address of
-	 * of the message sender. Note: we can't use the msg_name field from
-	 * struct msghdr because it is out only, not in/out.
-	 */
-	sockaddr_in_union source_addr;
-
 	/**
 	 * @flags: (in) OR-ed combination of bits that control the operation.
 	 * See below for values.
@@ -222,6 +211,8 @@ struct homa_recvmsg_control {
 	 */
 	uint32_t num_buffers;
 
+	uint32_t _pad[2];
+
 	/**
 	 * @buffers: (in/out) Each entry is a buffer pointer, specified as an
 	 * offset within the buffer pool. Input values are buffers from previous
@@ -230,13 +221,11 @@ struct homa_recvmsg_control {
 	 * HOMA_BPAGE_SIZE bytes of data and are page-aligned.
 	 */
 	uint32_t buffers[HOMA_MAX_BPAGES];
-
-	uint32_t _pad;
 };
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recvmsg_control) >= 128,
+_Static_assert(sizeof(struct homa_recvmsg_control) >= 96,
 		"homa_recvmsg_control shrunk");
-_Static_assert(sizeof(struct homa_recvmsg_control) <= 128,
+_Static_assert(sizeof(struct homa_recvmsg_control) <= 96,
 		"homa_recvmsg_control grew");
 #endif
 
@@ -297,7 +286,7 @@ struct homa_abort_args {
 
 	/**
 	 * @error: Zero means destroy and free RPCs; nonzero means complete
-	 * them with this error (homa_recv will return the RPCs).
+	 * them with this error (recvmsg will return the RPCs).
 	 */
 	int error;
 
