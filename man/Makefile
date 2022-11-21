@@ -2,7 +2,6 @@
 
 SRCS := homa.7 \
 	homa_abort.3 \
-        homa_recv.3 \
         homa_reply.3 \
         homa_send.3
 

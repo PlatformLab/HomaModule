@@ -8,6 +8,8 @@ homa \- Homa transport protocol
 .B #include <homa.h>
 .PP
 .B homa_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA)
+.br
+.B homa_socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_HOMA)
 .fi
 .SH DESCRIPTION
 .PP
@@ -15,11 +17,17 @@ Homa is a network transport protocol for communication within a datacenter.
 Its most important benefit is that if offers exceptionally low latency
 for small messages, even in the presence of high network loads.
 It also has several other advantages over TCP; for a full rationale,
-see "Homa: A Receiver-Driven Low-Latency Transport Protocol Using
-Network Priorities,"
+see ``Homa: A Receiver-Driven Low-Latency Transport Protocol Using
+Network Priorities,''
 .I Proceedings of ACM SIGCOMM
 .IR 2019 ,
 pp. 221\(en235 (https://dl.acm.org/citation.cfm?id=3230564).
+Additional information about the Linux implementation of Homa
+is available in ``A Linux Kernel Implementation of the Homa Transport
+Protocol,''
+.I 2021 USENIX Annual Technical Conference (USENIX ATC
+.IR '21) ,
+pp. 773\(en787.
 .PP
 Homa differs from TCP in several respects.
 First, it is message-oriented, whereas TCP is stream-oriented.
@@ -53,45 +61,44 @@ Homa transport module on the server. Homa ensures at-most-once
 semantics for an RPC.
 .PP
 Home is intended for use between machines that are physically
-close, so round-trip latencies are at most a few tens of microseconds.
+close, with round-trip latencies no more than a few tens of microseconds.
 Homa is not suitable for wide-area communication.
 .PP
 In order for Homa to achieve its low latency, network switches must be
 configured to enable priority queues in output ports and to obey 3-bit
 priority values specified as the high-order bits of the DSCP field in
-IP packet headers.
+IPv4 packet headers, or as the high-order 4 bits of the traffic class
+(the low order 4 bits of octet 0) in IPv6 packet headers.
 Homa assumes that 8 priority levels are available, but it can be
 configured to use fewer than this.
 .SH BASIC USAGE
 .PP
-Most of the normal system calls for I/O, such as
-.BR read "(2), " write "(2), " connect "(2), " listen "(2), and " accept (2),
-are not supported by Homa.
-Instead, Homa offers a set of library methods that support
-message-oriented communication.
-.PP
 For an application to send or receive Homa messages, it opens a Homa
 socket as shown in
 .B SYNOPSIS
-above. Clients can then invoke
-.BR homa_send (3)
-to send a request, followed later by
-.BR homa_recv (3)
-to wait for the reply.
-Multiple requests may be initiated concurrently before waiting for any
-replies.
-Responses will not necessarily be received in the same order that the
-requests were sent.
+above; Homa supports both IPv4 and IPv6.
+A remote procedure call is initiated by the client, which uses its
+socket to send a
+.I request message
+to a specified server.
+The server uses its socket to receive the request.
+It handles that request in whatever way it
+wishes and then returns a
+.I response message
+back to the client. The RPC is complete once the client receives the
+response. Every request message is expected to have a corresponding
+response.
 .PP
-Servers can receive incoming requests by invoking
-.BR homa_recv (3).
-For each request that it receives, the application must eventually
-invoke
-.BR homa_reply (3)
-to send a response.
-The same Homa socket can be used for issuing outgoing requests as
-client and receiving incoming requests as server.
+A single socket can be used to issue concurrent RPCs to any number
+of servers. A socket can be used both as client (to send requests
+and receive responses) and as server (to receive requests and send
+responses). Homa provides no ordering guarantees on concurrent RPCs.
+.SH PORTS
 .PP
+Each socket has a
+.I port number
+that is unique among all Homa sockets on that host (Homa sockets use a
+different port number space than TCP sockets).
 When a Homa socket is created, Homa assigns a default port number for
 the socket, which will be
 .B HOMA_MIN_DEFAULT_PORT
@@ -106,25 +113,15 @@ Note:
 .BR bind (2)
 should not be invoked on a Homa socket after sending or receiving
 any messages on that socket.
-.PP
-The
-.BR shutdown (2)
-system call may be invoked on Homa sockets. It ignores the
-.I how
-argument and disables the socket,
-so that it may no longer be used for either sending or receiving messages.
-If any threads are blocked waiting on the socket, they will be unblocked
-and their current operations will return
-.BR ESHUTDOWN .
-.SH IDENTIFIERS
+.SH RPC IDENTIFIERS
 .PP
 When a client sends a request, Homa assigns a unique identifier
-to that message, which the client can use to receive the response.
-Client-side identifiers are always even (their low-order bit is 0).
+to that RPC, which the client can use to receive the response.
+Client-side identifiers are always even.
 When a server receives a request, it also receives an identifier
-for that request, which must be presented when returning a response. The
+for that RPC, which must be presented when returning a response. The
 server-side identifier will be the same as the client-side
-identifier except that the low-order bit will be 1.
+identifier except that its low-order bit will be 1.
 When an application receives a message, it can determine whether it
 is a request or response by testing the low-order bit of its identifier.
 .SH RECEIVE BUFFERS
@@ -134,34 +131,26 @@ differently than TCP and other Unix I/O. Instead of specifying a
 buffer when
 .B recvmsg
 is invoked, an application
-provides Homa with a large pool of buffer space in advance (using
-.BR setsockopt ,
-see below). Homa allocates
+provides Homa with a large pool of buffer space in advance. Homa allocates
 space from this pool as messages arrive, and
 .B recvmsg
 returns information about the space that was allocated. When the application
-has finished processing the incoming message, it uses the next
+has finished processing the incoming message, it uses a future
 .B recvmsg
 operation to pass information about the buffer(s) back to Homa so that
-Homa can reclaim the buffer space for future
+Homa can reuse the buffer space for future
 messages. This approach provides a significant performance advantage, since it
 allows Homa to copy message data out to user space as packets for the message
 are received, rather than waiting to start the copy until the entire message
 is complete.
 .PP
-Buffering must be set up using
+Buffering must be set up by invoking
 .B setsockopt
-before the first call to
-.B recvmsg
-(see below).
-.SH SOCKET OPTIONS
-Homa sockets support a single socket option,
-.BR SO_HOMA_SET_BUF ,
-which is used to specify the buffer pool to use for a particular socket;
-.B setsockopt
-should be invoked with this option exactly once per socket, before the
-first call to
-.B recvmsg .
+with the
+.BR SO_HOMA_SET_BUF
+option.
+This call should be made exactly once per socket, before the first call to
+.BR recvmsg .
 The
 .I level
 argument to
@@ -188,7 +177,7 @@ struct homa_set_buf_args {
 .in
 The
 .I start
-field is the address of the beginning of a contiguous buffer region (which
+field is the address of the first byte of a contiguous buffer region (which
 must be page-aligned), and
 .I length
 provides the total number of bytes in the region.
@@ -201,6 +190,214 @@ if needed. The region length represents the maximum amount of incoming
 message data that can be buffered for this socket; if space runs out
 then Homa will defer receiving new messages for the socket until some
 of the buffer space has been returned.
+.SH SENDING MESSAGES
+.PP
+To send a request or response message, an application uses library
+functions
+.B homa_send
+(for requests)
+and
+.B homa_reply
+(for responses).
+These functions are described in separate manual pages for each function.
+.SH RECEIVING MESSAGES
+.PP
+To receive a request or response message, an application invokes the
+.B recvmsg
+kernel call on a Homa socket (Homa does not support the
+.BR read ,
+.BR recv ,
+or
+.BR recvfrom
+kernel calls because they do not support additional control information
+that Homa requires). The fields of the
+.B struct msghdr
+passed to
+.B recvmsg
+are used as follows:
+.IP "" 4n
+.BR msg_name :
+provides the address of a
+.B struct sockaddr_in
+or
+.B struct sockaddr_in6
+in which Homa will return the address of the sender of the received
+message. If
+.B msg_name
+is NULL then the sender's adress is not returned.
+.IP
+.BR msg_namelen :
+specifies how many bytes of storage are available at
+.BR msg_name .
+.IP
+.BR msg_iov
+and
+.BR msg_iovlen :
+not used.
+.IP
+.BR msg_control
+and
+.BR msg_controllen:
+must refer to a
+.B homa_recvmsg_control
+struct as described below.
+.IP
+.BR msg_flags :
+not used.
+.PP
+The
+.B msg_control
+field of the
+.B msghdr
+struct must point to a structure of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_recvmsg_control {
+	  uint64_t id;
+	  uint64_t completion_cookie;
+	  int flags;
+	  uint32_t num_buffers;
+	  uint32_t buffers[HOMA_MAX_BPAGES];
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The structure serves three purposes:
+.nr step 1 1
+.IP \[bu] 2
+It indicates which messages are of interest to the caller, using the
+.B flags
+and
+.B id
+fields.
+.B Flags
+is a bitmask. If it contains the
+.B HOMA_RECVMSG_REQUEST
+bit, then the caller is interested in any incoming request message.
+If it contains the
+.B HOMA_RECVMSG_RESPONSE
+bit, then the caller is interested in any incoming response message.
+If the
+.B HOMA_RECVMSG_RESPONSE
+bit is zero but
+.B id
+is nonzero, then the caller is interested in receiving a response
+for the RPC given
+by
+.B id.
+.IP \[bu]
+It returns buffers to Homa. The number of buffers being returned
+(up to
+.BR HOMA_MAX_BPAGES )
+is given by
+.B num_buffers
+and the buffer pointers are stored in
+.BR buffers .
+Each of these pointers must have been passed to the
+application in a previous
+.B recvmsg
+call (they don't need to have all come from the same call).
+.IP \[bu]
+It provides information about the returned message. The
+.BR id
+field will hold the identifier of the message's RPC.
+For response messages,
+.B completion_cookie
+will contain the value that was specified when the request message
+was sent (for request messages it will always be zero).
+The message contents are returned in
+.BR num_buffers
+chunks, whose addresses are stored in
+.BR buffers.
+Each of the buffers except the last will hold
+.BR HOMA_BPAGE_SIZE
+bytes, and
+.BR num_buffers
+will be at most
+.BR HOMA_MAX_BPAGES .
+Each of the pointers in
+.BR buffers
+must eventually be returned to Homa exactly once in a future
+.BR recvmsg
+call. The address of the caller will be returned via the
+.B msg_name
+field of the
+.B struct msghdr
+passed to the call.
+.PP
+If
+.BR recvmsg
+succeeds, then it will return the length of the incoming message.
+On error, \-1 is returned and
+.I errno
+is set appropriately. If
+.I id
+is nonzero after an error return, it means that the error relates to
+that particular RPC. For response messages, this means that the RPC
+failed (e.g., if
+.B EHOSTUNREACH
+or
+.B ENOTCONN
+is returned). For request messages, this can happen after
+.B EFAULT
+errors (such as, for example, the kernel couldn't write to user space to return
+the message or other metadata associated with the system call).
+.PP
+Nonblocking behavior may be requested for
+.BR recvmsg
+in any of three ways. First, the
+.BR HOMA_RECVMSG_NONBLOCKING
+bit may be set in the
+.B flags
+field of the
+.BR homa_recvmsg_control
+struct. Second, the
+.BR MSG_DONTWAIT
+bit can be set in the
+.BR flags
+argument to
+.BR recvmsg .
+Third, the
+.B O_NONBLOCK
+flag may be set for the socket using the
+.B fcntl
+kernel call. If
+.B recvmsg
+is invoked in nonblocking mode and no appropriate message is available,
+it will fail with an
+.I errno
+value of
+.BR EAGAIN .
+.PP
+After sucessfully receiving a message, an application has two responsibilities.
+First, it must eventually return the message's buffers to Homa. Second, if
+the message is a request, the application must eventually send a response
+(Homa retains state for each request until its response has been sent; if
+the responses are sent, state will accumulate without bound).
+.SH ABORTING REQUESTS
+.PP
+It is possible to abort RPCs that are in progress. This is done with
+the
+.B homa_abort
+function call, which is described in a separate manual page.
+.SH SHUTDOWN
+.PP
+The
+.BR shutdown (2)
+system call may be invoked on Homa sockets. It ignores the
+.I how
+argument and disables the socket,
+so that it may no longer be used for either sending or receiving messages.
+If any threads are blocked waiting on the socket, they will be unblocked
+and their current operations will fail with an
+.I errno
+value of
+.BR ESHUTDOWN .
 .SH SYSCTL PARAMETERS
 .PP
 Homa supports several parameters that can be set with
@@ -514,16 +711,7 @@ Most of the counters are computed separately for each core. The data for
 each core is preceded by a line whose counter name is "core"; the value is
 the core number for the following lines. A few counters appear before the first
 "core" line: these are core-independent counters such as elapsed time.
-.SH IOCTLS
-.PP
-Homa supports several
-.BR ioctl (2)
-calls, which are used to implement the Homa library methods.
-These
-.BR ioctl(2)
-calls should not be invoked directly.
 .SH SEE ALSO
-.BR homa_invoke (3),
-.BR homa_recv (3),
+.BR homa_abort (3),
 .BR homa_reply (3),
 .BR homa_send (3)
