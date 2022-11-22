@@ -594,6 +594,24 @@ TEST_F(homa_incoming, homa_get_resend_range__gap_at_beginning)
 	EXPECT_EQ(0, ntohl(resend.offset));
 	EXPECT_EQ(6200, ntohl(resend.length));
 }
+TEST_F(homa_incoming, homa_get_resend_range__gap_starts_just_after_copied_out)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+	homa_message_in_init(&crpc->msgin, 10000, 0);
+	struct resend_header resend;
+
+	self->data.seg.offset = htonl(5000);
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 6200));
+	crpc->msgin.bytes_remaining = 6600;
+	crpc->msgin.incoming = 7000;
+	crpc->msgin.copied_out = 2000;
+	homa_get_resend_range(&crpc->msgin, &resend);
+	EXPECT_EQ(2000, ntohl(resend.offset));
+	EXPECT_EQ(3000, ntohl(resend.length));
+}
 
 TEST_F(homa_incoming, homa_pkt_dispatch__handle_ack)
 {

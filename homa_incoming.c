@@ -103,6 +103,10 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 //		printk(KERN_NOTICE "redundant Homa packet: %s\n",
 //			homa_print_packet(skb, buffer, sizeof(buffer)));
 		INC_METRIC(redundant_packets, 1);
+		tt_record4("homa_add_packet discarding packet for id %d, "
+				"offset %d, copied_out %d, remaining %d",
+				rpc->id, offset, rpc->msgin.copied_out,
+				rpc->msgin.total_length);
 		kfree_skb(skb);
 		return;
 	}
@@ -211,8 +215,16 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				error = skb_copy_datagram_iter(chunks[i].skb,
 						chunks[i].offset,
 						&iter, chunks[i].length);
-			if (chunks[i].free_skb)
+			if (chunks[i].free_skb) {
+				if (error) {
+					h = (struct data_header *) chunks[i].skb->data;
+					tt_record2("homa_copy_out discarding "
+							"offset %d for id %d",
+							ntohl(h->seg.offset),
+							rpc->id);
+				}
 				kfree_skb(chunks[i].skb);
+			}
 		}
 		n = 0;
 		homa_rpc_lock(rpc);
@@ -220,8 +232,11 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		if (error)
 			break;
 	}
+	tt_record2("homa_copy_out copied up to byte %d for id %d",
+			rpc->msgin.copied_out, rpc->id);
 	if (error)
-		tt_record1("homa_copy_to_user returning error %d", -error);
+		tt_record2("homa_copy_to_user returning error %d for id %d",
+				-error, rpc->id);
 	return error;
 }
 
@@ -252,14 +267,28 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		return;
 	}
 
+	end_offset = msgin->incoming;
+
+	/* The code below handles the case where we've received data past
+	 * msgin->incoming. In this case, end_offset should start off at
+	 * the offset just after the last byte received.
+	 */
+	skb = skb_peek_tail(&msgin->packets);
+	if (skb) {
+		struct data_header *h = (struct data_header *) skb->data;
+		int data_end = ntohl(h->seg.offset)
+				+ ntohl(h->seg.segment_length);
+		if (data_end > end_offset)
+			end_offset = data_end;
+	}
+
 	missing_bytes = msgin->bytes_remaining
-			- (msgin->total_length - msgin->incoming);
+			- (msgin->total_length - end_offset);
 	if (missing_bytes == 0) {
 		resend->offset = 0;
 		resend->length = 0;
 		return;
 	}
-	end_offset = msgin->incoming;
 
 	/* Basic idea: walk backwards through the message's packets until
 	 * we have accounted for all missing bytes; this will identify
@@ -271,8 +300,8 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		int pkt_length = ntohl(h->seg.segment_length);
 		int gap;
 
-		if (pkt_length > (msgin->total_length - offset))
-			pkt_length = msgin->total_length - offset;
+		if (pkt_length > (end_offset - offset))
+			pkt_length = end_offset - offset;
 		gap = end_offset - (offset + pkt_length);
 		missing_bytes -= gap;
 		if (missing_bytes == 0) {
@@ -284,7 +313,11 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	}
 
 	/* The first packet(s) are missing. */
-	resend->offset = 0;
+	tt_record4("first packets missing, missing_bytes %d, copied_out %d, "
+			"incoming %d, length %d",
+			missing_bytes, msgin->copied_out, msgin->incoming,
+			msgin->total_length);
+	resend->offset = htonl(msgin->copied_out);
 	resend->length = htonl(missing_bytes);
 }
 
