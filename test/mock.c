@@ -287,7 +287,7 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 		return -1;
 	if (!mock_check_error(&mock_copy_to_user_dont_copy))
 		memcpy(to, from, n);
-	unit_log_printf("; ", "_copy_to_user copied %lu bytes", n);
+	unit_log_printf("; ", "_copy_to_user copied %lu bytes to %p", n, to);
 	return 0;
 }
 
@@ -896,6 +896,9 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iov_iter *iter, int size)
 {
 	size_t bytes_left = size;
+
+	if (mock_check_error(&mock_copy_data_errors))
+		return -EFAULT;
 	if (bytes_left > iter->count) {
 		unit_log_printf("; ", "skb_copy_datagram_iter needs %lu bytes, "
 				"but iov_iter has only %lu",
@@ -909,7 +912,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
 		unit_log_printf("; ",
-				"skb_copy_datagram_iter: %lu bytes to %llu: ",
+				"skb_copy_datagram_iter: %lu bytes to 0x%llx: ",
 				chunk_bytes, int_base);
 		unit_log_data(NULL, from->data + offset + size - bytes_left,
 				chunk_bytes);

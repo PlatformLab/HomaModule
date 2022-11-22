@@ -359,11 +359,15 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("_copy_to_user copied 1400 bytes; "
-			"_copy_to_user copied 648 bytes; "
-			"_copy_to_user copied 352 bytes; "
-			"_copy_to_user copied 800 bytes; "
-			"_copy_to_user copied 800 bytes",
+	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399; "
+			"skb_copy_datagram_iter: 648 bytes to 0x1000578: "
+			"101400-102047; "
+			"skb_copy_datagram_iter: 352 bytes to 0x1000800: "
+			"102048-102399; "
+			"skb_copy_datagram_iter: 800 bytes to 0x1000960: "
+			"202400-203199; "
+			"skb_copy_datagram_iter: 800 bytes to 0x1000c80: "
+			"303200-303999",
 			unit_log_get());
 	EXPECT_EQ(crpc->msgin.total_length, crpc->msgin.copied_out);
 	EXPECT_EQ(NULL, skb_peek(&crpc->msgin.packets));
@@ -386,7 +390,8 @@ TEST_F(homa_incoming, homa_copy_to_user__message_data_exceeds_length)
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("_copy_to_user copied 1000 bytes", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 1000 bytes to 0x1000000: 0-999",
+			unit_log_get());
 	EXPECT_EQ(1000, crpc->msgin.copied_out);
 	EXPECT_EQ(1, crpc->msgin.num_skbs);
 }
@@ -410,7 +415,8 @@ TEST_F(homa_incoming, homa_copy_to_user__gap_in_packets)
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399",
+			unit_log_get());
 	EXPECT_EQ(1400, crpc->msgin.copied_out);
 	EXPECT_EQ(1, crpc->msgin.num_skbs);
 }
@@ -447,10 +453,10 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 			1400, 101000), crpc, NULL, &self->incoming_delta);
 
 	unit_log_clear();
-	mock_copy_to_user_errors = 2;
-	mock_copy_to_user_dont_copy = -1;
+	mock_copy_data_errors = 2;
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("_copy_to_user copied 1400 bytes", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399",
+			unit_log_get());
 	EXPECT_EQ(2800, crpc->msgin.copied_out);
 	EXPECT_EQ(1, crpc->msgin.num_skbs);
 }
@@ -474,12 +480,19 @@ TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
-	EXPECT_STREQ("_copy_to_user copied 512 bytes; "
-			"_copy_to_user copied 512 bytes; "
-			"_copy_to_user copied 512 bytes; "
-			"_copy_to_user copied 512 bytes; "
-			"_copy_to_user copied 512 bytes; "
-			"_copy_to_user copied 440 bytes", unit_log_get());
+	EXPECT_STREQ("skb_copy_datagram_iter: 512 bytes to 0x1000000: "
+			"101000-101511; "
+			"skb_copy_datagram_iter: 512 bytes to 0x1000200: "
+			"101512-102023; "
+			"skb_copy_datagram_iter: 512 bytes to 0x1000400: "
+			"102024-102535; "
+			"skb_copy_datagram_iter: 512 bytes to 0x1000600: "
+			"102536-103047; "
+			"skb_copy_datagram_iter: 512 bytes to 0x1000800: "
+			"103048-103559; "
+			"skb_copy_datagram_iter: 440 bytes to 0x1000a00: "
+			"103560-103999",
+			unit_log_get());
 	EXPECT_EQ(3000, crpc->msgin.copied_out);
 	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }

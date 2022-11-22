@@ -488,7 +488,6 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
-	mock_copy_to_user_dont_copy = 3;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -502,6 +501,9 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, self->recvmsg_control.num_buffers);
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, self->recvmsg_control.buffers[0]);
+	EXPECT_EQ(sizeof(struct homa_recvmsg_control),
+			(char *) self->recvmsg_hdr.msg_control
+			- (char *) &self->recvmsg_control);
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 {
@@ -519,7 +521,6 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
-	mock_copy_to_user_dont_copy = 3;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -562,7 +563,6 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
-	mock_copy_to_user_dont_copy = 3;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -576,7 +576,6 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 100, 200);
 	EXPECT_NE(NULL, srpc);
-	mock_copy_to_user_dont_copy = 1;
 
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -594,8 +593,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_control)
 			self->client_id, 100, 2000);
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	mock_copy_to_user_errors = 4;
-	mock_copy_to_user_dont_copy = 3;
+	mock_copy_to_user_errors = 1;
 
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
@@ -812,12 +810,12 @@ TEST_F(homa_plumbing, homa_metrics_read__basics)
 	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
 	self->homa.metrics_length = 26;
 	EXPECT_EQ(5, homa_metrics_read(NULL, buffer, 5, &offset));
-	EXPECT_STREQ("_copy_to_user copied 5 bytes", unit_log_get());
+	EXPECT_SUBSTR("_copy_to_user copied 5 bytes", unit_log_get());
 	EXPECT_EQ(15, offset);
 
 	unit_log_clear();
 	EXPECT_EQ(11, homa_metrics_read(NULL, buffer, 1000, &offset));
-	EXPECT_STREQ("_copy_to_user copied 11 bytes", unit_log_get());
+	EXPECT_SUBSTR("_copy_to_user copied 11 bytes", unit_log_get());
 	EXPECT_EQ(26, offset);
 
 	unit_log_clear();

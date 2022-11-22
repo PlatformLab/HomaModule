@@ -1,6 +1,12 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes for new receive API:
+  * Delete homa_recv_args
+  * Initialize msgin when RPC is created?
+  * Handle out of memory correctly.
+  * Check to be sure that retries are calculated correctly.
+
 * IPv6 issues:
   * Verify that priorities work.
   * See if error checking made syscalls slower.
@@ -10,7 +16,7 @@ Notes for Homa implementation in Linux:
   * grant_non_fifo may need to grant to a message that is also receiving
     regular grants
   * What if a message receives data beyond incoming, which completes the
-    message?a
+    message?
 
 * Pinning memory: see mm.h and mm/gup.c
   * get_user_page
