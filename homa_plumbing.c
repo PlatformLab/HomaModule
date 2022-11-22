@@ -1194,6 +1194,12 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		printk(KERN_NOTICE "homa_recvmsg couldn't copy back args\n");
 		result = -EFAULT;
 	}
+	/* This is needed because ____sys_recvmsg writes the after-before
+	 * difference for this value back as msg_controllen in the user's
+	 * struct msghdr.
+	 */
+	msg->msg_control = ((char *) msg->msg_control)
+			+ sizeof(struct homa_recvmsg_control);
 done:
 	finish = get_cycles();
 	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
