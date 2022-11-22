@@ -16,12 +16,13 @@
 /* This is a test program that acts as a server for testing either
  * Homa or TCP; it simply accepts request packets of arbitrary length
  * and responds with packets whose length is determined by the request.
- * The program runs forever; use control-C to kill it.
+ * It's typically used along with homa_test, which implements the client
+ * side.  The program runs forever; use control-C to kill it.
  *
  * Usage:
  * server [options]
  *
- * Type "server --help" for documenation on the options.
+ * Type "server --help" for documentation on the options.
  */
 
 #include <errno.h>
@@ -32,8 +33,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <netinet/ip.h>
-#include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 
 #include <thread>
 
@@ -62,16 +65,20 @@ void homa_server(int port)
 {
 	int fd;
 	sockaddr_in_union addr_in;
-	int message[1000000];
 	sockaddr_in_union source;
 	int length;
+	struct homa_recvmsg_control control;
+	struct msghdr hdr;
+	struct homa_set_buf_args arg;
+	char *buf_region;
+	struct iovec vecs[HOMA_MAX_BPAGES];
+	int num_vecs;
 
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 		return;
 	}
-
 	memset(&addr_in, 0, sizeof(addr_in));
 	addr_in.in4.sin_family = AF_INET;
 	addr_in.in4.sin_port = htons(port);
@@ -82,37 +89,72 @@ void homa_server(int port)
 	}
 	if (verbose)
 		printf("Successfully bound to Homa port %d\n", port);
+
+	// Set up buffer region.
+	buf_region = (char *) mmap(NULL, 1000*HOMA_BPAGE_SIZE,
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	if (buf_region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
+		return;
+	}
+	arg.start = buf_region;
+	arg.length = 1000*HOMA_BPAGE_SIZE;
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+			sizeof(arg));
+	if (status < 0) {
+		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+				strerror(errno));
+		return;
+	}
+
+	memset(&control, 0, sizeof(control));
+	hdr.msg_name = &source;
+	hdr.msg_namelen = sizeof32(source);
+	hdr.msg_iov = NULL;
+	hdr.msg_iovlen = 0;
+	hdr.msg_control = &control;
+	hdr.msg_controllen = sizeof(control);
+	hdr.msg_flags = 0;
 	while (1) {
-		uint64_t id = 0;
 		int seed;
 		int result;
 
-		length = homa_recv(fd, message, sizeof(message),
-			HOMA_RECV_REQUEST, &source,
-			&id, NULL, NULL);
+		control.id = 0;
+		control.flags = HOMA_RECVMSG_REQUEST;
+		length = recvmsg(fd, &hdr, 0);
 		if (length < 0) {
-			printf("homa_recv failed: %s\n", strerror(errno));
+			printf("recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
+		int resp_length = ((int *) (buf_region + control.buffers[0]))[1];
 		if (validate) {
-			seed = check_buffer(&message[2],
-				length - 2*sizeof32(int));
+			seed = check_message(&control, buf_region, length,
+					2*sizeof32(int));
 			if (verbose)
 				printf("Received message from %s with %d bytes, "
 					"id %lu, seed %d, response length %d\n",
-					print_address(&source), length, id,
-					seed, message[1]);
+					print_address(&source), length,
+					control.id, seed, resp_length);
 		} else
 			if (verbose)
 				printf("Received message from %s with "
 					"%d bytes, id %lu, response length %d\n",
-					print_address(&source), length, id,
-					message[1]);
+					print_address(&source), length,
+					control.id, resp_length);
 
 		/* Second word of the message indicates how large a
 		 * response to send.
 		 */
-		result = homa_reply(fd, message, message[1], &source, id);
+		num_vecs = 0;
+		while (resp_length > 0) {
+			vecs[num_vecs].iov_len = (resp_length > HOMA_BPAGE_SIZE)
+					? HOMA_BPAGE_SIZE : resp_length;
+			vecs[num_vecs].iov_base = buf_region
+					+ control.buffers[num_vecs];
+			resp_length -= vecs[num_vecs].iov_len;
+			num_vecs++;
+		}
+		result = homa_replyv(fd, vecs, num_vecs, &source, control.id);
 		if (result < 0) {
 			printf("Homa_reply failed: %s\n", strerror(errno));
 		}
@@ -130,7 +172,7 @@ void print_help(const char *name)
 		"--help       Print this message and exit\n"
 		"--port       (First) port number to use (default: 4000)\n"
 		"--num_ports  Number of Homa ports to open (default: 1)\n"
-		"--validate   Validate contents of incoming messages (default: false\n"
+		"--validate   Validate contents of incoming messages (default: false)\n"
 		"--verbose    Log events as they happen (default: false)\n",
 		name);
 }

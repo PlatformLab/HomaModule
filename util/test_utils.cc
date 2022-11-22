@@ -57,6 +57,43 @@ int check_buffer(void *buffer, size_t length)
 	return seed;
 }
 
+/**
+ * check_message() - Checks whether the data in a Homa message is consistent
+ * with what would have been produced by seed_buffer. If not, an error message
+ * is printed.
+ * @control:   Structure that describes the buffers in the message
+ * @region:    Base of the region used for input buffers.
+ * @length:    Total length of the message
+ * @skip:      This many bytes at the beginning of the message are skipped.
+ *
+ * Return: the seed value that was used to generate the buffer.
+ */
+int check_message(struct homa_recvmsg_control *control, char *region,
+		size_t length, int skip)
+{
+	int num_ints, seed;
+	int count = 0;
+
+	seed = *((int *) (region + control->buffers[0] + skip));
+	for (uint32_t i = 0; i < control->num_buffers; i++) {
+		size_t buf_length = ((length > HOMA_BPAGE_SIZE) ? HOMA_BPAGE_SIZE
+				: length) - skip;
+		int *ints = (int *) (region + control->buffers[i] + skip);
+		num_ints = (buf_length + sizeof(int) - 1)/sizeof(int);
+		skip = 0;
+		for (int j = 0; j < num_ints; j++) {
+			if (ints[j] != seed + count) {
+				printf("Bad value at index %d in "
+					"message; expected %d, got %d\n",
+					count, seed+count, ints[j]);
+				return seed;
+			}
+			count++;
+		}
+		length -= HOMA_BPAGE_SIZE;
+	}
+	return seed;
+}
 
 /**
  * get_cycles_per_sec(): calibrate the RDTSC timer.

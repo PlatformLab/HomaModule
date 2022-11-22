@@ -14,7 +14,7 @@
  */
 
 // This file contains a collection of tests for the Linux implementation
-// of Homa
+// of Homa; it's typically used together with homa_server.
 //
 // Usage:
 // homaTest host:port [options] op op ...
@@ -50,6 +50,16 @@ int count = 1000;
 
 /* Used to generate "somewhat random but predictable" contents for buffers. */
 int seed = 12345;
+
+/* Buffer space used for receiving messages. */
+char *buf_region;
+
+/* Control blocks for receiving messages. */
+struct homa_recvmsg_control recv_control;
+struct msghdr recv_hdr;
+
+/* Address of message sender. */
+sockaddr_in_union source_addr;
 
 /**
  * close_fd() - Helper method for "close" test: sleeps a while, then closes
@@ -121,13 +131,12 @@ void print_help(const char *name)
 
 /**
  * test_close() - Close a Homa socket while a thread is waiting on it.
+ * Note: this will hang the thread. To abort the thread, must invoke
+ * shutdown before close.
  */
 void test_close()
 {
 	int result, fd;
-	int message[100000];
-	uint64_t id = 0;
-	sockaddr_in_union addr;
 
 	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -136,8 +145,9 @@ void test_close()
 		exit(1);
 	}
 	std::thread thread(close_fd, fd);
-	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&addr, &id, NULL, NULL);
+	recv_control.id = 0;
+	recv_control.flags = HOMA_RECV_RESPONSE;
+	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
 	} else {
@@ -160,7 +170,6 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	int completed = 0;
 	size_t total = 0;
 #define PRINT_INTERVAL 1000
-	char buffer[length];
 	ssize_t received;
 	uint64_t start = rdtsc();
 
@@ -178,12 +187,11 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	}
 	total = 0;
 	for (int i = 1; i <= count; i++) {
-		id = 0;
-		sockaddr_in_union addr;
-		received = homa_recv(fd, buffer, length, HOMA_RECV_RESPONSE,
-				&addr, &id, NULL, NULL);
+		recv_control.id = 0;
+		recv_control.flags = HOMA_RECV_RESPONSE;
+		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
-			printf("Error in homa_recv for id %lu: %s\n",
+			printf("Error in recvmsg for id %lu: %s\n",
 				id, strerror(errno));
 		} else {
 			total += received;
@@ -209,31 +217,30 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 {
-	uint64_t id = 0;
-	char response[1000000];
-	sockaddr_in_union server_addr;
+	uint64_t id;
 	int status;
 	ssize_t resp_length;
 
 	status = homa_send(fd, request, length, dest, &id, 0);
 	if (status < 0) {
-		printf("Error in homa_send: %s\n",
-			strerror(errno));
+		printf("Error in homa_send: %s\n", strerror(errno));
+		return;
 	} else {
 		printf("Homa_send succeeded, id %lu\n", id);
 	}
-	resp_length = homa_recv(fd, response, sizeof(response),
-		HOMA_RECV_RESPONSE, &server_addr, &id, NULL, NULL);
+	recv_control.id = 0;
+	recv_control.flags = HOMA_RECV_RESPONSE;
+	resp_length = recvmsg(fd, &recv_hdr, 0);
 	if (resp_length < 0) {
-		printf("Error in homa_recv: %s\n",
-			strerror(errno));
+		printf("Error in recvmsg: %s\n", strerror(errno));
 		return;
 	}
-	int seed = check_buffer(response + 2*sizeof32(int),
-				resp_length - 2*sizeof32(int));
+	int seed = check_message(&recv_control, buf_region, resp_length,
+			2*sizeof32(int));
 	printf("Received message from %s with %lu bytes, "
-		"seed %d, id %lu\n",
-		print_address(&server_addr), resp_length, seed, id);
+			"seed %d, id %lu\n",
+			print_address(&source_addr), resp_length, seed,
+			recv_control.id);
 }
 
 /**
@@ -271,15 +278,12 @@ void test_ioctl(int fd, int count)
  */
 void test_poll(int fd, char *request)
 {
-	uint64_t id;
 	int result;
-	int message[100000];
 	struct pollfd poll_info = {
 		.fd =     fd,
 		.events = POLLIN,
 		.revents = 0
 	};
-	sockaddr_in_union source;
 	sockaddr_in_union addr;
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_addr.s_addr = inet_addr("127.0.0.1");
@@ -302,14 +306,14 @@ void test_poll(int fd, char *request)
 		return;
 	}
 
-	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_REQUEST,
-			&source, &id, NULL, NULL);
-	if (result < 0) {
-		printf("homa_recv failed: %s\n", strerror(errno));
-	} else {
-		printf("homa_recv returned %d bytes from port %d\n",
-				result, ntohs(source.in4.sin_port));
-	}
+	recv_control.id = 0;
+	recv_control.flags = HOMA_RECV_REQUEST;
+	result = recvmsg(fd, &recv_hdr, 0);
+	if (result < 0)
+		printf("Error in recvmsg: %s\n", strerror(errno));
+	else
+		printf("rcvmsg returned %d bytes from port %d\n",
+				result, ntohs(source_addr.in4.sin_port));
 }
 
 /**
@@ -348,29 +352,26 @@ void test_read(int fd, int count)
  */
 void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 {
-	uint64_t id;
-	char response[1000000];
 	int status;
 	ssize_t resp_length;
 	uint64_t start;
 	uint64_t times[count];
-	sockaddr_in_union addr;
 
 	for (int i = -10; i < count; i++) {
 		start = rdtsc();
-		status = homa_send(fd, request, length, dest, &id, 0);
+		status = homa_send(fd, request, length, dest, NULL, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
 					strerror(errno));
 			return;
 		}
-		resp_length = homa_recv(fd, response, sizeof(response),
-				HOMA_RECV_RESPONSE, &addr, &id, NULL, NULL);
+		recv_control.id = 0;
+		recv_control.flags = HOMA_RECV_RESPONSE;
+		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (i >= 0)
 			times[i] = rdtsc() - start;
 		if (resp_length < 0) {
-			printf("Error in homa_recv: %s\n",
-					strerror(errno));
+			printf("Error in recvmsg: %s\n", strerror(errno));
 			return;
 		}
 		if (resp_length != length)
@@ -434,29 +435,28 @@ void test_set_buf(int fd)
 void test_shutdown(int fd)
 {
 	int result;
-	int message[100000];
-	uint64_t id = 0;
-	sockaddr_in_union addr;
 
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
-	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&addr, &id, NULL, NULL);
+	recv_control.id = 0;
+	recv_control.flags = HOMA_RECV_RESPONSE;
+	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
 	} else {
-		printf("Error in homa_recv: %s\n",
+		printf("Error in recvmsg: %s\n",
 			strerror(errno));
 	}
 
 	/* Make sure that future reads also fail. */
-	result = homa_recv(fd, message, sizeof(message), HOMA_RECV_RESPONSE,
-			&addr, &id, NULL, NULL);
+	recv_control.id = 0;
+	recv_control.flags = HOMA_RECV_RESPONSE;
+	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0) {
-		printf("Second homa_recv call also failed: %s\n",
+		printf("Second recvmsg call also failed: %s\n",
 			strerror(errno));
 	} else {
-		printf("Second homa_recv call succeeded: %d bytes\n", result);
+		printf("Second recvmsg call succeeded: %d bytes\n", result);
 	}
 }
 
@@ -471,7 +471,6 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 {
 #define MAX_RPCS 100
 	int *buffers[MAX_RPCS];
-	int response[100];
 	ssize_t resp_length;
 	uint64_t id, end_cycles;
 	uint64_t start_cycles = 0;
@@ -504,18 +503,20 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 	 * request.
 	 */
 	while (1){
-		id = 0;
-		sockaddr_in_union addr;
-		resp_length = homa_recv(fd, response, sizeof(response),
-				HOMA_RECV_RESPONSE, &addr, &id, NULL, NULL);
+		int *response;
+
+		recv_control.id = 0;
+		recv_control.flags = HOMA_RECV_RESPONSE;
+		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
-			printf("Error in homa_recv: %s\n",
+			printf("Error in recvmsg: %s\n",
 					strerror(errno));
 			return;
 		}
 		if (resp_length != 12)
 			printf("Expected 12 bytes in response, received %ld\n",
 					resp_length);
+		response = (int *) (buf_region + recv_control.buffers[0]);
 		status = homa_send(fd, buffers[(response[2]/1000) %count],
 				length, dest, &id, 0);
 		if (status < 0) {
@@ -884,6 +885,34 @@ int main(int argc, char** argv)
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}
+
+	// Set up buffer region.
+	buf_region = (char *) mmap(NULL, 1000*HOMA_BPAGE_SIZE,
+			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	if (buf_region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
+		exit(1);
+	}
+	struct homa_set_buf_args arg;
+	arg.start = buf_region;
+	arg.length = 1000*HOMA_BPAGE_SIZE;
+	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+			sizeof(arg));
+	if (status < 0) {
+		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+				strerror(errno));
+		exit(1);
+	}
+	recv_control.id = 0;
+	recv_control.flags = 0;
+	recv_control.num_buffers = 0;
+	recv_hdr.msg_name = &source_addr;
+	recv_hdr.msg_namelen = sizeof32(source_addr);
+	recv_hdr.msg_iov = NULL;
+	recv_hdr.msg_iovlen = 0;
+	recv_hdr.msg_control = &recv_control;
+	recv_hdr.msg_controllen = sizeof(recv_control);
+	recv_hdr.msg_flags = 0;
 
 	for ( ; nextArg < argc; nextArg++) {
 		if (strcmp(argv[nextArg], "close") == 0) {
