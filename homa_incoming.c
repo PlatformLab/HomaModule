@@ -65,7 +65,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 
 	/* Any data from the packet with offset less than this is
 	 * of no value.*/
-	int floor = 0;
+	int floor = rpc->msgin.copied_out;
 
 	/* Any data with offset >= this is useless. */
 	int ceiling = rpc->msgin.total_length;

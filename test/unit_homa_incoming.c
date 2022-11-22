@@ -243,6 +243,29 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 1400@2800; "
 			"DATA 800@4200", unit_log_get());
 }
+TEST_F(homa_incoming, homa_add_packet__ignore_resends_of_copied_out_data)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+	homa_message_in_init(&crpc->msgin, 10000, 0);
+	unit_log_clear();
+	crpc->msgin.copied_out = 1500;
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 0));
+	unit_log_skb_list(&crpc->msgin.packets, 0);
+	EXPECT_STREQ("",
+			unit_log_get());
+	EXPECT_EQ(10000, crpc->msgin.bytes_remaining);
+
+	self->data.seg.offset = htonl(1400);
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 1400));
+	unit_log_skb_list(&crpc->msgin.packets, 0);
+	EXPECT_STREQ("DATA 1400@1400",
+			unit_log_get());
+	EXPECT_EQ(8700, crpc->msgin.bytes_remaining);
+}
 TEST_F(homa_incoming, homa_add_packet__varying_sizes)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
