@@ -5,7 +5,6 @@ Notes for Homa implementation in Linux:
   * Delete homa_recv_args
   * Initialize msgin when RPC is created?
   * Handle out of memory correctly.
-  * Check to be sure that retries are calculated correctly.
 
 * IPv6 issues:
   * Verify that priorities work.
