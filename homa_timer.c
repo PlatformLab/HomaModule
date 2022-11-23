@@ -54,6 +54,9 @@ int homa_check_rpc(struct homa_rpc *rpc)
 						- rpc->done_timer_ticks);
 			}
 		}
+
+		/* We don't want to send RESENDs for RPCs in this state. */
+		rpc->resend_timer_ticks = homa->timer_ticks;
 	}
 
 	if ((rpc->state == RPC_OUTGOING)
@@ -114,7 +117,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	 * until some other RPC makes progress (e.g. a server is waiting
 	 * to receive one RPC before it replies to another, or some RPC is
 	 * first on @peer->grantable_rpcs, so it blocks transmissions of
-	 * other RPCs.
+	 * other RPCs).
 	 */
 
 	/* First, collect information that will identify the RPC most
@@ -138,12 +141,12 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		 * optimizations is tricky; don't change the comparison below
 		 * unless you're sure you know what you are doing.
 		 */
-	       if (!((peer->least_recent_ticks - rpc->resend_timer_ticks)
-			       & (1U<<31))) {
-		       peer->least_recent_rpc = rpc;
-		       peer->least_recent_ticks = rpc->resend_timer_ticks;
-	       }
-	       return 0;
+	        if (!((peer->least_recent_ticks - rpc->resend_timer_ticks)
+				& (1U<<31))) {
+		        peer->least_recent_rpc = rpc;
+		        peer->least_recent_ticks = rpc->resend_timer_ticks;
+	        }
+	        return 0;
 	}
 
 	/* Issue a resend for this RPC. */

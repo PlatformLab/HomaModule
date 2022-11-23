@@ -79,6 +79,7 @@ TEST_F(homa_timer, homa_check_timeout__request_ack)
 	self->homa.timer_ticks++;
 	homa_check_rpc(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);
+	EXPECT_EQ(self->homa.timer_ticks, srpc->resend_timer_ticks);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Fourth call: request ack. */
@@ -86,6 +87,7 @@ TEST_F(homa_timer, homa_check_timeout__request_ack)
 	self->homa.timer_ticks++;
 	homa_check_rpc(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);
+	EXPECT_EQ(self->homa.timer_ticks, srpc->resend_timer_ticks);
 	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
 }
 TEST_F(homa_timer, homa_check_timeout__client_rpc__granted_bytes_not_sent)
