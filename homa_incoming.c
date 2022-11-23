@@ -733,13 +733,18 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	struct common_header *h = (struct common_header *) skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+	__u64 id = homa_local_id(h->sender_id);
 	struct ack_header ack;
 	struct homa_peer *peer;
 
+	tt_record1("Received NEED_ACK for id %d", id);
+
 	/* Return if it's not safe for the peer to purge its state
-	 * for this RPC, or if we can't find peer info.
+	 * for this RPC (the RPC still exists and we haven't received
+	 * the entire response), or if we can't find peer info.
 	 */
-	if (rpc != NULL) {
+	if ((rpc != NULL) && ((rpc->state != RPC_INCOMING)
+			|| rpc->msgin.bytes_remaining)) {
 		goto done;
 	} else {
 		peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);
@@ -754,13 +759,12 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
-	ack.common.sender_id = be64_to_cpu(homa_local_id(h->sender_id));
+	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 			NUM_PEER_UNACKED_IDS, ack.acks));
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d "
-			"other acks", homa_local_id(h->sender_id),
-			tt_addr(saddr), ntohs(ack.num_acks));
+			"other acks", id, tt_addr(saddr), ntohs(ack.num_acks));
 
     done:
 	kfree_skb(skb);

@@ -1316,10 +1316,49 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	EXPECT_EQ(0, peer->cutoff_version);
 }
 
-TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_finished)
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_response_fully_received)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 100, 3000);
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	struct need_ack_header h = {.common = {
+			.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = NEED_ACK}};
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk, &self->lcache, &self->incoming_delta);
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:40000, dport 99, id 1234, acks",
+			unit_log_get());
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.packets_received[
+			NEED_ACK - DATA]);
+}
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_response_not_fully_received)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 100, 3000);
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	struct need_ack_header h = {.common = {
+			.sport = htons(self->server_port),
+	                .dport = htons(self->client_port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = NEED_ACK}};
+	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
+			&self->hsk, &self->lcache, &self->incoming_delta);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.packets_received[
+			NEED_ACK - DATA]);
+}
+TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 3000);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
