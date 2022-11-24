@@ -145,6 +145,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		int free_skb;
 	} chunks[MAX_CHUNKS];
 	int error = 0;
+	int count;
 	int n = 0;             /* Number of filled entries in chunks. */
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
@@ -184,6 +185,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			chunks[n].length = skb_bytes;
 			chunks[n].free_skb = 1;
 			skb_dequeue(&rpc->msgin.packets);
+			tt_record("finished scanning an skb");
 			rpc->msgin.num_skbs--;
 		} else {
 			chunks[n].length = buf_bytes;
@@ -194,46 +196,56 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		if (n < MAX_CHUNKS)
 			continue;
 
-		copy_out:
+copy_out:
 		if (n == 0)
 			break;
 		atomic_or(RPC_COPYING_TO_USER, &rpc->flags);
 		homa_rpc_unlock(rpc);
+
+		/* Copy data to user space. */
+		tt_record1("starting copy to user space for id %d",
+				rpc->id);
+		count = 0;
 		for (i = 0; i < n; i++) {
 			struct iovec iov;
 			struct iov_iter iter;
 
-			/* Note: if an error occurs we still have to process
-			 * the remaining chunks in order to free all of the
-			 * skbs. But, we don't need to copy any more data
-			 * after an error.
-			 */
-			if (!error)
-				error = import_single_range(READ, chunks[i].dst,
-						chunks[i].length, &iov, &iter);
-			if (!error)
-				error = skb_copy_datagram_iter(chunks[i].skb,
+			if (error)
+				break;
+			error = import_single_range(READ, chunks[i].dst,
+					chunks[i].length, &iov, &iter);
+			if (error)
+				break;
+			error = skb_copy_datagram_iter(chunks[i].skb,
 						chunks[i].offset,
 						&iter, chunks[i].length);
-			if (chunks[i].free_skb) {
-				if (error) {
-					h = (struct data_header *) chunks[i].skb->data;
-					tt_record2("homa_copy_out discarding "
-							"offset %d for id %d",
-							ntohl(h->seg.offset),
-							rpc->id);
-				}
-				kfree_skb(chunks[i].skb);
-			}
+			count += chunks[i].length;
 		}
+		tt_record3("finished copying %d bytes for id %d, copied_out %d",
+				count, rpc->id, rpc->msgin.copied_out);
+
+		/* Free skbs. */
+		count = 0;
+		for (i = 0; i < n; i++) {
+			if (!chunks[i].free_skb)
+				continue;
+			if (error) {
+				h = (struct data_header *) chunks[i].skb->data;
+				tt_record2("homa_copy_out discarding skb"
+						"for id %d at offset %d",
+						rpc->id, ntohl(h->seg.offset));
+			}
+			kfree_skb(chunks[i].skb);
+			count++;
+		}
+		tt_record2("finished freeing %d skbs for id %d",
+				count, rpc->id);
 		n = 0;
 		homa_rpc_lock(rpc);
 		atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
 		if (error)
 			break;
 	}
-	tt_record2("homa_copy_out copied up to byte %d for id %d",
-			rpc->msgin.copied_out, rpc->id);
 	if (error)
 		tt_record2("homa_copy_to_user returning error %d for id %d",
 				-error, rpc->id);
