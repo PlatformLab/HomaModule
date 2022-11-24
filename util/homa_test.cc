@@ -449,10 +449,13 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 	ssize_t resp_length;
 	uint64_t id, end_cycles;
 	uint64_t start_cycles = 0;
+	uint64_t end_time;
 	int status, i;
 	int64_t bytes_sent = 0;
 	int64_t start_bytes = 0;
 	double rate;
+
+	end_time = rdtsc() + (uint64_t) (5*get_cycles_per_sec());
 
 	if (count > MAX_RPCS) {
 		printf("Count too large; reducing from %d to %d\n", count,
@@ -497,7 +500,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 			return;
 		}
 		bytes_sent += length;
-		if (bytes_sent > 1001000000)
+		if (rdtsc() > end_time)
 			break;
 
 		/* Don't start timing until we've sent a few bytes to warm
