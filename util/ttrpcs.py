@@ -31,14 +31,13 @@ from statistics import median
 # out_packet:   data packet sent with offset != 0
 # first_in:     this is the first data packet received for the RPC
 # in_packet:    data packet received with offset != 0
-# copy_in:      data was just copied from user spaceto kernel space
-# copy_out:     data was just copied from kernel space to user space
+# copy_in:      data was just copied from user space into the kernel
 client_patterns = [
   {"pattern": "homa_ioc_send starting.* id ([0-9]+)",
     "name": "start"},
   {"pattern": "data copied into request.* id ([0-9]+), length ([0-9]+)",
     "name": "data copied into request",
-    "copy_out": True},
+    "copy_in": True},
   {"pattern":"Finished queueing packet.* id ([0-9]+), offset 0",
     "name": "first request packet sent",
     "first_out": True},
@@ -57,13 +56,8 @@ client_patterns = [
     "name": "gro gets last response packet",
     "record_last": True,
     "in_packet": True},
-  {"pattern":"homa_wait_for_message woke up,* id ([0-9]+)",
-    "name": "client thread woke up"},
-  {"pattern": "starting data copy to user.* id ([0-9]+), length ([0-9]+)",
-    "name": "starting data copy to client"},
-  {"pattern":"homa_ioc_recv finished,* id ([0-9]+), .* length ([0-9]+)",
-    "name": "homa_ioc_recv finished",
-    "copy_in": True},
+  {"pattern":"homa_recvmsg returning id ([0-9]+), length ([0-9]+)",
+    "name": "homa_recvmsg returning"},
 ]
 
 server_patterns = [
@@ -76,18 +70,13 @@ server_patterns = [
     "name": "gro gets last request packet",
     "record_last": True,
     "in_packet": True},
-  {"pattern":"homa_wait_for_message woke up,* id ([0-9]+)",
-    "name": "server thread woke up"},
-  {"pattern": "starting data copy to user.* id ([0-9]+), length ([0-9]+)",
-    "name": "starting data copy to server"},
-  {"pattern":"homa_ioc_recv finished,* id ([0-9]+), .* length ([0-9]+)",
-    "name": "homa_ioc_recv finished",
-    "copy_in": True},
+  {"pattern":"homa_recvmsg returning id ([0-9]+), length ([0-9]+)",
+    "name": "homa_recvmsg returning"},
   {"pattern":"homa_ioc_reply starting,* id ([0-9]+)",
     "name": "homa_ioc_reply starting"},
   {"pattern": "data copied into response.* id ([0-9]+), length ([0-9]+)",
     "name": "data copied into response",
-    "copy_out": True},
+    "copy_in": True},
   {"pattern":"Finished queueing packet.* id ([0-9]+), offset 0",
     "name": "first response packet sent",
     "first_out": True},
@@ -98,6 +87,47 @@ server_patterns = [
     "record_last": True,
     "out_packet": True},
 ]
+
+# Additional patterns to track packet copying separately.
+aux_patterns = [
+  {"pattern":".* id ([0-9]+)",
+    "name": "gro gets first request packet",
+    "first_in": True},
+  {"pattern":"starting copy to user space for id ([0-9]+)",
+    "name": "starting copying to user space"},
+  {"pattern":"finished copying .* id ([0-9]+)",
+    "name": "finished copying to user space",
+    "record_last": True},
+]
+
+def print_stats(patterns, rpcs):
+  """
+  Print out a time line of when the events in patterns occur, using
+  data collected in rpcs
+  """
+  for i in range(1, len(patterns)):
+    pattern = patterns[i]
+    elapsed = []
+    deltas = []
+    for id in rpcs:
+      rpc = rpcs[id]
+      if (0 not in rpc) or ((len(patterns)-1) not in rpc):
+        continue
+      if i not in rpc:
+        continue
+      elapsed.append(rpc[i] - rpc[0])
+      prev = i - 1
+      while not prev in rpc:
+          prev -= 1
+      deltas.append(rpc[i] - rpc[prev])
+    if len(elapsed) == 0:
+      print("%-32s (no events)" % (pattern["name"]))
+      continue
+    elapsed = sorted(elapsed)
+    deltas = sorted(deltas)
+    print("%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1fus (+%7.1f us)" % (
+        pattern["name"], sum(elapsed)/len(elapsed), sum(deltas)/len(deltas),
+        elapsed[9*len(elapsed)//10], deltas[9*len(deltas)//10]))
 
 patterns = client_patterns
 if (len(sys.argv) >= 2) and (sys.argv[1] == "--server"):
@@ -115,6 +145,9 @@ else:
 # within patterns and whose values are the times when that event occurred.
 rpcs = {}
 
+# Similar to rpcs, except records info about aux_patterns.
+aux_rpcs = {}
+
 # Keys are RPC ids. Value is the last starting offset seen in a packet
 # transmitted or received for that RPC (used to calculate throughputs).
 last_out_offset = {}
@@ -127,11 +160,15 @@ first_out_time = {}
 last_in_time = {}
 last_out_time = {}
 
+# Keys are core ids. Value is the most recent time when a copy to user
+# space was initiated on that core.
+last_copy_out_start = {}
+
 # These variables track data copies into and out of the kernel
-copy_out_data = 0
-copy_out_time = 0
 copy_in_data = 0
 copy_in_time = 0
+copy_out_data = 0
+copy_out_time = 0
 
 for line in f:
   for i in range(len(patterns)):
@@ -159,36 +196,43 @@ for line in f:
         last_out_offset[id] = int(match.group(5))
       if i-1 in rpcs[id]:
         elapsed = time - rpcs[id][i-1]
-        if "copy_out" in pattern:
-          copy_out_data += int(match.group(5))
-          copy_out_time += elapsed
         if "copy_in" in pattern:
           copy_in_data += int(match.group(5))
           copy_in_time += elapsed
+  for i in range(len(aux_patterns)):
+    pattern = aux_patterns[i]
+    match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+        + pattern["pattern"], line)
+    if match:
+      time = float(match.group(1))
+      id = int(match.group(4))
+      if not id in aux_rpcs:
+        aux_rpcs[id] = {}
+      if (i in aux_rpcs[id]) and (not "record_last" in pattern):
+        continue
+      aux_rpcs[id][i] = time
+  match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+      'starting copy to user space', line)
+  if match:
+    time = float(match.group(1))
+    core = int(match.group(3))
+    last_copy_out_start[core] = time
+  match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+      'finished copying ([-0-9.]+) bytes', line)
+  if match:
+    time = float(match.group(1))
+    count = int(match.group(4))
+    core = int(match.group(3))
+    if core in last_copy_out_start:
+      elapsed = time - last_copy_out_start[core]
+      copy_out_time += elapsed
+      copy_out_data += count
+      # print("%8.3f: %d bytes copied in %.1f usec: %.1f GB/sec" % (
+          # qtime, count, elapsed, (count/1000)/elapsed))
 
-for i in range(1, len(patterns)):
-  pattern = patterns[i]
-  elapsed = []
-  deltas = []
-  for id in rpcs:
-    rpc = rpcs[id]
-    if (0 not in rpc) or ((len(patterns)-1) not in rpc):
-      continue
-    if i not in rpc:
-      continue
-    elapsed.append(rpc[i] - rpc[0])
-    prev = i - 1
-    while not prev in rpc:
-        prev -= 1
-    deltas.append(rpc[i] - rpc[prev])
-  if len(elapsed) == 0:
-    print("%-30s (no events)" % (pattern["name"]))
-    continue
-  elapsed = sorted(elapsed)
-  deltas = sorted(deltas)
-  print("%-30s Avg %6.1f us (+%6.1f us)  P90 %6.1fus (+%6.1f us)" % (
-      pattern["name"], sum(elapsed)/len(elapsed), sum(deltas)/len(deltas),
-      elapsed[9*len(elapsed)//10], deltas[9*len(deltas)//10]))
+print_stats(patterns, rpcs)
+print("")
+print_stats(aux_patterns, aux_rpcs)
 
 print("\nTotal RPCs: %d" % (len(rpcs)))
 avg_rpcs = 0
@@ -221,18 +265,22 @@ for id in first_out_time:
     out_time += last_out_time[id] - first_out_time[id]
 print("Throughput:")
 if out_time != 0:
-  print("  Transmit packets:     %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Transmit packets (per RPC):    %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*out_data/out_time,
       100.0*out_time/end))
+print("  Transmit packets (aggregate):  %5.1f Gbps" % (
+    8e-03*out_data/end))
 if in_time != 0:
-  print("  Receive packets:      %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Receive packets (per RPC):     %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*in_data/in_time,
       100.0*in_time/end))
-if copy_out_time != 0:
-  print("  Copy from user space: %5.1f Gbps (%4.1f%% of total time)" % (
-      8e-03*copy_out_data/copy_out_time,
-      100.0*copy_out_time/end))
+print("  Receive packets (aggregate):   %5.1f Gbps" % (
+    8e-03*in_data/end))
 if copy_in_time != 0:
-  print("  Copy to user space:   %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Copy from user space:          %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*copy_in_data/copy_in_time,
       100.0*copy_in_time/end))
+if copy_out_time != 0:
+  print("  Copy to user space:           %6.1f Gbps (%4.1f%% of total time)" % (
+      8e-03*copy_out_data/copy_out_time,
+      100.0*copy_out_time/end))
