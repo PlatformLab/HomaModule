@@ -1081,7 +1081,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	__u64 finish;
 	int result;
 
-	INC_METRIC(recvmsg_calls, 1);
+	INC_METRIC(recv_calls, 1);
 	if (msg->msg_controllen != sizeof(control)) {
 		result = -EINVAL;
 		goto done;
@@ -1205,7 +1205,7 @@ done:
 			control.id, result, control.buffers[0]);
 	finish = get_cycles();
 	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
-	INC_METRIC(recvmsg_cycles, finish - start);
+	INC_METRIC(recv_cycles, finish - start);
 	return result;
 }
 

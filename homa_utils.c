@@ -1332,13 +1332,13 @@ char *homa_print_metrics(struct homa *homa)
 				"Total invocations of send kernel call\n",
 				m->send_calls);
 		homa_append_metric(homa,
-				"recvmsg_cycles            %15llu  "
+				"recv_cycles               %15llu  "
 				"Unblocked time spent in recvmsg kernel call\n",
-				m->recvmsg_cycles - m->blocked_cycles);
+				m->recv_cycles - m->blocked_cycles);
 		homa_append_metric(homa,
-				"recvmsg_calls             %15llu  "
+				"recv_calls                %15llu  "
 				"Total invocations of recvmsg kernel call\n",
-				m->recvmsg_calls);
+				m->recv_calls);
 		homa_append_metric(homa,
 				"blocked_cycles            %15llu  "
 				"Time spent blocked in homa_recvmsg\n",
@@ -1395,7 +1395,7 @@ char *homa_print_metrics(struct homa *homa)
 				"homa_cycles               %15llu  "
 				"Total time in all Homa-related functions\n",
 				m->softirq_cycles + m->napi_cycles +
-				m->send_cycles + m->recvmsg_cycles +
+				m->send_cycles + m->recv_cycles +
 				m->reply_cycles - m->blocked_cycles +
 				m->timer_cycles + m->pacer_cycles);
 		homa_append_metric(homa,

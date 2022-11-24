@@ -2117,13 +2117,13 @@ struct homa_metrics {
 	__u64 send_calls;
 
 	/**
-	 * @recvmsg_cycles: total time spent executing homa_recvmsg (including
+	 * @recv_cycles: total time spent executing homa_recvmsg (including
 	 * time when the thread is blocked), as measured with get_cycles().
 	 */
-	__u64 recvmsg_cycles;
+	__u64 recv_cycles;
 
-	/** @recvmsg_calls: total number of invocations of homa_recvmsg. */
-	__u64 recvmsg_calls;
+	/** @recv_calls: total number of invocations of homa_recvmsg. */
+	__u64 recv_calls;
 
 	/**
 	 * @blocked_cycles: total time threads spend in blocked state
