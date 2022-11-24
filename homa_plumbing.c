@@ -761,7 +761,7 @@ int homa_ioc_reply(struct sock *sk, unsigned long arg) {
 		goto done;
 	}
 	tt_record2("data copied into response message for id %d, length %d",
-			args.id, args.length);
+			args.id, length);
 
 	srpc = homa_find_server_rpc(hsk, &canonical_dest,
 			ntohs(args.dest_addr.in6.sin6_port), args.id);
