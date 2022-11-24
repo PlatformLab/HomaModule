@@ -267,7 +267,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("send_syscall           %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("send syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
     cores = time/time_delta
@@ -278,7 +278,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("recv_syscall (-poll)   %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("recv syscall (-blocked) %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["reply_cycles"])
     cores = time/time_delta
@@ -289,7 +289,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("reply_syscall          %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("reply syscall           %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     for print_name, symbol in [["NAPI", "napi_cycles"],
             ["Linux SoftIRQ", "linux_softirq_cycles"],
@@ -300,20 +300,20 @@ if elapsed_secs != 0:
         if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
             total_cores_used += cores;
         if packets_received > 0:
-            print("%s     %6.2f   %7.2f us/packet" % (print_name.ljust(18),
+            print("%s      %6.2f   %7.2f us/packet" % (print_name.ljust(18),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
         else:
-            print("%s     %6.2f" % (print_name.ljust(18), cores))
+            print("%s      %6.2f" % (print_name.ljust(18), cores))
 
     for print_name, symbol in [["Pacer", "pacer_cycles"],
             ["Timer handler", "timer_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
         total_cores_used += cores;
-        print("%s     %6.2f" % (print_name.ljust(18), cores))
+        print("%s      %6.2f" % (print_name.ljust(18), cores))
 
     print("------------------------------");
-    print("Total Core Utilization %6.2f" % (total_cores_used))
+    print("Total Core Utilization  %6.2f" % (total_cores_used))
 
     time = float(deltas["poll_cycles"])
     cores = time/time_delta
@@ -322,7 +322,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("\nPolling in recv        %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("\nPolling in recv         %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["user_cycles"])
     cores = time/time_delta
@@ -331,7 +331,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("App/syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("App/syscall             %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     print("\nLock Misses:")
     print("------------")
@@ -362,7 +362,7 @@ if elapsed_secs != 0:
     print("\nMiscellaneous:")
     print("--------------")
     if packets_received > 0:
-        print("Bytes/packet:      %6.0f" % (
+        print("Bytes/packet rcvd: %6.0f" % (
                 total_received_bytes/packets_received))
         print("Packets received:   %5.3f M/sec" % (
                 1e-6*packets_received/elapsed_secs))
