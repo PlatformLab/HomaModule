@@ -1269,13 +1269,14 @@ char *homa_print_metrics(struct homa *homa)
 		for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
 			homa_append_metric(homa,
 					"priority%d_bytes        %15llu  "
-					"Bytes transmitted at priority %d\n",
+					"Bytes sent at priority %d "
+					"(including headers)\n",
 					i, m->priority_bytes[i], i);
 		}
 		for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
 			homa_append_metric(homa,
 					"priority%d_packets      %15llu  "
-					"Packets transmitted at priority %d\n",
+					"Packets sent at priority %d\n",
 					i, m->priority_packets[i], i);
 		}
 		homa_append_metric(homa,
