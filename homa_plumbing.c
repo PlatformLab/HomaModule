@@ -1201,9 +1201,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	msg->msg_control = ((char *) msg->msg_control)
 			+ sizeof(struct homa_recvmsg_control);
 done:
-	tt_record3("homa_recvmsg returning id %d, length %d, offset[0] %d",
-			control.id, result, control.buffers[0]);
 	finish = get_cycles();
+	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
+			control.id, result,
+			control.buffers[0] >> HOMA_BPAGE_SHIFT);
 	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
 	INC_METRIC(recv_cycles, finish - start);
 	return result;
