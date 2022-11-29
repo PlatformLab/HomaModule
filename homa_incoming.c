@@ -1626,7 +1626,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		/* Now it's time to sleep. */
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
-		if (!rpc) {
+		if (!rpc && !hsk->shutdown) {
 			__u64 end;
 			__u64 start = get_cycles();
 			tt_record1("homa_wait_for_message sleeping, pid %d",
