@@ -214,6 +214,7 @@ if elapsed_secs != 0:
     print("\nPer-Core CPU Usage:")
     print("-------------------")
     totals = []
+    busiest_core = 0;
     while len(totals) < num_cores:
         totals.append(0.0);
     cores_per_line = 8
@@ -243,7 +244,10 @@ if elapsed_secs != 0:
         line = "Total       "
         for core in range(first_core, end_core):
             line += "   %5.2f" % (totals[core])
+            if totals[core] > totals[busiest_core]:
+                busiest_core = core
         print(line)
+    print("\nBusiest core: %d (%.2f)" % (busiest_core, totals[busiest_core]))
 
     packets_received = 0.0
     packets_sent = 0.0
