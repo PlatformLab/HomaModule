@@ -356,8 +356,8 @@ if elapsed_secs != 0:
         sleep_percent = 100.0*float(deltas["slow_wakeups"])/total_messages
         print("Available immediately:   %4.1f%%" % (100.0 - poll_percent
                 - sleep_percent))
-        print("Arrival while polling:   %4.1f%%" % (poll_percent))
-        print("Arrival while sleeping:  %4.1f%%" % (sleep_percent))
+        print("Arrived while polling:   %4.1f%%" % (poll_percent))
+        print("Blocked at least once:   %4.1f%%" % (sleep_percent))
 
     print("\nMiscellaneous:")
     print("--------------")

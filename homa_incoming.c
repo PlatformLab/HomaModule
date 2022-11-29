@@ -1551,7 +1551,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	struct homa_interest interest;
 	struct homa_rpc *rpc = NULL;
 	uint64_t poll_start, now;
-	int error;
+	int error, blocked = 0, polled = 0;
 
 	/* Each iteration of this loop finds an RPC, but it might not be
 	 * in a state where we can return it (e.g., there might be packets
@@ -1611,7 +1611,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				tt_record3("received RPC handoff while polling, id %d, socket %d, pid %d",
 						rpc->id, hsk->port,
 						current->pid);
-				INC_METRIC(fast_wakeups, 1);
+				polled = 1;
 				INC_METRIC(poll_cycles, now - poll_start);
 				goto found_rpc;
 			}
@@ -1627,16 +1627,20 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (!rpc) {
+			__u64 end;
 			__u64 start = get_cycles();
 			tt_record1("homa_wait_for_message sleeping, pid %d",
 					current->pid);
 			schedule();
-			INC_METRIC(blocked_cycles, get_cycles() - start);
-			INC_METRIC(slow_wakeups, 1);
+			end = get_cycles();
+			blocked = 1;
+			INC_METRIC(blocked_cycles, end - start);
 			rpc = (struct homa_rpc *) atomic_long_read(
 					&interest.ready_rpc);
-			tt_record2("homa_wait_for_message woke up, id %d, pid %d",
-					rpc ? rpc->id : 0, current->pid);
+			tt_record3("homa_wait_for_message woke up, id %d, "
+					"pid %d blocked %d cycles",
+					rpc ? rpc->id : 0, current->pid,
+					end - start);
 		}
 		__set_current_state(TASK_RUNNING);
 
@@ -1682,10 +1686,10 @@ found_rpc:
 			if (!rpc->error)
 				rpc->error = homa_copy_to_user(rpc);
 			if (rpc->error)
-				return rpc;
+				goto done;
 			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
 			if (rpc->msgin.copied_out == rpc->msgin.total_length)
-				return rpc;
+				goto done;
 			homa_rpc_unlock(rpc);
 		}
 
@@ -1697,6 +1701,14 @@ found_rpc:
 
                 /* No message and no error; try again. */
 	}
+
+done:
+	if (blocked)
+		INC_METRIC(slow_wakeups, 1);
+	else if (polled)
+		INC_METRIC(fast_wakeups, 1);
+	return rpc;
+
 }
 
 /**
