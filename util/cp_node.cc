@@ -34,6 +34,7 @@
 #include <arpa/inet.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
@@ -53,6 +54,7 @@
 
 #include "dist.h"
 #include "homa.h"
+#include "homa_receiver.h"
 #include "test_utils.h"
 #include "time_trace.h"
 
@@ -518,7 +520,7 @@ void init_server_addrs(void)
  * constructor, released by destructor.
  */
 class spin_lock {
-    public:
+public:
 	spin_lock(std::atomic_bool *mutex)
 		: mutex(mutex)
 	{
@@ -551,7 +553,7 @@ class spin_lock {
  * of the state of partial messages.
  */
 class tcp_connection {
-    public:
+public:
 	tcp_connection(int fd, uint32_t epoll_id, int port,
 			sockaddr_in_union peer);
 	size_t pending();
@@ -876,7 +878,7 @@ bool tcp_connection::xmit()
  * socket).
  */
 class server_metrics {
-    public:
+public:
 	/** @requests: Total number of requests handled so far. */
 	uint64_t requests;
 
@@ -889,109 +891,161 @@ class server_metrics {
 	server_metrics() :requests(0), data(0) {}
 };
 
-/** @metrics: keeps track of metrics for all servers (whether Homa or TCP). */
+/**
+ * @metrics: keeps track of metrics for all servers (whether Homa or TCP).
+ * These are malloc-ed and must be freed eventually.
+ */
 std::vector<server_metrics *> metrics;
 
 /**
- * class homa_server - Holds information about a single Homa server
- * thread, which handles requests on a given port. There may be more
- * than one thread on the same port.
+ * class homa_server - Holds information about a single port used
+ * to receive incoming requests, including one or more threads that
+ * handle requests arriving via the port.
  */
 class homa_server {
-    public:
-	homa_server(int port, int id);
+public:
+	homa_server(int port, int id, int inet_family, int num_threads);
 	~homa_server();
-	void server();
+	void server(int thread_id, server_metrics *metrics);
 
-	/** @id: Identifying number of this server. */
+	/** @id: Unique identifier for this server among all Homa servers. */
 	int id;
 
-	/** @fd: File descriptor for Homa socket. */
+	/** @fd: File descriptor for a Homa socket. */
 	int fd;
 
+	/** @port: Homa port number managed by this object. */
+	int port;
+
 	/**
-	 * @buffer: Used for receiving requests and sending responses;
-	 * malloced, size HOMA_MAX_MESSAGE_LENGTH
+	 * @buf_region: mmapped region of memory in which receive buffers
+	 * are alloocated.
 	 */
-	char *buffer;
+	char *buf_region;
 
-	/** @metrics: Performance statistics. */
-	server_metrics metrics;
+	/** @buf_size: number of bytes available at @buf_region. */
+	size_t buf_size;
 
-	/** @thread: Background thread that services requests. */
-	std::thread thread;
+	/** @threads: One or more threads that service incoming requests*/
+	std::vector<std::thread> threads;
 };
 
-/** @homa_servers: keeps track of all existing Homa clients. */
+/** @homa_servers: keeps track of all existing Homa servers. */
 std::vector<homa_server *> homa_servers;
 
 /**
- * homa_server::homa_server() - Constructor for homa_server objects.
- * @fd:  File descriptor for Homa socket to use for receiving
- *       requests.
+ * homa_server::homa_server() - Constructor for homa_servers. Sets up the
+ * Homa socket and starts up the threads to service the port.
+ * @port:         Homa port number for this port.
+ * @id:           Unique identifier for this port; used in thread identifiers
+ *                for time traces.
+ * @inet_family:  AF_INET or AF_INET6: determines whether we use IPv4 or IPv6.
+ * @num_threads:  How many threads should collctively service requests on
+ *                @port.
  */
-homa_server::homa_server(int fd, int id)
+homa_server::homa_server(int port, int id, int inet_family,
+		int num_threads)
 	: id(id)
-	, fd(fd)
-        , buffer(new char[HOMA_MAX_MESSAGE_LENGTH])
-        , metrics()
-	, thread(&homa_server::server, this)
+        , fd(-1)
+        , port(port)
+        , buf_region(NULL)
+        , buf_size(0)
+        , threads()
 {
-	kfreeze_count = 0;
+	sockaddr_in_union addr;
+	struct homa_set_buf_args arg;
+
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		log(NORMAL, "FATAL: homa_server couldn't open Homa "
+				"socket: %s\n",
+				strerror(errno));
+		exit(1);
+	}
+
+	memset(&addr, 0, sizeof(addr));
+	addr.in4.sin_family = inet_family;
+	if (inet_family == AF_INET)
+		addr.in4.sin_port = htons(port);
+	else
+		addr.in6.sin6_family = AF_INET6;
+	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
+		log(NORMAL, "FATAL: homa_server couldn't bind socket "
+				"to Homa port %d: %s\n", port,
+				strerror(errno));
+		exit(1);
+	}
+	log(NORMAL, "Successfully bound to Homa port %d\n", port);
+
+	buf_size = 1000*HOMA_BPAGE_SIZE;
+	buf_region = (char *) mmap(NULL, buf_size, PROT_READ|PROT_WRITE,
+			MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	if (buf_region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region for server on port %d: %s\n",
+				port, strerror(errno));
+		exit(1);
+	}
+	arg.start = buf_region;
+	arg.length = buf_size;
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+			sizeof(arg));
+	if (status < 0) {
+		printf("FATAL: error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+				strerror(errno));
+		exit(1);
+	}
+
+	for (int i = 0; i < num_threads; i++) {
+		server_metrics *thread_metrics = new server_metrics;
+		metrics.push_back(thread_metrics);
+		threads.emplace_back([this, i, thread_metrics] () {
+			server(i, thread_metrics);
+		});
+	}
 }
 
 /**
- * homa_server::~homa_server() - Destructor for homa_servers; terminates
- * the background thread.
+ * homa_server::~homa_server() - Destructor for homa_servers.
  */
 homa_server::~homa_server()
 {
 	shutdown(fd, SHUT_RDWR);
+	for (std::thread &thread: threads)
+		thread.join();
 	close(fd);
-	delete[] buffer;
-	thread.join();
+	munmap(buf_region, buf_size);
 }
 
 /**
  * homa_server::server() - Handles incoming requests arriving on a Homa
  * socket. Normally invoked as top-level method in a thread.
+ * @thread_id:   Unique identifier for this thread among all those for the port.
+ * @metrics:     Used to record statistics for this thread.
  */
-void homa_server::server(void)
+void homa_server::server(int thread_id, server_metrics *metrics)
 {
-	message_header *header = reinterpret_cast<message_header *>(buffer);
-	sockaddr_in_union source;
-	int length;
+	message_header *header;
+	int length, resp_length, num_vecs, result;
 	char thread_name[50];
+	homa::receiver receiver(fd, buf_region);
+	struct iovec vecs[HOMA_MAX_BPAGES];
+	int offset;
 
-	snprintf(thread_name, sizeof(thread_name), "S%d", id);
+	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
-	while (1) {
-		uint64_t id = 0;
-		int result;
 
+	while (1) {
 		while (1) {
-			if (server_iovec) {
-				struct iovec vec[2];
-				vec[0].iov_base = buffer;
-				vec[0].iov_len = 20;
-				vec[1].iov_base = buffer + 20;
-				vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
-				length = homa_recvv(fd, vec, 2,
-						HOMA_RECV_REQUEST,
-						&source, &id, NULL, NULL);
-			} else
-				length = homa_recv(fd, buffer,
-						HOMA_MAX_MESSAGE_LENGTH,
-						HOMA_RECV_REQUEST,
-						&source, &id, NULL, NULL);
+			length = receiver.receive(HOMA_RECV_REQUEST, 0);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
 				return;
 			else if ((errno != EINTR) && (errno != EAGAIN))
-				log(NORMAL, "homa_recv failed: %s\n",
+				log(NORMAL, "recvmsg failed: %s\n",
 						strerror(errno));
 		}
+		header = receiver.get<message_header>(0);
 		tt("Received Homa request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
 		if ((header->freeze) && !time_trace::frozen) {
@@ -1003,22 +1057,26 @@ void homa_server::server(void)
 			kfreeze();
 		}
 
-		if (server_iovec && (length > 20)) {
-		    struct iovec vec[2];
-		    vec[0].iov_base = buffer;
-		    vec[0].iov_len = 20;
-		    vec[1].iov_base = buffer + 20;
-		    vec[1].iov_len = length - 20;
-		    result = homa_replyv(fd, vec, 2,  &source, id);
-		} else
-		    result = homa_reply(fd, buffer, length, &source, id);
+		num_vecs = 0;
+		resp_length = length;
+		offset = 0;
+		while (resp_length > 0) {
+			vecs[num_vecs].iov_len = receiver.contiguous(offset);
+			vecs[num_vecs].iov_base = receiver.get<char>(offset);
+			resp_length -= vecs[num_vecs].iov_len;
+			offset += vecs[num_vecs].iov_len;
+			num_vecs++;
+		}
+		result = homa_replyv(fd, vecs, num_vecs, receiver.src_addr(),
+				receiver.id());
 		if (result < 0) {
-			log(NORMAL, "FATAL: homa_reply failed: %s\n",
-					strerror(errno));
+			log(NORMAL, "FATAL: homa_reply failed for server "
+					"port %d: %s\n",
+					port, strerror(errno));
 			exit(1);
 		}
-		metrics.requests++;
-		metrics.data += length;
+		metrics->requests++;
+		metrics->data += length;
 	}
 }
 
@@ -1027,7 +1085,7 @@ void homa_server::server(void)
  * which consists of a thread that handles requests on a given port.
  */
 class tcp_server {
-    public:
+public:
 	tcp_server(int port, int id, int num_threads);
 	~tcp_server();
 	void accept(int epoll_fd);
@@ -1066,8 +1124,8 @@ class tcp_server {
 	 */
 	tcp_connection *connections[MAX_FDS];
 
-	/** @metrics: Performance statistics. */
-	server_metrics metrics;
+	/** @metrics: Performance statistics. Not owned by this class. */
+	server_metrics *metrics;
 
 	/**
 	 * @thread: Background threads that both accept connections and
@@ -1159,6 +1217,9 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 				strerror(errno));
 		exit(1);
 	}
+
+	metrics = new server_metrics;
+	::metrics.push_back(metrics);
 
 	for (int i = 0; i < num_threads; i++)
 		threads.emplace_back(&tcp_server::server, this, i);
@@ -1319,8 +1380,8 @@ void tcp_server::read(int fd, int pid)
 {
 	int error = connections[fd]->read(epollet,
 			[this, fd, pid](message_header *header) {
-		metrics.requests++;
-		metrics.data += header->length;
+		metrics->requests++;
+		metrics->data += header->length;
 		tt("Received TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header->cid, header->msg_id, header->length,
 				pid);
@@ -1355,7 +1416,7 @@ void tcp_server::read(int fd, int pid)
  * and TCP clients.
  */
 class client {
-    public:
+public:
 	/**
 	 * struct rinfo - Holds information about a request that we will
 	 * want when we get the response.
@@ -1716,18 +1777,28 @@ void client::record(uint64_t end_time, message_header *header)
  * receiving responses.
  */
 class homa_client : public client {
-    public:
+public:
 	homa_client(int id);
 	virtual ~homa_client();
 	void measure_unloaded(int count);
-	uint64_t measure_rtt(int server, int length, char *buffer);
+	uint64_t measure_rtt(int server, int length, char *buffer,
+			homa::receiver *receiver);
 	void receiver(int id);
 	void sender(void);
 	virtual void stop_sender(void);
-	bool wait_response(uint64_t id, char* buffer);
+	bool wait_response(homa::receiver *receiver, uint64_t rpc_id);
 
 	/** @fd: file descriptor for Homa socket. */
 	int fd;
+
+	/**
+	 * @buf_region: mmapped region of memory in which receive buffers
+	 * are alloocated.
+	 */
+	char *buf_region;
+
+	/** @buf_size: number of bytes available at @buf_region. */
+	size_t buf_size;
 
 	/** @stop_sending: true means the sending thread should exit ASAP. */
 	bool exit_sender;
@@ -1743,12 +1814,6 @@ class homa_client : public client {
 	 * by measure_unloaded; malloced, size HOMA_MAX_MESSAGE_LENGTH.
 	 */
 	char *sender_buffer;
-
-	/**
-	 * @receiver_buffers: one for each receiver thread, used to
-	 * receive responses; malloced, size HOMA_MAX_MESSAGE_LENGTH.
-	 */
-	std::vector<char *> receiver_buffers;
 
 	/** @receiver: threads that receive responses. */
 	std::vector<std::thread> receiving_threads;
@@ -1768,17 +1833,37 @@ class homa_client : public client {
 homa_client::homa_client(int id)
 	: client(id)
 	, fd(-1)
+        , buf_region(nullptr)
+	, buf_size(2000*HOMA_BPAGE_SIZE)
         , exit_sender(false)
         , exit_receivers(false)
         , sender_exited(false)
         , sender_buffer(new char[HOMA_MAX_MESSAGE_LENGTH])
-        , receiver_buffers()
         , receiving_threads()
         , sending_thread()
 {
+	struct homa_set_buf_args arg;
+
 	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
+		exit(1);
+	}
+
+	buf_region = (char *) mmap(NULL, buf_size, PROT_READ|PROT_WRITE,
+			MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+	if (buf_region == MAP_FAILED) {
+		printf("Couldn't mmap buffer region for homa_client id %d: %s\n",
+				id, strerror(errno));
+		exit(1);
+	}
+	arg.start = buf_region;
+	arg.length = buf_size;
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+			sizeof(arg));
+	if (status < 0) {
+		printf("FATAL: error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+				strerror(errno));
 		exit(1);
 	}
 
@@ -1787,8 +1872,6 @@ homa_client::homa_client(int id)
 		sender_exited = true;
 	} else {
 		for (int i = 0; i < port_receivers; i++) {
-			receiver_buffers.emplace_back(
-				new char[HOMA_MAX_MESSAGE_LENGTH]);
 			receiving_threads.emplace_back(&homa_client::receiver,
 					this, i);
 		}
@@ -1820,10 +1903,9 @@ homa_client::~homa_client()
 	delete[] sender_buffer;
 	if (sending_thread)
 		sending_thread->join();
-	for (char *buffer: receiver_buffers)
-		delete buffer;
 	for (std::thread &thread: receiving_threads)
 		thread.join();
+	munmap(buf_region, buf_size);
 	check_completion("homa");
 }
 
@@ -1850,45 +1932,32 @@ void homa_client::stop_sender(void)
 /**
  * homa_client::wait_response() - Wait for a response to arrive and
  * update statistics.
+ * @receiver: Use this for receiving the response and managing its buffers.
  * @rpc_id:   Id of a specific RPC to wait for, or 0 for "any response".
- * @buffer:   Memory that can be used for receiving the response message;
- *            must contain HOMA_MAX_MESSAGE_LENGTH bytes.
  * Return:    True means that a response was received; false means the client
  *            has been stopped and the socket has been shut down.
  */
-bool homa_client::wait_response(uint64_t rpc_id, char* buffer)
+bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 {
-	message_header *header = reinterpret_cast<message_header *>(buffer);
+	message_header *header;
 	sockaddr_in_union server_addr;
 
 	rpc_id = 0;
-	int length;
+	ssize_t length;
 	do {
-		if (client_iovec) {
-			struct iovec vec[2];
-			vec[0].iov_base = buffer;
-			vec[0].iov_len = 20;
-			vec[1].iov_base = buffer + 20;
-			vec[1].iov_len = HOMA_MAX_MESSAGE_LENGTH - 20;
-			length = homa_recvv(fd, vec, 2, HOMA_RECV_RESPONSE,
-					&server_addr, &rpc_id, NULL, NULL);
-		} else
-			length = homa_recv(fd, buffer,
-					HOMA_MAX_MESSAGE_LENGTH,
-					HOMA_RECV_RESPONSE,
-					&server_addr,
-					&rpc_id, NULL, NULL);
+		length = receiver->receive(HOMA_RECV_RESPONSE, rpc_id);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)
 			return false;
-		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
+		log(NORMAL, "FATAL: error in recvmsg: %s (id %lu, server %s)\n",
 				strerror(errno), rpc_id,
 				print_address(&server_addr));
 		exit(1);
 	}
-	if (static_cast<size_t>(length) < sizeof(*header)) {
-		log(NORMAL, "FATAL: response message contained %d bytes; "
+	header = receiver->get<message_header>(0);
+	if (header == nullptr) {
+		log(NORMAL, "FATAL: response message contained %lu bytes; "
 			"need at least %lu", length, sizeof(*header));
 		exit(1);
 	}
@@ -1908,6 +1977,7 @@ void homa_client::sender()
 	message_header *header = reinterpret_cast<message_header *>(sender_buffer);
 	uint64_t next_start = rdtsc();
 	char thread_name[50];
+	homa::receiver receiver(fd, buf_region);
 
 	snprintf(thread_name, sizeof(thread_name), "C%d", id);
 	time_trace::thread_buffer thread_buffer(thread_name);
@@ -1983,7 +2053,7 @@ void homa_client::sender()
 		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
-			wait_response(rpc_id, sender_buffer);
+			wait_response(&receiver, rpc_id);
 		}
 	}
 }
@@ -1998,9 +2068,10 @@ void homa_client::receiver(int receiver_id)
 	char thread_name[50];
 	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
+	homa::receiver receiver(fd, buf_region);
 
 	receivers_running++;
-	while (wait_response(0, receiver_buffers[receiver_id])) {}
+	while (wait_response(&receiver, 0)) {}
 }
 
 /**
@@ -2008,12 +2079,14 @@ void homa_client::receiver(int receiver_id)
  * return the RTT.
  * @server:      Identifier of server to use for the request.
  * @length:      Number of message bytes in the request.
- * @buffer:      Block of memory to use for request and response; must
+ * @buffer:      Block of memory to use for request; must
  *               contain HOMA_MAX_MESSAGE_LENGTH bytes.
+ * @receiver:    Use this to receive responses.
  *
  * Return:       Round-trip time to service the request, in rdtsc cycles.
  */
-uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
+uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
+		homa::receiver *receiver)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
@@ -2038,12 +2111,11 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer)
 		exit(1);
 	}
 	do {
-		status = homa_recv(fd, buffer, HOMA_MAX_MESSAGE_LENGTH,
-				HOMA_RECV_RESPONSE,
-				&server_addr, &rpc_id, NULL, NULL);
+		status = receiver->receive(0, rpc_id);
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
-		log(NORMAL, "FATAL: error in homa_recv: %s (id %lu, server %s)\n",
+		log(NORMAL, "FATAL: measure_rtt got error in recvmsg: %s "
+				"(id %lu, server %s)\n",
 				strerror(errno), rpc_id,
 				print_address(&server_addr));
 		exit(1);
@@ -2066,12 +2138,13 @@ void homa_client::measure_unloaded(int count)
 	int slot;
 	uint64_t ms100 = get_cycles_per_sec()/10;
 	uint64_t end;
+	homa::receiver receiver(fd, buf_region);
 
 	/* Make one request for each size in the distribution, just to warm
 	 * up the system.
 	 */
 	for (dist_point &point: dist)
-		measure_rtt(server, point.length, sender_buffer);
+		measure_rtt(server, point.length, sender_buffer, &receiver);
 
 	/* Now do the real measurements. Stop with each size after 10
 	 * measurements if more than 0.1 second has elapsed (otherwise
@@ -2085,7 +2158,7 @@ void homa_client::measure_unloaded(int count)
 				break;
 			actual_lengths[slot] = point.length;
 			actual_rtts[slot] = measure_rtt(server, point.length,
-					sender_buffer);
+					sender_buffer, &receiver);
 			slot++;
 			if (slot >= NUM_CLIENT_STATS) {
 				log(NORMAL, "WARNING: not enough space to "
@@ -2102,7 +2175,7 @@ void homa_client::measure_unloaded(int count)
  * responses.
  */
 class tcp_client : public client {
-    public:
+public:
 	tcp_client(int id);
 	virtual ~tcp_client();
 	void read(tcp_connection *connection, int pid);
@@ -2957,47 +3030,15 @@ int server_cmd(std::vector<string> &words)
 
 	if (strcmp(protocol, "homa") == 0) {
 		for (int i = 0; i < server_ports; i++) {
-			sockaddr_in_union addr_in;
-			int fd, j, port;
-
-			fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
-			if (fd < 0) {
-				log(NORMAL, "FATAL: couldn't open Homa socket: "
-						"%s\n",
-						strerror(errno));
-				exit(1);
-			}
-
-			port = first_port + i;
-			memset(&addr_in, 0, sizeof(addr_in));
-			if (inet_family == AF_INET) {
-				addr_in.in4.sin_family = AF_INET;
-				addr_in.in4.sin_port = htons(port);
-			} else {
-				addr_in.in6.sin6_family = AF_INET6;
-				addr_in.in6.sin6_port = htons(port);
-			}
-			if (bind(fd, &addr_in.sa, sizeof(addr_in)) != 0) {
-				log(NORMAL, "FATAL: couldn't bind socket "
-						"to Homa port %d: %s\n", port,
-						strerror(errno));
-				exit(1);
-			}
-			log(NORMAL, "Successfully bound to Homa port %d\n",
-					port);
-			for (j = 0; j < port_threads; j++) {
-				homa_server *server = new homa_server(
-						fd, homa_servers.size());
-				homa_servers.push_back(server);
-				metrics.push_back(&server->metrics);
-			}
+			homa_server *server = new homa_server(first_port + i,
+					i, inet_family, port_threads);
+			homa_servers.push_back(server);
 		}
 	} else {
 		for (int i = 0; i < server_ports; i++) {
 			tcp_server *server = new tcp_server(first_port + i,
 					i, port_threads);
 			tcp_servers.push_back(server);
-			metrics.push_back(&server->metrics);
 		}
 	}
 	last_per_server_rpcs.resize(server_ports*port_threads, 0);
@@ -3030,6 +3071,8 @@ int stop_cmd(std::vector<string> &words)
 				delete server;
 			tcp_servers.clear();
 			last_per_server_rpcs.clear();
+			for (server_metrics *m: metrics)
+				delete m;
 			metrics.clear();
 		} else {
 			printf("Unknown option '%s'; must be clients, senders, "
