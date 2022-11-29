@@ -228,12 +228,10 @@ copy_out:
 		for (i = 0; i < n; i++) {
 			if (!chunks[i].free_skb)
 				continue;
-			if (error) {
-				h = (struct data_header *) chunks[i].skb->data;
-				tt_record2("homa_copy_out discarding skb"
-						"for id %d at offset %d",
-						rpc->id, ntohl(h->seg.offset));
-			}
+			h = (struct data_header *) chunks[i].skb->data;
+			tt_record2("homa_copy_out freeing data packet "
+					"for id %d, offset %d",
+					rpc->id, ntohl(h->seg.offset));
 			kfree_skb(chunks[i].skb);
 			count++;
 		}
