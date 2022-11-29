@@ -237,6 +237,10 @@ if elapsed_secs != 0:
             for core in range(first_core, end_core):
                 frac = float(cur[core][symbol] - prev[core][symbol]) / float(
                         time_delta)
+                if where == "recv":
+                        frac -= (float(cur[core]["blocked_cycles"]
+                                - prev[core]["blocked_cycles"])
+                                / float(time_delta))
                 line += "   %5.2f" % (frac)
                 totals[core] += frac;
             print(line)
@@ -269,7 +273,7 @@ if elapsed_secs != 0:
         us_per = (time/calls)/(cpu_khz/1e03)
     print("send syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
+    time = float(deltas["recv_cycles"]) - float(deltas["blocked_cycles"])
     cores = time/time_delta
     total_cores_used += cores
     calls = float(deltas["recv_calls"])
