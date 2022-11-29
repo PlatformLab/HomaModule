@@ -324,8 +324,8 @@ void homa_peer_lock_slow(struct homa_peer *peer)
 	tt_record("beginning wait for peer lock");
 	spin_lock_bh(&peer->ack_lock);
 	tt_record("ending wait for peer lock");
-	INC_METRIC(peer_lock_misses, 1);
-	INC_METRIC(peer_lock_miss_cycles, get_cycles() - start);
+	INC_METRIC(peer_ack_lock_misses, 1);
+	INC_METRIC(peer_ack_lock_miss_cycles, get_cycles() - start);
 }
 
 /**

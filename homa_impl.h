@@ -2400,16 +2400,16 @@ struct homa_metrics {
 	__u64 grantable_lock_misses;
 
 	/**
-	 * @peer_lock_miss_cycles: total time spent waiting for peer
+	 * @peer_acklock_miss_cycles: total time spent waiting for peer
 	 * lock misses, measured by get_cycles().
 	 */
-	__u64 peer_lock_miss_cycles;
+	__u64 peer_ack_lock_miss_cycles;
 
 	/**
-	 * @peer_lock_misses: total number of times that Homa had to wait
-	 * to acquire a peer lock.
+	 * @peer_ack_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock used for managing acks for a peer.
 	 */
-	__u64 peer_lock_misses;
+	__u64 peer_ack_lock_misses;
 
 	/**
 	 * @disabled_reaps: total number of times that the reaper couldn't

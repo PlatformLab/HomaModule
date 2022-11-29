@@ -1533,13 +1533,13 @@ char *homa_print_metrics(struct homa *homa)
 				"Time lost waiting for grantable lock\n",
 				m->grantable_lock_miss_cycles);
 		homa_append_metric(homa,
-				"peer_lock_misses          %15llu  "
-				"Peer lock misses\n",
-				m->peer_lock_misses);
+				"peer_ack_lock_misses      %15llu  "
+				"Misses on peer ack locks\n",
+				m->peer_ack_lock_misses);
 		homa_append_metric(homa,
-				"peer_lock_miss_cycles     %15llu  "
-				"Time lost waiting for peer locks\n",
-				m->peer_lock_miss_cycles);
+				"peer_ack_lock_miss_cycles %15llu  "
+				"Time lost waiting for peer ack locks\n",
+				m->peer_ack_lock_miss_cycles);
 		homa_append_metric(homa,
 				"disabled_reaps            %15llu  "
 				"Reaper invocations that were disabled\n",

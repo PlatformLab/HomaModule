@@ -336,7 +336,7 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "socket", "grantable", "throttle", "peer"]:
+    for lock in ["client", "socket", "grantable", "throttle", "peer_ack"]:
         misses = float(deltas[lock + "_lock_misses"])
         cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:

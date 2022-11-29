@@ -273,16 +273,16 @@ TEST_F(homa_peertab, homa_peer_lock_slow)
 	ASSERT_NE(NULL, peer);
 
 	homa_peer_lock(peer);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_misses);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_lock_miss_cycles);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_ack_lock_misses);
+	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 
 	mock_trylock_errors = 1;
 	mock_spin_lock_hook = peer_spinlock_hook;
 	homa_peer_lock(peer);
 	mock_spin_lock_hook = peer_spinlock_hook;
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_lock_misses);
-	EXPECT_EQ(1000, homa_cores[cpu_number]->metrics.peer_lock_miss_cycles);
+	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_ack_lock_misses);
+	EXPECT_EQ(1000, homa_cores[cpu_number]->metrics.peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 }
 
