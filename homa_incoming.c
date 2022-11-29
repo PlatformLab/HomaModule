@@ -185,7 +185,6 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			chunks[n].length = skb_bytes;
 			chunks[n].free_skb = 1;
 			skb_dequeue(&rpc->msgin.packets);
-			tt_record("finished scanning an skb");
 			rpc->msgin.num_skbs--;
 		} else {
 			chunks[n].length = buf_bytes;
