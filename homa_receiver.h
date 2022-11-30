@@ -48,13 +48,11 @@ public:
 	 */
 	inline size_t contiguous(size_t offset) const
 	{
-		size_t bpage = offset >> HOMA_BPAGE_SHIFT;
-		size_t bpage_end = (bpage == (control.num_buffers-1))
-				? (msg_length & (HOMA_BPAGE_SIZE-1))
-				: HOMA_BPAGE_SIZE;
-		size_t result = (static_cast<ssize_t>(offset) >= msg_length) ? 0
-				: bpage_end - (offset & (HOMA_BPAGE_SIZE-1));
-		return result;
+		if (static_cast<ssize_t>(offset) >= msg_length)
+			return 0;
+		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_buffers-1))
+			return msg_length - offset;
+		return HOMA_BPAGE_SIZE - (offset & (HOMA_BPAGE_SIZE-1));
 	}
 
 	/**
@@ -89,7 +87,7 @@ public:
 		int buf_num = offset >> HOMA_BPAGE_SHIFT;
 		if (static_cast<ssize_t>(offset + sizeof(T)) > msg_length)
 			return nullptr;
-		if (contiguous(offset))
+		if (contiguous(offset) > sizeof(T))
 			return reinterpret_cast<T*>(buf_region
 					+ control.buffers[buf_num]
 					+ (offset & (HOMA_BPAGE_SIZE - 1)));
