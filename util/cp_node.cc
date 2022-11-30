@@ -69,6 +69,7 @@ bool is_server = false;
 int id = -1;
 double net_gbps = 0.0;
 bool tcp_trunc = true;
+bool one_way = false;
 int port_receivers = 1;
 int port_threads = 1;
 std::string protocol_string;
@@ -168,10 +169,18 @@ uint64_t last_stats_time = 0;
 uint64_t last_client_rpcs = 0;
 
 /**
- * @last_client_data: total amount of data in client RPCS completed by this
- * application as of the last time we printed statistics.
+ * @last_client_bytes_out: total amount of data in request messages for
+ * client RPCS completed by this application as of the last time we printed
+ * statistics.
  */
-uint64_t last_client_data = 0;
+uint64_t last_client_bytes_out = 0;
+
+/**
+ * @last_client_bytes_in: total amount of data in response messages for
+ * client RPCS completed by this application as of the last time we printed
+ * statistics.
+ */
+uint64_t last_client_bytes_in = 0;
 
 /**
  * @last_total_elapsed: total amount of elapsed time for all client RPCs
@@ -199,10 +208,16 @@ uint64_t last_backups = 0;
 uint64_t last_server_rpcs = 0;
 
 /**
- * @last_server_data: total amount of data in server RPCS handled by this
- * application as of the last time we printed statistics.
+ * @last_server_bytes_in: total amount of data in incoming requests handled by
+ * this application as of the last time we printed statistics.
  */
-uint64_t last_server_data = 0;
+uint64_t last_server_bytes_in = 0;
+
+/**
+ * @last_server_bytes_out: total amount of data in responses sent by
+ * this application as of the last time we printed statistics.
+ */
+uint64_t last_server_bytes_out = 0;
 
 /**
  * @last_per_server_rpcs: server->requests for each individual server,
@@ -274,6 +289,8 @@ void print_help(const char *name)
                 "    --iovec           Use homa_sendv instead of homa_send\n"
                 "    --ipv6            Use IPv6 instead of IPv4\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
+		"    --one-way         Make all response messages 100 B, instead of the same\n"\
+		"                      size as request messages\n"
 		"    --ports           Number of ports on which to send requests (one\n"
 		"                      sending thread per port (default: %d)\n"
 		"    --port-receivers  Number of threads to listen for responses on each\n"
@@ -445,10 +462,16 @@ struct message_header {
 	 * @length: total number of bytes in the message, including this
 	 * header.
 	 */
-	int length:31;
+	int length:30;
 
 	/** @freeze: true means the recipient should freeze its time trace. */
 	unsigned int freeze:1;
+
+	/**
+	 * @short_response: true means responses should only be 100 bytes,
+	 * regardless of the request length.
+	 */
+	unsigned int short_response:1;
 
 	/**
 	 * @cid: uniquely identifies the connection between a client
@@ -881,12 +904,18 @@ class server_metrics {
 	uint64_t requests;
 
 	/**
-	 * @data: Total number of bytes of data in requests handled
-	 * so far.
+	 * @bytes_in: Total number of bytes of message data received by this
+	 * server in requests.
 	 */
-	uint64_t data;
+	uint64_t bytes_in;
 
-	server_metrics() :requests(0), data(0) {}
+	/**
+	 * @bytes_out: Total number of bytes of message data sent by this
+	 * server in responses.
+	 */
+	uint64_t bytes_out;
+
+	server_metrics() :requests(0), bytes_in(0), bytes_out(0) {}
 };
 
 /** @metrics: keeps track of metrics for all servers (whether Homa or TCP). */
@@ -1002,23 +1031,27 @@ void homa_server::server(void)
 			time_trace::freeze();
 			kfreeze();
 		}
+		if ((header->short_response) && (header->length > 100)) {
+			header->length = 100;
+		}
 
-		if (server_iovec && (length > 20)) {
+		if (server_iovec && (header->length > 20)) {
 		    struct iovec vec[2];
 		    vec[0].iov_base = buffer;
 		    vec[0].iov_len = 20;
 		    vec[1].iov_base = buffer + 20;
-		    vec[1].iov_len = length - 20;
+		    vec[1].iov_len = header->length - 20;
 		    result = homa_replyv(fd, vec, 2,  &source, id);
 		} else
-		    result = homa_reply(fd, buffer, length, &source, id);
+		    result = homa_reply(fd, buffer, header->length, &source, id);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed: %s\n",
 					strerror(errno));
 			exit(1);
 		}
 		metrics.requests++;
-		metrics.data += length;
+		metrics.bytes_in += length;
+		metrics.bytes_out += header->length;
 	}
 }
 
@@ -1320,7 +1353,7 @@ void tcp_server::read(int fd, int pid)
 	int error = connections[fd]->read(epollet,
 			[this, fd, pid](message_header *header) {
 		metrics.requests++;
-		metrics.data += header->length;
+		metrics.bytes_in += header->length;
 		tt("Received TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header->cid, header->msg_id, header->length,
 				pid);
@@ -1332,6 +1365,9 @@ void tcp_server::read(int fd, int pid)
 			time_trace::freeze();
 			kfreeze();
 		}
+		if ((header->short_response) && (header->length > 100))
+			header->length = 100;
+		metrics.bytes_out += header->length;
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
 					EPOLLIN|EPOLLOUT|epollet);
@@ -1364,13 +1400,16 @@ class client {
 		/** @start_time: rdtsc time when the request was sent. */
 		uint64_t start_time;
 
+		/** @request_length: number of bytes in the request message. */
+		int request_length;
+
 		/**
 		 * @active: true means the request has been sent but
 		 * a response hasn't yet been received.
 		 */
 		bool active;
 
-		rinfo() : start_time(0), active(false) {}
+		rinfo() : start_time(0), request_length(0), active(false) {}
 	};
 
 	client(int id);
@@ -1487,10 +1526,16 @@ class client {
 	std::atomic<uint64_t> total_responses;
 
 	/**
-	 * @response_data: total number of bytes of data in responses
+	 * @request_bytes: total amount of data sent in all requests for
+	 * which responses have been received.
+	 */
+	std::atomic<uint64_t> request_bytes;
+
+	/**
+	 * @response_bytes: total amount of data in all response messages
 	 * received so far.
 	 */
-	std::atomic<uint64_t> response_data;
+	std::atomic<uint64_t> response_bytes;
 
 	/**
 	 * @total_rtt: sum of round-trip times (in rdtsc cycles) for
@@ -1532,7 +1577,8 @@ client::client(int id)
         , num_servers(server_addrs.size())
 	, total_requests(0)
 	, total_responses(0)
-	, response_data(0)
+	, request_bytes(0)
+	, response_bytes(0)
         , total_rtt(0)
         , lag(0)
 {
@@ -1704,7 +1750,8 @@ void client::record(uint64_t end_time, message_header *header)
 	}
 	server_id += header->cid.server_port;
 	responses[server_id].fetch_add(1);
-	response_data += header->length;
+	request_bytes += r->request_length;
+	response_bytes += header->length;
 	total_rtt += rtt;
 	actual_lengths[slot] = header->length;
 	actual_rtts[slot] = rtt;
@@ -1946,9 +1993,11 @@ void homa_client::sender()
 			header->length = HOMA_MAX_MESSAGE_LENGTH;
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
+		rinfos[slot].request_length = header->length;
 		header->cid = server_ids[server];
 		header->cid.client_port = id;
 		header->freeze = freeze[header->cid.server];
+		header->short_response = one_way;
 		header->msg_id = slot;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
@@ -2347,10 +2396,12 @@ void tcp_client::sender()
 		header.length = request_lengths[next_length];
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
+		rinfos[slot].request_length = header.length;
 		header.cid = server_ids[server];
 		header.cid.client_port = id;
 		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
+		header.short_response = one_way;
 		size_t old_pending = connections[server]->pending();
 		tt("Sending TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header.cid, header.msg_id, header.length,
@@ -2473,12 +2524,14 @@ void server_stats(uint64_t now)
 	int offset = 0;
 	int length;
 	uint64_t server_rpcs = 0;
-	uint64_t server_data = 0;
+	uint64_t server_bytes_in = 0;
+	uint64_t server_bytes_out = 0;
 	details[0] = 0;
 	for (uint32_t i = 0; i < metrics.size(); i++) {
 		server_metrics *server = metrics[i];
 		server_rpcs += server->requests;
-		server_data += server->data;
+		server_bytes_in += server->bytes_in;
+		server_bytes_out += server->bytes_out;
 		length = snprintf(details + offset, sizeof(details) - offset,
 				"%s%lu", (offset != 0) ? " " : "",
 				server->requests - last_per_server_rpcs[i]);
@@ -2489,18 +2542,24 @@ void server_stats(uint64_t now)
 					metrics.size());
 		last_per_server_rpcs[i] = server->requests;
 	}
-	if ((last_stats_time != 0) && (server_data != last_server_data)) {
+	if ((last_stats_time != 0) && (server_bytes_in != last_server_bytes_in)) {
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (server_rpcs - last_server_rpcs);
-		double data = (double) (server_data - last_server_data);
-		log(NORMAL, "Servers: %.2f Kops/sec, %.2f Gbps, "
-				"avg. length %.1f bytes\n",
-				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
-				data/rpcs);
+		double in_delta = (double) (server_bytes_in
+				- last_server_bytes_in);
+		double out_delta = (double) (server_bytes_out
+				- last_server_bytes_out);
+		log(NORMAL, "Servers: %.2f Kops/sec, %.2f Gbps in, "
+				"%.2f Gbps out, avg. req. length %.1f bytes\n",
+				rpcs/(1000.0*elapsed),
+				8.0*in_delta/(1e09*elapsed),
+				8.0*out_delta/(1e09*elapsed),
+				in_delta/rpcs);
 		log(NORMAL, "RPCs per server: %s\n", details);
 	}
 	last_server_rpcs = server_rpcs;
-	last_server_data = server_data;
+	last_server_bytes_in = server_bytes_in;
+	last_server_bytes_out = server_bytes_out;
 }
 
 /**
@@ -2513,7 +2572,8 @@ void client_stats(uint64_t now)
 {
 #define CDF_VALUES 100000
 	uint64_t client_rpcs = 0;
-	uint64_t client_data = 0;
+	uint64_t request_bytes = 0;
+	uint64_t response_bytes = 0;
 	uint64_t total_rtt = 0;
 	uint64_t lag = 0;
 	uint64_t outstanding_rpcs = 0;
@@ -2531,7 +2591,8 @@ void client_stats(uint64_t now)
 	for (client *client: clients) {
 		for (size_t i = 0; i < client->num_servers; i++)
 			client_rpcs += client->responses[i];
-		client_data += client->response_data;
+		request_bytes += client->request_bytes;
+		response_bytes += client->response_bytes;
 		total_rtt += client->total_rtt;
 		lag += client->lag;
 		outstanding_rpcs += client->total_requests
@@ -2555,18 +2616,23 @@ void client_stats(uint64_t now)
 			backups += tclient->backups;
 	}
 	std::sort(cdf_times, cdf_times + cdf_index);
-	if ((last_stats_time != 0) && (client_data != last_client_data)) {
+	if ((last_stats_time != 0) && (request_bytes != last_client_bytes_out)) {
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
-		double data = (double) (client_data - last_client_data);
-		log(NORMAL, "Clients: %.2f Kops/sec, %.2f Gbps, RTT (us) "
-				"P50 %.2f P99 %.2f P99.9 %.2f, avg. length "
-				"%.1f bytes\n",
-				rpcs/(1000.0*elapsed), 8.0*data/(1e09*elapsed),
+		double delta_out = (double) (request_bytes
+				- last_client_bytes_out);
+		double delta_in = (double) (response_bytes
+				- last_client_bytes_in);
+		log(NORMAL, "Clients: %.2f Kops/sec, %.2f Gbps out, "
+				"%.2f Gbps in, RTT (us) P50 %.2f P99 %.2f "
+				"P99.9 %.2f, avg. req. length %.1f bytes\n",
+				rpcs/(1000.0*elapsed),
+				8.0*delta_out/(1e09*elapsed),
+				8.0*delta_in/(1e09*elapsed),
 				to_seconds(cdf_times[cdf_index/2])*1e06,
 				to_seconds(cdf_times[99*cdf_index/100])*1e06,
 				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
-			        data/rpcs);
+			        delta_out/rpcs);
 		double lag_fraction;
 		if (lag > last_lag)
 			lag_fraction = (to_seconds(lag - last_lag)/elapsed)
@@ -2588,7 +2654,8 @@ void client_stats(uint64_t now)
 	if (outstanding_rpcs != 0)
 		log(NORMAL, "Outstanding client RPCs: %lu\n", outstanding_rpcs);
 	last_client_rpcs = client_rpcs;
-	last_client_data = client_data;
+	last_client_bytes_out = request_bytes;
+	last_client_bytes_in = response_bytes;
 	last_total_rtt = total_rtt;
 	last_lag = lag;
 	last_backups = backups;
@@ -2630,6 +2697,7 @@ int client_cmd(std::vector<string> &words)
 	protocol = "homa";
 	server_nodes = 1;
 	tcp_trunc = true;
+	one_way = false;
 	unloaded = 0;
 	workload = "100";
 	for (unsigned i = 1; i < words.size(); i++) {
@@ -2662,6 +2730,8 @@ int client_cmd(std::vector<string> &words)
 			inet_family = AF_INET6;
 		} else if (strcmp(option, "--no-trunc") == 0) {
 			tcp_trunc = false;
+		} else if (strcmp(option, "--one-way") == 0) {
+			one_way = true;
 		} else if (strcmp(option, "--ports") == 0) {
 			if (!parse(words, i+1, &client_ports, option, "integer"))
 				return 0;
