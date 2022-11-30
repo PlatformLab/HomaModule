@@ -1054,7 +1054,7 @@ homa_server::~homa_server()
 void homa_server::server(int thread_id, server_metrics *metrics)
 {
 	message_header *header;
-	int length, resp_length, num_vecs, result;
+	int length, num_vecs, result;
 	char thread_name[50];
 	homa::receiver receiver(fd, buf_region);
 	struct iovec vecs[HOMA_MAX_BPAGES];
@@ -1092,9 +1092,12 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 		num_vecs = 0;
 		offset = 0;
 		while (offset < header->length) {
-			vecs[num_vecs].iov_len = receiver.contiguous(offset);
+			size_t chunk_size = header->length - offset;
+			if (chunk_size > HOMA_BPAGE_SIZE)
+				chunk_size = HOMA_BPAGE_SIZE;
+			vecs[num_vecs].iov_len = chunk_size;
 			vecs[num_vecs].iov_base = receiver.get<char>(offset);
-			offset += vecs[num_vecs].iov_len;
+			offset += chunk_size;
 			num_vecs++;
 		}
 		result = homa_replyv(fd, vecs, num_vecs, receiver.src_addr(),
@@ -1105,9 +1108,9 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 					port, strerror(errno));
 			exit(1);
 		}
-		metrics.requests++;
-		metrics.bytes_in += length;
-		metrics.bytes_out += header->length;
+		metrics->requests++;
+		metrics->bytes_in += length;
+		metrics->bytes_out += header->length;
 	}
 }
 
@@ -1411,8 +1414,8 @@ void tcp_server::read(int fd, int pid)
 {
 	int error = connections[fd]->read(epollet,
 			[this, fd, pid](message_header *header) {
-		metrics.requests++;
-		metrics.bytes_in += header->length;
+		metrics->requests++;
+		metrics->bytes_in += header->length;
 		tt("Received TCP request, cid 0x%08x, id %u, length %d, pid %d",
 				header->cid, header->msg_id, header->length,
 				pid);
@@ -1426,7 +1429,7 @@ void tcp_server::read(int fd, int pid)
 		}
 		if ((header->short_response) && (header->length > 100))
 			header->length = 100;
-		metrics.bytes_out += header->length;
+		metrics->bytes_out += header->length;
 		if (!connections[fd]->send_message(header))
 			connections[fd]->set_epoll_events(epoll_fd,
 					EPOLLIN|EPOLLOUT|epollet);
