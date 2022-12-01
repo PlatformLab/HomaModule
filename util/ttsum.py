@@ -15,8 +15,8 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 """
-This program reads a log file and generates summary information for
-time trace information in the file.
+This program reads one or more timetrace logs and generates summary
+information. Use the --help option to print usage information.
 """
 
 from __future__ import division, print_function
@@ -127,8 +127,9 @@ def scan(f, startingEvent):
 # Parse command line options
 parser = OptionParser(description=
         'Read one or more log files and summarize the time trace information '
-        'present in the file(s) as specified by the arguments.',
-        usage='%prog [options] file file ...',
+        'present in the file(s) as specified by the arguments. If no files '
+        'are given then a time trace is read from standard input.',
+        usage='%prog [options] [file file ...]',
         conflict_handler='resolve')
 parser.add_option('-a', '--alt', action='store_true', default=False,
         dest='altFormat',
@@ -145,10 +146,10 @@ parser.add_option('-n', '--numbers', action='store_false', default=True,
 
 (options, files) = parser.parse_args()
 if len(files) == 0:
-    print("No log files given")
-    sys.exit(1)
-for name in files:
-    scan(open(name), options.startEvent)
+    scan(sys.stdin, options.startEvent)
+else:
+    for name in files:
+        scan(open(name), options.startEvent)
 
 # Print information about all events, unless --from was specified.
 if not options.startEvent:
