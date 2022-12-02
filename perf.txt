@@ -2,6 +2,25 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (December 2022) One-way throughput for 1M messages varies from 18-27 Gbps
+  for Homa on the c6525-100g cluster, whereas TCP throughput is relatively
+  constant at 24 Gbps. Homa's variance comes from core placement: performance
+  is best if all of NAPI, GRO, and app are in the same group of 3 cores
+  (3N..3N+2) or their hypertwins. If they aren't, there are significant
+  cache miss costs as skbs get recycled from the app core back to the NAPI
+  core. TCP uses RFS to make sure that NAPI and GRO processing happen on
+  the same core as the application.
+
+* (December 2022) Restructured the receive buffer mechanism to mitigate
+  the page_pool_alloc_pages_slow problem (see August 2022 below); packets
+  can now be copied to user space and their buffers release without waiting
+  for the entire message to be received. This has a significant impact on
+  throughput. For "cp_node --one-way --client-max 4 --ports 1 --server-ports 1
+  --port-threads 8" on the c6525-100g cluster:
+  * Throughput increased from 21.5 Gbps to 42-45 Gbps
+  * Page allocations still happen with the new code, but they only consume
+    0.07 core now, vs. 0.6 core before
+
 * (November 2022) Software GSO is very slow (17 usec on AMD EPYC processors,
   breaking 64K into 9K jumbo frames). The main problem appears to be sk_buff
   allocation, which takes multiple usecs because the packet buffers are too
