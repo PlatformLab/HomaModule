@@ -85,6 +85,7 @@ int unloaded = 0;
 bool client_iovec = false;
 bool server_iovec = false;
 int inet_family = AF_INET;
+int server_core = -1;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -321,6 +322,8 @@ void print_help(const char *name)
 		"    --first-port      Lowest port number to use (default: %d)\n"
                 "    --iovec           Use homa_replyv instead of homa_reply\n"
                 "    --ipv6            Use IPv6 instead of IPv4\n"
+		"    --pin             All server threads will be restricted to run only\n"
+	        "                      on the givevn core\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
@@ -406,6 +409,21 @@ int parse(std::vector<string> &words, unsigned i, ValueType *value,
 	}
 	*value = num;
 	return 1;
+}
+
+/**
+ * pin_thread() - Ensure that the current thread only runs on a particular
+ * core.
+ * @core:   Identifier for core to pin the current thread to.
+ */
+void pin_thread(int core) {
+	cpu_set_t cpuset;
+
+	CPU_ZERO(&cpuset);
+	CPU_SET(core, &cpuset);
+	if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0)
+		    printf("Couldn't pin thread to core %d: %s",
+				    core, strerror(errno));
 }
 
 /**
@@ -1062,6 +1080,11 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 
 	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
+	if (server_core >= 0) {
+		printf("Pinning thread %s to core %d\n", thread_name,
+				server_core);
+		pin_thread(server_core);
+	}
 
 	while (1) {
 		while (1) {
@@ -1325,6 +1348,11 @@ void tcp_server::server(int thread_id)
 	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
 	int pid = syscall(__NR_gettid);
+	if (server_core >= 0) {
+		printf("Pinning thread %s to core %d\n", thread_name,
+				server_core);
+		pin_thread(server_core);
+	}
 
 	/* Each iteration through this loop processes a batch of epoll events. */
 	while (1) {
@@ -3062,6 +3090,7 @@ int server_cmd(std::vector<string> &words)
 	inet_family = AF_INET;
         protocol = "homa";
 	port_threads = 1;
+	server_core = -1;
 	server_ports = 1;
 	server_iovec = false;
 
@@ -3076,6 +3105,10 @@ int server_cmd(std::vector<string> &words)
 			server_iovec = true;
 		} else if (strcmp(option, "--ipv6") == 0) {
 			inet_family = AF_INET6;
+		} else if (strcmp(option, "--pin") == 0) {
+			if (!parse(words, i+1, &server_core, option, "integer"))
+				return 0;
+			i++;
 		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;
