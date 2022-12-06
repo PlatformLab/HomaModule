@@ -11,3 +11,6 @@ __pycache__
 *.pdf
 *.tt
 *.log
+tmp*
+*.out
+erfan
