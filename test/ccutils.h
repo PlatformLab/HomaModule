@@ -33,6 +33,9 @@ CEXTERN struct unit_hash *
 CEXTERN void          unit_hash_set(struct unit_hash *hash, const void *key,
 				void *value);
 CEXTERN int           unit_hash_size(struct unit_hash *hash);
+CEXTERN void          unit_hook(char *id);
+CEXTERN void          unit_hook_clear(void);
+CEXTERN void          unit_hook_register(void hook_proc(char *id));
 CEXTERN void          unit_log_add_separator(char *sep);
 CEXTERN void          unit_log_clear(void);
 CEXTERN void          unit_log_data(const char *separator, unsigned char *data,

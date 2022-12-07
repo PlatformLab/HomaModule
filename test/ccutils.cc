@@ -25,6 +25,7 @@
 #include <cstdarg>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "ccutils.h"
 
@@ -41,6 +42,13 @@ struct unit_hash {
 
 /* Accumulates data passed to unit_log_printf */
 static std::string unit_log;
+
+/**
+ * Each of the functions in this array will be invoked whenever unit_hook
+ * is called.
+ */
+typedef void(*hook_func)(char *id);
+static std::vector<hook_func> hooks;
 
 /**
  * unit_hash_erase() - Remove an entry from hash table, if it exists.
@@ -108,6 +116,37 @@ int unit_hash_size(struct unit_hash *hash)
 	if (!hash)
 		return 0;
 	return static_cast<int>(hash->map.size());
+}
+
+/**
+ * unit_hook() - Invoke all registered hook functions.
+ * @id:   String identifying the point at which the hook was invoked.
+ */
+void unit_hook(char *id)
+{
+	for (hook_func& func: hooks)
+		func(id);
+}
+
+/**
+ * unit_hook_clear() - Unregister all existing hook functions.
+ */
+void unit_hook_clear()
+{
+	hooks.clear();
+}
+
+/**
+ * unit_hook_register() - Specify a function to be invoked whenever unit_hook
+ * is called (or whenever the UNIT_HOOK macro is invoked). This is used
+ * to arrange for callbacks during unit tests, which can change the state
+ * of the system being tested.
+ * @hook_proc:  Function to be invoked; it will be passed the same argument
+ *              passed to unit_hook().
+ */
+void unit_hook_register(void hook_proc(char *id))
+{
+	hooks.push_back(hook_proc);
 }
 
 /**

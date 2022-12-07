@@ -21,14 +21,16 @@
 #include "mock.h"
 #include "utils.h"
 
-/* The following variable (and function) are used via mock_schedule_hook
- * to mark an RPC ready (but only if thread is sleeping).
+/* The following variable (and hook function) are used  to mark an RPC
+ * ready (but only if thread is sleeping).
  */
 struct homa_rpc *hook_rpc = NULL;
 struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
-void handoff_hook(void)
+void handoff_hook(char *id)
 {
+	if (strcmp(id, "schedule") != 0)
+		return;
 	if (task_is_running(current))
 		return;
 	hook_rpc->error = -EFAULT;
@@ -42,12 +44,13 @@ void handoff_hook(void)
 			unit_list_length(&hook_rpc->hsk->response_interests));
 }
 
-/* The following function is used by mock_schedule_hook to mark an
- * RPC ready even if a thread is polling.
+/* The following hook function marks an RPC ready even if a thread is polling.
  */
 int poll_count = 0;
-void poll_hook(void)
+void poll_hook(char *id)
 {
+	if (strcmp(id, "schedule") != 0)
+		return;
 	if (poll_count <= 0)
 		return;
 	poll_count--;
@@ -57,57 +60,13 @@ void poll_hook(void)
 	}
 }
 
-/* Used when testing the mechanism to abort polls because not at front
- * of waiting list.
- */
-struct homa_interest *hook_interest;
-struct list_head *hook_list_request;
-struct list_head *hook_list_response;
-int cycle_increment = 0;
-struct homa_sock *shutdown_hsk;
-void poll_hook2(void) {
-	mock_cycles += cycle_increment;
-	if (poll_count <= 0)
-		return;
-	poll_count--;
-	if (poll_count == 0) {
-		if (hook_list_request)
-			list_add(&hook_interest->request_links,
-					hook_list_request);
-		if (hook_list_response)
-			list_add(&hook_interest->response_links,
-					hook_list_response);
-		shutdown_hsk->shutdown = 1;
-	}
-
-}
-
-int poll_hook3_count = 0;
-void poll_hook3(void) {
-	if (poll_hook3_count == 0) {
-		/* First call (while polling): just increment clock enough
-		 * to abort the polling loop.
-		 */
-		mock_cycles += 1000;
-	} else if (poll_hook3_count == 1) {
-		/* Second call (thread "sleeps"): do nothing. */
-	} else if (poll_hook3_count == 2) {
-		/* Third call (thread has looped back around and is
-		 * polling again):mark RPC ready.
-		 */
-		homa_rpc_handoff(hook_rpc);
-	}
-	poll_hook3_count++;
-}
-
-/* The following function is used via mock_schedule_hook to delete an RPC. */
-void delete_hook(void)
+/* The following hook function deletes an RPC. */
+void delete_hook(char *id)
 {
+	if (strcmp(id, "schedule") != 0)
+		return;
 	if (delete_count == 0) {
-		void (*saved)(void) = mock_spin_lock_hook;
-		mock_spin_lock_hook = NULL;
 		homa_rpc_free(hook_rpc);
-		mock_spin_lock_hook = saved;
 	}
 	delete_count--;
 }
@@ -120,9 +79,11 @@ void match_hook(char *id)
 		homa_rpc_free(hook_rpc);
 }
 
-/* The following function is used via mock_schedule_hook to shutdown a socket. */
-void shutdown_hook(void)
+/* The following hook function shuts down a socket. */
+void shutdown_hook(char *id)
 {
+	if (strcmp(id, "schedule") != 0)
+		return;
 	homa_sock_shutdown(hook_hsk);
 }
 
@@ -2686,7 +2647,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_polling)
 	hook_rpc = crpc1;
 	poll_count = 5;
 	self->homa.poll_cycles = 1000000;
-	mock_schedule_hook = poll_hook;
+	unit_hook_register(poll_hook);
 	unit_log_clear();
 	rpc = homa_wait_for_message(&self->hsk, 0, self->client_id);
 	EXPECT_EQ(crpc1, rpc);
@@ -2727,7 +2688,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_sleeping)
 	unit_log_clear();
 
 	hook_rpc = crpc1;
-	mock_schedule_hook = handoff_hook;
+	unit_hook_register(handoff_hook);
 	rpc = homa_wait_for_message(&self->hsk, 0, self->client_id);
 	EXPECT_EQ(crpc1, rpc);
 	EXPECT_EQ(NULL, crpc1->interest);
@@ -2747,7 +2708,7 @@ TEST_F(homa_incoming, homa_wait_for_message__explicit_rpc_deleted_while_sleeping
 	unit_log_clear();
 
 	hook_rpc = crpc;
-	mock_schedule_hook = delete_hook;
+	unit_hook_register(delete_hook);
 	rpc = homa_wait_for_message(&self->hsk, HOMA_RECVMSG_RESPONSE,
 			self->client_id);
 	EXPECT_EQ(EINVAL, -PTR_ERR(rpc));
@@ -2769,7 +2730,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_after_matching)
 	unit_log_clear();
 
 	hook_rpc = crpc1;
-	unit_hook_set(match_hook);
+	unit_hook_register(match_hook);
 	rpc = homa_wait_for_message(&self->hsk,
 			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
 	EXPECT_EQ(RPC_DEAD, crpc1->state);
@@ -2786,7 +2747,7 @@ TEST_F(homa_incoming, homa_wait_for_message__socket_shutdown_while_sleeping)
 	unit_log_clear();
 
 	hook_hsk = &self->hsk;
-	mock_schedule_hook = shutdown_hook;
+	unit_hook_register(shutdown_hook);
 	rpc = homa_wait_for_message(&self->hsk,
 			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_REQUEST, 0);
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(rpc));

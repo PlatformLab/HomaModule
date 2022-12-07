@@ -55,16 +55,6 @@ int mock_spin_lock_held = 0;
 int mock_trylock_errors = 0;
 int mock_vmalloc_errors = 0;
 
-/* If a test sets this variable to non-NULL, this function will be invoked
- * during future calls to spin_lock or spin_lock_bh.
- */
-void (*mock_spin_lock_hook)(void) = NULL;
-
-/* If a test sets this variable to non-NULL, this function will be invoked
- * during future calls to schedule.
- */
-void (*mock_schedule_hook)(void) = NULL;
-
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending = 0;
 
@@ -828,9 +818,7 @@ void _raw_spin_lock(raw_spinlock_t *lock)
 
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
-	if (mock_spin_lock_hook) {
-		mock_spin_lock_hook();
-	}
+	UNIT_HOOK("spin_lock");
 	mock_active_locks++;
 }
 
@@ -838,9 +826,7 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 {
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
-	if (mock_spin_lock_hook) {
-		mock_spin_lock_hook();
-	}
+	UNIT_HOOK("spin_lock");
 	mock_active_locks++;
 	return 1;
 }
@@ -877,10 +863,7 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 
 void schedule(void)
 {
-	if (mock_schedule_hook)
-		mock_schedule_hook();
-	else
-		unit_log_printf("; ", "schedule");
+	UNIT_HOOK("schedule");
 }
 
 void security_sk_classify_flow(struct sock *sk, struct flowi_common *flic) {}
@@ -1307,9 +1290,7 @@ void mock_teardown(void)
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
 	memset(&mock_task, 0, sizeof(mock_task));
-	mock_schedule_hook = NULL;
 	mock_signal_pending = 0;
-	mock_spin_lock_hook = NULL;
 	mock_xmit_log_verbose = 0;
 	mock_mtu = 0;
 	mock_net_device.gso_max_size = 0;
@@ -1353,5 +1334,5 @@ void mock_teardown(void)
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;
 
-	unit_hook_set(NULL);
+	unit_hook_clear();
 }

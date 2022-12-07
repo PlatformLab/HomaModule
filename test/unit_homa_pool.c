@@ -49,8 +49,10 @@ FIXTURE_TEARDOWN(homa_pool)
 	unit_teardown();
 }
 
-static void steal_bpages_hook(void)
+static void steal_bpages_hook(char *id)
 {
+	if (strcmp(id, "spin_lock") != 0)
+		return;
 	if (!cur_pool)
 		return;
 	switch (atomic_read(&cur_pool->next_scan)) {
@@ -208,7 +210,7 @@ TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 	__u32 pages[10];
 	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
 			self->buffer_region, 100*HOMA_BPAGE_SIZE));
-	mock_spin_lock_hook = steal_bpages_hook;
+	unit_hook_register(steal_bpages_hook);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(1, pages[0]);
 	EXPECT_EQ(3, pages[1]);

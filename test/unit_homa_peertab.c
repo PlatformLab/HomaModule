@@ -60,8 +60,10 @@ static int dead_count(struct homa_peertab *peertab)
 	return count;
 }
 
-static void peer_spinlock_hook(void)
+static void peer_spinlock_hook(char *id)
 {
+	if (strcmp(id, "spin_lock") != 0)
+		return;
 	mock_cycles += 1000;
 }
 
@@ -86,8 +88,13 @@ TEST_F(homa_peertab, homa_peer_find__basics)
 
 static struct _test_data_homa_peertab *test_data;
 static struct homa_peer *conflicting_peer = NULL;
-static void peer_lock_hook(void) {
-	mock_spin_lock_hook = NULL;
+static int peer_lock_hook_invocations = 0;
+static void peer_lock_hook(char *id) {
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (peer_lock_hook_invocations > 0)
+		return;
+	peer_lock_hook_invocations ++;
 	/* Creates a peer with the same address as the one being created
 	 * by the main test function below. */
 	conflicting_peer = homa_peer_find(&test_data->peertab, ip3333,
@@ -127,7 +134,8 @@ TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 	struct homa_peer *peer;
 
 	test_data = self;
-	mock_spin_lock_hook = peer_lock_hook;
+	peer_lock_hook_invocations = 0;
+	unit_hook_register(peer_lock_hook);
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_NE(NULL, conflicting_peer);
 	EXPECT_EQ(conflicting_peer, peer);
@@ -278,9 +286,8 @@ TEST_F(homa_peertab, homa_peer_lock_slow)
 	homa_peer_unlock(peer);
 
 	mock_trylock_errors = 1;
-	mock_spin_lock_hook = peer_spinlock_hook;
+	unit_hook_register(peer_spinlock_hook);
 	homa_peer_lock(peer);
-	mock_spin_lock_hook = peer_spinlock_hook;
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.peer_ack_lock_misses);
 	EXPECT_EQ(1000, homa_cores[cpu_number]->metrics.peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);

@@ -24,8 +24,6 @@
 #include "mock.h"
 #include "utils.h"
 
-static void (*unit_hook_proc)(char *id);
-
 /**
  * unit_client_rpc() - Create a homa_client_rpc and arrange for it to be
  * in a given state.
@@ -462,28 +460,4 @@ char *unit_ack_string(struct homa_ack *ack)
 			ntohs(ack->client_port), ntohs(ack->server_port),
 			be64_to_cpu(ack->client_id));
 	return buffer;
-}
-
-/**
- * unit_hook_set() - Specify a function to be invoked whenever unit_hook
- * is called (or whenever the UNIT_HOOK macro is invoked). This is used
- * to arrange for callbacks during unit tests, which can change the state
- * of the system being tested.
- * @hook_proc:  Function to be invoked; it will be passed the same argument
- *              passed to unit_hook().
- */
-void unit_hook_set(void (*hook_proc)(char *id))
-{
-	unit_hook_proc = hook_proc;
-}
-
-/**
- * unit_hook() - If unit_hook_set has been invoked, invoke the function
- * that it specified.
- * @id:   String identifying the point at which the hook was invoked.
- */
-void unit_hook(char *id)
-{
-	if (unit_hook_proc)
-		unit_hook_proc(id);
 }

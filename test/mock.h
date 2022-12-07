@@ -38,9 +38,7 @@ extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
 extern int         mock_route_errors;
-extern void        (*mock_schedule_hook)(void);
 extern int         mock_spin_lock_held;
-extern void        (*mock_spin_lock_hook)(void);
 extern struct task_struct
 		   mock_task;
 extern int         mock_trylock_errors;
