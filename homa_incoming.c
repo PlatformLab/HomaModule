@@ -1635,12 +1635,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			end = get_cycles();
 			blocked = 1;
 			INC_METRIC(blocked_cycles, end - start);
-			rpc = (struct homa_rpc *) atomic_long_read(
-					&interest.ready_rpc);
-			tt_record3("homa_wait_for_message woke up, id %d, "
-					"pid %d blocked %d cycles",
-					rpc ? rpc->id : 0, current->pid,
-					end - start);
 		}
 		__set_current_state(TASK_RUNNING);
 
@@ -1677,6 +1671,8 @@ found_rpc:
 		 */
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (rpc) {
+			tt_record2("homa_wait_for_message found rpc id %d, pid %d",
+					rpc->id, current->pid);
 			if (!interest.locked)
 				homa_rpc_lock(rpc);
 			atomic_andnot(RPC_HANDING_OFF, &rpc->flags);

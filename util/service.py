@@ -209,7 +209,7 @@ for line in f:
         if not "grant_lag" in rpc:
             rpc["grant_lag"] = time - rpc["start"]
 
-    if re.match('.*message woke up,', line):
+    if re.match('.*message found rpc,', line):
         if not "offset0" in rpc:
             rpc["bogus"] = True
             continue

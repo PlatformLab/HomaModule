@@ -184,7 +184,7 @@ def analyze_rpc(id, client_num, server_num):
         elif "received message while reaping" in line:
             event = "wakeup reaping thread"
             add_stat("server wakeup", gap)
-        elif "homa_wait_for_message woke up" in line:
+        elif "homa_wait_for_message found rpc" in line:
             event = "wakeup thread"
             add_stat("server wakeup", gap)
         elif "received message while polling" in line:
@@ -282,7 +282,7 @@ def analyze_rpc(id, client_num, server_num):
         elif "received message while reaping" in line:
             event = "wakeup reaping thread"
             add_stat("client wakeup", time - last)
-        elif "homa_wait_for_message woke up" in line:
+        elif "homa_wait_for_message found rpc" in line:
             event = "wakeup thread"
             add_stat("client wakeup", time - last)
         elif "received message while polling" in line:
