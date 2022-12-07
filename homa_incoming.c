@@ -123,7 +123,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 /**
  * homa_copy_to_user() - Copy as much data as possible from incoming
  * packet buffers to buffers in user space.
- * @rpc:     RPC for which data should be copied.
+ * @rpc:     RPC for which data should be copied. Must be locked by caller.
  * Return:   Zero for success or a negative errno if there is an error.
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
@@ -1656,7 +1656,7 @@ found_rpc:
 		 * when we test them below and when we acquire the socket lock,
 		 * so they have to be checked again after locking the socket.
 		 */
-		UNIT_HOOK("homa_wait_for_message match");
+		UNIT_HOOK("found_rpc");
 		if ((interest.reg_rpc)
 				|| (interest.request_links.next != LIST_POISON1)
 				|| (interest.response_links.next
@@ -1675,9 +1675,11 @@ found_rpc:
 		 * this could have happened anytime up until we reset the
 		 * interests above).
 		 */
+		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (rpc) {
 			if (!interest.locked)
 				homa_rpc_lock(rpc);
+			atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
 			if (rpc->state == RPC_DEAD) {
 				homa_rpc_unlock(rpc);
 				continue;

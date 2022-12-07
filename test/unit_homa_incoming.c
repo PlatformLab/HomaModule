@@ -21,8 +21,8 @@
 #include "mock.h"
 #include "utils.h"
 
-/* The following variable (and hook function) are used  to mark an RPC
- * ready (but only if thread is sleeping).
+/* The following variable (and hook function) are used to mark an RPC
+ * ready with an error (but only if thread is sleeping).
  */
 struct homa_rpc *hook_rpc = NULL;
 struct homa_sock *hook_hsk = NULL;
@@ -44,8 +44,7 @@ void handoff_hook(char *id)
 			unit_list_length(&hook_rpc->hsk->response_interests));
 }
 
-/* The following hook function marks an RPC ready even if a thread is polling.
- */
+/* The following hook function marks an RPC ready after several calls. */
 int poll_count = 0;
 void poll_hook(char *id)
 {
@@ -58,6 +57,28 @@ void poll_hook(char *id)
 		hook_rpc->error = -EFAULT;
 		homa_rpc_handoff(hook_rpc);
 	}
+}
+
+/* The following hook function hands off an RPC (with an error). */
+void handoff_hook2(char *id)
+{
+	if (strcmp(id, "found_rpc") != 0)
+		return;
+
+	hook_rpc->error = -ETIMEDOUT;
+	homa_rpc_handoff(hook_rpc);
+}
+
+/* The following hook function first hands off an RPC, then deletes it. */
+int hook3_count = 0;
+void handoff_hook3(char *id)
+{
+	if (hook3_count || (strcmp(id, "found_rpc") != 0))
+		return;
+	hook3_count++;
+
+	homa_rpc_handoff(hook_rpc);
+	homa_rpc_free(hook_rpc);
 }
 
 /* The following hook function deletes an RPC. */
@@ -73,9 +94,9 @@ void delete_hook(char *id)
 
 /* The following function is used via unit_hook to delete an RPC after it
  * has been matched in homa_wait_for_message. */
-void match_hook(char *id)
+void match_delete_hook(char *id)
 {
-	if (strcmp(id, "homa_wait_for_message match") == 0)
+	if (strcmp(id, "found_rpc") == 0)
 		homa_rpc_free(hook_rpc);
 }
 
@@ -2698,6 +2719,48 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_sleeping)
 	EXPECT_EQ(0, self->hsk.dead_skbs);
 	homa_rpc_unlock(rpc);
 }
+TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_after_giving_up)
+{
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc);
+
+	hook_rpc = crpc;
+	unit_hook_register(handoff_hook2);
+	unit_log_clear();
+	rpc = homa_wait_for_message(&self->hsk,
+			HOMA_RECVMSG_NONBLOCKING|HOMA_RECVMSG_RESPONSE, 0);
+	ASSERT_EQ(crpc, rpc);
+	EXPECT_EQ(NULL, crpc->interest);
+	EXPECT_EQ(ETIMEDOUT, -rpc->error);
+	homa_rpc_unlock(rpc);
+}
+TEST_F(homa_incoming, homa_wait_for_message__handoff_rpc_then_delete_after_giving_up)
+{
+	// A key thing this test does it to ensure that RPC_HANDING_OFF
+	// gets cleared even though the RPC has been deleted.
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc);
+
+	// Prevent the RPC from being reaped during the test.
+	atomic_or(RPC_COPYING_TO_USER, &crpc->flags);
+
+	hook_rpc = crpc;
+	hook3_count = 0;
+	unit_hook_register(handoff_hook3);
+	unit_log_clear();
+	rpc = homa_wait_for_message(&self->hsk,
+			HOMA_RECVMSG_NONBLOCKING|HOMA_RECVMSG_RESPONSE, 0);
+	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
+	EXPECT_EQ(RPC_COPYING_TO_USER, atomic_read(&crpc->flags));
+	EXPECT_EQ(RPC_DEAD, crpc->state);
+	atomic_andnot(RPC_COPYING_TO_USER, &crpc->flags);
+}
 TEST_F(homa_incoming, homa_wait_for_message__explicit_rpc_deleted_while_sleeping)
 {
 	struct homa_rpc *rpc;
@@ -2730,7 +2793,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_after_matching)
 	unit_log_clear();
 
 	hook_rpc = crpc1;
-	unit_hook_register(match_hook);
+	unit_hook_register(match_delete_hook);
 	rpc = homa_wait_for_message(&self->hsk,
 			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
 	EXPECT_EQ(RPC_DEAD, crpc1->state);
