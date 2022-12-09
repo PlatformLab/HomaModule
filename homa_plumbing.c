@@ -1010,8 +1010,6 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 
 	if (copy_from_sockptr(&args, optval, optlen))
 		return -EFAULT;
-	printk(KERN_NOTICE "homa_ioc_set_buf: args.start 0x%llx, args.length 0x%lx\n",
-			(uint64_t) args.start, args.length);
 
 	/* Do a trivial test to make sure we can at least write the first
 	 * page of the region.
