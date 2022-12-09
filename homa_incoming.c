@@ -1680,7 +1680,6 @@ found_rpc:
 				homa_rpc_unlock(rpc);
 				continue;
 			}
-			atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
 			if (!rpc->error)
 				rpc->error = homa_copy_to_user(rpc);
 			if (rpc->error)
@@ -1762,18 +1761,20 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	return;
 
 thread_waiting:
-	/* We found a waiting thread. Wakeup the thread and cleanup its
-	 * interest info, so it won't have to acquire the socket lock
-	 * again. This is also needed so no-one else attempts to give
-	 * this interest an RPC.
-	 */
-
-	/* The following line must be here, before resetting the interests,
-	 * in order to avoid a race with homa_wait_for_message (which
-	 * may not acquire the socket lock).
+	/* We found a waiting thread. The following 3 lines must be here,
+	 * before clearing the interest, in order to avoid a race with
+	 * homa_wait_for_message (which won't acquire the socket lock if
+	 * the interest is clear).
 	 */
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	interest->locked = 0;
+	atomic_long_set_release(&interest->ready_rpc, (long) rpc);
+
+	/* Clear the interest. This serves two purposes. First, it saves
+	 * the waking thread from acquiring the socket lock again, which
+	 * reduces contention on that lock). Second, it ensures that
+	 * no-one else attempts to give this interest a different RPC.
+	 */
 	if (interest->reg_rpc) {
 		interest->reg_rpc->interest = NULL;
 		interest->reg_rpc = NULL;
@@ -1782,11 +1783,10 @@ thread_waiting:
 		list_del(&interest->request_links);
 	if (interest->response_links.next != LIST_POISON1)
 		list_del(&interest->response_links);
+	wake_up_process(interest->thread);
 	tt_record3("homa_rpc_handoff handed off id %d to pid %d on core %d",
 			rpc->id, interest->thread->pid,
 			task_cpu(interest->thread));
-	atomic_long_set_release(&interest->ready_rpc, (long) rpc);
-	wake_up_process(interest->thread);
 }
 
 /**
