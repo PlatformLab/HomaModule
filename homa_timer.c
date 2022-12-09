@@ -259,8 +259,8 @@ void homa_timer(struct homa *homa)
 		homa_abort_rpcs(homa, &dead_peer->addr, 0, -ETIMEDOUT);
 	}
 
-	if (total_rpcs > 0)
-		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
+//	if (total_rpcs > 0)
+//		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
 
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
