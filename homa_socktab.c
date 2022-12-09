@@ -174,6 +174,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
+	int i;
 
 	homa_sock_lock(hsk, "homa_socket_shutdown");
 	if (hsk->shutdown) {
@@ -214,8 +215,15 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 
 	homa_pool_destroy(&hsk->buffer_pool);
 
-	while (!list_empty(&hsk->dead_rpcs))
+	i = 0;
+	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, 1000);
+		i++;
+		if (i == 5) {
+			tt_record("Freezing because reap seems hung");
+			tt_freeze();
+		}
+	}
 }
 
 /**
