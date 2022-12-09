@@ -1,4 +1,4 @@
-/* Copyright (c) 2022, Stanford University
+/* Copyright (c) 2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -145,6 +145,20 @@ TEST_F(homa_pool, homa_pool_get_pages__grow_active_pool)
 	EXPECT_EQ(5, pages[0]);
 	EXPECT_EQ(6, pages[1]);
 	EXPECT_EQ(7, atomic_read(&pool->active_pages));
+}
+TEST_F(homa_pool, homa_pool_get_pages__grow_fails_pool_max_size)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	__u32 pages[10];
+	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa,
+			self->buffer_region, 100*HOMA_BPAGE_SIZE));
+	pool->num_bpages = 5;
+	atomic_set(&pool->active_pages, 5);
+	atomic_set(&pool->next_scan, 5);
+	atomic_set(&pool->free_bpages_found, 1);
+	EXPECT_EQ(0, -homa_pool_get_pages(pool, 1, pages, 0));
+	EXPECT_EQ(0, pages[0]);
+	EXPECT_EQ(5, atomic_read(&pool->active_pages));
 }
 TEST_F(homa_pool, homa_pool_get_pages__shrink_active_pool)
 {

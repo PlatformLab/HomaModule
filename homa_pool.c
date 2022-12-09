@@ -146,16 +146,16 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 				if (active > pool->num_bpages)
 					active = pool->num_bpages;
 				atomic_set(&pool->active_pages, active);
-			} else {
-				if (2*free > active) {
-					/* > 50% of pages free; shrink active
-					 * pool by 10%.
-					 */
-					active -= active/10;
-					atomic_set(&pool->active_pages,
-							(active >= MIN_ACTIVE)
-							? active : MIN_ACTIVE);
-				}
+			} else if (2*free > active) {
+				/* > 50% of pages free; shrink active
+				 * pool by 10%.
+				 */
+				active -= active/10;
+				atomic_set(&pool->active_pages,
+						(active >= MIN_ACTIVE)
+						? active : MIN_ACTIVE);
+			}
+			if (cur >= active) {
 				atomic_set(&pool->free_bpages_found, 0);
 				atomic_set(&pool->next_scan, 0);
 				continue;
