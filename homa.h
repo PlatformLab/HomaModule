@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2021 Stanford University
+/* Copyright (c) 2019-2022 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -116,68 +116,6 @@ struct homa_send_args {
 _Static_assert(sizeof(struct homa_send_args) >= 128, "homa_send_args shrunk");
 _Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
 #endif
-
-/**
- * struct homa_recv_args - Used to pass arguments and results between
- * user space and the HOMAIOCRECV ioctl.
- *
- * Ideally this should have the exact same layout as homa_reply_args.
- * Therefore new members should be added at the end of the padding,
- * not at the beginning.
- */
-struct homa_recv_args {
-	/** @message_buf: Where to store incoming message. */
-	void *message_buf;
-
-	/**
-	 * @iovec: Describes store message in multiple disjoint pieces.
-	 * Exactly one of this or @message_buf must be non-null.
-	 */
-	const struct iovec *iovec;
-
-	/**
-	 * @length: Initially holds length of @message_buf or @iovec; modified
-	 * to return total message length.
-	 */
-	size_t length;
-
-	/** @source_addr: Address of the sender of the message. */
-	sockaddr_in_union source_addr;
-
-	/**
-	 * @flags: OR-ed combination of bits that control the operation.
-	 * see the man page for details.
-	 */
-	int flags;
-
-	/**
-	 * @id: Initially specifies the id of the desired RPC, or 0 if
-	 * any RPC is OK; used to return the actual id received.
-	 */
-	uint64_t id;
-
-	/**
-	 * @completion_cookie: If the incoming message is a response,
-	 * this will return the completion cookie specified when the
-	 * request was sent. For incoming requests, this will always
-	 * be zero.
-	 */
-	uint64_t completion_cookie;
-
-	uint64_t _pad[7];
-};
-#if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recv_args) >= 128, "homa_recv_args shrunk");
-_Static_assert(sizeof(struct homa_recv_args) <= 128, "homa_recv_args grew");
-#endif
-
-/* Flag bits for homa_recv (see man page for documentation):
- */
-#define HOMA_RECV_REQUEST       0x01
-#define HOMA_RECV_RESPONSE      0x02
-#define HOMA_RECV_NONBLOCKING   0x04
-#define HOMA_RECV_PARTIAL       0x08
-#define HOMA_RECV_VALID_FLAGS   0x0F
 
 /**
  * struct homa_recvmsg_control - Provides information needed by Homa's
@@ -332,7 +270,6 @@ struct homa_set_buf_args {
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
-extern ssize_t homa_recvp(int fd, struct homa_recv_args *args);
 extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);
 extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
 extern int     homa_abortp(int fd, struct homa_abort_args *args);
@@ -343,13 +280,6 @@ extern int     homa_send(int sockfd, const void *message_buf,
 extern int     homa_sendv(int sockfd, const struct iovec *iov,
 		int iovcnt, const sockaddr_in_union *dest_addr,
 		uint64_t *id, uint64_t completion_cookie);
-extern ssize_t homa_recv(int sockfd, void *message_buf, size_t length,
-		int flags, sockaddr_in_union *src_addr, uint64_t *id,
-		size_t *msglen, uint64_t *completion_cookie_p);
-extern ssize_t homa_recvv(int sockfd, const struct iovec *iov,
-		int iovcnt, int flags, sockaddr_in_union *src_addr,
-		uint64_t *id, size_t *msglen,
-		uint64_t *completion_cookie_p);
 extern ssize_t homa_reply(int sockfd, const void *message_buf,
 		size_t length, const sockaddr_in_union *dest_addr,
 		uint64_t id);

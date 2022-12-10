@@ -1088,7 +1088,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 
 	while (1) {
 		while (1) {
-			length = receiver.receive(HOMA_RECV_REQUEST, 0);
+			length = receiver.receive(HOMA_RECVMSG_REQUEST, 0);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN))
@@ -2021,7 +2021,7 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 	rpc_id = 0;
 	ssize_t length;
 	do {
-		length = receiver->receive(HOMA_RECV_RESPONSE, rpc_id);
+		length = receiver->receive(HOMA_RECVMSG_RESPONSE, rpc_id);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)

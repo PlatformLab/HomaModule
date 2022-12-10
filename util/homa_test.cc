@@ -146,7 +146,7 @@ void test_close()
 	}
 	std::thread thread(close_fd, fd);
 	recv_control.id = 0;
-	recv_control.flags = HOMA_RECV_RESPONSE;
+	recv_control.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
@@ -188,7 +188,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	total = 0;
 	for (int i = 1; i <= count; i++) {
 		recv_control.id = 0;
-		recv_control.flags = HOMA_RECV_RESPONSE;
+		recv_control.flags = HOMA_RECVMSG_RESPONSE;
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
 			printf("Error in recvmsg for id %lu: %s\n",
@@ -229,7 +229,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 		printf("Homa_send succeeded, id %lu\n", id);
 	}
 	recv_control.id = 0;
-	recv_control.flags = HOMA_RECV_RESPONSE;
+	recv_control.flags = HOMA_RECVMSG_RESPONSE;
 	resp_length = recvmsg(fd, &recv_hdr, 0);
 	if (resp_length < 0) {
 		printf("Error in recvmsg: %s\n", strerror(errno));
@@ -307,7 +307,7 @@ void test_poll(int fd, char *request)
 	}
 
 	recv_control.id = 0;
-	recv_control.flags = HOMA_RECV_REQUEST;
+	recv_control.flags = HOMA_RECVMSG_REQUEST;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0)
 		printf("Error in recvmsg: %s\n", strerror(errno));
@@ -366,7 +366,7 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 			return;
 		}
 		recv_control.id = 0;
-		recv_control.flags = HOMA_RECV_RESPONSE;
+		recv_control.flags = HOMA_RECVMSG_RESPONSE;
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (i >= 0)
 			times[i] = rdtsc() - start;
@@ -440,7 +440,7 @@ void test_shutdown(int fd)
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
 	recv_control.id = 0;
-	recv_control.flags = HOMA_RECV_RESPONSE;
+	recv_control.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
@@ -451,7 +451,7 @@ void test_shutdown(int fd)
 
 	/* Make sure that future reads also fail. */
 	recv_control.id = 0;
-	recv_control.flags = HOMA_RECV_RESPONSE;
+	recv_control.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0) {
 		printf("Second recvmsg call also failed: %s\n",
@@ -510,7 +510,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		int *response;
 
 		recv_control.id = 0;
-		recv_control.flags = HOMA_RECV_RESPONSE;
+		recv_control.flags = HOMA_RECVMSG_RESPONSE;
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
 			printf("Error in recvmsg: %s\n",
