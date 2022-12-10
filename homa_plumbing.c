@@ -1103,6 +1103,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	}
 	homa_pool_release_buffers(&hsk->buffer_pool, control.num_buffers,
 			control.buffers);
+	control.num_buffers = 0;
 
 	rpc = homa_wait_for_message(hsk, nonblocking
 			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
@@ -1143,8 +1144,6 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		control.num_buffers = rpc->msgin.num_buffers;
 		memcpy(control.buffers, rpc->msgin.buffers,
 				sizeof(control.buffers));
-	} else {
-		control.num_buffers = 0;
 	}
 	if (sk->sk_family == AF_INET6) {
 		struct sockaddr_in6 *in6 = msg->msg_name;
@@ -1176,18 +1175,21 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	}
 	homa_rpc_unlock(rpc);
 
+done:
 	if (unlikely(copy_to_user(msg->msg_control, &control, sizeof(control)))) {
 		/* Note: in this case the message's buffers will be leaked. */
 		printk(KERN_NOTICE "homa_recvmsg couldn't copy back args\n");
 		result = -EFAULT;
 	}
-	/* This is needed because ____sys_recvmsg writes the after-before
-	 * difference for this value back as msg_controllen in the user's
-	 * struct msghdr.
+
+	/* This is needed to compensate for ____sys_recvmsg (which writes the
+	 * after-before difference for this value back as msg_controllen in
+	 * the user's struct msghdr) so that the value in the user's struct
+	 * doesn't change.
 	 */
 	msg->msg_control = ((char *) msg->msg_control)
 			+ sizeof(struct homa_recvmsg_control);
-done:
+
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 			control.id, result,
