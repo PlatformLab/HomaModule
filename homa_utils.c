@@ -649,7 +649,7 @@ int homa_rpc_send_offset(struct homa_rpc *rpc)
  *
  * Return:    A pointer to the homa_rpc for this id, or NULL if none.
  *            The RPC will be locked; the caller must eventually unlock it
- *            by invoking homa_unlock_client_rpc.
+ *            by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 {
@@ -675,7 +675,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *
  * Return:    A pointer to the homa_rpc matching the arguments, or NULL
  *            if none. The RPC will be locked; the caller must eventually
- *            unlock it by invoking homa_unlock_server_rpc.
+ *            unlock it by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		const struct in6_addr *saddr, __u16 sport, __u64 id)

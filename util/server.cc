@@ -156,7 +156,7 @@ void homa_server(int port)
 		}
 		result = homa_replyv(fd, vecs, num_vecs, &source, control.id);
 		if (result < 0) {
-			printf("Homa_reply failed: %s\n", strerror(errno));
+			printf("homa_reply failed: %s\n", strerror(errno));
 		}
 	}
 }

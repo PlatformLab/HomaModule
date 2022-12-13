@@ -14,7 +14,7 @@
  */
 
 // This file contains a collection of tests for the Linux implementation
-// of Homa; it's typically used together with homa_server.
+// of Homa; it's typically used together with server.
 //
 // Usage:
 // homaTest host:port [options] op op ...
@@ -94,7 +94,7 @@ void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
 	} else {
-		printf("Homa_send succeeded, id %lu\n", id);
+		printf("homa_send succeeded, id %lu\n", id);
 	}
 }
 
@@ -226,7 +226,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 		printf("Error in homa_send: %s\n", strerror(errno));
 		return;
 	} else {
-		printf("Homa_send succeeded, id %lu\n", id);
+		printf("homa_send succeeded, id %lu\n", id);
 	}
 	recv_control.id = 0;
 	recv_control.flags = HOMA_RECVMSG_RESPONSE;

@@ -433,12 +433,9 @@ void unit_teardown(void)
  * unit_iov_iter() - Return an iov_iter corresponding to the arguments.
  * @buffer:     First byte of data.
  * @length:     Number of bytes of data.
- * @direction:  WRITE means data will be copied out of the init, READ means
- *              data will be copied into it.
  */
 struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 {
-
 	static struct iovec iovec;
 	static struct iov_iter iter;
 	iovec.iov_base = buffer;
