@@ -97,7 +97,7 @@ size_t homa::receiver::receive(int flags, uint64_t id)
 	control.id = id;
 	msg_length = recvmsg(fd, &hdr, 0);
 	if (msg_length < 0) {
-		control.num_buffers = 0;
+		control.num_bpages = 0;
 		id = 0;
 	}
 	return msg_length;
@@ -109,12 +109,12 @@ size_t homa::receiver::receive(int flags, uint64_t id)
  */
 void homa::receiver::release()
 {
-	if (control.num_buffers == 0)
+	if (control.num_bpages == 0)
 		return;
 
 	/* This recvmsg request will do nothing except return buffer space. */
 	control.flags = HOMA_RECVMSG_NONBLOCKING;
 	control.id = 0;
 	recvmsg(fd, &hdr, 0);
-	control.num_buffers = 0;
+	control.num_bpages = 0;
 }

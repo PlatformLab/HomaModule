@@ -143,22 +143,25 @@ struct homa_recvmsg_control {
 	int flags;
 
 	/**
-	 * @num_buffers: (in/out) Number of valid entries in @buffer_offsets.
-	 * Passes in buffers from previous messages that can now be
-	 * recycled; returns buffers from the new message.
+	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
+	 * Passes in bpages from previous messages that can now be
+	 * recycled; returns bpages from the new message.
 	 */
-	uint32_t num_buffers;
+	uint32_t num_bpages;
 
 	uint32_t _pad[2];
 
 	/**
-	 * @buffers: (in/out) Each entry is a buffer pointer, specified as an
-	 * offset within the buffer pool. Input values are buffers from previous
-	 * messages that can now be recycled. Return values describe the
-	 * incoming message: all of the buffers except the last one have
-	 * HOMA_BPAGE_SIZE bytes of data and are page-aligned.
+	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer
+     * region for the socket pool. When returned from recvmsg, the
+     * offsets indicate where fragments of the new message are stored. All
+     * entries but the last refer to full buffer pages (HOMA_BPAGE_SIZE bytes)
+     * and are bpage-aligned. The last entry may refer to a bpage fragment and
+     * is not necessarily aligned. The application now owns these bpages and
+     * must eventually return them to Homa, using bpage_offsets in a future
+     * recvmsg invocation.
 	 */
-	uint32_t buffers[HOMA_MAX_BPAGES];
+	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_recvmsg_control) >= 96,

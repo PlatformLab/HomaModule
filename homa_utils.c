@@ -235,7 +235,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->error = 0;
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
-	crpc->msgin.num_buffers = 0;
+	crpc->msgin.num_bpages = 0;
 	skb = homa_fill_packets(hsk, crpc->peer, iter);
 	if (IS_ERR(skb)) {
 		err = PTR_ERR(skb);
@@ -340,7 +340,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->msgin.total_length = -1;
 	srpc->msgin.num_skbs = 0;
 	srpc->msgout.length = -1;
-	srpc->msgin.num_buffers = 0;
+	srpc->msgin.num_bpages = 0;
 	srpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
@@ -483,9 +483,9 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
-	if (unlikely(rpc->msgin.num_buffers))
+	if (unlikely(rpc->msgin.num_bpages))
 		homa_pool_release_buffers(&rpc->hsk->buffer_pool,
-				rpc->msgin.num_buffers, rpc->msgin.buffers);
+				rpc->msgin.num_bpages, rpc->msgin.bpage_offsets);
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);

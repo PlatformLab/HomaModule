@@ -1096,14 +1096,14 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	tt_record3("homa_recvmsg starting, port %d, pid %d, flags %d",
 			hsk->port, current->pid, control.flags);
 
-	if ((control.num_buffers > HOMA_MAX_BPAGES)
+	if ((control.num_bpages > HOMA_MAX_BPAGES)
 			|| (control.flags & ~HOMA_RECVMSG_VALID_FLAGS)) {
 		result = -EINVAL;
 		goto done;
 	}
-	homa_pool_release_buffers(&hsk->buffer_pool, control.num_buffers,
-			control.buffers);
-	control.num_buffers = 0;
+	homa_pool_release_buffers(&hsk->buffer_pool, control.num_bpages,
+			control.bpage_offsets);
+	control.num_bpages = 0;
 
 	rpc = homa_wait_for_message(hsk, nonblocking
 			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
@@ -1141,9 +1141,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	control.id = rpc->id;
 	control.completion_cookie = rpc->completion_cookie;
 	if (likely(rpc->msgin.total_length >= 0)) {
-		control.num_buffers = rpc->msgin.num_buffers;
-		memcpy(control.buffers, rpc->msgin.buffers,
-				sizeof(control.buffers));
+		control.num_bpages = rpc->msgin.num_bpages;
+		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
+				sizeof(control.bpage_offsets));
 	}
 	if (sk->sk_family == AF_INET6) {
 		struct sockaddr_in6 *in6 = msg->msg_name;
@@ -1162,7 +1162,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	/* This indicates that the application now owns the buffers, so
 	 * we won't free them in homa_rpc_free.
 	 */
-	rpc->msgin.num_buffers = 0;
+	rpc->msgin.num_bpages = 0;
 
 	/* Must release the RPC lock (and potentially free the RPC) before
 	 * copying the results back to user space.
@@ -1193,7 +1193,7 @@ done:
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 			control.id, result,
-			control.buffers[0] >> HOMA_BPAGE_SHIFT);
+			control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
 	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
 	INC_METRIC(recv_cycles, finish - start);
 	return result;

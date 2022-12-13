@@ -45,7 +45,7 @@ void homa_message_in_init(struct homa_message_in *msgin, int length,
 		INC_METRIC(large_msg_bytes, length);
 	}
 	msgin->copied_out = 0;
-	msgin->num_buffers = 0;
+	msgin->num_bpages = 0;
 }
 
 /**

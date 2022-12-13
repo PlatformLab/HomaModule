@@ -188,8 +188,10 @@ region with no backing file. Homa will try to concentrate its buffer
 usage in the first pages of the region, only using the higher addresses
 if needed. The region length represents the maximum amount of incoming
 message data that can be buffered for this socket; if space runs out
-then Homa will defer receiving new messages for the socket until some
-of the buffer space has been returned.
+then
+.I
+recvmsg
+calls on the socket will return ENOMEM errors.
 .SH SENDING MESSAGES
 .PP
 To send a request or response message, an application uses library
@@ -209,7 +211,7 @@ kernel call on a Homa socket (Homa does not support the
 .BR recv ,
 or
 .BR recvfrom
-kernel calls because they do not support additional control information
+kernel calls because they do not convey additional control information
 that Homa requires). The fields of the
 .B struct msghdr
 passed to
@@ -259,18 +261,23 @@ struct homa_recvmsg_control {
 	  uint64_t id;
 	  uint64_t completion_cookie;
 	  int flags;
-	  uint32_t num_buffers;
-	  uint32_t buffers[HOMA_MAX_BPAGES];
+	  uint32_t num_bpages;
+	  uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };
 .EE
 .vs +2
 .ps +1
 .in
 .PP
-The structure serves three purposes:
+The structure provides input parameters for
+.BR recvmsg
+and it is modified by
+.B recvmsg
+to return information about the received message:
 .nr step 1 1
 .IP \[bu] 2
-It indicates which messages are of interest to the caller, using the
+The input contents indicate which messages are of interest to the caller,
+using the
 .B flags
 and
 .B id
@@ -291,44 +298,64 @@ for the RPC given
 by
 .B id.
 .IP \[bu]
-It returns buffers to Homa. The number of buffers being returned
+The output contents provide information about where Homa has stored the
+message in the socket's buffer region. Messages are divided up into
+one or more chunks called
+.IR "bpages".
+All but the last bpage for a message will have
+.B HOMA_BPAGE_SIZE
+bytes (which is a power of two) and will be aligned on a
+.B HOMA_BPAGE_SIZE
+boundary within the buffer pool.
+The last bpage for a message may be smaller than
+.B HOMA_BPAGE_SIZE
+and is not necessarily aligned.
+The number of bpages being returned
 (up to
 .BR HOMA_MAX_BPAGES )
 is given by
-.B num_buffers
-and the buffer pointers are stored in
-.BR buffers .
-Each of these pointers must have been passed to the
-application in a previous
-.B recvmsg
-call (they don't need to have all come from the same call).
-.IP \[bu]
-It provides information about the returned message. The
-.BR id
-field will hold the identifier of the message's RPC.
-For response messages,
-.B completion_cookie
-will contain the value that was specified when the request message
-was sent (for request messages it will always be zero).
-The message contents are returned in
-.BR num_buffers
-chunks, whose addresses are stored in
-.BR buffers.
-Each of the buffers except the last will hold
-.BR HOMA_BPAGE_SIZE
-bytes, and
-.BR num_buffers
-will be at most
-.BR HOMA_MAX_BPAGES .
-Each of the pointers in
-.BR buffers
-must eventually be returned to Homa exactly once in a future
+.B num_bpages
+and the locations of the bpages are stored in
+.BR bpage_offsets .
+Each entry in
+.BR bpage_offsets
+is an offset from the beginning of the buffer region
+for the socket. Each of these bpages is now owned by the application
+and must be returned to Homa in a future
 .BR recvmsg
-call. The address of the caller will be returned via the
+call (see below).
+.IP \[bu]
+The output contents provide additional information about the message.
+The identifier of the message's RPC will be returned in the
+.BR id
+field, and
+.B completion_cookie
+will contain the value that was specified when the request
+was sent (for request messages it will always be zero).
+In addition, the address of the sender is returned via the
 .B msg_name
 field of the
 .B struct msghdr
-passed to the call.
+passed to
+.BR recvmsg .
+.IP \[bu]
+The input values of
+.B num_bpages
+and
+.B bpage_offsets
+are used to return buffer space to Homa.
+Each of the
+.B num_bpages
+values in
+.B bpage_offsets
+must have been returned by some previous call to
+.BR recvmsg .
+The order of the bpages returned in
+.B bpage_offsets
+is irrelevant, and a single
+.B recvmsg
+call can include bpages from multiple messages; all that matters is
+that each bpage is returned to Homa exactly once.
 .PP
 If
 .BR recvmsg
@@ -347,6 +374,12 @@ is returned). For request messages, this can happen after
 .B EFAULT
 errors (such as, for example, the kernel couldn't write to user space to return
 the message or other metadata associated with the system call).
+If an error is returned with an
+.BR errno
+value of
+.B ENOMEM
+it means that space in the buffer pool was exhausted: either the pool was
+too small, or the application failed to return bpages to Homa.
 .PP
 Nonblocking behavior may be requested for
 .BR recvmsg

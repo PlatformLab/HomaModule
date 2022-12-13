@@ -520,7 +520,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		if (resp_length != 12)
 			printf("Expected 12 bytes in response, received %ld\n",
 					resp_length);
-		response = (int *) (buf_region + recv_control.buffers[0]);
+		response = (int *) (buf_region + recv_control.bpage_offsets[0]);
 		status = homa_send(fd, buffers[(response[2]/1000) %count],
 				length, dest, &id, 0);
 		if (status < 0) {
@@ -909,7 +909,7 @@ int main(int argc, char** argv)
 	}
 	recv_control.id = 0;
 	recv_control.flags = 0;
-	recv_control.num_buffers = 0;
+	recv_control.num_bpages = 0;
 	recv_hdr.msg_name = &source_addr;
 	recv_hdr.msg_namelen = sizeof32(source_addr);
 	recv_hdr.msg_iov = NULL;

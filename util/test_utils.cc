@@ -74,11 +74,11 @@ int check_message(struct homa_recvmsg_control *control, char *region,
 	int num_ints, seed;
 	int count = 0;
 
-	seed = *((int *) (region + control->buffers[0] + skip));
-	for (uint32_t i = 0; i < control->num_buffers; i++) {
+	seed = *((int *) (region + control->bpage_offsets[0] + skip));
+	for (uint32_t i = 0; i < control->num_bpages; i++) {
 		size_t buf_length = ((length > HOMA_BPAGE_SIZE) ? HOMA_BPAGE_SIZE
 				: length) - skip;
-		int *ints = (int *) (region + control->buffers[i] + skip);
+		int *ints = (int *) (region + control->bpage_offsets[i] + skip);
 		num_ints = (buf_length + sizeof(int) - 1)/sizeof(int);
 		skip = 0;
 		for (int j = 0; j < num_ints; j++) {

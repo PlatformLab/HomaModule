@@ -230,9 +230,9 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 		if (homa_pool_get_pages(pool, full_pages, pages, 0) != 0)
 			return -1;
 		for (i = 0; i < full_pages; i++)
-			rpc->msgin.buffers[i] = pages[i] << HOMA_BPAGE_SHIFT;
+			rpc->msgin.bpage_offsets[i] = pages[i] << HOMA_BPAGE_SHIFT;
 	}
-	rpc->msgin.num_buffers = full_pages;
+	rpc->msgin.num_bpages = full_pages;
 
 	/* The last chunk may be less than a full bpage; for this we use
 	 * a bpage that we own (and reuse for multiple messages).
@@ -271,18 +271,18 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	/* Can't use the current page; get another one. */
 	new_page:
 	if (homa_pool_get_pages(pool, 1, pages, 1) != 0) {
-		homa_pool_release_buffers(pool, rpc->msgin.num_buffers,
-				rpc->msgin.buffers);
-		rpc->msgin.num_buffers = 0;
+		homa_pool_release_buffers(pool, rpc->msgin.num_bpages,
+				rpc->msgin.bpage_offsets);
+		rpc->msgin.num_bpages = 0;
 		return -1;
 	}
 	core->page_hint = pages[0];
 	core->allocated = 0;
 
 	allocate_partial:
-	rpc->msgin.buffers[rpc->msgin.num_buffers] = core->allocated
+	rpc->msgin.bpage_offsets[rpc->msgin.num_bpages] = core->allocated
 			+ (core->page_hint << HOMA_BPAGE_SHIFT);
-	rpc->msgin.num_buffers++;
+	rpc->msgin.num_bpages++;
 	core->allocated += partial;
 	return 0;
 }
@@ -303,16 +303,16 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 {
 	int bpage_index, bpage_offset;
 
-	if (rpc->msgin.num_buffers == 0)
+	if (rpc->msgin.num_bpages == 0)
 		if (homa_pool_allocate(rpc) != 0)
 			return NULL;
 	bpage_index = offset >> HOMA_BPAGE_SHIFT;
-	BUG_ON(bpage_index >= rpc->msgin.num_buffers);
+	BUG_ON(bpage_index >= rpc->msgin.num_bpages);
 	bpage_offset = offset & (HOMA_BPAGE_SIZE-1);
-	*available = (bpage_index < (rpc->msgin.num_buffers-1))
+	*available = (bpage_index < (rpc->msgin.num_bpages-1))
 			? HOMA_BPAGE_SIZE - bpage_offset
 			: rpc->msgin.total_length - offset;
-	return rpc->hsk->buffer_pool.region + rpc->msgin.buffers[bpage_index]
+	return rpc->hsk->buffer_pool.region + rpc->msgin.bpage_offsets[bpage_index]
 			+ bpage_offset;
 }
 

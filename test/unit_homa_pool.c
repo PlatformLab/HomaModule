@@ -289,10 +289,10 @@ TEST_F(homa_pool, homa_pool_allocate__basics)
 	ASSERT_NE(NULL, crpc);
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(3, crpc->msgin.num_buffers);
-	EXPECT_EQ(0, crpc->msgin.buffers[0]);
+	EXPECT_EQ(3, crpc->msgin.num_bpages);
+	EXPECT_EQ(0, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(-1, pool->descriptors[0].owner);
-	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.buffers[2]);
+	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[2]);
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(150000 - 2*HOMA_BPAGE_SIZE,
 			pool->cores[cpu_number].allocated);
@@ -312,7 +312,7 @@ TEST_F(homa_pool, homa_pool_allocate__out_of_buffer_space)
 	atomic_set(&pool->descriptors[4].refs, 1);
 
 	EXPECT_EQ(1, -homa_pool_allocate(crpc));
-	EXPECT_EQ(0, crpc->msgin.num_buffers);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 }
 TEST_F(homa_pool, homa_pool_allocate__owned_page_locked)
 {
@@ -327,11 +327,11 @@ TEST_F(homa_pool, homa_pool_allocate__owned_page_locked)
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
-	crpc->msgin.num_buffers = 0;
+	crpc->msgin.num_bpages = 0;
         mock_trylock_errors = 1;
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(1, crpc->msgin.num_buffers);
-	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(1, crpc->msgin.num_bpages);
+	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
 	EXPECT_EQ(1, pool->descriptors[2].owner);
@@ -354,8 +354,8 @@ TEST_F(homa_pool, homa_pool_allocate__reuse_owned_page)
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc1));
 	EXPECT_EQ(0, homa_pool_allocate(crpc2));
-	EXPECT_EQ(1, crpc1->msgin.num_buffers);
-	EXPECT_EQ(1, crpc2->msgin.num_buffers);
+	EXPECT_EQ(1, crpc1->msgin.num_bpages);
+	EXPECT_EQ(1, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, atomic_read(&pool->descriptors[2].refs));
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(5000, pool->cores[cpu_number].allocated);
@@ -374,7 +374,7 @@ TEST_F(homa_pool, homa_pool_allocate__cant_allocate_partial_bpage)
 	ASSERT_NE(NULL, crpc);
 
 	EXPECT_EQ(-1, homa_pool_allocate(crpc));
-	EXPECT_EQ(0, crpc->msgin.num_buffers);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[4].refs));
@@ -392,11 +392,11 @@ TEST_F(homa_pool, homa_pool_allocate__not_enough_space_in_owned_page)
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
-	crpc->msgin.num_buffers = 0;
+	crpc->msgin.num_bpages = 0;
 	pool->cores[cpu_number].allocated = HOMA_BPAGE_SIZE-1900;
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(1, crpc->msgin.num_buffers);
-	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(1, crpc->msgin.num_bpages);
+	EXPECT_EQ(3*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(3, pool->cores[cpu_number].page_hint);
 	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
 	EXPECT_EQ(-1, pool->descriptors[2].owner);
@@ -417,8 +417,8 @@ TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
 
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
 	EXPECT_EQ(2, pool->cores[cpu_number].page_hint);
-	EXPECT_EQ(1, crpc->msgin.num_buffers);
-	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.buffers[0]);
+	EXPECT_EQ(1, crpc->msgin.num_bpages);
+	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(2000, pool->cores[cpu_number].allocated);
 	EXPECT_EQ(cpu_number, pool->descriptors[2].owner);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.bpage_reuses);
@@ -450,7 +450,7 @@ TEST_F(homa_pool, homa_pool_get_buffer__cant_allocate_buffers)
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(-1, homa_pool_allocate(crpc));
-	EXPECT_EQ(0, crpc->msgin.num_buffers);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 }
 
 TEST_F(homa_pool, homa_pool_release_buffers)
@@ -475,8 +475,8 @@ TEST_F(homa_pool, homa_pool_release_buffers)
 	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(2, atomic_read(&pool->descriptors[2].refs));
 
-	homa_pool_release_buffers(pool, crpc1->msgin.num_buffers,
-			crpc1->msgin.buffers);
+	homa_pool_release_buffers(pool, crpc1->msgin.num_bpages,
+			crpc1->msgin.bpage_offsets);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 	EXPECT_EQ(1, atomic_read(&pool->descriptors[2].refs));
@@ -484,8 +484,8 @@ TEST_F(homa_pool, homa_pool_release_buffers)
 	/* Ignore requests if pool not initialized. */
 	saved_region = pool->region;
 	pool->region = NULL;
-	homa_pool_release_buffers(pool, crpc1->msgin.num_buffers,
-			crpc1->msgin.buffers);
+	homa_pool_release_buffers(pool, crpc1->msgin.num_bpages,
+			crpc1->msgin.bpage_offsets);
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	pool->region = saved_region;
 }

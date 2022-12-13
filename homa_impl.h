@@ -645,16 +645,16 @@ struct homa_message_in {
 	int copied_out;
 
 	/**
-	 * @num_buffers: The number of entries in @buffers used for this
+	 * @num_bpages: The number of entries in @bpage_offsets used for this
 	 * message (0 means buffers not allocated yet).
 	 */
-	__u32 num_buffers;
+	__u32 num_bpages;
 
-	/** @buffers: Describes buffer space allocated for this message.
+	/** @bpage_offsets: Describes buffer space allocated for this message.
 	 * Each entry is an offset from the start of the buffer region.
 	 * All but the last pointer refer to areas of size HOMA_BPAGE_SIZE.
 	 */
-	__u32 buffers[HOMA_MAX_BPAGES];
+	__u32 bpage_offsets[HOMA_MAX_BPAGES];
 };
 
 /**

@@ -50,7 +50,7 @@ public:
 	{
 		if (static_cast<ssize_t>(offset) >= msg_length)
 			return 0;
-		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_buffers-1))
+		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_bpages-1))
 			return msg_length - offset;
 		return HOMA_BPAGE_SIZE - (offset & (HOMA_BPAGE_SIZE-1));
 	}
@@ -89,7 +89,7 @@ public:
 			return nullptr;
 		if (contiguous(offset) > sizeof(T))
 			return reinterpret_cast<T*>(buf_region
-					+ control.buffers[buf_num]
+					+ control.bpage_offsets[buf_num]
 					+ (offset & (HOMA_BPAGE_SIZE - 1)));
 		if (storage)
 			copy_out(storage, offset, sizeof(T));

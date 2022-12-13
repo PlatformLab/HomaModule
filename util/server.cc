@@ -126,7 +126,7 @@ void homa_server(int port)
 			printf("recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
-		int resp_length = ((int *) (buf_region + control.buffers[0]))[1];
+		int resp_length = ((int *) (buf_region + control.bpage_offsets[0]))[1];
 		if (validate) {
 			seed = check_message(&control, buf_region, length,
 					2*sizeof32(int));
@@ -150,7 +150,7 @@ void homa_server(int port)
 			vecs[num_vecs].iov_len = (resp_length > HOMA_BPAGE_SIZE)
 					? HOMA_BPAGE_SIZE : resp_length;
 			vecs[num_vecs].iov_base = buf_region
-					+ control.buffers[num_vecs];
+					+ control.bpage_offsets[num_vecs];
 			resp_length -= vecs[num_vecs].iov_len;
 			num_vecs++;
 		}
