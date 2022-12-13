@@ -34,7 +34,7 @@ struct msghdr {
     socklen_t     msg_namelen;    /* Size of address. */
     struct iovec *msg_iov;        /* Message contents: one or more extents. */
     size_t        msg_iovlen;     /* Number of elements in msg_iov. */
-    void         *msg_control;    /* Address of homa_send_msg_args struct. */
+    void         *msg_control;    /* Address of homa_sendmsg_args struct. */
     size_t        msg_controllen; /* Must always be zero (if not, sendmsg will
                                    * fail with EINVAL, for arcane reasons). */
     int           msg_flags;      /* Not used by Homa. */
@@ -119,15 +119,11 @@ is not a valid open file descriptor.
 .B EFAULT
 An invalid user space address was specified for an argument.
 .TP
-.B EINTR
-A signal occurred before any data was transmitted; see
-.BR signal (7).
-.TP
 .B EINVAL
 The size of the request exceeded
 .B HOMA_MAX_MESSAGE_LENGTH, or
 .I sockfd
-was not a Homa socket, or a nonzero completion coookie was specified
+was not a Homa socket, or a nonzero completion cookie was specified
 for a response message, or the
 .B id
 for a response message does not match an existing RPC for which a
