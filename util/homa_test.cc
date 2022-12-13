@@ -55,7 +55,7 @@ int seed = 12345;
 char *buf_region;
 
 /* Control blocks for receiving messages. */
-struct homa_recvmsg_control recv_control;
+struct homa_recvmsg_args recv_args;
 struct msghdr recv_hdr;
 
 /* Address of message sender. */
@@ -145,8 +145,8 @@ void test_close()
 		exit(1);
 	}
 	std::thread thread(close_fd, fd);
-	recv_control.id = 0;
-	recv_control.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.id = 0;
+	recv_args.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
@@ -187,8 +187,8 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	}
 	total = 0;
 	for (int i = 1; i <= count; i++) {
-		recv_control.id = 0;
-		recv_control.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.id = 0;
+		recv_args.flags = HOMA_RECVMSG_RESPONSE;
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
 			printf("Error in recvmsg for id %lu: %s\n",
@@ -228,19 +228,19 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 	} else {
 		printf("homa_send succeeded, id %lu\n", id);
 	}
-	recv_control.id = 0;
-	recv_control.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.id = 0;
+	recv_args.flags = HOMA_RECVMSG_RESPONSE;
 	resp_length = recvmsg(fd, &recv_hdr, 0);
 	if (resp_length < 0) {
 		printf("Error in recvmsg: %s\n", strerror(errno));
 		return;
 	}
-	int seed = check_message(&recv_control, buf_region, resp_length,
+	int seed = check_message(&recv_args, buf_region, resp_length,
 			2*sizeof32(int));
 	printf("Received message from %s with %lu bytes, "
 			"seed %d, id %lu\n",
 			print_address(&source_addr), resp_length, seed,
-			recv_control.id);
+			recv_args.id);
 }
 
 /**
@@ -306,8 +306,8 @@ void test_poll(int fd, char *request)
 		return;
 	}
 
-	recv_control.id = 0;
-	recv_control.flags = HOMA_RECVMSG_REQUEST;
+	recv_args.id = 0;
+	recv_args.flags = HOMA_RECVMSG_REQUEST;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0)
 		printf("Error in recvmsg: %s\n", strerror(errno));
@@ -365,8 +365,8 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 					strerror(errno));
 			return;
 		}
-		recv_control.id = 0;
-		recv_control.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.id = 0;
+		recv_args.flags = HOMA_RECVMSG_RESPONSE;
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (i >= 0)
 			times[i] = rdtsc() - start;
@@ -439,8 +439,8 @@ void test_shutdown(int fd)
 
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
-	recv_control.id = 0;
-	recv_control.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.id = 0;
+	recv_args.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
 		printf("Received %d bytes\n", result);
@@ -450,8 +450,8 @@ void test_shutdown(int fd)
 	}
 
 	/* Make sure that future reads also fail. */
-	recv_control.id = 0;
-	recv_control.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.id = 0;
+	recv_args.flags = HOMA_RECVMSG_RESPONSE;
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0) {
 		printf("Second recvmsg call also failed: %s\n",
@@ -509,8 +509,8 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 	while (1){
 		int *response;
 
-		recv_control.id = 0;
-		recv_control.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.id = 0;
+		recv_args.flags = HOMA_RECVMSG_RESPONSE;
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
 			printf("Error in recvmsg: %s\n",
@@ -520,7 +520,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		if (resp_length != 12)
 			printf("Expected 12 bytes in response, received %ld\n",
 					resp_length);
-		response = (int *) (buf_region + recv_control.bpage_offsets[0]);
+		response = (int *) (buf_region + recv_args.bpage_offsets[0]);
 		status = homa_send(fd, buffers[(response[2]/1000) %count],
 				length, dest, &id, 0);
 		if (status < 0) {
@@ -731,7 +731,7 @@ void test_tmp(int fd, int count)
 {
 	struct msghdr h;
 	char addr[20];
-	struct homa_recvmsg_control control;
+	struct homa_recvmsg_args control;
 	struct iovec vecs[2];
 	char buffer1[10], buffer2[20];
 
@@ -907,15 +907,15 @@ int main(int argc, char** argv)
 				strerror(errno));
 		exit(1);
 	}
-	recv_control.id = 0;
-	recv_control.flags = 0;
-	recv_control.num_bpages = 0;
+	recv_args.id = 0;
+	recv_args.flags = 0;
+	recv_args.num_bpages = 0;
 	recv_hdr.msg_name = &source_addr;
 	recv_hdr.msg_namelen = sizeof32(source_addr);
 	recv_hdr.msg_iov = NULL;
 	recv_hdr.msg_iovlen = 0;
-	recv_hdr.msg_control = &recv_control;
-	recv_hdr.msg_controllen = sizeof(recv_control);
+	recv_hdr.msg_control = &recv_args;
+	recv_hdr.msg_controllen = sizeof(recv_args);
 	recv_hdr.msg_flags = 0;
 
 	for ( ; nextArg < argc; nextArg++) {

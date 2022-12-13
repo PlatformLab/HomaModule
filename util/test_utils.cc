@@ -68,7 +68,7 @@ int check_buffer(void *buffer, size_t length)
  *
  * Return: the seed value that was used to generate the buffer.
  */
-int check_message(struct homa_recvmsg_control *control, char *region,
+int check_message(struct homa_recvmsg_args *control, char *region,
 		size_t length, int skip)
 {
 	int num_ints, seed;

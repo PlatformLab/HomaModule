@@ -499,7 +499,7 @@ static int __init homa_load(void) {
 			sizeof32(struct tcp_sock),
 			sizeof32(struct homa_rpc),
 			sizeof32(struct sk_buff),
-			sizeof32(struct homa_recvmsg_control),
+			sizeof32(struct homa_recvmsg_args),
 			sizeof32(sockaddr_in_union),
 			HOMA_MAX_BPAGES,
 			NR_CPUS,
@@ -985,7 +985,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		 int nonblocking, int flags, int *addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_recvmsg_control control;
+	struct homa_recvmsg_args control;
 	__u64 start = get_cycles();
 	struct homa_rpc *rpc;
 	__u64 finish;
@@ -1109,7 +1109,7 @@ done:
 	 * doesn't change.
 	 */
 	msg->msg_control = ((char *) msg->msg_control)
-			+ sizeof(struct homa_recvmsg_control);
+			+ sizeof(struct homa_recvmsg_args);
 
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",

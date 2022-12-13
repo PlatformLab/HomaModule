@@ -96,16 +96,16 @@ struct homa_sendmsg_args {
 };
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_sendmsg_args) >= 16,
-		"homa_sendmsg_control shrunk");
+		"homa_sendmsg_args shrunk");
 _Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
-		"homa_sendmsg_control grew");
+		"homa_sendmsg_args grew");
 #endif
 
 /**
- * struct homa_recvmsg_control - Provides information needed by Homa's
+ * struct homa_recvmsg_args - Provides information needed by Homa's
  * recvmsg; passed to recvmsg using the msg_control field.
  */
-struct homa_recvmsg_control {
+struct homa_recvmsg_args {
 
 	/**
 	 * @id: (in/out) Initially specifies the id of the desired RPC, or 0
@@ -148,13 +148,13 @@ struct homa_recvmsg_control {
 	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recvmsg_control) >= 96,
-		"homa_recvmsg_control shrunk");
-_Static_assert(sizeof(struct homa_recvmsg_control) <= 96,
-		"homa_recvmsg_control grew");
+_Static_assert(sizeof(struct homa_recvmsg_args) >= 96,
+		"homa_recvmsg_args shrunk");
+_Static_assert(sizeof(struct homa_recvmsg_args) <= 96,
+		"homa_recvmsg_args grew");
 #endif
 
-/* Flag bits for homa_recvmsg_control.flags (see man page for documentation):
+/* Flag bits for homa_recvmsg_args.flags (see man page for documentation):
  */
 #define HOMA_RECVMSG_REQUEST       0x01
 #define HOMA_RECVMSG_RESPONSE      0x02

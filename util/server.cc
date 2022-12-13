@@ -67,7 +67,7 @@ void homa_server(int port)
 	sockaddr_in_union addr_in;
 	sockaddr_in_union source;
 	int length;
-	struct homa_recvmsg_control control;
+	struct homa_recvmsg_args recv_args;
 	struct msghdr hdr;
 	struct homa_set_buf_args arg;
 	char *buf_region;
@@ -107,40 +107,40 @@ void homa_server(int port)
 		return;
 	}
 
-	memset(&control, 0, sizeof(control));
+	memset(&recv_args, 0, sizeof(recv_args));
 	hdr.msg_name = &source;
 	hdr.msg_namelen = sizeof32(source);
 	hdr.msg_iov = NULL;
 	hdr.msg_iovlen = 0;
-	hdr.msg_control = &control;
-	hdr.msg_controllen = sizeof(control);
+	hdr.msg_control = &recv_args;
+	hdr.msg_controllen = sizeof(recv_args);
 	hdr.msg_flags = 0;
 	while (1) {
 		int seed;
 		int result;
 
-		control.id = 0;
-		control.flags = HOMA_RECVMSG_REQUEST;
+		recv_args.id = 0;
+		recv_args.flags = HOMA_RECVMSG_REQUEST;
 		length = recvmsg(fd, &hdr, 0);
 		if (length < 0) {
 			printf("recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
-		int resp_length = ((int *) (buf_region + control.bpage_offsets[0]))[1];
+		int resp_length = ((int *) (buf_region + recv_args.bpage_offsets[0]))[1];
 		if (validate) {
-			seed = check_message(&control, buf_region, length,
+			seed = check_message(&recv_args, buf_region, length,
 					2*sizeof32(int));
 			if (verbose)
 				printf("Received message from %s with %d bytes, "
 					"id %lu, seed %d, response length %d\n",
 					print_address(&source), length,
-					control.id, seed, resp_length);
+					recv_args.id, seed, resp_length);
 		} else
 			if (verbose)
 				printf("Received message from %s with "
 					"%d bytes, id %lu, response length %d\n",
 					print_address(&source), length,
-					control.id, resp_length);
+					recv_args.id, resp_length);
 
 		/* Second word of the message indicates how large a
 		 * response to send.
@@ -150,11 +150,11 @@ void homa_server(int port)
 			vecs[num_vecs].iov_len = (resp_length > HOMA_BPAGE_SIZE)
 					? HOMA_BPAGE_SIZE : resp_length;
 			vecs[num_vecs].iov_base = buf_region
-					+ control.bpage_offsets[num_vecs];
+					+ recv_args.bpage_offsets[num_vecs];
 			resp_length -= vecs[num_vecs].iov_len;
 			num_vecs++;
 		}
-		result = homa_replyv(fd, vecs, num_vecs, &source, control.id);
+		result = homa_replyv(fd, vecs, num_vecs, &source, recv_args.id);
 		if (result < 0) {
 			printf("homa_reply failed: %s\n", strerror(errno));
 		}

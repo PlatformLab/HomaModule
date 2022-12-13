@@ -1443,7 +1443,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  *                assumed to be undefined.
  * @hsk:          Socket on which relevant messages will arrive.  Must not be
  *                locked.
- * @flags:        Flags field from homa_recvmsg_control; see manual entry for
+ * @flags:        Flags field from homa_recvmsg_args; see manual entry for
  *                details.
  * @id:           If non-zero, then the caller is interested in receiving
  *                the response for this RPC (@id must be a client request).
@@ -1549,7 +1549,7 @@ int homa_register_interests(struct homa_interest *interest,
  * that matches the parameters. Various other activities can occur while
  * waiting, such as reaping dead RPCs and copying data to user space.
  * @hsk:          Socket where messages will arrive.
- * @flags:        Flags field from homa_recvmsg_control; see manual entry for
+ * @flags:        Flags field from homa_recvmsg_args; see manual entry for
  *                details.
  * @id:           If non-zero, then a response message matching this id may
  *                be returned (@id must refer to a client request).

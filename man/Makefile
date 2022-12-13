@@ -4,6 +4,7 @@ SRCS := homa.7 \
 	homa_abort.3 \
         homa_reply.3 \
         homa_send.3 \
+        recvmsg.2 \
         sendmsg.2
 
 PDFS := $(patsubst %.2,%.pdf,$(SRCS))

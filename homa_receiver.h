@@ -151,7 +151,7 @@ protected:
 	 * num_buffers != 0, it means this contains buffers from a previous
 	 * message that must be returned to Homa.
 	 */
-	struct homa_recvmsg_control control;
+	struct homa_recvmsg_args control;
 
 	/** @source: Address of the node that sent the current message. */
 	sockaddr_in_union source;

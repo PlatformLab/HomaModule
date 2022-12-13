@@ -28,7 +28,7 @@ extern "C"
 #define sizeof32(type) static_cast<int>(sizeof(type))
 
 extern int     check_buffer(void *buffer, size_t length);
-extern int     check_message(struct homa_recvmsg_control *control,
+extern int     check_message(struct homa_recvmsg_args *control,
 	           char *region, size_t length, int skip);
 extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);

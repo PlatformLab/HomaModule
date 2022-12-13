@@ -1,0 +1,288 @@
+.TH RECVMSG 2 2022-12-13 "Homa" "Linux Programmer's Manual"
+.SH NAME
+recvmsg \- receive a Homa message
+.SH SYNOPSIS
+.nf
+.B #include <homa.h>
+.PP
+.BI "ssize_t recvmsg(int " sockfd ", const struct msghdr *" msg ", int " flags );
+.fi
+.SH DESCRIPTION
+The
+.B recvmsg
+kernel call is used to receive messages (both requests and responses)
+on Homa sockets. The
+.I sockfd
+argument must refer to a Homa socket. The
+.I msg
+argument describes which incoming messages are of interest, and is
+used to return information about the message that is received. The
+.I flags
+argument is not used for its
+.B MSG_DONTWAIT
+bit, which can be used to request nonblocking behavior
+.PP
+The
+.B msg
+argument must point to a structure of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct msghdr {
+    void         *msg_name;       /* Address of sender (sockaddr_in or
+                                   * sockaddr_in6) will be stored here. If NULL,
+                                   * no address info is returned. */
+    socklen_t     msg_namelen;    /* Number of bytes available at *msg_name. */
+    struct iovec *msg_iov;        /* Not used. */
+    size_t        msg_iovlen;     /* Not used. */
+    void         *msg_control;    /* Address of homa_recvmsg_args struct. */
+    size_t        msg_controllen; /* Must be sizeof(struct homa_recvmsg_args). */
+    int           msg_flags;      /* Not used by Homa. */
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+Homa requires additional information beyond what can be represented in a
+.BR "struct msghdr" ,
+so the
+.B msg_controllen
+field must refer to a structure of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_recvmsg_args {
+	  uint64_t id;                             /* If nonzero, specifies id of
+                                              * desired RPC. */
+	  uint64_t completion_cookie;              /* Value from sendmsg for request. */
+	  int flags;                               /* OR-ed combination of bits. */
+	  uint32_t num_bpages;                     /* Number of valid entries in
+                                              * bpage_offsets. */
+	  uint32_t bpage_offsets[HOMA_MAX_BPAGES]  /* Tokens for buffer pages. */
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The
+.B msghdr
+and
+.B homa_recvmsg_args structs are used both for passing parameter
+information into Homa and for receiving result information:
+.nr step 1 1
+.IP \[bu] 2
+The input values for
+.B flags
+and
+.B id
+indicate which messages are of interest to the caller.
+.B Flags
+is a bitmask. If it contains the
+.B HOMA_RECVMSG_REQUEST
+bit, then the caller is interested in any request message.
+If it contains the
+.B HOMA_RECVMSG_RESPONSE
+bit, then the caller is interested in any response message.
+If the
+.B HOMA_RECVMSG_RESPONSE
+bit is zero but
+.B id
+is nonzero, then the caller is interested in receiving a response
+for the RPC given by
+.B id.
+.IP \[bu]
+Homa will use the struts to return information about the message received.
+The
+.B id
+field will be set to the RPC identifier for the received message (if
+.B id
+is odd it means the message is a request; even means that it is a
+response). If
+.IR msg ->\c
+.B msg_name
+is not NULL, then a
+.B sockaddr_in
+or
+.B sockaddr_in6
+will be stored at its target (depnding on the address family of
+.IR sockfd ),
+describing the sender of the message.
+For response messages, the
+.BR completion_cookie
+field will be sent to the value specified when the corresponding request
+was sent (typically this will be information that helps the application
+locate its information about the RPC).
+For requests,
+.B completion_cookie
+will always be zero.
+.IP \[bu]
+The output values of
+.B num_bpages
+and
+.B bpage_offsets
+fields will describe where Homa has stored
+the message in the socket's buffer region. Messages are divided up into
+one or more chunks called
+.IR "bpages".
+All but the last bpage for a message will have
+.B HOMA_BPAGE_SIZE
+bytes (which is a power of two) and will be aligned on a
+.B HOMA_BPAGE_SIZE
+boundary within the buffer pool.
+The last bpage for a message may be smaller than
+.B HOMA_BPAGE_SIZE
+and is not necessarily aligned.
+The number of bpages being returned
+(up to
+.BR HOMA_MAX_BPAGES )
+is given by
+.B num_bpages
+and the locations of the bpages are stored in
+.BR bpage_offsets .
+Each entry in
+.BR bpage_offsets
+is an offset from the beginning of the buffer region
+for the socket. Each of these bpages is now owned by the application
+and must be returned to Homa in a future
+.BR recvmsg
+call (see below).
+.IP \[bu]
+The input values of
+.B num_bpages
+and
+.B bpage_offsets
+are used to return buffer space to Homa.
+Each of the
+.B num_bpages
+values in
+.B bpage_offsets
+must have been returned by some previous call to
+.BR recvmsg .
+The order of the bpages returned in
+.B bpage_offsets
+is irrelevant, and a single
+.B recvmsg
+call can include bpages from multiple messages; all that matters is
+that each bpage is returned to Homa exactly once.
+.PP
+.B recvmsg
+normally waits until a suitable message has arrived, but nonblocking
+behavior may be requested in any of three ways. First, the
+.BR HOMA_RECVMSG_NONBLOCKING
+bit may be set in the
+.B flags
+field of the
+.BR homa_recvmsg_args
+struct. Second, the
+.BR MSG_DONTWAIT
+bit can be set in the
+.BR flags
+argument to
+.BR recvmsg .
+Third, the
+.B O_NONBLOCK
+flag may be set for the socket using
+.BR fcntl .
+If
+.B recvmsg
+is invoked in nonblocking mode and no appropriate message is available,
+it will fail with an
+.I errno
+value of
+.BR EAGAIN .
+.SH RETURN VALUE
+The return value is 0 for success and -1 if an error occurred. If
+.B id
+is zero after an error, it means that the failure prevented a message
+from being received.
+If
+.B id
+is zero, it means that a specific RPC has failed.
+For request messages, this can happen after errors such as
+.B EFAULT
+errors (the kernel couldn't write to user space to return
+the message or other metadata associated with the system call) or
+.B ENOMEM
+(the kernel ran out of buffer space to store the message).
+For response messages,
+.I errno
+values such as
+.BR ENOTCONN ,
+.BR EHOSTUNREACH ,
+or
+.B ETIMEDOUT
+can occur if there was no server at the specified address, it couldn't
+be reached, or it timed out, respectively.
+.B ENOMEM
+can also occur for responses.
+.PP
+After sucessfully receiving a message, an application has two responsibilities.
+First, it must eventually return the message's bpages to Homa as described
+above. Second, if
+the message is a request, the application must eventually send a response
+(Homa retains state for each request until its response has been sent; if
+no responses are sent, kernel state will accumulate without bound).
+.SH ERRORS
+.PP
+When
+.B recvmsg
+returns an error,
+.I errno
+will have one of the following values:
+.TP
+.B EAGAIN
+No appropriate message was available and the operation was nonblocking.
+.TP
+.B EAFNOSUPPORT
+The address family specified by
+.I dest_addr
+does not match the address family specified when the socket was opened
+.RB ( AF_INET
+or
+.BR AF_INET6 ).
+.TP
+.B EBADF
+.I sockfd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+An invalid user space address was specified for an argument.
+.TP
+.B EINTR
+A signal occurred before a message was received; see
+.BR signal (7).
+.TP
+.B EHOSTUNREACH
+No route could be found to the destination host.
+.TP
+.B EINVAL
+The size of the request exceeded
+.BR HOMA_MAX_MESSAGE_LENGTH ,
+or
+.I sockfd
+was not a Homa socket.
+.TP
+.B ENOMEM
+Memory could not be allocated for internal data structures needed
+for the message, or space in the application-supplied buffer pool
+was exhausted.
+.TP
+.B ENOTCONN
+There was no server connected to the port specified when the request
+was sent.
+.TP
+.B ESHUTDOWN
+The socked has been disabled using
+.BR shutdown (2).
+.SH SEE ALSO
+.BR recvmsg (2),
+.BR homa_abort (3),
+.BR homa_reply (3),
+.BR homa_send (3),
+.BR homa (7)
