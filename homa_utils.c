@@ -65,8 +65,6 @@ int homa_init(struct homa *homa)
 			core->softirq_offset = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;
-			core->thread = NULL;
-			core->syscall_end_time = 0;
 			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
@@ -1372,10 +1370,6 @@ char *homa_print_metrics(struct homa *homa)
 				"grant_cycles              %15llu  "
 				"Time spent sending grants\n",
 				m->grant_cycles);
-		homa_append_metric(homa,
-				"user_cycles               %15llu  "
-				"App. time outside Homa kernel call handler\n",
-				m->user_cycles);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",

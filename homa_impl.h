@@ -2171,17 +2171,6 @@ struct homa_metrics {
 	__u64 grant_cycles;
 
 	/**
-	 * @user_cycles: total time spent in user threads between the
-	 * completion of one Homa system call and the initiation of another.
-	 * This includes time spent in kernel call and return, plus time
-	 * in the user thread (including any non-Homa system calls it makes)
-	 * plus time when the thread is preempted (e.g. to run NAPI or
-	 * SoftIRQ handlers). This metric is only useful under very limited
-	 * conditions.
-	 */
-	__u64 user_cycles;
-
-	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
 	 * get_cycles().
 	 */

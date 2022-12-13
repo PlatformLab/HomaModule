@@ -736,17 +736,12 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 	int result;
 	__u64 start = get_cycles();
-	struct homa_core *core = homa_cores[raw_smp_processor_id()];
-	if (current == core->thread)
-		INC_METRIC(user_cycles, start - core->syscall_end_time);
 
 	switch (cmd) {
 	case HOMAIOCABORT:
 		result = homa_ioc_abort(sk, arg);
-		core = homa_cores[raw_smp_processor_id()];
-		core->syscall_end_time = get_cycles();
 		INC_METRIC(abort_calls, 1);
-		INC_METRIC(abort_cycles, core->syscall_end_time - start);
+		INC_METRIC(abort_cycles, get_cycles() - start);
 		break;
 	case HOMAIOCFREEZE:
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, "
@@ -759,7 +754,6 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		result = -EINVAL;
 		break;
 	}
-	core->thread = current;
 	return result;
 }
 
@@ -1115,7 +1109,6 @@ done:
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 			control.id, result,
 			control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
-	homa_cores[raw_smp_processor_id()]->syscall_end_time = finish;
 	INC_METRIC(recv_cycles, finish - start);
 	return result;
 }

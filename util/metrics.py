@@ -328,15 +328,6 @@ if elapsed_secs != 0:
         us_per = (time/calls)/(cpu_khz/1e03)
     print("\nPolling in recv         %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    time = float(deltas["user_cycles"])
-    cores = time/time_delta
-    calls = total_syscalls
-    if calls == 0:
-        us_per = 0
-    else:
-        us_per = (time/calls)/(cpu_khz/1e03)
-    print("App/syscall             %6.2f   %7.2f us/syscall" % (cores, us_per))
-
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
