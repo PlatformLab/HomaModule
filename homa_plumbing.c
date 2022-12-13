@@ -1171,7 +1171,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		homa_peer_add_ack(rpc);
 		homa_rpc_free(rpc);
 	} else {
-		rpc->state = RPC_IN_SERVICE;
+		if (result < 0)
+			homa_rpc_free(rpc);
+		else
+			rpc->state = RPC_IN_SERVICE;
 	}
 	homa_rpc_unlock(rpc);
 

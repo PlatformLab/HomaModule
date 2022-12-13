@@ -584,6 +584,22 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 	EXPECT_EQ(0, srpc->peer->num_acks);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
+{
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
+			(char *) 0x1000000, 100*HOMA_BPAGE_SIZE));
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 100, 200);
+	EXPECT_NE(NULL, srpc);
+	srpc->error = -ENOMEM;
+
+	EXPECT_EQ(ENOMEM, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(self->server_id, self->recvmsg_control.id);
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_control)
 {
 	EXPECT_EQ(0, -homa_pool_init(&self->hsk.buffer_pool, &self->homa,
