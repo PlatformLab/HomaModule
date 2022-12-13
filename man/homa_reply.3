@@ -1,6 +1,6 @@
-.TH HOMA_REPLY 3 2021-08-24 "Homa" "Linux Programmer's Manual"
+.TH HOMA_REPLY 3 2022-12-13 "Homa" "Linux Programmer's Manual"
 .SH NAME
-homa_reply \- send a Homa response message
+homa_reply, homa_replyv \- send a Homa response message
 .SH SYNOPSIS
 .nf
 .B #include <homa.h>
@@ -16,16 +16,16 @@ iovcnt ,
 .BI "               const struct sockaddr *" dest_addr ", size_t " \
 addrlen  ,
 .BI "               uint64_t " id );
-.PP
-.BI "ssize_t homa_replyp(int " sockfd ", struct homa_reply_args *" args );
 .fi
 .SH DESCRIPTION
-The functions
-.BR homa_reply ,
-.BR homa_replyv ,
+.BR homa_reply
 and
-.BR homa_replyp
-transmit a response message using the Homa transport protocol.
+.BR homa_replyv
+are convenience functions layered on top of the
+.B sendmsg
+system call.
+Either may be used to transmit a response message using the Homa
+transport protocol.
 The argument
 .I sockfd
 is the file descriptor of a Homa socket to use for sending the response.
@@ -66,97 +66,27 @@ typedef union sockaddr_in_union {
 The argument
 .I id
 is an identifier previously returned by
-.BR homa_recv (3);
+.BR recvmsg (2);
 along with
 .IR dest_addr ,
 it identifies the request for which this message is the response.
-If no such request is active,
-.B homa_reply
-returns (successfully) without doing anything.
 .PP
 This function returns as soon as the response has been queued for
 transmission.
-.PP
-.B homa_replyp
-is similar to
-.B homa_reply
-and
-.B homa_replyv
-except that the arguments and return values are all packed into a
-structure:
-.PP
-.in +4n
-.ps -1
-.vs -2
-.EX
-struct homa_reply_args {
-    void *message_buf;
-    const struct iovec *iovec;
-    size_t length;
-    sockaddr_in_union dest_addr;
-    uint64_t id;
-};
-.EE
-.vs +2
-.ps +1
-.in
-.PP
-The
-.I message_buf
-and
-.I iovec
-fields indicate where the outgoing message is stored; exactly one of
-these should be non-null.
-The
-.I length
-field is initially set to indicate the size of
-.I message_buf
-or
-.IR iovec .
-The
-.I dest_addr
-and
-.I id
-fields have the same meanings as in
-.BR homa_reply .
-
 .SH RETURN VALUE
 On success, the return value is 0.
 On error, \-1 is returned and
 .I errno
 is set appropriately.
 .SH ERRORS
-.TP
-.B EAFNOSUPPORT
-The address family specified by
-.I dest_addr
-is not supported by Homa.
-.TP
-.B EBADF
-.I sockfd
-is not a valid open file descriptor.
-.TP
-.B EFAULT
-An invalid user space address was specified for an argument.
-.TP
-.B EINTR
-A signal occurred before any data was transmitted; see
-.BR signal (7).
-.TP
-.B EINVAL
-The size of the response exceeded
-.B HOMA_MAX_MESSAGE_LENGTH, or
-.I sockfd
-was not a Homa socket.
-.TP
-.B ENOMEM
-No memory available.
-.TP
-.B ESHUTDOWN
-The socked has been disabled using
-.BR shutdown (2).
+See
+.BR sendmsg (2)
+for details on the
+.I errno
+values returned after errors.
 .SH SEE ALSO
+.BR recvmsg (2),
+.BR sendmsg (2),
 .BR homa_abort (3),
-.BR homa_recv (3),
 .BR homa_send (3),
 .BR homa (7)

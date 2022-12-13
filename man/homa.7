@@ -1,4 +1,4 @@
-.TH HOMA 7 2019-02-15 "Homa" "Linux Programmer's Manual"
+.TH HOMA 7 2022-12-13 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa \- Homa transport protocol
 .SH SYNOPSIS
@@ -194,14 +194,25 @@ recvmsg
 calls on the socket will return ENOMEM errors.
 .SH SENDING MESSAGES
 .PP
-To send a request or response message, an application uses library
-functions
-.B homa_send
-(for requests)
+The
+.B sendmsg
+system call can be used to send request and response messages; see
+Homa's
+.BR sendmsg (2)
+man page for details.
+In addition, Homa provides library functions
+.BR homa_send ,
+.BR homa_sendv ,
+.BR homa_reply ,
 and
-.B homa_reply
-(for responses).
-These functions are described in separate manual pages for each function.
+.BR homa_replyv ,
+which are layered on top of
+.BR sendmsg .
+See the man pages
+.BR homa_send (3)
+and
+.BR homa_reply (3)
+for details on these functions.
 .SH RECEIVING MESSAGES
 .PP
 To receive a request or response message, an application invokes the
@@ -745,6 +756,7 @@ each core is preceded by a line whose counter name is "core"; the value is
 the core number for the following lines. A few counters appear before the first
 "core" line: these are core-independent counters such as elapsed time.
 .SH SEE ALSO
+.BR sendmsg (2),
 .BR homa_abort (3),
 .BR homa_reply (3),
 .BR homa_send (3)

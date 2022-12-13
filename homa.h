@@ -75,46 +75,30 @@ typedef union sockaddr_in_union {
 } sockaddr_in_union;
 
 /**
- * define homa_send_args - Used to pass arguments and results between
- * user space and the HOMAIOCSEND ioctl.
+ * struct homa_sendmsg_args - Provides information needed by Homa's
+ * sendmsg; passed to sendmsg using the msg_control field.
  */
-struct homa_send_args {
-	/** @message_buf: First byte of outgoing message. */
-	void *message_buf;
-
+struct homa_sendmsg_args {
 	/**
-	 * @iovec: Describes outgoing message in multiple disjoint pieces.
-	 * Exactly one of this or @message_buf must be non-null.
+	 * @id: (in/out) An initial value of 0 means a new request is
+	 * being sent; nonzero means the message is a reply to the given
+	 * id. If the message is a request, then the value is modified to
+	 * hold the id of the new RPC.
 	 */
-	const struct iovec *iovec;
-
-	/**
-	 * @length: The number of bytes at *message_buf, or the number of
-	 * elements at *iovec.
-	 */
-	size_t length;
-
-	/** @dest_addr: Address of server to which message_buf will be sent. */
-	sockaddr_in_union dest_addr;
-
-	uint32_t _pad1;
-
-	/** @id: The identifier for the new RPC is returned here. */
 	uint64_t id;
 
 	/**
-	 * @completion_cookie: Will be returned by recvmsg when the
-	 * RPC completes. Typically used to locate app-specific info
-	 * about the RPC.
+	 * @completion_cookie: (in) Used only for request messages; will be
+	 * returned by recvmsg when the RPC completes. Typically used to
+	 * locate app-specific info about the RPC.
 	 */
 	uint64_t completion_cookie;
-
-	uint64_t _pad2[7];
 };
-
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_send_args) >= 128, "homa_send_args shrunk");
-_Static_assert(sizeof(struct homa_send_args) <= 128, "homa_send_args grew");
+_Static_assert(sizeof(struct homa_sendmsg_args) >= 16,
+		"homa_sendmsg_control shrunk");
+_Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
+		"homa_sendmsg_control grew");
 #endif
 
 /**
@@ -178,46 +162,6 @@ _Static_assert(sizeof(struct homa_recvmsg_control) <= 96,
 #define HOMA_RECVMSG_VALID_FLAGS   0x07
 
 /**
- * struct homa_reply_args - Structure that passes arguments and results
- * between user space and the HOMAIOCREPLY ioctl.
- *
- * Ideally this should have the exact same layout as homa_recv_args.
- * Therefore new members should be added at the beginning of the padding,
- * not at the end.
- */
-struct homa_reply_args {
-	/** @message_buf: Where to store incoming message. */
-	void *message_buf;
-
-	/**
-	 * @iovec: Describes store message in multiple disjoint pieces.
-	 * Exactly one of this or @message_buf must be non-null.
-	 */
-	const struct iovec *iovec;
-
-	/**
-	 * @length: Initially holds length of @message_buf or @iovec; modified
-	 * to return total message length.
-	 */
-	size_t length;
-
-	/** @dest_addr: Address of client to which response will be sent. */
-	sockaddr_in_union dest_addr;
-
-	uint32_t _pad1;
-
-	/** @id: Identifier of the RPC to respond to. */
-	uint64_t id;
-	uint64_t completion_cookie;
-
-	uint64_t _pad2[7];
-};
-#if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_reply_args) >= 128, "homa_reply_args shrunk");
-_Static_assert(sizeof(struct homa_reply_args) <= 128, "homa_reply_args grew");
-#endif
-
-/**
  * struct homa_abort_args - Structure that passes arguments and results
  * between user space and the HOMAIOCABORT ioctl.
  */
@@ -267,14 +211,10 @@ struct homa_set_buf_args {
  * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
  */
 
-#define HOMAIOCSEND   _IOWR(0x89, 0xe0, struct homa_send_args)
-#define HOMAIOCRECV   _IOWR(0x89, 0xe1, struct homa_recv_args)
 #define HOMAIOCREPLY  _IOWR(0x89, 0xe2, struct homa_reply_args)
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
-extern ssize_t homa_replyp(int fd, struct homa_reply_args *args);
-extern ssize_t homa_sendp(int fd, struct homa_send_args *args);
 extern int     homa_abortp(int fd, struct homa_abort_args *args);
 
 extern int     homa_send(int sockfd, const void *message_buf,

@@ -33,7 +33,7 @@ from statistics import median
 # in_packet:    data packet received with offset != 0
 # copy_in:      data was just copied from user space into the kernel
 client_patterns = [
-  {"pattern": "homa_ioc_send starting.* id ([0-9]+)",
+  {"pattern": "homa_sendmsg request.* id ([0-9]+)",
     "name": "start"},
   {"pattern": "data copied into request.* id ([0-9]+), length ([0-9]+)",
     "name": "data copied into request",
@@ -72,8 +72,8 @@ server_patterns = [
     "in_packet": True},
   {"pattern":"homa_recvmsg returning id ([0-9]+), length ([0-9]+)",
     "name": "homa_recvmsg returning"},
-  {"pattern":"homa_ioc_reply starting,* id ([0-9]+)",
-    "name": "homa_ioc_reply starting"},
+  {"pattern":"homa_sendmsg response,* id ([0-9]+)",
+    "name": "homa_sendmsg response"},
   {"pattern": "data copied into response.* id ([0-9]+), length ([0-9]+)",
     "name": "data copied into response",
     "copy_in": True},

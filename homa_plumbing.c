@@ -688,201 +688,6 @@ int homa_disconnect(struct sock *sk, int flags) {
 }
 
 /**
- * homa_ioc_reply() - The top-level function for the ioctl that implements
- * the homa_reply user-level API.
- * @sk:       Socket for this request.
- * @arg:      Used to pass information from/to user space.
- *
- * Return: 0 on success, otherwise a negative errno.
- */
-int homa_ioc_reply(struct sock *sk, unsigned long arg) {
-	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_reply_args args;
-	struct iovec iovstack[UIO_FASTIOV];
-
-	// Must be freed at the end of this function.
-	struct iovec *iov = NULL;
-	struct iov_iter iter;
-	int err = 0;
-	struct homa_rpc *srpc;
-	struct homa_peer *peer;
-	struct sk_buff *skbs;
-	size_t length;
-	struct in6_addr canonical_dest;
-
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
-		err = -EFAULT;
-		goto done;
-	}
-	if ((args.message_buf && args.iovec)
-		|| args._pad1
-		|| args._pad2[0]
-		|| args._pad2[1]
-		|| args._pad2[2]
-		|| args._pad2[3]
-		|| args._pad2[4]
-		|| args._pad2[5]
-		|| args._pad2[6]) {
-		return -EINVAL;
-	}
-	tt_record3("homa_ioc_reply starting, id %llu, port %d, pid %d",
-			args.id, hsk->port, current->pid);
-//	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
-//	if (unlikely(err))
-//		return err;
-	canonical_dest = canonical_ipv6_addr(&args.dest_addr);
-	if (unlikely(args.dest_addr.in6.sin6_family &&
-			args.dest_addr.in6.sin6_family != sk->sk_family)) {
-		err = -EAFNOSUPPORT;
-		goto done;
-	}
-
-	if (args.message_buf != NULL) {
-		err = import_single_range(WRITE, args.message_buf, args.length,
-				iovstack, &iter);
-	} else {
-		iov = iovstack;
-		err = import_iovec(WRITE, args.iovec, args.length,
-			ARRAY_SIZE(iovstack), &iov, &iter);
-	}
-	if (err < 0)
-		goto done;
-	err = 0;
-	length = iter.count;
-
-	peer = homa_peer_find(&hsk->homa->peers, &canonical_dest, &hsk->inet);
-	if (IS_ERR(peer)) {
-		err = PTR_ERR(peer);
-		goto done;
-	}
-	skbs = homa_fill_packets(hsk, peer, &iter);
-	if (IS_ERR(skbs)) {
-		err = PTR_ERR(skbs);
-		goto done;
-	}
-	tt_record2("data copied into response message for id %d, length %d",
-			args.id, length);
-
-	srpc = homa_find_server_rpc(hsk, &canonical_dest,
-			ntohs(args.dest_addr.in6.sin6_port), args.id);
-	if (!srpc) {
-		homa_free_skbs(skbs);
-		err = -EINVAL;
-		goto done;
-	}
-	if (srpc->state != RPC_IN_SERVICE) {
-		err = -EINVAL;
-		goto unlock;
-	}
-	srpc->state = RPC_OUTGOING;
-
-	homa_message_out_init(srpc, hsk->port, skbs, length);
-	tt_record1("homa_ioc_reply calling homa_xmit_data for id %u",
-			srpc->id);
-	homa_xmit_data(srpc, false);
-unlock:
-	homa_rpc_unlock(srpc);
-
-done:
-//	tt_record3("homa_ioc_reply finished, id %llu, port %d, length %d",
-//			args.id, hsk->client_port, args.length);
-	kfree(iov);
-	return err;
-}
-
-/**
- * homa_ioc_send() - The top-level function for the ioctl that implements
- * the homa_send user-level API.
- * @sk:       Socket for this request.
- * @arg:      Used to pass information from/to user space.
- *
- * Return: 0 on success, otherwise a negative errno.
- */
-int homa_ioc_send(struct sock *sk, unsigned long arg) {
-	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_send_args args;
-	struct iovec iovstack[UIO_FASTIOV];
-
-	// Must be freed at the end of this function.
-	struct iovec *iov = NULL;
-	struct iov_iter iter;
-	int err;
-	struct homa_rpc *crpc = NULL;
-
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args)))) {
-		err = -EFAULT;
-		goto error;
-	}
-	if ((args.message_buf && args.iovec)
-		|| args._pad1
-		|| args._pad2[0]
-		|| args._pad2[1]
-		|| args._pad2[2]
-		|| args._pad2[3]
-		|| args._pad2[4]
-		|| args._pad2[5]
-		|| args._pad2[6]) {
-		return -EINVAL;
-	}
-//	err = audit_sockaddr(sizeof(args.dest_addr), &args.dest_addr);
-//	if (unlikely(err))
-//		return err;
-	tt_record3("homa_ioc_send starting, target 0x%x:%d, id %u",
-	                (args.dest_addr.in6.sin6_family == AF_INET)
-			? ntohl(args.dest_addr.in4.sin_addr.s_addr)
-			: tt_addr(args.dest_addr.in6.sin6_addr),
-			ntohs(args.dest_addr.in6.sin6_port),
-			atomic64_read(&hsk->homa->next_outgoing_id));
-	if (unlikely(args.dest_addr.in6.sin6_family &&
-			args.dest_addr.in6.sin6_family != sk->sk_family)) {
-		err = -EAFNOSUPPORT;
-		goto error;
-	}
-
-	if (args.message_buf != NULL) {
-		err = import_single_range(WRITE, args.message_buf, args.length,
-				iovstack, &iter);
-	} else {
-		iov = iovstack;
-		err = import_iovec(WRITE, args.iovec, args.length,
-				ARRAY_SIZE(iovstack), &iov, &iter);
-	}
-	if (err < 0)
-		goto error;
-	err = 0;
-
-	crpc = homa_rpc_new_client(hsk, &args.dest_addr, &iter);
-	if (IS_ERR(crpc)) {
-		err = PTR_ERR(crpc);
-		crpc = NULL;
-		goto error;
-	}
-	tt_record2("data copied into request message for id %d, length %d",
-			crpc->id, crpc->msgout.length);
-	crpc->completion_cookie = args.completion_cookie;
-	homa_xmit_data(crpc, false);
-
-	if (unlikely(copy_to_user(&((struct homa_send_args *) arg)->id,
-			&crpc->id, sizeof(crpc->id)))) {
-		err = -EFAULT;
-		goto error;
-	}
-	tt_record3("homa_ioc_send finished, id %llu, port %d, length %d",
-			crpc->id, hsk->port, args.length);
-	homa_rpc_unlock(crpc);
-	kfree(iov);
-	return 0;
-
-    error:
-	if (crpc) {
-		homa_rpc_free(crpc);
-		homa_rpc_unlock(crpc);
-	}
-	kfree(iov);
-	return err;
-}
-
-/**
  * homa_ioc_abort() - The top-level function for the ioctl that implements
  * the homa_abort user-level API.
  * @sk:       Socket for this request.
@@ -936,20 +741,6 @@ int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
 		INC_METRIC(user_cycles, start - core->syscall_end_time);
 
 	switch (cmd) {
-	case HOMAIOCSEND:
-		result = homa_ioc_send(sk, arg);
-		core = homa_cores[raw_smp_processor_id()];
-		core->syscall_end_time = get_cycles();
-		INC_METRIC(send_calls, 1);
-		INC_METRIC(send_cycles, core->syscall_end_time - start);
-		break;
-	case HOMAIOCREPLY:
-		result = homa_ioc_reply(sk, arg);
-		core = homa_cores[raw_smp_processor_id()];
-		core->syscall_end_time = get_cycles();
-		INC_METRIC(reply_calls, 1);
-		INC_METRIC(reply_cycles, core->syscall_end_time - start);
-		break;
 	case HOMAIOCABORT:
 		result = homa_ioc_abort(sk, arg);
 		core = homa_cores[raw_smp_processor_id()];
@@ -1045,17 +836,138 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 }
 
 /**
- * homa_sendmsg() - Send a message on a Homa socket.
+ * homa_sendmsg() - Send a request or response message on a Homa socket.
  * @sk:    Socket on which the system call was invoked.
- * @msg:   Structure describing the message to send.
+ * @msg:   Structure describing the message to send; the msg_control
+ *         field points to additional information.
  * @len:   Number of bytes of the message.
  * Return: 0 on success, otherwise a negative errno.
  */
-int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len) {
-	/* Homa doesn't support the usual read-write kernel calls; must
-	 * invoke operations through ioctls in order to manipulate RPC ids.
-	 */
-	return -EINVAL;
+int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
+	struct homa_sock *hsk = homa_sk(sk);
+	struct homa_sendmsg_args args;
+	__u64 start = get_cycles();
+	__u64 finish;
+	int result = 0;
+	struct homa_rpc *rpc = NULL;
+	struct sk_buff *skbs = NULL;
+	sockaddr_in_union *addr = (sockaddr_in_union *) msg->msg_name;
+
+	if (unlikely(!msg->msg_control_is_user)) {
+		result = -EINVAL;
+		goto error;
+	}
+	if (unlikely(copy_from_user(&args, msg->msg_control,
+			sizeof(args)))) {
+		result = -EFAULT;
+		goto error;
+	}
+	if (addr->in6.sin6_family != sk->sk_family) {
+		result = -EAFNOSUPPORT;
+		goto error;
+	}
+
+	if (!args.id) {
+		/* This is a request message. */
+		INC_METRIC(send_calls, 1);
+		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
+				(addr->in6.sin6_family == AF_INET)
+				? ntohl(addr->in4.sin_addr.s_addr)
+				: tt_addr(addr->in6.sin6_addr),
+				ntohs(addr->in6.sin6_port),
+				atomic64_read(&hsk->homa->next_outgoing_id),
+				length);
+
+		rpc = homa_rpc_new_client(hsk, addr, &msg->msg_iter);
+		if (IS_ERR(rpc)) {
+			tt_record("error 2");
+			result = PTR_ERR(rpc);
+			rpc = NULL;
+			goto error;
+		}
+		tt_record2("data copied into request message for id %d, length %d",
+				rpc->id, rpc->msgout.length);
+		rpc->completion_cookie = args.completion_cookie;
+		args.id = rpc->id;
+		homa_xmit_data(rpc, false);
+		homa_rpc_unlock(rpc);
+		rpc = NULL;
+
+		if (unlikely(copy_to_user(msg->msg_control, &args,
+				sizeof(args)))) {
+			rpc = homa_find_client_rpc(hsk, args.id);
+			result = -EFAULT;
+			goto error;
+		}
+		finish = get_cycles();
+		INC_METRIC(send_cycles, finish - start);
+	} else {
+		/* This is a response message. */
+		struct in6_addr canonical_dest;
+		struct homa_peer *peer;
+
+		INC_METRIC(reply_calls, 1);
+		tt_record4("homa_sendmsg response, id %llu, port %d, pid %d, length %d",
+				args.id, hsk->port, current->pid, length);
+		if (args.completion_cookie != 0) {
+			result = -EINVAL;
+			goto error;
+		}
+		canonical_dest = canonical_ipv6_addr(addr);
+		peer = homa_peer_find(&hsk->homa->peers, &canonical_dest,
+				&hsk->inet);
+		if (IS_ERR(peer)) {
+			result = PTR_ERR(peer);
+			goto error;
+		}
+		skbs = homa_fill_packets(hsk, peer, &msg->msg_iter);
+		if (IS_ERR(skbs)) {
+			result = PTR_ERR(skbs);
+			skbs = NULL;
+			goto error;
+		}
+		tt_record2("data copied into response packets for id %d, length %d",
+				args.id, length);
+
+		rpc = homa_find_server_rpc(hsk, &canonical_dest,
+				ntohs(addr->in6.sin6_port), args.id);
+		if (!rpc) {
+			result = -EINVAL;
+			goto error;
+		}
+		if (rpc->error) {
+			result = rpc->error;
+			goto error;
+		}
+		if (rpc->state != RPC_IN_SERVICE) {
+			homa_rpc_unlock(rpc);
+			rpc = 0;
+			result = -EINVAL;
+			goto error;
+		}
+		rpc->state = RPC_OUTGOING;
+
+		homa_message_out_init(rpc, hsk->port, skbs, length);
+		skbs = NULL;
+		homa_xmit_data(rpc, false);
+		homa_rpc_unlock(rpc);
+		finish = get_cycles();
+		INC_METRIC(reply_cycles, finish - start);
+	}
+	tt_record1("homa_sendmsg finished, id %d", args.id);
+	return 0;
+
+error:
+	if (rpc) {
+		homa_rpc_free(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	if (skbs)
+		homa_free_skbs(skbs);
+	tt_record2("homa_sendmsg returning error %d for id %d",
+			result, args.id);
+	tt_freeze();
+	return result;
 }
 
 /**
@@ -1080,6 +992,12 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 	int result;
 
 	INC_METRIC(recv_calls, 1);
+	if (unlikely(!msg->msg_control)) {
+		/* This test isn't strictly necessary, but it provides a
+		 * hook for testing kernel call times.
+		 */
+		return -EINVAL;
+	}
 	if (msg->msg_controllen != sizeof(control)) {
 		result = -EINVAL;
 		goto done;

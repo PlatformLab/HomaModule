@@ -3,14 +3,19 @@
 SRCS := homa.7 \
 	homa_abort.3 \
         homa_reply.3 \
-        homa_send.3
+        homa_send.3 \
+        sendmsg.2
 
-PDFS := $(patsubst %.7,%.pdf,$(patsubst %.3,%.pdf,$(SRCS)))
-
+PDFS := $(patsubst %.2,%.pdf,$(SRCS))
+PDFS := $(patsubst %.3,%.pdf,$(PDFS))
+PDFS := $(patsubst %.7,%.pdf,$(PDFS))
 all: $(PDFS)
 
 clean:
 	rm -f *.pdf
+
+%.pdf: %.2
+	pdfroff -man $< > $@
 
 %.pdf: %.3
 	pdfroff -man $< > $@

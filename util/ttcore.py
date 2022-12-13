@@ -84,8 +84,8 @@ if len(sys.argv) > 1:
 if len(substrings) == 0:
     substrings = ["mlx processed",
         "homa_softirq: first",
-        "homa_ioc_recv finished",
-        "homa_ioc_send starting",
+        "homa_recvmsg returning",
+        "homa_sendmsg request",
         "mlx_xmit starting, id",
         "pacer calling",
         "tcp_v4_rcv invoked",

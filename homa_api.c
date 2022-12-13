@@ -30,39 +30,6 @@
 #include "homa.h"
 
 /**
- * homa_replyp() - Send a response message for an RPC.
- * @sockfd:     File descriptor for the socket on which to receive.
- * @args:       Structure that contains parameters for this operation;
- *              results are also returned in this struct.
- * Return:      0 means the response has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
- */
-ssize_t homa_replyp(int sockfd, struct homa_reply_args *args) {
-	return ioctl(sockfd, HOMAIOCREPLY, args);
-}
-
-/**
- * homa_sendp() - Send the request message for a new RPC.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @args:       Structure that contains parameters for this operation;
- *              results are also returned in this struct.
- * Return:      0 means the request has been accepted for delivery. If an
- *              error occurred, -1 is returned and errno is set appropriately.
- */
-ssize_t homa_sendp(int sockfd, struct homa_send_args *args) {
-	return ioctl(sockfd, HOMAIOCSEND, args);
-}
-
-/**
- * homa_abortp() - Terminate the execution of an RPC.
- * @sockfd:     File descriptor for the socket associated with the RPC.
- * @args:       Structure that contains parameters for this operation.
- */
-int homa_abortp(int sockfd, struct homa_abort_args *args) {
-	return ioctl(sockfd, HOMAIOCABORT, args);
-}
-
-/**
  * homa_reply() - Send a response message for an RPC previously received
  * with a call to recvmsg.
  * @sockfd:     File descriptor for the socket on which to send the message.
@@ -83,13 +50,25 @@ int homa_abortp(int sockfd, struct homa_abort_args *args) {
 ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 		const sockaddr_in_union *dest_addr, uint64_t id)
 {
-	struct homa_reply_args args = {};
-	args.message_buf = (void *) message_buf;
-	args.iovec = NULL;
-	args.length = length;
-	args.dest_addr = *dest_addr;
+	struct homa_sendmsg_args args;
+	struct iovec vec;
+	struct msghdr hdr;
+	int result;
+
 	args.id = id;
-	return homa_replyp(sockfd, &args);
+	args.completion_cookie = 0;
+
+	vec.iov_base = (void *) message_buf;
+	vec.iov_len = length;
+
+	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_namelen = sizeof(dest_addr->in4);
+	hdr.msg_iov = &vec;
+	hdr.msg_iovlen = 1;
+	hdr.msg_control = &args;
+	hdr.msg_controllen = 0;
+	result = sendmsg(sockfd, &hdr, 0);
+	return result;
 }
 
 /**
@@ -114,13 +93,21 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 		const sockaddr_in_union *dest_addr, uint64_t id)
 {
-	struct homa_reply_args args = {};
-	args.message_buf = NULL;
-	args.iovec = iov;
-	args.length = iovcnt;
-	args.dest_addr = *dest_addr;
+	struct homa_sendmsg_args args;
+	struct msghdr hdr;
+	int result;
+
 	args.id = id;
-	return homa_replyp(sockfd, &args);
+	args.completion_cookie = 0;
+
+	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_iov = (struct iovec *) iov;
+	hdr.msg_iovlen = iovcnt;
+	hdr.msg_control = &args;
+	hdr.msg_controllen = 0;
+	result = sendmsg(sockfd, &hdr, 0);
+	return result;
 }
 
 /**
@@ -142,15 +129,24 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 		const sockaddr_in_union *dest_addr, uint64_t *id,
 		uint64_t completion_cookie)
 {
-	struct homa_send_args args = {};
+	struct homa_sendmsg_args args;
+	struct iovec vec;
+	struct msghdr hdr;
 	int result;
-	args.message_buf = (void *) message_buf;
-	args.iovec = NULL;
-	args.length = length;
-	args.dest_addr = *dest_addr;
+
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
-	result = homa_sendp(sockfd, &args);
+
+	vec.iov_base = (void *) message_buf;
+	vec.iov_len = length;
+
+	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_namelen = sizeof(dest_addr->in4);
+	hdr.msg_iov = &vec;
+	hdr.msg_iovlen = 1;
+	hdr.msg_control = &args;
+	hdr.msg_controllen = 0;
+	result = sendmsg(sockfd, &hdr, 0);
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;
@@ -177,15 +173,20 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 		const sockaddr_in_union *dest_addr, uint64_t *id,
 		uint64_t completion_cookie)
 {
-	struct homa_send_args args = {};
+	struct homa_sendmsg_args args;
+	struct msghdr hdr;
 	int result;
-	args.message_buf = NULL;
-	args.iovec = iov;
-	args.length = iovcnt;
-	args.dest_addr = *dest_addr;
+
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
-	result = homa_sendp(sockfd, &args);
+
+	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_iov = (struct iovec *) iov;
+	hdr.msg_iovlen = iovcnt;
+	hdr.msg_control = &args;
+	hdr.msg_controllen = 0;
+	result = sendmsg(sockfd, &hdr, 0);
 	if ((result >= 0) && (id != NULL))
 		*id = args.id;
 	return result;

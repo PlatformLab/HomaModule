@@ -46,8 +46,8 @@ else:
 #                    RPC).
 # rcv_lag -          Extra time before first call to homa_pkt_rcv
 # wakeup_lag -       Extra time before the server thread wakes up
-# recv_done -        The time when homa_ioc_recv finishes
-# recv_done_lag -    Extra time to finish homa_ioc_recv
+# recv_done -        The time when homa_recvmsg finishes
+# recv_done_lag -    Extra time to finish homa_recvmsg
 # first_xmit -       Time when first result packet is transmitted
 # first_xmit_lag -   Extra time between receive_done and first_xmit
 # freed -            Time when RPC is freed (last packet transmitted)
@@ -219,7 +219,7 @@ for line in f:
             lag = 0.0
         rpc["wakeup_lag"] = lag
 
-    if re.match('.*homa_ioc_recv finished', line):
+    if re.match('.*homa_recvmsg returning', line):
         rpc["recv_done"] = time
         if not "wakeup_lag" in rpc:
             rpc["wakeup_lag"] = 0

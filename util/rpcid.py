@@ -190,9 +190,9 @@ def analyze_rpc(id, client_num, server_num):
         elif "received message while polling" in line:
             event = "wakeup polling thread"
             add_stat("server wakeup", gap)
-        elif "homa_ioc_recv finished" in line:
-            event = "ioc_recv"
-        elif "homa_ioc_reply starting," in line:
+        elif "homa_recvmsg returning" in line:
+            event = "recvmsg"
+        elif "homa_sendmsg response," in line:
             event ="application"
         elif "mlx sent homa data packet" in line:
             event ="xmit reply"
@@ -257,7 +257,7 @@ def analyze_rpc(id, client_num, server_num):
             continue
 
         event = ""
-        if "homa_ioc_send starting" in line:
+        if "homa_sendmsg request" in line:
             last = start = time
             continue
         elif "mlx sent homa data" in line:
@@ -288,10 +288,10 @@ def analyze_rpc(id, client_num, server_num):
         elif "received message while polling" in line:
             event = "wakeup polling thread"
             add_stat("client wakeup", time - last)
-        elif "homa_ioc_recv finished" in line:
-            event = "ioc_recv"
+        elif "homa_recvmsg returning" in line:
+            event = "recvmsg"
         elif "Long RTT" in line:
-            event ="ioc_recv"
+            event ="recvmsg"
 
         if not event:
             continue
@@ -301,7 +301,7 @@ def analyze_rpc(id, client_num, server_num):
         if (event == "xmit request") and (nic_empty_time > time):
             total_nic_delay += nic_empty_time - time
         last = time
-        if event == "ioc_recv":
+        if event == "recvmsg":
             print(cfmt % ("total", time - start))
             add_stat("total", time - start)
             break
@@ -341,7 +341,7 @@ if len(sys.argv) == 1:
     print(cfmt % ("wakeup SoftIRQ", avg_stat("client wakeup SoftIRQ")))
     print(cfmt % ("softIRQ", avg_stat("client softIRQ")))
     print(cfmt % ("wakeup thread", avg_stat("client wakeup")))
-    print(cfmt % ("ioc_recv", avg_stat("client ioc_recv")))
+    print(cfmt % ("recvmsg", avg_stat("client recvmsg")))
     print(cfmt % ("total", avg_stat("total")))
 
     print("\nServer Averages:")
@@ -350,7 +350,7 @@ if len(sys.argv) == 1:
     print(cfmt % ("wakeup SoftIRQ", avg_stat("server wakeup SoftIRQ")))
     print(cfmt % ("softIRQ", avg_stat("server softIRQ")))
     print(cfmt % ("wakeup thread", avg_stat("server wakeup")))
-    print(cfmt % ("ioc_recv", avg_stat("server ioc_recv")))
+    print(cfmt % ("recvmsg", avg_stat("server recvmsg")))
     print(cfmt % ("application", avg_stat("server application")))
     print(cfmt % ("xmit reply", avg_stat("server xmit reply")))
     print(cfmt % ("(nic queue)", avg_stat("server nic")))

@@ -35,12 +35,11 @@ FIXTURE(homa_plumbing) {
 	sockaddr_in_union server_addr;
 	struct data_header data;
 	int starting_skb_count;
-	struct iovec reply_vec[2];
-	struct iovec send_vec[2];
-	struct homa_reply_args reply_args;
-	struct homa_send_args send_args;
 	struct msghdr recvmsg_hdr;
 	struct homa_recvmsg_control recvmsg_control;
+	struct iovec send_vec[2];
+	struct msghdr sendmsg_hdr;
+	struct homa_sendmsg_args sendmsg_args;
 	char buffer[2000];
 	sockptr_t optval;
 	sockaddr_in_union addr;
@@ -77,24 +76,6 @@ FIXTURE_SETUP(homa_plumbing)
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .retransmit = 0,
 			.seg={.offset = 0}};
-	self->reply_vec[0].iov_base = self->buffer;
-	self->reply_vec[0].iov_len = 100;
-	self->reply_vec[1].iov_base = self->buffer + 1000;
-	self->reply_vec[1].iov_len = 900;
-	self->reply_args.message_buf = NULL;
-	self->reply_args.iovec = self->reply_vec;
-	self->reply_args.length = 2;
-	self->reply_args.dest_addr = self->client_addr;
-	self->reply_args.id = self->server_id;
-	self->send_vec[0].iov_base = self->buffer;
-	self->send_vec[0].iov_len = 100;
-	self->send_vec[1].iov_base = self->buffer + 1000;
-	self->send_vec[1].iov_len = 100;
-	self->send_args.message_buf = NULL;
-	self->send_args.iovec = self->send_vec;
-	self->send_args.length = 2;
-	self->send_args.dest_addr = self->server_addr;
-	self->send_args.id = 0;
 	self->recvmsg_control.id = 0;
 	self->recvmsg_hdr.msg_name = &self->addr;
 	self->recvmsg_hdr.msg_namelen = 0;
@@ -104,6 +85,19 @@ FIXTURE_SETUP(homa_plumbing)
 	memset(&self->recvmsg_control, 0, sizeof(self->recvmsg_control));
 	self->recvmsg_control.flags = HOMA_RECVMSG_REQUEST
 			| HOMA_RECVMSG_RESPONSE | HOMA_RECVMSG_NONBLOCKING;
+	self->send_vec[0].iov_base = self->buffer;
+	self->send_vec[0].iov_len = 100;
+	self->send_vec[1].iov_base = self->buffer + 1000;
+	self->send_vec[1].iov_len = 100;
+	self->sendmsg_hdr.msg_name = &self->client_addr;
+	self->sendmsg_hdr.msg_namelen = sizeof(self->client_addr);
+	iov_iter_init(&self->sendmsg_hdr.msg_iter, WRITE, self->send_vec,
+			2, 200);
+	self->sendmsg_hdr.msg_control = &self->sendmsg_args;
+	self->sendmsg_hdr.msg_controllen = sizeof(self->sendmsg_args);
+	self->sendmsg_hdr.msg_control_is_user = 1;
+	self->sendmsg_args.id = 0;
+	self->sendmsg_args.completion_cookie = 0;
 	self->optval.user = (void *) 0x100000;
 	self->optval.is_kernel = 0;
 	unit_log_clear();
@@ -188,136 +182,6 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
-}
-
-TEST_F(homa_plumbing, homa_ioc_reply__basics)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	EXPECT_EQ(0, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_NE(UNIT_IN_SERVICE, srpc->state);
-	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
-}
-TEST_F(homa_plumbing, homa_ioc_reply__cant_read_user_args)
-{
-	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-}
-TEST_F(homa_plumbing, homa_ioc_reply__bad_address_family)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	int family = (self->hsk.inet.sk.sk_family == AF_INET) ? AF_INET6
-			: AF_INET;
-	self->reply_args.dest_addr.in6.sin6_family = family;
-	EXPECT_EQ(EAFNOSUPPORT, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-}
-TEST_F(homa_plumbing, homa_ioc_reply__error_in_import_iovec)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	mock_import_iovec_errors = 1;
-	EXPECT_EQ(EINVAL, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_reply__cant_find_rpc)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	self->reply_args.id += 1;
-	EXPECT_EQ(EINVAL, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-}
-TEST_F(homa_plumbing, homa_ioc_reply__error_in_homa_message_out_init)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	mock_alloc_skb_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_reply__dont_free_rpc)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
-			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
-	unit_log_clear();
-	self->reply_args.length = 10000;
-	self->reply_args.iovec = NULL;
-	self->reply_args.message_buf = (void *) 1000;
-	self->homa.rtt_bytes = 5000;
-	EXPECT_EQ(0, -homa_ioc_reply(&self->hsk.inet.sk,
-			(unsigned long) &self->reply_args));
-	EXPECT_EQ(RPC_OUTGOING, srpc->state);
-	EXPECT_SUBSTR("xmit DATA 1400@0; xmit DATA 1400@1400",
-			unit_log_get());
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-}
-
-TEST_F(homa_plumbing, homa_ioc_send__cant_read_user_args)
-{
-	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_send(&self->hsk.inet.sk,
-		(unsigned long) &self->send_args));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_send__bad_address_family)
-{
-	int family = (self->hsk.inet.sk.sk_family == AF_INET) ? AF_INET6
-			: AF_INET;
-	self->send_args.dest_addr.in6.sin6_family = family;
-	EXPECT_EQ(EAFNOSUPPORT, -homa_ioc_send(&self->hsk.inet.sk,
-			(unsigned long) &self->send_args));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_send__error_in_import_iovec)
-{
-	mock_import_iovec_errors = 1;
-	EXPECT_EQ(EINVAL, -homa_ioc_send(&self->hsk.inet.sk,
-			(unsigned long) &self->send_args));
-}
-TEST_F(homa_plumbing, homa_ioc_send__error_in_homa_rpc_new_client)
-{
-	mock_kmalloc_errors = 2;
-	EXPECT_EQ(ENOMEM, -homa_ioc_send(&self->hsk.inet.sk,
-			(unsigned long) &self->send_args));
-}
-TEST_F(homa_plumbing, homa_ioc_send__cant_update_user_arguments)
-{
-	mock_copy_to_user_errors = 1;
-	atomic64_set(&self->homa.next_outgoing_id, 1234);
-	EXPECT_EQ(EFAULT, -homa_ioc_send(&self->hsk.inet.sk,
-			(unsigned long) &self->send_args));
-	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_ioc_send__successful_send)
-{
-	atomic64_set(&self->homa.next_outgoing_id, 1234);
-	EXPECT_EQ(0, homa_ioc_send(&self->hsk.inet.sk,
-			(unsigned long) &self->send_args));
-	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
-	EXPECT_EQ(1234L, self->send_args.id);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 
 TEST_F(homa_plumbing, homa_ioc_abort__basics)
@@ -408,6 +272,141 @@ TEST_F(homa_plumbing, homa_set_sock_opt__success)
 	EXPECT_EQ(args.start, self->hsk.buffer_pool.region);
 	EXPECT_EQ(5, self->hsk.buffer_pool.num_bpages);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.so_set_buf_calls);
+}
+
+TEST_F(homa_plumbing, homa_sendmsg__control_not_from_user)
+{
+	self->sendmsg_hdr.msg_control_is_user = 0;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__cant_read_control)
+{
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__bad_address_family)
+{
+	self->client_addr.in4.sin_family = 1;
+	EXPECT_EQ(EAFNOSUPPORT, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_new_client)
+{
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__cant_update_user_arguments)
+{
+	mock_copy_to_user_errors = 1;
+	atomic64_set(&self->homa.next_outgoing_id, 1234);
+	EXPECT_EQ(EFAULT, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
+{
+	struct homa_rpc *crpc;
+	atomic64_set(&self->homa.next_outgoing_id, 1234);
+	self->sendmsg_args.completion_cookie = 88888;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_SUBSTR("xmit DATA 200@0", unit_log_get());
+	EXPECT_EQ(1234L, self->sendmsg_args.id);
+	ASSERT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	crpc = homa_find_client_rpc(&self->hsk, self->sendmsg_args.id);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(88888, crpc->completion_cookie);
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_nonzero_completion_cookie)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	self->sendmsg_args.completion_cookie = 12345;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_cant_find_peer)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_hdr.msg_name = &self->server_addr;
+	self->sendmsg_args.id = self->server_id;
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_cant_fill_packets)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH + 1;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_cant_find_rpc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id + 1;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_error_in_rpc)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = srpc->id;
+	srpc->error = -ENOMEM;
+	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_INCOMING, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_OUTGOING, srpc->state);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
 
 TEST_F(homa_plumbing, homa_recvmsg__wrong_control_length)

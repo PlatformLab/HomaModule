@@ -1,0 +1,148 @@
+.TH SENDMSG 2 2022-12-14 "Homa" "Linux Programmer's Manual"
+.SH NAME
+sendmsg \- send a Homa request or response message
+.SH SYNOPSIS
+.nf
+.B #include <homa.h>
+.PP
+.BI "ssize_t sendmsg(int " sockfd ", const struct msghdr *" msg ", int " flags );
+.fi
+.SH DESCRIPTION
+The
+.B sendmsg
+kernel call is used to send request and response messages on Homa sockets.
+The
+.I sockfd
+argument must refer to a Homa socket. The
+.I msg
+argument describes the message to send and the destination where it
+should be sent (more details below). The
+.I flags
+argument is not used for Homa messages.
+.PP
+The
+.B msg
+argument must point to a structure of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct msghdr {
+    void         *msg_name;       /* Address of destination (sockaddr_in
+                                   * or sockaddr_in6).
+    socklen_t     msg_namelen;    /* Size of address. */
+    struct iovec *msg_iov;        /* Message contents: one or more extents. */
+    size_t        msg_iovlen;     /* Number of elements in msg_iov. */
+    void         *msg_control;    /* Address of homa_send_msg_args struct. */
+    size_t        msg_controllen; /* Must always be zero (if not, sendmsg will
+                                   * fail with EINVAL, for arcane reasons). */
+    int           msg_flags;      /* Not used by Homa. */
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+Homa requires additional information beyond what can be represented in a
+.BR "struct msghdr" ,
+so the
+.B msg_controllen
+field must refer to a structure of the following type:
+.PP
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_sendmsg_args {
+    uint64_t id;                  /* RPC identifier. */
+    uint64_t completion_cookie;   /* For requests only; value to return
+                                   * along with response. */
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+If the
+.B id
+field of the
+.B homa_sendmsg_args
+is initially 0, then a new RPC will be created and a request message
+will be sent as described by
+.I msg\c
+->\c
+.B msg_name
+and
+.IR msg ->\c
+.BR msg_iov ;
+the
+.B id
+field will be overwritten with the identifier of the new RPC, which is
+unique among all RPCs initiated via
+.IR sockfd .
+This identifier can be used to wait for the response with
+.BR recvmsg .
+If
+.B id
+is nonzero, then a response message will be sent for the RPC identified
+uniquely by
+.B id
+and
+.IR msg ->\c
+.BR msg_name .
+.PP
+.B sendmsg
+returns as soon as the message has been queued for transmission.
+.SH RETURN VALUE
+The return value is 0 for success and -1 if an error occurred.
+.SH ERRORS
+.PP
+When
+.B sendmsg
+returns an error,
+.I errno
+will have one of the following values:
+.TP
+.B EAFNOSUPPORT
+The address family specified by
+.I dest_addr
+does not match the address family specified when the socket was opened
+.RB ( AF_INET
+or
+.BR AF_INET6 ).
+.TP
+.B EBADF
+.I sockfd
+is not a valid open file descriptor.
+.TP
+.B EFAULT
+An invalid user space address was specified for an argument.
+.TP
+.B EINTR
+A signal occurred before any data was transmitted; see
+.BR signal (7).
+.TP
+.B EINVAL
+The size of the request exceeded
+.B HOMA_MAX_MESSAGE_LENGTH, or
+.I sockfd
+was not a Homa socket, or a nonzero completion coookie was specified
+for a response message, or the
+.B id
+for a response message does not match an existing RPC for which a
+request message has been received.
+.TP
+.B ENOMEM
+Memory could not be allocated for internal data structures needed
+for the message.
+.TP
+.B ESHUTDOWN
+The socked has been disabled using
+.BR shutdown (2).
+.SH SEE ALSO
+.BR recvmsg (2),
+.BR homa_abort (3),
+.BR homa_reply (3),
+.BR homa_send (3),
+.BR homa (7)
