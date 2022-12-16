@@ -138,6 +138,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		homa->next_client_port++;
 	}
 	hsk->port = homa->next_client_port;
+	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
 	homa->next_client_port++;
 	hsk->socktab_links.sock = hsk;
@@ -274,6 +275,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	}
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
 	hsk->port = port;
+	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
 			&socktab->buckets[homa_port_hash(port)]);

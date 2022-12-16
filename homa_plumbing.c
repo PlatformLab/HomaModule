@@ -135,6 +135,7 @@ struct proto homa_prot = {
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
 	.obj_size	   = sizeof(struct homa_sock),
 	.diag_destroy	   = homa_diag_destroy,
+	.no_autobind       = 1,
 };
 
 struct proto homav6_prot = {
@@ -167,6 +168,7 @@ struct proto homav6_prot = {
 	 */
 	.obj_size	   = sizeof(struct homa_sock) + sizeof(struct ipv6_pinfo),
 	.diag_destroy	   = homa_diag_destroy,
+	.no_autobind       = 1,
 };
 
 /* Top-level structure describing the Homa protocol. */
@@ -1156,13 +1158,16 @@ void homa_rehash(struct sock *sk) {
 }
 
 /**
- * homa_get_port() - ??.
+ * homa_get_port() - It appears that this function is called to assign a
+ * default port for a socket.
  * @sk:    Socket for the operation
- * @snum:  ??
- * Return: ??
+ * @snum:  Unclear what this is.
+ * Return: Zero for success, or a negative errno for an error.
  */
 int homa_get_port(struct sock *sk, unsigned short snum) {
-	printk(KERN_WARNING "unimplemented get_port invoked on Homa socket\n");
+	/* Homa always assigns ports immediately when a socket is created,
+	 * so there is nothing to do here.
+	 */
 	return 0;
 }
 
@@ -1360,6 +1365,8 @@ discard:
 	atomic_add(incoming_delta, &homa->total_incoming);
 	homa_send_grants(homa);
 	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
+	tt_record2("Backlog on core %d now %d", raw_smp_processor_id(),
+			atomic_read(&homa_cores[raw_smp_processor_id()]->softirq_backlog));
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }
