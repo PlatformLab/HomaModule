@@ -218,7 +218,7 @@ for line in f:
     core = int(match.group(3))
     last_copy_out_start[core] = time
   match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-      'finished copying ([-0-9.]+) bytes', line)
+      'finished copying ([-0-9.]+) bytes for id ([-0-9.]+)', line)
   if match:
     time = float(match.group(1))
     count = int(match.group(4))
@@ -229,6 +229,17 @@ for line in f:
       copy_out_data += count
       # print("%8.3f: %d bytes copied in %.1f usec: %.1f GB/sec" % (
           # qtime, count, elapsed, (count/1000)/elapsed))
+
+# Make sure aux_rpcs doesn't contain elements not in rpcs.
+bad_ids = []
+for id in aux_rpcs:
+    if id in rpcs:
+        rpc = rpcs[id]
+        if (0 in rpc) and ((len(patterns)-1) in rpc):
+            continue
+    bad_ids.append(id)
+for id in bad_ids:
+    del aux_rpcs[id]
 
 print_stats(patterns, rpcs)
 print("")

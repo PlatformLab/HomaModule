@@ -881,8 +881,10 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 			rpc = NULL;
 			goto error;
 		}
-		tt_record2("data copied into request message for id %d, length %d",
-				rpc->id, rpc->msgout.length);
+		tt_record3("data copied into request message for id %d, "
+				"length %d unscheduled %d",
+				rpc->id, rpc->msgout.length,
+				rpc->msgout.unscheduled);
 		rpc->completion_cookie = args.completion_cookie;
 		args.id = rpc->id;
 		homa_xmit_data(rpc, false);
@@ -1365,8 +1367,6 @@ discard:
 	atomic_add(incoming_delta, &homa->total_incoming);
 	homa_send_grants(homa);
 	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
-	tt_record2("Backlog on core %d now %d", raw_smp_processor_id(),
-			atomic_read(&homa_cores[raw_smp_processor_id()]->softirq_backlog));
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }

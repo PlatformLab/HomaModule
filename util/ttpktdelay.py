@@ -131,7 +131,7 @@ def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
 def print_samples2(events, pct, msg, fmt, num_samples):
     """
     Similar to print_sample, except that the data is passed in a single
-    list. Prints info about the event that in events thatfalls at a given
+    list. Prints info about the event that in events that falls at a given
     percentile (from smallest to largest)
     events:      list of <value, time> tuples, where value is the data on
                  which we're computing percentile, and time is the time
@@ -212,6 +212,8 @@ def parse_tt(tt, server):
                          when the handoff to SoftIRQ was made
     """
 
+    global verbose
+
     data_send = {}
     data_mlx = {}
     data_gro = {}
@@ -262,6 +264,22 @@ def parse_tt(tt, server):
     # level interrupt handler (common_interrupt) was invoked.
     last_irq = {}
 
+    # Counts of number of records of each type; used to detect when
+    # changes in the timetrace code break these statistics.
+    counts = {
+        "sent packet": 0,
+        "napi_poll invoked": 0,
+        "backlog enqueue": 0,
+        "softirq start": 0,
+        "interrupt start": 0,
+        "ip_queue_xmit": 0,
+        "gro_receive": 0,
+        "softirq data pkt": 0,
+        "sent grant": 0,
+        "gro_receive got grant": 0,
+        "grant processed": 0,
+    }
+
     for line in open(tt):
         match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\]'
                 '.* id ([-0-9.]+),.* offset ([-0-9.]+)', line)
@@ -270,6 +288,7 @@ def parse_tt(tt, server):
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] mlx '
                     'sent homa packet to .* id ([-0-9.]+), type 21', line)
             if match:
+                counts["sent packet"] += 1
                 time = float(match.group(1))
                 core = int(match.group(2))
                 id = match.group(3)
@@ -283,6 +302,7 @@ def parse_tt(tt, server):
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'mlx5e_napi_poll invoked', line)
             if match:
+                counts["napi_poll invoked"] += 1
                 time = float(match.group(1))
                 core = int(match.group(2))
                 last_mlx_napi[core] = time
@@ -293,6 +313,7 @@ def parse_tt(tt, server):
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'enqueue_to_backlog', line)
             if match:
+                counts["backlog enqueue"] += 1
                 time = float(match.group(1))
                 core = int(match.group(2))
                 if core in last_gro:
@@ -318,6 +339,7 @@ def parse_tt(tt, server):
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'homa_softirq: first packet', line)
             if match:
+                counts["softirq start"] += 1
                 time = float(match.group(1))
                 core = int(match.group(2))
                 softirq_start[core] = time
@@ -326,6 +348,7 @@ def parse_tt(tt, server):
             match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] '
                     'irq common_interrupt starting', line)
             if match:
+                counts["interrupt start"] += 1
                 time = float(match.group(1))
                 core = int(match.group(2))
                 last_irq[core] = time
@@ -342,14 +365,17 @@ def parse_tt(tt, server):
 
         # Outgoing data sent
         if "calling ip_queue_xmit: skb->len" in line:
+            counts["ip_queue_xmit"] += 1
             data_send[pktid] = time
 
         # Data packet passed to NIC
         if "Finished queueing packet" in line:
+            counts["ip_queue_xmit"] += 1
             data_mlx[pktid] = time
 
         # Incoming data packet processed by Homa GRO
         if "homa_gro_receive got packet" in line:
+            counts["gro_receive"] += 1
             data_gro[pktid] = time
             last_gro[core] = time
             if not core in num_gro_packets:
@@ -361,18 +387,21 @@ def parse_tt(tt, server):
 
         # Incoming data (SoftIRQ level)
         if "incoming data packet, id" in line:
+            counts["softirq data pkt"] += 1
             if core in softirq_start:
                 data_softirq[pktid] = time
                 data_softirq_start[pktid] = softirq_start[core]
 
         # Outgoing grant
         if "sending grant for id" in line:
+            counts["sent grant"] += 1
             grant_send[pktid] = time
             key = id + ":" + str(core)
             grant_ids[key] = pktid
 
         # Incoming grant processed by Homa GRO
         if "homa_gro_receive got grant" in line:
+            counts["gro_receive got grant"] += 1
             grant_gro[pktid] = time
             last_gro[core] = time
             if not core in grant_handoff_ids:
@@ -381,9 +410,18 @@ def parse_tt(tt, server):
 
         # Incoming grant (SoftIRQ level)
         if "processing grant for id" in line:
+            counts["grant processed"] += 1
             if core in softirq_start:
                 grant_softirq[pktid] = time
                 grant_softirq_start[pktid] = softirq_start[core]
+
+    if verbose:
+        if server:
+            print("Record counts in server log:")
+        else:
+            print("Record counts in client log:")
+        for id in counts:
+            print("  %-24s %6d" % (id, counts[id]))
 
     return {
         'data_send': data_send,
@@ -407,7 +445,6 @@ def parse_tt(tt, server):
         'gro_counts': gro_counts,
         'gro_gaps': gro_gaps,
     }
-
 
 client = parse_tt(client_trace, False)
 server = parse_tt(server_trace, True)

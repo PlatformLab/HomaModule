@@ -532,6 +532,8 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 
 	if (rpc->msgin.total_length < 0) {
 		/* First data packet for message; initialize. */
+		tt_record2("Incoming message for id %d has %d unscheduled bytes",
+				rpc->id, ntohl(h->incoming));
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
 				ntohl(h->incoming));
 		*delta += rpc->msgin.incoming;
