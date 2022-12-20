@@ -2,6 +2,27 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+* (December 2022) More analysis of SMI interrupts. Wrote smi.cc to gather
+  data on vents that cause all cores to stop simultaneously. Found 3 distinct
+  kinds of gaps on xl170 (Intel) CPUs:
+  * 2.5 usec gaps every 4 ms
+  * 17 usec gaps every 10 ms (however, these don't seem to be consistent:
+    they appear for a while at the start of each experiment, then stop)
+  * 170 usec gaps every 250 ms
+  I don't know for sure that these are all caused by SMI (e.g., could the
+  gaps every 4 ms be scheduler wakeups?)
+
+* (December 2022) NAPI can't process incoming jumbo frames at line rate
+  for 100 Gbps network (AMD CPUs): it takes at 850 ns to process each
+  packet (median), but packets are arriving every 700 ns.
+  Most of the time is spent in __alloc_skb in two places:
+  kmalloc_reserve for data   :       370 ns
+  prefetchw for last word of data:   140 ns
+  These times depend on core placements of threads; the above times
+  are for an "unfortunate" (but typical) placement; with an ideal placement,
+  the times drop to 100 ns for kmalloc_reserve and essentiall 0 for the
+  prefetch.
+
 * (December 2022) One-way throughput for 1M messages varies from 18-27 Gbps
   for Homa on the c6525-100g cluster, whereas TCP throughput is relatively
   constant at 24 Gbps. Homa's variance comes from core placement: performance
