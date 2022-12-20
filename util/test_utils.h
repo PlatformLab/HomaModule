@@ -32,6 +32,7 @@ extern int     check_message(struct homa_recvmsg_args *control,
 	           char *region, size_t length, int skip);
 extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);
+extern void    pin_thread(int core);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern const char*
