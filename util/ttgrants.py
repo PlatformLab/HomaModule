@@ -188,7 +188,7 @@ for line in f:
 # incoming grant
 first_grants = []
 for id in out_data:
-    if not id in in_grants:
+    if not ((id in in_grants) and in_grants[id]):
         continue
     delay = in_grants[id][0][0] - out_data[id][0][0]
     first_grants.append(delay)
