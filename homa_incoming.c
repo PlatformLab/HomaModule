@@ -229,11 +229,11 @@ copy_out:
 			if (!chunks[i].free_skb)
 				continue;
 			h = (struct data_header *) chunks[i].skb->data;
-			tt_record4("homa_copy_out freeing skb 0x%08x%08x "
-					"for id %d, offset %d",
-					tt_hi(chunks[i].skb),
-					tt_lo(chunks[i].skb),
-					rpc->id, ntohl(h->seg.offset));
+//			tt_record4("homa_copy_out freeing skb 0x%08x%08x "
+//					"for id %d, offset %d",
+//					tt_hi(chunks[i].skb),
+//					tt_lo(chunks[i].skb),
+//					rpc->id, ntohl(h->seg.offset));
 			kfree_skb(chunks[i].skb);
 			count++;
 		}
