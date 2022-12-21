@@ -83,6 +83,7 @@ int unloaded = 0;
 bool client_iovec = false;
 bool server_iovec = false;
 int inet_family = AF_INET;
+int server_core = -1;
 
 /** @rand_gen: random number generator. */
 std::mt19937 rand_gen(
@@ -319,6 +320,8 @@ void print_help(const char *name)
 		"    --first-port      Lowest port number to use (default: %d)\n"
                 "    --iovec           Use homa_replyv instead of homa_reply\n"
                 "    --ipv6            Use IPv6 instead of IPv4\n"
+		"    --pin             All server threads will be restricted to run only\n"
+	        "                      on the given core\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
 		"    --port-threads    Number of server threads to service each port\n"
 		"                      (Homa only, default: %d)\n"
@@ -994,6 +997,11 @@ void homa_server::server(void)
 
 	snprintf(thread_name, sizeof(thread_name), "S%d", id);
 	time_trace::thread_buffer thread_buffer(thread_name);
+	if (server_core >= 0) {
+		printf("Pinning thread %s to core %d\n", thread_name,
+				server_core);
+		pin_thread(server_core);
+	}
 	while (1) {
 		uint64_t id = 0;
 		int result;
@@ -2988,6 +2996,7 @@ int server_cmd(std::vector<string> &words)
 	inet_family = AF_INET;
         protocol = "homa";
 	port_threads = 1;
+	server_core = -1;
 	server_ports = 1;
 	server_iovec = false;
 
@@ -3002,6 +3011,10 @@ int server_cmd(std::vector<string> &words)
 			server_iovec = true;
 		} else if (strcmp(option, "--ipv6") == 0) {
 			inet_family = AF_INET6;
+		} else if (strcmp(option, "--pin") == 0) {
+			if (!parse(words, i+1, &server_core, option, "integer"))
+				return 0;
+			i++;
 		} else if (strcmp(option, "--port-threads") == 0) {
 			if (!parse(words, i+1, &port_threads, option, "integer"))
 				return 0;

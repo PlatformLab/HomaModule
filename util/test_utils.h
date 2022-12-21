@@ -30,6 +30,7 @@ extern "C"
 extern int     check_buffer(void *buffer, size_t length);
 extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);
+extern void    pin_thread(int core);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern const char*

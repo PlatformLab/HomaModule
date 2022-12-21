@@ -131,6 +131,21 @@ int get_int(const char *s, const char *msg)
 }
 
 /**
+ * pin_thread() - Ensure that the current thread only runs on a particular
+ * core.
+ * @core:   Identifier for core to pin the current thread to.
+ */
+void pin_thread(int core) {
+	cpu_set_t cpuset;
+
+	CPU_ZERO(&cpuset);
+	CPU_SET(core, &cpuset);
+	if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0)
+		    printf("Couldn't pin thread to core %d: %s",
+				    core, strerror(errno));
+}
+
+/**
  * print_dist() - Prints information on standard output about the distribution
  * of a collection of interval measurements.
  * @times:  An array containing interval times measured in rdtsc cycles.
