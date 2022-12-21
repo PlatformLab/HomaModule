@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 
 """
-Analyzes the rate at which data packets are transmitted in a given timetrace
-(useful in situations where the uplink should be fully utilized, but isn't)
+Analyzes packet transmissions in a timetrace to find gaps where the
+uplink was unnecessarily idle.
 
 Usage: ttxmit.py [--verbose] [--gbps n] [trace]
 
@@ -13,6 +13,7 @@ from __future__ import division, print_function
 from glob import glob
 from optparse import OptionParser
 import math
+from operator import itemgetter
 import os
 import re
 import string
@@ -39,197 +40,140 @@ if len(extra) > 0:
       print("Unrecognized argument %s" % (extra[1]))
       exit(1)
 
-# First and last times in trace
-first_time = -1
-last_time = 0
+# Time when all of the output packets presented to the NIC will have
+# been fully transmitted.
+idle_time = 0
 
-# Time when next packet should be transmitted to maintain line rate
-next_time = -1
+# Will eventually hold the amount of data in a full-sized output
+# packet (before GSO chops it up).
+packet_size = 1000
 
-# Each entry in this list corresponds to a "gap" (where a packet was
-# sent later than expected); the value is the length of the gap (us).
+# Dictionary holding one entry for each RPC that is currently active
+# (some of its bytes have been transmitted, but not all). Index is
+# RPC id, value is a list <time, offset> giving time when most recent
+# packet was transmitted for the RPC, offset of the packet's data.
+active_rpcs = {}
+
+# Total time when there was at least one active RPC.
+active_usecs = 0
+
+# Total time in all gaps
+gap_usecs = 0
+
+# Time when len(total_active_time) went from 0 to 1.
+active_start = 0
+
+# Time when len(total_active_time) become 0.
+active_end = 0
+
+# Total number of data packets sent.
+total_packets = 0
+
+# Total number of packets that experienced gaps >= long_gap.
+long_gaps = 0
+
+# Threshold length for a gap to be considered "long".
+long_gap = 2.0
+
+# One entry for each period of time when the uplink was idle yet there
+# were active outgoing RPCs. Value is a list <duration, start, end, active, id,
+# offset>: duration is the length of the gap, start end end give the range of
+# the idle period, active counts the number of active RPCs at the end of the
+# interval, and id and offset identify the packet whose transmission ended
+# the gap.
 gaps = []
 
-# Number of cores with active calls to ip_queue_xmit
-num_active = 0
-
-# Dictionary indexed by core name; existing elements are the cores with
-# active ip_queue_xmit calls. Value is time when ip_queue_xmit was
-# invoked.
-active_cores = {}
-
-# Dictionary indexed by RPC id; value is number of bytes that have been
-# transmitted for that RPC (i.e. ip_queue_xmit has returned).
-rpc_xmitted = {}
-
-# List of elapsed times in ip_queue_xmit
-xmit_times = []
-
-# For each integer value, the number times ip_queue_xmit was invoked
-# with that many other concurrent calls in progress.
-xmit_concurrency = []
-
-# The most recent times when ip_queue_xmit was invoked and returned.
-last_invoke = -1
-last_return = -1
-
-# Lists of elapsed times in ip_queue_xmit, when only one call was active
-# at a time, and when other concurrent calls overlapped the one in
-# question.
-no_overlap_times = []
-overlap_times = []
-
-# Last time when num_active became 0.
-last_idle = -1
-
-# Records info about gaps of time when no ip_queue_xmit calls were
-# active. Each key is the offset of the packet transmitted just after
-# the gap; value is a list of gap lengths that occurred for that offset.
-idle_gaps = {}
-
-# Total idle time in gaps longer than long_idle_threshold
-long_idle_threshold = 10
-long_idle_time = 0
-
-total_pkts = 0
-total_bytes = 0
-max_pkt_len = 0
+# One entry for each period of time when there were no active RPCS.
+# Each entry is a list <duration, start, end, id>: duration is the length
+# of the gap, start and end give the range, and id identifies the RPC that
+# ended the gap.
+inactive_gaps = []
 
 for line in f:
-    match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] ',
-            line)
+    match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+            'calling ip_queue_xmit: skb->len ([0-9]+), .* id ([0-9]+), '
+            'offset ([0-9]+)', line)
     if not match:
         continue
 
     time = float(match.group(1))
     core = match.group(3)
+    length = int(match.group(4))
+    id = int(match.group(5))
+    offset = int(match.group(6))
 
-    match = re.match('.*calling ip_queue_xmit.* id ([0-9]+)', line)
-    if match:
-        id = int(match.group(1))
-        last_invoke = time;
-        while len(xmit_concurrency) <= num_active:
-            xmit_concurrency.append(0)
-        xmit_concurrency[num_active] += 1
-        if not id in rpc_xmitted:
-            rpc_xmitted[id] = 0
-        offset = rpc_xmitted[id]
-        if  num_active == 0 and last_idle != -1:
-            idle = time - last_idle
-            if not offset in idle_gaps:
-                idle_gaps[offset] = []
-            idle_gaps[offset].append(idle)
-            if (idle >= long_idle_threshold):
-                long_idle_time += idle
-                if options.verbose:
-                    print("%9.3f: Long idle time (%.1f us), id %d, "
-                            "offset %d" % (time, idle, id, offset))
-        num_active += 1
-        active_cores[core] = time
+    total_packets += 1
+    if packet_size < length:
+        packet_size = length
 
-    match = re.match('.*Finished queueing packet: rpc id ([0-9]+), '
-            'offset ([0-9]+), len ([0-9]+)', line)
-    if match:
-        id = int(match.group(1))
-        offset = int(match.group(2))
-        pkt_len = int(match.group(3))
-        rpc_xmitted[id] = offset + pkt_len
+    if (idle_time < time) and (len(active_rpcs) > 0):
+        gap_length = time - idle_time
+        gaps.append([gap_length, idle_time, time, len(active_rpcs), id, offset])
+        gap_usecs += gap_length
+        if gap_length >= long_gap:
+            long_gaps += 1
 
-        if core in active_cores:
-            my_start = active_cores[core]
-            elapsed = time - my_start
-            if options.verbose:
-                print("%9.3f: ip_queue_xmit returned for id %d, elapsed %0.1f, "
-                        "active %d" % (time, id, elapsed, num_active-1))
-            if (last_invoke > my_start) or (last_return > my_start) \
-                    or (num_active > 1):
-                no_overlap_times.append(elapsed)
-            else:
-                overlap_times.append(elapsed)
-            xmit_times.append(elapsed)
-            del active_cores[core]
-            num_active -= 1;
-            if num_active == 0:
-                last_idle = time;
-
-        if first_time < 0:
-            first_time = time
-        last_time =  time
-        total_pkts += 1
-        total_bytes += pkt_len
-        if pkt_len > max_pkt_len:
-            max_pkt_len = pkt_len
-
-        xmit_us = (pkt_len * 8.0)/(1000 * options.gbps)
-        if next_time == -1:
-            next_time = time + xmit_us
+    if len(active_rpcs) == 0:
+        if idle_time < time:
+            active_start = time
+            if active_end != 0:
+                inactive_gaps.append([time - active_end, active_end, time, id])
         else:
-          if (time <= next_time):
-              next_time += xmit_us
-          else:
-              gaps.append(time - next_time)
-              next_time = time + xmit_us
+            active_start = idle_time
 
-gaps = sorted(gaps)
-gap_time = sum(gaps)
+    xmit_time = (length * 8)/(options.gbps * 1000)
+    if (idle_time < time):
+        idle_time = time + xmit_time
+    else:
+        idle_time += xmit_time
 
-xmit_times = sorted(xmit_times)
-overlap_times = sorted(overlap_times)
-no_overlap_times = sorted(no_overlap_times)
-total_idle = 0
-for offset in idle_gaps:
-    idle_gaps[offset] = sorted(idle_gaps[offset])
-    total_idle += sum(idle_gaps[offset])
+    if length < packet_size:
+        active_rpcs.pop(id, None)
+    else:
+        active_rpcs[id] = [time, id]
 
-total_time = last_time - first_time
+    if len(active_rpcs) == 0:
+        active_usecs += idle_time - active_start
+        active_end = idle_time
 
-print("Total packets: %d" % (total_pkts))
-print("Total bytes: %.1f MB" % (total_bytes/1e06))
-avg_tput =  total_bytes*8.0/(total_time)/1000
-print("Average throughput: %.1f Gbps" % (avg_tput))
-xmit_time = total_bytes*8.0/(options.gbps*1000)
-print("Lost xmit time: %.1f us (%.1f%%)" % (total_time - xmit_time,
-        100*(total_time - xmit_time)/total_time))
-print("Serialization time for %d-byte packets: %.1f us" % (max_pkt_len,
-        (max_pkt_len * 8.0)/(1000 * options.gbps)))
-print("ip_queue_xmit time: min %.1f us, P50 %.1f us, P90 %.1f us, "
-        "P99 %.1f us" % (xmit_times[0], xmit_times[len(xmit_times)//2],
-        xmit_times[90*len(xmit_times)//100],
-        xmit_times[99*len(xmit_times)//100]))
-print("\nTotal idle time (no active ip_queue_xmit calls: %.1f us "
-        "(%.1f%%)" % (total_idle, 100.0*total_idle/total_time))
-print("Total time in idle gaps > %d us: %0.1f us (%.1f%%)" % (
-        long_idle_threshold, long_idle_time, 100.0*long_idle_time/total_time))
-print("Offset   Total Idle      Avg Gap    P50    P90    P99")
-for offset in sorted(idle_gaps.keys()):
-    gaps = idle_gaps[offset]
-    total = sum(gaps)
-    avg = total/len(gaps)
-    print("%6d %7.1f (%4.1f%%)    %6.2f %6.2f %6.2f %6.2f" % (offset,
-            total, 100.0*total/total_time, avg, gaps[len(gaps)//2],
-            gaps[9*len(gaps)//10], gaps[99*len(gaps)//100]))
-if 0:
-    print("Idle intervals: min %.1f us, P50 %.1f us, P90 %.1f us, "
-            "P99 %.1f us" % (idle_gaps[0], idle_gaps[len(idle_gaps)//2],
-            idle_gaps[90*len(idle_gaps)//100], idle_gaps[99*len(idle_gaps)//100]))
-    print("Idle time CDF:")
-    sum = 0
-    i = 0
-    for target in range(10, 90, 10):
-        while i < len(idle_gaps):
-          sum += idle_gaps[i]
-          i += 1
-          pct = 100.0*sum/total_idle
-          if pct >= target:
-              print("    %2d%% of idle time in gaps >= %4.1f us" % (100 - target,
-                      idle_gaps[i-1]))
-              break
-print("\nSlow xmits: %d (%.1f%%); P50 %.1f us, P90 %.1f us, P99 %.1f us" % (
-        len(gaps), 100.0*len(gaps)/total_pkts, gaps[50*len(gaps)//100],
-        gaps[90*len(gaps)//100], gaps[99*len(gaps)//100]))
-print("Total xmit delay %.1f us (%.1f%%)" % (gap_time,
-        100.0*gap_time/(total_time)))
-print("Concurrent calls when ip_queue_xmit invoked:")
-for i in range(0, len(xmit_concurrency)):
-    print("  %d: %5d (%4.1f%%)" % (i, xmit_concurrency[i],
-            100.0*xmit_concurrency[i]/total_pkts))
+if len(active_rpcs):
+    active_usecs += time - active_start
+
+print("RPC active time: %9.1f us (%.1f%% of elapsed time)" % (active_usecs,
+        100.0*active_usecs/time))
+print("Total xmit gaps: %9.1f us (%.1f%% of active time)" % (gap_usecs,
+        100.0*gap_usecs/active_usecs))
+print('%d data packets (%.1f%% of all packets) were delayed by gaps '
+                '>= %.1f us' % (long_gaps, 100*long_gaps/ total_packets,
+                long_gap))
+
+gaps = sorted(gaps, key=itemgetter(0), reverse=True)
+print("\nLongest gaps:")
+count = 0
+for gap in gaps:
+    print("%9.3f: gap of %5.1f us (starting at %9.3f), id %d, offset %d" % (
+            gap[2], gap[0], gap[1], gap[4], gap[5]))
+    count += 1
+    if count >= 10:
+        break
+
+print("\nGap CDF (% of total gap time in gaps > given size):")
+print("Percent    Gap")
+pctl = 0
+total_usecs = 0
+for gap in gaps:
+    total_usecs += gap[0]
+    if (total_usecs >= pctl*gap_usecs/100):
+        print("%5d   %5.1f us" % (pctl, gap[0]))
+        pctl += 10
+
+if inactive_gaps:
+    inactive_gaps = sorted(inactive_gaps, key=itemgetter(0), reverse=True)
+    print("\nLongest intervals with no active RPCs:")
+    count = 0
+    for gap in inactive_gaps:
+        print("%9.3f: %5.1f us starting at %9.3f, ending with id %d" % (
+                gap[2], gap[0], gap[1], gap[3]))
+        count += 1
+        if count >= 10:
+            break

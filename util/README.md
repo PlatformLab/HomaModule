@@ -63,7 +63,7 @@ the time differences using only those records.
 **ttoffset.py**: offsets all of the times in a timetrace by a given amount (usually
 done to line up times in one trace with times in another).
 
-**ttpacketdelay.py**: reads client and server timetraces gathered at about the same time,
+**ttpktdelay.py**: reads client and server timetraces gathered at about the same time,
 and analyzes packet delays in both directions.
 
 **ttrpcs.py**: scans a client or server timetrace to compute the time taken for each
@@ -80,3 +80,7 @@ on a server.
 **ttsync.py**: reads client and server timetraces gathered at about the same time,
 computes the clock offset between client and server, and outputs a new server
 trace with its clock values offset to match the client clock.
+
+**ttxmit.py**: analyzes packet transmissions from a timetrace to identify
+uplink bubbles (gaps during which the uplink was idle even though there
+were active outbound messages).
