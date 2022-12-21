@@ -34,6 +34,14 @@ This file discusses issues related to freeing resources for completed RPCs
     will reap a few buffers for every incoming data packet. This is undesirable
     because it will impact Homa's performance.
 
+* In addition, during the conversion to the new input buffering scheme for 2.0,
+  freeing of packets for incoming messages was moved to homa_copy_to_user,
+  under the assumption that this code wouldn't be on the critical path.
+  However, right now the packet freeing is taking 20-25% of the total
+  time in that function, and with faster networks it's quite possible that
+  this code will indeed be on the critical path. So, it probably shouldn't
+  be doing packet freeing after all.
+
 * Here are some approaches that have been tried and eventually abandoned:
   * Occasionally when data packets arrive, reap if too much dead info has
     accumulated. This will cause a latency impact. The amount to reap is
