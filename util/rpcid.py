@@ -7,7 +7,7 @@ latency profile for a single RPC.
 Usage:
 rpcid id client_node server_node
 
-id:           The unique id for a given RPC
+id:           The client id for a given RPC
 client_node:  The number (e.g. 1, corresponding to node-1) of the client
               node: its timetrace should be in ~/node.tt on that node.
 server_node:  The number (e.g. 1, corresponding to node-1) of the server
@@ -102,7 +102,7 @@ def analyze_rpc(id, client_num, server_num):
     """
     Analyze the client and server timetraces for a given RPC and output
     a latency breakdown for the RPC.
-    id:         id of the desired RPC
+    id:         client id of the desired RPC
     client_num: number of the client machine (3, not node-3)
     server_num: number of the server machine
     """
@@ -114,9 +114,12 @@ def analyze_rpc(id, client_num, server_num):
     client = "node-" + str(client_num)
     server = "node-" + str(server_num)
 
+    # Server's RPC id is id+1
+    sid = str(int(id) + 1)
+
     # Indexed by core id; holds the time of the last do_IRQ invocation
     # for that core.
-    doirq = {}
+    start_irq = {}
 
     tt = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
             server, "cat", "node.tt"], encoding="utf-8",
@@ -142,8 +145,8 @@ def analyze_rpc(id, client_num, server_num):
         core = int(match.group(2))
         gap = time - last
 
-        if "do_IRQ starting" in line:
-            doirq[core] = time;
+        if "mlx5e_poll_rx_cq starting" in line:
+            start_irq[core] = time;
 
         if "Freezing" in line:
             server_info += sfmt % ("freeze delay", gap)
@@ -161,7 +164,7 @@ def analyze_rpc(id, client_num, server_num):
             continue
 
         match = re.match('.* id ([0-9]+)', line)
-        if done or (not match) or (match.group(1) != id):
+        if done or (not match) or (match.group(1) != sid):
             continue
 
         event = ""
@@ -171,7 +174,7 @@ def analyze_rpc(id, client_num, server_num):
             if (int(match.group(1), 16) & 0xff) == (client_num+1):
                 event = "(interrupt)"
                 start = time
-                gap = time - doirq[core]
+                gap = time - start_irq[core]
                 server_interrupt = gap
                 gro_core = core
         elif start < 0:
@@ -225,7 +228,7 @@ def analyze_rpc(id, client_num, server_num):
     gro_receive = False
 
     if server_total == 0:
-        print("Incomplete trace data on %s for id %s; skipping" % (server, id))
+        print("Incomplete trace data on %s for id %s; skipping" % (server, sid))
         return
 
     if rpcs_analyzed != 0:
@@ -239,8 +242,8 @@ def analyze_rpc(id, client_num, server_num):
         time = float(match.group(1))
         core = int(match.group(2))
 
-        if "do_IRQ starting" in line:
-            doirq[core] = time;
+        if "mlx5e_poll_rx_cq starting" in line:
+            start_irq[core] = time;
 
         if "mlx packet info" in line:
             track_nic_queue(line, time)
@@ -269,9 +272,9 @@ def analyze_rpc(id, client_num, server_num):
             net = time - last - server_total - total_nic_delay
             print(cfmt % ("network", net))
             add_stat("network", net)
-            print(cfmt % ("(net - int)", net - (time - doirq[core])
+            print(cfmt % ("(net - int)", net - (time - start_irq[core])
                     - server_interrupt))
-            last = doirq[core]
+            last = start_irq[core]
             event = "(interrupt)"
             gro_core = core
             gro_receive = True
