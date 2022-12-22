@@ -3,10 +3,13 @@
 # Usage:
 # start_xl170 [mod_file]
 
+set -e
+
+xl170=1
+
 # Network interface name
 ni=ens1f1np1
 
-set -e
 rps=1
 limit_rss=0
 for arg in $@; do
@@ -23,14 +26,25 @@ fi
 
 sudo rmmod homa || true
 sudo insmod $homa
-sudo sysctl /net/homa/link_mbps=25000
-sudo sysctl /net/homa/max_nic_queue_ns=2000
-sudo sysctl /net/homa/rtt_bytes=60000
+
+if [ $xl170 -eq 1 ] ; then
+    echo Configuring for xl170
+    sudo sysctl /net/homa/link_mbps=25000
+    sudo sysctl /net/homa/max_nic_queue_ns=2000
+    sudo sysctl /net/homa/rtt_bytes=60000
+    sudo cpupower frequency-set -g performance
+else
+    echo Configuring for c6525-100g
+    sudo sysctl /net/homa/link_mbps=100000
+    sudo sysctl /net/homa/max_nic_queue_ns=5000
+    sudo sysctl /net/homa/rtt_bytes=200000
+    sudo sysctl /net/homa/max_gso_size=100000
+fi
+
 sudo sysctl /net/homa/num_priorities=8
 # sudo sysctl /net/homa/pacer_fifo_fraction=0
 # sudo sysctl /net/homa/grant_fifo_fraction=0
 # sudo sysctl /net/homa/verbose=1
-sudo cpupower frequency-set -g performance
 sudo ethtool -C $ni adaptive-rx off rx-usecs 5 rx-frames 1 || true
 # sudo sysctl .net.core.netdev_budget=300
 # sudo sysctl .net.ipv4.tcp_congestion_control=cubic
@@ -49,7 +63,7 @@ if [ $rps -eq 1 ]; then
         sudo bash -c "echo fffff > $f"
         done
     sudo ethtool -K $ni ntuple on
-else 
+else
     echo Turning off RPS/RFS
     sudo sysctl -w net.core.rps_sock_flow_entries=0
     for f in /sys/class/net/$ni/queues/rx-*/rps_flow_cnt; do
