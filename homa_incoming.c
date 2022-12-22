@@ -1617,9 +1617,9 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		/* Busy-wait for a while before going to sleep; this avoids
 		 * context-switching overhead to wake up.
 		 */
-		poll_start = get_cycles();
+		poll_start = now = get_cycles();
 		while (1) {
-			now = get_cycles();
+			__u64 blocked;
 			rpc = (struct homa_rpc *) atomic_long_read(
 					&interest.ready_rpc);
 			if (rpc) {
@@ -1632,7 +1632,17 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			}
 			if (now >= (poll_start + hsk->homa->poll_cycles))
 				break;
+			blocked = get_cycles();
 			schedule();
+			now = get_cycles();
+			blocked = now - blocked;
+			if (blocked > 5000) {
+				/* Looks like another thread ran (or perhaps
+				 * SoftIRQ). Count this time as blocked.
+				 */
+				INC_METRIC(blocked_cycles, blocked);
+				poll_start += blocked;
+			}
 		}
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
 				hsk->port, current->pid);

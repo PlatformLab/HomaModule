@@ -273,7 +273,7 @@ if elapsed_secs != 0:
         us_per = (time/calls)/(cpu_khz/1e03)
     print("send syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    time = float(deltas["recv_cycles"])
+    time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
     cores = time/time_delta
     total_cores_used += cores
     calls = float(deltas["recv_calls"])
@@ -282,7 +282,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("recv syscall (-blocked) %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("recv syscall (-poll)    %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["reply_cycles"])
     cores = time/time_delta
