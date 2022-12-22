@@ -21,7 +21,7 @@
 
 # Names of the interfaces that must be configured (system-specific!)
 #interfaces="ens1f1 vlan310"
-interfaces="ens1f1np1 vlan299"
+interfaces="ens1f1np1 vlan260"
 
 set -e
 for i in $interfaces; do
