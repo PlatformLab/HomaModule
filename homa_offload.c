@@ -184,7 +184,9 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 	core->last_active = get_cycles();
 
-	if (homa->gro_policy & HOMA_GRO_BYPASS) {
+	if ((homa->gro_policy & HOMA_GRO_BYPASS)
+			|| ((homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
+			&& (skb->len < 1400))) {
 		homa_softirq(skb);
 
 		/* This return value indicates that we have freed skb. */

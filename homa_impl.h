@@ -1874,8 +1874,22 @@ struct homa {
 	/* Bits that can be specified for gro_policy. These were created for
 	 * testing, in order to evaluate various possible policies; you almost
 	 * certainly should not use any value other than HOMA_GRO_NORMAL.
-	 * If you want to know what the bits mean, read the code of
-	 * homa_offload.c.
+	 * HOMA_GRO_BYPASS:           Pass all incoming packets directly to
+	 *                            homa_softirq during GRO; this bypasses
+	 *                            the SoftIRQ dispatching mechanism as well
+	 *                            as the network and IP stack layers.
+	 * HOMA_GRO_SAME_CORE         If isolated packets arrive (not part of
+	 *                            a batch) use the GRO core for SoftIRQ also.
+	 * HOMA_GRO_IDLE              Use old mechanism for selecting an idle
+	 *                            core for SoftIRQ (deprecated).
+	 * HOMA_GRO_NEXT              Always use the next core in circular
+	 *                            order for SoftIRQ (deprecated).
+	 * HOMA_GRO_IDLE_NEW          Use the new mechanism for selecting an
+	 *                            idle core for SoftIRQ.
+	 * HOMA_GRO_FAST_GRANTS       Pass all grant I can see immediately to
+	 *                            homa_softirq during GRO.
+	 * HOMA_GRO_SHORT_BYPASS      Pass all short packets directly to
+	 *                            homa_softirq during GR).
 	 */
 	#define HOMA_GRO_BYPASS          1
 	#define HOMA_GRO_SAME_CORE       2
@@ -1883,8 +1897,9 @@ struct homa {
 	#define HOMA_GRO_NEXT            8
 	#define HOMA_GRO_IDLE_NEW       16
 	#define HOMA_GRO_FAST_GRANTS    32
+	#define HOMA_GRO_SHORT_BYPASS   64
 	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE_NEW \
-			|HOMA_GRO_FAST_GRANTS)
+			|HOMA_GRO_SHORT_BYPASS)
 
 	/*
 	 * @gro_busy_usecs: try not to schedule SoftIRQ processing on a core

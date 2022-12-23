@@ -57,8 +57,7 @@ FIXTURE_SETUP(homa_offload)
 	}
 	self->napi.gro_bitmask = 0;
 
-	self->skb = mock_skb_new(&self->ip, &self->header.common, 1400,
-			self->header.seg.offset);
+	self->skb = mock_skb_new(&self->ip, &self->header.common, 1400, 2000);
 	NAPI_GRO_CB(self->skb)->same_flow = 0;
 	NAPI_GRO_CB(self->skb)->last = self->skb;
 	NAPI_GRO_CB(self->skb)->count = 1;
@@ -86,6 +85,7 @@ FIXTURE_TEARDOWN(homa_offload)
 	homa = NULL;
 	unit_teardown();
 }
+
 
 TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 {
@@ -123,6 +123,55 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	EXPECT_EQ(12600, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 	kfree_skb(skb);
+}
+TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
+{
+	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
+	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
+	int client_port = 40000;
+	int server_port = 99;
+	__u64 client_id = 1234;
+	__u64 server_id = 1235;
+	struct data_header h = {.common = {
+			.sport = htons(40000), .dport = htons(server_port),
+			.type = DATA,
+			.sender_id = cpu_to_be64(client_id)},
+			.message_length = htonl(10000),
+			.incoming = htonl(10000), .cutoff_version = 0,
+			.retransmit = 0,
+			.seg = {.offset = htonl(2000),
+			        .segment_length = htonl(1400),
+	                        .ack = {0, 0, 0}}};
+	struct sk_buff *skb, *skb2, *skb3;
+
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			&client_ip, &server_ip, client_port, server_id, 10000,
+			200);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	/* First attempt: HOMA_GRO_SHORT_BYPASS not enabled. */
+	skb = mock_skb_new(&self->ip, &h.common, 1400, 2000);
+	struct sk_buff *result = homa_gro_receive(&self->empty_list, skb);
+	EXPECT_EQ(0, -PTR_ERR(result));
+	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
+
+	/* Second attempt: HOMA_GRO_SHORT_BYPASS enabled but packet too long. */
+	self->homa.gro_policy |= HOMA_GRO_SHORT_BYPASS;
+	skb2 = mock_skb_new(&self->ip, &h.common, 1400, 3000);
+	result = homa_gro_receive(&self->empty_list, skb2);
+	EXPECT_EQ(0, -PTR_ERR(result));
+	EXPECT_EQ(8600, srpc->msgin.bytes_remaining);
+
+	/* Third attempt: bypass should happen. */
+	h.seg.segment_length = htonl(100);
+	skb3 = mock_skb_new(&self->ip, &h.common, 100, 4000);
+	result = homa_gro_receive(&self->empty_list, skb3);
+	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
+	EXPECT_EQ(8500, srpc->msgin.bytes_remaining);
+
+	kfree_skb(skb);
+	kfree_skb(skb2);
 }
 TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 {
