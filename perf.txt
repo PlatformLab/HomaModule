@@ -2,6 +2,48 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+42. (December 2022) New cluster measurements with "bench n10_mtu3000" (10
+    nodes, MTU 3000B) on the following configurations:
+    Jun 22:         Previous measurements from June of 2022
+    1.01:           Last commit before implementing new Homa-allocated buffers
+    2.0 Buf:        Homa-allocated buffers
+    Grants:         2.0 Buf plus GRO_FAST_GRANTS (incoming grants processed
+                    entirely during GRO)
+    Short Bypass:   2.0 Buf plus GRO_SHORT_BYPASS (all packets < 1400 bytes
+                    processed entirely during GRO)
+
+    Short-message latencies in usecs (fastest short messages taken from
+    homa_w*.data files, W4NL data taken from unloaded_w4.data):
+            Jun 22        1.01       2.0 Buf       Grants    Short Bypass
+          P50   P99    P50   P99    P50   P99    P50   P99    P50   P99
+          ----------   ----------   ----------   ----------   ----------
+    W2    38.2  100    37.1  84.7   38.3  87.1   38.9  89.7   27.3  71.5
+    W3    54.8  269    53.0  263    51.8  211    51.0  216    38.4  199
+    W4    55.8  189    56.0  207    53.0  113    54.0  128    45.2  108
+    W5    65.3  223    66.2  232    61.9  133    62.2  154    61.9  151
+    W4NL  16.6  32.4   15.2  30.1   16.2  30.6   16.2  31.5   13.8  28.4
+
+    Best of 5 runs from "bench basic_n10_mtu3000":
+                                       1.01   2.0 Buf   Grants  Short Bypass
+    ------------------------------------------------------------------------
+    Short-message RTT (usec)           16.1      16.1     16.1      13.7
+    Single-message throughput (Gbps)   10.2      12.2     12.7      12.7
+    Client RPC throughput (Mops/s)     1.46      1.51     1.52      1.69
+    Server RPC throughput (Mops/s)     1.52      1.66     1.63      1.68
+    Client throughput (Gbps)           23.6      23.7     23.6      23.7
+    Server throughput (Gbps)           23.6      23.7     23.7      23.7
+
+    Conclusions:
+    * New buffering reduces tail latency >40% for W4 and W5 (perhaps by
+      eliminating all-at-once message copies that occupy cores for long
+      periods?). Latency improves by 20-30% (both at P50 and P99) for
+      all message lengths in W4.
+    * New buffering improves single-message throughput by 20% (25% when
+      combined with fast grants)
+    * Short bypass appears to be a win overall: a bit worse P99 for W5,
+      but better everywhere else and a significant improvement for short
+      messages at low load
+
 41. (December 2022) More analysis of SMI interrupts. Wrote smi.cc to gather
     data on vents that cause all cores to stop simultaneously. Found 3 distinct
     kinds of gaps on xl170 (Intel) CPUs:
@@ -16,12 +58,16 @@ order.
     for 100 Gbps network (AMD CPUs): it takes at 850 ns to process each
     packet (median), but packets are arriving every 700 ns.
     Most of the time is spent in __alloc_skb in two places:
-    kmalloc_reserve for data   :       370 ns
+    kmalloc_reserve for data:       370 ns
     prefetchw for last word of data:   140 ns
     These times depend on core placements of threads; the above times
     are for an "unfortunate" (but typical) placement; with an ideal placement,
-    the times drop to 100 ns for kmalloc_reserve and essentiall 0 for the
+    the times drop to 100 ns for kmalloc_reserve and essentially 0 for the
     prefetch.
+
+    Intel CPUs don't seem to have this problem: on the xl170 cluster, NAPI
+    processes 1500B packets in about 300 ns, and 9000B packets in about
+    450 ns.
 
 39. (December 2022) One-way throughput for 1M messages varies from 18-27 Gbps
     for Homa on the c6525-100g cluster, whereas TCP throughput is relatively
@@ -159,25 +205,25 @@ order.
     seems to be in kernel call time and NIC->NIC time. Also, note that
     the 5.4.80 times have improved considerably from January 2021; there
     appears to be at least 1 us variation in RTT from machine to machine.
-                            5.17.7             5.4.80
-                        Server   Client    Server   Client
-----------------------------------------------------------
-Send:
-  homa_send/reply         461      588       468      534
-  IP/Driver               514      548       508      522
-  Total                   975     1136      1475     1056
-Receive:
-  Interrupt->Homa GRO     923     1003       789      815
-  GRO                     200      227       193      201
-  Wakeup SoftIRQ          601      480       355      347
-  IP SoftIRQ              361      441       400      361
-  Homa SoftIRQ            702      469       588      388
-  Wakeup App               94      106        87       53
-  homa_recv               447      562       441      588
-  Total                  3328     3288      2853     2753
-Recv -> send kcall        682                220
-NIC->NIC (round-trip)             6361               5261
-RTT Total                        15770              13618
+                                5.17.7             5.4.80
+                            Server   Client    Server   Client
+    ----------------------------------------------------------
+    Send:
+      homa_send/reply         461      588       468      534
+      IP/Driver               514      548       508      522
+      Total                   975     1136      1475     1056
+    Receive:
+      Interrupt->Homa GRO     923     1003       789      815
+      GRO                     200      227       193      201
+      Wakeup SoftIRQ          601      480       355      347
+      IP SoftIRQ              361      441       400      361
+      Homa SoftIRQ            702      469       588      388
+      Wakeup App               94      106        87       53
+      homa_recv               447      562       441      588
+      Total                  3328     3288      2853     2753
+    Recv -> send kcall        682                220
+    NIC->NIC (round-trip)             6361               5261
+    RTT Total                        15770              13618
 
 32. (January 2021) Best-case short-message timelines (xl170 cluster).
     Linux 4.15.18 numbers were measured in September 2020. All times are ns.
