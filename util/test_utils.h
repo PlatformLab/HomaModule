@@ -36,7 +36,7 @@ extern void    pin_thread(int core);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern const char*
-               print_address(sockaddr_in_union *addr);
+               print_address(const sockaddr_in_union *addr);
 extern double  to_seconds(uint64_t cycles);
 
 /**

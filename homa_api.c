@@ -141,7 +141,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 	vec.iov_len = length;
 
 	hdr.msg_name = (void *) dest_addr;
-	hdr.msg_namelen = sizeof(dest_addr->in4);
+	hdr.msg_namelen = sizeof(*dest_addr);
 	hdr.msg_iov = &vec;
 	hdr.msg_iovlen = 1;
 	hdr.msg_control = &args;

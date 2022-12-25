@@ -999,8 +999,10 @@ homa_server::homa_server(int port, int id, int inet_family,
 	addr.in4.sin_family = inet_family;
 	if (inet_family == AF_INET)
 		addr.in4.sin_port = htons(port);
-	else
+	else {
 		addr.in6.sin6_family = AF_INET6;
+		addr.in6.sin6_port = htons(port);
+	}
 	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
 		log(NORMAL, "FATAL: homa_server couldn't bind socket "
 				"to Homa port %d: %s\n", port,
@@ -2001,7 +2003,6 @@ void homa_client::stop_sender(void)
 bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 {
 	message_header *header;
-	sockaddr_in_union server_addr;
 
 	rpc_id = 0;
 	ssize_t length;
@@ -2013,7 +2014,7 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 			return false;
 		log(NORMAL, "FATAL: error in recvmsg: %s (id %lu, server %s)\n",
 				strerror(errno), rpc_id,
-				print_address(&server_addr));
+				print_address(receiver->src_addr()));
 		exit(1);
 	}
 	header = receiver->get<message_header>(0);
@@ -2154,7 +2155,6 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
 	uint64_t rpc_id;
-	sockaddr_in_union server_addr;
 	int status;
 
 	header->length = length;
@@ -2180,7 +2180,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 		log(NORMAL, "FATAL: measure_rtt got error in recvmsg: %s "
 				"(id %lu, server %s)\n",
 				strerror(errno), rpc_id,
-				print_address(&server_addr));
+				print_address(receiver->src_addr()));
 		exit(1);
 	}
 	return rdtsc() - start;
