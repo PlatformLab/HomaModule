@@ -216,6 +216,9 @@ def get_parser(description, usage, defaults = {}):
             help='Pause after starting servers to enable debugging setup')
     parser.add_argument('-h', '--help', action='help',
             help='Show this help message and exit')
+    parser.add_argument('-6', '--ipv6', dest='ipv6', action='store_const',
+            const='--ipv6', default='',
+            help='Use IPv6 for communication (default: use IPv4)')
     parser.add_argument('-l', '--log-dir', dest='log_dir',
             metavar='D', default=defaults['log_dir'],
             help='Directory to use for logs and metrics')
@@ -526,13 +529,13 @@ def start_servers(r, options):
         server_nodes = range(0,0)
     start_nodes(r, options)
     if options.protocol == "homa":
-        do_cmd("server --ports %d --port-threads %d --protocol %s" % (
+        do_cmd("server --ports %d --port-threads %d --protocol %s %s" % (
                 options.server_ports, options.port_threads,
-                options.protocol), r)
+                options.protocol, options.ipv6), r)
     else:
-        do_cmd("server --ports %d --port-threads %d --protocol %s" % (
+        do_cmd("server --ports %d --port-threads %d --protocol %s %s" % (
                 options.tcp_server_ports, options.tcp_port_threads,
-                options.protocol), r)
+                options.protocol, options.ipv6), r)
     server_nodes = r
 
 def run_experiment(name, clients, options):
@@ -574,7 +577,7 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa":
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--gbps %.3f --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f --client-max %d --protocol %s --id %d %s" % (
                     options.client_ports,
                     options.port_receivers,
                     options.server_ports,
@@ -584,7 +587,8 @@ def run_experiment(name, clients, options):
                     options.gbps,
                     options.client_max,
                     options.protocol,
-                    id);
+                    id,
+                    options.ipv6);
             if "unloaded" in options:
                 command += " --unloaded %d" % (options.unloaded)
         else:
@@ -594,7 +598,7 @@ def run_experiment(name, clients, options):
                 trunc = ''
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --server-nodes %d --first-server %d " \
-                    "--gbps %.3f %s --client-max %d --protocol %s --id %d" % (
+                    "--gbps %.3f %s --client-max %d --protocol %s --id %d %s" % (
                     options.tcp_client_ports,
                     options.tcp_port_receivers,
                     options.tcp_server_ports,
@@ -605,7 +609,8 @@ def run_experiment(name, clients, options):
                     trunc,
                     options.client_max,
                     options.protocol,
-                    id);
+                    id,
+                    options.ipv6);
         active_nodes[id].stdin.write(command + "\n")
         try:
             active_nodes[id].stdin.flush()
