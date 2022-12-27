@@ -141,7 +141,12 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 	vec.iov_len = length;
 
 	hdr.msg_name = (void *) dest_addr;
-	hdr.msg_namelen = sizeof(*dest_addr);
+	/* For some unknown reason, this change improves short-message P99
+	 * latency by 20% in W3 under IPv4 (as of December 2022).
+	 */
+//	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_namelen = dest_addr->in4.sin_family == AF_INET ?
+			sizeof(dest_addr->in4) : sizeof(dest_addr->in6);
 	hdr.msg_iov = &vec;
 	hdr.msg_iovlen = 1;
 	hdr.msg_control = &args;
