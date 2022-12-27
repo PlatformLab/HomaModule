@@ -1312,8 +1312,13 @@ char *homa_print_metrics(struct homa *homa)
 				m->softirq_calls);
 		homa_append_metric(homa,
 				"softirq_cycles            %15llu  "
-				"Time spent in homa_softirq\n",
+				"Time spent in homa_softirq during SoftIRQ\n",
 				m->softirq_cycles);
+		homa_append_metric(homa,
+				"bypass_softirq_cycles     %15llu  "
+				"Time spent in homa_softirq during bypass "
+				"from GRO\n",
+				m->bypass_softirq_cycles);
 		homa_append_metric(homa,
 				"linux_softirq_cycles      %15llu  "
 				"Time spent in all Linux SoftIRQ\n",

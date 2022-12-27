@@ -2103,10 +2103,16 @@ struct homa_metrics {
 	__u64 softirq_calls;
 
 	/**
-	 * @softirq_cycles: total time spent executing homa_softirq, as
-	 * measured with get_cycles().
+	 * @softirq_cycles: total time spent executing homa_softirq when
+	 * invoked under Linux's SoftIRQ handler, as measured with get_cycles().
 	 */
 	__u64 softirq_cycles;
+
+	/**
+	 * @bypass_softirq_cycles: total time spent executing homa_softirq when
+	 * invoked during GRO, bypassing the SoftIRQ mechanism.
+	 */
+	__u64 bypass_softirq_cycles;
 
 	/**
 	 * @linux_softirq_cycles: total time spent executing all softirq

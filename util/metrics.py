@@ -271,7 +271,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("send syscall            %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("send syscall                %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
     cores = time/time_delta
@@ -282,7 +282,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("recv syscall (-poll)    %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("recv syscall (-poll)        %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     time = float(deltas["reply_cycles"])
     cores = time/time_delta
@@ -293,31 +293,47 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("reply syscall           %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("reply syscall               %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     for print_name, symbol in [["NAPI", "napi_cycles"],
+            ["  Bypass homa_softirq", "bypass_softirq_cycles"],
             ["Linux SoftIRQ", "linux_softirq_cycles"],
-            ["  Homa SoftIRQ", "softirq_cycles"],
-            ["  Sending grants", "grant_cycles"]]:
+            ["  Normal homa_softirq", "softirq_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
-        if (symbol != "softirq_cycles") and (symbol != "grant_cycles"):
-            total_cores_used += cores;
         if packets_received > 0:
-            print("%s      %6.2f   %7.2f us/packet" % (print_name.ljust(18),
+            print("%s      %6.2f   %7.2f us/packet" % (print_name.ljust(22),
                     cores, (cpu_time/packets_received) / (cpu_khz/1e03)))
         else:
-            print("%s      %6.2f" % (print_name.ljust(18), cores))
+            print("%s      %6.2f" % (print_name.ljust(22), cores))
+    cpu_time = float(deltas["napi_cycles"])
+    if cpu_time == 0:
+        cpu_time = float(deltas["bypass_softirq_cycles"])
+    total_cores_used += cpu_time/time_delta
+    cpu_time = float(deltas["linux_softirq_cycles"])
+    if cpu_time == 0:
+        cpu_time = float(deltas["softirq_cycles"])
+    total_cores_used += cpu_time/time_delta
 
     for print_name, symbol in [["Pacer", "pacer_cycles"],
             ["Timer handler", "timer_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
         total_cores_used += cores;
-        print("%s      %6.2f" % (print_name.ljust(18), cores))
+        print("%s      %6.2f" % (print_name.ljust(22), cores))
 
-    print("------------------------------");
-    print("Total Core Utilization  %6.2f" % (total_cores_used))
+    print("----------------------------------");
+    print("Total Core Utilization      %6.2f" % (total_cores_used))
+
+    cpu_time = float(deltas["grant_cycles"])
+    cores = cpu_time/time_delta
+    num_grants = deltas["packets_sent_GRANT"]
+    if num_grants != 0:
+        per_grant = cpu_time/float(deltas["packets_sent_GRANT"])/(cpu_khz/1e03)
+    else:
+        per_grant = 0.0
+    print("\nSending grants              %6.2f   %7.2f us/grant" % (cores,
+            per_grant))
 
     time = float(deltas["poll_cycles"])
     cores = time/time_delta
@@ -326,7 +342,7 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
-    print("\nPolling in recv         %6.2f   %7.2f us/syscall" % (cores, us_per))
+    print("Polling in recv             %6.2f   %7.2f us/syscall" % (cores, us_per))
 
     print("\nLock Misses:")
     print("------------")

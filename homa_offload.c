@@ -137,6 +137,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 	__u32 hash;
+	__u64 saved_softirq_metric, softirq_cycles;
 	struct data_header *h_new = (struct data_header *)
 			skb_transport_header(skb);
 	int priority;
@@ -170,12 +171,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		 * a significant difference in throughput for large
 		 * messages, especially when the system is loaded.
 		 */
-		if (homa->gro_policy & HOMA_GRO_FAST_GRANTS) {
-			homa_softirq(skb);
-
-			/* Indicates that we have freed skb. */
-			return ERR_PTR(-EINPROGRESS);
-		}
+		if (homa->gro_policy & HOMA_GRO_FAST_GRANTS)
+			goto bypass;
 	} else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
@@ -186,12 +183,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 	if ((homa->gro_policy & HOMA_GRO_BYPASS)
 			|| ((homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
-			&& (skb->len < 1400))) {
-		homa_softirq(skb);
-
-		/* This return value indicates that we have freed skb. */
-		return ERR_PTR(-EINPROGRESS);
-	}
+			&& (skb->len < 1400)))
+		goto bypass;
 
 	/* The GRO mechanism tries to separate packets onto different
 	 * gro_lists by hash. This is bad for us, because we want to batch
@@ -266,6 +259,25 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
     done:
 	homa_check_pacer(homa, 1);
 	return result;
+
+    bypass:
+	saved_softirq_metric = homa_cores[raw_smp_processor_id()]
+			->metrics.softirq_cycles;
+	homa_softirq(skb);
+	softirq_cycles = homa_cores[raw_smp_processor_id()]
+			->metrics.softirq_cycles - saved_softirq_metric;
+	homa_cores[raw_smp_processor_id()]->metrics.softirq_cycles
+			= saved_softirq_metric;
+	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
+
+        /* Record SoftIRQ cycles in a different metric to reflect that
+	 * they happened during bypass.
+	 */
+
+
+	/* This return value indicates that we have freed skb. */
+	return ERR_PTR(-EINPROGRESS);
+
 }
 
 /**
