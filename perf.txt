@@ -2,6 +2,26 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+43. (December 2022) 2-host throughput measurements (Gbps). Configuration:
+    * Single message: cp_node client --one-way --workload 500000
+      Server: one thread, pinned on a "good" core (avoid GRO/SoftIRQ conflicts)
+    * Multiple messages: client adds "--ports 2 --client-max 8
+      Server doesn't pin, adds "--port-threads 2" (single port)
+    * All measurements used rtt_bytes=150000
+
+                                          1.01     2.0 Buf + Short Bypass
+    ---------------------------------------------------------------------
+    Single message (MTU 1500)              9                11
+    Single message (MTU 3000)            10-11              13
+    Multiple messages (MTU 1500)         20-21            21-22
+    Multiple messages (MTU 3000)         22-23            22-23
+
+    Conclusions:
+    * The new buffering mechanism helps single-message throughput about 20%,
+      but not much impact when there are many concurrent messages.
+    * Homa 1.01 seems to be able to hide most of the overhead of
+      page pool thrashing (#35 below).
+
 42. (December 2022) New cluster measurements with "bench n10_mtu3000" (10
     nodes, MTU 3000B) on the following configurations:
     Jun 22:         Previous measurements from June of 2022
@@ -17,19 +37,19 @@ order.
             Jun 22        1.01       2.0 Buf       Grants    Short Bypass
           P50   P99    P50   P99    P50   P99    P50   P99    P50   P99
           ----------   ----------   ----------   ----------   ----------
-    W2    38.2  100    37.1  84.7   38.3  87.1   38.9  89.7   27.3  71.5
-    W3    54.8  269    53.0  263    51.8  211    51.0  216    38.4  199
-    W4    55.8  189    56.0  207    53.0  113    54.0  128    45.2  108
-    W5    65.3  223    66.2  232    61.9  133    62.2  154    61.9  151
-    W4NL  16.6  32.4   15.2  30.1   16.2  30.6   16.2  31.5   13.8  28.4
+    W2    38.2  100    37.1  84.7   38.3  87.1   38.9  89.7   27.1  70.5
+    W3    54.8  269    53.0  263    51.8  211    51.0  216    39.2  216
+    W4    55.8  189    56.0  207    53.0  113    54.0  128    44.6  106
+    W5    65.3  223    66.2  232    61.9  133    62.2  154    61.5  150
+    W4NL  16.6  32.4   15.2  30.1   16.2  30.6   16.2  31.5   13.7  27.1
 
     Best of 5 runs from "bench basic_n10_mtu3000":
                                        1.01   2.0 Buf   Grants  Short Bypass
     ------------------------------------------------------------------------
-    Short-message RTT (usec)           16.1      16.1     16.1      13.7
-    Single-message throughput (Gbps)   10.2      12.2     12.7      12.7
-    Client RPC throughput (Mops/s)     1.46      1.51     1.52      1.69
-    Server RPC throughput (Mops/s)     1.52      1.66     1.63      1.68
+    Short-message RTT (usec)           16.1      16.1     16.1      13.5
+    Single-message throughput (Gbps)   10.2      12.2     12.7      12.5
+    Client RPC throughput (Mops/s)     1.46      1.51     1.52      1.75
+    Server RPC throughput (Mops/s)     1.52      1.66     1.63      1.73
     Client throughput (Gbps)           23.6      23.7     23.6      23.7
     Server throughput (Gbps)           23.6      23.7     23.7      23.7
 
