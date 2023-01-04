@@ -295,6 +295,22 @@ TEST_F(homa_plumbing, homa_sendmsg__bad_address_family)
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__address_too_short)
+{
+	self->client_addr.in4.sin_family = AF_INET;
+	self->hsk.inet.sk.sk_family = AF_INET;
+	self->sendmsg_hdr.msg_namelen = sizeof(struct sockaddr_in) - 1;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+
+	self->client_addr.in4.sin_family = AF_INET6;
+	self->hsk.inet.sk.sk_family = AF_INET6;
+	self->sendmsg_hdr.msg_namelen = sizeof(struct sockaddr_in6) - 1;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_new_client)
 {
 	mock_kmalloc_errors = 2;

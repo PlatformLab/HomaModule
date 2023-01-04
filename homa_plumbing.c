@@ -862,6 +862,12 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		result = -EAFNOSUPPORT;
 		goto error;
 	}
+	if ((msg->msg_namelen < sizeof(struct sockaddr_in))
+			|| ((msg->msg_namelen < sizeof(struct sockaddr_in6))
+			&& (addr->in6.sin6_family == AF_INET6))) {
+		result = -EINVAL;
+		goto error;
+	}
 
 	if (!args.id) {
 		/* This is a request message. */
