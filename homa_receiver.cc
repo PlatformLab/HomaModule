@@ -77,8 +77,8 @@ void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
 }
 
 /**
- * homa::receiver::receive() - Receive an incoming message and release
- * resources for the current message, if any.
+ * homa::receiver::receive() - Release resources for the current message, if
+ * any, and receive a new incoming message.
  * @flags:    Various OR'ed bits such as HOMA_RECVMSG_REQUEST and
  *            HOMA_RECVMSG_NONBLOCKING. See the Homa documentation
  *            for the flags field of recvmsg for details.
@@ -88,7 +88,7 @@ void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
  * Return:    The length of the new active message. If an error occurs, -1
  *            is returned and additional information is available in
  *            errno. Note: if id() returns a nonzero result after an
- *            error, it means that RPC has now completed with an error
+ *            error, it means that that RPC has now completed with an error
  *            and errno describes the nature of the error.
  */
 size_t homa::receiver::receive(int flags, uint64_t id)
@@ -105,7 +105,8 @@ size_t homa::receiver::receive(int flags, uint64_t id)
 
 /**
  * homa::receiver::release() - Release any resources associated with the
- * current message, if any.
+ * current message, if any. The current message must not be accessed again
+ * until receive has returned successfully.
  */
 void homa::receiver::release()
 {
@@ -117,4 +118,5 @@ void homa::receiver::release()
 	control.id = 0;
 	recvmsg(fd, &hdr, 0);
 	control.num_bpages = 0;
+	msg_length = -1;
 }

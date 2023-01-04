@@ -24,15 +24,24 @@ namespace homa {
 
 /**
  * class homa::receiver - Helper class for receiving a series of messages
- * from a Homa socket. At any given time there may be a single incoming
- * message associated with the object (the "current" message); receiving the
- * next message releases resources for any existing current message.
+ * from a Homa socket. This class serves two purposes: first, it implements
+ * the application side of the Homa buffer management protocol, returning
+ * receive buffer space to Homa when the application longer needs it. Second,
+ * it provides convenience methods for accessing messages that are scattered\
+ * over several discontiguous regions of buffer space.
  *
- * This class serves two purposes: first, it implements the application side
- * of the Homa buffer management protocol, returning receive buffer space to
- * Homa when the application longer needs it. Second, it provides convenience
- * methods for accessing messages that are scattered over several discontiguous
- * regions of buffer space.
+ * Typical usage:
+ * - Call receive, which will invoke Homa to receive an incoming message.
+ * - Access the message using methods such as get and copy_out (note: if
+ *   the message is shorter than HOMA_BPAGE_SIZE then it will be contiguous).
+ * - Call receive to get the next message. This releases all of the resources
+ *   associated with the previous message, so you can no longer access that.
+ * - Access the new message ...
+ *
+ * A single homa::receiver allows only a single active incoming message
+ * at a time. However, you can create multiple homa::receivers for the
+ * same Homa socket, each of which can have one active message. An
+ * individual homa::receiver is not thread-safe.
  */
 class receiver {
 public:
