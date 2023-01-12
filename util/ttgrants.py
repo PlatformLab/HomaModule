@@ -78,6 +78,10 @@ in_grants = {}
 # that data packet.
 out_data = {}
 
+# Keys are RPC ids; each value is the first time at which we noticed that
+# this RPC is transmitting data.
+first_out = {}
+
 for line in f:
     # Collect info about outgoing grants (including implicit grants
     # for unscheduled bytes)
@@ -135,6 +139,7 @@ for line in f:
         id = int(match.group(4))
         unsched = int(match.group(5))
         unscheduled[id] = unsched
+        first_out[id] = time
         # print("%9.3f: %d unscheduled bytes for id %d" % (time, id, unsched))
 
     # Collect info about incoming grants
@@ -165,13 +170,13 @@ for line in f:
 
     # Collect info about outgoing data packets (and also the packet size)
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'calling ip_queue_xmit: skb->len ([0-9]+).* id ([0-9]+), '
-            'offset ([0-9]+)', line)
+            'Finished queueing packet: .* id ([0-9]+), offset ([0-9]+), '
+            'len ([0-9]+)', line)
     if match:
         time = float(match.group(1))
-        size = int(match.group(4))
-        id = int(match.group(5))
-        offset = int(match.group(6))
+        id = int(match.group(4))
+        offset = int(match.group(5))
+        size = int(match.group(6))
         if size > packet_size:
             packet_size = size
           # print("Setting packet size to %d" % (packet_size))
@@ -181,6 +186,8 @@ for line in f:
                 continue
             out_data[id] = []
         out_data[id].append([time, offset])
+        if not (id in first_out):
+            first_out[id] = time
         # print("%9.3f: outgoing data for id %d, offset %d" % (
         #         time, id, offset))
 
@@ -240,6 +247,31 @@ for id in out_data:
         # print("%9.3f: grant offset %d arrived for id %d, data time %9.3f" % (
         #         grant[1], grant_start, id, prev_data_time))
 
+# Compute total amount of time during which at least one RPC was actively
+# transmitting.
+xmit_active_time = 0
+start_times = []
+end_times = []
+for id in out_data:
+    start_times.append(first_out[id])
+    end_times.append(out_data[id][-1][0])
+start_times = sorted(start_times)
+end_times = sorted(end_times)
+num_active = 0
+active_start = 0
+while (len(start_times) > 0) or (len(end_times) > 0):
+    if len(start_times) > 0:
+        if (len(end_times) == 0) or (start_times[0] < end_times[0]):
+            if num_active == 0:
+                active_start = start_times[0]
+            num_active += 1
+            start_times.pop(0)
+            continue
+    num_active -= 1
+    if num_active == 0:
+        xmit_active_time += end_times[0] - active_start
+    end_times.pop(0)
+
 latencies = sorted(latencies)
 first_grants = sorted(first_grants)
 in_lags = sorted(in_lags)
@@ -273,8 +305,8 @@ else:
 print("Average:   %9s     %9s   %9s" % (out_avg, in_avg, in_lags_avg))
 
 print("\nTotal data packet xmit delays because grants were slow:\n"
-        "%.1f us (%.1f%% of total elapsed time)" % (
-        total_lag, 100.0*total_lag/time))
+        "%.1f us (%.1f%% of xmit active time)" % (
+        total_lag, 100.0*total_lag/xmit_active_time))
 
 in_deltas = sorted(in_deltas)
 print("\nSizes of incoming grants (additional authorized data)")
