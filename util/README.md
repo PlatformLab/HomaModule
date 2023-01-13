@@ -60,6 +60,9 @@ the time differences using only those records.
 
 **ttmerge.py**: combines two or more timetraces into a single timetrace.
 
+**ttnicedelay.py**:: analyzes synchronized client and server traces to
+detect situations where the NIC is delaying interrupts.
+
 **ttoffset.py**: offsets all of the times in a timetrace by a given amount (usually
 done to line up times in one trace with times in another).
 
