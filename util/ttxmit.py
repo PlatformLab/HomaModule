@@ -91,7 +91,7 @@ inactive_gaps = []
 
 for line in f:
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'calling ip_queue_xmit: skb->len ([0-9]+), .* id ([0-9]+), '
+            'calling .*_xmit: skb->len ([0-9]+), .* id ([0-9]+), '
             'offset ([0-9]+)', line)
     if not match:
         continue

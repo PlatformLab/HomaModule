@@ -364,7 +364,7 @@ def parse_tt(tt, server):
         pktid = id + ":" + offset
 
         # Outgoing data sent
-        if "calling ip_queue_xmit: skb->len" in line:
+        if re.match('.*calling .*_xmit: skb->len', line):
             counts["ip_queue_xmit"] += 1
             data_send[pktid] = time
 
