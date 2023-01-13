@@ -125,7 +125,7 @@ def print_stats(patterns, rpcs):
       continue
     elapsed = sorted(elapsed)
     deltas = sorted(deltas)
-    print("%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1fus (+%7.1f us)" % (
+    print("%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)" % (
         pattern["name"], sum(elapsed)/len(elapsed), sum(deltas)/len(deltas),
         elapsed[9*len(elapsed)//10], deltas[9*len(deltas)//10]))
 
@@ -169,6 +169,13 @@ copy_in_data = 0
 copy_in_time = 0
 copy_out_data = 0
 copy_out_time = 0
+
+# A list containing the elapsed time for each invocation of ip_queue_xmit
+# or ip6_xmit for a data packet
+xmit_times = []
+
+# For each core, time of most recent call to either ip_queue_xmit or ip6_xmit.
+start_xmit = {}
 
 for line in f:
   for i in range(len(patterns)):
@@ -229,6 +236,19 @@ for line in f:
       copy_out_data += count
       # print("%8.3f: %d bytes copied in %.1f usec: %.1f GB/sec" % (
           # qtime, count, elapsed, (count/1000)/elapsed))
+  match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+      'calling .*_xmit: skb->len', line)
+  if match:
+    time = float(match.group(1))
+    core = int(match.group(3))
+    start_xmit[core] = time
+  match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+      'Finished queueing packet:', line)
+  if match:
+    time = float(match.group(1))
+    core = int(match.group(3))
+    if core in start_xmit:
+        xmit_times.append(time - start_xmit[core])
 
 # Make sure aux_rpcs doesn't contain elements not in rpcs.
 bad_ids = []
@@ -295,3 +315,10 @@ if copy_out_time != 0:
   print("  Copy to user space:           %6.1f Gbps (%4.1f%% of total time)" % (
       8e-03*copy_out_data/copy_out_time,
       100.0*copy_out_time/end))
+
+if len(xmit_times):
+    xmit_times = sorted(xmit_times)
+    print("\nAverage time to xmit packet: %.1f us (P0: %.1f, P50: %.1f, "
+            "P90: %.1f, P100: %.1f)" % (sum(xmit_times)/len(xmit_times),
+            xmit_times[0], xmit_times[len(xmit_times)//2],
+            xmit_times[9*len(xmit_times)//10], xmit_times[-1]))
