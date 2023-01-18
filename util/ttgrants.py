@@ -46,7 +46,7 @@ else:
     sys.exit(1)
 
 # Network link speed in Gbps.
-gbps = 25
+gbps = 40
 
 # Collects all the observed grant latencies (time from sending grant
 # to receiving first data packet enabled by grant), in microseconds
@@ -61,8 +61,8 @@ out_grants = {}
 # for the RPC (including the initial "grant" for unscheduled data).
 last_grant = {}
 
-# Eventually holds the amount of data in a full-size output (GSO) packet.
-packet_size = 1000
+# Largest observed incoming packet size (presumably a full GSO packet?).
+packet_size = 0
 
 # Keys are outgoing RPC ids; each value is the amount of unscheduled data
 # transmitted for that RPC.
@@ -179,7 +179,7 @@ for line in f:
         size = int(match.group(6))
         if size > packet_size:
             packet_size = size
-          # print("Setting packet size to %d" % (packet_size))
+            # print("Setting packet size to %d" % (packet_size))
         if not id in out_data:
             if offset != 0:
                 # The trace doesn't include all outgoing data packets
@@ -203,8 +203,9 @@ for id in out_data:
 
 # Time to transmit a full-size packet, in microseconds.
 xmit_time = (packet_size * 8)/(gbps * 1000)
-print("Data bytes per xmit packet: %d" % (packet_size))
-print("Packet xmit time: %.1f us" % (xmit_time))
+print("Largest observed incoming packet: %d bytes" % (packet_size))
+print("Wire serialization time for %d-byte packet at %d Gbps: %.1f us" % (
+        packet_size, gbps, xmit_time))
 
 # Collect info for all incoming grants about how much additional data
 # is authorized by each grant.
@@ -304,9 +305,10 @@ else:
     in_lags_avg = "%6.1f us" %  (sum(in_lags)/len(in_lags))
 print("Average:   %9s     %9s   %9s" % (out_avg, in_avg, in_lags_avg))
 
-print("\nTotal data packet xmit delays because grants were slow:\n"
-        "%.1f us (%.1f%% of xmit active time)" % (
-        total_lag, 100.0*total_lag/xmit_active_time))
+if xmit_active_time != 0:
+    print("\nTotal data packet xmit delays because grants were slow:\n"
+            "%.1f us (%.1f%% of xmit active time)" % (
+            total_lag, 100.0*total_lag/xmit_active_time))
 
 in_deltas = sorted(in_deltas)
 print("\nSizes of incoming grants (additional authorized data)")
