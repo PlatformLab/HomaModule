@@ -381,7 +381,7 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 	print_dist(times, count);
 	printf("Bandwidth at median: %.1f MB/sec\n",
 			2.0*((double) length)/(to_seconds(times[count/2])*1e06));
-	delete times;
+	delete[] times;
 }
 
 /**
