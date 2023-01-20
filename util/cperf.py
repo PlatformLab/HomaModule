@@ -327,7 +327,7 @@ def init(options):
 
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
-        do_ssh(["set_mtu", str(options.mtu)], range(0, options.num_nodes))
+        do_ssh(["config", "mtu", str(options.mtu)], range(0, options.num_nodes))
 
 def wait_output(string, nodes, cmd, time_limit=10.0):
     """

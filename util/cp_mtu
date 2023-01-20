@@ -37,10 +37,7 @@ mtus = [1500, 3000, 6000, 9000]
 # Run the experiments
 if not options.plot_only:
     try:
-        do_ssh(["sudo", "ip", "link", "set", "ens1f1", "mtu", "1500"],
-                range(0, options.num_nodes))
-        do_ssh(["sudo", "ip", "link", "set", "vlan287", "mtu", "1500"],
-                range(0, options.num_nodes))
+        do_ssh(["config", "mtu", "1500"], range(0, options.num_nodes))
         options.protocol = "homa"
         start_servers(servers, options)
 
@@ -55,28 +52,19 @@ if not options.plot_only:
         run_experiment("unloaded_%s" % (options.workload), range(0, 1), o)
 
         for mtu in mtus:
-            do_ssh(["sudo", "ip", "link", "set", "ens1f1", "mtu", str(mtu)],
-                    range(0, options.num_nodes))
-            do_ssh(["sudo", "ip", "link", "set", "vlan287", "mtu", str(mtu)],
-                    range(0, options.num_nodes))
+            do_ssh(["config", "mtu", str(mtu)], range(0, options.num_nodes))
             start_servers(servers, options)
             run_experiment("homa_%s_mtu%d" % (options.workload, mtu),
                     clients, options)
 
         options.protocol = "tcp"
         for mtu in mtus:
-            do_ssh(["sudo", "ip", "link", "set", "ens1f1", "mtu", str(mtu)],
-                    range(0, options.num_nodes))
-            do_ssh(["sudo", "ip", "link", "set", "vlan287", "mtu", str(mtu)],
-                    range(0, options.num_nodes))
+            do_ssh(["config", "mtu", str(mtu)], range(0, options.num_nodes))
             start_servers(servers, options)
             run_experiment("tcp_%s_mtu%d" % (options.workload, mtu),
                     clients, options)
 
-        do_ssh(["sudo", "ip", "link", "set", "ens1f1", "mtu", "1500"],
-                range(0, options.num_nodes))
-        do_ssh(["sudo", "ip", "link", "set", "vlan287", "mtu", "1500"],
-                range(0, options.num_nodes))
+        do_ssh(["config", "mtu", "1500"], range(0, options.num_nodes))
     except Exception as e:
         log(traceback.format_exc())
 

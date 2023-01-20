@@ -48,5 +48,5 @@ for ((i = $first ; i <= $last; i++)); do
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/bin/ $node:bin/
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
     ssh $node 'echo $PATH'
-    ssh $node 'start_xl170 ~/bin/homa.ko'
+    ssh $node 'config default'
 done

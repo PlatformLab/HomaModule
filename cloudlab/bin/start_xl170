@@ -1,3 +1,6 @@
+# As of January 2023 this script is obsolete and deprecated. It is
+# retained (for now) a possibly useful historical reference
+
 # This script starts up the Homa module and configures it for the
 # local system. If Homa was previously installed, it is uninstalled.
 # Usage:

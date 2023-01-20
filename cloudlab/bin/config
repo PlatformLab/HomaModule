@@ -1,0 +1,375 @@
+#!/usr/bin/python3
+
+# Copyright (c) 2023 Stanford University
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR(S) DISCLAIM ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL AUTHORS BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+"""
+This script is used to configure CloudLab nodes for running Homa experiments.
+It does things such as (re-)installing Homa, setting Homa configuration
+parameters, and configuring the system in various ways such as setting
+power management parameters and enabling RPS.
+"""
+
+from glob import glob
+import os
+import re
+import subprocess
+import sys
+
+# Names for the main network interface and VLAN for this host. Set by
+# get_interfaces
+interface = None
+vlan = None
+
+# Number of this node (e.g. 1 for "node-1"). Set by get_node_num.
+node_num = None
+
+# CloudLab node type for this machine, such as xl170 or c6525-100g.
+# Set by get_node_type.
+node_type = None
+
+# Contains information from /proc/cpuinfo with one entry for each
+# "processor" in /proc/cpuinfo. The entry is a dictionary with the
+# following entries (same names as in /proc/cpuinfo):
+# processor:    number of this core (hyperthread)
+# core id:      number of the physical core (same for all hyperthreads
+#               on the core)
+# physical id:  number for the socket containing this core
+# This array is filled in by read_cpu_info().
+cpu_info = []
+
+# The total number of physical cores (i.e. distinct values of "core id"
+# in cpuinfo). Filled in by read_cpu_info().
+num_phys_cores = 0;
+
+def get_core_mask():
+    """
+    Returns a hexadecimal integer mask with a 1 bit for each core
+    (hyperthread) in this machine.
+    """
+    read_cpu_info()
+    mask = 0
+    for cpu in cpu_info:
+        mask = mask | (1 << cpu["processor"])
+    return "%x" % (mask)
+
+def get_interfaces():
+    """
+    Runs ifconfig and parses its output to identify the key network
+    interfaces for this host. Returns a list containing two interface
+    names. The first is the name of the hardware interface, and the
+    second is the name of the VLAN associated with that interface.
+    """
+
+    global interface, vlan
+    if interface:
+        return [interface, vlan]
+    available = "";
+    for line in subprocess.run(["ifconfig"], stdout=subprocess.PIPE,
+            encoding="utf-8", check=True).stdout.splitlines():
+        match = re.match('^([a-z0-9]*):', line)
+        if match:
+            current = match.group(1)
+            if available:
+                available += ", "
+            available += current
+            match = re.match('^([a-z]*1f1[a-z0-9]*):', line)
+            if match:
+                interface = match.group(1)
+            continue
+        if re.match('^[ ]+ inet 10\.0\.1\.', line):
+            vlan = current
+    if not vlan:
+        raise Exception("Couldn't identify vlan interface");
+    if not interface:
+        raise Exception("Couldn't identify primary network interface");
+    if not vlan or not interface:
+        print("Found the following interfaces: %s" % (available))
+    print("Primary network interface is %s, vlan is %s" % (interface, vlan))
+    return [interface, vlan]
+
+def get_node_num():
+    """
+    Returns the (integer) number of this node (e.g., 1 for "node-1").
+    """
+
+    global node_num
+    if node_num:
+        return node_num
+    hostname = subprocess.run(["hostname"], stdout=subprocess.PIPE,
+            encoding="utf-8", check=True).stdout
+    match = re.match('node-([0-9]+)\.', hostname)
+    if not match:
+        raise Exception("Couldn't figure out node number for this node")
+    node_num = int(match.group(1))
+    print("Number of this node is %d" % (node_num))
+    return node_num
+
+def get_node_type():
+    """
+    Returns the node type for this machine.
+    """
+
+    global node_type
+    if node_type:
+        return node_type
+    f = open("/var/emulab/boot/nodetype")
+    node_type = f.read().strip()
+    f.close()
+    print("Type of this node is %s" % (node_type))
+    return node_type
+
+def read_cpu_info():
+    """
+    Read the file /proc/cpuinfo and store information from it in various
+    global arrays above.
+    """
+    global cpu_info, num_phys_cores
+
+    if len(cpu_info) > 0:
+        return
+    cpu = None
+    cores = {}
+    sockets = {}
+    f = open("/proc/cpuinfo", "r")
+    for line in f:
+        match = re.match('([^\t]*)[\t ]+: (.*)', line)
+        if match:
+            name = match.group(1)
+            value = match.group(2)
+            # print("name '%s' value '%s'" % (name, value))
+            if name == 'processor':
+                cpu = int(value)
+                cpu_info.append({name: int(value)})
+            elif cpu == None:
+                continue
+            if name == "core id":
+                cpu_info[-1][name] = int(value)
+                cores[value] = 1
+            elif name == "physical id":
+                cpu_info[-1][name] = int(value)
+                sockets[value] = 1
+    f.close()
+    num_phys_cores = len(cores)
+    s = "sockets"
+    if len(sockets) == 1:
+        s = "socket"
+    if num_phys_cores == len(cpu_info):
+        print("This node has %d %s, %d cores, no hyperthreading" % (
+                len(sockets), s, num_phys_cores))
+    else:
+        print("This node has %d %s, %d logical cores, %d-way "
+                "hyperthreading" % (len(sockets), s, len(cpu_info),
+                len(cpu_info)/num_phys_cores))
+
+def add_ipv6_to_etc_hosts(num_hosts):
+    """
+    If /etc/hosts doesn't already contain IPv6 addresses for hosts
+    in the cluster, add them. The num_hosts argument indicates how
+    many hosts should be present in /etc/hosts.
+    """
+
+    # First see which, if any, entries are already in /etc/hosts.
+    f = open("/etc/hosts", "r")
+    old = f.read()
+    f.close()
+    for first in range(num_hosts-1, -1, -1):
+        if ("fd00::%d" % (first+1)) in old:
+            first += 1
+            break;
+    if first < (num_hosts-1):
+        print("Adding IPv6 addresses for nodes %d-%d to /etc/hosts" % (
+                first, num_hosts-1))
+        input = ""
+        for i in range(first, num_hosts):
+            input += "fd00::%d  node-%d\n" % (i+1, i);
+        subprocess.run(["sudo", "bash", "-c", "cat >> /etc/hosts"],
+                input=input, encoding="utf-8", check=True)
+    else:
+        print("/etc/hosts already contains IPv6 addresses for nodes 0-%d" % (
+                num_hosts-1))
+
+def set_sysctl(name, value):
+    """
+    Set a Homa sysctl configuration option as given by name and value.
+    """
+    subprocess.run(["sudo", "sysctl", ".net.homa.%s=%s" % (name, value)],
+            check=True)
+
+def config_homa(mod):
+    """
+    Install the Homa kernel driver and configure it appropriately for
+    this node type.
+    mod:   the path to the Homa module '.ko' file
+    """
+    type = get_node_type()
+    print("Installing Homa kernel module from %s" % (mod))
+    subprocess.run(["sudo", "rmmod", "homa"], check=False)
+    subprocess.run(["sudo", "bash", "-c", "insmod %s" % (mod)],
+            check=True)
+
+    set_sysctl("num_priorities", "8")
+    if type == "xl170":
+        set_sysctl("link_mbps", "25000")
+        set_sysctl("max_nic_queue_ns", "2000")
+        set_sysctl("rtt_bytes", "60000")
+        set_sysctl("max_gso_size", "10000")
+    elif type == "c6525-100g":
+        set_sysctl("link_mbps", "100000")
+        set_sysctl("max_nic_queue_ns", "5000")
+        set_sysctl("rtt_bytes", "200000")
+        set_sysctl("max_gso_size", "100000")
+    else:
+        raise Exception("Can't configure Homa: unknown node type %s" % (type))
+
+def config_ipv6(num_hosts, vlan):
+    """
+    Configure this node to enable IPv6.
+
+    num_hosts: the total number of hosts in the cluster (OK to overestimate).
+    vlan:      name of the VLAN interface to configure with IPv6 info
+    """
+    vlan = get_interfaces()[1]
+    # Configure ifconfig and route if not already done.
+    if "inet6 fd00::" in subprocess.run(["ifconfig", vlan],
+            stdout=subprocess.PIPE, encoding="utf-8", check=True).stdout:
+        print("IPv6 already configured")
+    else:
+        print("Configuring IPv6:")
+        subprocess.run(["sudo", "ifconfig", vlan, "add", "fd00::%d/64" % (
+                get_node_num() + 1)], check=True)
+        subprocess.run(["sudo", "route", "-6", "add", "fd00::/16", vlan],
+                check=True)
+    add_ipv6_to_etc_hosts(num_hosts)
+
+def config_mtu(size):
+    """
+    Set the maximum allowable packet length for this node to size.
+    """
+    [interface, vlan] = get_interfaces()
+    subprocess.run(["sudo", "ip", "link", "set", interface, "mtu", str(size)],
+            check=True)
+    subprocess.run(["sudo", "ip", "link", "set", vlan, "mtu", str(size)],
+            check=True)
+    print("MTU set to %d bytes" % (size))
+
+def config_nic():
+    """
+    Configure the NIC for best performance (turn off interrupt delaying
+    mechanisms).
+    """
+    interface = get_interfaces()[0]
+    subprocess.run(["sudo", "ethtool", "-C", interface, "adaptive-rx", "off"],
+            check=False)
+    subprocess.run(["sudo", "ethtool", "-C", interface, "rx-usecs", "5",
+            "rx-frames", "1"], check=False)
+
+def config_power():
+    """
+    Configure the machine's power management for best Homa performance.
+    """
+    type = get_node_type()
+    if type == "xl170":
+        # Intel E5-2640v4 processor. For Homa, it's best to leave C-states
+        # enabled. This can cause CPUs to sleep in power-saving mode, but if
+        # C-states are disabled, then so is Turbo mode, and that will hurt
+        # peak peformance.
+        print("Configuring power settings for Intel CPUs")
+        subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
+                "performance"], check=True)
+    elif type == "c6525-100g":
+        # AMD 7402P (EPYC Rome processor); don't know of any appropriate
+        # power setting changes
+        return
+    else:
+        raise Exception("Can't configure power: unknown node type %s" % (type))
+
+def config_rps():
+    """
+    Enable RPS (Receive Packet Steering) and RFS (Receive Flow Steering).
+    """
+
+    interface = get_interfaces()[0]
+    mask = get_core_mask()
+    subprocess.run(["sudo", "sysctl", "-w",
+            "net.core.rps_sock_flow_entries=32768"], check=True)
+    flow_cnt = 0
+    for file in glob("/sys/class/net/%s/queues/rx-*/rps_flow_cnt"
+            % (interface)):
+        subprocess.run(["sudo", "bash", "-c", "echo 2048 > %s" % (file)],
+                check=True)
+        flow_cnt += 1
+    cpus = 0
+    for file in glob("/sys/class/net/%s/queues/rx-*/rps_cpus" % (interface)):
+        subprocess.run(["sudo", "bash", "-c", "echo %s > %s" % (mask, file)],
+                check=True)
+        cpus += 1
+    print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
+            % (flow_cnt, cpus))
+
+def print_help():
+    print("Performs any of several configuration tasks to prepare a node for")
+    print("running Homa applications.")
+    print("Usage: config feature feature ...")
+    print("\nEach feature may be one of the following:")
+    print("    --help             Print this help text and exit")
+    print("    default            Normal configuration for Homa: equivalent to")
+    print("                       'homa ~/bin/homa.ko ipv6 nic power rps'")
+    print("    homa HHH           Install and configure the Homa kernel driver;")
+    print("                       HHH is the path to the homa.ko file")
+    print("    ipv6               Set up routing information so that IPv6")
+    print("                       addresses can be used.")
+    print("    mtu NNN            Set the maximum packet length to NNN")
+    print("    nic                Configure the NIC for optimal Homa performance")
+    print("    power              Configure power management (e.g., C-states)")
+    print("                       for best Homa performance")
+    print("    rps                Set up (and enable) RPS and RFS")
+
+i = 1
+while i < len(sys.argv):
+    arg = sys.argv[i]
+    i += 1
+    if arg == "--help":
+        print_help()
+        exit(0)
+    elif arg == "default":
+        config_homa("~/bin/homa.ko")
+        config_ipv6(10, vlan)
+        config_nic()
+        config_power()
+        config_rps()
+    elif arg == "homa":
+        if i >= len(sys.argv):
+            raise Exception("No argument provided for 'homa' command");
+            exit(1)
+        mod = sys.argv[i]
+        i += 1
+        config_homa(mod)
+    elif arg == "ipv6":
+        config_ipv6(10, vlan)
+    elif arg == "mtu":
+        if i >= len(sys.argv):
+            raise Exception("No argument provided for 'mtu' command");
+            exit(1)
+        mtu = int(sys.argv[i])
+        i += 1
+        config_mtu(mtu)
+    elif arg == "nic":
+        config_nic()
+    elif arg == "power":
+        config_power()
+    elif arg == "rps":
+        config_rps()
+    else:
+        raise Exception("Unknown feature '%s'" % (arg))
