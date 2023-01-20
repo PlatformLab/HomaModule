@@ -2,7 +2,6 @@ Notes for Homa implementation in Linux:
 ---------------------------------------
 
 * IPv6 issues:
-  * Verify that priorities work.
   * See if error checking made syscalls slower.
 
 * Refactor of granting mechanism:
@@ -18,6 +17,9 @@ Notes for Homa implementation in Linux:
   * pin_user_page (not sure the difference from get_user_page)
 
 * Performance-related tasks:
+  * Improve software GSO by making segments refer to the initial large
+    buffer instead of copying?
+  * Rework granting to
   * Implement sk_buff caching for output buffers:
     * Allocation is slow (2-10 us on AMD processors; check on Intel?)
     * Large buffers exceed KMALLOC_MAX_CACHE_SIZE, so they aren't cached
@@ -36,6 +38,7 @@ Notes for Homa implementation in Linux:
       * Max accumulation of credits
     * Methods:
       * Request (current time, amount) (possibly 2 stages: isItOk and doIt?)
+    * Or, just reduce the link speed and let the pacer handler this?
   * Analyze 40-us W4 short message latency by writing a time-trace
     analyzer that tracks NIC queue length.
   * Perhaps limit the number of polling threads per socket, to solve
