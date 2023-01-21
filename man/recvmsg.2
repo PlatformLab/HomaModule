@@ -73,7 +73,8 @@ struct homa_recvmsg_args {
 The
 .B msghdr
 and
-.B homa_recvmsg_args structs are used both for passing parameter
+.B homa_recvmsg_args
+structs are used both for passing parameter
 information into Homa and for receiving result information:
 .nr step 1 1
 .IP \[bu] 2
@@ -97,7 +98,7 @@ is nonzero, then the caller is interested in receiving a response
 for the RPC given by
 .B id.
 .IP \[bu]
-Homa will use the struts to return information about the message received.
+Homa will use the structs to return information about the message received.
 The
 .B id
 field will be set to the RPC identifier for the received message (if
@@ -115,12 +116,12 @@ will be stored at its target (depnding on the address family of
 describing the sender of the message.
 For response messages, the
 .BR completion_cookie
-field will be sent to the value specified when the corresponding request
+field will be set to the value specified when the corresponding request
 was sent (typically this will be information that helps the application
 locate its information about the RPC).
-For requests,
+For requests, or if an error prevented an RPC from being found,
 .B completion_cookie
-will always be zero.
+will be zero.
 .IP \[bu]
 The output values of
 .B num_bpages

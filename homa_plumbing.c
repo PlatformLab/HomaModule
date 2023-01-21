@@ -1011,6 +1011,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		result = -EFAULT;
 		goto done;
 	}
+	control.completion_cookie = 0;
 	if (control._pad[0] || control._pad[1]) {
 		result = -EINVAL;
 		goto done;

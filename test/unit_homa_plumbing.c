@@ -437,6 +437,16 @@ TEST_F(homa_plumbing, homa_recvmsg__cant_read_args)
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
 }
+TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
+{
+	// Make sure that the completion_cookie will be zero if anything
+	// goes wrong with the receive.
+	self->recvmsg_args._pad[0] = 1;
+	self->recvmsg_args.completion_cookie = 12345;
+	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(99, self->recvmsg_args.completion_cookie);
+}
 TEST_F(homa_plumbing, homa_recvmsg__pad_not_zero)
 {
 	self->recvmsg_args._pad[0] = 1;
