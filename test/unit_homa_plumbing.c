@@ -445,7 +445,7 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 	self->recvmsg_args.completion_cookie = 12345;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
-	EXPECT_EQ(99, self->recvmsg_args.completion_cookie);
+	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
 }
 TEST_F(homa_plumbing, homa_recvmsg__pad_not_zero)
 {
