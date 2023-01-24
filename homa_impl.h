@@ -2900,9 +2900,9 @@ static inline bool is_mapped_ipv4(const struct in6_addr x)
  */
 static inline __be32 tt_addr(const struct in6_addr x)
 {
-	return is_mapped_ipv4(x) ? x.in6_u.u6_addr32[3]
-			: (x.in6_u.u6_addr32[3] ? x.in6_u.u6_addr32[3]
-			: x.in6_u.u6_addr32[1]);
+	return is_mapped_ipv4(x) ? ntohl(x.in6_u.u6_addr32[3])
+			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
+			: ntohl(x.in6_u.u6_addr32[1]));
 }
 
 #define INC_METRIC(metric, count) \
