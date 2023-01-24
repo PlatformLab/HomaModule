@@ -527,6 +527,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 2, next_offset 2800", unit_log_get());
 }
+
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
