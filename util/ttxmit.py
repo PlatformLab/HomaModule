@@ -221,18 +221,20 @@ for gap in gaps:
 if pctl <= 100:
     print("%5d   %5.1f us" % (100, gaps[-1][0]))
 
-grant_gaps = sorted(grant_gaps)
-print("\nCDF of gaps caused by grants (% of total grant gap time in gaps <= given size):")
-print("Percent    Gap")
-pctl = 0
-total_usecs = 0
-for gap in grant_gaps:
-    total_usecs += gap
-    if (total_usecs >= pctl*grant_gap_usecs/100):
-        print("%5d   %5.1f us" % (pctl, gap))
-        pctl += 10
-if pctl <= 100:
-    print("%5d   %5.1f us" % (100, grant_gaps[-1]))
+if len(grant_gaps) > 0:
+    grant_gaps = sorted(grant_gaps)
+    print("\nCDF of gaps caused by grants (% of total grant gap time "
+            "in gaps <= given size):")
+    print("Percent    Gap")
+    pctl = 0
+    total_usecs = 0
+    for gap in grant_gaps:
+        total_usecs += gap
+        if (total_usecs >= pctl*grant_gap_usecs/100):
+            print("%5d   %5.1f us" % (pctl, gap))
+            pctl += 10
+    if pctl <= 100:
+        print("%5d   %5.1f us" % (100, grant_gaps[-1]))
 
 if inactive_gaps:
     inactive_gaps = sorted(inactive_gaps, key=itemgetter(0), reverse=True)

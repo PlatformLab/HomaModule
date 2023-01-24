@@ -199,7 +199,9 @@ for id in out_data:
         continue
     delay = in_grants[id][0][0] - out_data[id][0][0]
     first_grants.append(delay)
-    # print("Grant lag for id %d: %.1f us" % (id, delay))
+    # print("Grant lag for id %d: %.3f us (ip_queue_xmit %.3f, "
+            # "grant received %.1f" % (id, delay, out_data[id][0][0],
+            # in_grants[id][0][0]))
 
 # Time to transmit a full-size packet, in microseconds.
 xmit_time = (packet_size * 8)/(gbps * 1000)
