@@ -56,6 +56,9 @@ int port = 4000;
  */
 bool validate = false;
 
+/* Either AF_INET or AF_INET6: indicates whether to use IPv6 instead of IPv4. */
+int inet_family = AF_INET;
+
 /**
  * homa_server() - Opens a Homa socket and handles all requests arriving on
  * that socket.
@@ -64,7 +67,7 @@ bool validate = false;
 void homa_server(int port)
 {
 	int fd;
-	sockaddr_in_union addr_in;
+	sockaddr_in_union addr;
 	sockaddr_in_union source;
 	int length;
 	struct homa_recvmsg_args recv_args;
@@ -74,15 +77,15 @@ void homa_server(int port)
 	struct iovec vecs[HOMA_MAX_BPAGES];
 	int num_vecs;
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 		return;
 	}
-	memset(&addr_in, 0, sizeof(addr_in));
-	addr_in.in4.sin_family = AF_INET;
-	addr_in.in4.sin_port = htons(port);
-	if (bind(fd, &addr_in.sa, sizeof(addr_in.in4)) != 0) {
+	memset(&addr, 0, sizeof(addr));
+	addr.in4.sin_family = inet_family;
+	addr.in4.sin_port = htons(port);
+	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n", port,
 				strerror(errno));
 		return;
@@ -170,8 +173,9 @@ void print_help(const char *name)
 	printf("Usage: %s [options]\n\n"
 		"The following options are supported:\n\n"
 		"--help       Print this message and exit\n"
-		"--port       (First) port number to use (default: 4000)\n"
+		"--ipv6       Use IPv6 instead of IPv4 (default: IPv4)\n"
 		"--num_ports  Number of Homa ports to open (default: 1)\n"
+		"--port       (First) port number to use (default: 4000)\n"
 		"--validate   Validate contents of incoming messages (default: false)\n"
 		"--verbose    Log events as they happen (default: false)\n",
 		name);
@@ -262,7 +266,7 @@ void tcp_connection(int fd, sockaddr_in_union source)
  */
 void tcp_server(int port)
 {
-	int listen_fd = socket(PF_INET, SOCK_STREAM, 0);
+	int listen_fd = socket(inet_family, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
 		printf("Couldn't open server socket: %s\n", strerror(errno));
 		exit(1);
@@ -275,11 +279,10 @@ void tcp_server(int port)
 		exit(1);
 	}
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
+	memset(&addr, 0, sizeof(addr));
+	addr.in4.sin_family = inet_family;
 	addr.in4.sin_port = htons(port);
-	addr.in4.sin_addr.s_addr = INADDR_ANY;
-	if (bind(listen_fd, reinterpret_cast<sockaddr *>(&addr.in4), sizeof(addr.in4))
-			== -1) {
+	if (bind(listen_fd, &addr.sa, sizeof(addr)) == -1) {
 		printf("Couldn't bind to port %d: %s\n", port, strerror(errno));
 		exit(1);
 	}
@@ -290,9 +293,7 @@ void tcp_server(int port)
 			printf("Couldn't listen on socket: %s", strerror(errno));
 			exit(1);
 		}
-		int stream = accept(listen_fd,
-				reinterpret_cast<sockaddr *>(&client_addr),
-				&addr_len);
+		int stream = accept(listen_fd, &client_addr.sa,	&addr_len);
 		if (stream < 0) {
 			printf("Couldn't accept incoming connection: %s",
 				strerror(errno));
@@ -316,15 +317,8 @@ int main(int argc, char** argv) {
 		if (strcmp(argv[next_arg], "--help") == 0) {
 			print_help(argv[0]);
 			exit(0);
-		} else if (strcmp(argv[next_arg], "--port") == 0) {
-			if (next_arg == (argc-1)) {
-				printf("No value provided for %s option\n",
-					argv[next_arg]);
-				exit(1);
-			}
-			next_arg++;
-			port = get_int(argv[next_arg],
-					"Bad port %s; must be positive integer\n");
+		} else if (strcmp(argv[next_arg], "--ipv6") == 0) {
+			inet_family = AF_INET6;
 		} else if (strcmp(argv[next_arg], "--num_ports") == 0) {
 			if (next_arg == (argc-1)) {
 				printf("No value provided for %s option\n",
@@ -334,6 +328,15 @@ int main(int argc, char** argv) {
 			next_arg++;
 			num_ports = get_int(argv[next_arg],
 				"Bad num_ports %s; must be positive integer\n");
+		} else if (strcmp(argv[next_arg], "--port") == 0) {
+			if (next_arg == (argc-1)) {
+				printf("No value provided for %s option\n",
+					argv[next_arg]);
+				exit(1);
+			}
+			next_arg++;
+			port = get_int(argv[next_arg],
+					"Bad port %s; must be positive integer\n");
 		} else if (strcmp(argv[next_arg], "--validate") == 0) {
 			validate = true;
 		} else if (strcmp(argv[next_arg], "--verbose") == 0) {

@@ -54,6 +54,9 @@ int seed = 12345;
 /* Buffer space used for receiving messages. */
 char *buf_region;
 
+/* Either AF_INET or AF_INET6: indicates whether to use IPv6 instead of IPv4. */
+int inet_family = AF_INET;
+
 /* Control blocks for receiving messages. */
 struct homa_recvmsg_args recv_args;
 struct msghdr recv_hdr;
@@ -124,6 +127,7 @@ void print_help(const char *name)
 		"selects a particular test to run (see the code for available\n"
 		"tests). The following options are supported:\n\n"
 		"--count      Number of times to repeat a test (default: 1000)\n"
+		"--ipv6       Use IPv6 instead of IPv4 (default: IPv4)\n"
 		"--length     Size of messages, in bytes (default: 100)\n"
 		"--seed       Used to compute message contents (default: 12345)\n",
 		name);
@@ -138,7 +142,7 @@ void test_close()
 {
 	int result, fd;
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n",
 			strerror(errno));
@@ -285,13 +289,27 @@ void test_poll(int fd, char *request)
 		.revents = 0
 	};
 	sockaddr_in_union addr;
-	addr.in4.sin_family = AF_INET;
-	addr.in4.sin_addr.s_addr = inet_addr("127.0.0.1");
-	addr.in4.sin_port = htons(500);
+	if (inet_family == AF_INET) {
+		if (!inet_pton(AF_INET, "127.0.0.1", &addr.in4.sin_addr)) {
+			printf("inet_pton failed for AF_INET: %s",
+					strerror(errno));
+			return;
+		}
+		addr.in4.sin_family = inet_family;
+		addr.in4.sin_port = htons(500);
+	} else {
+		if (!inet_pton(AF_INET6, "::1", &addr.in6.sin6_addr)) {
+			printf("inet_pton failed for AF_INET6: %s",
+					strerror(errno));
+			return;
+		}
+		addr.in6.sin6_family = inet_family;
+		addr.in6.sin6_port = htons(500);
+	}
 
 	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n",
-				ntohl(addr.in4.sin_port), strerror(errno));
+				ntohs(addr.in4.sin_port), strerror(errno));
 		return;
 	}
 
@@ -608,7 +626,7 @@ void test_tcp(char *server_name, int port)
 	int buffer[250000];
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = inet_family;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -619,16 +637,17 @@ void test_tcp(char *server_name, int port)
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
 
-	int stream = socket(PF_INET, SOCK_STREAM, 0);
+	int stream = socket(inet_family, SOCK_STREAM, 0);
 	if (stream == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
 		exit(1);
 	}
-	if (connect(stream, dest, sizeof(struct sockaddr_in)) == -1) {
+	if (connect(stream, dest, sizeof(sockaddr_in_union)) == -1) {
 		printf("Couldn't connect to %s:%d: %s\n", server_name, port,
 				strerror(errno));
 		exit(1);
 	}
+	freeaddrinfo(matching_addresses);
 	int flag = 1;
 	setsockopt(stream, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
@@ -674,7 +693,7 @@ void test_tcpstream(char *server_name, int port)
 	double elapsed, rate;
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = inet_family;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(server_name, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -685,16 +704,17 @@ void test_tcpstream(char *server_name, int port)
 	dest = matching_addresses->ai_addr;
 	((struct sockaddr_in *) dest)->sin_port = htons(port);
 
-	int fd = socket(PF_INET, SOCK_STREAM, 0);
+	int fd = socket(inet_family, SOCK_STREAM, 0);
 	if (fd == -1) {
 		printf("Couldn't open client socket: %s\n", strerror(errno));
 		return;
 	}
-	if (connect(fd, dest, sizeof(struct sockaddr_in)) == -1) {
+	if (connect(fd, dest, sizeof(sockaddr_in_union)) == -1) {
 		printf("Couldn't connect to %s:%d: %s\n", server_name, port,
 				strerror(errno));
 		return;
 	}
+	freeaddrinfo(matching_addresses);
 	int flag = 1;
 	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 	buffer[0] = -1;
@@ -770,18 +790,15 @@ void test_udpclose()
 	sockaddr_in_union address;
 	char buffer[1000];
 
-	int fd = socket(AF_INET, SOCK_DGRAM, 0);
+	int fd = socket(inet_family, SOCK_DGRAM, 0);
 	if (fd < 0) {
 		printf("Couldn't open UDP socket: %s\n",
 			strerror(errno));
 		exit(1);
 	}
-	address.in4.sin_family = AF_INET;
-	address.in4.sin_addr.s_addr = htonl(INADDR_ANY);
-	address.in4.sin_port = 0;
-	int result = bind(fd,
-		&address.sa,
-		sizeof(address));
+	memset(&address, 0, sizeof(address));
+	address.in4.sin_family = inet_family;
+	int result = bind(fd, &address.sa, sizeof(address));
 	if (result < 0) {
 		printf("Couldn't bind UDP socket: %s\n",
 			strerror(errno));
@@ -800,7 +817,7 @@ void test_udpclose()
 
 int main(int argc, char** argv)
 {
-	int fd, status, port, nextArg;
+	int fd, status, port, next_arg;
 	struct addrinfo *matching_addresses;
 	sockaddr_in_union dest;
 	struct addrinfo hints;
@@ -826,52 +843,54 @@ int main(int argc, char** argv)
 	port_name++;
 	port = get_int(port_name,
 			"Bad port number %s; must be positive integer\n");
-	for (nextArg = 2; (nextArg < argc) && (*argv[nextArg] == '-');
-			nextArg += 1) {
-		if (strcmp(argv[nextArg], "--help") == 0) {
+	for (next_arg = 2; (next_arg < argc) && (*argv[next_arg] == '-');
+			next_arg += 1) {
+		if (strcmp(argv[next_arg], "--help") == 0) {
 			print_help(argv[0]);
 			exit(0);
-		} else if (strcmp(argv[nextArg], "--count") == 0) {
-			if (nextArg == (argc-1)) {
+		} else if (strcmp(argv[next_arg], "--count") == 0) {
+			if (next_arg == (argc-1)) {
 				printf("No value provided for %s option\n",
-					argv[nextArg]);
+					argv[next_arg]);
 				exit(1);
 			}
-			nextArg++;
-			count = get_int(argv[nextArg],
+			next_arg++;
+			count = get_int(argv[next_arg],
 					"Bad count %s; must be positive integer\n");
-		} else if (strcmp(argv[nextArg], "--length") == 0) {
-			if (nextArg == (argc-1)) {
+		} else if (strcmp(argv[next_arg], "--ipv6") == 0) {
+			inet_family = AF_INET6;
+		} else if (strcmp(argv[next_arg], "--length") == 0) {
+			if (next_arg == (argc-1)) {
 				printf("No value provided for %s option\n",
-					argv[nextArg]);
+					argv[next_arg]);
 				exit(1);
 			}
-			nextArg++;
-			length = get_int(argv[nextArg],
+			next_arg++;
+			length = get_int(argv[next_arg],
 				"Bad message length %s; must be positive "
 				"integer\n");
 			if (length > HOMA_MAX_MESSAGE_LENGTH) {
 				length = HOMA_MAX_MESSAGE_LENGTH;
 				printf("Reducing message length to %d\n", length);
 			}
-		} else if (strcmp(argv[nextArg], "--seed") == 0) {
-			if (nextArg == (argc-1)) {
+		} else if (strcmp(argv[next_arg], "--seed") == 0) {
+			if (next_arg == (argc-1)) {
 				printf("No value provided for %s option\n",
-					argv[nextArg]);
+					argv[next_arg]);
 				exit(1);
 			}
-			nextArg++;
-			seed = get_int(argv[nextArg],
+			next_arg++;
+			seed = get_int(argv[next_arg],
 				"Bad seed %s; must be positive integer\n");
 		} else {
 			printf("Unknown option %s; type '%s --help' for help\n",
-				argv[nextArg], argv[0]);
+				argv[next_arg], argv[0]);
 			exit(1);
 		}
 	}
 
 	memset(&hints, 0, sizeof(struct addrinfo));
-	hints.ai_family = AF_INET;
+	hints.ai_family = inet_family;
 	hints.ai_socktype = SOCK_DGRAM;
 	status = getaddrinfo(host, "80", &hints, &matching_addresses);
 	if (status != 0) {
@@ -879,13 +898,18 @@ int main(int argc, char** argv)
 				host, gai_strerror(status));
 		exit(1);
 	}
-	dest.in4 = *(struct sockaddr_in*)matching_addresses->ai_addr;
-	dest.in4.sin_port = htons(port);
+	dest = *(sockaddr_in_union *) matching_addresses->ai_addr;
+	if (inet_family == AF_INET) {
+		dest.in4.sin_port = htons(port);
+	} else {
+		dest.in6.sin6_port = htons(port);
+	}
+	freeaddrinfo(matching_addresses);
 	int *ibuf = reinterpret_cast<int *>(buffer);
 	ibuf[0] = ibuf[1] = length;
 	seed_buffer(&ibuf[2], sizeof32(buffer) - 2*sizeof32(int), seed);
 
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_HOMA);
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		printf("Couldn't open Homa socket: %s\n", strerror(errno));
 	}
@@ -918,39 +942,39 @@ int main(int argc, char** argv)
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	recv_hdr.msg_flags = 0;
 
-	for ( ; nextArg < argc; nextArg++) {
-		if (strcmp(argv[nextArg], "close") == 0) {
+	for ( ; next_arg < argc; next_arg++) {
+		if (strcmp(argv[next_arg], "close") == 0) {
 			test_close();
-		} else if (strcmp(argv[nextArg], "fill_memory") == 0) {
+		} else if (strcmp(argv[next_arg], "fill_memory") == 0) {
 			test_fill_memory(fd, &dest, buffer);
-		} else if (strcmp(argv[nextArg], "invoke") == 0) {
+		} else if (strcmp(argv[next_arg], "invoke") == 0) {
 			test_invoke(fd, &dest, buffer);
-		} else if (strcmp(argv[nextArg], "ioctl") == 0) {
+		} else if (strcmp(argv[next_arg], "ioctl") == 0) {
 			test_ioctl(fd, count);
-		} else if (strcmp(argv[nextArg], "poll") == 0) {
+		} else if (strcmp(argv[next_arg], "poll") == 0) {
 			test_poll(fd, buffer);
-		} else if (strcmp(argv[nextArg], "send") == 0) {
+		} else if (strcmp(argv[next_arg], "send") == 0) {
 			test_send(fd, &dest, buffer);
-		} else if (strcmp(argv[nextArg], "read") == 0) {
+		} else if (strcmp(argv[next_arg], "read") == 0) {
 			test_read(fd, count);
-		} else if (strcmp(argv[nextArg], "rtt") == 0) {
+		} else if (strcmp(argv[next_arg], "rtt") == 0) {
 			test_rtt(fd, &dest, buffer);
-		} else if (strcmp(argv[nextArg], "shutdown") == 0) {
+		} else if (strcmp(argv[next_arg], "shutdown") == 0) {
 			test_shutdown(fd);
-		} else if (strcmp(argv[nextArg], "set_buf") == 0) {
+		} else if (strcmp(argv[next_arg], "set_buf") == 0) {
 			test_set_buf(fd);
-		} else if (strcmp(argv[nextArg], "stream") == 0) {
+		} else if (strcmp(argv[next_arg], "stream") == 0) {
 			test_stream(fd, &dest);
-		} else if (strcmp(argv[nextArg], "tcp") == 0) {
+		} else if (strcmp(argv[next_arg], "tcp") == 0) {
 			test_tcp(host, port);
-		} else if (strcmp(argv[nextArg], "tcpstream") == 0) {
+		} else if (strcmp(argv[next_arg], "tcpstream") == 0) {
 			test_tcpstream(host, port);
-		} else if (strcmp(argv[nextArg], "tmp") == 0) {
+		} else if (strcmp(argv[next_arg], "tmp") == 0) {
 			test_tmp(fd, count);
-		} else if (strcmp(argv[nextArg], "udpclose") == 0) {
+		} else if (strcmp(argv[next_arg], "udpclose") == 0) {
 			test_udpclose();
 		} else {
-			printf("Unknown operation '%s'\n", argv[nextArg]);
+			printf("Unknown operation '%s'\n", argv[next_arg]);
 			exit(1);
 		}
 	}

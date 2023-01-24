@@ -54,8 +54,10 @@ Notes for Homa implementation in Linux:
     >1 request per kernel call?
 
 * Things to do:
-  * Refactor homa_recv again: assume that if id != 0 then the desired message
-    is a response (never need to consider src_addr).
+  * If a socket is closed with unacked RPCs, the peer will have to send a
+    long series of NEED_ACKS (which must be ignored because the socket is
+    gone) before finally reaping the RPCs. Perhaps have a "no such socket"
+    packet type?
   * Reap most of a message before getting an ack? To do this, sender
     must include "received offset" in grants; then sender can free
     everything up to the latest received offset.
