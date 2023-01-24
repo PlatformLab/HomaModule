@@ -325,7 +325,7 @@ void unit_log_throttled(struct homa *homa)
 			offset = homa_data_offset(rpc->msgout.next_packet);
 		else
 			offset = rpc->msgout.length;
-		unit_log_printf("; ", "%s %lu, next_offset %d",
+		unit_log_printf("; ", "%s id %lu, next_offset %d",
 				homa_is_client(rpc->id) ? "request"
 				: "response",
 				(long unsigned int) rpc->id, offset);

@@ -385,7 +385,9 @@ error:
 void homa_rpc_lock_slow(struct homa_rpc *rpc)
 {
 	__u64 start = get_cycles();
+	tt_record("beginning wait for rpc lock");
 	spin_lock_bh(rpc->lock);
+	tt_record("ending wait for rpc lock");
 	if (homa_is_client(rpc->id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
@@ -545,8 +547,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
-			if ((atomic_read(&rpc->flags)
-					& (RPC_HANDING_OFF|RPC_COPYING_TO_USER))
+			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP)
 					|| (atomic_read(&rpc->grants_in_progress)
 					!= 0)) {
 				INC_METRIC(disabled_rpc_reaps, 1);

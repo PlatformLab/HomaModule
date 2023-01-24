@@ -777,10 +777,16 @@ struct homa_rpc {
 	 * RPC_HANDING_OFF -       This RPC is in the process of being
 	 *                         handed off to a waiting thread; it must
 	 *                         not be reaped.
+	 * RPC_XMITTING -          homa_xmit_data is actively transmitting
+	 *                         packets for this RPC, so it must not be
+	 *                         reaped.
 	 */
 #define RPC_PKTS_READY        1
 #define RPC_COPYING_TO_USER   2
 #define RPC_HANDING_OFF       4
+#define RPC_XMITTING          8
+
+#define RPC_CANT_REAP (RPC_COPYING_TO_USER | RPC_HANDING_OFF | RPC_XMITTING)
 
 	/**
 	 * @grants_in_progress: Count of active grant sends for this RPC;

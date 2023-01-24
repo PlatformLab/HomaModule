@@ -443,19 +443,6 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 			"xmit DATA 1400@4200", unit_log_get());
 	EXPECT_STREQ("6 6 2 2", mock_xmit_prios);
 	EXPECT_EQ(5600, homa_data_offset(crpc->msgout.next_packet));
-}
-TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, unit_iov_iter((void *) 1000, 200));
-	ASSERT_FALSE(IS_ERR(crpc));
-	homa_rpc_unlock(crpc);
-	unit_log_clear();
-	atomic64_set(&self->homa.link_idle_time, 11000);
-	self->homa.max_nic_queue_cycles = 500;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	homa_xmit_data(crpc, false);
-	EXPECT_STREQ("xmit DATA 200@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
@@ -475,24 +462,21 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_xmit_data__throttle)
+TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 {
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, unit_iov_iter((void *) 1000, 6000));
-	ASSERT_FALSE(IS_ERR(crpc1));
-	homa_rpc_unlock(crpc1);
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, unit_iov_iter((void *) 1000, 200));
+	ASSERT_FALSE(IS_ERR(crpc));
+	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 11000);
-	self->homa.max_nic_queue_cycles = 3000;
+	self->homa.max_nic_queue_cycles = 500;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-
-	homa_xmit_data(crpc1, false);
-	EXPECT_STREQ("xmit DATA 1400@0; "
-			"xmit DATA 1400@1400; "
-			"wake_up_process pid -1", unit_log_get());
+	homa_xmit_data(crpc, false);
+	EXPECT_STREQ("xmit DATA 200@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 2800", unit_log_get());
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_xmit_data__force)
 {
@@ -512,7 +496,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	homa_xmit_data(crpc1, false);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 2800", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 2800", unit_log_get());
 
 	/* Now force transmission. */
 	unit_log_clear();
@@ -521,10 +505,28 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 2800; "
-			"request 4, next_offset 1400", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 2800; "
+			"request id 4, next_offset 1400", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_xmit_data__throttle)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr, unit_iov_iter((void *) 1000, 6000));
+	ASSERT_FALSE(IS_ERR(crpc1));
+	homa_rpc_unlock(crpc1);
+	unit_log_clear();
+	atomic64_set(&self->homa.link_idle_time, 11000);
+	self->homa.max_nic_queue_cycles = 3000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
+	homa_xmit_data(crpc1, false);
+	EXPECT_STREQ("xmit DATA 1400@0; "
+			"xmit DATA 1400@1400; "
+			"wake_up_process pid -1", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request id 2, next_offset 2800", unit_log_get());
+}
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -798,9 +800,9 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 		unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 2800; "
-		"request 4, next_offset 0; "
-		"request 6, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 2800; "
+		"request id 4, next_offset 0; "
+		"request id 6, next_offset 0", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 {
@@ -835,9 +837,9 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 4, next_offset 1400; "
-			"request 2, next_offset 0; "
-			"request 6, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 4, next_offset 1400; "
+			"request id 2, next_offset 0; "
+			"request id 6, next_offset 0", unit_log_get());
 	EXPECT_EQ(50, self->homa.pacer_fifo_count);
 
 	/* Second attempt: pacer_fifo_count reaches zero. */
@@ -847,9 +849,9 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 4, next_offset 1400; "
-			"request 2, next_offset 1400; "
-			"request 6, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 4, next_offset 1400; "
+			"request id 2, next_offset 1400; "
+			"request id 6, next_offset 0", unit_log_get());
 	EXPECT_EQ(900, self->homa.pacer_fifo_count);
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
@@ -867,7 +869,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 	EXPECT_STREQ("", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 0", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 {
@@ -894,7 +896,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 1400", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 1400", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 {
@@ -936,7 +938,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 4, next_offset 1400", unit_log_get());
+	EXPECT_STREQ("request id 4, next_offset 1400", unit_log_get());
 	EXPECT_TRUE(list_empty(&crpc1->throttled_links));
 }
 
@@ -969,7 +971,7 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 	homa_add_to_throttled(crpc1);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 2, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 2, next_offset 0", unit_log_get());
 
 	/* Check priority ordering. */
 	homa_add_to_throttled(crpc2);
@@ -978,21 +980,21 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 	homa_add_to_throttled(crpc5);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 4, next_offset 0; "
-		"request 2, next_offset 0; "
-		"request 10, next_offset 0; "
-		"request 8, next_offset 0; "
-		"request 6, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 4, next_offset 0; "
+		"request id 2, next_offset 0; "
+		"request id 10, next_offset 0; "
+		"request id 8, next_offset 0; "
+		"request id 6, next_offset 0", unit_log_get());
 
 	/* Don't reinsert if already present. */
 	homa_add_to_throttled(crpc1);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request 4, next_offset 0; "
-		"request 2, next_offset 0; "
-		"request 10, next_offset 0; "
-		"request 8, next_offset 0; "
-		"request 6, next_offset 0", unit_log_get());
+	EXPECT_STREQ("request id 4, next_offset 0; "
+		"request id 2, next_offset 0; "
+		"request id 10, next_offset 0; "
+		"request id 8, next_offset 0; "
+		"request id 6, next_offset 0", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_add_to_throttled__inc_metrics)
 {

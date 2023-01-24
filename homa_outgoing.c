@@ -381,26 +381,33 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  * them to be sent (some may be sent immediately; others may be sent
  * later by the pacer thread).
  * @rpc:       RPC to check for transmittable packets. Must be locked by
- *             caller.
+ *             caller. Note: this function will release the RPC lock while
+ *             passing packets through the RPC stack, then reacquire it
+ *             before returning.
  * @force:     True means send at least one packet, even if the NIC queue
  *             is too long. False means that zero packets may be sent, if
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
-	while (rpc->msgout.next_packet) {
-		int priority;
-		struct sk_buff *skb = rpc->msgout.next_packet;
-		struct homa *homa = rpc->hsk->homa;
-		int offset = homa_data_offset(skb);
+	struct homa *homa = rpc->hsk->homa;
+	struct sk_buff *skb = rpc->msgout.next_packet;
+	int throttle = 0;
 
-		if (homa == NULL) {
-			printk(KERN_ERR "NULL homa pointer in homa_xmit_"
-				"data, state %d, shutdown %d, id %llu, socket %d",
-				rpc->state, rpc->hsk->shutdown, rpc->id,
-				rpc->hsk->port);
-			BUG();
-		}
+	// Passing packets downward through the IP stack is expensive; if
+	// there are a lot of packets ready to be transmitted, we don't
+	// want to hold the RPC lock for that entire time because it can block
+	// other work, such as processing incoming grants. Thus, this function
+	// releases the RPC lock while transmitting packets.
+	if (unlikely(atomic_read(&rpc->flags) & RPC_XMITTING))
+		return;
+	atomic_or(RPC_XMITTING, &rpc->flags);
+	homa_rpc_unlock(rpc);
+
+	while (skb) {
+		int priority;
+		int offset = homa_data_offset(skb);
+		struct sk_buff *next = *homa_next_skb(skb);
 
 		if (offset >= rpc->msgout.granted) {
 			tt_record3("homa_xmit_data stopping at offset %d "
@@ -411,9 +418,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 
 		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
-				tt_record1("homa_xmit_data adding id %u to "
-						"throttle queue", rpc->id);
-				homa_add_to_throttled(rpc);
+				throttle = 1;
 				break;
 			}
 		}
@@ -424,11 +429,20 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
-		rpc->msgout.next_packet = *homa_next_skb(skb);
 
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
 		force = false;
+		skb = next;
+	}
+
+	homa_rpc_lock(rpc);
+	rpc->msgout.next_packet = skb;
+	atomic_andnot(RPC_XMITTING, &rpc->flags);
+	if (throttle) {
+		tt_record1("homa_xmit_data adding id %u to throttle queue",
+				rpc->id);
+		homa_add_to_throttled(rpc);
 	}
 	tt_record("homa_xmit_data returning");
 }
