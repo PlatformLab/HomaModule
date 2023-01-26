@@ -2,6 +2,19 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+44. (January 2023) Until now Homa has held an RPC's lock while transmitting
+    packets for that RPC. This isn't a problem if ip_queue_xmit returns
+    quickly. However, in some configurations (such as Intel xl170 NICs) the
+    driver is very slow, and if the NIC can't do TSO for Homa then the packets
+    passed to the NIC aren't very large. In these situations, Homa will be
+    transmitting packets almost 100% of the time for large messages, which
+    means the RPC lock will be held continuously. This locks out other
+    activities on the RPC, such as processing grants, which causes additional
+    performance problems. To fix this, Homa releases the RPC lock while
+    transmitting data packets (ip_queue_xmit or ip6_xmit). This helps a lot
+    with bad NICs, and even seems to help a little with good NICs (5-10%
+    increase in throughput for single-flow benchmarks).
+
 43. (December 2022) 2-host throughput measurements (Gbps). Configuration:
     * Single message: cp_node client --one-way --workload 500000
       Server: one thread, pinned on a "good" core (avoid GRO/SoftIRQ conflicts)
