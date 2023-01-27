@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -193,20 +193,17 @@ void homa_destroy(struct homa *homa)
  * locks held.
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
- * @iter:     Describes the location(s) of request message data in user space.
  *
  * Return:    A printer to the newly allocated object, or a negative
  *            errno if an error occurred. The RPC will be locked; the
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		const sockaddr_in_union *dest, struct iov_iter *iter)
+		const sockaddr_in_union *dest)
 {
 	int err;
 	struct homa_rpc *crpc;
 	struct homa_rpc_bucket *bucket;
-	struct sk_buff *skb = NULL;
-	size_t length = iter->count;
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 
 	crpc = (struct homa_rpc *) kmalloc(sizeof(*crpc), GFP_KERNEL);
@@ -234,14 +231,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
 	crpc->msgin.num_bpages = 0;
-	skb = homa_fill_packets(hsk, crpc->peer, iter);
-	if (IS_ERR(skb)) {
-		err = PTR_ERR(skb);
-		tt_record1("error in homa_fill_packets: %d", err);
-		skb = NULL;
-		goto error;
-	}
-	homa_message_out_init(crpc, hsk->port, skb, length);
+	crpc->msgout.length = -1;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
@@ -273,7 +263,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	return crpc;
 
 error:
-	homa_free_skbs(skb);
 	kfree(crpc);
 	return ERR_PTR(err);
 }

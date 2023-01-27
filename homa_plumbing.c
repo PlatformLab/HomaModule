@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -846,7 +846,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 	__u64 finish;
 	int result = 0;
 	struct homa_rpc *rpc = NULL;
-	struct sk_buff *skbs = NULL;
 	sockaddr_in_union *addr = (sockaddr_in_union *) msg->msg_name;
 
 	if (unlikely(!msg->msg_control_is_user)) {
@@ -880,20 +879,21 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 				atomic64_read(&hsk->homa->next_outgoing_id),
 				length);
 
-		rpc = homa_rpc_new_client(hsk, addr, &msg->msg_iter);
+		rpc = homa_rpc_new_client(hsk, addr);
 		if (IS_ERR(rpc)) {
-			tt_record("error 2");
 			result = PTR_ERR(rpc);
 			rpc = NULL;
 			goto error;
 		}
+		rpc->completion_cookie = args.completion_cookie;
+		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
+		if (result)
+			goto error;
 		tt_record3("data copied into request message for id %d, "
 				"length %d unscheduled %d",
 				rpc->id, rpc->msgout.length,
 				rpc->msgout.unscheduled);
-		rpc->completion_cookie = args.completion_cookie;
 		args.id = rpc->id;
-		homa_xmit_data(rpc, false);
 		homa_rpc_unlock(rpc);
 		rpc = NULL;
 
@@ -908,7 +908,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 	} else {
 		/* This is a response message. */
 		struct in6_addr canonical_dest;
-		struct homa_peer *peer;
 
 		INC_METRIC(reply_calls, 1);
 		tt_record4("homa_sendmsg response, id %llu, port %d, pid %d, length %d",
@@ -918,20 +917,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 			goto error;
 		}
 		canonical_dest = canonical_ipv6_addr(addr);
-		peer = homa_peer_find(&hsk->homa->peers, &canonical_dest,
-				&hsk->inet);
-		if (IS_ERR(peer)) {
-			result = PTR_ERR(peer);
-			goto error;
-		}
-		skbs = homa_fill_packets(hsk, peer, &msg->msg_iter);
-		if (IS_ERR(skbs)) {
-			result = PTR_ERR(skbs);
-			skbs = NULL;
-			goto error;
-		}
-		tt_record2("data copied into response packets for id %d, length %d",
-				args.id, length);
 
 		rpc = homa_find_server_rpc(hsk, &canonical_dest,
 				ntohs(addr->in6.sin6_port), args.id);
@@ -951,9 +936,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		}
 		rpc->state = RPC_OUTGOING;
 
-		homa_message_out_init(rpc, hsk->port, skbs, length);
-		skbs = NULL;
-		homa_xmit_data(rpc, false);
+		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
+		if (result)
+			goto error;
+		tt_record2("data copied into response packets for id %d, length %d",
+				args.id, length);
 		homa_rpc_unlock(rpc);
 		finish = get_cycles();
 		INC_METRIC(reply_cycles, finish - start);
@@ -966,8 +953,6 @@ error:
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
-	if (skbs)
-		homa_free_skbs(skbs);
 	tt_record2("homa_sendmsg returning error %d for id %d",
 			result, args.id);
 	tt_freeze();

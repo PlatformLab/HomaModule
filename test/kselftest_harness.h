@@ -605,7 +605,7 @@ extern int strcmp(const char *s1, const char *s2);
 	if (!(__exp _t __seen)) { \
 		unsigned long long __exp_print = (long long)__exp; \
 		unsigned long long __seen_print = (long long)__seen; \
-		__TH_LOG("Expected %s (%llu) %s %s (%llu)", \
+		__TH_LOG(" Expected %s (%llu) %s %s (%llu)", \
 			 #_expected, __exp_print, #_t, \
 			 #_seen, __seen_print); \
 		__current_test->passed = 0; \
@@ -620,7 +620,7 @@ extern int strcmp(const char *s1, const char *s2);
 	const char *__seen = (_seen); \
 	__INC_STEP(_metadata); \
 	if (!(strcmp(__exp, __seen) _t 0))  { \
-		__TH_LOG("Expected '%s' %s '%s'.", __exp, #_t, __seen); \
+		__TH_LOG(" Expected '%s' %s '%s'.", __exp, #_t, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
 		return_or_NULL; \
@@ -632,7 +632,7 @@ extern int strcmp(const char *s1, const char *s2);
 	const char *__seen = (_seen); \
 	__INC_STEP(_metadata); \
 	if (!strstr( __seen, __exp))  { \
-		__TH_LOG("Expected '%s' in '%s'.", __exp, __seen); \
+		__TH_LOG(" Expected '%s' in '%s'.", __exp, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
 		return_or_NULL; \

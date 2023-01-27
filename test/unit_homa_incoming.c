@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022, Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -693,18 +693,18 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	EXPECT_EQ(11200, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
-			.offset = htonl(11200),
+			.offset = htonl(12600),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(12600, crpc->msgout.granted);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__lcached_client_rpc)
 {
@@ -712,22 +712,22 @@ TEST_F(homa_incoming, homa_pkt_dispatch__lcached_client_rpc)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	EXPECT_EQ(11200, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct grant_header h = {{.sport = htons(self->server_port),
 	                .dport = htons(self->client_port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
-			.offset = htonl(11200),
+			.offset = htonl(12600),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(11200, crpc->msgout.granted);
-	h.offset = htonl(12600);
+	EXPECT_EQ(12600, crpc->msgout.granted);
+	h.offset = htonl(14000);
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(12600, crpc->msgout.granted);
+	EXPECT_EQ(14000, crpc->msgout.granted);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__cutoffs_for_unknown_client_rpc)
 {
@@ -766,7 +766,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	EXPECT_EQ(11200, crpc->msgout.granted);
 	unit_log_clear();
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
@@ -775,7 +775,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 	                .dport = htons(self->client_port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
-			.offset = htonl(11200), .priority = 3};
+			.offset = htonl(12600), .priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
 	EXPECT_EQ(0, crpc->silent_ticks);
@@ -826,7 +826,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	EXPECT_EQ(11200, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct common_header h = {.sport = htons(self->server_port),
@@ -1262,7 +1262,7 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(10000, crpc->msgout.granted);
+	EXPECT_EQ(11200, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct cutoffs_header h = {{.sport = htons(self->server_port),

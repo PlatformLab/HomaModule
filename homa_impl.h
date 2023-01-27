@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -548,7 +548,7 @@ struct homa_message_out {
 	int num_skbs;
 
 	/**
-	 * @next_packet: Pointer within @request of the next packet to transmit.
+	 * @next_packet: Pointer within @packets of the next packet to transmit.
 	 *
 	 * All packets before this one have already been sent. NULL means
 	 * entire message has been sent.
@@ -557,7 +557,7 @@ struct homa_message_out {
 
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
-	 * without waiting for grants. May be larger than @length;
+	 * without waiting for grants.
 	 */
 	int unscheduled;
 
@@ -772,6 +772,8 @@ struct homa_rpc {
 	/* Valid bits for @flags:
 	 * RPC_PKTS_READY -        The RPC has input packets ready to be
 	 *                         copied to user space.
+	 * RPC_COPYING_FROM_USER - Data is being copied from user space into
+	 *                         the RPC; the RPC must not be reaped.
 	 * RPC_COPYING_TO_USER -   Data is being copied from this RPC to
 	 *                         user space; the RPC must not be reaped.
 	 * RPC_HANDING_OFF -       This RPC is in the process of being
@@ -782,11 +784,13 @@ struct homa_rpc {
 	 *                         reaped.
 	 */
 #define RPC_PKTS_READY        1
-#define RPC_COPYING_TO_USER   2
-#define RPC_HANDING_OFF       4
-#define RPC_XMITTING          8
+#define RPC_COPYING_FROM_USER 2
+#define RPC_COPYING_TO_USER   4
+#define RPC_HANDING_OFF       8
+#define RPC_XMITTING          0x10
 
-#define RPC_CANT_REAP (RPC_COPYING_TO_USER | RPC_HANDING_OFF | RPC_XMITTING)
+#define RPC_CANT_REAP (RPC_COPYING_FROM_USER | RPC_COPYING_TO_USER \
+		| RPC_HANDING_OFF | RPC_XMITTING)
 
 	/**
 	 * @grants_in_progress: Count of active grant sends for this RPC;
@@ -2953,9 +2957,6 @@ extern void     homa_dst_refresh(struct homa_peertab *peertab,
 extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 extern int      homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *
                     , u8,  u8,  int,  __be32);
-extern struct sk_buff
-               *homa_fill_packets(struct homa_sock *hsk, struct homa_peer *peer,
-                    struct iov_iter *iter);
 extern struct homa_rpc
                *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
@@ -2990,8 +2991,8 @@ extern void     homa_log_throttled(struct homa *homa);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 		    int incoming);
 extern void     homa_message_out_destroy(struct homa_message_out *msgout);
-extern void     homa_message_out_init(struct homa_rpc *rpc, int sport,
-                    struct sk_buff *skb, int len);
+extern int      homa_message_out_init(struct homa_rpc *rpc,
+		    struct iov_iter *iter, int xmit);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
 		    int whence);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
@@ -3067,7 +3068,7 @@ extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
-                    const sockaddr_in_union *dest, struct iov_iter *iter);
+                    const sockaddr_in_union *dest);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk,
 			const struct in6_addr *source, struct data_header *h);

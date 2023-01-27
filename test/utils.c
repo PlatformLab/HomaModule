@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -54,10 +54,13 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	server_addr.in6.sin6_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
-	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr,
-			unit_iov_iter(NULL, req_length));
+	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr);
 	if (IS_ERR(crpc))
 		return NULL;
+	if (homa_message_out_init(crpc, unit_iov_iter(NULL, req_length), 0)) {
+		homa_rpc_free(crpc);
+		return NULL;
+	}
 	homa_rpc_unlock(crpc);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, saved_id);
@@ -402,12 +405,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	srpc->state = RPC_IN_SERVICE;
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
-	struct sk_buff *skb = homa_fill_packets(
-		hsk, srpc->peer, unit_iov_iter((void *) 2000, resp_length));
-	if (IS_ERR(skb)) {
+	if (homa_message_out_init(srpc,
+			unit_iov_iter((void *) 2000, resp_length), 0) != 0)
 		goto error;
-	}
-	homa_message_out_init(srpc, hsk->port, skb, resp_length);
 	srpc->state = RPC_OUTGOING;
 	if (state == UNIT_OUTGOING)
 		return srpc;

@@ -114,7 +114,7 @@ static const char *dead_rpcs(struct homa_sock *hsk)
 TEST_F(homa_utils, homa_rpc_new_client__normal)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
+			&self->server_addr);
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 	homa_rpc_unlock(crpc);
@@ -123,7 +123,7 @@ TEST_F(homa_utils, homa_rpc_new_client__malloc_error)
 {
 	mock_kmalloc_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
+			&self->server_addr);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
@@ -131,23 +131,15 @@ TEST_F(homa_utils, homa_rpc_new_client__route_error)
 {
 	mock_route_errors = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
+			&self->server_addr);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(crpc));
-}
-TEST_F(homa_utils, homa_rpc_new_client__msgout_init_error)
-{
-	mock_alloc_skb_errors = 1;
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	EXPECT_TRUE(IS_ERR(crpc));
-	EXPECT_EQ(ENOMEM, -PTR_ERR(crpc));
 }
 TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
 {
 	self->hsk.shutdown = 1;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
+			&self->server_addr);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(crpc));
 	self->hsk.shutdown = 1;
@@ -247,7 +239,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 {
 	mock_cycles = ~0;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
+			&self->server_addr);
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_free(crpc);
 	homa_rpc_unlock(crpc);
@@ -438,10 +430,9 @@ TEST_F(homa_utils, homa_rpc_free__release_buffers)
 }
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc));
-	homa_rpc_unlock(crpc);
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 1000);
 	homa_add_to_throttled(crpc);
 	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
 	unit_log_clear();
@@ -594,35 +585,23 @@ TEST_F(homa_utils, homa_rpc_send_offset__msgout_partly_transmitted)
 TEST_F(homa_utils, homa_find_client_rpc)
 {
 	atomic64_set(&self->homa.next_outgoing_id, 3);
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc1));
-	homa_rpc_unlock(crpc1);
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 1000);
 	atomic64_set(&self->homa.next_outgoing_id, 3 + 3*HOMA_CLIENT_RPC_BUCKETS);
-	self->iovec.iov_base = (void *) 2000;
-	self->iovec.iov_len = 1000;
-	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc2));
-	homa_rpc_unlock(crpc2);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+2, 10000, 1000);
 	atomic64_set(&self->homa.next_outgoing_id,
 			3 + 10*HOMA_CLIENT_RPC_BUCKETS);
-	self->iovec.iov_base = (void *) 2000;
-	self->iovec.iov_len = 1000;
-	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
-	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc3));
-	homa_rpc_unlock(crpc3);
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+4, 10000, 1000);
 	atomic64_set(&self->homa.next_outgoing_id, 40);
-	self->iovec.iov_base = (void *) 2000;
-	self->iovec.iov_len = 1000;
-	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
-	struct homa_rpc *crpc4 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr, &self->iter);
-	ASSERT_FALSE(IS_ERR(crpc4));
-	homa_rpc_unlock(crpc4);
+	struct homa_rpc *crpc4 = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+6, 10000, 1000);
+
 	EXPECT_EQ(crpc1, homa_find_client_rpc(&self->hsk, crpc1->id));
 	homa_rpc_unlock(crpc1);
 	EXPECT_EQ(crpc2, homa_find_client_rpc(&self->hsk, crpc2->id));
