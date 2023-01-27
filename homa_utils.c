@@ -232,6 +232,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->msgin.num_skbs = 0;
 	crpc->msgin.num_bpages = 0;
 	crpc->msgout.length = -1;
+	crpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
@@ -326,8 +327,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->error = 0;
 	srpc->msgin.total_length = -1;
 	srpc->msgin.num_skbs = 0;
-	srpc->msgout.length = -1;
 	srpc->msgin.num_bpages = 0;
+	srpc->msgout.length = -1;
 	srpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
@@ -610,26 +611,6 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 }
 
 /**
- * homa_rpc_send_offset() - Return the offset of the first unsent byte of a
- * message.
- * @rpc:      RPC whose msgout will be examined.
- *
- * Return:    The first unsent byte for rpc->msgout (0 if the msgout
- *            hasn't been initialized, message length if all bytes have been
- *            sent).
- */
-int homa_rpc_send_offset(struct homa_rpc *rpc)
-{
-	struct sk_buff *pkt = rpc->msgout.next_packet;
-
-	if (rpc->msgout.length < 0)
-		return 0;
-	if (!pkt)
-		return rpc->msgout.length;
-	return homa_data_offset(pkt);
-}
-
-/**
  * homa_find_client_rpc() - Locate client-side information about the RPC that
  * a packet belongs to, if there is any. Thread-safe without socket lock.
  * @hsk:      Socket via which packet was received.
@@ -699,13 +680,12 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				- rpc->msgin.bytes_remaining,
 				rpc->msgin.total_length, rpc->msgin.incoming);
 	else if (rpc->state == RPC_OUTGOING) {
-		int offset = homa_rpc_send_offset(rpc);
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
 				"out length %d, left %d, granted %d, "
 				"in left %d, resend_ticks %u, silent_ticks %d\n",
 				type, rpc->id, peer, rpc->dport,
 				rpc->msgout.length,
-				rpc->msgout.length - offset,
+				rpc->msgout.length - rpc->msgout.next_xmit_offset,
 				rpc->msgout.granted,
 				rpc->msgin.bytes_remaining,
 				rpc->resend_timer_ticks,

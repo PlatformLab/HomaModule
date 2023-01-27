@@ -67,7 +67,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	EXPECT_EQ(RPC_OUTGOING, crpc->state);
 	if (state == UNIT_OUTGOING)
 		return crpc;
-	crpc->msgout.next_packet = NULL;
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
 	struct data_header h = {
 		.common = {
@@ -322,16 +322,12 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 void unit_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	int offset;
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
-		if (rpc->msgout.next_packet)
-			offset = homa_data_offset(rpc->msgout.next_packet);
-		else
-			offset = rpc->msgout.length;
 		unit_log_printf("; ", "%s id %lu, next_offset %d",
 				homa_is_client(rpc->id) ? "request"
 				: "response",
-				(long unsigned int) rpc->id, offset);
+				(long unsigned int) rpc->id,
+				rpc->msgout.next_xmit_offset);
 	}
 }
 

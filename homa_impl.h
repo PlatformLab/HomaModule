@@ -534,26 +534,38 @@ struct homa_message_out {
 	int length;
 
 	/**
-	 * @packets: singly-linked list of all packets in message, linked
-	 * using homa_next_skb. The list is in order of offset in the message
-	 * (offset 0 first); each sk_buff can potentially contain multiple
-	 * data_segments, which will be split into separate packets by GSO.
-	 */
-	struct sk_buff *packets;
-
-	/**
-	 * @num_skbs:  Total number of buffers in @packets. Will be 0 if
-	 * @length is less than 0.
+	 * @num_skbs:  Total number of buffers currently in @packets. Will
+	 * be 0 if @length is less than 0.
 	 */
 	int num_skbs;
 
 	/**
-	 * @next_packet: Pointer within @packets of the next packet to transmit.
-	 *
-	 * All packets before this one have already been sent. NULL means
-	 * entire message has been sent.
+	 * @packets: Singly-linked list of all packets in message, linked
+	 * using homa_next_skb. The list is in order of offset in the message
+	 * (offset 0 first); each sk_buff can potentially contain multiple
+	 * data_segments, which will be split into separate packets by GSO.
+	 * This list grows gradually as data is copied in from user space,
+	 * so it may not be complete.
 	 */
-	struct sk_buff *next_packet;
+	struct sk_buff *packets;
+
+	/**
+	 * @next_xmit: Pointer to pointer to next packet to transmit (will
+	 * either refer to @packets or homa_next_skb(skb) for some skb
+	 * in @packets).
+	 */
+	struct sk_buff **next_xmit;
+
+	/**
+	 * @next_xmit_offset: All bytes in the message, up to but not
+	 * including this one, have been transmitted.
+	 */
+	int next_xmit_offset;
+
+	/** @gso_pkt_data: Number of bytes of message data in each packet
+	 * of @packets except possibly the last.
+	 */
+	int gso_pkt_data;
 
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
@@ -3073,7 +3085,6 @@ extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk,
 			const struct in6_addr *source, struct data_header *h);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
-extern int      homa_rpc_send_offset(struct homa_rpc *rpc);
 extern void     homa_send_grants(struct homa *homa);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,

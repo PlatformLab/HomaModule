@@ -853,7 +853,7 @@ TEST_F(homa_incoming, homa_data_pkt__basics)
 			self->server_port, self->client_id, 1000, 1600);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
-	crpc->msgout.next_packet = NULL;
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 	self->data.message_length = htonl(1600);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc, NULL, &self->incoming_delta);
@@ -940,7 +940,7 @@ TEST_F(homa_incoming, homa_data_pkt__handoff)
 			self->server_port, self->client_id, 1000, 3000);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
-	crpc->msgout.next_packet = NULL;
+	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
 	/* First packet is not first in sequence, so can't hand off. */
 	self->data.message_length = htonl(3000);

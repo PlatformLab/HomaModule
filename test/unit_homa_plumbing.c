@@ -321,7 +321,7 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_new_client)
 TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init)
 {
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH+1;
-	EXPECT_EQ(EINVAL+1, -homa_sendmsg(&self->hsk.inet.sk,
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }

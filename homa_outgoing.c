@@ -61,21 +61,20 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 *                   header).
 	 * max_pkt_data:     largest amount of Homa message data that
 	 *                   fits in an on-the-wire packet.
-	 * max_gso_data:     largest amount of Homa message data that fits
-	 *                   in each sk_buff generated here (pre-GSO).
-	 * gso_size:         size to allocate for sk_buffs (pre-GSO), starting
+	 * gso_size:         space required in each sk_buff (pre-GSO), starting
 	 *                   with IP header.
 	 */
-	int mtu, max_pkt_data, max_gso_data, gso_size;
+	int mtu, max_pkt_data, gso_size;
 	int bytes_left;
 	int err;
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
 
 	rpc->msgout.length = iter->count;
-	rpc->msgout.packets = NULL;
 	rpc->msgout.num_skbs = 0;
-	rpc->msgout.next_packet = NULL;
+	rpc->msgout.packets = NULL;
+	rpc->msgout.next_xmit = &rpc->msgout.packets;
+	rpc->msgout.next_xmit_offset = 0;
 	rpc->msgout.sched_priority = 0;
 	rpc->msgout.init_cycles = get_cycles();
 
@@ -94,7 +93,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			- sizeof(struct data_header);
 	if (rpc->msgout.length <= max_pkt_data) {
 		/* Message fits in a single packet: no need for GSO. */
-		rpc->msgout.unscheduled = max_gso_data = rpc->msgout.length;
+		rpc->msgout.unscheduled = rpc->msgout.length;
+		rpc->msgout.gso_pkt_data = rpc->msgout.length;
 		gso_size = mtu;
 	} else {
 		/* Can use GSO to pass multiple network packets through the
@@ -113,18 +113,19 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		pkts_per_gso = (gso_size - repl_length)/(mtu - repl_length);
 		if (pkts_per_gso == 0)
 			pkts_per_gso = 1;
-		max_gso_data = pkts_per_gso * max_pkt_data;
+		rpc->msgout.gso_pkt_data = pkts_per_gso * max_pkt_data;
 		gso_size = repl_length + (pkts_per_gso * (mtu - repl_length));
 
 		/* Round unscheduled bytes *up* to an even number of gsos. */
 		rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes
-				+ max_gso_data - 1;
-		rpc->msgout.unscheduled -= rpc->msgout.unscheduled % max_gso_data;
+				+ rpc->msgout.gso_pkt_data - 1;
+		rpc->msgout.unscheduled -= rpc->msgout.unscheduled
+				% rpc->msgout.gso_pkt_data;
 		if (rpc->msgout.unscheduled > rpc->msgout.length)
 			rpc->msgout.unscheduled = rpc->msgout.length;
 	}
-	UNIT_LOG("; ", "mtu %d, max_pkt_data %d, gso_size %d, max_gso_data %d",
-			mtu, max_pkt_data, gso_size, max_gso_data);
+	UNIT_LOG("; ", "mtu %d, max_pkt_data %d, gso_size %d, gso_pkt_data %d",
+			mtu, max_pkt_data, gso_size, rpc->msgout.gso_pkt_data);
 
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 	atomic_or(RPC_COPYING_FROM_USER, &rpc->flags);
@@ -151,7 +152,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			goto error;
 		}
 		if ((bytes_left > max_pkt_data)
-				&& (max_gso_data > max_pkt_data)) {
+				&& (rpc->msgout.gso_pkt_data > max_pkt_data)) {
 			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
 					+ max_pkt_data;
 			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV6;
@@ -176,7 +177,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
 
-		available = max_gso_data;
+		available = rpc->msgout.gso_pkt_data;
 
 		/* Each iteration of the following loop adds one segment
 		 * (which will become a separate packet after GSO) to the buffer.
@@ -210,7 +211,6 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
 	}
-	rpc->msgout.next_packet = rpc->msgout.packets;
 	atomic_andnot(RPC_COPYING_FROM_USER, &rpc->flags);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	if (likely(xmit))
@@ -397,19 +397,20 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	if (unlikely(atomic_read(&rpc->flags) & RPC_XMITTING))
 		return;
 	atomic_or(RPC_XMITTING, &rpc->flags);
-	while (rpc->msgout.next_packet) {
+	while (*rpc->msgout.next_xmit) {
 		int priority;
-		struct sk_buff *skb = rpc->msgout.next_packet;
-		int offset = homa_data_offset(skb);
+		struct sk_buff *skb = *rpc->msgout.next_xmit;
 
-		if (offset >= rpc->msgout.granted) {
+		if (rpc->msgout.next_xmit_offset >= rpc->msgout.granted) {
 			tt_record3("homa_xmit_data stopping at offset %d "
 					"for id %u: granted is %d",
-					offset, rpc->id, rpc->msgout.granted);
+					rpc->msgout.next_xmit_offset, rpc->id,
+					rpc->msgout.granted);
 			break;
 		}
 
-		if ((rpc->msgout.length - offset) >= homa->throttle_min_bytes) {
+		if ((rpc->msgout.length - rpc->msgout.next_xmit_offset)
+				>= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to "
 						"throttle queue", rpc->id);
@@ -418,13 +419,16 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 			}
 		}
 
-		if (offset < rpc->msgout.unscheduled) {
+		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled) {
 			priority = homa_unsched_priority(homa, rpc->peer,
 					rpc->msgout.length);
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
-		rpc->msgout.next_packet = *homa_next_skb(skb);
+		rpc->msgout.next_xmit = homa_next_skb(skb);
+		rpc->msgout.next_xmit_offset += rpc->msgout.gso_pkt_data;
+		if (rpc->msgout.next_xmit_offset > rpc->msgout.length)
+			 rpc->msgout.next_xmit_offset = rpc->msgout.length;
 
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
@@ -717,7 +721,6 @@ void homa_pacer_xmit(struct homa *homa)
 	 */
 	for (i = 0; i < 5; i++) {
 		__u64 idle_time, now;
-		int offset;
 
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = get_cycles();
@@ -774,14 +777,13 @@ void homa_pacer_xmit(struct homa *homa)
 		}
 		homa_throttle_unlock(homa);
 
-		offset = homa_rpc_send_offset(rpc);
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, "
 				"port %d, offset %d, bytes_left %d",
-				rpc->id, rpc->hsk->port, offset,
-				rpc->msgout.length - offset);
+				rpc->id, rpc->hsk->port,
+				rpc->msgout.next_xmit_offset,
+				rpc->msgout.length - rpc->msgout.next_xmit_offset);
 		homa_xmit_data(rpc, true);
-		if (!rpc->msgout.next_packet
-				|| (homa_data_offset(rpc->msgout.next_packet)
+		if (!*rpc->msgout.next_xmit || (rpc->msgout.next_xmit_offset
 				>= rpc->msgout.granted)) {
 			/* Nothing more to transmit from this message (right now),
 			 * so remove it from the throttled list.
@@ -790,7 +792,8 @@ void homa_pacer_xmit(struct homa *homa)
 			if (!list_empty(&rpc->throttled_links)) {
 				tt_record2("pacer removing id %d from "
 						"throttled list, offset %d",
-						rpc->id, offset);
+						rpc->id,
+						rpc->msgout.next_xmit_offset);
 				list_del_rcu(&rpc->throttled_links);
 				if (list_empty(&homa->throttled_rpcs))
 					INC_METRIC(throttled_cycles, get_cycles()
@@ -848,8 +851,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	if (!list_empty(&homa->throttled_rpcs))
 		INC_METRIC(throttled_cycles, now - homa->throttle_add);
 	homa->throttle_add = now;
-	bytes_left = rpc->msgout.length - homa_data_offset(
-			rpc->msgout.next_packet);
+	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
 			throttled_links) {
@@ -860,7 +862,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 		 * packet from candidate.
 		 */
 		bytes_left_cand = candidate->msgout.length -
-				homa_rpc_send_offset(candidate);
+				candidate->msgout.next_xmit_offset;
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
 					&candidate->throttled_links);
@@ -914,8 +916,9 @@ void homa_log_throttled(struct homa *homa)
 			printk(KERN_NOTICE "Skipping throttled RPC: locked\n");
 			continue;
 		}
-		if (rpc->msgout.next_packet != NULL)
-			bytes += rpc->msgout.length - homa_rpc_send_offset(rpc);
+		if (*rpc->msgout.next_xmit != NULL)
+			bytes += rpc->msgout.length
+					- rpc->msgout.next_xmit_offset;
 		if (rpcs <= 20)
 			homa_rpc_log(rpc);
 		homa_rpc_unlock(rpc);

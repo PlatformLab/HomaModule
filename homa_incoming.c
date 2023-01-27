@@ -646,14 +646,13 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			goto done;
 		}
 	}
-	if (rpc->msgout.next_packet && (homa_data_offset(rpc->msgout.next_packet)
-			< rpc->msgout.granted)) {
+	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
 		/* We have chosen not to transmit data from this message;
 		 * send BUSY instead.
 		 */
 		tt_record3("sending BUSY from resend, id %d, offset %d, "
 				"granted %d", rpc->id,
-				homa_data_offset(rpc->msgout.next_packet),
+				rpc->msgout.next_xmit_offset,
 				rpc->msgout.granted);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
@@ -692,10 +691,10 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 					"lost %d bytes",
 					rpc->id, tt_addr(rpc->peer->addr),
 					rpc->dport,
-					homa_rpc_send_offset(rpc));
+					rpc->msgout.next_xmit_offset);
 			homa_freeze(rpc, RESTART_RPC, "Freezing because of "
 					"RPC restart, id %d, peer 0x%x");
-			homa_resend_data(rpc, 0, homa_rpc_send_offset(rpc),
+			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
 					homa_unsched_priority(rpc->hsk->homa,
 					rpc->peer, rpc->msgout.length));
 			goto done;

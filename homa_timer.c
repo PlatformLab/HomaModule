@@ -37,7 +37,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
-			&& (rpc->msgout.next_packet == NULL)) {
+			&& (rpc->msgout.next_xmit_offset >= rpc->msgout.length)) {
 		if (rpc->done_timer_ticks == 0)
 			rpc->done_timer_ticks = homa->timer_ticks;
 		else {
@@ -59,8 +59,8 @@ int homa_check_rpc(struct homa_rpc *rpc)
 		rpc->resend_timer_ticks = homa->timer_ticks;
 	}
 
-	if ((rpc->state == RPC_OUTGOING)
-			&& (homa_rpc_send_offset(rpc) < rpc->msgout.granted)) {
+	if ((rpc->state == RPC_OUTGOING) && (rpc->msgout.next_xmit_offset
+			< rpc->msgout.granted)) {
 		/* There are granted bytes that we haven't transmitted, so
 		 * no need to be concerned about lack of traffic from the peer.
 		 */
