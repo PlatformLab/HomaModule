@@ -2640,17 +2640,6 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
 }
 
 /**
- * homa_data_offset() - Returns the offset-within-message of the first
- * byte in a data packet.
- * @skb:  Must contain a valid data packet.
- */
-static inline int homa_data_offset(struct sk_buff *skb)
-{
-	return ntohl(((struct data_header *) skb_transport_header(skb))
-			->seg.offset);
-}
-
-/**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
  * @skb:     Socket buffer containing private link field.
  *
