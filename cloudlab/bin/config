@@ -223,7 +223,7 @@ def config_homa(mod):
     if type == "xl170":
         set_sysctl("link_mbps", "25000")
         set_sysctl("max_nic_queue_ns", "2000")
-        set_sysctl("rtt_bytes", "60000")
+        set_sysctl("rtt_bytes", "150000")
         set_sysctl("max_gso_size", "10000")
     elif type == "c6525-100g":
         set_sysctl("link_mbps", "100000")
