@@ -132,7 +132,7 @@ for line in f:
 
     # Collect information about unscheduled data for outgoing RPCs
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'data copied into request .* id ([0-9]+), .* unscheduled ([0-9]+)',
+            'starting copy from user space .* id ([0-9]+), .* unscheduled ([0-9]+)',
             line)
     if match:
         time = float(match.group(1))

@@ -169,7 +169,7 @@ for line in f:
         granted[id] = offset
 
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'data copied into request .* id ([0-9]+), .* unscheduled ([0-9]+)',
+            'starting copy from user .* id ([0-9]+), .* unscheduled ([0-9]+)',
             line)
     if match:
         id = match.group(4)

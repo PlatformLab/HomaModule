@@ -889,10 +889,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
 		if (result)
 			goto error;
-		tt_record3("data copied into request message for id %d, "
-				"length %d unscheduled %d",
-				rpc->id, rpc->msgout.length,
-				rpc->msgout.unscheduled);
 		args.id = rpc->id;
 		homa_rpc_unlock(rpc);
 		rpc = NULL;
@@ -939,8 +935,6 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
 		if (result)
 			goto error;
-		tt_record2("data copied into response packets for id %d, length %d",
-				args.id, length);
 		homa_rpc_unlock(rpc);
 		finish = get_cycles();
 		INC_METRIC(reply_cycles, finish - start);

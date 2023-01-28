@@ -69,6 +69,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int err;
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
+	int overlap_xmit;
 
 	rpc->msgout.length = iter->count;
 	rpc->msgout.num_skbs = 0;
@@ -127,6 +128,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	UNIT_LOG("; ", "mtu %d, max_pkt_data %d, gso_size %d, gso_pkt_data %d",
 			mtu, max_pkt_data, gso_size, rpc->msgout.gso_pkt_data);
 
+	overlap_xmit = rpc->msgout.length > 2*rpc->msgout.gso_pkt_data;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 	atomic_or(RPC_COPYING_FROM_USER, &rpc->flags);
 
@@ -134,6 +136,9 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 * iteration of the outer loop creates one sk_buff, which may
 	 * contain info for multiple packets on the wire (via TSO or GSO).
 	 */
+	tt_record3("starting copy from user space for id %d, length %d, "
+			"unscheduled %d",
+			rpc->id, rpc->msgout.length, rpc->msgout.unscheduled);
 	last_link = &rpc->msgout.packets;
 	for (bytes_left = rpc->msgout.length; bytes_left > 0; ) {
 		struct data_header *h;
@@ -210,10 +215,16 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		last_link = homa_next_skb(skb);
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
+		if (overlap_xmit && list_empty(&rpc->throttled_links) && xmit) {
+			tt_record1("waking up pacer for id %d", rpc->id);
+			homa_add_to_throttled(rpc);
+		}
 	}
+	tt_record2("finished copy from user space for id %d, length %d",
+			rpc->id, rpc->msgout.length);
 	atomic_andnot(RPC_COPYING_FROM_USER, &rpc->flags);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
-	if (likely(xmit))
+	if (!overlap_xmit && xmit)
 		homa_xmit_data(rpc, false);
 	return 0;
 

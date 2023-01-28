@@ -287,6 +287,37 @@ TEST_F(homa_outgoing, homa_message_out_init__multiple_segs_per_skbuff)
 			"DATA 1400@8400 200@9800",
 			unit_log_get());
 }
+TEST_F(homa_outgoing, homa_message_out_init__add_to_throttled)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+	ASSERT_EQ(0, -homa_message_out_init(crpc,
+			unit_iov_iter((void *) 1000, 5000), 1));
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	unit_log_filled_skbs(crpc->msgout.packets, 0);
+	EXPECT_STREQ("DATA 1400@0; DATA 1400@1400; DATA 1400@2800; "
+			"DATA 800@4200",
+			unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request id 2, next_offset 0",
+			unit_log_get());
+}
+TEST_F(homa_outgoing, homa_message_out_init__too_short_for_pipelining)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+	ASSERT_EQ(0, -homa_message_out_init(crpc,
+			unit_iov_iter((void *) 1000, 1000), 1));
+	homa_rpc_unlock(crpc);
+	EXPECT_SUBSTR("xmit DATA 1000@0", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+}
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)
 {
