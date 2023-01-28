@@ -3002,7 +3002,6 @@ extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
 extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
 		    int incoming);
-extern void     homa_message_out_destroy(struct homa_message_out *msgout);
 extern int      homa_message_out_init(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int xmit);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,

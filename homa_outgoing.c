@@ -234,22 +234,6 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 }
 
 /**
- * homa_message_out_destroy() - Destructor for homa_message_out.
- * @msgout:       Structure to clean up.
- */
-void homa_message_out_destroy(struct homa_message_out *msgout)
-{
-	struct sk_buff *skb, *next;
-	if (msgout->length < 0)
-		return;
-	for (skb = msgout->packets; skb !=  NULL; skb = next) {
-		next = *homa_next_skb(skb);
-		kfree_skb(skb);
-	}
-	msgout->packets = NULL;
-}
-
-/**
  * homa_xmit_control() - Send a control packet to the other end of an RPC.
  * @type:      Packet type, such as DATA.
  * @contents:  Address of buffer containing the contents of the packet.
