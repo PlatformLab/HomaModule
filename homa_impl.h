@@ -1599,6 +1599,12 @@ struct homa {
 	int pacer_fifo_count;
 
 	/**
+	 * @pacer_start: get_cycles() time when the pacer last woke up
+	 * (if the pacer is running) or 0 if the pacer is sleeping.
+	 */
+	__u64 pacer_wake_time;
+
+	/**
 	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
 	 * insert or remove an RPC from throttled_rpcs, must first acquire
 	 * the RPC's socket lock, then this lock.

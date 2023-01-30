@@ -81,6 +81,7 @@ int homa_init(struct homa *homa)
 	spin_lock_init(&homa->pacer_mutex);
 	homa->pacer_fifo_fraction = 50;
 	homa->pacer_fifo_count = 1;
+	homa->pacer_wake_time = 0;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
 	homa->throttle_add = 0;

@@ -629,10 +629,12 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 		if (!list_empty(&homa->throttled_rpcs))
 			INC_METRIC(pacer_bytes, bytes);
 		if (idle < clock) {
-			if (!list_empty(&homa->throttled_rpcs)) {
-				INC_METRIC(pacer_lost_cycles, clock - idle);
-				tt_record1("pacer lost %d cycles",
-						clock - idle);
+			if (homa->pacer_wake_time) {
+				__u64 lost = (homa->pacer_wake_time > idle)
+						? clock - homa->pacer_wake_time
+						: clock - idle;
+				INC_METRIC(pacer_lost_cycles, lost);
+				tt_record1("pacer lost %d cycles", lost);
 			}
 			new_idle = clock + cycles_for_packet;
 		} else
@@ -654,15 +656,14 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
  */
 int homa_pacer_main(void *transportInfo)
 {
-	cycles_t start;
 	struct homa *homa = (struct homa *) transportInfo;
 
+	homa->pacer_wake_time = get_cycles();
 	while (1) {
 		if (homa->pacer_exit) {
+			homa->pacer_wake_time = 0;
 			break;
 		}
-
-		start = get_cycles();
 		homa_pacer_xmit(homa);
 
 		/* Sleep this thread if the throttled list is empty. Even
@@ -677,8 +678,10 @@ int homa_pacer_main(void *transportInfo)
 			tt_record("pacer sleeping");
 		else
 			__set_current_state(TASK_RUNNING);
-		INC_METRIC(pacer_cycles, get_cycles() - start);
+		INC_METRIC(pacer_cycles, get_cycles() - homa->pacer_wake_time);
+		homa->pacer_wake_time = 0;
 		schedule();
+		homa->pacer_wake_time = get_cycles();
 		__set_current_state(TASK_RUNNING);
 	}
 	kthread_complete_and_exit(&homa_pacer_kthread_done, 0);
