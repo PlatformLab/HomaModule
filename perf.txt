@@ -2,6 +2,13 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+45. (January 2023) Up until now, output messages had to be completely copied
+    into sk_buffs before transmission could begin. Modified Homa to pipeline
+    the copy from user space with packet transmission. This makes a significant
+    difference in performance. For cp_node client --one-way --workload 500000
+    with MTU 1500, goodput increased from 11 Gbps (see #43 below) to 17-19
+    Gbps. For comparison, TCP is about 18.5 Gbps .
+
 44. (January 2023) Until now Homa has held an RPC's lock while transmitting
     packets for that RPC. This isn't a problem if ip_queue_xmit returns
     quickly. However, in some configurations (such as Intel xl170 NICs) the
