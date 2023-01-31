@@ -74,7 +74,7 @@ def parse_tt(tt, server):
         if not pktid in packets:
             packets[pktid] = {}
 
-        if re.match('.*calling .*_xmit: skb->len', line):
+        if re.match('.*calling .*_xmit: wire_bytes', line):
             packets[pktid]["send"] = time
             sent += 1
 

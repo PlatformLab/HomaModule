@@ -258,7 +258,8 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 	struct sk_buff *skb;
 	char buffer[200];
 
-	for (skb = message->packets; skb != NULL; skb = *homa_next_skb(skb)) {
+	for (skb = message->packets; skb != NULL;
+			skb = homa_get_skb_info(skb)->next_skb) {
 		if (verbose) {
 			homa_print_packet(skb, buffer, sizeof(buffer));
 		} else {
@@ -288,7 +289,7 @@ void unit_log_filled_skbs(struct sk_buff *skb, int verbose)
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
 		}
 		unit_log_printf("; ", "%s", buffer);
-		skb = *homa_next_skb(skb);
+		skb = homa_get_skb_info(skb)->next_skb;
 	}
 }
 

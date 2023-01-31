@@ -148,9 +148,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 		homa_rpc_unlock(rpc);
 
-		/* The sizeof32(void*) creates extra space for homa_next_skb. */
-		skb = alloc_skb(gso_size + HOMA_SKB_EXTRA + sizeof32(void*),
-				GFP_KERNEL);
+		skb = alloc_skb(HOMA_SKB_EXTRA + gso_size
+				+ sizeof32(struct homa_skb_info), GFP_KERNEL);
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
 			homa_rpc_lock(rpc);
@@ -181,6 +180,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		h->incoming = htonl(rpc->msgout.unscheduled);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
+		homa_get_skb_info(skb)->wire_bytes = 0;
 
 		available = rpc->msgout.gso_pkt_data;
 
@@ -208,11 +208,14 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			bytes_left -= seg_size;
 			(skb_shinfo(skb)->gso_segs)++;
 			available -= seg_size;
+			homa_get_skb_info(skb)->wire_bytes += mtu
+					- (max_pkt_data - seg_size)
+					+ HOMA_ETH_OVERHEAD;
 		} while ((available > 0) && (bytes_left > 0));
 
 		homa_rpc_lock(rpc);
 		*last_link = skb;
-		last_link = homa_next_skb(skb);
+		last_link = &(homa_get_skb_info(skb)->next_skb);
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
 		if (overlap_xmit && list_empty(&rpc->throttled_links) && xmit) {
@@ -420,7 +423,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
-		rpc->msgout.next_xmit = homa_next_skb(skb);
+		rpc->msgout.next_xmit = &(homa_get_skb_info(skb)->next_skb);
 		rpc->msgout.next_xmit_offset += rpc->msgout.gso_pkt_data;
 		if (rpc->msgout.next_xmit_offset > rpc->msgout.length)
 			 rpc->msgout.next_xmit_offset = rpc->msgout.length;
@@ -463,17 +466,19 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->csum_start = skb_transport_header(skb) - skb->head;
 	skb->csum_offset = offsetof(struct common_header, checksum);
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
-		tt_record4("calling ip6_xmit: skb->len %d, peer 0x%x, id %d, "
+		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, "
 				"offset %d",
-				skb->len, tt_addr(rpc->peer->addr), rpc->id,
+				homa_get_skb_info(skb)->wire_bytes,
+				tt_addr(rpc->peer->addr), rpc->id,
 				ntohl(h->seg.offset));
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
 				0, NULL,
 				rpc->hsk->homa->priority_map[priority] << 4, 0);
 	} else {
-		tt_record4("calling ip_queue_xmit: skb->len %d, peer 0x%x, "
+		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, "
 				"id %d, offset %d",
-				skb->len, tt_addr(rpc->peer->addr), rpc->id,
+				homa_get_skb_info(skb)->wire_bytes,
+				tt_addr(rpc->peer->addr), rpc->id,
 				htonl(h->seg.offset));
 
 		rpc->hsk->inet.tos = rpc->hsk->homa->priority_map[priority]<<5;
@@ -513,7 +518,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 	 * packet, looking for those that overlap the range of
 	 * interest.
 	 */
-	for (skb = rpc->msgout.packets; skb !=  NULL; skb = *homa_next_skb(skb)) {
+	for (skb = rpc->msgout.packets; skb !=  NULL;
+			skb = homa_get_skb_info(skb)->next_skb) {
 		int seg_offset = (skb_transport_header(skb) - skb->head)
 				+ sizeof32(struct data_header)
 				- sizeof32(struct data_segment);
@@ -610,16 +616,10 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
 	__u64 idle, new_idle, clock;
-	int cycles_for_packet, segs, bytes;
+	int cycles_for_packet, bytes;
 
-	segs = skb_shinfo(skb)->gso_segs;
-	bytes = skb->tail - skb->transport_header;
-	bytes += HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD;
-	if (segs > 0)
-		bytes += (segs - 1) * (sizeof32(struct data_header)
-				- sizeof32(struct data_segment)
-				+ HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD);
-	cycles_for_packet = (bytes*homa->cycles_per_kbyte)/1000;
+	bytes = homa_get_skb_info(skb)->wire_bytes;
+	cycles_for_packet = (bytes * homa->cycles_per_kbyte)/1000;
 	while (1) {
 		clock = get_cycles();
 		idle = atomic64_read(&homa->link_idle_time);

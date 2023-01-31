@@ -548,8 +548,9 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			if (rpc->msgout.length >= 0) {
 				while (rpc->msgout.packets) {
 					skbs[num_skbs] = rpc->msgout.packets;
-					rpc->msgout.packets = *homa_next_skb(
-							rpc->msgout.packets);
+					rpc->msgout.packets = homa_get_skb_info(
+							rpc->msgout.packets)
+							->next_skb;
 					num_skbs++;
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
@@ -1632,7 +1633,7 @@ void homa_spin(int usecs)
 void homa_free_skbs(struct sk_buff *head)
 {
 	while (head) {
-		struct sk_buff *next = *homa_next_skb(head);
+		struct sk_buff *next = homa_get_skb_info(head)->next_skb;
 		kfree_skb(head);
 		head = next;
 	}

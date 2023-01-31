@@ -272,7 +272,7 @@ for line in f:
           # qtime, count, elapsed, (count/1000)/elapsed))
 
   match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-      'calling .*_xmit: skb->len', line)
+      'calling .*_xmit: wire_bytes', line)
   if match:
     time = float(match.group(1))
     core = int(match.group(3))
@@ -332,16 +332,16 @@ for id in first_out_time:
     out_time += last_out_time[id] - first_out_time[id]
 print("Throughput:")
 if out_time != 0:
-  print("  Transmit packets (per RPC):    %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Transmit goodput (per RPC):    %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*out_data/out_time,
       100.0*out_time/end))
-print("  Transmit packets (aggregate):  %5.1f Gbps" % (
+print("  Transmit goodput (aggregate):  %5.1f Gbps" % (
     8e-03*out_data/end))
 if in_time != 0:
-  print("  Receive packets (per RPC):     %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Receive goodput (per RPC):     %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*in_data/in_time,
       100.0*in_time/end))
-print("  Receive packets (aggregate):   %5.1f Gbps" % (
+print("  Receive goodput (aggregate):   %5.1f Gbps" % (
     8e-03*in_data/end))
 if copy_in_time != 0:
   print("  Copy from user space:          %5.1f Gbps (%4.1f%% of total time)" % (

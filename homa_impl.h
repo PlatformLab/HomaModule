@@ -2596,6 +2596,37 @@ struct homa_core {
 };
 
 /**
+ * struct homa_skb_info - Additional information needed by Homa for each
+ * sk_buff. Space is allocated for this at the very end of the skb.
+ */
+struct homa_skb_info {
+	/**
+	 * @next_skb: used to link together all of the skb's for a Homa
+	 * message (in order of offset).
+	 */
+	struct sk_buff *next_skb;
+
+	/**
+	 * @wire_bytes: total number of bytes of network bandwidth that
+	 * will be consumed by this packet. This includes everything,
+	 * including additional headers added by GSO, IP header, Ethernet
+	 * header, CRC, preamble, and inter-packet gap.
+	 */
+	int wire_bytes;
+};
+
+/**
+ * homa_get_skb_info() - Return the address of Homa's private information
+ * for an sk_buff.
+ * @skb:     Socket buffer whose info is needed.
+ */
+static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
+{
+	return (struct homa_skb_info *) (skb_end_pointer(skb)
+			- sizeof(struct homa_skb_info));
+}
+
+/**
  * homa_is_client(): returns true if we are the client for a particular RPC,
  * false if we are the server.
  * @id:  Id of the RPC in question.

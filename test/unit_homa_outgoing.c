@@ -183,8 +183,9 @@ TEST_F(homa_outgoing, homa_message_out_init__packet_header)
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
 			"message_length 20000, offset 4200, data_length 1400, "
 			"incoming 12600, extra segs 1400@5600 1400@7000",
-			homa_print_packet(*homa_next_skb(crpc->msgout.packets),
-			buffer, sizeof(buffer)));
+			homa_print_packet(homa_get_skb_info(
+					crpc->msgout.packets)->next_skb,
+					buffer, sizeof(buffer)));
 }
 TEST_F(homa_outgoing, homa_message_out_init__cant_alloc_skb)
 {
@@ -727,10 +728,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			500 - sizeof(struct data_header)
-			- HOMA_IPV6_HEADER_LENGTH
-			- HOMA_ETH_OVERHEAD, 1000);
+			self->server_port, self->client_id, 500, 1000);
+	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
 	mock_cycles = 8000;
@@ -740,31 +739,12 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 			false));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.link_idle_time));
 }
-TEST_F(homa_outgoing, homa_check_nic_queue__multiple_packets_gso)
-{
-	mock_mtu = 500 - sizeof(struct data_header)
-			- self->hsk.ip_header_length - HOMA_ETH_OVERHEAD;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			1200 - 3 *(sizeof(struct data_header)
-			+ HOMA_IPV6_HEADER_LENGTH + HOMA_ETH_OVERHEAD), 1000);
-	unit_log_clear();
-	atomic64_set(&self->homa.link_idle_time, 9000);
-	self->homa.max_nic_queue_cycles = 100000;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	mock_cycles = 0;
-	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
-			false));
-	EXPECT_EQ(10200, atomic64_read(&self->homa.link_idle_time));
-}
 TEST_F(homa_outgoing, homa_check_nic_queue__queue_full)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			500 - sizeof(struct data_header)
-			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD, 1000);
+			self->server_port, self->client_id, 500, 1000);
+	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
 	mock_cycles = 7999;
@@ -778,9 +758,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			500 - sizeof(struct data_header)
-			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD, 1000);
+			self->server_port, self->client_id, 500, 1000);
+	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
 	mock_cycles = 7999;
@@ -790,13 +769,31 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
 			true));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.link_idle_time));
 }
+TEST_F(homa_outgoing, homa_check_nic_queue__pacer_metrics)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 500, 1000);
+	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
+	homa_add_to_throttled(crpc);
+	unit_log_clear();
+	atomic64_set(&self->homa.link_idle_time, 9000);
+	self->homa.pacer_wake_time = 9800;
+	mock_cycles = 10000;
+	self->homa.max_nic_queue_cycles = 1000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
+			true));
+	EXPECT_EQ(10500, atomic64_read(&self->homa.link_idle_time));
+	EXPECT_EQ(500, homa_cores[cpu_number]->metrics.pacer_bytes);
+	EXPECT_EQ(200, homa_cores[cpu_number]->metrics.pacer_lost_cycles);
+}
 TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			500 - sizeof(struct data_header)
-			- HOMA_IPV6_HEADER_LENGTH - HOMA_ETH_OVERHEAD, 1000);
+			self->server_port, self->client_id, 500, 1000);
+	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
 	mock_cycles = 10000;

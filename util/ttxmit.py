@@ -55,7 +55,7 @@ packet_size = 1000
 active_rpcs = {}
 
 # Total number of RPCs that completed during the trace.
-total_rpcs = 0
+completed_rpcs = 0
 
 # Total time when there was at least one active RPC.
 active_usecs = 0
@@ -109,7 +109,7 @@ needs_grant = {}
 
 for line in f:
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'calling .*_xmit: skb->len ([0-9]+), .* id ([0-9]+), '
+            'calling .*_xmit: wire_bytes ([0-9]+), .* id ([0-9]+), '
             'offset ([0-9]+)', line)
     if match:
         time = float(match.group(1))
@@ -153,7 +153,7 @@ for line in f:
 
         if length < packet_size:
             active_rpcs.pop(id, None)
-            total_rpcs += 1
+            completed_rpcs += 1
         else:
             active_rpcs[id] = [time, id]
 
@@ -169,7 +169,7 @@ for line in f:
         granted[id] = offset
 
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
-            'starting copy from user .* id ([0-9]+), .* unscheduled ([0-9]+)',
+            'starting copy from user .* id ([0-9]+),.* unscheduled ([0-9]+)',
             line)
     if match:
         id = match.group(4)
@@ -192,11 +192,11 @@ print("%d data packets (%.1f%% of all packets) were delayed waiting for grants"
 print('%d data packets (%.1f%% of all packets) were delayed by gaps '
                 '>= %.1f us' % (long_gaps, 100*long_gaps/ total_packets,
                 long_gap))
-print("Transmit rate when RPCs active: %.1f Gbps" % (
+print("Network bandwidth consumed when RPCs active: %.1f Gbps" % (
         total_bytes*8.0/(active_usecs*1e03)))
-if (total_rpcs > 0):
+if (completed_rpcs > 0):
     print("Average delay/RPC caused by missing grants: %.1f usec" % (
-            grant_gap_usecs/total_rpcs))
+            grant_gap_usecs/completed_rpcs))
 
 gaps = sorted(gaps, key=itemgetter(0), reverse=True)
 print("\nLongest gaps:")
