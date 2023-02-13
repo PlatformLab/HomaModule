@@ -375,7 +375,7 @@ TEST_F(homa_incoming, homa_copy_to_user__message_data_exceeds_length)
 	EXPECT_STREQ("skb_copy_datagram_iter: 1000 bytes to 0x1000000: 0-999",
 			unit_log_get());
 	EXPECT_EQ(1000, crpc->msgin.copied_out);
-	EXPECT_EQ(1, crpc->msgin.num_skbs);
+	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_copy_to_user__gap_in_packets)
 {
@@ -439,8 +439,8 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399",
 			unit_log_get());
-	EXPECT_EQ(2800, crpc->msgin.copied_out);
-	EXPECT_EQ(1, crpc->msgin.num_skbs);
+	EXPECT_EQ(2048, crpc->msgin.copied_out);
+	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 {
