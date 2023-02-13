@@ -87,15 +87,18 @@ def get_interfaces():
             match = re.match('^([a-z]*1f1[a-z0-9]*):', line)
             if match:
                 interface = match.group(1)
+            match = re.match('^([a-z]*1f0[a-z0-9]*):', line)
+            if match:
+                interface = match.group(1)
             continue
         if re.match('^[ ]+ inet 10\.0\.1\.', line):
             vlan = current
+    if not vlan or not interface:
+        print("Found the following interfaces: %s" % (available))
     if not vlan:
         raise Exception("Couldn't identify vlan interface");
     if not interface:
         raise Exception("Couldn't identify primary network interface");
-    if not vlan or not interface:
-        print("Found the following interfaces: %s" % (available))
     print("Primary network interface is %s, vlan is %s" % (interface, vlan))
     return [interface, vlan]
 
@@ -230,6 +233,11 @@ def config_homa(mod):
         set_sysctl("max_nic_queue_ns", "5000")
         set_sysctl("rtt_bytes", "200000")
         set_sysctl("max_gso_size", "100000")
+    elif type == "c6525-25g":
+        set_sysctl("link_mbps", "25000")
+        set_sysctl("max_nic_queue_ns", "5000")
+        set_sysctl("rtt_bytes", "150000")
+        set_sysctl("max_gso_size", "10000")
     else:
         raise Exception("Can't configure Homa: unknown node type %s" % (type))
 
@@ -288,7 +296,7 @@ def config_power():
         print("Configuring power settings for Intel CPUs")
         subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
                 "performance"], check=True)
-    elif type == "c6525-100g":
+    elif (type == "c6525-100g") or (type == "c6525-25g"):
         # AMD 7402P (EPYC Rome processor); don't know of any appropriate
         # power setting changes
         return
