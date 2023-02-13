@@ -528,15 +528,14 @@ _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
  * for which this machine is the sender.
  */
 struct homa_message_out {
-	/** @length: Total bytes in message (excluding headers).  A value
+	/**
+	 * @length: Total bytes in message (excluding headers).  A value
 	 * less than 0 means this structure is uninitialized and therefore
-	 * not in use.*/
+	 * not in use (all other fields will be zero in this case).
+	 */
 	int length;
 
-	/**
-	 * @num_skbs:  Total number of buffers currently in @packets. Will
-	 * be 0 if @length is less than 0.
-	 */
+	/** @num_skbs: Total number of buffers currently in @packets. */
 	int num_skbs;
 
 	/**
@@ -561,6 +560,13 @@ struct homa_message_out {
 	 * including this one, have been transmitted.
 	 */
 	int next_xmit_offset;
+
+	/**
+	 * @active_xmits: The number of threads that are currently
+	 * transmitting data packets for this RPC; can't reap the RPC
+	 * until this count becomes zero.
+	 */
+	atomic_t active_xmits;
 
 	/** @gso_pkt_data: Number of bytes of message data in each packet
 	 * of @packets except possibly the last.
@@ -791,18 +797,14 @@ struct homa_rpc {
 	 * RPC_HANDING_OFF -       This RPC is in the process of being
 	 *                         handed off to a waiting thread; it must
 	 *                         not be reaped.
-	 * RPC_XMITTING -          homa_xmit_data is actively transmitting
-	 *                         packets for this RPC, so it must not be
-	 *                         reaped.
 	 */
 #define RPC_PKTS_READY        1
 #define RPC_COPYING_FROM_USER 2
 #define RPC_COPYING_TO_USER   4
 #define RPC_HANDING_OFF       8
-#define RPC_XMITTING          0x10
 
 #define RPC_CANT_REAP (RPC_COPYING_FROM_USER | RPC_COPYING_TO_USER \
-		| RPC_HANDING_OFF | RPC_XMITTING)
+		| RPC_HANDING_OFF)
 
 	/**
 	 * @grants_in_progress: Count of active grant sends for this RPC;

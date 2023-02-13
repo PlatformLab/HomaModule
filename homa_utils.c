@@ -232,8 +232,8 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->msgin.total_length = -1;
 	crpc->msgin.num_skbs = 0;
 	crpc->msgin.num_bpages = 0;
+	memset(&crpc->msgout, 0, sizeof(crpc->msgout));
 	crpc->msgout.length = -1;
-	crpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
@@ -329,8 +329,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->msgin.total_length = -1;
 	srpc->msgin.num_skbs = 0;
 	srpc->msgin.num_bpages = 0;
+	memset(&srpc->msgout, 0, sizeof(srpc->msgout));
 	srpc->msgout.length = -1;
-	srpc->msgout.num_skbs = 0;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
 	srpc->interest = NULL;
@@ -540,6 +540,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP)
 					|| (atomic_read(&rpc->grants_in_progress)
+					!= 0)
+					|| (atomic_read(&rpc->msgout.active_xmits)
 					!= 0)) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;

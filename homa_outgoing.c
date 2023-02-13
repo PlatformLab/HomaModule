@@ -76,6 +76,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	rpc->msgout.packets = NULL;
 	rpc->msgout.next_xmit = &rpc->msgout.packets;
 	rpc->msgout.next_xmit_offset = 0;
+	atomic_set(&rpc->msgout.active_xmits, 0);
 	rpc->msgout.sched_priority = 0;
 	rpc->msgout.init_cycles = get_cycles();
 
@@ -392,9 +393,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
 	struct homa *homa = rpc->hsk->homa;
 
-	if (unlikely(atomic_read(&rpc->flags) & RPC_XMITTING))
-		return;
-	atomic_or(RPC_XMITTING, &rpc->flags);
+	atomic_inc(&rpc->msgout.active_xmits);
 	while (*rpc->msgout.next_xmit) {
 		int priority;
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
@@ -434,7 +433,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		force = false;
 		homa_rpc_lock(rpc);
 	}
-	atomic_andnot(RPC_XMITTING, &rpc->flags);
+	atomic_dec(&rpc->msgout.active_xmits);
 }
 
 /**

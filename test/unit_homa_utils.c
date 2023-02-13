@@ -512,6 +512,27 @@ TEST_F(homa_utils, homa_rpc_reap__skip_rpc_because_of_flags)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 3));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 }
+TEST_F(homa_utils, homa_rpc_reap__skip_rpc_because_of_active_xmits)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 2000);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+2, 1000, 2000);
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	homa_rpc_free(crpc1);
+	homa_rpc_free(crpc2);
+	unit_log_clear();
+	atomic_inc(&crpc1->msgout.active_xmits);
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 100));
+	EXPECT_STREQ("reaped 1236", unit_log_get());
+	unit_log_clear();
+	atomic_dec(&crpc1->msgout.active_xmits);
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 100));
+	EXPECT_STREQ("reaped 1234", unit_log_get());
+}
 TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
