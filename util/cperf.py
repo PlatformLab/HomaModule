@@ -1027,21 +1027,22 @@ def get_digest(experiment):
 
 def start_slowdown_plot(title, max_y, x_experiment, size=10,
         show_top_label=True, show_bot_label=True, figsize=[6,4],
-        y_label="Slowdown"):
+        y_label="Slowdown", show_upper_x_axis= True):
     """
     Create a pyplot graph that will be used for slowdown data. Returns the
     Axes object for the plot.
 
-    title:           Title for the plot; may be empty
-    max_y:           Maximum y-coordinate
-    x_experiment:    Name of experiment whose rtt distribution will be used to
-                     label the x-axis of the plot. None means don't label the
-                     x-axis (caller will presumably invoke cdf_xaxis to do it).
-    size:            Size to use for fonts
-    show_top_label:  True means display title text for upper x-axis
-    show_bot_label:  True means display title text for lower x-axis
-    figsize:         Dimensions of plot
-    y_label:         Label for the y-axis
+    title:             Title for the plot; may be empty
+    max_y:             Maximum y-coordinate
+    x_experiment:      Name of experiment whose rtt distribution will be used to
+                       label the x-axis of the plot. None means don't label the
+                       x-axis (caller will presumably invoke cdf_xaxis to do it).
+    size:              Size to use for fonts
+    show_top_label:    True means display title text for upper x-axis
+    show_bot_label:    True means display title text for lower x-axis
+    figsize:           Dimensions of plot
+    y_label:           Label for the y-axis
+    show_upper_x_axis: Display upper x-axis ticks and labels (percentiles)
     """
 
     fig = plt.figure(figsize=figsize)
@@ -1066,19 +1067,20 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     ax.set_ylabel(y_label, size=size)
     ax.grid(which="major", axis="y")
 
-    top_axis = ax.twiny()
-    top_axis.tick_params(axis="x", direction="in", length=5)
-    top_axis.set_xlim(0, 1.0)
-    top_ticks = []
-    top_labels = []
-    for x in range(0, 11, 2):
-        top_ticks.append(x/10.0)
-        top_labels.append("%d%%" % (x*10))
-    top_axis.set_xticks(top_ticks)
-    top_axis.set_xticklabels(top_labels, size=size)
-    if show_top_label:
-        top_axis.set_xlabel("Cumulative % of Messages", size=size)
-    top_axis.xaxis.set_label_position('top')
+    if show_upper_x_axis:
+        top_axis = ax.twiny()
+        top_axis.tick_params(axis="x", direction="in", length=5)
+        top_axis.set_xlim(0, 1.0)
+        top_ticks = []
+        top_labels = []
+        for x in range(0, 11, 2):
+            top_ticks.append(x/10.0)
+            top_labels.append("%d%%" % (x*10))
+        top_axis.set_xticks(top_ticks)
+        top_axis.set_xticklabels(top_labels, size=size)
+        if show_top_label:
+            top_axis.set_xlabel("Cumulative % of Messages", size=size)
+        top_axis.xaxis.set_label_position('top')
 
     if x_experiment != None:
         # Generate x-axis labels
