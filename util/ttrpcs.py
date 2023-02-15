@@ -343,27 +343,27 @@ for id in first_out_time:
     out_time += last_out_time[id] - first_out_time[id]
 print("Throughput:")
 if out_time != 0:
-  print("  Transmit goodput (per RPC):       %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Transmit goodput (per RPC):        %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*out_data/out_time,
       100.0*out_time/end))
-print("  Transmit goodput (aggregate):     %5.1f Gbps" % (
+print("  Transmit goodput (aggregate):      %5.1f Gbps" % (
     8e-03*out_data/end))
 if in_time != 0:
-  print("  Receive goodput (per RPC):        %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Receive goodput (per RPC):         %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*in_data/in_time,
       100.0*in_time/end))
-print("  Receive goodput (aggregate):      %5.1f Gbps" % (
+print("  Receive goodput (aggregate):       %5.1f Gbps" % (
     8e-03*in_data/end))
 if copy_in_time != 0:
-  print("  Copy from user space:             %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Copy from user space (per thread): %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*copy_in_data/copy_in_time,
       100.0*copy_in_time/end))
 if copy_out_time != 0:
-  print("  Copy to user space:              %6.1f Gbps (%4.1f%% of total time)" % (
+  print("  Copy to user space (per thread):   %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*copy_out_data/copy_out_time,
       100.0*copy_out_time/end))
 if copy_out_time_with_del != 0:
-  print("  Copy to user space (inc. skb gc): %5.1f Gbps (%4.1f%% of total time)" % (
+  print("  Copy to user space (inc. skb gc):  %5.1f Gbps (%4.1f%% of total time)" % (
       8e-03*copy_out_data/copy_out_time_with_del,
       100.0*copy_out_time_with_del/end))
 
