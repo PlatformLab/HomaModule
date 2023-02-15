@@ -32,7 +32,7 @@ import sys
 interface = None
 vlan = None
 
-# Number of this node (e.g. 1 for "node-1"). Set by get_node_num.
+# Number of this node (e.g. 1 for "node1"). Set by get_node_num.
 node_num = None
 
 # CloudLab node type for this machine, such as xl170 or c6525-100g.
@@ -104,7 +104,7 @@ def get_interfaces():
 
 def get_node_num():
     """
-    Returns the (integer) number of this node (e.g., 1 for "node-1").
+    Returns the (integer) number of this node (e.g., 1 for "node1").
     """
 
     global node_num
@@ -112,7 +112,7 @@ def get_node_num():
         return node_num
     hostname = subprocess.run(["hostname"], stdout=subprocess.PIPE,
             encoding="utf-8", check=True).stdout
-    match = re.match('node-([0-9]+)\.', hostname)
+    match = re.match('node([0-9]+)\.', hostname)
     if not match:
         raise Exception("Couldn't figure out node number for this node")
     node_num = int(match.group(1))
@@ -196,7 +196,7 @@ def add_ipv6_to_etc_hosts(num_hosts):
                 first, num_hosts-1))
         input = ""
         for i in range(first, num_hosts):
-            input += "fd00::%d  node-%d\n" % (i+1, i);
+            input += "fd00::%d  node%d\n" % (i+1, i);
         subprocess.run(["sudo", "bash", "-c", "cat >> /etc/hosts"],
                 input=input, encoding="utf-8", check=True)
     else:

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -24,7 +24,7 @@
 # to values appropriate for that workload. The "num_nodes" arguments indicates
 # how many servers should be updated. The "first" argument is optional; it
 # is an integer identifying the first node on which installation will occur
-# (e.g. "set_cutoffs w3 4 2" means node-2 through node-5 will be updated.
+# (e.g. "set_cutoffs w3 4 2" means node2 through node5 will be updated.
 # "first" defaults to 0.
 
 root=~/homaModule
@@ -55,7 +55,7 @@ else
 fi
 
 for ((i = $first ; i <= $last; i++)); do
-    node=node-$i
+    node=node$i
     echo '*** Updating cutoffs on' $node '***'
     ssh $node sudo sysctl /net/homa/unsched_cutoffs=\"$cutoffs\"
 done

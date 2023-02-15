@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020-2022 Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -170,14 +170,14 @@ if not options.plot_only:
 
 # Parse the log files to extract useful data
 experiments = {}
-scan_log(options.log_dir + "/node-0.log", "node-0", experiments)
+scan_log(options.log_dir + "/node0.log", "node0", experiments)
 
-node = experiments["homa_latency"]["node-0"]
+node = experiments["homa_latency"]["node0"]
 if len(node["client_latency"]) == 0:
     raise Error("No Homa client latencies found")
 log("Homa RTT latency (us): %s" % (avg(node["client_latency"], "%.2f")))
 
-node = experiments["homa_1msg_tput"]["node-0"]
+node = experiments["homa_1msg_tput"]["node0"]
 if len(node["client_gbps"]) == 0:
     raise Error("No Homa client throughput found")
 gbps = []
@@ -185,25 +185,25 @@ for m in node["client_gbps"]:
     gbps.append(2*m)
 log("Homa single message throughput (Gbps): %s" % (avg(gbps, "%.1f")))
 
-node = experiments["homa_client_rpc_tput"]["node-0"]
+node = experiments["homa_client_rpc_tput"]["node0"]
 if len(node["client_kops"]) == 0:
     raise Error("No Homa client RPC throughputs found")
 log("Homa client RPC throughput (Kops/sec): %s"
         % (avg(node["client_kops"], "%.2f")))
 
-node = experiments["homa_server_rpc_tput"]["node-0"]
+node = experiments["homa_server_rpc_tput"]["node0"]
 if len(node["server_kops"]) == 0:
     raise Error("No Homa server RPC throughputs found")
 log("Homa server RPC throughput (Kops/sec): %s"
         % (avg(node["server_kops"], "%.2f")))
 
-node = experiments["homa_client_tput"]["node-0"]
+node = experiments["homa_client_tput"]["node0"]
 if len(node["client_gbps"]) == 0:
     raise Error("No Homa client throughputs found")
 log("Homa client throughput (Gbps): %s"
         % (avg(node["client_gbps"], "%.2f")))
 
-node = experiments["homa_server_tput"]["node-0"]
+node = experiments["homa_server_tput"]["node0"]
 if len(node["server_gbps"]) == 0:
     raise Error("No Homa server throughputs found")
 log("Homa server throughput (Gbps): %s"
@@ -216,12 +216,12 @@ for protocol in ["tcp", "dctcp"]:
         name = "DCTCP"
     else:
         name = "TCP"
-    node = experiments["%s_latency" % (protocol)]["node-0"]
+    node = experiments["%s_latency" % (protocol)]["node0"]
     if len(node["client_latency"]) == 0:
         raise Error("No %s client latencies found" % (name))
     log("\n%s RTT latency (us): %s" % (name, avg(node["client_latency"], "%.2f")))
 
-    node = experiments["%s_1msg_tput" % (protocol)]["node-0"]
+    node = experiments["%s_1msg_tput" % (protocol)]["node0"]
     if len(node["client_gbps"]) == 0:
         raise Error("No %s client throughput found" % (name))
     gbps = []
@@ -229,25 +229,25 @@ for protocol in ["tcp", "dctcp"]:
         gbps.append(2*m)
     log("%s single message throughput (Gbps): %s" % (name, avg(gbps, "%.2f")))
 
-    node = experiments["%s_client_rpc_tput" % (protocol)]["node-0"]
+    node = experiments["%s_client_rpc_tput" % (protocol)]["node0"]
     if len(node["client_kops"]) == 0:
         raise Error("No %s client RPC throughputs found" % (name))
     log("%s client RPC throughput (Kops/sec): %s" % (name,
             avg(node["client_kops"], "%.2f")))
 
-    node = experiments["%s_server_rpc_tput" % (protocol)]["node-0"]
+    node = experiments["%s_server_rpc_tput" % (protocol)]["node0"]
     if len(node["server_kops"]) == 0:
         raise Error("No %s server RPC throughputs found" % (name))
     log("%s server RPC throughput (Kops/sec): %s" % (name,
             avg(node["server_kops"], "%.2f")))
 
-    node = experiments["%s_client_tput" % (protocol)]["node-0"]
+    node = experiments["%s_client_tput" % (protocol)]["node0"]
     if len(node["client_gbps"]) == 0:
         raise Error("No %s client throughputs found" % (name))
     log("%s client throughput (Gbps): %s" % (name, avg(node["client_gbps"],
             "%.2f")))
 
-    node = experiments["%s_server_tput" % (protocol)]["node-0"]
+    node = experiments["%s_server_tput" % (protocol)]["node0"]
     if len(node["server_gbps"]) == 0:
         raise Error("No %s server throughputs found" % (name))
     log("%s server throughput (Gbps): %s" % (name, avg(node["server_gbps"],

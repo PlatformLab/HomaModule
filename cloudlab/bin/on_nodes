@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -21,7 +21,7 @@
 # on_nodes num_nodes cmd arg arg ...
 #
 # The "num_nodes" arguments indicates how many nodes the command should
-# be run on (starting at node-0). The remaining arguments are a command
+# be run on (starting at node0). The remaining arguments are a command
 # and its arguments to run on the given machines
 
 root=~/homaModule
@@ -34,7 +34,7 @@ last=`expr $1 - 1`
 shift
 
 for ((i = 0 ; i <= $last; i++)); do
-    node=node-$i
+    node=node$i
     echo ""
     echo $node:
     ssh $node $@

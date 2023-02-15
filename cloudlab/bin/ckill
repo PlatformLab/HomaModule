@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2020, Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -23,7 +23,7 @@
 # argument to "pidof"). The "num_nodes" arguments indicates how many
 # servers should be examined for processes to kill. The "first" argument
 # is optional; it is an integer identifying the first node on which
-# killing will occur (e.g. "ckill cp_node 4 2" means node-2 throughnode-5 will be 
+# killing will occur (e.g. "ckill cp_node 4 2" means node2 through node5 will be
 # updated will be searched. "first" defaults to 0.
 
 root=~/homaModule
@@ -39,7 +39,7 @@ fi
 last=`expr $first + $2 - 1`
 
 for ((i = $first ; i <= $last; i++)); do
-    node=node-$i
-    echo "ssh node-$i 'kill \`pidof $1\`'"
-    ssh node-$i "kill \`pidof $1\`"
+    node=node$i
+    echo "ssh node$i 'kill \`pidof $1\`'"
+    ssh node$i "kill \`pidof $1\`"
 done

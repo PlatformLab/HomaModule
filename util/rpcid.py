@@ -1,5 +1,19 @@
 #!/usr/bin/python3
 
+# Copyright (c)2023 Stanford University
+#
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR(S) DISCLAIM ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL AUTHORS BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 """
 Analyzes Homa timetraces on two different machines to extract a
 latency profile for a single RPC.
@@ -8,9 +22,9 @@ Usage:
 rpcid id client_node server_node
 
 id:           The client id for a given RPC
-client_node:  The number (e.g. 1, corresponding to node-1) of the client
+client_node:  The number (e.g. 1, corresponding to node1) of the client
               node: its timetrace should be in ~/node.tt on that node.
-server_node:  The number (e.g. 1, corresponding to node-1) of the server
+server_node:  The number (e.g. 1, corresponding to node1) of the server
               node: its timetrace should be in ~/node.tt on that node.
 
 If no arguments are supplied, then rpcid reads information from stdin,
@@ -103,7 +117,7 @@ def analyze_rpc(id, client_num, server_num):
     Analyze the client and server timetraces for a given RPC and output
     a latency breakdown for the RPC.
     id:         client id of the desired RPC
-    client_num: number of the client machine (3, not node-3)
+    client_num: number of the client machine (3, not node3)
     server_num: number of the server machine
     """
 
@@ -111,8 +125,8 @@ def analyze_rpc(id, client_num, server_num):
     global rpcs_analyzed
 
     client_num = int(client_num)
-    client = "node-" + str(client_num)
-    server = "node-" + str(server_num)
+    client = "node" + str(client_num)
+    server = "node" + str(server_num)
 
     # Server's RPC id is id+1
     sid = str(int(id) + 1)
@@ -317,7 +331,7 @@ def analyze_rpc(id, client_num, server_num):
 if len(sys.argv) == 1:
     rpcs = []
     for line in sys.stdin:
-        match = re.match('node-([0-9]+)', line)
+        match = re.match('node([0-9]+)', line)
         if match:
             node = match.group(1)
         match = re.match('.*Freezing because of request on port .* '

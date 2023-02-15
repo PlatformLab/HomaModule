@@ -68,7 +68,7 @@ if not options.plot_only:
 
 # Parse the log files to extract useful data
 experiments = {}
-scan_log(options.log_dir + "/node-0.log", "node-0", experiments)
+scan_log(options.log_dir + "/node0.log", "node0", experiments)
 
 # Keys are workload names, values are lists of throughputs for each
 # number of ports
@@ -79,7 +79,7 @@ for workload in workloads:
     for ports in port_range:
         exp = "%s_%s_%d" % (options.protocol, workload, ports)
         print("Experiment %s: %s" % (exp, experiments[exp]))
-        node = experiments[exp]["node-0"]
+        node = experiments[exp]["node0"]
         readings = node["server_kops"]
         if len(readings) == 0:
             raise Error("No RPC throughput found for experiment %s"

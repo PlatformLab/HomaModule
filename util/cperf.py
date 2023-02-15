@@ -355,7 +355,7 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
                 if print_data.endswith(string):
                     print_data = print_data[:(len(data) - len(string))]
                 if print_data != "":
-                    log("output from node-%d: '%s'" % (id, print_data))
+                    log("output from node%d: '%s'" % (id, print_data))
                 outputs[id] += data
         bad_node = -1
         for id in nodes:
@@ -365,12 +365,12 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
         if bad_node < 0:
             return
         if (time.time() > (start_time + time_limit)) and not printed:
-            log("expected output from node-%d not yet received "
+            log("expected output from node%d not yet received "
             "after command '%s': expecting '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
             printed = True;
         time.sleep(0.1)
-    raise Exception("bad output from node-%d after command '%s': "
+    raise Exception("bad output from node%d after command '%s': "
             "expected '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
 
@@ -387,9 +387,9 @@ def start_nodes(r, options):
     for id in r:
         if id in active_nodes:
             continue
-        vlog("Starting cp_node on node-%d" % (id))
+        vlog("Starting cp_node on node%d" % (id))
         node = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
-                "node-%d" % (id), "cp_node"], encoding="utf-8",
+                "node%d" % (id), "cp_node"], encoding="utf-8",
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT)
         fl = fcntl.fcntl(node.stdin, fcntl.F_GETFL)
@@ -400,7 +400,7 @@ def start_nodes(r, options):
         if not options.no_homa_prio:
             f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
             homa_prios[id] = subprocess.Popen(["ssh", "-o",
-                    "StrictHostKeyChecking=no", "node-%d" % (id), "sudo",
+                    "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
                     "bin/homa_prio", "--interval", "500", "--unsched",
                     str(options.unsched), "--unsched-boost",
                     str(options.unsched_boost)], encoding="utf-8",
@@ -424,22 +424,22 @@ def stop_nodes():
     global active_nodes, server_nodes
     for id, popen in homa_prios.items():
         subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no",
-                "node-%d" % id, "sudo", "pkill", "homa_prio"])
+                "node%d" % id, "sudo", "pkill", "homa_prio"])
         try:
             popen.wait(5.0)
         except subprocess.TimeoutExpired:
-            log("Timeout killing homa_prio on node-%d" % (id))
+            log("Timeout killing homa_prio on node%d" % (id))
     for node in active_nodes.values():
         node.stdin.write("exit\n")
         try:
             node.stdin.flush()
         except BrokenPipeError:
-            log("Broken pipe to node-%d" % (id))
+            log("Broken pipe to node%d" % (id))
     for node in active_nodes.values():
         node.wait(5.0)
     for id in active_nodes:
-        subprocess.run(["rsync", "-rtvq", "node-%d:node.log" % (id),
-                "%s/node-%d.log" % (log_dir, id)])
+        subprocess.run(["rsync", "-rtvq", "node%d:node.log" % (id),
+                "%s/node%d.log" % (log_dir, id)])
     active_nodes.clear()
     server_nodes = range(0,0)
 
@@ -461,12 +461,12 @@ def do_cmd(command, r, r2 = range(0,0)):
         if id not in r:
             nodes.append(id)
     for id in nodes:
-        vlog("Command for node-%d: %s" % (id, command))
+        vlog("Command for node%d: %s" % (id, command))
         active_nodes[id].stdin.write(command + "\n")
         try:
             active_nodes[id].stdin.flush()
         except BrokenPipeError:
-            log("Broken pipe to node-%d" % (id))
+            log("Broken pipe to node%d" % (id))
     wait_output("% ", nodes, command)
 
 def do_ssh(command, nodes):
@@ -479,7 +479,7 @@ def do_ssh(command, nodes):
     """
     vlog("ssh command on nodes %s: %s" % (str(nodes), " ".join(command)))
     for id in nodes:
-        subprocess.run(["ssh", "node-%d" % id] + command,
+        subprocess.run(["ssh", "node%d" % id] + command,
                 stdout=subprocess.DEVNULL)
 
 def get_sysctl_parameter(name):
@@ -508,7 +508,7 @@ def set_sysctl_parameter(name, value, nodes):
     vlog("Setting Homa parameter %s to %s on nodes %s" % (name, value,
             str(nodes)))
     for id in nodes:
-        subprocess.run(["ssh", "node-%d" % id, "sudo", "sysctl",
+        subprocess.run(["ssh", "node%d" % id, "sudo", "sysctl",
                 "%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
 
 def start_servers(r, options):
@@ -615,9 +615,9 @@ def run_experiment(name, clients, options):
         try:
             active_nodes[id].stdin.flush()
         except BrokenPipeError:
-            log("Broken pipe to node-%d" % (id))
+            log("Broken pipe to node%d" % (id))
         nodes.append(id)
-        vlog("Command for node-%d: %s" % (id, command))
+        vlog("Command for node%d: %s" % (id, command))
     wait_output("% ", nodes, command, 40.0)
     if not "unloaded" in options:
         if options.protocol == "homa":
@@ -625,7 +625,7 @@ def run_experiment(name, clients, options):
             time.sleep(2)
             vlog("Recording initial metrics")
             for id in active_nodes:
-                subprocess.run(["ssh", "node-%d" % (id), "metrics.py"],
+                subprocess.run(["ssh", "node%d" % (id), "metrics.py"],
                         stdout=subprocess.DEVNULL)
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
@@ -646,7 +646,7 @@ def run_experiment(name, clients, options):
         vlog("Recording final metrics")
         for id in active_nodes:
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
-            subprocess.run(["ssh", "node-%d" % (id), "metrics.py"], stdout=f);
+            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f);
             f.close()
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
                 "%s/reports/%s-%d.metrics" % (options.log_dir, name, first_server))
@@ -661,7 +661,7 @@ def run_experiment(name, clients, options):
     do_cmd("stop clients", clients)
     if not "no_rtt_files" in options:
         for id in clients:
-            subprocess.run(["rsync", "-rtvq", "node-%d:rtts" % (id),
+            subprocess.run(["rsync", "-rtvq", "node%d:rtts" % (id),
                     "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
 def scan_log(file, node, experiments):
@@ -670,7 +670,7 @@ def scan_log(file, node, experiments):
     error messages or interesting statistics.
 
     file:         Name of the log file to read
-    node:         Name of the node that generated the log, such as "node-1".
+    node:         Name of the node that generated the log, such as "node1".
     experiments:  Info from the given log file is added to this structure
                   * At the top level it is dictionary indexed by experiment
                     name, where
@@ -764,7 +764,7 @@ def scan_log(file, node, experiments):
 
 def scan_logs():
     """
-    Read all of the node-specific log files produced by a run, and
+    Read all of the nodespecific log files produced by a run, and
     extract useful information.
     """
     global log_dir, verbose
@@ -772,8 +772,8 @@ def scan_logs():
     # This value is described in the header doc for scan_log.
     experiments = {}
 
-    for file in sorted(glob.glob(log_dir + "/node-*.log")):
-        node = re.match('.*/(node-[0-9]+)\.log', file).group(1)
+    for file in sorted(glob.glob(log_dir + "/node*.log")):
+        node = re.match('.*/(node[0-9]+)\.log', file).group(1)
         scan_log(file, node, experiments)
 
     for name, exp in experiments.items():

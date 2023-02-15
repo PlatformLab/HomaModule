@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -284,11 +284,11 @@ void print_help(const char *name)
 		"                      client machine (divided equally among client ports)\n"
 		"                      (default: %d)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
-		"    --first-server    Id of first server node (default: %d, meaning node-%d)\n"
+		"    --first-server    Id of first server node (default: %d, meaning node%d)\n"
 		"    --gbps            Target network utilization, including only message data,\n"
 		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
-		"                      not be sent to node-I (default: -1)\n"
+		"                      not be sent to nodeI (default: -1)\n"
                 "    --iovec           Use homa_sendv instead of homa_send\n"
                 "    --ipv6            Use IPv6 instead of IPv4\n"
 		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
@@ -513,7 +513,7 @@ void init_server_addrs(void)
 
 		if (node == id)
 			continue;
-		snprintf(host, sizeof(host), "node-%d", node);
+		snprintf(host, sizeof(host), "node%d", node);
 		memset(&hints, 0, sizeof(struct addrinfo));
 		hints.ai_family = inet_family;
 		hints.ai_socktype = SOCK_DGRAM;

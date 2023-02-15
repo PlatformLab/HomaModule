@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2020-2022 Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -21,9 +21,9 @@
 # update_linux num_nodes [first]
 #
 # The "num_nodes" arguments indicates how many nodes the command should
-# be run on (starting at node-1). The "first" argument is optional; it is
+# be run on (starting at node1). The "first" argument is optional; it is
 # an integer identifying the first node on which installation will occur
-# (e.g. "update_linux 4 2" means node-2 through node-5 will be updated).
+# (e.g. "update_linux 4 2" means node2 through node5 will be updated).
 # "first" defaults to 1.
 
 #v=`uname -r`
@@ -40,7 +40,7 @@ fi
 last=`expr $first + $1 - 1`
 
 for ((i = $first ; i <= $last; i++)); do
-    node=node-$i
+    node=node$i
     echo
     echo $node
     ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
