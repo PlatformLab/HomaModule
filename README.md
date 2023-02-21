@@ -38,21 +38,28 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   [GitHub repo](https://github.com/PlatformLab/grpc_homa).
 
 - To build the module, type `make all`; then type `sudo insmod homa.ko` to install
-  it, and `sudo rmmod homa` to remove an installed module.
+  it, and `sudo rmmod homa` to remove an installed module. In practice, though,
+  you'll probably want to do several other things as part of installing Homa.
+  I have created a Python script that I use for installing Homa on clusters
+  managed by the CloudLab project; it's in `cloudlab/bin/config`. I normally
+  invoke it with no parameters to install and configure Homa on the current
+  machine.
+  
+- The script `cloudlab/bin/install` will copy relevant Homa files
+  across a cluster of machines and configure Homa on each node. It assumes
+  that nodes have names `nodeN` where N is a small integer, and it also
+  assumes that you have already run `make` both in the top-level directory and
+  in `util`.
 
-- For best Homa performance, you should make the following configuration
+- For best Homa performance, you should also make the following configuration
   changes:
   - Enable priority queues in your switches, selected by the 3
-    high-order bits of the DSCP field
-    in IP packet headers. You can use `sysctl` to configure Homa's use of
+    high-order bits of the DSCP field in IPv4 packet headers or the 4
+    high-order bits of the Traffic Class field in IPv6 headers.
+    You can use `sysctl` to configure Homa's use of
     priorities (e.g., if you want it to use fewer than 8 levels). See the man
     page `homa.7` for more info.
   - Enable jumbo frames on your switches and on the Linux nodes.
-  - Set the `rtt_bytes` parameter via `sysctl` to match your network's latency
-    and bandwidth.
-  - It may also be useful to set other Linux networking parameters. As one
-    example, see the script  `cloudlab\bin\start_xl170`, which is what I
-    use to configure my test nodes.
 
 - NIC support for TSO: Homa can use TCP Segmentation Offload (TSO) in order
   to send large messages more efficiently. To do this, it uses a header format
@@ -81,11 +88,29 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   "make" in that subdirectory.
 
 - The subdirectory "util" contains an assortment of utility programs that
-  you may find useful in exercising Homa. Compile them by typing `make` in that
-  subdirectory. Most notable is the `cperf` family of programs, which will
-  run a variety of benchmarks on a cluster of nodes. The file cperf.py contains
-  library functions for benchmarking, which are used by a variety of benchmarks
-  with names starting with `cp_`.
+  you may find useful in exercising and benchmarking Homa. Compile them by typing
+  `make` in that subdirectory. Here are some examples of benchmarks you might
+  find useful:
+  - The `cp_node` program can be run stand-alone on clients and servers to run
+    simple benchmarks. For a simple latency test, run `cp_node server` on node1 of
+    the cluster, then run `cp_node client` on node 0. The client will send
+    continuous back-to-back short requests to the server and output timing
+    information. Or, run `cp_node client --workload 500000` on the client:
+    this will send continuous 500 KB messages for a simple througput test.
+    Type `cp_node --help` to learn about other ways you can use this program.
+  - The `cp_vs_tcp` script uses `cp_node` to run cluster-wide tests comparing
+    Homa with TCP (and/or DCTCP); it was used to generate the data for
+    Figures 3 and 4 in the Homa ATC paper. Here is an example command:
+    ```
+    cp_vs_tcp -n 10 -w w4 -b 20
+    ```
+    When invoked on node0, this will run a benchmark using the W4 workload
+    from the ATC paper,
+    running on 10 nodes and generating 20 Gbps of offered load (80%
+    network load on a 25 Gbps network). Type `cp_vs_tcp --help` for
+    information on all available options.
+  - Other `cp_` scripts can be used for different benchmarks.
+    See `util/README.md` for more information.
 
  - Some additional tools you might find useful:
    - Homa collects various metrics about its behavior, such as the size
