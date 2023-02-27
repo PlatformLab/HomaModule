@@ -32,6 +32,7 @@ long sysctl_homa_mem[3] __read_mostly;
 int sysctl_homa_rmem_min __read_mostly;
 int sysctl_homa_wmem_min __read_mostly;
 atomic_long_t homa_memory_allocated;
+static DEFINE_PER_CPU(int, homa_memory_per_cpu_fw_alloc);
 
 /* Global data for Homa. Never reference homa_data directory. Always use
  * the homa variable instead; this allows overriding during unit tests.
@@ -130,6 +131,7 @@ struct proto homa_prot = {
 	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
 	.memory_allocated  = &homa_memory_allocated,
+	.per_cpu_fw_alloc  = &homa_memory_per_cpu_fw_alloc,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
@@ -159,6 +161,7 @@ struct proto homav6_prot = {
 	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
 	.memory_allocated  = &homa_memory_allocated,
+	.per_cpu_fw_alloc  = &homa_memory_per_cpu_fw_alloc,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
