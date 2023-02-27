@@ -16,14 +16,16 @@ MY_CFLAGS += -g
 ccflags-y += ${MY_CFLAGS}
 CC += ${MY_CFLAGS}
 
+KDIR ?= /lib/modules/$(shell uname -r)/build
+
 all:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
+	make -C $(KDIR) M=$(PWD) modules
 
 check:
 	../homaLinux/scripts/kernel-doc -none *.c
 
 clean:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
+	make -C $(KDIR) M=$(PWD) clean
 
 # The following targets are useful for debugging Makefiles; they
 # print the value of a make variable in one of several contexts.
@@ -31,7 +33,7 @@ print-%:
 	@echo $* = $($*)
 
 printBuild-%:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) $@
+	make -C $(KDIR) M=$(PWD) $@
 
 printClean-%:
-	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) $@
+	make -C $(KDIR) M=$(PWD) $@
