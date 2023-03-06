@@ -3084,7 +3084,7 @@ extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
                     int count, int *eof, void *data);
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-                    int noblock, int flags, int *addr_len);
+                    int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
                     struct homa_sock *hsk, int flags, __u64 id);
 extern void     homa_rehash(struct sock *sk);
