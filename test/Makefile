@@ -1,6 +1,6 @@
 # Makefile to run unit tests for Homa
 
-KERNEL_DIR := /lib/modules/$(shell uname -r)/build
+KDIR ?= /lib/modules/$(shell uname -r)/build
 CC ?= gcc
 CXX ?= g++
 PERL ?= perl
@@ -8,25 +8,25 @@ ARCH ?= x86
 
 CINCLUDES := -I. \
 	    -I.. \
-	    -I$(KERNEL_DIR)/arch/x86/include \
-	    -I$(KERNEL_DIR)/arch/x86/include/generated \
-	    -I$(KERNEL_DIR)/include \
-	    -I$(KERNEL_DIR)/arch/x86/include/uapi \
-	    -I$(KERNEL_DIR)/arch/x86/include/generated/uapi \
-	    -I$(KERNEL_DIR)/include/uapi \
-	    -I$(KERNEL_DIR)/include/generated/uapi \
-	    -include $(KERNEL_DIR)/include/linux/kconfig.h \
-	    -include $(KERNEL_DIR)/include/linux/compiler-version.h \
-	    -include $(KERNEL_DIR)/include/linux/compiler_types.h
+	    -I$(KDIR)/arch/x86/include \
+	    -I$(KDIR)/arch/x86/include/generated \
+	    -I$(KDIR)/include \
+	    -I$(KDIR)/arch/x86/include/uapi \
+	    -I$(KDIR)/arch/x86/include/generated/uapi \
+	    -I$(KDIR)/include/uapi \
+	    -I$(KDIR)/include/generated/uapi \
+	    -include $(KDIR)/include/linux/kconfig.h \
+	    -include $(KDIR)/include/linux/compiler-version.h \
+	    -include $(KDIR)/include/linux/compiler_types.h
 CCINCLUDES := -I. \
 	    -I.. \
-	    -I$(KERNEL_DIR)/arch/x86/include \
-	    -I$(KERNEL_DIR)/arch/x86/include/generated \
-	    -I$(KERNEL_DIR)/include \
-	    -I$(KERNEL_DIR)/arch/x86/include/uapi \
-	    -I$(KERNEL_DIR)/arch/x86/include/generated/uapi \
-	    -I$(KERNEL_DIR)/include/uapi \
-	    -I$(KERNEL_DIR)/include/generated/uapi
+	    -I$(KDIR)/arch/x86/include \
+	    -I$(KDIR)/arch/x86/include/generated \
+	    -I$(KDIR)/include \
+	    -I$(KDIR)/arch/x86/include/uapi \
+	    -I$(KDIR)/arch/x86/include/generated/uapi \
+	    -I$(KDIR)/include/uapi \
+	    -I$(KDIR)/include/generated/uapi
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
