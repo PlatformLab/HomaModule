@@ -1893,6 +1893,13 @@ struct homa {
 	int max_gro_skbs;
 
 	/**
+	 * @gso_force_software: A value of non-zero will enable force software
+	 * GSO. Homa will force software GSO with this parameter enabled. Set
+	 * externally via sysctl.
+	 */
+	int gso_force_software;
+
+	/**
 	 * @gro_policy: An OR'ed together collection of bits that determine
 	 * how Homa packets should be steered for SoftIRQ handling.  A value
 	 * of zero will eliminate any Homa-specific behaviors, reverting

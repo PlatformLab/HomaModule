@@ -70,6 +70,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
 	int overlap_xmit;
+	unsigned int gso_type;
 
 	rpc->msgout.length = iter->count;
 	rpc->msgout.num_skbs = 0;
@@ -93,6 +94,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	mtu = dst_mtu(dst);
 	max_pkt_data = mtu - rpc->hsk->ip_header_length
 			- sizeof(struct data_header);
+	gso_type = (!rpc->hsk->homa->gso_force_software) ? SKB_GSO_TCPV6 : 0xd;
+
 	if (rpc->msgout.length <= max_pkt_data) {
 		/* Message fits in a single packet: no need for GSO. */
 		rpc->msgout.unscheduled = rpc->msgout.length;
@@ -160,8 +163,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 				&& (rpc->msgout.gso_pkt_data > max_pkt_data)) {
 			skb_shinfo(skb)->gso_size = sizeof(struct data_segment)
 					+ max_pkt_data;
-			skb_shinfo(skb)->gso_type = SKB_GSO_TCPV6;
-//			skb_shinfo(skb)->gso_type = 0xd;  // Force software GSO
+			skb_shinfo(skb)->gso_type = gso_type;
 		}
 		skb_shinfo(skb)->gso_segs = 0;
 

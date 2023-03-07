@@ -44,7 +44,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   managed by the CloudLab project; it's in `cloudlab/bin/config`. I normally
   invoke it with no parameters to install and configure Homa on the current
   machine.
-  
+
 - The script `cloudlab/bin/install` will copy relevant Homa files
   across a cluster of machines and configure Homa on each node. It assumes
   that nodes have names `nodeN` where N is a small integer, and it also
@@ -78,8 +78,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   in software, but that's quite a bit slower. If for some reason software
   GSO doesn't work (it's fairly new in Homa), then messages larger than the
   maximum packet size may hang or result in very poor performance. If this
-  happens, you'll need to use `sysctl` to ensure that `max_gso_size` is the
-  same as the maximum packet size.
+  happens, you'll need to use `sysctl` to either enable force software GSO with
+  `gso_force_software` which is a bit slow but still uses GSO or ensure
+  that `max_gso_size` is the same as the maximum packet size which stops GSO
+  at all.
 
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
