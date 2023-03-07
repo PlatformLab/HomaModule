@@ -24,6 +24,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
+#include <sched.h>
 
 #include <algorithm>
 #include <atomic>
