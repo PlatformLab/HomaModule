@@ -18,6 +18,7 @@
  */
 
 #include <errno.h>
+#include <sched.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
