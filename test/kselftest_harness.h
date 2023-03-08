@@ -465,6 +465,17 @@ extern int strcmp(const char *s1, const char *s2);
 	__EXPECT_SUBSTR(expected, seen, return)
 
 /**
+ * ASSERT_NOSUBSTR(expected, seen)
+ *
+ * @expected: value not expected to appear as a substring of @seen
+ * @seen: measured value
+ *
+ * ASSERT_NOSUBSTR(expected, measured): strstr(measured, expected) == NULL
+ */
+#define ASSERT_NOSUBSTR(expected, seen) \
+	__EXPECT_NOSUBSTR(expected, seen, return)
+
+/**
  * EXPECT_EQ(expected, seen)
  *
  * @expected: expected value
@@ -593,6 +604,17 @@ extern int strcmp(const char *s1, const char *s2);
 #define EXPECT_SUBSTR(expected, seen) \
 	__EXPECT_SUBSTR(expected, seen, NULL)
 
+/**
+ * EXPECT_NOSUBSTR(expected, seen)
+ *
+ * @expected: value not expected to appear as a substring of @seen
+ * @seen: measured value
+ *
+ * EXPECT_NOSUBSTR(expected, measured): strstr(measured, expected) == NULL
+ */
+#define EXPECT_NOSUBSTR(expected, seen) \
+	__EXPECT_NOSUBSTR(expected, seen, NULL)
+
 #define __INC_STEP(_metadata) \
 	if (_metadata->passed && _metadata->step < 255) \
 		_metadata->step++;
@@ -633,6 +655,18 @@ extern int strcmp(const char *s1, const char *s2);
 	__INC_STEP(_metadata); \
 	if (!strstr( __seen, __exp))  { \
 		__TH_LOG(" Expected '%s' in '%s'.", __exp, __seen); \
+		_metadata->passed = 0; \
+		_metadata->trigger = 1; \
+		return_or_NULL; \
+	} \
+} while (0)
+
+#define __EXPECT_NOSUBSTR(_expected, _seen, return_or_NULL) do { \
+	const char *__exp = (_expected); \
+	const char *__seen = (_seen); \
+	__INC_STEP(_metadata); \
+	if (strstr( __seen, __exp))  { \
+		__TH_LOG(" Expected no '%s' in '%s'.", __exp, __seen); \
 		_metadata->passed = 0; \
 		_metadata->trigger = 1; \
 		return_or_NULL; \

@@ -145,6 +145,7 @@ int homa_init(struct homa *homa)
 	homa->verbose = 0;
 	homa->max_gso_size = 10000;
 	homa->max_gro_skbs = 20;
+	homa->gso_force_software = 0;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->gro_busy_usecs = 10;
 	homa->timer_ticks = 0;
@@ -851,6 +852,9 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		if (h->retransmit)
 			used = homa_snprintf(buffer, buf_len, used,
 					", RETRANSMIT");
+		if (skb_shinfo(skb)->gso_type == 0xd)
+			used = homa_snprintf(buffer, buf_len, used,
+					", TSO disabled");
 		bytes_left = skb->len - sizeof32(*h) - seg_length;
 		if (skb_shinfo(skb)->gso_segs <= 1)
 			break;

@@ -321,6 +321,11 @@ of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
 .TP
+.IR gso_force_software
+If this value is nonzero, Homa will perform GSO in software instead of
+asking the NIC to perform TSO in hardware. This can be useful when running
+with NICs that refuse to perform TSO on Homa packets.
+.TP
 .IR gro_policy
 An integer value that determines how Homa processes incoming packets
 at the GRO level. See code in homa_offload.c for more details.

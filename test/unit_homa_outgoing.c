@@ -105,6 +105,33 @@ TEST_F(homa_outgoing, homa_message_out_init__basics)
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 }
+TEST_F(homa_outgoing, homa_message_out_init__gso_force_software)
+{
+	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc1 == NULL);
+	homa_rpc_unlock(crpc1);
+	mock_net_device.gso_max_size = 10000;
+	mock_xmit_log_verbose = 1;
+	self->homa.gso_force_software = 0;
+	ASSERT_EQ(0, -homa_message_out_init(crpc1,
+			unit_iov_iter((void *) 1000, 5000), 0));
+	unit_log_clear();
+	homa_xmit_data(crpc1, false);
+	EXPECT_SUBSTR("xmit DATA", unit_log_get());
+	EXPECT_NOSUBSTR("TSO disabled", unit_log_get());
+
+	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc2 == NULL);
+	homa_rpc_unlock(crpc2);
+	self->homa.gso_force_software = 1;
+	ASSERT_EQ(0, -homa_message_out_init(crpc2,
+			unit_iov_iter((void *) 1000, 5000), 0));
+	unit_log_clear();
+	homa_xmit_data(crpc2, false);
+	EXPECT_SUBSTR("TSO disabled", unit_log_get());
+}
 TEST_F(homa_outgoing, homa_message_out_init__message_too_long)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,

@@ -288,6 +288,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "gso_force_software",
+		.data		= &homa_data.gso_force_software,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "link_mbps",
 		.data		= &homa_data.link_mbps,
 		.maxlen		= sizeof(int),
