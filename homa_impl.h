@@ -1893,9 +1893,9 @@ struct homa {
 	int max_gro_skbs;
 
 	/**
-	 * @gso_force_software: A non-zero value will enable force software
-	 * GSO; zero means ask the NIC to perform TSO. Set externally via
-	 * sysctl.
+	 * @gso_force_software: A non-zero value will cause Home to perform
+	 * segmentation in software using GSO; zero means ask the NIC to
+	 * perform TSO. Set externally via sysctl.
 	 */
 	int gso_force_software;
 
