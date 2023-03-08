@@ -44,7 +44,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   managed by the CloudLab project; it's in `cloudlab/bin/config`. I normally
   invoke it with no parameters to install and configure Homa on the current
   machine.
-  
+
 - The script `cloudlab/bin/install` will copy relevant Homa files
   across a cluster of machines and configure Homa on each node. It assumes
   that nodes have names `nodeN` where N is a small integer, and it also
@@ -74,12 +74,13 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - Intel E810 (ice), XXV710 (i40e), XL710
 
   Please let me know if you find other NICs that work (or NICs that don't work).
-  If the NIC doesn't support TSO for Homa, then Homa will perform segmentation
-  in software, but that's quite a bit slower. If for some reason software
-  GSO doesn't work (it's fairly new in Homa), then messages larger than the
-  maximum packet size may hang or result in very poor performance. If this
-  happens, you'll need to use `sysctl` to ensure that `max_gso_size` is the
-  same as the maximum packet size.
+  If the NIC doesn't support TSO for Homa, then you can request that Homa
+  perform segmentation in software by setting the `gso_force_software` parameter
+  to a nonzero value using `sysctl`. Unfortunately, software segmentation
+  is inefficient because it has to copy the packet data. Alternatively,
+  you can ensure that the `max_gso_size` parameter is the same as the maximum
+  packet size, which eliminates GSO in any form. This is also inefficient
+  because it requires more packets to traverse the Linux networking stack.
 
 - A collection of man pages is available in the "man" subdirectory. The API for
   Homa is different from TCP sockets.
