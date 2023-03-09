@@ -86,6 +86,23 @@ FIXTURE_TEARDOWN(homa_offload)
 	unit_teardown();
 }
 
+TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
+{
+	mock_ipv6 = false;
+	struct sk_buff *skb = mock_skb_new(&self->ip, &self->header.common,
+			1400, 2000);
+	int version = ip_hdr(skb)->version;
+	EXPECT_EQ(4, version);
+	struct sk_buff *segs = homa_gso_segment(skb, 0);
+	ASSERT_NE(NULL, segs);
+	ASSERT_NE(NULL, segs->next);
+	EXPECT_EQ(NULL, segs->next->next);
+	EXPECT_EQ(0, ntohs(ip_hdr(segs)->id));
+	EXPECT_EQ(1, ntohs(ip_hdr(segs->next)->id));
+	kfree_skb(skb);
+	kfree_skb(segs->next);
+	kfree_skb(segs);
+}
 
 TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 {
