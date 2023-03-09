@@ -100,6 +100,19 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	__skb_pull(skb, sizeof(struct data_header)
 			- sizeof(struct data_segment));
 	segs = skb_segment(skb, features);
+
+	/* Set incrementing ids in each of the segments (mimics behavior
+	 * of Mellanox NICs and other segmenters).
+	 */
+	if (ip_hdr(segs)->version == 4) {
+		struct sk_buff *seg;
+		int i = 0;
+		for (seg = segs; seg != NULL; seg = seg->next) {
+			ip_hdr(seg)->id = htons(i);
+			i++;
+		}
+	}
+
 	tt_record("homa_gso_segment returning");
 	return segs;
 }

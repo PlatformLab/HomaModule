@@ -933,7 +933,24 @@ void *skb_put(struct sk_buff *skb, unsigned int len)
 struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		netdev_features_t features)
 {
-	return NULL;
+	struct data_header h;
+	int offset, length;
+	struct sk_buff *skb1, *skb2;
+
+	/* Split the existing packet into two packets. */
+	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
+	offset = ntohl(h.seg.offset);
+	length = ntohl(h.seg.segment_length);
+	h.seg.segment_length = htonl(length/2);
+	skb1 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
+			offset);
+	offset += length/2;
+	h.seg.offset = htonl(offset);
+	skb2 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
+			offset);
+	skb2->next = NULL;
+	skb1->next = skb2;
+	return skb1;
 }
 
 int sock_common_getsockopt(struct socket *sock, int level, int optname,
@@ -1125,7 +1142,7 @@ void mock_rcu_read_unlock(void)
 /**
  * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
- * @saddr:        IPV4 address to use as the sender of the packet, in
+ * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
  * @h:            Header for the buffer; actual length and contents depend
  *                on the type.
