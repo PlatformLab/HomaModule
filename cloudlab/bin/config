@@ -51,7 +51,7 @@ cpu_info = []
 
 # The total number of physical cores (i.e. distinct values of "core id"
 # in cpuinfo). Filled in by read_cpu_info().
-num_phys_cores = 0;
+num_phys_cores = 0
 
 def get_core_mask():
     """
