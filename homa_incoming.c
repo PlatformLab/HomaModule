@@ -78,7 +78,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	skb_queue_reverse_walk(&rpc->msgin.packets, skb2) {
 		struct data_header *h2 = (struct data_header *) skb2->data;
 		int offset2 = ntohl(h2->seg.offset);
-		int data_bytes2 = skb2->len - sizeof32(struct data_header);
+		int data_bytes2 = ntohl(h2->seg.segment_length);
 		if (offset2 < offset) {
 			floor = offset2 + data_bytes2;
 			break;
@@ -86,18 +86,11 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		ceiling = offset2;
 	}
 
-	/* New packet goes right after skb2 (which may refer to the header).
-	 * Packets shouldn't overlap in byte ranges, but the code below
-	 * assumes they might, so it computes how many non-overlapping bytes
-	 * are contributed by the new packet.
+	/* New packet goes right after skb2. If this packet overlaps either
+	 * of its neighbors, then it is discarded (partial overlaps are
+	 * not permitted).
 	 */
-	if (unlikely(floor < offset)) {
-		floor = offset;
-	}
-	if (ceiling > offset + data_bytes) {
-		ceiling = offset + data_bytes;
-	}
-	if (floor >= ceiling) {
+	if ((offset < floor) || ((offset + data_bytes) > ceiling)) {
 		/* This packet is redundant. */
 //		char buffer[100];
 //		printk(KERN_NOTICE "redundant Homa packet: %s\n",
@@ -116,7 +109,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				"packet, id %d, peer 0x%x");
 	}
 	__skb_insert(skb, skb2, skb2->next, &rpc->msgin.packets);
-	rpc->msgin.bytes_remaining -= (ceiling - floor);
+	rpc->msgin.bytes_remaining -= data_bytes;
 	rpc->msgin.num_skbs++;
 }
 
