@@ -161,7 +161,7 @@ if not options.startEvent:
     outputInfo = []
 
     # Compute the length of the longest event name.
-    nameLength = 0;
+    nameLength = 0
     for event in eventIntervals.keys():
         nameLength = max(nameLength, len(event))
 
@@ -192,7 +192,7 @@ if options.startEvent:
     outputInfo = []
 
     # Compute the length of the longest event name.
-    nameLength = 0;
+    nameLength = 0
     for event in relativeEvents.keys():
         occurrences = relativeEvents[event]
         thisLength = len(event)

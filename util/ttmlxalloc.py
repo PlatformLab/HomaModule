@@ -55,7 +55,7 @@ last_alloc_time = {}
 last_free_time = {}
 
 # Time of previous time trace record that was printed.
-prev_time = 0;
+prev_time = 0
 
 # Each entry in this list is a count of the number of pages allocated/freed
 # in one batch.

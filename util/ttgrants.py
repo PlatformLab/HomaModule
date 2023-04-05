@@ -91,7 +91,7 @@ for line in f:
         time = float(match.group(1))
         id = int(match.group(4))
         offset = int(match.group(5))
-        last_grant[id] = offset;
+        last_grant[id] = offset
         out_grants[id] = []
         # print("%9.3f: unscheduled 'grant' for id %d, offset %d" % (
         #         time, id, offset))
@@ -106,7 +106,7 @@ for line in f:
             # print("%9.3f: grant for id %d, %d:%d" % (time, id,
             #         last_grant[id], offset))
             out_grants[id].append([time, last_grant[id], offset])
-            last_grant[id] = offset;
+            last_grant[id] = offset
 
     # Collect info about incoming data packets
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '

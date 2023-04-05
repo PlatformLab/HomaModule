@@ -48,7 +48,7 @@ for line in f:
                 print("%9.3f Long SoftIRQ delay: %.1f usec (C%02d)" %
                         (time, delay, core))
 
-delays.sort();
+delays.sort()
 print("Minimum delay: %4.1f usec" % (delays[0]))
 print("Median delay:  %4.1f usec" % (delays[len(delays)//2]))
 print("P90 delay:     %4.1f usec" % (delays[len(delays)*9//10]))

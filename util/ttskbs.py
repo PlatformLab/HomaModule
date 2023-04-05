@@ -109,7 +109,7 @@ for line in f:
                         time, id, len(active_skbs)))
 
         if "gro" not in rpc:
-            continue;
+            continue
 
         if "homa_copy_out freeing skb" in msg:
             rpc["copy_start"] = copy_out_start[core]
@@ -135,7 +135,7 @@ for line in f:
         copy_out_start[core] = time
 
 if len(lifetimes) == 0:
-    print("No packets found with complete life cycle");
+    print("No packets found with complete life cycle")
     exit(1)
 
 print("Maximum number of active skbs: %d" % (max_active))

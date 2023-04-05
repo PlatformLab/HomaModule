@@ -44,7 +44,7 @@ def read_rtts(file, column):
     print("Reading %s" % file)
     f = open(file, "r")
     for line in f:
-        stripped = line.strip();
+        stripped = line.strip()
         if stripped[0] == '#':
             continue
         words = stripped.split()
@@ -75,7 +75,7 @@ for i in range(1, len(sys.argv), 2):
         got_data = True
     if not got_data:
         print("Couldn't find any files corresponding to '%s'" % (pattern))
-        continue;
+        continue
 
     info["total_msgs"] = 0.0
     info["total_bytes"] = 0.0
@@ -122,7 +122,7 @@ plt.ylabel("Cum. Frac. Bytes")
 plt.grid(which="major", axis="both")
 
 for w in workloads:
-    print("Plotting workload %s" % (w["name"]));
+    print("Plotting workload %s" % (w["name"]))
     plt.plot(w["x"], w["cum_bytes"], label=w["name"])
 plt.legend()
 

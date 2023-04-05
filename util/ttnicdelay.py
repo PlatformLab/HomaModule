@@ -63,8 +63,8 @@ for line in open(client_trace):
         if (offset != "0") and (gap > 10.0):
             total_xmit_gap += gap
         if last_xmit > 0:
-            client_packets[id + ":" + offset] = [time, gap];
-        last_xmit = time;
+            client_packets[id + ":" + offset] = [time, gap]
+        last_xmit = time
 
 last_recv = 0.0
 total_gap = 0.0

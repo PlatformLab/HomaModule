@@ -89,7 +89,7 @@ def read_metrics(metrics_file, out):
             docs[symbol] = doc
         metrics[core][symbol] = count
     f.close()
-    return metrics;
+    return metrics
 
 def scale_number(number):
     """
@@ -170,9 +170,9 @@ for symbol in symbols:
         rate_info = ""
         if (time_delta != 0):
             rate = float(delta)/elapsed_secs
-            rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+            rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         if ("msg_bytes" in symbol) and (symbol != "sent_msg_bytes"):
-            total_received_bytes += delta;
+            total_received_bytes += delta
         if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
@@ -203,7 +203,7 @@ for symbol in symbols:
     if (symbol == "large_msg_bytes") and (total_received_bytes != 0) \
             and (time_delta != 0):
         rate = float(total_received_bytes)/elapsed_secs
-        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-28s %15d %s%s" % ("received_msg_bytes", total_received_bytes,
                 rate_info, "Total bytes in all incoming messages"))
 if gro_packets != 0:
@@ -214,13 +214,13 @@ if elapsed_secs != 0:
     print("\nPer-Core CPU Usage:")
     print("-------------------")
     totals = []
-    busiest_core = 0;
+    busiest_core = 0
     while len(totals) < num_cores:
-        totals.append(0.0);
+        totals.append(0.0)
     cores_per_line = 8
     for first_core in range(0, num_cores, cores_per_line):
         if first_core != 0:
-            print("");
+            print("")
         end_core = first_core + cores_per_line
         if end_core > num_cores:
             end_core = num_cores
@@ -239,7 +239,7 @@ if elapsed_secs != 0:
                 frac = float(cur[core][symbol] - prev[core][symbol]) / float(
                         time_delta)
                 line += "   %5.2f" % (frac)
-                totals[core] += frac;
+                totals[core] += frac
             print(line)
         line = "Total       "
         for core in range(first_core, end_core):
@@ -319,10 +319,10 @@ if elapsed_secs != 0:
             ["Timer handler", "timer_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
-        total_cores_used += cores;
+        total_cores_used += cores
         print("%s      %6.2f" % (print_name.ljust(22), cores))
 
-    print("----------------------------------");
+    print("----------------------------------")
     print("Total Core Utilization      %6.2f" % (total_cores_used))
 
     cpu_time = float(deltas["grant_cycles"])
@@ -411,7 +411,7 @@ if elapsed_secs != 0:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
-        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13);
+        rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
     for symbol in ["pacer_lost_cycles", "timer_reap_cycles",

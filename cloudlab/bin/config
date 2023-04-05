@@ -75,7 +75,7 @@ def get_interfaces():
     global interface, vlan
     if interface:
         return [interface, vlan]
-    available = "";
+    available = ""
     for line in subprocess.run(["ifconfig"], stdout=subprocess.PIPE,
             encoding="utf-8", check=True).stdout.splitlines():
         match = re.match('^([a-z0-9]*):', line)
@@ -96,9 +96,9 @@ def get_interfaces():
     if not vlan or not interface:
         print("Found the following interfaces: %s" % (available))
     if not vlan:
-        raise Exception("Couldn't identify vlan interface");
+        raise Exception("Couldn't identify vlan interface")
     if not interface:
-        raise Exception("Couldn't identify primary network interface");
+        raise Exception("Couldn't identify primary network interface")
     print("Primary network interface is %s, vlan is %s" % (interface, vlan))
     return [interface, vlan]
 
@@ -190,13 +190,13 @@ def add_ipv6_to_etc_hosts(num_hosts):
     for first in range(num_hosts-1, -1, -1):
         if ("fd00::%d" % (first+1)) in old:
             first += 1
-            break;
+            break
     if first < (num_hosts-1):
         print("Adding IPv6 addresses for nodes %d-%d to /etc/hosts" % (
                 first, num_hosts-1))
         input = ""
         for i in range(first, num_hosts):
-            input += "fd00::%d  node%d\n" % (i+1, i);
+            input += "fd00::%d  node%d\n" % (i+1, i)
         subprocess.run(["sudo", "bash", "-c", "cat >> /etc/hosts"],
                 input=input, encoding="utf-8", check=True)
     else:

@@ -144,7 +144,7 @@ def analyze_rpc(id, client_num, server_num):
     gro_core = -1
     nic_empty_time = 0.0
     max_queue = 0.0
-    server_total = 0;
+    server_total = 0
     total_nic_delay = 0.0
     start = -1.0
     server_interrupt = 0.0
@@ -160,7 +160,7 @@ def analyze_rpc(id, client_num, server_num):
         gap = time - last
 
         if "mlx5e_poll_rx_cq starting" in line:
-            start_irq[core] = time;
+            start_irq[core] = time
 
         if "Freezing" in line:
             server_info += sfmt % ("freeze delay", gap)
@@ -257,7 +257,7 @@ def analyze_rpc(id, client_num, server_num):
         core = int(match.group(2))
 
         if "mlx5e_poll_rx_cq starting" in line:
-            start_irq[core] = time;
+            start_irq[core] = time
 
         if "mlx packet info" in line:
             track_nic_queue(line, time)

@@ -101,7 +101,7 @@ def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
     for pktid in event1:
         if not pktid in event2:
             continue
-        elapsed = event2[pktid] - event1[pktid] - offset;
+        elapsed = event2[pktid] - event1[pktid] - offset
         samples.append({'time': event2[pktid], 'pktid': pktid,
                         'delay': elapsed})
 
@@ -379,8 +379,8 @@ def parse_tt(tt, server):
             data_gro[pktid] = time
             last_gro[core] = time
             if not core in num_gro_packets:
-                num_gro_packets[core] = 0;
-            num_gro_packets[core] += 1;
+                num_gro_packets[core] = 0
+            num_gro_packets[core] += 1
             if not core in data_handoff_ids:
                 data_handoff_ids[core] = []
             data_handoff_ids[core].append(pktid)
@@ -518,10 +518,10 @@ sc_grant_total = sorted(dict_diffs(server['grant_send'], client['grant_softirq']
 
 # Compute minimum RTT and server clock offset
 if len(cs_data_net) == 0:
-    print("No data in cs_data_net");
+    print("No data in cs_data_net")
     exit(1)
 if len(sc_data_net) == 0:
-    print("No data in sc_data_net");
+    print("No data in sc_data_net")
     exit(1)
 rtt = cs_data_net[0] + sc_data_net[0]
 clock_offset = cs_data_net[0] - rtt/2
@@ -662,18 +662,18 @@ if verbose:
 
     print()
     print_samples2(delays_before_napi, 90, "delay before NAPI starts (server)",
-            "%.1f us", num_samples);
+            "%.1f us", num_samples)
     print_samples2(delays_before_napi, 99, "delay before NAPI starts (server)",
-            "%.1f us", num_samples);
+            "%.1f us", num_samples)
     print_samples2(gro_times, 90, "total time for GRO batch (server)",
-            "%.1f us", num_samples);
+            "%.1f us", num_samples)
     print_samples2(gro_times, 99, "total time for GRO batch (server)",
-            "%.1f us", num_samples);
+            "%.1f us", num_samples)
     print_samples2(gro_counts, 90, "packets in a GRO batch (server)",
-            "%d", num_samples);
+            "%d", num_samples)
     print_samples2(gro_counts, 99, "packets in a GRO batch (server)",
-            "%d", num_samples);
+            "%d", num_samples)
     print_samples2(gro_gaps, 90, "gap before SoftIRQ wakeup (server)",
-            "%.1f us", num_samples);
+            "%.1f us", num_samples)
     print_samples2(gro_gaps, 99, "gap before SoftIRQ wakeup (server)",
             "%.1f us", num_samples);
