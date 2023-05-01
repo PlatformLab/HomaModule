@@ -118,7 +118,7 @@ def collect(dict, key):
     for record in dict:
         if key in record:
             result.append(record[key])
-    return result;
+    return result
 
 for line in f:
     match = re.match(' *([0-9.]+) us .* id ([0-9]+)', line)
@@ -327,7 +327,7 @@ if len(times) > 0:
             times[len(times)//2], times[9*len(times)//10],
             max["grant_lag"], max["id"]))
 else:
-    print("No grants sent, so can't show grant delay");
+    print("No grants sent, so can't show grant delay")
 
 times = collect(complete, "xmit_grant_delay")
 if len(times) > 0:
@@ -339,4 +339,4 @@ if len(times) > 0:
             min["xmit_grant_delay"], min["id"], times[len(times)//2],
             times[9*len(times)//10], max["xmit_grant_delay"], max["id"]))
 else:
-    print("No grants received, so can't show xmit grant delay");
+    print("No grants received, so can't show xmit grant delay")

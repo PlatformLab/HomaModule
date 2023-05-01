@@ -31,7 +31,7 @@ import re
 import string
 import sys
 
-rebase = False;
+rebase = False
 
 def scan(f, string):
     """

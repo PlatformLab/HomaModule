@@ -322,7 +322,7 @@ def init(options):
             'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
             'rtt_bytes', 'throttle_min_bytes', 'timeout_resends']:
         result = subprocess.run(['sysctl', '-n', '.net.homa.' + param],
-                capture_output = True, encoding="utf-8");
+                capture_output = True, encoding="utf-8")
         vlog("  %-20s %s" % (param, result.stdout.rstrip()))
 
     if options.mtu != 0:
@@ -368,7 +368,7 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
             log("expected output from node%d not yet received "
             "after command '%s': expecting '%s', got '%s'"
             % (bad_node, cmd, string, outputs[bad_node]))
-            printed = True;
+            printed = True
         time.sleep(0.1)
     raise Exception("bad output from node%d after command '%s': "
             "expected '%s', got '%s'"
@@ -588,7 +588,7 @@ def run_experiment(name, clients, options):
                     options.client_max,
                     options.protocol,
                     id,
-                    options.ipv6);
+                    options.ipv6)
             if "unloaded" in options:
                 command += " --unloaded %d" % (options.unloaded)
         else:
@@ -610,7 +610,7 @@ def run_experiment(name, clients, options):
                     options.client_max,
                     options.protocol,
                     id,
-                    options.ipv6);
+                    options.ipv6)
         active_nodes[id].stdin.write(command + "\n")
         try:
             active_nodes[id].stdin.flush()
@@ -646,7 +646,7 @@ def run_experiment(name, clients, options):
         vlog("Recording final metrics")
         for id in active_nodes:
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
-            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f);
+            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
             f.close()
         shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, first_server),
                 "%s/reports/%s-%d.metrics" % (options.log_dir, name, first_server))
@@ -870,7 +870,7 @@ def read_rtts(file, rtts):
     total = 0
     f = open(file, "r")
     for line in f:
-        stripped = line.strip();
+        stripped = line.strip()
         if stripped[0] == '#':
             continue
         words = stripped.split()
@@ -1057,7 +1057,7 @@ def start_slowdown_plot(title, max_y, x_experiment, size=10,
     labels = []
     y = 1
     while y <= max_y:
-        ticks.append(y);
+        ticks.append(y)
         labels.append("%d" % (y))
         y = y*10
     ax.set_yticks(ticks)
@@ -1165,8 +1165,8 @@ def make_histogram(x, y, init=None, after=True):
     x_new = []
     y_new = []
     if init:
-        x_new.append(init[0]);
-        y_new.append(init[1]);
+        x_new.append(init[0])
+        y_new.append(init[1])
     for i in range(len(x)):
         if i != 0:
             if after:
@@ -1299,7 +1299,7 @@ def get_short_cdf(experiment):
     remaining = total
     f = open("%s/reports/%s_cdf.data" % (log_dir, experiment), "w")
     f.write("# Fraction of RTTS longer than a given time for %s experiment\n"
-            % (experiment));
+            % (experiment))
     f.write("# Includes messages <= %d bytes; measured at %s\n"
             % (longest, date_time))
     f.write("# Data collected at %s \n" % (date_time))
@@ -1315,7 +1315,7 @@ def get_short_cdf(experiment):
         frac = remaining/total
         if (prevy != 0) and (prevx != 0) and (abs((frac - prevy)/prevy) < .01) \
                 and (abs((rtt - prevx)/prevx) < .01):
-            continue;
+            continue
         if len(x) > 0:
             x.append(rtt)
             y.append(prevy)

@@ -40,8 +40,8 @@ init(options)
 if options.num_servers <= 0:
     servers = range(0, options.num_nodes)
     clients = range(0, options.num_nodes)
-    options.num_clients = options.num_nodes;
-    options.num_servers = options.num_nodes;
+    options.num_clients = options.num_nodes
+    options.num_servers = options.num_nodes
     bw_multiplier = 0.5
 else:
     if options.num_servers >= options.num_nodes:
@@ -55,10 +55,10 @@ else:
     options.tcp_server_ports = options.tcp_server_ports * 2
     options.tcp_client_ports = options.tcp_client_ports * 2
     bw_multiplier = min(options.num_servers, options.num_clients) \
-            / options.num_clients;
+            / options.num_clients
 
 if options.workload != "":
-    load_info = [[options.workload, options.gbps]];
+    load_info = [[options.workload, options.gbps]]
 
 # First, run all of the experiments
 if not options.plot_only:
@@ -66,15 +66,15 @@ if not options.plot_only:
     for workload, bw in load_info:
         options.workload = workload
         options.gbps = bw * bw_multiplier
-        unloaded_exp = "unloaded_" + workload;
-        homa_exp = "homa_" + workload;
-        tcp_exp = "tcp_" + workload;
-        dctcp_exp = "dctcp_" + workload;
+        unloaded_exp = "unloaded_" + workload
+        homa_exp = "homa_" + workload
+        tcp_exp = "tcp_" + workload
+        dctcp_exp = "dctcp_" + workload
         try:
             options.protocol = "homa"
             start_servers(range(1, 2), options)
 
-            o = copy.deepcopy(options);
+            o = copy.deepcopy(options)
             o.gbps = 0.0
             o.client_ports = 1
             o.client_max = 1
@@ -113,10 +113,10 @@ if not options.plot_only:
 
 # Generate plots and reports
 for workload, bw in load_info:
-    unloaded_exp = "unloaded_" + workload;
-    homa_exp = "homa_" + workload;
-    tcp_exp = "tcp_" + workload;
-    dctcp_exp = "dctcp_" + workload;
+    unloaded_exp = "unloaded_" + workload
+    homa_exp = "homa_" + workload
+    tcp_exp = "tcp_" + workload
+    dctcp_exp = "dctcp_" + workload
 
     set_unloaded(unloaded_exp)
 

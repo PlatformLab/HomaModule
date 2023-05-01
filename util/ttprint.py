@@ -41,7 +41,7 @@ prev_time = 0
 file_name = "/proc/timetrace"
 if len(sys.argv) > 1:
     file_name = sys.argv[1]
-f = open(file_name);
+f = open(file_name)
 
 # Read initial line containing clock rate.
 line = f.readline()
@@ -52,7 +52,7 @@ match = re.match('cpu_khz: ([0-9.]+)', line)
 if not match:
     print('Initial line doesn\'t contain clock rate:\n%s' % (line))
     exit(1)
-cpu_ghz = float(match.group(1))*1e-06;
+cpu_ghz = float(match.group(1))*1e-06
 
 for line in f:
     match = re.match('([0-9.]+) (.+)', line)
