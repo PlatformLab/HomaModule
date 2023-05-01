@@ -108,7 +108,7 @@ def get_node_num():
     """
 
     global node_num
-    if node_num:
+    if node_num != None:
         return node_num
     hostname = subprocess.run(["hostname"], stdout=subprocess.PIPE,
             encoding="utf-8", check=True).stdout
