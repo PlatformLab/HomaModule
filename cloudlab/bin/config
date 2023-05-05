@@ -91,7 +91,7 @@ def get_interfaces():
             if match:
                 interface = match.group(1)
             continue
-        if re.match('^[ ]+ inet 10\.0\.1\.', line):
+        if re.match('^[ ]+ inet 10\.10\.1\.', line):
             vlan = current
     if not vlan or not interface:
         print("Found the following interfaces: %s" % (available))
