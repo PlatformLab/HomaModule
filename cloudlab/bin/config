@@ -294,8 +294,12 @@ def config_power():
         # C-states are disabled, then so is Turbo mode, and that will hurt
         # peak peformance.
         print("Configuring power settings for Intel CPUs")
-        subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
-                "performance"], check=True)
+        subprocess.run(["sudo", "apt-get", "install", "-y", "cpufrequtils"],
+                check=True)
+        read_cpu_info()
+        for num in range(len(cpu_info)):
+            subprocess.run(["sudo", "cpufreq-set", "-c", "%d" % (num), "-g",
+                    "performance"], check=True)
     elif (type == "c6525-100g") or (type == "c6525-25g"):
         # AMD 7402P (EPYC Rome processor); don't know of any appropriate
         # power setting changes
