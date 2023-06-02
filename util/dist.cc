@@ -22,6 +22,32 @@
 
 #include "dist.h"
 
+/** struct dist_point - Describes one point in a CDF of message lengths. */
+	struct dist_point {
+		/**
+		 * @length: message length, in bytes; must be at least
+		 * sizeof(message_header).
+		 */
+		size_t length;
+
+		/**
+		 * @fraction: fraction of all messages that are this size
+		 * or smaller.
+		 */
+		double fraction;
+
+		dist_point(size_t length, double fraction)
+			: length(length), fraction(fraction)
+		{}
+	};
+
+//Forward declairing these arrays of CDFs (defined at the bottom).
+extern dist_point w1[];
+extern dist_point w2[];
+extern dist_point w3[];
+extern dist_point w4[];
+extern dist_point w5[];
+
 /**
  * dist_lookup() - Returns raw information about a workload.
  * @dist:         Name of the desired workload, such as "w1". Can also
@@ -36,85 +62,40 @@
  *                the array for that workload.  Otherwise the return value
  *                will be NULL.
  */
-dist_point *dist_lookup(const char *dist, int *fixed)
+static dist_point *dist_lookup(const char *workload, int *fixed)
 {
 	char *end;
 	int length;
 
 	/* First check for a fixed-size distribution. */
-	length = strtol(dist, &end, 10);
+	length = strtol(workload, &end, 10);
 	if ((length != 0) && (*end == 0)) {
 		*fixed = length;
-		return NULL;
+		printf("FATAL: invalid workload '%s'\n", workload);
+		abort();
 	}
 	*fixed = 0;
 
-	if (strcmp(dist, "w1") == 0) {
+	if (strcmp(workload, "w1") == 0) {
 		return w1;
-	} else if (strcmp(dist, "w2") == 0) {
+	} else if (strcmp(workload, "w2") == 0) {
 		return w2;
-	} else if (strcmp(dist, "w3") == 0) {
+	} else if (strcmp(workload, "w3") == 0) {
 		return w3;
-	} else if (strcmp(dist, "w4") == 0) {
+	} else if (strcmp(workload, "w4") == 0) {
 		return w4;
-	} else if (strcmp(dist, "w5") == 0) {
+	} else if (strcmp(workload, "w5") == 0) {
 		return w5;
 	}
-	return NULL;
+	//should not reach here
+	printf("FATAL: invalid workload '%s'\n", workload);
+	abort();
 }
 
 /**
- * dist_sample() - Generate a collection of values sampled randomly from a
- * particular workload distribution.
- * @points:       Describes the workload (as returned by dist_get).
- * @rand_gen:     Random number generator to use in generating samples.
- * @num_samples:  How many samples to generate.
- * @sizes:        The generated samples are appended to this vector.
- *
- * Return:        Non-zero means success; zero means dist isn't a valid
- *                workload name.
- */
-void dist_sample(std::vector<dist_point> &points, std::mt19937 *rand_gen,
-		int num_samples, std::vector<int> &sizes)
-{
-	std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
-
-	for (int i = 0; i < num_samples; i++) {
-		double cdf_fraction = uniform_dist(*rand_gen);
-		for (dist_point &p: points) {
-			if (p.fraction > cdf_fraction) {
-				sizes.push_back(p.length);
-				break;
-			}
-		}
-	}
-}
-
-/**
- * dist_mean() - Returns the mean value in a distribution.
- * @points:      Specifies the distribution to use (previous result
- *               from dist_get).
- *
- * Return:  the mean value, or a negative value if dist isn't a valid
- *          workload name.
- */
-double dist_mean(std::vector<dist_point> &points)
-{
-	double mean, prev_fraction;
-
-	mean = 0;
-	prev_fraction = 0.0;
-	for (dist_point &p: points) {
-		mean += static_cast<double>(p.length)
-				* (p.fraction - prev_fraction);
-		prev_fraction = p.fraction;
-	}
-	return mean;
-}
-
-/**
- * dist_get() - Returns a distribution, potentially merging buckets to
- * reduce the total number of points.
+ * dist_point_gen() - Constructor for the dist_point generator class. Sets the
+ * distribution for the object, potentially merging buckets to reduce the
+ * total number of points and calculates and records the mean.
  * @dist:        Name of the desired distribution, using the same syntax
  *               as for dist_sample.
  * @max_length:  Assume that any lengths longer than this value will
@@ -129,45 +110,41 @@ double dist_mean(std::vector<dist_point> &points)
  *               combined into one bucket; smaller buckets will be created
  *               if necessary to ensure that a bucket doesn't have too much
  *               variation in size.
- *
- * Return:       A (possibly condensed) distribution, with points in increasing
- *               order of @length. If the result is empty, it means that @dist
- *               wasn't a valid name.
  */
-std::vector<dist_point> dist_get(const char *dist, int max_length,
-		double min_bucket_frac, double max_size_range)
+dist_point_gen::dist_point_gen(const char* workload, size_t max_length, double min_bucket_frac,
+			double max_size_range)
 {
-	std::vector<dist_point> result;
 	int length, buck_short;
 	dist_point *points, *prev;
 	double last_buck_fraction;
 
-	points = dist_lookup(dist, &length);
+	points = dist_lookup(workload, &length);
 	if (length != 0) {
-		result.emplace_back(length, 1.0);
-		return result;
+		dist_point_ptr[dist_size] = dist_point(length, 1.0);
+		dist_size++;
 	}
-	if (!points)
-		return result;
 
 	last_buck_fraction = 0;
 	buck_short = -1;
 	prev = NULL;
 	for (dist_point *p = points; ; p++) {
 		if (p->length >= max_length) {
-			result.emplace_back(max_length, 1.0);
+			dist_point_ptr[dist_size] = dist_point(max_length, 1.0);
+			dist_size++;
 			last_buck_fraction = 1.0;
 			break;
 		}
 		if (buck_short < 0)
 			buck_short = p->length;
 		if (p->length > max_size_range*buck_short) {
-			result.emplace_back(prev->length, prev->fraction);
+			dist_point_ptr[dist_size] = dist_point(prev->length, prev->fraction);
+			dist_size++;
 			last_buck_fraction = prev->fraction;
 			buck_short = p->length;
 		}
 		if ((p->fraction - last_buck_fraction) >= min_bucket_frac) {
-			result.emplace_back(p->length, p->fraction);
+			dist_point_ptr[dist_size] = dist_point(p->length, p->fraction);
+			dist_size++;
 			last_buck_fraction = p->fraction;
 			buck_short = -1;
 		}
@@ -175,10 +152,56 @@ std::vector<dist_point> dist_get(const char *dist, int max_length,
 		if (p->fraction >= 1.0)
 			break;
 	}
-	if (last_buck_fraction < 1.0)
-		result.emplace_back((prev->length > max_length) ? max_length
-				: prev->length, 1.0);
-	return result;
+	if (last_buck_fraction < 1.0) {
+		dist_point_ptr[dist_size] = dist_point((prev->length > max_length) ?
+			 max_length : prev->length, 1.0);
+		dist_size++;
+	}
+	dist_mean = comp_dist_mean();
+	return;
+}
+
+/**
+ * operator() - Generate a value sampled randomly from a
+ * particular workload distribution.
+ * @dist_point_ptr: Describes the workload (as set by constructor).
+ * @rand_gen:       Random number generator to use in generating samples.
+ *
+ * Return:        The smallest length greater than the generated fraction.
+ */
+int dist_point_gen::operator()(std::mt19937 &rand_gen)
+{
+	std::uniform_real_distribution<double> uniform_dist(0.0, 1.0);
+
+	double cdf_fraction = uniform_dist(rand_gen);
+	for (size_t i = 0; i < dist_size; ++i) {
+		if (dist_point_ptr[i].fraction >= cdf_fraction) {
+			return dist_point_ptr[i].length;
+		}
+	}
+	//we should not get here
+	abort();
+}
+
+/**
+ * comp_dist_mean() - Computes the mean value in a distribution.
+ * @dist_point_ptr: Specifies the distribution to use (result
+ *              	from constructor).
+ *
+ * Return:  The mean value in a distribution.
+ */
+double dist_point_gen::comp_dist_mean()
+{
+	double mean, prev_fraction;
+
+	mean = 0;
+	prev_fraction = 0.0;
+	for (size_t i = 0; i < dist_size; ++i) {
+		mean += static_cast<double>(dist_point_ptr[i].length)
+				* (dist_point_ptr[i].fraction - prev_fraction);
+		prev_fraction = dist_point_ptr[i].fraction;
+	}
+	return mean;
 }
 
 /**
@@ -191,7 +214,7 @@ std::vector<dist_point> dist_get(const char *dist, int max_length,
  *
  * Return:    Total overhead bytes for a message of the given length.
  */
-int dist_msg_overhead(int length, int mtu)
+static int dist_msg_overhead(int length, int mtu)
 {
 	int packet_data, packets, grants, common;
 
@@ -221,25 +244,42 @@ int dist_msg_overhead(int length, int mtu)
  * on the wire (everything that consumes link bandwidth except actual
  * message bytes, including packet headers, preambles, interpacket gaps,
  * etc.) per byte of actual message data.
- * @points:      Describes a workload's message size distribution (return
- *               value from dist_get).
+ * @dist_point_ptr:  Describes a workload's message size distribution (return
+ *               	 value from dist_get).
  * @mtu:         Maximum size of an Ethernet payload.
  */
-double dist_overhead(std::vector<dist_point> &points, int mtu)
+double dist_point_gen::dist_overhead(int mtu) const
 {
 	double overhead, prev_fraction;
 
 	overhead = 0.0;
 	prev_fraction = 0.0;
-	for (dist_point &p: points) {
-		overhead += static_cast<double>(dist_msg_overhead(p.length, mtu))
-				* (p.fraction - prev_fraction)
-				/ static_cast<double>(p.length);
-		prev_fraction = p.fraction;
-		if (p.fraction >= 1.0)
+	for (size_t i = 0; i < dist_size; ++i) {
+		overhead += static_cast<double>(dist_msg_overhead(dist_point_ptr[i].length, mtu))
+				* (dist_point_ptr[i].fraction - prev_fraction)
+				/ static_cast<double>(dist_point_ptr[i].length);
+		prev_fraction = dist_point_ptr[i].fraction;
+		if (dist_point_ptr[i].fraction >= 1.0)
 			break;
 	}
 	return overhead;
+}
+
+/**
+ * sizes() - Returns a vector of int that returns the length of every
+ * dist_point in dist_point_ptr
+ * @dist_point_ptr:  Describes a workload's message size distribution
+ * @mtu:         Maximum size of an Ethernet payload.
+ */
+std::vector<int> dist_point_gen::sizes() const
+{
+	std::vector<int> output;
+	output.reserve(dist_size);
+
+	for (size_t i = 0; i < dist_size; ++i) {
+		output.push_back(dist_point_ptr[i].length);
+	}
+	return output;
 }
 
 /*
