@@ -23,23 +23,23 @@
 #include "dist.h"
 
 /** struct dist_point - Describes one point in a CDF of message lengths. */
-	struct dist_point {
-		/**
-		 * @length: message length, in bytes; must be at least
-		 * sizeof(message_header).
-		 */
-		size_t length;
+struct dist_point {
+	/**
+	 * @length: message length, in bytes; must be at least
+	 * sizeof(message_header).
+	 */
+	size_t length;
 
-		/**
-		 * @fraction: fraction of all messages that are this size
-		 * or smaller.
-		 */
-		double fraction;
+	/**
+	 * @fraction: fraction of all messages that are this size
+	 * or smaller.
+	 */
+	double fraction;
 
-		dist_point(size_t length, double fraction)
-			: length(length), fraction(fraction)
-		{}
-	};
+	dist_point(size_t length, double fraction)
+		: length(length), fraction(fraction)
+	{}
+};
 
 //Forward declairing these arrays of CDFs (defined at the bottom).
 extern dist_point w1[];
@@ -62,33 +62,33 @@ extern dist_point w5[];
  *                the array for that workload.  Otherwise the return value
  *                will be NULL.
  */
-static dist_point *dist_lookup(const char *workload, int *fixed)
+static dist_point *dist_lookup(const char *dist, int *fixed)
 {
 	char *end;
 	int length;
 
 	/* First check for a fixed-size distribution. */
-	length = strtol(workload, &end, 10);
+	length = strtol(dist, &end, 10);
 	if ((length != 0) && (*end == 0)) {
 		*fixed = length;
-		printf("FATAL: invalid workload '%s'\n", workload);
+		printf("FATAL: invalid workload '%s'\n", dist);
 		abort();
 	}
 	*fixed = 0;
 
-	if (strcmp(workload, "w1") == 0) {
+	if (strcmp(dist, "w1") == 0) {
 		return w1;
-	} else if (strcmp(workload, "w2") == 0) {
+	} else if (strcmp(dist, "w2") == 0) {
 		return w2;
-	} else if (strcmp(workload, "w3") == 0) {
+	} else if (strcmp(dist, "w3") == 0) {
 		return w3;
-	} else if (strcmp(workload, "w4") == 0) {
+	} else if (strcmp(dist, "w4") == 0) {
 		return w4;
-	} else if (strcmp(workload, "w5") == 0) {
+	} else if (strcmp(dist, "w5") == 0) {
 		return w5;
 	}
 	//should not reach here
-	printf("FATAL: invalid workload '%s'\n", workload);
+	printf("FATAL: invalid workload '%s'\n", dist);
 	abort();
 }
 
@@ -111,14 +111,14 @@ static dist_point *dist_lookup(const char *workload, int *fixed)
  *               if necessary to ensure that a bucket doesn't have too much
  *               variation in size.
  */
-dist_point_gen::dist_point_gen(const char* workload, size_t max_length, double min_bucket_frac,
+dist_point_gen::dist_point_gen(const char* dist, size_t max_length, double min_bucket_frac,
 			double max_size_range)
 {
 	int length, buck_short;
 	dist_point *points, *prev;
 	double last_buck_fraction;
 
-	points = dist_lookup(workload, &length);
+	points = dist_lookup(dist, &length);
 	if (length != 0) {
 		dist_point_ptr[dist_size] = dist_point(length, 1.0);
 		dist_size++;
@@ -164,7 +164,6 @@ dist_point_gen::dist_point_gen(const char* workload, size_t max_length, double m
 /**
  * operator() - Generate a value sampled randomly from a
  * particular workload distribution.
- * @dist_point_ptr: Describes the workload (as set by constructor).
  * @rand_gen:       Random number generator to use in generating samples.
  *
  * Return:        The smallest length greater than the generated fraction.
@@ -185,8 +184,6 @@ int dist_point_gen::operator()(std::mt19937 &rand_gen)
 
 /**
  * comp_dist_mean() - Computes the mean value in a distribution.
- * @dist_point_ptr: Specifies the distribution to use (result
- *              	from constructor).
  *
  * Return:  The mean value in a distribution.
  */
@@ -268,7 +265,6 @@ double dist_point_gen::dist_overhead(int mtu) const
 /**
  * sizes() - Returns a vector of int that returns the length of every
  * dist_point in dist_point_ptr
- * @dist_point_ptr:  Describes a workload's message size distribution
  * @mtu:         Maximum size of an Ethernet payload.
  */
 std::vector<int> dist_point_gen::sizes() const
