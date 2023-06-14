@@ -88,7 +88,7 @@ int inet_family = AF_INET;
 int server_core = -1;
 
 /** @rand_gen: random number generator. */
-std::mt19937 rand_gen(
+static std::mt19937 rand_gen(
 		std::chrono::system_clock::now().time_since_epoch().count());
 
 /**
@@ -1518,46 +1518,25 @@ public:
 	std::atomic<size_t> receivers_running;
 
 	/**
-	 * @request_servers: a randomly chosen collection of indexes into
-	 * server_addrs; used to select the server for each outgoing request.
+	 * @cycles_per_second: cycles per second calculated while running.
 	 */
-	std::vector<int16_t> request_servers;
+	uint64_t cycles_per_second;
 
 	/**
-	 * @next_server: index into request_servers of the server to use for
-	 * the next outgoing RPC.
+	 * @server_dist: object to obtain a random number between an interval.
 	 */
-	uint32_t next_server;
+	std::uniform_int_distribution<int> server_dist;
+
+    /**
+	 * @interval_dist: random number ditribution producing numbers
+	 * according to exponential distribution .
+	 */
+	std::exponential_distribution<double> interval_dist;
 
 	/**
-	 * @request_lengths: a randomly chosen collection of lengths to
-	 * use for outgoing RPCs. Precomputed to save time during the
-	 * actual measurements, and based on a given distribution.
-	 * Note: lengths are always at least 4 (this is needed in order
-	 * to include a 32-bit timestamp in the request).
+	 * @length_dist: Generator of request sizes
 	 */
-	std::vector<int> request_lengths;
-
-	/**
-	 * @cnext_length: index into request_lengths of the length to use for
-	 * the next outgoing RPC.
-	 */
-	uint32_t next_length;
-
-	/**
-	 * @request_intervals: a randomly chosen collection of inter-request
-	 * intervals, measured in rdtsc cycles. Precomputed to save time
-	 * during the actual measurements, and chosen to achieve a given
-	 * network utilization, assuming a given distribution of request
-	 * lengths.
-	 */
-	std::vector<int> request_intervals;
-
-	/**
-	 * @next_interval: index into request_intervals of the value to use
-	 * for the next outgoing RPC.
-	 */
-	std::atomic<uint32_t> next_interval;
+	dist_point_gen length_dist;
 
 	/**
 	 * @actual_lengths: a circular buffer that holds the actual payload
@@ -1638,19 +1617,13 @@ std::vector<client *> clients;
  */
 client::client(int id)
 	: id(id)
-        , rinfos()
         , last_rinfo(0)
 	, receivers_running(0)
-	, request_servers()
-	, next_server(0)
-	, request_lengths()
-	, next_length(0)
-	, request_intervals()
-	, next_interval(0)
+	, cycles_per_second(get_cycles_per_sec())
+	, server_dist(0, static_cast<int>(num_servers - 1))
+	, length_dist(workload, HOMA_MAX_MESSAGE_LENGTH)
 	, actual_lengths(NUM_CLIENT_STATS, 0)
 	, actual_rtts(NUM_CLIENT_STATS, 0)
-	, requests()
-	, responses()
         , num_servers(server_addrs.size())
 	, total_requests(0)
 	, total_responses(0)
@@ -1660,56 +1633,16 @@ client::client(int id)
         , lag(0)
 {
 	rinfos.resize(2*client_port_max + 5);
-
-	/* Precompute information about the requests this client will
-	 * generate. Pick a different prime number for the size of each
-	 * vector, so that they will wrap at different times, giving
-	 * different combinations of values over time.
-	 */
-#define NUM_SERVERS 4729
-#define NUM_LENGTHS 7207
-#define NUM_INTERVALS 8783
-	std::uniform_int_distribution<int> server_dist(0,
-			static_cast<int>(num_servers - 1));
-	for (int i = 0; i < NUM_SERVERS; i++) {
-		int server = server_dist(rand_gen);
-		request_servers.push_back(server);
-	}
-	std::vector<dist_point> points = dist_get(workload,
-			HOMA_MAX_MESSAGE_LENGTH);
-	if (points.empty()) {
-		printf("FATAL: invalid workload '%s'\n", workload);
-		exit(1);
-	}
-	dist_sample(points, &rand_gen, NUM_LENGTHS, request_lengths);
-	if (net_gbps == 0.0)
-		request_intervals.push_back(0);
-	else {
-		double lambda = 1e09*(net_gbps/8.0)
-				/(dist_mean(points)*client_ports);
-		double cycles_per_second = get_cycles_per_sec();
-		std::exponential_distribution<double> interval_dist(lambda);
-		for (int i = 0; i < NUM_INTERVALS; i++) {
-			double seconds = interval_dist(rand_gen);
-			int cycles = int(seconds*cycles_per_second);
-			request_intervals.push_back(cycles);
-		}
-	}
+	double avg_length = length_dist.get_mean();
+	double rate = 1e09*(net_gbps/8.0)/(avg_length*client_ports);
+	interval_dist = std::exponential_distribution<double>(rate);
 	requests.resize(server_addrs.size());
 	responses = new std::atomic<uint64_t>[num_servers];
 	for (size_t i = 0; i < num_servers; i++)
 		responses[i] = 0;
-	double avg_length = 0;
-	for (size_t i = 0; i < request_lengths.size(); i++)
-		avg_length += request_lengths[i];
-	avg_length /= NUM_LENGTHS;
-	uint64_t interval_sum = 0;
-	for (size_t i = 0; i < request_intervals.size(); i++)
-		interval_sum += request_intervals[i];
-	double rate = ((double) NUM_INTERVALS)/to_seconds(interval_sum);
 	log(NORMAL, "Average message length %.1f KB (expected %.1fKB), "
 			"rate %.2f K/sec, expected BW %.1f Gbps\n",
-			avg_length*1e-3, dist_mean(points)*1e-3, rate*1e-3,
+			avg_length*1e-3, avg_length*1e-3, rate*1e-3,
 			avg_length*rate*8e-9);
 	kfreeze_count = 0;
 }
@@ -2068,12 +2001,8 @@ void homa_client::sender()
 		}
 
 		rinfos[slot].start_time = now;
-		server = request_servers[next_server];
-		next_server++;
-		if (next_server >= request_servers.size())
-			next_server = 0;
-
-		header->length = request_lengths[next_length];
+		server = server_dist(rand_gen);
+		header->length = length_dist(rand_gen);
 		if (header->length > HOMA_MAX_MESSAGE_LENGTH)
 			header->length = HOMA_MAX_MESSAGE_LENGTH;
 		if (header->length < sizeof32(*header))
@@ -2105,15 +2034,8 @@ void homa_client::sender()
 		}
 		requests[server]++;
 		total_requests++;
-		next_length++;
-		if (next_length >= request_lengths.size())
-			next_length = 0;
 		lag = now - next_start;
-		next_start = next_start + request_intervals[next_interval];
-		next_interval++;
-		if (next_interval >= request_intervals.size())
-			next_interval = 0;
-
+		next_start += interval_dist(rand_gen)*cycles_per_second;
 		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
@@ -2186,6 +2108,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	return rdtsc() - start;
 }
 
+
 /**
  * homa_client::measure_unloaded() - Gather baseline measurements of Homa
  * under best-case conditions. This method will fill in the actual_lengths
@@ -2195,9 +2118,9 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
  */
 void homa_client::measure_unloaded(int count)
 {
-	std::vector<dist_point> dist = dist_get(workload,
-			HOMA_MAX_MESSAGE_LENGTH);
-	int server = request_servers[0];
+	dist_point_gen length_dist(workload, HOMA_MAX_MESSAGE_LENGTH);
+	std::vector<int> dist_sizes = length_dist.sizes();
+	int server = 0;
 	int slot;
 	uint64_t ms100 = get_cycles_per_sec()/10;
 	uint64_t end;
@@ -2206,21 +2129,21 @@ void homa_client::measure_unloaded(int count)
 	/* Make one request for each size in the distribution, just to warm
 	 * up the system.
 	 */
-	for (dist_point &point: dist)
-		measure_rtt(server, point.length, sender_buffer, &receiver);
+	for (int length: dist_sizes)
+		measure_rtt(server, length, sender_buffer, &receiver);
 
 	/* Now do the real measurements. Stop with each size after 10
 	 * measurements if more than 0.1 second has elapsed (otherwise
 	 * this takes too long).
 	 */
 	slot = 0;
-	for (dist_point &point: dist) {
+	for (int length: dist_sizes) {
 		end = rdtsc() + ms100;
 		for (int i = 0; i < count; i++) {
 			if ((rdtsc() >= end) && (i >= 10))
 				break;
-			actual_lengths[slot] = point.length;
-			actual_rtts[slot] = measure_rtt(server, point.length,
+			actual_lengths[slot] = length;
+			actual_rtts[slot] = measure_rtt(server, length,
 					sender_buffer, &receiver);
 			slot++;
 			if (slot >= NUM_CLIENT_STATS) {
@@ -2475,12 +2398,8 @@ void tcp_client::sender()
 		}
 
 		rinfos[slot].start_time = now;
-		server = request_servers[next_server];
-		next_server++;
-		if (next_server >= request_servers.size())
-			next_server = 0;
-
-		header.length = request_lengths[next_length];
+		server = server_dist(rand_gen);
+		header.length = length_dist(rand_gen);
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		rinfos[slot].request_length = header.length;
@@ -2510,20 +2429,14 @@ void tcp_client::sender()
 					header.cid.client_port,
 					header.cid.server,
 					header.cid.server_port,
-					request_lengths[next_length]);
+					header.length);
 		requests[server]++;
 		total_requests++;
 		if ((bytes_sent[server] - bytes_rcvd[server]) > 100000)
 			backups++;
 		bytes_sent[server] += header.length;
-		next_length++;
-		if (next_length >= request_lengths.size())
-			next_length = 0;
 		lag = now - next_start;
-		next_start += request_intervals[next_interval];
-		next_interval++;
-		if (next_interval >= request_intervals.size())
-			next_interval = 0;
+		next_start += interval_dist(rand_gen)*cycles_per_second;
 	}
 }
 
@@ -2982,11 +2895,10 @@ int info_cmd(std::vector<string> &words)
 				words[2].c_str());
 		return 0;
 	}
-	std::vector<dist_point> points = dist_get(workload,
-			HOMA_MAX_MESSAGE_LENGTH);
+	dist_point_gen length_dist(workload, HOMA_MAX_MESSAGE_LENGTH);
 	printf("Workload %s: mean %.1f bytes, overhead %.3f\n",
-			workload, dist_mean(points),
-			dist_overhead(points, mtu));
+			workload, length_dist.get_mean(),
+			length_dist.dist_overhead(mtu));
 	return 1;
 }
 
