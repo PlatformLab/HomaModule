@@ -46,11 +46,11 @@ int main (int argc, char**argv)
     std::map<int, float> cdf;
     clock_t start = clock();
 
-    for (size_t i = 0; i < num_points; i++) {
+    for (size_t i = 0; i < 1e06; i++) {
         generator(rand_gen);
     }
     clock_t end = clock();
-    double avg_time_cost = double(end-start)/(CLOCKS_PER_SEC * num_points);
+    double avg_time_cost = double(end-start)/(CLOCKS_PER_SEC * 1e06);
 
 
     for (size_t i = 0; i < num_points; i++) {
