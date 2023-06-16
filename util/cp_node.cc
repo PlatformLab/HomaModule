@@ -1523,13 +1523,12 @@ public:
 	uint64_t cycles_per_second;
 
 	/**
-	 * @server_dist: object to obtain a random number between an interval.
+	 * @server_dist: generator used to select a server index for outgoing RPC.
 	 */
 	std::uniform_int_distribution<int> server_dist;
 
     /**
-	 * @interval_dist: random number ditribution producing numbers
-	 * according to exponential distribution .
+	 * @interval_dist: generator for the time intervals between RPCs.
 	 */
 	std::exponential_distribution<double> interval_dist;
 

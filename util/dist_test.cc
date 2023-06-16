@@ -3,7 +3,7 @@
 #include <chrono>
 #include <algorithm>
 #include <map>
-
+#include <time.h>
 /**
  * define HOMA_MAX_MESSAGE_LENGTH - Maximum bytes of payload in a Homa
  * request or response message.
@@ -29,6 +29,15 @@ int main (int argc, char**argv)
     dist_point_gen generator(argv[1], max_message_length);
     std::map<int, int> hist;
     std::map<int, float> cdf;
+    clock_t start = clock();
+
+    for (size_t i = 0; i < num_points; i++) {
+        generator(rand_gen);
+    }
+    clock_t end = clock();
+    double avg_time_cost = double(end-start)/(CLOCKS_PER_SEC * num_points);
+
+
     for (size_t i = 0; i < num_points; i++) {
         hist[generator(rand_gen)]++;
     }
@@ -60,4 +69,5 @@ int main (int argc, char**argv)
     std::cout << "Range: Min = " << hist.begin()->first << " Max = " <<
     hist.rbegin()->first << "\n";
     std:: cout << "Overhead: " << generator.dist_overhead(1500) << "\n";
+    std:: cout << "Average time for computing random numbers: "<< avg_time_cost * 1e09 << "ns \n";
 }
