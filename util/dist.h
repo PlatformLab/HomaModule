@@ -24,7 +24,8 @@
 #include <vector>
 #include <memory>
 
-/* class dist_point_gen - Returns a single CDF based on the specified workload
+/**
+ * class @dist_point_gen: - Returns a single CDF based on the specified workload
  * and reference to random number generator
  */
 class dist_point_gen {
@@ -56,17 +57,34 @@ class dist_point_gen {
 	};
 
 	private:
-	/*We do not have span so we are using a raw pointer and size_t to describe
-	our distribution.*/
+	/**
+	 * @dist_point_ptr: - points to one of the arrays of CDF points or the
+	 * fixed size member variable (whichever is specified).
+	 */
 	const dist_point* dist_point_ptr = nullptr;
+
+	/**
+	 * @dist_size: - the number of CDF points in the distribution.
+	 */
 	int dist_size = 0;
-	//The maximum size of a message length passed through the constructor
+
+	/**
+	 * @max_message_length: - the maximum size of a message.
+	 */
 	size_t max_message_length = 0;
-	//Computes the mean of the distribution
-	double comp_dist_mean();
+
+	/**
+	 * @dist_mean: - the average length of a distribution.
+	 */
 	double dist_mean = 0;
-	//This dist point is used if a fixed size is established
-	//(initialized to {1, 1.0} for compile)
+
+	/**
+	 * @fixed_dist: - dist_point_ptr points to this variable if a fixed
+	 * distribution is requested (initialized to {1, 1.0} for compile).
+	 */
 	dist_point fixed_dist = {1, 1.0};
+
+	double comp_dist_mean();
+	static int dist_msg_overhead(int length, int mtu);
 };
 #endif /* _DIST_H */

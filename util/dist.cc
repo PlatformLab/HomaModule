@@ -23,7 +23,7 @@
 
 #include "dist.h"
 
-//Forward declairing these arrays of CDFs (defined at the bottom).
+/*Forward declairing these arrays of CDFs (defined at the bottom).*/
 extern dist_point_gen::dist_point w1[];
 extern dist_point_gen::dist_point w2[];
 extern dist_point_gen::dist_point w3[];
@@ -58,9 +58,9 @@ static dist_point_gen::dist_point *dist_lookup(const char *dist)
 }
 
 /**
- * comp_dist_mean() - Computes the mean value in a distribution.
+ * comp_dist_mean() - Computes the mean value of this distribution.
  *
- * Return:  The mean value in a distribution.
+ * Return:  The mean value of this distribution.
  */
 double dist_point_gen::comp_dist_mean()
 {
@@ -79,9 +79,8 @@ double dist_point_gen::comp_dist_mean()
 /**
  * dist_point_gen() - Constructor for the dist_point generator class. Sets the
  * distribution for the object, potentially merging buckets to reduce the
- * total number of points and calculates and records the mean.
- * @dist:        Name of the desired distribution, using the same syntax
- *               as for dist_sample.
+ * total number of points and calculates the mean.
+ * @dist:        Name of the desired distribution
  * @max_length:  Assume that any lengths longer than this value will
  *               be truncated to this. 0 means no truncation.
  * @min_bucket_frac:
@@ -99,14 +98,17 @@ dist_point_gen::dist_point_gen(const char* dist, size_t max_length,
 				double min_bucket_frac, double max_size_range)
 {
 	char *end;
-	max_message_length = max_length;
+	if (max_length != 0) {
+		max_message_length = max_length;
+	} else {
+		max_message_length = std::numeric_limits<int>::max();
+	}
 
 	/* First check for a fixed-size distribution. */
 	int length = strtol(dist, &end, 10);
 	dist_size = 1;
 	if ((length != 0) && (*end == 0)) {
-		size_t num = std::atoi(dist);
-		fixed_dist = dist_point(num, 1.0);
+		fixed_dist = dist_point(length, 1.0);
 		dist_point_ptr = &fixed_dist;
 	} else {
 		dist_point_ptr = dist_lookup(dist);
@@ -115,20 +117,15 @@ dist_point_gen::dist_point_gen(const char* dist, size_t max_length,
 		}
 		dist_size++; //include the last CDF of 1.0
 	}
-	
-	if (dist_point_ptr[dist_size - 1].fraction != 1.0) {
-		printf("FATAL: last CDf not equal to 1 '%s' %20.19f\n", dist,
-		dist_point_ptr[dist_size - 1].fraction);
-		abort();
-	}
+
 	dist_mean = comp_dist_mean();
 	return;
 }
 
 /**
- * operator() - Generate a value sampled randomly from a
- * particular workload distribution.
- * @rand_gen:       Random number generator to use in generating samples.
+ * operator() - Generate a value sampled randomly from a particular workload
+ * distribution.
+ * @rand_gen:     Random number generator to use in generating samples.
  *
  * Return:        The smallest length greater than the generated fraction.
  */
@@ -139,7 +136,6 @@ int dist_point_gen::operator()(std::mt19937 &rand_gen)
 	double cdf_fraction = uniform_dist(rand_gen);
 	for (int i = 0; i < dist_size; ++i) {
 		if (dist_point_ptr[i].fraction >= cdf_fraction) {
-			//if max_message_length == 0 then no truncation was requested
 			if (max_message_length != 0) {
 				return std::min(dist_point_ptr[i].length, max_message_length);
 			} else {
@@ -147,7 +143,7 @@ int dist_point_gen::operator()(std::mt19937 &rand_gen)
 			}
 		}
 	}
-	//we should not get here
+	printf("ERROR: dist_point_gen::operator() failed to return a value\n");	
 	abort();
 }
 
@@ -161,7 +157,7 @@ int dist_point_gen::operator()(std::mt19937 &rand_gen)
  *
  * Return:    Total overhead bytes for a message of the given length.
  */
-static int dist_msg_overhead(int length, int mtu)
+int dist_point_gen::dist_msg_overhead(int length, int mtu)
 {
 	int packet_data, packets, grants, common;
 
@@ -219,8 +215,7 @@ std::vector<int> dist_point_gen::sizes() const
 	std::vector<int> output;
 	output.reserve(dist_size + 1); //accomodate for max_msg_length
 
-	if (max_message_length != 0) {
-		for (int i = 0; i < dist_size; ++i) {
+	for (int i = 0; i < dist_size; ++i) {
 		if(dist_point_ptr[i].length < max_message_length) {
 			output.push_back(dist_point_ptr[i].length);
 		} else {
@@ -228,11 +223,7 @@ std::vector<int> dist_point_gen::sizes() const
 			break;
 		}
 	}
-	} else { //if max_message_length == 0 then no truncation was requested
-		for (int i = 0; i < dist_size; ++i) {
-			output.push_back(dist_point_ptr[i].length);
-		}
-	}
+
 	return output;
 }
 

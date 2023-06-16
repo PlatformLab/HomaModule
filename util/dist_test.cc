@@ -14,7 +14,22 @@
 static std::mt19937 rand_gen(
 		std::chrono::system_clock::now().time_since_epoch().count());
 
-// ./dist_test [workload] [number of points] [max message length]
+/* This file tests the dist.cc/dist.h files and dist_point_gen class. It will
+ * print the CDF for every generated length, a histogram to show how often each
+ * length was generated, the sizes of the given distribution, and finally the
+ * mean, range, and overhead of the distribution requested.
+ * 
+ * Produced by:
+ * ./dist_test [workload] [number of points] [max message length]
+ * 
+ * @workload: - the distribution requested for the test. Can be workload 1-5
+ * or a fixed distribution.
+ * 
+ * @number_of_points: - the number of points that the dist_point_gen will
+ * randomly generate for the test. (Default = 10).
+ * 
+ * @max_message_length: - the maximum size of a message.
+ */
 int main (int argc, char**argv)
 {
     int max_message_length = HOMA_MAX_MESSAGE_LENGTH;
