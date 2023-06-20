@@ -369,7 +369,6 @@ TEST_F(homa_incoming, homa_copy_to_user__no_buffer_pool_available)
 			1000, 4000);
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(12, -homa_copy_to_user(crpc));
-	EXPECT_EQ(0, crpc->msgin.copied_out);
 }
 TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 {
@@ -397,7 +396,6 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_copy_to_user)
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399",
 			unit_log_get());
-	EXPECT_EQ(2048, crpc->msgin.copied_out);
 	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
