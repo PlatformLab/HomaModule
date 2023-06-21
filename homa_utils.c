@@ -823,9 +823,17 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	int used = 0;
-	struct common_header *common = (struct common_header *) skb->data;
-	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+	struct common_header *common;
+	struct in6_addr saddr;
 
+	if (skb == NULL) {
+		snprintf(buffer, buf_len, "skb is NULL!");
+		buffer[buf_len-1] = 0;
+		return buffer;
+	}
+
+	common = (struct common_header *) skb->data;
+	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
 		homa_symbol_for_type(common->type),
