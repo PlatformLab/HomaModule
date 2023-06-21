@@ -195,6 +195,8 @@ void homa_timer(struct homa *homa)
 	struct homa_peer *dead_peer = NULL;
 	int rpc_count = 0;
 	int total_rpcs = 0;
+	int total_incoming_rpcs = 0;
+	int total_incoming_bytes = 0;
 
 	start = get_cycles();
 	homa->timer_ticks++;
@@ -228,6 +230,9 @@ void homa_timer(struct homa *homa)
 				rpc->silent_ticks = 0;
 				homa_rpc_unlock(rpc);
 				continue;
+			} else if (rpc->state == RPC_INCOMING) {
+				total_incoming_rpcs++;
+				total_incoming_bytes += rpc->msgin.total_length;
 			}
 			rpc->silent_ticks++;
 			if (homa_check_rpc(rpc))
@@ -264,5 +269,7 @@ void homa_timer(struct homa *homa)
 
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
-//	tt_record("homa_timer finishing");
+	tt_record2("homa_timer finished scan, incoming_rpcs %d, "
+			"incoming_bytes %d", total_incoming_rpcs,
+			total_incoming_bytes);
 }
