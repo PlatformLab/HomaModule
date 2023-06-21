@@ -20,6 +20,13 @@
 #include "mock.h"
 #include "utils.h"
 
+int get_offset(struct sk_buff *skb)
+{
+	struct data_header *h = ((struct data_header *)
+					skb_transport_header(skb));
+	return ntohl(h->seg.offset);
+}
+
 FIXTURE(homa_outgoing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -729,6 +736,39 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	unit_log_clear();
 	homa_resend_data(crpc, 15500, 16500, 2);
 	EXPECT_SUBSTR("incoming 16000", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_resend_data__advance_next_xmit)
+{
+	char buffer[1000];
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 4500, 1000);
+	unit_log_clear();
+	mock_clear_xmit_prios();
+
+	/* First resend ends just short of a full packet. */
+	homa_resend_data(crpc, 2000, 2799, 2);
+	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
+	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
+	EXPECT_SUBSTR("offset 1400", buffer);
+
+	/* Second resend ends on a packet boundary. */
+	homa_resend_data(crpc, 2000, 4200, 2);
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
+	EXPECT_SUBSTR("offset 4200", buffer);
+
+	/* Third resend ends just before message end. */
+	homa_resend_data(crpc, 2000, 4499, 2);
+	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
+	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
+	EXPECT_SUBSTR("offset 4200", buffer);
+
+	/* Fourth resend covers entire message. */
+	homa_resend_data(crpc, 2000, 4500, 2);
+	EXPECT_EQ(4500, crpc->msgout.next_xmit_offset);
+	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
+	EXPECT_STREQ("skb is NULL!", buffer);
 }
 
 TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)

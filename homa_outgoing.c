@@ -543,7 +543,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			length = ntohl(seg->segment_length);
 
 			if (end <= offset)
-				return;
+				goto resend_done;
 			if ((offset + length) <= start)
 				continue;
 
@@ -580,6 +580,31 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			__homa_xmit_data(new_skb, rpc, priority);
 			INC_METRIC(resent_packets, 1);
 		}
+	}
+
+resend_done:
+	/* Advance next_xmit past any packets that have now been completely
+	 * transmitted (otherwise they'll get sent again, unnecessarily).
+	 */
+	while (true) {
+		struct sk_buff *skb_next;
+		int pkt_end;
+
+		skb = *rpc->msgout.next_xmit;
+		if (skb == NULL)
+			break;
+		skb_next = homa_get_skb_info(skb)->next_skb;
+		if (skb_next != NULL) {
+			struct data_header *h = ((struct data_header *)
+					skb_transport_header(skb_next));
+			pkt_end = ntohl(h->seg.offset);
+		} else {
+			pkt_end = rpc->msgout.length;
+		}
+		if (pkt_end > end)
+			break;
+		rpc->msgout.next_xmit = &(homa_get_skb_info(skb)->next_skb);
+		rpc->msgout.next_xmit_offset = pkt_end;
 	}
 }
 
