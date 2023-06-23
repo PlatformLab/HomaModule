@@ -347,7 +347,9 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
         while len(outputs) <= id:
             outputs.append("")
     start_time = time.time()
-    while time.time() < (start_time + time_limit):
+    while True:
+        if time.time() > (start_time + time_limit):
+          raise Exception("timeout exceeded for command '%s'" % (cmd))
         for id in nodes:
             data = active_nodes[id].stdout.read(1000)
             if data != None:
