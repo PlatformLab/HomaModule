@@ -205,6 +205,21 @@ std::vector<int> dist_point_gen::values() const
 	return output;
 }
 
+/**
+ * CDF_fractions() - Returns a vector containing the cdf fraction of
+ * every point in this distribution.
+ */
+std::vector<double> dist_point_gen::CDF_fractions() const
+{
+	std::vector<double> output;
+	output.reserve(dist_points.size());
+
+	for (const cdf_point &point: dist_points) {
+		output.push_back(point.fraction);
+	}
+	return output;
+}
+
 /*
  * The following arrays store CDFs for Workloads 1-5 from the Homa
  * SIGCOMM paper.

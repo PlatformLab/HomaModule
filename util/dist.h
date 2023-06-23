@@ -35,6 +35,7 @@ class dist_point_gen {
 	double get_mean() const {return dist_mean;}
 	double dist_overhead(int mtu) const;
 	std::vector<int> values() const;
+	std::vector<double> CDF_fractions() const;
 
 	/**
 	 * struct dist_point - Describes one point in a CDF of message lengths.
