@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -23,40 +23,52 @@
 #include <random>
 #include <vector>
 
-/** struct dist_point - Describes one point in a CDF of message lengths. */
-struct dist_point {
-	/**
-	 * @length: message length, in bytes; must be at least
-	 * sizeof(message_header).
-	 */
-	int length;
+/**
+ * class @dist_point_gen: - Represents a CDF of message lengths and generates
+ * randomized lengths according to that CDF.
+ */
+class dist_point_gen {
+	public:
+	dist_point_gen(const char* workload, size_t max_size,
+		double min_bucket_frac = .0025, double max_size_ratio = 1.2);
+	int operator()(std::mt19937 &rand_gen);
+	double get_mean() const {return dist_mean;}
+	double dist_overhead(int mtu) const;
+	std::vector<int> values() const;
 
 	/**
-	 * @fraction: fraction of all messages that are this size
-	 * or smaller.
+	 * struct dist_point - Describes one point in a CDF of message lengths.
 	 */
-	double fraction;
+	struct cdf_point {
+		/** @length: message length, in bytes. */
+		size_t length;
 
-	dist_point(int length, double fraction)
-		: length(length), fraction(fraction)
-	{}
+		/**
+		 * @fraction: fraction of all messages that are this size
+		 * or smaller.
+		 */
+		double fraction;
+
+		cdf_point(size_t length, double fraction)
+			: length(length), fraction(fraction)
+		{}
+	};
+
+	private:
+	/**
+	 * @dist_points: collection of individual data points that
+	 * make up this CDF (in increasing order of length).
+	 */
+	std::vector<cdf_point> dist_points;
+
+	/**
+	 * @dist_mean: the average value of this distribution.
+	 */
+	double dist_mean;
+
+	/** @uniform_dist: used to generate values in the range [0, 1). */
+	std::uniform_real_distribution<double> uniform_dist;
+
+	static int dist_msg_overhead(int length, int mtu);
 };
-
-extern std::vector<dist_point>
-                dist_get(const char *dist, int max_length,
-			double min_bucket_frac = .0025,
-			double max_size_range = 1.2);
-extern double   dist_mean(std::vector<dist_point> &points);
-extern int      dist_msg_overhead(int length, int mtu);
-extern double   dist_overhead(std::vector<dist_point> &points, int mtu);
-extern void     dist_sample(std::vector<dist_point> &points,
-			std::mt19937 *rand_gen, int num_samples,
-			std::vector<int> &sizes);
-
-extern dist_point w1[];
-extern dist_point w2[];
-extern dist_point w3[];
-extern dist_point w4[];
-extern dist_point w5[];
-
 #endif /* _DIST_H */

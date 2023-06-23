@@ -2,7 +2,7 @@
 
 CFLAGS := -Wall -Werror -fno-strict-aliasing -O3 -I..
 
-BINS := buffer_client buffer_server cp_node get_time_trace \
+BINS := buffer_client buffer_server cp_node dist_test get_time_trace \
 	homa_prio homa_test receive_raw scratch send_raw server \
         smi test_time_trace use_memory
 
@@ -21,7 +21,7 @@ all: $(BINS)
 cp_node: cp_node.o dist.o time_trace.o $(LIB_OBJS)
 	g++ $(CFLAGS) $^ -lpthread -o $@
 
-$(OBJS): $(HDRS)
+$(OBJS) $(LIB_OBJS): $(HDRS)
 
 homa_receiver.o: ../homa_receiver.cc ../homa_receiver.h
 	g++ -c $(CFLAGS) -std=c++17 $< -o $@
