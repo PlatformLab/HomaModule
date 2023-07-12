@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -160,8 +160,9 @@ double get_cycles_per_sec()
 int get_int(const char *s, const char *msg)
 {
 	int value;
-	value = strtol(s, NULL, 10);
-	if (value == 0) {
+	char *end;
+	value = strtol(s, &end, 10);
+	if (end == s) {
 		printf(msg, s);
 		exit(1);
 	}
