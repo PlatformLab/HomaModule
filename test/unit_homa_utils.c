@@ -332,14 +332,14 @@ TEST_F(homa_utils, homa_rpc_free__basics)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
-	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_peers));
+	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_rpcs));
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_free(crpc);
 	EXPECT_STREQ("homa_remove_from_grantable invoked",
 			unit_log_get());
-	EXPECT_EQ(0, unit_list_length(&self->homa.grantable_peers));
+	EXPECT_EQ(0, unit_list_length(&self->homa.grantable_rpcs));
 	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc->id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));

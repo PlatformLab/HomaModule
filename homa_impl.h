@@ -888,8 +888,8 @@ struct homa_rpc {
 	struct homa_interest *interest;
 
 	/**
-	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
-	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
+	 * @grantable_links: Used to link this RPC into homa->grantable_rpcs.
+	 * If this RPC isn't in homa->grantable_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
@@ -1445,9 +1445,9 @@ struct homa_peer {
 	struct list_head grantable_rpcs;
 
 	/**
-	 * @grantable_links: Used to link this peer into homa->grantable_peers,
-	 * if there are entries in grantable_rpcs. If grantable_rpcs is empty,
-	 * this is an empty list pointing to itself.
+	 * @grantable_links: Used to link this peer into homa->grantable_rpcs.
+	 * If this RPC is not linked into homa->grantable_rpcs, this is an
+	 * empty list pointing to itself.
 	 */
 	struct list_head grantable_links;
 
@@ -1552,21 +1552,20 @@ struct homa {
 	atomic64_t link_idle_time __attribute__((aligned(CACHE_LINE_SIZE)));
 
 	/**
-	 * @grantable_lock: Used to synchronize access to @grantable_peers and
-	 * @num_grantable_peers.
+	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
+	 * @num_grantable_rpcs.
 	 */
 	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
 
 	/**
-	 * @grantable_peers: Contains all homa_peers for which there are
-	 * RPCs that have not been fully granted. The list is sorted in
-	 * priority order (the rpc with the fewest bytes_remaining is the
-	 * first one on the first peer's list).
+	 * @grantable_rpcs: Contains all RPCs that have not been fully
+	 * granted. The list is sorted in priority order (fewer ungranted
+	 * bytes -> higher priority).
 	 */
-	struct list_head grantable_peers;
+	struct list_head grantable_rpcs;
 
-	/** @num_grantable_peers: The number of peers in grantable_peers. */
-	int num_grantable_peers;
+	/** @num_grantable_rpcs: The number of RPCs in grantable_rpcs. */
+	int num_grantable_rpcs;
 
 	/**
 	 * @grant_nonfifo: How many bytes should be granted using the

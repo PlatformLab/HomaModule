@@ -74,8 +74,8 @@ int homa_init(struct homa *homa)
 	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
-	INIT_LIST_HEAD(&homa->grantable_peers);
-	homa->num_grantable_peers = 0;
+	INIT_LIST_HEAD(&homa->grantable_rpcs);
+	homa->num_grantable_rpcs = 0;
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
 	spin_lock_init(&homa->pacer_mutex);

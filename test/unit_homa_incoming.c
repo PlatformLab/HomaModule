@@ -1420,7 +1420,7 @@ TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
 	EXPECT_STREQ("request from 196.168.0.1, id 1235, remaining 10000",
 			unit_log_get());
 }
-TEST_F(homa_incoming, homa_check_grantable__insert_in_peer_list)
+TEST_F(homa_incoming, homa_check_grantable__insert_in_grantable_rpcs)
 {
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 100000, 100);
@@ -1437,9 +1437,9 @@ TEST_F(homa_incoming, homa_check_grantable__insert_in_peer_list)
 			"request from 196.168.0.1, id 1, remaining 98600; "
 			"request from 196.168.0.1, id 5, remaining 118600",
 			unit_log_get());
-	EXPECT_EQ(1, self->homa.num_grantable_peers);
+	EXPECT_EQ(4, self->homa.num_grantable_rpcs);
 }
-TEST_F(homa_incoming, homa_check_grantable__adjust_order_in_peer_list)
+TEST_F(homa_incoming, homa_check_grantable__adjust_order_in_grantable_rpcs)
 {
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
@@ -1495,7 +1495,7 @@ TEST_F(homa_incoming, homa_check_grantable__adjust_order_in_peer_list)
 			"request from 196.168.0.1, id 3, remaining 28600",
 			unit_log_get());
 }
-TEST_F(homa_incoming, homa_check_grantable__age_tiebreaker_in_peer_list)
+TEST_F(homa_incoming, homa_check_grantable__age_tiebreaker_in_grantable_rpcs)
 {
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
@@ -1526,150 +1526,6 @@ TEST_F(homa_incoming, homa_check_grantable__age_tiebreaker_in_peer_list)
 			"request from 196.168.0.1, id 3, remaining 28600; "
 			"request from 196.168.0.1, id 7, remaining 28600; "
 			"request from 196.168.0.1, id 5, remaining 28600",
-			unit_log_get());
-}
-TEST_F(homa_incoming, homa_check_grantable__insert_in_homa_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 100000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 3, 50000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
-			self->server_ip, self->client_port, 5, 120000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+3,
-			self->server_ip, self->client_port, 7, 70000, 100);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 197.168.0.1, id 3, remaining 48600; "
-			"request from 199.168.0.1, id 7, remaining 68600; "
-			"request from 196.168.0.1, id 1, remaining 98600; "
-			"request from 198.168.0.1, id 5, remaining 118600",
-			unit_log_get());
-	EXPECT_EQ(4, self->homa.num_grantable_peers);
-}
-TEST_F(homa_incoming, homa_check_grantable__age_tiebreaker_inserting_in_homa_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+1, self->server_ip, self->client_port,
-			3, 30000, 100);
-	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+2, self->server_ip, self->client_port,
-			5, 30000, 100);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 28600",
-			unit_log_get());
-
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip+1,
-			self->server_port, self->client_id, 1400, 30000);
-	srpc2->msgin.birth = 1000;
-	srpc3->msgin.birth = 2000;
-	mock_cycles = 1500;
-	self->data.message_length = htonl(30000);
-	homa_data_pkt(mock_skb_new(self->server_ip+1, &self->data.common,
-			1400, 0), crpc, NULL, &self->incoming_delta);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"response from 2.2.3.4, id 1234, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 28600",
-			unit_log_get());
-	EXPECT_EQ(4, self->homa.num_grantable_peers);
-}
-TEST_F(homa_incoming, homa_check_grantable__move_upward_in_homa_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 3, 30000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
-			self->server_ip, self->client_port, 5, 40000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+3,
-			self->server_ip, self->client_port, 7, 50000, 100);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 38600; "
-			"request from 199.168.0.1, id 7, remaining 48600",
-			unit_log_get());
-
-	struct homa_rpc *srpc = homa_find_server_rpc(&self->hsk,
-			self->client_ip+2, self->client_port, 5);
-	ASSERT_NE(NULL, srpc);
-	homa_rpc_unlock(srpc);
-	srpc->msgin.bytes_remaining = 28600;
-	homa_check_grantable(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 28600; "
-			"request from 199.168.0.1, id 7, remaining 48600",
-			unit_log_get());
-
-	srpc->msgin.bytes_remaining = 28599;
-	homa_check_grantable(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 198.168.0.1, id 5, remaining 28599; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 199.168.0.1, id 7, remaining 48600",
-			unit_log_get());
-
-	srpc = homa_find_server_rpc(&self->hsk, self->client_ip+3,
-			self->client_port, 7);
-	ASSERT_NE(NULL, srpc);
-	homa_rpc_unlock(srpc);;
-	srpc->msgin.bytes_remaining = 1000;
-	homa_check_grantable(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 199.168.0.1, id 7, remaining 1000; "
-			"request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 198.168.0.1, id 5, remaining 28599; "
-			"request from 197.168.0.1, id 3, remaining 28600",
-			unit_log_get());
-}
-TEST_F(homa_incoming, homa_check_grantable__age_tiebreaker_moving_upward_in_homa_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+1, self->server_ip, self->client_port,
-			3, 30000, 100);
-	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+2, self->server_ip, self->client_port,
-			5, 30000, 100);
-	struct homa_rpc *srpc4 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+3, self->server_ip, self->client_port,
-			7, 50000, 100);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 28600; "
-			"request from 199.168.0.1, id 7, remaining 48600",
-			unit_log_get());
-
-	srpc2->msgin.birth = 1000;
-	srpc3->msgin.birth = 2000;
-	srpc4->msgin.birth = 1500;
-	srpc4->msgin.bytes_remaining = 28600;
-	homa_check_grantable(&self->homa, srpc4);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600; "
-			"request from 199.168.0.1, id 7, remaining 28600; "
-			"request from 198.168.0.1, id 5, remaining 28600",
 			unit_log_get());
 }
 
@@ -1740,29 +1596,6 @@ TEST_F(homa_incoming, homa_send_grants__enlarge_window)
 	EXPECT_EQ(16400, srpc2->msgin.incoming);
 	EXPECT_EQ(30000, atomic_read(&self->homa.total_incoming));
 }
-TEST_F(homa_incoming, homa_send_grants__one_grant_per_peer)
-{
-	struct homa_rpc *srpc1, *srpc2, *srpc3, *srpc4;
-	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 3, 30000, 100);
-	srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 5, 40000, 100);
-	srpc4 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 7, 50000, 100);
-	srpc1->msgin.incoming = 1400;
-	srpc2->msgin.incoming = 1400;
-	srpc3->msgin.incoming = 1400;
-	srpc4->msgin.incoming = 1400;
-	atomic_set(&self->homa.total_incoming, 0);
-	self->homa.max_incoming = 25000;
-	homa_send_grants(&self->homa);
-	EXPECT_EQ(11400, srpc1->msgin.incoming);
-	EXPECT_EQ(1400, srpc2->msgin.incoming);
-	EXPECT_EQ(1400, srpc3->msgin.incoming);
-	EXPECT_EQ(11400, srpc4->msgin.incoming);
-}
 TEST_F(homa_incoming, homa_send_grants__truncate_grant_to_message_length)
 {
 	struct homa_rpc *srpc;
@@ -1818,23 +1651,19 @@ TEST_F(homa_incoming, homa_send_grants__share_lowest_priority_level)
 }
 TEST_F(homa_incoming, homa_send_grants__remove_from_grantable)
 {
-	struct homa_rpc *srpc1, *srpc2, *srpc3;
+	struct homa_rpc *srpc1, *srpc2;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 11000, 100);
 	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
 			self->server_ip, self->client_port, 3, 30000, 100);
-	srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 5, 20000, 100);
 	atomic_set(&self->homa.total_incoming, 0);
 	self->homa.max_incoming = 3000;
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 9600; "
-			"request from 196.168.0.1, id 5, remaining 18600; "
 			"request from 197.168.0.1, id 3, remaining 28600",
 			unit_log_get());
 
-	/* First attempt grants to one message per host. */
 	unit_log_clear();
 	homa_send_grants(&self->homa);
 	EXPECT_STREQ("xmit GRANT 11000@1; xmit GRANT 11400@0", unit_log_get());
@@ -1842,15 +1671,9 @@ TEST_F(homa_incoming, homa_send_grants__remove_from_grantable)
 	EXPECT_EQ(11400, srpc2->msgin.incoming);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 5, remaining 18600; "
-			"request from 197.168.0.1, id 3, remaining 28600",
+	EXPECT_STREQ("request from 197.168.0.1, id 3, remaining 28600",
 			unit_log_get());
-
-	/* Second attempt will now get second message from host. */
-	unit_log_clear();
-	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 10600@1", unit_log_get());
-	EXPECT_EQ(10600, srpc3->msgin.incoming);
+	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
 }
 TEST_F(homa_incoming, homa_send_grants__MAX_GRANTS_exceeded)
 {
@@ -1879,7 +1702,7 @@ TEST_F(homa_incoming, homa_send_grants__grant_fifo)
 	self->homa.grant_fifo_fraction = 100;
 	self->homa.grant_nonfifo_left = 6000;
 	self->homa.grant_nonfifo = 10000;
-	self->homa.max_overcommit = 1;
+	mock_max_grants = 1;
 	self->homa.max_incoming = 10000;
 	mock_cycles = ~0;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -1932,7 +1755,7 @@ TEST_F(homa_incoming, homa_send_grants__dont_grant_fifo_no_inactive_rpcs)
 	self->homa.grant_fifo_fraction = 100;
 	self->homa.grant_nonfifo_left = 1000;
 	self->homa.grant_nonfifo = 10000;
-	self->homa.max_overcommit = 2;
+	mock_max_grants = 2;
 	self->homa.max_incoming = 10000;
 	mock_cycles = ~0;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -2054,7 +1877,7 @@ TEST_F(homa_incoming, homa_grant_fifo__remove_from_grantable)
 	EXPECT_STREQ("", unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_remove_grantable_locked__basics)
+TEST_F(homa_incoming, homa_remove_grantable_locked)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
@@ -2065,86 +1888,12 @@ TEST_F(homa_incoming, homa_remove_grantable_locked__basics)
 	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600",
 			unit_log_get());
 
-	/* First time: on the list. */
 	homa_remove_grantable_locked(&self->homa, srpc);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, self->homa.num_grantable_peers);
-
-	/* Second time: not on the list. */
-	homa_remove_grantable_locked(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, self->homa.num_grantable_peers);
+	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 };
-TEST_F(homa_incoming, homa_remove_grantable_locked__not_head_of_peer_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			3, 50000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 5, 30000, 100);
-	ASSERT_NE(NULL, srpc);
-	homa_remove_grantable_locked(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 197.168.0.1, id 5, remaining 28600",
-			unit_log_get());
-	EXPECT_EQ(2, self->homa.num_grantable_peers);
-}
-TEST_F(homa_incoming, homa_remove_grantable_locked__remove_peer_from_homa_list)
-{
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 1, 20000, 100);
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip+1, self->server_ip, self->client_port,
-			3, 30000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
-			self->server_ip, self->client_port, 5, 40000, 100);
-	ASSERT_NE(NULL, srpc);
-	homa_remove_grantable_locked(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 198.168.0.1, id 5, remaining 38600",
-			unit_log_get());
-	EXPECT_EQ(2, self->homa.num_grantable_peers);
-}
-TEST_F(homa_incoming, homa_remove_grantable_locked__peer_moves_down)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			1, 20000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->client_port, 3, 40000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
-			self->server_ip, self->client_port, 5, 30000, 100);
-	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
-			self->server_ip, self->client_port, 7, 40000, 100);
-	ASSERT_NE(NULL, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1, remaining 18600; "
-			"request from 196.168.0.1, id 3, remaining 38600; "
-			"request from 197.168.0.1, id 5, remaining 28600; "
-			"request from 198.168.0.1, id 7, remaining 38600",
-			unit_log_get());
-	EXPECT_EQ(3, self->homa.num_grantable_peers);
-
-	homa_remove_grantable_locked(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 197.168.0.1, id 5, remaining 28600; "
-			"request from 198.168.0.1, id 7, remaining 38600; "
-			"request from 196.168.0.1, id 3, remaining 38600",
-			unit_log_get());
-	EXPECT_EQ(3, self->homa.num_grantable_peers);
-}
 
 TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 {
@@ -2176,7 +1925,7 @@ TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 }
 TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 {
-	self->homa.max_overcommit = 1;
+	mock_max_grants = 1;
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
