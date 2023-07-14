@@ -1420,6 +1420,22 @@ TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
 	EXPECT_STREQ("request from 196.168.0.1, id 1235, remaining 10000",
 			unit_log_get());
 }
+TEST_F(homa_incoming, homa_check_grantable__update_statistics)
+{
+	mock_cycles = 1000;
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 1, 100000, 100);
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 3, 50000, 100);
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 5, 120000, 100);
+	mock_cycles = 5000;
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 7, 70000, 100);
+	EXPECT_EQ(12000, homa_cores[cpu_number]->metrics.grantable_rpcs_integral);
+	EXPECT_EQ(4, self->homa.max_grantable_rpcs);
+	EXPECT_EQ(5000, self->homa.last_grantable_change);
+}
 TEST_F(homa_incoming, homa_check_grantable__insert_in_grantable_rpcs)
 {
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -1894,6 +1910,23 @@ TEST_F(homa_incoming, homa_remove_grantable_locked)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 };
+TEST_F(homa_incoming, homa_remove_grantable_locked__update_statistics)
+{
+	mock_cycles = 1000;
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port, 1,
+			100000, 100);
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 3, 50000, 100);
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 5, 120000, 100);
+	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 7, 70000, 100);
+	mock_cycles = 2500;
+	homa_remove_from_grantable(&self->homa, srpc);
+	EXPECT_EQ(6000, homa_cores[cpu_number]->metrics.grantable_rpcs_integral);
+	EXPECT_EQ(2500, self->homa.last_grantable_change);
+}
 
 TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 {

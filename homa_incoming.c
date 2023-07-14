@@ -852,7 +852,15 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 	 */
 	if (list_empty(&rpc->grantable_links)) {
 		/* Message not yet tracked; add it in priority order. */
+		__u64 time = get_cycles();
+		INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
+				* (time - homa->last_grantable_change));
+		homa->last_grantable_change = time;
 		homa->num_grantable_rpcs++;
+		tt_record1("incremented num_grantable_rpcs to %d",
+				homa->num_grantable_rpcs);
+		if (homa->num_grantable_rpcs > homa->max_grantable_rpcs)
+			homa->max_grantable_rpcs = homa->num_grantable_rpcs;
 		rpc->msgin.birth = get_cycles();
 		list_for_each_entry(candidate, &homa->grantable_rpcs,
 				grantable_links) {
@@ -1145,8 +1153,14 @@ int homa_grant_fifo(struct homa *homa)
  */
 void homa_remove_grantable_locked(struct homa *homa, struct homa_rpc *rpc)
 {
+	__u64 time = get_cycles();
+	INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
+			* (time - homa->last_grantable_change));
+	homa->last_grantable_change = time;
 	list_del_init(&rpc->grantable_links);
 	homa->num_grantable_rpcs--;
+	tt_record1("decremented num_grantable_rpcs to %d",
+			homa->num_grantable_rpcs);
 }
 
 /**

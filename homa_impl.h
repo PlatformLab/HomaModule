@@ -1567,6 +1567,19 @@ struct homa {
 	/** @num_grantable_rpcs: The number of RPCs in grantable_rpcs. */
 	int num_grantable_rpcs;
 
+	/** @last_grantable_change: The get_cycles time of the most recent
+	 * increment or decrement of num_grantable_rpcs; used for computing
+	 * statistics.
+	 */
+	__u64 last_grantable_change;
+
+	/**
+	 * @max_grantable_rpcs: The largest value that has been seen for
+	 * num_grantable_rpcs since this value was reset to 0 (it can be
+	 * reset externally using sysctl).
+	 */
+	int max_grantable_rpcs;
+
 	/**
 	 * @grant_nonfifo: How many bytes should be granted using the
 	 * normal priority system between grants to the oldest message.
@@ -2497,6 +2510,13 @@ struct homa_metrics {
 	 * calls to homa_add_to_throttled.
 	 */
 	__u64 throttle_list_checks;
+
+	/**
+	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,
+	 * where time_delta is a get_cycles time and grantable is the
+	 * value of homa->num_grantable_rpcs over that time period.
+	 */
+	__u64 grantable_rpcs_integral;
 
 	/**
 	 * @fifo_grants: total number of times that grants were sent to

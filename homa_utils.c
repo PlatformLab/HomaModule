@@ -76,6 +76,8 @@ int homa_init(struct homa *homa)
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable_rpcs = 0;
+	homa->last_grantable_change = get_cycles();
+	homa->max_grantable_rpcs = 0;
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
 	spin_lock_init(&homa->pacer_mutex);
@@ -1555,6 +1557,10 @@ char *homa_print_metrics(struct homa *homa)
 				"List elements checked in "
 				"homa_add_to_throttled\n",
 				m->throttle_list_checks);
+		homa_append_metric(homa,
+				"grantable_rpcs_integral   %15llu  "
+				"Integral of homa->num_grantable_rpcs*dt\n",
+				m->grantable_rpcs_integral);
 		homa_append_metric(homa,
 				"fifo_grants               %15llu  "
 				"Grants issued using FIFO priority\n",

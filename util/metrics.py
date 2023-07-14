@@ -209,6 +209,11 @@ for symbol in symbols:
 if gro_packets != 0:
     print("%-28s          %6.2f %sHoma packets per homa_softirq call" % (
           "gro_benefit", float(total_packets)/float(gro_packets), pad))
+avg_grantable_rpcs = 0.0
+if ("grantable_rpcs_integral" in deltas) and (time_delta != 0):
+    avg_grantable_rpcs = float(deltas["grantable_rpcs_integral"])/time_delta
+    print("%-28s          %6.2f %sAverage number of grantable incoming RPCs" % (
+          "avg_grantable_rpcs", avg_grantable_rpcs, pad))
 
 if elapsed_secs != 0:
     print("\nPer-Core CPU Usage:")
@@ -433,3 +438,6 @@ if elapsed_secs != 0:
                 % ("acks_per_rpc", 1000.0 * deltas["packets_sent_ACK"]
                 / deltas["responses_received"]))
 
+    if avg_grantable_rpcs > 1.0:
+        print("%-28s          %6.2f %sAverage number of grantable incoming RPCs" % (
+              "avg_grantable_rpcs", avg_grantable_rpcs, pad))
