@@ -269,7 +269,4 @@ void homa_timer(struct homa *homa)
 
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
-	tt_record2("homa_timer finished scan, incoming_rpcs %d, "
-			"incoming_bytes %d", total_incoming_rpcs,
-			total_incoming_bytes);
 }
