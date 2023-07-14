@@ -868,6 +868,9 @@ void schedule(void)
 
 void security_sk_classify_flow(struct sock *sk, struct flowi_common *flic) {}
 
+void __show_free_areas(unsigned int filter, nodemask_t *nodemask,
+		int max_zone_idx) {}
+
 void sk_common_release(struct sock *sk) {}
 
 int sk_set_peek_off(struct sock *sk, int val)
@@ -1042,8 +1045,11 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
 	return 0;
 }
 
-void __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
-		int nr_exclusive, void *key) {}
+int __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
+		int nr_exclusive, void *key)
+{
+	return 0;
+}
 
 int wake_up_process(struct task_struct *tsk)
 {

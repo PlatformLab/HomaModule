@@ -25,14 +25,15 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- The head is known to work under Linux 5.17.5 and 5.18. In the past
-  it has run under 5.4.3 and 4.15.18; you can access these versions with branches
-  named linux_5.4.3 and linux_4.15.18. These older branches are out of date
-  feature-wise: recent commits have not been back-ported to them.
+- The head is known to work under Linux 6.1.138. In the past, Homa has
+  run under several earlier versions of Linux, including 5.17.7,
+  5.4.80, and 4.15.18. There is a separate branch for each of these
+  older versions, with a names such as linux_4.15.18. Older branches are
+  out of date feature-wise: recent commits have not been back-ported to them.
   Other versions of Linux have not been tested and
-  may require code changes (the upgrade from 4.15.18 to 5.4.3 took only about
-  a day). If you get Homa working on some other version, please submit a
-  pull request for the required code changes.
+  may require code changes (these upgrades rarely take more than a couple
+  of hours). If you get Homa working on some other version, please submit a
+  pull request with the required code changes.
 
 - There now exists support for using Homa with gRPC: see the
   [GitHub repo](https://github.com/PlatformLab/grpc_homa).

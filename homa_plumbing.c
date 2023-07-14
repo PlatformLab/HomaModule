@@ -129,7 +129,7 @@ struct proto homa_prot = {
 	.unhash		   = homa_unhash,
 	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
-	.memory_allocated  = &homa_memory_allocated,
+//	.memory_allocated  = &homa_memory_allocated,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
@@ -158,7 +158,7 @@ struct proto homav6_prot = {
 	.unhash		   = homa_unhash,
 	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
-	.memory_allocated  = &homa_memory_allocated,
+//	.memory_allocated  = &homa_memory_allocated,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
@@ -965,14 +965,13 @@ error:
  * @sk:          Socket on which the system call was invoked.
  * @msg:         Controlling information for the receive.
  * @len:         Total bytes of space available in msg->msg_iov; not used.
- * @nonblocking: Non-zero means MSG_DONTWAIT was specified.
  * @flags:       Flags from system call, not including MSG_DONTWAIT; ignored.
  * @addr_len:    Store the length of the sender address here
  * Return:       The length of the message on success, otherwise a negative
  *               errno.
  */
-int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		 int nonblocking, int flags, int *addr_len)
+int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
+		 int *addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
@@ -1014,9 +1013,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 			control.bpage_offsets);
 	control.num_bpages = 0;
 
-	rpc = homa_wait_for_message(hsk, nonblocking
-			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
-			: control.flags, control.id);
+	rpc = homa_wait_for_message(hsk, control.flags, control.id);
 	if (IS_ERR(rpc)) {
 		/* If we get here, it means there was an error that prevented
 		 * us from finding an RPC to return. If there's an error in

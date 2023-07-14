@@ -423,13 +423,13 @@ TEST_F(homa_plumbing, homa_recvmsg__wrong_args_length)
 {
 	self->recvmsg_hdr.msg_controllen -= 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__cant_read_args)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 {
@@ -438,26 +438,26 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 	self->recvmsg_args._pad[0] = 1;
 	self->recvmsg_args.completion_cookie = 12345;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
 }
 TEST_F(homa_plumbing, homa_recvmsg__pad_not_zero)
 {
 	self->recvmsg_args._pad[0] = 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 {
 	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__bogus_flags)
 {
 	self->recvmsg_args.flags = 1 << 10;
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 {
@@ -472,21 +472,15 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool.descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool.descriptors[1].refs));
-}
-TEST_F(homa_plumbing, homa_recvmsg__nonblocking_argument)
-{
-	self->recvmsg_args.flags = HOMA_RECVMSG_REQUEST;
-	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 1, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_in_homa_wait_for_message)
 {
 	self->hsk.shutdown = true;
 	EXPECT_EQ(ESHUTDOWN, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, 0, 0,
+			&self->recvmsg_hdr, 0, 0,
 			&self->recvmsg_hdr.msg_namelen));
 	self->hsk.shutdown = false;
 }
@@ -509,7 +503,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
@@ -542,7 +536,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
 	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
@@ -565,7 +559,7 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 	homa_rpc_abort(crpc, -ETIMEDOUT);
 
 	EXPECT_EQ(ETIMEDOUT, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, 0, 0,
+			&self->recvmsg_hdr, 0, 0,
 			&self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
@@ -584,7 +578,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	crpc->completion_cookie = 44444;
 
 	EXPECT_EQ(2000, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(1, crpc->peer->num_acks);
 }
 TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
@@ -597,7 +591,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 	EXPECT_NE(NULL, srpc);
 
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 	EXPECT_EQ(0, srpc->peer->num_acks);
@@ -614,7 +608,7 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 	srpc->error = -ENOMEM;
 
 	EXPECT_EQ(ENOMEM, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -631,7 +625,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 	mock_copy_to_user_errors = 1;
 
 	EXPECT_EQ(EFAULT, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.id);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -648,7 +642,7 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 
