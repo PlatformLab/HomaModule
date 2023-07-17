@@ -960,35 +960,7 @@ void homa_send_grants(struct homa *homa)
 		return;
 	}
 
-	/* Compute the window (how much granted-but-not-received data there
-	 * can be for each message. This will always be at least rtt_bytes,
-	 * but if there aren't enough messages to consume all of
-	 * max_incoming, then increase the window size to use it up
-	 * (except, keep rtt_bytes in reserve so we can fully grant
-	 * a new high-priority message).
-	 */
-	if (homa->max_grant_window == 0) {
-		window = homa->rtt_bytes;
-	} else {
-		/* Experimental: compute the window (how much granted-but-not-
-		 * received data there can be for any given message. This will
-		 * always be at least rtt_bytes, but if there aren't enough
-		 * messages to consume all of max_incoming, then increase
-		 * the window size to use it up (except, keep rtt_bytes in
-		 * reserve so we can fully grant a new high-priority message).
-		 * This technique is risky because it could use up almost
-		 * all the grants on a single non-responsive host, which
-		 * could result in underutilization of our downlink if that
-		 * host stops responding.
-		 */
-		window = (homa->max_incoming
-				- homa->rtt_bytes)/num_grantable_rpcs;
-		if (window > homa->max_grant_window)
-			window = homa->max_grant_window;
-		if (window < homa->rtt_bytes)
-			window = homa->rtt_bytes;
-	}
-
+	window = homa->rtt_bytes;
 	start = get_cycles();
 	homa_grantable_lock(homa);
 

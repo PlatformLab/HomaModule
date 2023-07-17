@@ -100,7 +100,6 @@ int homa_init(struct homa *homa)
 
 	/* Wild guesses to initialize configuration values... */
 	homa->rtt_bytes = 10000;
-	homa->max_grant_window = 0;
 	homa->link_mbps = 10000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;

@@ -352,19 +352,6 @@ This parameter is updated by Homa to reflect the largest number of packet
 buffers occupied by dead (but not yet reaped) RPCs in a single socket at
 a given time. It may be reset to zero to initiate a new calculation.
 .TP
-.IR max_grant_window
-A nonzero value for this parameter enables an experimental new approach to
-sending grants that allows more than
-.I rtt_bytes
-of outstanding grants for messages in some situations. It's not ready
-for production use; read the code of the
-.I homa_send_grants
-method if you want to learn more about it.
-.TP
-.IR max_grantable_rpcs
-The largest number of grantable incoming RPCs that has been observed
-so far. The value can be reset to 0 to start a fresh calculation.
-.TP
 .IR max_gro_skbs
 An integer value setting an upper limit on the number of buffers that
 Homa will allow to accumulate at driver level before passing them

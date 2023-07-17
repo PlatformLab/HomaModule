@@ -1688,13 +1688,6 @@ struct homa {
 	int rtt_bytes;
 
 	/**
-	 * @max_grant_window: if nonzero, determines the maximum number
-	 * of granted-but-not-yet-received bytes for a message (may be
-	 * greater than rtt_bytes). This feature is currently for
-	 * experimentation only. Set externally via sysctl.*/
-	int max_grant_window;
-
-	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
 	 * units of 1e06 bits per second.  Set externally via sysctl.
 	 */
