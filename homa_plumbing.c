@@ -359,6 +359,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "max_rpcs_per_peer",
+		.data		= &homa_data.max_rpcs_per_peer,
+		.maxlen		= sizeof(int),
+		.mode		= 0444,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "max_sched_prio",
 		.data		= &homa_data.max_sched_prio,
 		.maxlen		= sizeof(int),

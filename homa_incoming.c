@@ -936,6 +936,16 @@ void homa_send_grants(struct homa *homa)
 	struct homa_rpc *rpcs[MAX_GRANTS];
 	int num_grants = 0;
 
+	/* The variables below allow us to limit how many messages we
+	 * will grant for a single peer. Peers contains one entry for
+	 * each of the num_peers distinct peers we have encountered so
+	 * far in grantable_rpcs and rpc_count indicates how many
+	 * different RPCs are destined for that peer.
+	 */
+	struct homa_peer *peers[MAX_GRANTS];
+	int rpc_count[MAX_GRANTS];
+	int num_peers = 0;
+
 	/* How many more bytes we can grant before hitting the limit. */
 	int available = homa->max_incoming - atomic_read(&homa->total_incoming);
 
@@ -982,8 +992,8 @@ void homa_send_grants(struct homa *homa)
 	start = get_cycles();
 	homa_grantable_lock(homa);
 
-	/* Figure out which messages should receive additional grants. Consider
-	 * only a single (highest-priority) entry for each peer.
+	/* Figure out which messages should receive additional grants. Each
+	 * iteration considers the next lower priority RPC.
 	 */
 	rank = 0;
 	list_for_each_entry_safe(rpc, temp, &homa->grantable_rpcs,
@@ -994,6 +1004,22 @@ void homa_send_grants(struct homa *homa)
 
 		rank++;
 
+		/* Keep track of how many RPCs we have seen from each
+		 * distinct peer.
+		 */
+		for (int i = 0; i < num_peers; i++) {
+			if (peers[i] == rpc->peer) {
+				rpc_count[i]++;
+				if (rpc_count[i] > homa->max_rpcs_per_peer)
+					goto next_rpc;
+				goto peer_count_done;
+			}
+		}
+		peers[num_peers] = rpc->peer;
+		rpc_count[num_peers] = 1;
+		num_peers++;
+
+		peer_count_done:
 		/* Tricky synchronization issue: homa_data_pkt may be
 		 * updating bytes_remaining while we're working here.
 		 * So, we only read it once, right now, and we only
@@ -1052,6 +1078,7 @@ void homa_send_grants(struct homa *homa)
 			homa_remove_grantable_locked(homa, rpc);
 		if (num_grants == MAX_GRANTS)
 			break;
+		next_rpc:
 	}
 
 	if (homa->grant_nonfifo_left <= 0) {

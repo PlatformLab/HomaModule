@@ -125,6 +125,7 @@ int homa_init(struct homa *homa)
 	homa->grant_threshold = 0;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
+	homa->max_rpcs_per_peer = 1;
 	homa->resend_ticks = 15;
 	homa->resend_interval = 10;
 	homa->timeout_resends = 5;

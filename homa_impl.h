@@ -1803,6 +1803,13 @@ struct homa {
 	int max_incoming;
 
 	/**
+	 * @max_rpcs_per_peer: If there are multiple incoming messages from
+	 * the same peer, Homa will only issue grants to this many of them
+	 * at a time.  Set externally via sysctl.
+	 */
+	int max_rpcs_per_peer;
+
+	/**
 	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,
 	 * start sending RESEND requests.
 	 */

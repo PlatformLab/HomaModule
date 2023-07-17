@@ -1612,6 +1612,33 @@ TEST_F(homa_incoming, homa_send_grants__enlarge_window)
 	EXPECT_EQ(16400, srpc2->msgin.incoming);
 	EXPECT_EQ(30000, atomic_read(&self->homa.total_incoming));
 }
+TEST_F(homa_incoming, homa_send_grants__limit_granted_rpcs_per_peer)
+{
+	struct homa_rpc *srpc1, *srpc2, *srpc3, *srpc4, *srpc5, *srpc6;
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 1, 20000, 100);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
+			self->server_ip, self->client_port, 3, 30000, 100);
+	srpc3 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
+			self->server_ip, self->client_port, 5, 40000, 100);
+	srpc4 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
+			self->server_ip, self->client_port, 7, 50000, 100);
+	srpc5 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
+			self->server_ip, self->client_port, 9, 60000, 100);
+	srpc6 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+2,
+			self->server_ip, self->client_port, 11, 70000, 100);
+	atomic_set(&self->homa.total_incoming, 0);
+	self->homa.max_incoming = 200000;
+	self->homa.max_sched_prio = 5;
+	self->homa.max_rpcs_per_peer = 2;
+	homa_send_grants(&self->homa);
+	EXPECT_EQ(11400, srpc1->msgin.incoming);
+	EXPECT_EQ(11400, srpc2->msgin.incoming);
+	EXPECT_EQ(11400, srpc3->msgin.incoming);
+	EXPECT_EQ(11400, srpc4->msgin.incoming);
+	EXPECT_EQ(10000, srpc5->msgin.incoming);
+	EXPECT_EQ(11400, srpc6->msgin.incoming);
+}
 TEST_F(homa_incoming, homa_send_grants__truncate_grant_to_message_length)
 {
 	struct homa_rpc *srpc;
