@@ -329,11 +329,10 @@ void read_metrics(const char *path, metrics *metrics)
  *                   unsched_cutoffs parameter.
  * @num_priorities:  Total number of priorities available for Homa (including
  *                   both scheduled and unscheduled).
- * @rtt_bytes:       Homa's rtt_bytes parameter (i.e., the maximum number of
- *                   unscheduled bytes in any message).
+ * @unsched_bytes:   Homa's unsched_bytes parameter.
  */
 void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
-		int rtt_bytes)
+		int unsched_bytes)
 {
 	int64_t total_bytes, total_unsched_bytes;
 	int prev_size;
@@ -348,11 +347,11 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 					"by %d\n",
 					prev_size, interval.max_size);
 		total_bytes += interval.total_bytes;
-		if (interval.max_size <= rtt_bytes)
+		if (interval.max_size <= unsched_bytes)
 			interval.unsched_bytes = interval.total_bytes;
 		else {
 			interval.unsched_bytes = interval.total_messages
-					* rtt_bytes;
+					* unsched_bytes;
 			if (interval.unsched_bytes > interval.total_bytes)
 				interval.unsched_bytes = interval.total_bytes;
 		}
@@ -360,7 +359,7 @@ void compute_cutoffs(metrics *diff, int cutoffs[8], int num_priorities,
 		prev_size = interval.max_size;
 	}
 	total_bytes += diff->large_msg_bytes;
-	total_unsched_bytes += diff->large_msg_count * rtt_bytes;
+	total_unsched_bytes += diff->large_msg_count * unsched_bytes;
 
 	// Divide priorities between scheduled and unscheduled packets.
 	int64_t unsched_prios = unsched;
@@ -656,7 +655,7 @@ int main(int argc, const char** argv)
 	int prev_deciles[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 	int cutoffs[8];
 	int num_priorities = 1;
-	int rtt_bytes = 0;
+	int unsched_bytes = 0;
 	int prev_num_priorities = -1;
 	while (1) {
 		usleep(1000*reconfig_interval);
@@ -673,8 +672,8 @@ int main(int argc, const char** argv)
 			log(NORMAL, "get_param failed for num_priorities\n");
 			continue;
 		}
-		if (!get_param("rtt_bytes", &rtt_bytes)) {
-			log(NORMAL, "get_param failed for rtt_bytes\n");
+		if (!get_param("unsched_bytes", &unsched_bytes)) {
+			log(NORMAL, "get_param failed for unsched_bytes\n");
 			continue;
 		}
 
@@ -716,7 +715,7 @@ int main(int argc, const char** argv)
 					drift, min_drift);
 			continue;
 		}
-		compute_cutoffs(&diff, cutoffs, num_priorities, rtt_bytes);
+		compute_cutoffs(&diff, cutoffs, num_priorities, unsched_bytes);
 		log(NORMAL, "Decile drift %.2f, best cutoffs: %d %d %d %d "
 				"%d %d %d %d\n",
 				drift, cutoffs[0], cutoffs[1], cutoffs[2],

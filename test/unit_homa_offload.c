@@ -37,7 +37,6 @@ FIXTURE_SETUP(homa_offload)
 	int i;
 	homa_init(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	self->homa.grant_threshold = self->homa.rtt_bytes;
 	homa = &self->homa;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");

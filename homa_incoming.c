@@ -818,9 +818,9 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 }
 
 /**
- * homa_check_grantable() - This function ensures that an RPC is on a
- * grantable list if appropriate, and not on one otherwise. It also adjusts
- * the position of the RPC upward on its list, if needed.
+ * homa_check_grantable() - This function ensures that an RPC is on the
+ * grantable list if appropriate. It also adjusts the position of the RPC
+ * upward on the list, if needed.
  * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC to check; typically the status of this RPC has changed
  *           in a way that may affect its grantability (e.g. a packet
@@ -831,12 +831,8 @@ void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
 	struct homa_rpc *candidate;
 	struct homa_message_in *msgin = &rpc->msgin;
 
-	/* No need to do anything unless this message is ready for more
-	 * grants.
-	 */
-	if (((rpc->msgin.incoming - (rpc->msgin.total_length
-			- rpc->msgin.bytes_remaining)) >= homa->rtt_bytes)
-			|| (rpc->msgin.incoming >= rpc->msgin.total_length))
+	/* No need to do anything unless this message needs more grants. */
+	if (rpc->msgin.incoming >= rpc->msgin.total_length)
 		return;
 
 	homa_grantable_lock(homa);
@@ -1059,7 +1055,7 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 	int granted_bytes = 0;
 
 	/* Compute the maximum window size for any RPC. */
-	int window = homa->rtt_bytes;
+	int window = homa->unsched_bytes;
 
 	for (int rank = 0; rank < num_rpcs; rank++) {
 		int extra_levels, priority;
@@ -1166,7 +1162,7 @@ void homa_grant_fifo(struct homa *homa)
 		received = (rpc->msgin.total_length
 				- rpc->msgin.bytes_remaining);
 		on_the_way = rpc->msgin.incoming - received;
-		if (on_the_way > homa->rtt_bytes) {
+		if (on_the_way > homa->unsched_bytes) {
 			/* The last "pity" grant hasn't been used
 			 * up yet.
 			 */
@@ -1774,8 +1770,6 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
 
-	homa->max_incoming = homa->max_overcommit * homa->rtt_bytes;
-
 	if (homa->grant_fifo_fraction > 500)
 		homa->grant_fifo_fraction = 500;
 	tmp = homa->grant_fifo_fraction;
@@ -1794,11 +1788,6 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = homa->gro_busy_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->gro_busy_cycles = tmp;
-
-	tmp = homa->rtt_bytes * homa->duty_cycle;
-	homa->grant_threshold = tmp/1000;
-	if (homa->grant_threshold > homa->rtt_bytes)
-		homa->grant_threshold = homa->rtt_bytes;
 
 	tmp = homa->bpage_lease_usecs;
 	tmp = (tmp*cpu_khz)/1000;

@@ -99,7 +99,7 @@ int homa_init(struct homa *homa)
 	}
 
 	/* Wild guesses to initialize configuration values... */
-	homa->rtt_bytes = 10000;
+	homa->unsched_bytes = 10000;
 	homa->link_mbps = 10000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
@@ -120,8 +120,6 @@ int homa_init(struct homa *homa)
 #endif
 	homa->fifo_grant_increment = 10000;
 	homa->grant_fifo_fraction = 50;
-	homa->duty_cycle = 800;
-	homa->grant_threshold = 0;
 	homa->max_overcommit = 8;
 	homa->max_incoming = 0;
 	homa->max_rpcs_per_peer = 1;

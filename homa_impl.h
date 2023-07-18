@@ -1687,12 +1687,15 @@ struct homa {
 	struct homa_peertab peers;
 
 	/**
-	 * @rtt_bytes: An estimate of the amount of data that can be transmitted
-         * over the wire in the time it takes to send a full-size data packet
-         * and receive back a grant. Used to ensure full utilization of
-         * uplink bandwidth. Set externally via sysctl.
+	 * @unsched_bytes: The number of bytes that may be sent in a
+	 * new message without receiving any grants. This used to be
+	 * called rtt_bytes; historically it was intended to be the amount
+	 * of data that can be transmitted over the wire in the time it
+	 * takes to send a full-size data packet and receive back a grant
+	 * (but for faster networks that value could result in too much
+	 * buffer utilization). Set externally via sysctl.
 	 */
-	int rtt_bytes;
+	int unsched_bytes;
 
 	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
@@ -1771,34 +1774,16 @@ struct homa {
 	int grant_fifo_fraction;
 
 	/**
-	 * @duty_cycle: Sets a limit on the fraction of network bandwidth that
-	 * may be consumed by a single RPC in units of one-thousandth (1000
-	 * means a single RPC can consume all of the incoming network
-	 * bandwidth, 500 means half, and so on). This also determines the
-	 * fraction of a core that can be consumed by NAPI when a large
-	 * message is being received. Its main purpose is to keep NAPI from
-	 * monopolizing a core so much that user threads starve. Set externally
-	 * via sysctl.
-	 */
-	int duty_cycle;
-
-	/**
-	 * @grant_threshold: A grant will not be sent for an RPC until
-	 * the number of incoming bytes drops below this threshold. Computed
-	 * from @rtt_bytes and @duty_cycle.
-	 */
-	int grant_threshold;
-
-	/**
 	 * @max_overcommit: The maximum number of messages to which Homa will
 	 * send grants at any given point in time.  Set externally via sysctl.
 	 */
 	int max_overcommit;
 
 	/**
-	 * @max_incoming: This value is computed from max_overcommit, and
-	 * is the limit on how many bytes are currently permitted to be
-	 * granted but not yet received, cumulative across all messages.
+	 * @max_incoming: Homa will try to ensure that the total number of
+	 * bytes senders have permission to send to this host (either
+	 * unscheduled bytes or granted bytes) does not exceeds this value.
+	 * Set externally via sysctl.
 	 */
 	int max_incoming;
 

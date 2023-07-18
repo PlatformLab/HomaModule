@@ -126,7 +126,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		gso_size = repl_length + (pkts_per_gso * (mtu - repl_length));
 
 		/* Round unscheduled bytes *up* to an even number of gsos. */
-		rpc->msgout.unscheduled = rpc->hsk->homa->rtt_bytes
+		rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes
 				+ rpc->msgout.gso_pkt_data - 1;
 		rpc->msgout.unscheduled -= rpc->msgout.unscheduled
 				% rpc->msgout.gso_pkt_data;

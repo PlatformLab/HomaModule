@@ -233,13 +233,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "duty_cycle",
-		.data		= &homa_data.duty_cycle,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "flags",
 		.data		= &homa_data.flags,
 		.maxlen		= sizeof(int),
@@ -345,6 +338,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "max_incoming",
+		.data		= &homa_data.max_incoming,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "max_overcommit",
 		.data		= &homa_data.max_overcommit,
 		.maxlen		= sizeof(int),
@@ -415,13 +415,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "rtt_bytes",
-		.data		= &homa_data.rtt_bytes,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "sync_freeze",
 		.data		= &homa_data.sync_freeze,
 		.maxlen		= sizeof(int),
@@ -448,6 +441,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "unsched_bytes",
+		.data		= &homa_data.unsched_bytes,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "unsched_cutoffs",

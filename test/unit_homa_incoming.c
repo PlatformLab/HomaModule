@@ -142,7 +142,6 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
-	self->homa.grant_threshold = self->homa.rtt_bytes;
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
@@ -1388,7 +1387,7 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 	homa_sock_shutdown(&hsk1);
 }
 
-TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
+TEST_F(homa_incoming, homa_check_grantable__message_fully_granted)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
@@ -1398,27 +1397,18 @@ TEST_F(homa_incoming, homa_check_grantable__not_ready_for_grant)
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 
-	srpc->msgin.total_length = 20000;
-	srpc->msgin.bytes_remaining = 15000;
-	srpc->msgin.incoming = 18000;
+	srpc->msgin.incoming = 5000;
 	homa_check_grantable(&self->homa, srpc);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 
-	srpc->msgin.incoming = 20000;
-	homa_check_grantable(&self->homa, srpc);
-	unit_log_clear();
-	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
 
-	srpc->msgin.incoming = 18000;
-	srpc->msgin.bytes_remaining = 10000;
+	srpc->msgin.incoming = 3000;
 	homa_check_grantable(&self->homa, srpc);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
-	EXPECT_STREQ("request from 196.168.0.1, id 1235, remaining 10000",
-			unit_log_get());
+	EXPECT_SUBSTR("request from 196.168.0.1, id 1235", unit_log_get());
 }
 TEST_F(homa_incoming, homa_check_grantable__update_statistics)
 {
@@ -1809,7 +1799,6 @@ TEST_F(homa_incoming, homa_create_grants__remove_from_grantable)
 TEST_F(homa_incoming, homa_grant_fifo__basics)
 {
 	struct homa_rpc *srpc;
-	self->homa.rtt_bytes = 10000;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1834,7 +1823,6 @@ TEST_F(homa_incoming, homa_grant_fifo__basics)
 TEST_F(homa_incoming, homa_grant_fifo__pity_grant_still_active)
 {
 	struct homa_rpc *srpc1, *srpc2;
-	self->homa.rtt_bytes = 10000;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1859,7 +1847,6 @@ TEST_F(homa_incoming, homa_grant_fifo__pity_grant_still_active)
 TEST_F(homa_incoming, homa_grant_fifo__no_good_candidates)
 {
 	struct homa_rpc *srpc1;
-	self->homa.rtt_bytes = 10000;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1878,7 +1865,6 @@ TEST_F(homa_incoming, homa_grant_fifo__no_good_candidates)
 TEST_F(homa_incoming, homa_grant_fifo__increment_fifo_grants_no_incoming)
 {
 	struct homa_rpc *srpc1;
-	self->homa.rtt_bytes = 10000;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1898,7 +1884,6 @@ TEST_F(homa_incoming, homa_grant_fifo__increment_fifo_grants_no_incoming)
 TEST_F(homa_incoming, homa_grant_fifo__remove_from_grantable)
 {
 	struct homa_rpc *srpc1;
-	self->homa.rtt_bytes = 10000;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;

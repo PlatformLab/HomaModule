@@ -278,18 +278,6 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
-.IR duty_cycle
-.I (Note: this feature has been temporarily removed, so this parameter
-.I is currently ignored)
-Determines the maximum fraction of network bandwidth that a single RPC
-will be allowed to consume, in units of one-thousandth (e.g., 500 means 50%).
-The main reason for this parameter is that it also limits the fraction
-of a core that can be consumed by NAPI processing for a single incoming
-message. Without this limit, a large incoming message can completely
-consume one core for NAPI, which starves user threads on that core and
-can result in high tail latency for short messages served by those
-threads.
-.TP
 .IR fifo_grant_increment
 An integer value. When Homa decides to issue a grant to the oldest message
 (because of
@@ -362,6 +350,15 @@ best with this set to infinity.
 An integer value setting an upper limit on the size of an output packet,
 before segmentation using GSO. The Linux networking layer already imposes
 an upper limit; this configuration value can be used to reduce it further.
+.TP
+.IR max_incoming
+Homa will try to ensure that the total number of bytes authorized
+to be sent (but not yet received) by all senders (including both unscheduled
+bytes and granted bytes) does not exceed this value. If the known number
+of incoming bytes exceeds this value (e.g. because many new messages
+have appeared) then Homa will not issue grants until enough data has
+been received to get below the limit. Used to control the total
+utilization of TOR switch buffers.
 .TP
 .IR max_nic_queue_ns
 An integer value specifying a NIC queue length in units of nanoseconds
@@ -489,14 +486,6 @@ resend_ticks
 reduces the likelihood of restarts (but doesn't completely eliminate the
 problem).
 .TP
-.IR rtt_bytes
-An estimate of the number of bytes that can be transmitted on the wire
-by a host in the time it takes that host to send a full-size packet to
-another host and receive back a grant packet. Used by Homa to ensure
-full network bandwidth utilization (or whatever is specified by the
-.IR duty_cycle
-parameter).
-.TP
 .IR sync_freeze
 If a nonzero value is written into this parameter, then upon completion
 of the next client RPC issued from this machine, Homa will will clear
@@ -523,6 +512,22 @@ to be dead. If this many resend requests have been issued to a peer without
 receiving any packets from the peer, then Homa will consider the peer
 dead and abort all RPCs involving that peer with
 .BR ETIMEDOUT .
+.TP
+.IR unsched_bytes
+The number of bytes that may be transmitted from a new message without
+waiting for grants from the receiver. Historically, this has been
+the number of bytes that can be transmitted on the wire
+by a host in the time it takes that host to send a full-size packet to
+another host and receive back a grant packet, and it was called
+.IR rtt_bytes .
+This approach ensured full network bandwidth utilization in unloaded
+networks.
+However,
+.IR rtt_bytes
+can be quite large on faster networks (particularly when including
+all of the software overheads), so using it for
+.IR unsched_bytes
+may result in too much switch buffer utilization.
 .TP
 .IR unsched_cutoffs
 An array of 8 integer values. The nth element specifies the largest
