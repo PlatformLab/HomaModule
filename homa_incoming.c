@@ -914,12 +914,8 @@ void homa_send_grants(struct homa *homa)
 	 * - If there are fewer messages than priority levels, then we use
 	 *   the lowest available levels (new higher-priority messages can
 	 *   use the higher levels to achieve instantaneous preemption).
-	 * - We only grant to one message for a given host (there's no
-	 *   point in granting to multiple, since the host will only send
-	 *   the highest priority one).
 	 */
-	struct homa_rpc *rpc, *temp;
-	int rank, i, window;
+	int i, num_grants;
 	__u64 start;
 
 	/* The variables below keep track of grants we have decided to
@@ -930,11 +926,75 @@ void homa_send_grants(struct homa *homa)
 	extern int mock_max_grants;
 #define MAX_GRANTS mock_max_grants
 #else
-#define MAX_GRANTS 10
+#define MAX_GRANTS HOMA_MAX_GRANTS
 #endif
-	struct grant_header grants[MAX_GRANTS];
+	/* RPCs that are candidates for grants; if we eventually decide
+	 * not to grant for an RPC, the array entry becomes NULL.
+	 */
 	struct homa_rpc *rpcs[MAX_GRANTS];
-	int num_grants = 0;
+	int num_rpcs = 0;
+
+	/* For each non-null entry in rpcs, a GRANT packet header to
+	 * send for that RPC.
+	 */
+	struct grant_header grants[MAX_GRANTS];
+
+	/* How many more bytes we can grant before hitting the limit. */
+	int available = homa->max_incoming - atomic_read(&homa->total_incoming);
+
+	if (list_empty(&homa->grantable_rpcs) || (available <= 0)) {
+		return;
+	}
+
+	start = get_cycles();
+	homa_grantable_lock(homa);
+
+	num_rpcs = homa_choose_rpcs_to_grant(homa, rpcs, MAX_GRANTS);
+
+	/* Compute grants but don't actually send them; we want to release
+	 * grantable_lock before sending.
+	 */
+	num_grants = homa_create_grants(homa, rpcs, num_rpcs, grants,
+			available);
+
+	if (homa->grant_nonfifo_left <= 0) {
+		homa->grant_nonfifo_left += homa->grant_nonfifo;
+		if (homa->grant_fifo_fraction)
+			homa_grant_fifo(homa);
+	}
+	homa_grantable_unlock(homa);
+
+	/* By sending grants without holding grantable_lock here, we reduce
+	 * contention on that lock significantly. This only works because
+	 * rpc->grants_in_progress keeps RPCs from being deleted out from
+	 * under us.
+	 */
+	for (i = 0; i < num_grants; i++) {
+		/* Send any accumulated grants (ignore errors). */
+		BUG_ON(rpcs[i]->magic != HOMA_RPC_MAGIC);
+		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
+			rpcs[i]);
+		atomic_dec(&rpcs[i]->grants_in_progress);
+	}
+	INC_METRIC(grant_cycles, get_cycles() - start);
+}
+
+/**
+ * homa_choose_rpcs_to_grant() - Scans homa->grantable_rpcs and picks
+ * a set that are candidates for granting, considering factors such
+ * as homa->max_peers_per_rpc. The caller must hold homa->grantable_lock.
+ * @homa:      Overall data about the Homa protocol implementation.
+ * @rpcs:      The selected RPCs will be stored in this array, in
+ *             decreasing priority order.
+ * @max_rpcs:  Maximum number of RPCs to return in @rpcs (must be <=
+ *             HOMA_MAX_GRANTS).
+ * Return:     The number of RPCs actually stored in @rpcs.
+ */
+int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
+		int max_rpcs)
+{
+	struct homa_rpc *rpc, *temp;
+	int num_rpcs = 0;
 
 	/* The variables below allow us to limit how many messages we
 	 * will grant for a single peer. Peers contains one entry for
@@ -942,40 +1002,12 @@ void homa_send_grants(struct homa *homa)
 	 * far in grantable_rpcs and rpc_count indicates how many
 	 * different RPCs are destined for that peer.
 	 */
-	struct homa_peer *peers[MAX_GRANTS];
-	int rpc_count[MAX_GRANTS];
+	struct homa_peer *peers[HOMA_MAX_GRANTS];
+	int rpc_count[HOMA_MAX_GRANTS];
 	int num_peers = 0;
 
-	/* How many more bytes we can grant before hitting the limit. */
-	int available = homa->max_incoming - atomic_read(&homa->total_incoming);
-
-	/* Total bytes in additional grants that we've given out so far. */
-	int granted_bytes = 0;
-
-	/* Make a local copy of homa->grantable_rpcs, since that variable
-	 * could change during this function.
-	 */
-	int num_grantable_rpcs = homa->num_grantable_rpcs;
-	if ((num_grantable_rpcs == 0) || (available <= 0)) {
-		return;
-	}
-
-	window = homa->rtt_bytes;
-	start = get_cycles();
-	homa_grantable_lock(homa);
-
-	/* Figure out which messages should receive additional grants. Each
-	 * iteration considers the next lower priority RPC.
-	 */
-	rank = 0;
 	list_for_each_entry_safe(rpc, temp, &homa->grantable_rpcs,
 			grantable_links) {
-		int extra_levels, priority;
-		int received, new_grant, increment;
-		struct grant_header *grant;
-
-		rank++;
-
 		/* Keep track of how many RPCs we have seen from each
 		 * distinct peer.
 		 */
@@ -991,7 +1023,50 @@ void homa_send_grants(struct homa *homa)
 		rpc_count[num_peers] = 1;
 		num_peers++;
 
-		peer_count_done:
+    peer_count_done:
+		rpcs[num_rpcs] = rpc;
+		num_rpcs++;
+		if (num_rpcs >= max_rpcs)
+			break;
+    next_rpc:
+	}
+	return num_rpcs;
+}
+
+/**
+ * Given a set of RPCs, this function computes additional grants for
+ * each of them. It doesn't actually send the grants.
+ * @homa:      Overall data about the Homa protocol implementation.
+ * @rpcs:      Array containing @num_rpcs RPCs to consider for granting,
+ *             in decreasing priority order. The array will be modified
+ *             to leave only the RPCs for which grants were actually
+ *             created, so its size may be less than @num_rpcs when the
+ *             function returns.
+ * @num_rpcs:  Number of RPCs initially in @rpcs.
+ * @grants:    An array to fill in with headers for GRANT packets. These
+ *             entries correspond to the (final) entries in @rpcs.
+ * @available: Maximum number of bytes of new grants that we can issue.
+ * Return:     The final size of @rpcs and @grants (<= @num_rpcs). Note:
+ *             grants_in_progress will be incremented for each of the
+ *             returned RPCs.
+ */
+int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
+		int num_rpcs, struct grant_header *grants, int available)
+{
+	int num_grants = 0;
+
+	/* Total bytes in additional grants that we've given out so far. */
+	int granted_bytes = 0;
+
+	/* Compute the maximum window size for any RPC. */
+	int window = homa->rtt_bytes;
+
+	for (int rank = 0; rank < num_rpcs; rank++) {
+		int extra_levels, priority;
+		int received, new_grant, increment;
+		struct grant_header *grant;
+		struct homa_rpc *rpc = rpcs[rank];
+
 		/* Tricky synchronization issue: homa_data_pkt may be
 		 * updating bytes_remaining while we're working here.
 		 * So, we only read it once, right now, and we only
@@ -1002,6 +1077,10 @@ void homa_send_grants(struct homa *homa)
 		 */
 		received = (rpc->msgin.total_length
 				- rpc->msgin.bytes_remaining);
+
+		/* Compute how many bytes of additional grants (increment)
+		 * to give this RPC.
+		 */
 		new_grant = received + window;
 		if (new_grant > rpc->msgin.total_length)
 			new_grant = rpc->msgin.total_length;
@@ -1030,14 +1109,16 @@ void homa_send_grants(struct homa *homa)
 		rpc->msgin.incoming = new_grant;
 		granted_bytes += increment;
 		available -= increment;
-		homa->grant_nonfifo_left -= increment;
 		atomic_inc(&rpc->grants_in_progress);
-		rpcs[num_grants] = rpc;
 		grant = &grants[num_grants];
-		num_grants++;
 		grant->offset = htonl(new_grant);
-		priority = homa->max_sched_prio - (rank - 1);
-		extra_levels = homa->max_sched_prio + 1 - num_grantable_rpcs;
+		priority = homa->max_sched_prio - rank;
+
+		/* If there aren't enough RPCs to consume all of the priority
+		 * levels, use only the lower levels; this allows faster
+		 * preemption if a new high-priority message appears.
+		 */
+		extra_levels = homa->max_sched_prio + 1 - num_rpcs;
 		if (extra_levels >= 0)
 			priority -= extra_levels;
 		if (priority < 0)
@@ -1048,34 +1129,12 @@ void homa_send_grants(struct homa *homa)
 				rpc->id, new_grant, priority, increment);
 		if (new_grant == rpc->msgin.total_length)
 			homa_remove_grantable_locked(homa, rpc);
-		if (num_grants == MAX_GRANTS)
-			break;
-		next_rpc:
+		rpcs[num_grants] = rpc;
+		num_grants++;
 	}
-
-	if (homa->grant_nonfifo_left <= 0) {
-		homa->grant_nonfifo_left += homa->grant_nonfifo;
-		if ((num_grantable_rpcs > MAX_GRANTS)
-				&& homa->grant_fifo_fraction)
-			granted_bytes += homa_grant_fifo(homa);
-	}
-
+	homa->grant_nonfifo_left -= granted_bytes;
 	atomic_add(granted_bytes, &homa->total_incoming);
-	homa_grantable_unlock(homa);
-
-	/* By sending grants without holding grantable_lock here, we reduce
-	 * contention on that lock significantly. This only works because
-	 * rpc->grants_in_progress keeps the RPC from being deleted out from
-	 * under us.
-	 */
-	for (i = 0; i < num_grants; i++) {
-		/* Send any accumulated grants (ignore errors). */
-		BUG_ON(rpcs[i]->magic != HOMA_RPC_MAGIC);
-		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
-			rpcs[i]);
-		atomic_dec(&rpcs[i]->grants_in_progress);
-	}
-	INC_METRIC(grant_cycles, get_cycles() - start);
+	return num_grants;
 }
 
 /**
@@ -1084,9 +1143,8 @@ void homa_send_grants(struct homa *homa)
  * order to reduce the starvation that SRPT can cause for long messages.
  * @homa:    Overall data about the Homa protocol implementation. The
  *           grantable_lock must be held by the caller.
- * Return:   The number of bytes of additional grants that were issued.
  */
-int homa_grant_fifo(struct homa *homa)
+void homa_grant_fifo(struct homa *homa)
 {
 	struct homa_rpc *rpc, *oldest;
 	__u64 oldest_birth;
@@ -1118,7 +1176,7 @@ int homa_grant_fifo(struct homa *homa)
 		oldest_birth = rpc->msgin.birth;
 	}
 	if (oldest == NULL)
-		return 0;
+		return;
 	INC_METRIC(fifo_grants, 1);
 	if ((oldest->msgin.total_length - oldest->msgin.bytes_remaining)
 			== oldest->msgin.incoming)
@@ -1138,7 +1196,7 @@ int homa_grant_fifo(struct homa *homa)
 			oldest->id, oldest->msgin.incoming,
 			homa->max_sched_prio);
 	homa_xmit_control(GRANT, &grant, sizeof(grant), oldest);
-	return granted;
+	atomic_add(granted, &homa->total_incoming);
 }
 
 /**

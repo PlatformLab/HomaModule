@@ -176,6 +176,13 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_PRIORITIES 8
 
+/**
+ * define HOMA_MAX_GRANTS - An upper limit on the number of RPCs Homa
+ * will consider for granting at one time. Used to size stack-allocated
+ * arrays.
+ */
+#define HOMA_MAX_GRANTS 10
+
 #define sizeof32(type) ((int) (sizeof(type)))
 
 /** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
@@ -3006,8 +3013,12 @@ extern void     homa_check_grantable(struct homa *homa, struct homa_rpc *rpc);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
+extern int      homa_choose_rpcs_to_grant(struct homa *homa,
+		    struct homa_rpc **rpcs, int max_rpcs);
 extern void     homa_close(struct sock *sock, long timeout);
 extern int      homa_copy_to_user(struct homa_rpc *rpc);
+extern int      homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
+		    int num_rpcs, struct grant_header *grants, int available);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
@@ -3036,7 +3047,7 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
-extern int      homa_grant_fifo(struct homa *homa);
+extern void     homa_grant_fifo(struct homa *homa);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
