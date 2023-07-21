@@ -176,13 +176,6 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_PRIORITIES 8
 
-/**
- * define HOMA_MAX_GRANTS - An upper limit on the number of RPCs Homa
- * will consider for granting at one time. Used to size stack-allocated
- * arrays.
- */
-#define HOMA_MAX_GRANTS 10
-
 #define sizeof32(type) ((int) (sizeof(type)))
 
 /** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
@@ -1793,6 +1786,15 @@ struct homa {
 	 * at a time.  Set externally via sysctl.
 	 */
 	int max_rpcs_per_peer;
+
+	/**
+	 * @dynamic_windows: A zero value means that unsched_bytes should
+	 * always be used as the window size for grants (i.e. how much
+	 * data to grant beyond what has already been received). Nonzero
+	 * means use an adaptive approach that allows larger window sizes
+	 * if there are fewer incoming messages.
+	 */
+	int dynamic_windows;
 
 	/**
 	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,

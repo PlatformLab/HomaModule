@@ -71,11 +71,6 @@ int mock_xmit_log_verbose = 0;
  */
 int mock_log_rcu_sched = 0;
 
-/* The maximum number of grants that can be issued in one call to
- * homa_send_grants.
- */
-int mock_max_grants = 10;
-
 /* A zero value means that copy_to_user will actually copy bytes to
  * the destination address; if nonzero, then 0 bits determine which
  * copies actually occur (bit 0 for the first copy, etc., just like
@@ -1302,7 +1297,6 @@ void mock_teardown(void)
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
-	mock_max_grants = 10;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;

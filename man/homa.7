@@ -278,6 +278,22 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
+.IR dynamic_windows
+This integer value selects one of two approaches for managing grant
+windows (the difference between the offset specified in a grant and
+the number of bytes that have been received for that message). A value
+of 0 means windows are always
+.IR unsched_bytes
+(the approach in the original Homa design). A nonzero value means
+that the window size depends on the number of grantable messages;
+with fewer grantable messages, the window for each message increases.
+Specifically, if there are N grantable messages, the window for each
+of these messages will be
+.IR unsched_bytes /(N+1).
+This approach is inspired by the paper "Dynamic Queue Length Thresholds
+for Shared-Memory Packet Switches"; the idea is to maintain unused
+granting capacity equal to the window for each of the current messages.
+.TP
 .IR fifo_grant_increment
 An integer value. When Homa decides to issue a grant to the oldest message
 (because of

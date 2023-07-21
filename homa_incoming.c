@@ -20,6 +20,12 @@
 #include "homa_lcache.h"
 
 /**
+ * Used to size stack-allocated arrays for grant management; the
+ * max_overcommit sysctl parameter cannot be greater than this.
+ */
+#define MAX_GRANTS 10
+
+/**
  * homa_message_in_init() - Constructor for homa_message_in.
  * @msgin:        Structure to initialize.
  * @length:       Total number of bytes in message.
@@ -914,23 +920,16 @@ void homa_send_grants(struct homa *homa)
 	int i, num_grants;
 	__u64 start;
 
-	/* The variables below keep track of grants we have decided to
-	 * send; these don't get sent until the very end, so we can release
-	 * grantable_lock first.
-	 */
-#ifdef __UNIT_TEST__
-	extern int mock_max_grants;
-#define MAX_GRANTS mock_max_grants
-#else
-#define MAX_GRANTS HOMA_MAX_GRANTS
-#endif
 	/* RPCs that are candidates for grants; if we eventually decide
-	 * not to grant for an RPC, the array entry becomes NULL.
+	 * not to grant for an RPC, the array will be compacted to
+	 * remove that RPC.
 	 */
 	struct homa_rpc *rpcs[MAX_GRANTS];
+
+	/* Number of valid entries in rpcs. */
 	int num_rpcs = 0;
 
-	/* For each non-null entry in rpcs, a GRANT packet header to
+	/* For each valid entry in rpcs, a GRANT packet header to
 	 * send for that RPC.
 	 */
 	struct grant_header grants[MAX_GRANTS];
@@ -945,7 +944,7 @@ void homa_send_grants(struct homa *homa)
 	start = get_cycles();
 	homa_grantable_lock(homa);
 
-	num_rpcs = homa_choose_rpcs_to_grant(homa, rpcs, MAX_GRANTS);
+	num_rpcs = homa_choose_rpcs_to_grant(homa, rpcs, homa->max_overcommit);
 
 	/* Compute grants but don't actually send them; we want to release
 	 * grantable_lock before sending.
@@ -983,7 +982,7 @@ void homa_send_grants(struct homa *homa)
  * @rpcs:      The selected RPCs will be stored in this array, in
  *             decreasing priority order.
  * @max_rpcs:  Maximum number of RPCs to return in @rpcs (must be <=
- *             HOMA_MAX_GRANTS).
+ *             MAX_GRANTS).
  * Return:     The number of RPCs actually stored in @rpcs.
  */
 int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
@@ -998,8 +997,8 @@ int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
 	 * far in grantable_rpcs and rpc_count indicates how many
 	 * different RPCs are destined for that peer.
 	 */
-	struct homa_peer *peers[HOMA_MAX_GRANTS];
-	int rpc_count[HOMA_MAX_GRANTS];
+	struct homa_peer *peers[MAX_GRANTS];
+	int rpc_count[MAX_GRANTS];
 	int num_peers = 0;
 
 	list_for_each_entry_safe(rpc, temp, &homa->grantable_rpcs,
@@ -1054,8 +1053,16 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 	/* Total bytes in additional grants that we've given out so far. */
 	int granted_bytes = 0;
 
-	/* Compute the maximum window size for any RPC. */
+	/* Compute the maximum window size for any RPC. Dynamic window
+	 * sizing uses the approach inspired by the paper "Dynamic Queue
+	 * Length Thresholds for Shared-Memory Packet Switches" with an
+	 * alpha value of 1. The idea is to maintain unused incoming capacity
+	 * (for new RPC arrivals) equal to the amount of incoming
+	 * allocated to each of the current RPCs.
+	 */
 	int window = homa->unsched_bytes;
+	if (homa->dynamic_windows)
+	    window = homa->max_incoming/(num_rpcs+1);
 
 	for (int rank = 0; rank < num_rpcs; rank++) {
 		int extra_levels, priority;
@@ -1777,6 +1784,9 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 		tmp = (1000*homa->fifo_grant_increment)/tmp
 				- homa->fifo_grant_increment;
 	homa->grant_nonfifo = tmp;
+
+	if (homa->max_overcommit > MAX_GRANTS)
+		homa->max_overcommit = MAX_GRANTS;
 
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!

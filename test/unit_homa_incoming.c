@@ -1685,6 +1685,26 @@ TEST_F(homa_incoming, homa_create_grants__basics)
 	for (int i = 0; i < num_grants; i++)
 		atomic_set(&rpcs[i]->grants_in_progress, 0);
 }
+TEST_F(homa_incoming, homa_create_grants__dynamic_windows)
+{
+	struct homa_rpc *rpcs[1];
+	struct grant_header grants[1];
+	int num_grants;
+	rpcs[0] = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+			1, 100000, 100);
+	self->homa.dynamic_windows = 0;
+	num_grants = homa_create_grants(&self->homa, rpcs, 1, grants, 10000);
+	EXPECT_EQ(1, num_grants);
+	EXPECT_EQ(11400, ntohl(grants[0].offset));
+	self->homa.max_incoming = 100000;
+	self->homa.dynamic_windows = 1;
+	num_grants = homa_create_grants(&self->homa, rpcs, 1, grants, 1000000);
+	EXPECT_EQ(1, num_grants);
+	EXPECT_EQ(51400, ntohl(grants[0].offset));
+
+	atomic_set(&rpcs[0]->grants_in_progress, 0);
+}
 TEST_F(homa_incoming, homa_create_grants__truncate_grant_to_message_length)
 {
 	struct homa_rpc *rpcs[1];
@@ -1967,7 +1987,8 @@ TEST_F(homa_incoming, homa_remove_from_grantable__basics)
 }
 TEST_F(homa_incoming, homa_remove_from_grantable__grant_to_other_message)
 {
-	mock_max_grants = 1;
+	self->homa.max_incoming = 100000;
+	self->homa.max_overcommit = 1;
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 1, 20000, 100);
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
