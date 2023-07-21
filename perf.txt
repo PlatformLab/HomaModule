@@ -85,7 +85,7 @@ order.
       messages at low load
 
 41. (December 2022) More analysis of SMI interrupts. Wrote smi.cc to gather
-    data on vents that cause all cores to stop simultaneously. Found 3 distinct
+    data on events that cause all cores to stop simultaneously. Found 3 distinct
     kinds of gaps on xl170 (Intel) CPUs:
     * 2.5 usec gaps every 4 ms
     * 17 usec gaps every 10 ms (however, these don't seem to be consistent:
@@ -95,7 +95,7 @@ order.
     gaps every 4 ms be scheduler wakeups?)
 
 40. (December 2022) NAPI can't process incoming jumbo frames at line rate
-    for 100 Gbps network (AMD CPUs): it takes at 850 ns to process each
+    for 100 Gbps network (AMD CPUs): it takes about 850 ns to process each
     packet (median), but packets are arriving every 700 ns.
     Most of the time is spent in __alloc_skb in two places:
     kmalloc_reserve for data:       370 ns
@@ -120,7 +120,7 @@ order.
 
 38. (December 2022) Restructured the receive buffer mechanism to mitigate
     the page_pool_alloc_pages_slow problem (see August 2022 below); packets
-    can now be copied to user space and their buffers release without waiting
+    can now be copied to user space and their buffers released without waiting
     for the entire message to be received. This has a significant impact on
     throughput. For "cp_node --one-way --client-max 4 --ports 1 --server-ports 1
     --port-threads 8" on the c6525-100g cluster:
@@ -307,8 +307,8 @@ TCP   P50    108.8 (3.5x)   192.7 (4.6x)  353.1 (7.5x)  385.7 (6.9x)
                      largest messages with modified W4 workload.
     gro_policy:      NORMAL always better; others 10-25% worse for short P99
     max_gro_skbs:    Larger is better; reducing to 5 hurts short P99 10-15%.
-                    However, anecdotal experience suggests that very large
-                    values can cause long delays for things like sending
+                     However, anecdotal experience suggests that very large
+                     values can cause long delays for things like sending
                      grants, so perhaps 10 is best?
     max_gso_size:    10K looks best; not much difference above that, 10-20%
                      degradation of short P99 at 5K
