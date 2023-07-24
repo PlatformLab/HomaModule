@@ -227,9 +227,11 @@ copy_out:
 			copied_from_seg = next_copied;
 			count += skb_bytes;
 		}
-		tt_record3("finished copying %d bytes for id %d, copied_out %d",
+		tt_record4("finished copying %d bytes for id %d, copied_out "
+				"%d, last offset %d",
 				count, rpc->id, ntohl(h->seg.offset)
-					+ ntohl(h->seg.segment_length));
+					+ ntohl(h->seg.segment_length),
+				ntohl(h->seg.offset));
 
 		/* Free skbs. */
 		for (i = 0; i < n; i++)
@@ -1006,7 +1008,8 @@ int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
 		/* Keep track of how many RPCs we have seen from each
 		 * distinct peer.
 		 */
-		for (int i = 0; i < num_peers; i++) {
+		int i;
+		for (i = 0; i < num_peers; i++) {
 			if (peers[i] == rpc->peer) {
 				rpc_count[i]++;
 				if (rpc_count[i] > homa->max_rpcs_per_peer)
@@ -1048,6 +1051,7 @@ int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
 int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 		int num_rpcs, struct grant_header *grants, int available)
 {
+	int rank;
 	int num_grants = 0;
 
 	/* Total bytes in additional grants that we've given out so far. */
@@ -1064,7 +1068,7 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 	if (homa->dynamic_windows)
 	    window = homa->max_incoming/(num_rpcs+1);
 
-	for (int rank = 0; rank < num_rpcs; rank++) {
+	for (rank = 0; rank < num_rpcs; rank++) {
 		int extra_levels, priority;
 		int received, new_grant, increment;
 		struct grant_header *grant;
