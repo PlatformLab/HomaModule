@@ -55,14 +55,25 @@ num_phys_cores = 0
 
 def get_core_mask():
     """
-    Returns a hexadecimal integer mask with a 1 bit for each core
-    (hyperthread) in this machine.
+    Returns a string describing all the cores (hyperthreads) available
+    on this machine. The string represents a bit mask containing one
+    or more 32-bit hex values: "val,val,...val".
     """
     read_cpu_info()
-    mask = 0
+    mask_words = [0]
     for cpu in cpu_info:
-        mask = mask | (1 << cpu["processor"])
-    return "%x" % (mask)
+        core = cpu["processor"]
+        word = core//32
+        while word >= len(mask_words):
+            mask_words.append(0);
+        mask_words[word] |= 1<<(core & 0x1f);
+    result = ""
+    while len(mask_words) > 0:
+        if len(result) != 0:
+            result += ",";
+        result += ("%x" % (mask_words[-1]))
+        mask_words.pop()
+    return result
 
 def get_interfaces():
     """
@@ -84,12 +95,8 @@ def get_interfaces():
             if available:
                 available += ", "
             available += current
-            match = re.match('^([a-z]*1f1[a-z0-9]*):', line)
-            if match:
-                interface = match.group(1)
-            match = re.match('^([a-z]*1f0[a-z0-9]*):', line)
-            if match:
-                interface = match.group(1)
+            if ('s1f1' in current) or ('s1f0' in current) or ('s0f0' in current):
+                interface = current
             continue
         if re.match('^[ ]+ inet 10\.0\.1\.', line):
             vlan = current
