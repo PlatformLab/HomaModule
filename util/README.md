@@ -74,7 +74,8 @@ phase of the RPC.
 
 **ttrange.py**: extracts timetrace entries from a given time range.
 
-**ttsoftirq.py**: analyzes SoftIRQ wakeup times in a timetrace.
+**ttsoftirq.py**: analyzes SoftIRQ wakeup times in a timetrace. Also measures
+total lifetime of receive buffers from GRO -> kfree_skb.
 
 **ttsum.py**: outputs statistics from a timetrace on the delay preceding each event.
 Can also produce a timeline for repeated operations such as processing a request

@@ -491,6 +491,21 @@ server_grant_handoff = sorted(dict_diffs(server['grant_gro_last'],
         server['grant_handoff'], "server grant_gro_last -> grant_handoff"))
 
 # Delays from SoftIRQ handoff until homa_softirq starts
+# Adjust data_handoff times to account for the fact that sometimes
+# homa_gro_receive calls homa_softirq directly on the same core without
+# an official handoff. When this happens, the data_handoff time will be
+# incorrectly set to a value greater than the softirq time; modify data_handoff
+# to be the same as softirq.
+handoff = server['data_handoff']
+softirq = server['data_softirq_start']
+for pkt in handoff:
+    if (pkt in softirq) and (handoff[pkt] > softirq[pkt]):
+        handoff[pkt] = softirq[pkt]
+handoff = client['data_handoff']
+softirq = client['data_softirq_start']
+for pkt in handoff:
+    if (pkt in softirq) and (handoff[pkt] > softirq[pkt]):
+        handoff[pkt] = softirq_start[pkt]
 client_data_softirq_start = sorted(dict_diffs(client['data_handoff'],
         client['data_softirq_start'], "client data_handoff -> softirq_start"))
 client_grant_softirq_start = sorted(dict_diffs(client['grant_handoff'],
