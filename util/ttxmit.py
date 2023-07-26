@@ -185,8 +185,9 @@ print("Total xmit gaps:               %9.1f us (%.1f%% of active time)" % (
         gap_usecs, 100.0*gap_usecs/active_usecs))
 print("Average xmit gap:              %9.1f us" % (gap_usecs/total_packets))
 grant_gap_usecs = sum(grant_gaps)
-print("Gaps caused by delayed grants: %9.1f us (%.1f%% of all gap time)" % (
-        grant_gap_usecs, 100.0*grant_gap_usecs/gap_usecs))
+if grant_gap_usecs > 0:
+    print("Gaps caused by delayed grants: %9.1f us (%.1f%% of all gap time)" % (
+            grant_gap_usecs, 100.0*grant_gap_usecs/gap_usecs))
 print("%d data packets (%.1f%% of all packets) were delayed waiting for grants"
         % (len(grant_gaps), 100*len(grant_gaps)/total_packets))
 print('%d data packets (%.1f%% of all packets) were delayed by gaps '
@@ -208,18 +209,19 @@ for gap in gaps:
     if count >= 10:
         break
 
-gaps.reverse()
-print("\nGap CDF (% of total gap time in gaps <= given size):")
-print("Percent    Gap")
-pctl = 0
-total_usecs = 0
-for gap in gaps:
-    total_usecs += gap[0]
-    if (total_usecs >= pctl*gap_usecs/100):
-        print("%5d   %5.1f us" % (pctl, gap[0]))
-        pctl += 10
-if pctl <= 100:
-    print("%5d   %5.1f us" % (100, gaps[-1][0]))
+if len(gaps) > 0:
+    gaps.reverse()
+    print("\nGap CDF (% of total gap time in gaps <= given size):")
+    print("Percent    Gap")
+    pctl = 0
+    total_usecs = 0
+    for gap in gaps:
+        total_usecs += gap[0]
+        if (total_usecs >= pctl*gap_usecs/100):
+            print("%5d   %5.1f us" % (pctl, gap[0]))
+            pctl += 10
+    if pctl <= 100:
+        print("%5d   %5.1f us" % (100, gaps[-1][0]))
 
 if len(grant_gaps) > 0:
     grant_gaps = sorted(grant_gaps)

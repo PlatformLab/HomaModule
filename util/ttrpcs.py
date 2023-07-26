@@ -369,7 +369,7 @@ if copy_out_time_with_del != 0:
 
 if len(xmit_times):
     xmit_times = sorted(xmit_times)
-    print("\nAverage time to xmit packet: %.1f us (P0: %.1f, P50: %.1f, "
+    print("\nAvg time to xmit packet (IP stack + driver): %.1f us (P0: %.1f, P50: %.1f, "
             "P90: %.1f, P100: %.1f)" % (sum(xmit_times)/len(xmit_times),
             xmit_times[0], xmit_times[len(xmit_times)//2],
             xmit_times[9*len(xmit_times)//10], xmit_times[-1]))
