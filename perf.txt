@@ -2,6 +2,43 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+48. (August 2023) Unexpected packet loss on c6525-100g cluster (AMD processors,
+    100 Gbps links). Under some conditions (such as "cp_node client --one-way
+    --workload 1000000" with dynamic_windows=1 and unsched_bytes=50000)
+    messages suffer packet losses starting around offset 700000 and
+    continuing intermittently until the end of the message. I was unable
+    to identify a cause, but increasing the size of the Mellanox driver's
+    page cache (MLX5E_CACHE_SIZE, see item 46 below) seems to make the problem
+    go away. Slight configuration changes, such as unsched_bytes=200000 also
+    make the problem go away.
+
+47. (July 2023) Intel vs. AMD processors. 100B roundtrips under best-case
+    conditions are about 8.7 us slower on AMD processors than Intel:
+      xl170:        14.5 us
+      c6525-100g:   23.2 us
+    Places where c6525-100g is slower (each way):
+      Packet prep (Homa):     1.2 us
+      IP stack and driver :   0.9 us
+      Network (interrupts?):  1.7 us
+      Thread wakeup:          0.6 us
+    TCP is also slower on AMD:  38.7 us vs. 23.3 us
+    Note: results on AMD are particularly sensitive to core placement of
+    various components.
+
+46. (July 2023) MLX buffer issues on c6525-100g cluster. The Mellanox
+    driver is configured with 256 pages (1 MB) of receive buffer space
+    for each channel. With a 100 Gbps network, this is about 80 us of
+    time. However, a single thread can copy data from buffers to user space
+    at only about 40 Gbps, which means that with longer messages, the
+    copy gets behind and packet lifetimes increase: with 1 MB messages,
+    median lifetime is 77 us and P90 lifetime (i.e. the later packets in
+    messages) are 115 us. With multiple messages from one host to another,
+    the buffer cache is running dry. When this happens, the Mellanox driver
+    allocates (and eventually frees) additional buffers, which adds
+    significant overhead. Bottom line: it's essential to use multiple
+    channels to keep up with a 100 Gbps network (this provides a larger
+    total buffer pool, plus more threads to copy to user space).
+
 45. (January 2023) Up until now, output messages had to be completely copied
     into sk_buffs before transmission could begin. Modified Homa to pipeline
     the copy from user space with packet transmission. This makes a significant
