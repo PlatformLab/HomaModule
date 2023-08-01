@@ -171,13 +171,12 @@ int homa_check_rpc(struct homa_rpc *rpc)
 				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, ntohl(resend.offset));
 	}
-	if (homa->verbose) {
+	if (homa->verbose)
 		printk(KERN_NOTICE "Homa %s RESEND to %s %s:%d for id %llu, "
-				"offset %d, length %d", us, them,
+				"offset %d, length %d\n", us, them,
 				homa_print_ipv6_addr(&rpc->peer->addr),
 				rpc->dport, rpc->id, ntohl(resend.offset),
 				ntohl(resend.length));
-	}
 	return 0;
 }
 
