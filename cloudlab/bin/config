@@ -39,6 +39,9 @@ node_num = None
 # Set by get_node_type.
 node_type = None
 
+# Number of nodes in the experiment (0 means uninitialized).
+num_nodes = 0
+
 # Contains information from /proc/cpuinfo with one entry for each
 # "processor" in /proc/cpuinfo. The entry is a dictionary with the
 # following entries (same names as in /proc/cpuinfo):
@@ -139,6 +142,21 @@ def get_node_type():
     f.close()
     print("Type of this node is %s" % (node_type))
     return node_type
+
+def get_num_nodes():
+    """
+    Returns the number of nodes in this experiment.
+    """
+
+    global num_nodes
+    if num_nodes > 0:
+        return num_nodes
+    f = open("/var/emulab/boot/hostmap")
+    for line in f:
+        if re.match('node([-0-9.]+)', line):
+            num_nodes += 1
+    f.close()
+    return num_nodes
 
 def read_cpu_info():
     """
@@ -363,7 +381,7 @@ while i < len(sys.argv):
         exit(0)
     elif arg == "default":
         config_homa("~/bin/homa.ko")
-        config_ipv6(10, vlan)
+        config_ipv6(get_num_nodes(), vlan)
         config_nic()
         config_power()
         config_rps()
@@ -375,7 +393,7 @@ while i < len(sys.argv):
         i += 1
         config_homa(mod)
     elif arg == "ipv6":
-        config_ipv6(10, vlan)
+        config_ipv6(get_num_nodes(), vlan)
     elif arg == "mtu":
         if i >= len(sys.argv):
             raise Exception("No argument provided for 'mtu' command");
