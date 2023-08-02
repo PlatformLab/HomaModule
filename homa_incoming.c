@@ -1027,6 +1027,7 @@ int homa_choose_rpcs_to_grant(struct homa *homa, struct homa_rpc **rpcs,
 		if (num_rpcs >= max_rpcs)
 			break;
     next_rpc:
+		continue;
 	}
 	return num_rpcs;
 }
