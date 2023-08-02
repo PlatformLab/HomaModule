@@ -240,6 +240,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "fifo_grant_increment",
+		.data		= &homa_data.fifo_grant_increment,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "flags",
 		.data		= &homa_data.flags,
 		.maxlen		= sizeof(int),
@@ -256,13 +263,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "grant_fifo_fraction",
 		.data		= &homa_data.grant_fifo_fraction,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "fifo_grant_increment",
-		.data		= &homa_data.fifo_grant_increment,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -298,13 +298,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "log_topic",
 		.data		= &log_topic,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "pacer_fifo_fraction",
-		.data		= &homa_data.pacer_fifo_fraction,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -375,6 +368,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "num_priorities",
 		.data		= &homa_data.num_priorities,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "pacer_fifo_fraction",
+		.data		= &homa_data.pacer_fifo_fraction,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
