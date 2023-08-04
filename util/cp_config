@@ -27,9 +27,9 @@ parser = get_parser(description=
         'varies.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['duty_cycle', 'fifo', 'gro', 'max_gro', 'max_gso',
+        choices=['fifo', 'gro', 'max_gro', 'max_gso',
                 'nic_queue', 'poll', 'ports', 'prios', 'receivers',
-                'rtt_bytes', 'throttle'],
+                'throttle', 'unsched_bytes'],
         required = True,
         help='Aspect of configuration to change')
 options = parser.parse_args()
@@ -41,14 +41,7 @@ if options.workload != "":
     load_info = [[options.workload, options.gbps]]
 
 specs = []
-if options.config == 'duty_cycle':
-    # Vary the duty_cycle configuration parameter
-    for duty in [100, 80, 60, 40]:
-        specs.append({'param': '.net.homa.duty_cycle',
-                'value': duty*10,
-                'exp_name': 'duty_%d' % (duty),
-                'label': '%d%% duty cycle' % (duty)})
-elif options.config == 'fifo':
+if options.config == 'fifo':
     # Vary the fraction of bandwidth reserved for the oldest message
     for fifo in [0, 5, 10, 20]:
         specs.append({'param': '.net.homa.grant_fifo_fraction',
@@ -117,13 +110,6 @@ elif options.config == 'receivers':
         name = "%d ports %d rcvrs" % (ports, receivers)
         specs.append({'options': o, 'exp_name': "p%dr%d" % (ports, receivers),
                 'label': "%d ports %d rcvrs" % (ports, receivers)})
-elif options.config == 'rtt_bytes':
-    # Vary rtt_bytes
-    for rtt in [40000, 60000, 70000, 100000]:
-        specs.append({'param': '.net.homa.rtt_bytes',
-                'value': rtt,
-                'exp_name': 'rttb_%d' % (rtt),
-                'label': 'rtt_bytes %d' % (rtt)})
 elif options.config == 'throttle':
     # Vary the cuttoff for short messages that bypass the throttle mechanism
     for cutoff in [100, 200, 500, 1000, 2000]:
@@ -131,6 +117,13 @@ elif options.config == 'throttle':
                 'value': cutoff,
                 'exp_name': 'throttle_%d' % (cutoff),
                 'label': 'throttle_min_bytes %d' % (cutoff)})
+elif options.config == 'unsched_bytes':
+    # Vary unsched_bytes
+    for unsched in [40, 60, 80, 100, 120]:
+        specs.append({'param': '.net.homa.unsched_bytes',
+                'value': unsched*1000,
+                'exp_name': 'unsched_%dk' % (unsched),
+                'label': 'unsched_bytes %dk' % (unsched)})
 
 # Keys are parameter names, values are old values to restore.
 old_values = {}

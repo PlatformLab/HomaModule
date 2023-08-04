@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2020 Stanford University
+# Copyright (c) 2020-2023 Stanford University
 #
 # Permission to use, copy, modify, and/or distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -24,7 +24,8 @@
 import sys
 
 # Ports to configure
-nodes = [104, 102]
+nodes = [81, 82, 83, 84, 85, 87, 88, 89, 91, 93, 94, 95, 96, 98, 100, 102,
+         104, 105, 106, 107, 108, 110, 111, 112, 114, 116, 117, 118, 120]
 ports = []
 prev_switch = -1
 for node in nodes:

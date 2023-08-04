@@ -1,4 +1,4 @@
-#!/bin/bash
+ls#!/bin/bash
 
 # Copyright (c) 2020-2023 Stanford University
 #
@@ -45,7 +45,7 @@ for ((i = $first ; i <= $last; i++)); do
     echo
     echo '*** Installing on' $node '***'
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
-    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/bin/ $node:bin/
+    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
     rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
     ssh $node 'echo $PATH'
     ssh $node 'config default'
