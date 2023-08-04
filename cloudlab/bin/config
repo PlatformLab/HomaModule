@@ -21,11 +21,16 @@ parameters, and configuring the system in various ways such as setting
 power management parameters and enabling RPS.
 """
 
+import fcntl
+import functools
 from glob import glob
 import os
 import re
 import subprocess
 import sys
+import time
+
+from switch import *
 
 # Names for the main network interface and VLAN for this host. Set by
 # get_interfaces
@@ -41,6 +46,9 @@ node_type = None
 
 # Number of nodes in the experiment (0 means uninitialized).
 num_nodes = 0
+
+# Cached result of get_node_names.
+node_names = []
 
 # Contains information from /proc/cpuinfo with one entry for each
 # "processor" in /proc/cpuinfo. The entry is a dictionary with the
@@ -142,6 +150,32 @@ def get_node_type():
     f.close()
     print("Type of this node is %s" % (node_type))
     return node_type
+
+def get_node_names():
+    """
+    Return a list, in order of node number (node0 first) containing the
+    name of each node in the experiment, such as hp083.
+    """
+    global node_names
+    if len(node_names) > 0:
+        return node_names
+    node_map = {}
+    f = open("/var/emulab/boot/ltpmap")
+    for line in f:
+        match = re.search('H node([0-9]+) ([^ ]+)', line)
+        if match:
+            num = int(match.group(1))
+            node_map[int(match.group(1))] = match.group(2)
+    f.close()
+    if len(node_map) != get_num_nodes():
+        raise Exception("get_node_names found only %d nodes, but expected %d"
+                % (len(node_map), get_num_nodes()))
+    node_names = []
+    for i in range(len(node_map)):
+        if not i in node_map:
+            raise Exception("Couldn't find host name for node%d" % (i))
+        node_names.append(node_map[i])
+    return node_names
 
 def get_num_nodes():
     """
@@ -322,14 +356,32 @@ def config_power():
         # C-states are disabled, then so is Turbo mode, and that will hurt
         # peak peformance.
         print("Configuring power settings for Intel CPUs")
-        subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
-                "performance"], check=True)
+        try:
+            subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
+                    "performance"], check=True)
+        except subprocess.CalledProcessError:
+            print("*** cpupower error; ignoring for now")
     elif (type == "c6525-100g") or (type == "c6525-25g"):
         # AMD 7402P (EPYC Rome processor); don't know of any appropriate
         # power setting changes
         return
     else:
         raise Exception("Can't configure power: unknown node type %s" % (type))
+
+def config_reset_switch_ports():
+    """
+    Reset the configuration of the egress ports at the top-of-rack switch
+    to undo a previous config_switch_ports.
+    """
+    s = Switch(True)
+    for name in get_node_names()[2:4]:
+        match = re.match('[^0-9]+([0-9]+)', name)
+        if not match:
+            raise Exception("bad host name %s: expected number at end" % (name))
+        port = int(match.group(1)) % 40
+        print("Resetting TOR port for %s (port %d):" % (name, port))
+        s.reset_port(port)
+    s.close()
 
 def config_rps():
     """
@@ -354,23 +406,46 @@ def config_rps():
     print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
+def config_switch_ports():
+    """
+    Modify the configuration of the egress ports at the top-of-rack switch
+    to enable optimal Homa performance.
+    """
+    s = Switch(True)
+    for name in get_node_names()[2:4]:
+        match = re.match('[^0-9]+([0-9]+)', name)
+        if not match:
+            raise Exception("bad host name %s: expected number at end" % (name))
+        port = int(match.group(1)) % 40
+        print("Configuring TOR port for %s (port %d):" % (name, port))
+        s.config_port(port)
+    s.close()
+
 def print_help():
     print("Performs any of several configuration tasks to prepare a node for")
     print("running Homa applications.")
     print("Usage: config feature feature ...")
     print("\nEach feature may be one of the following:")
-    print("    --help             Print this help text and exit")
-    print("    default            Normal configuration for Homa: equivalent to")
-    print("                       'homa ~/bin/homa.ko ipv6 nic power rps'")
-    print("    homa HHH           Install and configure the Homa kernel driver;")
+    print("    --help              Print this help text and exit")
+    print("    default             Normal configuration for Homa: equivalent to")
+    print("                        'homa ~/bin/homa.ko ipv6 nic power rps'")
+    print("    homa HHH            Install and configure the Homa kernel driver;")
     print("                       HHH is the path to the homa.ko file")
-    print("    ipv6               Set up routing information so that IPv6")
-    print("                       addresses can be used.")
-    print("    mtu NNN            Set the maximum packet length to NNN")
-    print("    nic                Configure the NIC for optimal Homa performance")
-    print("    power              Configure power management (e.g., C-states)")
-    print("                       for best Homa performance")
-    print("    rps                Set up (and enable) RPS and RFS")
+    print("    ipv6                Set up routing information so that IPv6")
+    print("                        addresses can be used.")
+    print("    mtu NNN             Set the maximum packet length to NNN")
+    print("    node_names          Print out the names of all the nodes in the experiment")
+    print("    nic                 Configure the NIC for optimal Homa performance")
+    print("    power               Configure power management (e.g., C-states)")
+    print("                        for best Homa performance")
+    print("    reset_switch_ports  Issue commands to TOR switch to restore original")
+    print("                        port settings")
+    print("    rps                 Set up (and enable) RPS and RFS")
+    print("    switch_ports        Issue commands to TOR switch to configure egress")
+    print("                        ports for Homa")
+
+# Force print to always flush (turn off line buffering).
+print = functools.partial(print, flush=True)
 
 i = 1
 while i < len(sys.argv):
@@ -403,9 +478,16 @@ while i < len(sys.argv):
         config_mtu(mtu)
     elif arg == "nic":
         config_nic()
+    elif arg == "node_names":
+        for name in get_node_names():
+            print(name)
     elif arg == "power":
         config_power()
+    elif arg == "reset_switch_ports":
+        config_reset_switch_ports()
     elif arg == "rps":
         config_rps()
+    elif arg == "switch_ports":
+        config_switch_ports()
     else:
         raise Exception("Unknown feature '%s'" % (arg))
