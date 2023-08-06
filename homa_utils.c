@@ -1200,6 +1200,7 @@ char *homa_print_metrics(struct homa *homa)
 			cpu_khz);
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &homa_cores[core]->metrics;
+		__s64 delta;
 		homa_append_metric(homa,
 				"core                      %15d  "
 				"Core id for following metrics\n",
@@ -1322,10 +1323,19 @@ char *homa_print_metrics(struct homa *homa)
 				"send_calls                %15llu  "
 				"Total invocations of send kernel call\n",
 				m->send_calls);
+		// It is possible for us to get here at a time when a
+		// thread has been blocked for a long time and has
+		// recorded blocked_cycles, but hasn't finished the
+		// system call so recv_cycles hasn't been incremented
+		// yet. If that happens, just record 0 to prevent
+		// underflow errors.
+		delta = m->recv_cycles - m->blocked_cycles;
+		if (delta < 0)
+			delta = 0;
 		homa_append_metric(homa,
 				"recv_cycles               %15llu  "
 				"Unblocked time spent in recvmsg kernel call\n",
-				m->recv_cycles - m->blocked_cycles);
+				delta);
 		homa_append_metric(homa,
 				"recv_calls                %15llu  "
 				"Total invocations of recvmsg kernel call\n",
