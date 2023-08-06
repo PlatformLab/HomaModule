@@ -196,7 +196,7 @@ for symbol in symbols:
                   "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
         if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
-            if (prefix + "_misses") in deltas:
+            if ((prefix + "_misses") in deltas) and (deltas[prefix + "_misses"] != 0):
                 ns = (delta/deltas[prefix + "_misses"])/(cpu_khz * 1e-06)
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
