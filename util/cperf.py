@@ -955,7 +955,7 @@ def read_rtts(file, rtts, min_rtt = 0.0, link_mbps = 0.0):
             continue
         words = stripped.split()
         if (len(words) < 2):
-            print("Line in %s too short (need at least 2 columns): '%s'" %
+            log("Line in %s too short (need at least 2 columns): '%s'" %
                     (file, line))
             continue
         length = int(words[0])
@@ -1056,7 +1056,7 @@ def get_digest(experiment):
         avg_slowdowns.append([file, slowdown])
         sys.stdout.write("#")
         sys.stdout.flush()
-    print("")
+    log("")
 
     # See if some nodes have anomalous performance.
     overall_avg = 0.0
@@ -1065,8 +1065,25 @@ def get_digest(experiment):
     overall_avg = overall_avg/len(avg_slowdowns)
     for info in avg_slowdowns:
         if (info[1] < 0.8*overall_avg) or (info[1] > 1.2*overall_avg):
-            print("Outlier alt-slowdown in %s: %.1f vs. %.1f overall average"
+            log("Outlier alt-slowdown in %s: %.1f vs. %.1f overall average"
                     % (info[0], info[1], overall_avg))
+
+    # Look for nodes with core utilization significantly above the median.
+    metrics_files = sorted(glob.glob(log_dir + ("/%s-*.metrics" % (experiment))))
+    core_util = {}
+    for file in metrics_files:
+        f = open(file)
+        for line in f:
+            match = re.match('Total Core Utilization *([0-9.]+)', line)
+            if match:
+                core_util[file] = float(match.group(1))
+    if len(core_util) == 0:
+        log("Couldn't find core utilization in metrics files")
+    median = sorted(list(core_util.values()))[len(core_util)//2]
+    for file, util in core_util.items():
+        if util > 1.5*median:
+            log("Outlier core utilization in %s: %.1f vs. %.1f median"
+                    % (file, util, median))
 
     if len(unloaded_p50) == 0:
         raise Exception("No unloaded data: must invoke set_unloaded")
