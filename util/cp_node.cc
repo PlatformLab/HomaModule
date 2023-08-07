@@ -66,7 +66,6 @@ uint32_t client_max = 1;
 uint32_t client_port_max = 1;
 int client_ports = 0;
 int first_port = 4000;
-int first_server = 1;
 bool is_server = false;
 int id = -1;
 double net_gbps = 0.0;
@@ -76,7 +75,6 @@ int port_receivers = 1;
 int port_threads = 1;
 std::string protocol_string;
 const char *protocol;
-int server_nodes = 1;
 int server_ports = 1;
 bool verbose = false;
 std::string workload_string;
@@ -86,6 +84,9 @@ bool client_iovec = false;
 bool server_iovec = false;
 int inet_family = AF_INET;
 int server_core = -1;
+
+/* Node ids for clients to send requests to. */
+std::vector<int> server_ids;
 
 /** @rand_gen: random number generator. */
 static std::mt19937 rand_gen(
@@ -138,10 +139,10 @@ struct conn_id {
 std::vector<sockaddr_in_union> server_addrs;
 
 /**
- * @server_ids: for each entry in @server_addrs, a connection identifier
+ * @server_conns: for each entry in @server_addrs, a connection identifier
  * with all fields filled in except client_port, which will be 0.
  */
-std::vector<conn_id> server_ids;
+std::vector<conn_id> server_conns;
 
 /**
  * @freeze: one entry for each node index; 1 means messages to that
@@ -284,7 +285,7 @@ void print_help(const char *name)
 		"                      client machine (divided equally among client ports)\n"
 		"                      (default: %d)\n"
 		"    --first-port      Lowest port number to use for each server (default: %d)\n"
-		"    --first-server    Id of first server node (default: %d, meaning node%d)\n"
+		"    --first-server    Id of first server node (default: 1, meaning node1)\n"
 		"    --gbps            Target network utilization, including only message data,\n"
 		"                      Gbps; 0 means send continuously (default: %.1f)\n"
 		"    --id              Id of this node; a value of I >= 0 means requests will\n"
@@ -300,9 +301,12 @@ void print_help(const char *name)
 		"                      port (default: %d). Zero means senders wait for their\n"
 		"                      own requests synchronously\n"
 		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --server-nodes    Number of nodes running server threads (default: %d)\n"
+		"    --server-nodes    Number of nodes running server threads (default: 1)\n"
 		"    --server-ports    Number of server ports on each server node\n"
 		"                      (default: %d)\n"
+		"    --servers         Comma-separated list of integer ids to use as server\n"
+		"                      nodes; if specified, overrides --first-server and\n"
+		"                      --server-nodes"
 		"    --unloaded        Nonzero means run test in special mode for collecting\n"
 		"                      baseline data, with the given number of measurements\n"
 		"                      per length in the distribution (Homa only, default: 0)\n"
@@ -335,9 +339,8 @@ void print_help(const char *name)
 		"                      print has been invoked\n"
 		"     kfreeze          Freeze the kernel's internal timetrace\n"
 		"     print file       Dump timetrace information to file\n",
-		client_max, first_port, first_server, first_server, net_gbps,
-		client_ports, port_receivers, protocol,
-		server_nodes, server_ports, workload,
+		client_max, first_port, net_gbps, client_ports,
+		port_receivers, protocol, server_ports, workload,
 		first_port, protocol, port_threads, server_ports);
 }
 
@@ -501,11 +504,10 @@ struct message_header {
 void init_server_addrs(void)
 {
 	server_addrs.clear();
-	server_ids.clear();
+	server_conns.clear();
 	freeze.clear();
 	first_id.clear();
-	for (int node = first_server; node < first_server + server_nodes;
-			node++) {
+	for (int node: server_ids) {
 		char host[100];
 		struct addrinfo hints;
 		struct addrinfo *matching_addresses;
@@ -533,7 +535,7 @@ void init_server_addrs(void)
 		for (int thread = 0; thread < server_ports; thread++) {
 			dest->in4.sin_port = htons(first_port + thread);
 			server_addrs.push_back(*dest);
-			server_ids.emplace_back(node, thread, id, 0);
+			server_conns.emplace_back(node, thread, id, 0);
 		}
 		while (((int) freeze.size()) <= node)
 			freeze.push_back(0);
@@ -1043,6 +1045,7 @@ homa_server::homa_server(int port, int id, int inet_family,
  */
 homa_server::~homa_server()
 {
+	log(NORMAL, "Homa server on port %d shutting down\n", port);
 	shutdown(fd, SHUT_RDWR);
 	for (std::thread &thread: threads)
 		thread.join();
@@ -1078,8 +1081,12 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 			length = receiver.receive(HOMA_RECVMSG_REQUEST, 0);
 			if (length >= 0)
 				break;
-			if ((errno == EBADF) || (errno == ESHUTDOWN))
+			if ((errno == EBADF) || (errno == ESHUTDOWN)) {
+				log(NORMAL, "Homa server thread %s exiting "
+						"(socket closed)\n",
+						thread_name);
 				return;
+			}
 			else if ((errno != EINTR) && (errno != EAGAIN))
 				log(NORMAL, "recvmsg failed: %s\n",
 						strerror(errno));
@@ -1381,6 +1388,7 @@ void tcp_server::server(int thread_id)
 			}
 		}
 	}
+	log(NORMAL, "TCP server thread %s exiting\n", thread_name);
 }
 
 /**
@@ -1651,7 +1659,7 @@ client::~client()
 
 /**
  * check_completion() - Make sure that all outstanding requests have
- * completed; if not, generate a log message.
+ * completed; if not, generate log messages.
  * @protocol:  String that identifies the current protocol for the log
  *             message, if any.
  */
@@ -1666,7 +1674,9 @@ void client::check_completion(const char *protocol)
 			continue;
 		if (!server_info.empty())
 			server_info.append(", ");
-		snprintf(buffer, sizeof(buffer), "s%lu: %d", i, diff);
+		snprintf(buffer, sizeof(buffer), "node%d.%d: %d",
+				server_conns[i].server,
+				server_conns[i].server_port, diff);
 		server_info.append(buffer);
 	}
 	if ((incomplete != 0) || !server_info.empty())
@@ -2002,7 +2012,7 @@ void homa_client::sender()
 		if (header->length < sizeof32(*header))
 			header->length = sizeof32(*header);
 		rinfos[slot].request_length = header->length;
-		header->cid = server_ids[server];
+		header->cid = server_conns[server];
 		header->cid.client_port = id;
 		header->freeze = freeze[header->cid.server];
 		header->short_response = one_way;
@@ -2019,7 +2029,7 @@ void homa_client::sender()
 				&server_addrs[server], &rpc_id, 0);
 		} else
 			status = homa_send(fd, sender_buffer, header->length,
-                &server_addrs[server], &rpc_id, 0);
+		&server_addrs[server], &rpc_id, 0);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2078,7 +2088,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 		header->length = HOMA_MAX_MESSAGE_LENGTH;
 	if (header->length < sizeof32(*header))
 		header->length = sizeof32(*header);
-	header->cid = server_ids[server];
+	header->cid = server_conns[server];
 	header->cid.client_port = id;
 	start = rdtsc();
 	status = homa_send(fd, buffer, header->length,
@@ -2397,7 +2407,7 @@ void tcp_client::sender()
 		if ((header.length > HOMA_MAX_MESSAGE_LENGTH) && tcp_trunc)
 			header.length = HOMA_MAX_MESSAGE_LENGTH;
 		rinfos[slot].request_length = header.length;
-		header.cid = server_ids[server];
+		header.cid = server_conns[server];
 		header.cid.client_port = id;
 		header.msg_id = slot;
 		header.freeze = freeze[header.cid.server];
@@ -2610,7 +2620,8 @@ void client_stats(uint64_t now)
 			backups += tclient->backups;
 	}
 	std::sort(cdf_times, cdf_times + cdf_index);
-	if ((last_stats_time != 0) && (request_bytes != last_client_bytes_out)) {
+	if ((last_stats_time != 0) && ((request_bytes != last_client_bytes_out)
+				|| (outstanding_rpcs != 0))){
 		double elapsed = to_seconds(now - last_stats_time);
 		double rpcs = (double) (client_rpcs - last_client_rpcs);
 		double delta_out = (double) (request_bytes
@@ -2680,16 +2691,18 @@ void log_stats()
  */
 int client_cmd(std::vector<string> &words)
 {
+	int first_server = 1;
+	int server_nodes = 1;
+	std::string servers;
+
 	client_iovec = false;
 	client_max = 1;
 	client_ports = 1;
 	first_port = 4000;
-	first_server = 1;
 	inet_family = AF_INET;
 	net_gbps = 0.0;
 	port_receivers = 1;
 	protocol = "homa";
-	server_nodes = 1;
 	tcp_trunc = true;
 	one_way = false;
 	unloaded = 0;
@@ -2752,6 +2765,13 @@ int client_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, &server_ports, option, "integer"))
 				return 0;
 			i++;
+		} else if (strcmp(option, "--servers") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n", option);
+				return 0;
+			}
+			servers = words[i+1];
+			i++;
 		} else if (strcmp(option, "--unloaded") == 0) {
 			if (!parse(words, i+1, &unloaded, option, "integer"))
 				return 0;
@@ -2770,6 +2790,32 @@ int client_cmd(std::vector<string> &words)
 			return 0;
 		}
 	}
+
+	/* Figure out which nodes to use for servers (--servers,
+	 * --server-ports, --first-server).
+	 */
+	server_ids.clear();
+	if (!servers.empty()) {
+		std::vector<string> ids;
+
+		split(servers.c_str(), ',', ids);
+		for (std::string &id_string: ids) {
+			char *end;
+			int id = strtoul(id_string.c_str(), &end, 10);
+			if (*end != 0) {
+				printf("Bad server id '%s' in --servers "
+						"option '%s'\n",
+						id_string.c_str(),
+						servers.c_str());
+				return 0;
+			}
+			server_ids.push_back(id);
+		}
+	} else {
+		for (int i = 0; i < server_nodes; i++)
+			server_ids.push_back(first_server + i);
+	}
+
 	init_server_addrs();
 	client_port_max = client_max/client_ports;
 	if (client_port_max < 1)
@@ -2841,8 +2887,8 @@ int dump_times_cmd(std::vector<string> &words)
 			time_buffer);
 	fprintf(f, "# --protocol %s, --workload %s, --gpbs %.1f --threads %d,\n",
 			protocol, workload, net_gbps, client_ports);
-	fprintf(f, "# --server-nodes %d --server-ports %d, --client-max %d\n",
-			server_nodes, server_ports, client_max);
+	fprintf(f, "# --server-nodes %lu --server-ports %d, --client-max %d\n",
+			server_ids.size(), server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");
 	for (client *client: clients) {
 		__u32 start = client->total_responses % NUM_CLIENT_STATS;
@@ -3059,6 +3105,7 @@ int stop_cmd(std::vector<string> &words)
 			for (client *client: clients)
 				client->stop_sender();
 		} else if (strcmp(option, "servers") == 0) {
+			log(NORMAL, "stop command deleting servers\n");
 			for (homa_server *server: homa_servers)
 				delete server;
 			homa_servers.clear();
