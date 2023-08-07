@@ -6,6 +6,8 @@ PATH=/opt/gradle-7.3/bin:/$USER/install/bin:~/homaModule/util:~/homaModule/perf:
 
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib/x86_64-linux-gnu
 
+export PYTHONPATH=/users/$USER/homaModule/util:/users/$USER/bin
+
 export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 
 # If not running interactively, don't do anything
