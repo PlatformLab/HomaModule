@@ -18,6 +18,11 @@
 
 #include <netinet/in.h>
 
+#ifdef __cplusplus
+#include <string>
+#include <vector>
+#endif
+
 #include "homa.h"
 
 #ifdef __cplusplus
@@ -33,10 +38,13 @@ extern int     check_message(struct homa_recvmsg_args *control,
 extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);
 extern void    pin_thread(int core);
-extern void    print_dist(uint64_t times[], int count);
-extern void    seed_buffer(void *buffer, size_t length, int seed);
 extern const char*
                print_address(const sockaddr_in_union *addr);
+extern void    print_dist(uint64_t times[], int count);
+extern void    seed_buffer(void *buffer, size_t length, int seed);
+#ifdef __cplusplus
+extern void    split(const char *s, char sep, std::vector<std::string> &dest);
+#endif
 extern double  to_seconds(uint64_t cycles);
 
 /**

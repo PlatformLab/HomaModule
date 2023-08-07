@@ -282,3 +282,28 @@ double to_seconds(uint64_t cycles)
 {
     return ((double) (cycles))/get_cycles_per_sec();
 }
+
+/**
+ * split() - Splits a string into substrings separated by a given character.
+ * @s:        String to split
+ * @sep:      Separater character
+ * @dest:     Substrings are appended to this vector (if @sep doesn't
+ *            appear in @s, then @s is appended).
+ */
+void split(const char *s, char sep, std::vector<std::string> &dest)
+{
+	while (1) {
+		const char *end;
+		while (*s == sep)
+			s++;
+		if (*s == 0)
+			break;
+		end = strchr(s, sep);
+		if (end == NULL) {
+			dest.emplace_back(s);
+			break;
+		}
+		dest.emplace_back(s, end-s);
+		s = end;
+	}
+}
