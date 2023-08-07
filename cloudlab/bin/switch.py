@@ -152,3 +152,12 @@ class Switch:
                 % (port))
         self.do_cmd("interface ethernet 1/%d no traffic-class 1 congestion-control"
                 % (port))
+
+    def set_buffer_limit(self, mbytes):
+        """
+        Configure the switch to limit the total amount of buffer space
+        in egress ports to a given amount.
+        mbytes:   Desired limit, in Mbytes
+        """
+        self.do_cmd("advance buffer management force")
+        self.do_cmd("pool ePool0 size %.3fM type dynamic" % (mbytes))

@@ -285,8 +285,8 @@ def config_homa(mod):
     if type == "xl170":
         set_sysctl("link_mbps", "25000")
         set_sysctl("max_nic_queue_ns", "2000")
-        set_sysctl("unsched_bytes", "150000")
-        set_sysctl("max_incoming", "1200000")
+        set_sysctl("unsched_bytes", "60000")
+        set_sysctl("max_incoming", "480000")
         set_sysctl("max_gso_size", "10000")
     elif type == "c6525-100g":
         set_sysctl("link_mbps", "100000")
@@ -297,8 +297,8 @@ def config_homa(mod):
     elif type == "c6525-25g":
         set_sysctl("link_mbps", "25000")
         set_sysctl("max_nic_queue_ns", "5000")
-        set_sysctl("unsched_bytes", "150000")
-        set_sysctl("max_incoming", "1200000")
+        set_sysctl("unsched_bytes", "60000")
+        set_sysctl("max_incoming", "480000")
         set_sysctl("max_gso_size", "10000")
     else:
         raise Exception("Can't configure Homa: unknown node type %s" % (type))
@@ -374,7 +374,7 @@ def config_reset_switch_ports():
     to undo a previous config_switch_ports.
     """
     s = Switch(True)
-    for name in get_node_names()[2:4]:
+    for name in get_node_names():
         match = re.match('[^0-9]+([0-9]+)', name)
         if not match:
             raise Exception("bad host name %s: expected number at end" % (name))
@@ -406,13 +406,23 @@ def config_rps():
     print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
+def config_switch_buffer_limit(mbytes):
+    """
+    Restrict the total amount of buffer space available for egress ports
+    in the top-of-rack switch.
+    mbytes:  New limit, in Mbytes
+    """
+    s = Switch(True)
+    s.set_buffer_limit(mbytes)
+    s.close()
+
 def config_switch_ports():
     """
     Modify the configuration of the egress ports at the top-of-rack switch
     to enable optimal Homa performance.
     """
     s = Switch(True)
-    for name in get_node_names()[2:4]:
+    for name in get_node_names():
         match = re.match('[^0-9]+([0-9]+)', name)
         if not match:
             raise Exception("bad host name %s: expected number at end" % (name))
@@ -426,23 +436,26 @@ def print_help():
     print("running Homa applications.")
     print("Usage: config feature feature ...")
     print("\nEach feature may be one of the following:")
-    print("    --help              Print this help text and exit")
-    print("    default             Normal configuration for Homa: equivalent to")
-    print("                        'homa ~/bin/homa.ko ipv6 nic power rps'")
-    print("    homa HHH            Install and configure the Homa kernel driver;")
-    print("                       HHH is the path to the homa.ko file")
-    print("    ipv6                Set up routing information so that IPv6")
-    print("                        addresses can be used.")
-    print("    mtu NNN             Set the maximum packet length to NNN")
-    print("    node_names          Print out the names of all the nodes in the experiment")
-    print("    nic                 Configure the NIC for optimal Homa performance")
-    print("    power               Configure power management (e.g., C-states)")
-    print("                        for best Homa performance")
-    print("    reset_switch_ports  Issue commands to TOR switch to restore original")
-    print("                        port settings")
-    print("    rps                 Set up (and enable) RPS and RFS")
-    print("    switch_ports        Issue commands to TOR switch to configure egress")
-    print("                        ports for Homa")
+    print("    --help                 Print this help text and exit")
+    print("    default                Normal configuration for Homa: equivalent to")
+    print("                           'homa ~/bin/homa.ko ipv6 nic power rps'")
+    print("    homa HHH               Install and configure the Homa kernel driver;")
+    print("                           HHH is the path to the homa.ko file")
+    print("    ipv6                   Set up routing information so that IPv6")
+    print("                           addresses can be used.")
+    print("    mtu NNN                Set the maximum packet length to NNN")
+    print("    node_names             Print out the names of all the nodes in ")
+    print("                           the experiment")
+    print("    nic                    Configure the NIC for optimal Homa performance")
+    print("    power                  Configure power management (e.g., C-states)")
+    print("                           for best Homa performance")
+    print("    reset_switch_ports     Issue commands to TOR switch to restore ")
+    print("                           original port settings")
+    print("    rps                    Set up (and enable) RPS and RFS")
+    print("    switch_buffer_limit MB Set max egress buffer space in TOR switch to")
+    print("                           MB Mbytes")
+    print("    switch_ports           Issue commands to TOR switch to configure ")
+    print("                           egress ports for Homa")
 
 # Force print to always flush (turn off line buffering).
 print = functools.partial(print, flush=True)
@@ -487,6 +500,12 @@ while i < len(sys.argv):
         config_reset_switch_ports()
     elif arg == "rps":
         config_rps()
+    elif arg == "switch_buffer_limit":
+        if i >= len(sys.argv):
+            raise Exception("No argument provided for 'switch_buffer_limit' command");
+            exit(1)
+        config_switch_buffer_limit(float(sys.argv[i]))
+        i += 1
     elif arg == "switch_ports":
         config_switch_ports()
     else:
