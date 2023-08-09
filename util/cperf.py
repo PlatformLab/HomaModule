@@ -69,6 +69,12 @@ alt_slowdown = False
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
 
+# The --delete-rtts command-line option.
+delete_rtts = False
+
+# The CloudLab node type for this node (e.g. xl170)
+node_type = None
+
 # Defaults for command-line options; assumes that servers and clients
 # share nodes.
 default_defaults = {
@@ -230,6 +236,8 @@ def get_parser(description, usage, defaults = {}):
             help='Name to use for the cperf log file (default: cperf.log)')
     parser.add_argument('-d', '--debug', dest='debug', action='store_true',
             help='Pause after starting servers to enable debugging setup')
+    parser.add_argument('--delete-rtts', dest='delete_rtts', action='store_true',
+            help='Delete .rtt files after reading, in order to save disk space')
     parser.add_argument('-h', '--help', action='help',
             help='Show this help message and exit')
     parser.add_argument('-6', '--ipv6', dest='ipv6', action='store_const',
@@ -314,7 +322,7 @@ def init(options):
     """
     Initialize various global state, such as the log file.
     """
-    global alt_slowdown, log_dir, log_file, verbose
+    global alt_slowdown, log_dir, log_file, verbose, delete_rtts
     log_dir = options.log_dir
     alt_slowdown = options.alt_slowdown
     if not options.plot_only:
@@ -366,13 +374,15 @@ def init(options):
             'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
             'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
             'throttle_min_bytes', 'timeout_resends', 'unsched_bytes']:
-        result = subprocess.run(['sysctl', '-n', '.net.homa.' + param],
-                capture_output = True, encoding="utf-8")
-        vlog("  %-20s %s" % (param, result.stdout.rstrip()))
+        result = do_subprocess(['sysctl', '-n', '.net.homa.' + param])
+        vlog("  %-20s %s" % (param, result))
 
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
         do_ssh(["config", "mtu", str(options.mtu)], range(0, options.num_nodes))
+
+    if options.delete_rtts:
+        delete_rtts = True
 
 def wait_output(string, nodes, cmd, time_limit=10.0):
     """
@@ -473,7 +483,7 @@ def stop_nodes():
     """
     global active_nodes, server_nodes
     for id, popen in homa_prios.items():
-        subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no",
+        do_subprocess(["ssh", "-o", "StrictHostKeyChecking=no",
                 "node%d" % id, "sudo", "pkill", "homa_prio"])
         try:
             popen.wait(5.0)
@@ -488,7 +498,7 @@ def stop_nodes():
     for node in active_nodes.values():
         node.wait(5.0)
     for id in active_nodes:
-        subprocess.run(["rsync", "-rtvq", "node%d:node.log" % (id),
+        do_subprocess(["rsync", "-rtvq", "node%d:node.log" % (id),
                 "%s/node%d.log" % (log_dir, id)])
     active_nodes.clear()
     server_nodes = range(0,0)
@@ -529,8 +539,7 @@ def do_ssh(command, nodes):
     """
     vlog("ssh command on nodes %s: %s" % (str(nodes), " ".join(command)))
     for id in nodes:
-        subprocess.run(["ssh", "node%d" % id] + command,
-                stdout=subprocess.DEVNULL)
+        do_subprocess(["ssh", "node%d" % id] + command)
 
 def get_sysctl_parameter(name):
     """
@@ -539,8 +548,7 @@ def get_sysctl_parameter(name):
 
     name:      name of the desired configuration parameter
     """
-    output = subprocess.run(["sysctl", name], stdout=subprocess.PIPE,
-            encoding="utf-8").stdout.rstrip()
+    output = do_subprocess(["sysctl", name])
     match = re.match('.*= (.*)', output)
     if not match:
          raise Exception("Couldn't parse sysctl output: %s" % output)
@@ -558,8 +566,36 @@ def set_sysctl_parameter(name, value, nodes):
     vlog("Setting Homa parameter %s to %s on nodes %s" % (name, value,
             str(nodes)))
     for id in nodes:
-        subprocess.run(["ssh", "node%d" % id, "sudo", "sysctl",
-                "%s=%s" % (name, value)], stdout=subprocess.DEVNULL)
+        do_subprocess(["ssh", "node%d" % id, "sudo", "sysctl",
+                "%s=%s" % (name, value)])
+
+def get_node_type():
+    """
+    Returns the node type for this machine.
+    """
+
+    global node_type
+    if node_type:
+        return node_type
+    f = open("/var/emulab/boot/nodetype")
+    node_type = f.read().strip()
+    f.close()
+    return node_type
+
+def do_subprocess(words):
+    """
+    Invoke subprocess.run to run args in a child process and then
+    check the results. Log any errors that are detected. Returns
+    stdout from the child (with trailing newlines removed).
+
+    words:   List of words for the command to run.
+    """
+    result = subprocess.run(words, capture_output=True, encoding="utf-8")
+    if (result.returncode != 0):
+        log("Command %s exited with status %d" % (words, result.returncode))
+    if (result.stderr != ""):
+        log("Error output from %s: %s" % (words, result.stderr.rstrip()))
+    return result.stdout.rstrip()
 
 def start_servers(ids, options):
     """
@@ -638,8 +674,8 @@ def run_experiment(name, clients, options):
             else:
                 trunc = ''
             command = "client --ports %d --port-receivers %d --server-ports %d " \
-                    "--workload %s --server-nodes %d --first-server %d " \
-                    "--gbps %.3f %s --client-max %d --protocol %s --id %d %s" % (
+                    "--workload %s --servers %s --gbps %.3f %s --client-max %d " \
+                    "--protocol %s --id %d %s" % (
                     options.tcp_client_ports,
                     options.tcp_port_receivers,
                     options.tcp_server_ports,
@@ -665,8 +701,7 @@ def run_experiment(name, clients, options):
             time.sleep(2)
             vlog("Recording initial metrics")
             for id in active_nodes:
-                subprocess.run(["ssh", "node%d" % (id), "metrics.py"],
-                        stdout=subprocess.DEVNULL)
+                do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
@@ -701,7 +736,7 @@ def run_experiment(name, clients, options):
     do_cmd("stop clients", clients)
     if not "no_rtt_files" in options:
         for id in clients:
-            subprocess.run(["rsync", "-rtvq", "node%d:rtts" % (id),
+            do_subprocess(["rsync", "-rtvq", "node%d:rtts" % (id),
                     "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
 def scan_log(file, node, experiments):
@@ -789,8 +824,9 @@ def scan_log(file, node, experiments):
             if match:
                 if not "backups" in node_data:
                     node_data["backups"] = []
-                node_data["backups"].append(float(match.group(1))
-                        /float(match.group(2)))
+                total = float(match.group(2))
+                if total > 0:
+                    node_data["backups"].append(float(match.group(1))/total)
                 continue
         if "FATAL:" in line:
             log("%s: %s" % (file, line[:-1]))
@@ -804,7 +840,7 @@ def scan_log(file, node, experiments):
 
 def scan_logs():
     """
-    Read all of the nodespecific log files produced by a run, and
+    Read all of the node-specific log files produced by a run, and
     extract useful information.
     """
     global log_dir, verbose
@@ -902,31 +938,52 @@ def scan_logs():
                     % (100.0*sum(backups)/len(backups)))
     log("")
 
-def remove_rtt_files():
+def scan_metrics(experiment):
     """
-    Delete all of the .rtt files in the log directory. This is sometimes
-    needed because the .rtt files can result in disk space exhaustion.
-    """
-
-    for file in glob.glob(log_dir + "/*.rtts"):
-        os.remove(file)
-
-def get_link_mbps():
-    """
-    Scans the current cperf.log file to extract the Homa link_mbps
-    configuration variable.
+    Reads in all of the .metrics files generated by an experiment,
+    extracts a few interesting statistics, and logs message if some
+    nodes appear to have significantly different behavior than
+    others (to detect flakey nodes)
     """
 
-    log_file = log_dir + "/reports/cperf.log"
-    f = open(log_file)
-    for line in f:
-        match = re.search(' link_mbps *([0-9]+)', line)
-        if match:
-            return int(match.group(1))
-        if "Starting" in line:
-            break;
-    raise Exception("Couldn't find link_mbps option in %s" %
-            (log_file))
+    metrics_files = sorted(glob.glob(log_dir + ("/%s-*.metrics" % (experiment))))
+    if len(metrics_files) == 0:
+        return
+
+    names = ['Total Core Utilization', 'packets_sent_RESEND', 'packets_rcvd_RESEND']
+    docs = ['core utilization', 'outgoing resend requests', 'incoming resend requests']
+    # Keys are one of the metric names above, values are dictionaries, in which
+    # keys are metric file names and values are the value of the corresponding
+    # metric name in that metrics file.
+    metrics = {}
+    for name in names:
+        metrics[name] = {}
+    for file in metrics_files:
+        f = open(file)
+        for name in names:
+            metrics[name][file] = 0
+        for line in f:
+            match = re.match('([a-zA-Z][^0-9]+) +([0-9.]+)', line)
+            if not match:
+                continue
+            name = match.group(1)
+            if not name in metrics:
+                continue
+            if "." in match.group(2):
+                metrics[name][file] = float(match.group(2))
+            else:
+                metrics[name][file] = int(match.group(2))
+        f.close()
+    outlier_count = 0
+    for (name, doc) in zip(names, docs):
+        median = sorted(list(metrics[name].values()))[len(metrics_files)//2]
+        if (name == 'Total Core Utilization') and (median == 0.0):
+            log("Couldn't find core utilization in metrics files")
+        for file, value in metrics[name].items():
+            if value > 1.5*median:
+                log("Outlier %s in %s: %.1f vs. %.1f median"
+                        % (file, util, median))
+    # This function is still work in progress!
 
 def read_rtts(file, rtts, min_rtt = 0.0, link_mbps = 0.0):
     """
@@ -1022,7 +1079,7 @@ def get_digest(experiment):
 
     experiment:  Name of the desired experiment
     """
-    global alt_slowdown, digests, log_dir, min_rtt, unloaded_p50
+    global alt_slowdown, digests, log_dir, min_rtt, unloaded_p50, delete_rtts
 
     if experiment in digests:
         return digests[experiment]
@@ -1041,7 +1098,7 @@ def get_digest(experiment):
 
     avg_slowdowns = []
 
-    link_mbps = get_link_mbps()
+    link_mbps = float(get_sysctl_parameter(".net.homa.link_mbps"))
 
     # Read in the RTT files for this experiment.
     files = sorted(glob.glob(log_dir + ("/%s-*.rtts" % (experiment))))
@@ -1056,6 +1113,9 @@ def get_digest(experiment):
         avg_slowdowns.append([file, slowdown])
         sys.stdout.write("#")
         sys.stdout.flush()
+
+        if delete_rtts and not ("unloaded" in file):
+            os.remove(file)
     log("")
 
     # See if some nodes have anomalous performance.
@@ -1070,20 +1130,22 @@ def get_digest(experiment):
 
     # Look for nodes with core utilization significantly above the median.
     metrics_files = sorted(glob.glob(log_dir + ("/%s-*.metrics" % (experiment))))
-    core_util = {}
-    for file in metrics_files:
-        f = open(file)
-        for line in f:
-            match = re.match('Total Core Utilization *([0-9.]+)', line)
-            if match:
-                core_util[file] = float(match.group(1))
-    if len(core_util) == 0:
-        log("Couldn't find core utilization in metrics files")
-    median = sorted(list(core_util.values()))[len(core_util)//2]
-    for file, util in core_util.items():
-        if util > 1.5*median:
-            log("Outlier core utilization in %s: %.1f vs. %.1f median"
-                    % (file, util, median))
+    if len(metrics_files) > 0:
+        core_util = {}
+        for file in metrics_files:
+            f = open(file)
+            for line in f:
+                match = re.match('Total Core Utilization *([0-9.]+)', line)
+                if match:
+                    core_util[file] = float(match.group(1))
+        if len(core_util) == 0:
+            log("Couldn't find core utilization in metrics files")
+        else:
+            median = sorted(list(core_util.values()))[len(core_util)//2]
+            for file, util in core_util.items():
+                if util > 1.5*median:
+                    log("Outlier core utilization in %s: %.1f vs. %.1f median"
+                          % (file, util, median))
 
     if len(unloaded_p50) == 0:
         raise Exception("No unloaded data: must invoke set_unloaded")
