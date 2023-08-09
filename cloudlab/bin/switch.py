@@ -132,6 +132,14 @@ class Switch:
         self.do_cmd("interface ethernet 1/%d traffic-class 1 congestion-control ecn "
                 "minimum-absolute 70 maximum-absolute 70" % (port))
 
+    def config_all_ports(self):
+        """
+        Invoke config_port on all of the egress ports for the switch.
+        """
+
+        for port in range(1, 41):
+            self.config_port(port)
+
     def reset_port(self, port):
         """
         Restore default settings for a port (undo the effects of a previous
@@ -153,6 +161,14 @@ class Switch:
         self.do_cmd("interface ethernet 1/%d no traffic-class 1 congestion-control"
                 % (port))
 
+    def reset_all_ports(self):
+        """
+        Invoke resetport on all of the egress ports for the switch.
+        """
+
+        for port in range(1, 41):
+            self.reset_port(port)
+
     def set_buffer_limit(self, mbytes):
         """
         Configure the switch to limit the total amount of buffer space
@@ -161,3 +177,26 @@ class Switch:
         """
         self.do_cmd("advance buffer management force")
         self.do_cmd("pool ePool0 size %.3fM type dynamic" % (mbytes))
+
+    def set_ecn_threshold(self, port, kb):
+        """
+        Set the ECN marking threshold for a given port.
+
+        port:       The port to configure
+        kb:         Value to set for the marking threshold, in KB
+        """
+
+        self.do_cmd("interface ethernet 1/%d traffic-class 0 congestion-control ecn "
+                "minimum-absolute %d maximum-absolute %d" % (port, kb, kb))
+        self.do_cmd("interface ethernet 1/%d traffic-class 1 congestion-control ecn "
+                "minimum-absolute %d maximum-absolute %d" % (port, kb, kb))
+
+    def set_all_ecn_thresholds(self, kb):
+        """
+        Set ECN marking threshold for all of the ports in the switch.
+
+        kb:         Value to set for the marking threshold, in KB
+        """
+
+        for port in range(1, 41):
+            self.set_ecn_threshold(port, kb)
