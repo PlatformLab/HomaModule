@@ -1,0 +1,355 @@
+#!/usr/bin/python3 -u
+
+# Copyright (c) 2023 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark varies one or more aspects of Homa's configuration,
+# similar and measures Homa slowdown, but it also measures switch buffer
+# utilization for each configuration, including the maximum utilization
+# (if there is no limit), and the minimum buffer space that can be supported
+# without significant performance degradation.
+# Type "cp_config_buf --help" for documentation.
+
+
+from cperf import *
+from switch import *
+
+# Workloads, bandwidths, and running times to use by default.
+load_info = [["w2", 3.2, 5], ["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
+
+parser = get_parser(description=
+        'Measures Homa slowdown and buffer utilization in TOR egress ports '
+        "while varying Homa's configuration.",
+        usage='%(prog)s [options]')
+parser.add_argument('-c', '--config', dest='config',
+        choices=['dctcp_link_util',
+                 'dctcp_nodes',
+                 'dctcp_threshold',
+                 'dynamic_windows',
+                 'link_util',
+                 'nodes',
+                 'overcommit',
+                 'tcp_link_util',
+                 'tcp_nodes',
+                 'unsched_bytes'],
+        required = True,
+        help='Aspect of configuration to vary')
+parser.add_argument('--report', dest='report',
+        metavar='F', default='buf_usage.data',
+        help='Name of the file to use for the buffer usage report in the log '
+                '"reports" directory (default: buf_usage.data)')
+options = parser.parse_args()
+init(options)
+
+if options.workload != "":
+    load_info = [[options.workload, options.gbps, options.seconds]]
+
+# The following functions provide flexibility to compute various
+# values related to specs at runtime, where they can incorporate
+# other information like the specific workload.
+
+def get_value(value, spec, options):
+    if type(value) is str:
+        return value
+    return value(spec)
+
+specs = []
+if options.config == 'dctcp_link_util':
+    # Measure DCTCP while varying link utilization
+    options.protocol = "dctcp"
+    for gbps in [5, 10, 12, 14, 16, 18, 20]:
+        specs.append({'exp_name': 'dctcp_util_%d' % (gbps),
+                'label': 'DCTCP link utilization %d Gbps' % (gbps),
+                'options': ['gbps', gbps/2.0],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp']
+                })
+elif options.config == 'dctcp_nodes':
+    # Measure DCTCP while varying the number of nodes
+    options.protocol = "dctcp"
+    for nodes in [5, 10, 15, 20, 25, 30]:
+        if nodes > options.num_nodes:
+            print("Can't run experiment with %d nodes: --nodes is only %d"
+                    % (nodes, options.num_nodes))
+            continue
+        specs.append({'exp_name': 'dctcp_nodes_%d' % (nodes),
+                'label': '%d nodes' % (nodes),
+                'options': ['num_nodes', nodes],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp']
+                })
+elif options.config == 'dctcp_threshold':
+    # Measure DCTCP while varying the ECN marking threshold
+    options.protocol = "dctcp"
+    for thresh in [50, 78, 100, 150, 200, 500, 1000, 2000]:
+        specs.append({'exp_name': 'dctcp_threshold_%dk' % (thresh),
+                'label': 'DCTCP ECN threshold %d KB' % (thresh),
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
+                'ecn_threshold': thresh
+                })
+elif options.config == 'dynamic_windows':
+    # Use Homa's new dynamic windows and vary max_incoming
+    for max in [200, 300, 400, 500, 1000]:
+        specs.append({'exp_name': 'dwin_%dk' % (max),
+                'label': 'max_incoming %d KB' % (max),
+                'sysctl': ['.net.homa.dynamic_windows', 1,
+                           '.net.homa.max_incoming', max*1000]
+                })
+elif options.config == 'link_util':
+    # Vary link utilization
+    for gbps in [5, 10, 12, 14, 16, 18, 20]:
+        specs.append({'exp_name': 'util_%d' % (gbps),
+                'label': 'Link utilization %d Gbps' % (gbps),
+                'options': ['gbps', gbps/2.0]
+                })
+elif options.config == 'nodes':
+    # Vary the number of nodes
+    for nodes in [5, 10, 15, 20, 25, 30]:
+        if nodes > options.num_nodes:
+            print("Can't run experiment with %d nodes: --nodes is only %d"
+                    % (nodes, options.num_nodes))
+            continue
+        specs.append({'exp_name': 'nodes_%d' % (nodes),
+                'label': '%d nodes' % (nodes),
+                'options': ['num_nodes', nodes]
+                })
+elif options.config == 'overcommit':
+    # Vary unsched_bytes
+    for over in [2, 3, 4, 5, 6, 7, 8]:
+        specs.append({'exp_name': 'over_%d' % (over),
+                'label': 'Overcommit %d' % (over),
+                'sysctl': ['.net.homa.max_overcommit', over]
+                })
+elif options.config == 'tcp_link_util':
+    # Measure TCP while varying link utilization
+    options.protocol = "tcp"
+    for gbps in [5, 10, 12, 14, 16, 18, 20]:
+        specs.append({'exp_name': 'tcp_util_%d' % (gbps),
+                'label': 'TCP link utilization %d Gbps' % (gbps),
+                'options': ['gbps': gbps/2.0],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
+                })
+elif options.config == 'tcp_nodes':
+    # Meausre TCP while varying the number of nodes
+    options.protocol = "tcp"
+    for nodes in [5, 10, 15, 20, 25, 30]:
+        if nodes > options.num_nodes:
+            print("Can't run experiment with %d nodes: --nodes is only %d"
+                    % (nodes, options.num_nodes))
+            continue
+        specs.append({'exp_name': 'tcp_nodes_%d' % (nodes),
+                'label': '%d nodes' % (nodes),
+                'options': ['num_nodes', nodes],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
+                })
+elif options.config == 'unsched_bytes':
+    # Vary unsched_bytes
+    for unsched in [40, 60, 80, 100, 120]:
+        specs.append({'exp_name': 'unsched_%dk' % (unsched),
+                'label': 'unsched_bytes %dk' % (unsched),
+                'sysctl': ['.net.homa.unsched_bytes', unsched*1000]
+                })
+
+# A list with one value per entry in specs. Each value is a dictionary
+# with several fields describing various results for that spec.
+buf_limits = []
+
+# Keys are parameter names, values are old values to restore.
+old_values = {}
+if not options.plot_only:
+    try:
+        switch = Switch()
+
+        # For each workload, run a set of experiments with a different
+        # configurations.
+        for workload, bw, seconds in load_info:
+            o = copy.deepcopy(options)
+            o.workload = workload
+            o.gbps = bw/2.0
+            o.seconds = seconds
+            o.client_ports = 1
+            o.client_max = 1
+            o.server_ports = 1
+            o.servers = options.nodes[1:2]
+            o.unloaded = 500
+            exp_name = "unloaded_" + workload
+            start_servers(o.servers, o)
+            run_experiment(exp_name, o.clients[0:1], o)
+            set_unloaded(exp_name)
+
+            for spec in specs:
+                o = copy.deepcopy(options)
+                o.workload = workload
+                o.gbps = bw/2.0
+                o.seconds = seconds
+                exp_name = "%s_%s" % (spec['exp_name'], workload)
+                if 'sysctl' in spec:
+                    for i in range(0, len(spec['sysctl']), 2):
+                        name = spec['sysctl'][i]
+                        value = spec['sysctl'][i+1]
+                        if name not in old_values:
+                            old_values[name] = get_sysctl_parameter(name)
+                        log("Setting %s = %s" % (name, value))
+                        set_sysctl_parameter(name, value,
+                                range(0, options.num_nodes))
+                if 'options' in spec:
+                    for i in range(0, len(spec['options']), 2):
+                        name = spec['options'][i]
+                        value = spec['options'][i+1]
+                        setattr(o, name, value)
+                if 'ecn_threshold' in spec:
+                    log("Setting switch ECN marking thresholds to %d"
+                            % (spec['ecn_threshold']))
+                    switch.set_all_ecn_thresholds(spec['ecn_threshold'])
+                o.servers = options.nodes[0:o.num_nodes]
+                o.clients = options.nodes[0:o.num_nodes]
+
+                # Total downlink bandwidth across all nodes, in MBytes/sec
+                mBps = float(get_sysctl_parameter(".net.homa.link_mbps")) \
+                                * o.num_nodes/8
+                start_servers(o.servers, o)
+
+                # Run the experiment once with no buffer restrictions to get
+                # a baseline slowdown and buffer utilization.
+                switch.clear_max_buffer_usage()
+                switch.set_buffer_limit(13.2)
+                run_experiment(exp_name, o.clients, o)
+                digest = get_digest(exp_name)
+                base_slowdown = digest["avg_slowdown"]
+                base_buf = switch.get_max_buffer_usage()
+                log("Baseline for %s: slowdown %.1f, buffer space %.1f MB"
+                        % (exp_name, base_slowdown, base_buf))
+                if base_buf < 1.0:
+                    log("Baseline buffer space for %s is only %.3f MB; "
+                            "no need to find minimum." % (exp_name, base_buf))
+                    buf_limits.append({
+                            "name": exp_name,
+                            "slowdown": base_slowdown,
+                            "base_buf": base_buf,
+                            "lower_limit": 0,
+                            "base_usecs": base_buf * 1e06 / mBps,
+                            "min_usecs": 0,
+                            })
+                    continue
+
+                # Now restrict the buffer size, using a series of experiments
+                # with binary search to find the buffer size at which average
+                # slowdown increases by 10% from the baseline
+                max_buf = base_buf
+                min_buf = 0.0
+                count = 0
+                while (max_buf - min_buf) > .1*max_buf:
+                    buf = (max_buf + min_buf)/2.0
+                    switch.set_buffer_limit(buf)
+                    log("Trying %.3f MB buffer limit (max %.3f MB, min %.3f MB)"
+                            % (buf, max_buf, min_buf))
+                    count += 1
+                    exp = "%s_%d" % (exp_name, count)
+                    run_experiment(exp, o.clients, o)
+                    slowdown = get_digest(exp)["avg_slowdown"]
+                    log("Slowdown for %s with %.3f MB buffer limit: %.1f"
+                            % (exp, buf, slowdown))
+                    if slowdown > 1.1*base_slowdown:
+                        min_buf = buf
+                    else:
+                        max_buf = buf
+                lower_limit = (max_buf + min_buf)/2.0
+                log("Minimum buffer space for %s: %.3f MB" % (exp_name,
+                        lower_limit))
+                buf_limits.append({
+                        "name": exp_name,
+                        "slowdown": base_slowdown,
+                        "base_buf": base_buf,
+                        "lower_limit": lower_limit,
+                        "base_usecs": base_buf * 1e06 / mBps,
+                        "min_usecs": lower_limit * 1e06/ mBps,
+                })
+        log("Resetting switch buffer limit")
+        switch.set_buffer_limit(13.2)
+        if options.config == 'dctcp_threshold':
+            log("Resetting switch ECN marking thresholds")
+            switch.set_all_ecn_thresholds(78)
+        switch.close()
+
+    except Exception as e:
+        log(traceback.format_exc())
+
+    f = open("%s/reports/%s" % (options.log_dir, options.report), "w")
+    print("# Buffer usage statistics gathered by cp_config_buf at %s"
+            % date_time, file=f)
+    for name in sorted(dir(options)):
+        if name.startswith("_"):
+            continue
+        print("# options.%s: %*s %s" % (name, 20 - len(name), "",
+                getattr(options, name)), file=f)
+    log("\nSwitch Buffer Utilization:")
+    print("\nSwitch Buffer Utilization:", file=f)
+    log("Experiment               Slowdown   Max MB  Min MB  Max us  Min us")
+    print("Experiment               Slowdown   Max MB  Min MB  Max us  Min us",
+            file = f)
+    for exp in buf_limits:
+        log("%-24s   %6.1f   %6.2f  %6.2f  %6.1f  %6.1f" % (
+                exp["name"], exp["slowdown"], exp["base_buf"],
+                exp["lower_limit"], exp["base_usecs"], exp["min_usecs"]))
+        print("%-24s   %6.1f   %6.2f  %6.2f  %6.1f  %6.1f" % (
+                exp["name"], exp["slowdown"], exp["base_buf"],
+                exp["lower_limit"], exp["base_usecs"], exp["min_usecs"]),
+                file=f)
+    log("")
+    f.close()
+
+    for name, value in old_values.items():
+        log("Restoring %s to %s" % (name, value))
+        set_sysctl_parameter(name, value, range(0, options.num_nodes))
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+# Generate plots and reports
+for workload, bw, seconds in load_info:
+    set_unloaded("unloaded_" + workload)
+
+    # Generate slowdown plot.
+    log("Generating slowdown plot for %s" % (workload))
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, bw)
+    ax = start_slowdown_plot(title, 1000, "%s_%s" % (
+            specs[0]['exp_name'], workload), y_label=" Slowdown")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p99", spec['label'] + ' P99')
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        plot_slowdown(ax, exp_name, "p50", spec['label'] + ' P50')
+    if workload == "w5":
+        ax.legend(loc="upper right", prop={'size': 9})
+    else:
+        ax.legend(loc="upper left", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, options.config, workload))
+
+    # Generate CDF of small-message RTTs.
+    log("Generating short message CDFs for %s" % (workload))
+    title = "%s %d nodes" % (workload.capitalize(), options.num_nodes)
+    start_cdf_plot(title, 10, 0.99e05, 1e-05, "RTT (usecs)",
+            "Cumulative Fraction of Short Messages")
+    for spec in specs:
+        exp_name = "%s_%s" % (spec['exp_name'], workload)
+        x, y = get_short_cdf(exp_name)
+        plt.plot(x, y, label=spec['label'])
+    x, y = get_short_cdf("unloaded_" + workload)
+    plt.plot(x, y, label="Homa best case")
+
+    plt.legend(loc="upper right", prop={'size': 9})
+    plt.savefig("%s/reports/%s_%s_cdfs.pdf" %
+            (options.log_dir, options.config, workload))
