@@ -1,0 +1,183 @@
+#!/usr/bin/python3 -u
+
+# Copyright (c) 2023 Stanford University
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+# This cperf benchmark varies one or more aspects of Homa's configuration,
+# similar and measures Homa slowdown, but it also measures switch buffer
+# utilization for each configuration, including the maximum utilization
+# (if there is no limit), and the minimum buffer space that can be supported
+# without significant performance degradation.
+# Type "cp_config_buf --help" for documentation.
+
+from cperf import *
+from switch import *
+
+# Workloads, bandwidths, and running times to use by default.
+load_info = [["w2", 3.2, 5], ["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
+
+parser = get_parser(description=
+        'Measures performance as the available switch buffer space is restricted.',
+        usage='%(prog)s [options]', defaults={'client_max': 400})
+
+options = parser.parse_args()
+options.alt_slowdown = True
+init(options)
+
+if options.workload != "":
+    load_info = [[options.workload, options.gbps, options.seconds]]
+
+# Total downlink bandwidth across all nodes, in MBytes/sec
+mBps = float(get_sysctl_parameter(".net.homa.link_mbps")) * options.num_nodes/8
+
+# Used to collect data from experiments; a list with one value for each
+# experiment. The value is a dictionary containing various information
+# about the experiment.
+data = []
+
+if options.protocol == "homa":
+    pcts = [90, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30]
+elif options.protocol == "tcp":
+    pcts = [90, 80, 70, 60, 50, 40, 30, 20]
+    set_sysctl_parameter('.net.ipv4.tcp_congestion_control', 'cubic',
+            options.nodes)
+elif options.protocol == "dctcp":
+    pcts = [50, 40, 30, 25, 20, 15, 10]
+    set_sysctl_parameter('.net.ipv4.tcp_congestion_control', 'dctcp',
+            options.nodes)
+
+switch = Switch()
+if not options.plot_only:
+    try:
+
+        for workload, bw, seconds in load_info:
+            if (workload == "w4")
+            options.workload = workload
+            options.seconds = seconds
+            options.gbps = bw/2.0
+
+            # Measure unloaded performance.
+            o = copy.deepcopy(options)
+            o.protocol = "homa"
+            o.client_ports = 1
+            o.client_max = 1
+            o.server_ports = 1
+            o.servers = options.nodes[1:2]
+            o.unloaded = 500
+            exp_name = "unloaded_" + workload
+            start_servers(o.servers, o)
+            run_experiment(exp_name, o.clients[0:1], o)
+            set_unloaded(exp_name)
+
+            start_servers(options.servers, options)
+
+            # Run the experiment once with no buffer restrictions to get
+            # a baseline slowdown and buffer utilization.
+            switch.clear_max_buffer_usage()
+            switch.set_buffer_limit(13.2)
+            exp_name = "%s_%s_100" % (options.protocol, workload)
+            run_experiment(exp_name, options.clients, options)
+            digest = get_digest(exp_name)
+            base_slowdown = digest["avg_slowdown"]
+            base_buf = switch.get_max_buffer_usage()
+            log("Baseline for %s: slowdown %.1f, buffer space %.1f MB"
+                    % (exp_name, base_slowdown, base_buf))
+            data.append({
+                    "name": exp_name,
+                    "workload": workload,
+                    "pct": 100,
+                    "buf_size": base_buf,
+                    "slowdown": base_slowdown
+                    })
+
+            # Restrict the buffer size in increments of 10% of the
+            # baseline usage.
+            for pct in pcts:
+                buf = base_buf*pct/100
+                switch.set_buffer_limit(buf)
+                log("Trying %.3f MB buffer limit (%d%% of baseline)"
+                        % (buf, pct))
+                exp = "%s_%d" % (exp_name, pct)
+                run_experiment(exp, options.clients, options)
+                slowdown = get_digest(exp)["avg_slowdown"]
+                log("Slowdown for %s with %.3f MB buffer limit: %.1f"
+                            % (exp, buf, slowdown))
+                data.append({
+                        "name": exp,
+                        "workload": workload,
+                        "pct": pct,
+                        "buf_size": buf,
+                        "slowdown": slowdown
+                        })
+                if (slowdown > 5*base_slowdown):
+                    break;
+
+    except Exception as e:
+        log(traceback.format_exc())
+
+    f = open("%s/reports/%s_slowdown.data" % (options.log_dir, options.protocol),
+            "w")
+    print("# This file was created by cp_buffers at %s"
+            % date_time, file=f)
+    for name in sorted(dir(options)):
+        if name.startswith("_"):
+            continue
+        print("# options.%s: %*s %s" % (name, 20 - len(name), "",
+                getattr(options, name)), file=f)
+    log("\nSlowdown vs. Switch Buffer Space:")
+    print("\n# Slowdown as a function of switch buffer space for %s:"
+            % (options.protocol), file=f)
+    print("# exp:       Name of the experiment", file=f)
+    print("# prot:      Transport protocol", file=f)
+    print("# workload:  w1-w5", file=f)
+    print("# buf_mb:    Buffer space limit for experiment (MBytes)", file=f)
+    print("# pct:       Buffer space limit as percentage of buf usage when", file=f)
+    print("#            unrestricted", file=f)
+    print("# slowdown:  Average slowdown across all RPCs", file=f)
+    log("Experiment              Buffer MB      Pct   Slowdown")
+    print("%-20s     prot  workload   buf_mb    pct   slowdown" % ("exp"), file = f)
+    for exp in data:
+        log("%-20s   %6.1f    %5d     %6.1f" % (
+                exp["name"], exp["buf_size"], exp["pct"],
+                exp["slowdown"]))
+        print("%-20s   %6s    %6s   %6.1f  %5d     %6.1f" % (
+                exp["name"], options.protocol, exp["workload"],
+                exp["buf_size"], exp["pct"], exp["slowdown"]), file=f)
+    log("")
+    f.close()
+
+    log("Stopping nodes")
+    stop_nodes()
+    scan_logs()
+
+log("Resetting switch buffer limit")
+switch.set_buffer_limit(13.2)
+switch.close()
+
+# Generate plots and reports
+for workload, bw, seconds in load_info:
+    set_unloaded("unloaded_" + workload)
+
+    # Generate slowdown plot.
+    log("Generating slowdown plot for %s" % (workload))
+    title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
+            options.num_nodes, bw)
+    exp_name = "%s_%s" % (options.protocol, workload)
+    ax = start_slowdown_plot(title, 1000, exp_name, y_label=" Slowdown")
+    for exp in data:
+        plot_slowdown(ax, exp["name"], "p99", "%.1f MB P99" % exp["buf_size"])
+    ax.legend(loc="upper left", prop={'size': 9})
+    plt.tight_layout()
+    plt.savefig("%s/reports/%s_%s.pdf" %
+            (options.log_dir, options.protocol, workload))
