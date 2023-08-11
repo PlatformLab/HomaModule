@@ -741,6 +741,19 @@ int tcp_connection::read(bool loop,
 
 		}
 
+		if ((count >= 4) && (strncmp(buffer, "GET ", 4) == 0)) {
+			/* It looks like someone is trying to make an HTTP
+			 * connection to us; that's bogus.
+			 */
+			log(NORMAL, "ERROR: unexpected data received from "
+					"%s: %.*s\n", print_address(&peer),
+					count, buffer);
+			snprintf(error_message, sizeof(error_message),
+					"Unexpected data received from %s",
+					print_address(&peer));
+			return 1;
+		}
+
 		/*
 		 * Process incoming bytes (could contains parts of multiple
 		 * requests). The first 4 bytes of each request give its
@@ -772,8 +785,22 @@ int tcp_connection::read(bool loop,
 				}
 			}
 
-			/* At this point we know the request length, so read until
-			 * we've got a full request.
+			if ((header.length > HOMA_MAX_MESSAGE_LENGTH)
+					|| (header.length < 0)) {
+				log(NORMAL, "ERROR: invalid message length %d "
+						"from %s, closing connection\n",
+						header.length,
+						print_address(&peer));
+				snprintf(error_message, sizeof(error_message),
+						"Invalid message length %d "
+						"from %s",
+						header.length,
+						print_address(&peer));
+				return 1;
+			}
+
+			/* At this point we know the request length, so read
+			 * until we've got a full request.
 			 */
 			int needed = header.length - bytes_received;
 			if (count < needed) {
@@ -1409,6 +1436,21 @@ void tcp_server::accept(int epoll_fd)
 		log(NORMAL, "FATAL: couldn't accept incoming TCP connection: "
 				"%s\n", strerror(errno));
 		exit(1);
+	}
+
+	/* Make sure the connection appears to be coming from someone
+	 * we trust (as of August 2023, at CloudLab, external sites
+	 * could open connections).
+	 */
+	if (client_addr.in4.sin_family == AF_INET) {
+		uint8_t *ipaddr = (uint8_t *) &client_addr.in4.sin_addr;
+		if ((ipaddr[0] != 10) || (ipaddr[1] != 0) || (ipaddr[2] != 1)) {
+			log(NORMAL, "ERROR: tcp_server::accept rejecting "
+					"rogue TCP connection from %s\n",
+					print_address(&client_addr));
+			::close(fd);
+			return;
+		}
 	}
 	log(NORMAL, "tcp_server on port %d accepted connection from %s, fd %d\n",
 			port, print_address(&client_addr), fd);
@@ -3244,9 +3286,11 @@ void error_handler(int signal, siginfo_t* info, void* ucontext)
 	void* caller_address = reinterpret_cast<void*>(
 			uc->uc_mcontext.gregs[REG_RIP]);
 
-	log(NORMAL, "Signal %d (%s) at address %p from %p\n",
+	log(NORMAL, "ERROR: Signal %d (%s) at address %p from %p\n",
 			signal, strsignal(signal), info->si_addr,
 			caller_address);
+	tt("ERROR: Signal %d; freezing timetrace", signal);
+	time_trace::freeze();
 
 	const int max_frames = 128;
 	void* return_addresses[max_frames];
@@ -3269,6 +3313,10 @@ void error_handler(int signal, siginfo_t* info, void* ucontext)
 	log(NORMAL, "Backtrace:\n");
 	for (int i = 1; i < frames; ++i)
 		log(NORMAL, "%s\n", symbols[i]);
+	log(NORMAL, "Writing time trace to error.tt\n");
+	if (time_trace::print_to_file("error.tt"))
+		log(NORMAL, "ERROR: couldn't write time trace %s\n",
+				strerror(errno));
 	fflush(log_file);
 	while(1) {}
 
