@@ -74,6 +74,9 @@ phase of the RPC.
 
 **ttrange.py**: extracts timetrace entries from a given time range.
 
+**ttrcv.py**: analyzes packet arrivals in a timetrace, outputs information
+on arrival times for each offset within a message.
+
 **ttsoftirq.py**: analyzes SoftIRQ wakeup times in a timetrace. Also measures
 total lifetime of receive buffers from GRO -> kfree_skb.
 
@@ -88,3 +91,8 @@ trace with its clock values offset to match the client clock.
 **ttxmit.py**: analyzes packet transmissions from a timetrace to identify
 uplink bubbles (gaps during which the uplink was idle even though there
 were active outbound messages).
+
+### Other Useful Tools
+
+**diff_rtts.py**: compares two .rtts files collected by the cperf benchmarks,
+tries to identify how/why they are different.
