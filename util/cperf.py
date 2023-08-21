@@ -489,7 +489,7 @@ def stop_nodes():
             popen.wait(5.0)
         except subprocess.TimeoutExpired:
             log("Timeout killing homa_prio on node%d" % (id))
-    for node in active_nodes.values():
+    for id, node in active_nodes.items():
         node.stdin.write("exit\n")
         try:
             node.stdin.flush()
@@ -648,6 +648,7 @@ def run_experiment(name, clients, options):
     """
 
     global active_nodes
+    exp_nodes = list(set(options.servers + clients))
     start_nodes(clients, options)
     nodes = []
     log("Starting %s experiment with clients %s" % (name, clients))
@@ -700,7 +701,7 @@ def run_experiment(name, clients, options):
             # Wait a bit so that homa_prio can set priorities appropriately
             time.sleep(2)
             vlog("Recording initial metrics")
-            for id in active_nodes:
+            for id in exp_nodes:
                 do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null", clients)
@@ -717,9 +718,9 @@ def run_experiment(name, clients, options):
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
         do_cmd("dump_times rtts", clients)
-    if options.protocol == "homa":
-        vlog("Recording final metrics")
-        for id in active_nodes:
+    if (options.protocol == "homa") and not "unloaded" in options:
+        vlog("Recording final metrics from nodes %s" % (exp_nodes))
+        for id in exp_nodes:
             f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
             subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
             f.close()
@@ -950,40 +951,47 @@ def scan_metrics(experiment):
     if len(metrics_files) == 0:
         return
 
-    names = ['Total Core Utilization', 'packets_sent_RESEND', 'packets_rcvd_RESEND']
-    docs = ['core utilization', 'outgoing resend requests', 'incoming resend requests']
-    # Keys are one of the metric names above, values are dictionaries, in which
+    metric_names = ({'packets_sent_RESEND', 'packets_rcvd_RESEND'})
+    docs = {'cores': 'core utilization',
+            'packets_sent_RESEND': 'outgoing resend requests',
+            'packets_rcvd_RESEND': 'incoming resend requests'}
+    units = {'cores': '',
+            'packets_sent_RESEND': '/s',
+            'packets_rcvd_RESEND': '/s'}
+    # Keys are same as in docs above, values are dictionaries, in which
     # keys are metric file names and values are the value of the corresponding
     # metric name in that metrics file.
     metrics = {}
-    for name in names:
+    for name in docs.keys():
         metrics[name] = {}
     for file in metrics_files:
         f = open(file)
-        for name in names:
+        for name in docs.keys():
             metrics[name][file] = 0
         for line in f:
-            match = re.match('([a-zA-Z][^0-9]+) +([0-9.]+)', line)
+            match = re.match('Total Core Utilization *([0-9.]+)', line)
+            if match:
+                metrics['cores'][file] = float(match.group(1))
+                continue
+            match = re.match('([^ ]+) +([0-9]+) +\( *([0-9.]+ *[MKG]?)/s', line)
             if not match:
                 continue
             name = match.group(1)
-            if not name in metrics:
-                continue
-            if "." in match.group(2):
-                metrics[name][file] = float(match.group(2))
-            else:
-                metrics[name][file] = int(match.group(2))
+            if name in metric_names:
+                metrics[name][file] = unscale_number(match.group(3))
         f.close()
     outlier_count = 0
-    for (name, doc) in zip(names, docs):
-        median = sorted(list(metrics[name].values()))[len(metrics_files)//2]
-        if (name == 'Total Core Utilization') and (median == 0.0):
+    for name in metrics:
+        values = sorted(metrics[name].values())
+        median = values[len(values)//2]
+        if (median == 0) and name == 'cores':
             log("Couldn't find core utilization in metrics files")
+            continue
         for file, value in metrics[name].items():
             if value > 1.5*median:
-                log("Outlier %s in %s: %.1f vs. %.1f median"
-                        % (file, util, median))
-    # This function is still work in progress!
+                log("Outlier %s in %s: %s vs. %s median"
+                        % (docs[name], file, scale_number(value, units[name]),
+                        scale_number(median, units[name])))
 
 def read_rtts(file, rtts, min_rtt = 0.0, link_mbps = 0.0):
     """
@@ -1127,25 +1135,6 @@ def get_digest(experiment):
         if (info[1] < 0.8*overall_avg) or (info[1] > 1.2*overall_avg):
             log("Outlier alt-slowdown in %s: %.1f vs. %.1f overall average"
                     % (info[0], info[1], overall_avg))
-
-    # Look for nodes with core utilization significantly above the median.
-    metrics_files = sorted(glob.glob(log_dir + ("/%s-*.metrics" % (experiment))))
-    if len(metrics_files) > 0:
-        core_util = {}
-        for file in metrics_files:
-            f = open(file)
-            for line in f:
-                match = re.match('Total Core Utilization *([0-9.]+)', line)
-                if match:
-                    core_util[file] = float(match.group(1))
-        if len(core_util) == 0:
-            log("Couldn't find core utilization in metrics files")
-        else:
-            median = sorted(list(core_util.values()))[len(core_util)//2]
-            for file, util in core_util.items():
-                if util > 1.5*median:
-                    log("Outlier core utilization in %s: %.1f vs. %.1f median"
-                          % (file, util, median))
 
     if len(unloaded_p50) == 0:
         raise Exception("No unloaded data: must invoke set_unloaded")
@@ -1556,3 +1545,45 @@ def column_from_file(file, column):
                 data[columns[i]].append(float(fields[i]))
     data_from_files[file] = data
     return data[column]
+
+def scale_number(number, units):
+    """
+    Return a string describing a number, but with a "K", "M", or "G"
+    suffix to keep the number small and readable.
+
+    number: number to scale
+    units:  additional units designation, such as "bps" or "/s" to add
+    """
+
+    if number > 1000000000:
+        return "%.1f G%s" % (number/1000000000.0, units)
+    if number > 1000000:
+        return "%.1f M%S" % (number/1000000.0, units)
+    elif (number > 1000):
+        return "%.1f K%s" % (number/1000.0, units)
+    else:
+        if units == "":
+            space = ""
+        else:
+            space = " "
+        return "%.1f%s%s" % (number, space, units)
+
+def unscale_number(number):
+    """
+    Given a string representation of a number, which may have a "K",
+    "M", or "G" scale factor (e.g. "1.2 M"), return the actual number
+    (e.g. 1200000).
+    """
+    match = re.match("([0-9.]+) *([GMK]?)$", number)
+    if not match:
+        raise Exception("Couldn't unscale '%s': bad syntax" % (number))
+    mantissa = float(match.group(1))
+    scale = match.group(2)
+    if scale == 'G':
+        return mantissa * 1e09
+    elif scale == 'M':
+        return mantissa * 1e06
+    elif scale == 'K':
+        return mantissa * 1e03
+    else:
+        return mantissa

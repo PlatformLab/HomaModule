@@ -19,16 +19,17 @@
 # Type "cp_config --help" for documentation.
 
 from cperf import *
+from switch import *
 
 load_info = [["w2", 3.2, 5], ["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
 
 parser = get_parser(description=
-        'Measures Homa slowdown as the configuraton is changed in various ways.',
+        'Measures slowdown as the configuraton is changed in various ways.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['fifo', 'gro', 'max_gro', 'max_gso',
-                'nic_queue', 'poll', 'ports', 'prios', 'receivers',
-                'throttle', 'unsched_bytes'],
+        choices=['buffers', 'dctcp_buffers', 'fifo', 'gro', 'max_gro',
+                'max_gso', 'nic_queue', 'poll', 'ports', 'prios', 'receivers',
+                'tcp_buffers', 'throttle', 'unsched_bytes'],
         required = True,
         help='Aspect of configuration to change')
 options = parser.parse_args()
@@ -37,8 +38,29 @@ init(options)
 if options.workload != "":
     load_info = [[options.workload, options.gbps, options.seconds]]
 
+plot_max_y = 1000
 specs = []
-if options.config == 'fifo':
+if options.config == 'buffers':
+    # Vary the amount of buffer space in the switch
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 60]]
+    # Specs will be filled in below (they are workload dependent).
+    for mb in [10, 2.5, 2]:
+        specs.append({'exp_name': 'bufs_%.1fM' % (mb),
+                'label': '%.1f MB' % (mb),
+                'switch_buffer': mb})
+elif options.config == 'dctcp_buffers':
+    # Use TCP, vary the amount of buffer space in the switch
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 60]]
+    plot_max_y = 10000
+    for mb in [10, 1.2, 0.7]:
+        specs.append({'exp_name': 'bufs_%.1fM' % (mb),
+                'label': '%.1f MB' % (mb),
+                'options': ['protocol', 'dctcp'],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
+                'switch_buffer': mb})
+elif options.config == 'fifo':
     # Vary the fraction of bandwidth reserved for the oldest message
     for fifo in [0, 5, 10, 20]:
         specs.append({'exp_name': 'fifo_%d' % (fifo),
@@ -111,6 +133,17 @@ elif options.config == 'receivers':
                 'options': ['client_ports', ports,
                             'port_receivers', receivers]
                 })
+elif options.config == 'tcp_buffers':
+    # Use TCP, vary the amount of buffer space in the switch
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 60]]
+    plot_max_y = 10000
+    for mb in [13.2, 8, 3]:
+        specs.append({'exp_name': 'bufs_%.1fM' % (mb),
+                'label': '%.1f MB' % (mb),
+                'options': ['protocol', 'tcp'],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+                'switch_buffer': mb})
 elif options.config == 'throttle':
     # Vary the cuttoff for short messages that bypass the throttle mechanism
     for cutoff in [100, 200, 500, 1000, 2000]:
@@ -128,27 +161,41 @@ elif options.config == 'unsched_bytes':
 
 # Keys are parameter names, values are old values to restore.
 old_values = {}
+switch = None
 if not options.plot_only:
     try:
-        # Start servers and measure unloaded latencies.
-        start_servers(options.servers, options)
-
         # For each workload, run a set of experiments with a different
         # configurations.
         for workload, bw, seconds in load_info:
+            if options.config == 'buffers':
+                if workload == "w5":
+                    mbs = [10, 2.5, 2]
+                else:
+                    mbs = [10, 2.0, 1]
+                specs = []
+                for mb in mbs:
+                    specs.append({'exp_name': 'bufs_%.1fM' % (mb),
+                            'label': '%.1f MB' % (mb),
+                        'switch_buffer': mb})
+
+            # Run unloaded experiment
             o = copy.deepcopy(options)
+            o.protocol = 'homa'
             o.workload = workload
             o.seconds = seconds
             o.client_ports = 1
             o.client_max = 1
             o.server_ports = 1
-            o.server_nodes = 1
-            o.first_server = 1
+            o.servers = options.nodes[1:2]
             o.unloaded = 500
+            start_servers(o.servers, o)
             run_experiment("unloaded_" + workload, o.clients[0:1], o)
 
             for spec in specs:
-                o = options
+                o = copy.deepcopy(options)
+                o.workload = workload
+                o.gbps = bw/2.0
+                o.seconds = seconds
                 exp_name = "%s_%s" % (spec['exp_name'], workload)
                 if 'sysctl' in spec:
                     for i in range(0, len(spec['sysctl']), 2):
@@ -164,7 +211,12 @@ if not options.plot_only:
                         name = spec['options'][i]
                         value = spec['options'][i+1]
                         setattr(o, name, value)
-                o.gbps = bw/2.0
+                if 'switch_buffer' in spec:
+                    if not switch:
+                        switch = Switch()
+                    mb = spec["switch_buffer"]
+                    log("Setting buffer limit to %.1f MB" % (mb))
+                    switch.set_buffer_limit(mb)
                 start_servers(o.servers, o)
                 run_experiment(exp_name, o.clients, o)
     except Exception as e:
@@ -176,6 +228,11 @@ if not options.plot_only:
     log("Stopping nodes")
     stop_nodes()
     scan_logs()
+if switch:
+    log("Resetting buffer limit to 13.2 MB")
+    switch.set_buffer_limit(13.2)
+    switch.close
+    switch = None
 
 # Generate plots and reports
 for workload, bw, seconds in load_info:
@@ -185,7 +242,7 @@ for workload, bw, seconds in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, "%s_%s" % (
+    ax = start_slowdown_plot(title, plot_max_y, "%s_%s" % (
             specs[0]['exp_name'], workload), y_label=" Slowdown")
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)

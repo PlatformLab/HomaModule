@@ -55,15 +55,7 @@ init(options)
 if options.workload != "":
     load_info = [[options.workload, options.gbps, options.seconds]]
 
-# The following functions provide flexibility to compute various
-# values related to specs at runtime, where they can incorporate
-# other information like the specific workload.
-
-def get_value(value, spec, options):
-    if type(value) is str:
-        return value
-    return value(spec)
-
+plot_max_y = 1000
 specs = []
 if options.config == 'dctcp_link_util':
     # Measure DCTCP while varying link utilization
@@ -72,10 +64,13 @@ if options.config == 'dctcp_link_util':
         specs.append({'exp_name': 'dctcp_util_%d' % (gbps),
                 'label': 'DCTCP link utilization %d Gbps' % (gbps),
                 'options': ['gbps', gbps/2.0],
-                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp']
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
+                'value': gbps
                 })
 elif options.config == 'dctcp_nodes':
     # Measure DCTCP while varying the number of nodes
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
     options.protocol = "dctcp"
     for nodes in [5, 10, 15, 20, 25, 30]:
         if nodes > options.num_nodes:
@@ -85,7 +80,8 @@ elif options.config == 'dctcp_nodes':
         specs.append({'exp_name': 'dctcp_nodes_%d' % (nodes),
                 'label': '%d nodes' % (nodes),
                 'options': ['num_nodes', nodes],
-                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp']
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
+                'value': nodes
                 })
 elif options.config == 'dctcp_threshold':
     # Measure DCTCP while varying the ECN marking threshold
@@ -94,7 +90,8 @@ elif options.config == 'dctcp_threshold':
         specs.append({'exp_name': 'dctcp_threshold_%dk' % (thresh),
                 'label': 'DCTCP ECN threshold %d KB' % (thresh),
                 'sysctl': ['.net.ipv4.tcp_congestion_control', 'dctcp'],
-                'ecn_threshold': thresh
+                'ecn_threshold': thresh,
+                'value': thresh
                 })
 elif options.config == 'dynamic_windows':
     # Use Homa's new dynamic windows and vary max_incoming
@@ -102,32 +99,40 @@ elif options.config == 'dynamic_windows':
         specs.append({'exp_name': 'dwin_%dk' % (max),
                 'label': 'max_incoming %d KB' % (max),
                 'sysctl': ['.net.homa.dynamic_windows', 1,
-                           '.net.homa.max_incoming', max*1000]
+                           '.net.homa.max_incoming', max*1000],
+                'value': max
                 })
 elif options.config == 'link_util':
     # Vary link utilization
     for gbps in [5, 10, 12, 14, 16, 18, 20]:
         specs.append({'exp_name': 'util_%d' % (gbps),
                 'label': 'Link utilization %d Gbps' % (gbps),
-                'options': ['gbps', gbps/2.0]
+                'options': ['gbps', gbps/2.0],
+                'value': gbps
                 })
 elif options.config == 'nodes':
     # Vary the number of nodes
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
     for nodes in [5, 10, 15, 20, 25, 30]:
         if nodes > options.num_nodes:
             print("Can't run experiment with %d nodes: --nodes is only %d"
                     % (nodes, options.num_nodes))
-            continue
+            break
         specs.append({'exp_name': 'nodes_%d' % (nodes),
                 'label': '%d nodes' % (nodes),
-                'options': ['num_nodes', nodes]
+                'options': ['num_nodes', nodes],
+                'value': nodes
                 })
 elif options.config == 'overcommit':
     # Vary unsched_bytes
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
     for over in [2, 3, 4, 5, 6, 7, 8]:
         specs.append({'exp_name': 'over_%d' % (over),
                 'label': 'Overcommit %d' % (over),
-                'sysctl': ['.net.homa.max_overcommit', over]
+                'sysctl': ['.net.homa.max_overcommit', over],
+                'value': over
                 })
 elif options.config == 'tcp_link_util':
     # Measure TCP while varying link utilization
@@ -135,11 +140,14 @@ elif options.config == 'tcp_link_util':
     for gbps in [5, 10, 12, 14, 16, 18, 20]:
         specs.append({'exp_name': 'tcp_util_%d' % (gbps),
                 'label': 'TCP link utilization %d Gbps' % (gbps),
-                'options': ['gbps': gbps/2.0],
-                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
+                'options': ['gbps', gbps/2.0],
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+                'value': gbps
                 })
 elif options.config == 'tcp_nodes':
     # Meausre TCP while varying the number of nodes
+    if not options.workload:
+        load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
     options.protocol = "tcp"
     for nodes in [5, 10, 15, 20, 25, 30]:
         if nodes > options.num_nodes:
@@ -149,14 +157,16 @@ elif options.config == 'tcp_nodes':
         specs.append({'exp_name': 'tcp_nodes_%d' % (nodes),
                 'label': '%d nodes' % (nodes),
                 'options': ['num_nodes', nodes],
-                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic']
+                'sysctl': ['.net.ipv4.tcp_congestion_control', 'cubic'],
+                'value': nodes
                 })
 elif options.config == 'unsched_bytes':
     # Vary unsched_bytes
     for unsched in [40, 60, 80, 100, 120]:
         specs.append({'exp_name': 'unsched_%dk' % (unsched),
                 'label': 'unsched_bytes %dk' % (unsched),
-                'sysctl': ['.net.homa.unsched_bytes', unsched*1000]
+                'sysctl': ['.net.homa.unsched_bytes', unsched*1000],
+                'value': unsched
                 })
 
 # A list with one value per entry in specs. Each value is a dictionary
@@ -173,6 +183,7 @@ if not options.plot_only:
         # configurations.
         for workload, bw, seconds in load_info:
             o = copy.deepcopy(options)
+            o.protocol = "homa"
             o.workload = workload
             o.gbps = bw/2.0
             o.seconds = seconds
@@ -233,11 +244,13 @@ if not options.plot_only:
                             "no need to find minimum." % (exp_name, base_buf))
                     buf_limits.append({
                             "name": exp_name,
+                            "workload": workload,
+                            "value": spec["value"],
                             "slowdown": base_slowdown,
                             "base_buf": base_buf,
                             "lower_limit": 0,
                             "base_usecs": base_buf * 1e06 / mBps,
-                            "min_usecs": 0,
+                            "min_usecs": 0
                             })
                     continue
 
@@ -247,7 +260,7 @@ if not options.plot_only:
                 max_buf = base_buf
                 min_buf = 0.0
                 count = 0
-                while (max_buf - min_buf) > .1*max_buf:
+                while ((max_buf - min_buf) > .1*max_buf) and (max_buf > 0.1):
                     buf = (max_buf + min_buf)/2.0
                     switch.set_buffer_limit(buf)
                     log("Trying %.3f MB buffer limit (max %.3f MB, min %.3f MB)"
@@ -258,6 +271,8 @@ if not options.plot_only:
                     slowdown = get_digest(exp)["avg_slowdown"]
                     log("Slowdown for %s with %.3f MB buffer limit: %.1f"
                             % (exp, buf, slowdown))
+                    if (slowdown < base_slowdown):
+                        slowdown = base_slowdown
                     if slowdown > 1.1*base_slowdown:
                         min_buf = buf
                     else:
@@ -267,11 +282,13 @@ if not options.plot_only:
                         lower_limit))
                 buf_limits.append({
                         "name": exp_name,
+                        "workload": workload,
+                        "value": spec["value"],
                         "slowdown": base_slowdown,
                         "base_buf": base_buf,
                         "lower_limit": lower_limit,
                         "base_usecs": base_buf * 1e06 / mBps,
-                        "min_usecs": lower_limit * 1e06/ mBps,
+                        "min_usecs": lower_limit * 1e06/ mBps
                 })
         log("Resetting switch buffer limit")
         switch.set_buffer_limit(13.2)
@@ -292,17 +309,27 @@ if not options.plot_only:
         print("# options.%s: %*s %s" % (name, 20 - len(name), "",
                 getattr(options, name)), file=f)
     log("\nSwitch Buffer Utilization:")
-    print("\nSwitch Buffer Utilization:", file=f)
+    print("", file=f)
+    print("# exp:       Name of the experiment", file=f)
+    print("# prot:      Transport protocol", file=f)
+    print("# workload:  w1-w5", file=f)
+    print("# value:     Value of configuration option that is varied", file=f)
+    print("# slowdown:  Average slowdown across all RPCs when no restrictions", file=f)
+    print("# base_mb:   Buffer space used when no restrictions (MBytes)", file=f)
+    print("# min_mb:    Buffer space when slowdown degrades by 10% (MBytes)", file=f)
+    print("# base_s:    Buffer space used when no restriction (microseconds)", file=f)
+    print("# min_us:    Buffer space when slowdown degrades by 10% (microseconds)", file=f)
     log("Experiment               Slowdown   Max MB  Min MB  Max us  Min us")
-    print("Experiment               Slowdown   Max MB  Min MB  Max us  Min us",
-            file = f)
+    print("%-24s   prot  workload  value slowdown  base_mb  min_mb  "
+            "base_us  min_us" % ("exp"), file = f)
     for exp in buf_limits:
         log("%-24s   %6.1f   %6.2f  %6.2f  %6.1f  %6.1f" % (
                 exp["name"], exp["slowdown"], exp["base_buf"],
                 exp["lower_limit"], exp["base_usecs"], exp["min_usecs"]))
-        print("%-24s   %6.1f   %6.2f  %6.2f  %6.1f  %6.1f" % (
-                exp["name"], exp["slowdown"], exp["base_buf"],
-                exp["lower_limit"], exp["base_usecs"], exp["min_usecs"]),
+        print("%-24s %6s    %6s %6s   %6.1f   %6.2f  %6.2f   %6.1f  %6.1f" % (
+                exp["name"], options.protocol, exp["workload"], exp["value"],
+                exp["slowdown"], exp["base_buf"], exp["lower_limit"],
+                exp["base_usecs"], exp["min_usecs"]),
                 file=f)
     log("")
     f.close()
@@ -322,7 +349,7 @@ for workload, bw, seconds in load_info:
     log("Generating slowdown plot for %s" % (workload))
     title = "%s %d nodes, %.1f Gbps" % (workload.capitalize(),
             options.num_nodes, bw)
-    ax = start_slowdown_plot(title, 1000, "%s_%s" % (
+    ax = start_slowdown_plot(title, plot_max_y, "%s_%s" % (
             specs[0]['exp_name'], workload), y_label=" Slowdown")
     for spec in specs:
         exp_name = "%s_%s" % (spec['exp_name'], workload)

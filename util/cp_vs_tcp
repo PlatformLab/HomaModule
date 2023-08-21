@@ -77,8 +77,6 @@ if not options.plot_only:
             o.client_ports = 1
             o.client_max = 1
             o.server_ports = 1
-            o.server_nodes = 1
-            o.first_server = 1
             o.unloaded = 500
             run_experiment(unloaded_exp, options.nodes[0:1], o)
 
@@ -115,6 +113,7 @@ for workload, bw, seconds in load_info:
     homa_exp = "homa_" + workload
     tcp_exp = "tcp_" + workload
     dctcp_exp = "dctcp_" + workload
+    scan_metrics(homa_exp)
 
     set_unloaded(unloaded_exp)
 

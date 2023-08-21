@@ -25,7 +25,7 @@ from cperf import *
 from switch import *
 
 # Workloads, bandwidths, and running times to use by default.
-load_info = [["w2", 3.2, 5], ["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
+load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 30]]
 
 parser = get_parser(description=
         'Measures performance as the available switch buffer space is restricted.',
@@ -56,13 +56,13 @@ elif options.protocol == "dctcp":
     pcts = [50, 40, 30, 25, 20, 15, 10]
     set_sysctl_parameter('.net.ipv4.tcp_congestion_control', 'dctcp',
             options.nodes)
+pcts = [90, 80, 70, 60, 50, 40, 30, 25, 20, 15, 10]
 
 switch = Switch()
 if not options.plot_only:
     try:
 
         for workload, bw, seconds in load_info:
-            if (workload == "w4")
             options.workload = workload
             options.seconds = seconds
             options.gbps = bw/2.0
