@@ -62,22 +62,27 @@ def percentile2(list, pct, format):
         i = len(list) - 1
     return format % (list[i][0])
 
-def dict_diffs(dict1, dict2, msg=None):
+def dict_diffs(dict1, dict2, msg=None, zero_min=False):
     """
     Return a list consisting of the differences between elements in
     dict2 and those in dict1 with matching keys (ignore elements that
     appear in only one dict). If msg is specified, then negative
     differences should be ignored and an error message should be printed;
-    msg provides info about the dictionaries being diffed.
+    msg provides info about the dictionaries being diffed. If zero_min
+    is True, then negative differences are converted to zeroes.
     """
     diffs = []
     for key in dict1:
         if key in dict2:
-            if msg and dict2[key] < dict1[key]:
-                print("Skipping out of order diff for %s, id %s: %9.3f "
-                        "< %9.3f" % (msg, key, dict2[key], dict1[key]))
-            else:
-                diffs.append(dict2[key] - dict1[key])
+            if dict2[key] < dict1[key]:
+                if zero_min:
+                    diffs.append(0)
+                    continue
+                elif msg:
+                    print("Skipping out of order diff for %s, id %s: %9.3f "
+                            "< %9.3f" % (msg, key, dict2[key], dict1[key]))
+                    continue
+            diffs.append(dict2[key] - dict1[key])
     return diffs
 
 def print_samples(event1, event2, offset, delays, pct, msg, num_samples):
@@ -491,29 +496,18 @@ server_grant_handoff = sorted(dict_diffs(server['grant_gro_last'],
         server['grant_handoff'], "server grant_gro_last -> grant_handoff"))
 
 # Delays from SoftIRQ handoff until homa_softirq starts
-# Adjust data_handoff times to account for the fact that sometimes
-# homa_gro_receive calls homa_softirq directly on the same core without
-# an official handoff. When this happens, the data_handoff time will be
-# incorrectly set to a value greater than the softirq time; modify data_handoff
-# to be the same as softirq.
-handoff = server['data_handoff']
-softirq = server['data_softirq_start']
-for pkt in handoff:
-    if (pkt in softirq) and (handoff[pkt] > softirq[pkt]):
-        handoff[pkt] = softirq[pkt]
-handoff = client['data_handoff']
-softirq = client['data_softirq_start']
-for pkt in handoff:
-    if (pkt in softirq) and (handoff[pkt] > softirq[pkt]):
-        handoff[pkt] = softirq_start[pkt]
+# Sometimes homa_gro_receive calls homa_softirq directly on the same core
+# without an official handoff. When this happens, the data_handoff time will be
+# incorrectly set to a value greater than the softirq time; tell dict_diffs
+# to use a zero value in that case.
 client_data_softirq_start = sorted(dict_diffs(client['data_handoff'],
-        client['data_softirq_start'], "client data_handoff -> softirq_start"))
+        client['data_softirq_start'], zero_min=True))
 client_grant_softirq_start = sorted(dict_diffs(client['grant_handoff'],
-        client['grant_softirq_start'], "client grant_handoff -> softirq_start"))
+        client['grant_softirq_start'], zero_min=True))
 server_data_softirq_start = sorted(dict_diffs(server['data_handoff'],
-        server['data_softirq_start'], "server data_handoff -> softirq_start"))
+        server['data_softirq_start'], zero_min=True))
 server_grant_softirq_start = sorted(dict_diffs(server['grant_handoff'],
-        server['grant_softirq_start'], "server grant_handoff -> softirq_start"))
+        server['grant_softirq_start'], zero_min=True))
 
 # Delays from SoftIRQ start until the desired packet is processed
 client_data_softirq = sorted(dict_diffs(client['data_softirq_start'],
