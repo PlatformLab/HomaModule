@@ -2672,11 +2672,13 @@ static inline __u64 homa_local_id(__be64 sender_id)
 	return be64_to_cpu(sender_id) ^ 1;
 }
 
-#define homa_bucket_lock(bucket, type)                      \
-	if (unlikely(!spin_trylock_bh(&bucket->lock))) {    \
-		__u64 start = get_cycles();                 \
-		INC_METRIC(type##_lock_misses, 1);        \
-		spin_lock_bh(&bucket->lock);                \
+#define homa_bucket_lock(bucket, type)                                     \
+	if (unlikely(!spin_trylock_bh(&bucket->lock))) {                   \
+		__u64 start = get_cycles();                                \
+		tt_record("beginning wait for " #type " bucket lock");     \
+		INC_METRIC(type##_lock_misses, 1);                         \
+		spin_lock_bh(&bucket->lock);                               \
+		tt_record("ending wait for " #type " bucket lock");        \
 		INC_METRIC(type##_lock_miss_cycles, get_cycles() - start); \
 	}
 
