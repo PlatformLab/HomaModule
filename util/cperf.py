@@ -648,7 +648,7 @@ def run_experiment(name, clients, options):
     """
 
     global active_nodes
-    exp_nodes = list(set(options.servers + clients))
+    exp_nodes = list(set(options.servers + list(clients)))
     start_nodes(clients, options)
     nodes = []
     log("Starting %s experiment with clients %s" % (name, clients))
