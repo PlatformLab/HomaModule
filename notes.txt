@@ -1,8 +1,73 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes on performance data from buffer benchmarking 8/2023:
+  * Restricting buffer space ("buffers"):
+    * Homa W5: unrestricted usage 3.8 MB/20 nodes
+      Performance degrades significantly below 80% of this (3 MB/20 nodes)
+      Homa still has better performance than DCTCP down to 1.9 MB
+    * DCTCP W5: unrestrcited usage 5.8 MB/20 nodes
+      Performance degrades significantly below 25% of this (1.4 MB/20 nodes)
+    * TCP W5: unrestricted usage 13.1 MB/20 nodes (all available space)
+      Performance degrades significantly below 80% of this (10.5 MB/20 nodes)
+  * Varying the number of nodes ("nodes"):
+    * Homa usage seems to increase gradually with number of nodes
+    * TCP/DCTCP usage decreases with number of nodes
+  * Varying the link utilization ("link_util"):
+    * Homa: 50% utilization drops min. buffer usage by ~4x relative to 80%
+      Large messages suffer more at higher utilization
+    * DCTCP benefits less from lower link utilization: min buffer usage
+      drops by 35% at 50% utilization vs. 80% utilization
+      All message sizes benefit as utilization drops
+    * At 50% utilization, Homa's min buffer usage is less than DCTCP! (recheck)
+    * TCP benefits more than DCTCP: 3x reduction in min buffers at 50% vs. 80%
+  * Varying the DCTCP marking threshold:
+    * Min buffer usage increases monotonically with marking threshold
+    * Slowdown is relatively stable (a bit higher at largest and smallest
+      thresholds).
+    * For small messages, P50 is better with low threshold, but P99 is higher
+  * Dynamic windows for Homa:
+    * Min buffer usage increases monotonically with larger windows
+    * Slowdown drops, then increases as window size increases
+    * Unclear whether there is a point where dwin has a better combination
+      of performance and buffer usage; maybe in the range of 3-4x rttbytes?
+  * Varying Homa's overcommitment:
+    * Results don't seem consistent with other benchmarks
+    * For W5, dropping overcommitment to 4 increases slowdown by 3x, drops
+      min buffer usage by 2x
+    * Even an overcommit of 7 increases slowdown by 2x?
+  * Varying unsched_bytes:
+    * For W4 and W5, increasing unsched_bytes from 40K to 120K increases
+      min buffer usage by 2x
+
+* Issues for next round of full-rack testing:
+  * Verify that unrestricted slowdown curves for the buffer benchmarks match
+    the "standard" curves.
+  * Some metrics seem to vary a lot:
+    * Unrestricted buffer usage in "nodes" vs. "buffers" vs. "link_util"
+    * 10% drop in Homa performance: "nodes" vs. "buffers" vs. "link_util"
+  * DCTCP buffer usage in "nodes" first, drops, then starts to rise;
+    recheck?
+  * Need more nodes to see if buffer usage/node eventually plateaus (need to
+    run all tests at 40 nodes)
+  * Explore dynamic windows more thoroughly
+  * Overcommit results look fishy
+  * Lower the threshold for assuming 0 min buffer usage (perhaps base on us
+    rather than MB?)
+  * Create a "scan_metrics" method to scan .metrics files and look for
+    outliers in multiple different ways?
+  * Compute a "P99 average" by computing average of worst 1% slowdowns
+    in 10 buckets (100?) according to message length?
+  * unsched for w3 has huge variaton in rtts; 40k is particularly bad. It
+    isn't keeping up on BW either; try raising client-max? Also, there seem
+    to be too many metrics files (the problem is with active_nodes in cperf.py?)
+
+* recvmsg doesn't seem to return an address if there is an error? May
+  need to return the address in a different place?
+
 * IPv6 issues:
   * See if error checking made syscalls slower.
+  * GSO always uses SKB_GSO_TCPV6; sometimes it should be V4.
 
 * Refactor of granting mechanism:
   * Eliminate grant_increment: change to fifo_grant_increment instead
