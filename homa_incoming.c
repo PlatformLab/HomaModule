@@ -130,7 +130,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 #ifdef __UNIT_TEST__
 #define MAX_SKBS 3
 #else
-#define MAX_SKBS 10
+#define MAX_SKBS 20
 #endif
 	struct sk_buff *skbs[MAX_SKBS];
 	int n = 0;             /* Number of filled entries in skbs. */
