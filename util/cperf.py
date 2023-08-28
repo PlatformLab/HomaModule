@@ -1511,6 +1511,43 @@ def get_short_cdf(experiment):
     f.close()
     return [x, y]
 
+def read_file_data(file):
+    """
+    Reads data from a file and returns a dict whose keys are column names
+    and whose values are lists of values from the given column.
+
+    file:   Path to the file containing the desired data. The file consists
+            of initial line containing space-separated column names, followed
+            any number of lines of data. Blank lines and lines starting with
+            "#" are ignored.
+    """
+    columns = {}
+    names = None
+    f = open(file)
+    for line in f:
+        fields = line.strip().split()
+        if len(fields) == 0:
+            continue
+        if fields[0] == '#':
+            continue
+        if not names:
+            names = fields
+            for n in names:
+                columns[n] = []
+        else:
+            if len(fields) != len(names):
+                print("Bad line in %s: %s (expected %d columns, got %d)"
+                        % (file, line.rstrip(), len(columns), len(fields)))
+                continue
+            for i in range(0, len(names)):
+                try:
+                    value = float(fields[i])
+                except ValueError:
+                    value = fields[i]
+                columns[names[i]].append(value)
+    f.close()
+    return columns
+
 def column_from_file(file, column):
     """
     Return a list containing a column of data from a given file.

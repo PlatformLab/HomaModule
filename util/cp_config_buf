@@ -317,7 +317,7 @@ if not options.plot_only:
     print("# slowdown:  Average slowdown across all RPCs when no restrictions", file=f)
     print("# base_mb:   Buffer space used when no restrictions (MBytes)", file=f)
     print("# min_mb:    Buffer space when slowdown degrades by 10% (MBytes)", file=f)
-    print("# base_s:    Buffer space used when no restriction (microseconds)", file=f)
+    print("# base_us:   Buffer space used when no restriction (microseconds)", file=f)
     print("# min_us:    Buffer space when slowdown degrades by 10% (microseconds)", file=f)
     log("Experiment               Slowdown   Max MB  Min MB  Max us  Min us")
     print("%-24s   prot  workload  value slowdown  base_mb  min_mb  "
