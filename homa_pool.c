@@ -46,7 +46,6 @@ int homa_pool_init(struct homa_pool *pool, struct homa *homa,
 
 	if (((__u64) region) & ~PAGE_MASK)
 		return -EINVAL;
-	pool->cores = NULL;
 	pool->region = (char *) region;
 	pool->num_bpages = region_size >> HOMA_BPAGE_SHIFT;
 	if (pool->num_bpages < MIN_ACTIVE) {

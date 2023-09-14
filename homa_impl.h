@@ -1065,11 +1065,7 @@ struct homa_rpc_bucket {
 
 /**
  * struct homa_bpage - Contains information about a single page in
- * a buffer pool. Note: this information is stored in user memory, so
- * it needs to be managed so that a misbehaving user program can't cause
- * kernel crashes (it's OK if a misbehaving program causes the buffer pool
- * to misbehave, such as running out of space, as long as it doesn't cause
- * a kernel crash).
+ * a buffer pool.
  */
 struct homa_bpage {
 	union {
@@ -1079,17 +1075,14 @@ struct homa_bpage {
 		 */
 		struct homa_cache_line cache_line;
 		struct {
-			/** @lock: to synchronize shared access. Must never
-			 * wait for this lock, since a faulty user program
-			 * could leave it locked.
-			 */
+			/** @lock: to synchronize shared access. */
 			struct spinlock lock;
 
 			/**
 			 * @refs: Number of messages with data in this page.
-			 * The kernel increments this when allocating buffer
-			 * space for a message, and the app decrements it when
-			 * done with a message.
+			 * Incremented when space in this bpage is allocated
+			 * for an incoming message, decremented when the
+			 * app tells us it is finished using the data.
 			 */
 			atomic_t refs;
 
@@ -1153,9 +1146,8 @@ _Static_assert(sizeof(struct homa_pool_core) == sizeof(struct homa_cache_line),
 struct homa_pool {
 	/**
 	 * @region: beginning of the pool's region (in the app's virtual
-	 * memory). Initial portion is used for bpage metadata shared
-	 * with the application, and the remainder is divided into pages.
-	 * 0 means the pool hasn't yet been initialized.
+	 * memory). Divided into bpages. 0 means the pool hasn't yet been
+	 * initialized.
 	 */
 	char *region;
 
@@ -1172,10 +1164,11 @@ struct homa_pool {
 
 	/**
 	 * @active_pages: the number of bpages (always the lowest ones)
-	 * that are currently being used for allocation.  Varies slowly
-	 * depending on active buffer usage. The goal is to keep this
-	 * number small to minimize memory footprint, while keeping it
-	 * large enough so that many pages are free at any given time
+	 * that are currently being used for allocation; bpages above
+	 * these will not be considered without first increasing @active_pages.
+	 * Varies slowly depending on active buffer usage. The goal is to
+	 * keep this number small to minimize memory footprint, while keeping
+	 * it large enough so that several pages are free at any given time
 	 * (so allocation is efficient).
 	 */
 	atomic_t active_pages;
