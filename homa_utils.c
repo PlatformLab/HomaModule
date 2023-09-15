@@ -121,7 +121,7 @@ int homa_init(struct homa *homa)
 	homa->fifo_grant_increment = 10000;
 	homa->grant_fifo_fraction = 50;
 	homa->max_overcommit = 8;
-	homa->max_incoming = 0;
+	homa->max_incoming = 400000;
 	homa->max_rpcs_per_peer = 1;
 	homa->dynamic_windows = 0;
 	homa->resend_ticks = 15;
