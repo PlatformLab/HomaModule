@@ -264,13 +264,13 @@ TEST_F(homa_plumbing, homa_set_sock_opt__success)
 
 	args.start = (void *) (((__u64) (buffer + PAGE_SIZE - 1))
 			& ~(PAGE_SIZE - 1));
-	args.length = 5*HOMA_BPAGE_SIZE;
+	args.length = 64*HOMA_BPAGE_SIZE;
 	self->optval.user = &args;
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
 			SO_HOMA_SET_BUF, self->optval,
 			sizeof(struct homa_set_buf_args)));
 	EXPECT_EQ(args.start, self->hsk.buffer_pool.region);
-	EXPECT_EQ(5, self->hsk.buffer_pool.num_bpages);
+	EXPECT_EQ(64, self->hsk.buffer_pool.num_bpages);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.so_set_buf_calls);
 }
 

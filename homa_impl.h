@@ -1079,10 +1079,10 @@ struct homa_bpage {
 			struct spinlock lock;
 
 			/**
-			 * @refs: Number of messages with data in this page.
-			 * Incremented when space in this bpage is allocated
-			 * for an incoming message, decremented when the
-			 * app tells us it is finished using the data.
+			 * @refs: Counts number of distinct uses of this
+			 * bpage (1 tick for each message that is using
+			 * this page, plus an additional tick if the @owner
+			 * field is set).
 			 */
 			atomic_t refs;
 
@@ -1095,7 +1095,7 @@ struct homa_bpage {
 			/**
 			 * @expiration: time (in get_cycles units) after
 			 * which it's OK to steal this page from its current
-			 * owner.
+			 * owner (if @refs is 1).
 			 */
 			__u64 expiration;
 		};
@@ -1130,6 +1130,12 @@ struct homa_pool_core {
 			 * from the page.
 			 */
 			int allocated;
+
+			/**
+			 * @next_candidate: when searching for free bpages,
+			 * check this index next.
+			 */
+			int next_candidate;
 		};
 	};
 };
@@ -1145,6 +1151,11 @@ _Static_assert(sizeof(struct homa_pool_core) == sizeof(struct homa_cache_line),
  */
 struct homa_pool {
 	/**
+	 * @homa: shared information about the Homa driver.
+	 */
+	struct homa *homa;
+
+	/**
 	 * @region: beginning of the pool's region (in the app's virtual
 	 * memory). Divided into bpages. 0 means the pool hasn't yet been
 	 * initialized.
@@ -1154,36 +1165,16 @@ struct homa_pool {
 	/** @num_bpages: total number of bpages in the pool. */
 	int num_bpages;
 
-	/**
-	 * @homa: shared information about the Homa driver.
-	 */
-	struct homa *homa;
-
 	/** @descriptors: kmalloced area containing one entry for each bpage. */
 	struct homa_bpage *descriptors;
 
 	/**
-	 * @active_pages: the number of bpages (always the lowest ones)
-	 * that are currently being used for allocation; bpages above
-	 * these will not be considered without first increasing @active_pages.
-	 * Varies slowly depending on active buffer usage. The goal is to
-	 * keep this number small to minimize memory footprint, while keeping
-	 * it large enough so that several pages are free at any given time
-	 * (so allocation is efficient).
+	 * @free_bpages: the number of pages still available for allocation
+	 * by homa_pool_get pages. This equals the number of pages with zero
+	 * reference counts, minus the number of pages that have been claimed
+	 * by homa_get_pool_pages but not yet allocated.
 	 */
-	atomic_t active_pages;
-
-	/**
-	 * @next_scan: index of the next page to check while searching for
-	 * a free bpage.
-	 */
-	atomic_t next_scan;
-
-	/**
-	 * @free_bpages_found: the number of pages successfully allocated
-	 * so far in the current scan (i.e. since @next_scan was set to 0).
-	 */
-	atomic_t free_bpages_found;
+	atomic_t free_bpages;
 
 	/** @cores: core-specific info; dynamically allocated. */
 	struct homa_pool_core *cores;
