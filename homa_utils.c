@@ -599,9 +599,9 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		for (i = 0; i < num_rpcs; i++) {
 			UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
 			/* Lock and unlock the RPC before freeing it. This
-			 * is needed to deal with races where the last user
-			 * of the RPC (such as homa_ioc_reply) hasn't
-			 * unlocked it yet.
+			 * is needed to deal with races where the code
+			 * that invoked homa_rpc_free hasn't unlocked the
+			 * RPC yet.
 			 */
 			homa_rpc_lock(rpcs[i]);
 			homa_rpc_unlock(rpcs[i]);
@@ -1317,11 +1317,12 @@ char *homa_print_metrics(struct homa *homa)
 				m->napi_cycles);
 		homa_append_metric(homa,
 				"send_cycles               %15llu  "
-				"Time spent in homa_ioc_send kernel call\n",
+				"Time spent in homa_sendmsg for requests\n",
 				m->send_cycles);
 		homa_append_metric(homa,
 				"send_calls                %15llu  "
-				"Total invocations of send kernel call\n",
+				"Total invocations of homa_sendmsg for "
+				"requests\n",
 				m->send_calls);
 		// It is possible for us to get here at a time when a
 		// thread has been blocked for a long time and has
@@ -1346,11 +1347,12 @@ char *homa_print_metrics(struct homa *homa)
 				m->blocked_cycles);
 		homa_append_metric(homa,
 				"reply_cycles              %15llu  "
-				"Time spent in homa_ioc_reply kernel call\n",
+				"Time spent in homa_sendmsg for responses\n",
 				m->reply_cycles);
 		homa_append_metric(homa,
 				"reply_calls               %15llu  "
-				"Total invocations of reply kernel call\n",
+				"Total invocations of homa_sendmsg for "
+				"responses\n",
 				m->reply_calls);
 		homa_append_metric(homa,
 				"abort_cycles              %15llu  "

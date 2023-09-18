@@ -2156,12 +2156,13 @@ struct homa_metrics {
 	__u64 napi_cycles;
 
 	/**
-	 * @send_cycles: total time spent executing the homa_ioc_send
-	 * kernel call handler, as measured with get_cycles().
+	 * @send_cycles: total time spent executing the homa_sendmsg kernel
+	 * call handler to send requests, as measured with get_cycles().
 	 */
 	__u64 send_cycles;
 
-	/** @send_calls: total number of invocations of the send kernel call. */
+	/** @send_calls: total number of invocations of homa_semdmsg
+	 * for requests. */
 	__u64 send_calls;
 
 	/**
@@ -2180,12 +2181,15 @@ struct homa_metrics {
 	__u64 blocked_cycles;
 
 	/**
-	 * @reply_cycles: total time spent executing the homa_ioc_reply
-	 * kernel call handler, as measured with get_cycles().
+	 * @reply_cycles: total time spent executing the homa_sendmsg kernel
+	 * call handler to send responses, as measured with get_cycles().
 	 */
 	__u64 reply_cycles;
 
-	/** @reply_calls: total number of invocations of the reply kernel call. */
+	/**
+	 * @reply_calls: total number of invocations of homa_semdmsg
+	 * for responses.
+	 */
 	__u64 reply_calls;
 
 	/**
