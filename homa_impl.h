@@ -944,8 +944,8 @@ struct homa_rpc {
  *         limited conditions. The caller must ensure that the RPC
  *         cannot be reaped before the lock is acquired. It cannot
  *         do that by acquiring the socket lock, since that violates
- *         lock ordering constraints. One approach is to increment
- *         rpc->hsk->reap_disable. Don't use this function unless you
+ *         lock ordering constraints. One approach is to use
+ *         homa_protect_rpcs. Don't use this function unless you
  *         are very sure what you are doing!  See sync.txt for more
  *         info on locking.
  */
