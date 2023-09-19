@@ -1,10 +1,9 @@
 #!/usr/bin/python3
 
 """
-Scans a timetrace to compute grant lag: how long it takes after a
-grant is issued for the granted packet to arrive. Also computes
-statistics on when grants arrive compared to when they are needed
-to transmit at full bandwidth.
+Scans a timetrace to compute various statistics related to grants, such
+as how long it takes after a grant is issued for the first newly granted
+packet to arrive. It can be used on either a client-side or server-side trace.
 Usage: ttgrant.py [tt_file]
 
 The existing timetrace is in tt_file (or stdin in tt_file is omitted).
@@ -20,6 +19,28 @@ import string
 import sys
 from statistics import median
 
+# Parse command line options
+parser = OptionParser(description=
+        'Read a timetrace and output statistics related to grants (works'
+        ' on both clients and servers)',
+        usage='%prog [options] [trace]',
+        conflict_handler='resolve')
+parser.add_option('--verbose', '-v', action='store_true', default=False,
+        dest='verbose',
+        help='print lots of output')
+parser.add_option('--gbps', type='int', dest='gbps', default=25,
+        metavar = 'N', help='network speed in Gbps')
+parser.add_option('--rtt_bytes', type='int', dest='rtt_bytes', default=60000,
+        metavar = 'N', help='rtt_bytes sysctl parameter for Homa')
+
+(options, extra) = parser.parse_args()
+f = sys.stdin
+if len(extra) > 0:
+    f = open(extra[0])
+    if len(extra) > 1:
+      print("Unrecognized argument %s" % (extra[1]))
+      exit(1)
+
 def percentile(list, pct, format, na):
     """
     Finds the element of list corresponding to a given percentile pct
@@ -33,28 +54,13 @@ def percentile(list, pct, format, na):
         i = len(list) - 1
     return format % (list[i])
 
-verbose = False
-if (len(sys.argv) >= 2) and (sys.argv[1] == "--verbose"):
-  verbose = True
-  sys.argv.pop(1)
-if len(sys.argv) == 2:
-    f = open(sys.argv[1])
-elif len(sys.argv) == 1:
-    f = sys.stdin
-else:
-    print("Usage: %s [--verbose] [tt_file]" % (sys.argv[0]))
-    sys.exit(1)
-
-# Network link speed in Gbps.
-gbps = 40
-
 # Collects all the observed grant latencies (time from sending grant
 # to receiving first data packet enabled by grant), in microseconds
 latencies = []
 
 # Keys are RPC ids. Each value is a list of lists, one per outstanding
-# grant, where each sublist consists of a pair <time, start_offset, end_offset>
-# griple identifying one grant
+# grant, where each sublist consists of a <time, prev_offset, new_offset>
+# triple identifying one grant
 out_grants = {}
 
 # Keys are RPC ids, values are the highest offset seen in any grant
@@ -69,13 +75,23 @@ packet_size = 0
 unscheduled = {}
 
 # Keys are RPC ids; each value is a list of lists, one per grant received
-# for that RPC, and each entry is an triple <time, start, end> pair indicating
-# when the grant was received and the range of bytes it covers.
+# for that RPC, and each entry is a triple <time, prev_offset, new_offset>
+# indicating when the grant was received and the range of bytes it covers.
 in_grants = {}
 
 # Keys are RPC ids; each value is a list of lists, one per data packet
-# sent for that RPC, and each entry is an <time, offset> pair describing
-# that data packet.
+# received by homa_gro_receive for that RPC, and each entry is a <time, offset>
+# pair describing that data packet.
+gro_data = {}
+
+# Keys are RPC ids; each value is a list of lists, one per data packet
+# received by homa_softirq for that RPC, and each entry is a <time, offset>
+# pair describing that data packet.
+softirq_data = {}
+
+# Keys are RPC ids; each value is a list of lists, one per data packet
+# sent for that RPC, and each entry is an <time, offset, length> triple
+# describing that data packet.
 out_data = {}
 
 # Keys are RPC ids; each value is the first time at which we noticed that
@@ -108,7 +124,7 @@ for line in f:
             out_grants[id].append([time, last_grant[id], offset])
             last_grant[id] = offset
 
-    # Collect info about incoming data packets
+    # Collect info about incoming data packets processed by homa_softirq
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
           'incoming data packet, id ([0-9]+), .*, offset ([0-9.]+)', line)
     if match:
@@ -116,19 +132,22 @@ for line in f:
         id = int(match.group(4))
         offset = int(match.group(5))
 
-        # Update grant latencies
-        if not id in out_grants:
-            continue
-        grants = out_grants[id]
-        if grants:
-            grant = grants[0]
-            if grant[1] < offset:
-                if verbose:
-                    print("%9.3f: grant lag %.1f us (%9.3f us), id %d, "
-                            "range %d:%d" % (time, time - grant[0], grant[0],
-                            id, grant[1], grant[2]))
-                latencies.append(time - grant[0])
-                grants.pop(0)
+        if not id in softirq_data:
+            softirq_data[id] = []
+        softirq_data[id].append([time, offset])
+
+    # Collect info about incoming data packets processed by homa_gro_receive
+    match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
+          'homa_gro_receive got packet .* id ([0-9]+), offset ([0-9.]+)',
+          line)
+    if match:
+        time = float(match.group(1))
+        id = int(match.group(4))
+        offset = int(match.group(5))
+
+        if not id in gro_data:
+            gro_data[id] = []
+        gro_data[id].append([time, offset])
 
     # Collect information about unscheduled data for outgoing RPCs
     match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\] '
@@ -185,7 +204,7 @@ for line in f:
                 # The trace doesn't include all outgoing data packets
                 continue
             out_data[id] = []
-        out_data[id].append([time, offset])
+        out_data[id].append([time, offset, size])
         if not (id in first_out):
             first_out[id] = time
         # print("%9.3f: outgoing data for id %d, offset %d" % (
@@ -204,10 +223,10 @@ for id in out_data:
             # in_grants[id][0][0]))
 
 # Time to transmit a full-size packet, in microseconds.
-xmit_time = (packet_size * 8)/(gbps * 1000)
-print("Largest observed incoming packet: %d bytes" % (packet_size))
+xmit_time = (packet_size * 8)/(options.gbps * 1000)
+print("Largest observed outgoing packet: %d bytes" % (packet_size))
 print("Wire serialization time for %d-byte packet at %d Gbps: %.1f us" % (
-        packet_size, gbps, xmit_time))
+        packet_size, options.gbps, xmit_time))
 
 # Collect info for all incoming grants about how much additional data
 # is authorized by each grant.
@@ -275,37 +294,122 @@ while (len(start_times) > 0) or (len(end_times) > 0):
         xmit_active_time += end_times[0] - active_start
     end_times.pop(0)
 
+# Compute "Latency": delay between issuing a grant and receipt in homa_softirq
+# of the first data packet that depended on that grant.
+
+for id in out_grants:
+    if not id in softirq_data:
+        continue;
+
+    data = softirq_data[id].copy()
+    for grant in out_grants[id]:
+        while data and (data[0][1] <= grant[1]):
+            data.pop(0)
+        if not data:
+            break
+        latency = data[0][0] - grant[0]
+        if options.verbose:
+            print("%9.3f: grant lag %.1f us (%9.3f us), id %d, "
+                    "range %d:%d" % (data[0][0], latency, grant[0],
+                    id, grant[1], grant[2]))
+        latencies.append(latency)
+
+# Compute "Xmit Lag": time it takes after a data packet arrives in GRO to
+# send a new grant enabled by that data packet.
+xmit_lags = []
+for id in out_grants:
+    if not id in gro_data:
+        continue
+    data = sorted(gro_data[id], key=lambda tuple : tuple[1])
+    prev_data = None
+    for grant in out_grants[id]:
+        while data and (data[0][1] + options.rtt_bytes) <= grant[1]:
+            prev_data = data[0]
+            data.pop(0)
+        if not data:
+            break
+
+        # The current data packet is the one *just after* the one that
+        # triggered the current grant, so the lag is measured from the
+        # previous data packet.
+        if not prev_data:
+            print("%9.3f: no prev_data for grant" % (grant[0]))
+            continue
+        lag = grant[0] - prev_data[0]
+        xmit_lags.append(lag)
+        if options.verbose:
+            print("%9.3f: data packet %d-%d triggered grant %d-%d, at %9.3f" %
+                    (prev_data[0], prev_data[1], data[0][1],
+                    grant[1], grant[2], grant[0]))
+
+# Compute "Client Lag": time it takes after sending a data packet for
+# homa_softirq to receive a new grant triggered by that packet.
+client_lags = []
+for id in in_grants:
+    if not id in out_data:
+        continue
+    data = out_data[id].copy()
+    for grant in in_grants[id]:
+        while data and (data[0][1] + data[0][2] + options.rtt_bytes) <= grant[1]:
+            data.pop(0)
+        if not data:
+            break
+
+        lag = grant[0] - data[0][0]
+        client_lags.append(lag)
+        if options.verbose:
+            print("%9.3f: client data packet %d-%d triggered grant %d-%d, at %9.3f" %
+                    (data[0][0], data[0][1], data[0][1] + data[0][2],
+                    grant[1], grant[2], grant[0]))
+
 latencies = sorted(latencies)
 first_grants = sorted(first_grants)
 in_lags = sorted(in_lags)
+xmit_lags = sorted(xmit_lags)
+client_lags = sorted(client_lags)
 print("\nLatency:         time from sending grant for an incoming message")
 print("                 (in homa_send_grants) to receiving first granted")
 print("                 data in Homa SoftIRQ")
 print("First Lag:       time from calling ip_queue_xmit for first data packet")
-print("                 until receiving first grant in Homa SoftIRQ")
+print("                 until homa_softirq gets first grant")
+print("Client Lag:      time from calling ip_queue_xmit for a data packet")
+print("                 until homa_softirq gets grant triggered by that packet")
 print("In Lag:          time when a grant arrived, relative to time when")
 print("                 it was needed to send message at full bandwidth")
 print("                 (skips first grant for each message)")
-print("Pctile       Latency     First Lag      In Lag")
+print("Xmit Lag:        time when a data packet arrives that allows a new")
+print("                 grant until the new grant is transmitted")
+print("Pctile      Latency   First Lag  Client Lag     In Lag   Xmit Lag")
 for p in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 99, 100]:
-    print("%3d        %s     %s   %s" %(p,
-            percentile(latencies, p, "%6.1f us", "   N/A   "),
-            percentile(first_grants, p, "%6.1f us", "   N/A   "),
-            percentile(in_lags, p, "%6.1f us", "   N/A   ")))
+    print("%3d       %s   %s   %s  %s  %s" % (p,
+            percentile(latencies, p, "%6.1f us", "      N/A"),
+            percentile(first_grants, p, "%6.1f us", "      N/A"),
+            percentile(client_lags, p, "%6.1f us", "      N/A"),
+            percentile(in_lags, p, "%6.1f us", "      N/A"),
+            percentile(xmit_lags, p, "%6.1f us", "      N/A")))
 
-if len(latencies) == 0:
-    out_avg = "   N/A   "
-else:
+if latencies:
     out_avg = "%6.1f us" % (sum(latencies)/len(latencies))
-if len(first_grants) == 0:
-    in_avg = "   N/A   "
 else:
-    in_avg = "%6.1f us" %  (sum(first_grants)/len(first_grants))
-if len(in_lags) == 0:
-    in_lags_avg = "   N/A   "
+    out_avg = "      N/A"
+if first_grants:
+    first_avg = "%6.1f us" %  (sum(first_grants)/len(first_grants))
 else:
+    first_avg = "      N/A"
+if client_lags:
+    client_avg = "%6.1f us" %  (sum(client_lags)/len(client_lags))
+else:
+    client_avg = "      N/A"
+if in_lags:
     in_lags_avg = "%6.1f us" %  (sum(in_lags)/len(in_lags))
-print("Average:   %9s     %9s   %9s" % (out_avg, in_avg, in_lags_avg))
+else:
+    in_lags_avg = "      N/A"
+if xmit_lags:
+    xmit_avg = "%6.1f us" % (sum(xmit_lags)/len(xmit_lags))
+else:
+    xmit_avg = "      N/A"
+print("Avg:      %9s   %9s   %9s  %9s  %9s" % (out_avg, first_avg, client_avg,
+        in_lags_avg, xmit_avg))
 
 if xmit_active_time != 0:
     print("\nTotal data packet xmit delays because grants were slow:\n"
