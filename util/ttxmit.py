@@ -211,7 +211,7 @@ for gap in gaps:
 
 if len(gaps) > 0:
     gaps.reverse()
-    print("\nGap CDF (% of total gap time in gaps <= given size):")
+    print("\nGap CDF (% of total xmit gap time in gaps <= given size):")
     print("Percent    Gap")
     pctl = 0
     total_usecs = 0
