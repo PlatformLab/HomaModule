@@ -49,20 +49,25 @@ This file describes the synchronization strategy used for Homa.
     of operations during shutdown, plus the rest of Homa must be careful
     never to add new RPCs to a socket that has been shut down.
 
-* There are a few places where Homa needs to scan all of the active RPCs
-  for a socket, such as the timer. Such code will lock each RPC that it
-  finds, but there is a risk that an RPC could be deleted and its memory
-  recycled before it can be locked; this could result in corruption. Locking
-  the socket for the duration of the scan would prevent this problem, but
-  that isn't possible because of the locking order constraints. It's OK if
-  the RPC gets deleted, as long as its memory doesn't get reclaimed. The
-  RCU mechanism could be used for this, but RCU results in *very* long delays
-  before final reclamation (tens of ms), even without contention, which means
-  that a large number of dead RPCs could accumulate. Thus I decided not to use
-  the Linux RCU mechanism. Instead, Homa has a special-purpose RCU-like
-  mechanism via the function homa_protect_rpcs; this function prevents RPC
-  reaping for a socket. RPCs can still be deleted, but their memory won't go
-  away until homa_unprotect_rpcs is invoked.
+* There are a few places where Homa needs to process RPCs on lists
+  associated with a socket, such as the timer. Such code must first lock
+  the socket (to synchronize access to the link pointers) then lock
+  individual RPCs on the list. However, this violates the rules for locking
+  order. It isn't safe to unlock the socket before locking the RPC, because
+  the RPC could be deleted and its memory recycled between the unlock of the
+  socket lock and the lock of the RPC; this could result in corruption. Homa
+  uses a few different ways to handle this situation:
+  * Use homa_protect_rpcs to prevent RPC reaping for a socket. RPCs can still
+    be deleted, but their memory won't go away until homa_unprotect_rpcs is
+    invoked. This allows the socket lock to be released before acquiring
+    the RPC lock; after acquiring the RPC lock check to see if it has been
+    deleted; if so, skip it.  Note: the Linux RCU mechanism could have been
+    used to achieve the same effect, but it results in *very* long delays
+    before final reclamation (tens of ms), even without contention, which
+    means that a large number of dead RPCs could accumulate.
+  * Use spin_trylock_bh to acquire the RPC lock, while still holding the
+    socket lock. If this fails, then release the socket lock, then retry
+    both the socket lock and the RPC lock.
 
 * There are also a few places where Homa is doing something related to an
   RPC (such as copying message data to user space) and needs the RPC to stay

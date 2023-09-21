@@ -199,10 +199,6 @@ copy_out:
 			dst = homa_pool_get_buffer(rpc,
 					ntohl(h->seg.offset) + copied_from_seg,
 					&buf_bytes);
-			if (dst == NULL) {
-				error = -ENOMEM;
-				break;
-			}
 			if (buf_bytes < skb_bytes) {
 				if (buf_bytes == 0) {
 					/* skb seems to have data beyond the
@@ -329,6 +325,30 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 			msgin->total_length);
 	resend->offset = htonl(msgin->copied_out);
 	resend->length = htonl(missing_bytes);
+}
+
+/**
+ * homa_advance_input() - This is an "odds and ends" function that
+ * helps an incoming rpc to progress by arranging for grants, if
+ * appropriate, and waking up a waiting process, if appropriate.
+ * @rpc:  RPC to process
+ */
+void homa_advance_input(struct homa_rpc *rpc)
+{
+	struct data_header *first_hdr;
+
+	if (rpc->msgin.num_bpages == 0)
+		return;
+	first_hdr = (struct data_header *) (skb_peek(&rpc->msgin.packets)->data);
+	if ((ntohl(first_hdr->seg.offset) == rpc->msgin.copied_out)
+			&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
+		atomic_or(RPC_PKTS_READY, &rpc->flags);
+		homa_sock_lock(rpc->hsk, "homa_advance_input");
+		homa_rpc_handoff(rpc);
+		homa_sock_unlock(rpc->hsk);
+	}
+	if (rpc->msgin.scheduled )
+		homa_check_grantable(rpc);
 }
 
 /**
@@ -497,6 +517,7 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
+ *           Must be locked by the caller.
  * @lcache:  @rpc must be stored here; released if needed to unlock @rpc.
  * @delta:   Pointer to a value that will be incremented or decremented
  *           to accumulate changes that need to be made to homa->total_incoming.
@@ -517,40 +538,33 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			tt_addr(rpc->peer->addr), ntohl(h->seg.offset),
 			ntohl(h->message_length));
 
-	if (rpc->state != RPC_INCOMING) {
-		if (homa_is_client(rpc->id)) {
-			if (unlikely(rpc->state != RPC_OUTGOING))
-				goto discard;
-			INC_METRIC(responses_received, 1);
-			rpc->state = RPC_INCOMING;
-		} else {
-			if (unlikely(rpc->msgin.total_length >= 0))
-				goto discard;
-		}
-	}
-
-	if (rpc->msgin.total_length < 0) {
-		/* First data packet for message; initialize. */
+	if ((rpc->state != RPC_INCOMING) && homa_is_client(rpc->id)) {
+		if (unlikely(rpc->state != RPC_OUTGOING))
+			goto discard;
+		INC_METRIC(responses_received, 1);
+		rpc->state = RPC_INCOMING;
 		tt_record2("Incoming message for id %d has %d unscheduled bytes",
 				rpc->id, ntohl(h->incoming));
 		homa_message_in_init(&rpc->msgin, ntohl(h->message_length),
 				ntohl(h->incoming));
-		*delta += rpc->msgin.incoming;
+		if (homa_pool_allocate(rpc) != 0)
+			goto discard;
+	} else if (rpc->state != RPC_INCOMING) {
+		/* Must be server; note that homa_rpc_new_server already
+		 * initialized msgin and allocated buffers.
+		 */
+		if (unlikely(rpc->msgin.total_length >= 0))
+			goto discard;
 	}
+
+	if (skb_peek(&rpc->msgin.packets) == NULL)
+		*delta += rpc->msgin.incoming;
 
 	old_remaining = rpc->msgin.bytes_remaining;
 	homa_add_packet(rpc, skb);
 	*delta -= old_remaining - rpc->msgin.bytes_remaining;
 
-	if ((ntohl(h->seg.offset) == rpc->msgin.copied_out)
-			&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
-		atomic_or(RPC_PKTS_READY, &rpc->flags);
-		homa_sock_lock(rpc->hsk, "homa_data_pkt");
-		homa_rpc_handoff(rpc);
-		homa_sock_unlock(rpc->hsk);
-	}
-	if (rpc->msgin.scheduled)
-		homa_check_grantable(homa, rpc);
+	homa_advance_input(rpc);
 
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
@@ -578,6 +592,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 
     discard:
 	kfree_skb(skb);
+	UNIT_LOG("; ", "homa_data_pkt discarded packet");
 }
 
 /**
@@ -829,15 +844,15 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
  * homa_check_grantable() - This function ensures that an RPC is on the
  * grantable list if appropriate. It also adjusts the position of the RPC
  * upward on the list, if needed.
- * @homa:    Overall data about the Homa protocol implementation.
  * @rpc:     RPC to check; typically the status of this RPC has changed
  *           in a way that may affect its grantability (e.g. a packet
  *           just arrived for it). Must be locked.
  */
-void homa_check_grantable(struct homa *homa, struct homa_rpc *rpc)
+void homa_check_grantable(struct homa_rpc *rpc)
 {
 	struct homa_rpc *candidate;
 	struct homa_message_in *msgin = &rpc->msgin;
+	struct homa *homa = rpc->hsk->homa;
 
 	/* No need to do anything unless this message needs more grants. */
 	if (rpc->msgin.incoming >= rpc->msgin.total_length)

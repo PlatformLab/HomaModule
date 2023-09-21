@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -142,7 +142,7 @@ TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
 			&self->server_addr);
 	EXPECT_TRUE(IS_ERR(crpc));
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(crpc));
-	self->hsk.shutdown = 1;
+	self->hsk.shutdown = 0;
 }
 
 TEST_F(homa_utils, homa_rpc_new_server__normal)
@@ -206,6 +206,28 @@ TEST_F(homa_utils, homa_rpc_new_server__socket_shutdown)
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	self->hsk.shutdown = 0;
+}
+TEST_F(homa_utils, homa_rpc_new_server__allocate_buffers)
+{
+	self->data.message_length = N(3*HOMA_BPAGE_SIZE);
+	self->data.seg.segment_length = N(1400);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	ASSERT_FALSE(IS_ERR(srpc));
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(3, srpc->msgin.num_bpages);
+	homa_rpc_free(srpc);
+}
+TEST_F(homa_utils, homa_rpc_new_server__no_buffer_pool)
+{
+	self->data.message_length = N(1400);
+	self->data.seg.segment_length = N(1400);
+	homa_pool_destroy(&self->hsk.buffer_pool);
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	ASSERT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 }
 TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 {
@@ -218,6 +240,18 @@ TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	homa_rpc_free(srpc);
+}
+TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_no_buffers)
+{
+	self->data.message_length = N(1400);
+	self->data.seg.segment_length = N(1400);
+	atomic_set(&self->hsk.buffer_pool.free_bpages,0 );
+	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
+			self->client_ip, &self->data);
+	ASSERT_FALSE(IS_ERR(srpc));
+	homa_rpc_unlock(srpc);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
 	homa_rpc_free(srpc);
 }
 TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
@@ -412,22 +446,6 @@ TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(1400, atomic_read(&self->homa.total_incoming));
 }
-TEST_F(homa_utils, homa_rpc_free__release_buffers)
-{
-	struct homa_pool *pool = &self->hsk.buffer_pool;
-
-	EXPECT_EQ(0, -homa_pool_init(pool, &self->homa, (void *) 0x1000000,
-			100*HOMA_BPAGE_SIZE));
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			4000, 98, 1000,	150000);
-	ASSERT_NE(NULL, crpc);
-
-	EXPECT_EQ(0, homa_pool_allocate(crpc));
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
-	homa_rpc_free(crpc);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-}
 TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -568,6 +586,20 @@ TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 	homa_rpc_reap(&self->hsk, 5);
 	EXPECT_STREQ("1235", dead_rpcs(&self->hsk));
 	EXPECT_EQ(3, self->hsk.dead_skbs);
+}
+TEST_F(homa_utils, homa_rpc_reap__release_buffers)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	homa_rpc_free(crpc);
+	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	homa_rpc_reap(&self->hsk, 5);
+	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
 }
 TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
 {

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2019-2022 Stanford University
+# Copyright (c) 2019-2023 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -412,7 +412,7 @@ if elapsed_secs != 0:
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "forced_reaps"]:
+            "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs

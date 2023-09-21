@@ -823,8 +823,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 		return -EFAULT;
 
 	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_SET_BUF");
-	ret = homa_pool_init(&hsk->buffer_pool, hsk->homa, args.start,
-			args.length);
+	ret = homa_pool_init(hsk, args.start, args.length);
 	homa_sock_unlock(hsk);
 	INC_METRIC(so_set_buf_calls, 1);
 	INC_METRIC(so_set_buf_cycles, get_cycles() - start);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -147,6 +147,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
+	INIT_LIST_HEAD(&hsk->waiting_for_bufs);
 	INIT_LIST_HEAD(&hsk->ready_requests);
 	INIT_LIST_HEAD(&hsk->ready_responses);
 	INIT_LIST_HEAD(&hsk->request_interests);

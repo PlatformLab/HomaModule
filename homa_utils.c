@@ -237,6 +237,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	memset(&crpc->msgout, 0, sizeof(crpc->msgout));
 	crpc->msgout.length = -1;
 	INIT_LIST_HEAD(&crpc->ready_links);
+	INIT_LIST_HEAD(&crpc->buf_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
 	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->grantable_links);
@@ -275,7 +276,7 @@ error:
  * homa_rpc_new_server() - Allocate and construct a server RPC (one that is
  * used to manage an incoming request). If appropriate, the RPC will also
  * be handed off (we do it here, while we have the socket locked, to avoid
- * acquiring the socket lock a second time).
+ * acquiring the socket lock a second time later for the handoff).
  * @hsk:    Socket that owns this RPC.
  * @source: IP address (network byte order) of the RPC's client.
  * @h:      Header for the first data packet received for this RPC; used
@@ -334,6 +335,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	memset(&srpc->msgout, 0, sizeof(srpc->msgout));
 	srpc->msgout.length = -1;
 	INIT_LIST_HEAD(&srpc->ready_links);
+	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
 	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->grantable_links);
@@ -343,6 +345,13 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->done_timer_ticks = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
+	tt_record2("Incoming message for id %d has %d unscheduled bytes",
+			srpc->id, ntohl(h->incoming));
+	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
+			ntohl(h->incoming));
+	err = homa_pool_allocate(srpc);
+	if (err != 0)
+		goto error;
 
 	/* Initialize fields that require socket to be locked. */
 	homa_sock_lock(hsk, "homa_rpc_new_server");
@@ -353,7 +362,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
-	if (ntohl(h->seg.offset) == 0) {
+	if ((ntohl(h->seg.offset) == 0) && (srpc->msgin.num_bpages > 0)) {
 		atomic_or(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
@@ -461,6 +470,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 		 */
 		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 	__list_del_entry(&rpc->ready_links);
+	__list_del_entry(&rpc->buf_links);
 	if (rpc->interest != NULL) {
 		rpc->interest->reg_rpc = NULL;
 		wake_up_process(rpc->interest->thread);
@@ -476,9 +486,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
-	if (unlikely(rpc->msgin.num_bpages))
-		homa_pool_release_buffers(&rpc->hsk->buffer_pool,
-				rpc->msgin.num_bpages, rpc->msgin.bpage_offsets);
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
@@ -597,14 +604,25 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		for (i = 0; i < num_skbs; i++)
 			kfree_skb(skbs[i]);
 		for (i = 0; i < num_rpcs; i++) {
-			UNIT_LOG("; ", "reaped %llu", rpcs[i]->id);
+			rpc = rpcs[i];
+			UNIT_LOG("; ", "reaped %llu", rpc->id);
 			/* Lock and unlock the RPC before freeing it. This
 			 * is needed to deal with races where the code
 			 * that invoked homa_rpc_free hasn't unlocked the
 			 * RPC yet.
 			 */
-			homa_rpc_lock(rpcs[i]);
-			homa_rpc_unlock(rpcs[i]);
+			homa_rpc_lock(rpc);
+			homa_rpc_unlock(rpc);
+
+			/* This code must be here (not in homa_rpc_free)
+			 * because homa_pool_release_buffers must be called
+			 * without holding any locks.
+			 */
+			if (unlikely(rpc->msgin.num_bpages))
+				homa_pool_release_buffers(
+						&rpc->hsk->buffer_pool,
+						rpc->msgin.num_bpages,
+						rpc->msgin.bpage_offsets);
 			rpcs[i]->state = 0;
 			kfree(rpcs[i]);
 		}
@@ -1596,6 +1614,11 @@ char *homa_print_metrics(struct homa *homa)
 				"Buffer page could be reused because ref "
 				"count was zero\n",
 				m->bpage_reuses);
+		homa_append_metric(homa,
+				"buffer_alloc_failures     %15llu  "
+				"homa_pool_allocate didn't find enough buffer "
+				"space for an RPC\n",
+				m->buffer_alloc_failures);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

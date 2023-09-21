@@ -867,9 +867,16 @@ struct homa_rpc {
 
 	/**
 	 * @ready_links: Used to link this object into
-	 * &homa_sock.ready_requests or &homa_sock.ready_responses.
+	 * @hsk->ready_requests or @hsk->ready_responses.
 	 */
 	struct list_head ready_links;
+
+	/**
+	 * @buf_links: Used to link this RPC into @hsk->waiting_for_bufs.
+	 * If the RPC isn't on @hsk->waiting_for_bufs, this is an empty
+	 * list pointing to itself.
+	 */
+	struct list_head buf_links;
 
 	/**
 	 * @active_links: For linking this object into @hsk->active_rpcs.
@@ -1151,9 +1158,9 @@ _Static_assert(sizeof(struct homa_pool_core) == sizeof(struct homa_cache_line),
  */
 struct homa_pool {
 	/**
-	 * @homa: shared information about the Homa driver.
+	 * @hsk: the socket that this pool belongs to.
 	 */
-	struct homa *homa;
+	struct homa_sock *hsk;
 
 	/**
 	 * @region: beginning of the pool's region (in the app's virtual
@@ -1175,6 +1182,13 @@ struct homa_pool {
 	 * by homa_get_pool_pages but not yet allocated.
 	 */
 	atomic_t free_bpages;
+
+	/**
+	 * The number of free bpages required to satisfy the needs of the
+	 * first RPC on @hsk->waiting_for_bufs, or INT_MAX if that queue
+	 * is empty.
+	 */
+	int bpages_needed;
 
 	/** @cores: core-specific info; dynamically allocated. */
 	struct homa_pool_core *cores;
@@ -1269,6 +1283,13 @@ struct homa_sock {
 
 	/** @dead_skbs: Total number of socket buffers in RPCs on dead_rpcs. */
 	int dead_skbs;
+
+	/**
+	 * @waiting_for_bufs: Contains RPCs that are blocked because there
+	 * wasn't enough space in the buffer pool region for their incoming
+	 * messages. Sorted in increasing order of message length.
+	 */
+	struct list_head waiting_for_bufs;
 
 	/**
 	 * @ready_requests: Contains server RPCs whose request message is
@@ -2533,6 +2554,13 @@ struct homa_metrics {
 	 */
 	__u64 bpage_reuses;
 
+	/**
+	 * @buffer_alloc_failures: total number of times that
+	 * homa_pool_allocate was unable to allocate buffer space for
+	 * an incoming message.
+	 */
+	__u64 buffer_alloc_failures;
+
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
 	__u64 temp[NUM_TEMP_METRICS];
@@ -2983,10 +3011,11 @@ extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
+extern void     homa_advance_input(struct homa_rpc *rpc);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
-extern void     homa_check_grantable(struct homa *homa, struct homa_rpc *rpc);
+extern void     homa_check_grantable(struct homa_rpc *rpc);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
@@ -3084,8 +3113,8 @@ extern void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 		    int *available);
 extern int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 		    __u32 *pages, int leave_locked);
-extern int      homa_pool_init(struct homa_pool *pool, struct homa *homa,
-		    void *buf_region, __u64 region_size);
+extern int      homa_pool_init(struct homa_sock *hsk, void *buf_region,
+		    __u64 region_size);
 extern void     homa_pool_release_buffers(struct homa_pool *pool,
 		    int num_buffers, __u32 *buffers);
 extern char    *homa_print_ipv4_addr(__be32 addr);
