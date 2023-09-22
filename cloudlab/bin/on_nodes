@@ -18,22 +18,23 @@
 # cluster.
 #
 # Usage:
-# on_nodes num_nodes cmd arg arg ...
+# on_nodes num_first last cmd arg arg ...
 #
-# The "num_nodes" arguments indicates how many nodes the command should
-# be run on (starting at node0). The remaining arguments are a command
+# The "first" and "last" arguments give the range of nodes (inclusive) on
+# which the command should run. The remaining arguments are a command
 # and its arguments to run on the given machines
 
 root=~/homaModule
 
-if [ $# -lt 2 ]; then
-    echo "Usage: on_nodes num_nodes cmd arg arg ..."
+if [ $# -lt 3 ]; then
+    echo "Usage: on_nodes first last cmd arg arg ..."
     exit 1
 fi
-last=`expr $1 - 1`
-shift
+first=$1
+last=$2
+shift 2
 
-for ((i = 0 ; i <= $last; i++)); do
+for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo ""
     echo $node:
