@@ -557,8 +557,11 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			goto discard;
 	}
 
-	if (skb_peek(&rpc->msgin.packets) == NULL)
+	if ((skb_peek(&rpc->msgin.packets) == NULL)
+			&& (rpc->msgin.copied_out == 0)) {
+		/* First packet received for this message. */
 		*delta += rpc->msgin.incoming;
+	}
 
 	old_remaining = rpc->msgin.bytes_remaining;
 	homa_add_packet(rpc, skb);
