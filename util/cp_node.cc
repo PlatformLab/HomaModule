@@ -74,7 +74,7 @@ bool one_way = false;
 int port_receivers = 1;
 int port_threads = 1;
 std::string protocol_string;
-const char *protocol;
+const char *protocol = "homa";
 int server_ports = 1;
 bool verbose = false;
 std::string workload_string;
@@ -84,6 +84,7 @@ bool client_iovec = false;
 bool server_iovec = false;
 int inet_family = AF_INET;
 int server_core = -1;
+int buf_bpages = 1000;
 
 /* Node ids for clients to send requests to. */
 std::vector<int> server_ids;
@@ -280,68 +281,82 @@ void print_help(const char *name)
 		"lines from standard input and executing them as commands. The following\n"
 		"commands are supported, each followed by a list of options supported\n"
 		"by that command:\n\n"
-		"client [options]      Start one or more client threads\n"
-		"    --client-max      Maximum number of outstanding requests from a single\n"
+	        "client [options]      Start one or more client threads\n");
+	printf("    --buf-bpages      Number of bpages to allocate in the buffer poool for\n"
+		"                      incoming messages (default: %d)\n",
+			buf_bpages);
+	printf("    --client-max      Maximum number of outstanding requests from a single\n"
 		"                      client machine (divided equally among client ports)\n"
-		"                      (default: %d)\n"
-		"    --first-port      Lowest port number to use for each server (default: %d)\n"
-		"    --first-server    Id of first server node (default: 1, meaning node1)\n"
-		"    --gbps            Target network utilization, including only message data,\n"
-		"                      Gbps; 0 means send continuously (default: %.1f)\n"
-		"    --id              Id of this node; a value of I >= 0 means requests will\n"
-		"                      not be sent to nodeI (default: -1)\n"
-                "    --iovec           Use homa_sendv instead of homa_send\n"
-                "    --ipv6            Use IPv6 instead of IPv4\n"
-		"    --no-trunc        For TCP, allow messages longer than Homa's limit\n"
-		"    --one-way         Make all response messages 100 B, instead of the same\n"\
-		"                      size as request messages\n"
-		"    --ports           Number of ports on which to send requests (one\n"
-		"                      sending thread per port (default: %d)\n"
-		"    --port-receivers  Number of threads to listen for responses on each\n"
+		"                      (default: %d)\n", client_max);
+	printf("    --first-port      Lowest port number to use for each server (default: %d)\n",
+			first_port);
+	printf("    --first-server    Id of first server node (default: 1, meaning node1)\n");
+	printf("    --gbps            Target network utilization, including only message data,\n"
+		"                      Gbps; 0 means send continuously (default: %.1f)\n",
+			net_gbps);
+	printf("    --id              Id of this node; a value of I >= 0 means requests will\n"
+		"                      not be sent to nodeI (default: -1)\n");
+        printf("    --ipv6            Use IPv6 instead of IPv4\n");
+	printf("    --no-trunc        For TCP, allow messages longer than Homa's limit\n");
+	printf("    --one-way         Make all response messages 100 B, instead of the same\n"\
+		"                      size as request messages\n");
+	printf("    --ports           Number of ports on which to send requests (one\n"
+		"                      sending thread per port (default: %d)\n",
+		client_ports);
+	printf("    --port-receivers  Number of threads to listen for responses on each\n"
 		"                      port (default: %d). Zero means senders wait for their\n"
-		"                      own requests synchronously\n"
-		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --server-nodes    Number of nodes running server threads (default: 1)\n"
-		"    --server-ports    Number of server ports on each server node\n"
-		"                      (default: %d)\n"
-		"    --servers         Comma-separated list of integer ids to use as server\n"
-		"                      nodes; if specified, overrides --first-server and\n"
-		"                      --server-nodes"
-		"    --unloaded        Nonzero means run test in special mode for collecting\n"
+		"                      own requests synchronously\n",
+			port_receivers);
+	printf("    --protocol        Transport protocol to use: homa or tcp (default: %s)\n",
+			protocol);
+	printf("    --server-nodes    Number of nodes running server threads (default: 1)\n");
+	printf("    --server-ports    Number of server ports on each server node\n"
+		"                      (default: %d)\n",
+			server_ports);
+	printf("    --servers         Comma-separated list of integer ids to use as server\n");
+	printf("                      nodes; if specified, overrides --first-server and\n"
+		"                      --server-nodes\n");
+	printf("    --unloaded        Nonzero means run test in special mode for collecting\n"
 		"                      baseline data, with the given number of measurements\n"
-		"                      per length in the distribution (Homa only, default: 0)\n"
-		"    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
-		"                      or integer for fixed length (default: %s)\n\n"                "debug value value ... Set one or more int64_t values that may be used for\n"
-		"                      various debugging purposes\n\n"
-		"dump_times file       Log RTT times (and lengths) to file\n\n"
-		"exit                  Exit the application\n\n"
-		"log [options] [msg]   Configure logging as determined by the options. If\n"
+		"                      per length in the distribution (Homa only, default: 0)\n");
+	printf("    --workload        Name of distribution for request lengths (e.g., 'w1')\n"
+		"                      or integer for fixed length (default: %s)\n\n",
+			workload);
+	printf("debug value value ... Set one or more int64_t values that may be used for\n"
+		"                      various debugging purposes\n\n");
+	printf("dump_times file       Log RTT times (and lengths) to file\n\n");
+	printf("exit                  Exit the application\n\n");
+	printf("log [options] [msg]   Configure logging as determined by the options. If\n"
 		"                      there is an \"option\" that doesn't start with \"--\",\n"
 		"                      then it and all of the remaining words are printed to\n"
-		"                      the log as a message.\n"
-		"    --file            Name of log file to use for future messages (\"-\"\n"
-		"                      means use standard output)\n"
-		"    --level           Log level: either normal or verbose\n\n"
-		"server [options]      Start serving requests on one or more ports\n"
-		"    --first-port      Lowest port number to use (default: %d)\n"
-                "    --iovec           Use homa_replyv instead of homa_reply\n"
-                "    --ipv6            Use IPv6 instead of IPv4\n"
-		"    --pin             All server threads will be restricted to run only\n"
-	        "                      on the givevn core\n"
-		"    --protocol        Transport protocol to use: homa or tcp (default: %s)\n"
-		"    --port-threads    Number of server threads to service each port\n"
-		"                      (Homa only, default: %d)\n"
-		"    --ports           Number of ports to listen on (default: %d)\n\n"
-		"stop [options]        Stop existing client and/or server threads; each\n"
-		"                      option must be either 'clients' or 'servers'\n\n"
-		" tt [options]         Manage time tracing:\n"
-		"     freeze           Stop recording time trace information until\n"
-		"                      print has been invoked\n"
-		"     kfreeze          Freeze the kernel's internal timetrace\n"
-		"     print file       Dump timetrace information to file\n",
-		client_max, first_port, net_gbps, client_ports,
-		port_receivers, protocol, server_ports, workload,
-		first_port, protocol, port_threads, server_ports);
+		"                      the log as a message.\n");
+	printf("    --file            Name of log file to use for future messages (\"-\"\n"
+		"                      means use standard output)\n");
+	printf("    --level           Log level: either normal or verbose\n\n");
+	printf("server [options]      Start serving requests on one or more ports\n");
+	printf("    --buf-bpages      Number of bpages to allocate in the buffer poool for\n"
+		"                      incoming messages (default: %d)\n",
+			buf_bpages);
+	printf("    --first-port      Lowest port number to use (default: %d)\n",
+			first_port);
+	printf("    --iovec           Use homa_replyv instead of homa_reply\n");
+	printf("    --ipv6            Use IPv6 instead of IPv4\n");
+	printf("    --pin             All server threads will be restricted to run only\n"
+	        "                      on the givevn core\n");
+	printf("    --protocol        Transport protocol to use: homa or tcp (default: %s)\n",
+			protocol);
+	printf("    --port-threads    Number of server threads to service each port\n"
+		"                      (Homa only, default: %d)\n",
+			port_threads);
+	printf("    --ports           Number of ports to listen on (default: %d)\n\n",
+			server_ports);
+	printf("stop [options]        Stop existing client and/or server threads; each\n"
+		"                      option must be either 'clients' or 'servers'\n\n");
+	printf(" tt [options]         Manage time tracing:\n");
+	printf("     freeze           Stop recording time trace information until\n"
+		"                      print has been invoked\n");
+	printf("     kfreeze          Freeze the kernel's internal timetrace\n");
+	printf("     print file       Dump timetrace information to file\n");
 }
 
 /**
@@ -1040,7 +1055,7 @@ homa_server::homa_server(int port, int id, int inet_family,
 	}
 	log(NORMAL, "Successfully bound to Homa port %d\n", port);
 
-	buf_size = 1000*HOMA_BPAGE_SIZE;
+	buf_size = buf_bpages*HOMA_BPAGE_SIZE;
 	buf_region = (char *) mmap(NULL, buf_size, PROT_READ|PROT_WRITE,
 			MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
 	if (buf_region == MAP_FAILED) {
@@ -1876,7 +1891,7 @@ homa_client::homa_client(int id)
 	: client(id)
 	, fd(-1)
         , buf_region(nullptr)
-	, buf_size(2000*HOMA_BPAGE_SIZE)
+	, buf_size(buf_bpages*HOMA_BPAGE_SIZE)
         , exit_sender(false)
         , exit_receivers(false)
         , sender_exited(false)
@@ -2737,6 +2752,7 @@ int client_cmd(std::vector<string> &words)
 	int server_nodes = 1;
 	std::string servers;
 
+	buf_bpages = 1000;
 	client_iovec = false;
 	client_max = 1;
 	client_ports = 1;
@@ -2752,7 +2768,11 @@ int client_cmd(std::vector<string> &words)
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--client-max") == 0) {
+		if (strcmp(option, "--buf-bpages") == 0) {
+			if (!parse(words, i+1, &buf_bpages, option, "integer"))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--client-max") == 0) {
 			if (!parse(words, i+1, (int *) &client_max,
 					option, "integer"))
 				return 0;
@@ -3065,6 +3085,7 @@ int log_cmd(std::vector<string> &words)
  */
 int server_cmd(std::vector<string> &words)
 {
+	buf_bpages = 1000;
 	first_port = 4000;
 	inet_family = AF_INET;
         protocol = "homa";
@@ -3076,7 +3097,11 @@ int server_cmd(std::vector<string> &words)
 	for (unsigned i = 1; i < words.size(); i++) {
 		const char *option = words[i].c_str();
 
-		if (strcmp(option, "--first-port") == 0) {
+		if (strcmp(option, "--buf-bpages") == 0) {
+			if (!parse(words, i+1, &buf_bpages, option, "integer"))
+				return 0;
+			i++;
+		} else if (strcmp(option, "--first-port") == 0) {
 			if (!parse(words, i+1, &first_port, option, "integer"))
 				return 0;
 			i++;
