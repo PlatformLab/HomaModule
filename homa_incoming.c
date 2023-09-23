@@ -335,12 +335,14 @@ void homa_get_resend_range(struct homa_message_in *msgin,
  */
 void homa_advance_input(struct homa_rpc *rpc)
 {
+	struct sk_buff *skb;
 	struct data_header *first_hdr;
 
 	if (rpc->msgin.num_bpages == 0)
 		return;
-	first_hdr = (struct data_header *) (skb_peek(&rpc->msgin.packets)->data);
-	if ((ntohl(first_hdr->seg.offset) == rpc->msgin.copied_out)
+	skb = skb_peek(&rpc->msgin.packets);
+	first_hdr = (struct data_header *) (skb->data);
+	if ((skb != NULL) && (ntohl(first_hdr->seg.offset) == rpc->msgin.copied_out)
 			&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
 		atomic_or(RPC_PKTS_READY, &rpc->flags);
 		homa_sock_lock(rpc->hsk, "homa_advance_input");
