@@ -24,8 +24,6 @@
 # which the command should run. The remaining arguments are a command
 # and its arguments to run on the given machines
 
-root=~/homaModule
-
 if [ $# -lt 3 ]; then
     echo "Usage: on_nodes first last cmd arg arg ..."
     exit 1
