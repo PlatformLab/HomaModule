@@ -1741,6 +1741,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 {
 	if (type != rpc->hsk->homa->freeze_type)
 		return;
+	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
