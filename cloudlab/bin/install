@@ -44,9 +44,9 @@ for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo
     echo '*** Installing on' $node '***'
-    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
-    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
-    rsync -e "ssh -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
-    ssh $node 'echo $PATH'
-    ssh $node 'config default'
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
+    ssh -4 $node 'echo $PATH'
+    ssh -4 $node 'config default'
 done
