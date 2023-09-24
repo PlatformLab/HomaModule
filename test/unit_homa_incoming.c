@@ -1656,7 +1656,7 @@ TEST_F(homa_incoming, homa_send_grants__grant_fifo)
 	srpc2->msgin.incoming = 10000;
 	atomic_set(&self->homa.total_incoming, 8600);
 	homa_send_grants(&self->homa);
-	EXPECT_STREQ("xmit GRANT 15000@3; xmit GRANT 11400@1", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 11400@1; xmit GRANT 15000@3", unit_log_get());
 	EXPECT_EQ(15000, srpc1->msgin.incoming);
 	EXPECT_EQ(11400, srpc2->msgin.incoming);
 	EXPECT_EQ(9600, self->homa.grant_nonfifo_left);
@@ -1868,9 +1868,9 @@ TEST_F(homa_incoming, homa_create_grants__remove_from_grantable)
 		atomic_set(&rpcs[i]->grants_in_progress, 0);
 }
 
-TEST_F(homa_incoming, homa_grant_fifo__basics)
+TEST_F(homa_incoming, homa_choose_fifo_grant__basics)
 {
-	struct homa_rpc *srpc;
+	struct homa_rpc *srpc, *fifo_rpc;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1885,16 +1885,16 @@ TEST_F(homa_incoming, homa_grant_fifo__basics)
 
 	unit_log_clear();
 	atomic_set(&self->homa.total_incoming, 0);
-	homa_grant_fifo(&self->homa);
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(srpc, fifo_rpc);
 	EXPECT_EQ(5000, atomic_read(&self->homa.total_incoming));
-	EXPECT_STREQ("xmit GRANT 15000@2", unit_log_get());
 	EXPECT_EQ(15000, srpc->msgin.incoming);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.fifo_grants);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.fifo_grants_no_incoming);
 }
-TEST_F(homa_incoming, homa_grant_fifo__pity_grant_still_active)
+TEST_F(homa_incoming, homa_choose_fifo_grant__pity_grant_still_active)
 {
-	struct homa_rpc *srpc1, *srpc2;
+	struct homa_rpc *srpc1, *srpc2, *fifo_rpc;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1910,15 +1910,15 @@ TEST_F(homa_incoming, homa_grant_fifo__pity_grant_still_active)
 
 	unit_log_clear();
 	atomic_set(&self->homa.total_incoming, 0);
-	homa_grant_fifo(&self->homa);
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(srpc2, fifo_rpc);
 	EXPECT_EQ(5000, atomic_read(&self->homa.total_incoming));
-	EXPECT_STREQ("xmit GRANT 15000@2", unit_log_get());
 	EXPECT_EQ(16400, srpc1->msgin.incoming);
 	EXPECT_EQ(15000, srpc2->msgin.incoming);
 }
-TEST_F(homa_incoming, homa_grant_fifo__no_good_candidates)
+TEST_F(homa_incoming, homa_choose_fifo_grant__no_good_candidates)
 {
-	struct homa_rpc *srpc1;
+	struct homa_rpc *srpc1, *fifo_rpc;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1929,14 +1929,15 @@ TEST_F(homa_incoming, homa_grant_fifo__no_good_candidates)
 
 	unit_log_clear();
 	atomic_set(&self->homa.total_incoming, 0);
-	homa_grant_fifo(&self->homa);
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(NULL, fifo_rpc);
 	EXPECT_EQ(0, atomic_read(&self->homa.total_incoming));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(16400, srpc1->msgin.incoming);
 }
-TEST_F(homa_incoming, homa_grant_fifo__increment_fifo_grants_no_incoming)
+TEST_F(homa_incoming, homa_choose_fifo_grant__increment_fifo_grants_no_incoming)
 {
-	struct homa_rpc *srpc1;
+	struct homa_rpc *srpc1, *fifo_rpc;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1947,15 +1948,15 @@ TEST_F(homa_incoming, homa_grant_fifo__increment_fifo_grants_no_incoming)
 
 	unit_log_clear();
 	atomic_set(&self->homa.total_incoming, 0);
-	homa_grant_fifo(&self->homa);
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(srpc1, fifo_rpc);
 	EXPECT_EQ(5000, atomic_read(&self->homa.total_incoming));
-	EXPECT_STREQ("xmit GRANT 6400@2", unit_log_get());
 	EXPECT_EQ(6400, srpc1->msgin.incoming);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.fifo_grants_no_incoming);
 }
-TEST_F(homa_incoming, homa_grant_fifo__remove_from_grantable)
+TEST_F(homa_incoming, homa_choose_fifo_grant__remove_from_grantable)
 {
-	struct homa_rpc *srpc1;
+	struct homa_rpc *srpc1, *fifo_rpc;
 	self->homa.fifo_grant_increment = 5000;
 	self->homa.max_sched_prio = 2;
 	mock_cycles = ~0;
@@ -1965,9 +1966,9 @@ TEST_F(homa_incoming, homa_grant_fifo__remove_from_grantable)
 
 	unit_log_clear();
 	atomic_set(&self->homa.total_incoming, 0);
-	homa_grant_fifo(&self->homa);
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(srpc1, fifo_rpc);
 	EXPECT_EQ(4000, atomic_read(&self->homa.total_incoming));
-	EXPECT_STREQ("xmit GRANT 14000@2", unit_log_get());
 	EXPECT_EQ(14000, srpc1->msgin.incoming);
 	unit_log_clear();
 	unit_log_grantables(&self->homa);

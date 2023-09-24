@@ -950,6 +950,7 @@ void homa_send_grants(struct homa *homa)
 	 */
 	int i, num_grants;
 	__u64 start;
+	struct homa_rpc *fifo_rpc = NULL;
 
 	/* RPCs that are candidates for grants; if we eventually decide
 	 * not to grant for an RPC, the array will be compacted to
@@ -986,7 +987,7 @@ void homa_send_grants(struct homa *homa)
 	if (homa->grant_nonfifo_left <= 0) {
 		homa->grant_nonfifo_left += homa->grant_nonfifo;
 		if (homa->grant_fifo_fraction)
-			homa_grant_fifo(homa);
+			fifo_rpc = homa_choose_fifo_grant(homa);
 	}
 	homa_grantable_unlock(homa);
 
@@ -1001,6 +1002,16 @@ void homa_send_grants(struct homa *homa)
 		homa_xmit_control(GRANT, &grants[i], sizeof(grants[i]),
 			rpcs[i]);
 		atomic_dec(&rpcs[i]->grants_in_progress);
+	}
+	if (fifo_rpc != NULL) {
+		struct grant_header grant;
+		grant.offset = htonl(fifo_rpc->msgin.incoming);
+		grant.priority = homa->max_sched_prio;
+		tt_record3("sending fifo grant for id %llu, offset %d, "
+				"priority %d",
+				fifo_rpc->id, fifo_rpc->msgin.incoming,
+				homa->max_sched_prio);
+		homa_xmit_control(GRANT, &grant, sizeof(grant), fifo_rpc);
 	}
 	INC_METRIC(grant_cycles, get_cycles() - start);
 }
@@ -1174,17 +1185,20 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 }
 
 /**
- * homa_grant_fifo() - This function is invoked occasionally to give
+ * homa_choose_fifo_grant() - This function is invoked occasionally to give
  * a high-priority grant to the oldest incoming message. We do this in
  * order to reduce the starvation that SRPT can cause for long messages.
  * @homa:    Overall data about the Homa protocol implementation. The
  *           grantable_lock must be held by the caller.
+ * Return: An RPC to which to send a FIFO grant, or NULL if there is
+ *         no appropriate RPC. This method doesn't actually send a grant,
+ *         but it updates @msgin.incoming to reflect the desired grant.
+ *         Also updates homa->total_incoming.
  */
-void homa_grant_fifo(struct homa *homa)
+struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 {
 	struct homa_rpc *rpc, *oldest;
 	__u64 oldest_birth;
-	struct grant_header grant;
 	int granted;
 
 	oldest = NULL;
@@ -1212,7 +1226,7 @@ void homa_grant_fifo(struct homa *homa)
 		oldest_birth = rpc->msgin.birth;
 	}
 	if (oldest == NULL)
-		return;
+		return NULL;
 	INC_METRIC(fifo_grants, 1);
 	if ((oldest->msgin.total_length - oldest->msgin.bytes_remaining)
 			== oldest->msgin.incoming)
@@ -1226,13 +1240,8 @@ void homa_grant_fifo(struct homa *homa)
 		oldest->msgin.incoming = oldest->msgin.total_length;
 		homa_remove_grantable_locked(homa, oldest);
 	}
-	grant.offset = htonl(oldest->msgin.incoming);
-	grant.priority = homa->max_sched_prio;
-	tt_record3("sending fifo grant for id %llu, offset %d, priority %d",
-			oldest->id, oldest->msgin.incoming,
-			homa->max_sched_prio);
-	homa_xmit_control(GRANT, &grant, sizeof(grant), oldest);
 	atomic_add(granted, &homa->total_incoming);
+	return oldest;
 }
 
 /**

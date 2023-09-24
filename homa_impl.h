@@ -3020,6 +3020,8 @@ extern void     homa_check_grantable(struct homa_rpc *rpc);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
+extern struct homa_rpc
+	       *homa_choose_fifo_grant(struct homa *homa);
 extern int      homa_choose_rpcs_to_grant(struct homa *homa,
 		    struct homa_rpc **rpcs, int max_rpcs);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -3054,7 +3056,6 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
-extern void     homa_grant_fifo(struct homa *homa);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern struct sk_buff
