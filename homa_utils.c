@@ -1619,6 +1619,11 @@ char *homa_print_metrics(struct homa *homa)
 				"homa_pool_allocate didn't find enough buffer "
 				"space for an RPC\n",
 				m->buffer_alloc_failures);
+		homa_append_metric(homa,
+				"linux_pkt_alloc_bytes     %15llu  "
+				"Bytes allocated in new packets by NIC driver "
+				"due to cache overflows\n",
+				m->linux_pkt_alloc_bytes);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

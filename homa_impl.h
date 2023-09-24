@@ -2561,6 +2561,12 @@ struct homa_metrics {
 	 */
 	__u64 buffer_alloc_failures;
 
+	/**
+	 * @linux_pkt_alloc_bytes: total bytes allocated in new packet buffers
+	 * by the NIC driver because of packet cache underflows.
+	 */
+	__u64 linux_pkt_alloc_bytes;
+
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
 	__u64 temp[NUM_TEMP_METRICS];
