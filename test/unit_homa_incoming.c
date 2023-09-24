@@ -599,6 +599,36 @@ TEST_F(homa_incoming, homa_advance_input__add_to_grantables)
 	unit_log_grantables(&self->homa);
 	EXPECT_SUBSTR("id 1235", unit_log_get());
 }
+TEST_F(homa_incoming, homa_advance_input__grantable_check)
+{
+	struct homa_lcache lcache;
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100000, 1000);
+	ASSERT_NE(NULL, srpc);
+	unit_log_clear();
+
+	homa_lcache_init(&lcache);
+	homa_lcache_save(&lcache, srpc);
+
+	/* First call to homa_advance_input doesn't use lcache. */
+	homa_advance_input(srpc, NULL);
+	EXPECT_STREQ("homa_check_grantable invoked", unit_log_get());
+	EXPECT_EQ(0, lcache.check_grantable);
+
+	/* Second call does use lcache. */
+	unit_log_clear();
+	homa_advance_input(srpc, &lcache);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, lcache.check_grantable);
+
+	/* Third call does nothing (message not scheduled). */
+	unit_log_clear();
+	srpc->msgin.scheduled = 0;
+	homa_advance_input(srpc, NULL);
+	EXPECT_STREQ("", unit_log_get());
+
+}
 
 TEST_F(homa_incoming, homa_pkt_dispatch__handle_ack)
 {

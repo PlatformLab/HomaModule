@@ -41,7 +41,7 @@ FIXTURE_SETUP(homa_lcache)
 	self->crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip,
 			self->server_ip,
-			99, 1234, 1000, 1000);
+			99, 1234, 1000, 100000);
 	self->srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip,
 			self->server_ip,
@@ -55,6 +55,15 @@ FIXTURE_TEARDOWN(homa_lcache)
 
 TEST_F(homa_lcache, constructor)
 {
+	EXPECT_TRUE(self->cache.rpc == NULL);
+}
+
+TEST_F(homa_lcache, homa_lcache_release)
+{
+	homa_lcache_release(&self->cache);
+	homa_rpc_lock(self->crpc);
+	homa_lcache_save(&self->cache, self->crpc);
+	homa_lcache_release(&self->cache);
 	EXPECT_TRUE(self->cache.rpc == NULL);
 }
 
@@ -73,15 +82,6 @@ TEST_F(homa_lcache, homa_lcache_save__full)
 	homa_lcache_release(&self->cache);
 }
 
-TEST_F(homa_lcache, homa_lcache_release)
-{
-	homa_lcache_release(&self->cache);
-	homa_rpc_lock(self->crpc);
-	homa_lcache_save(&self->cache, self->crpc);
-	homa_lcache_release(&self->cache);
-	EXPECT_TRUE(self->cache.rpc == NULL);
-}
-
 TEST_F(homa_lcache, homa_lcache_get)
 {
 	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, self->client_ip,
@@ -95,4 +95,16 @@ TEST_F(homa_lcache, homa_lcache_get)
 			40000) == NULL);
 	EXPECT_TRUE(homa_lcache_get(&self->cache, 1235, self->client_ip,
 			40001) == NULL);
+}
+
+TEST_F(homa_lcache, homa_lcache_check_grantable)
+{
+	homa_rpc_lock(self->crpc);
+	homa_lcache_save(&self->cache, self->crpc);
+	EXPECT_EQ(0, self->cache.check_grantable);
+	homa_lcache_check_grantable(&self->cache);
+	EXPECT_EQ(1, self->cache.check_grantable);
+	unit_log_clear();
+	homa_lcache_release(&self->cache);
+	EXPECT_STREQ("homa_check_grantable invoked", unit_log_get());
 }

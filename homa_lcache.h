@@ -25,6 +25,12 @@
 struct homa_lcache {
 	/** @rpc: if non-NULL, this RPC is currently locked. */
 	struct homa_rpc *rpc;
+
+	/**
+	 * @check_grantable: if nonzero, call homa_check_grantable
+	 * before unlocking.
+	 */
+	int check_grantable;
 };
 
 /**
@@ -33,6 +39,22 @@ struct homa_lcache {
  */
 static inline void homa_lcache_init(struct homa_lcache *lc)
 {
+	lc->rpc = NULL;
+	lc->check_grantable = 0;
+}
+
+/**
+ * homa_lcache_release() - Unlock the cached RPC, if there is one. This must
+ * be invoked before abandoning the object.
+ * @lc:    Lock cache.
+ */
+static inline void homa_lcache_release(struct homa_lcache *lc)
+{
+	if (lc->rpc == NULL)
+		return;
+	if (lc->check_grantable)
+		homa_check_grantable(lc->rpc);
+	homa_rpc_unlock(lc->rpc);
 	lc->rpc = NULL;
 }
 
@@ -45,27 +67,12 @@ static inline void homa_lcache_init(struct homa_lcache *lc)
 static inline void homa_lcache_save(struct homa_lcache *lc,
 		struct homa_rpc *rpc)
 {
-	if (lc->rpc) {
-		homa_rpc_unlock(lc->rpc);
-	}
+	homa_lcache_release(lc);
 	lc->rpc = rpc;
 }
 
 /**
- * homa_lcache_release() - Unlock the cached RPC, if there is one. This must
- * be invoked before abandoning the object.
- * @lc:    Lock cache.
- */
-static inline void homa_lcache_release(struct homa_lcache *lc)
-{
-	if (lc->rpc) {
-		homa_rpc_unlock(lc->rpc);
-	}
-	lc->rpc = NULL;
-}
-
-/**
- * homa_lcache_get_server() - Check to see if a particular server RPC is
+ * homa_lcache_get() - Check to see if a particular RPC is
  * locked.
  * @lc:    RPC lock cache to check
  * @id:    Id of the desired RPC
@@ -83,4 +90,17 @@ static inline struct homa_rpc *homa_lcache_get(struct homa_lcache *lc,
 			&& (lc->rpc->dport == port))
 		return lc->rpc;
 	return NULL;
+}
+
+/**
+ * homa_lcache_check_grantable() - Mark the lcache object so that when
+ * it is eventually released, homa_check_grantable will get called on
+ * the RPC. This is used to reduce the number of calls to homa_check_grantable
+ * (and its acquisition of the grantable lock) when series of packets is
+ * processed for the same RPC.
+ * @lc:    RPC lock cache to modify.
+ */
+static inline void homa_lcache_check_grantable(struct homa_lcache *lc)
+{
+	lc->check_grantable = 1;
 }

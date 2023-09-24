@@ -512,8 +512,7 @@ TEST_F(homa_pool, homa_pool_release_buffers__retry_allocation)
 	EXPECT_EQ(2, crpc3->msgin.num_bpages);
 	EXPECT_EQ(INT_MAX, pool->bpages_needed);
 
-	EXPECT_SUBSTR("sk->sk_data_ready invoked; "
-			"sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_SUBSTR("sk->sk_data_ready invoked; ", unit_log_get());
 }
 TEST_F(homa_pool, homa_pool_release_buffers__bpages_needed_but_no_queued_rpcs)
 {

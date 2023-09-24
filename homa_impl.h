@@ -3011,7 +3011,8 @@ extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
-extern void     homa_advance_input(struct homa_rpc *rpc);
+extern void     homa_advance_input(struct homa_rpc *rpc,
+		    struct homa_lcache *lcache);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);

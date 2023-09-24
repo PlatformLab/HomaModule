@@ -331,9 +331,12 @@ void homa_get_resend_range(struct homa_message_in *msgin,
  * homa_advance_input() - This is an "odds and ends" function that
  * helps an incoming rpc to progress by arranging for grants, if
  * appropriate, and waking up a waiting process, if appropriate.
- * @rpc:  RPC to process
+ * @rpc:     RPC to process
+ * @lcache:  If non-NULL, used to defer the call to homa_check_grantable
+ *           until the lcache is released (reduces homs_check_grantable
+ *           calls when a stream of packets is being processed).
  */
-void homa_advance_input(struct homa_rpc *rpc)
+void homa_advance_input(struct homa_rpc *rpc, struct homa_lcache *lcache)
 {
 	struct sk_buff *skb;
 	struct data_header *first_hdr;
@@ -349,8 +352,12 @@ void homa_advance_input(struct homa_rpc *rpc)
 		homa_rpc_handoff(rpc);
 		homa_sock_unlock(rpc->hsk);
 	}
-	if (rpc->msgin.scheduled )
-		homa_check_grantable(rpc);
+	if (rpc->msgin.scheduled ) {
+		if (lcache != NULL)
+			homa_lcache_check_grantable(lcache);
+		else
+			homa_check_grantable(rpc);
+	}
 }
 
 /**
@@ -569,7 +576,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	homa_add_packet(rpc, skb);
 	*delta -= old_remaining - rpc->msgin.bytes_remaining;
 
-	homa_advance_input(rpc);
+	homa_advance_input(rpc, lcache);
 
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
@@ -858,6 +865,8 @@ void homa_check_grantable(struct homa_rpc *rpc)
 	struct homa_rpc *candidate;
 	struct homa_message_in *msgin = &rpc->msgin;
 	struct homa *homa = rpc->hsk->homa;
+
+	UNIT_LOG("; ", "homa_check_grantable invoked");
 
 	/* No need to do anything unless this message needs more grants. */
 	if (rpc->msgin.incoming >= rpc->msgin.total_length)

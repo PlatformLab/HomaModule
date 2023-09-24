@@ -435,7 +435,7 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 				atomic_read(&pool->free_bpages),
 				pool->bpages_needed);
 		homa_pool_allocate(rpc);
-		homa_advance_input(rpc);
+		homa_advance_input(rpc, NULL);
 		homa_rpc_unlock(rpc);
 	}
 }
