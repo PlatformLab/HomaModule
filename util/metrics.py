@@ -97,7 +97,9 @@ def scale_number(number):
     suffix to keep the number small and readable
     """
 
-    if number > 1000000:
+    if number > 1e9:
+        return "%5.1f G" % (number/1e9)
+    elif number > 1000000:
         return "%5.1f M" % (number/1000000.0)
     elif (number > 1000):
         return "%5.1f K" % (number/1000.0)
@@ -412,7 +414,8 @@ if elapsed_secs != 0:
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures"]:
+            "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures",
+            "linux_pkt_alloc_bytes"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
