@@ -759,6 +759,71 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 }
 
 /**
+ * homa_rpc_log_tt() - Log info about a particular RPC using timetraces.
+ * @rpc:  RPC for which key info should be written to the system log.
+ */
+void homa_rpc_log_tt(struct homa_rpc *rpc)
+{
+	if (rpc->state == RPC_INCOMING) {
+		int received = rpc->msgin.total_length
+				- rpc->msgin.bytes_remaining;
+		tt_record4("Incoming RPC id %d, is_client %d, %d/%d bytes "
+				"received",
+				rpc->id, homa_is_client(rpc->id),
+				received, rpc->msgin.total_length);
+		if (rpc->msgin.incoming > received)
+			tt_record3("RPC id %d has %d outstanding grants "
+					"(incoming %d)", rpc->id,
+					rpc->msgin.incoming - received,
+					rpc->msgin.incoming);
+	} else if (rpc->state == RPC_OUTGOING) {
+		tt_record4("Outgoing RPC id %d, is_client %d, %d/%d bytes "
+				"sent",
+				rpc->id, homa_is_client(rpc->id),
+				rpc->msgout.next_xmit_offset,
+				rpc->msgout.length);
+		if (rpc->msgout.granted > rpc->msgout.next_xmit_offset)
+			tt_record3("RPC id %d has %d unsent grants (granted %d)",
+					rpc->id, rpc->msgout.granted
+					- rpc->msgout.next_xmit_offset,
+					rpc->msgout.granted);
+	} else {
+		tt_record2("RPC id %d is in state %d", rpc->id, rpc->state);
+	}
+}
+
+/**
+ * homa_rpc_log_active_tt() - Log information about all active RPCs using
+ * timetraces.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+void homa_rpc_log_active_tt(struct homa *homa)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int count = 0;
+
+	tt_record("Logging active Homa RPCs:");
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			count++;
+			homa_rpc_log_tt(rpc);
+					}
+		homa_unprotect_rpcs(hsk);
+	}
+	rcu_read_unlock();
+	tt_record1("Finished logging %d active Homa RPCs", count);
+}
+
+/**
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
  * @addr:    Address to convert, in network byte order.

@@ -796,6 +796,11 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 */
 	if ((rpc != NULL) && ((rpc->state != RPC_INCOMING)
 			|| rpc->msgin.bytes_remaining)) {
+		tt_record1("NEED_ACK arrived for id %d before message received",
+				rpc->id);
+		homa_freeze(rpc, NEED_ACK_MISSING_DATA,
+				"Freezing because NEED_ACK received before "
+				"message complete, id %d, peer 0x%x");
 		goto done;
 	} else {
 		peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);

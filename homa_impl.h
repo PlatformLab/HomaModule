@@ -1531,11 +1531,12 @@ struct homa_peer {
  * one of these values.
  */
 enum homa_freeze_type {
-	RESTART_RPC        = 1,
-	PEER_TIMEOUT       = 2,
-	SLOW_RPC           = 3,
-	SOCKET_CLOSE       = 4,
-	PACKET_LOST        = 5,
+	RESTART_RPC            = 1,
+	PEER_TIMEOUT           = 2,
+	SLOW_RPC               = 3,
+	SOCKET_CLOSE           = 4,
+	PACKET_LOST            = 5,
+	NEED_ACK_MISSING_DATA  = 6,
 };
 
 /**
@@ -3161,7 +3162,9 @@ extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern void     homa_rpc_handoff(struct homa_rpc *rpc);
 extern void     homa_rpc_log(struct homa_rpc *rpc);
+extern void     homa_rpc_log_tt(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
+extern void     homa_rpc_log_active_tt(struct homa *homa);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
                     const sockaddr_in_union *dest);

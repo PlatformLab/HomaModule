@@ -1042,7 +1042,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		if ((elapsed <= hsk->homa->temp[1])
 				&& (elapsed >= hsk->homa->temp[0])
 				&& homa_is_client(rpc->id)
-				&& (rpc->msgin.total_length < 500)) {
+				&& (rpc->msgin.total_length >= hsk->homa->temp[2])
+				&& (rpc->msgin.total_length < hsk->homa->temp[3])) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
 					"length %d",
 					elapsed, rpc->id,
