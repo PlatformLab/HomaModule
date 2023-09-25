@@ -100,7 +100,8 @@ int homa_init(struct homa *homa)
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;
-	homa->link_mbps = 10000;
+	homa->window = 10000;
+	homa->link_mbps = 25000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
@@ -123,7 +124,6 @@ int homa_init(struct homa *homa)
 	homa->max_overcommit = 8;
 	homa->max_incoming = 400000;
 	homa->max_rpcs_per_peer = 1;
-	homa->dynamic_windows = 0;
 	homa->resend_ticks = 15;
 	homa->resend_interval = 10;
 	homa->timeout_resends = 5;

@@ -278,22 +278,6 @@ aggressively (which could impact application performance) until the number
 of dead packet buffers drops below
 .I dead_buffs_limit .
 .TP
-.IR dynamic_windows
-This integer value selects one of two approaches for managing grant
-windows (the difference between the offset specified in a grant and
-the number of bytes that have been received for that message). A value
-of 0 means windows are always
-.IR unsched_bytes
-(the approach in the original Homa design). A nonzero value means
-that the window size depends on the number of grantable messages;
-with fewer grantable messages, the window for each message increases.
-Specifically, if there are N grantable messages, the window for each
-of these messages will be
-.IR unsched_bytes /(N+1).
-This approach is inspired by the paper "Dynamic Queue Length Thresholds
-for Shared-Memory Packet Switches"; the idea is to maintain unused
-granting capacity equal to the window for each of the current messages.
-.TP
 .IR fifo_grant_increment
 An integer value. When Homa decides to issue a grant to the oldest message
 (because of
@@ -502,6 +486,13 @@ resend_ticks
 reduces the likelihood of restarts (but doesn't completely eliminate the
 problem).
 .TP
+.IR rtt_bytes
+This configuration parameter is no longer supported; it has been split
+into two different parameters:
+.IR unsched_bytes
+and
+.IR window .
+.TP
 .IR sync_freeze
 If a nonzero value is written into this parameter, then upon completion
 of the next client RPC issued from this machine, Homa will will clear
@@ -531,19 +522,7 @@ dead and abort all RPCs involving that peer with
 .TP
 .IR unsched_bytes
 The number of bytes that may be transmitted from a new message without
-waiting for grants from the receiver. Historically, this has been
-the number of bytes that can be transmitted on the wire
-by a host in the time it takes that host to send a full-size packet to
-another host and receive back a grant packet, and it was called
-.IR rtt_bytes .
-This approach ensured full network bandwidth utilization in unloaded
-networks.
-However,
-.IR rtt_bytes
-can be quite large on faster networks (particularly when including
-all of the software overheads), so using it for
-.IR unsched_bytes
-may result in too much switch buffer utilization.
+waiting for grants from the receiver.
 .TP
 .IR unsched_cutoffs
 An array of 8 integer values. The nth element specifies the largest
@@ -559,6 +538,18 @@ this will be used for scheduled packets.
 .IR verbose
 An integer value; nonzero means that Homa will generate additional
 log output.
+.TP
+.IR window
+The maximum number of unreceived bytes that the receiver may grant for
+a message at a given time. If this value is zero, then receivers will
+use a dynamic approach that depends on the number of grantable messages;
+with fewer grantable messages, the window for each message increases.
+Specifically, if there are N grantable messages, the window for each
+of these messages will be
+.IR max_incoming /(N+1).
+This approach was inspired by the paper "Dynamic Queue Length Thresholds
+for Shared-Memory Packet Switches"; the idea is to maintain unused
+granting capacity equal to the window for each of the current messages.
 .SH /PROC FILES
 .PP
 In addition to files for the configuration parameters described above,

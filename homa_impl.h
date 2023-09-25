@@ -539,6 +539,12 @@ struct homa_message_out {
 	int num_skbs;
 
 	/**
+	 * @copied_from_user: Number of bytes of the message that have
+	 * been copied from user space into skbs in @packets.
+	 */
+	int copied_from_user;
+
+	/**
 	 * @packets: Singly-linked list of all packets in message, linked
 	 * using homa_next_skb. The list is in order of offset in the message
 	 * (offset 0 first); each sk_buff can potentially contain multiple
@@ -568,8 +574,8 @@ struct homa_message_out {
 	 */
 	atomic_t active_xmits;
 
-	/** @gso_pkt_data: Number of bytes of message data in each packet
-	 * of @packets except possibly the last.
+	/** @gso_pkt_data: Maximum number of bytes of message data that can
+	 * fit in a single outgoing GSO packet.
 	 */
 	int gso_pkt_data;
 
@@ -1686,14 +1692,23 @@ struct homa {
 
 	/**
 	 * @unsched_bytes: The number of bytes that may be sent in a
-	 * new message without receiving any grants. This used to be
-	 * called rtt_bytes; historically it was intended to be the amount
+	 * new message without receiving any grants. There used to be a
+	 * variable rtt_bytes that served this purpose, and was also used
+	 * for window.  Historically, rtt_bytes was intended to be the amount
 	 * of data that can be transmitted over the wire in the time it
-	 * takes to send a full-size data packet and receive back a grant
-	 * (but for faster networks that value could result in too much
-	 * buffer utilization). Set externally via sysctl.
+	 * takes to send a full-size data packet and receive back a grant.
+	 * But, for fast networks that value could result in too much
+	 * buffer utilization (and, we wanted to have separate values for
+	 * @unsched_bytes and @window). Set externally via sysctl.
 	 */
 	int unsched_bytes;
+
+	/**
+	 * @window: The size of the window for granting (i.e., this many
+	 * unreceived bytes may be granted for a message at any given time).
+	 * If this value is zero, then windows are computed dynamically.
+	 */
+	int window;
 
 	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
@@ -1791,15 +1806,6 @@ struct homa {
 	 * at a time.  Set externally via sysctl.
 	 */
 	int max_rpcs_per_peer;
-
-	/**
-	 * @dynamic_windows: A zero value means that unsched_bytes should
-	 * always be used as the window size for grants (i.e. how much
-	 * data to grant beyond what has already been received). Nonzero
-	 * means use an adaptive approach that allows larger window sizes
-	 * if there are fewer incoming messages.
-	 */
-	int dynamic_windows;
 
 	/**
 	 * @resend_ticks: When an RPC's @silent_ticks reaches this value,

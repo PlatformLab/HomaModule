@@ -121,14 +121,14 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	                .dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(client_id),
 			.type = GRANT},
-		        .offset = htonl(12600),
+		        .offset = htonl(11000),
 			.priority = 3};
 	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
 	struct sk_buff *result = homa_gro_receive(&self->empty_list,
 			mock_skb_new(&client_ip, &h.common, 0, 0));
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
-	EXPECT_EQ(12600, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
+	EXPECT_EQ(11000, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 1400@10000", unit_log_get());
 
 	unit_log_clear();
 	h.offset = htonl(14000);
@@ -136,7 +136,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct sk_buff *skb = mock_skb_new(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(NULL, result);
-	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_EQ(11000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 	kfree_skb(skb);
 }

@@ -727,7 +727,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__existing_client_rpc)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct grant_header h = {{.sport = htons(self->server_port),
@@ -746,7 +746,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__lcached_client_rpc)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct grant_header h = {{.sport = htons(self->server_port),
@@ -800,7 +800,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__reset_counters)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
@@ -830,7 +830,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 20000);
 	homa_rpc_free(dead);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(31, self->hsk.dead_skbs);
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 5000);
@@ -842,7 +842,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->hsk, &self->lcache,
 			&self->incoming_delta);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(31, self->hsk.dead_skbs);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.data_pkt_reap_cycles);
 
 	/* Second packet: must reap. */
@@ -851,7 +851,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__forced_reap)
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->hsk, &self->lcache,
 			&self->incoming_delta);
-	EXPECT_EQ(20, self->hsk.dead_skbs);
+	EXPECT_EQ(21, self->hsk.dead_skbs);
 	EXPECT_NE(0, homa_cores[cpu_number]->metrics.data_pkt_reap_cycles);
 }
 TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
@@ -860,7 +860,7 @@ TEST_F(homa_incoming, homa_pkt_dispatch__unknown_type)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct common_header h = {.sport = htons(self->server_port),
@@ -1032,19 +1032,19 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	                .dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
-		        .offset = htonl(12600),
+		        .offset = htonl(11000),
 			.priority = 3};
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(12600, srpc->msgout.granted);
-	EXPECT_STREQ("xmit DATA 1400@11200", unit_log_get());
+	EXPECT_EQ(11000, srpc->msgout.granted);
+	EXPECT_STREQ("xmit DATA 1400@10000", unit_log_get());
 
 	/* Don't let grant offset go backwards. */
 	h.offset = htonl(10000);
 	unit_log_clear();
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_EQ(11000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Wrong state. */
@@ -1053,7 +1053,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	unit_log_clear();
 	homa_pkt_dispatch(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->hsk, &self->lcache, &self->incoming_delta);
-	EXPECT_EQ(12600, srpc->msgout.granted);
+	EXPECT_EQ(11000, srpc->msgout.granted);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Must restore old state to avoid potential crashes. */
@@ -1269,7 +1269,7 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(11200, crpc->msgout.granted);
+	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
 	struct cutoffs_header h = {{.sport = htons(self->server_port),
@@ -1745,12 +1745,11 @@ TEST_F(homa_incoming, homa_create_grants__dynamic_windows)
 	rpcs[0] = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 			1, 100000, 100);
-	self->homa.dynamic_windows = 0;
 	num_grants = homa_create_grants(&self->homa, rpcs, 1, grants, 10000);
 	EXPECT_EQ(1, num_grants);
 	EXPECT_EQ(11400, ntohl(grants[0].offset));
 	self->homa.max_incoming = 100000;
-	self->homa.dynamic_windows = 1;
+	self->homa.window = 0;
 	num_grants = homa_create_grants(&self->homa, rpcs, 1, grants, 1000000);
 	EXPECT_EQ(1, num_grants);
 	EXPECT_EQ(51400, ntohl(grants[0].offset));
@@ -2526,7 +2525,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_sleeping)
 			self->server_port, self->client_id+2, 20000, 20000);
 	self->homa.reap_limit = 5;
 	homa_rpc_free(crpc2);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(31, self->hsk.dead_skbs);
 	unit_log_clear();
 
 	hook_rpc = crpc1;

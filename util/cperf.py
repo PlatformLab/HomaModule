@@ -367,13 +367,13 @@ def init(options):
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
     vlog("Homa configuration:")
-    for param in ['dead_buffs_limit', 'dynamic_windows', 'grant_fifo_fraction',
+    for param in ['dead_buffs_limit', 'grant_fifo_fraction',
             'gro_policy', 'link_mbps', 'max_dead_buffs',
             'max_grantable_rpcs', 'max_gro_skbs', 'max_gso_size',
             'max_nic_queue_ns', 'max_incoming', 'max_overcommit',
             'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
             'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
-            'throttle_min_bytes', 'timeout_resends', 'unsched_bytes']:
+            'throttle_min_bytes', 'timeout_resends', 'unsched_bytes', 'window']:
         result = do_subprocess(['sysctl', '-n', '.net.homa.' + param])
         vlog("  %-20s %s" % (param, result))
 

@@ -1104,8 +1104,8 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 	 * (for new RPC arrivals) equal to the amount of incoming
 	 * allocated to each of the current RPCs.
 	 */
-	int window = homa->unsched_bytes;
-	if (homa->dynamic_windows)
+	int window = homa->window;
+	if (window == 0)
 	    window = homa->max_incoming/(num_rpcs+1);
 
 	for (rank = 0; rank < num_rpcs; rank++) {

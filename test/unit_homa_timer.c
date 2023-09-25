@@ -347,17 +347,17 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 			self->server_port, self->client_id, 20000, 20000);
 	ASSERT_NE(NULL, dead);
 	homa_rpc_free(dead);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(31, self->hsk.dead_skbs);
 
 	// First call to homa_timer: not enough dead skbs.
-	self->homa.dead_buffs_limit = 31;
+	self->homa.dead_buffs_limit = 32;
 	homa_timer(&self->homa);
-	EXPECT_EQ(30, self->hsk.dead_skbs);
+	EXPECT_EQ(31, self->hsk.dead_skbs);
 
 	// Second call to homa_timer: must reap.
 	self->homa.dead_buffs_limit = 15;
 	homa_timer(&self->homa);
-	EXPECT_EQ(10, self->hsk.dead_skbs);
+	EXPECT_EQ(11, self->hsk.dead_skbs);
 }
 TEST_F(homa_timer, homa_timer__rpc_ready)
 {
