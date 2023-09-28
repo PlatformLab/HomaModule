@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -54,28 +54,38 @@ int homa_check_rpc(struct homa_rpc *rpc)
 						- rpc->done_timer_ticks);
 			}
 		}
-
-		/* We don't want to send RESENDs for RPCs in this state. */
-		rpc->resend_timer_ticks = homa->timer_ticks;
 	}
 
-	if ((rpc->state == RPC_OUTGOING) && (rpc->msgout.next_xmit_offset
-			< rpc->msgout.granted)) {
-		/* There are granted bytes that we haven't transmitted, so
-		 * no need to be concerned about lack of traffic from the peer.
+	if (rpc->state == RPC_INCOMING) {
+		if ((rpc->msgin.total_length - rpc->msgin.bytes_remaining)
+			>= rpc->msgin.incoming) {
+			/* We've received everything that we've granted, so we
+			 * shouldn't expect to hear anything until we grant more.
+			 */
+			rpc->silent_ticks = 0;
+			return 0;
+		}
+		if (rpc->msgin.num_bpages == 0) {
+			/* Waiting for buffer space, so no problem. */
+			rpc->silent_ticks = 0;
+			return 0;
+		}
+	} else if (!homa_is_client(rpc->id)) {
+		/* We're the server and we've received the input message;
+		 * no need to worry about retries.
 		 */
 		rpc->silent_ticks = 0;
 		return 0;
 	}
 
-	if ((rpc->state == RPC_INCOMING) && ((rpc->msgin.total_length
-			- rpc->msgin.bytes_remaining)
-			>= rpc->msgin.incoming)) {
-		/* We've received everything that we've granted, so we
-		 * shouldn't expect to hear anything until we grant more.
-		 */
-		rpc->silent_ticks = 0;
-		return 0;
+	if (rpc->state == RPC_OUTGOING) {
+		if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
+			/* There are granted bytes that we haven't transmitted,
+			 * so no need to be concerned; the ball is in our court.
+			 */
+			rpc->silent_ticks = 0;
+			return 0;
+		}
 	}
 
 	/* The -1 below is so that this RPC in considered in the
