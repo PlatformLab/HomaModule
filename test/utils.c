@@ -348,7 +348,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		struct in6_addr *server_ip, int client_port, int id,
 		int req_length, int resp_length)
 {
-	int bytes_received;
+	int bytes_received, created;
 	int incoming_delta = 0;
 	struct data_header h = {
 		.common = {
@@ -367,7 +367,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	};
 	if (req_length < UNIT_TEST_DATA_PER_PACKET)
 		h.seg.segment_length = htonl(req_length);
-	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h);
+	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h,
+			&created);
 	if (IS_ERR(srpc))
 		return NULL;
 	EXPECT_EQ(srpc->completion_cookie, 0);

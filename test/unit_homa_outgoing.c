@@ -77,6 +77,7 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	self->homa.priority_map[7] = 3;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -391,6 +392,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	h.common.sender_id = cpu_to_be64(self->client_id);
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -412,6 +414,7 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), crpc));
 	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1234, "
@@ -433,6 +436,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 	h.common.type = GRANT;
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	mock_alloc_skb_errors = 1;
 	EXPECT_EQ(ENOBUFS, -__homa_xmit_control(&h, sizeof(h), srpc->peer,
@@ -470,6 +474,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -493,6 +498,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 
 	h.offset = htonl(12345);
 	h.priority = 4;
+	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	mock_ip6_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
@@ -508,7 +514,8 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 			.sender_id = cpu_to_be64(99990),
 			.type = GRANT},
 		        .offset = htonl(11200),
-			.priority = 3};
+			.priority = 3,
+			.resend_all = 0};
 	mock_xmit_log_verbose = 1;
 	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
 	homa_xmit_unknown(skb, &self->hsk);

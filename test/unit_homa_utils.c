@@ -148,8 +148,9 @@ TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
 TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
 	int incoming_delta = 0;
+	int created;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
@@ -157,52 +158,59 @@ TEST_F(homa_utils, homa_rpc_new_server__normal)
 			1400, 0), srpc, NULL, &incoming_delta);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, created);
 	homa_rpc_free(srpc);
 }
 TEST_F(homa_utils, homa_rpc_new_server__already_exists)
 {
+	int created;
 	struct homa_rpc *srpc1 = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc1));
 	homa_rpc_unlock(srpc1);
 	self->data.common.sender_id = cpu_to_be64(
 			be64_to_cpu(self->data.common.sender_id)
 			+ 2*HOMA_SERVER_RPC_BUCKETS);
 	struct homa_rpc *srpc2 = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc2));
+	EXPECT_EQ(1, created);
 	homa_rpc_unlock(srpc2);
 	EXPECT_NE(srpc2, srpc1);
 	self->data.common.sender_id = cpu_to_be64(
 			be64_to_cpu(self->data.common.sender_id)
 			- 2*HOMA_SERVER_RPC_BUCKETS);
 	struct homa_rpc *srpc3 = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc3));
+	EXPECT_EQ(0, created);
 	homa_rpc_unlock(srpc3);
 	EXPECT_EQ(srpc3, srpc1);
 }
 TEST_F(homa_utils, homa_rpc_new_server__malloc_error)
 {
+	int created;
 	mock_kmalloc_errors = 1;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 }
 TEST_F(homa_utils, homa_rpc_new_server__addr_error)
 {
+	int created;
 	mock_route_errors = 1;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(srpc));
 }
 TEST_F(homa_utils, homa_rpc_new_server__socket_shutdown)
 {
+	int created;
 	self->hsk.shutdown = 1;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	EXPECT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(srpc));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -210,10 +218,11 @@ TEST_F(homa_utils, homa_rpc_new_server__socket_shutdown)
 }
 TEST_F(homa_utils, homa_rpc_new_server__allocate_buffers)
 {
+	int created;
 	self->data.message_length = N(3*HOMA_BPAGE_SIZE);
 	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(3, srpc->msgin.num_bpages);
@@ -221,20 +230,22 @@ TEST_F(homa_utils, homa_rpc_new_server__allocate_buffers)
 }
 TEST_F(homa_utils, homa_rpc_new_server__no_buffer_pool)
 {
+	int created;
 	self->data.message_length = N(1400);
 	self->data.seg.segment_length = N(1400);
 	homa_pool_destroy(&self->hsk.buffer_pool);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_TRUE(IS_ERR(srpc));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
 }
 TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 {
+	int created;
 	self->data.message_length = N(1400);
 	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
@@ -244,11 +255,12 @@ TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 }
 TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_no_buffers)
 {
+	int created;
 	self->data.message_length = N(1400);
 	self->data.seg.segment_length = N(1400);
 	atomic_set(&self->hsk.buffer_pool.free_bpages,0 );
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
@@ -256,11 +268,12 @@ TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_no_buffers)
 }
 TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
 {
+	int created;
 	self->data.message_length = N(2800);
 	self->data.seg.offset = N(1400);
 	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
@@ -271,6 +284,7 @@ TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
 
 TEST_F(homa_utils, homa_rpc_lock_slow)
 {
+	int created;
 	mock_cycles = ~0;
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr);
@@ -278,7 +292,7 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 	homa_rpc_free(crpc);
 	homa_rpc_unlock(crpc);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
-			self->client_ip, &self->data);
+			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 

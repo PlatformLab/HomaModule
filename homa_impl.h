@@ -372,6 +372,13 @@ struct grant_header {
 	 * with higher offset. Larger numbers indicate higher priorities.
 	 */
 	__u8 priority;
+
+	/**
+	 * @resend_all: Nonzero means that the sender should resend all previously
+	 * transmitted data, starting at the beginning of the message (assume
+	 * that no packets have been successfully received).
+	 */
+	__u8 resend_all;
 } __attribute__((packed));
 _Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
 		"grant_header too large for HOMA_MAX_HEADER; must "
@@ -655,6 +662,9 @@ struct homa_message_in {
 	 * must be scheduled with grants.
 	 */
 	bool scheduled;
+
+	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
+	__u8 resend_all;
 
 	/**
 	 * @birth: get_cycles time when this RPC was added to the grantable
@@ -2574,6 +2584,12 @@ struct homa_metrics {
 	 */
 	__u64 linux_pkt_alloc_bytes;
 
+	/**
+	 * @pkt_drops_no_buffers: total number of packets dropped because
+	 * there was no application buffer space available.
+	 */
+	__u64 pkt_drops_no_buffers;
+
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
 	__u64 temp[NUM_TEMP_METRICS];
@@ -3024,8 +3040,6 @@ extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
-extern void     homa_advance_input(struct homa_rpc *rpc,
-		    struct homa_lcache *lcache);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
@@ -3086,7 +3100,7 @@ extern int      homa_ioc_abort(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
-extern void     homa_message_in_init(struct homa_message_in *msgin, int length,
+extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
 		    int incoming);
 extern int      homa_message_out_init(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int xmit);
@@ -3170,7 +3184,8 @@ extern struct homa_rpc
                     const sockaddr_in_union *dest);
 extern struct homa_rpc
                *homa_rpc_new_server(struct homa_sock *hsk,
-			const struct in6_addr *source, struct data_header *h);
+		    const struct in6_addr *source, struct data_header *h,
+		    int *created);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
 extern void     homa_send_grants(struct homa *homa);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);

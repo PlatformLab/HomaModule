@@ -122,7 +122,8 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 			.sender_id = cpu_to_be64(client_id),
 			.type = GRANT},
 		        .offset = htonl(11000),
-			.priority = 3};
+			.priority = 3,
+			.resend_all = 0};
 	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
 	struct sk_buff *result = homa_gro_receive(&self->empty_list,
 			mock_skb_new(&client_ip, &h.common, 0, 0));

@@ -277,17 +277,20 @@ error:
  * used to manage an incoming request). If appropriate, the RPC will also
  * be handed off (we do it here, while we have the socket locked, to avoid
  * acquiring the socket lock a second time later for the handoff).
- * @hsk:    Socket that owns this RPC.
- * @source: IP address (network byte order) of the RPC's client.
- * @h:      Header for the first data packet received for this RPC; used
- *          to initialize the RPC.
+ * @hsk:      Socket that owns this RPC.
+ * @source:   IP address (network byte order) of the RPC's client.
+ * @h:        Header for the first data packet received for this RPC; used
+ *            to initialize the RPC.
+ * @created:  Will be set to 1 if a new RPC was created and 0 if an
+ *            existing RPC was found.
  *
  * Return:  A pointer to a new RPC, which is locked, or a negative errno
  *          if an error occurred. If there is already an RPC corresponding
  *          to h, then it is returned instead of creating a new RPC.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
-		const struct in6_addr *source, struct data_header *h)
+		const struct in6_addr *source, struct data_header *h,
+		int *created)
 {
 	int err;
 	struct homa_rpc *srpc = NULL;
@@ -305,6 +308,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
+			*created = 0;
 			return srpc;
 		}
 	}
@@ -347,9 +351,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->start_cycles = get_cycles();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 			srpc->id, ntohl(h->incoming));
-	homa_message_in_init(&srpc->msgin, ntohl(h->message_length),
+	err = homa_message_in_init(srpc, ntohl(h->message_length),
 			ntohl(h->incoming));
-	err = homa_pool_allocate(srpc);
 	if (err != 0)
 		goto error;
 
@@ -368,6 +371,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	homa_sock_unlock(hsk);
 	INC_METRIC(requests_received, 1);
+	*created = 1;
 	return srpc;
 
 error:
@@ -1028,9 +1032,10 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	}
 	case GRANT: {
 		struct grant_header *h = (struct grant_header *) skb->data;
+		char *resend = (h->resend_all) ? ", resend_all" : "";
 		used = homa_snprintf(buffer, buf_len, used,
-				", offset %d, grant_prio %u",
-				ntohl(h->offset), h->priority);
+				", offset %d, grant_prio %u%s",
+				ntohl(h->offset), h->priority, resend);
 		break;
 	}
 	case RESEND: {
@@ -1126,8 +1131,9 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	}
 	case GRANT: {
 		struct grant_header *h = (struct grant_header *) common;
-		snprintf(buffer, buf_len, "GRANT %d@%d", ntohl(h->offset),
-				h->priority);
+		char *resend = h->resend_all ? " resend_all" : "";
+		snprintf(buffer, buf_len, "GRANT %d@%d%s", ntohl(h->offset),
+				h->priority, resend);
 		break;
 	}
 	case RESEND: {
@@ -1753,6 +1759,11 @@ char *homa_print_metrics(struct homa *homa)
 				"Bytes allocated in new packets by NIC driver "
 				"due to cache overflows\n",
 				m->linux_pkt_alloc_bytes);
+		homa_append_metric(homa,
+				"pkt_drops_no_buffers     %15llu  "
+				"Packets dropped because no application "
+				"buffer space was available\n",
+				m->pkt_drops_no_buffers);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

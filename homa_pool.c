@@ -388,6 +388,7 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 		__u32 *buffers)
 {
 	int i;
+	int send_grants = 0;
 
 	if (!pool->region)
 		return;
@@ -430,12 +431,19 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 			set_bpages_needed(pool);
 		homa_sock_unlock(pool->hsk);
 		tt_record4("Retrying buffer allocation for id %d, length %d, "
-				"free_bpages %s, bpages_needed %d",
+				"free_bpages %d, new bpages_needed %d",
 				rpc->id, rpc->msgin.total_length,
 				atomic_read(&pool->free_bpages),
 				pool->bpages_needed);
 		homa_pool_allocate(rpc);
-		homa_advance_input(rpc, NULL);
+		if (rpc->msgin.num_bpages > 0) {
+			/* Allocation succeeded; "wake up" the RPC. */
+			rpc->msgin.resend_all = 1;
+			homa_check_grantable(rpc);
+			send_grants = 1;
+		}
 		homa_rpc_unlock(rpc);
 	}
+	if (send_grants)
+		homa_send_grants(pool->hsk->homa);
 }
