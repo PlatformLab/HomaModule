@@ -69,6 +69,7 @@ static inline void homa_lcache_save(struct homa_lcache *lc,
 {
 	homa_lcache_release(lc);
 	lc->rpc = rpc;
+	lc->check_grantable = 0;
 }
 
 /**
