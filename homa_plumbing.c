@@ -1328,15 +1328,13 @@ int homa_softirq(struct sk_buff *skb) {
 			 * unknown.
 			 */
 			if (!tt_frozen) {
+				homa_rpc_log_active_tt(homa, 0);
 				tt_record4("Freezing because of request on "
 						"port %d from 0x%x:%d, id %d",
 						ntohs(h->dport), tt_addr(saddr),
 						ntohs(h->sport),
 						homa_local_id(h->sender_id));
 				tt_freeze();
-//				homa_rpc_log_active(homa, h->id);
-//				homa_log_grantable_list(homa);
-//				homa_log_throttled(homa);
 			}
 			goto discard;
 		}
@@ -1627,7 +1625,12 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_log_throttled(homa);
 			else if (log_topic == 5)
 				tt_printk();
-			else
+			else if (log_topic == 6) {
+				tt_record("Calling homa_rpc_log_active because of log topic 6");
+				homa_rpc_log_active_tt(homa, 0);
+				tt_record("Freezing because of log_topic 6");
+				tt_freeze();
+			} else
 				homa_rpc_log_active(homa, log_topic);
 			log_topic = 0;
 		}

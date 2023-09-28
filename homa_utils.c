@@ -767,19 +767,22 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.total_length
 				- rpc->msgin.bytes_remaining;
-		tt_record4("Incoming RPC id %d, is_client %d, %d/%d bytes "
+		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes "
 				"received",
-				rpc->id, homa_is_client(rpc->id),
+				rpc->id, tt_addr(rpc->peer->addr),
 				received, rpc->msgin.total_length);
 		if (rpc->msgin.incoming > received)
 			tt_record3("RPC id %d has %d outstanding grants "
 					"(incoming %d)", rpc->id,
 					rpc->msgin.incoming - received,
 					rpc->msgin.incoming);
+		if (rpc->msgin.num_bpages == 0)
+			tt_record1("RPC id %d is blocked waiting for buffers",
+					rpc->id);
 	} else if (rpc->state == RPC_OUTGOING) {
-		tt_record4("Outgoing RPC id %d, is_client %d, %d/%d bytes "
+		tt_record4("Outgoing RPC id %d, peer 0x%x, %d/%d bytes "
 				"sent",
-				rpc->id, homa_is_client(rpc->id),
+				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->msgout.next_xmit_offset,
 				rpc->msgout.length);
 		if (rpc->msgout.granted > rpc->msgout.next_xmit_offset)
@@ -796,8 +799,10 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
  * homa_rpc_log_active_tt() - Log information about all active RPCs using
  * timetraces.
  * @homa:    Overall data about the Homa protocol implementation.
+ * @freeze_count:  If nonzero, FREEZE requests will be sent for this many
+ *                 incoming RPCs with outstanding grants
  */
-void homa_rpc_log_active_tt(struct homa *homa)
+void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -814,13 +819,72 @@ void homa_rpc_log_active_tt(struct homa *homa)
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			struct freeze_header freeze;
 			count++;
 			homa_rpc_log_tt(rpc);
-					}
+			if (freeze_count == 0) {
+				continue;
+			}
+			if (rpc->state != RPC_INCOMING)
+				continue;
+			if (rpc->msgin.incoming <= (rpc->msgin.total_length
+					- rpc->msgin.bytes_remaining))
+				continue;
+			freeze_count--;
+			printk(KERN_NOTICE "Emitting FREEZE in homa_rpc_log_active_tt\n");
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		}
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
 	tt_record1("Finished logging %d active Homa RPCs", count);
+}
+
+/**
+ * homa_validate_incoming() - Scan all of the active RPCs to compute what
+ * homa_total_incoming should be, and see if it actually matches..
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @verbose: Print incoming info for each individual RPC.
+ */
+void homa_validate_incoming(struct homa *homa, int verbose)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int total_incoming = 0;
+
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			int incoming;
+			if (rpc->state != RPC_INCOMING)
+				continue;
+			incoming = rpc->msgin.incoming -
+					(rpc->msgin.total_length
+					- rpc->msgin.bytes_remaining);
+			if (incoming == 0)
+				continue;
+			total_incoming += incoming;
+			if (verbose)
+				tt_record4("homa_validate_incoming: RPC id %d, "
+						"granted %d, remaining %d, "
+						"incoming %d",
+						rpc->id, rpc->msgin.incoming,
+						rpc->msgin.bytes_remaining,
+						incoming);
+		}
+		homa_unprotect_rpcs(hsk);
+	}
+	rcu_read_unlock();
+	tt_record2("homa_validate_incoming computed total incoming %d, "
+			"homa->total_incoming %d",
+			total_incoming, atomic_read(&homa->total_incoming));
 }
 
 /**
@@ -1814,8 +1878,13 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
+		tt_record1("homa_freeze calling homa_rpc_log_active with freeze_type %d", type);
+		homa_rpc_log_active_tt(rpc->hsk->homa, 0);
+		homa_validate_incoming(rpc->hsk->homa, 1);
+		printk(KERN_NOTICE "%s\n", format);
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
 		tt_freeze();
+		printk(KERN_NOTICE "Emitting FREEZE in homa_freeze with freeze_type %d\n", type);
 		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}
 }

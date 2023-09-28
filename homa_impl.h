@@ -3157,14 +3157,14 @@ extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
                     struct homa_sock *hsk);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_acked(struct homa_sock *hsk,
-			const struct in6_addr *saddr, struct homa_ack *ack);
+		    const struct in6_addr *saddr, struct homa_ack *ack);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_free_rcu(struct rcu_head *rcu_head);
 extern void     homa_rpc_handoff(struct homa_rpc *rpc);
 extern void     homa_rpc_log(struct homa_rpc *rpc);
 extern void     homa_rpc_log_tt(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
-extern void     homa_rpc_log_active_tt(struct homa *homa);
+extern void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 extern struct homa_rpc
                *homa_rpc_new_client(struct homa_sock *hsk,
                     const sockaddr_in_union *dest);
@@ -3209,6 +3209,7 @@ extern int      homa_unsched_priority(struct homa *homa,
                     struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
+extern void     homa_validate_incoming(struct homa *homa, int verbose);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
                     __u64 id);
