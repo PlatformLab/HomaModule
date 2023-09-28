@@ -224,7 +224,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
-		if (overlap_xmit && list_empty(&rpc->throttled_links) && xmit) {
+		if (overlap_xmit && list_empty(&rpc->throttled_links) && xmit
+				&& (offset < rpc->msgout.granted)) {
 			tt_record1("waking up pacer for id %d", rpc->id);
 			homa_add_to_throttled(rpc);
 		}
@@ -553,8 +554,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			if ((offset + length) <= start)
 				continue;
 
-			/* This segment must be retransmitted. Copy it into
-			 * a clean sk_buff.
+			/* This segment must be retransmitted. Sending packets
+			 * isn't idempotent (packet state gets updated during
+			 * sends) so copy the packet data into a clean sk_buff.
 			 */
 			new_skb = alloc_skb(length + sizeof(struct data_header)
 					+ rpc->hsk->ip_header_length
