@@ -255,6 +255,14 @@ if elapsed_secs != 0:
                 busiest_core = core
         print(line)
     print("\nBusiest core: %d (%.2f)" % (busiest_core, totals[busiest_core]))
+    other_busy = ""
+    for core in range(first_core, end_core):
+        if totals[core] >= 0.8:
+            if other_busy:
+                other_busy += ", "
+            other_busy += " %d (%.2f)" % (core, totals[core]);
+    if other_busy:
+        print("Other busy cores: %s" % (other_busy))
 
     packets_received = 0.0
     packets_sent = 0.0
