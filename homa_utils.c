@@ -1760,10 +1760,9 @@ char *homa_print_metrics(struct homa *homa)
 				"due to cache overflows\n",
 				m->linux_pkt_alloc_bytes);
 		homa_append_metric(homa,
-				"pkt_drops_no_buffers     %15llu  "
-				"Packets dropped because no application "
-				"buffer space was available\n",
-				m->pkt_drops_no_buffers);
+				"dropped_data_no_bufs     %15llu  "
+				"Data bytes dropped because app buffers full\n",
+				m->dropped_data_no_bufs);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

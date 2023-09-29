@@ -560,11 +560,12 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 * exceed available cache space, resulting in poor
 		 * performance.
 		 */
-		tt_record3("Dropping packet because no buffer space available: "
-				"id %d, offset %d, old incoming %d",
+		tt_record4("Dropping packet because no buffer space available: "
+				"id %d, offset %d, length %d, old incoming %d",
 				rpc->id, ntohl(h->seg.offset),
+				ntohl(h->seg.segment_length),
 				rpc->msgin.incoming);
-		INC_METRIC(pkt_drops_no_buffers, 1);
+		INC_METRIC(dropped_data_no_bufs, ntohl(h->seg.segment_length));
 		goto discard;
 	}
 

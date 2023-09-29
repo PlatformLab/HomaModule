@@ -2585,10 +2585,10 @@ struct homa_metrics {
 	__u64 linux_pkt_alloc_bytes;
 
 	/**
-	 * @pkt_drops_no_buffers: total number of packets dropped because
+	 * @dropped_data_no_bufs: total bytes of incoming data dropped because
 	 * there was no application buffer space available.
 	 */
-	__u64 pkt_drops_no_buffers;
+	__u64 dropped_data_no_bufs;
 
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10

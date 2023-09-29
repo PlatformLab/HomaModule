@@ -423,7 +423,7 @@ if elapsed_secs != 0:
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
             "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures",
-            "linux_pkt_alloc_bytes"]:
+            "dropped_data_no_bufs"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
