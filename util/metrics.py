@@ -256,8 +256,8 @@ if elapsed_secs != 0:
         print(line)
     print("\nBusiest core: %d (%.2f)" % (busiest_core, totals[busiest_core]))
     other_busy = ""
-    for core in range(first_core, end_core):
-        if totals[core] >= 0.8:
+    for core in range(0, num_cores):
+        if (totals[core] >= 0.8) and (core != busiest_core):
             if other_busy:
                 other_busy += ", "
             other_busy += " %d (%.2f)" % (core, totals[core]);
@@ -423,7 +423,7 @@ if elapsed_secs != 0:
             "short_packets", "redundant_packets",
             "peer_timeouts", "server_rpc_discards",
             "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures",
-            "dropped_data_no_bufs"]:
+            "dropped_data_no_bufs", "linux_pkt_alloc_bytes"]:
         if deltas[symbol] == 0:
             continue
         rate = float(deltas[symbol])/elapsed_secs
