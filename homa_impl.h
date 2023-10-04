@@ -2680,6 +2680,12 @@ struct homa_skb_info {
 	 * header, CRC, preamble, and inter-packet gap.
 	 */
 	int wire_bytes;
+
+	/**
+	 * @data_bytes: total bytes of message data across all of the
+	 * segments in this packet.
+	 */
+	int data_bytes;
 };
 
 /**

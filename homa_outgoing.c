@@ -139,6 +139,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		struct data_segment *seg;
 		int skb_bytes_left, offset;
 		struct sk_buff *skb;
+		struct homa_skb_info *homa_info;
 
 		homa_rpc_unlock(rpc);
 
@@ -170,6 +171,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			skb_shinfo(skb)->gso_type = gso_type;
 		}
 		skb_shinfo(skb)->gso_segs = 0;
+		homa_info = homa_get_skb_info(skb);
 
 		/* Fill in the initial portion (which will be replicated in
 		 * every network packet by GSO/TSO).
@@ -187,7 +189,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		h->incoming = htonl(rpc->msgout.unscheduled);
 		h->cutoff_version = rpc->peer->cutoff_version;
 		h->retransmit = 0;
-		homa_get_skb_info(skb)->wire_bytes = 0;
+		homa_info->wire_bytes = 0;
+		homa_info->data_bytes = 0;
 
 		/* Each iteration of the following loop adds one segment
 		 * (which will become a separate packet after GSO) to the buffer.
@@ -213,9 +216,10 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			bytes_left -= seg_size;
 			(skb_shinfo(skb)->gso_segs)++;
 			skb_bytes_left -= seg_size;
-			homa_get_skb_info(skb)->wire_bytes += mtu
+			homa_info->wire_bytes += mtu
 					- (max_pkt_data - seg_size)
 					+ HOMA_ETH_OVERHEAD;
+			homa_info->data_bytes += seg_size;
 		} while (skb_bytes_left > 0);
 
 		homa_rpc_lock(rpc);
@@ -498,7 +502,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
 			"granted %d",
-			rpc->id, ntohl(h->seg.offset), skb->len,
+			rpc->id, ntohl(h->seg.offset),
+			homa_get_skb_info(skb)->data_bytes,
 			rpc->msgout.granted);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);

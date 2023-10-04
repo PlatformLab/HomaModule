@@ -345,6 +345,7 @@ TEST_F(homa_outgoing, homa_message_out_init__multiple_segs_per_skbuff)
 			"DATA 1400@4200 1400@5600 1400@7000; "
 			"DATA 1400@8400 200@9800",
 			unit_log_get());
+	EXPECT_EQ(4200, homa_get_skb_info(crpc->msgout.packets)->data_bytes);
 }
 TEST_F(homa_outgoing, homa_message_out_init__add_to_throttled)
 {
