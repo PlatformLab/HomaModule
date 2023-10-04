@@ -897,7 +897,7 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 	atomic_set(&self->hsk.buffer_pool.free_bpages, 0);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc, NULL, &self->incoming_delta);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.pkt_drops_no_buffers);
+	EXPECT_EQ(1400, homa_cores[cpu_number]->metrics.dropped_data_no_bufs);
 	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
 TEST_F(homa_incoming, homa_data_pkt__update_delta)
