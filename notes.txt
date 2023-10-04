@@ -1,6 +1,31 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Performance notes from c6525-100g experiment ~10/1/2023:
+  * See if TCP is also overflowing packet caches; why does it
+    get higher throughput than Homa?
+  * Try running Homa with more nodes to see if that helps (spreads load
+    better?)
+  * Try increasing size of packet caches?
+  * Try turning off HOMA_GRO_SHORT_BYPASS?
+  * C22 gets blocked for long periods of time running napi_poll, and this
+    is locking out of of the threads serving port 4002. Part of the problem
+    is that HOMA_GRO_SHORT_BYPASS is enabled and a lot of time is spent
+    in homa_softirq and also in transmitting grant packets. homa_softirq is
+    also running in SoftIRQ mode on the same core.
+  * And, when packets are passed to SoftIRQ, C22 is frequently being
+    picked as the target (C22 is choosing itself about 25% of the time)!
+    All of these choices happen when homa_gro_complete isn't picking the core:
+    HOMA_GRO_SAME_CORE!
+
+* When requesting ACKs, must eventually give up and delete RPC.
+* Rename msgin.incoming to granted (confusing with total_incoming)
+* Eliminate msgin.scheduled: just compute when needed.
+* Replace msgin.bytes_remaining with bytes_received?
+* Include the GSO packet size in the initial packet, so the receiver
+  can predict how much grants will get rounded up.
+* Out-of-order incoming grants seem to be pretty common.
+
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
     * Homa W5: unrestricted usage 3.8 MB/20 nodes
