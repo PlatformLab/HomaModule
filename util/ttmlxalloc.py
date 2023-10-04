@@ -132,7 +132,6 @@ for line in f:
 
     if verbose:
         print("%9.3f us (+%8.3f us) [%s] %s" % (time, time - prev_time, core, msg))
-    prev_time = time
 
 if verbose:
     sys.exit(0)
