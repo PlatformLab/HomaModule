@@ -3125,16 +3125,19 @@ extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);
 extern void     homa_pacer_xmit(struct homa *homa);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
+extern struct homa_peer **
+		    homa_peertab_get_peers(struct homa_peertab *peertab,
+		    int *num_peers);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern void     homa_peer_add_ack(struct homa_rpc *rpc);
 extern struct homa_peer
                *homa_peer_find(struct homa_peertab *peertab,
-			const struct in6_addr *addr, struct inet_sock *inet);
+		    const struct in6_addr *addr, struct inet_sock *inet);
 extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
 		    struct homa_ack *dst);
 extern struct dst_entry
                *homa_peer_get_dst(struct homa_peer *peer,
-			struct inet_sock *inet);
+		    struct inet_sock *inet);
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
                     int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);

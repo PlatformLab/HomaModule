@@ -129,6 +129,60 @@ TEST_F(homa_peertab, homa_peertab_gc_dsts)
 	EXPECT_EQ(0, dead_count(&self->peertab));
 }
 
+TEST_F(homa_peertab, homa_peertab_get_peers__not_init)
+{
+	struct homa_peertab peertab;
+	int num_peers = 45;
+	memset(&peertab, 0, sizeof(peertab));
+	EXPECT_EQ(NULL, homa_peertab_get_peers(&peertab, &num_peers));
+	EXPECT_EQ(0, num_peers);
+}
+TEST_F(homa_peertab, homa_peertab_get_peers__table_empty)
+{
+	int num_peers = 45;
+	EXPECT_EQ(NULL, homa_peertab_get_peers(&self->peertab, &num_peers));
+	EXPECT_EQ(0, num_peers);
+}
+TEST_F(homa_peertab, homa_peertab_get_peers__kmalloc_fails)
+{
+	int num_peers = 45;
+	mock_kmalloc_errors = 1;
+	homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
+	EXPECT_EQ(NULL, homa_peertab_get_peers(&self->peertab, &num_peers));
+	EXPECT_EQ(0, num_peers);
+}
+TEST_F(homa_peertab, homa_peertab_get_peers__one_peer)
+{
+	struct homa_peer **peers;
+	struct homa_peer *peer;
+	int num_peers = 45;
+	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
+	peers = homa_peertab_get_peers(&self->peertab, &num_peers);
+	ASSERT_NE(NULL, peers);
+	EXPECT_EQ(1, num_peers);
+	EXPECT_EQ(peer, peers[0]);
+	kfree(peers);
+}
+TEST_F(homa_peertab, homa_peertab_get_peers__multiple_peers)
+{
+	struct homa_peer **peers;
+	struct homa_peer *peer1, *peer2, *peer3;
+	int num_peers = 45;
+	peer1 = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
+	peer2 = homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
+	peer3 = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
+	peers = homa_peertab_get_peers(&self->peertab, &num_peers);
+	ASSERT_NE(NULL, peers);
+	EXPECT_EQ(3, num_peers);
+	EXPECT_TRUE((peers[0] == peer1) || (peers[1] == peer1)
+			|| (peers[2] == peer1));
+	EXPECT_TRUE((peers[0] == peer2) || (peers[1] == peer2)
+			|| (peers[2] == peer2));
+	EXPECT_TRUE((peers[0] == peer3) || (peers[1] == peer3)
+			|| (peers[2] == peer3));
+	kfree(peers);
+}
+
 TEST_F(homa_peertab, homa_peer_find__conflicting_creates)
 {
 	struct homa_peer *peer;

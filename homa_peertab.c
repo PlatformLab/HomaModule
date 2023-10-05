@@ -71,6 +71,53 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 }
 
 /**
+ * homa_peertab_get_peers() - Return information about all of the peers
+ * currently known
+ * @peertab:    The table to search for peers.
+ * @num_peers:  Modified to hold the number of peers returned.
+ * Return:      kmalloced array holding pointers to all known peers. The
+ *		caller must free this. If there is an error, or if there
+ *	        are no peers, NULL is returned.
+ */
+struct homa_peer ** homa_peertab_get_peers(struct homa_peertab *peertab,
+		int *num_peers)
+{
+	int i, count;
+	struct homa_peer *peer;
+	struct hlist_node *next;
+	struct homa_peer **result;
+
+	*num_peers = 0;
+	if (!peertab->buckets)
+		return NULL;
+
+	/* Figure out how many peers there are. */
+	count = 0;
+	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
+		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
+				peertab_links)
+			count++;
+	}
+
+	if (count == 0)
+		return NULL;
+
+	result = (struct homa_peer **) kmalloc(count*sizeof(peer), GFP_KERNEL);
+	if (result == NULL)
+		return NULL;
+	*num_peers = count;
+	count = 0;
+	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
+		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
+				peertab_links) {
+			result[count] = peer;
+			count++;
+		}
+	}
+	return result;
+}
+
+/**
  * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
  * safe to do so.
  * @peertab:       The table in which to free entries.
