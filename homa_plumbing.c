@@ -1630,6 +1630,11 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record("Freezing because of log_topic 6");
 				tt_freeze();
+			} else if (log_topic == 7) {
+				tt_record("Freezing cluster because of log topic 7");
+				homa_rpc_log_active_tt(homa, 0);
+				tt_freeze();
+				homa_freeze_peers(homa);
 			} else
 				homa_rpc_log_active(homa, log_topic);
 			log_topic = 0;

@@ -1171,6 +1171,45 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 }
 
 /**
+ * homa_freeze_peers() - Send FREEZE packets to all known peers.
+ * @homa:   Provides info about peers.
+ */
+void homa_freeze_peers(struct homa *homa)
+{
+	struct homa_peer **peers;
+	int num_peers, i, err;
+	struct freeze_header freeze;
+	struct homa_sock *hsk;
+	struct homa_socktab_scan scan;
+
+	/* Find a socket to use (any will do). */
+	homa_socktab_start_scan(&homa->port_map, &scan);
+	hsk = homa_socktab_next(&scan);
+	if (hsk == NULL) {
+		printk(KERN_NOTICE "homa_freeze_peers couldn't find a socket\n");
+		return;
+	}
+
+	peers = homa_peertab_get_peers(&homa->peers, &num_peers);
+	if (peers == NULL) {
+		printk(KERN_NOTICE "homa_freeze_peers couldn't find peers "
+				"to freeze\n");
+		return;
+	}
+	freeze.common.type = FREEZE;
+	freeze.common.sport = htons(hsk->port);;
+	freeze.common.dport = 0;
+	freeze.common.sender_id = 0;
+	for (i = 0; i < num_peers; i++) {
+		err = __homa_xmit_control(&freeze, sizeof(freeze), peers[i], hsk);
+		if (err != 0)
+			printk(KERN_NOTICE "homa_freeze_peers got error %d "
+					"in xmit to %s\n", err,
+					homa_print_ipv6_addr(&peers[i]->addr));
+	}
+}
+
+/**
  * homa_snprintf() - This function makes it easy to use a series of calls
  * to snprintf to gradually append information to a fixed-size buffer.
  * If the buffer fills, the function can continue to be called, but nothing

@@ -3084,6 +3084,7 @@ extern struct homa_rpc
 extern void     homa_free_skbs(struct sk_buff *skb);
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		    char *format);
+extern void     homa_freeze_peers(struct homa *homa);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
