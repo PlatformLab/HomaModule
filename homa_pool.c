@@ -321,8 +321,9 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	core->allocated += partial;
 
 	success:
-	tt_record3("Allocated %d bpages for id %d, free_bpages %d",
-			rpc->msgin.num_bpages, rpc->id,
+	tt_record4("Allocated %d bpage pointers on port %d for id %d, "
+			"free_bpages now %d",
+			rpc->msgin.num_bpages, pool->hsk->port, rpc->id,
 			atomic_read(&pool->free_bpages));
 	return 0;
 
@@ -331,8 +332,9 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	 */
 	out_of_space:
 	INC_METRIC(buffer_alloc_failures, 1);
-	tt_record3("Buffer allocation failed for id %d, length %d, "
-			"free_bpages %d", rpc->id, rpc->msgin.total_length,
+	tt_record4("Buffer allocation failed, port %d, id %d, length %d, "
+			"free_bpages %d", pool->hsk->port, rpc->id,
+			rpc->msgin.total_length,
 			atomic_read(&pool->free_bpages));
 	homa_sock_lock(pool->hsk, "homa_pool_allocate");
 	list_for_each_entry(other, &pool->hsk->waiting_for_bufs, buf_links) {
@@ -400,7 +402,8 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 				 atomic_inc(&pool->free_bpages);
 		}
 	}
-	tt_record2("Released %d bpages, %d bpages free", num_buffers,
+	tt_record3("Released %d bpages, free_bpages for port %d now %d",
+			num_buffers, pool->hsk->port,
 			atomic_read(&pool->free_bpages));
 
 	/* Allocate buffers for waiting RPCS if possible. */
