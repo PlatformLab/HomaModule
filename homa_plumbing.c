@@ -531,6 +531,8 @@ static int __init homa_load(void) {
 			HOMA_MAX_BPAGES,
 			NR_CPUS,
 			nr_cpu_ids);
+	printk(KERN_NOTICE "Address of homa_data_pkt is 0x%llx\n",
+			(__u64) &homa_data_pkt);
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed for homa_prot: %d\n",
