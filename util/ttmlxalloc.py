@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Copyright (c) 2022 Stanford University
+# Copyright (c) 2022-2023 Stanford University
 #
 # Permission to use, copy, modify, and distribute this software for any
 # purpose with or without fee is hereby granted, provided that the above
@@ -108,6 +108,9 @@ for line in f:
             first_free_time[core] = time
         last_free_time[core] = time
         num_frees[core] += 1
+        continue
+
+    if 'mlx5e_rx_cache_get found ref count' in msg:
         continue
 
     if num_allocs[core] != 0:
