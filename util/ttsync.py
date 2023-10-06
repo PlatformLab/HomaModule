@@ -1,15 +1,9 @@
 #!/usr/bin/python3
 
 """
-Scans two timetraces covering the same time interval, one from a client and one
-from a server, determines the clock offset between the two machines, and
-outputs the server timetrace with its times adjusted so that they are
-synchronized with the client timetrace.
-
-Usage: ttsync.py [--verbose] [client [server]]
-
-The "client" and "server" arguments give the names of the two timetrace
-files; they default to client.tt and server.tt.
+Scans two timetraces covering the same time interval, determines the clock
+offset between the two machines, and outputs the second timetrace with its
+times adjusted so that they are synchronized with the first timetrace.
 """
 
 from __future__ import division, print_function
@@ -22,37 +16,36 @@ import string
 import sys
 from statistics import median
 
-client_trace = "client.tt"
-server_trace = "server.tt"
-verbose = False
-if (len(sys.argv) >= 2) and (sys.argv[1] == "--help"):
-    print("Usage: %s [--verbose] [client_trace [server_trace]]" % (sys.argv[0]))
-    sys.exit(0)
-if (len(sys.argv) >= 2) and (sys.argv[1] == "--verbose"):
-  verbose = True
-  sys.argv.pop(1)
-if len(sys.argv) >= 2:
-  client_trace = sys.argv[1]
-  sys.argv.pop(1)
-if len(sys.argv) >= 2:
-  server_trace = sys.argv[1]
+# Parse command line options
+parser = OptionParser(description=
+        'Read two timetraces, compute the clock offset between them, and '
+        'write to standard output a revised version of the second trace '
+        'with its clock offset to match the first',
+        usage='%prog [options] t1 t2',
+        conflict_handler='resolve')
+parser.add_option('--verbose', '-v', action='store_true', default=False,
+        dest='verbose',
+        help='print lots of output')
 
-def parse_tt(tt, server):
+(options, extra) = parser.parse_args()
+if len(extra) != 2:
+    print("Usage: %s [options] t1 t2" % (sys.argv[0]), file=sys.stderr)
+    exit(1)
+t1 = extra[0]
+t2 = extra[1]
+
+def parse_tt(tt):
     """
-    Reads the timetrace file given by tt and returns a dictionary containing
-    extracted statistics (see below). The server argument indicates whether
-    this is a server trace; if so, 1 gets subtracted from all RPC ids to
-    produce client ids.
-
-    The return value from parse_tt is a dictionary whose keys are packet
-    ids (rpc_id:offset). Each value is a dictionary containing some or all
-    of the following elements:
-
+    Reads the timetrace file given by tt and returns a dictionary whose
+    keys are packet ids (rpc_id:offset). Each value is a dictionary containing
+    some or all of the following elements:
     send:                time when ip_queue_xmit was called for that data packet
     gro_recv:            time when homa_gro_receive saw the packet
+    Note: all RPC ids are stored as client-side ids (even); ids read from
+    server traces are adjusted to the corresponding client-side id
     """
 
-    global verbose
+    global options
     packets = {}
     sent = 0
     recvd = 0
@@ -66,8 +59,7 @@ def parse_tt(tt, server):
         time = float(match.group(1))
         core = int(match.group(3))
         id = match.group(4)
-        if (server):
-            id = str(int(id) - 1)
+        id = str(int(id) & ~1)
         offset = match.group(5)
         pktid = id + ":" + offset
 
@@ -82,19 +74,24 @@ def parse_tt(tt, server):
             packets[pktid]["gro_recv"] = time
             recvd += 1
 
-    if verbose:
-        print("%s trace has %d packet sends, %d receives" % (
-                ("Server" if server else "Client"), sent, recvd),
+    if options.verbose:
+        print("%s has %d packet sends, %d receives" % (tt, sent, recvd),
                 file=sys.stderr)
     return packets
 
-def get_delays(p1, p2):
+def get_delays(p1, p2, msg):
     """
     Given two results from parse_tt, return a list containing all the
     delays from a packet sent in p1 and received in p2. The list will
-    be sorted in increasing order.
+    be sorted in increasing order. Msg is a string of the form "a to b"
+    indicating the direction of packet flow; used for verbose messages.
     """
+    global options
     delays = []
+    min_delay = 1e09
+    min_id = ""
+    send_time = None
+    recv_time = None
     for key in p1:
         if not key in p2:
             continue
@@ -104,47 +101,61 @@ def get_delays(p1, p2):
             continue
         delay = info2["gro_recv"] - info1["send"]
         delays.append(delay)
+        if delay < min_delay:
+            min_delay = delay
+            min_id = key
+            send_time = info1["send"]
+            recv_time = info2["gro_recv"]
+    if options.verbose:
+        print("Min delay from %s: %.1f usec (id %s, send %9.3f, recv %9.3f)" %
+                (msg, min_delay, min_id, send_time, recv_time),
+                file=sys.stderr)
     return sorted(delays)
 
-client = parse_tt(client_trace, False)
-server = parse_tt(server_trace, True)
+t1_pkts = parse_tt(t1)
+t2_pkts = parse_tt(t2)
 
-c_to_s = get_delays(client, server)
-s_to_c = get_delays(server, client)
+t1_to_t2 = get_delays(t1_pkts, t2_pkts, "%s to %s" % (t1, t2))
+t2_to_t1 = get_delays(t2_pkts, t1_pkts, "%s to %s" % (t1, t2))
 
-if verbose:
-    print("Found %d packets from client to server, %d from server to client" % (
-            len(c_to_s), len(s_to_c)), file=sys.stderr)
+if options.verbose:
+    print("Found %d packets from %s to %s, %d from %s to %s" % (
+            len(t1_to_t2), t1, t2, len(t2_to_t1), t2, t1), file=sys.stderr)
 
-min_rtt = (c_to_s[5*len(c_to_s)//100] + s_to_c[5*len(s_to_c)//100])
+# Percentile to use for computing offset
+percentile = 0
+
+min_rtt = (t1_to_t2[percentile*len(t1_to_t2)//100]
+        + t2_to_t1[percentile*len(t2_to_t1)//100])
 print("RTT: P0 %.1f us, P5 %.1f us, P10 %.1fus, P20 %.1f us, P50 %.1f us" % (
-        c_to_s[0] + s_to_c[0], min_rtt,
-        c_to_s[10*len(c_to_s)//100] + s_to_c[10*len(s_to_c)//100],
-        c_to_s[20*len(c_to_s)//100] + s_to_c[20*len(s_to_c)//100],
-        c_to_s[50*len(c_to_s)//100] + s_to_c[50*len(s_to_c)//100]),
+        t1_to_t2[0] + t2_to_t1[0],
+        t1_to_t2[5*len(t1_to_t2)//100] + t2_to_t1[5*len(t2_to_t1)//100],
+        t1_to_t2[10*len(t1_to_t2)//100] + t2_to_t1[10*len(t2_to_t1)//100],
+        t1_to_t2[20*len(t1_to_t2)//100] + t2_to_t1[20*len(t2_to_t1)//100],
+        t1_to_t2[50*len(t1_to_t2)//100] + t2_to_t1[50*len(t2_to_t1)//100]),
         file=sys.stderr)
-offset = min_rtt/2 - c_to_s[5*len(c_to_s)//100]
+offset = min_rtt/2 - t1_to_t2[percentile*len(t1_to_t2)//100]
 
-if verbose:
-    print("Server clock offset (assuming %.1f us RTT): %.1fus" % (
-            min_rtt, offset), file=sys.stderr)
-    print("Client->server packet delays: min %.1f us, P50 %.1f us, "
+if options.verbose:
+    print("%s clock offset (assuming %.1f us RTT): %.1fus" % (
+            t2, min_rtt, offset), file=sys.stderr)
+    print("%s->%s packet delays: min %.1f us, P50 %.1f us, "
             "P90 %.1f us, P99 %.1f us" % (
-            c_to_s[0] + offset,
-            c_to_s[len(c_to_s)//2] + offset,
-            c_to_s[len(c_to_s)*9//10] + offset,
-            c_to_s[len(c_to_s)*99//100] + offset), file=sys.stderr)
-    print("Server->client packet delays: min %.1f us, P50 %.1f us, "
+            t1, t2, t1_to_t2[0] + offset,
+            t1_to_t2[len(t1_to_t2)//2] + offset,
+            t1_to_t2[len(t1_to_t2)*9//10] + offset,
+            t1_to_t2[len(t1_to_t2)*99//100] + offset), file=sys.stderr)
+    print("%s->%s packet delays: min %.1f us, P50 %.1f us, "
             "P90 %.1f us, P99 %.1f us" % (
-            s_to_c[0] - offset,
-            s_to_c[len(s_to_c)//2] - offset,
-            s_to_c[len(s_to_c)*9//10] - offset,
-            s_to_c[len(s_to_c)*99//100] - offset), file=sys.stderr)
+            t2, t1, t2_to_t1[0] - offset,
+            t2_to_t1[len(t2_to_t1)//2] - offset,
+            t2_to_t1[len(t2_to_t1)*9//10] - offset,
+            t2_to_t1[len(t2_to_t1)*99//100] - offset), file=sys.stderr)
 
-# Now re-read the server's trace and output a new trace whose
-# clock is aligned with the client.
+# Now re-read the second trace and output a new trace whose
+# clock is aligned with the first trace.
 
-for line in open(server_trace):
+for line in open(t2):
     match = re.match(' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
             line)
     if not match:
