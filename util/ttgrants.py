@@ -28,7 +28,7 @@ parser = OptionParser(description=
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='print lots of output')
-parser.add_option('--gbps', type='int', dest='gbps', default=25,
+parser.add_option('--gbps', type='int', dest='gbps', default=100,
         metavar = 'N', help='network speed in Gbps')
 parser.add_option('--mtu_data', type='int', dest='mtu_data', default=8920,
         help='amount of message data in a full-size packet')
@@ -715,6 +715,9 @@ print("\nIncoming messages: active %d, granted %d, outstanding %.3f, backlog %.3
         % (recv_stats["active"], recv_stats["granted"],
         recv_stats["grants_pending"]/1e6, recv_stats["backlog"]/1e6))
 
+
+# Print information about messages with outstanding grants. The "age" for
+# an RPC is how long ago the most recent grant was sent for the RPC.
 partial = ""
 num_partial = 0
 fully = ""
@@ -738,7 +741,7 @@ for id in recv_lengths:
                 gaps += str(next_offset)
                 next_offset += pkt_length(next_offset, length, unsched)
             next_offset += pkt_length(next_offset, length, unsched)
-        recvd = next_offset + pkt_length(pkts[-1][1], length, unsched)
+        recvd = pkts[-1][1] + pkt_length(pkts[-1][1], length, unsched)
         if recvd < 0:
             print("Recvd %d, pkt_length %d" % (recvd,
                     pkt_length(pkts[-1][1], length, unsched)))
@@ -753,26 +756,28 @@ for id in recv_lengths:
         continue
     if recvd < 0:
         print("\nBogus recvd %d for id %d; pkts: %s" % (recvd, id, pkts))
+    info = "%7.1f %10d   %-7s %7d %7d  %7d  %s\n" % (
+                latest_time - grant[0], id, peer_name(id), recvd,
+                granted-recvd, length, gaps)
     if granted == length:
         num_fully += 1
-        fully += "%7.1f %9d   %-7s %7d  %7d  %s\n" % (latest_time - grant[0],
-                id, peer_name(id), length, recvd, gaps)
+        fully += info
     else:
         num_partial += 1
-        partial += "%7.1f %9d   %-7s %7d  %7d  %7d  %s\n" % (
-                latest_time - grant[0], id, peer_name(id), granted,
-                length, recvd, gaps)
+        partial += info
 
-print("\nFully-granted incoming messages with missing data (%d):" % (num_fully))
-print("Age:    usec since last grant sent")
-print("Id:     Identifier of RPC")
-print("Peer:   Sending host name")
-print("Length: Total lengtjh of RPC")
-print("Recvd:  Offset just after the last byte received")
-print("Gaps:   Offsets of missing packets")
-print("    Age        Id   Peer     Length    Recvd   Gaps")
-print(fully)
+print("\nIncoming messages with outstanding grants:")
+print("Age:       usec since last grant sent")
+print("Id:        Identifier of RPC")
+print("Peer:      Sending host name")
+print("Recvd:     Offset just after the last byte received")
+print("Out:       Bytes granted beyond Recvd")
+print("Length:    Total bytes in message")
+print("Gaps:      Offsets of missing packets")
+print("\nFully granted messages (%d):" % (num_fully))
+print("    Age         Id   Peer      Recvd     Out   Length  Gaps")
+print(fully, end='')
 
-
-print("    Age        Id   Peer    Granted   Length    Recvd   Gaps")
-print(partial)
+print("\nPartially granted messages (%d):" % (num_partial))
+print("    Age         Id   Peer      Recvd     Out   Length  Gaps")
+print(partial, end='')
