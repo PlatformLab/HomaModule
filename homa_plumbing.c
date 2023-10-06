@@ -359,6 +359,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "next_id",
+		.data		= &homa_data.next_id,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "num_priorities",
 		.data		= &homa_data.num_priorities,
 		.maxlen		= sizeof(int),
@@ -1608,6 +1615,11 @@ int homa_dointvec(struct ctl_table *table, int write,
 		if ((table->data == &homa_data.unsched_cutoffs)
 				|| (table->data == &homa_data.num_priorities)) {
 			homa_prios_changed(homa);
+		}
+
+		if (homa->next_id != 0) {
+			atomic64_set(&homa->next_outgoing_id, homa->next_id);
+			homa->next_id = 0;
 		}
 
 		/* Handle the special value log_topic by invoking a function

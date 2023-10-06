@@ -2047,6 +2047,13 @@ struct homa {
 	int bpage_lease_cycles;
 
 	/**
+	 * @next_id: Set via sysctl; causes next_outgoing_id to be set to
+	 * this value; always reads as zero. Typically used while debugging to
+	 * ensure that different nodes use different ranges of ids.
+	 */
+	int next_id;
+
+	/**
 	 * @temp: the values in this array can be read and written with sysctl.
 	 * They have no officially defined purpose, and are available for
 	 * short-term use during testing.

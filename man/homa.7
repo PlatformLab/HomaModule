@@ -402,6 +402,13 @@ This parameter is set automatically by Homa when
 .I unsched_cutoffs
 is modified.
 .TP
+.IR next_id
+(Write-only) Setting this parameter will cause Homa to assign identifiers
+for future outgoing RPCs starting at this value. This is typically used
+during debugging to ensure that different nodes use different id ranges
+(which simplifies some tools). Changing the value could be dangerous
+in production. This parameter always reads as zero.
+.TP
 .IR num_priorities
 The number of priority levels that Homa will use; Homa will use this many
 consecutive priority level starting with 0 (before priority mapping).

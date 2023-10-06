@@ -159,6 +159,7 @@ int homa_init(struct homa *homa)
 	homa->freeze_type = 0;
 	homa->sync_freeze = 0;
 	homa->bpage_lease_usecs = 10000;
+	homa->next_id = 0;
 	homa_outgoing_sysctl_changed(homa);
 	homa_incoming_sysctl_changed(homa);
 	return 0;

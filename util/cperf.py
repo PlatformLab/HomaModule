@@ -278,6 +278,10 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['server_ports'],
             help='Number of ports on which each server should listen '
             '(default: %d)'% (defaults['server_ports']))
+    parser.add_argument('--set-ids', dest='set_ids', type=boolean,
+            default=True, metavar="T/F", help="Boolean value: if true, the "
+            "next_id sysctl parameter will be set on each node in order to "
+            "avoid conflicting RPC ids on different nodes (default: true)")
     parser.add_argument('--skip', dest='skip',
             metavar='nodes',
             help='List of node numbers not to use in the experiment; can '
@@ -466,6 +470,9 @@ def start_nodes(ids, options):
                     str(options.unsched_boost)], encoding="utf-8",
                     stdout=f, stderr=subprocess.STDOUT)
             f.close
+        if options.set_ids:
+            set_sysctl_parameter(".net.homa.next_id", str(100000000*(id+1)),
+                    [id])
         started.append(id)
     wait_output("% ", started, "ssh")
     log_level = "normal"
