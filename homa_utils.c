@@ -1928,13 +1928,13 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
 		struct freeze_header freeze;
+		printk(KERN_NOTICE "freezing in homa_freeze with freeze_type %d\n", type);
 		tt_record1("homa_freeze calling homa_rpc_log_active with freeze_type %d", type);
 		homa_rpc_log_active_tt(rpc->hsk->homa, 0);
 		homa_validate_incoming(rpc->hsk->homa, 1);
 		printk(KERN_NOTICE "%s\n", format);
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
 		tt_freeze();
-		printk(KERN_NOTICE "Emitting FREEZE in homa_freeze with freeze_type %d\n", type);
 		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
 	}
 }
