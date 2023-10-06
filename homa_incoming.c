@@ -576,12 +576,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	first_skb = skb_peek(&rpc->msgin.packets);
 	if (first_skb != NULL) {
 		struct data_header *first_hdr = (struct data_header *)
-				(skb->data);
-		if (skb->data == NULL) {
-			printk(KERN_NOTICE "homa_data_pkt found NULL skb->data, "
-					"len %d, source 0x%x", skb->len,
-					ntohl(ip_hdr(skb)->saddr));
-		}
+				(first_skb->data);
 		if ((ntohl(first_hdr->seg.offset) == rpc->msgin.copied_out)
 				&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
 			atomic_or(RPC_PKTS_READY, &rpc->flags);
