@@ -1,23 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Performance notes from c6525-100g experiment ~10/1/2023:
-  * See if TCP is also overflowing packet caches; why does it
-    get higher throughput than Homa?
-  * Try running Homa with more nodes to see if that helps (spreads load
-    better?)
-  * Try increasing size of packet caches?
-  * Try turning off HOMA_GRO_SHORT_BYPASS?
-  * C22 gets blocked for long periods of time running napi_poll, and this
-    is locking out of of the threads serving port 4002. Part of the problem
-    is that HOMA_GRO_SHORT_BYPASS is enabled and a lot of time is spent
-    in homa_softirq and also in transmitting grant packets. homa_softirq is
-    also running in SoftIRQ mode on the same core.
-  * And, when packets are passed to SoftIRQ, C22 is frequently being
-    picked as the target (C22 is choosing itself about 25% of the time)!
-    All of these choices happen when homa_gro_complete isn't picking the core:
-    HOMA_GRO_SAME_CORE!
-
 * When requesting ACKs, must eventually give up and delete RPC.
 * Rename msgin.incoming to granted (confusing with total_incoming)
 * Eliminate msgin.scheduled: just compute when needed.
@@ -25,6 +8,20 @@ Notes for Homa implementation in Linux:
 * Include the GSO packet size in the initial packet, so the receiver
   can predict how much grants will get rounded up.
 * Out-of-order incoming grants seem to be pretty common.
+* When there are a lot of lost packets, Homa retries them *very* slowly
+  (only one every 11-12 ms per server?). This is bad.
+* Change "log_topic" parameter to "action"?
+
+* TODO list for Homa based on the 9/22-10/6 experiment:
+  * Rework HOMA_GRO_SHORT_BYPASS and HOMA_GRO_SAME_CORE to detect
+    congestion better (e.g. use time since last call to homa_gro_receive?)
+  * Rework the retransmission mechanism. Instead being entirely time-based,
+    detect missing packets at the front of in msgin->packets to retry
+    more aggressively. Also, perhaps keep copying data even when there
+    is a missing packet?
+  * Rebuild Homa timetrace analysis from scratch. Create one large script
+    with a clean dispatcher and a nice modular structure that makes it easy
+    to add more analyses.
 
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
