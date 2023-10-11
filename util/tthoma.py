@@ -14,6 +14,32 @@ import re
 import string
 import sys
 
+
+# This global variable holds information about every RPC from every trace
+# file. Keys are RPC ids, values are dictionaries of info about that RPC,
+# with the following elements (some elements may be missing, either because
+# they weren't needed by that RPC (e.g. grants) or because the RPC straddled
+# the beginning or end of the timetrace):
+# peer:              Address of the peer host
+# in_length:         Size of the incoming message, in bytes
+# gro_data:          List of <time, offset> tuples for all incoming
+#                    data packets processed by GRO
+# gro_grant:         List of <time, offset> tuples for all incoming
+#                    grant packets processed by GRO
+# softirq_data:      List of <time, offset> tuples for all incoming
+#                    data packets processed by SoftIRQ
+# softirq_grant:     List of <time, offset> tuples for all incoming
+#                    grant packets processed by SoftIRQ
+# recvmsg_return:    Time when homa_recvmsg returned
+# sendmsg:           Time when homa_sendmsg was invoked
+# out_length:        Size of the outgoing message, in bytes
+# send_data:         List of <time, offset, length> tuples for outgoing
+#                    data packets (length is message data)
+# send_grant:        List of <time, offset, priority> tuples for
+#                    outgoing grant packets
+#
+rpcs = {}
+
 def get_time_stats(samples):
     """
     Given a list of elapsed times, returns a string containing statistics
@@ -420,9 +446,9 @@ class AnalyzeCopy:
         if core in stats['in_start']:
             delta = time - stats['in_start'][core]
             stats['total_in_time'] += delta
-            if num_bytes <= 1200:
+            if num_bytes <= 1000:
                 stats['small_in_times'].append(delta)
-            elif num_bytes >= 100000:
+            elif num_bytes >= 5000:
                 stats['large_in_data'] += num_bytes
                 stats['large_in_time'] += delta
                 stats['large_in_count'] += 1
@@ -442,9 +468,9 @@ class AnalyzeCopy:
             stats['out_size'][core] = num_bytes
             delta = time - stats['out_start'][core]
             stats['total_out_time'] += delta
-            if num_bytes <= 1200:
+            if num_bytes <= 1000:
                 stats['small_out_times'].append(delta)
-            elif num_bytes >= 100000:
+            elif num_bytes >= 5000:
                 stats['large_out_data'] += num_bytes
                 stats['large_out_time'] += delta
                 stats['large_out_time_with_skbs'] += delta
@@ -459,7 +485,7 @@ class AnalyzeCopy:
             delta = time - stats['out_end'][core]
             stats['skbs_freed'] += num_skbs
             stats['skb_free_time'] += delta
-            if stats['out_size'][core] >= 100000:
+            if stats['out_size'][core] >= 5000:
                 stats['large_out_time_with_skbs'] += delta
 
     def print(self, traces):
@@ -468,60 +494,50 @@ class AnalyzeCopy:
         print("\nAnalyzer: copy")
         print("--------------")
         print("Copying data from user space to kernel:")
-        print("  %d short messages (<= 1200B): latency %s usec" %
-                (len(stats['small_in_times']),
-                get_time_stats(stats['small_in_times'])))
-        print("  %d long messages (>= 100KB): per-thread throughput %5.1f Gbps" %
-                (stats['large_in_count'],
-                8e-03*stats['large_in_data']/stats['large_in_time']))
+        if not stats['small_in_times']:
+            print("  0 short messages (<= 1000B)")
+        else:
+            print("  %d short messages (<= 1000 B): latency %s usec" %
+                    (len(stats['small_in_times']),
+                    get_time_stats(stats['small_in_times'])))
+        if stats['large_in_time'] == 0:
+            print("  0 long messages (>= 5000 B)")
+        else:
+            print("  %d long messages (>= 5000 B): per-thread throughput %.1f Gbps" %
+                    (stats['large_in_count'],
+                    8e-03*stats['large_in_data']/stats['large_in_time']))
         print("  Average core utilization: %.2f cores" %
                 (stats['total_in_time']/total_time))
         print("Copying data from kernel to user space:")
-        print("  %d short messages (<= 1200B): latency (usec) %s" %
-                (len(stats['small_out_times']),
-                get_time_stats(stats['small_out_times'])))
-        print("  %d long messages (>= 100KB): per-thread throughput %5.1f Gbps" %
-                (stats['large_out_count'],
-                8e-03*stats['large_out_data']/stats['large_out_time']))
+        if not stats['small_out_times']:
+            print("  0 short transfers (<= 1200B)")
+        else:
+            print("  %d short transfers (<= 1000 B): latency %s usec" %
+                    (len(stats['small_out_times']),
+                    get_time_stats(stats['small_out_times'])))
+        if stats['large_out_time'] == 0:
+            print("  0 long transfers (>= 5000 B)")
+        else:
+            print("  %d long transfers (>= 5000 B): per-thread throughput %.1f Gbps" %
+                    (stats['large_out_count'],
+                    8e-03*stats['large_out_data']/stats['large_out_time']))
         print("  Average core utilization: %.2f cores" %
                 (stats['total_out_time']/total_time))
         if stats['skbs_freed'] > 0:
             print("Freeing skbs after copying data to user space:")
             print("  %d skbs, average free time %.2f us" % (stats['skbs_freed'],
                     stats['skb_free_time']/stats['skbs_freed']))
-            print("  Copy throughput per thread, with skb freeing: %.1f Gbps"
-                    % (8e-03*stats['large_out_data']
-                    /stats['large_out_time_with_skbs']))
+            if stats['large_out_time_with_skbs'] > 0:
+                print("  Copy throughput per thread, with skb freeing: %.1f Gbps"
+                        % (8e-03*stats['large_out_data']
+                        /stats['large_out_time_with_skbs']))
 
 #------------------------------------------------
-# Analyzer: rpcLifecycle
+# Analyzer: rpc
 #------------------------------------------------
-class AnalyzeRpcLifecycle:
+class AnalyzeRpc:
     def __init__(self, dispatcher):
         return
-
-    def init_trace(self, trace):
-        # Keys are RPC ids, values are dictionaries of info about that RPC,
-        # with the following elements (elements not necessarily present):
-        # peer:              Address of the peer host
-        # in_length:         Size of the incoming message, in bytes
-        # gro_data:          List of <time, offset> tuples for all incoming
-        #                    data packets processed by GRO
-        # gro_grant:         List of <time, offset> tuples for all incoming
-        #                    grant packets processed by GRO
-        # softirq_data:      List of <time, offset> tuples for all incoming
-        #                    data packets processed by SoftIRQ
-        # softirq_grant:     List of <time, offset> tuples for all incoming
-        #                    grant packets processed by SoftIRQ
-        # recvmsg_return:    Time when homa_recvmsg returned
-        # sendmsg:           Time when homa_sendmsg was invoked
-        # out_length:        Size of the outgoing message, in bytes
-        # send_data:         List of <time, offset, length> tuples for outgoing
-        #                    data packets (length is message data)
-        # send_grant:        List of <time, offset, priority> tuples for
-        #                    outgoing grant packets
-        #
-        trace['rpc_lifecycle'] = {}
 
     def append(self, trace, id, name, value):
         """
@@ -536,10 +552,10 @@ class AnalyzeRpcLifecycle:
         value:      Value to append to the list indicated by id and name
         """
 
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        rpc = stats[id]
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpc = rpcs[id]
         if not name in rpc:
             rpc[name] = []
         rpc[name].append(value)
@@ -551,8 +567,9 @@ class AnalyzeRpcLifecycle:
         self.append(trace, id, "gro_grant", [time, offset])
 
     def tt_softirq_data(self, trace, time, core, id, offset, length):
+        global rpcs
         self.append(trace, id, "softirq_data", [time, offset])
-        trace['rpc_lifecycle'][id]['in_length'] = length
+        rpcs[id]['in_length'] = length
 
     def tt_softirq_grant(self, trace, time, core, id, offset):
         self.append(trace, id, "softirq_grant", [time, offset])
@@ -564,48 +581,58 @@ class AnalyzeRpcLifecycle:
         self.append(trace, id, "send_grant", [time, offset, priority])
 
     def tt_sendmsg_request(self, trace, time, core, peer, id, length):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        stats[id]['sendmsg'] = time
-        stats[id]['out_length'] = length
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpcs[id]['sendmsg'] = time
+        rpcs[id]['out_length'] = length
 
     def tt_sendmsg_response(self, trace, time, core, id, length):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        stats[id]['sendmsg'] = time
-        stats[id]['out_length'] = length
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpcs[id]['sendmsg'] = time
+        rpcs[id]['out_length'] = length
 
     def tt_recvmsg_done(self, trace, time, core, id, length):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        stats[id]['recvmsg_done'] = time
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpcs[id]['recvmsg_done'] = time
 
     def tt_copy_out_start(self, trace, time, core, id):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        if not 'copy_out_start' in stats[id]:
-            stats[id]['copy_out_start'] = time
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        if not 'copy_out_start' in rpcs[id]:
+            rpcs[id]['copy_out_start'] = time
 
     def tt_copy_out_done(self, trace, time, core, id, num_bytes):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        stats[id]['copy_out_done'] = time
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpcs[id]['copy_out_done'] = time
 
     def tt_copy_in_done(self, trace, time, core, id, num_bytes):
-        stats = trace['rpc_lifecycle']
-        if not id in stats:
-            stats[id] = {}
-        stats[id]['copy_in_done'] = time
+        global rpcs
+        if not id in rpcs:
+            rpcs[id] = {}
+        rpcs[id]['copy_in_done'] = time
+
+#------------------------------------------------
+# Analyzer: timeline
+#------------------------------------------------
+class AnalyzeTimeline:
+    def __init__(self, dispatcher):
+        d.interest('AnalyzeRpc')
+        return
 
     def print(self, traces):
-        trace = traces[0]
-        stats = trace['rpc_lifecycle']
-        separator = ''
+        global rpcs
+        num_client_rpcs = 0
+        num_server_rpcs = 0
+        print("\nAnalyzer: timeline")
+        print("------------------")
 
         # These tables describe the phases of interest. Each sublist is
         # a <label, name, lambda> triple, where the label is human-readable
@@ -657,11 +684,12 @@ class AnalyzeRpcLifecycle:
         server_extra_deltas = []
 
         # Collect statistics from all of the RPCs.
-        for id, rpc in stats.items():
+        for id, rpc in rpcs.items():
             if not (id & 1):
                 # This is a client RPC
                 if (not 'sendmsg' in rpc) or (not 'recvmsg_done' in rpc):
                     continue
+                num_client_rpcs += 1
                 self.__collect_stats(client_phases, rpc, client_totals,
                         client_deltas)
                 self.__collect_stats(client_extra, rpc, client_extra_totals,
@@ -671,23 +699,20 @@ class AnalyzeRpcLifecycle:
                 if (not 'gro_data' in rpc) or (rpc['gro_data'][0][1] != 0) \
                         or (not 'send_data' in rpc):
                     continue
+                num_server_rpcs += 1
                 self.__collect_stats(server_phases, rpc, server_totals,
                         server_deltas)
                 self.__collect_stats(server_extra, rpc, server_extra_totals,
                         server_extra_deltas)
 
         if client_totals:
-            print(separator, end='')
-            separator = '\n'
-            print("Client RPCs:")
+            print("\nTimeline for clients (%d RPCs):\n" % (num_client_rpcs))
             self.__print_phases(client_phases, client_totals, client_deltas)
             print("")
             self.__print_phases(client_extra, client_extra_totals,
                     client_extra_deltas)
         if server_totals:
-            print(separator, end='')
-            separator = '\n'
-            print("Server RPCs:")
+            print("\nTimeline for servers (%d RPCs):\n" % (num_server_rpcs))
             self.__print_phases(server_phases, server_totals, server_deltas)
             print("")
             self.__print_phases(server_extra, server_extra_totals,
@@ -714,6 +739,7 @@ class AnalyzeRpcLifecycle:
                     start = prev = t
                 totals[i].append(t - start)
                 deltas[i].append(t - prev)
+                prev = t
 
     def __print_phases(self, phases, totals, deltas):
         """
@@ -722,6 +748,9 @@ class AnalyzeRpcLifecycle:
         """
         for i in range(1, len(phases)):
             label = phases[i][0]
+            if not totals[i]:
+                print("%-32s (no events)" % (label))
+                continue
             elapsed = sorted(totals[i])
             gaps = sorted(deltas[i])
             print("%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)" %
