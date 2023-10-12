@@ -14,325 +14,189 @@ import os
 import re
 import string
 import sys
-from statistics import median
+import tempfile
 
 # Parse command line options
 parser = OptionParser(description=
-        'Read two timetraces, compute the clock offset between them, and '
-        'write to standard output a revised version of the second trace '
-        'with its clock offset to match the first. Also prints statistics '
-        'about one-way packet delays.',
-        usage='%prog [options] t1 t2',
+        'Read two or more timetraces, compute the clock offsets between them, '
+        'and rewrite all of the traces except the first to synchronize '
+        'their clocks. Also prints statistics about one-way packet delays.',
+        usage='%prog [options] t1 t2 ...',
         conflict_handler='resolve')
-parser.add_option('--intervals', type='int', dest='intervals', default=0,
-        metavar = 'I', help='divide timeline into this many equal-size '
-        'intervals and print statistics for each interval')
+parser.add_option('--no-rewrite', action='store_true', dest='no_rewrite',
+        default=False, metavar='T/F', help='read-only: compute offsets but '
+        "don't rewrite trace files")
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='print lots of output')
 
-(options, extra) = parser.parse_args()
-if len(extra) != 2:
-    print("Usage: %s [options] t1 t2" % (sys.argv[0]), file=sys.stderr)
+(options, tt_files) = parser.parse_args()
+if len(tt_files) < 2:
+    print('Need at least 2 trace files; run "ttsync.py --help" for help')
     exit(1)
-t1 = extra[0]
-t2 = extra[1]
 
-def parse_tt(tt):
+# Dictionary describing all data and grant packets sent/received
+# by clients. Keys are packet ids (rpc_id:offset, with a "g" suffix
+# for grant packets). Each value is a list <time, type, node> where
+# time is when the packet was sent or received, type is "send" or "recv",
+# indicating whether the packet was sent or received by this node, and
+# "node" is the integer node identifier passed to parse_tt.
+client_pkts = {}
+
+# Same as client_pkts, exception describes it and grant packets sent/received
+# by servers. Note: RPC ids are stored as client-side(even) ids
+server_pkts = {}
+
+# This is an NxN array, where N is the number of nodes. min_delays[A][B]
+# gives the smallest delay seen from node A to node B, as measured with
+# their unadjusted clocks (one of these delays could be negative).
+min_delays = []
+
+# For each node, the offset to add to its clock value in order to synchronize
+# its clock with node 0.
+offsets = []
+
+def parse_tt(tt, node_num):
     """
-    Reads the timetrace file given by tt and returns a dictionary whose
-    keys are packet ids (rpc_id:offset, with a "g" suffix for grant packets).
-    Each value is a list <time, type> where time is when the event occurred
-    and type is "send" or "gro_recv", indicating whether the packet was sent
-    or received by this node. Note: all RPC ids are stored as client-side
-    (even) ids; ids read from server traces are adjusted to the corresponding
-    client-side id
+    Reads a timetrace file and adds entries to client_pkts and server_pkts.
+
+    tt:        Name of the timetrace file
+    node_num:  Integer identifier for this file/node (should reflect the
+               order of the timetrace file in the arguments
     """
 
-    global options
-    packets = {}
+    global options, client_pkts, server_pkts
     sent = 0
     recvd = 0
 
     for line in open(tt):
-        match = re.match(' *([-0-9.]+) us \(\+ *([-0-9.]+) us\) \[C([0-9]+)\]'
+        match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\]'
                 '.* id ([-0-9.]+),.* offset ([-0-9.]+)', line)
         if not match:
             continue
 
         time = float(match.group(1))
-        core = int(match.group(3))
-        id = match.group(4)
-        id = str(int(id) & ~1)
-        offset = match.group(5)
-        pktid = id + ":" + offset
+        core = int(match.group(2))
+        id = int(match.group(3))
+        pkts = client_pkts
+        if id & 1:
+            pkts = server_pkts
+            id = id - 1
+        offset = match.group(4)
+        pktid = str(id) + ":" + offset
 
         if re.match('.*calling .*_xmit: wire_bytes', line):
-            packets[pktid] = [time, "send"]
+            pkts[pktid] = [time, "send", node_num]
             sent += 1
 
         if "homa_gro_receive got packet" in line:
-            packets[pktid] = [time, "gro_recv"]
+            pkts[pktid] = [time, "recv", node_num]
             recvd += 1
 
         if "sending grant for" in line:
-            packets[pktid+"g"] = [time, "send"]
+            pkts[pktid+"g"] = [time, "send", node_num]
             sent += 1
 
         if "homa_gro_receive got grant from" in line:
-            packets[pktid+"g"] = [time, "gro_recv"]
+            pkts[pktid+"g"] = [time, "recv", node_num]
             recvd += 1
 
-    if options.verbose:
-        print("%s has %d packet sends, %d receives" % (tt, sent, recvd),
-                file=sys.stderr)
-    return packets
+    print("%s has %d packet sends, %d receives" % (tt, sent, recvd))
 
-def get_delays(p1, p2, msg):
+def find_min_delays(num_nodes):
     """
-    Given two results from parse_tt, return a list containing all the
-    delays from a packet sent in p1 and received in p2. The list will
-    be sorted in increasing order. Msg is a string of the form "a to b"
-    indicating the direction of packet flow; used for verbose messages.
+    Combines the information in client_pkts and server_pkts to fill in
+    min_delays
+
+    num_nodes:  Total number of distinct nodes; node numbers in
+                client_pkts and server_pkts must be < num_nodes.
     """
-    global options
-    delays = []
-    min_delay = 1e09
-    min_id = ""
-    send_time = None
-    recv_time = None
 
-    # Entries are <min_delay, id, p1_time, p2_time>
-    deciles = []
-    for i in range(10):
-        deciles.append([1e09, "", 0, 0])
-    end_time = 0.0
+    global min_delays, client_pkts, server_pkts
 
-    for id in p1:
-        if not id in p2:
+    min_delays = [[1e20 for i in range(num_nodes)] for j in range(num_nodes)]
+
+    # Iterate over all the client-side events and match them to server-side
+    # events if possible.
+    for id, client_pkt in client_pkts.items():
+        if not id in server_pkts:
             continue
-        p1_time, p1_type = p1[id]
-        p2_time, p2_type = p2[id]
-        if (not "send"  == p1_type) or (not "gro_recv" == p2_type):
+        client_time, client_type, client_node = client_pkt
+        server_time, server_type, server_node = server_pkts[id]
+        if ("send"  == client_type) and ("recv" == server_type):
+            delay = server_time - client_time
+            if delay < min_delays[client_node][server_node]:
+                min_delays[client_node][server_node] = delay
+        if ("send"  == server_type) and ("recv" == client_type):
+            delay = client_time - server_time
+            if delay < min_delays[server_node][client_node]:
+                min_delays[server_node][client_node] = delay
+
+def get_node_num(tt_file):
+    """
+    Given a timetrace file name with a node number in it somewhere,
+    extract the number.
+    """
+    match = re.match('[^0-9]*([0-9]+)', tt_file)
+    if match:
+        return int(match.group(1))
+    return tt_file
+
+tt_files.sort(key = lambda name : get_node_num(name))
+node_ids = [get_node_num(tt_file) for tt_file in tt_files]
+num_nodes = len(tt_files)
+for i in range(num_nodes):
+    parse_tt(tt_files[i],i)
+find_min_delays(num_nodes)
+
+# Compute clock offsets from min_delays
+offsets = [0.0 for i in range(num_nodes)]
+print('\nTime offsets computed for each node by synchronizing with node %d' %
+        (node_ids[0]))
+print('MinOut:   Smallest time difference (unsynced clocks) for a packet')
+print('          to get from the node %d to this node' % (node_ids[0]))
+print('MinBack:  Smallest time difference (unsynced clocks) for a packet')
+print('          to get from this node to the node %d' % (node_ids[0]))
+print('MinRTT:   Minimum RTT (computed from MinOut and MinBack)')
+print('Offset:   Add this to node\'s clock to align with the first node')
+print('\nNode    MinOut  MinBack Min RTT   Offset')
+print('%-5d %8.1f %8.1f %7.1f %8.1f' % (node_ids[0],
+        0.0, 0.0, 0.0, 0.0))
+for node in range(1, num_nodes):
+    min_rtt = min_delays[0][node] + min_delays[node][0]
+    offsets[node] = min_rtt/2 - min_delays[0][node]
+    print('%-5d %8.1f %8.1f %7.1f %8.1f' % (node_ids[node],
+            min_delays[0][node], min_delays[node][0], min_rtt, offsets[node]))
+
+# Check for consistency (with these offsets, will all one-way delays be
+# positive?)
+for src in range(num_nodes):
+    for dst in range(num_nodes):
+        if src == dst:
             continue
-        delay = p2_time - p1_time
-        delays.append(delay)
-        if delay < min_delay:
-            min_delay = delay
-            min_id = id
-            send_time = p1_time
-            recv_time = p2_time
-    if options.verbose:
-        print("Min delay from %s: %.1f usec (id %s, send %9.3f, recv %9.3f)" %
-                (msg, min_delay, min_id, send_time, recv_time),
-                file=sys.stderr)
-    return sorted(delays)
+        new_min = min_delays[src][dst] + offsets[dst] - offsets[src]
+        if new_min < 0:
+            print('Problematic offsets for node %d (%.1f) and %d (%.1f)'
+                    %(src, offsets[src], dst, offsets[dst]))
+            print('   mimimum delay %.1f becomes %.1f' %
+                    (min_delays[src][dst], new_min))
 
-def get_intervals(p1, p2, num_intervals):
-    """
-    Process packet information generated by parse_tt from 2 traces, divide
-    the total time of the trace into num_intervals intervals, and return
-    information for each interval. The result is a list with num_intervals
-    elements, each a dictionary with the following entries:
-    pkts1:     Total packets sent by p1 and received by p2 in the interval
-    pkts2:     Total packets sent by p2 and received by p1 in the interval
-    min_rtt:   Shortest RTT computed using packets in this interval
-    offset:    Clock offset (how to add to p2's clock to align with p1)
-               computed using packets in this interval
-    min_id1:   Identifier of fastest packet travelling from p1 to p2
-    min_id2:   Identifier of fastest packet travelling from p2 to p1
-    delay1:    Avg. packet delay traveling from p1 to p2
-    delay2:    Avg. packet delay traveling from p2 to p1
-    """
-    global options
-
-    # Entries are <min_delay, id, p1_time, p2_time>
-    # 1 means p1->p2
-    # 2 means p2->p1
-    intervals1 = []
-    intervals2 = []
-    pkts1 = []
-    pkts2 = []
-    delay_sum1 = []
-    delay_sum2 = []
-    for i in range(num_intervals):
-        intervals1.append([1e09, "", 0, 0])
-        intervals2.append([1e09, "", 0, 0])
-        pkts1.append(0)
-        pkts2.append(0)
-        delay_sum1.append(0)
-        delay_sum2.append(0)
-
-    end_time = 0.0
-    for time, type in p1.values():
-        if time > end_time:
-            end_time = time
-    # Ensures that all bucket numbers below will be [0..num_intervals)
-    end_time += 0.1
-
-    for id in p1:
-        if not id in p2:
-            continue
-        p1_time, p1_type = p1[id]
-        p2_time, p2_type = p2[id]
-        bucket = int(p1_time*num_intervals/end_time)
-        if ("send"  == p1_type) and ("gro_recv" == p2_type):
-            pkts1[bucket] += 1
-            delay = p2_time - p1_time
-            delay_sum1[bucket] += delay
-            if delay < intervals1[bucket][0]:
-                intervals1[bucket] = [delay, id, p1_time, p2_time]
-        elif ("send"  == p2_type) and ("gro_recv" == p1_type):
-            pkts2[bucket] += 1
-            delay = p1_time - p2_time
-            delay_sum2[bucket] += delay
-            if delay < intervals2[bucket][0]:
-                intervals2[bucket] = [delay, id, p2_time, p1_time]
-
-    result = []
-    for i in range(num_intervals):
-        min_rtt = intervals1[i][0] + intervals2[i][0]
-        offset = min_rtt/2 - intervals1[i][0]
-        result.append({"pkts1": pkts1[i],
-                "pkts2": pkts2[i],
-                "min_rtt": min_rtt,
-                "offset": offset,
-                "min_id1": intervals1[i][1],
-                "min_id2": intervals2[i][1],
-                "delay1": delay_sum1[i]/pkts1[i] + offset,
-                "delay2": delay_sum2[i]/pkts2[i] - offset})
-    return result
-
-def print_negative_delays(p1, p2, offset):
-    """
-    Given two packet dictionaries returned by parse_tt and a clock offset
-    to synchronize the clocks, re-analyze packets to see if any appear to
-    have been delivered in negative time. Print out those that seem
-    problematic.
-    """
-
-    # One entry for each packet with negative one-way delay:
-    # <time, id, delay> where time is the p1 time when the packet
-    # was sent, id is its id, and delay is the (negative) apparent
-    # delay.
-    outliers = []
-    for id in p1:
-        print_packet = False;
-        if not id in p2:
-            continue
-        p1_time, p1_type = p1[id]
-        p2_time, p2_type = p2[id]
-
-        if ("send"  == p1_type) and ("gro_recv" == p2_type):
-            delay = p2_time + offset - p1_time
-            if delay < 0:
-                outliers.append([p1_time, id, delay])
-            print_packet = True
-        elif ("send"  == p2_type) and ("gro_recv" == p1_type):
-            delay = p1_time - (p2_time + offset)
-            if delay < 0:
-                outliers.append([p2_time + offset, id, delay])
-            print_packet = True
-
-        # if id == "601609112:407320":
-        if print_packet:
-            print("Id %s: p1_time %9.3f (%s), p2_time %9.3f, offset %9.1f, "
-                    "delay %9.1f" % (id, p1_time, p1_type, p2_time, offset, delay))
-    if not outliers:
-        print("No packets found with negative apparent delay", file=sys.stderr)
-        return
-    outliers.sort(key = lambda tuple : tuple[0])
-    print("Packets that appear to have negative delivery times:",
-            file=sys.stderr)
-    print("Send Time   Delay              Id", file=sys.stderr)
-    for time, id, delay in outliers:
-        print("%9.3f %9.1f %18s" % (time, delay, id), file=sys.stderr)
-
-t1_pkts = parse_tt(t1)
-t2_pkts = parse_tt(t2)
-
-t1_to_t2 = get_delays(t1_pkts, t2_pkts, "%s to %s" % (t1, t2))
-t2_to_t1 = get_delays(t2_pkts, t1_pkts, "%s to %s" % (t1, t2))
-
-if options.verbose:
-    print("Found %d packets from %s to %s, %d from %s to %s" % (
-            len(t1_to_t2), t1, t2, len(t2_to_t1), t2, t1), file=sys.stderr)
-
-# Percentile to use for computing offset
-percentile = 0
-
-min_rtt = (t1_to_t2[percentile*len(t1_to_t2)//100]
-        + t2_to_t1[percentile*len(t2_to_t1)//100])
-print("RTT: P0 %.1f us, P5 %.1f us, P10 %.1fus, P20 %.1f us, P50 %.1f us" % (
-        t1_to_t2[0] + t2_to_t1[0],
-        t1_to_t2[5*len(t1_to_t2)//100] + t2_to_t1[5*len(t2_to_t1)//100],
-        t1_to_t2[10*len(t1_to_t2)//100] + t2_to_t1[10*len(t2_to_t1)//100],
-        t1_to_t2[20*len(t1_to_t2)//100] + t2_to_t1[20*len(t2_to_t1)//100],
-        t1_to_t2[50*len(t1_to_t2)//100] + t2_to_t1[50*len(t2_to_t1)//100]),
-        file=sys.stderr)
-offset = min_rtt/2 - t1_to_t2[percentile*len(t1_to_t2)//100]
-
-if options.verbose:
-    print("%s clock offset (assuming %.1f us RTT): %.1fus" % (
-            t2, min_rtt, offset), file=sys.stderr)
-    print("%s->%s packet delays: min %.1f us, P50 %.1f us, "
-            "P90 %.1f us, P99 %.1f us" % (
-            t1, t2, t1_to_t2[0] + offset,
-            t1_to_t2[len(t1_to_t2)//2] + offset,
-            t1_to_t2[len(t1_to_t2)*9//10] + offset,
-            t1_to_t2[len(t1_to_t2)*99//100] + offset), file=sys.stderr)
-    print("%s->%s packet delays: min %.1f us, P50 %.1f us, "
-            "P90 %.1f us, P99 %.1f us" % (
-            t2, t1, t2_to_t1[0] - offset,
-            t2_to_t1[len(t2_to_t1)//2] - offset,
-            t2_to_t1[len(t2_to_t1)*9//10] - offset,
-            t2_to_t1[len(t2_to_t1)*99//100] - offset), file=sys.stderr)
-
-if options.intervals > 0:
-    intervals = get_intervals(t1_pkts, t2_pkts, options.intervals)
-    print("\nInterval statistics: the timeline is divided into %d equal size intervals,"
-            % (options.intervals), file=sys.stderr)
-    print("and each line shows results for that interval:",
-            file=sys.stderr)
-    print("Pkts1:    Total packets that flowed from %s to %s"
-            % (t1, t2), file=sys.stderr)
-    print("Pkts2:    Total packets that flowed from %s to %s"
-            % (t2, t1), file=sys.stderr)
-    print("Min_RTT:  Fastest round-trip time computed from packets in the "
-            "interval", file=sys.stderr)
-    print("Offset:   Clock offset computed from packets in the interval (how much",
-            file=sys.stderr)
-    print("          to add to %s's clock to align with %s)" % (t1, t2),
-            file=sys.stderr)
-    print("Delay1:   Average one-way delay from %s to %s"
-            % (t1, t2), file=sys.stderr)
-    print("Delay2:   Average one-way delay from %s to %s"
-            % (t2, t1), file=sys.stderr)
-    print("Id1:      Packet with smallest one-way delay from %s to %s"
-            % (t1, t2), file=sys.stderr)
-    print("Id2:      Packet with smallest one-way delay from %s to %s\n"
-            % (t2, t1), file=sys.stderr)
-    print("Interval Pkts1    Pkts2   Min_RTT    Offset  Delay1  Delay2"
-            "                Id1                Id2",
-            file=sys.stderr)
-    for i in range(options.intervals):
-        interval = intervals[i]
-        # print("interval[%d]: %s" % (i, interval), file=sys.stderr)
-        print("%-3d   %8d %8d %9.1f  %8.1f %7.1f %7.1f %18s %18s" % (i, interval["pkts1"],
-                interval["pkts2"], interval["min_rtt"], interval["offset"],
-                interval["delay1"], interval["delay2"],
-                interval["min_id1"], interval["min_id2"]), file=sys.stderr)
-
-# print_negative_delays(t1_pkts, t2_pkts, offset)
-
-# Now re-read the second trace and output a new trace whose
-# clock is aligned with the first trace.
-
-for line in open(t2):
-    match = re.match(' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
-            line)
-    if not match:
-        print(line)
-    else:
-        time = float(match.group(1)) + offset
-        print("%9.3f us %s" % (time, match.group(2)))
+# Rewrite traces with synchronized times
+if not options.no_rewrite:
+    print("")
+    for i in range(1, num_nodes):
+        offset = offsets[i]
+        src = open(tt_files[i])
+        dst = tempfile.NamedTemporaryFile(dir=os.path.dirname(tt_files[i]),
+                mode='w', encoding='utf-8', delete=False)
+        print("Rewriting %s with offset %.1f usec" % (tt_files[i], offset))
+        for line in src:
+            match = re.match(' *([-0-9.]+) us (\(\+ *[-0-9.]+ us\) \[C[0-9]+\].*)',
+                    line)
+            if not match:
+                print(line, file=dst)
+            else:
+                time = float(match.group(1)) + offset
+                dst.write('%9.3f us %s\n' % (time, match.group(2)))
+        dst.close()
+        os.rename(dst.name, tt_files[i])
