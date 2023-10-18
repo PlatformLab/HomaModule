@@ -1016,7 +1016,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		goto done;
 	}
 	control.completion_cookie = 0;
-	if (control._pad[0] || control._pad[1]) {
+	if (control._pad[0]) {
 		result = -EINVAL;
 		goto done;
 	}
@@ -1085,6 +1085,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 				rpc->peer->addr);
 		*addr_len = sizeof(*in4);
 	}
+	memcpy(&control.peer_addr, msg->msg_name, *addr_len);
 	/* This indicates that the application now owns the buffers, so
 	 * we won't free them in homa_rpc_free.
 	 */

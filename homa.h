@@ -127,30 +127,39 @@ struct homa_recvmsg_args {
 	int flags;
 
 	/**
+	 * @error_addr: the address of the peer is stored here when available.
+	 * This field is different from the msg_name field in struct msghdr
+	 * in that the msg_name field isn't set after errors. This field will
+	 * always be set when peer information is available, which includes
+	 * some error cases.
+	 */
+	sockaddr_in_union peer_addr;
+
+	/**
 	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
 	 * Passes in bpages from previous messages that can now be
 	 * recycled; returns bpages from the new message.
 	 */
 	uint32_t num_bpages;
 
-	uint32_t _pad[2];
+	uint32_t _pad[1];
 
 	/**
 	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer
-     * region for the socket pool. When returned from recvmsg, the
-     * offsets indicate where fragments of the new message are stored. All
-     * entries but the last refer to full buffer pages (HOMA_BPAGE_SIZE bytes)
-     * and are bpage-aligned. The last entry may refer to a bpage fragment and
-     * is not necessarily aligned. The application now owns these bpages and
-     * must eventually return them to Homa, using bpage_offsets in a future
-     * recvmsg invocation.
+	 * region for the socket pool. When returned from recvmsg, the
+	 * offsets indicate where fragments of the new message are stored. All
+	 * entries but the last refer to full buffer pages (HOMA_BPAGE_SIZE bytes)
+	 * and are bpage-aligned. The last entry may refer to a bpage fragment and
+	 * is not necessarily aligned. The application now owns these bpages and
+	 * must eventually return them to Homa, using bpage_offsets in a future
+	 * recvmsg invocation.
 	 */
 	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recvmsg_args) >= 96,
+_Static_assert(sizeof(struct homa_recvmsg_args) >= 120,
 		"homa_recvmsg_args shrunk");
-_Static_assert(sizeof(struct homa_recvmsg_args) <= 96,
+_Static_assert(sizeof(struct homa_recvmsg_args) <= 120,
 		"homa_recvmsg_args grew");
 #endif
 
