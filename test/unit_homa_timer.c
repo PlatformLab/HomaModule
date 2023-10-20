@@ -95,7 +95,7 @@ TEST_F(homa_timer, homa_check_rpc__all_granted_bytes_received)
 			self->server_port, self->client_id, 100, 5000);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
-	crpc->msgin.incoming = 1400;
+	crpc->msgin.granted = 1400;
 	crpc->silent_ticks = 10;
 	EXPECT_EQ(0, homa_check_rpc(crpc));
 	EXPECT_EQ(0, crpc->silent_ticks);

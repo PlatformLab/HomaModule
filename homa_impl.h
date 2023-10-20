@@ -315,7 +315,7 @@ struct data_header {
 	 * bytes in the message up to at least this offset (exclusive),
 	 * even without additional grants. This includes unscheduled
 	 * bytes, granted bytes, plus any additional bytes the sender
-	 * transmits unilaterally (e.g., to send batches, such as with GSO).
+	 * transmits unilaterally (e.g., to round up to a full GSO batch).
 	 */
 	__be32 incoming;
 
@@ -646,13 +646,12 @@ struct homa_message_in {
 	int bytes_remaining;
 
 	/**
-	 * @incoming: Total # of bytes of the message that the sender will
-	 * transmit without additional grants. Initialized to the number of
-	 * unscheduled bytes; after that, updated only when grants are sent.
+	 * @granted: Total # of bytes (starting from offset 0) that the sender
+	 * may transmit without additional grants, includes unscheduled bytes.
 	 * Never larger than @total_length. Note: once initialized, this
 	 * may not be modified without holding @homa->grantable_lock.
 	 */
-        int incoming;
+        int granted;
 
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
@@ -3115,7 +3114,7 @@ extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
-		    int incoming);
+		    int unsched);
 extern int      homa_message_out_init(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int xmit);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,

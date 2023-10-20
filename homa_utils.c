@@ -487,7 +487,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 
 	/* If the RPC had incoming bytes, remove them from the global count. */
 	delta = (rpc->msgin.total_length < 0) ? 0
-			: (rpc->msgin.incoming - (rpc->msgin.total_length
+			: (rpc->msgin.granted - (rpc->msgin.total_length
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
@@ -707,7 +707,7 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				type, rpc->id, peer, rpc->dport,
 				rpc->msgin.total_length
 				- rpc->msgin.bytes_remaining,
-				rpc->msgin.total_length, rpc->msgin.incoming);
+				rpc->msgin.total_length, rpc->msgin.granted);
 	else if (rpc->state == RPC_OUTGOING) {
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
 				"out length %d, left %d, granted %d, "
@@ -776,11 +776,11 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 				"received",
 				rpc->id, tt_addr(rpc->peer->addr),
 				received, rpc->msgin.total_length);
-		if (rpc->msgin.incoming > received)
+		if (rpc->msgin.granted > received)
 			tt_record3("RPC id %d has %d outstanding grants "
 					"(incoming %d)", rpc->id,
-					rpc->msgin.incoming - received,
-					rpc->msgin.incoming);
+					rpc->msgin.granted - received,
+					rpc->msgin.granted);
 		if (rpc->msgin.num_bpages == 0)
 			tt_record1("RPC id %d is blocked waiting for buffers",
 					rpc->id);
@@ -832,7 +832,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 			}
 			if (rpc->state != RPC_INCOMING)
 				continue;
-			if (rpc->msgin.incoming <= (rpc->msgin.total_length
+			if (rpc->msgin.granted <= (rpc->msgin.total_length
 					- rpc->msgin.bytes_remaining))
 				continue;
 			freeze_count--;
@@ -870,7 +870,7 @@ void homa_validate_incoming(struct homa *homa, int verbose)
 			int incoming;
 			if (rpc->state != RPC_INCOMING)
 				continue;
-			incoming = rpc->msgin.incoming -
+			incoming = rpc->msgin.granted -
 					(rpc->msgin.total_length
 					- rpc->msgin.bytes_remaining);
 			if (incoming == 0)
@@ -880,7 +880,7 @@ void homa_validate_incoming(struct homa *homa, int verbose)
 				tt_record4("homa_validate_incoming: RPC id %d, "
 						"granted %d, remaining %d, "
 						"incoming %d",
-						rpc->id, rpc->msgin.incoming,
+						rpc->id, rpc->msgin.granted,
 						rpc->msgin.bytes_remaining,
 						incoming);
 		}

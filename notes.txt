@@ -16,7 +16,6 @@ Notes for Homa implementation in Linux:
     * ttgrants.py
 
 * When requesting ACKs, must eventually give up and delete RPC.
-* Rename msgin.incoming to granted (confusing with total_incoming)
 * Eliminate msgin.scheduled: just compute when needed.
 * Replace msgin.bytes_remaining with bytes_received?
 * Include the GSO packet size in the initial packet, so the receiver

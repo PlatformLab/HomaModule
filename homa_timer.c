@@ -58,7 +58,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 
 	if (rpc->state == RPC_INCOMING) {
 		if ((rpc->msgin.total_length - rpc->msgin.bytes_remaining)
-			>= rpc->msgin.incoming) {
+			>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
 			 * shouldn't expect to hear anything until we grant more.
 			 */

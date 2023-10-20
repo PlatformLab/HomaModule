@@ -1236,7 +1236,7 @@ int homa_softirq(struct sk_buff *skb) {
 	int pull_length;
 	struct homa_lcache lcache;
 
-	/* Accumulates changes to homa->incoming, to avoid repeated
+	/* Accumulates changes to homa->total_incoming, to avoid repeated
 	 * updates to this shared variable.
 	 */
 	int incoming_delta = 0;
