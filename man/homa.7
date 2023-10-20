@@ -255,6 +255,15 @@ the default values should work fine in production. It's probably a
 bad idea to change any of these unless you are sure you have made
 detailed performance measurements to justify the change.
 .TP
+.IR action
+This value always reads as 0. Writing a nonzero value will cause Homa to
+perform one of several actions (such as logging certain information or
+freezing the timetrace), depending on the value.
+For details on the recognized values, see the method
+.BR homa_dointvec
+in
+.BR homa_plumbing.c .
+.TP
 .I bpage_lease_usecs
 The amount of time (in microseconds) that a given core can own a page in
 a receive buffer pool before its ownership can be revoked by a different
@@ -329,11 +338,6 @@ microseconds (in order to avoid hot spots that degrade load balancing).
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
 the top-of-rack switch, in units of 1e06 bits per second.
-.TP
-.IR log_topic
-This value always reads as 0. Writing a nonzero value will cause Homa to
-log various state information to the system log, depending on the value.
-For details on the recognized values, consult the Homa code.
 .TP
 .IR max_dead_buffs
 This parameter is updated by Homa to reflect the largest number of packet

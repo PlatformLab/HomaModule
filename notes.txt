@@ -23,7 +23,6 @@ Notes for Homa implementation in Linux:
 * Out-of-order incoming grants seem to be pretty common.
 * When there are a lot of lost packets, Homa retries them *very* slowly
   (only one every 11-12 ms per server?). This is bad.
-* Change "log_topic" parameter to "action"?
 * Round up bpage fragments to 64 byte boundaries
 
 * TODO list for Homa based on the 9/22-10/6 experiment:

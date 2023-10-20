@@ -46,11 +46,10 @@ static bool exiting = false;
 /* Thread that runs timer code to detect lost packets and crashed peers. */
 static struct task_struct *timer_kthread;
 
-/* Set via sysctl to request that information on a particular topic
- * be printed to the system log. The value written determines the
- * topic.
+/* Set via sysctl to request that a particular action be taken. The value
+ * written determines the action.
  */
-static int log_topic;
+static int action;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -212,6 +211,13 @@ static struct proc_dir_entry *metrics_dir_entry = NULL;
 /* Used to configure sysctl access to Homa configuration parameters.*/
 static struct ctl_table homa_ctl_table[] = {
 	{
+		.procname	= "action",
+		.data		= &action,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "bpage_lease_usecs",
 		.data		= &homa_data.bpage_lease_usecs,
 		.maxlen		= sizeof(int),
@@ -284,13 +290,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "link_mbps",
 		.data		= &homa_data.link_mbps,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "log_topic",
-		.data		= &log_topic,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -1628,31 +1627,32 @@ int homa_dointvec(struct ctl_table *table, int write,
 		/* Handle the special value log_topic by invoking a function
 		 * to print information to the log.
 		 */
-		if (table->data == &log_topic) {
-			if (log_topic == 1)
+		if (table->data == &action) {
+			if (action == 1)
 				homa_log_grantable_list(homa);
-			else if (log_topic == 2)
+			else if (action == 2)
 				homa_rpc_log_active(homa, 0);
-			else if (log_topic == 3) {
+			else if (action == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-			} else if (log_topic == 4)
+			} else if (action == 4)
 				homa_log_throttled(homa);
-			else if (log_topic == 5)
+			else if (action == 5)
 				tt_printk();
-			else if (log_topic == 6) {
-				tt_record("Calling homa_rpc_log_active because of log topic 6");
+			else if (action == 6) {
+				tt_record("Calling homa_rpc_log_active because "
+						"of action 6");
 				homa_rpc_log_active_tt(homa, 0);
-				tt_record("Freezing because of log_topic 6");
+				tt_record("Freezing because of action 6");
 				tt_freeze();
-			} else if (log_topic == 7) {
-				tt_record("Freezing cluster because of log topic 7");
+			} else if (action == 7) {
+				tt_record("Freezing cluster because of action 7");
 				homa_rpc_log_active_tt(homa, 0);
 				tt_freeze();
 				homa_freeze_peers(homa);
 			} else
-				homa_rpc_log_active(homa, log_topic);
-			log_topic = 0;
+				homa_rpc_log_active(homa, action);
+			action = 0;
 		}
 	}
 	return result;
