@@ -10,10 +10,10 @@ from optparse import OptionParser
 import math
 from operator import itemgetter
 import os
+from pathlib import Path
 import re
 import string
 import sys
-
 
 # This global variable holds information about every RPC from every trace
 # file. Keys are RPC ids, values are dictionaries of info about that RPC,
@@ -21,17 +21,21 @@ import sys
 # they weren't needed by that RPC (e.g. grants) or because the RPC straddled
 # the beginning or end of the timetrace):
 # peer:              Address of the peer host
+# name:              'name' field from the trace file where this RPC appeared
+#                    (name of trace file without extension)
 # in_length:         Size of the incoming message, in bytes
 # gro_data:          List of <time, offset> tuples for all incoming
 #                    data packets processed by GRO
 # gro_grant:         List of <time, offset> tuples for all incoming
 #                    grant packets processed by GRO
+# gro_core:          Core that handled GRO processing for this RPC
 # softirq_data:      List of <time, offset> tuples for all incoming
 #                    data packets processed by SoftIRQ
 # softirq_grant:     List of <time, offset> tuples for all incoming
 #                    grant packets processed by SoftIRQ
-# recvmsg_return:    Time when homa_recvmsg returned
+# recvmsg_done:      Time when homa_recvmsg returned
 # sendmsg:           Time when homa_sendmsg was invoked
+# in_length:         Size of the incoming message, in bytes
 # out_length:        Size of the outgoing message, in bytes
 # send_data:         List of <time, offset, length> tuples for outgoing
 #                    data packets (length is message data)
@@ -40,21 +44,114 @@ import sys
 #
 rpcs = {}
 
+# This global variable holds information about all of the traces that
+# have been read. Maps from the 'name' fields of a traces to the trace.
+traces = {}
+
+def extract_num(s):
+    """
+    If the argument contains an integer number as a substring,
+    return the number. Otherwise, return None.
+    """
+    match = re.match('[^0-9]*([0-9]+)', s)
+    if match:
+        return int(match.group(1))
+    return None
+
+def get_packet_size():
+    """
+    Returns the amount of message data in a full-size network packet (as
+    received by the receiver; GSO packets sent by senders may be larger).
+    """
+
+    global rpcs
+
+    # We cache the result to avoid recomputing
+    if get_packet_size.result != None:
+        return get_packet_size.result
+
+    # Scan incoming data packets for all of the RPCs, looking for one
+    # with at least 4 packets. Of the 3 gaps in offset, at least 2 must
+    # be the same (the only special case is for unscheduled data). If
+    # we can't find any RPCs with 4 packets, then look for one with 2
+    # packets and find the offset of the second packet. If there are
+    # no multi-packet RPCs, then just pick a large value (the size won't
+    # matter).
+    for id, rpc in rpcs.items():
+        if not 'softirq_data' in rpc:
+            continue
+        offsets = sorted(map(lambda pkt : pkt[1], rpc['softirq_data']))
+        if (len(offsets) < 2) or (offsets[0] != 0) or not 'recvmsg_done' in rpc:
+            continue
+        size1 = offsets[1] - offsets[0]
+        if len(offsets) >= 4:
+            size2 = None
+            for i in range(2, len(offsets)):
+                size = offsets[i] - offsets[i-1]
+                if (size == size1) or (size == size2):
+                    get_packet_size.result = size
+                    return size
+                choice2 = size
+        get_packet_size.result = size1
+    if get_packet_size.result == None:
+        get_packet_size.result = 100000
+    return get_packet_size.result;
+get_packet_size.result = None
+
+def get_sorted_nodes():
+    """
+    Returns a list of node names ('name' value from traces), sorted
+    by node number of there are numbers in the names, otherwise
+    sorted alphabetically.
+    """
+    global traces
+
+    # We cache the result to avoid recomputing
+    if get_sorted_nodes.result != None:
+        return get_sorted_nodes.result
+
+    # First see if all of the names contain numbers.
+    nodes = traces.keys()
+    got_nums = True
+    for node in nodes:
+        if extract_num(node) == None:
+            got_nums = False
+            break
+    if not got_nums:
+        get_sorted_nodes.result = sorted(nodes)
+    else:
+        get_sorted_nodes.result = sorted(nodes, key=lambda name : extract_num(name))
+    return get_sorted_nodes.result
+get_sorted_nodes.result = None
+
 def get_time_stats(samples):
     """
     Given a list of elapsed times, returns a string containing statistics
     such as min time, P99, and average.
     """
     if not samples:
-        return "no data"
+        return 'no data'
     sorted_data = sorted(samples)
     average = sum(sorted_data)/len(samples)
-    return "Min %.1f, P50 %.1f, P90 %.1f, P99 %.1f, Avg %.1f" % (
+    return 'Min %.1f, P50 %.1f, P90 %.1f, P99 %.1f, Avg %.1f' % (
             sorted_data[0],
             sorted_data[50*len(sorted_data)//100],
             sorted_data[90*len(sorted_data)//100],
             sorted_data[99*len(sorted_data)//100],
             average)
+
+def print_analyzer_help():
+    """
+    Prints out documentation for all of the analyzers.
+    """
+
+    module = sys.modules[__name__]
+    for attr in sorted(dir(module)):
+        if not attr.startswith('Analyze'):
+            continue
+        object = getattr(module, attr)
+        analyzer = attr[7].lower() + attr[8:]
+        print('%s: %s' % (analyzer, object.__doc__))
 
 class Dispatcher:
     """
@@ -94,7 +191,7 @@ class Dispatcher:
         If analyzer hasn't already been registered with this dispatcher,
         create an instance of that class and arrange for its methods to
         be invoked for matching lines in timetrace files. For each method
-        named "tt_xxx" in the class there must be a pattern named "xxx";
+        named 'tt_xxx' in the class there must be a pattern named 'xxx';
         the method will be invoked whenever the pattern matches a timetrace
         line, with parameters containing parsed fields from the line.
 
@@ -124,27 +221,37 @@ class Dispatcher:
                 self.interests[name].append(obj)
                 break
             if not name in self.interests:
-                raise Exception("Couldn't find pattern %s for analyzer %s"
+                raise Exception('Couldn\'t find pattern %s for analyzer %s'
                         % (name, analyzer))
 
-    def parse(self, file, trace):
+    def parse(self, file):
         """
         Parse a timetrace file and invoke interests.
         file:     Name of the file to parse.
-        trace:    Dictionary in which data from the timetrace file will be
-                  collected. Usage is up to the various interests that have
-                  been created; typically each interested class will store
-                  its information under one key of the dictionary.
         """
 
+        global traces
         self.__build_active()
 
+        # Fields of a trace:
+        # file:         Name of file from which the trace was read
+        # name:         The last element of file, with extension removed; used
+        #               as a host name in various output
+        # first_time:   Time of the first event read for this trace.
+        # last_time:    Time of the last event read for this trace.
+        # elapsed_time: Total time interval covered by the trace.
+        trace = {}
         trace['file'] = file
+        name = Path(file).stem
+        trace['name'] = name
+        traces[name] = trace
+
         for analyzer in self.objs:
-            if hasattr(analyzer, "init_trace"):
+            if hasattr(analyzer, 'init_trace'):
                 analyzer.init_trace(trace)
 
         f = open(file)
+        first = True
         for line in f:
             # Parse each line in 2 phases: first the time and core information
             # that is common to all patterns, then the message, which will
@@ -156,6 +263,9 @@ class Dispatcher:
             core = int(match.group(2))
             msg = match.group(3)
 
+            if first:
+                trace['first_time'] = time
+                first = False
             trace['last_time'] = time
             for pattern in self.active:
                 match = re.match(pattern['regexp'], msg)
@@ -164,6 +274,7 @@ class Dispatcher:
                             self.interests[pattern['name']])
                     break
         f.close()
+        trace['elapsed_time'] = trace['last_time'] - trace['first_time']
 
     def __build_active(self):
         """
@@ -176,7 +287,7 @@ class Dispatcher:
         self.active = []
         for pattern in self.patterns:
             pattern['parser'] = getattr(self, '_Dispatcher__' + pattern['name'])
-            if pattern["name"] in self.interests:
+            if pattern['name'] in self.interests:
                 self.active.append(pattern)
 
     # Each entry in this list represents one pattern that can be matched
@@ -372,9 +483,195 @@ class Dispatcher:
     })
 
 #------------------------------------------------
+# Analyzer: activity
+#------------------------------------------------
+class AnalyzeActivity:
+    """
+    Prints statistics about how many RPCs are active and data throughput.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpc')
+        return
+
+    def sum_list(self, events):
+        """
+        Given a list of <time, event> entries where event is 'start' or 'end',
+        return a list <num_starts, active_frac, avg_active>:
+        num_starts:    Total number of 'start' events
+        active_frac:   Fraction of all time when #starts > #ends
+        avg_active:    Average value of #starts - #ends
+        The input list should be sorted in order of time by the caller.
+        """
+        num_starts = 0
+        cur_active = 0
+        active_time = 0
+        active_integral = 0
+        last_time = events[0][0]
+
+        for time, event in events:
+            # print("%9.3f: %s, cur_active %d, active_time %.1f, active_integral %.1f" %
+            #         (time, event, cur_active, active_time, active_integral))
+            delta = time - last_time
+            if cur_active:
+                active_time += delta
+            active_integral += delta * cur_active
+            if event == 'start':
+                num_starts += 1
+                cur_active += 1
+            else:
+                cur_active -= 1
+            last_time = time
+        total_time = events[-1][0] - events[0][0]
+        return num_starts, active_time/total_time, active_integral/total_time
+
+    def print(self):
+        global rpcs, traces
+
+        # Each of the following lists contains <time, event> entries,
+        # where event is 'start' or end'. The entry indicates that an
+        # input or output message started arriving or completed at the given time.
+
+        # Maps from trace name to a list of events for input messages
+        # on that server.
+        node_in_events = {}
+
+        # Maps from a trace name to a list of events for output messages
+        # on that server.
+        node_out_events = {}
+
+        # Maps from trace name to a dictionary that maps from core
+        # number to total GRO data received by that core
+        node_core_in_bytes = {}
+
+        # Maps from trace name to a count of total bytes output by that node
+        node_out_bytes = {}
+
+        for node in get_sorted_nodes():
+            node_in_events[node] = []
+            node_out_events[node] = []
+            node_core_in_bytes[node] = {}
+            node_out_bytes[node] = 0
+        for id, rpc in rpcs.items():
+            node = rpc['name']
+
+            if 'gro_data' in rpc:
+                # The start time for an input message is normally the time when
+                # GRO received the first data packet. However, if offset 0
+                # doesn't appear in the GRO list, assume the message was
+                # already in progress when the trace began.
+                gros = rpc['gro_data']
+                if gros[0][1] == 0:
+                    in_start = gros[0][0]
+                else:
+                    in_start = traces[node]['first_time']
+                    for gro in gros:
+                        if gro[1] == 0:
+                            in_start = gros[0][0]
+                            break
+
+                if 'recvmsg_done' in rpc:
+                    in_end = rpc['recvmsg_done']
+                else:
+                    in_end = traces[node]['last_time']
+                node_in_events[node].append([in_start, 'start'])
+                node_in_events[node].append([in_end, 'end'])
+
+                # Compute total data received for the message.
+                min_offset = 10000000
+                max_offset = -1
+                for pkt in gros:
+                    offset = pkt[1]
+                    if offset < min_offset:
+                        min_offset = offset
+                    if offset > max_offset:
+                        max_offset = offset
+                if 'rcvmsg_done' in rpc:
+                    bytes = rpc['in_length'] - min_offset
+                else:
+                    bytes = max_offset + get_packet_size() - min_offset
+                core = rpc['gro_core']
+                cores = node_core_in_bytes[rpc['name']]
+                if not core in cores:
+                    cores[core] = bytes
+                else:
+                    cores[core] += bytes
+
+            # Collect information about outgoing messages.
+            if 'send_data' in rpc:
+                if 'sendmsg' in rpc:
+                    out_start = rpc['sendmsg']
+                else:
+                    out_start = traces[node]['first_time']
+                time, offset, length = rpc['send_data'][-1]
+                out_end = time
+                if 'out_length' in rpc:
+                    if (offset + length) != rpc['out_length']:
+                        out_end = traces[node]['last_time']
+                node_out_events[node].append([out_start, 'start'])
+                node_out_events[node].append([out_end, 'end'])
+
+                # Collect total data sent for the message.
+                bytes = 0
+                for pkt in rpc['send_data']:
+                    bytes += pkt[2]
+                node_out_bytes[rpc['name']] += bytes
+
+        def printList(self, node, events, num_bytes, extra):
+            global traces
+            events.sort(key=lambda tuple : tuple[0])
+            msgs, activeFrac, avgActive = self.sum_list(events)
+            rate = msgs/(events[-1][0] - events[0][0])
+            gbps = num_bytes*8e-3/(traces[node]['elapsed_time'])
+            print('%-10s %6d %7.3f %9.3f %8.2f %7.2f  %7.2f%s' % (
+                    node, msgs, rate, activeFrac, avgActive, gbps,
+                    gbps/activeFrac, extra))
+
+        print('\n------------------')
+        print('Analyzer: activity')
+        print('------------------\n')
+        print('Msgs:          Total number of incoming/outgoing messages')
+        print('MsgRate:       Rate at which new messages arrived (M/sec)')
+        print('ActvFrac:      Fraction of time when at least one message was active')
+        print('AvgActv:       Average number of active messages')
+        print('Gbps:          Total message throughtput (Gbps)')
+        print('ActvGbps:      Total throughput when at least one message was active (Gbps)')
+        print('MaxCore:       Highest incoming throughput via a single GRO core (Gbps)')
+        print('\nIncoming messages:')
+        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps       MaxCore')
+        print('---------------------------------------------------------------------------')
+        for node in get_sorted_nodes():
+            if not node in node_in_events:
+                continue
+            events = node_in_events[node]
+            max_core = 0
+            max_bytes = 0
+            total_bytes = 0
+            for core, bytes in node_core_in_bytes[node].items():
+                total_bytes += bytes
+                if bytes > max_bytes:
+                    max_bytes = bytes
+                    max_core = core
+            max_gbps = max_bytes*8e-3/(traces[node]['elapsed_time'])
+            printList(self, node, events, total_bytes,
+                    ' %7.2f (C%02d)' % (max_core, max_gbps))
+        print('\nOutgoing messages:')
+        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps')
+        print('-------------------------------------------------------------')
+        for node in get_sorted_nodes():
+            if not node in node_out_events:
+                continue
+            bytes = node_out_bytes[node]
+            printList(self, node, node_out_events[node], bytes, "")
+
+#------------------------------------------------
 # Analyzer: copy
 #------------------------------------------------
 class AnalyzeCopy:
+    """
+    Measures the throughput of copies between user space and kernel space.
+    """
+
     def __init__(self, dispatcher):
         return
 
@@ -488,47 +785,50 @@ class AnalyzeCopy:
             if stats['out_size'][core] >= 5000:
                 stats['large_out_time_with_skbs'] += delta
 
-    def print(self, traces):
-        stats = traces[0]['copy']
-        total_time = traces[0]['last_time']
-        print("\nAnalyzer: copy")
-        print("--------------")
-        print("Copying data from user space to kernel:")
+    def print(self):
+        global traces
+        trace = traces[get_sorted_nodes()[0]]
+        stats = trace['copy']
+        total_time = trace['last_time']
+        print('\n--------------')
+        print('Analyzer: copy')
+        print('--------------')
+        print('Copying data from user space to kernel:')
         if not stats['small_in_times']:
-            print("  0 short messages (<= 1000B)")
+            print('  0 short messages (<= 1000B)')
         else:
-            print("  %d short messages (<= 1000 B): latency %s usec" %
+            print('  %d short messages (<= 1000 B): latency %s usec' %
                     (len(stats['small_in_times']),
                     get_time_stats(stats['small_in_times'])))
         if stats['large_in_time'] == 0:
-            print("  0 long messages (>= 5000 B)")
+            print('  0 long messages (>= 5000 B)')
         else:
-            print("  %d long messages (>= 5000 B): per-thread throughput %.1f Gbps" %
+            print('  %d long messages (>= 5000 B): per-thread throughput %.1f Gbps' %
                     (stats['large_in_count'],
                     8e-03*stats['large_in_data']/stats['large_in_time']))
-        print("  Average core utilization: %.2f cores" %
+        print('  Average core utilization: %.2f cores' %
                 (stats['total_in_time']/total_time))
-        print("Copying data from kernel to user space:")
+        print('Copying data from kernel to user space:')
         if not stats['small_out_times']:
-            print("  0 short transfers (<= 1200B)")
+            print('  0 short transfers (<= 1200B)')
         else:
-            print("  %d short transfers (<= 1000 B): latency %s usec" %
+            print('  %d short transfers (<= 1000 B): latency %s usec' %
                     (len(stats['small_out_times']),
                     get_time_stats(stats['small_out_times'])))
         if stats['large_out_time'] == 0:
-            print("  0 long transfers (>= 5000 B)")
+            print('  0 long transfers (>= 5000 B)')
         else:
-            print("  %d long transfers (>= 5000 B): per-thread throughput %.1f Gbps" %
+            print('  %d long transfers (>= 5000 B): per-thread throughput %.1f Gbps' %
                     (stats['large_out_count'],
                     8e-03*stats['large_out_data']/stats['large_out_time']))
-        print("  Average core utilization: %.2f cores" %
+        print('  Average core utilization: %.2f cores' %
                 (stats['total_out_time']/total_time))
         if stats['skbs_freed'] > 0:
-            print("Freeing skbs after copying data to user space:")
-            print("  %d skbs, average free time %.2f us" % (stats['skbs_freed'],
+            print('Freeing skbs after copying data to user space:')
+            print('  %d skbs, average free time %.2f us' % (stats['skbs_freed'],
                     stats['skb_free_time']/stats['skbs_freed']))
             if stats['large_out_time_with_skbs'] > 0:
-                print("  Copy throughput per thread, with skb freeing: %.1f Gbps"
+                print('  Copy throughput per thread, with skb freeing: %.1f Gbps'
                         % (8e-03*stats['large_out_data']
                         /stats['large_out_time_with_skbs']))
 
@@ -536,6 +836,11 @@ class AnalyzeCopy:
 # Analyzer: rpc
 #------------------------------------------------
 class AnalyzeRpc:
+    """
+    Collects information about each RPC but doesn't actually print
+    anything. Intended primarily for use by other analyzers.
+    """
+
     def __init__(self, dispatcher):
         return
 
@@ -544,7 +849,7 @@ class AnalyzeRpc:
         Add a value to an element of an RPC's dictionary, creating the RPC
         and the list if they don't exist already
 
-        trace:      Where information about this RPC is stored
+        trace:      Overall information about the trace file being parsed.
         id:         Identifier for a specific RPC; stats for this RPC are
                     initialized if they don't already exist
         name:       Name of a value in the RPC's record; will be created
@@ -554,85 +859,95 @@ class AnalyzeRpc:
 
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         rpc = rpcs[id]
         if not name in rpc:
             rpc[name] = []
         rpc[name].append(value)
 
     def tt_gro_data(self, trace, time, core, peer, id, offset):
-        self.append(trace, id, "gro_data", [time, offset])
+        global rpcs
+        self.append(trace, id, 'gro_data', [time, offset])
+        rpcs[id]['peer'] = peer
+        rpcs[id]['gro_core'] = core
 
     def tt_gro_grant(self, trace, time, core, peer, id, offset, priority):
-        self.append(trace, id, "gro_grant", [time, offset])
+        self.append(trace, id, 'gro_grant', [time, offset])
 
     def tt_softirq_data(self, trace, time, core, id, offset, length):
         global rpcs
-        self.append(trace, id, "softirq_data", [time, offset])
+        self.append(trace, id, 'softirq_data', [time, offset])
         rpcs[id]['in_length'] = length
 
     def tt_softirq_grant(self, trace, time, core, id, offset):
-        self.append(trace, id, "softirq_grant", [time, offset])
+        self.append(trace, id, 'softirq_grant', [time, offset])
 
     def tt_send_data(self, trace, time, core, id, offset, length):
-        self.append(trace, id, "send_data", [time, offset, length])
+        self.append(trace, id, 'send_data', [time, offset, length])
 
     def tt_send_grant(self, trace, time, core, id, offset, priority):
-        self.append(trace, id, "send_grant", [time, offset, priority])
+        self.append(trace, id, 'send_grant', [time, offset, priority])
 
     def tt_sendmsg_request(self, trace, time, core, peer, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
-        rpcs[id]['sendmsg'] = time
+            rpcs[id] = {'name': trace['name']}
         rpcs[id]['out_length'] = length
+        rpcs[id]['peer'] = peer
+        rpcs[id]['sendmsg'] = time
 
     def tt_sendmsg_response(self, trace, time, core, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         rpcs[id]['sendmsg'] = time
         rpcs[id]['out_length'] = length
 
     def tt_recvmsg_done(self, trace, time, core, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         rpcs[id]['recvmsg_done'] = time
 
     def tt_copy_out_start(self, trace, time, core, id):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         if not 'copy_out_start' in rpcs[id]:
             rpcs[id]['copy_out_start'] = time
 
     def tt_copy_out_done(self, trace, time, core, id, num_bytes):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         rpcs[id]['copy_out_done'] = time
 
     def tt_copy_in_done(self, trace, time, core, id, num_bytes):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {}
+            rpcs[id] = {'name': trace['name']}
         rpcs[id]['copy_in_done'] = time
 
 #------------------------------------------------
 # Analyzer: timeline
 #------------------------------------------------
 class AnalyzeTimeline:
+    """
+    Prints a timeline showing how long it takes for RPCs to reach various
+    interesting stages on both clients and servers. Most useful for
+    benchmarks where all RPCs are the same size.
+    """
     def __init__(self, dispatcher):
-        d.interest('AnalyzeRpc')
+        dispatcher.interest('AnalyzeRpc')
         return
 
-    def print(self, traces):
+    def print(self):
         global rpcs
         num_client_rpcs = 0
         num_server_rpcs = 0
-        print("\nAnalyzer: timeline")
-        print("------------------")
+        print('\n------------------')
+        print('Analyzer: timeline')
+        print('------------------')
 
         # These tables describe the phases of interest. Each sublist is
         # a <label, name, lambda> triple, where the label is human-readable
@@ -706,15 +1021,15 @@ class AnalyzeTimeline:
                         server_extra_deltas)
 
         if client_totals:
-            print("\nTimeline for clients (%d RPCs):\n" % (num_client_rpcs))
+            print('\nTimeline for clients (%d RPCs):\n' % (num_client_rpcs))
             self.__print_phases(client_phases, client_totals, client_deltas)
-            print("")
+            print('')
             self.__print_phases(client_extra, client_extra_totals,
                     client_extra_deltas)
         if server_totals:
-            print("\nTimeline for servers (%d RPCs):\n" % (num_server_rpcs))
+            print('\nTimeline for servers (%d RPCs):\n' % (num_server_rpcs))
             self.__print_phases(server_phases, server_totals, server_deltas)
-            print("")
+            print('')
             self.__print_phases(server_extra, server_extra_totals,
                     server_extra_deltas)
 
@@ -749,15 +1064,15 @@ class AnalyzeTimeline:
         for i in range(1, len(phases)):
             label = phases[i][0]
             if not totals[i]:
-                print("%-32s (no events)" % (label))
+                print('%-32s (no events)' % (label))
                 continue
             elapsed = sorted(totals[i])
             gaps = sorted(deltas[i])
-            print("%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)" %
+            print('%-32s Avg %7.1f us (+%7.1f us)  P90 %7.1f us (+%7.1f us)' %
                 (label, sum(elapsed)/len(elapsed), sum(gaps)/len(gaps),
                 elapsed[9*len(elapsed)//10], gaps[9*len(gaps)//10]))
 
-# Parse command line options
+# Parse command-line options.
 parser = OptionParser(description=
         'Analyze one or more Homa timetrace files and print information '
         'extracted from the file(s). Command-line arguments determine '
@@ -765,23 +1080,38 @@ parser = OptionParser(description=
         usage='%prog [options] [trace trace ...]',
         conflict_handler='resolve')
 parser.add_option('--analyzers', '-a', dest='analyzers', default='all',
-        help="space-separated list of analyzers to apply to the trace files "
-        "(default: all)")
+        metavar='A', help='Space-separated list of analyzers to apply to '
+        'the trace files (default: all)')
+parser.add_option('-h', '--help', dest='help', action='store_true',
+                  help='Show this help message and exit')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
-        help='print additional output with more details')
+        help='Print additional output with more details')
 
 (options, tt_files) = parser.parse_args()
+if options.help:
+    parser.print_help()
+    print("\nAvailable analyzers:")
+    print_analyzer_help()
+    exit(0)
 if not tt_files:
-    print("No trace files specified")
+    print('No trace files specified')
     exit(1)
 d = Dispatcher()
 for name in options.analyzers.split():
     d.interest('Analyze' + name[0].capitalize() + name[1:])
-traces = []
+
+# Parse the timetrace files; this will invoke handler in the analyzers.
 for file in tt_files:
-    traces.append({})
-    d.parse(file, traces[-1])
+    d.parse(file)
+
+# Invoke 'analyze' methods in each analyzer, if present, to perform
+# postprocessing now that all the trace data has been read.
 for analyzer in d.get_analyzers():
-    if hasattr(analyzer, "print"):
-        analyzer.print(traces)
+    if hasattr(analyzer, 'analyze'):
+        analyzer.analyze()
+
+# Give each analyzer a chance to print out its findings.
+for analyzer in d.get_analyzers():
+    if hasattr(analyzer, 'print'):
+        analyzer.print()
