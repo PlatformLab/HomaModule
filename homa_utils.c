@@ -1184,8 +1184,7 @@ void homa_freeze_peers(struct homa *homa)
 	struct homa_socktab_scan scan;
 
 	/* Find a socket to use (any will do). */
-	homa_socktab_start_scan(&homa->port_map, &scan);
-	hsk = homa_socktab_next(&scan);
+	hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 	if (hsk == NULL) {
 		printk(KERN_NOTICE "homa_freeze_peers couldn't find a socket\n");
 		return;
