@@ -769,6 +769,19 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	homa_resend_data(crpc, 15700, 16500, 2);
 	EXPECT_SUBSTR("incoming 16000", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
+{
+	mock_net_device.gso_max_size = 5000;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 16000, 1000);
+	unit_log_clear();
+	mock_xmit_log_homa_info = 1;
+	homa_resend_data(crpc, 8400, 8800, 2);
+	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
+			"homa_info: wire_bytes 1524, data_bytes 1400",
+			unit_log_get());
+}
 TEST_F(homa_outgoing, homa_resend_data__advance_next_xmit)
 {
 	char buffer[1000];

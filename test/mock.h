@@ -44,6 +44,7 @@ extern struct task_struct
 extern int         mock_trylock_errors;
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
+extern int         mock_xmit_log_homa_info;
 
 extern int         mock_check_error(int *errorMask);
 extern void        mock_clear_xmit_prios(void);

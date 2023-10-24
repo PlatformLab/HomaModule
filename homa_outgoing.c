@@ -550,6 +550,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		for ( ; count > 0; count--,
 				seg_offset += sizeof32(*seg) + length) {
 			struct sk_buff *new_skb;
+			struct homa_skb_info *homa_info;
+
 			seg = (struct data_segment *) (skb->head + seg_offset);
 			offset = ntohl(seg->offset);
 			length = ntohl(seg->segment_length);
@@ -587,6 +589,14 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				h->incoming = htonl(rpc->msgout.length);
 			else
 				h->incoming = htonl(offset + length);
+
+
+			homa_info = homa_get_skb_info(new_skb);
+			homa_info->wire_bytes = length
+					+ sizeof(struct data_header)
+					+ rpc->hsk->ip_header_length
+					+ HOMA_ETH_OVERHEAD;
+			homa_info->data_bytes = length;
 			tt_record3("retransmitting offset %d, length %d, id %d",
 					offset, length, rpc->id);
 			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
