@@ -755,6 +755,7 @@ void mutex_lock(struct mutex *lock)
 
 void mutex_unlock(struct mutex *lock)
 {
+	UNIT_HOOK("unlock");
 	mock_active_locks--;
 }
 
@@ -845,6 +846,7 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
+	UNIT_HOOK("unlock");
 	mock_active_locks--;
 }
 
@@ -1290,6 +1292,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
  */
 void mock_spin_unlock(spinlock_t *lock)
 {
+	UNIT_HOOK("unlock");
 	mock_active_locks--;
 }
 

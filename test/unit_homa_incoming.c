@@ -27,6 +27,7 @@
 struct homa_rpc *hook_rpc = NULL;
 struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
+int hook_granted = 0;
 void handoff_hook(char *id)
 {
 	if (strcmp(id, "schedule") != 0)
@@ -106,6 +107,14 @@ void shutdown_hook(char *id)
 	if (strcmp(id, "schedule") != 0)
 		return;
 	homa_sock_shutdown(hook_hsk);
+}
+
+/* The following hook function updates hook_rpc->msgin.granted. */
+void unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0)
+		return;
+	hook_rpc->msgin.granted = hook_granted;
 }
 
 FIXTURE(homa_incoming) {
@@ -1738,6 +1747,32 @@ TEST_F(homa_incoming, homa_send_grants__grant_fifo)
 	EXPECT_EQ(7000, srpc2->msgin.granted);
 	EXPECT_EQ(9000, self->homa.grant_nonfifo_left);
 }
+TEST_F(homa_incoming, homa_send_grants__grant_fifo_but_granted_changed)
+{
+	struct homa_rpc *srpc1, *srpc2;
+	self->homa.fifo_grant_increment = 5000;
+	self->homa.grant_fifo_fraction = 100;
+	self->homa.grant_nonfifo_left = 0;
+	self->homa.grant_nonfifo = 10000;
+	self->homa.max_incoming = 10000;
+	self->homa.max_overcommit = 1;
+	mock_cycles = ~0;
+	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 5, 30000, 100);
+	ASSERT_NE(NULL, srpc1);
+	EXPECT_EQ(10000, srpc1->msgin.granted);
+	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
+			self->server_ip, self->client_port, 7, 20000, 100);
+	ASSERT_NE(NULL, srpc2);
+
+	unit_log_clear();
+	srpc2->msgin.granted = 10000;
+	unit_hook_register(unlock_hook);
+	hook_rpc = srpc1;
+	hook_granted = 20000;
+	homa_send_grants(&self->homa);
+	EXPECT_STREQ("xmit GRANT 11400@0", unit_log_get());
+}
 
 TEST_F(homa_incoming, homa_choose_rpcs_to_grant)
 {
@@ -2036,6 +2071,23 @@ TEST_F(homa_incoming, homa_choose_fifo_grant__remove_from_grantable)
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_incoming, homa_choose_fifo_grant__granted_bytes_alread_received)
+{
+	struct homa_rpc *srpc, *fifo_rpc;
+	self->homa.fifo_grant_increment = 5000;
+	self->homa.max_sched_prio = 2;
+	mock_cycles = ~0;
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->client_port, 1, 40000, 100);
+	ASSERT_NE(NULL, srpc);
+	EXPECT_EQ(10000, srpc->msgin.granted);
+	srpc->msgin.bytes_remaining = 20000;
+
+	unit_log_clear();
+	fifo_rpc = homa_choose_fifo_grant(&self->homa);
+	EXPECT_EQ(NULL, fifo_rpc);
+	EXPECT_EQ(15000, srpc->msgin.granted);
 }
 
 TEST_F(homa_incoming, homa_remove_grantable_locked)

@@ -975,6 +975,7 @@ void homa_send_grants(struct homa *homa)
 	int i, num_grants;
 	__u64 start;
 	struct homa_rpc *fifo_rpc = NULL;
+	int fifo_grant;
 
 	/* RPCs that are candidates for grants; if we eventually decide
 	 * not to grant for an RPC, the array will be compacted to
@@ -1015,8 +1016,11 @@ void homa_send_grants(struct homa *homa)
 
 	if (homa->grant_nonfifo_left <= 0) {
 		homa->grant_nonfifo_left += homa->grant_nonfifo;
-		if (homa->grant_fifo_fraction)
+		if (homa->grant_fifo_fraction) {
 			fifo_rpc = homa_choose_fifo_grant(homa);
+			if (fifo_rpc != NULL)
+				fifo_grant = fifo_rpc->msgin.granted;
+		}
 	}
 	homa_grantable_unlock(homa);
 
@@ -1032,9 +1036,14 @@ void homa_send_grants(struct homa *homa)
 			rpcs[i]);
 		atomic_dec(&rpcs[i]->grants_in_progress);
 	}
-	if (fifo_rpc != NULL) {
+
+	/* The second check below is avoids duplicate grants in situations
+	 * where multiple cores decide to send fifo grants for the same
+	 * RPC before any of them gets here.
+	 */
+	if ((fifo_rpc != NULL) && (fifo_grant == fifo_rpc->msgin.granted)) {
 		struct grant_header grant;
-		grant.offset = htonl(fifo_rpc->msgin.granted);
+		grant.offset = htonl(fifo_grant);
 		grant.priority = homa->max_sched_prio;
 		grant.resend_all = 0;
 		tt_record3("sending fifo grant for id %llu, offset %d, "
@@ -1271,6 +1280,16 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 		homa_remove_grantable_locked(homa, oldest);
 	}
 	atomic_add(granted, &homa->total_incoming);
+
+	if (oldest->msgin.granted < (oldest->msgin.total_length
+				- oldest->msgin.bytes_remaining)) {
+		/* We've already received all of the bytes in the new
+		 * grant; most likely this means that the sender sent extra
+		 * data after the last fifo grant (e.g. by rounding up to a
+		 * TSO packet). Don't send this grant.
+		 */
+		return NULL;
+	}
 	return oldest;
 }
 
