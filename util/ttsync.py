@@ -11,6 +11,7 @@ from glob import glob
 from optparse import OptionParser
 import math
 import os
+from pathlib import Path
 import re
 import string
 import sys
@@ -143,29 +144,34 @@ def get_node_num(tt_file):
     return tt_file
 
 tt_files.sort(key = lambda name : get_node_num(name))
-node_ids = [get_node_num(tt_file) for tt_file in tt_files]
+node_names = [Path(tt_file).stem for tt_file in tt_files]
 num_nodes = len(tt_files)
 for i in range(num_nodes):
     parse_tt(tt_files[i],i)
 find_min_delays(num_nodes)
+for i in range(1, num_nodes):
+    if (min_delays[0][i] > 1e10) or (min_delays[i][0] > 1e10):
+        print("No delay info between %s and %s (traces don't overlap?)" %
+                (node_names[0], node_names[i]), file=sys.stderr)
+        exit(1)
 
 # Compute clock offsets from min_delays
 offsets = [0.0 for i in range(num_nodes)]
-print('\nTime offsets computed for each node by synchronizing with node %d' %
-        (node_ids[0]))
+print('\nTime offsets computed for each node by synchronizing with %s' %
+        (node_names[0]))
 print('MinOut:   Smallest time difference (unsynced clocks) for a packet')
-print('          to get from the node %d to this node' % (node_ids[0]))
+print('          to get from %s to this node' % (node_names[0]))
 print('MinBack:  Smallest time difference (unsynced clocks) for a packet')
-print('          to get from this node to the node %d' % (node_ids[0]))
+print('          to get from this node to %s' % (node_names[0]))
 print('MinRTT:   Minimum RTT (computed from MinOut and MinBack)')
-print('Offset:   Add this to node\'s clock to align with the first node')
-print('\nNode    MinOut  MinBack Min RTT   Offset')
-print('%-5d %8.1f %8.1f %7.1f %8.1f' % (node_ids[0],
+print('Offset:   Add this to node\'s clock to align with %s' % (node_names[0]))
+print('\nNode         MinOut  MinBack  Min RTT   Offset')
+print('%-10s %8.1f %8.1f  %7.1f %8.1f' % (node_names[0],
         0.0, 0.0, 0.0, 0.0))
 for node in range(1, num_nodes):
     min_rtt = min_delays[0][node] + min_delays[node][0]
     offsets[node] = min_rtt/2 - min_delays[0][node]
-    print('%-5d %8.1f %8.1f %7.1f %8.1f' % (node_ids[node],
+    print('%-10s %8.1f %8.1f  %7.1f %8.1f' % (node_names[node],
             min_delays[0][node], min_delays[node][0], min_rtt, offsets[node]))
 
 # Check for consistency (with these offsets, will all one-way delays be
