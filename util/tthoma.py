@@ -15,6 +15,8 @@ from pathlib import Path
 import re
 import string
 import sys
+import textwrap
+import time
 
 # This global variable holds information about every RPC from every trace
 # file. Keys are RPC ids, values are dictionaries of info about that RPC,
@@ -254,6 +256,7 @@ class Dispatcher:
         trace['name'] = name
         traces[name] = trace
 
+        print('Reading trace file %s' % (file), file=sys.stderr)
         for analyzer in self.objs:
             if hasattr(analyzer, 'init_trace'):
                 analyzer.init_trace(trace)
@@ -570,7 +573,7 @@ class AnalyzeActivity:
         total_time = events[-1][0] - events[0][0]
         return num_starts, active_time/total_time, active_integral/total_time
 
-    def print(self):
+    def output(self):
         global rpcs, traces
 
         # Each of the following lists contains <time, event> entries,
@@ -662,7 +665,7 @@ class AnalyzeActivity:
                     bytes += pkt[2]
                 node_out_bytes[rpc['name']] += bytes
 
-        def printList(self, node, events, num_bytes, extra):
+        def print_list(node, events, num_bytes, extra):
             global traces
             events.sort(key=lambda tuple : tuple[0])
             msgs, activeFrac, avgActive = self.sum_list(events)
@@ -698,7 +701,7 @@ class AnalyzeActivity:
                     max_bytes = bytes
                     max_core = core
             max_gbps = max_bytes*8e-3/(traces[node]['elapsed_time'])
-            printList(self, node, events, total_bytes,
+            print_list(node, events, total_bytes,
                     ' %7.2f (C%02d)' % (max_core, max_gbps))
         print('\nOutgoing messages:')
         print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps')
@@ -707,7 +710,7 @@ class AnalyzeActivity:
             if not node in node_out_events:
                 continue
             bytes = node_out_bytes[node]
-            printList(self, node, node_out_events[node], bytes, "")
+            print_list(node, node_out_events[node], bytes, "")
 
 #------------------------------------------------
 # Analyzer: copy
@@ -830,7 +833,7 @@ class AnalyzeCopy:
             if stats['out_size'][core] >= 5000:
                 stats['large_out_time_with_skbs'] += delta
 
-    def print(self):
+    def output(self):
         global traces
         trace = traces[get_sorted_nodes()[0]]
         stats = trace['copy']
@@ -1043,10 +1046,131 @@ class AnalyzeNet:
                 core_data['avg_backlog'] /= traces[name]['elapsed_time']
         return stats
 
-    def print(self):
-        global rpcs, traces
+    def generate_delay_data(self, events, dir):
+        """
+        Creates data files for the delay information in events.
+
+        events:    Dictionary of events returned by collect_events.
+        dir:       Directory in which to write data files (one file per node)
+        """
+
+        for name, node_events in events.items():
+            # Maps from core number to a list of <time, delay> tuples
+            # for that core. Each tuple indicates when a packet was processed
+            # by GRO on that core, and the packet's end-to-end delay. The
+            # list for each core is sorted in increasing time order.
+            core_data = defaultdict(list)
+            for event in node_events:
+                event_time, type, length, core, delay = event
+                if type != "recv":
+                    continue
+                core_data[core].append([event_time, delay])
+
+            cores = sorted(core_data.keys())
+            max_len = 0
+            for core in cores:
+                length = len(core_data[core])
+                if length > max_len:
+                    max_len = length
+
+            f = open('%s/net_delay_%s.dat' % (dir, name), 'w')
+            f.write('# Node: %s\n' % (name))
+            f.write('# Generated at %s.\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            doc = ('# Packet delay information for a single node, broken '
+                'out by the core '
+                'where the packet is processed by GRO. For each active core '
+                'there are two columns, TimeN and '
+                'DelayN. Each line corresponds to a packet that was processed '
+                'by homa_gro_receive on core N at the given time with '
+                'the given delay '
+                '(measured end to end from ip_*xmit call to homa_gro_receive '
+                'call)')
+            f.write('\n# '.join(textwrap.wrap(doc)))
+            f.write('\n')
+            for core in cores:
+                t = 'Time%d' % core
+                d = 'Delay%d' % core
+                f.write('%8s%8s' % (t, d))
+            f.write('\n')
+            for i in range(0, max_len):
+                for core in cores:
+                    pkts = core_data[core]
+                    if i >= len(pkts):
+                        f.write('' * 15)
+                    else:
+                        f.write('%8.1f %7.1f' % (pkts[i][0], pkts[i][1]))
+                f.write('\n')
+            f.close()
+
+    def generate_backlog_data(self, events, dir):
+        """
+        Creates data files for per-core backlog information
+
+        events:    Dictionary of events returned by collect_events.
+        dir:       Directory in which to write data files (one file per node)
+        """
+        global options
+
+        for name, node_events in events.items():
+            # Maps from core number to a list; entry i in the list is
+            # the backlog on that core at the end of interval i.
+            backlogs = defaultdict(list)
+
+            interval_length = 20.0
+            start = (node_events[0][0]//interval_length) * interval_length
+            interval_end = start + interval_length
+            cur_interval = 0
+
+            for event in node_events:
+                event_time, type, length, core, delay = event
+                while event_time >= interval_end:
+                    interval_end += interval_length
+                    cur_interval += 1
+                    for core_intervals in backlogs.values():
+                        core_intervals.append(core_intervals[-1])
+
+                if not core in backlogs:
+                    backlogs[core] = [0] * (cur_interval+1)
+                if type == "recv":
+                    backlogs[core][-1] -= length
+                else:
+                    backlogs[core][-1] += length
+
+            cores = sorted(backlogs.keys())
+
+            print("Total intervals: %d" % (cur_interval))
+            f = open('%s/net_backlog_%s.dat' % (dir, name), "w")
+            f.write('# Node: %s\n' % (name))
+            f.write('# Generated at %s.\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            doc = ('# Time-series history of backlog for each active '
+                'GRO core on this node.  Column "BackC" shows the backlog '
+                'on core C at the given time (in usec). Backlog '
+                'is the KB of data destined '
+                'for core C that have been passed to ip*_xmit at the sender '
+                'but not yet seen by homa_gro_receive on the receiver.')
+            f.write('\n# '.join(textwrap.wrap(doc)))
+            f.write('\n    Time')
+            for core in cores:
+                f.write(' %7s' % ('Back%d' % core))
+            f.write('\n')
+            for i in range(0, cur_interval):
+                f.write('%8.1f' % (start + (i+1)*interval_length))
+                for core in cores:
+                    f.write(' %7.1f' % (backlogs[core][i] / 1000))
+                f.write('\n')
+            f.close()
+
+    def output(self):
+        global rpcs, traces, options
 
         events = self.collect_events()
+
+        if options.data_dir != None:
+            self.generate_delay_data(events, options.data_dir)
+            self.generate_backlog_data(events, options.data_dir)
+
         stats = self.summarize_events(events)
 
         print('\n-------------')
@@ -1235,7 +1359,7 @@ class AnalyzeTimeline:
         dispatcher.interest('AnalyzeRpc')
         return
 
-    def print(self):
+    def output(self):
         global rpcs
         num_client_rpcs = 0
         num_server_rpcs = 0
@@ -1376,7 +1500,7 @@ parser = OptionParser(description=
 parser.add_option('--analyzers', '-a', dest='analyzers', default='all',
         metavar='A', help='Space-separated list of analyzers to apply to '
         'the trace files (default: all)')
-parser.add_option('--data', '-d', dest='data', default='all',
+parser.add_option('--data', '-d', dest='data_dir', default=None,
         metavar='DIR', help='If this option is specified, analyzers will '
         'output data files (suitable for graphing) in the directory given '
         'by DIR. If this option is not specified, no data files will '
@@ -1414,7 +1538,8 @@ for analyzer in d.get_analyzers():
     if hasattr(analyzer, 'analyze'):
         analyzer.analyze()
 
-# Give each analyzer a chance to print out its findings.
+# Give each analyzer a chance to output its findings (includes
+# printing output and generating data files).
 for analyzer in d.get_analyzers():
-    if hasattr(analyzer, 'print'):
-        analyzer.print()
+    if hasattr(analyzer, 'output'):
+        analyzer.output()
