@@ -5,6 +5,7 @@ This script analyzes time traces gathered from Homa in a variety of ways.
 Invoke with the --help option for documentation.
 """
 
+from collections import defaultdict
 from glob import glob
 from optparse import OptionParser
 import math
@@ -17,8 +18,8 @@ import sys
 
 # This global variable holds information about every RPC from every trace
 # file. Keys are RPC ids, values are dictionaries of info about that RPC,
-# with the following elements (some elements may be missing, either because
-# they weren't needed by that RPC (e.g. grants) or because the RPC straddled
+# with the following elements (some elements may be missing if the RPC
+# straddled
 # the beginning or end of the timetrace):
 # peer:              Address of the peer host
 # name:              'name' field from the trace file where this RPC appeared
@@ -41,6 +42,13 @@ import sys
 #                    data packets (length is message data)
 # send_grant:        List of <time, offset, priority> tuples for
 #                    outgoing grant packets
+# ip_xmits:          Dictionary mapping from offset to ip_*xmit time for
+#                    that offset. Only contains entries for offsets where
+#                    the ip_xmit record has been seen but not send_data
+# resends:           Maps from offset to (most recent) time when a RESEND
+#                    request was made for that offset
+# retansmits:        One entry for each packet retransmitted; maps from offset
+#                    to <time, length> tuple
 #
 rpcs = {}
 
@@ -369,10 +377,24 @@ class Dispatcher:
         'regexp': 'processing grant for id ([0-9]+), offset ([0-9]+)'
     })
 
+    def __ip_xmit(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        for interest in interests:
+            interest.tt_ip_xmit(trace, time, core, id, offset)
+
+    patterns.append({
+        'name': 'ip_xmit',
+        'regexp': 'calling ip.*_xmit: .* id ([0-9]+), offset ([0-9]+)'
+    })
+
     def __send_data(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
         length = int(match.group(3))
+        if length == 0:
+            # Temporary fix to compensate for Homa bug; delete this code soon.
+            return
         for interest in interests:
             interest.tt_send_data(trace, time, core, id, offset, length)
 
@@ -482,6 +504,29 @@ class Dispatcher:
         'regexp': 'finished freeing ([0-9]+) skbs'
     })
 
+    def __resend(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        for interest in interests:
+            interest.tt_resend(trace, time, core, id, offset)
+
+    patterns.append({
+        'name': 'resend',
+        'regexp': 'Sent RESEND for client RPC id ([0-9]+), .* offset ([0-9]+)'
+    })
+
+    def __retransmit(self, trace, time, core, match, interests):
+        offset = int(match.group(1))
+        length = int(match.group(2))
+        id = int(match.group(3))
+        for interest in interests:
+            interest.tt_retransmit(trace, time, core, id, offset, length)
+
+    patterns.append({
+        'name': 'retransmit',
+        'regexp': 'retransmitting offset ([0-9]+), length ([0-9]+), id ([0-9]+)'
+    })
+
 #------------------------------------------------
 # Analyzer: activity
 #------------------------------------------------
@@ -555,12 +600,12 @@ class AnalyzeActivity:
         for id, rpc in rpcs.items():
             node = rpc['name']
 
-            if 'gro_data' in rpc:
+            gros = rpc['gro_data']
+            if gros:
                 # The start time for an input message is normally the time when
                 # GRO received the first data packet. However, if offset 0
                 # doesn't appear in the GRO list, assume the message was
                 # already in progress when the trace began.
-                gros = rpc['gro_data']
                 if gros[0][1] == 0:
                     in_start = gros[0][0]
                 else:
@@ -598,7 +643,7 @@ class AnalyzeActivity:
                     cores[core] += bytes
 
             # Collect information about outgoing messages.
-            if 'send_data' in rpc:
+            if rpc['send_data']:
                 if 'sendmsg' in rpc:
                     out_start = rpc['sendmsg']
                 else:
@@ -833,6 +878,212 @@ class AnalyzeCopy:
                         /stats['large_out_time_with_skbs']))
 
 #------------------------------------------------
+# Analyzer: net
+#------------------------------------------------
+class AnalyzeNet:
+    """
+    Prints information about delays in the network including NICs, network
+    delay and congestion, and receiver GRO overload.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpc')
+        return
+
+    def collect_events(self):
+        """
+        Matches up packet sends and receives for all RPCs to return a
+        dictionary that maps from trace name for a receiving node to a
+        list of events for that receiver. Each event is a
+        <time, event, length, core, delay> list:
+        time:      Time when the event occurred
+        event:     What happened: "xmit" for packet transmission or "recv"
+                   for packet reception (by GRO)
+        length:    Number of message bytes in packet
+        core:      Core where packet was processed by GRO
+        delay:     End-to-end delay for packet; zero for xmit events
+        """
+
+        global rpcs, traces
+        receivers = defaultdict(list)
+
+        # Process RPCs in sender-receiver pairs to collect data
+        max_data = get_packet_size()
+        for xmit_id, xmit_rpc in rpcs.items():
+            recv_id = xmit_id ^ 1
+            if not recv_id in rpcs:
+                continue
+            recv_rpc = rpcs[recv_id]
+            receiver = receivers[recv_rpc['name']]
+            if not 'gro_core' in recv_rpc:
+                continue
+            core = recv_rpc['gro_core']
+
+            xmit_pkts = sorted(xmit_rpc['send_data'],
+                    key=lambda tuple : tuple[1])
+            if xmit_pkts:
+                xmit_end = xmit_pkts[-1][1] + xmit_pkts[-1][2]
+            elif 'out_length' in xmit_rpc:
+                xmit_end = xmit_rpc['out_length']
+            elif 'in_length' in recv_rpc:
+                xmit_end = recv_rpc['in_length']
+            else:
+                # Not enough info to process this RPC
+                continue
+            if xmit_id == 701559387:
+                print("Id %d\nxmit_rpc %s\nrecv_rpc %s" % (xmit_id, xmit_rpc,
+                        recv_rpc))
+
+            recv_pkts = sorted(recv_rpc['gro_data'],
+                    key=lambda tuple : tuple[1])
+            xmit_ix = 0
+            if xmit_pkts:
+                xmit_time, xmit_offset, xmit_length = xmit_pkts[0]
+            else:
+                xmit_offset = 100000000
+                xmit_length = 0
+            xmit_bytes = 0
+            for i in range(0, len(recv_pkts)):
+                recv_time, recv_offset = recv_pkts[i]
+                if i == (len(recv_pkts) - 1):
+                    length = xmit_end - recv_offset
+                else:
+                    length = recv_pkts[i+1][1] - recv_offset
+                if length > max_data:
+                    length = max_data
+
+                if recv_offset < xmit_offset:
+                    # No xmit record; skip
+                    continue
+                while recv_offset >= (xmit_offset + xmit_length):
+                    if xmit_bytes:
+                        receiver.append([xmit_time, "xmit", xmit_bytes,
+                                core, 0.0])
+                    xmit_ix += 1
+                    if xmit_ix >= len(xmit_pkts):
+                        break
+                    xmit_time, xmit_offset, xmit_length = xmit_pkts[xmit_ix]
+                    xmit_bytes = 0
+                if xmit_ix >= len(xmit_pkts):
+                    # Receiver trace extends beyond sender trace; ignore extras
+                    break
+                if (recv_offset in recv_rpc['resends']) or (recv_offset
+                        in xmit_rpc['retransmits']):
+                    # Skip retransmitted packets (too hard to account for).
+                    # BTW, need both of the above checks to handle corner cases.
+                    continue
+                receiver.append([recv_time, "recv", length, core,
+                        recv_time - xmit_time])
+                if recv_time < xmit_time:
+                    print('%9.3f Negative delay, xmit_time %9.3f, '
+                            'xmit_id %d, recv_id %d, recv_rpc %s, xmit_rpc %s'
+                            % (recv_time, xmit_time, xmit_id, recv_id,
+                            recv_rpc, xmit_rpc), file=sys.stderr)
+                if xmit_id == 701559387:
+                    print('Normal delay %.3f for id %d, xmit_offset %d, '
+                            'recv_offset %d' % (recv_time - xmit_time,
+                            xmit_id, xmit_offset, recv_offset))
+                xmit_bytes += length
+            if xmit_bytes:
+                receiver.append([xmit_time, "xmit", xmit_bytes, core, 0.0])
+
+        for name, receiver in receivers.items():
+            receiver.sort(key=lambda tuple : tuple[0])
+        return receivers
+
+    def summarize_events(self, events):
+        """
+        Given a dictionary returned by collect_events, return information
+        about each GRO core as a dictionary indexed by trace names. Each
+        element is a dictionary indexed by cores, which in turn is a
+        dictionary with the following values:
+        num_packets:      Total number of packets received by the core
+        avg_delay:        Average end-to-end delay for packets
+        max_delay:        Worst-case end-to-end delay
+        max_delay_time:   Time when max_delay occurred
+        avg_backlog:      Average number of bytes of data in transit
+        max_backlog:      Worst-case number of bytes of data in transit
+        max_backlog_time: Time when max_backlog occurred
+        """
+
+        stats = defaultdict(lambda: defaultdict(lambda: {
+            'num_packets': 0,
+            'avg_delay': 0,
+            'max_delay': 0,
+            'avg_backlog': 0,
+            'max_backlog': 0,
+            'cur_backlog': 0,
+            'prev_time': 0}))
+
+        for name, node_events in events.items():
+            node = stats[name]
+            for event in node_events:
+                time, type, length, core, delay = event
+                core_data = node[core]
+                core_data['avg_backlog'] += (core_data['cur_backlog'] *
+                        (time - core_data['prev_time']))
+                if type == "recv":
+                    core_data['num_packets'] += 1
+                    core_data['avg_delay'] += delay
+                    if delay > core_data['max_delay']:
+                        core_data['max_delay'] = delay
+                        core_data['max_delay_time'] = time
+                    if core_data['cur_backlog'] == core_data['max_backlog']:
+                        core_data['max_backlog_time'] = time
+                    core_data['cur_backlog'] -= length
+                    if delay < 0:
+                        print('Negative delay: %s' % (event))
+                else:
+                    core_data['cur_backlog'] += length
+                    if core_data['cur_backlog'] > core_data['max_backlog']:
+                            core_data['max_backlog'] = core_data['cur_backlog']
+                core_data['prev_time'] = time
+            for core_data in node.values():
+                core_data['avg_delay'] /= core_data['num_packets']
+                core_data['avg_backlog'] /= traces[name]['elapsed_time']
+        return stats
+
+    def print(self):
+        global rpcs, traces
+
+        events = self.collect_events()
+        stats = self.summarize_events(events)
+
+        print('\n-------------')
+        print('Analyzer: net')
+        print('-------------')
+        print('Network delay (including sending NIC, network, receiving NIC, and GRO')
+        print('backup, for packets with GRO processing on a particular core.')
+        print('Pkts:      Total data packets processed by Core on Node')
+        print('AvgDelay:  Average end-to-end delay from ip_*xmit invocation to '
+                'GRO (usec)')
+        print('MaxDelay:  Maximum end-to-end delay, and the time when the max packet was')
+        print('           processed by GRO (usec)')
+        print('AvgBack:   Average backup for Core on Node (total data bytes that were')
+        print('           passed to ip_*xmit but not yet seen by GRO) (KB)')
+        print('MaxBack:   Maximum backup for Core (KB) and the time when GRO processed')
+        print('           a packet from that backup')
+        print('')
+        print('Node       Core   Pkts  AvgDelay     MaxDelay (Time)    '
+                'AvgBack     MaxBack (Time)')
+        print('--------------------------------------------------------'
+                '----------------------------', end='')
+        for name in get_sorted_nodes():
+            if not name in stats:
+                continue
+            node = stats[name]
+            print('')
+            for core in sorted(node.keys()):
+                core_data = node[core]
+                print('%-10s %4d %6d %9.1f %9.1f (%9.3f) %8.1f %8.1f (%9.3f)' % (
+                        name, core, core_data['num_packets'],
+                        core_data['avg_delay'], core_data['max_delay'],
+                        core_data['max_delay_time'],
+                        core_data['avg_backlog'] * 1e-3,
+                        core_data['max_backlog'] * 1e-3,
+                        core_data['max_backlog_time']))
+
+#------------------------------------------------
 # Analyzer: rpc
 #------------------------------------------------
 class AnalyzeRpc:
@@ -843,6 +1094,23 @@ class AnalyzeRpc:
 
     def __init__(self, dispatcher):
         return
+
+    def new_rpc(self, id, name):
+        """
+        Initialize a new RPC.
+        """
+
+        global rpcs
+        rpcs[id] = {'name': name,
+            'gro_data': [],
+            'gro_grant': [],
+            'softirq_data': [],
+            'softirq_grant': [],
+            'send_data': [],
+            'send_grant': [],
+            'ip_xmits': {},
+            'resends': {},
+            'retransmits': {}}
 
     def append(self, trace, id, name, value):
         """
@@ -859,7 +1127,7 @@ class AnalyzeRpc:
 
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpc = rpcs[id]
         if not name in rpc:
             rpc[name] = []
@@ -873,6 +1141,25 @@ class AnalyzeRpc:
 
     def tt_gro_grant(self, trace, time, core, peer, id, offset, priority):
         self.append(trace, id, 'gro_grant', [time, offset])
+        rpcs[id]['gro_core'] = core
+
+    def tt_ip_xmit(self, trace, time, core, id, offset):
+        global rpcs
+        if not id in rpcs:
+            self.new_rpc(id, trace['name'])
+        rpcs[id]['ip_xmits'][offset] = time
+
+    def tt_resend(self, trace, time, core, id, offset):
+        global rpcs
+        if not id in rpcs:
+            self.new_rpc(id, trace['name'])
+        rpcs[id]['resends'][offset] = time
+
+    def tt_retransmit(self, trace, time, core, id, offset, length):
+        global rpcs
+        if not id in rpcs:
+            self.new_rpc(id, trace['name'])
+        rpcs[id]['retransmits'][offset] = [time, length]
 
     def tt_softirq_data(self, trace, time, core, id, offset, length):
         global rpcs
@@ -883,7 +1170,14 @@ class AnalyzeRpc:
         self.append(trace, id, 'softirq_grant', [time, offset])
 
     def tt_send_data(self, trace, time, core, id, offset, length):
-        self.append(trace, id, 'send_data', [time, offset, length])
+        # Combine the length and other info from this record with the time
+        # from the ip_xmit call. No ip_xmit call? Skip this record too.
+        global rpcs
+        if (not id in rpcs) or (not offset in rpcs[id]['ip_xmits']):
+            return
+        ip_xmits = rpcs[id]['ip_xmits']
+        self.append(trace, id, 'send_data', [ip_xmits[offset], offset, length])
+        del ip_xmits[offset]
 
     def tt_send_grant(self, trace, time, core, id, offset, priority):
         self.append(trace, id, 'send_grant', [time, offset, priority])
@@ -891,7 +1185,7 @@ class AnalyzeRpc:
     def tt_sendmsg_request(self, trace, time, core, peer, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpcs[id]['out_length'] = length
         rpcs[id]['peer'] = peer
         rpcs[id]['sendmsg'] = time
@@ -899,33 +1193,33 @@ class AnalyzeRpc:
     def tt_sendmsg_response(self, trace, time, core, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpcs[id]['sendmsg'] = time
         rpcs[id]['out_length'] = length
 
     def tt_recvmsg_done(self, trace, time, core, id, length):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpcs[id]['recvmsg_done'] = time
 
     def tt_copy_out_start(self, trace, time, core, id):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         if not 'copy_out_start' in rpcs[id]:
             rpcs[id]['copy_out_start'] = time
 
     def tt_copy_out_done(self, trace, time, core, id, num_bytes):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpcs[id]['copy_out_done'] = time
 
     def tt_copy_in_done(self, trace, time, core, id, num_bytes):
         global rpcs
         if not id in rpcs:
-            rpcs[id] = {'name': trace['name']}
+            self.new_rpc(id, trace['name'])
         rpcs[id]['copy_in_done'] = time
 
 #------------------------------------------------
@@ -1011,8 +1305,8 @@ class AnalyzeTimeline:
                         client_extra_deltas)
             else:
                 # This is a server RPC
-                if (not 'gro_data' in rpc) or (rpc['gro_data'][0][1] != 0) \
-                        or (not 'send_data' in rpc):
+                if (not rpc['gro_data']) or (rpc['gro_data'][0][1] != 0) \
+                        or (not rpc['send_data']):
                     continue
                 num_server_rpcs += 1
                 self.__collect_stats(server_phases, rpc, server_totals,
@@ -1082,6 +1376,11 @@ parser = OptionParser(description=
 parser.add_option('--analyzers', '-a', dest='analyzers', default='all',
         metavar='A', help='Space-separated list of analyzers to apply to '
         'the trace files (default: all)')
+parser.add_option('--data', '-d', dest='data', default='all',
+        metavar='DIR', help='If this option is specified, analyzers will '
+        'output data files (suitable for graphing) in the directory given '
+        'by DIR. If this option is not specified, no data files will '
+        'be generated.')
 parser.add_option('-h', '--help', dest='help', action='store_true',
                   help='Show this help message and exit')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
@@ -1099,7 +1398,11 @@ if not tt_files:
     exit(1)
 d = Dispatcher()
 for name in options.analyzers.split():
-    d.interest('Analyze' + name[0].capitalize() + name[1:])
+    class_name = 'Analyze' + name[0].capitalize() + name[1:]
+    if not hasattr(sys.modules[__name__], class_name):
+        print('No analyzer named "%s"' % (name), file=sys.stderr)
+        exit(1)
+    d.interest(class_name)
 
 # Parse the timetrace files; this will invoke handler in the analyzers.
 for file in tt_files:
