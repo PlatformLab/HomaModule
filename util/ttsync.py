@@ -149,30 +149,76 @@ num_nodes = len(tt_files)
 for i in range(num_nodes):
     parse_tt(tt_files[i],i)
 find_min_delays(num_nodes)
+
+# Compute clock offsets and min delays. Try to use the first node as
+# a reference for all the others, but this may not be possible if not
+# all nodes communicated with the first one.
+
+# List of offset info for all nodes; index = node id; elements are
+# dictionaries with the following entries:
+# ref:         Node that was used to synchronize this node. -1 means
+#              this node isn't yet synchronized.
+# ref_offset:  Amount to add to node's clock to sync with ref.
+# offset:      Amount to add to node's clock to sync with index 0.
+offsets = []
+offsets.append({'ref': 0, 'ref_offset': 0.0, 'offset': 0.0})
 for i in range(1, num_nodes):
-    if (min_delays[0][i] > 1e10) or (min_delays[i][0] > 1e10):
-        print("No delay info between %s and %s (traces don't overlap?)" %
-                (node_names[0], node_names[i]), file=sys.stderr)
+    offsets.append({'ref': -1, 'ref_offset': 0.0, 'offset': 0.0})
+
+synced = 1
+while synced < num_nodes:
+    # Look for an unsynced node that we can sync.
+    progress = False
+    for i in range(1, num_nodes):
+        if offsets[i]['ref'] >= 0:
+            continue
+        # Look for a synced node that can be used as reference for node i.
+        for j in range(0, num_nodes):
+            if offsets[j]['ref'] < 0:
+                # This candidate isn't synced.
+                continue
+            if (min_delays[i][j] > 1e10) or (min_delays[j][i] > 1e10):
+                # No traffic between these nodes.
+                continue
+            # j can serve as referenced for i.
+            rtt = min_delays[j][i] + min_delays[i][j]
+            ref_offset = rtt/2 - min_delays[j][i]
+            offsets[i] = {'ref': j, 'ref_offset': ref_offset,
+                    'offset': offsets[j]['offset'] + ref_offset};
+            synced += 1
+            progress = True
+            break
+    if not progress:
+        # The remaining unsynced nodes can't be synced; print a message.
+        unsynced = []
+        for i in range(1, num_nodes):
+            if offsets[i]['ref'] < 0:
+                unsynced.append(node_names[i])
+        print('The following nodes couldn\'t be synced: %s (no traffic between\n'
+                'these nodes and other nodes)' %
+                (', '.join(unsynced)), file=sys.stderr)
         exit(1)
 
-# Compute clock offsets from min_delays
-offsets = [0.0 for i in range(num_nodes)]
-print('\nTime offsets computed for each node by synchronizing with %s' %
-        (node_names[0]))
-print('MinOut:   Smallest time difference (unsynced clocks) for a packet')
-print('          to get from %s to this node' % (node_names[0]))
-print('MinBack:  Smallest time difference (unsynced clocks) for a packet')
-print('          to get from this node to %s' % (node_names[0]))
-print('MinRTT:   Minimum RTT (computed from MinOut and MinBack)')
-print('Offset:   Add this to node\'s clock to align with %s' % (node_names[0]))
-print('\nNode         MinOut  MinBack  Min RTT   Offset')
-print('%-10s %8.1f %8.1f  %7.1f %8.1f' % (node_names[0],
-        0.0, 0.0, 0.0, 0.0))
+print('\nTime offsets computed for each node:')
+print('Ref:       Reference node used to sync this node')
+print('MinOut:    Smallest time difference (unsynced clocks) for a packet')
+print('           to get from Ref to this node')
+print('MinBack:   Smallest time difference (unsynced clocks) for a packet')
+print('           to get from this node to Ref')
+print('MinRTT:    Minimum RTT (computed from MinOut and MinBack)')
+print('RefOffset: Add this to node\'s clock to align with Ref')
+print('Offset:    Add this to node\'s clock to align with %s' % (node_names[0]))
+print('\nNode         Ref        MinOut  MinBack  Min RTT RefOffset   Offset')
+print('%-10s %-10s %8.1f %8.1f  %7.1f  %8.1f %8.1f' % (node_names[0], "N/A",
+        0.0, 0.0, 0.0, 0.0, 0.0))
 for node in range(1, num_nodes):
     min_rtt = min_delays[0][node] + min_delays[node][0]
-    offsets[node] = min_rtt/2 - min_delays[0][node]
-    print('%-10s %8.1f %8.1f  %7.1f %8.1f' % (node_names[node],
-            min_delays[0][node], min_delays[node][0], min_rtt, offsets[node]))
+    info = offsets[node]
+    ref = info['ref']
+    min_rtt = min_delays[ref][node] + min_delays[node][ref]
+    print('%-10s %-10s %8.1f %8.1f  %7.1f  %8.1f %8.1f' % (node_names[node],
+            node_names[ref], min_delays[ref][node], min_delays[node][ref],
+            min_rtt, info['ref_offset'], info['offset']))
 
 # Check for consistency (with these offsets, will all one-way delays be
 # positive?)
@@ -180,10 +226,12 @@ for src in range(num_nodes):
     for dst in range(num_nodes):
         if src == dst:
             continue
-        new_min = min_delays[src][dst] + offsets[dst] - offsets[src]
+        src_offset = offsets[src]['offset']
+        dst_offset = offsets[dst]['offset']
+        new_min = min_delays[src][dst] + dst_offset - src_offset
         if new_min < 0:
             print('Problematic offsets for node %d (%.1f) and %d (%.1f)'
-                    %(src, offsets[src], dst, offsets[dst]))
+                    %(src, src_offset, dst, dst_offset))
             print('   mimimum delay %.1f becomes %.1f' %
                     (min_delays[src][dst], new_min))
 
@@ -191,7 +239,7 @@ for src in range(num_nodes):
 if not options.no_rewrite:
     print("")
     for i in range(1, num_nodes):
-        offset = offsets[i]
+        offset = offsets[i]['offset']
         src = open(tt_files[i])
         dst = tempfile.NamedTemporaryFile(dir=os.path.dirname(tt_files[i]),
                 mode='w', encoding='utf-8', delete=False)
