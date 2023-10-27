@@ -835,50 +835,121 @@ class AnalyzeCopy:
 
     def output(self):
         global traces
-        trace = traces[get_sorted_nodes()[0]]
-        stats = trace['copy']
-        total_time = trace['last_time']
         print('\n--------------')
         print('Analyzer: copy')
         print('--------------')
-        print('Copying data from user space to kernel:')
-        if not stats['small_in_times']:
-            print('  0 short messages (<= 1000B)')
-        else:
-            print('  %d short messages (<= 1000 B): latency %s usec' %
-                    (len(stats['small_in_times']),
-                    get_time_stats(stats['small_in_times'])))
-        if stats['large_in_time'] == 0:
-            print('  0 long messages (>= 5000 B)')
-        else:
-            print('  %d long messages (>= 5000 B): per-thread throughput %.1f Gbps' %
-                    (stats['large_in_count'],
-                    8e-03*stats['large_in_data']/stats['large_in_time']))
-        print('  Average core utilization: %.2f cores' %
-                (stats['total_in_time']/total_time))
-        print('Copying data from kernel to user space:')
-        if not stats['small_out_times']:
-            print('  0 short transfers (<= 1200B)')
-        else:
-            print('  %d short transfers (<= 1000 B): latency %s usec' %
-                    (len(stats['small_out_times']),
-                    get_time_stats(stats['small_out_times'])))
-        if stats['large_out_time'] == 0:
-            print('  0 long transfers (>= 5000 B)')
-        else:
-            print('  %d long transfers (>= 5000 B): per-thread throughput %.1f Gbps' %
-                    (stats['large_out_count'],
-                    8e-03*stats['large_out_data']/stats['large_out_time']))
-        print('  Average core utilization: %.2f cores' %
-                (stats['total_out_time']/total_time))
-        if stats['skbs_freed'] > 0:
-            print('Freeing skbs after copying data to user space:')
-            print('  %d skbs, average free time %.2f us' % (stats['skbs_freed'],
-                    stats['skb_free_time']/stats['skbs_freed']))
-            if stats['large_out_time_with_skbs'] > 0:
-                print('  Copy throughput per thread, with skb freeing: %.1f Gbps'
-                        % (8e-03*stats['large_out_data']
-                        /stats['large_out_time_with_skbs']))
+        print('Performance of data copying between user space and kernel:')
+        print('Node:     Name of node')
+        print('#Short:   Number of short blocks copied (<= 1000 B)')
+        print('Min:      Minimum copy time for a short block (usec)')
+        print('P50:      Median copy time for short blocks (usec)')
+        print('P90:      90th percentile copy time for short blocks (usec)')
+        print('P99:      99th percentile copy time for short blocks (usec)')
+        print('Max:      Maximum copy time for a short block (usec)')
+        print('Avg:      Average copy time for short blocks (usec)')
+        print('#Long:    Number of long blocks copied (>= 5000 B)')
+        print('TputC:    Average per-core throughput for copying long blocks')
+        print('          when actively copying (Gbps)')
+        print('TputN:    Average long block copy throughput for the node (Gbps)')
+        print('Cores:    Average number of cores copying long blocks')
+        print('')
+        print('Copying from user space to kernel:')
+        print('Node       #Short   Min   P50   P90   P99   Max   Avg  #Long  '
+                'TputC TputN Cores')
+        print('--------------------------------------------------------------'
+                '-----------------')
+        for node in get_sorted_nodes():
+            trace = traces[node]
+            stats = trace['copy']
+
+            num_short = len(stats['small_in_times'])
+            if num_short == 0:
+                min = p50 = p90 = p99 = max = avg = 0.0
+            else:
+                sorted_data = sorted(stats['small_in_times'])
+                min = sorted_data[0]
+                p50 = sorted_data[50*num_short//100]
+                p90 = sorted_data[90*num_short//100]
+                p99 = sorted_data[99*num_short//100]
+                max = sorted_data[-1]
+                avg = sum(sorted_data)/num_short
+
+            num_long = stats['large_in_count']
+            if stats['large_in_time'] == 0:
+                core_tput = '   N/A'
+                node_tput = '   N/A'
+                cores = 0
+            else:
+                core_tput = '%6.1f' % (8e-03*stats['large_in_data']
+                            /stats['large_in_time'])
+                node_tput = '%6.1f' % (8e-03*stats['large_in_data']
+                            /trace['elapsed_time'])
+                cores = stats['total_in_time']/trace['elapsed_time']
+            print('%-10s %6d%6.1f%6.1f%6.1f%6.1f%6.1f%6.1f  %5d %s%s %5.2f' %
+                    (node, num_short, min, p50, p90, p99, max, avg, num_long,
+                    core_tput, node_tput, cores))
+
+        print('\nCopying from kernel space to user:')
+        print('Node       #Short   Min   P50   P90   P99   Max   Avg  #Long  '
+                'TputC TputN Cores')
+        print('--------------------------------------------------------------'
+                '-----------------')
+        for node in get_sorted_nodes():
+            trace = traces[node]
+            stats = trace['copy']
+
+            num_short = len(stats['small_out_times'])
+            if num_short == 0:
+                min = p50 = p90 = p99 = max = avg = 0.0
+            else:
+                sorted_data = sorted(stats['small_out_times'])
+                min = sorted_data[0]
+                p50 = sorted_data[50*num_short//100]
+                p90 = sorted_data[90*num_short//100]
+                p99 = sorted_data[99*num_short//100]
+                max = sorted_data[-1]
+                avg = sum(sorted_data)/num_short
+
+            num_long = stats['large_out_count']
+            if stats['large_out_time'] == 0:
+                core_tput = '   N/A'
+                node_tput = '   N/A'
+                cores = 0
+            else:
+                core_tput = '%6.1f' % (8e-03*stats['large_out_data']
+                            /stats['large_out_time'])
+                node_tput = '%6.1f' % (8e-03*stats['large_out_data']
+                            /trace['elapsed_time'])
+                cores = stats['total_out_time']/trace['elapsed_time']
+            print('%-10s %6d%6.1f%6.1f%6.1f%6.1f%6.1f%6.1f  %5d %s%s %5.2f' %
+                    (node, num_short, min, p50, p90, p99, max, avg, num_long,
+                    core_tput, node_tput, cores))
+
+        print('\nImpact of freeing socket buffers while copying to user:')
+        print('Node:     Name of node')
+        print('#Freed:   Number of skbs freed')
+        print('Time:     Average time to free an skb (usec)')
+        print('Tput:     Effective kernel->user throughput per core (TputC) including')
+        print('          skb freeing (Gbps)')
+        print('')
+        print('Node       #Freed   Time   Tput')
+        print('-------------------------------')
+        for node in get_sorted_nodes():
+            trace = traces[node]
+            stats = trace['copy']
+            stats['skbs_freed']
+            if stats['skbs_freed'] == 0:
+                free_time = 0
+                tput = 0
+            else:
+                free_time = stats['skb_free_time']/stats['skbs_freed']
+                if stats['large_out_time_with_skbs']:
+                    tput = '%6.1f' % (8e-03*stats['large_out_data']
+                        /stats['large_out_time_with_skbs'])
+                else:
+                    tput = '   N/A'
+            print('%-10s %6d %6.2f %s' % (node, stats['skbs_freed'],
+                    free_time, tput))
 
 #------------------------------------------------
 # Analyzer: net
@@ -907,7 +978,7 @@ class AnalyzeNet:
         delay:     End-to-end delay for packet; zero for xmit events
         """
 
-        global rpcs, traces
+        global rpcs, traces, options
         receivers = defaultdict(list)
 
         # Process RPCs in sender-receiver pairs to collect data
@@ -933,9 +1004,6 @@ class AnalyzeNet:
             else:
                 # Not enough info to process this RPC
                 continue
-            if xmit_id == 701559387:
-                print("Id %d\nxmit_rpc %s\nrecv_rpc %s" % (xmit_id, xmit_rpc,
-                        recv_rpc))
 
             recv_pkts = sorted(recv_rpc['gro_data'],
                     key=lambda tuple : tuple[1])
@@ -977,15 +1045,11 @@ class AnalyzeNet:
                     continue
                 receiver.append([recv_time, "recv", length, core,
                         recv_time - xmit_time])
-                if recv_time < xmit_time:
+                if recv_time < xmit_time and not options.negative_ok:
                     print('%9.3f Negative delay, xmit_time %9.3f, '
                             'xmit_id %d, recv_id %d, recv_rpc %s, xmit_rpc %s'
                             % (recv_time, xmit_time, xmit_id, recv_id,
                             recv_rpc, xmit_rpc), file=sys.stderr)
-                if xmit_id == 701559387:
-                    print('Normal delay %.3f for id %d, xmit_offset %d, '
-                            'recv_offset %d' % (recv_time - xmit_time,
-                            xmit_id, xmit_offset, recv_offset))
                 xmit_bytes += length
             if xmit_bytes:
                 receiver.append([xmit_time, "xmit", xmit_bytes, core, 0.0])
@@ -1008,6 +1072,7 @@ class AnalyzeNet:
         max_backlog:      Worst-case number of bytes of data in transit
         max_backlog_time: Time when max_backlog occurred
         """
+        global options
 
         stats = defaultdict(lambda: defaultdict(lambda: {
             'num_packets': 0,
@@ -1034,7 +1099,7 @@ class AnalyzeNet:
                     if core_data['cur_backlog'] == core_data['max_backlog']:
                         core_data['max_backlog_time'] = time
                     core_data['cur_backlog'] -= length
-                    if delay < 0:
+                    if (delay < 0) and not options.negative_ok:
                         print('Negative delay: %s' % (event))
                 else:
                     core_data['cur_backlog'] += length
@@ -1377,7 +1442,7 @@ class AnalyzeTimeline:
             ['softirq gets first grant',      'softirq_grant',lambda x : x[0][0]],
             ['last request packet sent',      'send_data',    lambda x : x[-1][0]],
             ['gro gets first response packet','gro_data',     lambda x : x[0][0]],
-            ['sent grant',                    'send_grant',   lambda x : x[0][0]],
+            ['sent grant',                    'send_grant',   lambda x : (print(x), x[0][0])],
             ['gro gets last response packet', 'gro_data',     lambda x : x[-1][0]],
             ['homa_recvmsg returning',        'recvmsg_done', lambda x : x]
             ]
@@ -1467,12 +1532,14 @@ class AnalyzeTimeline:
         for i in range(len(phases)):
             phase = phases[i]
             if phase[1] in rpc:
-                t = phase[2](rpc[phase[1]])
-                if i == 0:
-                    start = prev = t
-                totals[i].append(t - start)
-                deltas[i].append(t - prev)
-                prev = t
+                rpc_phase = rpc[phase[1]]
+                if rpc_phase:
+                    t = phase[2](rpc_phase)
+                    if i == 0:
+                        start = prev = t
+                    totals[i].append(t - start)
+                    deltas[i].append(t - prev)
+                    prev = t
 
     def __print_phases(self, phases, totals, deltas):
         """
@@ -1507,6 +1574,9 @@ parser.add_option('--data', '-d', dest='data_dir', default=None,
         'be generated.')
 parser.add_option('-h', '--help', dest='help', action='store_true',
                   help='Show this help message and exit')
+parser.add_option('--negative-ok', action='store_true', default=False,
+        dest='negative_ok',
+        help='Don\'t print warnings when negative delays are encountered')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='Print additional output with more details')
@@ -1520,6 +1590,8 @@ if options.help:
 if not tt_files:
     print('No trace files specified')
     exit(1)
+if options.data_dir:
+    os.makedirs(options.data_dir, exist_ok=True)
 d = Dispatcher()
 for name in options.analyzers.split():
     class_name = 'Analyze' + name[0].capitalize() + name[1:]
