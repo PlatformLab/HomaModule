@@ -300,18 +300,21 @@ def config_homa(mod):
         set_sysctl("link_mbps", "25000")
         set_sysctl("max_nic_queue_ns", "2000")
         set_sysctl("unsched_bytes", "60000")
+        set_sysctl("window", "100000")
         set_sysctl("max_incoming", "480000")
         set_sysctl("max_gso_size", "10000")
     elif type == "c6525-100g":
         set_sysctl("link_mbps", "100000")
         set_sysctl("max_nic_queue_ns", "5000")
-        set_sysctl("unsched_bytes", "200000")
+        set_sysctl("unsched_bytes", "60000")
+        set_sysctl("window", "200000")
         set_sysctl("max_incoming", "1600000")
         set_sysctl("max_gso_size", "100000")
     elif type == "c6525-25g":
         set_sysctl("link_mbps", "25000")
         set_sysctl("max_nic_queue_ns", "5000")
         set_sysctl("unsched_bytes", "60000")
+        set_sysctl("window", "100000")
         set_sysctl("max_incoming", "480000")
         set_sysctl("max_gso_size", "10000")
     else:
