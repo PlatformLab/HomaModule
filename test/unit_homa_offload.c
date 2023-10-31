@@ -302,9 +302,9 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 
 TEST_F(homa_offload, homa_gro_complete__GRO_IDLE_NEW)
 {
-	homa->gro_policy = HOMA_GRO_IDLE_NEW;
+	homa->gro_policy = HOMA_GRO_GEN2;
 	mock_cycles = 1000;
-	homa->gro_busy_cycles = 100;
+	homa->busy_cycles = 100;
 	cpu_number = 5;
 	atomic_set(&homa_cores[6]->softirq_backlog, 1);
 	homa_cores[6]->last_gro = 0;

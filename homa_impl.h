@@ -1948,7 +1948,7 @@ struct homa {
 	 *                            core for SoftIRQ (deprecated).
 	 * HOMA_GRO_NEXT              Always use the next core in circular
 	 *                            order for SoftIRQ (deprecated).
-	 * HOMA_GRO_IDLE_NEW          Use the new mechanism for selecting an
+	 * HOMA_GRO_GEN2              Use the new mechanism for selecting an
 	 *                            idle core for SoftIRQ.
 	 * HOMA_GRO_FAST_GRANTS       Pass all grant I can see immediately to
 	 *                            homa_softirq during GRO.
@@ -1959,25 +1959,22 @@ struct homa {
 	#define HOMA_GRO_SAME_CORE       2
 	#define HOMA_GRO_IDLE            4
 	#define HOMA_GRO_NEXT            8
-	#define HOMA_GRO_IDLE_NEW       16
+	#define HOMA_GRO_GEN2           16
 	#define HOMA_GRO_FAST_GRANTS    32
 	#define HOMA_GRO_SHORT_BYPASS   64
-	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_IDLE_NEW \
+	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_GEN2 \
 			|HOMA_GRO_SHORT_BYPASS)
 
 	/*
-	 * @gro_busy_usecs: try not to schedule SoftIRQ processing on a core
-	 * if it has handled Homa packets at GRO level in the last
-	 * gro_busy_us microseconds (improve load balancing by avoiding
-	 * hot spots). Set externally via sysctl.
+	 * @busy_usecs: if there has been activity on a core within the
+	 * last @busy_usecs, it is considered to be busy and Homa will
+	 * try to avoid scheduling other activities on the core. Set
+	 * externally via sysctl.
 	 */
-	int gro_busy_usecs;
+	int busy_usecs;
 
-	/**
-	 * @gro_busy_cycles: Same as gro_busy_usecs, except in units
-	 * of get_cycles().
-	 */
-	int gro_busy_cycles;
+	/** @busy_cycles: Same as busy_usecs except in get_cycles() units. */
+	int busy_cycles;
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked

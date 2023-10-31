@@ -268,7 +268,7 @@ static struct ctl_table homa_ctl_table[] = {
 	},
 	{
 		.procname	= "gro_busy_us",
-		.data		= &homa_data.gro_busy_usecs,
+		.data		= &homa_data.busy_usecs,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec

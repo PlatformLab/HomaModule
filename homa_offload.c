@@ -313,7 +313,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 //			NAPI_GRO_CB(skb)->count);
 
 #define CORES_TO_CHECK 4
-	if (homa->gro_policy & HOMA_GRO_IDLE_NEW) {
+	if (homa->gro_policy & HOMA_GRO_GEN2) {
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. This policy scans the next several cores
 		 * in order after this, trying to find one that is not
@@ -333,7 +333,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			core = homa_cores[candidate];
 			if (atomic_read(&core->softirq_backlog)  > 0)
 				continue;
-			if ((core->last_gro + homa->gro_busy_cycles) > now)
+			if ((core->last_gro + homa->busy_cycles) > now)
 				continue;
 			tt_record3("homa_gro_complete chose core %d for id %d "
 					"offset %d with IDLE_NEW policy",
