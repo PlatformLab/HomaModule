@@ -64,20 +64,32 @@ cpu_info = []
 # in cpuinfo). Filled in by read_cpu_info().
 num_phys_cores = 0
 
-def get_core_mask():
+# Describes the the full channel mappings for xl170 machines at CloudLab.
+# Entry i is the core that will handle incoming packets on channel i.
+xl170_default_cores = [0, 10, 7, 19, 8, 18, 6, 16, 4, 14,
+    11, 1, 7, 17, 15, 5, 13, 3,  2,  12]
+
+def get_core_mask(core = -1):
     """
-    Returns a string describing all the cores (hyperthreads) available
-    on this machine. The string represents a bit mask containing one
-    or more 32-bit hex values: "val,val,...val".
+    Returns a string representing a bit mask containing one bit for each
+    core. The mask is represented with one or more 32-bit hex values:
+    "val,val,...val". If the core argument is -1, then all of the bits are
+    ones (i.e. all cores are selected). If the core argument is >=0, then
+    all of the bits will be zeros except for the one selecting the indicated
+    core.
+
+    core:    Either -1 (to select all cores) or the number of a single core
+             to select..
     """
     read_cpu_info()
     mask_words = [0]
     for cpu in cpu_info:
-        core = cpu["processor"]
+        cur_core = cpu["processor"]
         word = core//32
         while word >= len(mask_words):
             mask_words.append(0);
-        mask_words[word] |= 1<<(core & 0x1f);
+        if (core == -1) or (cur_core == core):
+            mask_words[word] |= 1<<(cur_core & 0x1f);
     result = ""
     while len(mask_words) > 0:
         if len(result) != 0:
@@ -120,6 +132,27 @@ def get_interfaces():
     print("Primary network interface is %s, vlan is %s" % (interface, vlan))
     return [interface, vlan]
 
+def get_nic_irqs():
+    """
+    Returns a list containing the IRQ numbers for NIC channels (entry
+    0 in the list corresponds to channel 0, and so on).
+    """
+    irqs = {}
+    f = open("/proc/interrupts")
+    for line in f:
+        match = re.match('([0-9]+): .* mlx5_comp([0-9]+)@pci:0000:03:00.1', line)
+        if not match:
+            continue
+        irq = int(match.group(1))
+        channel = int(match.group(2))
+        irqs[channel] = irq
+    result = []
+    for i in range(len(irqs)):
+        if not i in irqs:
+            raise Exception('Couldn\'t find IRQ for NIC channel %d' % (i))
+        result.append(irqs[i])
+    return result
+
 def get_node_num():
     """
     Returns the (integer) number of this node (e.g., 1 for "node1").
@@ -153,7 +186,7 @@ def get_node_type():
 
 def get_node_names():
     """
-    Return a list, in order of node number (node0 first) containing the
+    Return a list, in order of node number (node0 first), containing the
     name of each node in the experiment, such as hp083.
     """
     global node_names
@@ -195,7 +228,7 @@ def get_num_nodes():
 def get_exp_ports():
     """
     Return a list containing all of the switch egress port numbers used by
-    nodes in the current experiment.
+    nodes in the current CloudLab experiment.
     """
 
     ports = []
@@ -205,6 +238,30 @@ def get_exp_ports():
             raise Exception("bad host name %s: expected number at end" % (name))
         ports.append(int(match.group(1)) % 40)
     return ports
+
+def print_rss():
+    """
+    Print out the current RSS configuration (how many channels and which
+    cores will handle them)
+    """
+
+    nic = get_interfaces()[0]
+    irqs = get_nic_irqs()
+    num_channels = -1
+    for line in subprocess.run(["ethtool", "-l", nic], stdout=subprocess.PIPE,
+            encoding="utf-8", check=True).stdout.splitlines():
+        match = re.match('Combined:[^0-9]+([0-9]+)', line)
+        if match:
+            num_channels = int(match.group(1))
+    if num_channels <= 0:
+        raise Exception('Couldn\'t get number of channels from ethtool')
+    print('Number of NIC channels: %d' % (num_channels))
+    print('Channel   Core')
+    for i in range(num_channels):
+        f = open('/proc/irq/%s/smp_affinity_list' % (irqs[i]))
+        core = int(f.read())
+        f.close()
+        print('%-4d    %4d' % (i, core))
 
 def read_cpu_info():
     """
@@ -439,6 +496,63 @@ def config_rps():
     print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
+def config_rss(config):
+    """
+    Configure RSS (Receive-Side Scaling) and SoftIRQ steering by setting
+    the number of NIC channels and which cores will handle each. In addition,
+    it will configure Homa's mechanism for choosing SoftIRQ cores as described
+    in gen3.txt.
+
+    config:  Indicates which configuration is desired; one of:
+             xl170_default:   Boot-time default for CloudLab xl170 machines
+             gen2:            For Homa Gen2 load balancing: one channel/core
+             gen3:            For Homa Gen3 load balancing: one channel/4 cores
+             gen3_alt:        One channel/2 cores
+    """
+
+    read_cpu_info()
+
+    if config == 'xl170_default':
+        cores = xl170_default_cores
+    elif config == 'gen2':
+        cores = range(len(cpu_info))
+    elif config == 'gen3':
+        cores = [2*i for i in range(len(cpu_info)//4)]
+    elif config == 'gen3_alt':
+        cores = range(len(cpu_info)//2)
+    else:
+        raise Exception('Bad RSS config "%s"; must be xl170_default, gen2, '
+                'gen3, or gen3_alt' % (config))
+
+    subprocess.run(["sudo", "ethtool", "-L", get_interfaces()[0], "combined",
+          str(len(cores))], check=True)
+
+    irqs = get_nic_irqs()
+    half_cores = len(cpu_info)//2
+    for i in range(len(cores)):
+        softirq_cores = []
+        core = cores[i]
+        if config == 'gen3':
+            # Use every 4th core for GRO, with 3 choices for SoftIRQ
+            softirq_cores = [2*i + 1, half_cores + 2*i, half_cores + 2*i + 1]
+        elif config == 'gen3_alt':
+            # Use every other core for GRO, with only 1 choice for SoftIRQ
+            softirq_cores = [(half_cores + (core+1)%half_cores), -1, -1]
+        softirq_msg = ''
+        if softirq_cores:
+            softirq_msg = ", SoftIRQ on cores %s" % (softirq_cores)
+            subprocess.run(["sudo", "sysctl",
+                    ".net.homa.gen3_softirq_cores=%d %d %d %d" % (cores[i],
+                    softirq_cores[0], softirq_cores[1], softirq_cores[2])],
+                    check=True)
+
+        subprocess.run(["sudo", "bash", "-c",
+                "echo %d > /proc/irq/%s/smp_affinity_list" % (cores[i], irqs[i])],
+                check=True)
+
+        print("Configured RSS for channel %d (IRQ %d): NAPI on core %d%s"
+                % (i, irqs[i], cores[i], softirq_msg))
+
 def config_switch_buffer_limit(mbytes):
     """
     Restrict the total amount of buffer space available for egress ports
@@ -489,6 +603,7 @@ def print_help():
     print("    nic                    Configure the NIC for optimal Homa performance")
     print("    power                  Configure power management (e.g., C-states)")
     print("                           for best Homa performance")
+    print("    print_rss              Print out current RSS configuration")
     print("    reset_switch_all_ports Issue commands to TOR switch to restore original")
     print("                           port settings for all ports on the switch")
     print("                           (even those not used by current experiment)")
@@ -496,6 +611,9 @@ def print_help():
     print("                           original port settings (only restores ports")
     print("                           used by the current experiment)")
     print("    rps                    Set up (and enable) RPS and RFS")
+    print("    rss TYPE               Configure RSS and SoftIRQ core selection as")
+    print("                           indicated by TYPE (xl170_default, gen2, gen3,")
+    print("                           or gen3_alt)")
     print("    switch_buffer_limit MB Set max egress buffer space in TOR switch to")
     print("                           MB Mbytes")
     print("    switch_all_ports       Issue commands to TOR switch to configure ")
@@ -551,12 +669,20 @@ while i < len(sys.argv):
             print(name)
     elif arg == "power":
         config_power()
+    elif arg == "print_rss":
+        print_rss()
     elif arg == "reset_switch_all_ports":
         config_reset_switch_all_ports()
     elif arg == "reset_switch_ports":
         config_reset_switch_ports()
     elif arg == "rps":
         config_rps()
+    elif arg == "rss":
+        if i >= len(sys.argv):
+            raise Exception("No argument provided for 'rss' command");
+            exit(1)
+        config_rss(sys.argv[i])
+        i += 1
     elif arg == "switch_buffer_limit":
         if i >= len(sys.argv):
             raise Exception("No argument provided for 'switch_buffer_limit' command");
