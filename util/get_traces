@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Copyright (c) 2023 Stanford University
+#
+# SPDX-License-Identifier: BSD-1-Clause
+
+# Usage:
+# get_traces first last dst
+#
+# This script will retrieve node.tt timetraces from the home directory
+# of the nodes with numbers from first to last, inclusive, and store them
+# in files nodeN.tt in directory dst.
+
+if [ $# -ne 3 ]; then
+    echo "Usage: get_traces first last dst"
+    exit 1
+fi
+first=$1
+last=$2
+dst=$3
+
+for ((i = $first ; i <= $last; i++)); do
+    node=node$i
+    echo $node
+    mkdir -p $dst
+    cl ssh $node cat node.tt > $dst/$node.tt
+done
