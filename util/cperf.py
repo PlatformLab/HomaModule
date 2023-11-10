@@ -383,7 +383,7 @@ def init(options):
 
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
-        do_ssh(["config", "mtu", str(options.mtu)], range(0, options.num_nodes))
+        do_ssh(["config", "mtu", str(options.mtu)], options.nodes)
 
     if options.delete_rtts:
         delete_rtts = True
@@ -1194,7 +1194,7 @@ def get_digest(experiment):
             bucket_slowdowns.append(slowdown)
             slowdown_sum += slowdown
     digest["avg_slowdown"] = slowdown_sum/digest["total_messages"]
-    log("Digest finished for %s, %d RPCs, average slowdown %.1f, "
+    log("Digest finished for %s, %d RPCs, average slowdown %.2f, "
             "best-case RTT %.1f us" % (experiment, digest["total_messages"],
             digest["avg_slowdown"], min_rtt))
 
