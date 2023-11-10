@@ -300,7 +300,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	kfree_skb(self->skb);
 }
 
-TEST_F(homa_offload, homa_gro_complete__GRO_IDLE_NEW)
+TEST_F(homa_offload, homa_gro_gen2)
 {
 	homa->gro_policy = HOMA_GRO_GEN2;
 	mock_cycles = 1000;
@@ -335,6 +335,58 @@ TEST_F(homa_offload, homa_gro_complete__GRO_IDLE_NEW)
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(6, self->skb->hash - 32);
 	EXPECT_EQ(1, homa_cores[5]->softirq_offset);
+}
+
+TEST_F(homa_offload, homa_gro_gen3__basics)
+{
+	homa->gro_policy = HOMA_GRO_GEN3;
+	struct homa_core *core = homa_cores[cpu_number];
+	core->gen3_softirq_cores[0] = 3;
+	core->gen3_softirq_cores[1] = 7;
+	core->gen3_softirq_cores[2] = 5;
+	homa_cores[3]->last_app_active = 4100;
+	homa_cores[7]->last_app_active = 3900;
+	homa_cores[5]->last_app_active = 2000;
+	mock_cycles = 5000;
+	self->homa.busy_cycles = 1000;
+
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(7, self->skb->hash - 32);
+	EXPECT_EQ(0, homa_cores[3]->last_active);
+	EXPECT_EQ(5000, homa_cores[7]->last_active);
+}
+TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
+{
+	homa->gro_policy = HOMA_GRO_GEN3;
+	struct homa_core *core = homa_cores[cpu_number];
+	core->gen3_softirq_cores[0] = 3;
+	core->gen3_softirq_cores[1] = -1;
+	core->gen3_softirq_cores[2] = 5;
+	homa_cores[3]->last_app_active = 4100;
+	homa_cores[5]->last_app_active = 2000;
+	mock_cycles = 5000;
+	self->homa.busy_cycles = 1000;
+
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(3, self->skb->hash - 32);
+	EXPECT_EQ(5000, homa_cores[3]->last_active);
+}
+TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
+{
+	homa->gro_policy = HOMA_GRO_GEN3;
+	struct homa_core *core = homa_cores[cpu_number];
+	core->gen3_softirq_cores[0] = 3;
+	core->gen3_softirq_cores[1] = 7;
+	core->gen3_softirq_cores[2] = 5;
+	homa_cores[3]->last_app_active = 4100;
+	homa_cores[7]->last_app_active = 4001;
+	homa_cores[5]->last_app_active = 4500;
+	mock_cycles = 5000;
+	self->homa.busy_cycles = 1000;
+
+	homa_gro_complete(self->skb, 0);
+	EXPECT_EQ(3, self->skb->hash - 32);
+	EXPECT_EQ(5000, homa_cores[3]->last_active);
 }
 
 TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)

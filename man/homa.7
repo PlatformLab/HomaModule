@@ -268,6 +268,17 @@ in
 The amount of time (in microseconds) that a given core can own a page in
 a receive buffer pool before its ownership can be revoked by a different
 core.
+.IR gro_policy
+An integer value that determines how Homa processes incoming packets
+at the GRO level. See code in homa_offload.c for more details.
+.TP
+.IR busy_usecs
+An integer value in microsecond units; if a core has been active in
+the last
+.IR busy_usecs
+time, Homa will consider it to be "busy": in some situations Homa
+will try to avoid scheduling conflicting activities on that core, in order to
+avoid hot spots and achieve better load balancing.
 .TP
 .I cutoff_version
 (Read-only) The current version for unscheduled cutoffs; incremented
@@ -307,6 +318,16 @@ Homa will freeze its internal timetrace. This is used for debugging and
 performance analysis; see the source code for the values currently
 supported.
 .TP
+.IR gen3_softirq_cores
+Used to query and change the set of SoftIRQ cores associated with each
+GRO core. When written, the value contains 4 integers. The first is the number
+of a core on which GRO processing occurs. The others are core numbers for
+up to three other cores; the GRO core will choose from among these cores
+when deciding where to direct batches of packets for SoftIRQ processing.
+SoftIRQ core numbers of -1 can be used to reduce the number of SoftIRQ
+choices. When read, the value contains 4 integers for each core, with the
+same format as described above.
+.TP
 .IR grant_fifo_fraction
 When sending grants, Homa normally uses an SRPT policy, granting to the
 message(s) with the fewest remaining bytes. This parameter can be
@@ -323,17 +344,6 @@ If this value is nonzero, Homa will perform GSO in software instead of
 asking the NIC to perform TSO in hardware. This can be useful when running
 with NICs that refuse to perform TSO on Homa packets.
 .TP
-.IR gro_policy
-An integer value that determines how Homa processes incoming packets
-at the GRO level. See code in homa_offload.c for more details.
-.TP
-.IR gro_busy_usecs
-An integer value. Under some
-.IR gro_policy
-settings, Homa will try not to assign SoftIRQ processing to a core if
-it has had GRO-level activity in the last
-.IR gro_busy_usecs
-microseconds (in order to avoid hot spots that degrade load balancing).
 .TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to

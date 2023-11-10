@@ -2817,6 +2817,66 @@ TEST_F(homa_incoming, homa_wait_for_message__signal)
 	EXPECT_EQ(EINTR, -PTR_ERR(rpc));
 }
 
+TEST_F(homa_incoming, homa_choose_interest__empty_list)
+{
+	struct homa_interest *result = homa_choose_interest(&self->homa,
+			&self->hsk.request_interests,
+			offsetof(struct homa_interest, request_links));
+	EXPECT_EQ(NULL, result);
+}
+TEST_F(homa_incoming, homa_choose_interest__find_idle_core)
+{
+	struct homa_interest interest1, interest2, interest3;
+	homa_interest_init(&interest1);
+	interest1.core = 1;
+	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
+	homa_interest_init(&interest2);
+	interest2.core = 2;
+	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
+	homa_interest_init(&interest3);
+	interest3.core = 3;
+	list_add_tail(&interest3.request_links, &self->hsk.request_interests);
+
+	mock_cycles = 5000;
+	self->homa.busy_cycles = 1000;
+	homa_cores[1]->last_active = 4100;
+	homa_cores[2]->last_active = 3500;
+	homa_cores[3]->last_active = 2000;
+
+	struct homa_interest *result = homa_choose_interest(&self->homa,
+			&self->hsk.request_interests,
+			offsetof(struct homa_interest, request_links));
+	ASSERT_NE(NULL, result);
+	EXPECT_EQ(2, result->core);
+	INIT_LIST_HEAD(&self->hsk.request_interests);
+}
+TEST_F(homa_incoming, homa_choose_interest__all_cores_busy)
+{
+	struct homa_interest interest1, interest2, interest3;
+	homa_interest_init(&interest1);
+	interest1.core = 1;
+	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
+	homa_interest_init(&interest2);
+	interest2.core = 2;
+	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
+	homa_interest_init(&interest3);
+	interest3.core = 3;
+	list_add_tail(&interest3.request_links, &self->hsk.request_interests);
+
+	mock_cycles = 5000;
+	self->homa.busy_cycles = 1000;
+	homa_cores[1]->last_active = 4100;
+	homa_cores[2]->last_active = 4001;
+	homa_cores[3]->last_active = 4800;
+
+	struct homa_interest *result = homa_choose_interest(&self->homa,
+			&self->hsk.request_interests,
+			offsetof(struct homa_interest, request_links));
+	ASSERT_NE(NULL, result);
+	EXPECT_EQ(1, result->core);
+	INIT_LIST_HEAD(&self->hsk.request_interests);
+}
+
 TEST_F(homa_incoming, homa_rpc_handoff__handoff_already_in_progress)
 {
 	struct homa_interest interest;
@@ -2981,6 +3041,28 @@ TEST_F(homa_incoming, homa_rpc_handoff__detach_interest)
 	EXPECT_EQ(NULL, crpc->interest);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
+	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
+}
+TEST_F(homa_incoming, homa_rpc_handoff__update_last_app_active)
+{
+	struct homa_interest interest;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(NULL, crpc->interest);
+	unit_log_clear();
+
+	homa_interest_init(&interest);
+	interest.thread = &mock_task;
+	interest.reg_rpc = crpc;
+	interest.core = 2;
+	crpc->interest = &interest;
+	mock_cycles = 10000;
+	homa_cores[2]->last_app_active = 444;
+	homa_rpc_handoff(crpc);
+	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
+	EXPECT_EQ(10000, homa_cores[2]->last_app_active);
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
 }
 

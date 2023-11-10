@@ -1,0 +1,114 @@
+This file discusses the issue of load-balancing in Homa.
+
+In order to keep up with fast networks, transport protocols must distribute
+their processing across multiple cores. For outgoing packets this happens
+naturally: sending threads run on different cores and packet processing
+for outbound packets happens on the same core is the sending thread. Things
+are more difficult for incoming packets. In general, an incoming packet
+will pass through 3 cores:
+* NAPI/GRO: the NIC distributes incoming packets across cores using RSS.
+  The number of incoming channels, and their association with cores, can
+  be configured in software. The NIC will then distribute packets across
+  those channels using a hash based on packet header fields. The device
+  driver receives packets as part of NAPI, then packets are collected into
+  batches using GRO and handed off to SoftIRQ.
+* SoftIRQ processing occurs on a (potentially) different core from NAPI/GRO;
+  the network stack runs here, including Homa's main handlers for incoming
+  packets. The system default is to compute another hash function on packet
+  headers to select a SoftIRQ or for a batch, but it is possible for GRO
+  to make its own choice of core, and Homa does this.
+* Once a complete message is received, it is handed off to an application
+  thread, which typically runs on a different core.
+
+The load balancing challenge is to distribute load across multiple cores
+without overloading any individual core ("hotspots"). This has proven
+quite difficult, and hotspots are the primary source of tail latency in Homa.
+The most common cause of hotspots is when 2 or more of the above tasks
+are assigned to the same core. For example:
+* Two batches from different NAPI/GRO cores might get assigned to the same
+  SoftIRQ core.
+* A particular core might be very busy handling NAPI/GRO for a stream of
+  packets in a large message; this will prevent application threads from
+  making progress on that core. A short message might pass through other
+  cores for NAPI/GRO and SoftIRQ, but if its application is running on
+  the busy core, then it will not able to process the short message.
+
+Part of the problem is that core assignments are made independently by
+3 different schedulers (RSS for the NAPI/GRO core, GRO or the system for
+the SoftIRQ core, and the Linux scheduler for the application core),
+so conflicts are likely to occur. Only one of these schedulers is under
+control of the transport protocol.
+
+It's also important to note that using more cores isn't always the best
+approach. For example, if a node is lightly loaded, it would be best to
+do all RX processing on a single core: using multiple cores causes extra
+cache misses as data migrates from core to core, and it also adds latency
+to pass control between cores. In an ideal world, the number of cores used for
+protocol processing would be just enough to keep any of them from getting
+overloaded. However, it appears to be hard to vary the number of cores
+without risking overloads; except in a few special cases, Homa doesn't do
+this.
+
+Homa tries to use its control over SoftIRQ scheduling to minimize hotspots.
+Several different approaches have been tried over time; this document
+focuses on the two most recent ones, which are called "Gen2" and "Gen3".
+
+Gen2 Load Balancing
+-------------------
+* Gen2 assumes that NAPI/GRO processing is occurring on all cores.
+* When GRO chooses where to assign a batch of packets for SoftIRQ, it
+  considers the next several cores (in ascending circular core order
+  after the GRO core).
+* GRO uses several criteria to try to find a "good" core for SoftIRQ, such
+  as avoiding a core that has done recent GRO processing, or one for which
+  there is already pending SoftIRQ work.
+* Selection stops as soon as it finds a "good" core.
+* If no "good" core is found, then GRO will rotate among the successor
+  cores on a batch-by-batch basis.
+* In some cases, Gen2 will bypass the SoftIRQ handoff mechanism and simply
+  run SoftIRQ immediately on its core. This is done in two cases: short
+  packets and grant packets. Bypass is particularly useful for grants
+  because it eliminates the latency associated with a handoff, and grant
+  turnaround time is important for overall performance.
+
+Gen2 has several problems:
+* It doesn't do anything about the problem of application threads conflicting
+  with NAPI/GRO or SoftIRQ.
+* A single core may be assigned both SoftIRQ and NAPI/GRO work at the
+  same time.
+* The SoftIRQ core groups for different NAPI/GRO cores overlap, so it's
+  possible for multiple GROs to schedule batches to the same SoftIRQ core.
+* When receiving packets from a large message, Gen2 tends to alternate between
+  2 or more SoftIRQ cores, which results in unnecessary cache coherency
+  traffic.
+* If the NAPI/GRO core is overloaded, bypass can make things worse (especially
+  since grant processing results in transmitting additional packets, which
+  is fairly expensive).
+
+Gen3 Load Balancing
+-------------------
+The Gen3 load-balancing mechanism is an attempt to solve the problems
+associated with Gen2.
+* The number of channels is reduced, so that only 1/4 of the cores do
+  NAPI/GRO processing. This appears to be sufficient capacity to avoid
+  overloads on any of the NAPI/GRO cores.
+* Each NAPI/GRO core has 3 other cores (statically assigned) that it can use
+  for SoftIRQ processing. The SoftIRQ core groups for different NAPI/GRO
+  cores do not overlap. This means that SoftIRQ and GRO will never happen
+  simultaneously on the same core, and there will be no conflicts between
+  the SoftIRQ groups of different NAPI/GRO cores.
+* Gen3 takes steps to avoid core conflicts between application threads and
+  NAPI/GRO and SoftIRQ processing, as described below.
+* When an application thread is using Homa actively on a core, the core
+  is marked as "busy". When GRO selects a SoftIRQ core, it attempts to
+  avoid cores that are busy with application threads. If there is a choice
+  of un-busy cores, GRO will try to reuse a single SoftIRQ over and over.
+* Homa also keeps track of recent NAPI/GRO and SoftIRQ processing on each
+  core. When an incoming message becomes ready and there are multiple threads
+  waiting for messages, Homa tries to pick a thread whose core has not had
+  recent Homa activity.
+* Between these two mechanisms, the hope is that SoftIRQ and application
+  work will adjust their core assignments to avoid conflicts.
+
+Gen3 was implemented in November of 2023; so far its performance appears to be
+about the same as Gen2. We

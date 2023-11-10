@@ -225,6 +225,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
+		.procname	= "busy_usecs",
+		.data		= &homa_data.busy_usecs,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "cutoff_version",
 		.data		= &homa_data.cutoff_version,
 		.maxlen		= sizeof(int),
@@ -260,15 +267,15 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "grant_fifo_fraction",
-		.data		= &homa_data.grant_fifo_fraction,
-		.maxlen		= sizeof(int),
+		.procname	= "gen3_softirq_cores",
+		.data		= NULL,
+		.maxlen		= 0,
 		.mode		= 0644,
-		.proc_handler	= homa_dointvec
+		.proc_handler	= homa_sysctl_softirq_cores
 	},
 	{
-		.procname	= "gro_busy_us",
-		.data		= &homa_data.busy_usecs,
+		.procname	= "grant_fifo_fraction",
+		.data		= &homa_data.grant_fifo_fraction,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -871,6 +878,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 	struct homa_rpc *rpc = NULL;
 	sockaddr_in_union *addr = (sockaddr_in_union *) msg->msg_name;
 
+	homa_cores[raw_smp_processor_id()]->last_app_active = start;
 	if (unlikely(!msg->msg_control_is_user)) {
 		result = -EINVAL;
 		goto error;
@@ -997,6 +1005,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	int result;
 
 	INC_METRIC(recv_calls, 1);
+	homa_cores[raw_smp_processor_id()]->last_app_active = start;
 	if (unlikely(!msg->msg_control)) {
 		/* This test isn't strictly necessary, but it provides a
 		 * hook for testing kernel call times.
@@ -1653,6 +1662,78 @@ int homa_dointvec(struct ctl_table *table, int write,
 			action = 0;
 		}
 	}
+	return result;
+}
+
+/**
+ * homa_sysctl_softirq_cores() - This function is invoked to handle sysctl
+ * requests for the "gen3_softirq_cores" target, which requires special
+ * processing.
+ * @table:    sysctl table describing value to be read or written.
+ * @write:    Nonzero means value is being written, 0 means read.
+ * @buffer:   Address in user space of the input/output data.
+ * @lenp:     Not exactly sure.
+ * @ppos:     Not exactly sure.
+ *
+ * Return: 0 for success, nonzero for error.
+ */
+int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+		void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int result, i;
+	struct ctl_table table_copy;
+	struct homa_core *core;
+	int max_values, *values;
+
+	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
+	values = (int *) kmalloc(max_values * sizeof(int), GFP_KERNEL);
+	if (values == NULL)
+		return -ENOMEM;
+
+	table_copy = *table;
+	table_copy.data = values;
+	if (write) {
+		/* First value is core id, others are contents of its
+		 * gen3_softirq_cores.
+		 */
+		for (i = 0; i < max_values ; i++)
+			values[i] = -1;
+		table_copy.maxlen = max_values;
+		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
+		if (result != 0)
+			goto done;
+		for (i = 0; i < max_values;
+				i += NUM_GEN3_SOFTIRQ_CORES + 1) {
+			int j;
+			if (values[i] < 0)
+				break;
+			core = homa_cores[values[i]];
+			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
+				core->gen3_softirq_cores[j] = values[i+j+1];
+		}
+	} else {
+		/* Read: return values from all of the cores. */
+		int *dst;
+
+		table_copy.maxlen = 0;
+		dst = values;
+		for (i = 0; i < nr_cpu_ids; i++) {
+			int j;
+
+			*dst = i;
+			dst++;
+			table_copy.maxlen += sizeof(int);
+			core = homa_cores[i];
+			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++) {
+				*dst = core->gen3_softirq_cores[j];
+				dst++;
+				table_copy.maxlen += sizeof(int);
+			}
+		}
+		result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
+	}
+done:
+	kfree(values);
 	return result;
 }
 

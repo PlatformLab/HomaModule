@@ -380,10 +380,22 @@ if elapsed_secs != 0:
         print("-------------------")
         poll_percent = 100.0*float(deltas["fast_wakeups"])/total_messages
         sleep_percent = 100.0*float(deltas["slow_wakeups"])/total_messages
-        print("Available immediately:   %4.1f%%" % (100.0 - poll_percent
+        if deltas["gen3_alt_handoffs"]:
+            gen3_alt_percent = (100.0*deltas["gen3_alt_handoffs"]
+                    /deltas["gen3_handoffs"])
+        else:
+            gen3_alt_percent = 0.0
+        if deltas["handoffs_alt_thread"]:
+            alt_thread_percent = (100.0*deltas["handoffs_alt_thread"]
+                    /deltas["handoffs_thread_waiting"])
+        else:
+            alt_thread_percent = 0.0
+        print("Available immediately:      %4.1f%%" % (100.0 - poll_percent
                 - sleep_percent))
-        print("Arrived while polling:   %4.1f%%" % (poll_percent))
-        print("Blocked at least once:   %4.1f%%" % (sleep_percent))
+        print("Arrived while polling:      %4.1f%%" % (poll_percent))
+        print("Blocked at least once:      %4.1f%%" % (sleep_percent))
+        print("Alternate GRO handoffs:     %4.1f%%" % (gen3_alt_percent))
+        print("Alternate thread handoffs:  %4.1f%%" % (alt_thread_percent))
 
     print("\nMiscellaneous:")
     print("--------------")

@@ -2,6 +2,10 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+49. (November 2023) Implemented "Gen3" load balancing scheme, renamed the
+    old scheme "Gen2". For details on load balancing, see balance.txt.
+    So far, Gen3 doesn't appear any better than Gen2.
+
 48. (August 2023) Unexpected packet loss on c6525-100g cluster (AMD processors,
     100 Gbps links). Under some conditions (such as "cp_node client --one-way
     --workload 1000000" with dynamic_windows=1 and unsched_bytes=50000)
@@ -497,7 +501,7 @@ Event                                                               Median
     so as not to interfere with user threads. This sometimes means it has to
     wait for a full time slice for other threads, which seems to be 5-7 ms.
     I tried disabling this feature of __do_softirq, so that all requests get
-    processed in the high-priority thread, and the P999 latency improved by
+    processed in the high-priority thread, and the P9999 latency improved by
     about 10x (< 1 ms worst case).
 
 18. (July 2020) Small-message latency. The best-case RTT for small messages

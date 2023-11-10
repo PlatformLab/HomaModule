@@ -57,12 +57,18 @@ int homa_init(struct homa *homa)
 		first = (char *) (((__u64) core_memory + 0x3f) & ~0x3f);
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct homa_core *core;
+			int j;
+
 			core = (struct homa_core *) (first + i*aligned_size);
 			homa_cores[i] = core;
 			core->last_active = 0;
 			core->last_gro = 0;
 			atomic_set(&core->softirq_backlog, 0);
 			core->softirq_offset = 0;
+			core->gen3_softirq_cores[0] = i^1;
+			for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
+				core->gen3_softirq_cores[j] = -1;
+			core->last_app_active = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;
 			memset(&core->metrics, 0, sizeof(core->metrics));
@@ -148,7 +154,7 @@ int homa_init(struct homa *homa)
 	homa->max_gro_skbs = 20;
 	homa->gso_force_software = 0;
 	homa->gro_policy = HOMA_GRO_NORMAL;
-	homa->busy_usecs = 10;
+	homa->busy_usecs = 100;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
@@ -1482,6 +1488,15 @@ char *homa_print_metrics(struct homa *homa)
 				"Messages received after thread went to sleep\n",
 				m->slow_wakeups);
 		homa_append_metric(homa,
+				"handoffs_thread_waiting   %15llu  "
+				"RPC handoffs to waiting threads (vs. queue)\n",
+				m->handoffs_thread_waiting);
+		homa_append_metric(homa,
+				"handoffs_alt_thread       %15llu  "
+				"RPC handoffs not to first on list (avoid busy "
+				"core)\n",
+				m->handoffs_alt_thread);
+		homa_append_metric(homa,
 				"poll_cycles               %15llu  "
 				"Time spent polling for incoming messages\n",
 				m->poll_cycles);
@@ -1802,6 +1817,15 @@ char *homa_print_metrics(struct homa *homa)
 				"dropped_data_no_bufs     %15llu  "
 				"Data bytes dropped because app buffers full\n",
 				m->dropped_data_no_bufs);
+		homa_append_metric(homa,
+				"gen3_handoffs            %15llu  "
+				"GRO->SoftIRQ handoffs made by Gen3 balancer\n",
+				m->gen3_handoffs);
+		homa_append_metric(homa,
+				"gen3_alt_handoffs        %15llu  "
+				"Gen3 handoffs to secondary core (primary was "
+				"busy)\n",
+				m->gen3_alt_handoffs);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "
@@ -1926,7 +1950,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		return;
 	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
-		struct freeze_header freeze;
+//		struct freeze_header freeze;
 		printk(KERN_NOTICE "freezing in homa_freeze with freeze_type %d\n", type);
 		tt_record1("homa_freeze calling homa_rpc_log_active with freeze_type %d", type);
 		homa_rpc_log_active_tt(rpc->hsk->homa, 0);
@@ -1934,6 +1958,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		printk(KERN_NOTICE "%s\n", format);
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
 		tt_freeze();
-		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+//		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		homa_freeze_peers(rpc->hsk->homa);
 	}
 }

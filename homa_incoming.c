@@ -1694,6 +1694,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		INC_METRIC(poll_cycles, now - poll_start);
 
 		/* Now it's time to sleep. */
+		homa_cores[interest.core]->last_app_active = now;
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (!rpc && !hsk->shutdown) {
@@ -1779,7 +1780,43 @@ done:
 }
 
 /**
- * @homa_rpc_handoff: This function is called when the input message for
+ * @homa_choose_interest() - Given a list of interests for an incoming
+ * message, choose the best one to handle it (if any).
+ * @homa:        Overall information about the Homa transport.
+ * @head:        Head pointers for the list of interest: either
+ *		 hsk->request_interests or hsk->response_interests.
+ * @offset:      Offset of "next" pointers in the list elements (either
+ *               offsetof(request_links) or offsetof(response_links).
+ * Return:       An interest to use for the incoming message, or NULL if none
+ *               is available. If possible, this function tries to pick an
+ *               interest whose thread is running on a core that isn't
+ *               currently busy doing Homa transport work.
+ */
+struct homa_interest *homa_choose_interest(struct homa *homa,
+		struct list_head *head, int offset)
+{
+	struct homa_interest *backup = NULL;
+	struct list_head *pos;
+	struct homa_interest *interest;
+	__u64 busy_time = get_cycles() - homa->busy_cycles;
+
+	list_for_each(pos, head) {
+		interest = (struct homa_interest *) (((char *) pos) - offset);
+		if (homa_cores[interest->core]->last_active < busy_time) {
+			if (backup != NULL)
+				INC_METRIC(handoffs_alt_thread, 1);
+			return interest;
+		}
+		if (backup == NULL)
+			backup = interest;
+	}
+
+	/* All interested threads are on busy cores; return the first. */
+	return backup;
+}
+
+/**
+ * @homa_rpc_handoff() - This function is called when the input message for
  * an RPC is ready for attention from a user thread. It either notifies
  * a waiting reader or queues the RPC.
  * @rpc:                RPC to handoff; must be locked. The caller must
@@ -1803,17 +1840,17 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 
 	/* Second, check the interest list for this type of RPC. */
 	if (homa_is_client(rpc->id)) {
-		interest = list_first_entry_or_null(
+		interest = homa_choose_interest(hsk->homa,
 				&hsk->response_interests,
-				struct homa_interest, response_links);
+				offsetof(struct homa_interest, response_links));
 		if (interest)
 			goto thread_waiting;
 		list_add_tail(&rpc->ready_links, &hsk->ready_responses);
 		INC_METRIC(responses_queued, 1);
 	} else {
-		interest = list_first_entry_or_null(
+		interest = homa_choose_interest(hsk->homa,
 				&hsk->request_interests,
-				struct homa_interest, request_links);
+				offsetof(struct homa_interest, request_links));
 		if (interest)
 			goto thread_waiting;
 		list_add_tail(&rpc->ready_links, &hsk->ready_requests);
@@ -1838,7 +1875,16 @@ thread_waiting:
 	 */
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	interest->locked = 0;
+	INC_METRIC(handoffs_thread_waiting, 1);
+	tt_record3("homa_rpc_handoff handing off id %d to pid %d on core %d",
+			rpc->id, interest->thread->pid,
+			task_cpu(interest->thread));
 	atomic_long_set_release(&interest->ready_rpc, (long) rpc);
+
+	/* Update the last_app_active time for the thread's core, so Homa
+	 * will try to avoid doing any work there.
+	 */
+	homa_cores[interest->core]->last_app_active = get_cycles();
 
 	/* Clear the interest. This serves two purposes. First, it saves
 	 * the waking thread from acquiring the socket lock again, which
@@ -1854,9 +1900,6 @@ thread_waiting:
 	if (interest->response_links.next != LIST_POISON1)
 		list_del(&interest->response_links);
 	wake_up_process(interest->thread);
-	tt_record3("homa_rpc_handoff handed off id %d to pid %d on core %d",
-			rpc->id, interest->thread->pid,
-			task_cpu(interest->thread));
 }
 
 /**

@@ -717,6 +717,12 @@ struct homa_interest {
 	int locked;
 
 	/**
+	 * @core: Core on which @thread was executing when it registered
+	 * its interest.  Used for load balancing (see balance.txt).
+	 */
+	int core;
+
+	/**
 	 * @reg_rpc: RPC whose @interest field points here, or
 	 * NULL if none.
 	 */
@@ -746,6 +752,7 @@ static void inline homa_interest_init(struct homa_interest *interest)
 	interest->thread = current;
 	atomic_long_set(&interest->ready_rpc, 0);
 	interest->locked = 0;
+	interest->core = raw_smp_processor_id();
 	interest->reg_rpc = NULL;
 	interest->request_links.next = LIST_POISON1;
 	interest->response_links.next = LIST_POISON1;
@@ -1950,10 +1957,12 @@ struct homa {
 	 *                            order for SoftIRQ (deprecated).
 	 * HOMA_GRO_GEN2              Use the new mechanism for selecting an
 	 *                            idle core for SoftIRQ.
-	 * HOMA_GRO_FAST_GRANTS       Pass all grant I can see immediately to
+	 * HOMA_GRO_FAST_GRANTS       Pass all grants immediately to
 	 *                            homa_softirq during GRO.
 	 * HOMA_GRO_SHORT_BYPASS      Pass all short packets directly to
-	 *                            homa_softirq during GR).
+	 *                            homa_softirq during GRO.
+	 * HOMA_GRO_GEN3              Use the "Gen3" mechanisms for load
+	 *                            balancing.
 	 */
 	#define HOMA_GRO_BYPASS          1
 	#define HOMA_GRO_SAME_CORE       2
@@ -1962,14 +1971,15 @@ struct homa {
 	#define HOMA_GRO_GEN2           16
 	#define HOMA_GRO_FAST_GRANTS    32
 	#define HOMA_GRO_SHORT_BYPASS   64
+	#define HOMA_GRO_GEN3          128
 	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_GEN2 \
 			|HOMA_GRO_SHORT_BYPASS)
 
 	/*
 	 * @busy_usecs: if there has been activity on a core within the
 	 * last @busy_usecs, it is considered to be busy and Homa will
-	 * try to avoid scheduling other activities on the core. Set
-	 * externally via sysctl.
+	 * try to avoid scheduling other activities on the core. See
+	 * balance.txt for more on load balancing. Set externally via sysctl.
 	 */
 	int busy_usecs;
 
@@ -2156,6 +2166,19 @@ struct homa_metrics {
 	 * had to be put to sleep (no message arrived while it was polling).
 	 */
 	__u64 slow_wakeups;
+
+	/**
+	 * @handoffs_thread_waiting: total number of times that an RPC
+	 * was handed off to a waiting thread (vs. being queued).
+	 */
+	__u64 handoffs_thread_waiting;
+
+	/**
+	 * @handoffs_alt_thread: total number of times that a thread other
+	 * than the first on the list was chosen for a handoff (because the
+	 * first thread was on a busy core).
+	 */
+	__u64 handoffs_alt_thread;
 
 	/**
 	 * @poll_cycles: total time spent in the polling loop in
@@ -2593,6 +2616,19 @@ struct homa_metrics {
 	 */
 	__u64 dropped_data_no_bufs;
 
+	/**
+	 * @gen3_handoffs: total number of handoffs from GRO to SoftIRQ made
+	 * by Gen3 load balancer.
+	 */
+	__u64 gen3_handoffs;
+
+	/**
+	 * @gen3_alt_handoffs: total number of GRO->SoftIRQ handoffs that
+	 * didn't choose the primary SoftIRQ core because it was busy with
+	 * app threads.
+	 */
+	__u64 gen3_alt_handoffs;
+
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
 	__u64 temp[NUM_TEMP_METRICS];
@@ -2607,8 +2643,7 @@ struct homa_core {
 	/**
 	 * @last_active: the last time (in get_cycle() units) that
 	 * there was system activity, such NAPI or SoftIRQ, on this
-	 * core. Used to pick a less-busy core for assigning SoftIRQ
-	 * handlers.
+	 * core. Used for load balancing.
 	 */
 	__u64 last_active;
 
@@ -2633,6 +2668,23 @@ struct homa_core {
 	 * to produce the core for SoftIRQ.
 	 */
 	int softirq_offset;
+
+	/**
+	 * @gen3_softirq_cores: when the Gen3 load balancer is in use,
+	 * GRO will arrange for SoftIRQ processing to occur on one of
+	 * these cores; -1 values are ignored (see balance.txt for more
+	 * on lewd balancing). This information is filled in via sysctl.
+	 */
+#define NUM_GEN3_SOFTIRQ_CORES 3
+	int gen3_softirq_cores[NUM_GEN3_SOFTIRQ_CORES];
+
+	/**
+	 * @last_app_active: the most recent time (get_cycles() units)
+	 * when an application was actively using Homa on this core (e.g.,
+	 * by sending or receiving messages). Used for load balancing
+	 * (see balance.txt).
+	 */
+	__u64 last_app_active;
 
         /**
          * held_skb: last packet buffer known to be available for
@@ -3058,6 +3110,9 @@ extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
 extern struct homa_rpc
 	       *homa_choose_fifo_grant(struct homa *homa);
+extern struct homa_interest
+               *homa_choose_interest(struct homa *homa, struct list_head *head,
+	            int offset);
 extern int      homa_choose_rpcs_to_grant(struct homa *homa,
 		    struct homa_rpc **rpcs, int max_rpcs);
 extern void     homa_close(struct sock *sock, long timeout);
@@ -3095,6 +3150,8 @@ extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
+extern void     homa_gro_gen2(struct sk_buff *skb);
+extern void     homa_gro_gen3(struct sk_buff *skb);
 extern struct sk_buff
                *homa_gro_receive(struct list_head *gro_list,
                     struct sk_buff *skb);
@@ -3229,6 +3286,8 @@ extern int      homa_softirq(struct sk_buff *skb);
 extern void     homa_spin(int usecs);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
+extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+                    void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
