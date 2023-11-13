@@ -34,6 +34,11 @@ import time
 #                    data packets processed by SoftIRQ
 # softirq_grant:     List of <time, offset> tuples for all incoming
 #                    grant packets processed by SoftIRQ
+# handoff:           Time when RPC was handed off to waiting thread
+# queued:            Time when RPC was added to ready queue (no
+#                    waiting threads). At most one of 'handoff' and 'queued'
+#                    will be present.
+# found:             Time when homa_wait_for_message found the RPC
 # recvmsg_done:      Time when homa_recvmsg returned
 # sendmsg:           Time when homa_sendmsg was invoked
 # in_length:         Size of the incoming message, in bytes
@@ -68,16 +73,31 @@ traces = {}
 # AnalyzeRpcs.
 peer_nodes = {}
 
-def avg_elems(data, index):
+def dict_avg(data, key):
     """
-    Given a collection (data) consisting of lists, return the average
-    of the index'th elements of the lists.
+    Given a list of dictionaries, return the average of the elements
+    with the given key.
+    """
+    count = 0
+    total = 0.0
+    for item in data:
+        if (key in item) and (item[key] != None):
+            total += item[key]
+            count += 1
+    if not count:
+        return 0
+    return total / count
+
+def list_avg(data, index):
+    """
+    Given a list of lists, return the average of the index'th elements
+    of the lists.
     """
     if len(data) == 0:
         return 0
     total = 0
-    for pkt in data:
-        total += pkt[0]
+    for item in data:
+        total += item[0]
     return total / len(data)
 
 def extract_num(s):
@@ -622,6 +642,16 @@ class Dispatcher:
     patterns.append({
         'name': 'rpc_handoff',
         'regexp': 'homa_rpc_handoff handing off id ([0-9]+)'
+    })
+
+    def __rpc_queued(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_rpc_queued(trace, time, core, id)
+
+    patterns.append({
+        'name': 'rpc_queued',
+        'regexp': 'homa_rpc_handoff finished queuing id ([0-9]+)'
     })
 
     def __wait_found_rpc(self, trace, time, core, match, interests):
@@ -1215,7 +1245,7 @@ class AnalyzeDelay:
                     len(data), data[0][0], data[10*len(data)//100][0],
                     data[50*len(data)//100][0], data[90*len(data)//100][0],
                     data[99*len(data)//100][0], data[len(data)-1][0],
-                    avg_elems(data, 0)))
+                    list_avg(data, 0)))
         print('\nPhase        Count   Min    P10    P50    P90    P99    Max    Avg')
         print('-------------------------------------------------------------------------')
         print('Data packets from single-packet messages:')
@@ -1343,7 +1373,7 @@ class AnalyzeDelay:
         def get_slow_summary(data):
             data.sort(key=lambda t : t[0])
             return '%6.1f %6.1f' % (data[50*len(data)//100][0],
-                    avg_elems(data, 0))
+                    list_avg(data, 0))
 
         print('\nPhase breakdown for P98-P99 packets:')
         print('                          Xmit          Net         SoftIRQ')
@@ -1378,12 +1408,12 @@ class AnalyzeDelay:
                 % (len(soft), soft[0][0], soft[10*len(soft)//100][0],
                 soft[50*len(soft)//100][0], soft[90*len(soft)//100][0],
                 soft[99*len(soft)//100][0], soft[len(soft)-1][0],
-                avg_elems(soft, 0)))
+                list_avg(soft, 0)))
         print('SoftIRQ to App: %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
                 % (len(app), app[0][0], app[10*len(app)//100][0],
                 app[50*len(app)//100][0], app[90*len(app)//100][0],
                 app[99*len(app)//100][0], app[len(app)-1][0],
-                avg_elems(app, 0)))
+                list_avg(app, 0)))
 
         if options.verbose:
             print('\nWorst-case handoff delays:\n')
@@ -1410,7 +1440,9 @@ class AnalyzeDelay:
 class AnalyzeNet:
     """
     Prints information about delays in the network including NICs, network
-    delay and congestion, and receiver GRO overload.
+    delay and congestion, and receiver GRO overload. With --data, generates
+    data files describing backlog and delay over time on a core-by-core
+    basis.
     """
 
     def __init__(self, dispatcher):
@@ -1734,7 +1766,7 @@ class AnalyzePacket:
     Analyzes the delay between when a particular packet was sent and when
     it was received by GRO: prints information about other packets competing
     for the same GRO core. Must specify the packet of interest with the
-    --pkt option.
+    --pkt option: this is the packet id on the sender.
     """
 
     def __init__(self, dispatcher):
@@ -1806,11 +1838,13 @@ class AnalyzePacket:
             if ((rpc['node'] != recv_rpc['node']) or (not 'gro_core' in rpc)
                     or (rpc['gro_core'] != recv_rpc['gro_core'])):
                 continue
+            if id == 200434491 or id == 200434491:
+                print('\nId: %d, RPC: %s' % (id, rpc))
             rcvd = sorted(rpc['gro_data'], key=lambda t: t[1])
             xmit_id = id ^ 1
             if not xmit_id in rpcs:
                 sent = []
-                peer = recv_rpc['peer']
+                peer = rpc['peer']
                 if peer in peer_nodes:
                     sender = peer_nodes[peer]
                 else:
@@ -2017,11 +2051,23 @@ class AnalyzeRpcs:
         self.append(trace, id, 'gro_grant', [time, offset])
         rpcs[id]['gro_core'] = core
 
+    def tt_rpc_handoff(self, trace, time, core, id):
+        if not id in rpcs:
+            self.new_rpc(id, trace['node'])
+        rpcs[id]['handoff'] = time
+        rpcs.pop('queued', None)
+
     def tt_ip_xmit(self, trace, time, core, id, offset):
         global rpcs
         if not id in rpcs:
             self.new_rpc(id, trace['node'])
         rpcs[id]['ip_xmits'][offset] = time
+
+    def tt_rpc_queued(self, trace, time, core, id):
+        if not id in rpcs:
+            self.new_rpc(id, trace['node'])
+        rpcs[id]['queued'] = time
+        rpcs.pop('handoff', None)
 
     def tt_resend(self, trace, time, core, id, offset):
         global rpcs
@@ -2077,6 +2123,11 @@ class AnalyzeRpcs:
             self.new_rpc(id, trace['node'])
         rpcs[id]['recvmsg_done'] = time
 
+    def tt_wait_found_rpc(self, trace, time, core, id):
+        if not id in rpcs:
+            self.new_rpc(id, trace['node'])
+        rpcs[id]['found'] = time
+
     def tt_copy_out_start(self, trace, time, core, id):
         global rpcs
         if not id in rpcs:
@@ -2111,6 +2162,269 @@ class AnalyzeRpcs:
             peer_id = id ^ 1
             if peer_id in rpcs:
                 peer_nodes[peer] = rpcs[peer_id]['node']
+
+#------------------------------------------------
+# Analyzer: rtt
+#------------------------------------------------
+class AnalyzeRtt:
+    """
+    Prints statistics about round-trip times for short RPCs and identifies
+    RPCs with the longest RTTs. The --max-rtt option can be used to restrict
+    the time range for the "long" RPCs to print out.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        return
+
+    def output(self):
+        global rpcs, peer_nodes, options
+
+        # List with one entry for each short RPC, containing a tuple
+        # <rtt, id, start, end, client, server> where rtt is the round-trip
+        # time, id is the client's RPC id, start and end are the beginning
+        # and ending times, and client and server are the names of the two
+        # nodes involved.
+        rtts = []
+
+        for id, rpc in rpcs.items():
+            if id & 1:
+                continue
+            if (not 'sendmsg' in rpc) or (not 'recvmsg_done' in rpc):
+                continue
+            if (not 'out_length' in rpc) or (rpc['out_length'] > 1500):
+                continue
+            if (not 'in_length' in rpc) or (rpc['in_length'] > 1500):
+                continue
+            rtts.append([rpc['recvmsg_done'] - rpc['sendmsg'], id,
+                    rpc['sendmsg'], rpc['recvmsg_done'], rpc['node'],
+                    peer_nodes[rpc['peer']]])
+
+        rtts.sort(key=lambda t : t[0])
+
+        print('\n-------------')
+        print('Analyzer: rtt')
+        print('-------------')
+        if not rtts:
+            print('Traces contained no short RPCs (<= 1500 bytes)')
+            return
+        print('Round-trip times for %d short RPCs (<= 1500 bytes):'
+                % (len(rtts)))
+        print('Min:  %6.1f' % rtts[0][0])
+        print('P10:  %6.1f' % rtts[10*len(rtts)//100][0])
+        print('P50:  %6.1f' % rtts[50*len(rtts)//100][0])
+        print('P90:  %6.1f' % rtts[90*len(rtts)//100][0])
+        print('P99:  %6.1f' % rtts[99*len(rtts)//100][0])
+        print('Max:  %6.1f' % rtts[len(rtts) - 1][0])
+
+        def get_phase(rpc1, phase1, rpc2, phase2):
+            """
+            Returns the elapsed time from phase1 in rpc1 to phase2 in
+            rpc2, or None if the required data is missing.
+            """
+            if phase1 not in rpc1:
+                return None
+            start = rpc1[phase1]
+            if type(start) == list:
+                if not start:
+                    return None
+                start = start[0][0]
+            if phase2 not in rpc2:
+                return None
+            end = rpc2[phase2]
+            if type(end) == list:
+                if not end:
+                    return None
+                end = end[0][0]
+            return end - start
+
+        def get_phases(crpc, srpc):
+            """
+            Returns a dictionary containing the delays for each phase in
+            the RPC recorded on the client side in crpc and the server side
+            in srpc. Each phase measures from the end of the previous phase;
+            if data wasn't available for a phase then the value will be None.
+            prep:       From sendmsg until call to ip*xmit on client
+            net:        To GRO on the server
+            gro:        To SoftIRQ on the server
+            softirq:    To homa_rpc_handoff
+            handoff:    Handoff to waiting thread
+            queue:      Wait on queue for receiving thread (alternative to
+                        handoff: one of these will be None)
+            sendmsg:    To sendmsg call on server
+            prep2:      To call to ip*xmit on server
+            net2:       To GRO on the client
+            gro2:       To SoftIRQ on the client
+            softirq2:   To homa_rpc_handoff on client
+            handoff2:   Handoff to waiting thread
+            queue2:     Wait on queue for receiving thread (only one of
+                        this and handoff2 will be set)
+            done:       To return from sendmsg on client
+            """
+            global rpcs
+
+            result = {}
+
+            result['prep'] = get_phase(crpc, 'sendmsg', crpc, 'send_data')
+            result['net'] =  get_phase(crpc, 'send_data', srpc, 'gro_data')
+            result['gro'] = get_phase(srpc, 'gro_data', srpc, 'softirq_data')
+            if 'queued' in srpc:
+                result['softirq'] = get_phase(srpc, 'softirq_data', srpc, 'queued')
+                if result['softirq'] < 0:
+                    result['softirq'] = 0
+                result['queue'] = get_phase(srpc, 'queued', srpc, 'found')
+                result['handoff'] = None
+            else:
+                result['softirq'] = get_phase(srpc, 'softirq_data', srpc, 'handoff')
+                if result['softirq'] < 0:
+                    result['softirq'] = 0
+                result['handoff'] = get_phase(srpc, 'handoff', srpc, 'found')
+                result['queue'] = None
+            result['sendmsg'] = get_phase(srpc, 'found', srpc, 'sendmsg')
+            result['prep2'] = get_phase(srpc, 'sendmsg', srpc, 'send_data')
+            result['net2'] =  get_phase(srpc, 'send_data', crpc, 'gro_data')
+            result['gro2'] = get_phase(crpc, 'gro_data', crpc, 'softirq_data')
+            if 'queued' in crpc:
+                result['softirq2'] = get_phase(crpc, 'softirq_data', crpc, 'queued')
+                if result['softirq2'] < 0:
+                    result['softirq2'] = 0
+                result['queue2'] = get_phase(crpc, 'queued', crpc, 'found')
+                result['handoff2'] = None
+            else:
+                result['softirq2'] = get_phase(crpc, 'softirq_data', crpc, 'handoff')
+                if result['softirq2'] < 0:
+                    result['softirq2'] = 0
+                result['handoff2'] = get_phase(crpc, 'handoff', crpc, 'found')
+                result['queue2'] = None
+            result['done'] = get_phase(crpc, 'found', crpc, 'recvmsg_done')
+            return result
+
+        print('\nShort RPCs with the longest RTTs:')
+        print('RTT:       Round-trip time (usecs)')
+        print('Client Id: RPC id as seen by client')
+        print('Server:    Node that served the RPC')
+        print('Start:     Time of sendmsg invocation on client')
+        print('Prep:      Time until request passed to ip*xmit')
+        print('Net:       Time for request to reach server GRO')
+        print('GRO:       Time to finish GRO and wakeup homa_softirq on server')
+        print('SIRQ:      Time until server homa_softirq invokes homa_rpc_handoff')
+        print('Handoff:   Time to pass RPC to waiting thread (if thread waiting)')
+        print('Queue:     Time RPC is enqueued until receiving thread arrives')
+        print('App:       Time until application wakes up and invokes sendmsg '
+                'for response')
+        print('Prep2:     Time until response passed to ip*xmit')
+        print('Net2:      Time for response to reach client GRO')
+        print('GRO2:      Time to finish GRO and wakeup homa_softirq on client')
+        print('SIRQ2:     Time until client homa_softirq invokes homa_rpc_handoff')
+        print('Hand2:     Time to pass RPC to waiting thread (if thread waiting)')
+        print('Queue2:    Time RPC is enqueued until receiving thread arrives')
+        print('Done:      Time until recvmsg returns on client')
+        print('')
+        print('   RTT    Client Id     Server     Start Prep    Net   GRO SIRQ '
+                'Handoff  Queue  App Prep2   Net2   GRO2 SIRQ2  Hand2 Queue2 Done')
+        print('----------------------------------------------------------------'
+                '----------------------------------------------------------------')
+        slow_phases = []
+        slow_rtt_sum = 0
+        to_print = 20
+        max_rtt = 1e20
+        if options.max_rtt != None:
+            max_rtt = options.max_rtt
+        for i in range(len(rtts)-1, -1, -1):
+            rtt, id, start, end, client, server = rtts[i]
+            if rtt > max_rtt:
+                continue
+            crpc = rpcs[id]
+            server_id = id ^ 1
+            if not server_id in rpcs:
+                continue
+            srpc = rpcs[server_id]
+            phases = get_phases(crpc, srpc)
+            slow_phases.append(phases)
+            slow_rtt_sum += rtt
+
+            def fmt_phase(phase, size=6):
+                if (phase == None):
+                    return ' '*size
+                else:
+                    return ('%' + str(size) + '.1f') % (phase)
+
+            print('%6.1f %12d %10s %9.3f %s' % (rtt, id, server, start,
+                    fmt_phase(phases['prep'], 4)), end='')
+            print(' %s %s %s  %s' % (fmt_phase(phases['net']),
+                    fmt_phase(phases['gro'], 5),
+                    fmt_phase(phases['softirq'], 4),
+                    fmt_phase(phases['handoff'])), end='')
+            print(' %s %s %s %s' % (
+                    fmt_phase(phases['queue']), fmt_phase(phases['sendmsg'], 4),
+                    fmt_phase(phases['prep2'], 5), fmt_phase(phases['net2'])),
+                    end='')
+            print('  %s %s %s %s %s' % (fmt_phase(phases['gro2'], 5),
+                    fmt_phase(phases['softirq2'], 5), fmt_phase(phases['handoff2']),
+                    fmt_phase(phases['queue2'], 6), fmt_phase(phases['done'], 4)))
+            to_print -= 1
+            if to_print == 0:
+                break
+
+        # Print out phase averages for fast RPCs.
+        fast_phases = []
+        fast_rtt_sum = 0
+        for i in range(len(rtts)):
+            rtt, id, start, end, client, server = rtts[i]
+            crpc = rpcs[id]
+            server_id = id ^ 1
+            if not server_id in rpcs:
+                continue
+            srpc = rpcs[server_id]
+            fast_phases.append(get_phases(crpc, srpc))
+            fast_rtt_sum += rtt
+            if len(fast_phases) >= 10:
+                break
+        print('\nAverage times for the fastest short RPCs:')
+        print('   RTT                                   Prep    Net   GRO SIRQ '
+                'Handoff  Queue  App Prep2   Net2   GRO2 SIRQ2  Hand2 Queue2 Done')
+        print('----------------------------------------------------------------'
+                '----------------------------------------------------------------')
+        print('%6.1f %33s %4.1f %6.1f %5.1f' % (
+                fast_rtt_sum/len(fast_phases), '',
+                dict_avg(fast_phases, 'prep'), dict_avg(fast_phases, 'net'),
+                dict_avg(fast_phases, 'gro')), end='')
+        print(' %4.1f %7.1f %6.1f %4.1f %5.1f' % (
+                dict_avg(fast_phases, 'softirq'), dict_avg(fast_phases, 'handoff'),
+                dict_avg(fast_phases, 'queue'), dict_avg(fast_phases, 'sendmsg'),
+                dict_avg(fast_phases, 'prep2')), end='')
+        print(' %6.1f %6.1f %5.1f %6.1f %6.1f %4.1f' % (
+                dict_avg(fast_phases, 'net2'), dict_avg(fast_phases, 'gro2'),
+                dict_avg(fast_phases, 'softirq2'), dict_avg(fast_phases, 'handoff2'),
+                dict_avg(fast_phases, 'queue2'), dict_avg(fast_phases, 'done')))
+
+        # Print out how much slower each phase is for slow RPCs than
+        # for fast ones.
+        print('\nAverage extra time spent by slow RPCs relative to fast ones:')
+        print('   RTT                                   Prep    Net   GRO SIRQ '
+                'Handoff  Queue  App Prep2   Net2   GRO2 SIRQ2  Hand2 Queue2 Done')
+        print('----------------------------------------------------------------'
+                '----------------------------------------------------------------')
+        print('%6.1f %33s %4.1f %6.1f %5.1f' % (
+                slow_rtt_sum/len(slow_phases) - fast_rtt_sum/len(fast_phases),
+                '',
+                dict_avg(slow_phases, 'prep') - dict_avg(fast_phases, 'prep'),
+                dict_avg(slow_phases, 'net') - dict_avg(fast_phases, 'net'),
+                dict_avg(slow_phases, 'gro') - dict_avg(fast_phases, 'gro')),
+                        end='')
+        print(' %4.1f %7.1f %6.1f %4.1f %5.1f' % (
+                dict_avg(slow_phases, 'softirq') - dict_avg(fast_phases, 'softirq'),
+                dict_avg(slow_phases, 'handoff') - dict_avg(fast_phases, 'handoff'),
+                dict_avg(slow_phases, 'queue') - dict_avg(fast_phases, 'queue'),
+                dict_avg(slow_phases, 'sendmsg') - dict_avg(fast_phases, 'sendmsg'),
+                dict_avg(slow_phases, 'prep2') - dict_avg(fast_phases, 'prep2')),
+                        end='')
+        print(' %6.1f %6.1f %5.1f %6.1f %6.1f %4.1f' % (
+                dict_avg(slow_phases, 'net2') - dict_avg(fast_phases, 'net2'),
+                dict_avg(slow_phases, 'gro2') - dict_avg(fast_phases, 'gro2'),
+                dict_avg(slow_phases, 'softirq2') - dict_avg(fast_phases, 'softirq2'),
+                dict_avg(slow_phases, 'handoff2') - dict_avg(fast_phases, 'handoff2'),
+                dict_avg(slow_phases, 'queue2') - dict_avg(fast_phases, 'queue2'),
+                dict_avg(slow_phases, 'done') - dict_avg(fast_phases, 'done')))
 
 #------------------------------------------------
 # Analyzer: timeline
@@ -2282,6 +2596,9 @@ parser.add_option('--node', dest='node', default=None,
         metavar='N', help='Specifies a particular node (the name of its '
         'trace file without the extension); this option is required by '
         'some analyzers')
+parser.add_option('--max-rtt', dest='max_rtt', type=float, default=None,
+        metavar='T', help='Only consider RPCs with RTTs <= T usecs.  Used by '
+        'rpc analyzer to select which specific RTTs to print out.')
 parser.add_option('--pkt', dest='pkt', default=None,
         metavar='ID:OFF', help='Identifies a specific packet with ID:OFF, '
         'where ID is an RPC id (even means request message, odd means response) '
