@@ -272,6 +272,10 @@ class Dispatcher:
         # that pattern.
         self.interests = {}
 
+        # List of objects with tt_all methods, which will be invoked for
+        # every record.
+        self.all_interests= []
+
         # List (in same order as patterns) of all patterns that appear in
         # interests. Created lazily by parse, can be set to None to force
         # regeneration.
@@ -310,6 +314,9 @@ class Dispatcher:
             if not callable(method):
                 continue
             name = name[3:]
+            if name == 'all':
+                self.all_interests.append(obj)
+                continue
             for pattern in self.patterns:
                 if name != pattern['name']:
                     continue
@@ -366,6 +373,8 @@ class Dispatcher:
                     pattern['parser'](trace, time, core, match,
                             self.interests[pattern['name']])
                     break
+            for interest in self.all_interests:
+                interest.tt_all(trace, time, core, msg)
         f.close()
         trace['elapsed_time'] = trace['last_time'] - trace['first_time']
 
@@ -2425,6 +2434,46 @@ class AnalyzeRtt:
                 dict_avg(slow_phases, 'handoff2') - dict_avg(fast_phases, 'handoff2'),
                 dict_avg(slow_phases, 'queue2') - dict_avg(fast_phases, 'queue2'),
                 dict_avg(slow_phases, 'done') - dict_avg(fast_phases, 'done')))
+
+#------------------------------------------------
+# Analyzer: smis
+#------------------------------------------------
+class AnalyzeSmis:
+    """
+    Prints out information about SMIs (System Management Interrupts) that
+    occurred during the traces. An SMI causes all of the cores on a node
+    to freeze for a significant amount of time.
+    """
+    def __init__(self, dispatcher):
+        # A list of <start, end, node> tuples, each of which describes one
+        # gap that looks like an SMI.
+        self.smis = []
+
+        # Time of the last trace record seen.
+        self.last_time = None
+        return
+
+    def tt_all(self, trace, time, core, msg):
+        if self.last_time == None:
+            self.last_time = time
+            return
+        if (time - self.last_time) > 50:
+            self.smis.append([self.last_time, time, trace['node']])
+        self.last_time = time
+
+    def output(self):
+        print('\n-------------------')
+        print('Analyzer: smis')
+        print('-------------------')
+        print('Gaps that appear to be caused by System Management '
+                'Interrupts (SMIs),')
+        print('which freeze all cores on a node simultaneously:')
+        print('')
+        print('    Start        End     Gap   Node')
+        print('-----------------------------------')
+        for smi in sorted(self.smis, key=lambda t : t[0]):
+            start, end, node = smi
+            print('%9.3f  %9.3f  %6.1f  %s' % (start, end, end - start, node))
 
 #------------------------------------------------
 # Analyzer: timeline
