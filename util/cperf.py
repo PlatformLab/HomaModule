@@ -64,7 +64,7 @@ log_file = 0
 # True means use new slowdown calculation, where denominator is calculated
 # using best-case Homa unloaded RTT plus link bandwidth; False means use
 # original calculation where the denominator is Homa P50 unloaded latency.
-alt_slowdown = False
+old_slowdown = False
 
 # Indicates whether we should generate additional log messages for debugging
 verbose = False
@@ -212,11 +212,6 @@ def get_parser(description, usage, defaults = {}):
             'below may include some that are not used by this particular '
             'benchmark', usage=usage, add_help=False,
             conflict_handler='resolve')
-    parser.add_argument('--alt-slowdown', dest='alt_slowdown',
-            action='store_true', default=False,
-            help='Use new denominator for slowdown calculations, using '
-            'best-case Homa latency and network bandwidth (default: old '
-            'calculation, which used Homa measurements on unloaded cluster)')
     parser.add_argument('-b', '--gbps', type=float, dest='gbps',
             metavar='B', default=defaults['gbps'],
             help='Generate a total of B Gbits/sec of bandwidth on the most '
@@ -256,6 +251,11 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('--no-homa-prio', dest='no_homa_prio',
             action='store_true', default=False,
             help='Don\'t run homa_prio on nodes to adjust unscheduled cutoffs')
+    parser.add_argument('--old-slowdown', dest='old_slowdown',
+            action='store_true', default=False,
+            help='Compute slowdowns using the approach of the Homa ATC '
+            'paper (default: use 15 usec RTT and 100%% link throughput as '
+            'reference)')
     parser.add_argument('--plot-only', dest='plot_only', action='store_true',
             help='Don\'t run experiments; generate plot(s) with existing data')
     parser.add_argument('--port-receivers', type=int, dest='port_receivers',
@@ -326,9 +326,9 @@ def init(options):
     """
     Initialize various global state, such as the log file.
     """
-    global alt_slowdown, log_dir, log_file, verbose, delete_rtts
+    global old_slowdown, log_dir, log_file, verbose, delete_rtts
     log_dir = options.log_dir
-    alt_slowdown = options.alt_slowdown
+    old_slowdown = options.old_slowdown
     if not options.plot_only:
         if os.path.exists(log_dir):
             shutil.rmtree(log_dir)
@@ -1094,7 +1094,7 @@ def get_digest(experiment):
 
     experiment:  Name of the desired experiment
     """
-    global alt_slowdown, digests, log_dir, min_rtt, unloaded_p50, delete_rtts
+    global old_slowdown, digests, log_dir, min_rtt, unloaded_p50, delete_rtts
 
     if experiment in digests:
         return digests[experiment]
@@ -1156,10 +1156,10 @@ def get_digest(experiment):
     slowdown_sum = 0.0
     lengths = sorted(rtts.keys())
     lengths.append(999999999)            # Force one extra loop iteration
-    if alt_slowdown:
-        optimal = min_rtt + lengths[0]*8/link_mbps
-    else:
+    if old_slowdown:
         optimal = unloaded_p50[min(unloaded_p50.keys())]
+    else:
+        optimal = 15 + lengths[0]*8/link_mbps
     for length in lengths:
         if length > bucket_length:
             digest["lengths"].append(bucket_length)
@@ -1183,10 +1183,10 @@ def get_digest(experiment):
             bucket_count = 0
             bucket_length, bucket_cum_frac = buckets[next_bucket]
             next_bucket += 1
-        if alt_slowdown:
-            optimal = min_rtt + length*8/link_mbps
-        elif length in unloaded_p50:
+        if old_slowdown:
             optimal = unloaded_p50[length]
+        elif length in unloaded_p50:
+            optimal = min_rtt + length*8/link_mbps
         bucket_count += len(rtts[length])
         for rtt in rtts[length]:
             bucket_rtts.append(rtt)
