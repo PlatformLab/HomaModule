@@ -73,6 +73,34 @@ traces = {}
 # AnalyzeRpcs.
 peer_nodes = {}
 
+# This variable holds information about every data packet in the traces.
+# it is created by AnalyzePackets. Keys have the form id:offset where id is
+# the RPC id on the sending side and offset is the offset in message of
+# the first byte of the packet. Each value is a dictionary containing
+# the following fields:
+# xmit:        Time when ip*xmit was invoked
+# nic:         Time when the NIC transmitted the packet (if available)
+# gro:         Time when GRO received (the first bytes of) the packet
+# softirq:     Time when homa_softirq processed the packet
+# id:          RPC id on the sender
+# offset:      Offset of the data in the packet within its message
+# length:      # bytes of message data in this packet
+# msg_length:  Total number of bytes in the message
+# priority:    Priority at which packet was transmitted
+packets = defaultdict(dict)
+
+# This variable holds information about every grant packet in the traces.
+# it is created by AnalyzePackets. Keys have the form id:offset where id is
+# the RPC id on the sending side and offset is the offset in message of
+# the first byte of the packet. Each value is a dictionary containing
+# the following fields:
+# xmit:     Time when ip*xmit was invoked
+# nic:      Time when the NIC transmitted the packet
+# gro:      Time when GRO received (the first bytes of) the packet
+# softirq:  Time when homa_softirq processed the packet
+# id:       Id of the RPC on the sender
+grants = defaultdict(dict)
+
 def dict_avg(data, key):
     """
     Given a list of dictionaries, return the average of the elements
@@ -109,31 +137,6 @@ def extract_num(s):
     if match:
         return int(match.group(1))
     return None
-
-# This variable holds information about every data packet in the traces.
-# it is created by AnalyzePackets. Keys have the form id:offset where id is
-# the RPC id on the sending side and offset is the offset in message of
-# the first byte of the packet. Each value is a dictionary containing
-# the following fields:
-# xmit:        Time when ip*xmit was invoked
-# nic:         Time when the NIC transmitted the packet (if available)
-# gro:         Time when GRO received (the first bytes of) the packet
-# softirq:     Time when homa_softirq processed the packet
-# free:        Time when the packet was freed (after copy out data)
-# msg_length:  Total number of bytes in the message
-# priority:    Priority at which packet was transmitted
-packets = defaultdict(dict)
-
-# This variable holds information about every grant packet in the traces.
-# it is created by AnalyzePackets. Keys have the form id:offset where id is
-# the RPC id on the sending side and offset is the offset in message of
-# the first byte of the packet. Each value is a dictionary containing
-# the following fields:
-# xmit:     Time when ip*xmit was invoked
-# nic:      Time when the NIC transmitted the packet
-# gro:      Time when GRO received (the first bytes of) the packet
-# softirq:  Time when homa_softirq processed the packet
-grants = defaultdict(dict)
 
 def get_packet_size():
     """
@@ -250,6 +253,8 @@ def print_analyzer_help():
             continue
         object = getattr(module, attr)
         analyzer = attr[7].lower() + attr[8:]
+        if object.__doc__ == None:
+            continue
         print('%s: %s' % (analyzer, object.__doc__))
 
 class Dispatcher:
@@ -451,9 +456,9 @@ class Dispatcher:
     def __softirq_data(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
-        length = int(match.group(3))
+        msg_length = int(match.group(3))
         for interest in interests:
-            interest.tt_softirq_data(trace, time, core, id, offset, length)
+            interest.tt_softirq_data(trace, time, core, id, offset, msg_length)
 
     patterns.append({
         'name': 'softirq_data',
@@ -1444,6 +1449,144 @@ class AnalyzeDelay:
         self.print_wakeup_delays()
 
 #------------------------------------------------
+# Analyzer: incoming
+#------------------------------------------------
+class AnalyzeIncoming:
+    """
+    Generates detailed timelines of rates of incoming data and packets for
+    each core of each node. Use the --data option to specify a directory for
+    data files.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+        return
+
+    def write_node_data(self, node, pkts):
+        """
+        Write a data file describing incoming traffic to a given node.
+
+        node:   Name of the node
+        pkts:   List of <time, length, core, priority> tuples describing
+                packets on that node.
+        """
+        global options
+
+        interval = 20
+
+        # Figure out which cores received packets on this node.
+        cores = {}
+        for pkt in pkts:
+            cores[pkt[2]] = 1
+        core_ids = sorted(cores.keys())
+
+        pkts.sort(key=lambda t : t[0])
+        start = pkts[0][0]
+        interval_end = (start//interval) * interval
+        if interval_end > start:
+            interval_end -= interval
+
+        core_bytes = {}
+        core_pkts = {}
+        min_prio = 100
+
+        f = open('%s/incoming_%s.dat' % (options.data_dir, node), 'w')
+        f.write('# Node: %s\n' % (node))
+        f.write('# Generated at %s.\n' %
+                (time.strftime('%I:%M %p on %m/%d/%Y')))
+        f.write('# Rate of arrival of incoming data and packets, broken down\n')
+        f.write('# by core and time interval:\n')
+        f.write('# Time:    End of the time interval\n')
+        f.write('# GbpsN:   Data arrival rate on core N for the '
+                'interval (Gbps)\n')
+        f.write('# PktsN:   Total packets (grants and data) that arrived on '
+                'core N in the interval\n')
+        f.write('# Gbps:    Total arrival rate of data across all '
+                'cores (Gbps)\n')
+        f.write('# Pkts:    Total packet arrivals (grants and data) across all '
+                'cores\n')
+        f.write('# MinP:    Lowest priority level for any incoming packet\n')
+        f.write('\nInterval')
+        for c in core_ids:
+            f.write(' Gbps%d Pkts%d' % (c, c))
+        f.write('   Gbps   Pkts  MinP\n')
+
+        for t, length, core, priority in pkts:
+            if t >= interval_end:
+                if interval_end > start:
+                    f.write('%8.1f' % (interval_end))
+                    total_gbps = 0
+                    total_pkts = 0
+                    for c in core_ids:
+                        gbps = 8*core_bytes[c]/(interval*1e03)
+                        f.write(' %5.1f %5d' % (gbps, core_pkts[c]))
+                        total_gbps += gbps
+                        total_pkts += core_pkts[c]
+                    f.write('  %5.1f  %5d   %3d\n' % (total_gbps,
+                            total_pkts, min_prio))
+                for c in core_ids:
+                    core_bytes[c] = 0
+                    core_pkts[c] = 0
+                    min_prio = 7
+                interval_end += 20
+            core_pkts[core] += 1
+            core_bytes[core] += length
+            if priority < min_prio:
+                min_prio = priority
+        f.close()
+
+    def output(self):
+        global packets, grants, options, rpcs
+
+        # Maps from node names to a list of packets for that core. Each packet
+        # is described by a tuple <time, size, core> giving the arrival time
+        # and size of the packet (size 0 means the packet was a grant) and the
+        # core where it was received.
+        nodes = defaultdict(list)
+
+        skipped = 0
+        total_pkts = 0
+        mtu = get_packet_size()
+        for pkt in packets.values():
+            if not 'gro' in pkt:
+                continue
+            if not 'length' in pkt:
+                if 'msg_length' in pkt:
+                    length = pkt['msg_length'] - pkt['offset']
+                    if length > mtu:
+                        length = mtu
+                else:
+                    skipped += 1
+                    continue
+            else:
+                length = pkt['length']
+            if not 'id' in pkt:
+                print('Packet: %s' % (pkt))
+            rpc = rpcs[pkt['id']^1]
+            nodes[rpc['node']].append([pkt['gro'], length, rpc['gro_core'],
+                    pkt['priority']])
+            total_pkts += 1
+        if skipped > 0:
+            print('Incoming analyzer skipped %d packets out of %d (%.2f%%): '
+                    'couldn\'t compute length' % (skipped, total_pkts,
+                    100.0*(skipped//total_pkts)), file=sys.stderr)
+
+        for grant in grants.values():
+            if not 'gro' in grant:
+                continue
+            rpc = rpcs[grant['id']^1]
+            nodes[rpc['node']].append([grant['gro'], 0, rpc['gro_core'], 7])
+
+        print('\n-------------------')
+        print('Analyzer: incoming')
+        print('-------------------')
+        if options.data_dir == None:
+            print('No --data option specified, data can\'t be written.')
+
+        for node, cores in nodes.items():
+              self.write_node_data(node, cores)
+
+#------------------------------------------------
 # Analyzer: net
 #------------------------------------------------
 class AnalyzeNet:
@@ -1836,7 +1979,7 @@ class AnalyzePacket:
 
         # Collect information for all packets received by the GRO core after
         # xmit_time. Each list entry is a tuple:
-        # <recv_time, xmit_time, rpc_id, offset, sender, length, prio>
+        # <recv_time, xmit_time, rpc_id, offset, sender, length, prio, gro_core>
         pkts = []
 
         # Amount of data already in transit to target at the time reference
@@ -1844,11 +1987,10 @@ class AnalyzePacket:
         prior_bytes = 0
 
         for id, rpc in rpcs.items():
-            if ((rpc['node'] != recv_rpc['node']) or (not 'gro_core' in rpc)
-                    or (rpc['gro_core'] != recv_rpc['gro_core'])):
-                continue
-            if id == 200434491 or id == 200434491:
+            if id == 0:
                 print('\nId: %d, RPC: %s' % (id, rpc))
+            if (rpc['node'] != recv_rpc['node']) or (not 'gro_core' in rpc):
+                continue
             rcvd = sorted(rpc['gro_data'], key=lambda t: t[1])
             xmit_id = id ^ 1
             if not xmit_id in rpcs:
@@ -1887,7 +2029,7 @@ class AnalyzePacket:
                     if roffset >= soffset:
                         length = min(pkt_max, soffset + slength - roffset)
                         pkts.append([rtime, stime, xmit_id, roffset, sender,
-                                length, rprio])
+                                length, rprio, rpc['gro_core']])
                         if stime < xmit_time:
                             prior_bytes += length
                         missing_xmit = False
@@ -1896,22 +2038,26 @@ class AnalyzePacket:
                     # Couldn't find the transmission record for this packet;
                     # if it looks like the packet's transmission overlapped
                     # the reference packet, print as much info as possible.
+                    if rtime >= recv_time:
+                        continue
                     if sender != 'unknown':
                         if traces[sender]['last_time'] < rtime:
+                            # Special send time means "send time unknown"
+                            pkts.append([rtime, -1e10, id, roffset, sender,
+                                    length, rprio, rpc['gro_core']])
                             continue
                     if xmit_rpc:
                         if ('sendmsg' in xmit_rpc) and (xmit_rpc['sendmsg']
                                 >= recv_time):
                             continue
-                    pkts.append([rtime, 0.0, id, roffset, sender, length, rprio])
+                    pkts.append([rtime, -1e10, id, roffset, sender, length,
+                            rprio, rpc['gro_core']])
                     prior_bytes += length
         print('%.1f KB already in transit to target core when packet '
                 'transmitted' % (prior_bytes * 1e-3))
-        print('\nOther packets whose transmission to core %d overlapped this '
-                'packet' % (recv_rpc['gro_core']))
-        print('reference packet:')
-        print('Xmit:     Time packet was transmitted; 0 means no info available')
-        print('          for packet transmission (transmitted before start of trace?)')
+        print('\nOther packets whose transmission to %s overlapped this '
+                'packet:' % (recv_rpc['node']))
+        print('Xmit:     Time packet was transmitted')
         print('Recv:     Time packet was received on core %d'
                 % (recv_rpc['gro_core']))
         print('Delay:    End-to-end latency for packet')
@@ -1920,19 +2066,27 @@ class AnalyzePacket:
         print('Sender:   Node that sent packet')
         print('Length:   Number of message bytes in packet')
         print('Prio:     Priority at which packet was transmitted')
+        print('Core:     Core on which homa_gro_receive handled packet')
         print('\n     Xmit       Recv    Delay         Rpc   Offset     Sender '
-                'Length  Prio')
-        print('----------------------------------------------------------------'
-                '------------')
+                'Length  Prio  Core')
+        print('--------------------------------------------------------------'
+                '------------------')
         pkts.sort(key=lambda t : t[1])
         message_printed = False
         before_before = ''
         before_after = ''
         after_before = ''
         after_after = ''
-        for rtime, stime, rpc_id, offset, sender, length, prio in pkts:
-            msg = '\n%9.3f  %9.3f %8.1f %11d  %7d %10s %6d    %2d' % (stime,
-                    rtime, rtime - stime, rpc_id, offset, sender, length, prio)
+        unknown_before = ''
+        for rtime, stime, rpc_id, offset, sender, length, prio, core in pkts:
+            if stime == -1e10:
+                unknown_before += ('\n      ???  %9.3f      ??? %11d  %7d %10s '
+                    '%6d    %2d  %4d' % (rtime, rpc_id, offset, sender, length,
+                    prio, core))
+                continue
+            msg = '\n%9.3f  %9.3f %8.1f %11d  %7d %10s %6d    %2d  %4d' % (stime,
+                    rtime, rtime - stime, rpc_id, offset, sender, length, prio,
+                    core)
             if stime < xmit_time:
                 if rtime < recv_time:
                     before_before += msg
@@ -1943,23 +2097,28 @@ class AnalyzePacket:
                     after_before += msg
                 else:
                     after_after += msg
-        print('Sent before %s, received before:%s' %
-                (options.pkt, before_before))
-        print('\nSent before %s, received after:%s' %
-                (options.pkt, before_after))
-        print('\nSent after %s, received before:%s' %
-                (options.pkt, after_before))
-        print('\nSent after %s, received after:%s' %
-                (options.pkt, after_after))
+        if before_before:
+            print('Sent before %s, received before:%s' %
+                    (options.pkt, before_before))
+        if before_after:
+            print('\nSent before %s, received after:%s' %
+                    (options.pkt, before_after))
+        if after_before:
+            print('\nSent after %s, received before:%s' %
+                    (options.pkt, after_before))
+        if after_after:
+            print('\nSent after %s, received after:%s' %
+                    (options.pkt, after_after))
+        if unknown_before:
+            print('\nSend time unknown, received before:%s' % (unknown_before))
+
 
 #------------------------------------------------
 # Analyzer: packets
 #------------------------------------------------
 class AnalyzePackets:
-    """
-    Collects information about each data packet and grant but doesn't generate
-    any output. The data it collects is used by other analyzers.
-    """
+    # Collects information about each data packet and grant but doesn't
+    # generate any output. The data it collects is used by other analyzers.
 
     def __init__(self, dispatcher):
         return
@@ -1977,12 +2136,20 @@ class AnalyzePackets:
         p = pkt_id(id^1, offset)
         packets[p]['gro'] = time
         packets[p]['priority'] = prio
+        packets[p]['id'] = id^1
+        packets[p]['offset'] = offset
 
-    def tt_softirq_data(self, trace, time, core, id, offset, length):
+    def tt_softirq_data(self, trace, time, core, id, offset, msg_length):
         global packets
         p = pkt_id(id^1, offset)
         packets[p]['softirq'] = time
-        packets[p]['msg_length'] = length
+        packets[p]['msg_length'] = msg_length
+
+    def tt_send_data(self, trace, time, core, id, offset, length):
+        global packets
+        p = pkt_id(id, offset)
+        packets[p]['id'] = id
+        packets[p]['length'] = length
 
     def tt_send_grant(self, trace, time, core, id, offset, priority):
         global grants
@@ -1994,7 +2161,9 @@ class AnalyzePackets:
 
     def tt_gro_grant(self, trace, time, core, peer, id, offset, priority):
         global grants
-        grants[pkt_id(id^1, offset)]['gro'] = time
+        p = pkt_id(id^1, offset)
+        grants[p]['gro'] = time
+        grants[p]['id'] = id^1
 
     def tt_softirq_grant(self, trace, time, core, id, offset):
         global grants
@@ -2004,10 +2173,8 @@ class AnalyzePackets:
 # Analyzer: rpcs
 #------------------------------------------------
 class AnalyzeRpcs:
-    """
-    Collects information about each RPC but doesn't actually print
-    anything. Intended primarily for use by other analyzers.
-    """
+    # Collects information about each RPC but doesn't actually print
+    # anything. Intended for use by other analyzers.
 
     def __init__(self, dispatcher):
         return
@@ -2058,6 +2225,7 @@ class AnalyzeRpcs:
 
     def tt_gro_grant(self, trace, time, core, peer, id, offset, priority):
         self.append(trace, id, 'gro_grant', [time, offset])
+        rpcs[id]['peer'] = peer
         rpcs[id]['gro_core'] = core
 
     def tt_rpc_handoff(self, trace, time, core, id):
