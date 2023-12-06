@@ -28,7 +28,7 @@ parser = get_parser(description=
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
         choices=['buffers', 'busy_usecs', 'client_threads',
-                'dctcp_buffers', 'fifo', 'gen2', 'gen3', 'gro',
+                'dctcp_buffers', 'fifo', 'gbps', 'gen2', 'gen3', 'gro',
                 'max_gro', 'max_gso', 'mtu', 'nic_queue', 'poll', 'ports',
                 'prios', 'receivers',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
@@ -86,6 +86,14 @@ elif options.config == 'fifo':
                 'label': '%d%% FIFO' % (fifo),
                 'sysctl': ['.net.homa.grant_fifo_fraction', fifo*10,
                            '.net.homa.pacer_fifo_fraction', fifo*10]})
+elif options.config == 'gbps':
+    # Vary the assumed link speed to increase headroom for the pacer
+    # to avoid overcommitting the uplink.
+    for gbps in [26, 25, 24, 23]:
+        specs.append({'exp_name': 'gpbs_%d' % (gbps),
+                'label': '%d Gbps' % (gbps),
+                'sysctl': ['.net.homa.link_mbps', gbps*1000]
+                })
 elif options.config == 'gen2':
     # Try multiple variants of the Gen2 load balancing policy
     specs.append({'exp_name': 'gen2default',
@@ -107,12 +115,17 @@ elif options.config == 'gen3':
     # Try multiple variants of the Gen3 load balancing policy
     specs.append({'exp_name': 'gen3',
             'label': 'Gen3',
-            'sysctl': ['.net.homa.gro_policy', 128],
+            'sysctl': ['.net.homa.gro_policy', 128+66],
             'rss': 'gen3'
             })
-    specs.append({'exp_name': 'gen3bypass',
-            'label': 'Gen3+Bypass',
+    specs.append({'exp_name': 'gen3nobypass',
+            'label': 'Gen3-Bypass',
             'sysctl': ['.net.homa.gro_policy', 128+66],
+            'rss': 'gen3'
+            })
+    specs.append({'exp_name': 'gen3noshortbypass',
+            'label': 'Gen3-ShortBypass',
+            'sysctl': ['.net.homa.gro_policy', 128+64],
             'rss': 'gen3'
             })
     specs.append({'exp_name': 'gen3_alt',
@@ -129,21 +142,11 @@ elif options.config == 'gro':
             })
     specs.append({'exp_name': 'gen2',
             'label': 'Gen2',
-            'sysctl': ['.net.homa.gro_policy', 16],
-            'rss': 'gen2'
-            })
-    specs.append({'exp_name': 'gen2bypass',
-            'label': 'Gen2+Bypass',
             'sysctl': ['.net.homa.gro_policy', 82],
             'rss': 'gen2'
             })
     specs.append({'exp_name': 'gen3',
             'label': 'Gen3',
-            'sysctl': ['.net.homa.gro_policy', 128],
-            'rss': 'gen3'
-            })
-    specs.append({'exp_name': 'gen3bypass',
-            'label': 'Gen3+Bypass',
             'sysctl': ['.net.homa.gro_policy', 128+66],
             'rss': 'gen3'
             })
