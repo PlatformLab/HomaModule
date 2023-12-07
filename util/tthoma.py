@@ -1227,7 +1227,7 @@ class AnalyzeDelay:
                     long_total.append(
                             [pkt['softirq'] - pkt['xmit'], p, pkt['softirq']])
 
-        for pkt in grants.values():
+        for p, pkt in grants.items():
             if ('xmit' in pkt) and ('nic' in pkt):
                 grant_to_nic.append(
                         [pkt['nic'] - pkt['xmit'], p, pkt['nic']])
@@ -1285,6 +1285,8 @@ class AnalyzeDelay:
 
         # Handle --verbose for packet-related delays.
         def print_worst(data, label):
+            global rpcs
+
             # The goal is to print about 20 packets covering the 98th-100th
             # percentiles; we'll print one out of every "interval" packets.
             num_pkts = len(data)
@@ -1295,13 +1297,31 @@ class AnalyzeDelay:
                 if i < 0:
                     break
                 pkt = data[i]
-                print('%-8s %6.1f  %20s  %9.3f %5.1f' % (label, pkt[0],
-                        pkt[1], pkt[2], i*100/num_pkts))
+                rpc_id = int(pkt[1].split(':')[0]) ^ 1
+                dest = '      ????   ??'
+                if rpc_id in rpcs:
+                    rpc = rpcs[rpc_id]
+                    if 'gro_core' in rpc:
+                        dest = '%10s %4d' % (rpc['node'], rpc['gro_core'])
+                    else:
+                        dest = '%10s   ??' % (rpc['node'])
+                print('%-8s %6.1f  %20s %s %9.3f %5.1f' % (label, pkt[0],
+                        pkt[1], dest, pkt[2], i*100/num_pkts))
 
         if options.verbose:
-            print('\nSampled packets with outlier delays:\n')
-            print('Type    Delay (us)             Packet   End Time  Pctl')
-            print('------------------------------------------------------')
+            print('\nSampled packets with outlier delays:')
+            print('Phase:    Phase of delay: Xmit, Net, or SoftIRQ')
+            print('Delay:    Delay for this phase')
+            print('Packet:   Identifier for packet: rpc_id:offset')
+            print('Node:     Node where packet was received')
+            print('Core:     Core where homa_gro_receive processed packet')
+            print('EndTime:  Time when phase completed')
+            print('Pctl:     Percentile of this packet\'s delay')
+            print('')
+            print('Phase   Delay (us)             Packet   RecvNode Core   '
+                    'EndTime  Pctl')
+            print('--------------------------------------------------------'
+                    '-------------')
 
             print('Data packets from single-packet messages:')
             print_worst(short_to_nic, 'Xmit')
