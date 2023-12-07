@@ -1,19 +1,9 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Notes for new Homa timetrace analyzer:
-  * Information that is needed by various analyzers:
-    * Incoming data packets and grants (GRO and SoftIRQ)
-    * Outgoing data packets and grants (regular and FIFO)
-    * Message lengths
-    * Peer for each RPC
-    * Length of unscheduled data (outgoing and incoming)
-    * Copy-to-user activity
-    * Copy-from-user activity
-    * mlx5 page allocation and freeing
-    * RPC handoffs
-  * Existing analyzers:
-    * ttgrants.py
+* Implement a new packet steering mechanism to avoid core conflicts:
+  * Write gen3.txt file
+  * Add new metrics
 
 * When requesting ACKs, must eventually give up and delete RPC.
 * Eliminate msgin.scheduled: just compute when needed.
@@ -32,16 +22,9 @@ Notes for Homa implementation in Linux:
     detect missing packets at the front of in msgin->packets to retry
     more aggressively. Also, perhaps keep copying data even when there
     is a missing packet?
-  * Implement a a new packet steering mechanism to avoid core conflicts:
-    * When passing a message to a waiting thread, pick one that doesn't
-      conflict with GRO or SoftIRQ.
-    * Record the core for threads that are copying out; avoid this core
-      when picking SoftIRQ.
-    * Statically allocate the SoftIRQ cores for each GRO core to prevent
-      any conflicts.
-  * Rebuild Homa timetrace analysis from scratch. Create one large script
-    with a clean dispatcher and a nice modular structure that makes it easy
-    to add more analyses.
+  * Rework the mechanism for copying to user space to record gaps in the
+    packets that have been received and keep copying (in order to avoid
+    long-lived packet buffers).
 
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
@@ -126,7 +109,6 @@ Notes for Homa implementation in Linux:
 * Performance-related tasks:
   * Improve software GSO by making segments refer to the initial large
     buffer instead of copying?
-  * Rework granting to
   * Implement sk_buff caching for output buffers:
     * Allocation is slow (2-10 us on AMD processors; check on Intel?)
     * Large buffers exceed KMALLOC_MAX_CACHE_SIZE, so they aren't cached
@@ -556,9 +538,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
-
-
-Return peer address when recvmsg fails
-* Unfortunately Linux doesn't progagate this information after
-  errors, so it has to be done through homa_recvmsg_args.
-* This resulted in a size
