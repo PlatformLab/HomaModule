@@ -268,9 +268,6 @@ in
 The amount of time (in microseconds) that a given core can own a page in
 a receive buffer pool before its ownership can be revoked by a different
 core.
-.IR gro_policy
-An integer value that determines how Homa processes incoming packets
-at the GRO level. See code in homa_offload.c for more details.
 .TP
 .IR busy_usecs
 An integer value in microsecond units; if a core has been active in
@@ -338,6 +335,19 @@ for the oldest message, specified in thousandths (e.g., 100 means that 10%
 of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
+.TP
+.I gro_busy_usecs
+An integer value used to determine whether or not to perform some
+optimizations specified by
+.IR gro_policy .
+If the gap between the completion of one call to homa_gro_receive and
+the invocation of the next call on the same core is less than this many
+microseconds, the core is considered to be "busy", so optimizations
+that add to the load of the core will not be performed.
+.TP
+.I gro_policy
+An integer value that determines how Homa processes incoming packets
+at the GRO level. See code in homa_offload.c for more details.
 .TP
 .IR gso_force_software
 If this value is nonzero, Homa will perform GSO in software instead of

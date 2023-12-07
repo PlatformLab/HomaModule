@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -151,12 +151,16 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct sk_buff *held_skb;
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
+	__u64 now = get_cycles();
+	int busy = (now - core->last_gro) < homa->gro_busy_cycles;
 	__u32 hash;
 	__u64 saved_softirq_metric, softirq_cycles;
 	struct data_header *h_new = (struct data_header *)
 			skb_transport_header(skb);
 	int priority;
 	__u32 saddr;
+
+	core->last_active = now;
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
 		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
@@ -169,12 +173,18 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 //	if (!pskb_may_pull(skb, 64))
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
-	if (h_new->common.type == DATA)
+	if (h_new->common.type == DATA) {
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset), priority);
-	else if (h_new->common.type == GRANT) {
+		if ((h_new->seg.segment_length == h_new->message_length)
+				&& (homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
+				&& !busy) {
+			INC_METRIC(gro_data_bypasses, 1);
+			goto bypass;
+		}
+	} else if (h_new->common.type == GRANT) {
 		tt_record4("homa_gro_receive got grant from 0x%x "
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
@@ -186,20 +196,15 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		 * a significant difference in throughput for large
 		 * messages, especially when the system is loaded.
 		 */
-		if (homa->gro_policy & HOMA_GRO_FAST_GRANTS)
+		if ((homa->gro_policy & HOMA_GRO_FAST_GRANTS) && !busy) {
+			INC_METRIC(gro_grant_bypasses, 1);
 			goto bypass;
+		}
 	} else
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, type 0x%x, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				h_new->common.type, priority);
-
-	core->last_active = get_cycles();
-
-	if ((homa->gro_policy & HOMA_GRO_BYPASS)
-			|| ((homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
-			&& (skb->len < 1400)))
-		goto bypass;
 
 	/* The GRO mechanism tries to separate packets onto different
 	 * gro_lists by hash. This is bad for us, because we want to batch
@@ -273,24 +278,22 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
     done:
 	homa_check_pacer(homa, 1);
+	core->last_gro = get_cycles();
 	return result;
 
     bypass:
         /* Record SoftIRQ cycles in a different metric to reflect that
 	 * they happened during bypass.
 	 */
-	saved_softirq_metric = homa_cores[raw_smp_processor_id()]
-			->metrics.softirq_cycles;
+	saved_softirq_metric = core->metrics.softirq_cycles;
 	homa_softirq(skb);
-	softirq_cycles = homa_cores[raw_smp_processor_id()]
-			->metrics.softirq_cycles - saved_softirq_metric;
-	homa_cores[raw_smp_processor_id()]->metrics.softirq_cycles
-			= saved_softirq_metric;
+	softirq_cycles = core->metrics.softirq_cycles - saved_softirq_metric;
+	core->metrics.softirq_cycles = saved_softirq_metric;
 	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
+	core->last_gro = get_cycles();
 
 	/* This return value indicates that we have freed skb. */
 	return ERR_PTR(-EINPROGRESS);
-
 }
 
 /**
@@ -350,7 +353,6 @@ void homa_gro_gen2(struct sk_buff *skb)
 				ntohl(h->seg.offset));
 	}
 	atomic_inc(&homa_cores[candidate]->softirq_backlog);
-	homa_cores[this_core]->last_gro = now;
 	homa_set_softirq_cpu(skb, candidate);
 }
 

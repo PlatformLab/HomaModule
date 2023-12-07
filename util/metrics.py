@@ -390,12 +390,24 @@ if elapsed_secs != 0:
                     /deltas["handoffs_thread_waiting"])
         else:
             alt_thread_percent = 0.0
-        print("Available immediately:      %4.1f%%" % (100.0 - poll_percent
+        if deltas["packets_rcvd_DATA"]:
+            data_bypass_percent = (100.0*deltas["gro_data_bypasses"]
+                        /deltas["packets_rcvd_DATA"])
+        else:
+            data_bypass_percent = 0.0
+        if deltas["packets_rcvd_GRANT"]:
+            grant_bypass_percent = (100.0*deltas["gro_grant_bypasses"]
+                        /deltas["packets_rcvd_GRANT"])
+        else:
+            grant_bypass_percent = 0.0
+        print("Available immediately:        %5.1f%%" % (100.0 - poll_percent
                 - sleep_percent))
-        print("Arrived while polling:      %4.1f%%" % (poll_percent))
-        print("Blocked at least once:      %4.1f%%" % (sleep_percent))
-        print("Alternate GRO handoffs:     %4.1f%%" % (gen3_alt_percent))
-        print("Alternate thread handoffs:  %4.1f%%" % (alt_thread_percent))
+        print("Arrived while polling:        %5.1f%%" % (poll_percent))
+        print("Blocked at least once:        %5.1f%%" % (sleep_percent))
+        print("Alternate GRO handoffs:       %5.1f%%" % (gen3_alt_percent))
+        print("Alternate thread handoffs:    %5.1f%%" % (alt_thread_percent))
+        print("GRO bypass for data packets:  %5.1f%%" % (data_bypass_percent))
+        print("GRO bypass for grant packets: %5.1f%%" % (grant_bypass_percent))
 
     print("\nMiscellaneous:")
     print("--------------")

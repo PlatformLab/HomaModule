@@ -1945,10 +1945,6 @@ struct homa {
 	/* Bits that can be specified for gro_policy. These were created for
 	 * testing, in order to evaluate various possible policies; you almost
 	 * certainly should not use any value other than HOMA_GRO_NORMAL.
-	 * HOMA_GRO_BYPASS:           Pass all incoming packets directly to
-	 *                            homa_softirq during GRO; this bypasses
-	 *                            the SoftIRQ dispatching mechanism as well
-	 *                            as the network and IP stack layers.
 	 * HOMA_GRO_SAME_CORE         If isolated packets arrive (not part of
 	 *                            a batch) use the GRO core for SoftIRQ also.
 	 * HOMA_GRO_IDLE              Use old mechanism for selecting an idle
@@ -1958,13 +1954,14 @@ struct homa {
 	 * HOMA_GRO_GEN2              Use the new mechanism for selecting an
 	 *                            idle core for SoftIRQ.
 	 * HOMA_GRO_FAST_GRANTS       Pass all grants immediately to
-	 *                            homa_softirq during GRO.
-	 * HOMA_GRO_SHORT_BYPASS      Pass all short packets directly to
-	 *                            homa_softirq during GRO.
+	 *                            homa_softirq during GRO (only if the
+	 *                            core isn't overloaded).
+	 * HOMA_GRO_SHORT_BYPASS      Pass all single-packet messages directly
+	 *                            to homa_softirq during GRO (only if the
+	 *                            core isn't overloaded).
 	 * HOMA_GRO_GEN3              Use the "Gen3" mechanisms for load
 	 *                            balancing.
 	 */
-	#define HOMA_GRO_BYPASS          1
 	#define HOMA_GRO_SAME_CORE       2
 	#define HOMA_GRO_IDLE            4
 	#define HOMA_GRO_NEXT            8
@@ -1973,7 +1970,7 @@ struct homa {
 	#define HOMA_GRO_SHORT_BYPASS   64
 	#define HOMA_GRO_GEN3          128
 	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_GEN2 \
-			|HOMA_GRO_SHORT_BYPASS)
+			|HOMA_GRO_SHORT_BYPASS|HOMA_GRO_FAST_GRANTS)
 
 	/*
 	 * @busy_usecs: if there has been activity on a core within the
@@ -1985,6 +1982,19 @@ struct homa {
 
 	/** @busy_cycles: Same as busy_usecs except in get_cycles() units. */
 	int busy_cycles;
+
+	/*
+	 * @gro_busy_usecs: if the gap between the completion of
+	 * homa_gro_receive and the next call to homa_gro_receive on the same
+	 * core is less than this, then GRO on that core is considered to be
+	 * "busy", and optimizations such as HOMA_GRO_SHORT_BYPASS will not be
+	 * done because they risk overloading the core. Set externally via
+	 * sysctl.
+	 */
+	int gro_busy_usecs;
+
+	/** @gro_busy_cycles: Same as busy_usecs except in get_cycles() units. */
+	int gro_busy_cycles;
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -2629,6 +2639,20 @@ struct homa_metrics {
 	 */
 	__u64 gen3_alt_handoffs;
 
+	/**
+	 * @gro_grant_bypasses: total number of GRANT packets passed directly
+	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
+	 * mechanism (triggered by HOMA_GRO_FAST_GRANTS).
+	 */
+	__u64 gro_grant_bypasses;
+
+	/**
+	 * @gro_data_bypasses: total number of DATA packets passed directly
+	 * to homa_softirq by homa_gro_receive, bypassing the normal SoftIRQ
+	 * mechanism (triggered by HOMA_GRO_SHORT_BYPASS).
+	 */
+	__u64 gro_data_bypasses;
+
 	/** @temp: For temporary use during testing. */
 #define NUM_TEMP_METRICS 10
 	__u64 temp[NUM_TEMP_METRICS];
@@ -2648,10 +2672,9 @@ struct homa_core {
 	__u64 last_active;
 
 	/**
-	 * @last_gro: the last time (in get_cycle() units) that Homa
-	 * processed packets at GRO(NAPI) level on this core. Used to
-	 * avoid assigning SoftIRQ handlers to this core when it has
-	 * been used recently for GRO.
+	 * @last_gro: the last time (in get_cycle() units) that
+	 * homa_gro_receive returned on this core. Used to determine
+	 * whether GRO is keeping a core busy.
 	 */
 	__u64 last_gro;
 

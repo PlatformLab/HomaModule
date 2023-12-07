@@ -155,6 +155,7 @@ int homa_init(struct homa *homa)
 	homa->gso_force_software = 0;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->busy_usecs = 100;
+	homa->gro_busy_usecs = 5;
 	homa->timer_ticks = 0;
 	spin_lock_init(&homa->metrics_lock);
 	homa->metrics = NULL;
@@ -1826,6 +1827,16 @@ char *homa_print_metrics(struct homa *homa)
 				"Gen3 handoffs to secondary core (primary was "
 				"busy)\n",
 				m->gen3_alt_handoffs);
+		homa_append_metric(homa,
+				"gro_grant_bypasses       %15llu  "
+				"Grant packets passed directly to homa_softirq "
+				"by homa_gro_receive\n",
+				m->gro_grant_bypasses);
+		homa_append_metric(homa,
+				"gro_data_bypasses        %15llu  "
+				"Data packets passed directly to homa_softirq "
+				"by homa_gro_receive\n",
+				m->gro_data_bypasses);
 		for (i = 0; i < NUM_TEMP_METRICS;  i++)
 			homa_append_metric(homa,
 					"temp%-2d                  %15llu  "

@@ -1933,6 +1933,10 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = (tmp*cpu_khz)/1000;
 	homa->busy_cycles = tmp;
 
+	tmp = homa->gro_busy_usecs;
+	tmp = (tmp*cpu_khz)/1000;
+	homa->gro_busy_cycles = tmp;
+
 	tmp = homa->bpage_lease_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->bpage_lease_cycles = tmp;
