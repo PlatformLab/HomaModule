@@ -4,7 +4,16 @@ order.
 
 49. (November 2023) Implemented "Gen3" load balancing scheme, renamed the
     old scheme "Gen2". For details on load balancing, see balance.txt.
-    So far, Gen3 doesn't appear any better than Gen2.
+    Gen3 seems to reduce significantly tail latency for cross-core handoffs;
+    here are a few samples(us):
+                     --Gen2 P50-   ---Gen2 P99---   --Gen3 P50-   --Gen3 P99-
+    GRO -> SoftIRQ   2.7 2.8 3.0   71.1 43.6 71.3   2.8 2.6 2.7   8.7 5.4 8.3
+    SoftIRQ -> App   0.3 0.3 0.3   20.5 21.7 19.9   0.3 0.3 0.3   7.2 6.8 9.0
+
+    However, this doesn't seem to translate into better overall performance:
+    standard slowdown graphs look about the same with Gen2 and Gen3.
+    Furthermore, Gen3 seems to hurt performance for W2 and W3 (too much
+    load on GRO cores?). This needs more analysis.
 
 48. (August 2023) Unexpected packet loss on c6525-100g cluster (AMD processors,
     100 Gbps links). Under some conditions (such as "cp_node client --one-way
