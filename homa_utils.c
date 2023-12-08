@@ -239,7 +239,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->dport = ntohs(dest->in6.sin6_port);
 	crpc->completion_cookie = 0;
 	crpc->error = 0;
-	crpc->msgin.total_length = -1;
+	crpc->msgin.length = -1;
 	crpc->msgin.num_skbs = 0;
 	crpc->msgin.num_bpages = 0;
 	memset(&crpc->msgout, 0, sizeof(crpc->msgout));
@@ -341,7 +341,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->id = id;
 	srpc->completion_cookie = 0;
 	srpc->error = 0;
-	srpc->msgin.total_length = -1;
+	srpc->msgin.length = -1;
 	srpc->msgin.num_skbs = 0;
 	srpc->msgin.num_bpages = 0;
 	memset(&srpc->msgout, 0, sizeof(srpc->msgout));
@@ -493,8 +493,8 @@ void homa_rpc_free(struct homa_rpc *rpc)
 //			rpc->hsk->dead_skbs);
 
 	/* If the RPC had incoming bytes, remove them from the global count. */
-	delta = (rpc->msgin.total_length < 0) ? 0
-			: (rpc->msgin.granted - (rpc->msgin.total_length
+	delta = (rpc->msgin.length < 0) ? 0
+			: (rpc->msgin.granted - (rpc->msgin.length
 			- rpc->msgin.bytes_remaining));
 	if (delta != 0)
 		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
@@ -581,7 +581,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 				}
 			}
 			i = 0;
-			if (rpc->msgin.total_length >= 0) {
+			if (rpc->msgin.length >= 0) {
 				while (1) {
 					struct sk_buff *skb;
 					skb = skb_dequeue(&rpc->msgin.packets);
@@ -712,9 +712,9 @@ void homa_rpc_log(struct homa_rpc *rpc)
 		printk(KERN_NOTICE "%s RPC INCOMING, id %llu, peer %s:%d, "
 				"%d/%d bytes received, incoming %d\n",
 				type, rpc->id, peer, rpc->dport,
-				rpc->msgin.total_length
+				rpc->msgin.length
 				- rpc->msgin.bytes_remaining,
-				rpc->msgin.total_length, rpc->msgin.granted);
+				rpc->msgin.length, rpc->msgin.granted);
 	else if (rpc->state == RPC_OUTGOING) {
 		printk(KERN_NOTICE "%s RPC OUTGOING, id %llu, peer %s:%d, "
 				"out length %d, left %d, granted %d, "
@@ -731,7 +731,7 @@ void homa_rpc_log(struct homa_rpc *rpc)
 				"incoming length %d, outgoing length %d\n",
 				type, homa_symbol_for_state(rpc),
 				rpc->id, peer, rpc->dport,
-				rpc->msgin.total_length, rpc->msgout.length);
+				rpc->msgin.length, rpc->msgout.length);
 	}
 }
 
@@ -777,12 +777,12 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 void homa_rpc_log_tt(struct homa_rpc *rpc)
 {
 	if (rpc->state == RPC_INCOMING) {
-		int received = rpc->msgin.total_length
+		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;
 		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes "
 				"received",
 				rpc->id, tt_addr(rpc->peer->addr),
-				received, rpc->msgin.total_length);
+				received, rpc->msgin.length);
 		if (rpc->msgin.granted > received)
 			tt_record3("RPC id %d has %d outstanding grants "
 					"(incoming %d)", rpc->id,
@@ -839,7 +839,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 			}
 			if (rpc->state != RPC_INCOMING)
 				continue;
-			if (rpc->msgin.granted <= (rpc->msgin.total_length
+			if (rpc->msgin.granted <= (rpc->msgin.length
 					- rpc->msgin.bytes_remaining))
 				continue;
 			freeze_count--;
@@ -878,7 +878,7 @@ void homa_validate_incoming(struct homa *homa, int verbose)
 			if (rpc->state != RPC_INCOMING)
 				continue;
 			incoming = rpc->msgin.granted -
-					(rpc->msgin.total_length
+					(rpc->msgin.length
 					- rpc->msgin.bytes_remaining);
 			if (incoming == 0)
 				continue;

@@ -1054,7 +1054,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = PTR_ERR(rpc);
 		goto done;
 	}
-	result = rpc->error ? rpc->error : rpc->msgin.total_length;
+	result = rpc->error ? rpc->error : rpc->msgin.length;
 
 	/* Generate time traces on both ends for long elapsed times (used
 	 * for performance debugging).
@@ -1064,13 +1064,13 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		if ((elapsed <= hsk->homa->temp[1])
 				&& (elapsed >= hsk->homa->temp[0])
 				&& homa_is_client(rpc->id)
-				&& (rpc->msgin.total_length >= hsk->homa->temp[2])
-				&& (rpc->msgin.total_length < hsk->homa->temp[3])) {
+				&& (rpc->msgin.length >= hsk->homa->temp[2])
+				&& (rpc->msgin.length < hsk->homa->temp[3])) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, "
 					"length %d",
 					elapsed, rpc->id,
 					tt_addr(rpc->peer->addr),
-					rpc->msgin.total_length);
+					rpc->msgin.length);
 			homa_freeze(rpc, SLOW_RPC, "Freezing because of long "
 					"elapsed time for RPC id %d, peer 0x%x");
 		}
@@ -1079,7 +1079,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	/* Collect result information. */
 	control.id = rpc->id;
 	control.completion_cookie = rpc->completion_cookie;
-	if (likely(rpc->msgin.total_length >= 0)) {
+	if (likely(rpc->msgin.length >= 0)) {
 		control.num_bpages = rpc->msgin.num_bpages;
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
 				sizeof(control.bpage_offsets));

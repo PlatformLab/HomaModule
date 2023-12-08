@@ -365,7 +365,7 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 			"skb_copy_datagram_iter: 1200 bytes to 0x1000af0: "
 			"201800-202999",
 			unit_log_get());
-	EXPECT_EQ(crpc->msgin.total_length, crpc->msgin.copied_out);
+	EXPECT_EQ(crpc->msgin.length, crpc->msgin.copied_out);
 	EXPECT_EQ(NULL, skb_peek(&crpc->msgin.packets));
 	EXPECT_EQ(0, crpc->msgin.num_skbs);
 }
@@ -458,7 +458,7 @@ TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)
 	struct homa_message_in msgin;
 	struct resend_header resend;
 
-	msgin.total_length = -1;
+	msgin.length = -1;
 	homa_get_resend_range(&msgin, &resend);
 	EXPECT_EQ(0, resend.offset);
 	EXPECT_EQ(100, ntohl(resend.length));
@@ -1294,7 +1294,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 			"message_length 2000, offset 1400, data_length 600, "
 			"incoming 2000, RETRANSMIT",
 			unit_log_get());
-	EXPECT_EQ(-1, crpc->msgin.total_length);
+	EXPECT_EQ(-1, crpc->msgin.length);
 }
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 {
@@ -1317,7 +1317,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 			"message_length 2000, offset 0, data_length 1400, "
 			"incoming 1400, RETRANSMIT",
 			unit_log_get());
-	EXPECT_EQ(-1, crpc->msgin.total_length);
+	EXPECT_EQ(-1, crpc->msgin.length);
 }
 TEST_F(homa_incoming, homa_unknown_pkt__free_server_rpc)
 {

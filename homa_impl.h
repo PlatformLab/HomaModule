@@ -616,11 +616,10 @@ struct homa_message_out {
  */
 struct homa_message_in {
 	/**
-	 * @total_length: Size of the entire message, in bytes. A value
-	 * less than 0 means this structure is uninitialized and therefore
-	 * not in use.
+	 * @length: Payload size in bytes. A value less than 0 means this
+	 * structure is uninitialized and therefore not in use.
 	 */
-	int total_length;
+	int length;
 
 	/**
 	 * @packets: DATA packets received for this message so far. The list
@@ -635,7 +634,7 @@ struct homa_message_in {
 
 	/**
 	 * @num_skbs: Number of buffers currently in @packets. Will be 0 if
-	 * @total_length is less than 0.
+	 * @length is less than 0.
 	 */
 	int num_skbs;
 
@@ -648,7 +647,7 @@ struct homa_message_in {
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
 	 * may transmit without additional grants, includes unscheduled bytes.
-	 * Never larger than @total_length. Note: once initialized, this
+	 * Never larger than @length. Note: once initialized, this
 	 * may not be modified without holding @homa->grantable_lock.
 	 */
         int granted;

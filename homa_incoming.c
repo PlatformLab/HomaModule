@@ -38,7 +38,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 {
 	int err;
 
-	rpc->msgin.total_length = length;
+	rpc->msgin.length = length;
 	skb_queue_head_init(&rpc->msgin.packets);
 	rpc->msgin.num_skbs = 0;
 	rpc->msgin.bytes_remaining = length;
@@ -88,7 +88,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	int floor = rpc->msgin.copied_out;
 
 	/* Any data with offset >= this is useless. */
-	int ceiling = rpc->msgin.total_length;
+	int ceiling = rpc->msgin.length;
 
 	/* Figure out where in the list of existing packets to insert the
 	 * new one. It doesn't necessarily go at the end, but it almost
@@ -119,7 +119,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		tt_record4("homa_add_packet discarding packet for id %d, "
 				"offset %d, copied_out %d, remaining %d",
 				rpc->id, offset, rpc->msgin.copied_out,
-				rpc->msgin.total_length);
+				rpc->msgin.length);
 		kfree_skb(skb);
 		return;
 	}
@@ -168,7 +168,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		struct data_header *h;
 		int i, seg_offset;
 
-		if (!skb || (rpc->msgin.copied_out >= rpc->msgin.total_length))
+		if (!skb || (rpc->msgin.copied_out >= rpc->msgin.length))
 			goto copy_out;
 		h = (struct data_header *) skb->data;
 		seg_offset = ntohl(h->seg.offset);
@@ -276,7 +276,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	/* This will eventually be the top of the first missing range. */
 	int end_offset;
 
-	if (msgin->total_length < 0) {
+	if (msgin->length < 0) {
 		/* Haven't received any data for this message; request
 		 * retransmission of just the first packet (the sender
 		 * will send at least one full packet, regardless of
@@ -303,7 +303,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	}
 
 	missing_bytes = msgin->bytes_remaining
-			- (msgin->total_length - end_offset);
+			- (msgin->length - end_offset);
 	if (missing_bytes == 0) {
 		resend->offset = 0;
 		resend->length = 0;
@@ -336,7 +336,7 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 	tt_record4("first packets missing, missing_bytes %d, copied_out %d, "
 			"incoming %d, length %d",
 			missing_bytes, msgin->copied_out, msgin->granted,
-			msgin->total_length);
+			msgin->length);
 	resend->offset = htonl(msgin->copied_out);
 	resend->length = htonl(missing_bytes);
 }
@@ -550,7 +550,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		/* Must be server; note that homa_rpc_new_server already
 		 * initialized msgin and allocated buffers.
 		 */
-		if (unlikely(rpc->msgin.total_length >= 0))
+		if (unlikely(rpc->msgin.length >= 0))
 			goto discard;
 	}
 
@@ -893,13 +893,13 @@ void homa_check_grantable(struct homa_rpc *rpc)
 	UNIT_LOG("; ", "homa_check_grantable invoked");
 
 	/* No need to do anything unless this message needs more grants. */
-	if (rpc->msgin.granted >= rpc->msgin.total_length)
+	if (rpc->msgin.granted >= rpc->msgin.length)
 		return;
 
 	homa_grantable_lock(homa);
 	/* Note: must check incoming again: it might have changed. */
 	if ((rpc->state == RPC_DEAD) || (rpc->msgin.granted
-			>= rpc->msgin.total_length)) {
+			>= rpc->msgin.length)) {
 		homa_grantable_unlock(homa);
 		return;
 	}
@@ -1162,15 +1162,15 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 		 * will update total_incoming based on bytes_remaining
 		 * but not incoming.
 		 */
-		received = (rpc->msgin.total_length
+		received = (rpc->msgin.length
 				- rpc->msgin.bytes_remaining);
 
 		/* Compute how many bytes of additional grants (increment)
 		 * to give this RPC.
 		 */
 		new_grant = received + window;
-		if (new_grant > rpc->msgin.total_length)
-			new_grant = rpc->msgin.total_length;
+		if (new_grant > rpc->msgin.length)
+			new_grant = rpc->msgin.length;
 		increment = new_grant - rpc->msgin.granted;
 		if (increment <= 0)
 			continue;
@@ -1213,7 +1213,7 @@ int homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 		tt_record4("sending grant for id %llu, offset %d, priority %d, "
 				"increment %d",
 				rpc->id, new_grant, priority, increment);
-		if (new_grant == rpc->msgin.total_length)
+		if (new_grant == rpc->msgin.length)
 			homa_remove_grantable_locked(homa, rpc);
 		rpcs[num_grants] = rpc;
 		num_grants++;
@@ -1252,7 +1252,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 		if (rpc->msgin.birth >= oldest_birth)
 			continue;
 
-		received = (rpc->msgin.total_length
+		received = (rpc->msgin.length
 				- rpc->msgin.bytes_remaining);
 		on_the_way = rpc->msgin.granted - received;
 		if (on_the_way > homa->unsched_bytes) {
@@ -1267,21 +1267,21 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	if (oldest == NULL)
 		return NULL;
 	INC_METRIC(fifo_grants, 1);
-	if ((oldest->msgin.total_length - oldest->msgin.bytes_remaining)
+	if ((oldest->msgin.length - oldest->msgin.bytes_remaining)
 			== oldest->msgin.granted)
 		INC_METRIC(fifo_grants_no_incoming, 1);
 
 	oldest->silent_ticks = 0;
 	granted = homa->fifo_grant_increment;
 	oldest->msgin.granted += granted;
-	if (oldest->msgin.granted >= oldest->msgin.total_length) {
-		granted -= oldest->msgin.granted - oldest->msgin.total_length;
-		oldest->msgin.granted = oldest->msgin.total_length;
+	if (oldest->msgin.granted >= oldest->msgin.length) {
+		granted -= oldest->msgin.granted - oldest->msgin.length;
+		oldest->msgin.granted = oldest->msgin.length;
 		homa_remove_grantable_locked(homa, oldest);
 	}
 	atomic_add(granted, &homa->total_incoming);
 
-	if (oldest->msgin.granted < (oldest->msgin.total_length
+	if (oldest->msgin.granted < (oldest->msgin.length
 				- oldest->msgin.bytes_remaining)) {
 		/* We've already received all of the bytes in the new
 		 * grant; most likely this means that the sender sent extra
@@ -1756,7 +1756,7 @@ found_rpc:
 			if (rpc->error)
 				goto done;
 			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
-			if (rpc->msgin.copied_out == rpc->msgin.total_length)
+			if (rpc->msgin.copied_out == rpc->msgin.length)
 				goto done;
 			homa_rpc_unlock(rpc);
 		}
