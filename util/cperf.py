@@ -965,6 +965,9 @@ def scan_metrics(experiment):
     units = {'cores': '',
             'packets_sent_RESEND': '/s',
             'packets_rcvd_RESEND': '/s'}
+    thresholds = {'cores': 2,
+            'packets_sent_RESEND': 5,
+            'packets_rcvd_RESEND': 5}
     # Keys are same as in docs above, values are dictionaries, in which
     # keys are metric file names and values are the value of the corresponding
     # metric name in that metrics file.
@@ -995,7 +998,7 @@ def scan_metrics(experiment):
             log("Couldn't find core utilization in metrics files")
             continue
         for file, value in metrics[name].items():
-            if value > 1.5*median:
+            if (value >= thresholds[name]) and (value > 1.5*median):
                 log("Outlier %s in %s: %s vs. %s median"
                         % (docs[name], file, scale_number(value, units[name]),
                         scale_number(median, units[name])))
