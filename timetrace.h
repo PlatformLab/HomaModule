@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2022 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -119,6 +119,7 @@ extern void      tt_dbg1(char *msg, ...);
 extern void      tt_dbg2(char *msg, ...);
 extern void      tt_dbg3(char *msg, ...);
 extern void      tt_find_oldest(int *pos);
+extern void      tt_get_messages(char *buffer, size_t length);
 extern void      tt_printk(void);
 extern int       tt_proc_open(struct inode *inode, struct file *file);
 extern ssize_t   tt_proc_read(struct file *file, char __user *user_buf,

@@ -1,4 +1,4 @@
-/* Copyright (c) 2019-2020 Stanford University
+/* Copyright (c) 2019-2023 Stanford University
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -96,7 +96,8 @@ bool tt_test_no_khz = false;
 /**
  * tt_init(): Enable time tracing, create /proc file for reading traces.
  * @proc_file: Name of a file in /proc; this file can be read to extract
- *             the current timetrace.
+ *             the current timetrace. NULL means don't create a /proc file
+ *             (such as when running unit tests).
  * @temp:      Pointer to homa's "temp" configuration parameters, which
  *             we should make available to the kernel. NULL means no
  *             such variables available.
@@ -124,11 +125,15 @@ int tt_init(char *proc_file, int *temp)
 		tt_buffers[i] = buffer;
 	}
 
-	tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
-	if (!tt_dir_entry) {
-		printk(KERN_ERR "couldn't create /proc/%s for timetrace "
-				"reading\n", proc_file);
-		goto error;
+	if (proc_file != NULL) {
+		tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
+		if (!tt_dir_entry) {
+			printk(KERN_ERR "couldn't create /proc/%s for timetrace "
+					"reading\n", proc_file);
+			goto error;
+		}
+	} else {
+		tt_dir_entry = NULL;
 	}
 
 	spin_lock_init(&tt_lock);
@@ -171,7 +176,8 @@ void tt_destroy(void)
 	spin_lock(&tt_lock);
 	if (init) {
 		init = false;
-		proc_remove(tt_dir_entry);
+		if (tt_dir_entry != NULL)
+			proc_remove(tt_dir_entry);
 	}
 	for (i = 0; i < nr_cpu_ids; i++) {
 		kfree(tt_buffers[i]);
@@ -596,6 +602,75 @@ void tt_printk(void)
 
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
+}
+
+/**
+ * tt_get_messages() - Print the messages from all timetrace records to a
+ * caller-provided buffer. Only the messages are printed (no timestamps or
+ * core numbers). Intended primarily for use by unit tests.
+ * @buffer:    Where to print messages.
+ * @length:    Number of bytes available at @buffer; output will be truncated
+ *             if needed to fit in this space.
+ */
+void tt_get_messages(char *buffer, size_t length)
+{
+	/* Index of the next entry to return from each tt_buffer (too
+	 * large to allocate on stack, so allocate dynamically).
+	 */
+	int *pos = kmalloc(NR_CPUS * sizeof(int), GFP_KERNEL);
+	int printed = 0;
+
+	*buffer = 0;
+	if (!init)
+		goto done;
+	atomic_inc(&tt_freeze_count);
+	tt_find_oldest(pos);
+
+	/* Each iteration of this loop prints one event. */
+	while (true) {
+		struct tt_event *event;
+		int i, result;
+		int current_core = -1;
+		__u64 earliest_time = ~0;
+
+		/* Check all the traces to find the earliest available event. */
+		for (i = 0; i < nr_cpu_ids; i++) {
+			struct tt_buffer *buffer = tt_buffers[i];
+			event = &buffer->events[pos[i]];
+			if ((pos[i] != buffer->next_index)
+					&& (event->timestamp < earliest_time)) {
+			    current_core = i;
+			    earliest_time = event->timestamp;
+			}
+		}
+		if (current_core < 0) {
+		    /* None of the traces have any more events to process. */
+		    break;
+		}
+		event = &(tt_buffers[current_core]->events[
+				pos[current_core]]);
+		pos[current_core] = (pos[current_core] + 1)
+				& (tt_buffer_size-1);
+
+		if (printed > 0) {
+			result = snprintf(buffer + printed, length - printed,
+					"; ");
+			if ((result < 0) || (result >= (length - printed)))
+				break;
+			printed += result;
+		}
+		result = snprintf(buffer + printed, length - printed,
+				event->format, event->arg0, event->arg1,
+				event->arg2, event->arg3);
+		if ((result < 0) || (result >= (length - printed)))
+			break;
+		printed += result;
+	}
+
+	atomic_dec(&tt_freeze_count);
+
+	done:
+	kfree(pos);
 }
 
 /**
