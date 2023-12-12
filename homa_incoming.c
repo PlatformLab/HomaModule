@@ -40,13 +40,13 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 
 	rpc->msgin.length = length;
 	skb_queue_head_init(&rpc->msgin.packets);
-	rpc->msgin.num_skbs = 0;
+	rpc->msgin.recv_end = 0;
+	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
 	rpc->msgin.granted = (unsched > length) ? length : unsched;
 	rpc->msgin.priority = 0;
 	rpc->msgin.scheduled = length > unsched;
 	rpc->msgin.resend_all = 0;
-	rpc->msgin.copied_out = 0;
 	rpc->msgin.num_bpages = 0;
 	err = homa_pool_allocate(rpc);
 	if (err != 0)
@@ -69,68 +69,121 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 }
 
 /**
+ * homa_new_gap() - Create a new gap and add it to a list.
+ * @next:   Add the new gap just before this list element.
+ * @start:  Offset of first byte covered by the gap.
+ * @end:    Offset of byte just after the last one covered by the gap.
+ */
+void homa_gap_new(struct list_head *next, int start, int end)
+{
+	struct homa_gap *gap;
+	gap = (struct homa_gap *) kmalloc(sizeof(struct homa_gap), GFP_KERNEL);
+	gap->start = start;
+	gap->end = end;
+	list_add_tail(& gap-> links, next);
+}
+
+/**
  * homa_add_packet() - Add an incoming packet to the contents of a
  * partially received message.
  * @rpc:   Add the packet to the msgin for this RPC.
  * @skb:   The new packet. This function takes ownership of the packet
- *         and will free it, if it doesn't get added to msgin (because
- *         it provides no new data).
+ *         (the packet will either be freed or added to rpc->msgin.packets).
  */
 void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
-	int offset = ntohl(h->seg.offset);
-	int data_bytes = ntohl(h->seg.segment_length);
-	struct sk_buff *skb2;
+	int start = ntohl(h->seg.offset);
+	int length = ntohl(h->seg.segment_length);
+	int end = start + length;
+	struct homa_gap *gap, *dummy;
 
-	/* Any data from the packet with offset less than this is
-	 * of no value.*/
-	int floor = rpc->msgin.copied_out;
+	if ((start + length) > rpc->msgin.length) {
+		tt_record3("Packet extended past message end; id %d, "
+				"offset %d, length %d",
+				rpc->id, start, length);
+		goto discard;
+	}
 
-	/* Any data with offset >= this is useless. */
-	int ceiling = rpc->msgin.length;
+	if (start == rpc->msgin.recv_end) {
+		/* Common case: packet is sequential. */
+		rpc->msgin.recv_end += length;
+		goto keep;
+	}
 
-	/* Figure out where in the list of existing packets to insert the
-	 * new one. It doesn't necessarily go at the end, but it almost
-	 * always will in practice, so work backwards from the end of the
-	 * list.
+	if (start > rpc->msgin.recv_end) {
+		/* Packet creates a new gap. */
+		homa_gap_new(&rpc->msgin.gaps, rpc->msgin.recv_end, start);
+		rpc->msgin.recv_end = end;
+		goto keep;
+	}
+
+	/* Must now check to see if the packet fills in part or all of
+	 * an existing gap.
 	 */
-	skb_queue_reverse_walk(&rpc->msgin.packets, skb2) {
-		struct data_header *h2 = (struct data_header *) skb2->data;
-		int offset2 = ntohl(h2->seg.offset);
-		int data_bytes2 = ntohl(h2->seg.segment_length);
-		if (offset2 < offset) {
-			floor = offset2 + data_bytes2;
-			break;
+	list_for_each_entry_safe(gap, dummy, &rpc->msgin.gaps, links) {
+	        /* Is packet at the start of this gap? */
+		if (start <= gap->start) {
+			if (end <= gap->start)
+				continue;
+			if (start < gap->start) {
+				tt_record4("Packet overlaps gap start: id %d, "
+						"start %d, end %d, gap_start %d",
+						rpc->id, start, end, gap->start);
+				goto discard;
+			}
+			if (end > gap->end) {
+				tt_record4("Packet overlaps gap end: id %d, "
+						"start %d, end %d, gap_end %d",
+						rpc->id, start, end, gap->start);
+				goto discard;
+			}
+			gap->start = end;
+			if (gap-> start >= gap->end) {
+				list_del(&gap->links);
+				kfree(gap);
+			}
+			goto keep;
 		}
-		ceiling = offset2;
+
+	        /* Is packet at the end of this gap? BTW, at this point we know
+		 * the packet can't cover the entire gap.
+		 */
+		if (end >= gap->end) {
+			if (start >= gap->end)
+				continue;
+			if (end > gap->end) {
+				tt_record4("Packet overlaps gap end: id %d, "
+						"start %d, end %d, gap_end %d",
+						rpc->id, start, end, gap->start);
+				goto discard;
+			}
+			gap->end = start;
+			goto keep;
+		}
+
+		/* Packet is in the middle of the gap; must split the gap. */
+		homa_gap_new(&gap->links, gap->start, start);
+		gap->start = end;
+		goto keep;
 	}
 
-	/* New packet goes right after skb2. If this packet overlaps either
-	 * of its neighbors, then it is discarded (partial overlaps are
-	 * not permitted).
-	 */
-	if ((offset < floor) || ((offset + data_bytes) > ceiling)) {
-		/* This packet is redundant. */
-//		char buffer[100];
-//		printk(KERN_NOTICE "redundant Homa packet: %s\n",
-//			homa_print_packet(skb, buffer, sizeof(buffer)));
-		INC_METRIC(redundant_packets, 1);
-		tt_record4("homa_add_packet discarding packet for id %d, "
-				"offset %d, copied_out %d, remaining %d",
-				rpc->id, offset, rpc->msgin.copied_out,
-				rpc->msgin.length);
-		kfree_skb(skb);
-		return;
-	}
-	if (h->retransmit) {
+	discard:
+	if (h->retransmit)
+		INC_METRIC(resent_discards, 1);
+	else
+		INC_METRIC(packet_discards, 1);
+	tt_record4("homa_add_packet discarding packet for id %d, "
+			"offset %d, length %d, retransmit %d",
+			rpc->id, start, length, h->retransmit);
+	kfree_skb(skb);
+	return;
+
+	keep:
+	if (h->retransmit)
 		INC_METRIC(resent_packets_used, 1);
-		homa_freeze(rpc, PACKET_LOST, "Freezing because of lost "
-				"packet, id %d, peer 0x%x");
-	}
-	__skb_insert(skb, skb2, skb2->next, &rpc->msgin.packets);
-	rpc->msgin.bytes_remaining -= data_bytes;
-	rpc->msgin.num_skbs++;
+	__skb_queue_tail(&rpc->msgin.packets, skb);
+	rpc->msgin.bytes_remaining -= length;
 }
 
 /**
@@ -149,101 +202,94 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 	struct sk_buff *skbs[MAX_SKBS];
 	int n = 0;             /* Number of filled entries in skbs. */
 	int error = 0;
-	int count;
-
-	/* Number of bytes that have already been copied to user space
-	 * from the current packet.
-	 */
-	int copied_from_seg;
+	int start_offset = 0;
+	int end_offset = 0;
+	int i;
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
 	 * copying to user space, because (a) it's illegal to hold a spinlock
 	 * while copying to user space and (b) we'd like for homa_softirq
 	 * to add more packets to the RPC while we're copying these out.
-	 * So, collect a bunch of chunks to copy, then release the lock,
+	 * So, collect a bunch of packets to copy, then release the lock,
 	 * copy them, and reacquire the lock.
 	 */
 	while (true) {
-		struct sk_buff *skb = skb_peek(&rpc->msgin.packets);
-		struct data_header *h;
-		int i, seg_offset;
-
-		if (!skb || (rpc->msgin.copied_out >= rpc->msgin.length))
-			goto copy_out;
-		h = (struct data_header *) skb->data;
-		seg_offset = ntohl(h->seg.offset);
-		if (rpc->msgin.copied_out < seg_offset) {
-			/* The next data to copy hasn't yet been received;
-			 * wait for more packets to arrive.
-			 */
-			goto copy_out;
+		struct sk_buff *skb = __skb_dequeue(&rpc->msgin.packets);
+		if (skb != NULL) {
+			skbs[n] = skb;
+			n++;
+			if (n < MAX_SKBS)
+				continue;
 		}
-		BUG_ON(rpc->msgin.copied_out != seg_offset);
-		skbs[n] = skb;
-		n++;
-		skb_dequeue(&rpc->msgin.packets);
-		rpc->msgin.num_skbs--;
-		rpc->msgin.copied_out = seg_offset + ntohl(h->seg.segment_length);
-		if (n < MAX_SKBS)
-			continue;
-
-copy_out:
 		if (n == 0)
 			break;
+
+		/* At this point we've collected a batch of packets (or
+		 * run out of packets); copy any available packets out to
+		 * user space.
+		 */
 		atomic_or(RPC_COPYING_TO_USER, &rpc->flags);
 		homa_rpc_unlock(rpc);
 
 		tt_record1("starting copy to user space for id %d",
 				rpc->id);
 
-		/* Each iteration of this loop copies (part of?) an skb
-		 * to a contiguous range of buffer space.
-		 */
-		count = 0;
-		copied_from_seg = 0;
-		for (i = 0; i < n && !error; ) {
-			int skb_bytes, buf_bytes, next_copied;
+		/* Each iteration of this loop copies out one skb. */
+		for (i = 0; i < n; i++) {
+			struct data_header *h = (struct data_header *)
+					skbs[i]->data;
+			int offset = ntohl(h->seg.offset);
+			int pkt_length = ntohl(h->seg.segment_length);
+			int copied = 0;
 			char *dst;
 			struct iovec iov;
 			struct iov_iter iter;
+			int buf_bytes, chunk_size;
 
-			skb = skbs[i];
-			h = (struct data_header *) skb->data;
-			skb_bytes = ntohl(h->seg.segment_length) - copied_from_seg;
-			dst = homa_pool_get_buffer(rpc,
-					ntohl(h->seg.offset) + copied_from_seg,
-					&buf_bytes);
-			if (buf_bytes < skb_bytes) {
-				if (buf_bytes == 0) {
-					/* skb seems to have data beyond the
-					 * end of the message.
-					 */
-					break;
+			/* Each iteration of this loop copies to one
+			 * user buffer.
+			 */
+			while (copied < pkt_length) {
+				chunk_size = pkt_length - copied;
+				dst = homa_pool_get_buffer(rpc, offset + copied,
+						&buf_bytes);
+				if (buf_bytes < chunk_size) {
+					if (buf_bytes == 0) {
+						/* skb has data beyond message
+						 * end?
+						 */
+						break;
+					}
+					chunk_size = buf_bytes;
 				}
-				skb_bytes = buf_bytes;
-				next_copied = copied_from_seg + skb_bytes;
-			} else {
-				i++;
-				next_copied = 0;
+				error = import_single_range(READ, dst,
+						chunk_size, &iov, &iter);
+				if (error)
+					goto free_skbs;
+				error = skb_copy_datagram_iter(skbs[i],
+						sizeof(*h) + copied, &iter,
+						chunk_size);
+				if (error)
+					goto free_skbs;
+				copied += chunk_size;
 			}
-			BUG_ON(skb_bytes <= 0);
-			error = import_single_range(READ, dst, skb_bytes, &iov,
-					&iter);
-			if (error)
-				break;
-			error = skb_copy_datagram_iter(skb,
-					sizeof(*h) + copied_from_seg, &iter,
-					skb_bytes);
-			copied_from_seg = next_copied;
-			count += skb_bytes;
+			if (end_offset == 0) {
+				start_offset = offset;
+			} else if (end_offset != offset) {
+				tt_record3("copied out bytes %d-%d for id %d",
+						start_offset, end_offset,
+						rpc->id);
+				start_offset = offset;
+			}
+			end_offset = offset + pkt_length;
 		}
-		tt_record4("finished copying %d bytes for id %d, copied_out "
-				"%d, last offset %d",
-				count, rpc->id, ntohl(h->seg.offset)
-					+ ntohl(h->seg.segment_length),
-				ntohl(h->seg.offset));
 
-		/* Free skbs. */
+		free_skbs:
+		if (end_offset != 0) {
+			tt_record3("copied out bytes %d-%d for id %d",
+					start_offset, end_offset, rpc->id);
+			end_offset = 0;
+		}
 		for (i = 0; i < n; i++)
 			kfree_skb(skbs[i]);
 		tt_record2("finished freeing %d skbs for id %d",
@@ -271,10 +317,6 @@ copy_out:
 void homa_get_resend_range(struct homa_message_in *msgin,
 		struct resend_header *resend)
 {
-	struct sk_buff *skb;
-	int missing_bytes;
-	/* This will eventually be the top of the first missing range. */
-	int end_offset;
 
 	if (msgin->length < 0) {
 		/* Haven't received any data for this message; request
@@ -282,63 +324,23 @@ void homa_get_resend_range(struct homa_message_in *msgin,
 		 * will send at least one full packet, regardless of
 		 * the length below).
 		 */
-		resend->offset = 0;
+		resend->offset = htonl(0);
 		resend->length = htonl(100);
 		return;
 	}
 
-	end_offset = msgin->granted;
-
-	/* The code below handles the case where we've received data past
-	 * msgin->granted. In this case, end_offset should start off at
-	 * the offset just after the last byte received.
-	 */
-	skb = skb_peek_tail(&msgin->packets);
-	if (skb) {
-		struct data_header *h = (struct data_header *) skb->data;
-		int data_end = ntohl(h->seg.offset)
-				+ ntohl(h->seg.segment_length);
-		if (data_end > end_offset)
-			end_offset = data_end;
+	if (!list_empty(&msgin->gaps)) {
+		struct homa_gap *gap = list_first_entry(&msgin->gaps,
+				struct homa_gap, links);
+		resend->offset = htonl(gap->start);
+		resend->length = htonl(gap->end - gap->start);
+	} else {
+		resend->offset = htonl(msgin->recv_end);
+		if (msgin->granted >= msgin->recv_end)
+			resend->length = htonl(msgin->granted - msgin->recv_end);
+		else
+			resend->length = htonl(0);
 	}
-
-	missing_bytes = msgin->bytes_remaining
-			- (msgin->length - end_offset);
-	if (missing_bytes == 0) {
-		resend->offset = 0;
-		resend->length = 0;
-		return;
-	}
-
-	/* Basic idea: walk backwards through the message's packets until
-	 * we have accounted for all missing bytes; this will identify
-	 * the first missing range.
-	 */
-	skb_queue_reverse_walk(&msgin->packets, skb) {
-		struct data_header *h = (struct data_header *) skb->data;
-		int offset = ntohl(h->seg.offset);
-		int pkt_length = ntohl(h->seg.segment_length);
-		int gap;
-
-		if (pkt_length > (end_offset - offset))
-			pkt_length = end_offset - offset;
-		gap = end_offset - (offset + pkt_length);
-		missing_bytes -= gap;
-		if (missing_bytes == 0) {
-			resend->offset = htonl(offset + pkt_length);
-			resend->length = htonl(gap);
-			return;
-		}
-		end_offset = offset;
-	}
-
-	/* The first packet(s) are missing. */
-	tt_record4("first packets missing, missing_bytes %d, copied_out %d, "
-			"incoming %d, length %d",
-			missing_bytes, msgin->copied_out, msgin->granted,
-			msgin->length);
-	resend->offset = htonl(msgin->copied_out);
-	resend->length = htonl(missing_bytes);
 }
 
 /**
@@ -528,7 +530,6 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
 	int old_remaining;
-	struct sk_buff *first_skb;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			homa_local_id(h->common.sender_id),
@@ -573,17 +574,12 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	homa_add_packet(rpc, skb);
 	*delta -= old_remaining - rpc->msgin.bytes_remaining;
 
-	first_skb = skb_peek(&rpc->msgin.packets);
-	if (first_skb != NULL) {
-		struct data_header *first_hdr = (struct data_header *)
-				(first_skb->data);
-		if ((ntohl(first_hdr->seg.offset) == rpc->msgin.copied_out)
-				&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
-			atomic_or(RPC_PKTS_READY, &rpc->flags);
-			homa_sock_lock(rpc->hsk, "homa_data_pkt");
-			homa_rpc_handoff(rpc);
-			homa_sock_unlock(rpc->hsk);
-		}
+	if ((skb_queue_len(&rpc->msgin.packets) != 0)
+			&& !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
+		atomic_or(RPC_PKTS_READY, &rpc->flags);
+		homa_sock_lock(rpc->hsk, "homa_data_pkt");
+		homa_rpc_handoff(rpc);
+		homa_sock_unlock(rpc->hsk);
 	}
 
 	if (rpc->msgin.scheduled ) {
@@ -1756,7 +1752,8 @@ found_rpc:
 			if (rpc->error)
 				goto done;
 			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
-			if (rpc->msgin.copied_out == rpc->msgin.length)
+			if ((rpc->msgin.bytes_remaining == 0)
+					&& (!skb_queue_len(&rpc->msgin.packets)))
 				goto done;
 			homa_rpc_unlock(rpc);
 		}

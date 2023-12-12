@@ -240,7 +240,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->completion_cookie = 0;
 	crpc->error = 0;
 	crpc->msgin.length = -1;
-	crpc->msgin.num_skbs = 0;
 	crpc->msgin.num_bpages = 0;
 	memset(&crpc->msgout, 0, sizeof(crpc->msgout));
 	crpc->msgout.length = -1;
@@ -342,7 +341,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->completion_cookie = 0;
 	srpc->error = 0;
 	srpc->msgin.length = -1;
-	srpc->msgin.num_skbs = 0;
 	srpc->msgin.num_bpages = 0;
 	memset(&srpc->msgout, 0, sizeof(srpc->msgout));
 	srpc->msgout.length = -1;
@@ -457,7 +455,6 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
  */
 void homa_rpc_free(struct homa_rpc *rpc)
 {
-	int delta;
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
 
@@ -474,13 +471,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
-	rpc->hsk->dead_skbs += rpc->msgin.num_skbs + rpc->msgout.num_skbs;
-	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
-		/* This update isn't thread-safe; it's just a
-		 * statistic so it's OK if updates occasionally get
-		 * missed.
-		 */
-		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 	__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->buf_links);
 	if (rpc->interest != NULL) {
@@ -492,12 +482,28 @@ void homa_rpc_free(struct homa_rpc *rpc)
 //			rpc->hsk->client_port,
 //			rpc->hsk->dead_skbs);
 
-	/* If the RPC had incoming bytes, remove them from the global count. */
-	delta = (rpc->msgin.length < 0) ? 0
-			: (rpc->msgin.granted - (rpc->msgin.length
-			- rpc->msgin.bytes_remaining));
-	if (delta != 0)
-		atomic_add(-delta, &rpc->hsk->homa->total_incoming);
+	if (rpc->msgin.length >= 0) {
+		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
+		atomic_sub((rpc->msgin.granted - (rpc->msgin.length
+				- rpc->msgin.bytes_remaining)),
+				&rpc->hsk->homa->total_incoming);
+		while (1) {
+			struct homa_gap *gap = list_first_entry_or_null(
+					&rpc->msgin.gaps, struct homa_gap, links);
+			if (gap == NULL) {
+				break;
+			}
+			list_del(&gap->links);
+			kfree(gap);
+		}
+	}
+	rpc->hsk->dead_skbs += rpc->msgout.num_skbs;
+	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
+		/* This update isn't thread-safe; it's just a
+		 * statistic so it's OK if updates occasionally get
+		 * missed.
+		 */
+		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
@@ -589,7 +595,6 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 						break;
 					skbs[num_skbs] = skb;
 					num_skbs++;
-					rpc->msgin.num_skbs--;
 					if (num_skbs >= batch_size)
 						goto release;
 				}
@@ -1676,14 +1681,18 @@ char *homa_print_metrics(struct homa *homa)
 				"Packets discarded because too short\n",
 				m->short_packets);
 		homa_append_metric(homa,
-				"redundant_packets         %15llu  "
-				"Packets discarded because data already "
-				"received\n",
-				m->redundant_packets);
+				"packet_discards           %15llu  "
+				"Non-resent packets discarded because data "
+				"already received\n",
+				m->packet_discards);
+		homa_append_metric(homa,
+				"resent_discards           %15llu  "
+				"Resent packets discarded because data "
+				"already received\n",
+				m->resent_discards);
 		homa_append_metric(homa,
 				"resent_packets_used       %15llu  "
-				"Retransmitted packets that were actually "
-				"needed\n",
+				"Retransmitted packets that were actually used\n",
 				m->resent_packets_used);
 		homa_append_metric(homa,
 				"peer_timeouts             %15llu  "

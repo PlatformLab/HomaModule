@@ -611,6 +611,21 @@ struct homa_message_out {
 };
 
 /**
+ * struct homa_gap - Represents a range of bytes within a message that have
+ * not yet been received.
+ */
+struct homa_gap {
+	/** @start: offset of first byte in this gap. */
+	int start;
+
+	/** @end: offset of byte just after last one in this gap. */
+	int end;
+
+	/** @links: for linking into list in homa_message_in. */
+	struct list_head links;
+};
+
+/**
  * struct homa_message_in - Holds the state of a message received by
  * this machine; used for both requests and responses.
  */
@@ -622,21 +637,22 @@ struct homa_message_in {
 	int length;
 
 	/**
-	 * @packets: DATA packets received for this message so far. The list
-	 * is sorted in order of offset (head is lowest offset), but
-	 * packets can be received out of order, so there may be times
-	 * when there are holes in the list. Packets in this list contain
-	 * exactly one data_segment. Packets on this list are removed from
-	 * this list and freed once all of their data has been copied
-	 * out to a user buffer.
+	 * @packets: DATA packets for this message that have been received but
+	 * not yet copied to user space (no particular order).
 	 */
 	struct sk_buff_head packets;
 
 	/**
-	 * @num_skbs: Number of buffers currently in @packets. Will be 0 if
-	 * @length is less than 0.
+	 * @recv_end: Offset of the byte just after the highest one that
+	 * has been received so far.
 	 */
-	int num_skbs;
+	int recv_end;
+
+	/**
+	 * @gaps: List of homa_gaps describing all of the bytes with
+	 * offsets less than @recv_end that have not yet been received.
+	 */
+	struct list_head gaps;
 
 	/**
 	 * @bytes_remaining: Amount of data for this message that has
@@ -669,12 +685,6 @@ struct homa_message_in {
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	__u64 birth;
-
-	/**
-	 * @copied_out: All of the bytes of the message with offset less
-	 * than this value have been copied to user-space buffers.
-	 */
-	int copied_out;
 
 	/**
 	 * @num_bpages: The number of entries in @bpage_offsets used for this
@@ -2422,11 +2432,16 @@ struct homa_metrics {
 	__u64 short_packets;
 
 	/**
-	 * @redundant_packets: total number of times a packet was discarded
-	 * because all of its they had already been received (perhaps a
-	 * resent packet that turned out to be unnecessary?).
+	 * @packet_discards: total number of times a normal (non-retransmitted)
+	 * packet was discarded because all its data had already been received.
 	 */
-	__u64 redundant_packets;
+	__u64 packet_discards;
+
+	/**
+	 * @resent_discards: total number of times a retransmitted packet
+	 * was discarded because its data had already been received.
+	 */
+	__u64 resent_discards;
 
 	/**
 	 * @resent_packets_used: total number of times a resent packet was
@@ -3165,6 +3180,7 @@ extern void     homa_free_skbs(struct sk_buff *skb);
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		    char *format);
 extern void     homa_freeze_peers(struct homa *homa);
+extern void     homa_gap_new(struct list_head *next, int start, int end);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);

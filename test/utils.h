@@ -59,6 +59,7 @@ extern void          unit_log_grantables(struct homa *homa);
 extern void          unit_log_hashed_rpcs(struct homa_sock *hsk);
 extern void          unit_log_message_out_packets(
                         struct homa_message_out *message, int verbose);
+extern const char   *unit_print_gaps(struct homa_rpc *rpc);
 extern struct homa_rpc
                     *unit_server_rpc(struct homa_sock *hsk,
 		        enum unit_rpc_state state, struct in6_addr *server_ip,

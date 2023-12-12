@@ -329,6 +329,27 @@ void unit_log_throttled(struct homa *homa)
 }
 
 /**
+ * unit_print_gaps() - Returns a static string describing the gaps in an RPC.
+ * @rpc:     Log the gaps in this RPC.
+ */
+const char *unit_print_gaps(struct homa_rpc *rpc)
+{
+	struct homa_gap *gap;
+	static char buffer[1000];
+	int used = 0;
+
+	buffer[0] = 0;
+	list_for_each_entry(gap, &rpc->msgin.gaps, links) {
+		if (used != 0)
+			used += snprintf(buffer + used, sizeof(buffer) - used,
+					"; ");
+		used += snprintf(buffer + used, sizeof(buffer) - used,
+				"start %d, end %d", gap->start, gap->end);
+	}
+	return buffer;
+}
+
+/**
  * unit_server_rpc() - Create a homa_server_rpc and arrange for it to be
  * in a given state.
  * @hsk:           Socket that will receive the incoming RPC.

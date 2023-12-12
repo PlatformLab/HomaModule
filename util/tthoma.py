@@ -610,16 +610,15 @@ class Dispatcher:
     })
 
     def __copy_out_done(self, trace, time, core, match, interests):
-        num_bytes = int(match.group(1))
-        id = int(match.group(2))
-        offset = int(match.group(3))
+        start = int(match.group(1))
+        end = int(match.group(2))
+        id = int(match.group(3))
         for interest in interests:
-            interest.tt_copy_out_done(trace, time, core, id, num_bytes, offset)
+            interest.tt_copy_out_done(trace, time, core, id, start, end)
 
     patterns.append({
         'name': 'copy_out_done',
-        'regexp': 'finished copying ([0-9.]+) bytes for id ([0-9.]+), '
-                  '.*last offset ([0-9.]+)'
+        'regexp': 'copied out bytes ([0-9.]+)-([0-9.]+) for id ([0-9.]+)'
     })
 
     def __free_skbs(self, trace, time, core, match, interests):
@@ -979,13 +978,15 @@ class AnalyzeCopy:
         stats = trace['copy']
         stats['out_start'][core] = time
 
-    def tt_copy_out_done(self, trace, time, core, id, num_bytes, offset):
+    def tt_copy_out_done(self, trace, time, core, id, start, end):
         global options
         stats = trace['copy']
+        num_bytes = end - start
         if core in stats['out_start']:
             stats['out_end'][core] = time
             stats['out_size'][core] = num_bytes
             delta = time - stats['out_start'][core]
+            stats['out_start'][core] = time
             stats['total_out_time'] += delta
             if num_bytes <= 1000:
                 stats['small_out_times'].append(delta)
@@ -1297,10 +1298,10 @@ class AnalyzeDelay:
                 if i < 0:
                     break
                 pkt = data[i]
-                rpc_id = int(pkt[1].split(':')[0]) ^ 1
+                recv_id = int(pkt[1].split(':')[0]) ^ 1
                 dest = '      ????   ??'
-                if rpc_id in rpcs:
-                    rpc = rpcs[rpc_id]
+                if recv_id in rpcs:
+                    rpc = rpcs[recv_id]
                     if 'gro_core' in rpc:
                         dest = '%10s %4d' % (rpc['node'], rpc['gro_core'])
                     else:
@@ -1312,7 +1313,7 @@ class AnalyzeDelay:
             print('\nSampled packets with outlier delays:')
             print('Phase:    Phase of delay: Xmit, Net, or SoftIRQ')
             print('Delay:    Delay for this phase')
-            print('Packet:   Identifier for packet: rpc_id:offset')
+            print('Packet:   Sender\'s identifier for packet: rpc_id:offset')
             print('Node:     Node where packet was received')
             print('Core:     Core where homa_gro_receive processed packet')
             print('EndTime:  Time when phase completed')
@@ -2059,6 +2060,18 @@ class AnalyzeOoo:
         # ooo packet.
         ooo_rpcs = []
 
+        # Each element of this list represents one RPC whose completion
+        # was delayed by ooo packets (i.e. the last packet received didn't
+        # contain the last bytes of the message). Each element is a tuple
+        # <delay, id, count>:
+        # delay:   time between the arrival of the packet containing the
+        #          last bytes of the message and the arrival of the last
+        #          packet
+        # id:      RPC identifier
+        # count:   the number of packets that arrived after the one containing
+        #          the last bytes of the message
+        delayed_msgs = []
+
         # Scan the incoming packets in each RPC.
         for id, rpc in rpcs.items():
             if not 'gro_data' in rpc:
@@ -2068,16 +2081,24 @@ class AnalyzeOoo:
             total_packets += len(pkts)
             highest_index = -1
             highest_offset = -1
+            highest_offset_time = 0
+            last_time = 0
+            packets_after_highest = 0
             highest_prio = 0
             max_delay = -1
             info = ''
             for i in range(len(pkts)):
                 time, offset, prio = pkts[i]
+                last_time = time
                 if offset > highest_offset:
                     highest_index = i;
                     highest_offset = offset
+                    highest_offset_time = time
                     highest_prio = prio
+                    packets_after_highest = 0
                     continue
+                else:
+                    packets_after_highest += 1
 
                 # This packet is out of order. Find the first packet received
                 # with higher offset than this one so we can compute how long
@@ -2100,15 +2121,45 @@ class AnalyzeOoo:
                 if delay > max_delay:
                     max_delay = delay
             if info:
-                  ooo_rpcs.append([max_delay, info])
+                ooo_rpcs.append([max_delay, info])
+            if packets_after_highest > 0:
+                delayed_msgs.append([last_time - highest_offset_time, id,
+                        packets_after_highest])
 
         print('\n-----------------')
         print('Analyzer: ooo')
         print('-----------------')
-        print('RPCs with out-of-order packets: %d/%d (%.1f%%)' %
+        print('Messages with out-of-order packets: %d/%d (%.1f%%)' %
                 (len(ooo_rpcs), total_rpcs, 100.0*len(ooo_rpcs)/total_rpcs))
         print('Out-of-order packets: %d/%d (%.1f%%)' %
                 (ooo_packets, total_packets, 100.0*ooo_packets/total_packets))
+        if delayed_msgs:
+            delayed_msgs.sort()
+            print('')
+            print('Messages whose completion was delayed by out-of-order-packets: '
+                    '%d (%.1f%%)' % (len(delayed_msgs),
+                    100.0*len(delayed_msgs)/len(rpcs)))
+            print('P50 completion delay: %.1f us' % (
+                    delayed_msgs[len(delayed_msgs)//2][0]))
+            print('P90 completion delay: %.1f us' % (
+                    delayed_msgs[(9*len(delayed_msgs))//10][0]))
+            print('Worst delays:')
+            print('Delay (us)         RPC   Receiver  Late Pkts')
+            for i in range(len(delayed_msgs)-1, len(delayed_msgs)-6, -1):
+                if i < 0:
+                    break;
+                delay, id, packets = delayed_msgs[i]
+                print('  %8.1f  %10d %10s      %5d' %
+                        (delay, id, rpcs[id]['node'], packets))
+
+            delayed_msgs.sort(key=lambda t : t[2])
+            packets_sum = sum(i[2] for i in delayed_msgs)
+            print('Late packets per delayed message: P50 %.1f, P90 %.1f, Avg %.1f' %
+                    (delayed_msgs[len(delayed_msgs)//2][2],
+                    delayed_msgs[(9*len(delayed_msgs))//10][2],
+                    packets_sum / len(delayed_msgs)))
+        else:
+            print('No RPCs had their completion delayed by out-of-order packtets')
 
         if not ooo_rpcs:
             return
@@ -2298,11 +2349,12 @@ class AnalyzePacket:
                 'Length  Prio  Core')
         print('--------------------------------------------------------------'
                 '------------------')
-        pkts.sort(key=lambda t : t[1])
+        pkts.sort()
         message_printed = False
         before_before = ''
         before_after = ''
-        after_before = ''
+        after_before_core = ''
+        after_before_other = ''
         after_after = ''
         unknown_before = ''
         for rtime, stime, rpc_id, offset, sender, length, prio, core in pkts:
@@ -2321,7 +2373,10 @@ class AnalyzePacket:
                     before_after += msg
             else:
                 if rtime < recv_time:
-                    after_before += msg
+                    if core == recv_rpc['gro_core']:
+                        after_before_core += msg
+                    else:
+                        after_before_other += msg
                 else:
                     after_after += msg
         if before_before:
@@ -2330,9 +2385,12 @@ class AnalyzePacket:
         if before_after:
             print('\nSent before %s, received after:%s' %
                     (options.pkt, before_after))
-        if after_before:
-            print('\nSent after %s, received before:%s' %
-                    (options.pkt, after_before))
+        if after_before_core:
+            print('\nSent after %s, received on core %d before:%s' %
+                    (options.pkt, recv_rpc['gro_core'], after_before_core))
+        if after_before_other:
+            print('\nSent after %s, received on other cores before:%s' %
+                    (options.pkt, after_before_other))
         if after_after:
             print('\nSent after %s, received after:%s' %
                     (options.pkt, after_after))
@@ -2383,11 +2441,11 @@ class AnalyzePackets:
         p['softirq'] = time
         p['msg_length'] = msg_length
 
-    def tt_copy_out_done(self, trace, time, core, id, num_bytes, offset):
+    def tt_copy_out_done(self, trace, time, core, id, start, end):
         pkts = self.active[id]
         for i in range(len(pkts) -1, -1, -1):
             p = pkts[i]
-            if p['offset'] <= offset:
+            if (p['offset'] >= start) and (p['offset'] < end):
                 self.copied[core].append(p)
                 pkts.pop(i)
 
@@ -2563,7 +2621,7 @@ class AnalyzeRpcs:
         if not 'copy_out_start' in rpcs[id]:
             rpcs[id]['copy_out_start'] = time
 
-    def tt_copy_out_done(self, trace, time, core, id, num_bytes, offset):
+    def tt_copy_out_done(self, trace, time, core, id, start, end):
         global rpcs
         if not id in rpcs:
             self.new_rpc(id, trace['node'])
