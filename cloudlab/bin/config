@@ -496,15 +496,18 @@ def config_rps():
     print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
 
-def config_rss(config):
+def config_lb(config):
     """
-    Configure RSS (Receive-Side Scaling) and SoftIRQ steering by setting
-    the number of NIC channels and which cores will handle each. In addition,
-    it will configure Homa's mechanism for choosing SoftIRQ cores as described
-    in gen3.txt.
+    Configures load balancing as specified by config. This includes RSS
+    (Receive-Side Scaling) and SoftIRQ steering by setting the number of
+    NIC channels and which cores will handle each. It will also configure
+    Homa's mechanism for choosing SoftIRQ cores as described in gen3.txt,
+    and it will set related sysctl parameters such as gro_policy and
+    gro_busy_usecs.
 
     config:  Indicates which configuration is desired; one of:
-             xl170_default:   Boot-time default for CloudLab xl170 machines
+             xl170_default:   Same as Gen2, except with the default boot-time
+                              assignment of network channels to cores
              gen2:            For Homa Gen2 load balancing: one channel/core
              gen3:            For Homa Gen3 load balancing: one channel/4 cores
              gen3_alt:        One channel/2 cores
@@ -514,15 +517,23 @@ def config_rss(config):
 
     if config == 'xl170_default':
         cores = xl170_default_cores
+        set_sysctl('gro_policy', '114')
+        set_sysctl('gro_busy_usecs', '0')
     elif config == 'gen2':
         cores = range(len(cpu_info))
+        set_sysctl('gro_policy', '114')
+        set_sysctl('gro_busy_usecs', '0')
     elif config == 'gen3':
         cores = [2*i for i in range(len(cpu_info)//4)]
+        set_sysctl('gro_policy', '226')
+        set_sysctl('gro_busy_usecs', '2')
     elif config == 'gen3_alt':
         cores = range(len(cpu_info)//2)
+        set_sysctl('gro_policy', '226')
+        set_sysctl('gro_busy_usecs', '2')
     else:
-        raise Exception('Bad RSS config "%s"; must be xl170_default, gen2, '
-                'gen3, or gen3_alt' % (config))
+        raise Exception('Bad load balancing config "%s"; must be '
+                'xl170_default, gen2, gen3, or gen3_alt' % (config))
 
     subprocess.run(["sudo", "ethtool", "-L", get_interfaces()[0], "combined",
           str(len(cores))], check=True)
@@ -597,6 +608,10 @@ def print_help():
     print("                           HHH is the path to the homa.ko file")
     print("    ipv6                   Set up routing information so that IPv6")
     print("                           addresses can be used.")
+    print("    lb CONFIG              Configure load balancing, including RSS, SoftIRQ")
+    print("                           core selection, and various sysctl parameters,")
+    print("                           as indicated by CONFIG (xl170_default, gen2,")
+    print("                           gen3, or gen3_alt)")
     print("    mtu NNN                Set the maximum packet length to NNN")
     print("    node_names             Print out the names of all the nodes in ")
     print("                           the experiment")
@@ -611,9 +626,6 @@ def print_help():
     print("                           original port settings (only restores ports")
     print("                           used by the current experiment)")
     print("    rps                    Set up (and enable) RPS and RFS")
-    print("    rss TYPE               Configure RSS and SoftIRQ core selection as")
-    print("                           indicated by TYPE (xl170_default, gen2, gen3,")
-    print("                           or gen3_alt)")
     print("    switch_buffer_limit MB Set max egress buffer space in TOR switch to")
     print("                           MB Mbytes")
     print("    switch_all_ports       Issue commands to TOR switch to configure ")
@@ -655,6 +667,12 @@ while i < len(sys.argv):
         config_homa(mod)
     elif arg == "ipv6":
         config_ipv6(get_num_nodes(), vlan)
+    elif arg == "lb":
+        if i >= len(sys.argv):
+            raise Exception("No argument provided for 'lb' command");
+            exit(1)
+        config_lb(sys.argv[i])
+        i += 1
     elif arg == "mtu":
         if i >= len(sys.argv):
             raise Exception("No argument provided for 'mtu' command");
@@ -677,12 +695,6 @@ while i < len(sys.argv):
         config_reset_switch_ports()
     elif arg == "rps":
         config_rps()
-    elif arg == "rss":
-        if i >= len(sys.argv):
-            raise Exception("No argument provided for 'rss' command");
-            exit(1)
-        config_rss(sys.argv[i])
-        i += 1
     elif arg == "switch_buffer_limit":
         if i >= len(sys.argv):
             raise Exception("No argument provided for 'switch_buffer_limit' command");
