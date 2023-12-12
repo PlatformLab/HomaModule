@@ -145,10 +145,10 @@ enum homa_packet_type {
 #define HOMA_SKB_EXTRA 40
 
 /**
- * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for CRC,
- * preamble, and inter-packet gap.
+ * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for Ethernet
+ * header, CRC, preamble, and inter-packet gap.
  */
-#define HOMA_ETH_OVERHEAD 24
+#define HOMA_ETH_OVERHEAD 42
 
 /**
  * define HOMA_MIN_PKT_LENGTH - Every Homa packet must be padded to at least
