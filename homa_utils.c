@@ -1219,6 +1219,7 @@ void homa_freeze_peers(struct homa *homa)
 					"in xmit to %s\n", err,
 					homa_print_ipv6_addr(&peers[i]->addr));
 	}
+	kfree(peers);
 }
 
 /**
