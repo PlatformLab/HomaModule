@@ -1660,10 +1660,11 @@ int homa_dointvec(struct ctl_table *table, int write,
 				tt_record("Freezing because of action 6");
 				tt_freeze();
 			} else if (action == 7) {
-				tt_record("Freezing cluster because of action 7");
 				homa_rpc_log_active_tt(homa, 0);
-				tt_freeze();
+				tt_record("Freezing cluster because of action 7");
 				homa_freeze_peers(homa);
+				tt_record("Finished freezing cluster");
+				tt_freeze();
 			} else
 				homa_rpc_log_active(homa, action);
 			action = 0;
