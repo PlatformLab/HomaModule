@@ -408,6 +408,74 @@ def config_ipv6(num_hosts, vlan):
                 check=True)
     add_ipv6_to_etc_hosts(num_hosts)
 
+def config_lb(config):
+    """
+    Configures load balancing as specified by config. This includes RSS
+    (Receive-Side Scaling) and SoftIRQ steering by setting the number of
+    NIC channels and which cores will handle each. It will also configure
+    Homa's mechanism for choosing SoftIRQ cores as described in gen3.txt,
+    and it will set related sysctl parameters such as gro_policy and
+    gro_busy_usecs.
+
+    config:  Indicates which configuration is desired; one of:
+             xl170_default:   Same as Gen2, except with the default boot-time
+                              assignment of network channels to cores
+             gen2:            For Homa Gen2 load balancing: one channel/core
+             gen3:            For Homa Gen3 load balancing: one channel/4 cores
+             gen3_alt:        Gen3 with one channel/2 cores
+    """
+
+    read_cpu_info()
+
+    if config == 'xl170_default':
+        cores = xl170_default_cores
+        set_sysctl('gro_policy', '114')
+        set_sysctl('gro_busy_usecs', '0')
+    elif config == 'gen2':
+        cores = range(len(cpu_info))
+        set_sysctl('gro_policy', '114')
+        set_sysctl('gro_busy_usecs', '0')
+    elif config == 'gen3':
+        cores = [2*i for i in range(len(cpu_info)//4)]
+        set_sysctl('gro_policy', '226')
+        set_sysctl('gro_busy_usecs', '2')
+    elif config == 'gen3_alt':
+        cores = range(len(cpu_info)//2)
+        set_sysctl('gro_policy', '226')
+        set_sysctl('gro_busy_usecs', '2')
+    else:
+        raise Exception('Bad load balancing config "%s"; must be '
+                'xl170_default, gen2, gen3, or gen3_alt' % (config))
+
+    subprocess.run(["sudo", "ethtool", "-L", get_interfaces()[0], "combined",
+          str(len(cores))], check=True)
+
+    irqs = get_nic_irqs()
+    half_cores = len(cpu_info)//2
+    for i in range(len(cores)):
+        softirq_cores = []
+        core = cores[i]
+        if config == 'gen3':
+            # Use every 4th core for GRO, with 3 choices for SoftIRQ
+            softirq_cores = [2*i + 1, half_cores + 2*i, half_cores + 2*i + 1]
+        elif config == 'gen3_alt':
+            # Use every other core for GRO, with only 1 choice for SoftIRQ
+            softirq_cores = [(half_cores + (core+1)%half_cores), -1, -1]
+        softirq_msg = ''
+        if softirq_cores:
+            softirq_msg = ", SoftIRQ on cores %s" % (softirq_cores)
+            subprocess.run(["sudo", "sysctl",
+                    ".net.homa.gen3_softirq_cores=%d %d %d %d" % (cores[i],
+                    softirq_cores[0], softirq_cores[1], softirq_cores[2])],
+                    check=True)
+
+        subprocess.run(["sudo", "bash", "-c",
+                "echo %d > /proc/irq/%s/smp_affinity_list" % (cores[i], irqs[i])],
+                check=True)
+
+        print("Configured RSS for channel %d (IRQ %d): NAPI on core %d%s"
+                % (i, irqs[i], cores[i], softirq_msg))
+
 def config_mtu(size):
     """
     Set the maximum allowable packet length for this node to size.
@@ -495,74 +563,6 @@ def config_rps():
         cpus += 1
     print("Configured RPS and RFS: %d rps_flow_cnt files and %d rps_cpus files"
             % (flow_cnt, cpus))
-
-def config_lb(config):
-    """
-    Configures load balancing as specified by config. This includes RSS
-    (Receive-Side Scaling) and SoftIRQ steering by setting the number of
-    NIC channels and which cores will handle each. It will also configure
-    Homa's mechanism for choosing SoftIRQ cores as described in gen3.txt,
-    and it will set related sysctl parameters such as gro_policy and
-    gro_busy_usecs.
-
-    config:  Indicates which configuration is desired; one of:
-             xl170_default:   Same as Gen2, except with the default boot-time
-                              assignment of network channels to cores
-             gen2:            For Homa Gen2 load balancing: one channel/core
-             gen3:            For Homa Gen3 load balancing: one channel/4 cores
-             gen3_alt:        One channel/2 cores
-    """
-
-    read_cpu_info()
-
-    if config == 'xl170_default':
-        cores = xl170_default_cores
-        set_sysctl('gro_policy', '114')
-        set_sysctl('gro_busy_usecs', '0')
-    elif config == 'gen2':
-        cores = range(len(cpu_info))
-        set_sysctl('gro_policy', '114')
-        set_sysctl('gro_busy_usecs', '0')
-    elif config == 'gen3':
-        cores = [2*i for i in range(len(cpu_info)//4)]
-        set_sysctl('gro_policy', '226')
-        set_sysctl('gro_busy_usecs', '2')
-    elif config == 'gen3_alt':
-        cores = range(len(cpu_info)//2)
-        set_sysctl('gro_policy', '226')
-        set_sysctl('gro_busy_usecs', '2')
-    else:
-        raise Exception('Bad load balancing config "%s"; must be '
-                'xl170_default, gen2, gen3, or gen3_alt' % (config))
-
-    subprocess.run(["sudo", "ethtool", "-L", get_interfaces()[0], "combined",
-          str(len(cores))], check=True)
-
-    irqs = get_nic_irqs()
-    half_cores = len(cpu_info)//2
-    for i in range(len(cores)):
-        softirq_cores = []
-        core = cores[i]
-        if config == 'gen3':
-            # Use every 4th core for GRO, with 3 choices for SoftIRQ
-            softirq_cores = [2*i + 1, half_cores + 2*i, half_cores + 2*i + 1]
-        elif config == 'gen3_alt':
-            # Use every other core for GRO, with only 1 choice for SoftIRQ
-            softirq_cores = [(half_cores + (core+1)%half_cores), -1, -1]
-        softirq_msg = ''
-        if softirq_cores:
-            softirq_msg = ", SoftIRQ on cores %s" % (softirq_cores)
-            subprocess.run(["sudo", "sysctl",
-                    ".net.homa.gen3_softirq_cores=%d %d %d %d" % (cores[i],
-                    softirq_cores[0], softirq_cores[1], softirq_cores[2])],
-                    check=True)
-
-        subprocess.run(["sudo", "bash", "-c",
-                "echo %d > /proc/irq/%s/smp_affinity_list" % (cores[i], irqs[i])],
-                check=True)
-
-        print("Configured RSS for channel %d (IRQ %d): NAPI on core %d%s"
-                % (i, irqs[i], cores[i], softirq_msg))
 
 def config_switch_buffer_limit(mbytes):
     """
