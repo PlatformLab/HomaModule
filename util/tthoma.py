@@ -139,6 +139,28 @@ def extract_num(s):
         return int(match.group(1))
     return None
 
+def get_first_time():
+    """
+    Return the earliest event time across all trace files.
+    """
+    earliest = 1e20
+    for trace in traces.values():
+        first = trace['first_time']
+        if first < earliest:
+            earliest = first
+    return earliest
+
+def get_last_time():
+    """
+    Return the latest event time across all trace files.
+    """
+    latest = -1e20
+    for trace in traces.values():
+        last = trace['last_time']
+        if last > latest:
+            latest = last
+    return latest
+
 def get_packet_size():
     """
     Returns the amount of message data in a full-size network packet (as
@@ -680,6 +702,16 @@ class Dispatcher:
         'regexp': 'homa_wait_for_message found rpc id ([0-9]+)'
     })
 
+    def __poll_success(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_poll_success(trace, time, core, id)
+
+    patterns.append({
+        'name': 'poll_success',
+        'regexp': 'received RPC handoff while polling, id ([0-9]+)'
+    })
+
     def __resend(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
@@ -1140,18 +1172,31 @@ class AnalyzeDelay:
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeRpcs')
 
-    def init_trace(self, trace):
-        # Maps from target core id to the time when gro chose that core
-        self.gro_handoffs = {}
-
-        # List of <delay, end time> tuples for gro->softirq handoffs
+        # <delay, end time> for gro->softirq handoffs
         self.softirq_wakeups = []
 
-        # Maps from RPC id to the time when homa_rpc_handoff received that RPC.
+        # RPC id -> time when homa_rpc_handoff handed off that RPC to a thread.
         self.rpc_handoffs = {}
 
-        # List of <delay, end time> tuples for softirq->app handoffs
-        self.app_wakeups = []
+        # RPC id -> time when homa_rpc_handoff queued the RPC.
+        self.rpc_queued = {}
+
+        # <delay, end time, node> for softirq->app handoffs (thread was polling)
+        self.app_poll_wakeups = []
+
+        # <delay, end time, node> for softirq->app handoffs (thread was sleeping)
+        self.app_sleep_wakeups = []
+
+        # <delay, end time, node> for softirq->app handoffs when RPC was queued
+        self.app_queue_wakeups = []
+
+        # An entry exists for RPC id if a handoff occurred while a
+        # thread was polling
+        self.poll_success = {}
+
+    def init_trace(self, trace):
+        # Target core id -> time when gro chose that core
+        self.gro_handoffs = {}
 
     def tt_gro_handoff(self, trace, time, core, softirq_core):
         self.gro_handoffs[softirq_core] = time
@@ -1159,7 +1204,8 @@ class AnalyzeDelay:
     def tt_softirq_start(self, trace, time, core):
         if not core in self.gro_handoffs:
             return
-        self.softirq_wakeups.append([time - self.gro_handoffs[core], time])
+        self.softirq_wakeups.append([time - self.gro_handoffs[core], time,
+                trace['node']])
         del self.gro_handoffs[core]
 
     def tt_rpc_handoff(self, trace, time, core, id):
@@ -1169,14 +1215,31 @@ class AnalyzeDelay:
                     file=sys.stderr)
         self.rpc_handoffs[id] = time
 
+    def tt_poll_success(self, trace, time, core, id):
+        self.poll_success[id] = time
+
+    def tt_rpc_queued(self, trace, time, core, id):
+        self.rpc_queued[id] = time
+
     def tt_wait_found_rpc(self, trace, time, core, id):
-        if not id in self.rpc_handoffs:
-            # The RPC was probably queued rather than handed off.
-            return
-        self.app_wakeups.append([time - self.rpc_handoffs[id], time])
-        del self.rpc_handoffs[id]
+        if id in self.rpc_handoffs:
+            delay = time - self.rpc_handoffs[id]
+            if id in self.poll_success:
+                self.app_poll_wakeups.append([delay, time, trace['node']])
+                del self.poll_success[id]
+            else:
+                self.app_sleep_wakeups.append([delay, time, trace['node']])
+            del self.rpc_handoffs[id]
+        elif id in self.rpc_queued:
+            self.app_queue_wakeups.append([time - self.rpc_queued[id], time,
+                    trace['node']])
+            del self.rpc_queued[id]
 
     def print_pkt_delays(self):
+        """
+        Prints basic packet delay info, returns verbose output for optional
+        printing by caller.
+        """
         global packets, grants, options
 
         # Each of the following lists holds <delay, pkt_id, time> tuples for
@@ -1290,6 +1353,7 @@ class AnalyzeDelay:
 
             # The goal is to print about 20 packets covering the 98th-100th
             # percentiles; we'll print one out of every "interval" packets.
+            result = ''
             num_pkts = len(data)
             interval = num_pkts//(50*20)
             if interval == 0:
@@ -1306,41 +1370,40 @@ class AnalyzeDelay:
                         dest = '%10s %4d' % (rpc['node'], rpc['gro_core'])
                     else:
                         dest = '%10s   ??' % (rpc['node'])
-                print('%-8s %6.1f  %20s %s %9.3f %5.1f' % (label, pkt[0],
-                        pkt[1], dest, pkt[2], i*100/num_pkts))
+                result += '%-8s %6.1f  %20s %s %9.3f %5.1f\n' % (label, pkt[0],
+                        pkt[1], dest, pkt[2], i*100/num_pkts)
+            return result
 
-        if options.verbose:
-            print('\nSampled packets with outlier delays:')
-            print('Phase:    Phase of delay: Xmit, Net, or SoftIRQ')
-            print('Delay:    Delay for this phase')
-            print('Packet:   Sender\'s identifier for packet: rpc_id:offset')
-            print('Node:     Node where packet was received')
-            print('Core:     Core where homa_gro_receive processed packet')
-            print('EndTime:  Time when phase completed')
-            print('Pctl:     Percentile of this packet\'s delay')
-            print('')
-            print('Phase   Delay (us)             Packet   RecvNode Core   '
-                    'EndTime  Pctl')
-            print('--------------------------------------------------------'
-                    '-------------')
+        verbose = 'Sampled packets with outlier delays:\n'
+        verbose += 'Phase:    Phase of delay: Xmit, Net, or SoftIRQ\n'
+        verbose += 'Delay:    Delay for this phase\n'
+        verbose += 'Packet:   Sender\'s identifier for packet: rpc_id:offset\n'
+        verbose += 'Node:     Node where packet was received\n'
+        verbose += 'Core:     Core where homa_gro_receive processed packet\n'
+        verbose += 'EndTime:  Time when phase completed\n'
+        verbose += 'Pctl:     Percentile of this packet\'s delay\n\n'
+        verbose += ('Phase   Delay (us)             Packet   RecvNode Core   '
+                'EndTime  Pctl\n')
+        verbose += ('--------------------------------------------------------'
+                '-------------\n')
 
-            print('Data packets from single-packet messages:')
-            print_worst(short_to_nic, 'Xmit')
-            print_worst(short_to_gro, 'Net')
-            print_worst(short_to_softirq, 'SoftIRQ')
-            print_worst(short_total, 'Total')
+        verbose += 'Data packets from single-packet messages:\n'
+        verbose += print_worst(short_to_nic, 'Xmit')
+        verbose += print_worst(short_to_gro, 'Net')
+        verbose += print_worst(short_to_softirq, 'SoftIRQ')
+        verbose += print_worst(short_total, 'Total')
 
-            print('\nData packets from multi-packet messages:')
-            print_worst(long_to_nic, 'Xmit')
-            print_worst(long_to_gro, 'Net')
-            print_worst(long_to_softirq, 'SoftIRQ')
-            print_worst(long_total, 'Total')
+        verbose += '\nData packets from multi-packet messages:\n'
+        verbose += print_worst(long_to_nic, 'Xmit')
+        verbose += print_worst(long_to_gro, 'Net')
+        verbose += print_worst(long_to_softirq, 'SoftIRQ')
+        verbose += print_worst(long_total, 'Total')
 
-            print('\nGrants:')
-            print_worst(grant_to_nic, 'Xmit')
-            print_worst(grant_to_gro, 'Net')
-            print_worst(grant_to_softirq, 'SoftIRQ')
-            print_worst(grant_total, 'Total')
+        verbose += '\nGrants:\n'
+        verbose += print_worst(grant_to_nic, 'Xmit')
+        verbose += print_worst(grant_to_gro, 'Net')
+        verbose += print_worst(grant_to_softirq, 'SoftIRQ')
+        verbose += print_worst(grant_total, 'Total')
 
         # Redo the statistics gathering, but only include the worst packets
         # from each category.
@@ -1429,48 +1492,79 @@ class AnalyzeDelay:
                 get_slow_summary(grant_to_nic),
                 get_slow_summary(grant_to_gro),
                 get_slow_summary(grant_to_softirq)))
+        return verbose
 
     def print_wakeup_delays(self):
+        """
+        Prints basic info about thread wakeup delays, returns verbose output
+        for optional printing by caller.
+        """
         global options
 
         soft = self.softirq_wakeups
-        soft.sort(key=lambda t : t[0])
-        app = self.app_wakeups
-        app.sort(key=lambda t : t[0])
+        soft.sort()
+        app_poll = self.app_poll_wakeups
+        app_poll.sort()
+        app_sleep = self.app_sleep_wakeups
+        app_sleep.sort()
+        app_queue = self.app_queue_wakeups
+        app_queue.sort()
         print('\nDelays in handing off from one core to another:')
-        print('                 Count    Min    P10    P50    P90    P99    '
+        print('                            Count   Min    P10    P50    P90    P99    '
                 'Max    Avg')
-        print('-------------------------------------------------------------'
-                '----------')
-        print('GRO to SoftIRQ: %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
-                % (len(soft), soft[0][0], soft[10*len(soft)//100][0],
-                soft[50*len(soft)//100][0], soft[90*len(soft)//100][0],
-                soft[99*len(soft)//100][0], soft[len(soft)-1][0],
-                list_avg(soft, 0)))
-        print('SoftIRQ to App: %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
-                % (len(app), app[0][0], app[10*len(app)//100][0],
-                app[50*len(app)//100][0], app[90*len(app)//100][0],
-                app[99*len(app)//100][0], app[len(app)-1][0],
-                list_avg(app, 0)))
+        print('------------------------------------------------------------'
+                '---------------------')
 
-        if options.verbose:
-            print('\nWorst-case handoff delays:\n')
-            print('Type        Delay (us)    End Time')
-            print('----------------------------------')
-            for i in range(len(soft)-1, len(soft)-11, -1):
+        def print_percentiles(label, data):
+            num = len(data)
+            if num == 0:
+                print('%-26s %6d' % (label, 0))
+            else:
+                print('%-26s %6d %5.1f %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f'
+                    % (label, num, data[0][0], data[10*num//100][0],
+                    data[50*num//100][0], data[90*num//100][0],
+                    data[99*num//100][0], data[num-1][0], list_avg(data, 0)))
+        print_percentiles('GRO to SoftIRQ:', soft)
+        print_percentiles('SoftIRQ to polling app:', app_poll)
+        print_percentiles('SoftIRQ to sleeping app:', app_sleep)
+        print_percentiles('SoftIRQ to app via queue:', app_queue)
+
+        verbose = 'Worst-case handoff delays:\n'
+        verbose += 'Type                   Delay (us)    End Time       Node  Pctl\n'
+        verbose += '--------------------------------------------------------------\n'
+
+        def print_worst(label, data):
+            # The goal is to print about 10 records covering the 98th-100th
+            # percentiles; we'll print one out of every "interval" packets.
+            num = len(data)
+            interval = num//(50*10)
+            if interval == 0:
+                interval = 1
+            result = ''
+            for i in range(num-1, num - 10*interval, -interval):
                 if i < 0:
                     break
-                sample = soft[i]
-                print('GRO to SoftIRQ  %6.1f   %9.3f' % (sample[0], sample[1]))
-            for i in range(len(app)-1, len(app)-11, -1):
-                if i < 0:
-                    break
-                sample = app[i]
-                print('SoftIRQ to App  %6.1f   %9.3f' % (sample[0], sample[1]))
+                time, delay, node = data[i]
+                result += '%-26s %6.1f   %9.3f %10s %5.1f\n' % (
+                        label, time, delay, node, 100*i/(num-1))
+            return result
+
+        verbose += print_worst('GRO to SoftIRQ', soft)
+        verbose += print_worst('SoftIRQ to polling app', app_poll)
+        verbose += print_worst('SoftIRQ to sleeping app', app_sleep)
+        verbose += print_worst('SoftIRQ to app via queue', app_queue)
+        return verbose
 
     def output(self):
-        self.print_pkt_delays()
-        self.print_wakeup_delays()
+        global options
+
+        delay_verbose = self.print_pkt_delays()
+        wakeup_verbose = self.print_wakeup_delays()
+        if options.verbose:
+            print('')
+            print(delay_verbose, end='')
+            print('')
+            print(wakeup_verbose, end='')
 
 #------------------------------------------------
 # Analyzer: incoming
@@ -2031,7 +2125,6 @@ class AnalyzeNicbufs:
             node, core_id = core.split('.')
             print('%8d %20s %10s %4s %9.3f %9.3f %7.1f' % (active, pkid,
                     node, core_id, gro_time, time, time - gro_time))
-
 
 #------------------------------------------------
 # Analyzer: ooo
@@ -3098,6 +3191,131 @@ class AnalyzeTimeline:
                 (label, sum(elapsed)/len(elapsed), sum(gaps)/len(gaps),
                 elapsed[9*len(elapsed)//10], gaps[9*len(gaps)//10]))
 
+#------------------------------------------------
+# Analyzer: txqueues
+#------------------------------------------------
+class AnalyzeTxqueues:
+    """
+    Prints statistics about the amount of outbound packet data queued
+    in the NIC of each node. The --gbps option specifies the rate at
+    which packets are transmitted. With --data option, generates detailed
+    timelines of NIC queue lengths.
+    """
+
+    def __init__(self, dispatcher):
+        # Maps from node names to a list of <time, length, queue_length> tuples
+        # for all transmitted packets. Length is the packet length including
+        # includes Homa header but not IP or Ethernet overheads. Queue_length
+        # is the # bytes in the NIC queue as of time (includes this packet).
+        # Queue_length starts off zero and is updated later.
+        self.nodes = defaultdict(list)
+
+    def tt_send_data(self, trace, time, core, id, offset, length):
+        self.nodes[trace['node']].append([time, length + 60, 0])
+
+    def tt_send_grant(self, trace, time, core, id, offset, priority):
+        self.nodes[trace['node']].append([time, 34, 0])
+
+    def output(self):
+        global options
+
+        print('\n-------------------')
+        print('Analyzer: txqueues')
+        print('-------------------')
+
+        # Compute queue lengths, find maximum for each node.
+        print('Worst-case length of NIX tx queue for each node, assuming a link')
+        print('speed of %.1f Gbps (change with --gbps):' % (options.gbps))
+        print('Node:        Name of node')
+        print('MaxLength:   Highest observed output queue length for NIC (bytes)')
+        print('Time:        Time when worst-case queue length occurred')
+        print('Delay:       Delay (usec until fully transmitted) experienced by packet ')
+        print('             transmitted at Time')
+        print('')
+        print('Node     MaxLength       Time   Delay')
+
+        for node in get_sorted_nodes():
+            pkts = self.nodes[node]
+            if not pkts:
+                continue
+            pkts.sort()
+            max_queue = 0
+            max_time = 0
+            cur_queue = 0
+            prev_time = 0
+            for i in range(len(pkts)):
+                time, length, ignore = pkts[i]
+
+                # 20 bytes for IPv4 header, 42 bytes for Ethernet overhead (CRC,
+                # preamble, interpacket gap)
+                total_length = length + 62
+
+                xmit_bytes = ((time - prev_time) * (1000.0*options.gbps/8))
+                if xmit_bytes < cur_queue:
+                    cur_queue -= xmit_bytes
+                else:
+                    cur_queue = 0
+                if 0 and (time > 12000) and (node == 'node9'):
+                    if cur_queue == 0:
+                        print('%9.3f (+%4.1f): length %6d, queue empty' %
+                                (time, time - prev_time, total_length))
+                    else:
+                        print('%9.3f (+%4.1f): length %6d, xmit %5d, queue %6d -> %6d' %
+                                (time, time - prev_time, total_length,
+                                xmit_bytes, cur_queue, cur_queue + total_length))
+                cur_queue += total_length
+                if cur_queue > max_queue:
+                    max_queue = cur_queue
+                    max_time = time
+                prev_time = time
+                pkts[i][2] = cur_queue
+            print('%-10s  %6d  %9.3f %7.1f ' % (node, max_queue, max_time,
+                    (max_queue*8)/(options.gbps*1000)))
+
+        if options.data_dir:
+            # Print stats for each node at regular intervals
+            file = open('%s/txqueues.dat' % (options.data_dir), 'w')
+            line = 'Interval'
+            for node in get_sorted_nodes():
+                line += ' %10s' % (node)
+            print(line, file=file)
+
+            interval = 20
+            start = get_first_time()
+            end = get_last_time()
+            interval_end = start//interval * interval
+            if interval_end < start:
+                interval_end += interval
+
+            # Maps from node name to current index in that node's packets
+            cur = {}
+            for node in get_sorted_nodes():
+                cur[node] = 0
+
+            while True:
+                line = '%8.1f' % (interval_end)
+                for node in get_sorted_nodes():
+                    max = -1
+                    i = cur[node]
+                    xmits = self.nodes[node]
+                    while i < len(xmits):
+                        time, ignore, queue_length = xmits[i]
+                        if time > interval_end:
+                            break
+                        if queue_length > max:
+                            max = queue_length
+                        i += 1
+                    cur[node] = i
+                    if max == -1:
+                        line += ' ' * 11
+                    else:
+                        line += '   %8d' % (max)
+                print(line, file=file)
+                if interval_end > end:
+                    break
+                interval_end += interval
+            file.close()
+
 # Parse command-line options.
 parser = OptionParser(description=
         'Analyze one or more Homa timetrace files and print information '
@@ -3113,6 +3331,9 @@ parser.add_option('--data', '-d', dest='data_dir', default=None,
         'output data files (suitable for graphing) in the directory given '
         'by DIR. If this option is not specified, no data files will '
         'be generated.')
+parser.add_option('--gbps', dest='gbps', type=float, default=25.0,
+        metavar='G', help='Link speed in Gbps (default: 25); used by some '
+        'analyzers.')
 parser.add_option('-h', '--help', dest='help', action='store_true',
                   help='Show this help message and exit')
 parser.add_option('--negative-ok', action='store_true', default=False,
@@ -3127,10 +3348,10 @@ parser.add_option('--max-rtt', dest='max_rtt', type=float, default=None,
         'rpc analyzer to select which specific RTTs to print out.')
 parser.add_option('--pkt', dest='pkt', default=None,
         metavar='ID:OFF', help='Identifies a specific packet with ID:OFF, '
-        'where ID is an RPC id (even means request message, odd means response) '
-        'and OFF is an offset in the message; if this option is specified, '
-        'some analyzers will output additional information related to that '
-        'packet')
+        'where ID is the RPC id on the sender (even means request message, '
+        'odd means response) and OFF is an offset in the message; if this '
+        'option is specified, some analyzers will output information specific '
+        'to that packet.')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='Print additional output with more details')
