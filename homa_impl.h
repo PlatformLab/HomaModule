@@ -1393,7 +1393,7 @@ struct homa_dead_dst {
  * homa_peertab.  Should be large enough to hold an entry for every server
  * in a datacenter without long hash chains.
  */
-#define HOMA_PEERTAB_BUCKET_BITS 20
+#define HOMA_PEERTAB_BUCKET_BITS 16
 
 /** define HOME_PEERTAB_BUCKETS - Number of buckets in a homa_peertab. */
 #define HOMA_PEERTAB_BUCKETS (1 << HOMA_PEERTAB_BUCKET_BITS)

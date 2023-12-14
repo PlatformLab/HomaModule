@@ -93,7 +93,7 @@ int homa_init(struct homa *homa)
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
 	homa->throttle_add = 0;
-	homa->throttle_min_bytes = 1000;
+	homa->throttle_min_bytes = 200;
 	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa_socktab_init(&homa->port_map);
