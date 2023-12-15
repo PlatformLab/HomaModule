@@ -1,9 +1,14 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Implement a new packet steering mechanism to avoid core conflicts:
-  * Write gen3.txt file
-  * Add new metrics
+* For W3, throttle_min_bytes is a problem: a significant fraction of all
+  transmitted bytes aren't being counted; as a result, the NIC queue
+  can build up. Reducing throttle_min_bytes from 1000 to 200 reduced P99
+  short message latency from 250 us to 200 us.
+
+* Don't understand why W3 performance is so variable under Gen3. Also,
+  it's worth comparing tthoma output for W4 and W3 under Gen2; e.g.,
+  W3 has way more active going messages than W4.
 
 * When requesting ACKs, must eventually give up and delete RPC.
 * Eliminate msgin.scheduled: just compute when needed.
@@ -16,15 +21,10 @@ Notes for Homa implementation in Linux:
 * Round up bpage fragments to 64 byte boundaries
 
 * TODO list for Homa based on the 9/22-10/6 experiment:
-  * Rework HOMA_GRO_SHORT_BYPASS and HOMA_GRO_SAME_CORE to detect
-    congestion better (e.g. use time since last call to homa_gro_receive?)
   * Rework the retransmission mechanism. Instead being entirely time-based,
     detect missing packets at the front of in msgin->packets to retry
     more aggressively. Also, perhaps keep copying data even when there
     is a missing packet?
-  * Rework the mechanism for copying to user space to record gaps in the
-    packets that have been received and keep copying (in order to avoid
-    long-lived packet buffers).
 
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
@@ -128,16 +128,11 @@ Notes for Homa implementation in Linux:
     * Methods:
       * Request (current time, amount) (possibly 2 stages: isItOk and doIt?)
     * Or, just reduce the link speed and let the pacer handler this?
-  * Analyze 40-us W4 short message latency by writing a time-trace
-    analyzer that tracks NIC queue length.
   * Perhaps limit the number of polling threads per socket, to solve
     the problems with having lots of receiver threads?
   * Move some reaping to the pacer? It has time to spare
   * Figure out why TCP W2 P99 gets worse with higher --client-max
   * See if turning off c-states allows shorter polling intervals?
-  * Consider a permanent reduction in rtt_bytes.
-  * Consider reducing throttle_min_bytes to see if it helps region 1
-    in the CDF?
   * Modify cp_node's TCP to use multiple connections per client-server pair
   * Why is TCP beating Homa on cp_server_ports? Perhaps TCP servers are getting
     >1 request per kernel call?
@@ -538,3 +533,9 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
+
+https://www.intel.com/content/www/us/en/products/network-io/ethernet/programmable-ethernet-switch.html
+
+Melissa Evers: OpenSource VP (Sales and Marketing)
+
+email Sachin
