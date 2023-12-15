@@ -839,8 +839,11 @@ class AnalyzeActivity:
                         min_offset = offset
                     if offset > max_offset:
                         max_offset = offset
-                if 'rcvmsg_done' in rpc:
-                    bytes = rpc['in_length'] - min_offset
+                if 'recvmsg_done' in rpc:
+                    if 'in_length' in rpc:
+                        bytes = rpc['in_length'] - min_offset
+                    else:
+                        bytes = 0
                 else:
                     bytes = max_offset + get_packet_size() - min_offset
                 core = rpc['gro_core']
@@ -3217,7 +3220,7 @@ class AnalyzeTxqueues:
         self.nodes[trace['node']].append([time, 34, 0])
 
     def output(self):
-        global options
+        global options, traces
 
         print('\n-------------------')
         print('Analyzer: txqueues')
@@ -3242,7 +3245,7 @@ class AnalyzeTxqueues:
             max_queue = 0
             max_time = 0
             cur_queue = 0
-            prev_time = 0
+            prev_time = traces[node]['first_time']
             for i in range(len(pkts)):
                 time, length, ignore = pkts[i]
 
@@ -3255,7 +3258,7 @@ class AnalyzeTxqueues:
                     cur_queue -= xmit_bytes
                 else:
                     cur_queue = 0
-                if 0 and (time > 12000) and (node == 'node9'):
+                if 0 and (node == 'node6'):
                     if cur_queue == 0:
                         print('%9.3f (+%4.1f): length %6d, queue empty' %
                                 (time, time - prev_time, total_length))
