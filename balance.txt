@@ -111,4 +111,7 @@ associated with Gen2.
   work will adjust their core assignments to avoid conflicts.
 
 Gen3 was implemented in November of 2023; so far its performance appears to be
-about the same as Gen2. We
+about the same as Gen2 (slightly worse for W2 and W3, slightly better for W5).
+Gen3 performance on W3 appears highly variable: P99 latency can vary by 5-10x
+from run to run; as of December 2023 the reasons for this have not been
+determined.

@@ -11,9 +11,9 @@ order.
     SoftIRQ -> App   0.3 0.3 0.3   20.5 21.7 19.9   0.3 0.3 0.3   7.2 6.8 9.0
 
     However, this doesn't seem to translate into better overall performance:
-    standard slowdown graphs look about the same with Gen2 and Gen3.
-    Furthermore, Gen3 seems to hurt performance for W2 and W3 (too much
-    load on GRO cores?). This needs more analysis.
+    standard slowdown graphs look about the same with Gen2 and Gen3 (Gen2 has
+    better P99 latency for W2 and W3; Gen3 is better for W5). This needs more
+    analysis.
 
 48. (August 2023) Unexpected packet loss on c6525-100g cluster (AMD processors,
     100 Gbps links). Under some conditions (such as "cp_node client --one-way
@@ -373,8 +373,10 @@ TCP   P50    108.8 (3.5x)   192.7 (4.6x)  353.1 (7.5x)  385.7 (6.9x)
                      lower short P99 for W2 and W3 than 4 receivers, but for
                      W5 3 receivers is 10% better than 2. Best choice: 3p2r?
     rtt_bytes:       60K is best, but not much sensitivity: 40K is < 10% worse
-    throttle_bytes:  Almost no noticeable difference from 100-2000; perhaps
-                     500 or 1000?
+    throttle_bytes:  Almost no noticeable difference from 100-2000; 100 is
+                     probably best because it includes more traffic in the
+                     computation of NIC queue length, reducing the probability
+                     of queue buildup
 
 29. (October 2020) Polling performance impact. In isolation, polling saves
     about 4 us RTT per RPC. In the workloads, it reduces short-message P50
