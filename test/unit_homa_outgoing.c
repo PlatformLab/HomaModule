@@ -570,6 +570,7 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 11000);
 	self->homa.max_nic_queue_cycles = 500;
+	self->homa.throttle_min_bytes = 250;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_xmit_data(crpc, false);
 	EXPECT_STREQ("xmit DATA 200@0", unit_log_get());
@@ -779,7 +780,7 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 	mock_xmit_log_homa_info = 1;
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
-			"homa_info: wire_bytes 1524, data_bytes 1400",
+			"homa_info: wire_bytes 1542, data_bytes 1400",
 			unit_log_get());
 }
 TEST_F(homa_outgoing, homa_resend_data__advance_next_xmit)
