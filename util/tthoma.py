@@ -58,7 +58,7 @@ import time
 rpcs = {}
 
 # This global variable holds information about all of the traces that
-# have been read. Maps from the 'node' fields of a traces to a dictionary
+# have been read. Maps from the 'node' fields of a trace to a dictionary
 # containing the following values:
 # file:         Name of file from which the trace was read
 # line:         The most recent line read from the file
@@ -85,10 +85,15 @@ peer_nodes = {}
 # free:        Time when skb was freed (after copying to application)
 # id:          RPC id on the sender
 # offset:      Offset of the data in the packet within its message
-# length:      # bytes of message data in this packet
+# length:      # bytes of message data in the TSO packet sent for offset
+#              (the receiver may get multiple smaller packets)
 # msg_length:  Total number of bytes in the message
 # priority:    Priority at which packet was transmitted
 packets = defaultdict(dict)
+
+# offset -> True for each offset that has occurred in a received data packet;
+# filled in by AnalyzePackets and AnalyzeRpcs.
+offsets = {}
 
 # This variable holds information about every grant packet in the traces.
 # it is created by AnalyzePackets. Keys have the form id:offset where id is
@@ -161,50 +166,52 @@ def get_last_time():
             latest = last
     return latest
 
-def get_packet_size():
+def get_length(offset, msg_length=1e20):
+    """
+    Compute the length of a packet. Uses information collected in the
+    offsets global variable, and assumes that all messages use the same
+    set offsets.
+
+    offset:      Offset of the first byte in the packet.
+    msg_length:  Total number of bytes in the message, if known. If not
+                 supplied, then the last packet in a message may have its
+                 length overestimated.
+    """
+    global offsets
+    if len(get_length.lengths) != len(offsets):
+        # Must recompute lengths (new offsets have appeared)
+        get_length.lengths = {}
+        sorted_offsets = sorted(offsets.keys())
+        max = 0
+        for i in range(len(sorted_offsets)-1):
+            length = sorted_offsets[i+1] - sorted_offsets[i]
+            if length > max:
+                max = length;
+            get_length.lengths[sorted_offsets[i]] = length
+        get_length.lengths[sorted_offsets[-1]] = max
+        get_length.mtu = max
+    if offset in get_length.lengths:
+        length = get_length.lengths[offset]
+    else:
+        length = get_length.mtu
+    if (offset + length) > msg_length:
+        length = msg_length - offset
+    return length
+
+# offset -> max packet length for that offset.
+get_length.lengths = {}
+# Maximum length for any offset.
+get_length.mtu = 0
+
+def get_mtu():
     """
     Returns the amount of message data in a full-size network packet (as
     received by the receiver; GSO packets sent by senders may be larger).
     """
 
-    global rpcs
-
-    # We cache the result to avoid recomputing
-    if get_packet_size.result != None:
-        return get_packet_size.result
-
-    if len(rpcs) == 0:
-        raise Exception('get_packet_size failed: no RPCs (did you forget '
-                'to include the rpc analyzer?)')
-
-    # Scan incoming data packets for all of the RPCs, looking for one
-    # with at least 4 packets. Of the 3 gaps in offset, at least 2 must
-    # be the same (the only special case is for unscheduled data). If
-    # we can't find any RPCs with 4 packets, then look for one with 2
-    # packets and find the offset of the second packet. If there are
-    # no multi-packet RPCs, then just pick a large value (the size won't
-    # matter).
-    for id, rpc in rpcs.items():
-        if not 'softirq_data' in rpc:
-            continue
-        offsets = sorted(map(lambda pkt : pkt[1], rpc['softirq_data']))
-        if (len(offsets) < 2) or (offsets[0] != 0) or not 'recvmsg_done' in rpc:
-            continue
-        size1 = offsets[1] - offsets[0]
-        if len(offsets) >= 4:
-            size2 = None
-            for i in range(2, len(offsets)):
-                size = offsets[i] - offsets[i-1]
-                if (size == size1) or (size == size2):
-                    get_packet_size.result = size
-                    return size
-                choice2 = size
-        get_packet_size.result = size1
-    if get_packet_size.result == None:
-        print('Can\'t compute maximum packet size; assuming 100000')
-        get_packet_size.result = 100000
-    return get_packet_size.result;
-get_packet_size.result = None
+    # Use get_length to do all of the work.
+    get_length(0)
+    return get_length.mtu
 
 def get_sorted_nodes():
     """
@@ -845,7 +852,7 @@ class AnalyzeActivity:
                     else:
                         bytes = 0
                 else:
-                    bytes = max_offset + get_packet_size() - min_offset
+                    bytes = max_offset + get_mtu() - min_offset
                 core = rpc['gro_core']
                 cores = node_core_in_bytes[rpc['node']]
                 if not core in cores:
@@ -1005,7 +1012,7 @@ class AnalyzeCopy:
                 stats['large_in_data'] += num_bytes
                 stats['large_in_time'] += delta
                 stats['large_in_count'] += 1
-            if options.verbose:
+            if 0 and options.verbose:
                 print('%9.3f Copy in finished [C%02d]: %d bytes, %.1f us, %5.1f Gbps' %
                         (time, core, num_bytes, delta, 8e-03*num_bytes/delta))
 
@@ -1030,7 +1037,7 @@ class AnalyzeCopy:
                 stats['large_out_time'] += delta
                 stats['large_out_time_with_skbs'] += delta
                 stats['large_out_count'] += 1
-            if options.verbose:
+            if 0 and options.verbose:
                 print('%9.3f Copy out finished [C%02d]: %d bytes, %.1f us, %5.1f Gbps' %
                         (time, core, num_bytes, delta, 8e-03*num_bytes/delta))
 
@@ -1265,7 +1272,7 @@ class AnalyzeDelay:
         grant_total = []
 
         # Collect statistics about delays within individual packets.
-        mtu = get_packet_size()
+        mtu = get_mtu()
         for p, pkt in packets.items():
             if ('msg_length') in pkt and (pkt['msg_length'] <= mtu):
                 if ('xmit' in pkt) and ('nic' in pkt):
@@ -1583,13 +1590,15 @@ class AnalyzeIncoming:
         dispatcher.interest('AnalyzePackets')
         return
 
-    def write_node_data(self, node, pkts):
+    def write_node_data(self, node, pkts, max):
         """
         Write a data file describing incoming traffic to a given node.
 
         node:   Name of the node
         pkts:   List of <time, length, core, priority> tuples describing
                 packets on that node.
+        max:    Dictionary with values that accumulate information about the
+                highest throughput seen.
         """
         global options
 
@@ -1629,7 +1638,7 @@ class AnalyzeIncoming:
         f.write('# MinP:    Lowest priority level for any incoming packet\n')
         f.write('\nInterval')
         for c in core_ids:
-            f.write(' Gbps%d Pkts%d' % (c, c))
+            f.write(' %6s %6s' % ('Gps%d' % c, 'Pkts%d' % c))
         f.write('   Gbps   Pkts  MinP\n')
 
         for t, length, core, priority in pkts:
@@ -1640,11 +1649,27 @@ class AnalyzeIncoming:
                     total_pkts = 0
                     for c in core_ids:
                         gbps = 8*core_bytes[c]/(interval*1e03)
-                        f.write(' %5.1f %5d' % (gbps, core_pkts[c]))
+                        f.write(' %6.1f %6d' % (gbps, core_pkts[c]))
                         total_gbps += gbps
                         total_pkts += core_pkts[c]
+                        if core_pkts[c] > max['core_pkts']:
+                            max['core_pkts'] = core_pkts[c]
+                            max['core_pkts_time'] = interval_end
+                            max['core_pkts_core'] = '%s, core %d' % (node, c)
+                        if gbps > max['core_gbps']:
+                            max['core_gbps'] = gbps
+                            max['core_gbps_time'] = interval_end
+                            max['core_gbps_core'] = '%s, core %d' % (node, c)
                     f.write('  %5.1f  %5d   %3d\n' % (total_gbps,
                             total_pkts, min_prio))
+                    if total_pkts > max['node_pkts']:
+                        max['node_pkts'] = total_pkts
+                        max['node_pkts_time'] = interval_end
+                        max['node_pkts_node'] = node
+                    if total_gbps > max['node_gbps']:
+                        max['node_gbps'] = total_gbps
+                        max['node_gbps_time'] = interval_end
+                        max['node_gbps_node'] = node
                 for c in core_ids:
                     core_bytes[c] = 0
                     core_pkts[c] = 0
@@ -1659,7 +1684,7 @@ class AnalyzeIncoming:
     def output(self):
         global packets, grants, options, rpcs
 
-        # Maps from node names to a list of packets for that core. Each packet
+        # Maps from node names to a list of packets for that node. Each packet
         # is described by a tuple <time, size, core> giving the arrival time
         # and size of the packet (size 0 means the packet was a grant) and the
         # core where it was received.
@@ -1667,20 +1692,14 @@ class AnalyzeIncoming:
 
         skipped = 0
         total_pkts = 0
-        mtu = get_packet_size()
         for pkt in packets.values():
             if not 'gro' in pkt:
                 continue
-            if not 'length' in pkt:
-                if 'msg_length' in pkt:
-                    length = pkt['msg_length'] - pkt['offset']
-                    if length > mtu:
-                        length = mtu
-                else:
-                    skipped += 1
-                    continue
+            if 'msg_length' in pkt:
+                length = get_length(pkt['offset'], pkt['msg_length'])
             else:
-                length = pkt['length']
+                skipped += 1
+                continue
             if not 'id' in pkt:
                 print('Packet: %s' % (pkt))
             rpc = rpcs[pkt['id']^1]
@@ -1704,8 +1723,23 @@ class AnalyzeIncoming:
         if options.data_dir == None:
             print('No --data option specified, data can\'t be written.')
 
-        for node, cores in nodes.items():
-              self.write_node_data(node, cores)
+        max = {
+            'core_pkts': 0,    'core_pkts_time': 0,    'core_pkts_core': 0,
+            'core_gbps': 0,    'core_gbps_time': 0,    'core_gbps_core': 0,
+            'node_pkts': 0,    'node_pkts_time': 0,    'node_pkts_node': 0,
+            'node_gbps': 0,    'node_gbps_time': 0,    'node_gbps_node': 0
+        }
+        for node, node_pkts in nodes.items():
+              self.write_node_data(node, node_pkts, max)
+        print('Maximum homa_gro_receive throughputs in a 20 usec interval:')
+        print('    Packets per core: %4d (time %7.1f, %s)' % (max['core_pkts'],
+                max['core_pkts_time'], max['core_pkts_core']))
+        print('    Gbps per core:   %5.1f (time %7.1f, %s)' % (max['core_gbps'],
+                max['core_gbps_time'], max['core_gbps_core']))
+        print('    Packets per node: %4d (time %7.1f, %s)' % (max['node_pkts'],
+                max['node_pkts_time'], max['node_pkts_node']))
+        print('    Gbps per node:   %5.1f (time %7.1f, %s)' % (max['node_gbps'],
+                max['node_gbps_time'], max['node_gbps_node']))
 
 #------------------------------------------------
 # Analyzer: net
@@ -1740,7 +1774,6 @@ class AnalyzeNet:
         receivers = defaultdict(list)
 
         # Process RPCs in sender-receiver pairs to collect data
-        max_data = get_packet_size()
         for xmit_id, xmit_rpc in rpcs.items():
             recv_id = xmit_id ^ 1
             if not recv_id in rpcs:
@@ -1773,12 +1806,7 @@ class AnalyzeNet:
             xmit_bytes = 0
             for i in range(0, len(recv_pkts)):
                 recv_time, recv_offset, prio = recv_pkts[i]
-                if i == (len(recv_pkts) - 1):
-                    length = xmit_end - recv_offset
-                else:
-                    length = recv_pkts[i+1][1] - recv_offset
-                if length > max_data:
-                    length = max_data
+                length = get_length(recv_offset, xmit_end)
 
                 while recv_offset >= (xmit_offset + xmit_length):
                     if xmit_bytes:
@@ -2000,7 +2028,7 @@ class AnalyzeNet:
         print('Analyzer: net')
         print('--------------')
         print('Network delay (including sending NIC, network, receiving NIC, and GRO')
-        print('backup, for packets with GRO processing on a particular core.')
+        print('backup) for packets with GRO processing on a particular core.')
         print('Pkts:      Total data packets processed by Core on Node')
         print('AvgDelay:  Average end-to-end delay from ip_*xmit invocation to '
                 'GRO (usec)')
@@ -2090,10 +2118,11 @@ class AnalyzeNicbufs:
                 pkt_allocs[pkid] = [time, core_bytes[core]]
                 core_bytes[core] += length
             elif type == 'free':
-                active_bytes = core_bytes[core] - pkt_allocs[pkid][1]
-                if active_bytes > core_max[core][1]:
-                    core_max[core] = [time, active_bytes, pkid,
-                            pkt_allocs[pkid][0]]
+                if pkid in pkt_allocs:
+                    active_bytes = core_bytes[core] - pkt_allocs[pkid][1]
+                    if active_bytes > core_max[core][1]:
+                        core_max[core] = [time, active_bytes, pkid,
+                                pkt_allocs[pkid][0]]
             else:
                 print('Bogus event type %s in nicbufs analzyer' % (type),
                         file=sys.stderr)
@@ -2302,8 +2331,6 @@ class AnalyzePacket:
     def output(self):
         global rpcs, traces, options, peer_nodes
 
-        pkt_max = get_packet_size()
-
         print('\n-----------------')
         print('Analyzer: packet')
         print('-----------------')
@@ -2365,6 +2392,9 @@ class AnalyzePacket:
                 print('\nId: %d, RPC: %s' % (id, rpc))
             if (rpc['node'] != recv_rpc['node']) or (not 'gro_core' in rpc):
                 continue
+            msg_len = 1e20
+            if 'in_length' in rpc:
+                msg_len = rpc['in_length']
             rcvd = sorted(rpc['gro_data'], key=lambda t: t[1])
             xmit_id = id ^ 1
             if not xmit_id in rpcs:
@@ -2379,6 +2409,8 @@ class AnalyzePacket:
                 xmit_rpc = rpcs[xmit_id]
                 sent = sorted(xmit_rpc['send_data'], key=lambda t : t[1])
                 sender = xmit_rpc['node']
+                if 'out_length' in xmit_rpc:
+                    msg_len = xmit_rpc['out_length']
             for rtime, roffset, rprio in rcvd:
                 if rtime < xmit_time:
                     continue
@@ -2386,11 +2418,7 @@ class AnalyzePacket:
                     # Skip the reference packet
                     continue
 
-                # Initial guess at length (in case no xmit info available)
-                length = pkt_max
-                if ('in_length' in rpc):
-                    length = min(length, rpc['in_length'] - roffset)
-
+                length = get_length(roffset, msg_len)
                 missing_xmit = True
                 while sent:
                     stime, soffset, slength = sent[0]
@@ -2401,7 +2429,6 @@ class AnalyzePacket:
                         sent.pop(0)
                         continue
                     if roffset >= soffset:
-                        length = min(pkt_max, soffset + slength - roffset)
                         pkts.append([rtime, stime, xmit_id, roffset, sender,
                                 length, rprio, rpc['gro_core']])
                         if stime < xmit_time:
@@ -2523,12 +2550,13 @@ class AnalyzePackets:
         packets[pkt_id(id, offset)]['nic'] = time
 
     def tt_gro_data(self, trace, time, core, peer, id, offset, prio):
-        global packets
+        global packets, offsets
         p = packets[pkt_id(id^1, offset)]
         p['gro'] = time
         p['priority'] = prio
         p['id'] = id^1
         p['offset'] = offset
+        offsets[offset] = True
         self.active[id].append(p)
 
     def tt_softirq_data(self, trace, time, core, id, offset, msg_length):
@@ -2623,10 +2651,11 @@ class AnalyzeRpcs:
         rpc[name].append(value)
 
     def tt_gro_data(self, trace, time, core, peer, id, offset, prio):
-        global rpcs
+        global rpcs, offsets
         self.append(trace, id, 'gro_data', [time, offset, prio])
         rpcs[id]['peer'] = peer
         rpcs[id]['gro_core'] = core
+        offsets[offset] = True
 
     def tt_gro_grant(self, trace, time, core, peer, id, offset, priority):
         self.append(trace, id, 'gro_grant', [time, offset])
@@ -3235,7 +3264,7 @@ class AnalyzeTxqueues:
         print('Delay:       Delay (usec until fully transmitted) experienced by packet ')
         print('             transmitted at Time')
         print('')
-        print('Node     MaxLength       Time   Delay')
+        print('Node        MaxLength       Time   Delay')
 
         for node in get_sorted_nodes():
             pkts = self.nodes[node]
@@ -3272,7 +3301,7 @@ class AnalyzeTxqueues:
                     max_time = time
                 prev_time = time
                 pkts[i][2] = cur_queue
-            print('%-10s  %6d  %9.3f %7.1f ' % (node, max_queue, max_time,
+            print('%-10s  %9d  %9.3f %7.1f ' % (node, max_queue, max_time,
                     (max_queue*8)/(options.gbps*1000)))
 
         if options.data_dir:
