@@ -412,22 +412,26 @@ if elapsed_secs != 0:
     print("\nMiscellaneous:")
     print("--------------")
     if packets_received > 0:
-        print("Bytes/packet rcvd: %6.0f" % (
+        print("Bytes/packet rcvd:    %6.0f" % (
                 total_received_bytes/packets_received))
-        print("Packets received:   %5.3f M/sec" % (
+        print("Packets received:      %5.3f M/sec" % (
                 1e-6*packets_received/elapsed_secs))
-        print("Packets sent:       %5.3f M/sec" % (
+        print("Packets sent:          %5.3f M/sec" % (
                 1e-6*packets_sent/elapsed_secs))
-        print("Core efficiency:    %5.3f M packets/sec/core "
+        print("Core efficiency:       %5.3f M packets/sec/core "
                 "(sent & received combined)" % (
                 1e-6*(packets_sent + packets_received)/elapsed_secs
                 /total_cores_used))
-        print("                   %5.2f  Gbps/core (goodput)" % (
+        print("                      %5.2f  Gbps/core (goodput)" % (
                 8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
                 /(total_cores_used * elapsed_secs)))
+    if deltas["pacer_cycles"] != 0:
+        pacer_secs = float(deltas["pacer_cycles"])/(cpu_khz * 1000.0)
+        print("Pacer throughput:     %5.2f  Gbps (pacer output when pacer running)" % (
+                deltas["pacer_bytes"]*8e-09/pacer_secs))
     if deltas["throttled_cycles"] != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
-        print("Pacer throughput:  %5.2f  Gbps" % (
+        print("Throttled throughput:  %5.2f  Gbps (pacer output when throttled)" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
 
     print("\nCanaries (possible problem indicators):")
