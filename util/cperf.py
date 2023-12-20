@@ -1189,7 +1189,7 @@ def get_digest(experiment):
         if old_slowdown:
             optimal = unloaded_p50[length]
         elif length in unloaded_p50:
-            optimal = min_rtt + length*8/link_mbps
+            optimal = 15 + length*8/link_mbps
         bucket_count += len(rtts[length])
         for rtt in rtts[length]:
             bucket_rtts.append(rtt)
