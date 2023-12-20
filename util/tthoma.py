@@ -73,6 +73,12 @@ traces = {}
 # AnalyzeRpcs.
 peer_nodes = {}
 
+class OffsetDict(dict):
+    def __missing__(self, key):
+        id_str, offset_str = key.split(':')
+        self[key] = {'id': int(id_str), 'offset': int(offset_str)}
+        return self[key]
+
 # This variable holds information about every data packet in the traces.
 # it is created by AnalyzePackets. Keys have the form id:offset where id is
 # the RPC id on the sending side and offset is the offset in message of
@@ -89,7 +95,9 @@ peer_nodes = {}
 #              (the receiver may get multiple smaller packets)
 # msg_length:  Total number of bytes in the message
 # priority:    Priority at which packet was transmitted
-packets = defaultdict(dict)
+# xmit_core:   Core on which ip*xmit was invoked
+# gro_core:    Core on which homa_gro_receive was invoked
+packets = OffsetDict()
 
 # offset -> True for each offset that has occurred in a received data packet;
 # filled in by AnalyzePackets and AnalyzeRpcs.
@@ -1577,6 +1585,127 @@ class AnalyzeDelay:
             print(wakeup_verbose, end='')
 
 #------------------------------------------------
+# Analyzer: filter
+#------------------------------------------------
+class AnalyzeFilter:
+    """
+    Prints information about the packets selected by the following command-line
+    options: --tx-node, --tx-core, --tx-start, --tx-end, --rx-node, --rx-core,
+    --rx-start, --rx-end.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+        return
+
+    def filter_packets(self, options):
+        """
+        Returns a list containing all of the packets that match options.
+        In addition, all returned packets will have valid 'xmit' and 'gro'
+        fields, and the sending and receiving RPCs will exist.
+
+        options:   A dictionary of option values (see class doc for list of
+                   valid options); usually contains the command-line options.
+        """
+        global packets, rpcs
+
+        result = []
+        for pkt in packets.values():
+            if not 'id' in pkt:
+                print('No id in pkt: %s' % (pkt))
+            rx_id = pkt['id'] ^ 1
+            if (not 'xmit' in pkt) or (not 'gro' in pkt):
+                continue
+            if (not pkt['id'] in rpcs) or (not rx_id in rpcs):
+                contine
+            if (options.tx_start != None) and (pkt['xmit'] < options.tx_start):
+                continue
+            if (options.tx_end != None) and (pkt['xmit'] >= options.tx_end):
+                continue
+            if (options.rx_start != None) and (pkt['gro'] < options.rx_start):
+                continue
+            if (options.rx_end != None) and (pkt['gro'] >= options.rx_start):
+                continue
+            if (options.tx_node != None) and (options.tx_node
+                    != rpcs[pkt['id']]['node']):
+                continue
+            if (options.rx_node != None) and (options.rx_node
+                    != rpcs[pkt['rx_id']]['node']):
+                continue
+            if (options.tx_core != None) and (options.tx_core != pkt['xmit_core']):
+                continue
+            if (options.rx_core != None) and (options.rx_core != pkt['gro_core']):
+                continue
+            result.append(pkt)
+        return result
+
+    def output(self):
+        global options
+
+        pkts = self.filter_packets(options)
+
+        print('\n-------------------')
+        print('Analyzer: filter')
+        print('-------------------\n')
+        if not pkts:
+            print('No packets matched filters')
+            return
+        tx_filter = 'xmit:'
+        if options.tx_node != None:
+            tx_filter += ' node %s' % (options.tx_node)
+        if options.tx_core != None:
+            tx_filter += ' core %d' % (options.tx_core)
+        if options.tx_start != None:
+            if options.tx_end != None:
+                tx_filter += ' time %9.3f-%9.3f' % (
+                        options.tx_start, options.tx_end)
+            else:
+                tx_filter += ' time >= %9.3f' % (options.tx_start)
+        elif options.tx_end != None:
+            tx_filter += ' time < %9.3f' % (options.tx_end)
+
+        rx_filter = 'gro:'
+        if options.rx_node != None:
+            rx_filter += ' node %s' % (options.rx_node)
+        if options.rx_core != None:
+            rx_filter += ' core %d' % (options.rx_core)
+        if options.rx_start != None:
+            if options.rx_end != None:
+                rx_filter += ' time %9.3f-%9.3f' % (
+                        options.rx_start, options.rx_end)
+            else:
+                rx_filter += ' time >= %9.3f' % (options.rx_start)
+        elif options.rx_end != None:
+            rx_filter += ' time < %9.3f' % (options.rx_end)
+
+        print('Packets below matched these filters:')
+        if len(tx_filter) > 5:
+            print(tx_filter)
+        if len(rx_filter) > 4:
+            print(rx_filter)
+        print('Packet information:')
+        print('TxTime:  Time when ip*xmit was invoked for packet')
+        print('TxNode:  Node that transmitted packet')
+        print('TxCore:  Core on which ip*xmit was invoked for packet')
+        print('RxTime:  Time when homa_gro_receive was invoked for packet')
+        print('Delay:   RxTime - TxTime')
+        print('RxNode:  Node that received packet')
+        print('RxCore:  Core where home_gro_receive was invoked for packet')
+        print('Prio:    Priority of packet')
+        print('')
+
+        print('TxTime        TxNode TxCore  RxTime  Delay     RxNode RxCore Prio')
+        print('-----------------------------------------------------------')
+        pkts.sort(key=lambda d : d['xmit'] if 'xmit' in d else 0)
+        for pkt in pkts:
+            tx_id = pkt['id']
+            rx_id = tx_id ^ 1
+            print('%9.3f %10s %4d %9.3f %6.1f %10s   %3d   %2d' % (
+                    pkt['xmit'], rpcs[tx_id]['node'], pkt['xmit_core'],
+                    pkt['gro'], pkt['gro'] - pkt['xmit'],
+                    rpcs[rx_id]['node'], pkt['gro_core'], pkt['priority']))
+
+#------------------------------------------------
 # Analyzer: incoming
 #------------------------------------------------
 class AnalyzeIncoming:
@@ -2543,7 +2672,9 @@ class AnalyzePackets:
 
     def tt_ip_xmit(self, trace, time, core, id, offset):
         global packets
-        packets[pkt_id(id, offset)]['xmit'] = time
+        p = packets[pkt_id(id, offset)]
+        p['xmit'] = time
+        p['xmit_core'] = core
 
     def tt_mlx_data(self, trace, time, core, peer, id, offset):
         global packets
@@ -2554,8 +2685,7 @@ class AnalyzePackets:
         p = packets[pkt_id(id^1, offset)]
         p['gro'] = time
         p['priority'] = prio
-        p['id'] = id^1
-        p['offset'] = offset
+        p['gro_core'] = core
         offsets[offset] = True
         self.active[id].append(p)
 
@@ -3362,7 +3492,7 @@ parser.add_option('--data', '-d', dest='data_dir', default=None,
         metavar='DIR', help='If this option is specified, analyzers will '
         'output data files (suitable for graphing) in the directory given '
         'by DIR. If this option is not specified, no data files will '
-        'be generated.')
+        'be generated')
 parser.add_option('--gbps', dest='gbps', type=float, default=25.0,
         metavar='G', help='Link speed in Gbps (default: 25); used by some '
         'analyzers.')
@@ -3384,6 +3514,30 @@ parser.add_option('--pkt', dest='pkt', default=None,
         'odd means response) and OFF is an offset in the message; if this '
         'option is specified, some analyzers will output information specific '
         'to that packet.')
+parser.add_option('--rx-core', dest='rx_core', type=int, default=None,
+        metavar='C', help='If specified, some analyzers will ignore packets '
+        'transmitted from cores other than C')
+parser.add_option('--rx-end', dest='rx_end', type=float, default=None,
+        metavar='T', help='If specified, some analyzers will ignore packets '
+        'received at or after time T')
+parser.add_option('--rx-node', dest='rx_node', default=None,
+        metavar='N', help='If specified, some analyzers will ignore packets '
+        'received by nodes other than N')
+parser.add_option('--rx-start', dest='rx_start', type=float, default=None,
+        metavar='T', help='If specified, some analyzers will ignore packets '
+        'received before time T')
+parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
+        metavar='C', help='If specified, some analyzers will ignore packets '
+        'transmitted from cores other than C')
+parser.add_option('--tx-end', dest='tx_end', type=float, default=None,
+        metavar='T', help='If specified, some analyzers will ignore packets '
+        'transmitted at or after time T')
+parser.add_option('--tx-node', dest='tx_node', default=None,
+        metavar='N', help='If specified, some analyzers will ignore ignore packets '
+        'transmitted by nodes other than N')
+parser.add_option('--tx-start', dest='tx_start', type=float, default=None,
+        metavar='T', help='If specified, some analyzers will ignore packets '
+        'transmitted before time T')
 parser.add_option('--verbose', '-v', action='store_true', default=False,
         dest='verbose',
         help='Print additional output with more details')
