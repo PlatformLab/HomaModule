@@ -54,6 +54,7 @@ import time
 #                    request was made for that offset
 # retansmits:        One entry for each packet retransmitted; maps from offset
 #                    to <time, length> tuple
+# unsched:           # of bytes of unscheduled data in the incoming message
 #
 rpcs = {}
 
@@ -115,6 +116,21 @@ offsets = {}
 # id:       Id of the RPC on the sender
 grants = defaultdict(dict)
 
+# Node -> list of intervals for that node. Each interval contains information
+# about a particular time range and consists of a dictionary with any or all
+# of the following fields:
+# time:       Ending time of the interval (integer usecs); this time is
+#             included in the interval
+# tx_pkts:    Number of data packets sent by the node during the interval
+# tx_data:    Number of bytes of data sent by the node during the interval
+# rx_pkts:    Number of data packets received by the node during the interval
+# rx_data:    Number of bytes of data received by the node during the interval
+# rx_grants:  Formatted text describing incoming RPCs with available grants
+#             as of the end of the interval
+# tx_grants:  Formatted text describing outgoing RPCs with outstanding grants
+#             as of the end of the interval
+intervals = defaultdict(list)
+
 def dict_avg(data, key):
     """
     Given a list of dictionaries, return the average of the elements
@@ -152,6 +168,21 @@ def extract_num(s):
         return int(match.group(1))
     return None
 
+def get_first_interval_end(interval):
+    """
+    Used when writing out data at regular intervals during the traces.
+    Returns the end time of the first interval of length interval,
+    given when the traces start.
+
+    interval:   The length of intervals, in usec.
+    """
+
+    start = get_first_time()
+    interval_end = int(start)//interval * interval
+    if interval_end < start:
+        interval_end += interval
+    return interval_end
+
 def get_first_time():
     """
     Return the earliest event time across all trace files.
@@ -162,6 +193,36 @@ def get_first_time():
         if first < earliest:
             earliest = first
     return earliest
+
+def get_interval(node, usecs):
+    """
+    Returns the interval dictionary corresponding to the arguments. A
+    new interval is created if the desired interval doesn't exist. Returns None
+    if the interval ends before the first trace record for the node.
+
+    node:     Name of the desired node
+    usecs:    Ending time of the interval (integer usecs)
+    """
+    global intervals, options, traces
+
+    data = intervals[node]
+    interval_length = options.interval
+    if not data:
+        # No intervals for this node yet; must figure out the time of the
+        # first interval for this node.
+        start = traces[node]['first_time']
+        first_end = int(start)//interval_length * interval_length
+        if first_end < start:
+            first_end += interval_length
+        data.append({'time': first_end})
+    else:
+        first_end = data[0]['time']
+    i = (usecs - first_end) // interval_length
+    if i < 0:
+        return None
+    while i >= len(data):
+        data.append({'time': first_end + interval_length*len(data)})
+    return data[i]
 
 def get_last_time():
     """
@@ -748,6 +809,17 @@ class Dispatcher:
     patterns.append({
         'name': 'retransmit',
         'regexp': 'retransmitting offset ([0-9]+), length ([0-9]+), id ([0-9]+)'
+    })
+
+    def __unsched(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        num_bytes = int(match.group(2))
+        for interest in interests:
+            interest.tt_unsched(trace, time, core, id, num_bytes)
+
+    patterns.append({
+        'name': 'unsched',
+        'regexp': 'Incoming message for id ([0-9]+) has ([0-9]+) unscheduled'
     })
 
 #------------------------------------------------
@@ -1706,6 +1778,440 @@ class AnalyzeFilter:
                     rpcs[rx_id]['node'], pkt['gro_core'], pkt['priority']))
 
 #------------------------------------------------
+# Analyzer: grants
+#------------------------------------------------
+class AnalyzeGrants:
+    """
+    Generates statistics about the granting mechanism, such as the number of
+    grants outstanding for incoming messages and the number of granted bytes
+    available for outgoing messages. If --data is specified, then two files
+    are created for each node in the data directory, with names
+    "grants_rx_<node>" and "grants_tx_<node>". These files contain information
+    about all incoming/outgoing RPCs with outstanding/available grants in each
+    time interval.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        return
+
+    def get_events(self):
+        """
+        Returns a list of events of interest for this analyzer. Elements
+        in the list have either of four forms:
+        <time, "txdata", node, id, offset, length>
+            Time is when data packet was passed to ip_queue_xmit on node.
+            Id is an RPC id, offset is the offset of first data byte in packet
+            and length is the number of data bytes in the packet. It
+        <time, "rxdata", node, id, offset, length>
+            Similar to "txdata" except describes when homa_softirq processed
+            the packet on the receiving node.
+        <time, "txgrant", node, id, offset>
+            Time is when a grant packet was created (in homa_create_grants) on
+            node, id identifies the RPC for the grant, and offset is the byte
+            just after the last one now granted for the RPC.
+        <time, "rxgrant", node, id, offset>
+            Similar to "txgrant" except the time is when homa_grant_pkt
+            processed the packet on the receiving node.
+        The return value will be sorted by time.
+        """
+        global rpcs
+
+        events = []
+        for id, rpc in rpcs.items():
+            node = rpc['node']
+            if 'send_data' in rpc:
+                for time, offset, length in rpc['send_data']:
+                    events.append([time, 'txdata', node, id, offset, length])
+            msg_length = 1e20
+            if 'in_length' in rpc:
+                msg_length = rpc['in_length']
+            if 'softirq_data' in rpc:
+                for time, offset in rpc['softirq_data']:
+                    events.append([time, 'rxdata', node, id, offset,
+                            get_length(offset, msg_length)])
+                if 'unsched' in rpc:
+                    # Pretend there was an actual grant for unscheduled bytes.
+                    events.append([rpc['softirq_data'][0][0], 'txgrant',
+                        node, id, rpc['unsched']])
+            if 'send_grant' in rpc:
+                for time, offset, priority in rpc['send_grant']:
+                    events.append([time, 'txgrant', node, id, offset])
+            if 'softirq_grant' in rpc:
+                for time, offset in rpc['softirq_grant']:
+                    events.append([time, 'rxgrant', node, id, offset])
+        return sorted(events)
+
+    class RpcDict(dict):
+        """
+        id -> dict for each RPC; dict contains any or all of:
+        rx_data_offset:  Offset just after last byte received
+        tx_data_offset:  Offset just after last byte sent; -1 means no data
+                         was ever sent for this message, so we ignore it
+                         for tx stats
+        rx_grant_offset: Offset just after last incoming byte granted
+        tx_grant_offset: Offset just after last outgoing byte granted
+        rx_length:       Length of incoming message for this RPC, or -1 if
+                         not known
+        tx_length:       Length of outgoing message for this RPC, or -1 if
+                         not known
+        """
+        def __missing__(self, key):
+            global rpcs
+            self[key] = {'rx_data_offset': 0, 'tx_data_offset': -1,
+                    'rx_grant_offset': 0, 'tx_grant_offset': 0}
+            record = self[key]
+            rpc = rpcs[key]
+            if 'in_length' in rpc:
+                record['rx_length'] = rpc['in_length']
+            else:
+                record['rx_length'] = -1
+            if 'out_length' in rpc:
+                record['tx_length'] = rpc['out_length']
+            else:
+                record['tx_length'] = -1
+            if rpc['send_data']:
+                record['tx_data_offset'] = rpc['send_data'][0][1]
+            return record
+
+    class NodeDict(dict):
+        """
+        node -> dict for each node; dict contains:
+        name:           Name of the node
+        rx_bytes:       Total bytes across all incoming messages that
+                        have been granted but not yet received
+        tx_bytes:       Total bytes across all outgoing messages that
+                        have been granted but not yet sent
+        rx_rpcs:        Id -> True for all incoming messages with granted
+                        bytes that haven't yet been received
+        tx_rpcs:        Id -> True for all outgoing messages with granted
+                        bytes that haven't yet been sent
+        *_integral:     For each of the above, sum of value*dt
+        tx_times:       Array: element n is total time when tx_msgs was n
+        rx_times:       Array: element n is total time when rx_msgs was n
+        prev_time:      The last time any of the stats above were changed
+        rx_data:        Accumulates detailed grant info for incoming messages
+                        when --data is specified; one line per interval
+        tx_data:        Accumulates detailed grant info for outgoing messages
+                        when --data is specified; one line per interval
+        """
+        def __missing__(self, key):
+            global traces
+            self[key] = {'name': key, 'rx_bytes': 0, 'tx_bytes': 0,
+                    'rx_rpcs': {}, 'tx_rpcs': {},
+                    'rx_bytes_integral': 0, 'tx_bytes_integral': 0,
+                    'rx_msgs_integral': 0, 'tx_msgs_integral': 0,
+                    'tx_times': [0, 0, 0, 0], 'rx_times': [0, 0, 0, 0],
+                    'prev_time': traces[key]['first_time'],
+                    'rx_data': '', 'tx_data': ''}
+            return self[key]
+
+    def check_node(self, node, local_rpcs):
+        """
+        Check consistency of node with current state of RPCs.
+
+        node:        Node to check (element of NodeDict).
+        local_rpcs:  RpcDict containing information about RPCs.
+        """
+
+        global rpcs
+        rx_bytes = 0
+        rx_msgs = 0
+        tx_bytes = 0
+        tx_msgs = 0
+        node_name = node['name']
+        for id, rpc in local_rpcs.items():
+            if rpcs[id]['node'] != node_name:
+                continue
+            delta = rpc['rx_grant_offset'] - rpc['rx_data_offset']
+            if delta > 0:
+                rx_msgs += 1
+                rx_bytes += delta
+            delta = rpc['tx_grant_offset'] - rpc['tx_data_offset']
+            if delta > 0:
+                tx_msgs += 1
+                tx_bytes += delta
+        if rx_msgs != len(node['rx_rpcs']):
+            print('Error for RPC %d rx_msgs" expected %d, got %d' %
+                    (id, rx_msgs, len(node['rx_rpcs'])))
+        if rx_bytes != node['rx_bytes']:
+            print('Error for RPC %d rx_bytes" expected %d, got %d' %
+                    (id, rx_bytes, node['rx_bytes']))
+        if tx_msgs != len(node['tx_rpcs']):
+            print('Error for RPC %d tx_msgs" expected %d, got %d' %
+                    (id, tx_msgs, len(node['tx_rpcs'])))
+        if tx_bytes != node['tx_bytes']:
+            print('Error for RPC %d tx_bytes" expected %d, got %d' %
+                    (id, tx_bytes, node['tx_bytes']))
+
+    def rx_info(self, node, local_rpcs):
+        """
+        Return a line of text describing the current state of grants for
+        incoming messages for a node.
+
+        node:        Node of interest (element of NodeDict).
+        local_rpcs:  RpcDict containing information about RPCs.
+        """
+
+        records = []
+        for id in node['rx_rpcs']:
+            rpc = local_rpcs[id]
+            length = rpc['rx_length']
+            data_offset = rpc['rx_data_offset']
+            grant_offset = rpc['rx_grant_offset']
+            outstanding = grant_offset - data_offset
+            if outstanding < 0:
+                outstanding = 0
+            if length >= 0:
+                records.append([length - data_offset, id, outstanding])
+            else:
+                records.append([1e20, id, outstanding])
+        records.sort(reverse=True)
+        result = ''
+        for remaining, id, outstanding in records:
+            if remaining == 1e20:
+                result += '%12d     ?? %6d' % (id, outstanding)
+            else:
+                result += '%12d %6d %6d' % (id, remaining, outstanding)
+        return result
+
+    def tx_info(self, node, local_rpcs):
+        """
+        Return a line of text describing the current state of grants for
+        outgoing messages for a node.
+
+        node:        Node of interest (element of NodeDict).
+        local_rpcs:  RpcDict containing information about RPCs.
+        """
+
+        records = []
+        for id in node['tx_rpcs']:
+            rpc = local_rpcs[id]
+            length = rpc['tx_length']
+            data_offset = rpc['tx_data_offset']
+            grant_offset = rpc['tx_grant_offset']
+            available = grant_offset - data_offset
+            if available < 0:
+                available = 0
+            if length >= 0:
+                records.append([length - data_offset, id, available])
+            else:
+                records.append([1e20, id, available])
+        records.sort(reverse=True)
+        result = ''
+        for remaining, id, available in records:
+            if remaining == 1e20:
+                result += '%12d    ?? %6d' % (id, available)
+            else:
+                result += '%12d %6d %6d' % (id, remaining, available)
+        return result
+
+    def output(self):
+        global options, rpcs, intervals
+
+        events = self.get_events()
+        interval_end = get_first_interval_end(options.interval)
+
+        local_rpcs = self.RpcDict()
+        local_nodes = self.NodeDict()
+
+        count = 0
+        for event in events:
+            t, op, node_name, id, offset = event[0:5]
+            rpc = local_rpcs[id]
+            node = local_nodes[node_name]
+
+            if (t > interval_end) and options.data_dir:
+                for name2, node2 in local_nodes.items():
+                    interval = get_interval(name2, interval_end)
+                    if interval == None:
+                        continue
+                    interval['rx_grants'] = self.rx_info(node2, local_rpcs)
+                    interval['tx_grants'] = self.tx_info(node2, local_rpcs)
+                interval_end += options.interval
+
+            # Update integrals.
+            delta = t - node['prev_time']
+            rx_msgs = len(node['rx_rpcs'])
+            tx_msgs = len(node['tx_rpcs'])
+            node['rx_bytes_integral'] += node['rx_bytes'] * delta
+            node['tx_bytes_integral'] += node['tx_bytes'] * delta
+            node['rx_msgs_integral'] += rx_msgs * delta
+            node['tx_msgs_integral'] += tx_msgs * delta
+            if rx_msgs < 4:
+                node['rx_times'][rx_msgs] += delta
+            if tx_msgs < 4:
+                node['tx_times'][tx_msgs] += delta
+            node['prev_time'] = t
+
+            # Update state
+            if op == 'rxdata':
+                offset += event[5]
+                old_offset = rpc['rx_data_offset']
+                if offset <= old_offset:
+                    continue
+                rpc['rx_data_offset'] = offset
+                grant = rpc['rx_grant_offset']
+                if old_offset < grant:
+                    if offset >= grant:
+                        node['rx_bytes'] -= grant - old_offset
+                        del node['rx_rpcs'][id]
+                    else:
+                        node['rx_bytes'] -= offset - old_offset
+                if 0 and node_name == 'node1':
+                    print('%9.3f id %12d old_offset %7d new_offset %7d grant %7d, '
+                            'rx_bytes %7d, rx_msgs %7d'
+                            % (t, id, old_offset, offset, grant,
+                            node['rx_bytes'], len(node['rx_rpcs'])))
+
+            if op == 'txdata':
+                offset += event[5]
+                old_offset = rpc['tx_data_offset']
+                if (offset < old_offset) or (old_offset < 0):
+                    continue
+                grant = rpc['tx_grant_offset']
+                rpc['tx_data_offset'] = offset
+                if old_offset < grant:
+                    if offset >= grant:
+                        node['tx_bytes'] -= grant - old_offset
+                        del node['tx_rpcs'][id]
+                    else:
+                        node['tx_bytes'] -= offset - old_offset
+                if 0 and id == 800994399:
+                    print('%9.3f: data %d, state %s' % (t, offset, rpc))
+
+            if op == 'rxgrant':
+                old_grant = rpc['tx_grant_offset']
+                if (offset < old_grant) or (rpc['tx_data_offset'] < 0):
+                    continue
+                data = rpc['tx_data_offset']
+                rpc['tx_grant_offset'] = offset
+                if offset > data:
+                    if old_grant > data:
+                        node['tx_bytes'] += offset - old_grant
+                    else:
+                        node['tx_bytes'] += offset - data
+                        node['tx_rpcs'][id] = True
+
+            if op == 'txgrant':
+                old_grant = rpc['rx_grant_offset']
+                data = rpc['rx_data_offset']
+                if offset < old_grant:
+                    continue
+                rpc['rx_grant_offset'] = offset
+                if offset > data:
+                    if old_grant > data:
+                        node['rx_bytes'] += offset - old_grant
+                    else:
+                        node['rx_bytes'] += offset - data
+                        node['rx_rpcs'][id] = True
+                if 0 and id == 800994399:
+                    print('%9.3f: grant %d, state %s' % (t, offset, rpc))
+
+            if 0 and node_name == 'node1':
+                count += 1
+                if (count % 10) == 0:
+                    self.check_node(node, local_rpcs)
+
+        print('\n-------------------')
+        print('Analyzer: grants')
+        print('-------------------\n')
+
+        print('Grant statistics:')
+        print('Node:     Name of node')
+        print('InMsgs:   Average number of incoming messages with outstanding grants')
+        print('InN:      Fraction of time when N incoming messages had outstanding grants')
+        print('InKB:     Average KB of outstanding grants across all incoming messages')
+        print('OutMsgs:  Average number of outgoing messages with available grants')
+        print('OutN:     Fraction of time when N outgoing messages had available grants')
+        print('OutKB:    Average KB of available grants across all outgoing messages')
+        print('')
+        print('Node       InMsgs  In0  In1  In2  In3   InKB OutMsgs Out0 Out1 Out2 Out3  OutKB')
+        print('-------------------------------------------------------------------------------')
+        total_in_msgs = 0
+        total_in_bytes = 0
+        total_out_msgs = 0
+        total_out_bytes = 0
+        for n in get_sorted_nodes():
+            node = local_nodes[n]
+            total_time = node['prev_time'] - traces[n]['first_time']
+            total_in_msgs += node['rx_msgs_integral']/total_time
+            total_in_bytes += node['rx_bytes_integral']/total_time
+            total_out_msgs += node['tx_msgs_integral']/total_time
+            total_out_bytes += node['tx_bytes_integral']/total_time
+            if total_time == 0:
+                print('%-10s  No data available' % (node))
+            print('%-10s %6.1f %4.2f %4.2f %4.2f %4.2f %6.1f  %6.1f %4.2f '
+                    '%4.2f %4.2f %4.2f %6.1f' % (n,
+                    node['rx_msgs_integral']/total_time,
+                    node['rx_times'][0]/total_time,
+                    node['rx_times'][1]/total_time,
+                    node['rx_times'][2]/total_time,
+                    node['rx_times'][3]/total_time,
+                    node['rx_bytes_integral']*1e-3/total_time,
+                    node['tx_msgs_integral']/total_time,
+                    node['tx_times'][0]/total_time,
+                    node['tx_times'][1]/total_time,
+                    node['tx_times'][2]/total_time,
+                    node['tx_times'][3]/total_time,
+                    node['tx_bytes_integral']*1e-3/total_time))
+        print('Average    %6.1f                     %6.1f  %6.1f     '
+                '                %6.1f' % (
+                total_in_msgs/len(local_nodes),
+                total_in_bytes/len(local_nodes)*1e-3,
+                total_out_msgs/len(local_nodes),
+                total_out_bytes/len(local_nodes)*1e-3))
+
+        # Create data files.
+        if options.data_dir:
+            for name, node in local_nodes.items():
+                f = open('%s/grants_rx_%s.dat' % (options.data_dir, name), 'w')
+                f.write('# Node: %s\n' % (name))
+                f.write('# Generated at %s.\n' %
+                        (time.strftime('%I:%M %p on %m/%d/%Y')))
+                f.write('# Incoming messages with outstanding grants, as a '
+                        'function of time.\n')
+                f.write('# Time:    End of the time interval\n')
+                f.write('# IdN:     Rpc identifier\n')
+                f.write('# RemN:    Number of bytes that have not yet been '
+                        'received for\n')
+                f.write('#          the message\n')
+                f.write('# GrantN:  Number of bytes that have been granted '
+                        'but data has\n')
+                f.write('#          not yet arrived\n')
+                f.write('\n')
+                f.write('   Time          Id1   Rem1 Grant1         '
+                        'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
+                for interval in intervals[name]:
+                    if not 'rx_grants' in interval:
+                        continue
+                    f.write('%7.1f %s\n' % (interval['time'], interval['rx_grants']))
+                f.close()
+
+                f = open('%s/grants_tx_%s.dat' % (options.data_dir, name), 'w')
+                f.write('# Node: %s\n' % (name))
+                f.write('# Generated at %s.\n' %
+                        (time.strftime('%I:%M %p on %m/%d/%Y')))
+                f.write('# Outgoing messages with available grants, as a '
+                        'function of time.\n')
+                f.write('# Time:    End of the time interval\n')
+                f.write('# IdN:     Rpc identifier\n')
+                f.write('# RemN:    Number of bytes that have not yet been '
+                        'transmitted for\n')
+                f.write('#          the message\n')
+                f.write('# GrantN:  Number of bytes that have been granted '
+                        'but data has\n')
+                f.write('#          not yet been transmitted\n')
+                f.write('\n')
+                f.write('   Time          Id1   Rem1 Grant1         '
+                        'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
+                for interval in intervals[name]:
+                    if not 'tx_grants' in interval:
+                        continue
+                    f.write('%7.1f %s\n' % (interval['time'], interval['tx_grants']))
+                f.close()
+
+
+#------------------------------------------------
 # Analyzer: incoming
 #------------------------------------------------
 class AnalyzeIncoming:
@@ -1731,7 +2237,7 @@ class AnalyzeIncoming:
         """
         global options
 
-        interval = 20
+        interval = options.interval
 
         # Figure out which cores received packets on this node.
         cores = {}
@@ -2888,21 +3394,41 @@ class AnalyzeRpcs:
             self.new_rpc(id, trace['node'])
         rpcs[id]['copy_in_done'] = time
 
+    def tt_unsched(self, trace, time, core, id, num_bytes):
+        global rpcs
+        if not id in rpcs:
+            self.new_rpc(id, trace['node'])
+        rpcs[id]['unsched'] = num_bytes
+
     def analyze(self):
         """
-        Fill in peer_traces.
+        Fill in various additional information related to RPCs
         """
         global rpcs, traces, peer_nodes
 
         for id, rpc in rpcs.items():
-            if not 'peer' in rpc:
-                continue
-            peer = rpc['peer']
-            if peer in peer_nodes:
-                continue
-            peer_id = id ^ 1
-            if peer_id in rpcs:
-                peer_nodes[peer] = rpcs[peer_id]['node']
+            # Fill in peer_nodes
+            if 'peer' in rpc:
+                peer = rpc['peer']
+                if not peer in peer_nodes:
+                    peer_id = id ^ 1
+                    if peer_id in rpcs:
+                        peer_nodes[peer] = rpcs[peer_id]['node']
+
+            # Deduce out_length if not already present.
+            if not 'out_length' in rpc:
+                length = -1
+                if 'send_data' in rpc:
+                    for t, offset, pkt_length in rpc['send_data']:
+                        l2 = offset + pkt_length
+                        if l2 > length:
+                            length = l2
+                if 'softirq_grant' in rpc:
+                    for t, offset in rpc['softirq_grant']:
+                        if offset > length:
+                            length = offset
+                if length >= 0:
+                    rpc['out_length'] = length
 
 #------------------------------------------------
 # Analyzer: rtt
@@ -3442,12 +3968,8 @@ class AnalyzeTxqueues:
                 line += ' %10s' % (node)
             print(line, file=file)
 
-            interval = 20
-            start = get_first_time()
-            end = get_last_time()
-            interval_end = start//interval * interval
-            if interval_end < start:
-                interval_end += interval
+            interval = options.interval
+            interval_end = get_first_interval_end(interval)
 
             # Maps from node name to current index in that node's packets
             cur = {}
@@ -3498,6 +4020,9 @@ parser.add_option('--gbps', dest='gbps', type=float, default=25.0,
         'analyzers.')
 parser.add_option('-h', '--help', dest='help', action='store_true',
                   help='Show this help message and exit')
+parser.add_option('--interval', dest='interval', type=int, default=20,
+        metavar='T', help='Specifies the length of intervals for '
+        'interval-based output, in microseconds (default: 20)')
 parser.add_option('--negative-ok', action='store_true', default=False,
         dest='negative_ok',
         help='Don\'t print warnings when negative delays are encountered')
