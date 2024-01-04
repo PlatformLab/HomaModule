@@ -27,10 +27,11 @@ parser = get_parser(description=
         'Measures slowdown as the configuraton is changed in various ways.',
         usage='%(prog)s [options]')
 parser.add_argument('-c', '--config', dest='config',
-        choices=['buffers', 'busy_usecs', 'client_threads',
-                'dctcp_buffers', 'fifo', 'gbps', 'gen2', 'gen3', 'gro',
-                'max_gro', 'max_gso', 'mtu', 'nic_queue', 'poll', 'ports',
-                'prios', 'receivers',
+        choices=['balance', 'buffers', 'busy_usecs', 'client_threads',
+                'dctcp_buffers', 'fifo', 'gbps', 'gen2', 'gen3',
+                'grant_policy', 'gro_busy_usecs', 'load',
+                'max_gro', 'max_gso', 'mtu', 'nic_queue',
+                'poll', 'ports', 'prios', 'receivers', 'repeat',
                 'tcp_buffers', 'throttle', 'time', 'unsched_bytes'],
         required = True,
         help='Aspect of configuration to change')
@@ -42,7 +43,25 @@ if options.workload != "":
 
 plot_max_y = 1000
 specs = []
-if options.config == 'buffers':
+if options.config == 'balance':
+    # Vary the load balancing policy
+    specs.append({'exp_name': 'gen2default',
+            'label': 'Gen2 Default',
+            'lb': 'xl170_default'
+            })
+    specs.append({'exp_name': 'gen2',
+            'label': 'Gen2',
+            'lb': 'gen2'
+            })
+    specs.append({'exp_name': 'gen3',
+            'label': 'Gen3',
+            'lb': 'gen3'
+            })
+    specs.append({'exp_name': 'gen3_alt',
+            'label': 'Gen3 Alt',
+            'lb': 'gen3_alt'
+            })
+elif options.config == 'buffers':
     # Vary the amount of buffer space in the switch
     if not options.workload:
         load_info = [["w3", 14, 10], ["w4", 20, 20], ["w5", 20, 60]]
@@ -133,6 +152,15 @@ elif options.config == 'gen3':
             'sysctl': ['.net.homa.gro_policy', 128+66],
             'rss': 'gen3_alt'
             })
+elif options.config == 'grant_policy':
+    # Try different ways of computing grant sizes (window and max_incoming)
+    specs.append({'exp_name': 'default',
+            'label': 'default'})
+    for max_incoming in [500]:
+        specs.append({'exp_name': 'max_%d' % (max_incoming),
+                'label': 'max_incoming %dK' % (max_incoming),
+                'sysctl': ['.net.homa.window', 0,
+                           '.net.homa.max_incoming', max_incoming*1000]})
 elif options.config == 'gro':
     # Vary the GRO policy
     specs.append({'exp_name': 'gen2default',
@@ -140,21 +168,14 @@ elif options.config == 'gro':
             'sysctl': ['.net.homa.gro_policy', 82],
             'rss': 'xl170_default'
             })
-    specs.append({'exp_name': 'gen2',
-            'label': 'Gen2',
-            'sysctl': ['.net.homa.gro_policy', 82],
-            'rss': 'gen2'
-            })
-    specs.append({'exp_name': 'gen3',
-            'label': 'Gen3',
-            'sysctl': ['.net.homa.gro_policy', 128+66],
-            'rss': 'gen3'
-            })
-    specs.append({'exp_name': 'gen3_alt',
-            'label': 'Gen3 Alt',
-            'sysctl': ['.net.homa.gro_policy', 128+66],
-            'rss': 'gen3_alt'
-            })
+elif options.config == 'load':
+    # Vary the network utilization.
+    for gbps in [30, 40, 50, 60, 70]:
+        name = "gbps%d" % (gbps)
+        specs.append({'exp_name': name,
+                'label': '%d Gbps' % (gbps),
+                'options': ['gbps', gbps/2]
+                })
 elif options.config == 'max_gro':
     # Vary the number of skbs processed at once by GRO before forwarding
     # to SoftIRQ
@@ -214,6 +235,13 @@ elif options.config == 'receivers':
                 'options': ['port_receivers', threads,
                             'port_threads', threads]
                 })
+elif options.config == 'repeat':
+    # Runs the same test multiple times to test repeatability; must setup
+    # the configuration by hand before running experiment.
+    for i in range(1,6):
+        specs.append({'exp_name': 'run%d' % (i),
+                'label': 'Run %d' % (i)
+                })
 elif options.config == 'tcp_buffers':
     # Use TCP, vary the amount of buffer space in the switch
     if not options.workload:
@@ -227,7 +255,7 @@ elif options.config == 'tcp_buffers':
                 'switch_buffer': mb})
 elif options.config == 'throttle':
     # Vary the cuttoff for short messages that bypass the throttle mechanism
-    for cutoff in [100, 200, 500, 1000, 2000]:
+    for cutoff in [100, 200, 500, 1000]:
         specs.append({'exp_name': 'throttle_%d' % (cutoff),
                 'label': 'throttle_min_bytes %d' % (cutoff),
                 'sysctl': ['.net.homa.throttle_min_bytes', cutoff]
@@ -306,8 +334,8 @@ if not options.plot_only:
                     switch.set_buffer_limit(mb)
                 if 'mtu' in spec:
                     do_ssh(["config", "mtu", str(spec['mtu'])], options.nodes)
-                if 'rss' in spec:
-                    do_ssh(["config", "rss", spec['rss']], options.nodes)
+                if 'lb' in spec:
+                    do_ssh(["config", "lb", spec['lb']], options.nodes)
                 start_servers(o.servers, o)
                 run_experiment(exp_name, o.clients, o)
     except Exception as e:
