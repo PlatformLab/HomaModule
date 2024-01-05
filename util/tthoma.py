@@ -122,24 +122,26 @@ grants = defaultdict(dict)
 # Node -> list of intervals for that node. Each interval contains information
 # about a particular time range and consists of a dictionary with any or all
 # of the following fields:
-# time:          Ending time of the interval (integer usecs); this time is
-#                included in the interval
-# rx_starts:     Number of new incoming messages that started in the interval
-# rx_active:     Number of incoming messages that have been partially received
+# time:           Ending time of the interval (integer usecs); this time is
+#                 included in the interval
+# rx_starts:      Number of new incoming messages that started in the interval
+# rx_active:      Number of incoming messages that have been partially received
+#                 as of the end of the interval
+# rx_pkts:        Number of data packets received by the node during the interval
+# rx_data:        Number of bytes of data received by the node during the interval
+# tx_starts:      Number of new outgoing messages that started in the interval
+# tx_active:      Number of outgoing messages with unsent data as of the
+#                 end of the interval
+# tx_pkts:        Number of data packets sent by the node during the interval
+# tx_data:        Number of bytes of data sent by the node during the interval
+# incoming_data:  Number of bytes of data that have been transmitted by some
+#                 other node but not yet received by this node
+# rx_grants:      Number of incoming RPCs with outstanding grants
+# rx_grant_bytes: Total bytes of data in outstanding grants for incoming RPCs
+# rx_grant_info:  Formatted text describing incoming RPCs with oustanding grants
 #                as of the end of the interval
-# rx_pkts:       Number of data packets received by the node during the interval
-# rx_data:       Number of bytes of data received by the node during the interval
-# tx_starts:     Number of new outgoing messages that started in the interval
-# tx_active:     Number of outgoing messages with unsent data as of the
-#                end of the interval
-# tx_pkts:       Number of data packets sent by the node during the interval
-# tx_data:       Number of bytes of data sent by the node during the interval
-# incoming_data: Number of bytes of data that have been transmitted by some
-#                other node but not yet received by this node
-# rx_grants:     Formatted text describing incoming RPCs with available grants
-#                as of the end of the interval
-# tx_grants:     Formatted text describing outgoing RPCs with outstanding grants
-#                as of the end of the interval
+# tx_grant_info:  Formatted text describing outgoing RPCs with available grants
+#                 as of the end of the interval
 intervals = defaultdict(list)
 
 def dict_avg(data, key):
@@ -441,6 +443,19 @@ class Dispatcher:
         # interests. Created lazily by parse, can be set to None to force
         # regeneration.
         self.active = []
+
+    def get_analyzer(self, name):
+        """
+        Return the analyzer object associated with name, or None if
+        there is no such analyzer.
+
+        name:   Name of an analyzer class.
+        """
+
+        if name in self.analyzers:
+            return self.analyzers[name]
+        else:
+            return None
 
     def get_analyzers(self):
         """
@@ -879,6 +894,17 @@ class Dispatcher:
         'regexp': 'Incoming message for id ([0-9]+) has ([0-9]+) unscheduled'
     })
 
+    def __lock_wait(self, trace, time, core, match, interests):
+        event = match.group(1)
+        lock_name = match.group(2)
+        for interest in interests:
+            interest.tt_lock_wait(trace, time, core, event, lock_name)
+
+    patterns.append({
+        'name': 'lock_wait',
+        'regexp': '(beginning|ending) wait for (.*) lock'
+    })
+
 #------------------------------------------------
 # Analyzer: activity
 #------------------------------------------------
@@ -892,6 +918,7 @@ class AnalyzeActivity:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
+        dispatcher.interest('AnalyzeGrants')
         return
 
     def analyze(self):
@@ -982,8 +1009,6 @@ class AnalyzeActivity:
                     xmit = get_xmit_time(offset, sender)
                 if (xmit == None) or (xmit > time):
                     xmit = time
-                if (time >= 11300) and (xmit < 11300) and (node == 'node7'):
-                    print('%9.3f: id %d, offset %d xmit %9.3f' % (time, sender_id, offset, xmit))
                 length = get_length(offset, in_msg_length)
                 self.node_in_packets[node].append([xmit, "tx", length])
                 self.node_in_packets[node].append([time, "rx", length])
@@ -1153,13 +1178,18 @@ class AnalyzeActivity:
                 f.write('# Node: %s\n' % (name))
                 f.write('# Generated at %s.\n' %
                         (time.strftime('%I:%M %p on %m/%d/%Y')))
-                f.write('# Statistics about RPC and packet activity on the node\n')
-                f.write('# over %d usec intervals:\n' % (options.interval))
+                f.write('# Statistics about RPC and packet activity on the ')
+                f.write('node over %d usec\n' % (options.interval))
+                f.write('# intervals:\n')
                 f.write('# Time:       End of the time interval\n')
                 f.write('# NewRx:      New incoming messages that started during '
                         'the interval\n')
                 f.write('# NumRx:      Incoming messages that were partially '
                         'received at the\n')
+                f.write('#             end of the interval\n')
+                f.write('# RxGts:      Number of incoming RPCS with outstanding grants at the\n')
+                f.write('#             end of the interval\n')
+                f.write('# RxGtKB      Amount of data bytes (KB) in outstanding grants at the\n')
                 f.write('#             end of the interval\n')
                 f.write('# RxPkts:     Number of data packets received during the interval\n')
                 f.write('# RxGbps:     Throughput of received data during the interval\n')
@@ -1171,7 +1201,7 @@ class AnalyzeActivity:
                         'transmitted at the\n')
                 f.write('#             end of the interval\n')
                 f.write('\n')
-                f.write('    Time NewRx NumRx RxPkts RxGbps Incoming NewTx NumTx\n')
+                f.write('    Time NewRx NumRx RxGts RxGtKB RxPkts RxGbps Incoming NewTx NumTx\n')
                 for interval in intervals[node]:
                     f.write('%8.1f' % (interval['time']))
                     if 'rx_starts' in interval:
@@ -1179,6 +1209,11 @@ class AnalyzeActivity:
                                 interval['rx_active']))
                     else:
                         f.write(' '*12)
+                    if 'rx_grants' in interval:
+                        f.write(' %5d %6.0f' % (interval['rx_grants'],
+                            interval['rx_grant_bytes']/1000.0))
+                    else:
+                        f.write(' ' *13)
                     if 'rx_pkts' in interval:
                         f.write(' %6d %6.1f   %6.1f' % (interval['rx_pkts'],
                                 gbps(interval['rx_data'], options.interval),
@@ -1976,6 +2011,168 @@ class AnalyzeFilter:
                     tx_id, pkt['offset']))
 
 #------------------------------------------------
+# Analyzer: grantablelock
+#------------------------------------------------
+class AnalyzeGrantablelock:
+    """
+    Analyzes contention for the grantable lock, which controls centrally
+    managed data about grantable RPCs.
+    """
+
+    def __init__(self, dispatcher):
+
+        # Node name -> dictionary with data about that node:
+        # last_block:  core -> last time that core blocked on the lock
+        # block_time:  core -> total time that core was blocked on the lock
+        # total_hold:  total time this core spent holding the lock
+        # hold_count:  number of distinct intervals with this core held the lock
+        # max_hold:    max amount of time lock was held before releasing
+        # max_time:    time when lock was released after max_hold
+        #
+        self.nodes = {}
+
+        # One record for each interval where a core blocked for the grantable
+        # lock: <time, duration, node, core> where time is when the lock was
+        # finally acquired, duration is how long the core had to wait, and
+        # node and core indicate where the block occurred.
+        self.block_intervals = []
+
+        # One record for each interval where it can be determined that the
+        # lock was held by one core: <time, duration, node, core>, where
+        # time is when the lock was acquired, duration is the elapsed time
+        # until the next core got the lock, and core is the core that
+        # acquired the lock.
+        self.hold_times = []
+
+        # Number of cores currently blocked on the lock.
+        self.blocked_cores = 0
+
+        # The last time that a core unblocked after waiting for the lock
+        # when at least one other core was waiting for the lock (used to
+        # compute hold_times).
+        self.last_unblock = None
+
+        # The core where last_unblock occurred.
+        self.last_core = None
+
+    def init_trace(self, trace):
+        self.node = {
+            'last_block': {},
+            'block_times': defaultdict(lambda: 0),
+            'block_time': 0,
+            'total_hold': 0,
+            'hold_count': 0,
+            'max_hold': 0,
+            'max_time': 0}
+        self.nodes[trace['node']] = self.node
+        self.blocked_cores = 0
+        self.last_unblock = None
+
+    def tt_lock_wait(self, trace, time, core, event, lock_name):
+        if lock_name != 'grantable':
+            return
+        if event == 'beginning':
+            # Core blocked on lock
+            self.node['last_block'][core] = time
+            self.blocked_cores += 1
+        else:
+            # Blocked core acquired lock
+            if core in self.node['last_block']:
+                duration = time - self.node['last_block'][core]
+                self.node['block_times'][core] += duration
+                self.block_intervals.append([time, duration, trace['node'],
+                        core])
+                if self.last_unblock != None:
+                    hold = time - self.last_unblock
+                    self.hold_times.append([self.last_unblock, hold,
+                            trace['node'], self.last_core])
+                    self.node['total_hold'] += hold
+                    self.node['hold_count'] += 1
+                    if hold > self.node['max_hold']:
+                        self.node['max_hold'] = hold
+                        self.node['max_time'] = time
+                self.blocked_cores -= 1
+                if self.blocked_cores > 0:
+                    self.last_unblock = time
+                    self.last_core = core
+                else:
+                    self.last_unblock = None
+
+    def output(self):
+        global traces
+
+        print('\n---------------------')
+        print('Analyzer: grantablelock')
+        print('-----------------------\n')
+
+        print('Per-node statistics on usage of the grantable lock:')
+        print('Node:     Name of node')
+        print('Blocked:  Fraction of core(s) wasted while blocked on the lock '
+                '(1.0 means')
+        print('          that on average, one core was blocked on the lock)')
+        print('MaxCore:  The core that spent the largest fraction of its time '
+                'blocked on')
+        print('          the grantable lock')
+        print('MaxBlk:   Fraction of time that MaxCore was blocked on the lock')
+        print('HoldFrac: Fraction of time this node held the lock (note: '
+                'hold times ')
+        print('          can be computed only when there are 2 or more '
+                  'waiting cores,')
+        print('          so this is an underestimate)')
+        print('AvgHold:  Average time that lock was held before releasing')
+        print('MaxHold:  Largest time that lock was held before releasing')
+        print('MaxTime:  Time when MaxHold ended')
+        print('')
+
+        # <node, total_block, max_block, max_core>
+        data = []
+        for name, node in self.nodes.items():
+            total_block = 0
+            max_block_time = -1
+            max_block_core = -1
+            for core in sorted(node['block_times']):
+                t = node['block_times'][core]
+                total_block += t
+                if t > max_block_time:
+                    max_block_time = t
+                    max_block_core = core
+            data.append([name, total_block, max_block_time, max_block_core])
+
+        print('Node     Blocked MaxCore MaxBlk HoldFrac AvgHold MaxHold    MaxTime')
+        print('-------------------------------------------------------------------')
+        for name, total_block, max_block, max_block_core in sorted(
+                data, key=lambda t : t[1], reverse = True):
+            elapsed = traces[name]['elapsed_time']
+            node = self.nodes[name]
+            if node['hold_count'] > 0:
+                hold_info = '    %4.2f  %6.2f  %6.2f %10.3f' % (
+                        node['total_hold']/elapsed,
+                        node['total_hold']/node['hold_count'],
+                        node['max_hold'], node['max_time'])
+            else:
+                hold_info = '    0.00     N/A     N/A        N/A'
+            print('%-10s %5.2f     C%02d %6.3f %s' % (name, total_block/elapsed,
+                    max_block_core, max_block/elapsed, hold_info))
+
+        print('\nLongest times a core had to wait for the grantable lock:')
+        print('  EndTime BlockTime       Node Core')
+        self.block_intervals.sort(key=lambda t : t[1], reverse=True)
+        for i in range(len(self.block_intervals)):
+            if i >= 10:
+                break
+            time, duration, node, core = self.block_intervals[i]
+            print('%9.3f   %7.1f %10s %4d' % (time, duration, node, core))
+
+        print('\nLongest periods that one core held the grantable lock:')
+        print('StartTime  HoldTime       Node Core')
+        self.hold_times.sort(key=lambda t : t[1], reverse=True)
+        for i in range(len(self.hold_times)):
+            if i >= 10:
+                break
+            time, duration, node, core = self.hold_times[i]
+            print('%9.3f   %7.1f %10s %4d' % (time, duration, node, core))
+
+#------------------------------------------------
 # Analyzer: grants
 #------------------------------------------------
 class AnalyzeGrants:
@@ -2023,12 +2220,14 @@ class AnalyzeGrants:
             msg_length = 1e20
             if 'in_length' in rpc:
                 msg_length = rpc['in_length']
-            if 'softirq_data' in rpc:
+            if rpc['softirq_data']:
                 for time, offset in rpc['softirq_data']:
                     events.append([time, 'rxdata', node, id, offset,
                             get_length(offset, msg_length)])
                 if 'unsched' in rpc:
                     # Pretend there was an actual grant for unscheduled bytes.
+                    if len(rpc['softirq_data']) == 0:
+                        print("Bogus RPC: %s" % (rpc))
                     events.append([rpc['softirq_data'][0][0], 'txgrant',
                         node, id, rpc['unsched']])
             if 'send_grant' in rpc:
@@ -2203,28 +2402,30 @@ class AnalyzeGrants:
                 result += '%12d %6d %6d' % (id, remaining, available)
         return result
 
-    def output(self):
+    def analyze(self):
         global options, rpcs, intervals
 
         events = self.get_events()
         interval_end = get_first_interval_end()
 
-        local_rpcs = self.RpcDict()
-        local_nodes = self.NodeDict()
+        self.local_rpcs = self.RpcDict()
+        self.local_nodes = self.NodeDict()
 
         count = 0
         for event in events:
             t, op, node_name, id, offset = event[0:5]
-            rpc = local_rpcs[id]
-            node = local_nodes[node_name]
+            rpc = self.local_rpcs[id]
+            node = self.local_nodes[node_name]
 
             while (t > interval_end) and options.data_dir:
-                for name2, node2 in local_nodes.items():
+                for name2, node2 in self.local_nodes.items():
                     interval = get_interval(name2, interval_end)
                     if interval == None:
                         continue
-                    interval['rx_grants'] = self.rx_info(node2, local_rpcs)
-                    interval['tx_grants'] = self.tx_info(node2, local_rpcs)
+                    interval['rx_grants'] = len(node2['rx_rpcs'])
+                    interval['rx_grant_bytes'] = node2['rx_bytes']
+                    interval['rx_grant_info'] = self.rx_info(node2, self.local_rpcs)
+                    interval['tx_grant_info'] = self.tx_info(node2, self.local_rpcs)
                 interval_end += options.interval
 
             # Update integrals.
@@ -2308,8 +2509,9 @@ class AnalyzeGrants:
             if 0 and node_name == 'node1':
                 count += 1
                 if (count % 10) == 0:
-                    self.check_node(node, local_rpcs)
+                    self.check_node(node, self.local_rpcs)
 
+    def output(self):
         print('\n-------------------')
         print('Analyzer: grants')
         print('-------------------\n')
@@ -2330,7 +2532,7 @@ class AnalyzeGrants:
         total_out_msgs = 0
         total_out_bytes = 0
         for n in get_sorted_nodes():
-            node = local_nodes[n]
+            node = self.local_nodes[n]
             total_time = node['prev_time'] - traces[n]['first_time']
             total_in_msgs += node['rx_msgs_integral']/total_time
             total_in_bytes += node['rx_bytes_integral']/total_time
@@ -2354,14 +2556,14 @@ class AnalyzeGrants:
                     node['tx_bytes_integral']*1e-3/total_time))
         print('Average    %6.1f                     %6.1f  %6.1f     '
                 '                %6.1f' % (
-                total_in_msgs/len(local_nodes),
-                total_in_bytes/len(local_nodes)*1e-3,
-                total_out_msgs/len(local_nodes),
-                total_out_bytes/len(local_nodes)*1e-3))
+                total_in_msgs/len(self.local_nodes),
+                total_in_bytes/len(self.local_nodes)*1e-3,
+                total_out_msgs/len(self.local_nodes),
+                total_out_bytes/len(self.local_nodes)*1e-3))
 
         # Create data files.
         if options.data_dir:
-            for name, node in local_nodes.items():
+            for name, node in self.local_nodes.items():
                 f = open('%s/grants_rx_%s.dat' % (options.data_dir, name), 'w')
                 f.write('# Node: %s\n' % (name))
                 f.write('# Generated at %s.\n' %
@@ -2380,9 +2582,10 @@ class AnalyzeGrants:
                 f.write('   Time          Id1   Rem1 Grant1         '
                         'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
                 for interval in intervals[name]:
-                    if not 'rx_grants' in interval:
+                    if not 'rx_grant_info' in interval:
                         continue
-                    f.write('%7.1f %s\n' % (interval['time'], interval['rx_grants']))
+                    f.write('%7.1f %s\n' % (interval['time'],
+                            interval['rx_grant_info']))
                 f.close()
 
                 f = open('%s/grants_tx_%s.dat' % (options.data_dir, name), 'w')
@@ -2403,9 +2606,10 @@ class AnalyzeGrants:
                 f.write('   Time          Id1   Rem1 Grant1         '
                         'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
                 for interval in intervals[name]:
-                    if not 'tx_grants' in interval:
+                    if not 'tx_grant_info' in interval:
                         continue
-                    f.write('%7.1f %s\n' % (interval['time'], interval['tx_grants']))
+                    f.write('%7.1f %s\n' % (interval['time'],
+                            interval['tx_grant_info']))
                 f.close()
 
 
@@ -3352,7 +3556,6 @@ class AnalyzePacket:
                     (options.pkt, after_after))
         if unknown_before:
             print('\nSend time unknown, received before:%s' % (unknown_before))
-
 
 #------------------------------------------------
 # Analyzer: packets
@@ -4319,12 +4522,14 @@ if options.pkt:
     options.pkt_id = int(match.group(1))
     options.pkt_offset = int(match.group(2))
 d = Dispatcher()
+analyzer_classes = []
 for name in options.analyzers.split():
     class_name = 'Analyze' + name[0].capitalize() + name[1:]
     if not hasattr(sys.modules[__name__], class_name):
         print('No analyzer named "%s"' % (name), file=sys.stderr)
         exit(1)
     d.interest(class_name)
+    analyzer_classes.append(class_name)
 
 # Parse the timetrace files; this will invoke handlers in the analyzers.
 for file in tt_files:
@@ -4338,6 +4543,7 @@ for analyzer in d.get_analyzers():
 
 # Give each analyzer a chance to output its findings (includes
 # printing output and generating data files).
-for analyzer in d.get_analyzers():
+for name in analyzer_classes:
+    analyzer = d.get_analyzer(name)
     if hasattr(analyzer, 'output'):
         analyzer.output()
