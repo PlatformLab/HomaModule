@@ -8,7 +8,7 @@ Notes for Homa implementation in Linux:
 
 * Don't understand why W3 performance is so variable under Gen3. Also,
   it's worth comparing tthoma output for W4 and W3 under Gen2; e.g.,
-  W3 has way more active going messages than W4.
+  W3 has way more active outgoing messages than W4.
 
 * When requesting ACKs, must eventually give up and delete RPC.
 * Eliminate msgin.scheduled: just compute when needed.
@@ -19,6 +19,10 @@ Notes for Homa implementation in Linux:
 * When there are a lot of lost packets, Homa retries them *very* slowly
   (only one every 11-12 ms per server?). This is bad.
 * Round up bpage fragments to 64 byte boundaries
+
+* CloudLab cluster issues:
+  * amd272 had a problem where all xmits from core 47 incurred a 1-2 ms
+    delay; power-cycling it fixed the problem.
 
 * TODO list for Homa based on the 9/22-10/6 experiment:
   * Rework the retransmission mechanism. Instead being entirely time-based,
