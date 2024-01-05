@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 
+# Copyright (c)2023 Homa Developers
+# SPDX-License-Identifier: BSD-1-Clause
+
 """
 This script analyzes time traces gathered from Homa in a variety of ways.
 Invoke with the --help option for documentation.

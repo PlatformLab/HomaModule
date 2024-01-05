@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 
+# Copyright (c)2023 Homa Developers
+# SPDX-License-Identifier: BSD-1-Clause
+
 """
 This program looks for evidence suggesting that NICs are configured to
 delay interrupts. It scans two timetraces for the same time interval, one

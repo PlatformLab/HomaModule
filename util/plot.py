@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 
 # Copyright (c) 2023 Homa Developers
-#
 # SPDX-License-Identifier: BSD-1-Clause
 
 # This file provides a library of functions for generating plots.

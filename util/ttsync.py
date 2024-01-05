@@ -1,9 +1,13 @@
 #!/usr/bin/python3
 
+# Copyright (c)2023 Homa Developers
+# SPDX-License-Identifier: BSD-1-Clause
+
 """
-Scans two timetraces covering the same time interval, determines the clock
-offset between the two machines, and outputs the second timetrace with its
-times adjusted so that they are synchronized with the first timetrace.
+Scans two or more timetraces covering the same time interval, determines the
+clock offsets between each machine and the first, and adjusts the times in
+all of the traces except the first so that the clocks are synchronized
+across the traces
 """
 
 from __future__ import division, print_function
