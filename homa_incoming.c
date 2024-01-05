@@ -628,9 +628,10 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
 
-	tt_record3("processing grant for id %llu, offset %d, priority %d",
+	tt_record4("processing grant for id %llu, offset %d, priority %d, "
+			"resend_all %d",
 			homa_local_id(h->common.sender_id), ntohl(h->offset),
-			h->priority);
+			h->priority, h->resend_all);
 	if (rpc->state == RPC_OUTGOING) {
 		int new_offset = ntohl(h->offset);
 
@@ -999,8 +1000,8 @@ void homa_send_grants(struct homa *homa)
 		return;
 	}
 
-	start = get_cycles();
 	homa_grantable_lock(homa);
+	start = get_cycles();
 
 	num_rpcs = homa_choose_rpcs_to_grant(homa, rpcs, homa->max_overcommit);
 
