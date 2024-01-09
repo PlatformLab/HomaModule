@@ -422,20 +422,6 @@ void homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
 				|| (h->type == BUSY))
 			rpc->silent_ticks = 0;
 		rpc->peer->outstanding_resends = 0;
-		if (hsk->homa->sync_freeze) {
-			hsk->homa->sync_freeze = 0;
-			if (!tt_frozen) {
-				struct freeze_header freeze;
-				tt_record2("Freezing timetrace because of "
-						"sync_freeze, id %d, peer 0x%x",
-						rpc->id,
-						tt_addr(rpc->peer->addr));
-				tt_freeze();
-				printk(KERN_NOTICE "Emitting FREEZE because of sync_freeze\n");
-				homa_xmit_control(FREEZE, &freeze,
-						sizeof(freeze), rpc);
-			}
-		}
 	}
 
 	switch (h->type) {

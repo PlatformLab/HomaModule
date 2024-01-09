@@ -424,13 +424,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
-		.procname	= "sync_freeze",
-		.data		= &homa_data.sync_freeze,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "temp",
 		.data		= homa_data.temp,
 		.maxlen		= sizeof(homa_data.temp),

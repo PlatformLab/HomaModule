@@ -2042,13 +2042,6 @@ struct homa {
 	enum homa_freeze_type freeze_type;
 
 	/**
-	 * @sync_freeze: nonzero means that on completion of the next
-	 * client RPC we should freeze our timetrace and also the peer's.
-	 * Then clear this back to zero again. Set externally via sysctl.
-	 */
-	int sync_freeze;
-
-	/**
 	 * @bpage_lease_usecs: how long a core can own a bpage (microseconds)
 	 * before its ownership can be revoked to reclaim the page.
 	 */

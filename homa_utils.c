@@ -153,7 +153,6 @@ int homa_init(struct homa *homa)
 	homa->metrics_active_opens = 0;
 	homa->flags = 0;
 	homa->freeze_type = 0;
-	homa->sync_freeze = 0;
 	homa->bpage_lease_usecs = 10000;
 	homa->next_id = 0;
 	homa_outgoing_sysctl_changed(homa);
