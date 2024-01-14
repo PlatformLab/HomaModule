@@ -1233,6 +1233,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	}
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
+	skb->next = NULL;
 	return skb;
 }
 

@@ -3,7 +3,6 @@
  */
 
 #include "homa_impl.h"
-#include "homa_lcache.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"

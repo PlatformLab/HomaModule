@@ -3,7 +3,8 @@
 ifneq ($(KERNELRELEASE),)
 
 obj-m += homa.o
-homa-y = homa_incoming.o \
+homa-y = homa_grant.o \
+	    homa_incoming.o \
             homa_offload.o \
             homa_outgoing.o \
             homa_peertab.o \

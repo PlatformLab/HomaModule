@@ -136,7 +136,6 @@ TEST_F(homa_utils, homa_rpc_new_client__socket_shutdown)
 
 TEST_F(homa_utils, homa_rpc_new_server__normal)
 {
-	int incoming_delta = 0;
 	int created;
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
@@ -144,7 +143,7 @@ TEST_F(homa_utils, homa_rpc_new_server__normal)
 	homa_rpc_unlock(srpc);
 	self->data.message_length = N(1600);
 	homa_data_pkt(mock_skb_new(self->client_ip, &self->data.common,
-			1400, 0), srpc, NULL, &incoming_delta);
+			1400, 0), srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, created);

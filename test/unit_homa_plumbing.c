@@ -632,77 +632,6 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_softirq__reorder_incoming_packets)
-{
-	struct sk_buff *skb, *skb2, *skb3, *skb4;
-
-	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(2000);
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.common.sender_id = cpu_to_be64(200);
-	self->data.message_length = htonl(200);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
-	self->data.common.sender_id = cpu_to_be64(300);
-	self->data.message_length = htonl(300);
-	skb3 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
-	self->data.common.sender_id = cpu_to_be64(5000);
-	self->data.message_length = htonl(5000);
-	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	skb_shinfo(skb)->frag_list = skb2;
-	skb2->next = skb3;
-	skb3->next = skb4;
-	skb4->next = NULL;
-	homa_softirq(skb);
-	unit_log_clear();
-	unit_log_active_ids(&self->hsk);
-	EXPECT_STREQ("201 301 2001 5001", unit_log_get());
-}
-TEST_F(homa_plumbing, homa_softirq__reorder_short_packet_at_front)
-{
-	struct sk_buff *skb, *skb2, *skb3, *skb4;
-
-	self->data.common.sender_id = cpu_to_be64(200);
-	self->data.message_length = htonl(200);
-	skb = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
-	self->data.common.sender_id = cpu_to_be64(4000);
-	self->data.message_length = htonl(4000);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.common.sender_id = cpu_to_be64(300);
-	self->data.message_length = htonl(300);
-	skb3 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
-	self->data.common.sender_id = cpu_to_be64(5000);
-	self->data.message_length = htonl(5000);
-	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	skb_shinfo(skb)->frag_list = skb2;
-	skb2->next = skb3;
-	skb3->next = skb4;
-	skb4->next = NULL;
-	homa_softirq(skb);
-	unit_log_clear();
-	unit_log_active_ids(&self->hsk);
-	EXPECT_STREQ("201 301 4001 5001", unit_log_get());
-}
-TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
-{
-	struct sk_buff *skb, *skb2, *skb3;
-
-	self->data.common.sender_id = cpu_to_be64(2000);
-	self->data.message_length = htonl(2000);
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.common.sender_id = cpu_to_be64(3000);
-	self->data.message_length = htonl(3000);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.common.sender_id = cpu_to_be64(5000);
-	self->data.message_length = htonl(5000);
-	skb3 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	skb_shinfo(skb)->frag_list = skb2;
-	skb2->next = skb3;
-	skb3->next = NULL;
-	homa_softirq(skb);
-	unit_log_clear();
-	unit_log_active_ids(&self->hsk);
-	EXPECT_STREQ("2001 3001 5001", unit_log_get());
-}
 TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
 {
 	struct sk_buff *skb;
@@ -739,80 +668,109 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
 }
-TEST_F(homa_plumbing, homa_softirq__unknown_socket_ipv4)
+TEST_F(homa_plumbing, homa_softirq__process_short_packets_first)
 {
-	struct sk_buff *skb;
-	self->data.common.dport = htons(100);
+	struct sk_buff *skb, *skb2, *skb3, *skb4;
 
-	// Make sure the test uses IPv4.
-	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
-
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	homa_softirq(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_STREQ("icmp_send type 3, code 3", unit_log_get());
-}
-TEST_F(homa_plumbing, homa_softirq__unknown_socket_ipv6)
-{
-	struct sk_buff *skb;
-	self->data.common.dport = htons(100);
-
-	// Make sure the test uses IPv6.
-	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
-
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	homa_softirq(skb);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_STREQ("icmp6_send type 1, code 4", unit_log_get());
-}
-TEST_F(homa_plumbing, homa_softirq__multiple_packets_different_sockets)
-{
-	struct sk_buff *skb, *skb2;
-	struct homa_sock sock2;
-	mock_sock_init(&sock2, &self->homa, 0);
-	homa_sock_bind(&self->homa.port_map, &sock2, self->server_port+1);
-
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	self->data.common.sender_id += 2;
-	self->data.common.dport = htons(self->server_port+1);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	skb_shinfo(skb)->frag_list = skb2;
-	skb2->next = NULL;
-	homa_softirq(skb);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, unit_list_length(&sock2.active_rpcs));
-	homa_sock_destroy(&sock2);
-}
-TEST_F(homa_plumbing, homa_softirq__multiple_packets_same_socket)
-{
-	struct sk_buff *skb, *skb2;
-	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	self->data.common.sender_id += cpu_to_be64(self->client_id + 2);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	skb_shinfo(skb)->frag_list = skb2;
-	skb2->next = NULL;
-	homa_softirq(skb);
-	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
-}
-TEST_F(homa_plumbing, homa_softirq__update_total_incoming)
-{
-	struct sk_buff *skb, *skb2;
-
-	self->data.seg.segment_length = htonl(1400);
+	self->data.common.sender_id = cpu_to_be64(2000);
+	self->data.message_length = htonl(2000);
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.seg.offset = htonl(1400);
-	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
-	skb_shinfo(skb2)->frag_list = skb;
-	skb->next = NULL;
-	homa_softirq(skb2);
+	self->data.common.sender_id = cpu_to_be64(300);
+	self->data.message_length = htonl(300);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
+	self->data.common.sender_id = cpu_to_be64(200);
+	self->data.message_length = htonl(200);
+	skb3 = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
+	self->data.common.sender_id = cpu_to_be64(5000);
+	self->data.message_length = htonl(5000);
+	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = skb3;
+	skb3->next = skb4;
+	skb4->next = NULL;
+	homa_softirq(skb);
 	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
-	EXPECT_STREQ("1235", unit_log_get());
-	EXPECT_EQ(7200, atomic_read(&self->homa.total_incoming));
+	EXPECT_STREQ("301 201 2001 5001", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
+{
+	struct sk_buff *skb, *skb2, *skb3;
+
+	self->data.common.sender_id = cpu_to_be64(2000);
+	self->data.message_length = htonl(2000);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.sender_id = cpu_to_be64(3000);
+	self->data.message_length = htonl(3000);
+	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	self->data.common.sender_id = cpu_to_be64(5000);
+	self->data.message_length = htonl(5000);
+	skb3 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = skb3;
+	skb3->next = NULL;
+	homa_softirq(skb);
+	unit_log_clear();
+	unit_log_active_ids(&self->hsk);
+	EXPECT_STREQ("2001 3001 5001", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
+{
+	struct sk_buff *skb, *tail;
+
+	self->data.common.sender_id = cpu_to_be64(2000);
+	self->data.message_length = htonl(10000);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = skb;
+
+	self->data.common.sender_id = cpu_to_be64(2002);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2004);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2002);
+	self->data.seg.offset = htonl(1400);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2004);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2002);
+	self->data.seg.offset = htonl(4200);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2002);
+	self->data.seg.offset = htonl(2800);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2004);
+	self->data.seg.offset = htonl(5600);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	self->data.common.sender_id = cpu_to_be64(2002);
+	self->data.seg.offset = htonl(7000);
+	tail->next = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	tail = tail->next;
+
+	skb_shinfo(skb)->frag_list = skb->next;
+	skb->next = NULL;
+	unit_log_clear();
+	homa_softirq(skb);
+	EXPECT_STREQ("id 2001, offsets 0; "
+			"sk->sk_data_ready invoked; "
+			"id 2003, offsets 0 1400 4200 2800 7000; "
+			"sk->sk_data_ready invoked; "
+			"id 2005, offsets 0 1400 5600; "
+			"sk->sk_data_ready invoked",
+			unit_log_get());
 }
 
 TEST_F(homa_plumbing, homa_metrics_open)

@@ -69,6 +69,7 @@ int homa_init(struct homa *homa)
 	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
+	INIT_LIST_HEAD(&homa->grantable_peers);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable_rpcs = 0;
 	homa->last_grantable_change = get_cycles();
@@ -415,6 +416,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	__u16 client_port = ntohs(ack->client_port);
 	__u16 server_port = ntohs(ack->server_port);
 
+	UNIT_LOG("; ", "ack %llu", id);
 	if (hsk2->port != server_port) {
 		/* Without RCU, sockets other than hsk can be deleted
 		 * out from under us.
@@ -472,9 +474,10 @@ void homa_rpc_free(struct homa_rpc *rpc)
 
 	if (rpc->msgin.length >= 0) {
 		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
-		atomic_sub((rpc->msgin.granted - (rpc->msgin.length
-				- rpc->msgin.bytes_remaining)),
-				&rpc->hsk->homa->total_incoming);
+		if (rpc->msgin.rec_incoming != 0) {
+			atomic_sub(rpc->msgin.rec_incoming,
+					&rpc->hsk->homa->total_incoming);
+		}
 		while (1) {
 			struct homa_gap *gap = list_first_entry_or_null(
 					&rpc->msgin.gaps, struct homa_gap, links);
@@ -484,6 +487,11 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			list_del(&gap->links);
 			kfree(gap);
 		}
+
+		/* Without this line, homa_grant might accidentally increment
+		 * homa->total_incoming again.
+		 */
+		rpc->msgin.scheduled = 0;
 	}
 	rpc->hsk->dead_skbs += rpc->msgout.num_skbs;
 	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
@@ -777,13 +785,16 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 				rpc->id, tt_addr(rpc->peer->addr),
 				received, rpc->msgin.length);
 		if (rpc->msgin.granted > received)
-			tt_record3("RPC id %d has %d outstanding grants "
-					"(incoming %d)", rpc->id,
+			tt_record4("RPC id %d has incoming %d, "
+					"granted %d, prio %d", rpc->id,
 					rpc->msgin.granted - received,
-					rpc->msgin.granted);
+					rpc->msgin.granted, rpc->msgin.priority);
 		if (rpc->msgin.num_bpages == 0)
 			tt_record1("RPC id %d is blocked waiting for buffers",
 					rpc->id);
+		else
+			tt_record2("RPC id %d has %d bpages allocated",
+					rpc->id, rpc->msgin.num_bpages);
 	} else if (rpc->state == RPC_OUTGOING) {
 		tt_record4("Outgoing RPC id %d, peer 0x%x, %d/%d bytes "
 				"sent",
@@ -847,17 +858,23 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 
 /**
  * homa_validate_incoming() - Scan all of the active RPCs to compute what
- * homa_total_incoming should be, and see if it actually matches..
+ * homa_total_incoming should be, and see if it actually matches.
  * @homa:    Overall data about the Homa protocol implementation.
  * @verbose: Print incoming info for each individual RPC.
+ * Return:   The difference between the actual value of homa->total_incoming
+ *           and the expected value computed from the individual RPCs (positive
+ *           means homa->total_incoming is higher than expected).
  */
-void homa_validate_incoming(struct homa *homa, int verbose)
+int homa_validate_incoming(struct homa *homa, int verbose)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
 	int total_incoming = 0;
+	int actual;
 
+	tt_record1("homa_validate_incoming starting, total_incoming %d",
+			atomic_read(&homa->total_incoming));
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
@@ -873,23 +890,25 @@ void homa_validate_incoming(struct homa *homa, int verbose)
 			incoming = rpc->msgin.granted -
 					(rpc->msgin.length
 					- rpc->msgin.bytes_remaining);
-			if (incoming == 0)
+			if (incoming < 0)
+				incoming = 0;
+			if (rpc->msgin.rec_incoming == 0)
 				continue;
-			total_incoming += incoming;
+			total_incoming += rpc->msgin.rec_incoming;
 			if (verbose)
-				tt_record4("homa_validate_incoming: RPC id %d, "
-						"granted %d, remaining %d, "
-						"incoming %d",
-						rpc->id, rpc->msgin.granted,
-						rpc->msgin.bytes_remaining,
-						incoming);
+				tt_record3("homa_validate_incoming: RPC id %d, "
+						"incoming %d, "
+						"rec_incoming %d",
+						rpc->id, incoming,
+						rpc->msgin.rec_incoming);
 		}
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
-	tt_record2("homa_validate_incoming computed total incoming %d, "
-			"homa->total_incoming %d",
-			total_incoming, atomic_read(&homa->total_incoming));
+	actual = atomic_read(&homa->total_incoming);
+	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",
+			actual - total_incoming, total_incoming, actual);
+	return actual - total_incoming;
 }
 
 /**

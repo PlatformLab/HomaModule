@@ -36,7 +36,6 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	int bytes_received;
 	sockaddr_in_union server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
-	int incoming_delta = 0;
 
 	server_addr.in6.sin6_family = AF_INET6;
 	server_addr.in6.sin6_addr = *server_ip;
@@ -77,9 +76,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	h.seg.segment_length = htonl(this_size);
-	homa_data_pkt(mock_skb_new(server_ip, &h.common, this_size, 0),
-			crpc, NULL, &incoming_delta);
-	atomic_add(incoming_delta, &hsk->homa->total_incoming);
+	homa_dispatch_pkts(mock_skb_new(server_ip, &h.common, this_size, 0),
+			hsk->homa);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return crpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -90,10 +88,8 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
-		int incoming_delta = 0;
-		homa_data_pkt(mock_skb_new(server_ip, &h.common,
-				this_size , 0), crpc, NULL, &incoming_delta);
-		atomic_add(incoming_delta, &hsk->homa->total_incoming);
+		homa_dispatch_pkts(mock_skb_new(server_ip, &h.common,
+				this_size , 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return crpc;
@@ -224,6 +220,29 @@ void unit_log_grantables(struct homa *homa)
 		unit_log_printf("; ", "num_grantable_rpcs error: should "
 				"be %d, is %d",
 				count, homa->num_grantable_rpcs);
+	}
+}
+
+/**
+ * unit_log_grantables() - Append to the test log information about all of
+ * the messages that are currently grantable.
+ * @homa:     Homa's overall state.
+ */
+void unit_log_grantables2(struct homa *homa)
+{
+	struct homa_peer *peer;
+	struct homa_rpc *rpc;
+	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
+		list_for_each_entry(rpc, &peer->grantable_rpcs,
+				grantable_links) {
+			unit_log_printf("; ", "%s from %s, id %lu, "
+					"remaining %d",
+					homa_is_client(rpc->id) ? "response"
+					: "request",
+					homa_print_ipv6_addr(&peer->addr),
+					(long unsigned int) rpc->id,
+					rpc->msgin.bytes_remaining);
+		}
 	}
 }
 
@@ -359,7 +378,6 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		int req_length, int resp_length)
 {
 	int bytes_received, created;
-	int incoming_delta = 0;
 	struct data_header h = {
 		.common = {
 			.sport = htons(client_port),
@@ -383,11 +401,10 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		return NULL;
 	EXPECT_EQ(srpc->completion_cookie, 0);
 	homa_rpc_unlock(srpc);
-	homa_data_pkt(mock_skb_new(client_ip, &h.common,
+	homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
-			srpc, NULL, &incoming_delta);
-	atomic_add(incoming_delta, &hsk->homa->total_incoming);
+			hsk->homa);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return srpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -398,10 +415,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		h.seg.segment_length = htonl(this_size);
-		incoming_delta = 0;
-		homa_data_pkt(mock_skb_new(client_ip, &h.common,
-				this_size , 0), srpc, NULL, &incoming_delta);
-		atomic_add(incoming_delta, &hsk->homa->total_incoming);
+		homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
+				this_size , 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return srpc;

@@ -37,8 +37,8 @@ WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare \
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
-TEST_SRCS :=  unit_homa_incoming.c \
-	      unit_homa_lcache.c \
+TEST_SRCS :=  unit_homa_grant.c \
+	      unit_homa_incoming.c \
 	      unit_homa_offload.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peertab.c \
@@ -50,7 +50,8 @@ TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_timetrace.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
-HOMA_SRCS :=  homa_incoming.c \
+HOMA_SRCS :=  homa_grant.c \
+	      homa_incoming.c \
 	      homa_offload.c \
 	      homa_outgoing.c \
 	      homa_peertab.c \

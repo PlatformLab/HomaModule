@@ -162,6 +162,10 @@ int homa_check_rpc(struct homa_rpc *rpc)
 				"offset %d",
 				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, ntohl(resend.offset));
+		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
+				rpc->msgin.length, rpc->msgin.granted,
+				rpc->msgin.bytes_remaining,
+				rpc->msgin.rec_incoming);
 	} else {
 		us = "server";
 		them = "client";
@@ -169,6 +173,10 @@ int homa_check_rpc(struct homa_rpc *rpc)
 				"offset %d",
 				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, ntohl(resend.offset));
+		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
+				rpc->msgin.length, rpc->msgin.granted,
+				rpc->msgin.bytes_remaining,
+				rpc->msgin.rec_incoming);
 	}
 	if (homa->verbose)
 		printk(KERN_NOTICE "Homa %s RESEND to %s %s:%d for id %llu, "
@@ -196,6 +204,9 @@ void homa_timer(struct homa *homa)
 	int total_incoming_rpcs = 0;
 	int total_incoming_bytes = 0;
 
+	tt_record2("homa_timer found total_incoming %d, num_grantable_rpcs %d",
+			atomic_read(&homa->total_incoming),
+			homa->num_grantable_rpcs);
 	start = get_cycles();
 	homa->timer_ticks++;
 

@@ -7,7 +7,6 @@
  */
 
 #include "homa_impl.h"
-#include "homa_lcache.h"
 
 #ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
@@ -1219,27 +1218,17 @@ int homa_v4_early_demux_handler(struct sk_buff *skb) {
  */
 int homa_softirq(struct sk_buff *skb) {
 	struct common_header *h;
-	struct sk_buff *packets, *short_packets, *next;
-	struct sk_buff **prev_link, **short_link;
-	__u16 dport;
+	struct sk_buff *packets, *other_pkts, *next;
+	struct sk_buff **prev_link, **other_link;
 	static __u64 last = 0;
 	__u64 start;
 	int header_offset;
 	int first_packet = 1;
-	struct homa_sock *hsk;
-	int num_packets = 0;
 	int pull_length;
-	struct homa_lcache lcache;
-
-	/* Accumulates changes to homa->total_incoming, to avoid repeated
-	 * updates to this shared variable.
-	 */
-	int incoming_delta = 0;
 
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
 	homa_cores[raw_smp_processor_id()]->last_active = start;
-	homa_lcache_init(&lcache);
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
@@ -1255,39 +1244,23 @@ int homa_softirq(struct sk_buff *skb) {
 	last = start;
 
 	/* skb may actually contain many distinct packets, linked through
-	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. First, pull
-	 * out all the short packets into a separate list, then splice this
-	 * list into the front of the packet list, so that all the short
-	 * packets will get served first.
+	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Make a
+	 * pass through the list to process all of the short packets,
+	 * leaving the longer packets in the list. Also, perform various
+	 * prep/cleanup/error checking functions.
 	 */
-
 	skb->next = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	packets = skb;
 	prev_link = &packets;
-	short_packets = NULL;
-	short_link = &short_packets;
-	for (skb = packets; skb != NULL; skb = skb->next) {
-		if (skb->len < 1400) {
-			*prev_link = skb->next;
-			*short_link = skb;
-			short_link = &skb->next;
-		} else
-			prev_link = &skb->next;
-	}
-	*short_link = packets;
-	packets = short_packets;
-
 	for (skb = packets; skb != NULL; skb = next) {
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 		next = skb->next;
-		num_packets++;
 
-		/* The code below makes the header available at skb->data, even
-		 * if the packet is fragmented. One complication: it's possible
-		 * that the IP header hasn't yet been removed (this happens for
-		 * GRO packets on the frag_list, since they aren't handled
-		 * explicitly by IP.
+		/* Make the header available at skb->data, even if the packet
+		 * is fragmented. One complication: it's possible that the IP
+		 * header hasn't yet been removed (this happens for GRO packets
+		 * on the frag_list, since they aren't handled explicitly by IP.
 		 */
 		header_offset = skb_transport_header(skb) - skb->data;
 		pull_length = HOMA_MAX_HEADER + header_offset;
@@ -1304,6 +1277,7 @@ int homa_softirq(struct sk_buff *skb) {
 		if (header_offset)
 			__skb_pull(skb, header_offset);
 
+		/* Reject packets that are too short or have bogus types. */
 		h = (struct common_header *) skb->data;
 		if (unlikely((skb->len < sizeof(struct common_header))
 				|| (h->type < DATA)
@@ -1327,11 +1301,11 @@ int homa_softirq(struct sk_buff *skb) {
 					homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
+
+		/* Check for FREEZE here, rather than in homa_incoming.c, so
+		 * it will work even if the RPC and/or socket are unknown.
+		 */
 		if (unlikely(h->type == FREEZE)) {
-			/* Check for FREEZE here, rather than in homa_incoming.c,
-			 * so it will work even if the RPC and/or socket are
-			 * unknown.
-			 */
 			if (!tt_frozen) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record4("Freezing because of request on "
@@ -1344,31 +1318,63 @@ int homa_softirq(struct sk_buff *skb) {
 			goto discard;
 		}
 
-		dport = ntohs(h->dport);
-		hsk = homa_sock_find(&homa->port_map, dport);
-		if (!hsk) {
-			if (skb_is_ipv6(skb))
-				icmp6_send(skb, ICMPV6_DEST_UNREACH,
-						ICMPV6_PORT_UNREACH, 0, NULL,
-						IP6CB(skb));
-			else
-				icmp_send(skb, ICMP_DEST_UNREACH,
-						ICMP_PORT_UNREACH, 0);
-			tt_record3("Discarding packet for unknown port %u, "
-					"id %llu, type %d", dport,
-					homa_local_id(h->sender_id), h->type);
-			goto discard;
-		}
-
-		homa_pkt_dispatch(skb, hsk, &lcache, &incoming_delta);
+		/* Process the packet immediately if it is short. */
+		if (skb->len < 1400) {
+			*prev_link = skb->next;
+			skb->next = NULL;
+			homa_dispatch_pkts(skb, homa);
+		} else
+			prev_link = &skb->next;
 		continue;
 
-discard:
+		discard:
+		*prev_link = skb->next;
 		kfree_skb(skb);
 	}
 
-	homa_lcache_release(&lcache);
-	atomic_add(incoming_delta, &homa->total_incoming);
+	/* Now process the longer packets. Each iteration of this loop
+	 * collects all of the packets for a particular RPC and dispatches
+	 * them.
+	 */
+	while (packets != NULL) {
+		struct in6_addr saddr, saddr2;
+		struct common_header *h2;
+		struct sk_buff *skb2;
+
+		skb = packets;
+		prev_link = &skb->next;
+		saddr = skb_canonical_ipv6_saddr(skb);
+		other_pkts = NULL;
+		other_link = &other_pkts;
+		h = (struct common_header *) skb->data;
+		for (skb2 = skb->next; skb2 != NULL; skb2 = next) {
+			next = skb2->next;
+			h2 = (struct common_header *) skb2->data;
+			if (h2->sender_id == h->sender_id) {
+				saddr2 = skb_canonical_ipv6_saddr(skb2);
+				if (ipv6_addr_equal(&saddr, &saddr2)) {
+					*prev_link = skb2;
+					prev_link = &skb2->next;
+					continue;
+				}
+			}
+			*other_link = skb2;
+			other_link = &skb2->next;
+		}
+		*prev_link = NULL;
+		*other_link = NULL;
+#ifdef __UNIT_TEST__
+		UNIT_LOG("; ", "id %lld, offsets", homa_local_id(h->sender_id));
+		for (skb2 = packets; skb2 != NULL; skb2 = skb2->next) {
+			struct data_header *h3 = (struct data_header *)
+					skb2->data;
+			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
+		}
+#endif
+		homa_dispatch_pkts(packets, homa);
+		packets = other_pkts;
+	}
+
 	homa_send_grants(homa);
 	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
@@ -1647,6 +1653,9 @@ int homa_dointvec(struct ctl_table *table, int write,
 				homa_freeze_peers(homa);
 				tt_record("Finished freezing cluster");
 				tt_freeze();
+			} else if (action == 8) {
+				printk("homa_total_incoming is %d\n",
+						atomic_read(&homa->total_incoming));
 			} else
 				homa_rpc_log_active(homa, action);
 			action = 0;

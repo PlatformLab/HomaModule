@@ -1,6 +1,57 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes on refactoring of grant mechanism:
+  * Change homa_pkt_dispatch to handle a batch of packets for the same RPC?
+    Could then eliminate homa_lcache struct.
+  * Collect information about grantable RPCs and reuse it so it doesn't have
+    to be recalculated until RPCs arrive or leave. Same for the oldest RPC
+    for FIFO grants.
+  * Is it possible to send grants for an RPC when data arrives without
+    acquiring the grantable lock? E.g., remember how many grants this
+    RPC is entitled to?
+  * How to handle max_incoming and unscheduled packets, which could prevent
+    grants from being sent on other RPCs?
+  * Places where homa->total_incoming is updated:
+    * homa_create_grants, after issuing grants
+    * homa_choose_fifo_grant
+    * homa_softirq, using deltas supplied by functions it calls:
+      * homa_pkt_dispatch: unscheduled bytes
+      * homa_data_pkt: unscheduled bytes
+      * homa_data_pkt: incoming data
+      * homa_rpc_free: outstanding grants
+  * Tricky issue: need to handle case where there aren't many RPCs to grant,
+    so we use the lowest levels. Keep this in the RPC along with its grant
+    quota?
+  * In struct homa, keep:
+    * Array of grantable RPCs
+    * Total grants allocated to these RPCs
+    * Total incoming from RPCs not on the list
+    * Flag: grants for one or more RPCs were deferred because max_incoming
+      was exceeded
+  * When to recalculate chosen RPCs:
+    * In homa_grant_add_rpc and homa_grant_remove_rpc
+    * When an RPC's bytes_remaining drops below the next higher priority
+      RPC's bytes_remaining
+  * In struct homa_rpc, keep:
+    * Total grants allocated to this RPC
+    * Priority to use for grants
+    * Index of this RPC in the array in struct homa?
+    * These fields are owned by the grant module and read-only to the RPC
+      (for purposes of sending grants)
+  * How to adjust position of RPC in grantable list when its priority changes?
+    Reflect bytes_remaining in the array of grantable RPCs where it can easily
+    be checked.
+  * Delete obsolete things:
+    * struct homa: grantable_rpcs, num_grantable_rpcs?
+    * old unit_log_grantables
+    * fifo_grant_increment?
+    * resetting homa->msgin.unscheduled in homa_rpc_free?
+  * Replace fifo_grant_increment with fifo_grant_interval
+  * Rework the way that homa->total_incoming is managed: keep
+    "registered_incoming" in each msgin, which indicates how much this
+    message currently contributes to total_incoming?
+
 * For W3, throttle_min_bytes is a problem: a significant fraction of all
   transmitted bytes aren't being counted; as a result, the NIC queue
   can build up. Reducing throttle_min_bytes from 1000 to 200 reduced P99

@@ -86,7 +86,6 @@ struct homa_sock;
 struct homa_rpc;
 struct homa;
 struct homa_peer;
-struct homa_lcache;
 
 /* Declarations used in this file, so they can't be made at the end. */
 extern void     homa_grantable_lock_slow(struct homa *homa);
@@ -657,6 +656,12 @@ struct homa_message_in {
 	 */
         int granted;
 
+	/**
+	 * @rec_incoming: Number of bytes in homa->total_incoming currently
+	 * contributed ("recorded") from this RPC.
+	 */
+	int rec_incoming;
+
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
 
@@ -915,8 +920,8 @@ struct homa_rpc {
 	struct homa_interest *interest;
 
 	/**
-	 * @grantable_links: Used to link this RPC into homa->grantable_rpcs.
-	 * If this RPC isn't in homa->grantable_rpcs, this is an empty
+	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
+	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
@@ -1582,6 +1587,14 @@ struct homa {
 	 * @num_grantable_rpcs.
 	 */
 	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
+
+	/**
+	 * @grantable_peers: Contains all peers with entries in their
+	 * grantable_rpcs lists. The list is sorted in priority order of
+	 * the highest priority RPC for each peer (fewer ungranted bytes ->
+	 * higher priority).
+	 */
+	struct list_head grantable_peers;
 
 	/**
 	 * @grantable_rpcs: Contains all RPCs that have not been fully
@@ -3116,7 +3129,7 @@ extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		    int port, int error);
 extern void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_rpc *rpc, struct homa_lcache *lcache);
+		    struct homa_rpc *rpc);
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
 extern void     homa_append_metric(struct homa *homa, const char* format, ...);
@@ -3141,11 +3154,11 @@ extern int      homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
-extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
-		    struct homa_lcache *lcache, int *delta);
+extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
+extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
 extern int      homa_dointvec(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
@@ -3168,7 +3181,13 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
+extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
+extern int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
+		    int max_rpcs);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+extern int      homa_grant_prio(struct homa_rpc *rpc1, struct homa_rpc *rpc2);
+extern void     homa_grant_remove_rpc(struct homa_rpc *rpc);
+extern void     homa_grant_update_incoming(struct homa_rpc *rpc);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern void     homa_gro_gen2(struct sk_buff *skb);
 extern void     homa_gro_gen3(struct sk_buff *skb);
@@ -3222,8 +3241,6 @@ extern struct dst_entry
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
                     int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
-extern void     homa_pkt_dispatch(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_lcache *lcache, int *delta);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
 extern int      homa_pool_allocate(struct homa_rpc *rpc);
@@ -3316,7 +3333,7 @@ extern int      homa_unsched_priority(struct homa *homa,
                     struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
-extern void     homa_validate_incoming(struct homa *homa, int verbose);
+extern int      homa_validate_incoming(struct homa *homa, int verbose);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
                     __u64 id);
