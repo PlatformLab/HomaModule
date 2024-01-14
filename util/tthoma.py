@@ -1165,7 +1165,7 @@ class AnalyzeActivity:
                     max_core = core
             max_gbps = max_bytes*8e-3/(traces[node]['elapsed_time'])
             print_list(node, events, total_bytes,
-                    ' %7.2f (C%02d)' % (max_core, max_gbps))
+                    ' %7.2f (C%02d)' % (max_gbps, max_core))
         print('\nOutgoing messages:')
         print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps')
         print('-------------------------------------------------------------')
@@ -1786,6 +1786,8 @@ class AnalyzeDelay:
                         [pkt['softirq'] - pkt['gro'], p, pkt['softirq']])
 
         def get_slow_summary(data):
+            if not data:
+                return " "*13
             data.sort(key=lambda t : t[0])
             return '%6.1f %6.1f' % (data[50*len(data)//100][0],
                     list_avg(data, 0))
@@ -2905,6 +2907,7 @@ class AnalyzeNet:
             'num_packets': 0,
             'avg_delay': 0,
             'max_delay': 0,
+            'max_delay_time': 0,
             'avg_backlog': 0,
             'max_backlog': 0,
             'cur_backlog': 0,
@@ -4408,6 +4411,7 @@ class AnalyzeTxqueues:
 
             interval = options.interval
             interval_end = get_first_interval_end()
+            end = get_last_time()
 
             # Maps from node name to current index in that node's packets
             cur = {}
