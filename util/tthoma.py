@@ -1721,8 +1721,12 @@ class AnalyzeDelay:
 
         # Redo the statistics gathering, but only include the worst packets
         # from each category.
-        min_short = short_total[98*len(short_total)//100][0]
-        max_short = short_total[99*len(short_total)//100][0]
+        if short_total:
+            min_short = short_total[98*len(short_total)//100][0]
+            max_short = short_total[99*len(short_total)//100][0]
+        else:
+            min_short = 0
+            max_short = 0
         min_long = long_total[98*len(long_total)//100][0]
         max_long = long_total[99*len(long_total)//100][0]
         min_grant = grant_total[98*len(grant_total)//100][0]
@@ -2731,6 +2735,11 @@ class AnalyzeIncoming:
         # and size of the packet (size 0 means the packet was a grant) and the
         # core where it was received.
         nodes = defaultdict(list)
+
+        if options.data_dir == None:
+            print('The incoming analyzer can\'t do anything without the '
+                    '--data option')
+            return
 
         skipped = 0
         total_pkts = 0
