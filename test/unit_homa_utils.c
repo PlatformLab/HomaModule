@@ -368,14 +368,12 @@ TEST_F(homa_utils, homa_rpc_free__basics)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
-	EXPECT_EQ(1, unit_list_length(&self->homa.grantable_rpcs));
+	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_free(crpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked",
-			unit_log_get());
-	EXPECT_EQ(0, unit_list_length(&self->homa.grantable_rpcs));
+	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc->id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
@@ -388,7 +386,7 @@ TEST_F(homa_utils, homa_rpc_free__already_dead)
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	homa_rpc_free(crpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked",
+	EXPECT_STREQ("homa_rpc_free invoked",
 		unit_log_get());
 	unit_log_clear();
 	homa_rpc_free(crpc);
@@ -417,19 +415,8 @@ TEST_F(homa_utils, homa_rpc_free__wakeup_interest)
 	unit_log_clear();
 	homa_rpc_free(crpc);
 	EXPECT_EQ(NULL, interest.reg_rpc);
-	EXPECT_STREQ("homa_remove_from_grantable invoked; "
+	EXPECT_STREQ("homa_rpc_free invoked; "
 			"wake_up_process pid -1", unit_log_get());
-}
-TEST_F(homa_utils, homa_rpc_free__update_total_incoming)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 20000);
-	EXPECT_NE(NULL, crpc);
-	unit_log_clear();
-	atomic_set(&self->homa.total_incoming, 10000);
-	homa_rpc_free(crpc);
-	EXPECT_EQ(1400, atomic_read(&self->homa.total_incoming));
 }
 TEST_F(homa_utils, homa_rpc_free__free_gaps)
 {

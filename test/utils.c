@@ -199,36 +199,10 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 
 /**
  * unit_log_grantables() - Append to the test log information about all of
- * the messages in homa->grantable_msgs.
- * @homa:     Homa's overall state.
- */
-void unit_log_grantables(struct homa *homa)
-{
-	struct homa_rpc *rpc;
-	int count = 0;
-	list_for_each_entry(rpc, &homa->grantable_rpcs, grantable_links) {
-		count++;
-		unit_log_printf("; ", "%s from %s, id %lu, "
-				"remaining %d",
-				homa_is_client(rpc->id) ? "response"
-				: "request",
-				homa_print_ipv6_addr(&rpc->peer->addr),
-				(long unsigned int) rpc->id,
-				rpc->msgin.bytes_remaining);
-	}
-	if (count != homa->num_grantable_rpcs) {
-		unit_log_printf("; ", "num_grantable_rpcs error: should "
-				"be %d, is %d",
-				count, homa->num_grantable_rpcs);
-	}
-}
-
-/**
- * unit_log_grantables() - Append to the test log information about all of
  * the messages that are currently grantable.
  * @homa:     Homa's overall state.
  */
-void unit_log_grantables2(struct homa *homa)
+void unit_log_grantables(struct homa *homa)
 {
 	struct homa_peer *peer;
 	struct homa_rpc *rpc;

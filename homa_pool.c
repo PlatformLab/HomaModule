@@ -379,7 +379,6 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 		__u32 *buffers)
 {
 	int i;
-	int send_grants = 0;
 
 	if (!pool->region)
 		return;
@@ -431,11 +430,8 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 		if (rpc->msgin.num_bpages > 0) {
 			/* Allocation succeeded; "wake up" the RPC. */
 			rpc->msgin.resend_all = 1;
-			homa_check_grantable(rpc);
-			send_grants = 1;
-		}
-		homa_rpc_unlock(rpc);
+			homa_grant_check_rpc(rpc);
+		} else
+			homa_rpc_unlock(rpc);
 	}
-	if (send_grants)
-		homa_send_grants(pool->hsk->homa);
 }

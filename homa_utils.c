@@ -74,6 +74,11 @@ int homa_init(struct homa *homa)
 	homa->num_grantable_rpcs = 0;
 	homa->last_grantable_change = get_cycles();
 	homa->max_grantable_rpcs = 0;
+	homa->num_active_rpcs = 0;
+	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
+		homa->active_rpcs[i] = NULL;
+		atomic_set(&homa->active_remaining[i], 0);
+	}
 	homa->grant_nonfifo = 0;
 	homa->grant_nonfifo_left = 0;
 	spin_lock_init(&homa->pacer_mutex);
@@ -96,7 +101,7 @@ int homa_init(struct homa *homa)
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;
-	homa->window = 10000;
+	homa->window_param = 10000;
 	homa->link_mbps = 25000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
@@ -243,6 +248,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->done_timer_ticks = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_cycles = get_cycles();
+	crpc->last_locker = "None";
 
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
@@ -344,6 +350,8 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->done_timer_ticks = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
+	srpc->last_locker = "homa_rpc_new_server";
+	srpc->locker_core = raw_smp_processor_id();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 			srpc->id, ntohl(h->incoming));
 	err = homa_message_in_init(srpc, ntohl(h->message_length),
@@ -386,9 +394,32 @@ error:
 void homa_rpc_lock_slow(struct homa_rpc *rpc)
 {
 	__u64 start = get_cycles();
-	tt_record("beginning wait for rpc lock");
-	spin_lock_bh(rpc->lock);
-	tt_record("ending wait for rpc lock");
+	int level = 0;
+	tt_record1("beginning wait for rpc lock, id %d", rpc->id);
+	while (!spin_trylock_bh(rpc->lock)) {
+		__u64 now = get_cycles();
+		if ((level == 0) && (now - start) > cpu_khz*13) {
+			printk(KERN_NOTICE "Core %d stuck on lock for RPC id "
+					"%llu for 13 ms, locker %s, core %d",
+					raw_smp_processor_id(), rpc->id,
+					rpc->last_locker, rpc->locker_core);
+			tt_record1("Freezing because stuck on lock for RPC id "
+					"%d for 25 ms", rpc->id);
+			tt_freeze();
+			level = 1;
+		}
+		if ((level == 1) && ((now - start) > cpu_khz*1000)) {
+			printk(KERN_NOTICE "Core %d stuck on lock for RPC id "
+					"%llu for 1 sec., locker %s, core %d",
+					raw_smp_processor_id(), rpc->id,
+					rpc->last_locker, rpc->locker_core);
+			level = 2;
+		}
+	}
+	if (level > 0)
+		printk(KERN_NOTICE "Core %d got unstuck on lock for RPC id %llu",
+				raw_smp_processor_id(), rpc->id);
+	tt_record1("ending wait for rpc lock, id %d", rpc->id);
 	if (homa_is_client(rpc->id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
@@ -447,14 +478,15 @@ void homa_rpc_free(struct homa_rpc *rpc)
 {
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
-
-	/* Before doing anything else, unlink the input message from
-	 * homa->grantable_msgs. This will synchronize to ensure that
-	 * homa_manage_grants doesn't access this RPC after destruction
-	 * begins.
-	 */
+	UNIT_LOG("; ", "homa_rpc_free invoked");
 	rpc->state = RPC_DEAD;
-	homa_remove_from_grantable(rpc->hsk->homa, rpc);
+
+	/* The following line must occur before the socket is locked or
+	 * RPC is added to dead_rpcs. This is necessary because homa_grant_free
+	 * releases the RPC lock and reacquires it (see comment in
+	 * homa_grant_free for more info).
+	 */
+	homa_grant_free_rpc(rpc);
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
 	homa_sock_lock(rpc->hsk, "homa_rpc_free");
@@ -474,10 +506,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 
 	if (rpc->msgin.length >= 0) {
 		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
-		if (rpc->msgin.rec_incoming != 0) {
-			atomic_sub(rpc->msgin.rec_incoming,
-					&rpc->hsk->homa->total_incoming);
-		}
 		while (1) {
 			struct homa_gap *gap = list_first_entry_or_null(
 					&rpc->msgin.gaps, struct homa_gap, links);
@@ -487,11 +515,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 			list_del(&gap->links);
 			kfree(gap);
 		}
-
-		/* Without this line, homa_grant might accidentally increment
-		 * homa->total_incoming again.
-		 */
-		rpc->msgin.scheduled = 0;
 	}
 	rpc->hsk->dead_skbs += rpc->msgout.num_skbs;
 	if (rpc->hsk->dead_skbs > rpc->hsk->homa->max_dead_buffs)
@@ -624,7 +647,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			 * that invoked homa_rpc_free hasn't unlocked the
 			 * RPC yet.
 			 */
-			homa_rpc_lock(rpc);
+			homa_rpc_lock(rpc, "homa_rpc_reap");
 			homa_rpc_unlock(rpc);
 
 			/* This code must be here (not in homa_rpc_free)
@@ -664,6 +687,8 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 	homa_bucket_lock(bucket, client);
 	hlist_for_each_entry_rcu(crpc, &bucket->rpcs, hash_links) {
 		if (crpc->id == id) {
+			crpc->last_locker = "homa_find_client_rpc";
+			crpc->locker_core = raw_smp_processor_id();
 			return crpc;
 		}
 	}
@@ -692,6 +717,8 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) && (srpc->dport == sport) &&
 				ipv6_addr_equal(&srpc->peer->addr, saddr)) {
+			srpc->last_locker = "homa_find_server_rpc";
+			srpc->locker_core = raw_smp_processor_id();
 			return srpc;
 		}
 	}
@@ -784,11 +811,15 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 				"received",
 				rpc->id, tt_addr(rpc->peer->addr),
 				received, rpc->msgin.length);
-		if (rpc->msgin.granted > received)
+		if (1)
 			tt_record4("RPC id %d has incoming %d, "
 					"granted %d, prio %d", rpc->id,
 					rpc->msgin.granted - received,
 					rpc->msgin.granted, rpc->msgin.priority);
+		tt_record4("RPC id %d: length %d, remaining %d, rank %d",
+				rpc->id, rpc->msgin.length,
+				rpc->msgin.bytes_remaining,
+				atomic_read(&rpc->msgin.rank));
 		if (rpc->msgin.num_bpages == 0)
 			tt_record1("RPC id %d is blocked waiting for buffers",
 					rpc->id);
@@ -1593,7 +1624,7 @@ char *homa_print_metrics(struct homa *homa)
 				m->so_set_buf_calls);
 		homa_append_metric(homa,
 				"grant_cycles              %15llu  "
-				"Time spent sending grants\n",
+				"Time spent in homa_grant_recalc\n",
 				m->grant_cycles);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "

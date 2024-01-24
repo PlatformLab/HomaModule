@@ -176,6 +176,13 @@ enum homa_packet_type {
 #define NUM_PEER_UNACKED_IDS 5
 
 /**
+ * define HOMA_MAX_GRANTS - Used to size various data structures for grant
+ * management; the max_overcommit sysctl parameter must never be greater than
+ * this.
+ */
+#define HOMA_MAX_GRANTS 10
+
+/**
  * struct homa_cache_line - An object whose size equals that of a cache line.
  */
 struct homa_cache_line {
@@ -662,14 +669,15 @@ struct homa_message_in {
 	 */
 	int rec_incoming;
 
+	/**
+	 * @rank: The index of this RPC in homa->active_rpcs and
+	 * homa->active_remaining, or -1 if this RPC is not in those arrays.
+	 * Set by homa_grant, read-only to the RPC.
+	 */
+	atomic_t rank;
+
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
-
-	/**
-	 * @scheduled: True means some of the bytes of this message
-	 * must be scheduled with grants.
-	 */
-	bool scheduled;
 
 	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
 	__u8 resend_all;
@@ -968,22 +976,28 @@ struct homa_rpc {
 	 * Used (sometimes) for testing.
 	 */
 	uint64_t start_cycles;
+	char* last_locker;
+	int locker_core;
 };
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.
- * @rpc:   RPC to lock. Note: this function is only safe under
- *         limited conditions. The caller must ensure that the RPC
- *         cannot be reaped before the lock is acquired. It cannot
- *         do that by acquiring the socket lock, since that violates
- *         lock ordering constraints. One approach is to use
- *         homa_protect_rpcs. Don't use this function unless you
- *         are very sure what you are doing!  See sync.txt for more
- *         info on locking.
+ * @rpc:    RPC to lock. Note: this function is only safe under
+ *          limited conditions. The caller must ensure that the RPC
+ *          cannot be reaped before the lock is acquired. It cannot
+ *          do that by acquiring the socket lock, since that violates
+ *          lock ordering constraints. One approach is to use
+ *          homa_protect_rpcs. Don't use this function unless you
+ *          are very sure what you are doing!  See sync.txt for more
+ *          info on locking.
+ * @locker: Static string identifying the locking code. Normally ignored,
+ *          but used when debugging deadlocks.
  */
-inline static void homa_rpc_lock(struct homa_rpc *rpc) {
+inline static void homa_rpc_lock(struct homa_rpc *rpc, char *locker) {
 	if (!spin_trylock_bh(rpc->lock))
 		homa_rpc_lock_slow(rpc);
+	rpc->last_locker = locker;
+	rpc->locker_core = raw_smp_processor_id();
 }
 
 /**
@@ -991,6 +1005,7 @@ inline static void homa_rpc_lock(struct homa_rpc *rpc) {
  * @rpc:   RPC to unlock.
  */
 inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
+	rpc->last_locker = "None";
 	spin_unlock_bh(rpc->lock);
 }
 
@@ -1475,8 +1490,8 @@ struct homa_peer {
 	struct list_head grantable_rpcs;
 
 	/**
-	 * @grantable_links: Used to link this peer into homa->grantable_rpcs.
-	 * If this RPC is not linked into homa->grantable_rpcs, this is an
+	 * @grantable_links: Used to link this peer into homa->grantable_peers.
+	 * If this RPC is not linked into homa->grantable_peers, this is an
 	 * empty list pointing to itself.
 	 */
 	struct list_head grantable_links;
@@ -1583,8 +1598,8 @@ struct homa {
 	atomic64_t link_idle_time __attribute__((aligned(CACHE_LINE_SIZE)));
 
 	/**
-	 * @grantable_lock: Used to synchronize access to @grantable_rpcs and
-	 * @num_grantable_rpcs.
+	 * @grantable_lock: Used to synchronize access to grant-related
+	 * fields below, from @grantable_peers to @last_grantable_change.
 	 */
 	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
 
@@ -1618,6 +1633,33 @@ struct homa {
 	 * reset externally using sysctl).
 	 */
 	int max_grantable_rpcs;
+
+	/**
+	 * @grant_window: How many bytes of granted but not yet received data
+	 * may exist for an RPC at any given time.
+	 */
+	int grant_window;
+
+	/**
+	 * @num_active_rpcs: number of entries in @active_rpcs and
+	 * @active_remaining that are currently used.
+	 */
+	int num_active_rpcs;
+
+	/**
+	 * @active_rpcs: pointers to all of the RPCs that we will grant to
+	 * right now.
+	 */
+	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
+
+	/**
+	 * @bytes_remaining: entry i in this array contains a copy of
+	 * active_rpcs[i]->msgin.bytes_remaining. These values can be
+	 * updated by the corresponding RPCs without holding the grantable
+	 * lock. Perfect consistency isn't required; this is used only to
+	 * detect when the priority ordering of messages changes.
+	 */
+	atomic_t active_remaining[HOMA_MAX_GRANTS];
 
 	/**
 	 * @grant_nonfifo: How many bytes should be granted using the
@@ -1732,11 +1774,13 @@ struct homa {
 	int unsched_bytes;
 
 	/**
-	 * @window: The size of the window for granting (i.e., this many
-	 * unreceived bytes may be granted for a message at any given time).
-	 * If this value is zero, then windows are computed dynamically.
+	 * @window_param: Set externally via sysctl to select a policy for
+	 * computing homa-grant_window. If 0 then homa->grant_window is
+	 * computed dynamically based on the number of RPCs we're currently
+	 * granting to. If nonzero then homa->grant_window will always be the
+	 * same as @window_param.
 	 */
-	int window;
+	int window_param;
 
 	/**
 	 * @link_bandwidth: The raw bandwidth of the network uplink, in
@@ -3136,7 +3180,6 @@ extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
-extern void     homa_check_grantable(struct homa_rpc *rpc);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
@@ -3145,12 +3188,8 @@ extern struct homa_rpc
 extern struct homa_interest
                *homa_choose_interest(struct homa *homa, struct list_head *head,
 	            int offset);
-extern int      homa_choose_rpcs_to_grant(struct homa *homa,
-		    struct homa_rpc **rpcs, int max_rpcs);
 extern void     homa_close(struct sock *sock, long timeout);
 extern int      homa_copy_to_user(struct homa_rpc *rpc);
-extern int      homa_create_grants(struct homa *homa, struct homa_rpc **rpcs,
-		    int num_rpcs, struct grant_header *grants, int available);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
                     struct homa_rpc *crpc);
@@ -3182,12 +3221,18 @@ extern void     homa_get_resend_range(struct homa_message_in *msgin,
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
 extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
+extern void     homa_grant_check_rpc(struct homa_rpc *rpc);
+extern void     homa_grant_free_rpc(struct homa_rpc *rpc);
+extern int      homa_grant_outranks(struct homa_rpc *rpc1,
+		    struct homa_rpc *rpc2);
 extern int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 		    int max_rpcs);
 extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern int      homa_grant_prio(struct homa_rpc *rpc1, struct homa_rpc *rpc2);
+extern void     homa_grant_recalc(struct homa *homa, int locked);
 extern void     homa_grant_remove_rpc(struct homa_rpc *rpc);
-extern void     homa_grant_update_incoming(struct homa_rpc *rpc);
+extern int      homa_grant_send(struct homa_rpc *rpc, struct homa *homa);
+extern int      homa_grant_update_incoming(struct homa_rpc *rpc,
+		    struct homa *homa);
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern void     homa_gro_gen2(struct sk_buff *skb);
 extern void     homa_gro_gen3(struct sk_buff *skb);
@@ -3204,7 +3249,6 @@ extern int      homa_init(struct homa *homa);
 extern void     homa_incoming_sysctl_changed(struct homa *homa);
 extern int      homa_ioc_abort(struct sock *sk, unsigned long arg);
 extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
-extern void     homa_log_grantable_list(struct homa *homa);
 extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
 		    int unsched);
@@ -3267,10 +3311,6 @@ extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 extern int      homa_register_interests(struct homa_interest *interest,
                     struct homa_sock *hsk, int flags, __u64 id);
 extern void     homa_rehash(struct sock *sk);
-extern void     homa_remove_grantable_locked(struct homa *homa,
-                    struct homa_rpc *rpc);
-extern void     homa_remove_from_grantable(struct homa *homa,
-                    struct homa_rpc *rpc);
 extern void     homa_remove_from_throttled(struct homa_rpc *rpc);
 extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
                     int priority);
@@ -3294,7 +3334,6 @@ extern struct homa_rpc
 		    const struct in6_addr *source, struct data_header *h,
 		    int *created);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
-extern void     homa_send_grants(struct homa *homa);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);

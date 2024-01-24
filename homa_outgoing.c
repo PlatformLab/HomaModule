@@ -150,7 +150,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 				+ sizeof32(struct homa_skb_info), GFP_KERNEL);
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
-			homa_rpc_lock(rpc);
+			homa_rpc_lock(rpc, "homa_message_out_init");
 			goto error;
 		}
 		if ((skb_bytes_left > max_pkt_data)
@@ -199,7 +199,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 					iter) != seg_size) {
 				err = -EFAULT;
 				kfree_skb(skb);
-				homa_rpc_lock(rpc);
+				homa_rpc_lock(rpc, "homa_message_out_init2");
 				goto error;
 			}
 			bytes_left -= seg_size;
@@ -211,7 +211,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			homa_info->data_bytes += seg_size;
 		} while (skb_bytes_left > 0);
 
-		homa_rpc_lock(rpc);
+		homa_rpc_lock(rpc, "homa_message_out_init3");
 		*last_link = skb;
 		last_link = &(homa_get_skb_info(skb)->next_skb);
 		*last_link = NULL;
@@ -437,7 +437,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
 		force = false;
-		homa_rpc_lock(rpc);
+		homa_rpc_lock(rpc, "homa_xmit_data");
 	}
 	atomic_dec(&rpc->msgout.active_xmits);
 }

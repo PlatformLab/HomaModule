@@ -579,7 +579,6 @@ TEST_F(homa_pool, homa_pool_release_buffers__wake_up_waiting_rpc)
 			4000, 98, 1000,	5*HOMA_BPAGE_SIZE);
 	ASSERT_NE(NULL, crpc1);
 	EXPECT_EQ(5, crpc1->msgin.num_bpages);
-	homa_send_grants(&self->homa);
 
         /* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
@@ -594,8 +593,7 @@ TEST_F(homa_pool, homa_pool_release_buffers__wake_up_waiting_rpc)
 	unit_log_clear();
 	homa_pool_release_buffers(pool, 2, crpc1->msgin.bpage_offsets);
 	EXPECT_EQ(2, crpc2->msgin.num_bpages);
-	EXPECT_STREQ("homa_check_grantable invoked; "
-			"xmit GRANT 10000@0 resend_all", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 10000@0 resend_all", unit_log_get());
 }
 TEST_F(homa_pool, homa_pool_release_buffers__reallocation_fails)
 {

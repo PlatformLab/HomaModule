@@ -115,7 +115,7 @@ int homa_check_rpc(struct homa_rpc *rpc)
 	 * deadlock in situations where the oldest RPC can't make progress
 	 * until some other RPC makes progress (e.g. a server is waiting
 	 * to receive one RPC before it replies to another, or some RPC is
-	 * first on @peer->grantable_rpcs, so it blocks transmissions of
+	 * earlier on the grantable list so it blocks transmissions of
 	 * other RPCs).
 	 */
 
@@ -234,7 +234,7 @@ void homa_timer(struct homa *homa)
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			total_rpcs++;
-			homa_rpc_lock(rpc);
+			homa_rpc_lock(rpc, "homa_timer");
 			if (rpc->state == RPC_IN_SERVICE) {
 				rpc->silent_ticks = 0;
 				homa_rpc_unlock(rpc);

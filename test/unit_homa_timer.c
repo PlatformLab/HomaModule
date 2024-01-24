@@ -382,5 +382,4 @@ TEST_F(homa_timer, homa_timer__abort_server_rpc)
 	homa_timer(&self->homa);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_rpc_discards);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
-	EXPECT_STREQ("homa_remove_from_grantable invoked", unit_log_get());
 }

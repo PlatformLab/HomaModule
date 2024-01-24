@@ -349,7 +349,7 @@ static struct ctl_table homa_ctl_table[] = {
 		.procname	= "max_rpcs_per_peer",
 		.data		= &homa_data.max_rpcs_per_peer,
 		.maxlen		= sizeof(int),
-		.mode		= 0444,
+		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
 	{
@@ -466,7 +466,7 @@ static struct ctl_table homa_ctl_table[] = {
 	},
 	{
 		.procname	= "window",
-		.data		= &homa_data.window,
+		.data		= &homa_data.window_param,
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -1375,7 +1375,6 @@ int homa_softirq(struct sk_buff *skb) {
 		packets = other_pkts;
 	}
 
-	homa_send_grants(homa);
 	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
@@ -1630,9 +1629,7 @@ int homa_dointvec(struct ctl_table *table, int write,
 		 * to print information to the log.
 		 */
 		if (table->data == &action) {
-			if (action == 1)
-				homa_log_grantable_list(homa);
-			else if (action == 2)
+			if (action == 2)
 				homa_rpc_log_active(homa, 0);
 			else if (action == 3) {
 				tt_record("Freezing because of sysctl");
