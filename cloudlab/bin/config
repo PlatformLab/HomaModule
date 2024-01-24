@@ -107,7 +107,8 @@ def get_interfaces():
             if available:
                 available += ", "
             available += current
-            if ('s1f1' in current) or ('s1f0' in current) or ('s0f0' in current):
+            if (('s1f1' in current) or ('s1f0' in current)
+                    or ('s0f0' in current) or ('s0f1' in current)):
                 interface = current
             continue
         if re.match('^[ ]+ inet 10\.0\.1\.', line):
