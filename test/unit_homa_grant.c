@@ -175,6 +175,16 @@ TEST_F(homa_grant, homa_grant_update_incoming)
 	EXPECT_EQ(500, rpc->msgin.rec_incoming);
 }
 
+TEST_F(homa_grant, homa_grant_add_rpc__update_metrics)
+{
+	self->homa.last_grantable_change = 100;
+	self->homa.num_grantable_rpcs = 3;
+	mock_cycles = 200;
+	test_rpc(self, 100, self->server_ip, 100000);
+	EXPECT_EQ(4, self->homa.num_grantable_rpcs);
+	EXPECT_EQ(300, homa_cores[cpu_number]->metrics.grantable_rpcs_integral);
+	EXPECT_EQ(200, self->homa.last_grantable_change);
+}
 TEST_F(homa_grant, homa_grant_add_rpc__insert_in_peer_list)
 {
 	test_rpc(self, 100, self->server_ip, 100000);
@@ -280,6 +290,30 @@ TEST_F(homa_grant, homa_grant_add_rpc__move_peer_in_homa_list)
 	EXPECT_EQ(4, self->homa.num_grantable_rpcs);
 }
 
+TEST_F(homa_grant, homa_grant_remove_rpc__skip_if_not_linked)
+{
+	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			100, 1000, 2000);
+	unit_log_grantables(&self->homa);
+	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
+
+	homa_grant_remove_rpc(rpc);
+	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
+}
+TEST_F(homa_grant, homa_grant_remove_rpc__update_metrics)
+{
+	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 20000);
+	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
+	self->homa.last_grantable_change = 100;
+	self->homa.num_grantable_rpcs = 3;
+	mock_cycles = 200;
+
+	homa_grant_remove_rpc(rpc);
+	EXPECT_EQ(2, self->homa.num_grantable_rpcs);
+	EXPECT_EQ(300, homa_cores[cpu_number]->metrics.grantable_rpcs_integral);
+	EXPECT_EQ(200, self->homa.last_grantable_change);
+}
 TEST_F(homa_grant, homa_grant_remove_rpc__not_first_in_peer_list)
 {
 	test_rpc(self, 200, self->server_ip, 20000);

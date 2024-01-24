@@ -94,6 +94,8 @@ extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern void     homa_sock_lock_slow(struct homa_sock *hsk);
 extern void     homa_throttle_lock_slow(struct homa *homa);
 
+extern struct homa_core *homa_cores[];
+
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
  *
@@ -1604,6 +1606,12 @@ struct homa {
 	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
 
 	/**
+	 * @grantable_lock_time: get_cycles() time when grantable_lock
+	 * was last locked.
+	 */
+	__u64 grantable_lock_time;
+
+	/**
 	 * @grantable_peers: Contains all peers with entries in their
 	 * grantable_rpcs lists. The list is sorted in priority order of
 	 * the highest priority RPC for each peer (fewer ungranted bytes ->
@@ -2339,10 +2347,10 @@ struct homa_metrics {
 	__u64 so_set_buf_calls;
 
 	/**
-	 * @grant_cycles: total time spent in homa_send_grants, as measured
-	 * with get_cycles().
+	 * @grantable_lock_cycles: total time spent with homa->grantable_lock
+	 * locked.
 	 */
-	__u64 grant_cycles;
+	__u64 grantable_lock_cycles;
 
 	/**
 	 * @timer_cycles: total time spent in homa_timer, as measured with
@@ -2628,6 +2636,24 @@ struct homa_metrics {
 	__u64 grantable_rpcs_integral;
 
 	/**
+	 * @grant_recalc_calls: cumulative number of times homa_grant_recalc
+	 * has been invoked.
+	 */
+	__u64 grant_recalc_calls;
+
+	/**
+	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
+	 * has looped back to recalculate again.
+	 */
+	__u64 grant_recalc_loops;
+
+	/**
+	 * @grant_priority_bumps: cumulative number of times the grant priority
+	 * of an RPC has increased above its next-higher-priority neighbor.
+	 */
+	__u64 grant_priority_bumps;
+
+	/**
 	 * @fifo_grants: total number of times that grants were sent to
 	 * the oldest message.
 	 */
@@ -2818,6 +2844,9 @@ struct homa_skb_info {
 	 */
 	int data_bytes;
 };
+
+#define INC_METRIC(metric, count) \
+		(homa_cores[raw_smp_processor_id()]->metrics.metric) += (count)
 
 /**
  * homa_get_skb_info() - Return the address of Homa's private information
@@ -3035,6 +3064,7 @@ static inline void homa_grantable_lock(struct homa *homa)
 	if (!spin_trylock_bh(&homa->grantable_lock)) {
 		homa_grantable_lock_slow(homa);
 	}
+	homa->grantable_lock_time = get_cycles();
 }
 
 /**
@@ -3043,6 +3073,8 @@ static inline void homa_grantable_lock(struct homa *homa)
  */
 static inline void homa_grantable_unlock(struct homa *homa)
 {
+	INC_METRIC(grantable_lock_cycles, get_cycles()
+			- homa->grantable_lock_time);
 	spin_unlock_bh(&homa->grantable_lock);
 }
 
@@ -3152,11 +3184,6 @@ static inline __be32 tt_addr(const struct in6_addr x)
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
 			: ntohl(x.in6_u.u6_addr32[1]));
 }
-
-#define INC_METRIC(metric, count) \
-		(homa_cores[raw_smp_processor_id()]->metrics.metric) += (count)
-
-extern struct homa_core *homa_cores[];
 
 #ifdef __UNIT_TEST__
 extern void unit_log_printf(const char *separator, const char* format, ...)

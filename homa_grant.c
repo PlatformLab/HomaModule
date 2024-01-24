@@ -75,8 +75,16 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		/* Message not yet tracked; add it in priority order to
 		 * the peer's list.
 		 */
+		__u64 time = get_cycles();
+		INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
+				* (time - homa->last_grantable_change));
+		homa->last_grantable_change = time;
 		homa->num_grantable_rpcs++;
-		rpc->msgin.birth = get_cycles();
+		tt_record2("Incremented num_grantable_rpcs to %d, id %d",
+				homa->num_grantable_rpcs, rpc->id);
+		if (homa->num_grantable_rpcs > homa->max_grantable_rpcs)
+			homa->max_grantable_rpcs = homa->num_grantable_rpcs;
+		rpc->msgin.birth = time;
 		list_for_each_entry(candidate, &peer->grantable_rpcs,
 				grantable_links) {
 			if (homa_grant_outranks(rpc, candidate)) {
@@ -146,11 +154,20 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
 	struct homa *homa = rpc->hsk->homa;
+	__u64 time = get_cycles();
+
+	if (list_empty(&rpc->grantable_links))
+		return;
 
 	head =  list_first_entry(&peer->grantable_rpcs,
 			struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
+	INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
+			* (time - homa->last_grantable_change));
+	homa->last_grantable_change = time;
 	homa->num_grantable_rpcs--;
+	tt_record2("Decremented num_grantable_rpcs to %d, id %d",
+			homa->num_grantable_rpcs, rpc->id);
 	if (rpc != head)
 		return;
 
@@ -296,6 +313,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		if (rpc->msgin.bytes_remaining < atomic_read(
 				&homa->active_remaining[homa->max_overcommit-1])) {
 			homa_rpc_unlock(rpc);
+			INC_METRIC(grant_priority_bumps, 1);
 			homa_grant_recalc(homa, 0);
 		} else {
 			homa_rpc_unlock(rpc);
@@ -306,6 +324,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			&homa->active_remaining[rank-1]))) {
 		homa_grant_update_incoming(rpc, homa);
 		homa_rpc_unlock(rpc);
+		INC_METRIC(grant_priority_bumps, 1);
 		homa_grant_recalc(homa, 0);
 		return;
 	}
@@ -345,7 +364,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
  */
 void homa_grant_recalc(struct homa *homa, int locked)
 {
-	__u64 start;
 	int i, active, try_again;
 
 	/* The tricky part of this method is that we need to release
@@ -357,15 +375,16 @@ void homa_grant_recalc(struct homa *homa, int locked)
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 
+	INC_METRIC(grant_recalc_calls, 1);
+	if (!locked)
+		homa_grantable_lock(homa);
+
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
 	 * opportunities to grant to additional messages.
 	 */
-	if (!locked)
-		homa_grantable_lock(homa);
 	while (1) {
 		try_again = 0;
-		start = get_cycles();
 
 		/* Clear the existing grant calculation. */
 		for (i = 0; i < homa->num_active_rpcs; i++) {
@@ -436,10 +455,9 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			atomic_dec(&rpc->grants_in_progress);
 		}
 
-		INC_METRIC(grant_cycles, get_cycles() - start);
-
 		if (try_again == 0)
 			break;
+		INC_METRIC(grant_recalc_loops, 1);
 		homa_grantable_lock(homa);
 	}
 }

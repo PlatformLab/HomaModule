@@ -329,16 +329,6 @@ if elapsed_secs != 0:
     print("----------------------------------")
     print("Total Core Utilization      %6.2f" % (total_cores_used))
 
-    cpu_time = float(deltas["grant_cycles"])
-    cores = cpu_time/time_delta
-    num_grants = deltas["packets_sent_GRANT"]
-    if num_grants != 0:
-        per_grant = cpu_time/float(deltas["packets_sent_GRANT"])/(cpu_khz/1e03)
-    else:
-        per_grant = 0.0
-    print("\nSending grants              %6.2f   %7.2f us/grant" % (cores,
-            per_grant))
-
     time = float(deltas["poll_cycles"])
     cores = time/time_delta
     calls = float(deltas["recv_calls"])
@@ -420,7 +410,7 @@ if elapsed_secs != 0:
                 deltas["pacer_bytes"]*8e-09/pacer_secs))
     if deltas["throttled_cycles"] != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
-        print("Throttled throughput:  %5.2f  Gbps (pacer output when throttled)" % (
+        print("Throttled throughput: %5.2f  Gbps (pacer output when throttled)" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
 
     print("\nCanaries (possible problem indicators):")
@@ -448,7 +438,7 @@ if elapsed_secs != 0:
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
     for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
-            "data_pkt_reap_cycles"]:
+            "data_pkt_reap_cycles", "grantable_lock_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue

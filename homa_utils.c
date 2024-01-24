@@ -69,6 +69,7 @@ int homa_init(struct homa *homa)
 	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
+	homa->grantable_lock_time = 0;
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable_rpcs = 0;
@@ -1623,9 +1624,9 @@ char *homa_print_metrics(struct homa *homa)
 				"Total invocations of setsockopt SO_HOMA_SET_BUF\n",
 				m->so_set_buf_calls);
 		homa_append_metric(homa,
-				"grant_cycles              %15llu  "
-				"Time spent in homa_grant_recalc\n",
-				m->grant_cycles);
+				"grantable_lock_cycles     %15llu  "
+				"Time spent with homa->grantable_lock locked\n",
+				m->grantable_lock_cycles);
 		homa_append_metric(homa,
 				"timer_cycles              %15llu  "
 				"Time spent in homa_timer\n",
@@ -1828,6 +1829,19 @@ char *homa_print_metrics(struct homa *homa)
 				"grantable_rpcs_integral   %15llu  "
 				"Integral of homa->num_grantable_rpcs*dt\n",
 				m->grantable_rpcs_integral);
+		homa_append_metric(homa,
+				"grant_recalc_calls        %15llu  "
+				"Number of calls to homa_grant_recalc\n",
+				m->grant_recalc_calls);
+		homa_append_metric(homa,
+				"grant_recalc_loops        %15llu  "
+				"Number of times homa_grant_recalc looped back\n",
+				m->grant_recalc_loops);
+		homa_append_metric(homa,
+				"grant_priority_bumps        %15llu  "
+				"Number of times an RPC moved up in the grant "
+				"priority order\n",
+				m->grant_priority_bumps);
 		homa_append_metric(homa,
 				"fifo_grants               %15llu  "
 				"Grants issued using FIFO priority\n",
