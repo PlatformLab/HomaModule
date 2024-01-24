@@ -1154,7 +1154,7 @@ class AnalyzeActivity:
         for node in get_sorted_nodes():
             if not node in self.node_in_msgs:
                 continue
-            events = self.node_in_msgs[node]
+            events = sorted(self.node_in_msgs[node])
             max_core = 0
             max_bytes = 0
             total_bytes = 0
@@ -1173,7 +1173,7 @@ class AnalyzeActivity:
             if not node in self.node_out_msgs:
                 continue
             bytes = self.node_out_bytes[node]
-            print_list(node, self.node_out_msgs[node], bytes, "")
+            print_list(node, sorted(self.node_out_msgs[node]), bytes, "")
 
         if options.data_dir:
             for node in get_sorted_nodes():
@@ -1509,18 +1509,19 @@ class AnalyzeDelay:
         self.poll_success = {}
 
     def init_trace(self, trace):
-        # Target core id -> time when gro chose that core
-        self.gro_handoffs = {}
+        # Target core id -> list of times when gro chose that core but
+        # SoftIRQ hasn't yet woken up
+        self.gro_handoffs = defaultdict(list)
 
     def tt_gro_handoff(self, trace, time, core, softirq_core):
-        self.gro_handoffs[softirq_core] = time
+        self.gro_handoffs[softirq_core].append(time)
 
     def tt_softirq_start(self, trace, time, core):
-        if not core in self.gro_handoffs:
+        if not self.gro_handoffs[core]:
             return
-        self.softirq_wakeups.append([time - self.gro_handoffs[core], time,
+        self.softirq_wakeups.append([time - self.gro_handoffs[core][0], time,
                 trace['node']])
-        del self.gro_handoffs[core]
+        self.gro_handoffs[core].pop(0)
 
     def tt_rpc_handoff(self, trace, time, core, id):
         if id in self.rpc_handoffs:
@@ -1602,6 +1603,8 @@ class AnalyzeDelay:
                     long_to_softirq.append(
                             [pkt['softirq'] - pkt['gro'], p, pkt['softirq']])
                 if ('softirq' in pkt) and ('xmit' in pkt):
+                    if (pkt['softirq'] - pkt['xmit']) < -15000:
+                        print('\npkt %s: %s' % (p, pkt))
                     long_total.append(
                             [pkt['softirq'] - pkt['xmit'], p, pkt['softirq']])
 
@@ -3048,18 +3051,23 @@ class AnalyzeNet:
             f.write('# Generated at %s.\n' %
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             doc = ('# Time-series history of backlog for each active '
-                'GRO core on this node.  Column "BackC" shows the backlog '
+                'GRO core on this node.  "Total" gives the total backlog '
+                'across all cores, and "BackC" shows the backlog '
                 'on core C at the given time (in usec). Backlog '
                 'is the KB of data destined '
-                'for core C that have been passed to ip*_xmit at the sender '
+                'for a core that have been passed to ip*_xmit at the sender '
                 'but not yet seen by homa_gro_receive on the receiver.')
             f.write('\n# '.join(textwrap.wrap(doc)))
-            f.write('\n    Time')
+            f.write('\n    Time   Total')
             for core in cores:
                 f.write(' %7s' % ('Back%d' % core))
             f.write('\n')
             for i in range(0, cur_interval):
                 f.write('%8.1f' % (start + (i+1)*interval_length))
+                total = 0
+                for core in cores:
+                    total += backlogs[core][i] / 1000
+                f.write(' %7.1f' % total)
                 for core in cores:
                     f.write(' %7.1f' % (backlogs[core][i] / 1000))
                 f.write('\n')
@@ -3091,10 +3099,10 @@ class AnalyzeNet:
         print('MaxBack:   Maximum backup for Core (KB) and the time when GRO processed')
         print('           a packet from that backup')
         print('')
-        print('Node       Core   Pkts  AvgDelay     MaxDelay (Time)    '
-                'AvgBack     MaxBack (Time)')
-        print('--------------------------------------------------------'
-                '----------------------------', end='')
+        print('Node       Core   Pkts  AvgDelay     MaxDelay (Time)     '
+                'AvgBack    MaxBack (Time)')
+        print('---------------------------------------------------------'
+                '-----------------------------', end='')
         for name in get_sorted_nodes():
             if not name in stats:
                 continue
@@ -3102,7 +3110,7 @@ class AnalyzeNet:
             print('')
             for core in sorted(node.keys()):
                 core_data = node[core]
-                print('%-10s %4d %6d %9.1f %9.1f (%9.3f) %8.1f %8.1f (%9.3f)' % (
+                print('%-10s %4d %6d %9.1f %9.1f (%10.3f) %8.1f %8.1f (%10.3f)' % (
                         name, core, core_data['num_packets'],
                         core_data['avg_delay'], core_data['max_delay'],
                         core_data['max_delay_time'],
@@ -3292,7 +3300,7 @@ class AnalyzeOoo:
                     rpc_id = '%12d' % (id)
                 else:
                     rpc_id = ' ' * 12
-                info += '%s %7d %10s %9.3f %6.1f %8d  %3d  %3d\n' % (rpc_id, offset,
+                info += '%s %7d %10s %9.3f %7.1f %8d  %3d  %3d\n' % (rpc_id, offset,
                         rpc['node'], time, delay, highest_offset - offset,
                         prio, highest_prio)
                 if delay > max_delay:
@@ -3355,8 +3363,8 @@ class AnalyzeOoo:
         print('Prev:    Priority of the highest-offset packet received before ')
         print('         this one')
         print('')
-        print('         RPC  Offset       Node      Time  Delay      Gap Prio Prev')
-        print('-------------------------------------------------------------------')
+        print('         RPC  Offset       Node      Time   Delay      Gap Prio Prev')
+        print('--------------------------------------------------------------------')
         ooo_rpcs.sort(key=lambda t : t[0], reverse=True)
         count = 0
         for delay, info in ooo_rpcs:
@@ -3415,6 +3423,7 @@ class AnalyzePacket:
             print('Can\'t find RPC that transmitted %s' % (options.pkt),
                     file=sys.stderr)
         xmit_rpc = rpcs[xmit_id]
+        success = False
         for xmit_time, offset, length in xmit_rpc['send_data']:
             if (options.pkt_offset >= offset) and (
                     options.pkt_offset < (offset + length)):
@@ -3580,6 +3589,9 @@ class AnalyzePackets:
     # generate any output. The data it collects is used by other analyzers.
 
     def __init__(self, dispatcher):
+        # Used to detect when the trace contains no mlx data records
+        # (probably Homa's timetrace wasn't configured properly).
+        self.mlx_data_pkts = 0
         return
 
     def init_trace(self, trace):
@@ -3600,6 +3612,7 @@ class AnalyzePackets:
 
     def tt_mlx_data(self, trace, time, core, peer, id, offset):
         global packets
+        self.mlx_data_pkts += 1
         packets[pkt_id(id, offset)]['nic'] = time
 
     def tt_gro_data(self, trace, time, core, peer, id, offset, prio):
@@ -3660,6 +3673,11 @@ class AnalyzePackets:
         """
         global packets, rpcs
 
+        if self.mlx_data_pkts == 0:
+            print('No \'mlx sent homa data packet\' records in timetraces; '
+                    'perhaps Homa wasn\'t\nconfigured correctly?',
+                    file=sys.stderr);
+
         for pkt in packets.values():
             if not 'msg_length' in pkt:
                 id = pkt['id']
@@ -3672,12 +3690,6 @@ class AnalyzePackets:
                         rpc = rpcs[id]
                         if 'out_length' in rpc:
                             pkt['msg_length'] = rpc['out_length']
-            if not 'xmit' in pkt:
-                id = pkt['id']
-                if id in rpcs:
-                    xmit = get_xmit_time(pkt['offset'], rpcs[id])
-                    if xmit != None:
-                        pkt['xmit'] = xmit
 
 #------------------------------------------------
 # Analyzer: rpcs
