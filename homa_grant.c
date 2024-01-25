@@ -275,6 +275,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int rank, recalc;
 
+	tt_record("homa_grant_check_rpc starting");
+
 	if ((rpc->msgin.length < 0) || (rpc->state == RPC_DEAD)
 			|| (rpc->msgin.num_bpages <= 0)) {
 		homa_rpc_unlock(rpc);
@@ -292,7 +294,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 */
 	if (list_empty(&rpc->grantable_links)) {
 		homa_grant_update_incoming(rpc,homa);
-		homa_grantable_lock(homa);
+		homa_grantable_lock(homa, 0);
 		homa_grant_add_rpc(rpc);
 		recalc = ((homa->num_grantable_rpcs <= homa->max_overcommit)
 				|| (rpc->msgin.bytes_remaining < atomic_read(
@@ -338,7 +340,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	/* Is the message now fully granted? */
 	if (rpc->msgin.granted >= rpc->msgin.length) {
 		homa_rpc_unlock(rpc);
-		homa_grantable_lock(homa);
+		homa_grantable_lock(homa, 0);
 		homa_grant_remove_rpc(rpc);
 		homa_grant_recalc(homa, 1);
 		return;
@@ -375,9 +377,14 @@ void homa_grant_recalc(struct homa *homa, int locked)
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 
+	tt_record("homa_grant_recalc starting");
 	INC_METRIC(grant_recalc_calls, 1);
-	if (!locked)
-		homa_grantable_lock(homa);
+	if (!locked) {
+		if (!homa_grantable_lock(homa, 1)) {
+			INC_METRIC(grant_recalc_skips, 1);
+			return;
+		}
+	}
 
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
@@ -385,6 +392,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 	 */
 	while (1) {
 		try_again = 0;
+		atomic_inc(&homa->grant_recalc_count);
 
 		/* Clear the existing grant calculation. */
 		for (i = 0; i < homa->num_active_rpcs; i++) {
@@ -446,7 +454,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			homa_grant_send(rpc, homa);
 			try_again += homa_grant_update_incoming(rpc, homa);
 			if (rpc->msgin.granted >= rpc->msgin.length) {
-				homa_grantable_lock(homa);
+				homa_grantable_lock(homa, 0);
 				try_again += 1;
 				homa_grant_remove_rpc(rpc);
 				homa_grantable_unlock(homa);
@@ -458,7 +466,10 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		if (try_again == 0)
 			break;
 		INC_METRIC(grant_recalc_loops, 1);
-		homa_grantable_lock(homa);
+		if (!homa_grantable_lock(homa, 1)) {
+			INC_METRIC(grant_recalc_skips, 1);
+			break;
+		}
 	}
 }
 
@@ -537,7 +548,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 
 	if (list_empty(&rpc->grantable_links))
 		return;
-	homa_grantable_lock(homa);
+	homa_grantable_lock(homa, 0);
 	homa_grant_remove_rpc(rpc);
 	if (atomic_read(&rpc->msgin.rank) >= 0) {
 		/* Very tricky code below. We have to unlock the RPC before
@@ -556,4 +567,42 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 
 	if (rpc->msgin.rec_incoming != 0)
 		atomic_sub(rpc->msgin.rec_incoming, &homa->total_incoming);
+}
+
+/**
+ * homa_grantable_lock_slow() - This function implements the slow path for
+ * acquiring the grantable lock. It is invoked when the lock isn't immediately
+ * available. It waits for the lock, but also records statistics about
+ * the waiting time.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @recalc:  Nonzero means the caller is homa_grant_recalc; if another thread
+ *           is already recalculating, can return without waiting for the lock.
+ * Return:   Nonzero means this thread now owns the grantable lock. Zero
+ *           means the lock was not acquired and there is no need for this
+ *           thread to do the work of homa_grant_recalc because some other
+ *           thread started a fresh calculation after this method was invoked.
+ */
+int homa_grantable_lock_slow(struct homa *homa, int recalc)
+{
+	int result = 0;
+	__u64 start = get_cycles();
+	int starting_count = atomic_read(&homa->grant_recalc_count);
+
+	tt_record("beginning wait for grantable lock");
+	while (1) {
+		if (spin_trylock_bh(&homa->grantable_lock)) {
+			tt_record("ending wait for grantable lock");
+			result = 1;
+			break;
+		}
+		if (recalc && atomic_read(&homa->grant_recalc_count)
+				!= starting_count) {
+			tt_record("skipping wait for grantable lock: recalc "
+					"elsewhere");
+			break;
+		}
+	}
+	INC_METRIC(grantable_lock_misses, 1);
+	INC_METRIC(grantable_lock_miss_cycles, get_cycles() - start);
+	return result;
 }

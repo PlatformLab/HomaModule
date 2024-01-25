@@ -88,7 +88,7 @@ struct homa;
 struct homa_peer;
 
 /* Declarations used in this file, so they can't be made at the end. */
-extern void     homa_grantable_lock_slow(struct homa *homa);
+extern int      homa_grantable_lock_slow(struct homa *homa, int recalc);
 extern void     homa_peer_lock_slow(struct homa_peer *peer);
 extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern void     homa_sock_lock_slow(struct homa_sock *hsk);
@@ -1612,6 +1612,14 @@ struct homa {
 	__u64 grantable_lock_time;
 
 	/**
+	 * @grant_recalc_count: Incremented every time homa_grant_recalc
+	 * starts a new recalculation; used to avoid unnecessary
+	 * recalculations in other threads. If a thread sees this value
+	 * change, it knows that someone else is recalculating grants.
+	 */
+	atomic_t grant_recalc_count;
+
+	/**
 	 * @grantable_peers: Contains all peers with entries in their
 	 * grantable_rpcs lists. The list is sorted in priority order of
 	 * the highest priority RPC for each peer (fewer ungranted bytes ->
@@ -2564,6 +2572,18 @@ struct homa_metrics {
 	__u64 throttle_lock_misses;
 
 	/**
+	 * @peer_acklock_miss_cycles: total time spent waiting for peer
+	 * lock misses, measured by get_cycles().
+	 */
+	__u64 peer_ack_lock_miss_cycles;
+
+	/**
+	 * @peer_ack_lock_misses: total number of times that Homa had to wait
+	 * to acquire the lock used for managing acks for a peer.
+	 */
+	__u64 peer_ack_lock_misses;
+
+	/**
 	 * @grantable_lock_miss_cycles: total time spent waiting for grantable
 	 * lock misses, measured by get_cycles().
 	 */
@@ -2576,16 +2596,49 @@ struct homa_metrics {
 	__u64 grantable_lock_misses;
 
 	/**
-	 * @peer_acklock_miss_cycles: total time spent waiting for peer
-	 * lock misses, measured by get_cycles().
+	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,
+	 * where time_delta is a get_cycles time and grantable is the
+	 * value of homa->num_grantable_rpcs over that time period.
 	 */
-	__u64 peer_ack_lock_miss_cycles;
+	__u64 grantable_rpcs_integral;
 
 	/**
-	 * @peer_ack_lock_misses: total number of times that Homa had to wait
-	 * to acquire the lock used for managing acks for a peer.
+	 * @grant_recalc_calls: cumulative number of times homa_grant_recalc
+	 * has been invoked.
 	 */
-	__u64 peer_ack_lock_misses;
+	__u64 grant_recalc_calls;
+
+	/**
+	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
+	 * has looped back to recalculate again.
+	 */
+	__u64 grant_recalc_loops;
+
+	/**
+	 * @grant_recalc_skips: cumulative number of times that
+	 * homa_grant_recalc skipped its work because in other thread
+	 * already did it.
+	 */
+	__u64 grant_recalc_skips;
+
+	/**
+	 * @grant_priority_bumps: cumulative number of times the grant priority
+	 * of an RPC has increased above its next-higher-priority neighbor.
+	 */
+	__u64 grant_priority_bumps;
+
+	/**
+	 * @fifo_grants: total number of times that grants were sent to
+	 * the oldest message.
+	 */
+	__u64 fifo_grants;
+
+	/**
+	 * @fifo_grants_no_incoming: total number of times that, when a
+	 * FIFO grant was issued, the message had no outstanding grants
+	 * (everything granted had been received).
+	 */
+	__u64 fifo_grants_no_incoming;
 
 	/**
 	 * @disabled_reaps: total number of times that the reaper couldn't
@@ -2627,44 +2680,6 @@ struct homa_metrics {
 	 * calls to homa_add_to_throttled.
 	 */
 	__u64 throttle_list_checks;
-
-	/**
-	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,
-	 * where time_delta is a get_cycles time and grantable is the
-	 * value of homa->num_grantable_rpcs over that time period.
-	 */
-	__u64 grantable_rpcs_integral;
-
-	/**
-	 * @grant_recalc_calls: cumulative number of times homa_grant_recalc
-	 * has been invoked.
-	 */
-	__u64 grant_recalc_calls;
-
-	/**
-	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
-	 * has looped back to recalculate again.
-	 */
-	__u64 grant_recalc_loops;
-
-	/**
-	 * @grant_priority_bumps: cumulative number of times the grant priority
-	 * of an RPC has increased above its next-higher-priority neighbor.
-	 */
-	__u64 grant_priority_bumps;
-
-	/**
-	 * @fifo_grants: total number of times that grants were sent to
-	 * the oldest message.
-	 */
-	__u64 fifo_grants;
-
-	/**
-	 * @fifo_grants_no_incoming: total number of times that, when a
-	 * FIFO grant was issued, the message had no outstanding grants
-	 * (everything granted had been received).
-	 */
-	__u64 fifo_grants_no_incoming;
 
 	/**
 	 * @unacked_overflows: total number of times that homa_peer_add_ack
@@ -3058,13 +3073,23 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
  * homa_grantable_lock() - Acquire the grantable lock. If the lock
  * isn't immediately available, record stats on the waiting time.
  * @homa:    Overall data about the Homa protocol implementation.
+ * @recalc:  Nonzero means the caller is homa_grant_recalc; if another thread
+ *           is already recalculating, can return without waiting for the lock.
+ * Return:   Nonzero means this thread now owns the grantable lock. Zero
+ *           means the lock was not acquired and there is no need for this
+ *           thread to do the work of homa_grant_recalc because some other
+ *           thread started a fresh calculation after this method was invoked.
  */
-static inline void homa_grantable_lock(struct homa *homa)
+static inline int homa_grantable_lock(struct homa *homa, int recalc)
 {
-	if (!spin_trylock_bh(&homa->grantable_lock)) {
-		homa_grantable_lock_slow(homa);
-	}
+	int result;
+
+	if (spin_trylock_bh(&homa->grantable_lock))
+		result = 1;
+	else
+		result = homa_grantable_lock_slow(homa, recalc);
 	homa->grantable_lock_time = get_cycles();
+	return result;
 }
 
 /**

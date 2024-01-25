@@ -826,9 +826,9 @@ void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 
 int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 {
+	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
-	UNIT_HOOK("spin_lock");
 	mock_active_locks++;
 	return 1;
 }

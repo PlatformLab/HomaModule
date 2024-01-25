@@ -70,6 +70,7 @@ int homa_init(struct homa *homa)
 	atomic64_set(&homa->link_idle_time, get_cycles());
 	spin_lock_init(&homa->grantable_lock);
 	homa->grantable_lock_time = 0;
+	atomic_set(&homa->grant_recalc_count, 0);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable_rpcs = 0;
@@ -1780,6 +1781,14 @@ char *homa_print_metrics(struct homa *homa)
 				"Time lost waiting for throttle locks\n",
 				m->throttle_lock_miss_cycles);
 		homa_append_metric(homa,
+				"peer_ack_lock_misses      %15llu  "
+				"Misses on peer ack locks\n",
+				m->peer_ack_lock_misses);
+		homa_append_metric(homa,
+				"peer_ack_lock_miss_cycles %15llu  "
+				"Time lost waiting for peer ack locks\n",
+				m->peer_ack_lock_miss_cycles);
+		homa_append_metric(homa,
 				"grantable_lock_misses     %15llu  "
 				"Grantable lock misses\n",
 				m->grantable_lock_misses);
@@ -1788,13 +1797,36 @@ char *homa_print_metrics(struct homa *homa)
 				"Time lost waiting for grantable lock\n",
 				m->grantable_lock_miss_cycles);
 		homa_append_metric(homa,
-				"peer_ack_lock_misses      %15llu  "
-				"Misses on peer ack locks\n",
-				m->peer_ack_lock_misses);
+				"grantable_rpcs_integral   %15llu  "
+				"Integral of homa->num_grantable_rpcs*dt\n",
+				m->grantable_rpcs_integral);
 		homa_append_metric(homa,
-				"peer_ack_lock_miss_cycles %15llu  "
-				"Time lost waiting for peer ack locks\n",
-				m->peer_ack_lock_miss_cycles);
+				"grant_recalc_calls        %15llu  "
+				"Number of calls to homa_grant_recalc\n",
+				m->grant_recalc_calls);
+		homa_append_metric(homa,
+				"grant_recalc_skips        %15llu  "
+				"Number of times homa_grant_recalc skipped "
+				"redundant work\n",
+				m->grant_recalc_skips);
+		homa_append_metric(homa,
+				"grant_recalc_loops        %15llu  "
+				"Number of times homa_grant_recalc looped back\n",
+				m->grant_recalc_loops);
+		homa_append_metric(homa,
+				"grant_priority_bumps        %15llu  "
+				"Number of times an RPC moved up in the grant "
+				"priority order\n",
+				m->grant_priority_bumps);
+		homa_append_metric(homa,
+				"fifo_grants               %15llu  "
+				"Grants issued using FIFO priority\n",
+				m->fifo_grants);
+		homa_append_metric(homa,
+				"fifo_grants_no_incoming   %15llu  "
+				"FIFO grants to messages with no "
+				"outstanding grants\n",
+				m->fifo_grants_no_incoming);
 		homa_append_metric(homa,
 				"disabled_reaps            %15llu  "
 				"Reaper invocations that were disabled\n",
@@ -1825,32 +1857,6 @@ char *homa_print_metrics(struct homa *homa)
 				"List elements checked in "
 				"homa_add_to_throttled\n",
 				m->throttle_list_checks);
-		homa_append_metric(homa,
-				"grantable_rpcs_integral   %15llu  "
-				"Integral of homa->num_grantable_rpcs*dt\n",
-				m->grantable_rpcs_integral);
-		homa_append_metric(homa,
-				"grant_recalc_calls        %15llu  "
-				"Number of calls to homa_grant_recalc\n",
-				m->grant_recalc_calls);
-		homa_append_metric(homa,
-				"grant_recalc_loops        %15llu  "
-				"Number of times homa_grant_recalc looped back\n",
-				m->grant_recalc_loops);
-		homa_append_metric(homa,
-				"grant_priority_bumps        %15llu  "
-				"Number of times an RPC moved up in the grant "
-				"priority order\n",
-				m->grant_priority_bumps);
-		homa_append_metric(homa,
-				"fifo_grants               %15llu  "
-				"Grants issued using FIFO priority\n",
-				m->fifo_grants);
-		homa_append_metric(homa,
-				"fifo_grants_no_incoming   %15llu  "
-				"FIFO grants to messages with no "
-				"outstanding grants\n",
-				m->fifo_grants_no_incoming);
 		homa_append_metric(homa,
 				"ack_overflows             %15llu  "
 				"Explicit ACKs sent because peer->acks was "
@@ -1971,23 +1977,6 @@ void homa_free_skbs(struct sk_buff *head)
 		kfree_skb(head);
 		head = next;
 	}
-}
-
-/**
- * homa_grantable_lock_slow() - This function implements the slow path for
- * acquiring the grantable lock. It is invoked when the lock isn't immediately
- * available. It waits for the lock, but also records statistics about
- * the waiting time.
- * @homa:    Overall data about the Homa protocol implementation.
- */
-void homa_grantable_lock_slow(struct homa *homa)
-{
-	__u64 start = get_cycles();
-	tt_record("beginning wait for grantable lock");
-	spin_lock_bh(&homa->grantable_lock);
-	tt_record("ending wait for grantable lock");
-	INC_METRIC(grantable_lock_misses, 1);
-	INC_METRIC(grantable_lock_miss_cycles, get_cycles() - start);
 }
 
 /**
