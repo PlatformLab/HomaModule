@@ -546,24 +546,24 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 
-	if (list_empty(&rpc->grantable_links))
-		return;
-	homa_grantable_lock(homa, 0);
-	homa_grant_remove_rpc(rpc);
-	if (atomic_read(&rpc->msgin.rank) >= 0) {
-		/* Very tricky code below. We have to unlock the RPC before
-		 * calling homa_grant_recalc. This creates a risk that the
-		 * RPC could be reaped before the lock is reacquired.
-		 * However, this function is only called from a specific
-		 * place in homa_rpc_free where the RPC hasn't yet been put
-		 * on the reap list, so there is no way it can be reaped
-		 * until we return.
-		 */
-		homa_rpc_unlock(rpc);
-		homa_grant_recalc(homa, 1);
-		homa_rpc_lock(rpc, "homa_grant_free_rpc");
-	} else
-		homa_grantable_unlock(homa);
+	if (!list_empty(&rpc->grantable_links)) {
+		homa_grantable_lock(homa, 0);
+		homa_grant_remove_rpc(rpc);
+		if (atomic_read(&rpc->msgin.rank) >= 0) {
+			/* Very tricky code below. We have to unlock the RPC before
+			 * calling homa_grant_recalc. This creates a risk that the
+			 * RPC could be reaped before the lock is reacquired.
+			 * However, this function is only called from a specific
+			 * place in homa_rpc_free where the RPC hasn't yet been put
+			 * on the reap list, so there is no way it can be reaped
+			 * until we return.
+			 */
+			homa_rpc_unlock(rpc);
+			homa_grant_recalc(homa, 1);
+			homa_rpc_lock(rpc, "homa_grant_free_rpc");
+		} else
+			homa_grantable_unlock(homa);
+	}
 
 	if (rpc->msgin.rec_incoming != 0)
 		atomic_sub(rpc->msgin.rec_incoming, &homa->total_incoming);

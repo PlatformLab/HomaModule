@@ -955,10 +955,10 @@ TEST_F(homa_grant, homa_grant_rpc_free__rpc_not_grantable)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
-	rpc->msgin.rec_incoming = 5000;
-	EXPECT_EQ(0, atomic_read(&self->homa.total_incoming));
+	atomic_set(&self->homa.total_incoming, 10000);
+	rpc->msgin.rec_incoming = 3000;
 	homa_grant_free_rpc(rpc);
-	EXPECT_EQ(0, atomic_read(&self->homa.total_incoming));
+	EXPECT_EQ(7000, atomic_read(&self->homa.total_incoming));
 }
 TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
 {
