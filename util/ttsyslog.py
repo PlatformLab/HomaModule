@@ -4,9 +4,14 @@
 # SPDX-License-Identifier: BSD-1-Clause
 
 """
-This program reads timetrace information from /proc/timetrace (or from
-the first argument, if given) and prints it out in a different form,
-with times in microseconds instead of clock cycles.
+This program reads timetrace information that was printk-ed to the
+system log, removing extraneous syslog information and printing it
+out with times in microseconds instead of clock cycles.
+
+Usage:
+ttsyslog.py [file]
+
+If no file is given, the information is read from standard input.
 """
 
 from __future__ import division, print_function
@@ -19,7 +24,7 @@ import string
 import sys
 
 # Clock cycles per nanosecond.
-cpu_ghz  = 0.0
+cpu_ghz  = None
 
 # Time in cycles of first event.
 first_time = 0
@@ -27,10 +32,9 @@ first_time = 0
 # Time in cycles of previous event.
 prev_time = 0
 
-file_name = "/proc/timetrace"
+f = sys.stdin
 if len(sys.argv) > 1:
-    file_name = sys.argv[1]
-f = open(file_name)
+    f = open(sys.argv[1])
 
 # Read initial line containing clock rate.
 line = f.readline()
@@ -44,7 +48,14 @@ if not match:
 cpu_ghz = float(match.group(1))*1e-06
 
 for line in f:
-    match = re.match('([0-9.]+) (.+)', line)
+    # Ignore everything up until the initial line containing the clock speed.
+    if cpu_ghz == None:
+        match = re.match('cpu_khz: ([0-9.]+)', line)
+        if match:
+            cpu_ghz = float(match.group(1))*1e-06
+        continue
+
+    match = re.match('.* ([0-9.]+) (\[C..\] .+)', line)
     if not match:
         continue
     this_time = float(match.group(1))
