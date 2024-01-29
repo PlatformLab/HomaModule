@@ -40,22 +40,25 @@ if len(tt_files) < 2:
     print('Need at least 2 trace files; run "ttsync.py --help" for help')
     exit(1)
 
-# Dictionary describing all data and grant packets sent/received
-# by clients. Keys are packet ids (rpc_id:offset, with a "g" suffix
-# for grant packets). Each value is a list <time, type, node> where
-# time is when the packet was sent or received, type is "send" or "recv",
-# indicating whether the packet was sent or received by this node, and
-# "node" is the integer node identifier passed to parse_tt.
-client_pkts = {}
+# (rpc_id:offset) -> <time, node> for each packet sent. rpc_id is the
+# id on the sender, and node is the integer node identifier of the sender,
+# as passed to parse_tt.
+send_pkts = {}
 
-# Same as client_pkts, exception describes it and grant packets sent/received
-# by servers. Note: RPC ids are stored as client-side(even) ids
-server_pkts = {}
+# (rpc_id:offset) -> <time, node> for each packet received. rpc_id is the
+# id on the sender, and node is the integer node identifier of the
+# receiver, as passed to parse_tt.
+recv_pkts = {}
 
 # This is an NxN array, where N is the number of nodes. min_delays[A][B]
 # gives the smallest delay seen from node A to node B, as measured with
 # their unadjusted clocks (one of these delays could be negative).
 min_delays = []
+
+# This is an NxN array, where N is the number of nodes. Each entry corresponds
+# to an entry in min_delays, and gives the time when the message producing
+# the minimum delay was received.
+recv_times = []
 
 # For each node, the offset to add to its clock value in order to synchronize
 # its clock with node 0.
@@ -63,14 +66,14 @@ offsets = []
 
 def parse_tt(tt, node_num):
     """
-    Reads a timetrace file and adds entries to client_pkts and server_pkts.
+    Reads a timetrace file and adds entries to send_pkts and recv_pkts.
 
     tt:        Name of the timetrace file
     node_num:  Integer identifier for this file/node (should reflect the
                order of the timetrace file in the arguments
     """
 
-    global options, client_pkts, server_pkts
+    global options, send_pkts, recv_pkts
     sent = 0
     recvd = 0
 
@@ -83,59 +86,57 @@ def parse_tt(tt, node_num):
         time = float(match.group(1))
         core = int(match.group(2))
         id = int(match.group(3))
-        pkts = client_pkts
-        if id & 1:
-            pkts = server_pkts
-            id = id - 1
         offset = match.group(4)
-        pktid = str(id) + ":" + offset
 
         if re.match('.*calling .*_xmit: wire_bytes', line):
-            pkts[pktid] = [time, "send", node_num]
-            sent += 1
+            pktid = str(id) + ":" + offset
+            if not pktid in send_pkts:
+                send_pkts[pktid] = [time, node_num]
+                sent += 1
 
         if "homa_gro_receive got packet" in line:
-            pkts[pktid] = [time, "recv", node_num]
+            pktid = str(id^1) + ":" + offset
+            recv_pkts[pktid] = [time, node_num]
             recvd += 1
 
         if "sending grant for" in line:
-            pkts[pktid+"g"] = [time, "send", node_num]
-            sent += 1
+            pktid = str(id) + ":" + offset + "g"
+            if not pktid in send_pkts:
+                send_pkts[pktid+"g"] = [time, node_num]
+                sent += 1
 
         if "homa_gro_receive got grant from" in line:
-            pkts[pktid+"g"] = [time, "recv", node_num]
+            pktid = str(id^1) + ":" + offset + "g"
+            recv_pkts[pktid+"g"] = [time, node_num]
             recvd += 1
 
     print("%s has %d packet sends, %d receives" % (tt, sent, recvd))
 
 def find_min_delays(num_nodes):
     """
-    Combines the information in client_pkts and server_pkts to fill in
+    Combines the information in send_pkts and recv_pkts to fill in
     min_delays
 
     num_nodes:  Total number of distinct nodes; node numbers in
-                client_pkts and server_pkts must be < num_nodes.
+                send_pkts and recv_pkts must be < num_nodes.
     """
 
-    global min_delays, client_pkts, server_pkts
+    global min_delays, recv_times, send_pkts, recv_pkts
 
     min_delays = [[1e20 for i in range(num_nodes)] for j in range(num_nodes)]
+    recv_times = [[0 for i in range(num_nodes)] for j in range(num_nodes)]
 
     # Iterate over all the client-side events and match them to server-side
     # events if possible.
-    for id, client_pkt in client_pkts.items():
-        if not id in server_pkts:
+    for id, send_pkt in send_pkts.items():
+        if not id in recv_pkts:
             continue
-        client_time, client_type, client_node = client_pkt
-        server_time, server_type, server_node = server_pkts[id]
-        if ("send"  == client_type) and ("recv" == server_type):
-            delay = server_time - client_time
-            if delay < min_delays[client_node][server_node]:
-                min_delays[client_node][server_node] = delay
-        if ("send"  == server_type) and ("recv" == client_type):
-            delay = client_time - server_time
-            if delay < min_delays[server_node][client_node]:
-                min_delays[server_node][client_node] = delay
+        send_time, send_node = send_pkt
+        recv_time, recv_node = recv_pkts[id]
+        delay = recv_time - send_time
+        if delay < min_delays[send_node][recv_node]:
+            min_delays[send_node][recv_node] = delay
+            recv_times[send_node][recv_node] = recv_time
 
 def get_node_num(tt_file):
     """
@@ -171,7 +172,7 @@ for i in range(1, num_nodes):
 # possible if a node hasn't communicated with the first one. Also, the
 # sync is likely to be inaccurate if the minimum RTT is very high.
 # Each iteration through the following loop finds one node to sync, looking
-# for a node that can has a low RTT to one of the nodes that's already
+# for a node that has a low RTT to one of the nodes that's already
 # synced.
 synced = 1
 while synced < num_nodes:
@@ -192,7 +193,10 @@ while synced < num_nodes:
                 continue
             # ref can potentially serve as reference for i.
             rtt = min_delays[ref][node] + min_delays[node][ref]
-            if rtt < best_rtt:
+            if rtt < 0:
+                print('Negative RTT %.1f between %s and %s' % (rtt,
+                        node_names[ref], node_names[node]))
+            if (rtt < best_rtt) and (rtt > 0):
                 best_node = node
                 best_ref = ref
                 best_rtt = rtt
@@ -247,10 +251,11 @@ for src in range(num_nodes):
         dst_offset = offsets[dst]['offset']
         new_min = min_delays[src][dst] + dst_offset - src_offset
         if new_min < 0:
-            print('Problematic offsets for node %d (%.1f) and %d (%.1f)'
-                    %(src, src_offset, dst, dst_offset))
-            print('   mimimum delay %.1f becomes %.1f' %
-                    (min_delays[src][dst], new_min))
+            print('Problematic offsets for %s (%.1f) and %s (%.1f)'
+                    %(node_names[src], src_offset, node_names[dst], dst_offset))
+            print('   mimimum delay %.1f becomes %.1f, received at %9.3f' %
+                    (min_delays[src][dst], new_min,
+                    recv_times[src][dst] + dst_offset))
 
 # Rewrite traces with synchronized times
 if not options.no_rewrite:
