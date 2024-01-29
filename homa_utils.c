@@ -463,6 +463,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	if (rpc) {
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
+		homa_pool_check_waiting(&hsk2->buffer_pool);
 	}
 
     done:
@@ -472,7 +473,8 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 
 /**
  * homa_rpc_free() - Destructor for homa_rpc; will arrange for all resources
- * associated with the RPC to be released (eventually).
+ * associated with the RPC to be released (eventually). Note: the caller must
+ * eventually invoke homa_pool_check_waiting with no locks held.
  * @rpc:  Structure to clean up, or NULL. Must be locked. Its socket must
  *        not be locked.
  */
@@ -528,6 +530,12 @@ void homa_rpc_free(struct homa_rpc *rpc)
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
+
+	if (unlikely(rpc->msgin.num_bpages))
+		homa_pool_release_buffers(
+				&rpc->hsk->buffer_pool,
+				rpc->msgin.num_bpages,
+				rpc->msgin.bpage_offsets);
 }
 
 /**
@@ -651,18 +659,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			 */
 			homa_rpc_lock(rpc, "homa_rpc_reap");
 			homa_rpc_unlock(rpc);
-
-			/* This code must be here (not in homa_rpc_free)
-			 * because homa_pool_release_buffers must be called
-			 * without holding any locks.
-			 */
-			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_release_buffers(
-						&rpc->hsk->buffer_pool,
-						rpc->msgin.num_bpages,
-						rpc->msgin.bpage_offsets);
-			rpcs[i]->state = 0;
-			kfree(rpcs[i]);
+			rpc->state = 0;
+			kfree(rpc);
 		}
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
 				num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);

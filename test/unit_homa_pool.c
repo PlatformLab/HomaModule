@@ -460,16 +460,10 @@ TEST_F(homa_pool, homa_pool_release_buffers__basics)
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	pool->region = saved_region;
 }
-TEST_F(homa_pool, homa_pool_release_buffers__retry_allocation)
+
+TEST_F(homa_pool, homa_pool_check_waiting__basics)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-
-	/* Allocate 5 bpages to an RPC. */
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	5*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(5, crpc1->msgin.num_bpages);
 
         /* Queue up 2 RPCs that together need a total of 5 bpages. */
 	atomic_set(&pool->free_bpages, 0);
@@ -487,137 +481,111 @@ TEST_F(homa_pool, homa_pool_release_buffers__retry_allocation)
 	EXPECT_EQ(0, crpc3->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 
-	/* Now free up the allocated pages and make sure that space gets
+	/* Now free up the allocated pages and make sure that space can be
 	 * allocated for the queued RPCs.
 	 */
 	unit_log_clear();
-	homa_pool_release_buffers(pool, 1, crpc1->msgin.bpage_offsets);
+	atomic_set(&pool->free_bpages, 1);
+	homa_pool_check_waiting(pool);
 	EXPECT_EQ(0, crpc2->msgin.num_bpages);
 	EXPECT_EQ(0, crpc3->msgin.num_bpages);
-	homa_pool_release_buffers(pool, 4, &crpc1->msgin.bpage_offsets[1]);
+	atomic_set(&pool->free_bpages, 5);
+	homa_pool_check_waiting(pool);
 	EXPECT_EQ(3, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, crpc3->msgin.num_bpages);
 	EXPECT_EQ(INT_MAX, pool->bpages_needed);
 }
-TEST_F(homa_pool, homa_pool_release_buffers__bpages_needed_but_no_queued_rpcs)
+TEST_F(homa_pool, homa_pool_check_waiting__bpages_needed_but_no_queued_rpcs)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	2*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(2, crpc1->msgin.num_bpages);
 	pool->bpages_needed = 1;
-	homa_pool_release_buffers(pool, crpc1->msgin.num_bpages,
-			crpc1->msgin.bpage_offsets);
+	homa_pool_check_waiting(pool);
 	EXPECT_EQ(100, atomic_read(&pool->free_bpages));
+	EXPECT_EQ(INT_MAX, pool->bpages_needed);
 }
-TEST_F(homa_pool, homa_pool_release_buffers__rpc_initially_locked)
+TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(1, crpc1->msgin.num_bpages);
 
 	atomic_set(&pool->free_bpages, 0);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	2000);
-	ASSERT_NE(NULL, crpc2);
-	EXPECT_EQ(0, crpc2->msgin.num_bpages);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 
 	mock_trylock_errors = 0xa;
 	unit_log_clear();
-	homa_pool_release_buffers(pool, 1, crpc1->msgin.bpage_offsets);
+	atomic_set(&pool->free_bpages, 1);
+	homa_pool_check_waiting(pool);
 	EXPECT_SUBSTR("rpc lock unavailable in homa_pool_release_buffers; "
 			"rpc lock unavailable in homa_pool_release_buffers",
 			unit_log_get());
-	EXPECT_EQ(1, crpc2->msgin.num_bpages);
+	EXPECT_EQ(1, crpc->msgin.num_bpages);
 	EXPECT_TRUE(list_empty(&self->hsk.waiting_for_bufs));
 }
-TEST_F(homa_pool, homa_pool_release_buffers__reset_bpages_needed)
+TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
 
+	atomic_set(&pool->free_bpages, 0);
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	2*HOMA_BPAGE_SIZE);
+			4000, 98, 1000,	2000);
 	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(2, crpc1->msgin.num_bpages);
+	EXPECT_EQ(0, crpc1->msgin.num_bpages);
 
 	atomic_set(&pool->free_bpages, 0);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	2000);
+			4000, 98, 1000,	2*HOMA_BPAGE_SIZE - 1);
 	ASSERT_NE(NULL, crpc2);
 	EXPECT_EQ(0, crpc2->msgin.num_bpages);
-
-	atomic_set(&pool->free_bpages, 0);
-	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	2*HOMA_BPAGE_SIZE - 1);
-	ASSERT_NE(NULL, crpc3);
-	EXPECT_EQ(0, crpc3->msgin.num_bpages);
 	EXPECT_EQ(1, pool->bpages_needed);
 
-	homa_pool_release_buffers(pool, 1, crpc1->msgin.bpage_offsets);
-	EXPECT_EQ(1, crpc2->msgin.num_bpages);
-	EXPECT_EQ(0, crpc3->msgin.num_bpages);
+	atomic_set(&pool->free_bpages, 1);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(1, crpc1->msgin.num_bpages);
+	EXPECT_EQ(0, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 }
-TEST_F(homa_pool, homa_pool_release_buffers__wake_up_waiting_rpc)
+TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
-
-	/* Allocate 5 bpages to an RPC. */
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	5*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(5, crpc1->msgin.num_bpages);
 
         /* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	2*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc2);
-	EXPECT_EQ(0, crpc2->msgin.num_bpages);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 
 	/* Free the required pages. */
 	unit_log_clear();
-	homa_pool_release_buffers(pool, 2, crpc1->msgin.bpage_offsets);
-	EXPECT_EQ(2, crpc2->msgin.num_bpages);
+	atomic_set(&pool->free_bpages, 2);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(2, crpc->msgin.num_bpages);
 	EXPECT_STREQ("xmit GRANT 10000@0 resend_all", unit_log_get());
 }
-TEST_F(homa_pool, homa_pool_release_buffers__reallocation_fails)
+TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 {
 	struct homa_pool *pool = &self->hsk.buffer_pool;
 
-	/* Allocate 5 bpages to an RPC. */
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
-			4000, 98, 1000,	5*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc1);
-	EXPECT_EQ(5, crpc1->msgin.num_bpages);
-
         /* Queue up an RPC that needs 4 bpages. */
 	atomic_set(&pool->free_bpages, 0);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	4*HOMA_BPAGE_SIZE);
-	ASSERT_NE(NULL, crpc2);
-	EXPECT_EQ(0, crpc2->msgin.num_bpages);
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	pool->bpages_needed = 2;
 
 	unit_log_clear();
-	homa_pool_release_buffers(pool, 2, crpc1->msgin.bpage_offsets);
-	EXPECT_EQ(0, crpc2->msgin.num_bpages);
+	atomic_set(&pool->free_bpages, 2);
+	homa_pool_check_waiting(pool);
+	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(4, pool->bpages_needed);
 }

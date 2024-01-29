@@ -742,6 +742,7 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
 		homa_rpc_abort(rpc, -args.error);
 	}
 	homa_rpc_unlock(rpc);
+	homa_pool_check_waiting(&hsk->buffer_pool);
 	return ret;
 }
 
@@ -965,6 +966,7 @@ error:
 	if (rpc) {
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
+		homa_pool_check_waiting(&hsk->buffer_pool);
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
 			result, args.id);
@@ -1114,6 +1116,7 @@ done:
 	msg->msg_control = ((char *) msg->msg_control)
 			+ sizeof(struct homa_recvmsg_args);
 
+	homa_pool_check_waiting(&hsk->buffer_pool);
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 			control.id, result,

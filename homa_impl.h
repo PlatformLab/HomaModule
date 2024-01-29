@@ -3340,6 +3340,7 @@ extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
                     struct poll_table_struct *wait);
 extern int      homa_pool_allocate(struct homa_rpc *rpc);
+extern void     homa_pool_check_waiting(struct homa_pool *pool);
 extern void     homa_pool_destroy(struct homa_pool *pool);
 extern void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 		    int *available);

@@ -514,6 +514,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 		INC_METRIC(data_pkt_reap_cycles,
 				get_cycles() - start);
 	}
+	homa_pool_check_waiting(&hsk->buffer_pool);
 }
 
 /**

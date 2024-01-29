@@ -126,7 +126,7 @@ void homa_pool_destroy(struct homa_pool *pool)
  *                was specified).
  * @set_owner:    If nonzero, the current core is marked as owner of all
  *                of the allocated pages (and the expiration time is also
- *                set). Otherwises the pages are left unowned.
+ *                set). Otherwise the pages are left unowned.
  * Return: 0 for success, -1 if there wasn't enough free space in the pool.
 */
 int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
@@ -368,9 +368,9 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 
 /**
  * homa_pool_release_buffers() - Release buffer space so that it can be
- * reused. The caller must not hold either an RPC lock or the socket lock
- * for pool.
- * @pool:         Pool that the buffer space belongs to.
+ * reused.
+ * @pool:         Pool that the buffer space belongs to. Doesn't need to
+ *                be locked.
  * @num_buffers:  How many buffers to release.
  * @buffers:      Points to @num_buffers values, each of which is an offset
  *                from the start of the pool to the buffer to be released.
@@ -393,12 +393,24 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
 			num_buffers, pool->hsk->port,
 			atomic_read(&pool->free_bpages));
+}
 
-	/* Allocate buffers for waiting RPCS if possible. */
+/**
+ * homa_pool_check_waiting() - Checks to see if there are enough free
+ * bpages to wake up any RPCs that were blocked. Whenever
+ * homa_pool_release_buffers is invoked, this function must be invoked later,
+ * at a point when the caller holds no locks (homa_pool_release_buffers may
+ * be invoked with locks held, so it can't safely invoke this function).
+ * This is regrettably tricky, but I can't think of a better solution.
+ * @pool:         Information about the buffer pool.
+ */
+void homa_pool_check_waiting(struct homa_pool *pool)
+{
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 		homa_sock_lock(pool->hsk, "buffer pool");
 		if (list_empty(&pool->hsk->waiting_for_bufs)) {
+			pool->bpages_needed = INT_MAX;
 			homa_sock_unlock(pool->hsk);
 			break;
 		}
