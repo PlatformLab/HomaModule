@@ -890,13 +890,15 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 /**
  * homa_validate_incoming() - Scan all of the active RPCs to compute what
  * homa_total_incoming should be, and see if it actually matches.
- * @homa:    Overall data about the Homa protocol implementation.
- * @verbose: Print incoming info for each individual RPC.
+ * @homa:         Overall data about the Homa protocol implementation.
+ * @verbose:      Print incoming info for each individual RPC.
+ * @link_errors:  Set to 1 if one or more grantable RPCs don't seem to
+ *                be linked into the grantable lists.
  * Return:   The difference between the actual value of homa->total_incoming
  *           and the expected value computed from the individual RPCs (positive
  *           means homa->total_incoming is higher than expected).
  */
-int homa_validate_incoming(struct homa *homa, int verbose)
+int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
@@ -906,6 +908,7 @@ int homa_validate_incoming(struct homa *homa, int verbose)
 
 	tt_record1("homa_validate_incoming starting, total_incoming %d",
 			atomic_read(&homa->total_incoming));
+	*link_errors = 0;
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
@@ -932,6 +935,20 @@ int homa_validate_incoming(struct homa *homa, int verbose)
 						"rec_incoming %d",
 						rpc->id, incoming,
 						rpc->msgin.rec_incoming);
+			if (rpc->msgin.granted >= rpc->msgin.length)
+				continue;
+			if (list_empty(&rpc->grantable_links)) {
+				tt_record1("homa_validate_incoming: RPC id %d "
+						"not linked in grantable list",
+						rpc->id);
+				*link_errors = 1;
+			}
+			if (list_empty(&rpc->grantable_links)) {
+				tt_record1("homa_validate_incoming: RPC id %d "
+						"peer not linked in grantable list",
+						rpc->id);\
+				*link_errors = 1;
+			}
 		}
 		homa_unprotect_rpcs(hsk);
 	}
@@ -2011,10 +2028,11 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
 //		struct freeze_header freeze;
+		int dummy;
 		printk(KERN_NOTICE "freezing in homa_freeze with freeze_type %d\n", type);
 		tt_record1("homa_freeze calling homa_rpc_log_active with freeze_type %d", type);
 		homa_rpc_log_active_tt(rpc->hsk->homa, 0);
-		homa_validate_incoming(rpc->hsk->homa, 1);
+		homa_validate_incoming(rpc->hsk->homa, 1, &dummy);
 		printk(KERN_NOTICE "%s\n", format);
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
 		tt_freeze();

@@ -3425,7 +3425,8 @@ extern int      homa_unsched_priority(struct homa *homa,
                     struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
-extern int      homa_validate_incoming(struct homa *homa, int verbose);
+extern int      homa_validate_incoming(struct homa *homa, int verbose,
+		    int *link_errors);
 extern struct homa_rpc
                *homa_wait_for_message(struct homa_sock *hsk, int flags,
                     __u64 id);
