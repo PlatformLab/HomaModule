@@ -5,11 +5,11 @@ Notes for Homa implementation in Linux:
   * Need to reimplement FIFO grants
   * Delete obsolete things
     * grant_cycles
-    * rpc->last_locker
     * lock_hook in unit_homa_grant
   * Replace fifo_grant_increment with fifo_grant_interval
   * Don't recalc when fully granted; wait until fully received?
   * Refactor so that the msgin structure is always properly initialized?
+  * Does homa_timer need to call check_waiting?
 
 * SoftIRQ processing can lock out kernel-to-user copies; add a preemption
   mechanism where the copying code can set a flag that it needs the lock,

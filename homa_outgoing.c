@@ -810,7 +810,8 @@ void homa_pacer_xmit(struct homa *homa)
 			homa_throttle_unlock(homa);
 			break;
 		}
-		if (!(spin_trylock_bh(rpc->lock))) {
+		if (!homa_bucket_try_lock(rpc->bucket, rpc->id,
+				"homa_pacer_xmit")) {
 			homa_throttle_unlock(homa);
 			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
@@ -952,7 +953,8 @@ void homa_log_throttled(struct homa *homa)
 	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
 		rpcs++;
-		if (!(spin_trylock_bh(rpc->lock))) {
+		if (!homa_bucket_try_lock(rpc->bucket, rpc->id,
+				"homa_log_throttled")) {
 			printk(KERN_NOTICE "Skipping throttled RPC: locked\n");
 			continue;
 		}

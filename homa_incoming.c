@@ -924,9 +924,10 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	 * the RPC, just skip it (waiting could deadlock), and it
 	 * will eventually get updated elsewhere.
 	 */
-	if (spin_trylock_bh(oldest->lock)) {
+	if (homa_bucket_try_lock(oldest->bucket, oldest->id,
+			"homa_choose_fifo_grant")) {
 		homa_grant_update_incoming(oldest, homa);
-		spin_unlock_bh(oldest->lock);
+		homa_rpc_unlock(oldest);
 	}
 
 	if (oldest->msgin.granted < (oldest->msgin.length

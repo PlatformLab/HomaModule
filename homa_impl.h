@@ -84,13 +84,14 @@ extern void *mock_kmalloc(size_t size, gfp_t flags);
 /* Forward declarations. */
 struct homa_sock;
 struct homa_rpc;
+struct homa_rpc_bucket;
 struct homa;
 struct homa_peer;
 
 /* Declarations used in this file, so they can't be made at the end. */
+extern void     homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id);
 extern int      homa_grantable_lock_slow(struct homa *homa, int recalc);
 extern void     homa_peer_lock_slow(struct homa_peer *peer);
-extern void     homa_rpc_lock_slow(struct homa_rpc *rpc);
 extern void     homa_sock_lock_slow(struct homa_sock *hsk);
 extern void     homa_throttle_lock_slow(struct homa *homa);
 
@@ -780,11 +781,11 @@ struct homa_rpc {
 	/** @hsk:  Socket that owns the RPC. */
 	struct homa_sock *hsk;
 
-	/** @lock: Used to synchronize modifications to this structure;
-	 * points to the lock in hsk->client_rpc_buckets or
-	 * hsk->server_rpc_buckets.
+	/** @bucket: Pointer to the bucket in hsk->client_rpc_buckets or
+	 * hsk->server_rpc_buckets where this RPC is linked. Used primarily
+	 * for locking the RPC (which is done by locking its bucket).
 	 */
-	struct spinlock *lock;
+	struct homa_rpc_bucket *bucket;
 
 	/**
 	 * @state: The current state of this RPC:
@@ -978,38 +979,7 @@ struct homa_rpc {
 	 * Used (sometimes) for testing.
 	 */
 	uint64_t start_cycles;
-	char* last_locker;
-	int locker_core;
 };
-
-/**
- * homa_rpc_lock() - Acquire the lock for an RPC.
- * @rpc:    RPC to lock. Note: this function is only safe under
- *          limited conditions. The caller must ensure that the RPC
- *          cannot be reaped before the lock is acquired. It cannot
- *          do that by acquiring the socket lock, since that violates
- *          lock ordering constraints. One approach is to use
- *          homa_protect_rpcs. Don't use this function unless you
- *          are very sure what you are doing!  See sync.txt for more
- *          info on locking.
- * @locker: Static string identifying the locking code. Normally ignored,
- *          but used when debugging deadlocks.
- */
-inline static void homa_rpc_lock(struct homa_rpc *rpc, char *locker) {
-	if (!spin_trylock_bh(rpc->lock))
-		homa_rpc_lock_slow(rpc);
-	rpc->last_locker = locker;
-	rpc->locker_core = raw_smp_processor_id();
-}
-
-/**
- * homa_rpc_unlock() - Release the lock for an RPC.
- * @rpc:   RPC to unlock.
- */
-inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
-	rpc->last_locker = "None";
-	spin_unlock_bh(rpc->lock);
-}
 
 /**
  * homa_rpc_validate() - Check to see if an RPC has been reaped (which
@@ -1110,6 +1080,13 @@ struct homa_rpc_bucket {
 
 	/** @rpcs: list of RPCs that hash to this bucket. */
 	struct hlist_head rpcs;
+
+	/** @id: identifier for this bucket, used in error messages etc.
+	 * It's the index of the bucket within its hash table bucket
+	 * array, with an additional offset to separate server and
+	 * client RPCs.
+	 */
+	int id;
 };
 
 /**
@@ -2830,6 +2807,12 @@ struct homa_core {
 	 */
 	__u64 syscall_end_time;
 
+	/**
+	 * @rpcs_locked: The total number of RPCs currently locked on this
+	 * core; better not ever be more than 1!
+	 */
+	int rpcs_locked;
+
 	/** @metrics: performance statistics for this core. */
 	struct homa_metrics metrics;
 };
@@ -2898,15 +2881,80 @@ static inline __u64 homa_local_id(__be64 sender_id)
 	return be64_to_cpu(sender_id) ^ 1;
 }
 
-#define homa_bucket_lock(bucket, type)                                     \
-	if (unlikely(!spin_trylock_bh(&bucket->lock))) {                   \
-		__u64 start = get_cycles();                                \
-		tt_record("beginning wait for " #type " bucket lock");     \
-		INC_METRIC(type##_lock_misses, 1);                         \
-		spin_lock_bh(&bucket->lock);                               \
-		tt_record("ending wait for " #type " bucket lock");        \
-		INC_METRIC(type##_lock_miss_cycles, get_cycles() - start); \
-	}
+/**
+ * homa_bucket_lock() - Acquire the lock for an RPC hash table bucket.
+ * @bucket:    Bucket to lock
+ * @id:        ID of the RPC that is requesting the lock. Normally ignored,
+ *             but used occasionally for diagnostics and debugging.
+ * @locker:    Static string identifying the locking code. Normally ignored,
+ *             but used occasionally for diagnostics and debugging.
+ */
+inline static void homa_bucket_lock(struct homa_rpc_bucket *bucket,
+		__u64 id, char *locker)
+{
+	int core = raw_smp_processor_id();
+	if (!spin_trylock_bh(&bucket->lock))
+		homa_bucket_lock_slow(bucket, id);
+	homa_cores[core]->rpcs_locked ++;
+	BUG_ON(homa_cores[core]->rpcs_locked > 1);
+}
+
+/**
+ * homa_bucket_try_lock() - Acquire the lock for an RPC hash table bucket if
+ * it is available.
+ * @bucket:    Bucket to lock
+ * @id:        ID of the RPC that is requesting the lock.
+ * @locker:    Static string identifying the locking code. Normally ignored,
+ *             but used when debugging deadlocks.
+ * Return:     Nonzero if lock was successfully acquired, zero if it is
+ *             currently owned by someone else.
+ */
+inline static int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
+		__u64 id, char *locker)
+{
+	int core = raw_smp_processor_id();
+	if (!spin_trylock_bh(&bucket->lock))
+		return 0;
+	homa_cores[core]->rpcs_locked ++;
+	BUG_ON(homa_cores[core]->rpcs_locked > 1);
+	return 1;
+}
+
+/**
+ * homa_bucket_unlock() - Release the lock for an RPC hash table bucket.
+ * @bucket:   Bucket to unlock.
+ * @id:       ID of the RPC that was using the lock.
+ */
+inline static void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
+{
+	homa_cores[raw_smp_processor_id()]->rpcs_locked--;
+	spin_unlock_bh(&bucket->lock);
+}
+
+/**
+ * homa_rpc_lock() - Acquire the lock for an RPC.
+ * @rpc:    RPC to lock. Note: this function is only safe under
+ *          limited conditions. The caller must ensure that the RPC
+ *          cannot be reaped before the lock is acquired. It cannot
+ *          do that by acquiring the socket lock, since that violates
+ *          lock ordering constraints. One approach is to use
+ *          homa_protect_rpcs. Don't use this function unless you
+ *          are very sure what you are doing!  See sync.txt for more
+ *          info on locking.
+ * @locker: Static string identifying the locking code. Normally ignored,
+ *          but used occasionally for diagnostics and debugging.
+ */
+inline static void homa_rpc_lock(struct homa_rpc *rpc, char *locker) {
+	homa_bucket_lock(rpc->bucket, rpc->id, locker);
+}
+
+/**
+ * homa_rpc_unlock() - Release the lock for an RPC.
+ * @rpc:   RPC to unlock.
+ */
+inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
+	homa_bucket_unlock(rpc->bucket, rpc->id);
+}
 
 /**
  * homa_client_rpc_bucket() - Find the bucket containing a given
@@ -3232,6 +3280,7 @@ extern void     homa_append_metric(struct homa *homa, const char* format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
+extern void     homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id);
 extern int      homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);

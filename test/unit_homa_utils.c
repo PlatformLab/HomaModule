@@ -270,7 +270,7 @@ TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
 	homa_rpc_free(srpc);
 }
 
-TEST_F(homa_utils, homa_rpc_lock_slow)
+TEST_F(homa_utils, homa_bucket_lock_slow)
 {
 	int created;
 	mock_cycles = ~0;
@@ -286,13 +286,13 @@ TEST_F(homa_utils, homa_rpc_lock_slow)
 
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_lock_misses);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.client_lock_miss_cycles);
-	homa_rpc_lock_slow(crpc);
+	homa_bucket_lock_slow(crpc->bucket, crpc->id);
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.client_lock_misses);
 	EXPECT_NE(0, homa_cores[cpu_number]->metrics.client_lock_miss_cycles);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.server_lock_misses);
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.server_lock_miss_cycles);
-	homa_rpc_lock_slow(srpc);
+	homa_bucket_lock_slow(srpc->bucket, srpc->id);
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.server_lock_misses);
 	EXPECT_NE(0, homa_cores[cpu_number]->metrics.server_lock_miss_cycles);

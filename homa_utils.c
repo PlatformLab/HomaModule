@@ -60,6 +60,7 @@ int homa_init(struct homa *homa)
 			core->last_app_active = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;
+			core->rpcs_locked = 0;
 			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
@@ -221,7 +222,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->hsk = hsk;
 	crpc->id = atomic64_fetch_add(2, &hsk->homa->next_outgoing_id);
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
-	crpc->lock = &bucket->lock;
+	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
 	atomic_set(&crpc->flags, 0);
 	atomic_set(&crpc->grants_in_progress, 0);
@@ -250,14 +251,13 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->done_timer_ticks = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_cycles = get_cycles();
-	crpc->last_locker = "None";
 
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
 	 * to be performed without holding locks. Also, can't hold spin
 	 * locks while doing things that could block, such as memory allocation.
 	 */
-	homa_bucket_lock(bucket, client);
+	homa_bucket_lock(bucket, crpc->id, "homa_rpc_new_client");
 	homa_sock_lock(hsk, "homa_rpc_new_client");
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
@@ -304,7 +304,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	/* Lock the bucket, and make sure no-one else has already created
 	 * the desired RPC.
 	 */
-	homa_bucket_lock(bucket, server);
+	homa_bucket_lock(bucket, id, "homa_rpc_new_server");
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) &&
 				(srpc->dport == ntohs(h->common.sport)) &&
@@ -324,7 +324,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		goto error;
 	}
 	srpc->hsk = hsk;
-	srpc->lock = &bucket->lock;
+	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
 	atomic_set(&srpc->flags, 0);
 	atomic_set(&srpc->grants_in_progress, 0);
@@ -352,8 +352,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->done_timer_ticks = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
-	srpc->last_locker = "homa_rpc_new_server";
-	srpc->locker_core = raw_smp_processor_id();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 			srpc->id, ntohl(h->incoming));
 	err = homa_message_in_init(srpc, ntohl(h->message_length),
@@ -380,49 +378,30 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	return srpc;
 
 error:
-	spin_unlock_bh(&bucket->lock);
+	homa_bucket_unlock(bucket, id);
 	if (srpc)
 		kfree(srpc);
 	return ERR_PTR(err);
 }
 
 /**
- * homa_rpc_lock_slow() - This function implements the slow path for
- * acquiring an RPC lock. It is invoked when an RPC lock isn't immediately
- * available. It waits for the lock, but also records statistics about
- * the waiting time.
- * @rpc:    RPC to  lock.
+ * homa_bucket_lock_slow() - This function implements the slow path for
+ * locking a bucket in one of the hash tables of RPCs. It is invoked when a
+ * lock isn't immediately available. It waits for the lock, but also records
+ * statistics about the waiting time.
+ * @bucket:    The hash table bucket to lock.
+ * @id:        ID of the particular RPC being locked (multiple RPCs may
+ *             share a single bucket lock).
  */
-void homa_rpc_lock_slow(struct homa_rpc *rpc)
+void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
 {
 	__u64 start = get_cycles();
-	int level = 0;
-	tt_record1("beginning wait for rpc lock, id %d", rpc->id);
-	while (!spin_trylock_bh(rpc->lock)) {
-		__u64 now = get_cycles();
-		if ((level == 0) && (now - start) > cpu_khz*13) {
-			printk(KERN_NOTICE "Core %d stuck on lock for RPC id "
-					"%llu for 13 ms, locker %s, core %d",
-					raw_smp_processor_id(), rpc->id,
-					rpc->last_locker, rpc->locker_core);
-			tt_record1("Freezing because stuck on lock for RPC id "
-					"%d for 25 ms", rpc->id);
-			tt_freeze();
-			level = 1;
-		}
-		if ((level == 1) && ((now - start) > cpu_khz*1000)) {
-			printk(KERN_NOTICE "Core %d stuck on lock for RPC id "
-					"%llu for 1 sec., locker %s, core %d",
-					raw_smp_processor_id(), rpc->id,
-					rpc->last_locker, rpc->locker_core);
-			level = 2;
-		}
-	}
-	if (level > 0)
-		printk(KERN_NOTICE "Core %d got unstuck on lock for RPC id %llu",
-				raw_smp_processor_id(), rpc->id);
-	tt_record1("ending wait for rpc lock, id %d", rpc->id);
-	if (homa_is_client(rpc->id)) {
+	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
+			id, bucket->id);
+	spin_lock_bh(&bucket->lock);
+	tt_record2("ending wait for bucket lock, id %d (bucket %d)",
+			id, bucket->id);
+	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
 	} else {
@@ -684,15 +663,12 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 {
 	struct homa_rpc *crpc;
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
-	homa_bucket_lock(bucket, client);
+	homa_bucket_lock(bucket, id, "homa_find_client_rpc");
 	hlist_for_each_entry_rcu(crpc, &bucket->rpcs, hash_links) {
-		if (crpc->id == id) {
-			crpc->last_locker = "homa_find_client_rpc";
-			crpc->locker_core = raw_smp_processor_id();
+		if (crpc->id == id)
 			return crpc;
-		}
 	}
-	spin_unlock_bh(&bucket->lock);
+	homa_bucket_unlock(bucket, id);
 	return NULL;
 }
 
@@ -713,16 +689,13 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 {
 	struct homa_rpc *srpc;
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
-	homa_bucket_lock(bucket, server);
+	homa_bucket_lock(bucket, id, "homa_find_server_rpc");
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) && (srpc->dport == sport) &&
-				ipv6_addr_equal(&srpc->peer->addr, saddr)) {
-			srpc->last_locker = "homa_find_server_rpc";
-			srpc->locker_core = raw_smp_processor_id();
+				ipv6_addr_equal(&srpc->peer->addr, saddr))
 			return srpc;
-		}
 	}
-	spin_unlock_bh(&bucket->lock);
+	homa_bucket_unlock(bucket, id);
 	return NULL;
 }
 
