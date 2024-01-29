@@ -36,21 +36,10 @@ f = sys.stdin
 if len(sys.argv) > 1:
     f = open(sys.argv[1])
 
-# Read initial line containing clock rate.
-line = f.readline()
-if not line:
-    print('File empty!')
-    exit(0)
-match = re.match('cpu_khz: ([0-9.]+)', line)
-if not match:
-    print('Initial line doesn\'t contain clock rate:\n%s' % (line))
-    exit(1)
-cpu_ghz = float(match.group(1))*1e-06
-
 for line in f:
     # Ignore everything up until the initial line containing the clock speed.
     if cpu_ghz == None:
-        match = re.match('cpu_khz: ([0-9.]+)', line)
+        match = re.match('.*cpu_khz: ([0-9.]+)', line)
         if match:
             cpu_ghz = float(match.group(1))*1e-06
         continue
