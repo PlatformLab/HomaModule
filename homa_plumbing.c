@@ -937,8 +937,11 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		rpc = homa_find_server_rpc(hsk, &canonical_dest,
 				ntohs(addr->in6.sin6_port), args.id);
 		if (!rpc) {
-			result = -EINVAL;
-			goto error;
+			/* Return without an error if the RPC doesn't exist;
+			 * this could be totally valid (e.g. client is
+			 * no longer interested in it).
+			 */
+			return 0;
 		}
 		if (rpc->error) {
 			result = rpc->error;

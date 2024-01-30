@@ -357,7 +357,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_cant_find_rpc)
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
 	self->sendmsg_args.id = self->server_id + 1;
-	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(RPC_IN_SERVICE, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
