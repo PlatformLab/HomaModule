@@ -64,6 +64,14 @@ recv_times = []
 # its clock with node 0.
 offsets = []
 
+# rpc_id -> maximum offset that has been sent so far for that RPC; used to
+# skip retransmitted packets, which can mess up delay calculations.
+max_send_offsets = {}
+
+# rpc_id -> maximum offset that has been received so far for that RPC; used to
+# skip receipts of retransmissions, which can mess up delay calculations.
+max_recv_offsets = {}
+
 def parse_tt(tt, node_num):
     """
     Reads a timetrace file and adds entries to send_pkts and recv_pkts.
@@ -73,7 +81,7 @@ def parse_tt(tt, node_num):
                order of the timetrace file in the arguments
     """
 
-    global options, send_pkts, recv_pkts
+    global options, send_pkts, recv_pkts, max_send_offsets, max_recv_offsets
     sent = 0
     recvd = 0
 
@@ -86,28 +94,40 @@ def parse_tt(tt, node_num):
         time = float(match.group(1))
         core = int(match.group(2))
         id = int(match.group(3))
-        offset = match.group(4)
+        offset = int(match.group(4))
 
         if re.match('.*calling .*_xmit: wire_bytes', line):
-            pktid = str(id) + ":" + offset
+            if (id in max_send_offsets) and (max_send_offsets[id] >= offset):
+                continue
+            pktid = '%d:%d' % (id, offset)
+            send_pkts[pktid] = [time, node_num]
+            max_send_offsets[id] = offset
+            sent += 1
+
+        match2 = re.match('.*Finished queueing packet: rpc id .*, offset .*, '
+                'len ([0-9.]+)', line)
+        if match2:
+            last_offset = offset + int(match2.group(1)) - 1
+            if (id in max_send_offsets) and (max_send_offsets[id] < last_offset):
+                max_send_offsets[id] = last_offset
+
+        if "homa_gro_receive got packet" in line:
+            if (id in max_recv_offsets) and (max_recv_offsets[id] >= offset):
+                continue
+            pktid = '%d:%d' % (id^1, offset)
+            recv_pkts[pktid] = [time, node_num]
+            max_recv_offsets[id] = offset
+            recvd += 1
+
+        if "sending grant for" in line:
+            pktid = '%d:%dg' % (id, offset)
             if not pktid in send_pkts:
                 send_pkts[pktid] = [time, node_num]
                 sent += 1
 
-        if "homa_gro_receive got packet" in line:
-            pktid = str(id^1) + ":" + offset
-            recv_pkts[pktid] = [time, node_num]
-            recvd += 1
-
-        if "sending grant for" in line:
-            pktid = str(id) + ":" + offset + "g"
-            if not pktid in send_pkts:
-                send_pkts[pktid+"g"] = [time, node_num]
-                sent += 1
-
         if "homa_gro_receive got grant from" in line:
-            pktid = str(id^1) + ":" + offset + "g"
-            recv_pkts[pktid+"g"] = [time, node_num]
+            pktid = '%d:%dg' % (id^1, offset)
+            recv_pkts[pktid] = [time, node_num]
             recvd += 1
 
     print("%s has %d packet sends, %d receives" % (tt, sent, recvd))
@@ -194,8 +214,10 @@ while synced < num_nodes:
             # ref can potentially serve as reference for i.
             rtt = min_delays[ref][node] + min_delays[node][ref]
             if rtt < 0:
-                print('Negative RTT %.1f between %s and %s' % (rtt,
-                        node_names[ref], node_names[node]))
+                print('Negative RTT %.1f between %s (recv %.3f) and '
+                        '%s (recv %.3f),' % (rtt, node_names[ref],
+                        recv_times[node][ref], node_names[node],
+                        recv_times[ref][node]))
             if (rtt < best_rtt) and (rtt > 0):
                 best_node = node
                 best_ref = ref
