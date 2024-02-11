@@ -1628,6 +1628,14 @@ struct homa {
 	int max_grantable_rpcs;
 
 	/**
+	 * @oldest_rpc: The RPC with incoming data whose start_cycles is
+	 * farthest in the past). NULL means either there are no incoming
+	 * RPCs or the oldest needs to be recomputed. Must hold grantable_lock
+	 * to update.
+	 */
+	struct homa_rpc *oldest_rpc;
+
+	/**
 	 * @grant_window: How many bytes of granted but not yet received data
 	 * may exist for an RPC at any given time.
 	 */
@@ -3323,6 +3331,7 @@ extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
 extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
 extern void     homa_grant_check_rpc(struct homa_rpc *rpc);
+extern void     homa_grant_find_oldest(struct homa *homa);
 extern void     homa_grant_free_rpc(struct homa_rpc *rpc);
 extern int      homa_grant_outranks(struct homa_rpc *rpc1,
 		    struct homa_rpc *rpc2);

@@ -159,6 +159,9 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	if (list_empty(&rpc->grantable_links))
 		return;
 
+	if (homa->oldest_rpc == rpc)
+		homa->oldest_rpc = NULL;
+
 	head =  list_first_entry(&peer->grantable_rpcs,
 			struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
@@ -537,6 +540,51 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 	return num_rpcs;
 }
 
+
+/**
+ * homa_grant_find_oldest() - Recompute the value of homa->oldest_rpc.
+ * @homa:    Overall data about the Homa protocol implementation. The
+ *           grantable_lock must be held by the caller.
+ */
+void homa_grant_find_oldest(struct homa *homa)
+{
+	struct homa_rpc *rpc, *oldest;
+	struct homa_peer *peer;
+	__u64 oldest_birth;
+	int max_incoming = homa->grant_window + 2*homa->fifo_grant_increment;
+
+	oldest = NULL;
+	oldest_birth = ~0;
+
+	/* Find the oldest message that doesn't currently have an
+	 * outstanding "pity grant".
+	 */
+	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
+		list_for_each_entry(rpc, &peer->grantable_rpcs,
+				grantable_links) {
+			int received, incoming;
+
+			if (rpc->msgin.birth >= oldest_birth)
+				continue;
+
+			received = (rpc->msgin.length
+					- rpc->msgin.bytes_remaining);
+			incoming = rpc->msgin.granted - received;
+			if (incoming >= max_incoming) {
+				/* This RPC has been granted way more bytes
+				 * than by the grant window. This can only
+				 * happen for FIFO grants, and it means the
+				 * peer isn't responding to grants we've sent.
+				 * Pick a different "oldest" RPC.
+				 */
+				continue;
+			}
+			oldest = rpc;
+			oldest_birth = rpc->msgin.birth;
+		}
+	}
+	homa->oldest_rpc = oldest;
+}
 /**
  * homa_grant_free_rpc() - This function is invoked when an RPC is freed;
  * it rank up any state related to grants for that RPC's incoming message.

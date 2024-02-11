@@ -77,6 +77,7 @@ int homa_init(struct homa *homa)
 	homa->num_grantable_rpcs = 0;
 	homa->last_grantable_change = get_cycles();
 	homa->max_grantable_rpcs = 0;
+	homa->oldest_rpc = NULL;
 	homa->num_active_rpcs = 0;
 	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
 		homa->active_rpcs[i] = NULL;
