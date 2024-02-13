@@ -467,18 +467,6 @@ TEST_F(homa_utils, homa_rpc_free__remove_from_throttled_list)
 	homa_rpc_free(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
 }
-TEST_F(homa_utils, homa_rpc_free__release_buffers)
-{
-	struct homa_pool *pool = &self->hsk.buffer_pool;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			4000, 98, 1000,	150000);
-	ASSERT_NE(NULL, crpc);
-
-	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
-	homa_rpc_free(crpc);
-	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
-}
 
 TEST_F(homa_utils, homa_rpc_free_rcu)
 {
@@ -608,6 +596,37 @@ TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
 	homa_rpc_reap(&self->hsk, 5);
 	EXPECT_STREQ("1235", dead_rpcs(&self->hsk));
 	EXPECT_EQ(3, self->hsk.dead_skbs);
+}
+TEST_F(homa_utils, homa_rpc_reap__release_buffers)
+{
+	struct homa_pool *pool = &self->hsk.buffer_pool;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+
+	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	homa_rpc_free(crpc);
+	EXPECT_EQ(1, atomic_read(&pool->descriptors[1].refs));
+	self->hsk.buffer_pool.check_waiting_invoked = 0;
+	homa_rpc_reap(&self->hsk, 5);
+	EXPECT_EQ(0, atomic_read(&pool->descriptors[1].refs));
+	EXPECT_EQ(1, self->hsk.buffer_pool.check_waiting_invoked);
+}
+TEST_F(homa_utils, homa_rpc_reap__free_gaps)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+	ASSERT_NE(NULL, crpc);
+	homa_gap_new(&crpc->msgin.gaps, 1000, 2000);
+	homa_gap_new(&crpc->msgin.gaps, 5000, 6000);
+
+	EXPECT_STREQ("start 1000, end 2000; start 5000, end 6000",
+			unit_print_gaps(crpc));
+	homa_rpc_free(crpc);
+	homa_rpc_reap(&self->hsk, 5);
+	// Test framework will complain if memory not freed.
 }
 TEST_F(homa_utils, homa_rpc_reap__nothing_to_reap)
 {

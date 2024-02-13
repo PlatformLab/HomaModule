@@ -90,6 +90,7 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 		pool->cores[i].allocated = 0;
 		pool->cores[i].next_candidate = 0;
 	}
+	pool->check_waiting_invoked = 0;
 
 	return 0;
 
@@ -406,6 +407,9 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
  */
 void homa_pool_check_waiting(struct homa_pool *pool)
 {
+#ifdef __UNIT_TEST__
+	pool->check_waiting_invoked += 1;
+#endif
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 		homa_sock_lock(pool->hsk, "buffer pool");

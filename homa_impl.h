@@ -1214,6 +1214,12 @@ struct homa_pool {
 
 	/** @num_cores: number of elements in @cores. */
 	int num_cores;
+
+	/**
+	 * @check_waiting_invoked: incremented during unit tests when
+	 * homa_pool_check_waiting is invoked.
+	 */
+	int check_waiting_invoked;
 };
 
 /**

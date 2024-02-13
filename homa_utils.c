@@ -443,7 +443,6 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	if (rpc) {
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
-		homa_pool_check_waiting(&hsk2->buffer_pool);
 	}
 
     done:
@@ -453,13 +452,26 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 
 /**
  * homa_rpc_free() - Destructor for homa_rpc; will arrange for all resources
- * associated with the RPC to be released (eventually). Note: the caller must
- * eventually invoke homa_pool_check_waiting with no locks held.
+ * associated with the RPC to be released (eventually).
  * @rpc:  Structure to clean up, or NULL. Must be locked. Its socket must
  *        not be locked.
  */
 void homa_rpc_free(struct homa_rpc *rpc)
 {
+	/* The goal for this function is to make the RPC inaccessible,
+	 * so that no other code will ever access it again. However, don't
+	 * actually release resources; leave that to homa_rpc_reap, which
+	 * runs later. There are two reasons for this. First, releasing
+	 * resources may be expensive, so we don't want to keep the caller
+	 * waiting; homa_rpc_reap will run in situations where there is time
+	 * to spare. Second, there may be other code that currently has
+	 * pointers to this RPC but temporarily released the lock (e.g. to
+	 * copy data to/from user space). It isn't safe to clean up until
+	 * that code has finished its work and released any pointers to the
+	 * RPC (homa_rpc_reap will ensure that this has happened). So, this
+	 * function should only make changes needed to make the RPC
+	 * inaccessible.
+	 */
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
 	UNIT_LOG("; ", "homa_rpc_free invoked");
@@ -510,12 +522,6 @@ void homa_rpc_free(struct homa_rpc *rpc)
 
 	homa_sock_unlock(rpc->hsk);
 	homa_remove_from_throttled(rpc);
-
-	if (unlikely(rpc->msgin.num_bpages))
-		homa_pool_release_buffers(
-				&rpc->hsk->buffer_pool,
-				rpc->msgin.num_bpages,
-				rpc->msgin.bpage_offsets);
 }
 
 /**
@@ -639,6 +645,26 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			 */
 			homa_rpc_lock(rpc, "homa_rpc_reap");
 			homa_rpc_unlock(rpc);
+
+			if (unlikely(rpc->msgin.num_bpages))
+				homa_pool_release_buffers(
+						&rpc->hsk->buffer_pool,
+						rpc->msgin.num_bpages,
+						rpc->msgin.bpage_offsets);
+			if (rpc->msgin.length >= 0) {
+				rpc->hsk->dead_skbs += skb_queue_len(
+						&rpc->msgin.packets);
+				while (1) {
+					struct homa_gap *gap = list_first_entry_or_null(
+							&rpc->msgin.gaps,
+							struct homa_gap, links);
+					if (gap == NULL) {
+						break;
+					}
+					list_del(&gap->links);
+					kfree(gap);
+				}
+			}
 			rpc->state = 0;
 			kfree(rpc);
 		}
@@ -647,6 +673,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		if (!result)
 			break;
 	}
+	homa_pool_check_waiting(&hsk->buffer_pool);
 	return result;
 }
 
