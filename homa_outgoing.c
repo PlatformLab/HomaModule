@@ -40,7 +40,10 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  * @xmit:    Nonzero means this method should start transmitting packets;
  *           zero means the caller will initiate transmission.
  *
- * Return:   0 for success, or a negative errno for failure.
+ * Return:   0 for success, or a negative errno for failure. It is is possible
+ *           for the RPC to be freed while this function is active. If that
+ *           happens, copying will cease, -EINVAL will be returned, and
+ *           rpc->state will be RPC_DEAD.
  */
 int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 {
@@ -212,6 +215,12 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		} while (skb_bytes_left > 0);
 
 		homa_rpc_lock(rpc, "homa_message_out_init3");
+		if (rpc->state == RPC_DEAD) {
+			/* RPC was freed while we were copying. */
+			err = -EINVAL;
+			kfree_skb(skb);
+			goto error;
+		}
 		*last_link = skb;
 		last_link = &(homa_get_skb_info(skb)->next_skb);
 		*last_link = NULL;

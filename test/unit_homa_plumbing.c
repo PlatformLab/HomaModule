@@ -11,6 +11,15 @@
 
 extern struct homa *homa;
 
+/* The following hook function frees hook_rpc. */
+static struct homa_rpc *hook_rpc = NULL;
+static void unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0)
+		return;
+	homa_rpc_free(hook_rpc);
+}
+
 FIXTURE(homa_plumbing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -395,6 +404,20 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_init_returns_error)
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_init)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
+			self->client_ip, self->server_ip, self->client_port,
+		        self->server_id, 2000, 100);
+	unit_hook_register(unlock_hook);
+	hook_rpc = srpc;
+	self->sendmsg_args.id = self->server_id;
+	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(RPC_DEAD, srpc->state);
+	EXPECT_EQ(0, srpc->msgout.num_skbs);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
 TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)

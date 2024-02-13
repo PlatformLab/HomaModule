@@ -955,7 +955,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		rpc->state = RPC_OUTGOING;
 
 		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
-		if (result)
+		if (result && (rpc->state != RPC_DEAD))
 			goto error;
 		homa_rpc_unlock(rpc);
 		finish = get_cycles();

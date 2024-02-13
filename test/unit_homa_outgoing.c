@@ -16,6 +16,15 @@ int get_offset(struct sk_buff *skb)
 	return ntohl(h->seg.offset);
 }
 
+/* The following hook function frees hook_rpc. */
+static struct homa_rpc *hook_rpc = NULL;
+static void unlock_hook(char *id)
+{
+	if (strcmp(id, "unlock") != 0)
+		return;
+	homa_rpc_free(hook_rpc);
+}
+
 FIXTURE(homa_outgoing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -335,6 +344,19 @@ TEST_F(homa_outgoing, homa_message_out_init__multiple_segs_per_skbuff)
 			"DATA 1400@8400 200@9800",
 			unit_log_get());
 	EXPECT_EQ(4200, homa_get_skb_info(crpc->msgout.packets)->data_bytes);
+}
+TEST_F(homa_outgoing, homa_message_out_init__rpc_freed_during_copy)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+	unit_hook_register(unlock_hook);
+	hook_rpc = crpc;
+	ASSERT_EQ(EINVAL, -homa_message_out_init(crpc,
+			unit_iov_iter((void *) 1000, 3000), 0));
+	EXPECT_EQ(0, crpc->msgout.num_skbs);
+	EXPECT_EQ(RPC_DEAD, crpc->state);
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_message_out_init__add_to_throttled)
 {
