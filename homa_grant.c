@@ -278,7 +278,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int rank, recalc;
 
-	tt_record("homa_grant_check_rpc starting");
+	tt_record1("homa_grant_check_rpc starting for id %d", rpc->id);
 
 	if ((rpc->msgin.length < 0) || (rpc->state == RPC_DEAD)
 			|| (rpc->msgin.num_bpages <= 0)) {
@@ -587,7 +587,7 @@ void homa_grant_find_oldest(struct homa *homa)
 }
 /**
  * homa_grant_free_rpc() - This function is invoked when an RPC is freed;
- * it rank up any state related to grants for that RPC's incoming message.
+ * it cleans up any state related to grants for that RPC's incoming message.
  * @rpc:   The RPC to clean up. Must be locked by the caller.
  */
 void homa_grant_free_rpc(struct homa_rpc *rpc)

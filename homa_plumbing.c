@@ -444,6 +444,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "timeout_ticks",
+		.data		= &homa_data.timeout_ticks,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "unsched_bytes",
 		.data		= &homa_data.unsched_bytes,
 		.maxlen		= sizeof(int),
@@ -868,6 +875,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 
 	homa_cores[raw_smp_processor_id()]->last_app_active = start;
 	if (unlikely(!msg->msg_control_is_user)) {
+		tt_record("homa_sendmsg error: !msg->msg_control_is_user");
 		result = -EINVAL;
 		goto error;
 	}
@@ -883,6 +891,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 	if ((msg->msg_namelen < sizeof(struct sockaddr_in))
 			|| ((msg->msg_namelen < sizeof(struct sockaddr_in6))
 			&& (addr->in6.sin6_family == AF_INET6))) {
+		tt_record("homa_sendmsg error: msg_namelen too short");
 		result = -EINVAL;
 		goto error;
 	}
@@ -928,6 +937,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		tt_record4("homa_sendmsg response, id %llu, port %d, pid %d, length %d",
 				args.id, hsk->port, current->pid, length);
 		if (args.completion_cookie != 0) {
+			tt_record("homa_sendmsg error: nonzero cookie");
 			result = -EINVAL;
 			goto error;
 		}
@@ -940,6 +950,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 			 * this could be totally valid (e.g. client is
 			 * no longer interested in it).
 			 */
+			tt_record2("homa_sendmsg error: RPC id %d, peer 0x%x, "
+					"doesn't exist", args.id,
+					tt_addr(canonical_dest));
 			return 0;
 		}
 		if (rpc->error) {
@@ -947,6 +960,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 			goto error;
 		}
 		if (rpc->state != RPC_IN_SERVICE) {
+			tt_record2("homa_sendmsg error: RPC id %d in bad "
+					"state %d", rpc->id, rpc->state);
 			homa_rpc_unlock(rpc);
 			rpc = 0;
 			result = -EINVAL;
@@ -1654,8 +1669,10 @@ int homa_dointvec(struct ctl_table *table, int write,
 				tt_record("Finished freezing cluster");
 				tt_freeze();
 			} else if (action == 8) {
-				printk("homa_total_incoming is %d\n",
+				printk(KERN_NOTICE"homa_total_incoming is %d\n",
 						atomic_read(&homa->total_incoming));
+			} else if (action == 9) {
+				tt_print_file("/users/ouster/node.tt");
 			} else
 				homa_rpc_log_active(homa, action);
 			action = 0;

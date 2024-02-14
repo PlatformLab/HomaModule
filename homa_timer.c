@@ -10,19 +10,16 @@
 /**
  * homa_check_rpc() -  Invoked for each RPC during each timer pass; does
  * most of the work of checking for time-related actions such as sending
- * resends, declaring a host dead, and sending requests for acks. Itt is
- * separate from homa_timer because homa_timer got too long and deeply
- * indented.
+ * resends, aborting RPCs for which there is no response, and sending
+ * requests for acks. It is separate from homa_timer because homa_timer
+ * got too long and deeply indented.
  * @rpc:     RPC to check; must be locked by the caller.
- * Return    Nonzero means this server has timed out; it's up to the caller
- *           to abort RPCs involving that server.
  */
-int homa_check_rpc(struct homa_rpc *rpc)
+void homa_check_rpc(struct homa_rpc *rpc)
 {
 	const char *us, *them;
 	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
-	struct homa_peer *peer;
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
@@ -52,19 +49,19 @@ int homa_check_rpc(struct homa_rpc *rpc)
 			 * shouldn't expect to hear anything until we grant more.
 			 */
 			rpc->silent_ticks = 0;
-			return 0;
+			return;
 		}
 		if (rpc->msgin.num_bpages == 0) {
 			/* Waiting for buffer space, so no problem. */
 			rpc->silent_ticks = 0;
-			return 0;
+			return;
 		}
 	} else if (!homa_is_client(rpc->id)) {
 		/* We're the server and we've received the input message;
 		 * no need to worry about retries.
 		 */
 		rpc->silent_ticks = 0;
-		return 0;
+		return;
 	}
 
 	if (rpc->state == RPC_OUTGOING) {
@@ -73,85 +70,35 @@ int homa_check_rpc(struct homa_rpc *rpc)
 			 * so no need to be concerned; the ball is in our court.
 			 */
 			rpc->silent_ticks = 0;
-			return 0;
+			return;
 		}
 	}
 
-	/* The -1 below is so that this RPC in considered in the
-	 * computation of peer->least_recent_rpc just before it reaches
-	 * homa->resend_ticks; the resend won't actually occur for
-	 * another tick.
-	 */
-	if (rpc->silent_ticks < (homa->resend_ticks-1))
-		return 0;
-
-	peer = rpc->peer;
-	if (peer->outstanding_resends
-			>= rpc->hsk->homa->timeout_resends) {
-		INC_METRIC(peer_timeouts, 1);
-		tt_record4("peer 0x%x timed out for RPC id %d, "
-				"state %d, outstanding_resends %d",
-				tt_addr(peer->addr), rpc->id, rpc->state,
-				peer->outstanding_resends);
+	if (rpc->silent_ticks < homa->resend_ticks)
+		return;
+	if (rpc->silent_ticks >= homa->timeout_ticks) {
+		INC_METRIC(rpc_timeouts, 1);
+		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, "
+				"state %d",
+				rpc->id, tt_addr(rpc->peer->addr), rpc->state);
+		homa_rpc_log_active_tt(homa, 0);
+		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
+		// homa_freeze_peers(homa);
+		// tt_freeze();
 		if (homa->verbose)
-			printk(KERN_NOTICE "Homa peer %s timed out, id %llu",
-					homa_print_ipv6_addr(&peer->addr),
-					rpc->id);
-		homa_freeze(rpc, PEER_TIMEOUT, "Freezing because of peer "
-				"timeout, id %d, peer 0x%x");
-		peer->outstanding_resends = 0;
-		return 1;
+			printk(KERN_NOTICE "RPC id %llu, peer %s, aborted "
+					"because of timeout, state %d\n",
+					rpc->id,
+					homa_print_ipv6_addr(&rpc->peer->addr),
+					rpc->state);
+		homa_rpc_abort(rpc, -ETIMEDOUT);
+		return;
 	}
-
-	/* Resends serve two purposes: to force retransmission of lost packets,
-	 * and to detect if servers have crashed. We only send one resend to
-	 * a given peer at a time: if many RPCs need resends to the same peer,
-	 * it's almost certainly because the peer is overloaded, so we don't
-	 * want to add to its load by sending lots of resends; we just want to
-	 * make sure that it is still alive. However, if there are multiple
-	 * RPCs that need resends, we need to rotate between them, so that
-	 * every RPC eventually gets a resend. In earlier versions of Homa
-	 * we only sent to the oldest RPC, but this led to distributed
-	 * deadlock in situations where the oldest RPC can't make progress
-	 * until some other RPC makes progress (e.g. a server is waiting
-	 * to receive one RPC before it replies to another, or some RPC is
-	 * earlier on the grantable list so it blocks transmissions of
-	 * other RPCs).
-	 */
-
-	/* First, collect information that will identify the RPC most
-	 * in need of a resend; this will be used during the *next*
-	 * homa_timer pass.
-	 */
-	if (peer->current_ticks != homa->timer_ticks) {
-		/* Reset info for this peer.*/
-		peer->resend_rpc = peer->least_recent_rpc;
-		peer->least_recent_rpc = NULL;
-		peer->least_recent_ticks = homa->timer_ticks;
-		peer->current_ticks = homa->timer_ticks;
-	}
-
-	if ((rpc != peer->resend_rpc) ||
-			(homa->timer_ticks - rpc->peer->most_recent_resend)
-			< homa->resend_interval) {
-		/* We're not sending a resend to this RPC now. Update info
-		 * about the best RPC for the next resend. Note: comparing
-		 * values in the face of wrap-around and compiler
-		 * optimizations is tricky; don't change the comparison below
-		 * unless you're sure you know what you are doing.
-		 */
-	        if (!((peer->least_recent_ticks - rpc->resend_timer_ticks)
-				& (1U<<31))) {
-		        peer->least_recent_rpc = rpc;
-		        peer->least_recent_ticks = rpc->resend_timer_ticks;
-	        }
-	        return 0;
-	}
+	if (((rpc->silent_ticks - homa->resend_ticks) % homa->resend_interval)
+			!= 0)
+		return;
 
 	/* Issue a resend for this RPC. */
-	rpc->resend_timer_ticks = homa->timer_ticks;
-	rpc->peer->most_recent_resend = homa->timer_ticks;
-	rpc->peer->outstanding_resends++;
 	homa_get_resend_range(&rpc->msgin, &resend);
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
@@ -184,7 +131,6 @@ int homa_check_rpc(struct homa_rpc *rpc)
 				homa_print_ipv6_addr(&rpc->peer->addr),
 				rpc->dport, rpc->id, ntohl(resend.offset),
 				ntohl(resend.length));
-	return 0;
 }
 
 /**
@@ -198,17 +144,40 @@ void homa_timer(struct homa *homa)
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
 	cycles_t start, end;
-	struct homa_peer *dead_peer = NULL;
 	int rpc_count = 0;
 	int total_rpcs = 0;
 	int total_incoming_rpcs = 0;
 	int total_incoming_bytes = 0;
+	static __u64 prev_grant_count = 0;
+	static int zero_count = 0;
+	int core;
+	__u64 total_grants;
 
-	tt_record2("homa_timer found total_incoming %d, num_grantable_rpcs %d",
-			atomic_read(&homa->total_incoming),
-			homa->num_grantable_rpcs);
 	start = get_cycles();
 	homa->timer_ticks++;
+
+	total_grants = 0;
+	for (core = 0; core < nr_cpu_ids; core++) {
+		struct homa_metrics *m = &homa_cores[core]->metrics;
+		total_grants += m->packets_sent[GRANT-DATA];
+	}
+
+	tt_record3("homa_timer found total_incoming %d, num_grantable_rpcs %d, "
+			"new grants %d",
+			atomic_read(&homa->total_incoming),
+			homa->num_grantable_rpcs, total_grants - prev_grant_count);
+	if ((total_grants == prev_grant_count)
+			&& (homa->num_grantable_rpcs > 20)) {
+		zero_count++;
+		if ((zero_count > 3) && !tt_frozen && 0) {
+			homa_rpc_log_active_tt(homa, 0);
+			tt_record("freezing because no grants are going out");
+			homa_freeze_peers(homa);
+			tt_freeze();
+		}
+	} else
+		zero_count = 0;
+	prev_grant_count = total_grants;
 
 	/* Scan all existing RPCs in all sockets.  The rcu_read_lock
 	 * below prevents sockets from being deleted during the scan.
@@ -244,8 +213,7 @@ void homa_timer(struct homa *homa)
 				total_incoming_bytes += rpc->msgin.length;
 			}
 			rpc->silent_ticks++;
-			if (homa_check_rpc(rpc))
-				dead_peer = rpc->peer;
+			homa_check_rpc(rpc);
 			homa_rpc_unlock(rpc);
 			rpc_count++;
 			if (rpc_count >= 10) {
@@ -262,16 +230,6 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
-	if (dead_peer) {
-		/* We only timeout one peer per call to this function (it's
-		 * tricky from a synchronization standpoint to handle the
-		 * crash in the middle of the loop above, and trying to
-		 * remember more than one dead peer until we get here adds
-		 * complexity). If there's more than one dead peer, we'll
-		 * timeout another one in the next call.
-		 */
-		homa_abort_rpcs(homa, &dead_peer->addr, 0, -ETIMEDOUT);
-	}
 
 //	if (total_rpcs > 0)
 //		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);

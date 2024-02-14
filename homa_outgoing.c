@@ -82,6 +82,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	if (unlikely((rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH)
 			|| (rpc->msgout.length == 0))) {
+		tt_record2("homa_message_out_init found bad length %d for id %d",
+				rpc->msgout.length, rpc->id);
 		err = -EINVAL;
 		goto error;
 	}
@@ -400,6 +402,8 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
 	struct homa *homa = rpc->hsk->homa;
+
+	tt_record("homa_xmit_data starting");
 
 	atomic_inc(&rpc->msgout.active_xmits);
 	while (*rpc->msgout.next_xmit) {

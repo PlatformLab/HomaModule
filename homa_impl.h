@@ -1894,9 +1894,14 @@ struct homa {
 
 	/**
 	 * @resend_interval: minimum number of homa timer ticks between
-	 * RESENDs to the same peer.
+	 * RESENDs for the same RPC.
 	 */
 	int resend_interval;
+
+	/**
+	 * @timeout_ticks: abort an RPC if its silent_ticks reaches this value.
+	 */
+	int timeout_ticks;
 
 	/**
 	 * @timeout_resends: Assume that a server is dead if it has not
@@ -2497,10 +2502,10 @@ struct homa_metrics {
 	__u64 resent_packets_used;
 
 	/**
-	 * @peer_timeouts: total number of times a peer (either client or
-	 * server) was found to be nonresponsive, resulting in RPC aborts.
+	 * @rpc_timeouts: total number of times an RPC (either client or
+	 * server) was aborted because the peer was nonresponsive.
 	 */
-	__u64 peer_timeouts;
+	__u64 rpc_timeouts;
 
 	/**
 	 * @server_rpc_discards: total number of times an RPC was aborted on
@@ -3295,7 +3300,7 @@ extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
                     int addr_len);
 extern void     homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id);
-extern int      homa_check_rpc(struct homa_rpc *rpc);
+extern void     homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
                     bool force);
 extern struct homa_rpc

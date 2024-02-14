@@ -846,6 +846,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	int i, count;
 
 	if (rpc != NULL) {
+		tt_record1("homa_ack_pkt freeing rpc id %d", rpc->id);
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
@@ -942,18 +943,29 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 }
 
 /**
- * homa_rpc_abort() - Terminate an RPC and arrange for an error to be returned
- * to the application.
- * @crpc:    RPC to be terminated. Must be a client RPC.
+ * homa_rpc_abort() - Terminate an RPC.
+ * @rpc:     RPC to be terminated.  Must be locked by caller.
  * @error:   A negative errno value indicating the error that caused the abort.
+ *           If this is a client RPC, the error will be returned to the
+ *           application; if it's a server RPC, the error is ignored and
+ *           we just free the RPC.
  */
-void homa_rpc_abort(struct homa_rpc *crpc, int error)
+void homa_rpc_abort(struct homa_rpc *rpc, int error)
 {
-	crpc->error = error;
-	homa_sock_lock(crpc->hsk, "homa_rpc_abort");
-	if (!crpc->hsk->shutdown)
-		homa_rpc_handoff(crpc);
-	homa_sock_unlock(crpc->hsk);
+	if (!homa_is_client(rpc->id)) {
+		INC_METRIC(server_rpc_discards, 1);
+		tt_record3("aborting server RPC: peer 0x%x, id %d, error %d",
+				tt_addr(rpc->peer->addr), rpc->id, error);
+		homa_rpc_free(rpc);
+		return;
+	}
+	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
+			tt_addr(rpc->peer->addr), rpc->id, error);
+	rpc->error = error;
+	homa_sock_lock(rpc->hsk, "homa_rpc_abort");
+	if (!rpc->hsk->shutdown)
+		homa_rpc_handoff(rpc);
+	homa_sock_unlock(rpc->hsk);
 }
 
 /**
@@ -989,20 +1001,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			if ((port != 0) && (rpc->dport != port))
 				continue;
 			homa_rpc_lock(rpc, "rpc_abort_rpcs");
-			if (homa_is_client(rpc->id)) {
-				tt_record3("aborting client RPC: peer 0x%x, "
-						"id %u, error %d",
-						tt_addr(rpc->peer->addr),
-						rpc->id, error);
-				homa_rpc_abort(rpc, error);
-			} else {
-				INC_METRIC(server_rpc_discards, 1);
-				tt_record3("discarding server RPC: peer 0x%x, "
-						"id %d, error %d",
-						tt_addr(rpc->peer->addr),
-						rpc->id, error);
-				homa_rpc_free(rpc);
-			}
+			homa_rpc_abort(rpc, error);
 			homa_rpc_unlock(rpc);
 		}
 		homa_unprotect_rpcs(hsk);
@@ -1011,7 +1010,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 }
 
 /**
- * homa_abort_rpcs() - Abort all outgoing (client-side) RPCs on a given socket.
+ * homa_abort_sock_rpcs() - Abort all outgoing (client-side) RPCs on a given
+ * socket.
  * @hsk:         Socket whose RPCs should be aborted.
  * @error:       Zero means that the aborted RPCs should be freed immediately.
  *               A nonzero value means that the RPCs should be marked

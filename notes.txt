@@ -3,8 +3,7 @@ Notes for Homa implementation in Linux:
 
 * Work in progress (1/29/2024): refactoring of homa_timer to simplify,
   allow faster retries. Performance with this code got significantly
-  worse (W4 tput of 22 Gbps instead of 60 Gbps before). These changes
-  are currently stashed
+  worse (W4 tput of 22 Gbps instead of 60 Gbps before).
 
 * Notes on refactoring of grant mechanism:
   * Need to reimplement FIFO grants

@@ -129,8 +129,9 @@ int homa_init(struct homa *homa)
 	homa->max_overcommit = 8;
 	homa->max_incoming = 400000;
 	homa->max_rpcs_per_peer = 1;
-	homa->resend_ticks = 15;
-	homa->resend_interval = 10;
+	homa->resend_ticks = 5;
+	homa->resend_interval = 5;
+	homa->timeout_ticks = 100;
 	homa->timeout_resends = 5;
 	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
@@ -441,6 +442,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	}
 	rpc = homa_find_server_rpc(hsk2, saddr, client_port, id);
 	if (rpc) {
+		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
 		homa_rpc_free(rpc);
 		homa_rpc_unlock(rpc);
 	}
@@ -475,6 +477,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	if (!rpc || (rpc->state == RPC_DEAD))
 		return;
 	UNIT_LOG("; ", "homa_rpc_free invoked");
+	tt_record1("homa_rpc_free invoked for id %d", rpc->id);
 	rpc->state = RPC_DEAD;
 
 	/* The following line must occur before the socket is locked or
@@ -665,6 +668,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 					kfree(gap);
 				}
 			}
+			tt_record1("homa_rpc_reap finished reaping id %d",
+					rpc->id);
 			rpc->state = 0;
 			kfree(rpc);
 		}
@@ -1752,12 +1757,12 @@ char *homa_print_metrics(struct homa *homa)
 				"Retransmitted packets that were actually used\n",
 				m->resent_packets_used);
 		homa_append_metric(homa,
-				"peer_timeouts             %15llu  "
-				"Peers found to be nonresponsive\n",
-				m->peer_timeouts);
+				"rpc_timeouts             %15llu  "
+				"RPCs aborted because peer was nonresponsive\n",
+				m->rpc_timeouts);
 		homa_append_metric(homa,
 				"server_rpc_discards       %15llu  "
-				"RPCs aborted by server because of timeouts\n",
+				"RPCs discarded by server because of errors\n",
 				m->server_rpc_discards);
 		homa_append_metric(homa,
 				"server_rpcs_unknown       %15llu  "
