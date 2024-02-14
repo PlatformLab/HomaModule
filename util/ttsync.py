@@ -50,6 +50,13 @@ send_pkts = {}
 # receiver, as passed to parse_tt.
 recv_pkts = {}
 
+
+# (rpc_id:offset) -> 1 for each retransmitted packet. rpc_id is the
+# id on the sender; used to ignore retransmits when syncing clocks
+# (the retransmit can accidentally be paired with the receipt of the
+# original packet).
+retransmits = {}
+
 # This is an NxN array, where N is the number of nodes. min_delays[A][B]
 # gives the smallest delay seen from node A to node B, as measured with
 # their unadjusted clocks (one of these delays could be negative).
@@ -82,6 +89,7 @@ def parse_tt(tt, node_num):
     """
 
     global options, send_pkts, recv_pkts, max_send_offsets, max_recv_offsets
+    global retransmits
     sent = 0
     recvd = 0
 
@@ -89,6 +97,13 @@ def parse_tt(tt, node_num):
         match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\]'
                 '.* id ([-0-9.]+),.* offset ([-0-9.]+)', line)
         if not match:
+            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+                    'retransmitting offset ([0-9.]+), .*id ([0-9.]+)', line)
+            if match:
+                offset = int(match.group(3))
+                id = int(match.group(4))
+                pktid = '%d:%d' % (id, offset)
+                retransmits[pktid] = 1
             continue
 
         time = float(match.group(1))
@@ -100,6 +115,8 @@ def parse_tt(tt, node_num):
             if (id in max_send_offsets) and (max_send_offsets[id] >= offset):
                 continue
             pktid = '%d:%d' % (id, offset)
+            if pktid in retransmits:
+                continue
             send_pkts[pktid] = [time, node_num]
             max_send_offsets[id] = offset
             sent += 1
@@ -107,6 +124,9 @@ def parse_tt(tt, node_num):
         match2 = re.match('.*Finished queueing packet: rpc id .*, offset .*, '
                 'len ([0-9.]+)', line)
         if match2:
+            pktid = '%d:%d' % (id, offset)
+            if pktid in retransmits:
+                continue
             last_offset = offset + int(match2.group(1)) - 1
             if (id in max_send_offsets) and (max_send_offsets[id] < last_offset):
                 max_send_offsets[id] = last_offset
