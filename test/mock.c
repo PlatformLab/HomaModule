@@ -643,6 +643,27 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
 
 void ip4_datagram_release_cb(struct sock *sk) {}
 
+int filp_close(struct file *, fl_owner_t id)
+{
+	return 0;
+}
+
+struct file *filp_open(const char *, int, umode_t)
+{
+	return NULL;
+}
+
+ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
+{
+	return 0;
+}
+
+ssize_t kernel_write(struct file *file, const void *buf, size_t count,
+		loff_t *pos)
+{
+	return 0;
+}
+
 void kfree(const void *block)
 {
 	if (block == NULL)
@@ -1023,6 +1044,11 @@ void vfree(const void *block)
 	}
 	unit_hash_erase(vmallocs_in_use, block);
 	free((void *) block);
+}
+
+int vfs_fsync(struct file *file, int datasync)
+{
+	return 0;
 }
 
 void *vmalloc(size_t size)

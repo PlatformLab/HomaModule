@@ -530,6 +530,136 @@ int tt_proc_release(struct inode *inode, struct file *file)
 }
 
 /**
+ * tt_print_file() - Print the contents of the timetrace to a given file.
+ * Useful in situations where the system is too unstable to extract a
+ * timetrace by reading /proc/timetrace. Unfortunately, this function cannot
+ * be invoked when preemption was disabled (e.g., when holding a spin lock).
+ * As of 2/2024, this function is not reliable in situations where the machine
+ * is about to crash.  It seems to print the trace, but after reboot the
+ * file isn't there.
+ * @file:  Name of the file in which to print the timetrace; should be
+ *         an absolute file name.
+ */
+void tt_print_file(char *path)
+{
+	/* Index of the next entry to return from each tt_buffer.
+	 * This array is too large to allocate on the stack, and we don't
+	 * want to allocate space dynamically (this function could be
+	 * called at a point where the world is going to hell). So,
+	 * allocate the array statically, and only allow one concurrent
+	 * call to this function.
+	 */
+	static int pos[NR_CPUS];
+	static atomic_t active;
+	struct file *filp = NULL;
+	int err;
+
+	/* Also use a static buffer for accumulating output data. */
+	static char buffer[10000];
+	int bytes_used = 0;
+	loff_t offset = 0;
+
+	printk(KERN_ERR "tt_print_file starting, file %s\n", path);
+
+	if (atomic_xchg(&active, 1)) {
+		printk(KERN_ERR "concurrent call to tt_print_file aborting\n");
+		return;
+	}
+	if (!init)
+		return;
+
+	filp = filp_open(path, O_WRONLY | O_CREAT, 0666);
+	if (IS_ERR(filp)) {
+		printk(KERN_ERR "tt_print_file couldn't open %s: "
+				"error %ld\n", path, -PTR_ERR(filp));
+		filp = NULL;
+		goto done;
+	}
+
+	tt_record("tt_print_file printing timetrace");
+	atomic_inc(&tt_freeze_count);
+	tt_find_oldest(pos);
+
+	bytes_used += snprintf(buffer + bytes_used,
+			sizeof(buffer) - bytes_used,
+			"cpu_khz: %u\n", cpu_khz);
+
+	/* Each iteration of this loop printk's one event. */
+	while (true) {
+		struct tt_event *event;
+		int i;
+		int current_core = -1;
+		__u64 earliest_time = ~0;
+
+		/* Check all the traces to find the earliest available event. */
+		for (i = 0; i < nr_cpu_ids; i++) {
+			struct tt_buffer *buffer = tt_buffers[i];
+			event = &buffer->events[pos[i]];
+			if ((pos[i] != buffer->next_index)
+					&& (event->timestamp < earliest_time)) {
+			    current_core = i;
+			    earliest_time = event->timestamp;
+			}
+		}
+		if (current_core < 0) {
+		    /* None of the traces have any more events to process. */
+		    break;
+		}
+		event = &(tt_buffers[current_core]->events[
+				pos[current_core]]);
+		pos[current_core] = (pos[current_core] + 1)
+				& (tt_buffer_size-1);
+
+		bytes_used += snprintf(buffer + bytes_used,
+				sizeof(buffer) - bytes_used,
+				"%lu [C%02d] ",
+				(long unsigned int) event->timestamp,
+				current_core);
+		bytes_used += snprintf(buffer + bytes_used,
+				sizeof(buffer) - bytes_used,
+				event->format, event->arg0,
+				event->arg1, event->arg2, event->arg3);
+		if (bytes_used < sizeof(buffer)) {
+			buffer[bytes_used] = '\n';
+			bytes_used++;
+		}
+		if ((bytes_used + 1000) >= sizeof(buffer)) {
+			err = kernel_write(filp, buffer, bytes_used,
+					&offset);
+			if (err < 0) {
+				printk(KERN_NOTICE "tt_print_file got "
+						"error %d writing %s\n",
+						-err, path);
+				goto done;
+			}
+			bytes_used = 0;
+		}
+	}
+	if (bytes_used > 0) {
+		err = kernel_write(filp, buffer, bytes_used, &offset);
+		if (err < 0)
+			printk(KERN_ERR "tt_print_file got error %d "
+					"writing %s\n", -err, path);
+	}
+
+	printk(KERN_ERR "tt_print_file finishing up\n");
+	done:
+	if (filp != NULL) {
+		err = vfs_fsync(filp, 0);
+		if (err < 0)
+			printk(KERN_ERR "tt_print_file got error %d "
+					"in fsync\n", -err);
+		err = filp_close(filp, NULL);
+		if (err < 0)
+			printk(KERN_ERR "tt_print_file got error %d "
+					"in filp_close\n", -err);
+	}
+	atomic_dec(&tt_freeze_count);
+	atomic_set(&active, 0);
+	printk(KERN_ERR "tt_print_file(%s) finished\n", path);
+}
+
+/**
  * tt_printk() - Print the contents of the timetrace to the system log.
  * Useful in situations where the system is too unstable to extract a
  * timetrace by reading /proc/timetrace.
@@ -554,6 +684,8 @@ void tt_printk(void)
 		return;
 	atomic_inc(&tt_freeze_count);
 	tt_find_oldest(pos);
+
+	printk(KERN_NOTICE "cpu_khz: %u\n", cpu_khz);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
