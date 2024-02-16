@@ -72,6 +72,38 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 }
 
 /**
+ * homa_send_ipis() - If there are any interprocessor interrupts pending
+ * from this core to others (for packets queued for SoftIRQ processing)
+ * issue those interrupts now. This function is needed because calling
+ * netif_receive_skb doesn't actually issue IPIs; it queues them until
+ * all NAPI processing is finished, and this could be a long time if a
+ * lot more packets are available for processing.
+ */
+void homa_send_ipis(void)
+{
+#if defined(CONFIG_RPS) && !defined(__UNIT_TEST__)
+	/* This function duplicates the code from net_rps_send_ipi because
+	 * we can't call that function from here.
+	 */
+	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
+	struct softnet_data *remsd;
+
+	local_irq_disable();
+	remsd = sd->rps_ipi_list;
+	sd->rps_ipi_list = NULL;
+	local_irq_enable();
+
+	while (remsd) {
+		struct softnet_data *next = remsd->rps_ipi_next;
+
+		if (cpu_online(remsd->cpu))
+			smp_call_function_single_async(remsd->cpu, &remsd->csd);
+		remsd = next;
+	}
+#endif
+}
+
+/**
  * homa_gso_segment() - Split up a large outgoing Homa packet (larger than MTU)
  * into multiple smaller packets.
  * @skb:       Packet to split.
@@ -242,6 +274,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				skb_list_del_init(held_skb);
 				homa_gro_complete(held_skb, 0);
 				netif_receive_skb(held_skb);
+				homa_send_ipis();
 				napi->gro_hash[core->held_bucket].count--;
 				if (napi->gro_hash[core->held_bucket].count == 0)
 					__clear_bit(core->held_bucket,

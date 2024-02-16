@@ -3456,6 +3456,7 @@ extern struct homa_rpc
 		    const struct in6_addr *source, struct data_header *h,
 		    int *created);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
+extern void     homa_send_ipis(void);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
                     size_t size, int flags);
