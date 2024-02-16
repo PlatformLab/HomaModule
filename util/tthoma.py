@@ -1730,10 +1730,18 @@ class AnalyzeDelay:
         else:
             min_short = 0
             max_short = 0
-        min_long = long_total[98*len(long_total)//100][0]
-        max_long = long_total[99*len(long_total)//100][0]
-        min_grant = grant_total[98*len(grant_total)//100][0]
-        max_grant = grant_total[99*len(grant_total)//100][0]
+        if long_total:
+            min_long = long_total[98*len(long_total)//100][0]
+            max_long = long_total[99*len(long_total)//100][0]
+        else:
+            min_long = 0
+            max_long = 0
+        if grant_total:
+            min_grant = grant_total[98*len(grant_total)//100][0]
+            max_grant = grant_total[99*len(grant_total)//100][0]
+        else:
+            min_grant = 0
+            max_grant = 0
 
         short_to_nic = []
         short_to_gro = []
@@ -2150,14 +2158,14 @@ class AnalyzeGrantablelock:
                     max_block_core = core
             data.append([name, total_block, max_block_time, max_block_core])
 
-        print('Node     Blocked MaxCore MaxBlk HoldFrac AvgHold MaxHold    MaxTime')
-        print('-------------------------------------------------------------------')
+        print('Node     Blocked MaxCore MaxBlk HoldFrac AvgHold  MaxHold    MaxTime')
+        print('--------------------------------------------------------------------')
         for name, total_block, max_block, max_block_core in sorted(
                 data, key=lambda t : t[1], reverse = True):
             elapsed = traces[name]['elapsed_time']
             node = self.nodes[name]
             if node['hold_count'] > 0:
-                hold_info = '    %4.2f  %6.2f  %6.2f %10.3f' % (
+                hold_info = '    %4.2f  %6.2f  %7.2f %10.3f' % (
                         node['total_hold']/elapsed,
                         node['total_hold']/node['hold_count'],
                         node['max_hold'], node['max_time'])
@@ -4210,8 +4218,7 @@ class AnalyzeTimeline:
 
     def output(self):
         global rpcs
-        num_client_rpcs = 0
-        num_server_rpcs = 0
+        num_rpcs = 0
         print('\n-------------------')
         print('Analyzer: timeline')
         print('-------------------')
@@ -4221,26 +4228,26 @@ class AnalyzeTimeline:
         # string for the phase, the name selects an element of an RPC, and
         # the lambda extracts a time from the RPC element.
         client_phases = [
-            ['start',                         'sendmsg',      lambda x : x],
             ['first request packet sent',     'send_data',    lambda x : x[0][0]],
             ['softirq gets first grant',      'softirq_grant',lambda x : x[0][0]],
             ['last request packet sent',      'send_data',    lambda x : x[-1][0]],
             ['gro gets first response packet','gro_data',     lambda x : x[0][0]],
+            ['softrq gets first response pkt','softirq_data', lambda x : x[0][0]],
             ['sent grant',                    'send_grant',   lambda x : x[0][0]],
             ['gro gets last response packet', 'gro_data',     lambda x : x[-1][0]],
             ['homa_recvmsg returning',        'recvmsg_done', lambda x : x]
             ]
         client_extra = [
-            ['start',                         'sendmsg',       lambda x : x],
             ['finished copying req into pkts','copy_in_done',  lambda x : x],
             ['started copying to user space', 'copy_out_start',lambda x : x],
             ['finished copying to user space','copy_out_done', lambda x : x]
         ]
 
         server_phases = [
-            ['start',                          'gro_data',      lambda x : x[0][0]],
+            ['gro gets first request packet',  'gro_data',      lambda x : x[0][0]],
+            ['softirq gets first request pkt', 'softirq_data',  lambda x : x[0][0]],
             ['sent grant',                     'send_grant',    lambda x : x[0][0]],
-            ['gro gets last request packet',  'gro_data',       lambda x : x[-1][0]],
+            ['gro gets last request packet',   'gro_data',       lambda x : x[-1][0]],
             ['homa_recvmsg returning',         'recvmsg_done',  lambda x : x],
             ['homa_sendmsg response',          'sendmsg',       lambda x : x],
             ['first response packet sent',     'send_data',     lambda x : x[0][0]],
@@ -4248,7 +4255,6 @@ class AnalyzeTimeline:
             ['last response packet sent',      'send_data',     lambda x : x[-1][0]]
         ]
         server_extra = [
-            ['start',                         'gro_data',       lambda x : x[0][0]],
             ['started copying to user space', 'copy_out_start', lambda x : x],
             ['finished copying to user space','copy_out_done',  lambda x : x],
             ['finished copying req into pkts','copy_in_done',   lambda x : x]
@@ -4266,46 +4272,51 @@ class AnalyzeTimeline:
         server_extra_deltas = []
 
         # Collect statistics from all of the RPCs.
-        for id, rpc in rpcs.items():
-            if not (id & 1):
-                # This is a client RPC
-                if (not 'sendmsg' in rpc) or (not 'recvmsg_done' in rpc):
-                    continue
-                num_client_rpcs += 1
-                self.__collect_stats(client_phases, rpc, client_totals,
-                        client_deltas)
-                self.__collect_stats(client_extra, rpc, client_extra_totals,
-                        client_extra_deltas)
-            else:
-                # This is a server RPC
-                if (not rpc['gro_data']) or (rpc['gro_data'][0][1] != 0) \
-                        or (not rpc['send_data']):
-                    continue
-                num_server_rpcs += 1
-                self.__collect_stats(server_phases, rpc, server_totals,
-                        server_deltas)
-                self.__collect_stats(server_extra, rpc, server_extra_totals,
-                        server_extra_deltas)
+        for id, crpc in rpcs.items():
+            # Find matching and complete pairs of client-side and
+            # serve-side RPCs.
+            if id & 1:
+                continue
+            if not ((id^1) in rpcs):
+                continue
+            srpc = rpcs[id^1]
+            if (not 'sendmsg' in crpc) or (not 'recvmsg_done' in crpc):
+                continue
+            if (not crpc['gro_data']) or (crpc['gro_data'][0][1] != 0) \
+                    or (not crpc['send_data']):
+                continue
+            num_rpcs += 1
+
+            start = crpc['sendmsg']
+            self.__collect_stats(client_phases, crpc, start, client_totals,
+                    client_deltas)
+            self.__collect_stats(client_extra, crpc, start, client_extra_totals,
+                    client_extra_deltas)
+            self.__collect_stats(server_phases, srpc, start, server_totals,
+                    server_deltas)
+            self.__collect_stats(server_extra, srpc, start, server_extra_totals,
+                    server_extra_deltas)
 
         if client_totals:
-            print('\nTimeline for clients (%d RPCs):\n' % (num_client_rpcs))
+            print('\nTimeline for clients (%d RPCs):\n' % (num_rpcs))
             self.__print_phases(client_phases, client_totals, client_deltas)
             print('')
             self.__print_phases(client_extra, client_extra_totals,
                     client_extra_deltas)
         if server_totals:
-            print('\nTimeline for servers (%d RPCs):\n' % (num_server_rpcs))
+            print('\nTimeline for servers (%d RPCs):\n' % (num_rpcs))
             self.__print_phases(server_phases, server_totals, server_deltas)
             print('')
             self.__print_phases(server_extra, server_extra_totals,
                     server_extra_deltas)
 
-    def __collect_stats(self, phases, rpc, totals, deltas):
+    def __collect_stats(self, phases, rpc, start, totals, deltas):
         """
         Utility method used by print to aggregate delays within an RPC
         into buckets corresponding to different phases of the RPC.
         phases:     Describes the phases to aggregate
         rpc:        Dictionary containing information about one RPC
+        start:      Starting time for RPC on client-side
         totals:     Total delays from start of the RPC are collected here
         deltas:     Delays from one phase to the next are collected here
         """
@@ -4313,14 +4324,13 @@ class AnalyzeTimeline:
         while len(phases) > len(totals):
             totals.append([])
             deltas.append([])
+        prev = start
         for i in range(len(phases)):
             phase = phases[i]
             if phase[1] in rpc:
                 rpc_phase = rpc[phase[1]]
                 if rpc_phase:
                     t = phase[2](rpc_phase)
-                    if i == 0:
-                        start = prev = t
                     totals[i].append(t - start)
                     deltas[i].append(t - prev)
                     prev = t
@@ -4330,7 +4340,7 @@ class AnalyzeTimeline:
         Utility method used by print to print out summary statistics
         aggregated by __phase_stats
         """
-        for i in range(1, len(phases)):
+        for i in range(0, len(phases)):
             label = phases[i][0]
             if not totals[i]:
                 print('%-32s (no events)' % (label))
@@ -4465,9 +4475,12 @@ class AnalyzeTxqueues:
 
 # Parse command-line options.
 parser = OptionParser(description=
-        'Analyze one or more Homa timetrace files and print information '
-        'extracted from the file(s). Command-line arguments determine '
-        'which analyses to perform.',
+        'Read in one or more Homa timetrace files and use one or more '
+        'analyzers to print information extracted from the file(s). The '
+        'trace files should be synchronized (collected at about the same '
+        'time and clock-synced with ttsync.py). Command-line arguments '
+        'determine which analyzers to apply and provide additional '
+        'parameters for the analyzers.',
         usage='%prog [options] [trace trace ...]',
         conflict_handler='resolve')
 parser.add_option('--analyzers', '-a', dest='analyzers', default='all',
