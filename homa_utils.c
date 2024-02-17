@@ -1976,12 +1976,12 @@ void homa_prios_changed(struct homa *homa)
 
 /**
  * homa_spin() - Delay (without sleeping) for a given time interval.
- * @usecs:   How long to delay (in microseconds)
+ * @ns:   How long to delay (in nanoseconds)
  */
-void homa_spin(int usecs)
+void homa_spin(int ns)
 {
 	__u64 end;
-	end = get_cycles() + (usecs*cpu_khz)/1000;
+	end = get_cycles() + (ns*cpu_khz)/1000000;
 	while (get_cycles() < end) {
 		/* Empty loop body.*/
 	}

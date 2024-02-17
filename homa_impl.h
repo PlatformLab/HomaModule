@@ -833,11 +833,21 @@ struct homa_rpc {
 	 * RPC_HANDING_OFF -       This RPC is in the process of being
 	 *                         handed off to a waiting thread; it must
 	 *                         not be reaped.
+	 * APP_NEEDS_LOCK -        Means that code in the application thread
+	 *                         needs the RPC lock (e.g. so it can start
+	 *                         copying data to user space) so others
+	 *                         (e.g. SoftIRQ processing) should relinquish
+	 *                         the lock ASAP. Without this, SoftIRQ can
+	 *                         lock out the application for a long time,
+	 *                         preventing data copies to user space from
+	 *                         starting (and they limit throughput at
+	 *                         high network speeds).
 	 */
 #define RPC_PKTS_READY        1
 #define RPC_COPYING_FROM_USER 2
 #define RPC_COPYING_TO_USER   4
 #define RPC_HANDING_OFF       8
+#define APP_NEEDS_LOCK       16
 
 #define RPC_CANT_REAP (RPC_COPYING_FROM_USER | RPC_COPYING_TO_USER \
 		| RPC_HANDING_OFF)
@@ -3482,7 +3492,7 @@ extern struct homa_sock
                *homa_socktab_start_scan(struct homa_socktab *socktab,
                     struct homa_socktab_scan *scan);
 extern int      homa_softirq(struct sk_buff *skb);
-extern void     homa_spin(int usecs);
+extern void     homa_spin(int ns);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,

@@ -278,8 +278,9 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		tt_record2("finished freeing %d skbs for id %d",
 				n, rpc->id);
 		n = 0;
+		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_copy_to_user");
-		atomic_andnot(RPC_COPYING_TO_USER, &rpc->flags);
+		atomic_andnot(APP_NEEDS_LOCK|RPC_COPYING_TO_USER, &rpc->flags);
 		if (error)
 			break;
 	}
@@ -384,6 +385,20 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 	for (; skb != NULL; skb = next) {
 		h = (struct data_header *) skb->data;
 		next = skb->next;
+
+		/* Relinquish the RPC lock temporarily if it's needed
+		 * elsewhere.
+		 */
+		if (rpc != NULL) {
+			int flags = atomic_read(&rpc->flags);
+			if (flags & APP_NEEDS_LOCK) {
+				homa_rpc_unlock(rpc);
+				tt_record2("softirq released lock for id %d, "
+						"flags 0x%x", rpc->id, flags);
+				homa_spin(200);
+				rpc = NULL;
+			}
+		}
 
 		/* Find and lock the RPC if we haven't already done so. */
 		if (rpc == NULL) {
@@ -1153,7 +1168,9 @@ int homa_register_interests(struct homa_interest *interest,
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	homa_sock_unlock(hsk);
 	if (!interest->locked) {
+		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_register_interests");
+		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
 		interest->locked = 1;
 	}
 	atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
@@ -1314,9 +1331,13 @@ found_rpc:
 		if (rpc) {
 			tt_record2("homa_wait_for_message found rpc id %d, pid %d",
 					rpc->id, current->pid);
-			if (!interest.locked)
+			if (!interest.locked) {
+				atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 				homa_rpc_lock(rpc, "homa_wait_for_message");
-			atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
+				atomic_andnot(APP_NEEDS_LOCK|RPC_HANDING_OFF,
+						&rpc->flags);
+			} else
+				atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
 			if (rpc->state == RPC_DEAD) {
 				homa_rpc_unlock(rpc);
 				continue;
