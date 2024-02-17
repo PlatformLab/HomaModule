@@ -340,12 +340,18 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		if (refcount_read(&skb->users) > 1) {
 			if (hsk->inet.sk.sk_family == AF_INET6) {
 				printk(KERN_NOTICE "ip6_xmit didn't free "
-						"Homa control packet after "
-						"error\n");
+						"Homa control packet (type %d) "
+						"after error %d\n",
+						h->type, result);
 			} else {
 				printk(KERN_NOTICE "ip_queue_xmit didn't free "
-						"Homa  control packet after "
-						"error\n");
+						"Homa control packet (type %d) "
+						"after error %d\n",
+						h->type, result);
+				tt_record2("ip_queue_xmit didn't free Homa "
+						"control packet (type %d) "
+						"after error %d\n",
+						h->type, result);
 			}
 		}
 	}
