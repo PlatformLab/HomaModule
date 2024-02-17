@@ -2,6 +2,30 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+51. (February 2024) RPC lock preemption. When SoftIRQ is processing a large
+    batch of packets for a single RPC, it was holding the RPC lock continuously.
+    This prevented homa_copy_to_user from acquiring the lock to extract the
+    next batch of packets to copy. Since homa_copy_to_user is the bottleneck
+    for large messages on 100 Gbps networks, this can potentially affect
+    throughput. Fixed by introducing APP_NEEDS_LOCK for RPCs, so that
+    SoftIRQ releases the lock temporarily if homa_copy_to_user needs it.
+    This may have improved throughput for W4 on c6525-100g cluster by 10%,
+    but it's very difficult to measure accurately.
+
+50. (February 2024) Don't queue IPIs. Discovered that when homa_gro_receive
+    invokes netif_receive_skb (intending to push a batch of packets through
+    to SoftIRQ ASAP), Linux doesn't immediately send an interprocessor
+    interrupt (IPI). It just queues the pending IPI until all NAPI processing
+    is finished, then issues all of the queued IPIs. This results in
+    significant delay for the first batch when NAPI has lots of additional
+    packets to process. Fixed this by writing homa_send_ipis and invoking it
+    in homa_gro_receive after calling netif_receive_skb. In 2-node tests
+    with "cp_node client --workload 500000 --client-max 1 --one-way"
+    (c6525-100g cluster), this improved latency from RPC start to beginning
+    copy to user space from 79 us to 46 us, resulting in 10-20% improvement
+    in throughput. W4 throughput appears to have improved about 10% (but a bit
+    had to measure precisely).
+
 49. (November 2023) Implemented "Gen3" load balancing scheme, renamed the
     old scheme "Gen2". For details on load balancing, see balance.txt.
     Gen3 seems to reduce significantly tail latency for cross-core handoffs;
