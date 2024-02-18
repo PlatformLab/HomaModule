@@ -2,6 +2,33 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+52. (February 2024) Impact of core allocation. Benchmark setup: 2 nodes,
+    c6525-100g cluster (100 Gbps network, 48 hyperthreads, 24 cores, 3 cores
+    per chiplet?):
+    cp_node server --pin N
+    cp_node client ----workload 500000 --one-way --client-max 1
+    window=0 max_incoming=2500000 gro_policy=16 unsched_bytes=50000
+    Measured RPC throughput and copy_to_user throughput:
+
+    --pin     Gbps    Copy
+    0         17.7    33.4
+    3         18.9    32.2
+    6         19.0    34.3
+    8         18.8    34.1
+    9         22.2    54.2
+    10        25.7    53.2
+    11        26.3    55.1
+    12        17.9    31.7
+    13        18.2    31.6
+    15        17.9    31.5
+    18        18.2    32.3
+    21        18.1    32.4
+    32        18.6    34.0
+    33        24.8    54.0
+    34        25.9    54.5
+    35        26.3    54.5
+    36        17.7    31.5
+
 51. (February 2024) RPC lock preemption. When SoftIRQ is processing a large
     batch of packets for a single RPC, it was holding the RPC lock continuously.
     This prevented homa_copy_to_user from acquiring the lock to extract the
