@@ -148,13 +148,19 @@ grants = defaultdict(dict)
 # tx_new_grants:  Bytes of grants that became available at SoftIRQ level
 #                 during the interval
 
-# rx_starts:      Number of new incoming messages that started in the interval
-# rx_active:      Number of incoming messages that have been partially received
-#                 as of the end of the interval
-# rx_pkts:        Number of data packets received by the node during the interval
-# rx_data:        Number of bytes of data received by the node during the interval
-# incoming_data:  Number of bytes of data that have been transmitted by some
-#                 other node but not yet received by this node
+# rx_starts:      Number of new incoming messages whose first packet was
+#                 transmitted by the sender in the interval
+# rx_active:      Number of incoming messages that have been partially
+#                 transmitted and/or received as of the end of the interval
+# rx_pkts:        Number of data packets received by GRO during the interval
+# rx_bytes:       Number of bytes of data received by GRO during the interval
+# rx_granted:     Bytes of grant that have been transmitted, but for which
+#                 corresponding data has not been transmitted
+# rx_data_xmit:   Number of bytes of data that have been transmitted by the
+#                 sender but not yet received by GRO
+# rx_data_gro:    Number of bytes of data that have been received by GRO
+#                 but not SoftIRQ, as of the end of the interval
+
 # rx_grants:      Number of incoming RPCs with outstanding grants
 # rx_grant_bytes: Total bytes of data in outstanding grants for incoming RPCs
 # rx_grant_info:  Formatted text describing incoming RPCs with oustanding grants
@@ -288,7 +294,7 @@ def get_length(offset, msg_length=1e20):
     """
     Compute the length of a packet. Uses information collected in the
     offsets global variable, and assumes that all messages use the same
-    set offsets.
+    set of offsets.
 
     offset:      Offset of the first byte in the packet.
     msg_length:  Total number of bytes in the message, if known. If not
@@ -2841,31 +2847,44 @@ class AnalyzeIntervals:
         dispatcher.interest('AnalyzeRpcs')
         return
 
-    class TxGrants:
+    class Incoming:
         """
-        Tracks grants incoming to a sender, keeping track of those currently
-        in transit, those that have been received by GRO but not SoftIRQ,
-        and those received by SoftIRQ for which data hasn't yet been sent.
+        Tracks either grants or message data incoming to a node, keeping track
+        of how much is in transit, how much as been received by GRO but not
+        SoftIRQ, and how much has been received by SoftIRQ. For grants, also
+        tracks how much data has been sent.
         """
 
-        def __init__(self):
-            # RPC id -> highest grant sent by receiver
+        def __init__(self, track_grants):
+            # track_grants is True to indicate we're tracking grant info, False
+            # to indicate we're tracking data.
+
+            self.track_grants = track_grants;
+
+            # RPC id -> highest offset of grant sent by this node (not used
+            # if track_grants)
+            self.granted = {}
+
+            # RPC id -> highest offset of data/grant sent by peer
             self.sent = {}
 
-            # RPC id -> highest grant received by GRO
+            # RPC id -> highest offset received by GRO
             self.gro = {}
 
-            # RPC id -> highest grant seen by SoftIRQ
+            # RPC id -> highest offset seen by SoftIRQ
             self.softirq = {}
 
-            # RPC id -> highest offset transmitted for RPC
+            # RPC id -> highest offset of data sent by this node (only
+            # used if track_grants)
             self.xmit = {}
 
-            # Total granted bytes that have been transmitted but not received
-            # by GRO
+            # Total bytes granted for which data has not been transmitted
+            self.sum_granted = 0
+
+            # Total bytes transmitted but not received by GRO
             self.sum_sent = 0
 
-            # Total granted bytes that have been received by GRO but not SoftIRQ
+            # Total bytes that have been received by GRO but not SoftIRQ
             self.sum_gro = 0
 
             # Total granted bytes that have been received by SoftIRQ but
@@ -2873,38 +2892,57 @@ class AnalyzeIntervals:
             self.sum_softirq = 0
 
         def init_rpc(self, id):
+            self.granted[id] = 0
             self.sent[id] = 0
             self.gro[id] = 0
             self.softirq[id] = 0
             self.xmit[id] = 0
 
         def add_rpc(self, id, interval):
-            # Add grant information for the given RPC to the sums. Assume
-            # no info for this RPC was previously in the sums, and that
-            # the raw grant info has been updated. Also updates info in
-            # interval
+            # Add info for the given RPC to the sums. Assume no info for this
+            # RPC was previously in the sums, and that raw data (self.sent,
+            # etc.) has been updated. Also updates info in interval.
             if self.xmit[id] > self.softirq[id]:
-                interval['tx_new_grants'] += self.xmit[id] - self.softirq[id]
+                if self.track_grants:
+                    interval['tx_new_grants'] += self.xmit[id] - self.softirq[id]
                 self.softirq[id] = self.xmit[id]
             if self.softirq[id] > self.gro[id]:
                 self.gro[id] = self.softirq[id]
             if self.gro[id] > self.sent[id]:
                 self.sent[id] = self.gro[id]
+            if self.sent[id] > self.granted[id]:
+                self.granted[id] = self.sent[id]
+            self.sum_granted += self.granted[id] - self.sent[id]
             self.sum_sent += self.sent[id] - self.gro[id]
-            interval['tx_grant_xmit'] = self.sum_sent;
             self.sum_gro += self.gro[id] - self.softirq[id]
-            interval['tx_grant_gro'] = self.sum_gro
             self.sum_softirq += self.softirq[id] - self.xmit[id]
-            interval['tx_grant_avl'] = self.sum_softirq
+            if 0:
+                print('id %d, granted %d, sent %d, gro %d, softirq %d '
+                        'sum_granted %d\n' % (id, self.granted[id],
+                        self.sent[id], self.gro[id], self.softirq[id],
+                        self.sum_granted))
+            if self.track_grants:
+                interval['tx_grant_xmit'] = self.sum_sent;
+                interval['tx_grant_gro'] = self.sum_gro
+                interval['tx_grant_avl'] = self.sum_softirq
+            else:
+                interval['rx_granted'] = self.sum_granted;
+                interval['rx_data_xmit'] = self.sum_sent
+                interval['rx_data_gro'] = self.sum_gro
 
         def sub_rpc(self, id):
-            # Subtract any grant information for the given RPC from the sums.
+            # Subtract any information for the given RPC from the sums.
+            self.sum_granted -= self.granted[id] - self.sent[id]
             self.sum_sent -= self.sent[id] - self.gro[id]
             self.sum_gro -= self.gro[id] - self.softirq[id]
             self.sum_softirq -= self.softirq[id] - self.xmit[id]
-            if (self.sum_softirq < 0) or (self.sum_gro < 0) or (self.sum_sent < 0):
-                print('Bogus grant info for id %d: sent %d, gro %d, softirq %d'
-                        % (id, self.sum_sent, self.sum_gro, self.sum_softirq))
+            self.sum_granted -= self.gro[id] - self.gro[id]
+            if ((self.sum_granted < 0) or (self.sum_softirq < 0)
+                    or (self.sum_gro < 0) or (self.sum_sent < 0)):
+                print('Bogus incoming info for id %d: granted %d, sent %d, '
+                        'gro %d, softirq %d'
+                        % (id, self.sum_granted, self.sum_sent, self.sum_gro,
+                        self.sum_softirq))
 
     def analyze_tx(self):
         """
@@ -2929,6 +2967,8 @@ class AnalyzeIntervals:
         # <time, 'grant_gro', id, offset> GRO has received grants up to offset
         # <time, 'grant_softirq', id, offset>
         #                                 SoftIRQ has received grants up to offset
+        # <time, 'trace_end', dummy>      Marks end of trace; used to make sure
+        #                                 all intervals are populated
         events = {}
 
         # Node name -> number of active tx messages at start of trace.
@@ -2937,12 +2977,13 @@ class AnalyzeIntervals:
         # Node name -> number of active RPCs at start of trace.
         init_active_rpcs = {}
 
-        grants = self.TxGrants()
+        grants = self.Incoming(track_grants=True)
 
         for node in get_sorted_nodes():
             init_active[node] = 0
             init_active_rpcs[node] = 0
             events[node] = []
+            events[node].append([traces[node]['last_time'], 'trace_end', 0])
 
         # Scan RPCs to collect data
         for id, rpc in rpcs.items():
@@ -3015,9 +3056,12 @@ class AnalyzeIntervals:
             interval_end = get_first_interval_end(node) - options.interval
             interval = None
             last_q_update = interval_end
+            trace_end = traces[node]['last_time']
             for event in node_events:
                 t = event[0]
                 op = event[1]
+                if t > trace_end:
+                    continue
                 while t > interval_end:
                     if interval:
                         cur_queue = qlen(cur_queue, interval_end - last_q_update)
@@ -3096,8 +3140,150 @@ class AnalyzeIntervals:
                         grants.softirq[id] = offset
                         grants.add_rpc(id, interval)
 
+    def analyze_rx(self):
+        """
+        Fill in fields of intervals related to incoming messages.
+        """
+
+        global rpcs, packets, intervals, max_unsched
+
+        # Node name -> list of events related to messages received by
+        # that node. Each event is one of the following lists:
+        # <time, 'rx_end', id>            Last packet arrived for id
+        # <time, 'grant', id, offset>     Receiver has sent grant for offset
+        # <time, 'send', id, offset>      Sender has sent data up to offset
+        # <time, 'gro', id, offset>       GRO has received data up to offset
+        # <time, 'softirq', id, offset>   SoftIRQ has received data up to offset
+        # <time, 'trace_end', dummy>      Marks end of trace; used to make sure
+        #                                 all intervals are populated
+        events = {}
+
+        # RPC id -> True for all RPCs for which we've seen at least one event.
+        started = {}
+
+        incoming = self.Incoming(track_grants=False)
+
+        for node in get_sorted_nodes():
+            events[node] = []
+            events[node].append([traces[node]['last_time'], 'trace_end', 0])
+
+        # Scan RPCs to collect data
+        for id, rpc in rpcs.items():
+            incoming.init_rpc(id)
+            node = rpc['node']
+            if id^1 in rpcs:
+                tx = rpcs[id^1]
+            else:
+                tx = {'send_data': []}
+            trace_start = traces[node]['first_time']
+
+            if 'in_length' in rpc:
+                msg_length = rpc['in_length']
+            else:
+                msg_length = 1e20
+
+            first_recv = 1e20
+            for t, offset, prio in rpc['gro_data']:
+                if offset < first_recv:
+                    first_recv = offset
+                events[node].append([t, 'gro', id,
+                        offset + get_length(offset, msg_length)])
+            if first_recv < 1e20:
+                # This ensures that we don't count bytes received before
+                # the start of the trace
+                incoming.gro[id] = first_recv
+
+            if tx['send_data']:
+                for t, offset, length in tx['send_data']:
+                    if offset < first_recv:
+                        continue
+                    if t < trace_start:
+                        t = trace_start
+                    events[node].append([t, 'send', id, offset + length])
+
+            if 'recvmsg_done' in rpc:
+                if rpc['softirq_data']:
+                    t = rpc['softirq_data'][-1][0]
+                else:
+                    t = rpc['recvmsg_done']
+                events[node].append([t, 'rx_end', id])
+
+            min_offset = 1e20
+            for t, offset in rpc['softirq_data']:
+                if offset < min_offset:
+                    min_offset = offset
+                events[node].append([t, 'softirq', id,
+                        offset + get_length(offset, msg_length)])
+            if min_offset < 1e20:
+                # This ensures that we don't count bytes received before
+                # the start of the trace
+                incoming.softirq[id] = min_offset
+
+            for t, offset, prio in rpc['send_grant']:
+                events[node].append([t, 'grant', id, offset])
+
+        # Scan events in time order to fill in intervals
+        for node, node_events in events.items():
+            node_events.sort()
+            active = 0
+            interval_end = get_first_interval_end(node) - options.interval
+            interval = None
+            node1 = (node == 'node1')
+            for event in node_events:
+                t, op, id = event[0:3]
+                while t > interval_end:
+                    interval_end += options.interval
+                    interval =  get_interval(node, interval_end)
+                    interval['rx_active'] = active
+                    interval['rx_starts'] = 0
+                    interval['rx_pkts'] = 0
+                    interval['rx_bytes'] = 0
+                    interval['rx_granted'] = incoming.sum_granted;
+                    interval['rx_data_xmit'] = incoming.sum_sent
+                    interval['rx_data_gro'] = incoming.sum_gro
+                if interval == None:
+                    print('Discarding too-early event: %s' % (event), file=sys.stderr)
+                    continue
+                if (not id in started) and (id != 0):
+                    started[id] = True
+                    active += 1
+                    interval['rx_active'] = active
+                    interval['rx_starts'] += 1
+                    incoming.add_rpc(id, interval)
+                elif op == 'rx_end':
+                    active -= 1
+                    interval['tx_active'] = active
+                elif op == 'grant':
+                    offset = event[3]
+                    if offset > incoming.granted[id]:
+                        incoming.sub_rpc(id)
+                        incoming.granted[id] = offset
+                        incoming.add_rpc(id, interval)
+                elif op == 'send':
+                    offset = event[3]
+                    if offset > incoming.sent[id]:
+                        incoming.sub_rpc(id)
+                        incoming.sent[id] = offset
+                        incoming.add_rpc(id, interval)
+                elif op == 'gro':
+                    offset = event[3]
+                    interval['rx_pkts'] += 1
+                    if offset > incoming.gro[id]:
+                        delta = offset - incoming.gro[id]
+                        interval['rx_bytes'] += delta
+                        incoming.sub_rpc(id)
+                        incoming.gro[id] = offset
+                        incoming.add_rpc(id, interval)
+                elif op == 'softirq':
+                    offset = event[3]
+                    if offset > incoming.softirq[id]:
+                        incoming.sub_rpc(id)
+                        incoming.softirq[id] = offset
+                        incoming.add_rpc(id, interval)
+
     def analyze(self):
         self.analyze_tx()
+        self.analyze_rx()
 
 #------------------------------------------------
 # Analyzer: net
@@ -4475,6 +4661,75 @@ class AnalyzeRtt:
                 dict_avg(slow_phases, 'handoff2') - dict_avg(fast_phases, 'handoff2'),
                 dict_avg(slow_phases, 'queue2') - dict_avg(fast_phases, 'queue2'),
                 dict_avg(slow_phases, 'done') - dict_avg(fast_phases, 'done')))
+
+
+#------------------------------------------------
+# Analyzer: rx
+#------------------------------------------------
+class AnalyzeRx:
+    """
+    Generates one data file for each node showing various statistics
+    related to incoming message reception as a function of time. Requires
+    the --data and --gbps options.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeIntervals')
+        return
+
+    def output(self):
+        global intervals, options
+
+        print('\n------------')
+        print('Analyzer: rx')
+        print('------------')
+        if options.data_dir == None:
+            print('--data option wasn\'t specified, so no output generated.')
+            return
+        print('See data files rx_*.dat in %s\n' % (options.data_dir))
+        print('Average receive throughput:')
+
+        for node in get_sorted_nodes():
+            f = open('%s/rx_%s.dat' % (options.data_dir, node), 'w')
+            f.write('# Node: %s\n' % (node))
+            f.write('# Generated at %s.\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            f.write('# Statistics about messages received by node ')
+            f.write('%s over %d usec intervals:\n' % (node, options.interval))
+            f.write('# Time:       End of the time interval\n')
+            f.write('# Gbps:       Rate of data received by GRO during the interval\n')
+            f.write('# Active:     Messages for which at least one packet has '
+                    'been transmitted,\n');
+            f.write('#             but which have not been fully received by '
+                    'SoftIRQ, as of the\n');
+            f.write('#             end of the interval\n')
+            f.write('# Pkts:       Packets received by GRO during the interval\n')
+            f.write('# Granted:    KB of grants that have been sent, but for '
+                    'which corresponding\n')
+            f.write('#             data packets have not been transmitted by '
+                    'the peer\n')
+            f.write('# Xmit:       KB of data that have been transmitted by '
+                    'the peer but not yet\n')
+            f.write('#             received by GRO\n')
+            f.write('# GRO:        KB of data that have been received by '
+                    'GRO but not yet\n')
+            f.write('#             received by SoftIRQ\n')
+
+            f.write('\n    Time   Gbps  Active  Pkts  Granted  Xmit   GRO\n')
+            total = 0
+            for interval in intervals[node]:
+                # print('Interval for %s: %s' % (node, interval))
+                gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
+                total += gbps
+                f.write('%8.1f %6.1f   %5d  %4d    %5.0f %5.0f %5.0f\n'
+                        % (interval['time'], gbps,
+                        interval['rx_active'],
+                        interval['rx_pkts'],
+                        interval['rx_granted'] * 1e-3,
+                        interval['rx_data_xmit'] * 1e-3,
+                        interval['rx_data_gro'] * 1e-3))
+            f.close()
+            print('%-10s %6.1f Gbps' % (node, total/len(intervals[node])))
 
 #------------------------------------------------
 # Analyzer: smis
