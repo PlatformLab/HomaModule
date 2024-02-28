@@ -1,6 +1,11 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Notes on poor 100 Gbps throughput as of Feb. 2024:
+  * One node (node3) has 1400 incoming RPCs blocked waiting for buffers
+  * Tried increasing max_overcommit to 16, but throughput cratered: only
+    a few Gbps.
+
 * Work in progress (1/29/2024): refactoring of homa_timer to simplify,
   allow faster retries. Performance with this code got significantly
   worse (W4 tput of 22 Gbps instead of 60 Gbps before).
