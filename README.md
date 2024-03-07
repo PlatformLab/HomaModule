@@ -35,8 +35,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   of hours). If you get Homa working on some other version, please submit a
   pull request with the required code changes.
 
-- There now exists support for using Homa with gRPC: see the
-  [GitHub repo](https://github.com/PlatformLab/grpc_homa).
+- Related work that you may find useful:
+  - [Preliminary support for using Homa with gRPC](https://github.com/PlatformLab/grpc_homa)
+  - [A Go client that works with this module](https://github.com/dpeckett/go-homa)
 
 - To build the module, type `make all`; then type `sudo insmod homa.ko` to install
   it, and `sudo rmmod homa` to remove an installed module. In practice, though,
