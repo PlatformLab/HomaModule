@@ -9,6 +9,7 @@ Invoke with the --help option for documentation.
 """
 
 from collections import defaultdict
+from functools import cmp_to_key
 from glob import glob
 from optparse import OptionParser
 import math
@@ -107,6 +108,7 @@ class OffsetDict(dict):
 # priority:    Priority at which packet was transmitted
 # xmit_core:   Core on which ip*xmit was invoked
 # gro_core:    Core on which homa_gro_receive was invoked
+# softirq_core:Core on with SoftIRQ processed the packet
 packets = OffsetDict()
 
 # offset -> True for each offset that has occurred in a received data packet;
@@ -178,6 +180,23 @@ def bytes_to_usec(bytes):
     global options
 
     return (bytes*8) / (options.gbps * 1000)
+
+def cmp_pkts(p1, p2, field):
+    """
+    Compute a sorting order among packets to print, using a given field
+    of the packets (which contains a time value), which may not be present.
+    """
+
+    if field in p1:
+        if field in p2:
+            return p1[field] - p2[field]
+        else:
+            return 1
+    elif field in p2:
+        return -1
+    if p1['id'] != p2['id']:
+        return p1['id'] - p2['id']
+    return p1['offset'] - p2['offset']
 
 def dict_avg(data, key):
     """
@@ -263,7 +282,8 @@ def get_interval(node, usecs):
     """
     Returns the interval dictionary corresponding to the arguments. A
     new interval is created if the desired interval doesn't exist. Returns None
-    if the interval ends before the first trace record for the node.
+    if the interval ends before the first trace record for the node or starts
+    after the last record for the node.
 
     node:     Name of the desired node
     usecs:    Ending time of the interval (integer usecs)
@@ -286,6 +306,8 @@ def get_interval(node, usecs):
     if i < 0:
         return None
     while i >= len(data):
+        if usecs > traces[node]['last_time']:
+            return None
         data.append({'time': first_end + interval_length*len(data)})
     return data[i]
 
@@ -448,6 +470,25 @@ def print_analyzer_help():
         analyzer = attr[7].lower() + attr[8:]
         if hasattr(object, 'output'):
             print('%s: %s' % (analyzer, object.__doc__))
+
+def print_if(dict, field, fmt):
+    """
+    If field exists in dict, return its value formated with fmt (e.g. %7.1f).
+    Otherwise return an empty string.
+    """
+    if field in dict:
+        return fmt % (dict[field])
+    return ''
+
+def sum_fields(list, field):
+    """
+    Given a list of dictionaries, return the sum of a given field in each
+    of the dictionaries.
+    """
+    total = 0
+    for d in list:
+        total += d[field]
+    return total
 
 class Dispatcher:
     """
@@ -939,6 +980,43 @@ class Dispatcher:
         'regexp': '(beginning|ending) wait for (.*) lock'
     })
 
+    def __resend_busy(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        state = int(match.group(2))
+        for interest in interests:
+            interest.tt_resend_busy(trace, time, core, id, state)
+
+    patterns.append({
+        'name': 'resend_busy',
+        'regexp': 'sending BUSY from resend, id ([0-9]+), state ([0-9]+)'
+    })
+
+    def __softirq_resend(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        length = int(match.group(3))
+        prio = int(match.group(4))
+        for interest in interests:
+            interest.tt_softirq_resend(trace, time, core, id, offset,
+                    length, prio)
+
+    patterns.append({
+        'name': 'softirq_resend',
+        'regexp': 'resend request for id ([0-9]+), offset ([0-9]+), '
+                'length ([0-9]+), prio ([0-9]+)'
+    })
+
+    def __bpages_alloced(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        bpages = int(match.group(2))
+        for interest in interests:
+            interest.tt_bpages_alloced(trace, time, core, id, bpages)
+
+    patterns.append({
+        'name': 'bpages_alloced',
+        'regexp': 'RPC id ([0-9]+) has ([0-9]+) bpages allocated'
+    })
+
 #------------------------------------------------
 # Analyzer: activity
 #------------------------------------------------
@@ -1180,6 +1258,39 @@ class AnalyzeActivity:
                 f.close()
 
 #------------------------------------------------
+# Analyzer: bpages
+#------------------------------------------------
+class AnalyzeBpages:
+    """
+    Output information about bpage usage on each of the nodes, as of the
+    end of the traces. This information is only available if
+    homa_rpc_log_active_tt was invoked before freezing the time traces.
+    """
+    def __init__(self, dispatcher):
+        self.node_rpcs = defaultdict(lambda : 0)
+        self.node_bpages = defaultdict(lambda: 0)
+
+    def tt_bpages_alloced(self, trace, time, core, id, bpages):
+        node = trace['node']
+        self.node_rpcs[node] += 1
+        self.node_bpages[node] += bpages
+
+    def output(self):
+        global traces, options
+        print('\n-------------------')
+        print('Analyzer: temp2')
+        print('-------------------')
+        print('Bpage usage at the end of the traces')
+        print('Node:    Name of a node')
+        print('RPCs:    Number of RPCs on that node with bpages allocated')
+        print('Bpages:  Total bpages (or partial bpages) allocated on the node')
+        print('')
+        print('Node         RPCs  Bpages')
+        for node in get_sorted_nodes():
+            print('%-10s  %5d  %6d' % (node, self.node_rpcs[node],
+                    self.node_bpages[node]))
+
+#------------------------------------------------
 # Analyzer: copy
 #------------------------------------------------
 class AnalyzeCopy:
@@ -1419,6 +1530,150 @@ class AnalyzeCopy:
                     tput = '   N/A'
             print('%-10s %6d %6.2f %s' % (node, stats['skbs_freed'],
                     free_time, tput))
+
+#------------------------------------------------
+# Analyzer: core
+#------------------------------------------------
+class AnalyzeCore:
+    """
+    Generates statistics about activity on a single core. Requires the --node,
+    --core, and --data options.
+    """
+
+    def __init__(self, dispatcher):
+        global options
+        if ((options.core == None) or (options.data_dir == None)
+                or (options.node == None)):
+            raise Exception('The core analyzer requires --core, --data, '
+                    'and --node options')
+
+        # List of all intervals over the life of the trace, each list entry
+        # is a dictionary with the following values related to that interval:
+        # time:         Ending time of the interval
+        # data_pkts:    Number of incoming data packets processed by SoftIRQ
+        # grants:       Number of incoming grant packets processed by SoftIRQ
+        # resends:      Number of incoming resend requests processed by SoftIRQ
+        # busy:         Number of BUSY packets sent
+        # grant_sends:  Number of GRANT packets sent
+        self.intervals = []
+
+    def init_trace(self, trace):
+        # Target core id -> list of times when gro chose that core but
+        # SoftIRQ hasn't yet woken up
+        self.gro_handoffs = defaultdict(list)
+
+    def get_interval(self, t):
+        """
+        Find the interval corresponding to time t, initializing new intervals
+        when needed.
+        """
+        global options
+
+        interval_length = options.interval
+        while True:
+            if len(self.intervals) == 0:
+                end = int(t)//interval_length * interval_length
+                self.intervals.append({'time': end})
+                interval = self.intervals[0]
+            else:
+                first_end = self.intervals[0]['time']
+                i = int((t - (first_end - interval_length))//interval_length)
+                if i < 0:
+                    raise Exception('Unexpected index %d (time %9.1f) in '
+                            'AnalyzeCore.get_interval' % (i, t))
+                if i < len(self.intervals):
+                    return self.intervals[i]
+                self.intervals.append({'time': first_end
+                        + interval_length*len(self.intervals)})
+                interval = self.intervals[-1]
+            interval['data_pkts'] = 0
+            interval['grants'] = 0
+            interval['resends'] = 0
+            interval['busy'] = 0
+            interval['grant_sends'] = 0
+
+    def inc_counter(self, trace, time, core, name):
+        """
+        Does most of the work of the tt_* methods below: increment the
+        counter given by name if the record is for the right core.
+        """
+        global options
+        if (core != options.core) or (trace['node'] != options.node):
+            return
+        self.get_interval(time)[name] += 1
+
+
+    def tt_softirq_data(self, trace, time, core, id, offset, msg_length):
+        self.inc_counter(trace, time, core, 'data_pkts')
+
+    def tt_softirq_grant(self, trace, time, core, id, offset):
+        self.inc_counter(trace, time, core, 'grants')
+
+    def tt_softirq_resend(self, trace, time, core, id, offset, length, prio):
+        self.inc_counter(trace, time, core, 'resends')
+
+    def tt_resend_busy(self, trace, time, core, id, state):
+        self.inc_counter(trace, time, core, 'busy')
+
+    def tt_send_grant(self, trace, time, core, id, offset, priority):
+        self.inc_counter(trace, time, core, 'grant_sends')
+
+    def output(self):
+        global options
+
+        print('\n-------------------')
+        print('Analyzer: core')
+        print('-------------------')
+
+        if not self.intervals:
+            print('No data found for core %d on %s' % (options.core,
+                    options.node))
+            return
+
+        print('\nOverall statistics:')
+        print('                                      Total Avg/Interval')
+        l = len(self.intervals)
+        total = sum_fields(self.intervals, 'data_pkts')
+        print('Data packets processed by SoftIRQ:   %6d   %6.1f' %
+                (total, total/l))
+        total = sum_fields(self.intervals, 'grants')
+        print('Grants processed by SoftIRQ:         %6d   %6.1f' %
+                (total, total/l))
+        total = sum_fields(self.intervals, 'resends')
+        print('Resends processed by SoftIRQ:        %6d   %6.1f' %
+                (total, total/l))
+        total = sum_fields(self.intervals, 'busy')
+        print('BUSY packets sent:                   %6d   %6.1f' %
+                (total, total/l))
+        total = sum_fields(self.intervals, 'grant_sends')
+        print('GRANT packets sent:                  %6d   %6.1f' %
+                (total, total/l))
+
+        f = open('%s/core_%s-%d.dat' % (options.data_dir, options.node,
+                options.core), 'w')
+        f.write('# Node: %s\n' % (options.node))
+        f.write('# Core: %d\n' % (options.core))
+        f.write('# Generated at %s.\n' %
+                (time.strftime('%I:%M %p on %m/%d/%Y')))
+        f.write('# Statistics about activity on the selected core ')
+        f.write('%s over %d usec intervals:\n' % (options. node,
+                options.interval))
+        f.write('# Time:       End of the time interval\n')
+        f.write('# Pkts:       Data packets processed by SoftIRQ\n')
+        f.write('# Grants:     Grant packets processed by SoftIRQ\n');
+        f.write('# Resends:    RESEND requests processed by SoftIRQ\n');
+        f.write('# TxBusy:     BUSY packets sent\n');
+        f.write('# TxGrant:    GRANT packets sent\n');
+
+        f.write('\n    Time   Pkts  Grants Resends TxBusy TxGrant\n')
+        total = 0
+        for interval in self.intervals:
+            if not 'data_pkts' in interval:
+                print('Interval: %s' % (interval))
+            f.write('%8.1f %5d    %5d   %5d  %5d   %5d\n'
+                    % (interval['time'], interval['data_pkts'],
+                    interval['grants'], interval['resends'], interval['busy'],
+                    interval['grant_sends']))
 
 #------------------------------------------------
 # Analyzer: delay
@@ -3010,6 +3265,8 @@ class AnalyzeIntervals:
                         last_q_update = interval_end
                     interval_end += options.interval
                     interval =  get_interval(node, interval_end)
+                    if not interval:
+                        break;
                     interval['tx_active'] = active
                     interval['rpcs_active'] = active_rpcs
                     interval['tx_starts'] = 0
@@ -3021,7 +3278,7 @@ class AnalyzeIntervals:
                     interval['tx_grant_avl'] = grants.sum_softirq
                     interval['tx_new_grants'] = 0
                 if not interval:
-                    # Event precedes start of this node's trace.
+                    # Event is outside the range of this node's trace.
                     continue
                 if op == 'tx_start':
                     id, unsched = event[2:]
@@ -3182,6 +3439,8 @@ class AnalyzeIntervals:
                 while t > interval_end:
                     interval_end += options.interval
                     interval =  get_interval(node, interval_end)
+                    if interval == None:
+                        break
                     interval['rx_active'] = active
                     interval['rx_starts'] = 0
                     interval['rx_pkts'] = 0
@@ -3190,7 +3449,6 @@ class AnalyzeIntervals:
                     interval['rx_data_xmit'] = incoming.sum_sent
                     interval['rx_data_gro'] = incoming.sum_gro
                 if interval == None:
-                    print('Discarding too-early event: %s' % (event), file=sys.stderr)
                     continue
                 if (not id in started) and (id != 0):
                     started[id] = True
@@ -4096,6 +4354,7 @@ class AnalyzePackets:
         global packets
         p = packets[pkt_id(id^1, offset)]
         p['softirq'] = time
+        p['softirq_core'] = core
         p['msg_length'] = msg_length
 
     def tt_copy_out_done(self, trace, time, core, id, start, end):
@@ -4713,7 +4972,8 @@ class AnalyzeRx:
             f.write('\n    Time   Gbps  Active  Pkts  Granted  Xmit   GRO\n')
             total = 0
             for interval in intervals[node]:
-                # print('Interval for %s: %s' % (node, interval))
+                if not 'rx_bytes' in interval:
+                    print('Strange interval for %s: %s' % (node, interval))
                 gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
                 f.write('%8.1f %6.1f   %5d  %4d    %5.0f %5.0f %5.0f\n'
@@ -4767,6 +5027,112 @@ class AnalyzeSmis:
             print('%9.3f  %9.3f  %6.1f  %s' % (start, end, end - start, node))
 
 #------------------------------------------------
+# Analyzer: snapshot
+#------------------------------------------------
+class AnalyzeSnapshot:
+    """
+    Prints information about the state of a particular node at a given time.
+    Requires the --node and --time options.
+    """
+
+    def __init__(self, dispatcher):
+        global options
+        if (options.time == None) or (options.node == None):
+            raise Exception('The snapshot analyzer requires --node and '
+                    '--time options')
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+
+    def print_time(self, pkt):
+        """
+        Generate a formatted line describing an incoming data.
+        """
+
+    def output(self):
+        global packets, rpcs, options, traces
+        t = options.time
+        node = options.node
+        trace_start = traces[node]['first_time']
+
+        # Packets transmitted to node but not yet received.
+        xmits = []
+
+        # Packets received by GRO but not yet by SoftIRQ.
+        gros = []
+
+        # Find active incoming packets and divide into phases
+        for pkt in packets.values():
+            id = pkt['id']
+            if not id^1 in rpcs:
+                continue
+            if rpcs[id^1]['node'] != node:
+                continue
+            if ('softirq' in pkt) and (pkt['softirq'] < t):
+                continue
+            if 'xmit' in pkt:
+                xmit = pkt['xmit']
+                if xmit > t:
+                    continue
+                if ((xmit < trace_start) and (not 'gro' in pkt)
+                        and (not 'softirq' in pkt)):
+                    # Packet probably arrived before trace started
+                    continue
+                if 'gro' in pkt:
+                    if pkt['gro'] > t:
+                        xmits.append(pkt)
+                    else:
+                        gros.append(pkt)
+                elif 'softirq' in pkt:
+                    gros.append(pkt)
+                else:
+                    xmits.append(pkt)
+            else:
+                if 'gro' in pkt:
+                    if pkt['gro'] > t:
+                        xmits.append(pkt)
+                    else:
+                        gros.append(pkt)
+                else:
+                    gros.append(pkt)
+
+        xmits.sort(key = cmp_to_key(lambda p1,p2 : cmp_pkts(p1, p2, 'xmit')))
+        gros.sort(key = cmp_to_key(lambda p1,p2 : cmp_pkts(p1, p2, 'gro')))
+
+        print('\n-------------------')
+        print('Analyzer: snapshot')
+        print('-------------------')
+
+        print('Fields in the tables below:')
+        print('Id:        Packet\'s RPC identifier on the sender side')
+        print('Offset:    Starting offset of packet data within its message')
+        print('Source:    Name of sending node')
+        print('GCore:     Core where receiver GRO processed packet')
+        print('SCore:     Core where receiver SoftIRQ processed packet')
+        print('Xmit:      Time when sender passed packet to ip*xmit')
+        print('Gro:       Time when receiver GRO processed packet')
+        print('SoftIrq:   Time when receiver SoftIRQ processed packet')
+
+        print('\nIncoming packets that have not been received by GRO:')
+        print('   Xmit          Id  Offset  Source         Gro GCore')
+        for pkt in xmits:
+            id = pkt['id']
+            print('%7s  %10d  %6d  %-10s %7s %5s' % (
+                    print_if(pkt, 'xmit', '%7.1f'), id, pkt['offset'],
+                    rpcs[id]['node'], print_if(pkt, 'gro', '%7.1f'),
+                    print_if(pkt, 'gro_core', '%3d')))
+
+        print('\nIncoming packets that have not been seen by GRO but not '
+                'yet by SoftIRQ:')
+        print('    Gro          Id Offset  GCore SoftIRQ   SCore')
+        for pkt in gros:
+            id = pkt['id']
+            print('%7s  %10d %6d  %5s %7s %7s' % (
+                    print_if(pkt, 'gro', '%7.1f'), id, pkt['offset'],
+                    print_if(pkt, 'gro_core', '%3d'),
+                    print_if(pkt, 'softirq', '%7.1f'),
+                    print_if(pkt, 'softirq_core', '%3d')))
+
+#------------------------------------------------
 # Analyzer: temp
 #------------------------------------------------
 class AnalyzeTemp:
@@ -4775,14 +5141,56 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzeRpcs')
-        dispatcher.interest('AnalyzePackets')
+        if False:
+            dispatcher.interest('AnalyzeRpcs')
+            dispatcher.interest('AnalyzePackets')
+        self.core_prev = defaultdict(lambda : None)
+        self.core_delays = defaultdict(list)
+
+    def tt_all(self, trace, time, core, msg):
+        global options
+        if trace['node'] != options.node:
+            return
+            print(msg)
+        if msg.find('__dev_xmit_skb calling sch_direct_xmit') != -1:
+            prev = self.core_prev[core]
+            if prev != None:
+                self.core_delays[core].append(time - prev)
+                self.core_prev[core] = None
+                if (time - prev) > 100:
+                    print('%7.1f: Core %d, delay %5.1f' % (time, core, time - prev))
+        elif msg.find('calling ip_queue_xmit') != -1:
+            self.core_prev[core] = None
+        elif msg.find('irq common_interrupt starting') != -1:
+            self.core_prev[core] = None
+        else:
+            self.core_prev[core] = time
 
     def output(self):
+        global traces, options
+        print('\n-------------------')
+        print('Analyzer: temp')
+        print('-------------------')
+        print('Delays before __dev_xmit_skb calls sch_direct_xmit:')
+        print('Core  Count    Avg    P10    P50    P90    P99    Max  Duty Cycle')
+        for core in sorted(self.core_prev.keys()):
+            if not self.core_delays[core]:
+                continue
+            delays = sorted(self.core_delays[core])
+            l = len(delays)
+            total = sum(delays)
+            trace = traces[options.node]
+            print('%4d %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f   %8.1f%%' %
+                    (core, l, total/l, delays[10*l//100],
+                    delays[50*l//100],  delays[90*l//100],
+                    delays[99*l//100], delays[-1],
+                    100*total/trace['elapsed_time']))
+
+    def output_snapshot(self):
         global packets, rpcs
 
         # Desired time for snapshot
-        t = 16160.0
+        t = 18000.0
 
         # Desired target node
         target = 'node3'
@@ -4867,7 +5275,6 @@ class AnalyzeTemp:
         for id in sorted(rpc_counts.keys()):
             rpc = rpc_counts[id]
             print('%-10d  %5d %8d' % (id, rpc['pkts'], rpc['bytes']))
-
 
 #------------------------------------------------
 # Analyzer: timeline
@@ -5230,6 +5637,9 @@ parser = OptionParser(description=
 parser.add_option('--analyzers', '-a', dest='analyzers', default='all',
         metavar='A', help='Space-separated list of analyzers to apply to '
         'the trace files (default: all)')
+parser.add_option('--core', dest='core', type=int, default=None,
+        metavar='C', help='Specifies the number of a particular core of '
+        'interest; required by some analyzers')
 parser.add_option('--data', '-d', dest='data_dir', default=None,
         metavar='DIR', help='If this option is specified, analyzers will '
         'output data files (suitable for graphing) in the directory given '
@@ -5248,8 +5658,7 @@ parser.add_option('--negative-ok', action='store_true', default=False,
         help='Don\'t print warnings when negative delays are encountered')
 parser.add_option('--node', dest='node', default=None,
         metavar='N', help='Specifies a particular node (the name of its '
-        'trace file without the extension); this option is required by '
-        'some analyzers')
+        'trace file without the extension); required by some analyzers')
 parser.add_option('--max-rtt', dest='max_rtt', type=float, default=None,
         metavar='T', help='Only consider RPCs with RTTs <= T usecs.  Used by '
         'rpc analyzer to select which specific RTTs to print out.')
@@ -5271,6 +5680,8 @@ parser.add_option('--rx-node', dest='rx_node', default=None,
 parser.add_option('--rx-start', dest='rx_start', type=float, default=None,
         metavar='T', help='If specified, some analyzers will ignore packets '
         'received before time T')
+parser.add_option('--time', dest='time', type=float, default=None,
+        metavar='T', help='Time of interest; required by some analyzers')
 parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
         metavar='C', help='If specified, some analyzers will ignore packets '
         'transmitted from cores other than C')
