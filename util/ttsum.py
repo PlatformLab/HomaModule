@@ -8,7 +8,7 @@ This program reads one or more timetrace logs and generates summary
 information. Use the --help option to print usage information.
 """
 
-from __future__ import division, print_function
+from collections import defaultdict
 from glob import glob
 from optparse import OptionParser
 import math
@@ -20,7 +20,7 @@ import sys
 # This variable collects all the times for all events, individually. It is
 # a dictionary that maps from key names to a list containing all of the
 # intervals for that event name (each interval is the elapsed time between
-# the most recent previous event and this event).
+# the previous event and this event).
 eventIntervals = {}
 
 # This variable collects information for all events relative to a given
@@ -51,6 +51,11 @@ relativeEvents = {}
 
 eventCount = {}
 
+# Core number -> time of most recent event on that core. -1 means no
+# events seen for that core yet.
+
+corePrev = defaultdict(lambda : None)
+
 def scan(f, startingEvent):
     """
     Scan the log file given by 'f' (handle for an open file) and collect
@@ -62,21 +67,31 @@ def scan(f, startingEvent):
 
     foundStart = False
     startTime = 0.0
-    lastTime = -1.0
+    lastTime = None
     for line in f:
-        match = re.match('(^|.* )([0-9.]+) us \(\+ *([0-9.]+) us\) (.+)', line)
+        match = re.match('(^|.* )([0-9.]+) us \(\+ *([0-9.]+) us\) '
+                '(\[C([0-9]+)\].+)', line)
         if not match:
             continue
         thisEventTime = float(match.group(2))*1000.0
-        thisEventInterval = float(match.group(3))*1000.0
+        core = int(match.group(5))
+        if options.useCores:
+            prevTime = corePrev[core]
+        else:
+            prevTime = lastTime
+        if prevTime == None:
+            thisEventInterval = 0
+        else:
+            thisEventInterval = thisEventTime - prevTime
         thisEvent = match.group(4)
         rawEvent = thisEvent
         if options.noNumbers:
             thisEvent = re.sub('0x[0-9a-f]+', '?', thisEvent)
             thisEvent = re.sub('[0-9]+', '?', thisEvent)
-        if (thisEventTime < lastTime):
+        if (lastTime != None) and (thisEventTime < lastTime):
             print('Time went backwards at the following line:\n%s' % (line))
         lastTime = thisEventTime
+        corePrev[core] = thisEventTime
         if thisEventInterval != 0.0:
             if not thisEvent in eventIntervals:
                 eventIntervals[thisEvent] = []
@@ -124,6 +139,11 @@ parser.add_option('-a', '--alt', action='store_true', default=False,
         dest='altFormat',
         help='use alternate output format if -f is specified (print min, '
         'max, etc. for cumulative time, not delta)')
+parser.add_option('-c', '--cores', action='store_true', default=False,
+        dest='useCores',
+        help='compute elapsed time for each event relative to the previous '
+        'event on the same core (default: compute relative to the previous '
+        'event on any core)')
 parser.add_option('-f', '--from', type='string', dest='startEvent',
         help='measure times for other events relative to FROM; FROM contains a '
         'substring of an event')
