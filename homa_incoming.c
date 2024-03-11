@@ -681,14 +681,31 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			rpc->id, ntohl(h->offset), ntohl(h->length),
 			h->priority);
 
-	if (!homa_is_client(rpc->id)) {
+	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
 		/* We are the server for this RPC. */
-		if (rpc->state != RPC_OUTGOING) {
+		if ((rpc->msgin.length - rpc->msgin.bytes_remaining) >= rpc->msgin.granted) {
+			/* We've received everything that we've granted, so either the server 
+			   is busy with an influx of messages exceeding max_incoming, or a 
+			   grant packet has been dropped. In either case, the server should 
+			   initiate RESEND
+			   */
 			tt_record2("sending BUSY from resend, id %d, state %d",
 					rpc->id, rpc->state);
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-			goto done;
 		}
+		else{
+			/* We haven't received everything we've granted so somehow DATA 
+			   packets have been lost. Issue RESEND immediately
+		   	*/
+			homa_get_resend_range(&rpc->msgin, h);
+			h->priority = rpc->hsk->homa->num_priorities -1;
+			homa_xmit_control(RESEND, h, sizeof(h), rpc);
+			tt_record4("sending RESEND from resend RPC id %llu, client 0x%x:%d "
+							"offset %d", 
+							rpc->id, tt_addr(rpc->peer->addr), 
+							rpc->dport, ntohl(h->offset));
+		}
+		goto done;
 	}
 	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
 		/* We have chosen not to transmit data from this message;
