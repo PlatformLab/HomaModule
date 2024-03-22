@@ -78,6 +78,14 @@ extern void mock_rcu_read_unlock(void);
 extern void *mock_kmalloc(size_t size, gfp_t flags);
 #endif
 
+/* Null out things that confuse VSCode Intellisense */
+#ifdef __VSCODE__
+#define raw_smp_processor_id() 1
+#define BUG()
+#define BUG_ON(...)
+#define set_current_state(...)
+#endif
+
 #include "homa.h"
 #include "timetrace.h"
 
