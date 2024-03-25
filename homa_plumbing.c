@@ -63,7 +63,6 @@ const struct proto_ops homa_proto_ops = {
 	.sendmsg	   = inet_sendmsg,
 	.recvmsg	   = inet_recvmsg,
 	.mmap		   = sock_no_mmap,
-	.sendpage	   = sock_no_sendpage,
 	.set_peek_off	   = sk_set_peek_off,
 };
 
@@ -85,7 +84,6 @@ const struct proto_ops homav6_proto_ops = {
 	.sendmsg	   = inet_sendmsg,
 	.recvmsg	   = inet_recvmsg,
 	.mmap		   = sock_no_mmap,
-	.sendpage	   = sock_no_sendpage,
 	.set_peek_off	   = sk_set_peek_off,
 };
 
@@ -108,7 +106,6 @@ struct proto homa_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.sendpage	   = homa_sendpage,
 	.backlog_rcv       = homa_backlog_rcv,
 	.release_cb	   = ip4_datagram_release_cb,
 	.hash		   = homa_hash,
@@ -136,7 +133,6 @@ struct proto homav6_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.sendpage	   = homa_sendpage,
 	.backlog_rcv       = homa_backlog_rcv,
 	.release_cb	   = ip6_datagram_release_cb,
 	.hash		   = homa_hash,
@@ -761,7 +757,8 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
  *
  * Return: 0 on success, otherwise a negative errno.
  */
-int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
+int homa_ioctl(struct sock *sk, int cmd, int *karg) {
+	unsigned long arg = (unsigned long) *karg;
 	int result;
 	__u64 start = get_cycles();
 
@@ -1138,21 +1135,6 @@ done:
 			control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
 	INC_METRIC(recv_cycles, finish - start);
 	return result;
-}
-
-/**
- * homa_sendpage() - ??.
- * @sk:     Socket for the operation
- * @page:   ??
- * @offset: ??
- * @size:   ??
- * @flags:  ??
- * Return:  0 on success, otherwise a negative errno.
- */
-int homa_sendpage(struct sock *sk, struct page *page, int offset,
-		  size_t size, int flags) {
-	printk(KERN_WARNING "unimplemented sendpage invoked on Homa socket\n");
-	return -ENOSYS;
 }
 
 /**

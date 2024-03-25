@@ -312,7 +312,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	/* Not a new message; see if we can upgrade the message's priority. */
 	rank = atomic_read(&rpc->msgin.rank);
-	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if (rank < 0) {
 		homa_grant_update_incoming(rpc, homa);
 		if (rpc->msgin.bytes_remaining < atomic_read(
@@ -325,13 +324,16 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		}
 		return;
 	}
-	if ((rank > 0) && (rpc->msgin.bytes_remaining < atomic_read(
-			&homa->active_remaining[rank-1]))) {
-		homa_grant_update_incoming(rpc, homa);
-		homa_rpc_unlock(rpc);
-		INC_METRIC(grant_priority_bumps, 1);
-		homa_grant_recalc(homa, 0);
-		return;
+	if ((rank > 0)) { 
+		atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
+		if(rpc->msgin.bytes_remaining < atomic_read(
+				&homa->active_remaining[rank-1])) {
+			homa_grant_update_incoming(rpc, homa);
+			homa_rpc_unlock(rpc);
+			INC_METRIC(grant_priority_bumps, 1);
+			homa_grant_recalc(homa, 0);
+			return;
+		}
 	}
 
 	/* Getting here should be the normal case: see if we can send a new
