@@ -273,7 +273,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * issue new grants to an RPC in many cases without calling
 	 * homa_grant_recalc or acquiring grantable_lock. Unfortunately
 	 * there are quite a few situations where homa_grant_recalc must
-	 * be called, which create a lot of special cases in this funtion.
+	 * be called, which create a lot of special cases in this function.
 	 */
 	struct homa *homa = rpc->hsk->homa;
 	int rank, recalc;
@@ -312,7 +312,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	/* Not a new message; see if we can upgrade the message's priority. */
 	rank = atomic_read(&rpc->msgin.rank);
-	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if (rank < 0) {
 		homa_grant_update_incoming(rpc, homa);
 		if (rpc->msgin.bytes_remaining < atomic_read(
@@ -325,6 +324,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		}
 		return;
 	}
+	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if ((rank > 0) && (rpc->msgin.bytes_remaining < atomic_read(
 			&homa->active_remaining[rank-1]))) {
 		homa_grant_update_incoming(rpc, homa);
