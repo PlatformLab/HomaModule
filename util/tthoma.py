@@ -114,7 +114,7 @@ class OffsetDict(dict):
 # xmit_length:  # bytes of message data in the sent packet. For TSO packets,
 #               which are divided into multiple smaller packets, only the
 #               first smaller packet will have this field, and it will give
-#              the TSO length (before subdivision).
+#               the TSO length (before subdivision).
 # msg_length:   Total number of bytes in the message, or None if unknown
 # priority:     Priority at which packet was transmitted
 # tx_node:      Name of node from which the packet was transmitted (always
@@ -614,6 +614,29 @@ class Dispatcher:
         # regeneration.
         self.active = []
 
+        # Pattern prefix -> list of patterns with that prefix. All of the
+        # keys have the same length, given by self.prefix_length. Entries
+        # in each list have the same order that they appear in patterns.
+        # Setting this to None causes it to be recomputed the next time
+        # a trace file is read
+        self.parse_table = None
+
+        # The number of initial characters of the message portion of a
+        # trace record that are used to lookup in parse_table. This is
+        # the largest number such that each pattern has at least this many
+        # literal initial characters.
+        self.prefix_length = -1
+
+        # Total nanoseconds spent parsing trace files so far.
+        self.parse_ns = 0
+
+        # Total number of lines parsed from trace files so far.
+        self.trace_lines = 0
+
+        # Total number of times regexps were applied to lines of trace
+        # files (whether they matched or not)
+        self.regex_tries = 0
+
     def get_analyzer(self, name):
         """
         Return the analyzer object associated with name, or None if
@@ -683,7 +706,10 @@ class Dispatcher:
         """
 
         global traces
+        start_ns = time.time_ns()
         self.__build_active()
+        self.__build_parse_table()
+        prefix_matcher = re.compile(' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)')
 
         trace = {}
         trace['file'] = file
@@ -702,27 +728,76 @@ class Dispatcher:
             # Parse each line in 2 phases: first the time and core information
             # that is common to all patterns, then the message, which will
             # select at most one pattern.
-            match = re.match(' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)', trace['line'])
+            self.trace_lines += 1
+            self.regex_tries += 1
+            match = prefix_matcher.match(trace['line'])
             if not match:
                 continue
-            time = float(match.group(1))
+            t = float(match.group(1))
             core = int(match.group(2))
             msg = match.group(3)
 
             if first:
-                trace['first_time'] = time
+                trace['first_time'] = t
                 first = False
-            trace['last_time'] = time
-            for pattern in self.active:
-                match = re.match(pattern['regexp'], msg)
-                if match:
-                    pattern['parser'](trace, time, core, match,
-                            self.interests[pattern['name']])
-                    break
+            trace['last_time'] = t
+            prefix = msg[0:self.prefix_length]
+            if prefix in self.parse_table:
+                for pattern in self.parse_table[prefix]:
+                    self.regex_tries += 1
+                    match = pattern['cregexp'].match(msg)
+                    if match:
+                        pattern['parser'](trace, t, core, match,
+                                self.interests[pattern['name']])
+                        break
             for interest in self.all_interests:
-                interest.tt_all(trace, time, core, msg)
+                interest.tt_all(trace, t, core, msg)
         f.close()
         trace['elapsed_time'] = trace['last_time'] - trace['first_time']
+        self.parse_ns += time.time_ns() - start_ns;
+
+    def print_stats(self):
+        """
+        Print statistics about the efficiency of parsing trace files.
+        """
+        print('Trace file lines read: %d' % (self.trace_lines))
+        print('Regex matches attempted: %d (%.1f per line)' % (
+                self.regex_tries, self.regex_tries/self.trace_lines))
+        print('Trace file parse time: %.3f sec' % (self.parse_ns*1e-9))
+        print('(%.1f usec/line, %.1f usec/regex attempt)' % (
+                ((self.parse_ns/self.trace_lines)*1e-3),
+                ((self.parse_ns/self.regex_tries)*1e-3)))
+
+    def __build_parse_table(self):
+        """
+        Builds self.parse_table. Also sets the 'parser' and 'cregexp' elements
+        for each pattern.
+        """
+        if self.parse_table != None:
+            return
+        self.parse_table = defaultdict(list)
+
+        # Pass 1: cirst compute self.prefix_length and set the 'parser'
+        # and 'cregexp' elements of pattern entries.
+        self.prefix_length = 1000
+        for pattern in self.patterns:
+            meta_matcher = re.compile('[()[\].+*?\\^${}]')
+            pattern['parser'] = getattr(self, '_Dispatcher__' + pattern['name'])
+            pattern['cregexp'] = re.compile(pattern['regexp'])
+            if pattern['name'] in self.interests:
+                match = meta_matcher.search(pattern['regexp'])
+                if not match:
+                    length = len(pattern['regexp'])
+                else:
+                    length = match.start()
+                if length < self.prefix_length:
+                    self.prefix_length = length;
+
+        # Pass 2: fill in self.parse_table
+        for pattern in self.patterns:
+            if pattern['name'] in self.interests:
+                prefix = pattern['regexp'][0:self.prefix_length]
+                self.parse_table[prefix].append(pattern)
 
     def __build_active(self):
         """
@@ -735,6 +810,7 @@ class Dispatcher:
         self.active = []
         for pattern in self.patterns:
             pattern['parser'] = getattr(self, '_Dispatcher__' + pattern['name'])
+            pattern['cregexp'] = re.compile(pattern['regexp'])
             if pattern['name'] in self.interests:
                 self.active.append(pattern)
 
@@ -747,6 +823,9 @@ class Dispatcher:
     #             lines).
     # regexp:     Regular expression to match against the message portion
     #             of timetrace records (everything after the core number).
+    #             For efficient matching, there should be several literal
+    #             characters before any regexp metachars.
+    # cregexp:    Compiled version of regexp.
     # matches:    Number of timetrace lines that matched this pattern.
     # parser:     Method in this class that will be invoked to do additional
     #             parsing of matched lines and invoke interests.
@@ -1224,8 +1303,6 @@ class AnalyzeActivity:
                 self.node_in_msgs[node].append([in_start, 'start'])
                 self.node_in_msgs[node].append([in_end, 'end'])
             elif 'remaining' in rpc:
-                if rpc['remaining'] == 0:
-                    print('RPC id %d has 0 remaining' % (id))
                 self.node_in_msgs[node].append([traces[node]['first_time'],
                         'start'])
 
@@ -4576,6 +4653,7 @@ class AnalyzePackets:
                     file=sys.stderr);
 
         missing_rpc = {'send_data': []}
+        new_pkts = []
         for pkt in packets.values():
             id = pkt['id']
             if id in rpcs:
@@ -4610,6 +4688,26 @@ class AnalyzePackets:
                     pkt['xmit'] = max_time
                 elif 'gro' in pkt:
                     pkt['xmit'] = pkt['gro']
+
+            # Make sure that all of the smaller packets deriving from each
+            # TSO packet are represented (if one of these packets is lost,
+            # it won't be represented yet).
+            if 'xmit_length' in pkt:
+                offset = pkt['offset'];
+                id = pkt['id']
+                end = pkt['xmit_length'] + offset
+                while offset < end:
+                    pid = pkt_id(id, offset)
+                    if not pid in packets:
+                        pkt2 = {}
+                        for key in ['xmit', 'nic', 'id', 'msg_length', 'priority', 'tx_node', 'tx_core', 'free_tx_skb']:
+                            if key in pkt:
+                                pkt2[key] = pkt[key]
+                        pkt2['offset'] = offset
+                        new_pkts.append([pid, pkt2])
+                    offset += get_recv_length(offset, end)
+        for pid, pkt in new_pkts:
+            packets[pid] = pkt
 
 #------------------------------------------------
 # Analyzer: rpcs
@@ -5371,12 +5469,20 @@ class AnalyzeSnapshot:
         print('Lost:      Packets that appear to have been dropped in the network')
         print('Net:       Packets that have been transmitted but not received by GRO')
         print('Gro:       Packets that have been received by GRO but not by SoftIRQ')
+        print('Incoming:  Granted - Rcvd')
         sorted_ids = sorted(self.active_rpcs.keys(),
                 key = lambda id2 : self.active_rpcs[id2]['min_time'])
-        print('        Id  Length    Rcvd Granted Lost  Net  Gro')
+        print('\n        Id  Length    Rcvd Granted Lost  Net  Gro  Incoming')
+        print('--------------------------------------------------------------------')
         total_lost = 0
         total_net = 0
         total_gro = 0
+        total_incoming = 0
+
+        # Divide output into groups of RPCs with similar characteristics
+        lost_output = ''
+        new_output = ''
+        other_output = ''
         for id in sorted_ids:
             rpc = rpcs[id]
             active_rpc = self.active_rpcs[id]
@@ -5388,20 +5494,33 @@ class AnalyzeSnapshot:
                 total_gro += len(active_rpc['rx_gro_pkts'])
             lost_info = ''
             if active_rpc['lost'] > 0:
-                          lost_info = '%d' % (active_rpc['lost'])
+                lost_info = '%d' % (active_rpc['lost'])
             net_info = ''
             if len(active_rpc['rx_net_pkts']) > 0:
-                    net_info = '%d' % (len(active_rpc['rx_net_pkts']))
+                net_info = '%d' % (len(active_rpc['rx_net_pkts']))
             gro_info = ''
             if len(active_rpc['rx_gro_pkts']) > 0:
-                    gro_info = '%d' % (len(active_rpc['rx_gro_pkts']))
+                gro_info = '%d' % (len(active_rpc['rx_gro_pkts']))
+            incoming_info = ''
+            if (granted != None) and (received != None):
+                incoming_info = '%d' % (granted - received)
+                total_incoming += granted - received
 
-            print('%10d %7s %7s %7s %4s %4s %4s' % (
+            output = '%10d %7s %7s %7s %4s %4s %4s   %7s\n' % (
                     id, print_if(rpc['in_length'], '%d'),
                     print_if(get_received(rpc, options.time), '%d'),
                     print_if(get_granted(rpc, options.time), '%d'),
-                    lost_info, net_info, gro_info))
-        print('Total (non-new messages) %9s %4d %4d %4d' % ('', total_lost, total_net, total_gro))
+                    lost_info, net_info, gro_info, incoming_info)
+            if granted == None:
+                new_output += output
+            elif active_rpc['lost'] > 0:
+                lost_output += output
+            else:
+                other_output += output
+        print(other_output)
+        print(lost_output, end='')
+        print('Total (RPCs with grants) %9s %4d %4d %4d   %7d\n' % ('', total_lost, total_net, total_gro, total_incoming))
+        print(new_output, end='')
 
         print('\nFields in the tables below:')
         print('Id:        Packet\'s RPC identifier on the receiver side')
@@ -6380,6 +6499,9 @@ for name in options.analyzers.split():
 # Parse the timetrace files; this will invoke handlers in the analyzers.
 for file in tt_files:
     d.parse(file)
+
+if options.verbose:
+    d.print_stats()
 
 # Invoke 'analyze' methods in each analyzer, if present, to perform
 # postprocessing now that all the trace data has been read.
