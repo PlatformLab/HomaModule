@@ -693,7 +693,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 							rpc->id, tt_addr(rpc->peer->addr), 
 							rpc->dport, ntohl(h->offset));
 			h->priority = rpc->hsk->homa->num_priorities -1;
-			homa_xmit_control(RESEND, h, sizeof(h), rpc);
+			homa_xmit_control(RESEND, h, sizeof(*h), rpc);
 		} else {
 			tt_record2("sending BUSY from resend, id %d, state %d",
 					rpc->id, rpc->state);
