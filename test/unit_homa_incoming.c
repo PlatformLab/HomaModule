@@ -1376,18 +1376,47 @@ TEST_F(homa_incoming, homa_resend_pkt__server_sends_busy)
 	                .dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = RESEND},
-		        .offset = htonl(100),
+		        .offset = htonl(8000),
+			.length = htonl(200),
+			.priority = 3};
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_MSG,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 10000, 20000);
+	ASSERT_NE(NULL, srpc);
+	homa_message_in_init(srpc, 10000, 0);
+	// The server should send BUSY if it has received everything it granted
+	srpc->msgin.granted = 8000; 
+	srpc->msgin.recv_end = 8000;
+	unit_log_clear();
+
+	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
+			&self->homa);
+	EXPECT_STREQ("xmit BUSY", unit_log_get());
+}
+TEST_F(homa_incoming, homa_resend_pkt__server_sends_resend)
+{
+	struct resend_header h = {{.sport = htons(self->client_port),
+	                .dport = htons(self->server_port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = RESEND},
+		        .offset = htonl(8000),
 			.length = htonl(200),
 			.priority = 3};
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 20000);
 	ASSERT_NE(NULL, srpc);
+	homa_message_in_init(srpc, 10000, 0);
+
+	srpc->msgin.granted = 9000;
+	srpc->msgin.recv_end = 8000;
 	unit_log_clear();
 
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->homa);
-	EXPECT_STREQ("xmit BUSY", unit_log_get());
+	// Doesn't really matter what range is requested
+	EXPECT_SUBSTR("xmit RESEND", unit_log_get());
+
 }
 TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 {
