@@ -687,7 +687,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 * of the missing bytes; otherwise just send a BUSY. 
 		 */
 		homa_get_resend_range(&rpc->msgin, h);
-		if (h->length > 0) {
+		if (ntohl(h->length) > 0) {
 			tt_record4("sending RESEND from resend RPC id %llu, client 0x%x:%d "
 							"offset %d", 
 							rpc->id, tt_addr(rpc->peer->addr), 
