@@ -535,12 +535,16 @@ def print_analyzer_help():
     Prints out documentation for all of the analyzers.
     """
 
+    global options
+    analyzers = options.analyzers.split()
     module = sys.modules[__name__]
     for attr in sorted(dir(module)):
         if not attr.startswith('Analyze'):
             continue
         object = getattr(module, attr)
         analyzer = attr[7].lower() + attr[8:]
+        if (options.analyzers != 'all') and (not analyzer in analyzers):
+            continue
         if hasattr(object, 'output'):
             print('%s: %s' % (analyzer, object.__doc__))
 
@@ -3736,6 +3740,130 @@ class AnalyzeIntervals:
         self.analyze_rx()
 
 #------------------------------------------------
+# Analyzer: lost
+#------------------------------------------------
+class AnalyzeLost:
+    """
+    Prints information about packets that appear to have been dropped
+    in the network.
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+
+    def analyze(self):
+        global packets, traces
+
+        # Packets that appear to have been lost.
+        self.lost_pkts = []
+
+        # node -> count of lost packets transmitted from that node.
+        self.tx_lost = defaultdict(lambda : 0)
+
+        # node-> count of lost packetss destined for that node.
+        self.rx_lost = defaultdict(lambda : 0)
+
+        # tx_node -> dict {rx_node -> core where GRO will happen for packets
+        # send from tx_node to rx_node}
+        self.rx_core = defaultdict(dict)
+
+        for pkt in packets.values():
+            if not 'xmit' in pkt:
+                continue
+            rx_node = get_rpc_node(pkt['id']^1)
+            if rx_node == None:
+                continue
+            if 'gro' in pkt:
+                if not 'tx_node' in pkt:
+                    print('Strange packet: %s' % (pkt))
+                self.rx_core[pkt['tx_node']][rx_node] = pkt['gro_core']
+                continue
+            if (pkt['xmit'] + 200) > traces[rx_node]['last_time']:
+                continue
+            if pkt['xmit'] < traces[rx_node]['first_time']:
+                continue
+            self.lost_pkts.append(pkt)
+            self.tx_lost[pkt['tx_node']] += 1
+            self.rx_lost[rx_node] += 1
+
+    def output(self):
+        global packets, rpcs, options, traces
+
+        print('\n--------------')
+        print('Analyzer: lost')
+        print('--------------')
+        print('Packets that appear to be lost: %d/%d (%.1f%%)\n' % (len(self.lost_pkts),
+                len(packets), 100*len(self.lost_pkts)/len(packets)))
+
+        print('Statistics on lost packets:')
+        print('Node:      Name of a node')
+        print('TxLost:    Lost packets sent from this node')
+        print('RxLost:    Lost packets destined to this node')
+
+        print('\nNode      TxLost  RxLost')
+        print('------------------------')
+        for node in get_sorted_nodes():
+            print('%-10s %6d %6d' % (node, self.tx_lost[node], self.rx_lost[node]))
+
+        print('\nLost packet details:')
+        print('Xmit:     Time packet was passed to ip*xmit on sender')
+        print('TxNode:   Node that transmitted packet')
+        print('RxNode:   Node that was supposed to receive packet')
+        print('RxCore:   Core where GRO should have processed the packet')
+        print('RPCId:    Identifier of the packet\'s RPC on TxNode')
+        print('Offset:   Offset of the packet\'s data within the message')
+        print('Blanks for any packet means "same as previous packet"')
+
+        print('\nXmit       TxNode     RxNode    RxCore        RpcId Offset')
+        print('----------------------------------------------------------')
+        prev_xmit = 1e20
+        prev_tx_node = ''
+        prev_rx_node = ''
+        prev_core = -1
+        prev_id = 0
+        for pkt in sorted(self.lost_pkts, key=lambda p : p['xmit']):
+            xmit = pkt['xmit']
+            if xmit == prev_xmit:
+                xmit_info = ''
+            else:
+                xmit_info = '%.3f' % (xmit)
+                prev_xmit = xmit
+
+            tx_node = pkt['tx_node']
+            rx_node = get_rpc_node(pkt['id']^1)
+            if not rx_node in self.rx_core[tx_node]:
+                core_info = "???"
+                prev_core = -1
+            else:
+                core = self.rx_core[tx_node][rx_node]
+                if core == prev_core:
+                    core_info = ''
+                else:
+                    core_info = '%d' % (core)
+                    prev_core = core
+
+            if tx_node == prev_tx_node:
+                tx_node = ''
+            else:
+                prev_tx_node = tx_node
+
+            if rx_node == prev_rx_node:
+                rx_node = ''
+            else:
+                prev_rx_node = rx_node
+
+            id = pkt['id']
+            if id == prev_id:
+                id_info = ''
+            else:
+                id_info = '%d' % (id)
+                prev_id = id
+
+            print('%9s   %-10s %-10s %4s %12s %6d' % (xmit_info, tx_node,
+                    rx_node, core_info, id_info, pkt['offset']))
+
+#------------------------------------------------
 # Analyzer: net
 #------------------------------------------------
 class AnalyzeNet:
@@ -4700,8 +4828,10 @@ class AnalyzePackets:
                         max_time = tx_time
                 if max_offset >= 0:
                     pkt['xmit'] = max_time
+                    pkt['tx_node'] = tx_rpc['node']
                 elif 'gro' in pkt:
                     pkt['xmit'] = pkt['gro']
+                    pkt['tx_node'] = get_rpc_node(id)
 
             # Make sure that all of the smaller packets deriving from each
             # TSO packet are represented (if one of these packets is lost,
@@ -5339,8 +5469,8 @@ class AnalyzeSmis:
 #------------------------------------------------
 class AnalyzeSnapshot:
     """
-    Prints information about the state of a particular node at a given time.
-    Requires the --node and --time options.
+    Prints information about the state of incoming messages to a particular
+    node at a given time. Requires the --node and --time options.
     """
 
     def __init__(self, dispatcher):
