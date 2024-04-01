@@ -291,12 +291,13 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 }
 
 /**
- * homa_get_resend_range() - Given a message for which some input data
- * is missing, find the first range of missing data.
- * @msgin:     Message for which not all granted data has been received.
+ * homa_get_resend_range() - Find the first range of data in a message
+ * that has been granted but not yet received.
+ * @msgin:     Message to examine.
  * @resend:    The @offset and @length fields of this structure will be
  *             filled in with information about the first missing range
- *             in @msgin.
+ *             in @msgin. If there is no missing data to resend (i.e. all
+ *             granted data has been received), the @length field will be zero.
  */
 void homa_get_resend_range(struct homa_message_in *msgin,
 		struct resend_header *resend)
@@ -681,14 +682,25 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			rpc->id, ntohl(h->offset), ntohl(h->length),
 			h->priority);
 
-	if (!homa_is_client(rpc->id)) {
-		/* We are the server for this RPC. */
-		if (rpc->state != RPC_OUTGOING) {
+	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
+		/* We are the server for this RPC. If we haven't received
+		 * all of the bytes we've granted then request a resend
+		 * of the missing bytes; otherwise just send a BUSY.
+		 */
+		homa_get_resend_range(&rpc->msgin, h);
+		if (ntohl(h->length) > 0) {
+			tt_record4("sending RESEND from resend RPC id %llu, "
+					"client 0x%x:%d offset %d",
+					rpc->id, tt_addr(rpc->peer->addr),
+					rpc->dport, ntohl(h->offset));
+			h->priority = rpc->hsk->homa->num_priorities -1;
+			homa_xmit_control(RESEND, h, sizeof(*h), rpc);
+		} else {
 			tt_record2("sending BUSY from resend, id %d, state %d",
 					rpc->id, rpc->state);
 			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-			goto done;
 		}
+		goto done;
 	}
 	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
 		/* We have chosen not to transmit data from this message;
