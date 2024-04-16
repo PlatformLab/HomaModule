@@ -353,10 +353,10 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			}
 		}
 	}
-	homa_skb_free(skb);
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
+	homa_skb_free(skb);
 	return result;
 }
 
