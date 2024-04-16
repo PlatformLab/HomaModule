@@ -125,6 +125,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- April 2024: replaced `master` branch with `main`
 - December 2022: Version 2.0. This includes a new mechanism for managing
   buffer space for incoming messages, which improves throughput by
   50-100% in many situations. In addition, Homa now uses the sendmsg
