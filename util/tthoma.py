@@ -46,7 +46,9 @@ import time
 # queued:            Time when RPC was added to ready queue (no
 #                    waiting threads). At most one of 'handoff' and 'queued'
 #                    will be present.
-# resends:           List of <time, offset> tuples for RESEND packets sent
+# resend_rx:         List of <time, offset, length> tuples for all incoming
+#                    RESEND packets
+# resend_tx:         List of <time, offset> tuples for RESEND packets sent
 #                    for the incoming message
 # retransmits:       One entry for each packet retransmitted; maps from offset
 #                    to <time, length> tuple
@@ -1139,15 +1141,28 @@ class Dispatcher:
         'regexp': 'received RPC handoff while polling, id ([0-9]+)'
     })
 
-    def __resend(self, trace, time, core, match, interests):
+    def __resend_tx(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
         for interest in interests:
-            interest.tt_resend(trace, time, core, id, offset)
+            interest.tt_resend_tx(trace, time, core, id, offset)
 
     patterns.append({
-        'name': 'resend',
+        'name': 'resend_tx',
         'regexp': 'Sent RESEND for client RPC id ([0-9]+), .* offset ([0-9]+)'
+    })
+
+    def __resend_rx(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        length = int(match.group(2))
+        for interest in interests:
+            interest.tt_resend_rx(trace, time, core, id, offset, length)
+
+    patterns.append({
+        'name': 'resend_rx',
+        'regexp': 'resend request for id ([0-9]+), offset ([0-9]+), '
+                'length ([0-9]+)'
     })
 
     def __retransmit(self, trace, time, core, match, interests):
@@ -3761,8 +3776,15 @@ class AnalyzeLost:
         # node -> count of lost packets transmitted from that node.
         self.tx_lost = defaultdict(lambda : 0)
 
-        # node-> count of lost packetss destined for that node.
+        # node-> count of lost packets destined for that node.
         self.rx_lost = defaultdict(lambda : 0)
+
+        # node -> number of packets retransmitted
+        self.retransmits = defaultdict(lambda : 0)
+
+        # RPC id -> True for all RPCs with at least one outgoing packet
+        # either lost or retransmitted.
+        self.lost_rpcs = {}
 
         # tx_node -> dict {rx_node -> core where GRO will happen for packets
         # send from tx_node to rx_node}
@@ -3787,33 +3809,35 @@ class AnalyzeLost:
             self.tx_lost[pkt['tx_node']] += 1
             self.rx_lost[rx_node] += 1
 
+        for rpc in rpcs.values():
+            self.retransmits[rpc['node']] += len(rpc['retransmits'])
+
     def output(self):
         global packets, rpcs, options, traces
 
         print('\n--------------')
         print('Analyzer: lost')
         print('--------------')
-        print('Packets that appear to be lost: %d/%d (%.1f%%)\n' % (len(self.lost_pkts),
+        print('Packets that appear to be lost: %d/%d (%.1f%%)' % (len(self.lost_pkts),
                 len(packets), 100*len(self.lost_pkts)/len(packets)))
+        num_retrans = sum(self.retransmits.values())
+        print('Retransmitted packets: %d/%d (%.1f%%)' % (num_retrans,
+                len(packets), 100*num_retrans/len(packets)))
+        print('')
 
-        print('Statistics on lost packets:')
+        print('A packet is considered to be "lost" if it has been transmitted')
+        print('but there is no evidence that it was ever received (presumably')
+        print('it has not been retransmitted).')
         print('Node:      Name of a node')
         print('TxLost:    Lost packets sent from this node')
         print('RxLost:    Lost packets destined to this node')
+        print('Retrans:   Number of packets retransmitted by node')
 
-        print('\nNode      TxLost  RxLost')
-        print('------------------------')
+        print('\nNode      TxLost  RxLost Retrans')
+        print('--------------------------------')
         for node in get_sorted_nodes():
-            print('%-10s %6d %6d' % (node, self.tx_lost[node], self.rx_lost[node]))
-
-        print('\nLost packet details:')
-        print('Xmit:     Time packet was passed to ip*xmit on sender')
-        print('TxNode:   Node that transmitted packet')
-        print('RxNode:   Node that was supposed to receive packet')
-        print('RxCore:   Core where GRO should have processed the packet')
-        print('RPCId:    Identifier of the packet\'s RPC on TxNode')
-        print('Offset:   Offset of the packet\'s data within the message')
-        print('Blanks for any packet means "same as previous packet"')
+            print('%-10s %6d %6d  %6d' % (node, self.tx_lost[node],
+                    self.rx_lost[node], self.retransmits[node]))
 
         print('\nXmit       TxNode     RxNode    RxCore        RpcId Offset')
         print('----------------------------------------------------------')
@@ -4702,10 +4726,10 @@ class AnalyzePackets:
         # that core (but not yet freed).
         self.copied = defaultdict(list)
 
-    def tt_ip_xmit(self, trace, t, core, id, offset):
+    def tt_ip_xmit(self, trace, time, core, id, offset):
         global packets
         p = packets[pkt_id(id, offset)]
-        p['xmit'] = t
+        p['xmit'] = time
         p['tx_node'] = trace['node']
         p['tx_core'] = core
 
@@ -4882,7 +4906,8 @@ class AnalyzeRpcs:
             'send_data': [],
             'send_grant': [],
             'ip_xmits': {},
-            'resends': [],
+            'resend_rx': [],
+            'resend_tx': [],
             'retransmits': {}}
 
     def append(self, trace, id, t, name, value):
@@ -4937,11 +4962,17 @@ class AnalyzeRpcs:
         rpcs[id]['queued'] = t
         rpcs.pop('handoff', None)
 
-    def tt_resend(self, trace, t, core, id, offset):
+    def tt_resend_rx(self, trace, t, core, id, offset, length):
         global rpcs
         if not id in rpcs:
             self.new_rpc(id, t, trace['node'])
-        rpcs[id]['resends'].append([t, offset])
+        rpcs[id]['resend_rx'].append([t, offset, length])
+
+    def tt_resend_tx(self, trace, t, core, id, offset):
+        global rpcs
+        if not id in rpcs:
+            self.new_rpc(id, t, trace['node'])
+        rpcs[id]['resend_tx'].append([t, offset])
 
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global rpcs
@@ -5742,7 +5773,8 @@ class AnalyzeSnapshot:
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
                             print_field_if(pkt, 'xmit', '(%7.1f)',
                                      lambda t : t - options.time ),
-                            peer_nodes[rpcs[id]['peer']],
+                            peer_nodes[rpcs[id]['peer']] if 'peer' in rpcs[id]
+                            else "",
                             print_field_if(pkt, 'tx_core', '%4d'),
                             print_field_if(pkt, 'gro', '%7.1f'),
                             print_field_if(pkt, 'gro', '(%6.1f)',
