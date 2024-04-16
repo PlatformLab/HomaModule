@@ -336,7 +336,24 @@ if elapsed_secs != 0:
         us_per = 0
     else:
         us_per = (time/calls)/(cpu_khz/1e03)
+    print("")
     print("Polling in recv             %6.2f   %7.2f us/syscall" % (cores, us_per))
+
+    calls = deltas["skb_allocs"]
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (deltas["skb_alloc_cycles"]/calls)/(cpu_khz/1e03)
+    print("Skb allocation              %6.2f   %7.2f us/skb" % (
+            deltas["skb_alloc_cycles"]/time_delta, us_per))
+
+    calls = deltas["skb_frees"]
+    if calls == 0:
+        us_per = 0
+    else:
+        us_per = (deltas["skb_free_cycles"]/calls)/(cpu_khz/1e03)
+    print("Skb freeing                 %6.2f   %7.2f us/skb" % (
+            deltas["skb_free_cycles"]/time_delta, us_per))
 
     print("\nLock Misses:")
     print("------------")

@@ -1,10 +1,29 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Experiments to try with c6525-100g cluster:
+  * Check whether Homa may be exceeding max_incoming
+  * Analyze homa_grant_recalc: it seems to be using a lot of time, and
+    it sometimes runs simultaneously in several threads, resulting in
+    long waits for RPC locks.
+  * Try increasing the timeout interval to see if this helps performance
+    (it might make things worse by increasing the number of messages
+    waiting for timeouts while holding buffers)
+  * Figure out how to program the switch: are buffer sizes too small?
+  * Better data on actual packet loss rates
+  * Measure time spent allocating and freeing skbs
+
 * Notes on poor 100 Gbps throughput as of Feb. 2024:
   * One node (node3) has 1400 incoming RPCs blocked waiting for buffers
   * Tried increasing max_overcommit to 16, but throughput cratered: only
     a few Gbps.
+  * On node3, one core (12) has a huge backup of data packets waiting for
+    SoftIRQ processing (1-2 MB, delays of 1 ms or more):
+    * Need to analyze why there are large delays in sending control packets
+    * Also, homa_grant_check_rpc seems to take a long time.
+  * Found times (e.g. in 100g2/node5 arond 13368.354) when homa_grant_recalc
+    runs simultaenously in several threads, resulting in long blocks for
+    RPC locks.
 
 * Work in progress (1/29/2024): refactoring of homa_timer to simplify,
   allow faster retries. Performance with this code got significantly
@@ -14,11 +33,6 @@ Notes for Homa implementation in Linux:
   * Need to reimplement FIFO grants
   * Replace fifo_grant_increment with fifo_grant_interval
   * Refactor so that the msgin structure is always properly initialized?
-
-* It looks like SoftIRQ backlogs can get quite long (1-2 ms!) and stay
-  that way for quite a while; add analyzer to tthoma.py to compute these?
-  Also, it looks like tthoma.py -a delay is underestimating the SoftIRQ
-  wakeup times (try this on 100g).
 
 * The current implementation can execute RPCs multiple times on the server:
   * The initial RPC arrives, but takes the slow path to SoftIRQ, which can
@@ -53,8 +67,6 @@ Notes for Homa implementation in Linux:
 * Include the GSO packet size in the initial packet, so the receiver
   can predict how much grants will get rounded up.
 * Out-of-order incoming grants seem to be pretty common.
-* When there are a lot of lost packets, Homa retries them *very* slowly
-  (only one every 11-12 ms per server?). This is bad.
 * Round up bpage fragments to 64 byte boundaries
 
 * CloudLab cluster issues:
@@ -574,9 +586,3 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
-
-https://www.intel.com/content/www/us/en/products/network-io/ethernet/programmable-ethernet-switch.html
-
-Melissa Evers: OpenSource VP (Sales and Marketing)
-
-email Sachin

@@ -1347,7 +1347,7 @@ int homa_softirq(struct sk_buff *skb) {
 
 		discard:
 		*prev_link = skb->next;
-		kfree_skb(skb);
+		homa_skb_free(skb);
 	}
 
 	/* Now process the longer packets. Each iteration of this loop
@@ -1410,7 +1410,7 @@ int homa_softirq(struct sk_buff *skb) {
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	printk(KERN_WARNING "unimplemented backlog_rcv invoked on Homa socket\n");
-	kfree_skb(skb);
+	homa_skb_free(skb);
 	return 0;
 }
 

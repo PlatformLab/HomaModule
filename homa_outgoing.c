@@ -150,9 +150,8 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		}
 		if (skb_bytes_left > bytes_left)
 			skb_bytes_left = bytes_left;
-
-		skb = alloc_skb(HOMA_SKB_EXTRA + gso_size
-				+ sizeof32(struct homa_skb_info), GFP_KERNEL);
+		skb = homa_skb_new(HOMA_SKB_EXTRA + gso_size
+				+ sizeof32(struct homa_skb_info));
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
 			homa_rpc_lock(rpc, "homa_message_out_init");
@@ -203,7 +202,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			if (copy_from_iter(skb_put(skb, seg_size), seg_size,
 					iter) != seg_size) {
 				err = -EFAULT;
-				kfree_skb(skb);
+				homa_skb_free(skb);
 				homa_rpc_lock(rpc, "homa_message_out_init2");
 				goto error;
 			}
@@ -220,7 +219,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		if (rpc->state == RPC_DEAD) {
 			/* RPC was freed while we were copying. */
 			err = -EINVAL;
-			kfree_skb(skb);
+			homa_skb_free(skb);
 			goto error;
 		}
 		*last_link = skb;
@@ -298,8 +297,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
          * packets (better reuse of sk_buffs?).
 	 */
 	dst = homa_get_dst(peer, hsk);
-	skb = alloc_skb(dst_mtu(dst) + HOMA_SKB_EXTRA + sizeof32(void*),
-			GFP_KERNEL);
+	skb = homa_skb_new(HOMA_MAX_HEADER + HOMA_SKB_EXTRA + sizeof32(void*));
 	if (unlikely(!skb))
 		return -ENOBUFS;
 	dst_hold(dst);
@@ -332,7 +330,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		/* It appears that ip*_xmit frees skbuffs after
 		 * errors; the following code is to raise an alert if
 		 * this isn't actually the case. The extra skb_get above
-		 * and kfree_skb below are needed to do the check
+		 * and homa_skb_free call below are needed to do the check
 		 * accurately (otherwise the buffer could be freed and
 		 * its memory used for some other purpose, resulting in
 		 * a bogus "reference count").
@@ -355,7 +353,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			}
 		}
 	}
-	kfree_skb(skb);
+	homa_skb_free(skb);
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
@@ -573,9 +571,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			 * isn't idempotent (packet state gets updated during
 			 * sends) so copy the packet data into a clean sk_buff.
 			 */
-			new_skb = alloc_skb(length + sizeof(struct data_header)
+			new_skb = homa_skb_new(length + sizeof(struct data_header)
 					+ rpc->hsk->ip_header_length
-					+ HOMA_SKB_EXTRA, GFP_KERNEL);
+					+ HOMA_SKB_EXTRA);
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
 					printk(KERN_NOTICE "homa_resend_data "

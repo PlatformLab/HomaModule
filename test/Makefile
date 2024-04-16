@@ -57,6 +57,7 @@ HOMA_SRCS :=  homa_grant.c \
 	      homa_peertab.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
+	      homa_skb.c \
 	      homa_socktab.c \
 	      homa_timer.c \
 	      homa_utils.c \

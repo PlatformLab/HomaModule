@@ -636,8 +636,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		result = !list_empty(&hsk->dead_rpcs)
 				&& ((num_skbs + num_rpcs) != 0);
 		homa_sock_unlock(hsk);
-		for (i = 0; i < num_skbs; i++)
-			kfree_skb(skbs[i]);
+		homa_skb_free_many(skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
 			rpc = rpcs[i];
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
@@ -1527,10 +1526,26 @@ char *homa_print_metrics(struct homa *homa)
 		}
 		for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
 			homa_append_metric(homa,
-					"priority%d_packets      %15llu  "
-					"Packets sent at priority %d\n",
-					i, m->priority_packets[i], i);
+					   "priority%d_packets      %15llu  "
+					   "Packets sent at priority %d\n",
+					   i, m->priority_packets[i], i);
 		}
+		homa_append_metric(homa,
+				"skb_allocs                 %15llu  "
+				"sk_buffs allocated\n",
+				m->skb_allocs);
+		homa_append_metric(homa,
+				"skb_alloc_cycles           %15llu  "
+				"Time spent allocating sk_buffs\n",
+				m->skb_alloc_cycles);
+		homa_append_metric(homa,
+				"skb_frees                 %15llu  "
+				"sk_buffs freed\n",
+				m->skb_frees);
+		homa_append_metric(homa,
+				"skb_free_cycles           %15llu  "
+				"Time spent freeing sk_buffs\n",
+				m->skb_free_cycles);
 		homa_append_metric(homa,
 				"requests_received         %15llu  "
 				"Incoming request messages\n",
@@ -1995,7 +2010,7 @@ void homa_free_skbs(struct sk_buff *head)
 {
 	while (head) {
 		struct sk_buff *next = homa_get_skb_info(head)->next_skb;
-		kfree_skb(head);
+		homa_skb_free(head);
 		head = next;
 	}
 }
