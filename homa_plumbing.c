@@ -898,21 +898,19 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 
 	if (!args.id) {
 		/* This is a request message. */
-		INC_METRIC(send_calls, 1);
-		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
-				(addr->in6.sin6_family == AF_INET)
-				? ntohl(addr->in4.sin_addr.s_addr)
-				: tt_addr(addr->in6.sin6_addr),
-				ntohs(addr->in6.sin6_port),
-				atomic64_read(&hsk->homa->next_outgoing_id),
-				length);
-
 		rpc = homa_rpc_new_client(hsk, addr);
 		if (IS_ERR(rpc)) {
 			result = PTR_ERR(rpc);
 			rpc = NULL;
 			goto error;
 		}
+		INC_METRIC(send_calls, 1);
+		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
+				(addr->in6.sin6_family == AF_INET)
+				? ntohl(addr->in4.sin_addr.s_addr)
+				: tt_addr(addr->in6.sin6_addr),
+				ntohs(addr->in6.sin6_port), rpc->id,
+				length);
 		rpc->completion_cookie = args.completion_cookie;
 		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
 		if (result)
