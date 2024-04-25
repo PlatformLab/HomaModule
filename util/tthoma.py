@@ -109,7 +109,7 @@ class OffsetDict(dict):
 # nic:          Time when the NIC transmitted the packet (if available)
 # gro:          Time when GRO received the packet
 # softirq:      Time when homa_softirq processed the packet
-# free:         Time when skb was freed (after copying to application)
+# free:         Time when skb was freed on receiver (after copying to application)
 # id:           RPC id on the sender
 # offset:       Offset of the data in the packet within its message
 # length:       # bytes of message data in the received packet
@@ -122,10 +122,11 @@ class OffsetDict(dict):
 # tx_node:      Name of node from which the packet was transmitted (always
 #               present if xmit is present)
 # tx_core:      Core on which ip*xmit was invoked
+# rx_node:      Name of node on which packet was received
 # gro_core:     Core on which homa_gro_receive was invoked
 # softirq_core: Core on with SoftIRQ processed the packet
-# free_tx_skb:  Time when the sk_buff used to transmit the packet was freed,
-#               which can't happen until the packet has been fully transmitted
+# free_tx_skb:  Time when NAPI released the skb on the sender, which can't
+#               happen until the packet has been fully transmitted
 packets = OffsetDict()
 
 # offset -> True for each offset that has occurred in a received data packet;
@@ -160,8 +161,9 @@ grants = defaultdict(dict)
 # tx_starts:      Number of new outgoing messages that started in the interval
 # tx_pkts:        Number of data packets sent by the node during the interval
 # tx_bytes:       Number of bytes of data sent by the node during the interval
-# tx_q:           Number of bytes of data currently queued in the NIC.
-# tx_grant_xmit:  Bytes of grant that have been transmitted by not yet
+# tx_q:           Estimate of the number of unsent bytes in the NIC (assumes
+#                 all bytes passed to ip*xmit are transmitted ASAP)
+# tx_grant_xmit:  Bytes of grant that have been passsed to ip*xmit but not yet
 #                 received by GRO, as of the end of the interval
 # tx_grant_gro:   Bytes of grant that have been received by GRO but not SoftIRQ,
 #                 as of the end of the interval
@@ -178,8 +180,12 @@ grants = defaultdict(dict)
 # rx_bytes:       Number of bytes of data received by GRO during the interval
 # rx_granted:     Bytes of grant that have been transmitted, but for which
 #                 corresponding data has not been transmitted
-# rx_data_xmit:   Number of bytes of data that have been transmitted by the
-#                 sender but not yet received by GRO
+# rx_data_xmit:   Number of bytes of data that have been passed to ip*xmit by
+#                 the sender but not yet received by GRO, as of the end of
+#                 the interval
+# rx_data_qdisc:  Number of bytes of data that have been passed to ip*xmit
+#                 by the sender but haven't actually been transmitted by
+#                 the NIC (they are queued in qdisc).
 # rx_data_gro:    Number of bytes of data that have been received by GRO
 #                 but not SoftIRQ, as of the end of the interval
 #
@@ -957,6 +963,21 @@ class Dispatcher:
                   'priority ([0-9]+)'
     })
 
+    def __qdisc_queue_data(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        offset = int(match.group(2))
+        qid = int(match.group(3))
+        queue = match.group(4)
+        for interest in interests:
+            interest.tt_qdisc_queue_data(trace, time, core, id,
+                    offset, qid, queue)
+
+    patterns.append({
+        'name': 'qdisc_queue_data',
+        'regexp': '__dev_xmit_skb queueing homa data packet for '
+                  'id ([0-9]+), offset ([0-9]+), qid ([0-9]+) \(([^)]+)\)'
+    })
+
     def __mlx_data(self, trace, time, core, match, interests):
         peer = match.group(1)
         id = int(match.group(2))
@@ -1016,6 +1037,16 @@ class Dispatcher:
     patterns.append({
         'name': 'sendmsg_response',
         'regexp': 'homa_sendmsg response, id ([0-9]+), .*length ([0-9]+)'
+    })
+
+    def __sendmsg_done(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_sendmsg_done(trace, time, core, id)
+
+    patterns.append({
+        'name': 'sendmsg_done',
+        'regexp': 'homa_sendmsg finished, id ([0-9]+)'
     })
 
     def __recvmsg_done(self, trace, time, core, match, interests):
@@ -1238,14 +1269,15 @@ class Dispatcher:
 
     def __rpc_incoming(self, trace, time, core, match, interests):
         id = int(match.group(1))
-        received = int(match.group(2))
-        length = int(match.group(3))
+        peer = match.group(2)
+        received = int(match.group(3))
+        length = int(match.group(4))
         for interest in interests:
-            interest.tt_rpc_incoming(trace, time, core, id, received, length)
+            interest.tt_rpc_incoming(trace, time, core, id, peer, received, length)
 
     patterns.append({
         'name': 'rpc_incoming',
-        'regexp': 'Incoming RPC id ([0-9]+), peer.*([0-9]+)/([0-9]+) bytes'
+        'regexp': 'Incoming RPC id ([0-9]+), peer ([^,]+), ([0-9]+)/([0-9]+) bytes'
     })
 
     def __rpc_incoming2(self, trace, time, core, match, interests):
@@ -1282,7 +1314,10 @@ class AnalyzeActivity:
     """
     Prints statistics about how many RPCs are active and data throughput.
     If --data is specified, generates activity_<node>.data files that
-    describe activity over small intervals across the traces.
+    describe activity over small intervals across the traces. The information
+    in the .dat files includes new and total incoming messages, messages
+    with grants, KB of outstanding grants, incoming data, and new and total
+    outgoing messages.
     """
 
     def __init__(self, dispatcher):
@@ -1290,7 +1325,6 @@ class AnalyzeActivity:
         dispatcher.interest('AnalyzePackets')
         dispatcher.interest('AnalyzeGrants')
         dispatcher.interest('AnalyzeIntervals')
-        return
 
     def analyze(self):
         global rpcs, packets, traces
@@ -1312,15 +1346,29 @@ class AnalyzeActivity:
         # Node name -> total bytes output by that node
         self.node_out_bytes = {}
 
+        # Node name -> dictionary that maps from peer address to the core
+        # that handles incoming packets from that (sending) peer on this
+        # (receiving) node.
+        self.node_peer_cores = {}
+
+        # Node name -> dictionary that maps from core number to total RPCs
+        # still in incoming state at the end of the trace.
+        self.node_core_pending = {}
+
         for node in get_sorted_nodes():
             self.node_in_msgs[node] = []
             self.node_out_msgs[node] = []
             self.node_core_in_bytes[node] = {}
             self.node_out_bytes[node] = 0
+            self.node_peer_cores[node] = {}
+            self.node_core_pending[node] = defaultdict(lambda: 0)
 
         # Scan RPCs to collect data
         for id, rpc in rpcs.items():
             node = rpc['node']
+
+            if ('peer' in rpc) and ('gro_core' in rpc):
+                self.node_peer_cores[node][rpc['peer']] = rpc['gro_core']
 
             gros = rpc['gro_data']
             if gros:
@@ -1381,6 +1429,14 @@ class AnalyzeActivity:
                 else:
                     cores[core] += length
 
+        for rpc in rpcs.values():
+            if 'remaining' in rpc:
+                node = rpc['node']
+                if not 'peer' in rpc:
+                    print('RPC missing peer: %s' % (rpc))
+                core = self.node_peer_cores[node][rpc['peer']]
+                self.node_core_pending[node][core] += 1
+
     def sum_list(self, events):
         """
         Given a list of <time, event> entries where event is 'start' or 'end',
@@ -1435,9 +1491,13 @@ class AnalyzeActivity:
         print('Gbps:          Total message throughput (Gbps)')
         print('ActvGbps:      Total throughput when at least one message was active (Gbps)')
         print('MaxCore:       Highest incoming throughput via a single GRO core (Gbps)')
+        print('MaxPend:       Highest # partially received RPCs (at end of trace) handled')
+        print('               by a single GRO core')
         print('\nIncoming messages:')
-        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps       MaxCore')
-        print('---------------------------------------------------------------------------')
+        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps'
+                '       MaxCore    MaxPend  MaxPeers')
+        print('-------------------------------------------------------------'
+                '-----------------------------------')
         for node in get_sorted_nodes():
             if not node in self.node_in_msgs:
                 continue
@@ -1451,8 +1511,26 @@ class AnalyzeActivity:
                     max_bytes = bytes
                     max_core = core
             max_gbps = max_bytes*8e-3/(traces[node]['elapsed_time'])
-            print_list(node, events, total_bytes,
-                    ' %7.2f (C%02d)' % (max_gbps, max_core))
+            max_pending = -1
+            max_pending_core = -1
+            for core, pending in self.node_core_pending[node].items():
+                if pending > max_pending:
+                    max_pending = pending
+                    max_pending_core = core
+            core_peers = defaultdict(list)
+            max_peers = -1
+            max_peers_core = -1
+            for peer, core in self.node_peer_cores[node].items():
+                core_peers[core].append(peer)
+                num_peers = len(core_peers[core])
+                if num_peers > max_peers:
+                    max_peers = num_peers
+                    max_peers_core = core
+            # print('core_peers for %s: %s' % (node, core_peers))
+            extra = ' %7.2f (C%02d) %4d (C%02d) %3d (C%02d)' % (
+                    max_gbps, max_core, max_pending, max_pending_core,
+                    max_peers, max_peers_core)
+            print_list(node, events, total_bytes, extra)
         print('\nOutgoing messages:')
         print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps')
         print('-------------------------------------------------------------')
@@ -1479,7 +1557,7 @@ class AnalyzeActivity:
                 f.write('#             end of the interval\n')
                 f.write('# RxGts:      Number of incoming RPCS with outstanding grants at the\n')
                 f.write('#             end of the interval (doesn\'t include unscheduled)\n')
-                f.write('# RxGtKB      Number of KB for which grants have been sent but data\n')
+                f.write('# RxGtKB:     Number of KB for which grants have been sent but data\n')
                 f.write('              not yet received at the end of the interval\n')
                 f.write('# RxPkts:     Number of data packets received during the interval\n')
                 f.write('# RxGbps:     Throughput of received data during the interval\n')
@@ -3298,6 +3376,7 @@ class AnalyzeIntervals:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
         return
 
     class Incoming:
@@ -3336,7 +3415,7 @@ class AnalyzeIntervals:
             # Total bytes granted for which data has not been transmitted
             self.sum_granted = 0
 
-            # Total bytes transmitted but not received by GRO
+            # Total bytes passed to ip*xmit but not received by GRO
             self.sum_sent = 0
 
             # Total bytes that have been received by GRO but not SoftIRQ
@@ -3420,7 +3499,7 @@ class AnalyzeIntervals:
         #                                 unsched unscheduled bytes
         # <time, 'tx_end', id>            Last packet for id submitted to
         #                                 ip*xmit
-        # <time, 'rpc_start'>    Client RPC created with unsched
+        # <time, 'rpc_start'>             Client RPC created with unsched
         #                                 bytes of unscheduled data
         # <time, 'rpc_end'>               Client RPC response received by app
         # <time, 'xmit', id, offset, length>
@@ -3618,6 +3697,11 @@ class AnalyzeIntervals:
         # <time, 'rx_end', id>            Last packet arrived for id
         # <time, 'grant', id, offset>     Receiver has sent grant for offset
         # <time, 'send', id, offset>      Sender has sent data up to offset
+        # <time, 'qdisc', id, length>     Length bytes of data entered the
+        #                                 qdisc mechanism on the sender (paired
+        #                                 with nic_xmit to compute qdisc
+        #                                 backups)
+        # <time, 'nic_xmit', id, length>  Length bytes of data transmitted by NIC
         # <time, 'gro', id, offset>       GRO has received data up to offset
         # <time, 'softirq', id, offset>   SoftIRQ has received data up to offset
         # <time, 'trace_end', dummy>      Marks end of trace; used to make sure
@@ -3626,6 +3710,10 @@ class AnalyzeIntervals:
 
         # RPC id -> True for all RPCs for which we've seen at least one event.
         started = {}
+
+        # Total bytes stuck on senders between ip*xmit and NIC transmission
+        # (probably queued in qdisc).
+        queued = 0
 
         incoming = self.Incoming(tx=False)
 
@@ -3685,6 +3773,16 @@ class AnalyzeIntervals:
             for t, offset, prio in rpc['send_grant']:
                 events[node].append([t, 'grant', id, offset])
 
+        # Scan packets to collect info about qdisc buildup.
+        for pkt in packets.values():
+            if (('xmit_length' in pkt) and ('xmit' in pkt) and ('nic' in pkt)
+                    and ('rx_node' in pkt)):
+                id = pkt['id']^1
+                node = pkt['rx_node']
+                bytes = pkt['xmit_length']
+                events[node].append([pkt['xmit'], 'qdisc', id, bytes])
+                events[node].append([pkt['nic'], 'nic_xmit', id, bytes])
+
         # Scan events in time order to fill in intervals
         for node, node_events in events.items():
             node_events.sort()
@@ -3696,7 +3794,7 @@ class AnalyzeIntervals:
             for event in node_events:
                 t, op, id = event[0:3]
                 if t > trace_end:
-                    break;
+                    break
                 if False:
                     print('rx event: %s' % (event))
                 while t > interval_end:
@@ -3710,7 +3808,20 @@ class AnalyzeIntervals:
                     interval['rx_bytes'] = 0
                     interval['rx_granted'] = incoming.sum_granted;
                     interval['rx_data_xmit'] = incoming.sum_sent
+                    interval['rx_data_qdisc'] = queued
                     interval['rx_data_gro'] = incoming.sum_gro
+                if op == 'qdisc':
+                    # print('%9.3f: queueing %d bytes for id %d' % (t, event[3], id))
+                    queued += event[3]
+                    if interval:
+                        interval['rx_data_qdisc'] = queued
+                    continue
+                elif op == 'nic_xmit':
+                    # print('%9.3f: dequeueing %d bytes for id %d' % (t, event[3], id))
+                    queued -= event[3]
+                    if interval:
+                        interval['rx_data_qdisc'] = queued
+                    continue
                 if interval == None:
                     continue
                 if (not id in started) and (id != 0):
@@ -3972,7 +4083,7 @@ class AnalyzeNet:
 
                 # Skip retransmitted packets (too hard to account for).
                 retransmit = False
-                for resend in recv_rpc['resends']:
+                for resend in recv_rpc['resend_rx']:
                     if resend[1] == recv_offset:
                         retransmit = True
                         break
@@ -4601,16 +4712,15 @@ class AnalyzePacket:
                     if sender != 'unknown':
                         if traces[sender]['last_time'] < rtime:
                             # Special send time means "send time unknown"
-                            pkts.append([rtime, -1e10, id, roffset, sender,
+                            pkts.append([rtime, -1e10, xmit_id, roffset, sender,
                                     length, rprio, rpc['gro_core']])
                             continue
                     if xmit_rpc:
                         if ('sendmsg' in xmit_rpc) and (xmit_rpc['sendmsg']
                                 >= recv_time):
                             continue
-                    pkts.append([rtime, -1e10, id, roffset, sender, length,
+                    pkts.append([rtime, -1e10, xmit_id, roffset, sender, length,
                             rprio, rpc['gro_core']])
-                    prior_bytes += length
 
         # Amount of data transmitted after the reference packet but received
         # on the reference packet's core before the reference packet.
@@ -4729,9 +4839,11 @@ class AnalyzePackets:
     def tt_ip_xmit(self, trace, time, core, id, offset):
         global packets
         p = packets[pkt_id(id, offset)]
-        p['xmit'] = time
-        p['tx_node'] = trace['node']
-        p['tx_core'] = core
+        # If packet retransmitted, only record first transmission
+        if not 'xmit' in p:
+            p['xmit'] = time
+            p['tx_node'] = trace['node']
+            p['tx_core'] = core
 
     def tt_mlx_data(self, trace, t, core, peer, id, offset):
         global packets
@@ -4748,6 +4860,7 @@ class AnalyzePackets:
         p['gro'] = t
         p['priority'] = prio
         p['gro_core'] = core
+        p['rx_node'] = trace['node']
         recv_offsets[offset] = True
         self.active[id].append(p)
 
@@ -4757,6 +4870,7 @@ class AnalyzePackets:
         p['softirq'] = t
         p['softirq_core'] = core
         p['msg_length'] = msg_length
+        p['rx_node'] = trace['node']
 
     def tt_copy_out_done(self, trace, t, core, id, start, end):
         pkts = self.active[id^1]
@@ -4812,6 +4926,7 @@ class AnalyzePackets:
         Try to deduce missing packet fields, such as message length.
         """
         global packets, rpcs
+        sync_error_printed = False
 
         if self.mlx_data_pkts == 0:
             print('No \'mlx sent homa data packet\' records in timetraces; '
@@ -4856,7 +4971,14 @@ class AnalyzePackets:
                 elif 'gro' in pkt:
                     pkt['xmit'] = pkt['gro']
                     pkt['tx_node'] = get_rpc_node(id)
-
+            else:
+                if ('gro' in pkt) and ((pkt['gro'] - pkt['xmit']) < -5.0):
+                    if not sync_error_printed:
+                        print('Timetraces don\'t appear to be synchronized '
+                              '(did you run ttsync.py?); packet arrived before '
+                              'transmitted: %s' % (pkt),
+                              file=sys.stderr)
+                        sync_error_printed = True
             # Make sure that all of the smaller packets deriving from each
             # TSO packet are represented (if one of these packets is lost,
             # it won't be represented yet).
@@ -4868,7 +4990,9 @@ class AnalyzePackets:
                     pid = pkt_id(id, offset)
                     if not pid in packets:
                         pkt2 = {}
-                        for key in ['xmit', 'nic', 'id', 'msg_length', 'priority', 'tx_node', 'tx_core', 'free_tx_skb']:
+                        for key in ['xmit', 'nic', 'id', 'msg_length',
+                                    'priority', 'tx_node', 'tx_core',
+                                    'free_tx_skb']:
                             if key in pkt:
                                 pkt2[key] = pkt[key]
                         pkt2['offset'] = offset
@@ -5054,11 +5178,12 @@ class AnalyzeRpcs:
         if num_bytes > max_unsched:
             max_unsched = num_bytes;
 
-    def tt_rpc_incoming(self, trace, t, core, id, received, length):
+    def tt_rpc_incoming(self, trace, t, core, id, peer, received, length):
         global rpcs, max_unsched
         if not id in rpcs:
             self.new_rpc(id, t, trace['node'])
         rpc = rpcs[id]
+        rpc['peer'] = peer
         rpc['in_length'] = length
         rpc['remaining'] = length - received
 
@@ -5392,7 +5517,9 @@ class AnalyzeRtt:
 class AnalyzeRx:
     """
     Generates one data file for each node showing various statistics
-    related to incoming message reception as a function of time. Requires
+    related to incoming message reception as a function of time, including
+    data rate, active messages, info about outstnanding grants, and where
+    incoming data packets are curently located (qdisc, net, gro). Requires
     the --data and --gbps options.
     """
 
@@ -5431,26 +5558,30 @@ class AnalyzeRx:
                     'which corresponding\n')
             f.write('#             data packets have not been transmitted by '
                     'the peer\n')
-            f.write('# Xmit:       KB of data that have been transmitted by '
-                    'the peer but not yet\n')
-            f.write('#             received by GRO\n')
+            f.write('# Xmit:       KB of data that have been passed to ip*xmit '
+                    'on sender but not\n')
+            f.write('#             yet received by GRO\n')
+            f.write('# Qdisc:      KB of data that have been passed to ip*xmit '
+                    'on sender but not\n')
+            f.write('#             yet transmitted by NIC\n')
             f.write('# GRO:        KB of data that have been received by '
                     'GRO but not yet\n')
             f.write('#             received by SoftIRQ\n')
 
-            f.write('\n    Time   Gbps  Active  Pkts  Granted  Xmit   GRO\n')
+            f.write('\n    Time   Gbps  Active  Pkts  Granted  Xmit Qdisc   GRO\n')
             total = 0
             for interval in intervals[node]:
                 if not 'rx_bytes' in interval:
                     print('Strange interval for %s: %s' % (node, interval))
                 gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f   %5d  %4d    %5.0f %5.0f %5.0f\n'
+                f.write('%8.1f %6.1f   %5d  %4d    %5.0f %5.0f %5.0f %5.0f\n'
                         % (interval['time'], gbps,
                         interval['rx_active'],
                         interval['rx_pkts'],
                         interval['rx_granted'] * 1e-3,
                         interval['rx_data_xmit'] * 1e-3,
+                        interval['rx_data_qdisc'] * 1e-3,
                         interval['rx_data_gro'] * 1e-3))
             f.close()
             print('%-10s %6.1f Gbps' % (node, total/len(intervals[node])))
@@ -5836,64 +5967,38 @@ class AnalyzeTemp:
     debugging. Consult the code to see what it does right now.
     """
     def __init__(self, dispatcher):
-        if False:
+        if True:
             dispatcher.interest('AnalyzeRpcs')
             dispatcher.interest('AnalyzePackets')
-        self.core_prev = defaultdict(lambda : None)
-        self.core_delays = defaultdict(list)
 
-    def tt_all(self, trace, time, core, msg):
-        global options
-        if trace['node'] != options.node:
-            return
-            print(msg)
-        if 0 and not re.match('__homa_xmit_control .* calling alloc_skb', msg):
-            return
-        if not re.match('homa_message_out_init .* calling alloc_skb', msg):
-            return
-        if msg.find('before') != -1:
-            self.core_prev[core] = time
-        else:
-            prev = self.core_prev[core]
-            if prev != None:
-                self.core_delays[core].append(time - prev)
-                self.core_prev[core] = None
-                if (time - prev) > 100:
-                    print('%7.1f: Core %d, delay %5.1f' % (time, core, time - prev))
+        # List of packet ids for all packets that were queued for a qdisc.
+        self.qdisc_ids = []
+
+    def tt_qdisc_queue_data(self, trace, time, core, id, offset, qix, queue):
+        self.qdisc_ids.append(pkt_id(id, offset))
 
     def output(self):
-        global traces, options
+        global traces, options, packets
         print('\n-------------------')
         print('Analyzer: temp')
         print('-------------------')
-        print('Elapsed time when __homa_xmit_control invokes alloc_skb:')
-        print(' Core  Count    Avg    P10    P50    P90    P99    Max  Duty Cycle')
-        for core in sorted(self.core_prev.keys()):
-            if not self.core_delays[core]:
+
+        pkts = []
+        for pkt_id in self.qdisc_ids:
+            if not pkt_id in packets:
                 continue
-            delays = sorted(self.core_delays[core])
-            l = len(delays)
-            total = sum(delays)
-            trace = traces[options.node]
-            print('%5d %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f   %8.1f%%' %
-                    (core, l, total/l, delays[10*l//100],
-                    delays[50*l//100],  delays[90*l//100],
-                    delays[99*l//100], delays[-1],
-                    100*total/trace['elapsed_time']))
+            pkt = packets[pkt_id]
+            if (not 'xmit' in pkt) or (not 'gro' in pkt):
+                continue
+            if not 'nic' in pkt:
+                print('Queued packet has no mlx send record: %s' % (pkt))
+                continue
+            pkts.append([pkt['nic'] - pkt['xmit'], pkt])
 
-        all_delays = []
-        for core in self.core_prev.keys():
-            all_delays.extend(self.core_delays[core])
-        all_delays = sorted(all_delays)
-        if len(all_delays) > 0:
-            l = len(all_delays)
-            total = sum(all_delays)
-            print('Total %6d %6.1f %6.1f %6.1f %6.1f %6.1f %6.1f   %8.1f%%' %
-                    (l, total/l, all_delays[10*l//100],
-                    all_delays[50*l//100],  all_delays[90*l//100],
-                    all_delays[99*l//100], all_delays[-1],
-                    100*total/trace['elapsed_time']))
-
+        for delay, pkt in sorted(pkts, reverse=True, key=lambda t : t[0]):
+            print('RPC id %10d, offset %d, xmit %9.3f, mlx_delay %6.1f, '
+                    'gro_delay %6.1f' % (pkt['id'], pkt['offset'],
+                    pkt['xmit'], delay, pkt['gro'] - pkt['xmit']))
 
     def output_snapshot(self):
         global packets, rpcs
@@ -6235,7 +6340,7 @@ class AnalyzeTxpkts:
 
         # Bucket all of the packets by transmitting node.
         for pkt in packets.values():
-            if not 'tx_node' in pkt:
+            if (not 'tx_node' in pkt) or (not 'tx_core' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
 
@@ -6244,19 +6349,19 @@ class AnalyzeTxpkts:
         print('Analyzer: txpkts')
         print('----------------')
         print('See data files txpkts_*.dat in %s\n' % (options.data))
-        print('\nSummary statistics on delays related to outgoing packets:')
+        print('Summary statistics on delays related to outgoing packets:')
         print('Node:      Name of node')
         print('Core:      Core number')
         print('Count:     Total number of packets transmitted by core')
-        print('NicAvg:    Average value of core\'s NIC delay (time from'
+        print('NicAvg:    Average value of core\'s NIC delay (time from '
                 'packet transmission')
         print('           until NIC doorbell rung)')
         print('NicP90:    90th percentile of core\'s NIC delay')
-        print('GroAvg:    Average value of core\'s NIC delay (time from'
+        print('GroAvg:    Average value of core\'s NIC delay (time from '
                 'packet transmission')
         print('           until packet received by GRO at destination)')
         print('GroP90:    90th percentile of core\'s GRO delay')
-        print('FreeAvg:   Average value of core\'s free delay (time from'
+        print('FreeAvg:   Average value of core\'s free delay (time from '
                 'packet transmission')
         print('           until sk_buff can be reclaimed)')
         print('FreeP90:   90th percentile of core\'s free delay')
