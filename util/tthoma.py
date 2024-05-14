@@ -1441,6 +1441,9 @@ class AnalyzeActivity:
                 else:
                     cores[core] += length
 
+            for time, offset, length in rpc['send_data']:
+                self.node_out_bytes[node] += length
+
         for rpc in rpcs.values():
             if 'remaining' in rpc:
                 node = rpc['node']
@@ -3214,6 +3217,107 @@ class AnalyzeGrants:
                             interval['tx_grant_info']))
                 f.close()
 
+#------------------------------------------------
+# Analyzer: handoffs
+#------------------------------------------------
+class AnalyzeHandoffs:
+    """
+    Analyzes handoff delays for incoming messages (time from when
+    homa_rpc_handoff was called until homa_wait_for_message received
+    the message).
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        return
+
+    def output(self):
+        global rpcs
+
+        # node name -> list of delays in cases where there was a thread
+        # waiting for the message; separate info for requests and responses
+        node_req_handoffs = defaultdict(list)
+        node_resp_handoffs = defaultdict(list)
+
+        # node name -> list of delays where messages had to be queued;
+        # separate info for requests and responses
+        node_req_queued = defaultdict(list)
+        node_resp_queued = defaultdict(list)
+
+        for id, rpc in rpcs.items():
+            if not 'found' in rpc:
+                continue
+            if 'handoff' in rpc:
+                delay = rpc['found'] - rpc['handoff']
+                if id & 1:
+                    node_req_handoffs[rpc['node']].append(delay)
+                else:
+                    node_resp_handoffs[rpc['node']].append(delay)
+            elif 'queued' in rpc:
+                delay = rpc['found'] - rpc['queued']
+                if id & 1:
+                    node_req_queued[rpc['node']].append(delay)
+                else:
+                    node_resp_queued[rpc['node']].append(delay)
+
+        print('\n------------------')
+        print('Analyzer: handoffs')
+        print('------------------')
+        print('')
+        print('Delays in handing off RPCs to an application thread (elapsed ')
+        print('time from when homa_rpc_handoff was called at SoftIRQ level ')
+        print('until homa_wait_for_message received the RPC in the application):')
+        print('Node:         Name of node')
+        print('FastFrac:     Fraction of messages that were handed directly to')
+        print('              a waiting thread (no queueing)')
+        print('FAvg:         Average delay for fast handoffs')
+        print('FP50:         Median delay for fast handoffs')
+        print('FP90:         90th percentile delay for fast handoffs')
+        print('FP99:         99th percentile delay for fast handoffs')
+        print('QAvg:         Average delay for handoffs where the message had')
+        print('              to be queued (no waiting thread)')
+        print('QP50:         Median delay for queued handoffs')
+        print('QP90:         90th percentile delay for queued handoffs')
+        print('QP99:         99th percentile delay for queued handoffs')
+        print('')
+
+        for i in [0, 1]:
+            if i == 0:
+                print("\nRequest messages:")
+            else:
+                print("\nResponse messages:")
+            print('Node      FastFrac  Favg  FP50   FP90   FP99  QAvg  '
+                    'QP50   QP90   QP99')
+            print('----------------------------------------------------'
+                    '------------------')
+
+            for node in get_sorted_nodes():
+                if i == 0:
+                    handoffs = sorted(node_req_handoffs[node])
+                    queued = sorted(node_req_queued[node])
+                else:
+                    handoffs = sorted(node_resp_handoffs[node])
+                    queued = sorted(node_resp_queued[node])
+
+                print('%-10s   %5.3f' % (node,
+                        len(handoffs)/(len(handoffs) + len(queued))),
+                        end='')
+                if handoffs:
+                    print(' %5.1f %5.1f %6.1f %6.1f' % (
+                            sum(handoffs)/len(handoffs),
+                            handoffs[(50*len(handoffs))//100],
+                            handoffs[(90*len(handoffs))//100],
+                            handoffs[(99*len(handoffs))//100]), end='')
+                else:
+                    print(' '*24, end='')
+                if queued:
+                    print(' %5.1f %5.1f %6.1f %6.1f' % (
+                            sum(queued)/len(queued),
+                            queued[(50*len(queued))//100],
+                            queued[(90*len(queued))//100],
+                            queued[(99*len(queued))//100]))
+                else:
+                    print('')
 
 #------------------------------------------------
 # Analyzer: incoming
@@ -3534,6 +3638,14 @@ class AnalyzeIntervals:
         self.init_intervals()
         late_usecs = options.late
 
+        # See if packets include NIC xmit times
+        nic_data = False
+        for pkt in packets.values():
+            if ('xmit' in pkt) and ('gro' in pkt):
+                if 'nic' in pkt:
+                    nic_data = True
+                break
+
         # Extract information from packets
         for pkt in packets.values():
             tx_node = pkt['tx_node'] if 'tx_node' in pkt else None
@@ -3569,6 +3681,8 @@ class AnalyzeIntervals:
                 else:
                     add_to_intervals(rx_node, traces[tx_node]['first_time'],
                             tnic, 'rx_data_qdisc', length)
+            elif not nic_data:
+                tnic = txmit
             else:
                 if txmit != None:
                     add_to_intervals(rx_node, txmit, traces[tx_node]['last_time'],
@@ -3638,19 +3752,21 @@ class AnalyzeIntervals:
             node = rpc['node']
             if not id & 1:
                 # rpcs_active
+                start = None
                 if 'sendmsg' in rpc:
+                    start = rpc['sendmsg']
                     if 'recvmsg_done' in rpc:
-                        add_to_intervals(node, rpc['sendmsg'],
-                                rpc['recvmsg_done'], 'rpcs_active', 1)
+                        end = rpc['recvmsg_done']
                     else:
-                        add_to_intervals(node, rpc['sendmsg'],
-                                traces[node]['last_time'], 'rpcs_active', 1)
+                        end = traces[node]['last_time']
                 elif 'recvmsg_done' in rpc:
-                    add_to_intervals(rpc['node'], traces[node]['first_time'],
-                            rpc['recvmsg_done'], 'rpcs_active', 1)
+                    start = traces[node]['first_time']
+                    end = rpc['recvmsg_done']
                 elif ('remaining' in rpc) or ('sent' in rpc):
-                    add_to_intervals(rpc['node'], traces[node]['first_time'],
-                            traces[node]['last_time'], 'rpcs_active', 1)
+                    start = traces[node]['first_time']
+                    end =   traces[node]['last_time']
+                if start != None:
+                    add_to_intervals(node, start, end, 'rpcs_active', 1)
 
             # tx_active, rx_active
             if 'tx_active' in rpc:
@@ -4913,28 +5029,28 @@ class AnalyzeRpcs:
         for RPC during the traces.
         """
 
-        if 'out_length' in rpc:
-            length = rpc['out_length']
-            if not rpc['send_data']:
-                if ('sent' in rpc) and (rpc['sent'] < length):
-                    return traces[rpc['node']]['last_time']
-                return None
-            for t, offset, pkt_length in rpc['send_data']:
-                if (offset + pkt_length) >= length:
-                    return rpc['send_data'][-1][0]
-            return traces[rpc['node']]['last_time']
-        else:
-            if rpc['send_data']:
-                if not (id & 0x1):
-                    # Client RPC
-                    if rpc['gro_data']:
-                        return rpc['send_data'][-1][0]
-                elif 'free' in rpc:
-                        return rpc['send_data'][-1][0]
-                return traces[rpc['node']]['last_time']
-            if 'sent' in rpc:
-                return traces[rpc['node']]['last_time']
+        if not 'sent' in rpc and (not rpc['send_data']):
             return None
+
+        ceiling = traces[rpc['node']]['last_time']
+        if 'free' in rpc:
+            ceiling = rpc['free']
+        if not (rpc['id'] ^ 1):
+            if rpc['gro_data']:
+                ceiling = rpc['gro_data'][0][0]
+            elif 'recvmsg_done' in rpc:
+                ceiling = rpc['recmvsg_done']
+        if rpc['send_data']:
+            if ceiling != None:
+                return rpc['send_data'][-1][0]
+            if rpc['send_data'][-1][2] < 1500:
+                return rpc['send_data'][-1][0]
+            if 'out_length' in rpc:
+                length = rpc['out_length']
+                for t, offset, pkt_length in rpc['send_data']:
+                    if (offset + pkt_length) >= length:
+                        return rpc['send_data'][-1][0]
+        return ceiling
 
     def set_active(self, rpc, peer):
         """
@@ -4947,11 +5063,14 @@ class AnalyzeRpcs:
         # tx_active
         node = rpc['node']
         end = self.tx_end(rpc)
+        start = None
         if 'sendmsg' in rpc:
+            start = rpc['sendmsg']
+        if start != None:
             if end != None:
-                rpc['tx_active'] = [rpc['sendmsg'], end]
+                rpc['tx_active'] = [start, end]
             else:
-                rpc['tx_active'] = [rpc['sendmsg'], traces[node]['last_time'],]
+                rpc['tx_active'] = [start, traces[node]['last_time'],]
         elif end != None:
             rpc['tx_active'] = [traces[node]['first_time'], end]
 
@@ -5046,6 +5165,11 @@ class AnalyzeRpcs:
 
     def tt_sendmsg_request(self, trace, t, core, peer, id, length):
         global rpcs
+        if (id in rpcs) and ('sendmsg' in rpcs[id]):
+            # This could happen for a while in 2024 because of a race
+            # between timetrace generation and id allocation; this code
+            # should become unnecessary soon.
+            id += 2
         if not id in rpcs:
             self.new_rpc(id, t, trace['node'])
         rpcs[id]['out_length'] = length
