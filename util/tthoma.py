@@ -174,8 +174,11 @@ grants = defaultdict(dict)
 # tx_active_resp: Number of outgoing response messages with unsent data as
 #                 of the end of the interval
 # tx_starts:      Number of new outgoing messages that started in the interval
-# tx_pkts:        Number of data packets sent by the node during the interval
-# tx_bytes:       Number of bytes of data sent by the node during the interval
+# tx_pkts:        Number of data packets passed to ip*xmit during the interval
+# tx_bytes:       Number of bytes of data passed to ip*xmit during the interval
+# tx_qdisc:       Bytes of data that have been passed to ip*xmit but not
+#                 yet transmitted, as of the end of the interval (large
+#                 numbers probably due to qdisc)
 # tx_q:           Estimate of the number of unsent bytes in the NIC (based
 #                 on when packets passed to the NIC if available, otherwise
 #                 when passed to ip*xmit)
@@ -3518,6 +3521,7 @@ class AnalyzeIntervals:
                     'tx_active_resp':   0,
                     'tx_pkts':          0,
                     'tx_bytes':         0,
+                    'tx_qdisc':         0,
                     'tx_q':             0,
                     'tx_grant_xmit':    0,
                     'tx_grant_gro':     0,
@@ -3663,6 +3667,8 @@ class AnalyzeIntervals:
                             traces[tx_node]['last_time'], pkt))
                 interval['tx_pkts'] += 1
                 interval['tx_bytes'] += length
+                if 'nic' in pkt:
+                    add_to_intervals(tx_node, txmit, pkt['nic'], 'tx_qdisc', length)
             else:
                 txmit = None
 
@@ -6326,6 +6332,9 @@ class AnalyzeTx:
                     'but not fully\n')
             f.write('              transmitted as of the end of the interval\n')
             f.write('# Pkts:       Packets transmitted during the interval\n')
+            f.write('# QDisc:      KB of data that have been passed to ip*xmit '
+                    'but not yet\n')
+            f.write('#             transmitted by NIC\n')
             f.write('# NIC:        NIC queue length, measured in usecs to xmit\n')
             f.write('# GXmit:      KB of grants that have been sent by peer '
                     'but not yet\n')
@@ -6340,7 +6349,7 @@ class AnalyzeTx:
                     'to GAvail during\n')
             f.write('              the interval\n')
 
-            f.write('\n    Time   Gbps  RPCs   Reqs  Resps  Pkts   NIC  GXmit  '
+            f.write('\n    Time   Gbps  RPCs   Reqs  Resps  Pkts Qdisc   NIC  GXmit  '
                     'GGro GAvail   GNew\n')
             total = 0
             for interval in intervals[node]:
@@ -6349,13 +6358,14 @@ class AnalyzeTx:
                     print('Trace: %s' % (traces[node]))
                 gbps = interval['tx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f %5d  %5d  %5d  %4d %5.1f  %5.0f '
+                f.write('%8.1f %6.1f %5d  %5d  %5d  %4d %5.0f %5.1f  %5.0f '
                         '%5.0f  %5.0f %6.1f\n'
                         % (interval['time'], gbps,
                         interval['rpcs_active'],
                         interval['tx_active_req'],
                         interval['tx_active_resp'],
                         interval['tx_pkts'],
+                        interval['tx_qdisc'] * 1e-3,
                         interval['tx_q'] * 8 / (options.gbps * 1000),
                         interval['tx_grant_xmit'] * 1e-3,
                         interval['tx_grant_gro'] * 1e-3,
