@@ -4543,10 +4543,11 @@ class AnalyzePacket:
 
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
         return
 
     def output(self):
-        global rpcs, traces, options, peer_nodes
+        global rpcs, traces, options, peer_nodes, packets
 
         print('\n-----------------')
         print('Analyzer: packet')
@@ -4556,208 +4557,160 @@ class AnalyzePacket:
                     file=sys.stderr)
             return
 
-        # Find the packet as received by GRO.
-        recv_id = options.pkt_id ^ 1
-        if not recv_id in rpcs:
-            print('Can\'t find RPC %d for packet %s'
-                    % (recv_id, options.pkt), file=sys.stderr)
-            print("RPC ids: %s" % (sorted(rpcs.keys())))
-            return
-        recv_rpc = rpcs[recv_id]
-        success = False
-        for recv_time, offset, pkt_prio in recv_rpc['gro_data']:
-            if offset == options.pkt_offset:
-                success = True
-                break
-        if not success:
-            print('Can\'t find packet with offset for %s' % (options.pkt),
+        if not options.pkt in packets:
+            print('Can\'t find packet %s' % (options.pkt),
                     file=sys.stderr)
             return
+        pkt = packets[options.pkt]
+        for field in ['gro', 'priority', 'xmit']:
+            if not field in pkt:
+                print('Packet %s doesn\'t have a "%s" field' % (options.pkt,
+                        field), file=sys.stderr)
+                return
+        xmit_time = pkt['xmit']
+        xmit_id = pkt['id']
+        recv_time = pkt['gro']
+        rx_node = pkt['rx_node']
+        gro_core = pkt['gro_core']
+        tx_node = pkt['tx_node']
 
-        # Find the corresponding packet transmission.
-        xmit_id = options.pkt_id
-        if not xmit_id in rpcs:
-            print('Can\'t find RPC that transmitted %s' % (options.pkt),
-                    file=sys.stderr)
-        xmit_rpc = rpcs[xmit_id]
-        success = False
-        for xmit_time, offset, length in xmit_rpc['send_data']:
-            if (options.pkt_offset >= offset) and (
-                    options.pkt_offset < (offset + length)):
-                success = True
-                break
-        if not success:
-            print('Can\'t find transmitted packet corresponding to %s'
-                    % (options.pkt), file=sys.stderr)
-            return
         print('Packet: RPC id %d, offset %d, delay %6.1f us' % (xmit_id,
                 options.pkt_offset, recv_time - xmit_time))
-        print('%.3f: Packet transmitted by %s' % (xmit_time, xmit_rpc['node']))
+        print('%.3f: Packet passed to ip*xmit on %s, core %d' % (xmit_time,
+                tx_node, pkt['tx_core']))
+        if 'nic' in pkt:
+            print('%.3f: Packet transmitted by NIC on %s' % (pkt['nic'],
+                    tx_node))
         print('%.3f: Packet received by %s on core %d with priority %d'
-                % (recv_time, recv_rpc['node'], recv_rpc['gro_core'], pkt_prio))
+                % (recv_time, pkt['rx_node'], pkt['gro_core'], pkt['priority']))
 
-        # Collect information for all packets received by the GRO core after
-        # xmit_time. Each list entry is a tuple:
-        # <recv_time, xmit_time, rpc_id, offset, sender, length, prio, gro_core>
+        # List of packets received by rx_node whose lifetimes overlap
+        # the reference packet.
         pkts = []
 
         # Amount of data already in transit to target at the time reference
         # packet was transmitted.
         prior_bytes = 0
+        prior_pkts = 0
 
-        for id, rpc in rpcs.items():
-            if id == 0:
-                print('\nId: %d, RPC: %s' % (id, rpc))
-            if (rpc['node'] != recv_rpc['node']) or (not 'gro_core' in rpc):
+        for p in packets.values():
+            if not 'gro' in p:
                 continue
-            msg_len = None
-            if rpc['in_length'] != None:
-                msg_len = rpc['in_length']
-            rcvd = sorted(rpc['gro_data'], key=lambda t: t[1])
-            xmit_id = id ^ 1
-            if not xmit_id in rpcs:
-                sent = []
-                peer = rpc['peer']
-                if peer in peer_nodes:
-                    sender = peer_nodes[peer]
-                else:
-                    sender = "unknown"
-                xmit_rpc = None
-            else:
-                xmit_rpc = rpcs[xmit_id]
-                sent = sorted(xmit_rpc['send_data'], key=lambda t : t[1])
-                sender = xmit_rpc['node']
-                if 'out_length' in xmit_rpc:
-                    msg_len = xmit_rpc['out_length']
-            for rtime, roffset, rprio in rcvd:
-                if rtime < xmit_time:
+            if p['gro'] < xmit_time:
+                continue
+            if p['rx_node'] != rx_node:
+                continue
+            if p is pkt:
+                continue
+            if 'xmit' in p:
+                if p['xmit'] >= recv_time:
                     continue
-                if rtime == recv_time:
-                    # Skip the reference packet
+                if p['xmit'] <= xmit_time:
+                    prior_bytes += p['length']
+                    prior_pkts += 1
+            elif p['gro'] >= recv_time:
                     continue
-
-                length = get_recv_length(roffset, msg_len)
-                missing_xmit = True
-                while sent:
-                    stime, soffset, slength = sent[0]
-                    if stime >= recv_time:
-                        missing_xmit = False
-                        break
-                    if roffset >= (soffset + slength):
-                        sent.pop(0)
-                        continue
-                    if roffset >= soffset:
-                        pkts.append([rtime, stime, xmit_id, roffset, sender,
-                                length, rprio, rpc['gro_core']])
-                        if stime < xmit_time:
-                            prior_bytes += length
-                        missing_xmit = False
-                    break
-                if missing_xmit:
-                    # Couldn't find the transmission record for this packet;
-                    # if it looks like the packet's transmission overlapped
-                    # the reference packet, print as much info as possible.
-                    if rtime >= recv_time:
-                        continue
-                    if sender != 'unknown':
-                        if traces[sender]['last_time'] < rtime:
-                            # Special send time means "send time unknown"
-                            pkts.append([rtime, -1e10, xmit_id, roffset, sender,
-                                    length, rprio, rpc['gro_core']])
-                            continue
-                    if xmit_rpc:
-                        if ('sendmsg' in xmit_rpc) and (xmit_rpc['sendmsg']
-                                >= recv_time):
-                            continue
-                    pkts.append([rtime, -1e10, xmit_id, roffset, sender, length,
-                            rprio, rpc['gro_core']])
+            pkts.append(p)
 
         # Amount of data transmitted after the reference packet but received
         # on the reference packet's core before the reference packet.
         after_core_bytes = 0
+        after_core_pkts = 0
 
         # Amount of data transmitted after the reference packet but received
         # on other cores before the reference packet.
         after_other_bytes = 0
+        after_other_pkts = 0
 
         # Create output messages grouped into categories.
-        pkts.sort()
+        pkts.sort(key=lambda p : p['gro'])
         before_before = ''
         before_after = ''
         after_before_core = ''
         after_before_other = ''
         after_after = ''
         unknown_before = ''
-        for rtime, stime, rpc_id, offset, sender, length, prio, core in pkts:
-            if stime == -1e10:
-                unknown_before += ('\n      ???  %9.3f      ??? %11d  %7d %10s '
-                    '%6d    %2d  %4d' % (rtime, rpc_id, offset, sender, length,
-                    prio, core))
+        for p in pkts:
+            if not 'xmit' in p:
+                sender = ""
+                if p['id'] in rpcs:
+                    sender = rpcs[p['id']]['node']
+                unknown_before += ('\n      ???  %9.3f      ??? %11d  %7d '
+                        '%-10s %4s %6d    %2d  %4d' % (p['gro'], p['id'],
+                        p['offset'], sender, "", p['length'],
+                        p['priority'], p['gro_core']))
                 continue
-            msg = '\n%9.3f  %9.3f %8.1f %11d  %7d %10s %6d    %2d  %4d' % (stime,
-                    rtime, rtime - stime, rpc_id, offset, sender, length, prio,
-                    core)
-            if stime < xmit_time:
-                if rtime < recv_time:
+            msg = '\n%9.3f  %9.3f %8.1f %11d  %7d %-10s %4s %6d    %2d  %4d' %  (
+                    p['xmit'], p['gro'], p['gro'] - p['xmit'], p['id'],
+                    p['offset'], p['tx_node'], p['tx_core'], p['length'],
+                    p['priority'], p['gro_core'])
+            if p['xmit'] < xmit_time:
+                if p['gro'] < recv_time:
                     before_before += msg
                 else:
                     before_after += msg
             else:
-                if rtime < recv_time:
-                    if core == recv_rpc['gro_core']:
+                if p['gro'] < recv_time:
+                    if p['gro_core'] == gro_core:
                         after_before_core += msg
-                        after_core_bytes += length
+                        after_core_bytes += p['length']
+                        after_core_pkts += 1
                     else:
                         after_before_other += msg
-                        after_other_bytes += length
+                        after_other_bytes += p['length']
+                        after_other_pkts += 1
                 else:
                     after_after += msg
 
-        print('%.1f KB  already in transit to target core when packet '
-                'transmitted' % (prior_bytes * 1e-3))
-        print('           (%.1f us at %.0f Gbps)' % (bytes_to_usec(prior_bytes),
-                options.gbps))
-        print('%.1f KB  transmitted to core %d after packet was transmitted but'
-                % (after_core_bytes * 1e-3, recv_rpc['gro_core']))
-        print('           received before packet (%.1f us at %.0f Gbps)'
+        print('%.1f KB (%d packets) already in transit to %s when packet '
+                'transmitted' % (prior_bytes * 1e-3, prior_pkts, tx_node))
+        print('             (%.1f us at %.0f Gbps)' % (
+                bytes_to_usec(prior_bytes), options.gbps))
+        print('%.1f KB (%d packets) transmitted to core %d after packet was '
+                'transmitted but' % (after_core_bytes * 1e-3, after_core_pkts,
+                gro_core))
+        print('             received before packet (%.1f us at %.0f Gbps)'
                 % (bytes_to_usec(after_core_bytes),  options.gbps))
-        print('%.1f KB  transmitted to other cores after packet was transmitted but'
-                % (after_other_bytes * 1e-3))
-        print('           received before packet (%.1f us at %.0f Gbps)'
-                % (bytes_to_usec(after_other_bytes),  options.gbps))
+        print('%.1f KB (%d packets) transmitted to other cores after packet '
+                'was' % (after_other_bytes * 1e-3,
+                after_other_pkts))
+        print('             transmitted but received before packet (%.1f us '
+                'at %.0f Gbps)' % (bytes_to_usec(after_other_bytes),
+                options.gbps))
         print('\nOther packets whose transmission to %s overlapped this '
-                'packet:' % (recv_rpc['node']))
+                'packet:' % (rx_node))
         print('Xmit:     Time packet was transmitted')
-        print('Recv:     Time packet was received on core %d'
-                % (recv_rpc['gro_core']))
+        print('Recv:     Time packet was received on core %d' % (gro_core))
         print('Delay:    End-to-end latency for packet')
         print('Rpc:      Id of packet\'s RPC (on sender)')
         print('Offset:   Offset of packet within message')
         print('Sender:   Node that sent packet')
+        print('TxCore:   Core on which packet was passed to ip*xmit')
         print('Length:   Number of message bytes in packet')
         print('Prio:     Priority at which packet was transmitted')
         print('Core:     Core on which homa_gro_receive handled packet')
-        print('\n     Xmit       Recv    Delay         Rpc   Offset     Sender '
-                'Length  Prio  Core')
-        print('--------------------------------------------------------------'
-                '------------------')
+        hdr = '     Xmit       Recv    Delay         Rpc   Offset Sender   ' \
+                'TxCore Length  Prio  Core\n' \
+                '------------------------------------------------------------' \
+                '-------------------------'
         if before_before:
-            print('Sent before %s, received before:%s' %
-                    (options.pkt, before_before))
+            print('\nSent before %s, received before:\n%s\n%s' %
+                    (options.pkt, hdr, before_before))
         if before_after:
-            print('\nSent before %s, received after:%s' %
-                    (options.pkt, before_after))
+            print('\nSent before %s, received after:\n%s\n%s' %
+                    (options.pkt, hdr, before_after))
         if after_before_core:
-            print('\nSent after %s, received on core %d before:%s' %
-                    (options.pkt, recv_rpc['gro_core'], after_before_core))
+            print('\nSent after %s, received on core %d before:\n%s\n%s' %
+                    (options.pkt, gro_core, hdr, after_before_core))
         if after_before_other:
-            print('\nSent after %s, received on other cores before:%s' %
-                    (options.pkt, after_before_other))
+            print('\nSent after %s, received on other cores before:\n%s\n%s' %
+                    (options.pkt, hdr, after_before_other))
         if after_after:
-            print('\nSent after %s, received after:%s' %
-                    (options.pkt, after_after))
+            print('\nSent after %s, received after:\n%s\n%s' %
+                    (options.pkt, hdr, after_after))
         if unknown_before:
-            print('\nSend time unknown, received before:%s' % (unknown_before))
+            print('\nSend time unknown, received before:\n%s\n%s' % (hdr,
+                    unknown_before))
 
 #------------------------------------------------
 # Analyzer: packets
