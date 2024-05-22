@@ -1307,6 +1307,35 @@ class Dispatcher:
         'regexp': 'homa_rpc_free invoked for id ([0-9]+)'
     })
 
+    def __grant_recalc_start(self, trace, time, core, match, interests):
+        for interest in interests:
+            interest.tt_grant_recalc_start(trace, time, core)
+
+    patterns.append({
+        'name': 'grant_recalc_start',
+        'regexp': 'homa_grant_recalc starting'
+    })
+
+    def __grant_check_start(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_grant_check_start(trace, time, core, id)
+
+    patterns.append({
+        'name': 'grant_check_start',
+        'regexp': 'homa_grant_check_rpc starting for id ([0-9]+)'
+    })
+
+    def __grant_check_done(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_grant_check_done(trace, time, core, id)
+
+    patterns.append({
+        'name': 'grant_check_done',
+        'regexp': 'homa_grant_check_rpc finished with id ([0-9]+)'
+    })
+
     def __rpc_incoming(self, trace, time, core, match, interests):
         id = int(match.group(1))
         peer = match.group(2)
@@ -2783,12 +2812,125 @@ class AnalyzeGrants:
     are created for each node in the data directory, with names
     "grants_rx_<node>" and "grants_tx_<node>". These files contain information
     about all incoming/outgoing RPCs with outstanding/available grants in each
-    time interval.
+    time interval. In addition, statistics are generated about the time spent
+    in homa_grant_check_rpc and homa_grant_recalc.
     """
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzeIntervals')
-        return
+
+        # Node name -> total time spent in homa_grant_check_rpc on that node,
+        # including time in homa_grant_recalc and time spent sending grants.
+        self.node_check_time = defaultdict(lambda : 0)
+
+        # Node name -> total time spent in homa_grant_recalc on that node,
+        # not including sending grants.
+        self.node_recalc_time = defaultdict(lambda : 0)
+
+        # Node name -> total time spent sending grants during homa_grant_check_rpc.
+        self.node_grant_send_time = defaultdict(lambda : 0)
+
+        # Node name -> number of calls to homa_grant_recalc
+        self.node_recalcs = defaultdict(lambda : 0)
+
+        # Node name -> number of calls to homa_grant_check_rpc
+        self.node_checks = defaultdict(lambda : 0)
+
+        # Node name -> count of grants sent in calls to homa_grant_check_rpc
+        self.node_grants_sent = defaultdict(lambda : 0)
+
+    def init_trace(self, trace):
+        # Core -> start time of active call to homa_grant_check_rpc (if any)
+        self.core_check_start = {}
+
+        # Core -> start time of active call to recalc start (if any)
+        self.core_recalc_start = {}
+
+        # Core -> time of first grant sent by current call to
+        # homa_grant_check_rpc (only valid if homa_grant_check_rpc in progress)
+        self.core_first_grant_send = {}
+
+    def tt_grant_check_start(self, trace, t, core, id):
+        self.node_checks[trace['node']] += 1
+        self.core_check_start[core] = t
+
+    def tt_grant_recalc_start(self, trace, t, core):
+        node = trace['node']
+        self.node_recalcs[node] += 1
+        self.core_recalc_start[core] = t
+        if core in self.core_first_grant_send:
+            self.node_grant_send_time[node] += t - self.core_first_grant_send[core]
+            del self.core_first_grant_send[core]
+
+    def tt_send_grant(self, trace, t, core, id, offset, priority):
+        if not core in self.core_check_start:
+            return
+        self.node_grants_sent[trace['node']] += 1
+        if not core in self.core_first_grant_send:
+            self.core_first_grant_send[core] = t
+
+    def tt_grant_check_done(self, trace, t, core, id):
+        node = trace['node']
+        if core in self.core_first_grant_send:
+            grant = self.core_first_grant_send[core]
+            self.node_grant_send_time[node] += (t - grant)
+            del self.core_first_grant_send[core]
+        else:
+            grant = -1e20
+        if core in self.core_recalc_start:
+            recalc_start = self.core_recalc_start[core]
+            end = t
+            if grant > recalc_start:
+                end = grant
+            self.node_recalc_time[node] += end - self.core_recalc_start[core]
+            del self.core_recalc_start[core]
+        if core in self.core_check_start:
+            self.node_check_time[node] += t - self.core_check_start[core]
+            del self.core_check_start[core]
+
+    def print_grant_check_stats(self):
+        print('\nStatistics about the functions homa_grant_check_rpc and '
+                'homa_grant_recalc:')
+        print('Node:    Name of node')
+        print('Checks:  Rate of calling homa_grant_check_rpc (k/sec)')
+        print('CUsec:   Average execution time in homa_grant_check_rpc, '
+                'not including')
+        print('         time in homa_grant_recalc or sending grants')
+        print('CCores:  Average active cores in homa_grant_check_rpc, '
+                'not including')
+        print('         time in homa_grant_recalc or sending grants')
+        print('RFrac:   Fraction of calls to homa_grant_check_rpc that '
+                '   invoked homa_grant_recalc')
+        print('RUsec:   Average execution time in homa_grant_recalc, '
+                'not including time')
+        print('         sending grants')
+        print('RCores:  Average active cores in homa_grant_recalc, '
+                'not including time')
+        print('         sending grants')
+        print('GPer     Average grants sent per call to homa_grant_check_rpc')
+        print('GUsec    Average time to send a grant')
+        print('GCores   Average cores actively sending grants from within '
+                'homa_grant_check_rpc')
+
+        print('')
+        print('Node      Checks CUsec CCores RFrac RUsec RCores  '
+                'GPer GUSec GCores')
+        print('--------------------------------------------------'
+                '-----------------')
+        for node in get_sorted_nodes():
+            checks = self.node_checks[node]
+            recalcs = self.node_recalcs[node]
+            grants = self.node_grants_sent[node]
+            recalc_time = self.node_recalc_time[node]
+            grant_time = self.node_grant_send_time[node]
+            check_time = self.node_check_time[node] - recalc_time - grant_time
+            elapsed = traces[node]['elapsed_time']
+            print('%-10s %5.1f %5.2f  %5.2f ' % (node, 1000*checks/elapsed,
+                    check_time/checks, check_time/elapsed), end='')
+            print('%5.2f %5.2f  %5.2f ' % (recalcs/checks, recalc_time/recalcs,
+                    recalc_time/elapsed), end='')
+            print('%5.2f %5.2f  %5.2f' % (grants/checks, grant_time/grants,
+                    grant_time/elapsed))
 
     def get_events(self):
         """
@@ -3219,6 +3361,9 @@ class AnalyzeGrants:
                     f.write('%7.1f %s\n' % (interval['time'],
                             interval['tx_grant_info']))
                 f.close()
+
+        # Print stats related to homa_grant_check_rpc.
+        self.print_grant_check_stats()
 
 #------------------------------------------------
 # Analyzer: handoffs
@@ -5576,15 +5721,15 @@ class AnalyzeRx:
             f.write('# Net:        KB of data that have been passed to the '
                     'NIC but not\n')
             f.write('#             yet received by GRO\n')
-            f.write('# Late:       KB of data transmitted by NIC > L us ago '
-                    '(where L is the value\n')
-            f.write('#             of the --late option) but not yet seen '
-                    'by receiver\'s GRO\n')
+            f.write('# Late:       KB of data transmitted by NIC > %d us ago '
+                    '(%d is the value\n' % (options.late, options.late))
+            f.write('#             of the --late option) but not yet '
+                    'seen by receiver\'s GRO\n')
             f.write('# GRO:        KB of data that have been received by '
                     'GRO but not yet\n')
             f.write('#             received by SoftIRQ\n')
 
-            f.write('\n    Time   Gbps  Active  Pkts  Granted    IP   Net  Late   GRO\n')
+            f.write('\n#   Time   Gbps  Active  Pkts  Granted    IP   Net  Late   GRO\n')
             total = 0
             for interval in intervals[node]:
                 if not 'rx_bytes' in interval:
@@ -6019,12 +6164,6 @@ class AnalyzeTemp:
             dispatcher.interest('AnalyzeRpcs')
             dispatcher.interest('AnalyzePackets')
 
-        # List of packet ids for all packets that were queued for a qdisc.
-        self.qdisc_ids = []
-
-    def tt_qdisc_queue_data(self, trace, time, core, id, offset, qix, queue):
-        self.qdisc_ids.append(pkt_id(id, offset))
-
     def output(self):
         global traces, options, packets
         print('\n-------------------')
@@ -6349,7 +6488,7 @@ class AnalyzeTx:
                     'to GAvail during\n')
             f.write('              the interval\n')
 
-            f.write('\n    Time   Gbps  RPCs   Reqs  Resps  Pkts Qdisc   NIC  GXmit  '
+            f.write('\n#   Time   Gbps  RPCs   Reqs  Resps  Pkts Qdisc   NIC  GXmit  '
                     'GGro GAvail   GNew\n')
             total = 0
             for interval in intervals[node]:
