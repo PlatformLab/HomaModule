@@ -1,17 +1,27 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Loose ends from experiment ending 4/29/2024:
+  * traces/100g and traces/100g2 both show significant qdisc queueing,
+    and the system appears to have difficulty clearing the queues (it
+    takes a very long time).
+  * Looked into packet drops:
+    * The switch is not reporting any packet drops.
+    * ifconfig is not showing any packet drops, either tx or rx.
+  * Tried to configure switch for priority queues, but it didn't seem
+    to help; see traces/100g4.
+
 * Experiments to try with c6525-100g cluster:
+  * Recompile with new timetrace for napi freeing that includes message
+    length, update tthoma.
+  * For packets that seem to be experiencing long times in the NIC,
+    see if perhaps the NIC doorbell isn't getting rung.
   * Check whether Homa may be exceeding max_incoming
   * Analyze homa_grant_recalc: it seems to be using a lot of time, and
     it sometimes runs simultaneously in several threads, resulting in
     long waits for RPC locks.
-  * Try increasing the timeout interval to see if this helps performance
-    (it might make things worse by increasing the number of messages
-    waiting for timeouts while holding buffers)
   * Figure out how to program the switch: are buffer sizes too small?
   * Better data on actual packet loss rates
-  * Measure time spent allocating and freeing skbs
 
 * Notes on poor 100 Gbps throughput as of Feb. 2024:
   * One node (node3) has 1400 incoming RPCs blocked waiting for buffers
@@ -21,7 +31,7 @@ Notes for Homa implementation in Linux:
     SoftIRQ processing (1-2 MB, delays of 1 ms or more):
     * Need to analyze why there are large delays in sending control packets
     * Also, homa_grant_check_rpc seems to take a long time.
-  * Found times (e.g. in 100g2/node5 arond 13368.354) when homa_grant_recalc
+  * Found times (e.g. in 100g2/node5 around 13368.354) when homa_grant_recalc
     runs simultaenously in several threads, resulting in long blocks for
     RPC locks.
 

@@ -2,6 +2,30 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+53. (May 2024) Strange NIC behavior (observed with Mellanox ConnectX5 NICs
+    on the c6525-100g CloudLab cluster, using W4 with offerred load 80 Gbps
+    and actual throughput more like 60 Gbps).
+    * The NIC is not returning tx packets to the host promptly after
+      transmission. In one set of traces (W4 at 80% offered load), 20% of
+      all packets weren't freed until at least 50 us after the packets had
+      been received by the target GRO; P99 delay was 400 us, and some packets
+      were delayed more than 1 ms. Note: other traces are not as bad, but
+      still show significant delays (15-20% of delays are at least 50 usec,
+      worst delays range from 250 us - 1100 us).
+    * Long delays in returning tx packets cause Linux to stop the tx queue
+      (it has a limit on outstanding bytes on a given channel), which slows
+      down transmission.
+    * The NIC doesn't seem to be able to transmit packets at 100 Gbps.
+      Many packets seem not to be transmitted for long periods of time (up to
+      1-2 ms) after they are added to a NIC queue: both the time until GRO
+      receipt and time until packet free are very long. Different tx queues
+      experience different delays: the delays for one queue can be short at
+      the same time that delays for another queue are very long. These problems
+      occur when Homa is passing packets to the NIC at < 100 Gbps.
+    * The NIC is not transmitting packets from different tx queues in a FIFO
+      order; it seems to be favoring some tx queues (perhaps it is
+      round-robining so queues with more traffic get treated badly?).
+
 52. (February 2024) Impact of core allocation. Benchmark setup: 2 nodes,
     c6525-100g cluster (100 Gbps network, 48 hyperthreads, 24 cores, 3 cores
     per chiplet?):
