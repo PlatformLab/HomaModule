@@ -123,20 +123,28 @@ class OffsetDict(dict):
 # id:           RPC id on the sender
 # offset:       Offset of the data in the packet within its message
 # length:       # bytes of message data in the received packet
-# xmit_length:  # bytes of message data in the sent packet. For TSO packets,
-#               which are divided into multiple smaller packets, only the
-#               first smaller packet will have this field, and it will give
-#               the TSO length (before subdivision).
+# tso_length:   # bytes of message data in the sent packet. For TSO packets,
+#               which are divided into multiple segments, only the first
+#               segment will have this field, and it will give the TSO length
+#               (before segmentation). This may be an overestimate for the
+#               last packet of a message if the message size isn't known.
+# segments:     This field will be present in the first packet of each
+#               TSO packet (the one with tso_length set); it will be a
+#               list of all the other segments deriving from the same
+#               TSO packet.
 # msg_length:   Total number of bytes in the message, or None if unknown
 # priority:     Priority at which packet was transmitted
 # tx_node:      Name of node from which the packet was transmitted (always
 #               present if xmit is present)
 # tx_core:      Core on which ip*xmit was invoked
+# tx_qid:       NIC channel on which packet was transmitted
 # rx_node:      Name of node on which packet was received
 # gro_core:     Core on which homa_gro_receive was invoked
 # softirq_core: Core on with SoftIRQ processed the packet
 # free_tx_skb:  Time when NAPI released the skb on the sender, which can't
-#               happen until the packet has been fully transmitted
+#               happen until the packet has been fully transmitted.
+# retransmits:  If the packet was retransmitted, this will be a list of all
+#               the times when the packet was retransmiteed.
 packets = OffsetDict()
 
 # offset -> True for each offset that has occurred in a received data packet;
@@ -176,12 +184,28 @@ grants = defaultdict(dict)
 # tx_starts:      Number of new outgoing messages that started in the interval
 # tx_pkts:        Number of data packets passed to ip*xmit during the interval
 # tx_bytes:       Number of bytes of data passed to ip*xmit during the interval
+# tx_nic_pkts:    Number of data packets passed to the NIC during the interval
+# tx_nic_bytes:   Number of bytes of data passed to the NIC during the interval
+# tx_in_nic:      Number of bytes of data that have been passed to the NIC
+#                 but not yet returned via the tx completion queue, as of the
+#                 end of the interval
 # tx_qdisc:       Bytes of data that have been passed to ip*xmit but not
 #                 yet transmitted, as of the end of the interval (large
 #                 numbers probably due to qdisc)
 # tx_q:           Estimate of the number of unsent bytes in the NIC (based
 #                 on when packets passed to the NIC if available, otherwise
 #                 when passed to ip*xmit)
+# tx_free_bytes:  Bytes of data freed after NIC notified tx completion
+# tx_max_free:    Largest value of pkt['free_tx_skb'] - pkt['nic'] for
+#                 a packet freed in this interval (0 if no packets freed)
+# tx_min_free:    Smallest value of pkt['free_tx_skb'] - pkt['nic'] for
+#                 a packet freed in this interval (0 if no packets freed)
+# tx_max_gro_free:Largest value of pkt['gro'] - pkt['free_tx_skb'] for
+#                 any segment of a packet freed in this interval (None if
+#                 no packets freed)
+# tx_min_gro_free:Smallest value of pkt['gro'] - pkt['free_tx_skb'] for
+#                 any segment of a packet freed in this interval (None if
+#                 no packets freed)
 # tx_grant_xmit:  Bytes of grant that have been passsed to ip*xmit but not yet
 #                 received by GRO, as of the end of the interval
 # tx_grant_gro:   Bytes of grant that have been received by GRO but not SoftIRQ,
@@ -203,7 +227,7 @@ grants = defaultdict(dict)
 #                 the sender but not yet received by GRO, as of the end of
 #                 the interval
 # rx_data_qdisc:  Number of bytes of data that have been passed to ip*xmit
-#                 by the sender but haven't actually been transmitted by
+#                 by the sender but haven't actually been handed off to
 #                 the NIC (they are queued in qdisc).
 # rx_overdue:     Number of bytes of data that were transmitted by the NIC
 #                 at least 100 us ago but haven't yet been seen by GRO
@@ -361,8 +385,9 @@ def get_interval(node, usecs):
     Returns the interval dictionary corresponding to the arguments. A
     new interval is created if the desired interval doesn't exist. Returns None
     if the interval ends before the first trace record for the node or starts
-    after the last record for the node. The intervals structure must have
-    been initialized when this function is called.
+    after the last record for the node, or if there is no interval
+    information associated with node. The intervals structure must have been
+    initialized before this function is called.
 
     node:     Name of the desired node
     usecs:    Time whose interval is desired. Intervals include their
@@ -370,12 +395,14 @@ def get_interval(node, usecs):
     """
     global intervals, options, traces
 
+    if not node in intervals:
+        return None
     data = intervals[node]
     interval_length = options.interval
     first_end = data[0]['time']
     # Adjust time down slightly to ensure that even intervals (e.g. 500.0)
     # end up in the right place.
-    i = int((usecs - 1e-5 - first_end) / interval_length) + 1
+    i = int((usecs - 1e-5 - (first_end - interval_length)) / interval_length)
     if i < 0 or i >= len(data):
         return None
     return data[i]
@@ -391,6 +418,23 @@ def get_last_time():
             latest = last
     return latest
 
+def get_max_gro(pkt):
+    """
+    If pkt is a TSO packet that was divided into multiple segments, returns
+    the largest 'gro' from any segment. Otherwise returns pkt['gro'] if it
+    exists (result could be None).
+    """
+    max_gro = 1e-20
+    if 'gro' in pkt:
+        max_gro = pkt['gro']
+    if 'segments' in pkt:
+        for seg in pkt['segments']:
+            if 'gro' in seg:
+                max_gro = max(max_gro, seg['gro'])
+    if max_gro == 1e-20:
+        return None
+    return max_gro
+
 def get_mtu():
     """
     Returns the amount of message data in a full-size network packet (as
@@ -400,6 +444,13 @@ def get_mtu():
     # Use get_recv_length to do all of the work.
     get_recv_length(0)
     return get_recv_length.mtu
+
+def get_packet(id, offset):
+    """
+    Returns the entry in packets corresponding to id and offset.
+    """
+    global packets
+    return packets['%d:%d' % (id, offset)]
 
 def get_recv_length(offset, msg_length=None):
     """
@@ -721,13 +772,14 @@ class Dispatcher:
         be invoked for matching lines in timetrace files. For each method
         named 'tt_xxx' in the class there must be a pattern named 'xxx';
         the method will be invoked whenever the pattern matches a timetrace
-        line, with parameters containing parsed fields from the line.
+        line, with parameters containing parsed fields from the line. In any
+        case, returns analyzer object.
 
         analyzer: name of a class containing trace analysis code
         """
 
         if analyzer in self.analyzers:
-            return
+            return self.analyzers[analyzer]
         obj = getattr(sys.modules[__name__], analyzer)(self)
         self.analyzers[analyzer] = obj
         self.objs.append(obj)
@@ -754,6 +806,7 @@ class Dispatcher:
             if not name in self.interests:
                 raise Exception('Couldn\'t find pattern %s for analyzer %s'
                         % (name, analyzer))
+        return obj
 
     def parse(self, file):
         """
@@ -1036,13 +1089,19 @@ class Dispatcher:
     def __free_tx_skb(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
+        qid = int(match.group(3))
+        if match.group(5) != None:
+            msg_length = int(match.group(5))
+        else:
+            msg_length = None
         for interest in interests:
-            interest.tt_free_tx_skb(trace, time, core, id, offset)
+            interest.tt_free_tx_skb(trace, time, core, id, offset, qid,
+                    msg_length)
 
     patterns.append({
         'name': 'free_tx_skb',
         'regexp': 'napi freeing tx skb for homa data, id ([0-9]+), '
-                'offset ([0-9]+)'
+                'offset ([0-9]+), qid ([0-9]+)(, msg_length ([0-9]+))?'
     })
 
     def __sendmsg_request(self, trace, time, core, match, interests):
@@ -1617,7 +1676,7 @@ class AnalyzeActivity:
                         'transmitted at the\n')
                 f.write('#             end of the interval\n')
                 f.write('\n')
-                f.write('    Time NewRx NumRx RxGts RxGtKB RxPkts RxGbps Incoming NewTx NumTx\n')
+                f.write('#   Time NewRx NumRx RxGts RxGtKB RxPkts RxGbps Incoming NewTx NumTx\n')
                 for interval in intervals[node]:
                     f.write('%8.1f' % (interval['time']))
                     if 'rx_starts' in interval:
@@ -1931,7 +1990,7 @@ class AnalyzeCore:
 
     def __init__(self, dispatcher):
         global options
-        require_options('core', 'core', 'data', 'node')
+        require_options('core', 'data', 'node')
 
         # List of all intervals over the life of the trace, each list entry
         # is a dictionary with the following values related to that interval:
@@ -3645,7 +3704,14 @@ class AnalyzeIntervals:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
+        self.tx_qid = None
         return
+
+    def restrict_qid(self, qid):
+        """
+        Ignore all packets except thost that use the given transmit queue.
+        """
+        self.tx_qid = qid
 
     def init_intervals(self):
         global intervals, options
@@ -3666,8 +3732,16 @@ class AnalyzeIntervals:
                     'tx_active_resp':   0,
                     'tx_pkts':          0,
                     'tx_bytes':         0,
+                    'tx_nic_pkts':      0,
+                    'tx_nic_bytes':     0,
+                    'tx_in_nic':        0,
                     'tx_qdisc':         0,
                     'tx_q':             0,
+                    'tx_free_bytes':    0,
+                    'tx_max_free':      0,
+                    'tx_min_free':      0,
+                    'tx_max_gro_free':  None,
+                    'tx_min_gro_free':  None,
                     'tx_grant_xmit':    0,
                     'tx_grant_gro':     0,
                     'tx_grant_avl':     0,
@@ -3797,36 +3871,64 @@ class AnalyzeIntervals:
 
         # Extract information from packets
         for pkt in packets.values():
+            if (self.tx_qid != None) and ((not 'tx_qid' in pkt)
+                    or (pkt['tx_qid'] != self.tx_qid)):
+                continue
             tx_node = pkt['tx_node'] if 'tx_node' in pkt else None
             if not 'length' in pkt:
                 print('Packet with no length: %s' % (pkt))
                 continue
             length = pkt['length']
+            txmit = pkt['xmit'] if 'xmit' in pkt else None
+            tnic = pkt['nic'] if 'nic' in pkt else None
+            tfree = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
+            tgro = pkt['gro'] if 'gro' in pkt else None
 
-            if 'xmit' in pkt:
-                txmit = pkt['xmit']
-                interval = get_interval(tx_node, txmit)
-                if interval == None:
-                    print('tx_node %s, xmit %9.3f, first_time %9.3f, last_time %9.3f, pkt %s'
-                            % (tx_node, txmit, traces[tx_node]['first_time'],
-                            traces[tx_node]['last_time'], pkt))
-                interval['tx_pkts'] += 1
-                interval['tx_bytes'] += length
+            # For tx statistics, process only the overall TSO frame, not the
+            # individual segments
+            if ('tso_length' in pkt):
+                tso_length = pkt['tso_length']
+
+                if txmit != None:
+                    interval = get_interval(tx_node, txmit)
+                    interval['tx_pkts'] += 1
+                    interval['tx_bytes'] += tso_length
+                    if 'nic' in pkt:
+                        add_to_intervals(tx_node, txmit, pkt['nic'],
+                            'tx_qdisc', tso_length)
+
                 if 'nic' in pkt:
-                    add_to_intervals(tx_node, txmit, pkt['nic'], 'tx_qdisc', length)
-            else:
-                txmit = None
+                    tnic = pkt['nic']
+                    node_xmits[tx_node].append([pkt['nic'],
+                            tso_length + data_overhead_bytes])
+                    interval = get_interval(tx_node, tnic)
+                    interval['tx_nic_pkts'] += 1
+                    interval['tx_nic_bytes'] += tso_length
+                elif txmit != None:
+                    node_xmits[tx_node].append([txmit,
+                            tso_length + data_overhead_bytes])
 
-            if 'nic' in pkt:
-                node_xmits[tx_node].append([pkt['nic'], length + data_overhead_bytes])
-            elif txmit != None:
-                node_xmits[tx_node].append([txmit, length + data_overhead_bytes])
+                if tfree != None:
+                    interval = get_interval(tx_node, tfree)
+                    interval['tx_free_bytes'] += tso_length
+                    if 'nic' in pkt:
+                        add_to_intervals(tx_node, tnic, tfree, 'tx_in_nic',
+                                tso_length)
+                        delay = tfree - tnic
+                        if delay > interval['tx_max_free']:
+                            interval['tx_max_free'] = delay
+                        if (interval['tx_min_free'] == 0) or (delay <
+                                interval['tx_min_free']):
+                            interval['tx_min_free'] = delay
+                    else:
+                        start = traces[tx_node]['first_time']
+                        add_to_intervals(tx_node, start, tfree, 'tx_in_nic',
+                                tso_length)
 
             if not 'rx_node' in pkt:
                 continue
             rx_node = pkt['rx_node']
-            if 'nic' in pkt:
-                tnic = pkt['nic']
+            if tnic != None:
                 if txmit != None:
                     add_to_intervals(rx_node, txmit, tnic, 'rx_data_qdisc', length)
                 else:
@@ -3834,24 +3936,31 @@ class AnalyzeIntervals:
                             tnic, 'rx_data_qdisc', length)
             elif not nic_data:
                 tnic = txmit
-            else:
-                if txmit != None:
+            elif txmit != None:
                     add_to_intervals(rx_node, txmit, traces[tx_node]['last_time'],
                             'rx_data_qdisc', length)
-                tnic = None
 
-            if 'gro' in pkt:
-                tgro = pkt['gro']
+            if tgro != None:
                 interval = get_interval(rx_node, tgro)
                 interval['rx_pkts'] += 1
                 interval['rx_bytes'] += length
                 if tnic != None:
                     add_to_intervals(rx_node, tnic, tgro, 'rx_data_net', length)
-                    if (tgro - tnic) > late_usecs:
+                    delay = tgro - tnic
+                    if delay > late_usecs:
                         add_to_intervals(rx_node, tnic+late_usecs, tgro,
                                 'rx_overdue', length)
-            else:
-                tgro = None
+
+            if (tgro != None) and (tfree != None):
+                interval = get_interval(tx_node, tfree)
+                if interval != None:
+                    delay = tgro - tfree
+                    if (interval['tx_max_gro_free'] == None) or (delay >
+                            interval['tx_max_gro_free']):
+                        interval['tx_max_gro_free'] = delay
+                    if (interval['tx_min_gro_free'] == None) or (delay <
+                            interval['tx_min_gro_free']):
+                        interval['tx_min_gro_free'] = delay
 
             if 'softirq' in pkt:
                 tsoftirq = pkt['softirq']
@@ -4427,106 +4536,6 @@ class AnalyzeNet:
                         core_data['max_backlog_time']))
 
 #------------------------------------------------
-# Analyzer: nicbufs
-#------------------------------------------------
-class AnalyzeNicbufs:
-    """
-    Analyzes lifetimes of skbs for incoming packets to compute total buffer
-    usage for each channel and underflows of NIC buffer caches (based on
-    caching mechanism of Mellanox mlx5 driver).
-    """
-
-    def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzeRpcs')
-        dispatcher.interest('AnalyzePackets')
-
-    def output(self):
-        global packets, rpcs
-
-        # List of <time, type, id, core, length> records, where type is
-        # "alloc" or "free", id is a packet id, core is the core where
-        # homa_gro_receive processed the packet (in the form "node.core"),
-        # and length is the number of bytes consumed by the packet.
-        events = []
-
-        # Core number (node.core) -> total number of bytes received so far
-        # by homa_gro_receive on that core.
-        core_bytes = defaultdict(lambda : 0)
-
-        # Packet id -> <gro_time, core_bytes> tuple, where gro_time is the
-        # time when the packet was processed by homa_gro_receive and
-        # core_bytes is the value of core_bytes just before the packet
-        # was allocated.
-        pkt_allocs = {}
-
-        # Core id -> <time, active_bytes, pkid, gro_time>, where active_bytes
-        # is the largest number of active skb bytes seen for that core, time
-        # is the time when some of those bytes were finally freed, pid is the
-        # id of the packet freed at time, and gro_time is the time when that
-        # packet was processed by homa_gro_receive.
-        core_max = defaultdict(lambda : [0, 0, '', 0])
-
-        # Scan all packets to build the events list. Note: change packet
-        # ids to refer to those on the receiver, not sender.
-        for pkt in packets.values():
-            if not 'gro' in pkt:
-                continue
-            rpc_id = pkt['id'] ^ 1
-            pkid = '%d:%d' % (rpc_id, pkt['offset'])
-            rpc = rpcs[rpc_id]
-            core = '%s.%d' % (rpc['node'], rpc['gro_core'])
-            events.append([pkt['gro'], 'alloc', pkid, core, pkt['length']])
-            if 'free' in pkt:
-                events.append([pkt['free'], 'free', pkid, core, pkt['length']])
-
-        # Process the events in time order
-        events.sort(key=lambda t : t[0])
-        for time, type, pkid, core, length in events:
-            if type == 'alloc':
-                pkt_allocs[pkid] = [time, core_bytes[core]]
-                core_bytes[core] += length
-            elif type == 'free':
-                if pkid in pkt_allocs:
-                    active_bytes = core_bytes[core] - pkt_allocs[pkid][1]
-                    if active_bytes > core_max[core][1]:
-                        core_max[core] = [time, active_bytes, pkid,
-                                pkt_allocs[pkid][0]]
-            else:
-                print('Bogus event type %s in nicbufs analzyer' % (type),
-                        file=sys.stderr)
-
-
-        print('\n-----------------')
-        print('Analyzer: nicbufs')
-        print('-----------------')
-        print('Maximum active NIC buffer space used for each GRO core over the')
-        print('life of the traces (assuming Mellanox mlx5 buffer cache):')
-        print('Active:    Maximum bytes of NIC buffers used by the core (bytes')
-        print('           allocated on Core between when PktId was received and')
-        print('           when PktId was freed)')
-        print('PktId:     Identifier (as seen by receiver) for the packet ')
-        print('           corresponding to Active')
-        print('Node:      Node where Pktid was received')
-        print('Core:      Core on which Pktid was received')
-        print('GRO:       Time when homa_gro_receive processed Pktid on Core')
-        print('Free:      Time when packet was freed after copying to user space')
-        print('Life:      Packet lifetime (Free - GRO, usecs)\n')
-
-        maxes = []
-        for core, max in core_max.items():
-            time, active, pkid, gro_time = max
-            maxes.append([core, time, active, pkid, gro_time])
-        maxes.sort(key=lambda t : t[2], reverse = True)
-        print('  Active                PktId       Node Core       GRO      '
-                'Free    Life')
-        print('-------------------------------------------------------------'
-                '------------')
-        for core, time, active, pkid, gro_time in maxes:
-            node, core_id = core.split('.')
-            print('%8d %20s %10s %4s %9.3f %9.3f %7.1f' % (active, pkid,
-                    node, core_id, gro_time, time, time - gro_time))
-
-#------------------------------------------------
 # Analyzer: ooo
 #------------------------------------------------
 class AnalyzeOoo:
@@ -4885,6 +4894,11 @@ class AnalyzePackets:
         # Unscheduled data is included as a grant offset, with 0
         # incremental bytes.
         self.grant_offsets = defaultdict(dict)
+
+        # offset -> Largest length that has occurred for that offset in a
+        # TSO packet.  Used to compute tso_offset field if it is
+        # missing
+        self.tso_lengths = defaultdict(lambda : -1)
         return
 
     def init_trace(self, trace):
@@ -4897,12 +4911,12 @@ class AnalyzePackets:
         # that core (but not yet freed).
         self.copied = defaultdict(list)
 
-    def tt_ip_xmit(self, trace, time, core, id, offset):
+    def tt_ip_xmit(self, trace, t, core, id, offset):
         global packets
         p = packets[pkt_id(id, offset)]
         # If packet retransmitted, only record first transmission
-        if not 'xmit' in p:
-            p['xmit'] = time
+        if not 'retransmits' in p:
+            p['xmit'] = t
             p['tx_node'] = trace['node']
             p['tx_core'] = core
 
@@ -4910,13 +4924,18 @@ class AnalyzePackets:
         global packets
         self.mlx_data_pkts += 1
         p = packets[pkt_id(id, offset)]
-        if not 'nic' in p:
+        if not 'retransmits' in p:
             p['nic'] = t
             p['tx_node'] = trace['node']
 
-    def tt_free_tx_skb(self, trace, t, core, id, offset):
+    def tt_free_tx_skb(self, trace, t, core, id, offset, qid, msg_length):
         global packets
-        packets[pkt_id(id, offset)]['free_tx_skb'] = t
+        p = packets[pkt_id(id, offset)]
+        p['free_tx_skb'] = t
+        p['tx_qid'] = qid
+        p['tx_node'] = trace['node']
+        if msg_length != None:
+            p['msg_length'] = msg_length
 
     def tt_gro_data(self, trace, t, core, peer, id, offset, prio):
         global packets, recv_offsets
@@ -4952,8 +4971,21 @@ class AnalyzePackets:
     def tt_send_data(self, trace, t, core, id, offset, length):
         global packets
         p = packets[pkt_id(id, offset)]
+        if (not 'retransmits' in p) and (length > self.tso_lengths[offset]):
+            self.tso_lengths[offset] = length
         p['id'] = id
-        p['xmit_length'] = length
+        # If packet has been retransmitted, don't record tso_length, since
+        # that could make a TSO segment appear to be the main TSO packet.
+        if not 'retransmits' in p:
+            p['tso_length'] = length
+
+    def tt_retransmit(self, trace, t, core, id, offset, length):
+        global packets
+        p = packets[pkt_id(id, offset)]
+        if not 'retransmits' in p:
+            p['retransmits'] = [t]
+        else:
+            p['retransmits'].append(t)
 
     def tt_unsched(self, trace, t, core, id, num_bytes):
         self.grant_offsets[id][num_bytes] = -1
@@ -5015,16 +5047,13 @@ class AnalyzePackets:
             else:
                 tx_rpc = missing_rpc
             if not 'msg_length' in pkt:
+                pkt['msg_length'] = None
                 if 'out_length' in tx_rpc:
                     pkt['msg_length'] = tx_rpc['out_length']
-                if id^1 in rpcs:
+                elif id^1 in rpcs:
                     rx_rpc = rpcs[id^1]
                     if rx_rpc['in_length'] != None:
                         pkt['msg_length'] = rx_rpc['in_length']
-                if (not 'msg_length' in pkt) and ('out_length' in tx_rpc):
-                    pkt['msg_length'] = tx_rpc['out_length']
-                else:
-                    pkt['msg_length'] = None
             pkt['length'] = get_recv_length(pkt['offset'], pkt['msg_length'])
             if ('xmit' in pkt) and ('gro' in pkt) and (
                     (pkt['gro'] - pkt['xmit']) < -5.0):
@@ -5034,13 +5063,28 @@ class AnalyzePackets:
                             'transmitted: %s' % (pkt),
                             file=sys.stderr)
                     sync_error_printed = True
+
+            if not 'tso_length' in pkt:
+                offset = pkt['offset']
+                if offset in self.tso_lengths:
+                    tso_length = self.tso_lengths[offset]
+                    msg_length = pkt['msg_length']
+                    if (msg_length != None) and ((offset + tso_length) > msg_length):
+                        pkt['tso_length'] = msg_length - offset
+                    else:
+                        pkt['tso_length'] = tso_length
+
             # Make sure that all of the smaller packets deriving from each
             # TSO packet are represented and properly populated (if one of
             # these packets is lost it won't be represented yet).
-            if 'xmit_length' in pkt:
-                offset = pkt['offset'];
+            if 'tso_length' in pkt:
+                tso_length = pkt['tso_length']
+                if tso_length < pkt['length']:
+                    pkt['length'] = tso_length
+                offset = pkt['offset']
                 id = pkt['id']
-                end = pkt['xmit_length'] + offset
+                end = tso_length + offset
+                offset += get_recv_length(offset, end)
                 while offset < end:
                     pid = pkt_id(id, offset)
                     length = get_recv_length(offset, end)
@@ -5055,6 +5099,10 @@ class AnalyzePackets:
                         if key in pkt:
                             pkt2[key] = pkt[key]
                     offset += length
+                    if not 'segments' in pkt:
+                        pkt['segments'] = [pkt2]
+                    else:
+                        pkt['segments'].append(pkt2)
         for pid, pkt in new_pkts:
             packets[pid] = pkt
 
@@ -5749,6 +5797,106 @@ class AnalyzeRx:
             print('%-10s %6.1f Gbps' % (node, total/len(intervals[node])))
 
 #------------------------------------------------
+# Analyzer: rxbufs
+#------------------------------------------------
+class AnalyzeRxbufs:
+    """
+    Analyzes lifetimes of skbs for incoming packets to compute total buffer
+    usage for each channel and underflows of NIC buffer caches (based on
+    caching mechanism of Mellanox mlx5 driver).
+    """
+
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+
+    def output(self):
+        global packets, rpcs
+
+        # List of <time, type, id, core, length> records, where type is
+        # "alloc" or "free", id is a packet id, core is the core where
+        # homa_gro_receive processed the packet (in the form "node.core"),
+        # and length is the number of bytes consumed by the packet.
+        events = []
+
+        # Core number (node.core) -> total number of bytes received so far
+        # by homa_gro_receive on that core.
+        core_bytes = defaultdict(lambda : 0)
+
+        # Packet id -> <gro_time, core_bytes> tuple, where gro_time is the
+        # time when the packet was processed by homa_gro_receive and
+        # core_bytes is the value of core_bytes just before the packet
+        # was allocated.
+        pkt_allocs = {}
+
+        # Core id -> <time, active_bytes, pkid, gro_time>, where active_bytes
+        # is the largest number of active skb bytes seen for that core, time
+        # is the time when some of those bytes were finally freed, pid is the
+        # id of the packet freed at time, and gro_time is the time when that
+        # packet was processed by homa_gro_receive.
+        core_max = defaultdict(lambda : [0, 0, '', 0])
+
+        # Scan all packets to build the events list. Note: change packet
+        # ids to refer to those on the receiver, not sender.
+        for pkt in packets.values():
+            if not 'gro' in pkt:
+                continue
+            rpc_id = pkt['id'] ^ 1
+            pkid = '%d:%d' % (rpc_id, pkt['offset'])
+            rpc = rpcs[rpc_id]
+            core = '%s.%d' % (rpc['node'], rpc['gro_core'])
+            events.append([pkt['gro'], 'alloc', pkid, core, pkt['length']])
+            if 'free' in pkt:
+                events.append([pkt['free'], 'free', pkid, core, pkt['length']])
+
+        # Process the events in time order
+        events.sort(key=lambda t : t[0])
+        for time, type, pkid, core, length in events:
+            if type == 'alloc':
+                pkt_allocs[pkid] = [time, core_bytes[core]]
+                core_bytes[core] += length
+            elif type == 'free':
+                if pkid in pkt_allocs:
+                    active_bytes = core_bytes[core] - pkt_allocs[pkid][1]
+                    if active_bytes > core_max[core][1]:
+                        core_max[core] = [time, active_bytes, pkid,
+                                pkt_allocs[pkid][0]]
+            else:
+                print('Bogus event type %s in nicbufs analzyer' % (type),
+                        file=sys.stderr)
+
+
+        print('\n-----------------')
+        print('Analyzer: nicbufs')
+        print('-----------------')
+        print('Maximum active NIC buffer space used for each GRO core over the')
+        print('life of the traces (assuming Mellanox mlx5 buffer cache):')
+        print('Active:    Maximum bytes of NIC buffers used by the core (bytes')
+        print('           allocated on Core between when PktId was received and')
+        print('           when PktId was freed)')
+        print('PktId:     Identifier (as seen by receiver) for the packet ')
+        print('           corresponding to Active')
+        print('Node:      Node where Pktid was received')
+        print('Core:      Core on which Pktid was received')
+        print('GRO:       Time when homa_gro_receive processed Pktid on Core')
+        print('Free:      Time when packet was freed after copying to user space')
+        print('Life:      Packet lifetime (Free - GRO, usecs)\n')
+
+        maxes = []
+        for core, max in core_max.items():
+            time, active, pkid, gro_time = max
+            maxes.append([core, time, active, pkid, gro_time])
+        maxes.sort(key=lambda t : t[2], reverse = True)
+        print('  Active                PktId       Node Core       GRO      '
+                'Free    Life')
+        print('-------------------------------------------------------------'
+                '------------')
+        for core, time, active, pkid, gro_time in maxes:
+            node, core_id = core.split('.')
+            print('%8d %20s %10s %4s %9.3f %9.3f %7.1f' % (active, pkid,
+                    node, core_id, gro_time, time, time - gro_time))
+
+#------------------------------------------------
 # Analyzer: smis
 #------------------------------------------------
 class AnalyzeSmis:
@@ -5770,7 +5918,7 @@ class AnalyzeSmis:
         if self.last_time == None:
             self.last_time = t
             return
-        if (time - self.last_time) > 50:
+        if (t - self.last_time) > 50:
             self.smis.append([self.last_time, t, trace['node']])
         self.last_time = t
 
@@ -6171,6 +6319,42 @@ class AnalyzeTemp:
         print('-------------------')
 
         pkts = []
+        node3pkts = 0
+        long = 50
+        node = options.node
+        for pkt in packets.values():
+            if not 'nic' in pkt:
+                continue
+            if not 'free_tx_skb' in pkt:
+                continue
+            if not 'gro' in pkt:
+                continue
+            max_gro = get_max_gro(pkt)
+            if (node != None) and ('tx_node' in pkt) and (node != pkt['tx_node']):
+                continue
+            node3pkts += 1
+            delta = pkt['free_tx_skb'] - max_gro
+            if delta < long:
+                continue
+            pkts.append([delta, pkt])
+        if pkts:
+            print('%d/%d packets (%.1f%%) had free delays > %d usec'% (
+                    len(pkts), node3pkts, 100*len(pkts)/node3pkts, long))
+        else:
+            print('No packets had long free delays')
+        for delay, pkt in sorted(pkts, reverse=True, key=lambda t : t[0]):
+            print('RPC id %10d (%s), offset %6d, nic %9.3f, max_gro %9.3f, free %9.3f, '
+                    'free delay %7.3f' % (pkt['id'], pkt['tx_node'], pkt['offset'],
+                    pkt['nic'], get_max_gro(pkt), pkt['free_tx_skb'],
+                    pkt['free_tx_skb'] - pkt['gro']))
+
+    def output_long_qdisc(self):
+        global traces, options, packets
+        print('\n-------------------')
+        print('Analyzer: temp')
+        print('-------------------')
+
+        pkts = []
         for pkt_id in self.qdisc_ids:
             if not pkt_id in packets:
                 continue
@@ -6426,17 +6610,21 @@ class AnalyzeTimeline:
                 elapsed[9*len(elapsed)//10], gaps[9*len(gaps)//10]))
 
 #------------------------------------------------
-# Analyzer: tx
+# Analyzer: txintervals
 #------------------------------------------------
-class AnalyzeTx:
+class AnalyzeTxintervals:
     """
-    Generates one data file for each node showing various statistics
-    related to message transmission as a function of time. Requires the
-    --data and --gbps options.
+    Computes statistics related to packet transmission over intervals,
+    and generates one data file for each node showing interval data for
+    that node. Requires the --data and --gbps options. Also uses the
+    --interval option.  If --tx-qid is specified, then only packets transmitted
+    via that qid will be considered.
     """
 
     def __init__(self, dispatcher):
-        dispatcher.interest('AnalyzeIntervals')
+        interval_analyzer = dispatcher.interest('AnalyzeIntervals')
+        if options.tx_qid != None:
+            interval_analyzer.restrict_qid(options.tx_qid)
         return
 
     def output(self):
@@ -6451,6 +6639,11 @@ class AnalyzeTx:
         print('See data files tx_*.dat in %s\n' % (options.data))
         print('Average transmit throughput:')
 
+        if options.tx_qid != None:
+            qid_msg = ' (considers only transmit queue %d)' % (options.tx_qid)
+        else:
+            qid_msg = ''
+
         for node in get_sorted_nodes():
             f = open('%s/tx_%s.dat' % (options.data, node), 'w')
             f.write('# Node: %s\n' % (node))
@@ -6458,9 +6651,11 @@ class AnalyzeTx:
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             f.write('# Statistics about message transmission from node ')
             f.write('%s over %d usec\n' % (node, options.interval))
-            f.write('# intervals:\n')
+            f.write('# intervals%s:\n' % (qid_msg))
             f.write('# Time:       End of the time interval\n')
             f.write('# Gbps:       Rate of data passed to ip*xmit during '
+                    'the interval\n')
+            f.write('# TxKB:       KB of data passed to ip*xmit during '
                     'the interval\n')
             f.write('# RPCs:       Number of active client RPCs at the end '
                     'of the interval\n')
@@ -6473,8 +6668,33 @@ class AnalyzeTx:
             f.write('# Pkts:       Packets transmitted during the interval\n')
             f.write('# QDisc:      KB of data that have been passed to ip*xmit '
                     'but not yet\n')
-            f.write('#             transmitted by NIC\n')
-            f.write('# NIC:        NIC queue length, measured in usecs to xmit\n')
+            f.write('#             transmitted by NIC, as of the end of the '
+                    'interval\n')
+            f.write('# NicKB:      KB of data passed to NIC during the interval\n')
+            f.write('# NQEst:      Estimate of NIC queue length at the end '
+                    'of the interval,\n')
+            f.write('#             measured in usecs to xmit (assumes the NIC '
+                    'can transmit at\n')
+            f.write('              link speed)\n')
+            f.write('# InNic:      KB of data that have been queued for the '
+                    'NIC but whose packets\n')
+            f.write('#             haven\'t been returned after transmission, '
+                    'as of the end of\n')
+            f.write('#             the interval\n')
+            f.write('# FreeKB:     KB of skb data freed after NIC notified '
+                    'transmission complete\n')
+            f.write('# MinFr:      Smallest p[\'free_tx_skb\'] - p[\'nic\'] for a '
+                    'packet freed in\n')
+            f.write('#             this interval\n')
+            f.write('# MaxFr:      Largest p[\'free_tx_skb\'] - p[\'nic\'] for a '
+                    'packet freed in\n')
+            f.write('#             this interval\n')
+            f.write('# MinGF:      Smallest p[\'gro\'] - p[\'free_tx_skb\'] '
+                    'for any segment of\n')
+            f.write('#             a packet freed in this interval')
+            f.write('# MaxGF:     Largest p[\'gro\'] - p[\'free_tx_skb\'] '
+                    'for any segment of\n')
+            f.write('#             a packet freed in this interval')
             f.write('# GXmit:      KB of grants that have been sent by peer '
                     'but not yet\n')
             f.write('              received by GRO\n')
@@ -6484,12 +6704,14 @@ class AnalyzeTx:
             f.write('# GAvail:     KB of grants that have been received by '
                     'SoftIRQ but data hasn\'t\n')
             f.write('              been transmitted yet\n')
-            f.write('# GNew:       Gbps rate at which new grants were added '
-                    'to GAvail during\n')
+            f.write('# GNew:       Gbps rate at which new grants were reeived '
+                    'by SoftIRQ during\n')
             f.write('              the interval\n')
 
-            f.write('\n#   Time   Gbps  RPCs   Reqs  Resps  Pkts Qdisc   NIC  GXmit  '
-                    'GGro GAvail   GNew\n')
+            f.write('\n#   Time   Gbps  TxKB  RPCs   Reqs  Resps')
+            f.write(' Pkts Qdisc NicKB NQEst InNic FreeKB')
+            f.write('  MinFr  MaxFr  MinGF  MaxGF')
+            f.write(' GXmit  GGro GAvail   GNew\n')
             total = 0
             for interval in intervals[node]:
                 if not 'tx_bytes' in interval:
@@ -6497,16 +6719,30 @@ class AnalyzeTx:
                     print('Trace: %s' % (traces[node]))
                 gbps = interval['tx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f %5d  %5d  %5d  %4d %5.0f %5.1f  %5.0f '
-                        '%5.0f  %5.0f %6.1f\n'
-                        % (interval['time'], gbps,
+                f.write('%8.1f %6.1f %5.0f %5d  %5d  %5d' %
+                        (interval['time'], gbps,
+                        interval['tx_bytes'] * 1e-3,
                         interval['rpcs_active'],
                         interval['tx_active_req'],
-                        interval['tx_active_resp'],
-                        interval['tx_pkts'],
-                        interval['tx_qdisc'] * 1e-3,
+                        interval['tx_active_resp']))
+                f.write(' %4d %5.0f %5.0f %5.1f %5.0f  %5.0f' % (
+                        interval['tx_pkts'], interval['tx_qdisc'] * 1e-3,
+                        interval['tx_nic_bytes'] * 1e-3,
                         interval['tx_q'] * 8 / (options.gbps * 1000),
-                        interval['tx_grant_xmit'] * 1e-3,
+                        interval['tx_in_nic'] * 1e-3,
+                        interval['tx_free_bytes'] * 1e-3))
+                v = interval['tx_min_free']
+                min_free = '%.1f' % v if v != 0 else ''
+                v = interval['tx_max_free']
+                max_free = '%.1f' % v if v != 0 else ''
+                v = interval['tx_min_gro_free']
+                min_gro_free= '%.1f' % v if v != None else ''
+                v = interval['tx_max_gro_free']
+                max_gro_free = '%.1f' % v if v != None else ''
+                f.write(' %6s %6s %6s %6s' % (min_free, max_free, min_gro_free,
+                        max_gro_free))
+                f.write(' %5.0f %5.0f  %5.0f %6.1f\n'
+                        % (interval['tx_grant_xmit'] * 1e-3,
                         interval['tx_grant_gro'] * 1e-3,
                         interval['tx_grant_avl'] * 1e-3,
                         interval['tx_new_grants'] * 8 / (options.interval * 1000)))
@@ -6520,7 +6756,7 @@ class AnalyzeTxpkts:
     """
     Generates one data file for each node showing information about every
     data packet transmitted from that node, in time order. Also generates
-    aggregate delay statistics by node and core. If either --node or --core
+    aggregate delay statistics by node and core. If either --node or --tx-qid
     is specified, only packets matching those options will be considered.
     """
 
@@ -6537,63 +6773,57 @@ class AnalyzeTxpkts:
 
         # Bucket all of the packets by transmitting node.
         for pkt in packets.values():
-            if (not 'tx_node' in pkt) or (not 'tx_core' in pkt):
+            if (not 'xmit' in pkt) or not ('tso_length' in pkt):
+                continue
+            if (not 'nic' in pkt) or (not 'gro' in pkt) or (not 'tx_qid' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
 
-        # Create one file for each node with packets in time order.
         print('\n----------------')
         print('Analyzer: txpkts')
         print('----------------')
         print('See data files txpkts_*.dat in %s\n' % (options.data))
         print('Summary statistics on delays related to outgoing packets:')
         print('Node:      Name of node')
-        print('Core:      Core number')
-        print('Count:     Total number of packets transmitted by core')
-        print('NicAvg:    Average value of core\'s NIC delay (time from '
-                'packet transmission')
-        print('           until NIC doorbell rung)')
-        print('NicP90:    90th percentile of core\'s NIC delay')
-        print('GroAvg:    Average value of core\'s NIC delay (time from '
-                'packet transmission')
-        print('           until packet received by GRO at destination)')
-        print('GroP90:    90th percentile of core\'s GRO delay')
-        print('FreeAvg:   Average value of core\'s free delay (time from '
-                'packet transmission')
-        print('           until sk_buff can be reclaimed)')
-        print('FreeP90:   90th percentile of core\'s free delay')
-        print('FSmAvg:    Same as FreeAvg, but considers only packets < '
-                '1500 bytes')
-        print('FSmP90:    Same as FreeP90, but considers only packets < '
-                '1500 bytes')
-        print('FLgAvg:    Same as FreeAvg, but considers only packets >= '
-                '1500 bytes')
-        print('FLgP90:    Same as FreeP90, but considers only packets >= '
-                '1500 bytes')
-        print('')
+        print('Qid:       Identifier of transmit queue')
+        print('Pkts:      Total number of packets transmitted by node or queue')
+        print('NicP10:    10th percentile of NIC delay (time from xmit to NIC '
+                'handoff)')
+        print('NicP50:    Median NIC delay')
+        print('NicP90:    90th percentile of NIC delay')
+        print('GroP10:    10th percentile of GRO delay (maximum time across '
+                'segments of TSO')
+        print('           from NIC handoff to receipt by destination GRO)')
+        print('GroP50:    Median GRO delay')
+        print('GroP90:    90th percentile of GRO delay')
+        print('FreP10:    10th percentile of free delay (time from NIC handoff '
+                'to freeing')
+        print('           transmit packet buffer)')
+        print('FreP50:    Median free delay')
+        print('FreP90:    90th percentile of free delay')
 
         first_node = True
         node_info = ''
-        core_details = ''
+        q_details = ''
         for node in get_sorted_nodes():
             if (options.node != None) and (node != options.node):
                 continue
+
+            # Create a data file for this node with packets in time order.
             pkts = sorted(node_pkts[node], key = lambda d : d['xmit'])
             if len(pkts) == 0:
                 continue
 
-            # Maps from core number to a dictionary mapping from delay type
-            # to a list of delays of the given type on the given core.
+            # Tx queue number -> dictionary mapping from delay type to a list
+            # of delays of the given type on the given transmit queue.
             # Delay types currently used:
             # nic:        delay from xmit to nic doorbell
             # gro:        delay from xmit to gro on receiver
             # free:       delay from xmit to sk_buff free on sender
-            # free_short: free delays for packets < 1500 bytes
-            # free_long:  free delays for packets >= 1500 bytes
             delays = defaultdict(lambda: defaultdict(list))
 
-            # Core number -> total number of packets transmitted on that node
-            core_counts = defaultdict(lambda: 0)
+            # Tx queue number -> total number of packets transmitted on that queue
+            qid_counts = defaultdict(lambda: 0)
 
             total_pkts = 0
 
@@ -6603,97 +6833,106 @@ class AnalyzeTxpkts:
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
             f.write('# Data packets transmitted from %s:\n' % (node))
             f.write('# Xmit:       Time when packet was passed to ip*xmit\n')
-            f.write('# Core:       Core on which ip*xmit was invoked\n')
+            f.write('# RpcId:      Identifier of packet\'s RPC\n')
+            f.write('# Offset:     Offset of packet within message\n')
             f.write('# Length:     Size of packet (before segmentation)\n')
-            f.write('# Nic:        usecs from Xmit until NIC doorbell has '
-                    'been rung\n')
-            f.write('# Gro:        usecs from Xmit until packet '
+            f.write('# Qid:        Transmit queue on which packet was sent\n')
+            f.write('# Nic:        Time when packet was queued for NIC\n')
+            f.write('# NDelay:     Nic - Xmit\n')
+            f.write('# MaxGro:     Time when last fragment of packet was '
                     'received by GRO\n')
-            f.write('# Free:       usecs from Xmit until sk_buff '
-                    'released on sender\n')
+            f.write('# GDelay:     MaxGro - Nic\n')
+            f.write('# Free:       Time when sk_buff was released on sender\n')
+            f.write('# FDelay:     Free - Nic\n')
+            f.write('# Rx:         Number of times segments in the packet were '
+                    'retransmitted\n\n')
 
-            f.write('\n   Xmit Core  Length    Nic    Gro   Free\n')
+            f.write('#    Xmit      RpcId Offset  Length Qid')
+            f.write('       Nic  NDelay    MaxGro  GDelay')
+            f.write('      Free  FDelay Rx\n')
             for pkt in pkts:
                 xmit = pkt['xmit']
-                core = pkt['tx_core']
-                if (options.core != None) and (core != options.core):
-                    continue
-                core_counts[core] += 1
+                nic = pkt['nic']
+                max_gro = get_max_gro(pkt)
+                free = pkt['free_tx_skb']
+
+                if 'tx_qid' in pkt:
+                    qid = pkt['tx_qid']
+                    qid_counts[qid] += 1
+                    qid_string = str(qid)
+                    if (options.tx_qid != None) and (qid != options.tx_qid):
+                        continue
+                else:
+                    if options.tx_qid != None:
+                        continue
+                    qid = None
+                    qid_string = ''
                 total_pkts += 1
 
-                nic_delta = ""
-                if 'nic' in pkt:
-                    delay = pkt['nic'] - pkt['xmit']
-                    nic_delta = '%6.1f' % (delay)
-                    delays[core]['nic'].append(delay)
-                gro_delta = ''
+                rx = 0
+                if 'retransmits' in pkt:
+                    rx += len(pkt['retransmits'])
+                if 'segments' in pkt:
+                    for seg in pkt['segments']:
+                        if 'retransmits' in seg:
+                            rx += len(seg['retransmits'])
+                rx_msg = str(rx) if rx > 0 else ""
 
-                if 'gro' in pkt:
-                    delay = pkt['gro'] - pkt['xmit']
-                    gro_delta = '%6.1f' % (delay)
-                    delays[core]['gro'].append(delay)
+                if rx == 0 and qid != None:
+                    delays[qid]['nic'].append(nic - xmit)
+                    delays[qid]['gro'].append(max_gro - nic)
+                    delays[qid]['free'].append(free - nic)
 
-                free_delta = ''
-                if 'free_tx_skb' in pkt:
-                    delay = pkt['free_tx_skb'] - pkt['xmit']
-                    free_delta = '%6.1f' % (delay)
-                    delays[core]['free'].append(delay)
-                    if ('xmit_length' in pkt) and (pkt['xmit_length'] < 1500):
-                        delays[core]['free_short'].append(delay)
-                    else:
-                        delays[core]['free_long'].append(delay)
-
-                f.write('%7.1f %4d  %6s %6s %6s %6s\n' % (xmit,
-                        pkt['tx_core'], print_field_if(pkt, 'xmit_length', '%6d'),
-                        nic_delta, gro_delta, free_delta))
+                f.write('%9.3f %10d %6d  %6d %3s' % (xmit, pkt['id'],
+                        pkt['offset'], pkt['tso_length'], qid_string))
+                f.write(' %9.3f %7.1f %9.3f %7.1f' % (nic, nic - xmit,
+                        max_gro, max_gro - nic))
+                f.write(' %9.3f %7.1f %2s\n' % (pkt['free_tx_skb'],
+                        pkt['free_tx_skb'] - nic, rx_msg))
             f.close()
 
             def print_type(delays):
                 delays.sort()
                 count = len(delays)
                 if count > 0:
-                    return '%6.1f %6.1f' % (sum(delays)/count,
-                            delays[90*count//100])
-                return ' '*13
+                    return '%6.1f %6.1f %6.1f' % (delays[10*count//100],
+                            delays[50*count//100], delays[90*count//100])
+                return ' '*20
 
-            # Generate overall statistics by core and node.
+            # Generate overall statistics by node and qid.
             if not first_node:
-                core_details += '\n'
-            core_details += 'Core-by-core breakdown for %s\n' % (node)
-            core_details += 'Core Count NicAvg NicP90 GroAvg GroP90 FreeAvg '
-            core_details += 'FreeP90 FSmAvg FSmP90 FLgAvg FLgP90\n'
-            core_details += '------------------------------------------------'
-            core_details += '-----------------------------------\n'
+                q_details += '\n'
+            q_details += 'Transmit queues for %s\n' % (node)
+            q_details += 'Qid   Pkts NicP10 NicP50 NicP90   GroP10 GroP50 '
+            q_details += 'GroP90   FreP10 FreP50 FreP90\n'
+            q_details += '------------------------------------------------'
+            q_details += '------------------------------\n'
             first_node = False
             totals = defaultdict(list)
-            for core in sorted(delays.keys()):
-                core_delays = delays[core]
-                for type, d in core_delays.items():
+            for qid in sorted(delays.keys()):
+                q_delays = delays[qid]
+                for type, d in q_delays.items():
                     totals[type].extend(d)
-                core_details += '%4d %5d %s %s  %s  %s %s\n' % (
-                        core, core_counts[core],
-                        print_type(core_delays['nic']),
-                        print_type(core_delays['gro']),
-                        print_type(core_delays['free']),
-                        print_type(core_delays['free_short']),
-                        print_type(core_delays['free_long']))
-            node_info += '%-10s %5d %s %s  %s  %s %s\n' % (
+                q_details += '%4d %5d %s   %s   %s\n' % (
+                        qid, qid_counts[qid],
+                        print_type(q_delays['nic']),
+                        print_type(q_delays['gro']),
+                        print_type(q_delays['free']))
+            node_info += '%-10s %5d %s   %s   %s\n' % (
                     node, total_pkts,
                     print_type(totals['nic']),
                     print_type(totals['gro']),
-                    print_type(totals['free']),
-                    print_type(totals['free_short']),
-                    print_type(totals['free_long']))
+                    print_type(totals['free']))
         if not node_info:
             print('No packet data available')
         else:
             print('\nNode totals')
-            print('Node       Count NicAvg NicP90 GroAvg GroP90 FreeAvg '
-                    'FreeP90 FSmAvg FSmP90 FLgAvg FLgP90')
-            print('-----------------------------------------------------'
-                    '-----------------------------------')
+            print('Node        Pkts NicP10 NicP50 NicP90   GroP10 GroP50 GroP90'
+                    '   FreP10 FreP50 FreP90')
+            print('------------------------------------------------------------'
+                    '-----------------------')
             print(node_info)
-            print(core_details, end='')
+            print(q_details, end='')
 
 #------------------------------------------------
 # Analyzer: txqueues
@@ -6884,6 +7123,9 @@ parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
 parser.add_option('--tx-end', dest='tx_end', type=float, default=None,
         metavar='T', help='If specified, some analyzers will ignore packets '
         'transmitted at or after time T')
+parser.add_option('--tx-qid', dest='tx_qid', type=int, default=None,
+        metavar='C', help='Specifies a transmit queue identifier; used '
+        'by some anlyzers to select a specific queue.')
 parser.add_option('--tx-node', dest='tx_node', default=None,
         metavar='N', help='If specified, some analyzers will ignore ignore packets '
         'transmitted by nodes other than N')
