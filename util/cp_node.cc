@@ -1448,7 +1448,19 @@ void tcp_server::accept(int epoll_fd)
 	 */
 	if (client_addr.in4.sin_family == AF_INET) {
 		uint8_t *ipaddr = (uint8_t *) &client_addr.in4.sin_addr;
-		if ((ipaddr[0] != 10) || (ipaddr[1] != 0) || (ipaddr[2] != 1)) {
+		bool is_internet = true;
+
+		if (ipaddr[0] == 10) {
+			is_internet = false;
+		}
+		else if (ipaddr[0] == 172 && (ipaddr[1] >= 16 && ipaddr[1] <= 31)) {
+			is_internet = false;
+		}
+		else if (ipaddr[0] == 192 && ipaddr[1] == 168) {
+			is_internet = false;
+		}
+
+		if (is_internet) {
 			log(NORMAL, "ERROR: tcp_server::accept rejecting "
 					"rogue TCP connection from %s\n",
 					print_address(&client_addr));
