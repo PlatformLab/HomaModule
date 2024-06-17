@@ -317,7 +317,7 @@ TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_rpc_new_client)
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_init)
+TEST_F(homa_plumbing, homa_sendmsg__error_in_homa_message_out_fill)
 {
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH+1;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
@@ -394,7 +394,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_init_returns_error)
+TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
@@ -406,7 +406,7 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_init_returns_error)
 	EXPECT_EQ(RPC_DEAD, srpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_init)
+TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_fill)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,

@@ -912,7 +912,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 				ntohs(addr->in6.sin6_port), rpc->id,
 				length);
 		rpc->completion_cookie = args.completion_cookie;
-		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
+		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result)
 			goto error;
 		args.id = rpc->id;
@@ -967,7 +967,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
 		}
 		rpc->state = RPC_OUTGOING;
 
-		result = homa_message_out_init(rpc, &msg->msg_iter, 1);
+		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result && (rpc->state != RPC_DEAD))
 			goto error;
 		homa_rpc_unlock(rpc);

@@ -133,7 +133,7 @@ int cpu_number = 1;
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset = 0;
 
-/* Maximum packet size allowed by "network" (see homa_message_out_init;
+/* Maximum packet size allowed by "network" (see homa_message_out_fill;
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
  * Set by mock_sock_init.

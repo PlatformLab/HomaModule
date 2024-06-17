@@ -3413,7 +3413,7 @@ extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
 extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
 		    int unsched);
-extern int      homa_message_out_init(struct homa_rpc *rpc,
+extern int      homa_message_out_fill(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int xmit);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
 		    int whence);

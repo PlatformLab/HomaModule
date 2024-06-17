@@ -29,7 +29,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
 }
 
 /**
- * homa_message_out_init() - Initializes information for sending a message
+ * homa_message_out_fill() - Initializes information for sending a message
  * for an RPC (either request or response); copies the message data from
  * user space and (possibly) begins transmitting the message.
  * @rpc:     RPC for which to send message; this function must not
@@ -45,7 +45,7 @@ inline static void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
  *           happens, copying will cease, -EINVAL will be returned, and
  *           rpc->state will be RPC_DEAD.
  */
-int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
+int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 {
 	/* Geometry information for packets:
 	 * mtu:              largest size for an on-the-wire packet (including
@@ -82,7 +82,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	if (unlikely((rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH)
 			|| (rpc->msgout.length == 0))) {
-		tt_record2("homa_message_out_init found bad length %d for id %d",
+		tt_record2("homa_message_out_fill found bad length %d for id %d",
 				rpc->msgout.length, rpc->id);
 		err = -EINVAL;
 		goto error;
@@ -154,7 +154,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 				+ sizeof32(struct homa_skb_info));
 		if (unlikely(!skb)) {
 			err = -ENOMEM;
-			homa_rpc_lock(rpc, "homa_message_out_init");
+			homa_rpc_lock(rpc, "homa_message_out_fill");
 			goto error;
 		}
 		if ((skb_bytes_left > max_pkt_data)
@@ -203,7 +203,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 					iter) != seg_size) {
 				err = -EFAULT;
 				homa_skb_free(skb);
-				homa_rpc_lock(rpc, "homa_message_out_init2");
+				homa_rpc_lock(rpc, "homa_message_out_fill2");
 				goto error;
 			}
 			bytes_left -= seg_size;
@@ -215,7 +215,7 @@ int homa_message_out_init(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			homa_info->data_bytes += seg_size;
 		} while (skb_bytes_left > 0);
 
-		homa_rpc_lock(rpc, "homa_message_out_init3");
+		homa_rpc_lock(rpc, "homa_message_out_fill3");
 		if (rpc->state == RPC_DEAD) {
 			/* RPC was freed while we were copying. */
 			err = -EINVAL;
