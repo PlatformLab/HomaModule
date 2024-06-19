@@ -429,6 +429,10 @@ if elapsed_secs != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
         print("Throttled throughput: %5.2f  Gbps (pacer output when throttled)" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
+    if deltas["skb_allocs"] != 0:
+        print("Skb alloc time:        %4.2f  usec/skb" % (
+                float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
+                deltas["skb_allocs"]))
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
