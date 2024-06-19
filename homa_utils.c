@@ -61,6 +61,9 @@ int homa_init(struct homa *homa)
 			core->held_skb = NULL;
 			core->held_bucket = 0;
 			core->rpcs_locked = 0;
+			core->skb_page = NULL;
+			core->page_inuse = 0;
+			core->page_size = 0;
 			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
@@ -186,6 +189,7 @@ void homa_destroy(struct homa *homa)
 	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(&homa->port_map);
 	homa_peertab_destroy(&homa->peers);
+	homa_skb_cleanup(homa);
 	if (core_memory) {
 		vfree(core_memory);
 		core_memory = NULL;
@@ -1050,6 +1054,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	int used = 0;
 	struct common_header *common;
 	struct in6_addr saddr;
+	char header[HOMA_MAX_HEADER];
 
 	if (skb == NULL) {
 		snprintf(buffer, buf_len, "skb is NULL!");
@@ -1057,7 +1062,8 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		return buffer;
 	}
 
-	common = (struct common_header *) skb->data;
+	homa_skb_get(skb, &header, 0, sizeof(header));
+	common = (struct common_header *) header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
 		"%s from %s:%u, dport %d, id %llu",
@@ -1067,9 +1073,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		be64_to_cpu(common->sender_id));
 	switch (common->type) {
 	case DATA: {
-		struct data_header *h = (struct data_header *)
-				skb->data;
-		struct data_segment *seg;
+		struct data_header *h = (struct data_header *) header;
 		int seg_length = ntohl(h->seg.segment_length);
 		int bytes_left, i;
 		used = homa_snprintf(buffer, buf_len, used,
@@ -1093,18 +1097,19 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 			break;
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			seg = (struct data_segment *) (skb->data + skb->len
-					- bytes_left);
-			seg_length = ntohl(seg->segment_length);
+			struct data_segment seg;
+			homa_skb_get(skb, &seg, skb->len - bytes_left,
+					sizeof(seg));
+			seg_length = ntohl(seg.segment_length);
 			used = homa_snprintf(buffer, buf_len, used,
 					" %d@%d", seg_length,
-					ntohl(seg->offset));
-			bytes_left -= sizeof32(*seg) + seg_length;
+					ntohl(seg.offset));
+			bytes_left -= sizeof32(seg) + seg_length;
 		};
 		break;
 	}
 	case GRANT: {
-		struct grant_header *h = (struct grant_header *) skb->data;
+		struct grant_header *h = (struct grant_header *) header;
 		char *resend = (h->resend_all) ? ", resend_all" : "";
 		used = homa_snprintf(buffer, buf_len, used,
 				", offset %d, grant_prio %u%s",
@@ -1112,7 +1117,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	case RESEND: {
-		struct resend_header *h = (struct resend_header *) skb->data;
+		struct resend_header *h = (struct resend_header *) header;
 		used = homa_snprintf(buffer, buf_len, used,
 				", offset %d, length %d, resend_prio %u",
 				ntohl(h->offset), ntohl(h->length),
@@ -1126,7 +1131,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		/* Nothing to add here. */
 		break;
 	case CUTOFFS: {
-		struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
+		struct cutoffs_header *h = (struct cutoffs_header *) header;
 		used = homa_snprintf(buffer, buf_len, used,
 				", cutoffs %d %d %d %d %d %d %d %d, version %u",
 				ntohl(h->unsched_cutoffs[0]),
@@ -1147,7 +1152,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		/* Nothing to add here. */
 		break;
 	case ACK: {
-		struct ack_header *h = (struct ack_header *) skb->data;
+		struct ack_header *h = (struct ack_header *) header;
 		int i, count;
 		count = ntohs(h->num_acks);
 		used = homa_snprintf(buffer, buf_len, used, ", acks");
@@ -1178,12 +1183,14 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
  */
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
-	struct common_header *common =
-			(struct common_header *) skb_transport_header(skb);
+	char header[HOMA_MAX_HEADER];
+	struct common_header *common = (struct common_header *) header;
+
+	homa_skb_get(skb, header, 0, HOMA_MAX_HEADER);
 	switch (common->type) {
 	case DATA: {
-		struct data_header *h = (struct data_header *) common;
-		struct data_segment *seg;
+		struct data_header *h = (struct data_header *) header;
+		struct data_segment seg;
 		int bytes_left, used, i;
 		int seg_length = ntohl(h->seg.segment_length);
 
@@ -1192,25 +1199,25 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 				seg_length, ntohl(h->seg.offset));
 		bytes_left = skb->len - sizeof32(*h) - seg_length;
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			seg = (struct data_segment *) (skb->data + skb->len
-					- bytes_left);
-			seg_length = ntohl(seg->segment_length);
+			homa_skb_get(skb, &seg, skb->len - bytes_left,
+					sizeof(seg));
+			seg_length = ntohl(seg.segment_length);
 			used = homa_snprintf(buffer, buf_len, used,
 					" %d@%d", seg_length,
-					ntohl(seg->offset));
-			bytes_left -= sizeof32(*seg) + seg_length;
+					ntohl(seg.offset));
+			bytes_left -= sizeof32(seg) + seg_length;
 		}
 		break;
 	}
 	case GRANT: {
-		struct grant_header *h = (struct grant_header *) common;
+		struct grant_header *h = (struct grant_header *) header;
 		char *resend = h->resend_all ? " resend_all" : "";
 		snprintf(buffer, buf_len, "GRANT %d@%d%s", ntohl(h->offset),
 				h->priority, resend);
 		break;
 	}
 	case RESEND: {
-		struct resend_header *h = (struct resend_header *) common;
+		struct resend_header *h = (struct resend_header *) header;
 		snprintf(buffer, buf_len, "RESEND %d-%d@%d", ntohl(h->offset),
 				ntohl(h->offset) + ntohl(h->length) - 1,
 				h->priority);
@@ -1531,11 +1538,11 @@ char *homa_print_metrics(struct homa *homa)
 					   i, m->priority_packets[i], i);
 		}
 		homa_append_metric(homa,
-				"skb_allocs                 %15llu  "
+				"skb_allocs                %15llu  "
 				"sk_buffs allocated\n",
 				m->skb_allocs);
 		homa_append_metric(homa,
-				"skb_alloc_cycles           %15llu  "
+				"skb_alloc_cycles          %15llu  "
 				"Time spent allocating sk_buffs\n",
 				m->skb_alloc_cycles);
 		homa_append_metric(homa,
@@ -1546,6 +1553,14 @@ char *homa_print_metrics(struct homa *homa)
 				"skb_free_cycles           %15llu  "
 				"Time spent freeing sk_buffs\n",
 				m->skb_free_cycles);
+		homa_append_metric(homa,
+				"skb_page_allocs           %15llu  "
+				"Pages allocated for sk_buff frags\n",
+				m->skb_page_allocs);
+		homa_append_metric(homa,
+				"skb_page_alloc_cycles     %15llu  "
+				"Time spent allocating pages for sk_buff frags\n",
+				m->skb_page_alloc_cycles);
 		homa_append_metric(homa,
 				"requests_received         %15llu  "
 				"Incoming request messages\n",

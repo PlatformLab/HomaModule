@@ -22,6 +22,9 @@
 
 extern void       free(void *ptr);
 extern void      *malloc(size_t size);
+#ifdef memcpy
+#undef memcpy
+#endif
 extern void      *memcpy(void *dest, const void *src, size_t n);
 
 /* The variables below can be set to non-zero values by unit tests in order
@@ -29,6 +32,7 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  * the next call to the function will fail; bit 1 corresponds to the next
  * call after that, and so on.
  */
+int mock_alloc_page_errors = 0;
 int mock_alloc_skb_errors = 0;
 int mock_copy_data_errors = 0;
 int mock_copy_to_iter_errors = 0;
@@ -78,11 +82,6 @@ int mock_bpage_size = 0x10000;
 /* HOMA_BPAGE_SHIFT will evaluate to this. */
 int mock_bpage_shift = 16;
 
-/* Keeps track of all sk_buffs that are alive in the current test.
- * Reset for each test.
- */
-static struct unit_hash *buffs_in_use = NULL;
-
 /* Keeps track of all the blocks of memory that have been allocated by
  * kmalloc but not yet freed by kfree. Reset for each test.
  */
@@ -93,9 +92,20 @@ static struct unit_hash *kmallocs_in_use = NULL;
  */
 static struct unit_hash *proc_files_in_use = NULL;
 
+/* Keeps track of all the results returned by alloc_pages that have
+ * not yet been released by calling put_page. The value of each entry is
+ * a (char *) giving the reference count for the page. Reset for each test.
+ */
+static struct unit_hash *pages_in_use = NULL;
+
 /* Keeps track of all the results returned by ip_route_output_flow that
  * have not yet been freed. Reset for each test. */
 static struct unit_hash *routes_in_use = NULL;
+
+/* Keeps track of all sk_buffs that are alive in the current test.
+ * Reset for each test.
+ */
+static struct unit_hash *skbs_in_use = NULL;
 
 /* Keeps track of all the blocks of memory that have been allocated by
  * vmalloc but not yet freed by vfree. Reset for each test.
@@ -140,6 +150,9 @@ int mock_xmit_prios_offset = 0;
  */
 int mock_mtu = 0;
 
+/* Used instead of MAX_SKB_FRAGS when running some unit tests. */
+int mock_max_skb_frags = MAX_SKB_FRAGS;
+
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
@@ -164,6 +177,18 @@ __u32 rps_cpu_mask = 0x1f;
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
+struct page *alloc_pages(gfp_t gfp, unsigned order)
+{
+	struct page *page;
+	if (mock_check_error(&mock_alloc_page_errors))
+		return NULL;
+	page = (struct page *) malloc(PAGE_SIZE << order);
+	if (!pages_in_use)
+	    pages_in_use = unit_hash_new();
+	unit_hash_set(pages_in_use, page, (char *) 1);
+	return page;
+}
+
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
@@ -174,9 +199,9 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	if (skb == NULL)
 		FAIL("skb malloc failed in __alloc_skb");
 	memset(skb, 0, sizeof(*skb));
-	if (!buffs_in_use)
-		buffs_in_use = unit_hash_new();
-	unit_hash_set(buffs_in_use, skb, "used");
+	if (!skbs_in_use)
+		skbs_in_use = unit_hash_new();
+	unit_hash_set(skbs_in_use, skb, "used");
 	size = SKB_DATA_ALIGN(size);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(size + shinfo_size);
@@ -311,9 +336,9 @@ void finish_wait(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5,18,0)
-void get_random_bytes(void *buf, int nbytes)
+	void get_random_bytes(void *buf, int nbytes)
 #else
-void get_random_bytes(void *buf, size_t nbytes)
+	void get_random_bytes(void *buf, size_t nbytes)
 #endif
 {
 	memset(buf, 0, nbytes);
@@ -570,8 +595,9 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	if (mock_xmit_log_homa_info) {
 		struct homa_skb_info *homa_info;
 		homa_info = homa_get_skb_info(skb);
-		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d",
-				homa_info->wire_bytes, homa_info->data_bytes);
+		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d, "
+				"offset %d", homa_info->wire_bytes,
+				homa_info->data_bytes, homa_info->offset);
 	}
 	kfree_skb(skb);
 	return 0;
@@ -678,19 +704,25 @@ void kfree(const void *block)
 
 void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 {
+	int i;
+	struct skb_shared_info *shinfo = skb_shinfo(skb);
+
 	skb->users.refs.counter--;
 	if (skb->users.refs.counter > 0)
 		return;
 	skb_dst_drop(skb);
-	if (!buffs_in_use || unit_hash_get(buffs_in_use, skb) == NULL) {
+	if (!skbs_in_use || unit_hash_get(skbs_in_use, skb) == NULL) {
 		FAIL("kfree_skb on unknown sk_buff");
 		return;
 	}
-	unit_hash_erase(buffs_in_use, skb);
-	while (skb_shinfo(skb)->frag_list) {
-		struct sk_buff *next = skb_shinfo(skb)->frag_list->next;
-		kfree_skb(skb_shinfo(skb)->frag_list);
-		skb_shinfo(skb)->frag_list = next;
+	unit_hash_erase(skbs_in_use, skb);
+	while (shinfo->frag_list) {
+		struct sk_buff *next = shinfo->frag_list->next;
+		kfree_skb(shinfo->frag_list);
+		shinfo->frag_list = next;
+	}
+	for (i = 0; i < shinfo->nr_frags; i++) {
+		put_page(shinfo->frags[i].bv_page);
 	}
 	free(skb->head);
 	free(skb);
@@ -1154,6 +1186,40 @@ unsigned int mock_get_mtu(const struct dst_entry *dst)
 	return mock_mtu;
 }
 
+void mock_get_page(struct page *page)
+{
+	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
+	if (ref_count == 0)
+		FAIL(" unallocated page passed to mock_get_page");
+	else
+		unit_hash_set(pages_in_use, page, (void *) (ref_count+1));
+}
+
+/**
+ * mock_page_refs() - Returns current reference count for page (0 if no
+ * such page exists).
+ */
+int mock_page_refs(struct page *page)
+{
+	return (int64_t) unit_hash_get(pages_in_use, page);
+}
+
+void mock_put_page(struct page *page)
+{
+	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
+	if (ref_count == 0)
+		FAIL(" unallocated page passed to mock_put_page");
+	else {
+		ref_count--;
+		if (ref_count == 0) {
+			unit_hash_erase(pages_in_use, page);
+			free(page);
+		} else {
+			unit_hash_set(pages_in_use, page, (void *) ref_count);
+		}
+	}
+}
+
 /**
  * mock_rcu_read_lock() - Called instead of rcu_read_lock when Homa is compiled
  * for unit testing.
@@ -1229,9 +1295,9 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	}
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
 	memset(skb, 0, sizeof(*skb));
-	if (!buffs_in_use)
-		buffs_in_use = unit_hash_new();
-	unit_hash_set(buffs_in_use, skb, "used");
+	if (!skbs_in_use)
+		skbs_in_use = unit_hash_new();
+	unit_hash_set(skbs_in_use, skb, "used");
 
 	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
@@ -1268,7 +1334,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
  */
 int mock_skb_count(void)
 {
-	return unit_hash_size(buffs_in_use);
+	return unit_hash_size(skbs_in_use);
 }
 
 /**
@@ -1322,6 +1388,7 @@ void mock_teardown(void)
 {
 	cpu_number = 1;
 	cpu_khz = 1000000;
+	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
@@ -1348,19 +1415,26 @@ void mock_teardown(void)
 	mock_xmit_log_verbose = 0;
 	mock_xmit_log_homa_info = 0;
 	mock_mtu = 0;
+	mock_max_skb_frags = MAX_SKB_FRAGS;
 	mock_net_device.gso_max_size = 0;
 
-	int count = unit_hash_size(buffs_in_use);
+	int count = unit_hash_size(skbs_in_use);
 	if (count > 0)
 		FAIL(" %u sk_buff(s) still in use after test", count);
-	unit_hash_free(buffs_in_use);
-	buffs_in_use = NULL;
+	unit_hash_free(skbs_in_use);
+	skbs_in_use = NULL;
 
 	count = unit_hash_size(kmallocs_in_use);
 	if (count > 0)
 		FAIL(" %u kmalloced block(s) still allocated after test", count);
 	unit_hash_free(kmallocs_in_use);
 	kmallocs_in_use = NULL;
+
+	count = unit_hash_size(pages_in_use);
+	if (count > 0)
+		FAIL(" %u pages still allocated after test", count);
+	unit_hash_free(pages_in_use);
+	pages_in_use = NULL;
 
 	count = unit_hash_size(proc_files_in_use);
 	if (count > 0)

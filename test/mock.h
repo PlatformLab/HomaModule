@@ -5,6 +5,7 @@
 /* Functions for mocking that are exported to test code. */
 
 extern int         cpu_number;
+extern int         mock_alloc_page_errors;
 extern int         mock_alloc_skb_errors;
 extern             int mock_bpage_size;
 extern             int mock_bpage_shift;
@@ -23,6 +24,7 @@ extern int         mock_kmalloc_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
+extern int         mock_max_skb_frags;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
@@ -41,6 +43,9 @@ extern void        mock_data_ready(struct sock *sk);
 extern cycles_t    mock_get_cycles(void);
 extern unsigned int
 		   mock_get_mtu(const struct dst_entry *dst);
+extern void        mock_get_page(struct page *page);
+extern int         mock_page_refs(struct page *page);
+extern void        mock_put_page(struct page *page);
 extern void        mock_rcu_read_lock(void);
 extern void        mock_rcu_read_unlock(void);
 extern void        mock_spin_lock(spinlock_t *lock);

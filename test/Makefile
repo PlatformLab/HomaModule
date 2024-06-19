@@ -44,6 +44,7 @@ TEST_SRCS :=  unit_homa_grant.c \
 	      unit_homa_peertab.c \
 	      unit_homa_pool.c \
 	      unit_homa_plumbing.c \
+	      unit_homa_skb.c \
 	      unit_homa_socktab.c \
 	      unit_homa_timer.c \
 	      unit_homa_utils.c \

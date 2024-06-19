@@ -76,6 +76,17 @@ extern void mock_rcu_read_unlock(void);
 
 #define kmalloc mock_kmalloc
 extern void *mock_kmalloc(size_t size, gfp_t flags);
+
+#define get_page mock_get_page
+extern void mock_get_page(struct page *page);
+
+#define put_page mock_put_page
+extern void mock_put_page(struct page *page);
+
+#ifdef page_address
+#undef page_address
+#endif
+#define page_address(page) ((void *) page)
 #endif
 
 /* Null out things that confuse VSCode Intellisense */
@@ -586,11 +597,6 @@ struct homa_message_out {
 	 * until this count becomes zero.
 	 */
 	atomic_t active_xmits;
-
-	/** @gso_pkt_data: Maximum number of bytes of message data that can
-	 * fit in a single outgoing GSO packet.
-	 */
-	int gso_pkt_data;
 
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
@@ -2227,7 +2233,7 @@ struct homa_metrics {
 	__u64 skb_allocs;
 
 	/**
-	 * @skb_alloc_cycles: total time spent allocating sk_buffs, as
+	 * @skb_alloc_cycles: total time spent in homa_skb_new, as
 	 * measured with get_cycles().
 	 */
 	__u64 skb_alloc_cycles;
@@ -2242,6 +2248,17 @@ struct homa_metrics {
 	 * measured with get_cycles().
 	 */
 	__u64 skb_free_cycles;
+
+	/**
+	 * @skb_page_allocs: total number of calls to homa_skb_page_alloc.
+	 */
+	__u64 skb_page_allocs;
+
+	/**
+	 * @skb_page_alloc_cycles: total time spent in homa_skb_page_alloc, as
+	 * measured with get_cycles().
+	 */
+	__u64 skb_page_alloc_cycles;
 
 	/**
 	 * @requests_received: total number of request messages received.
@@ -2872,13 +2889,35 @@ struct homa_core {
 	 */
 	int rpcs_locked;
 
+        /**
+	 * @skb_page: a page of data available being used for skb frags.
+	 * This pointer is included in the page's reference count.
+	 */
+	struct page *skb_page;
+
+	/**
+	 * define HOMA_PAGE_ORDER: power-of-two exponent determining how
+	 * many pages to allocate in a high-order page for skb_page (e.g.,
+	 * 2 means allocate in units of 4 pages).
+	 */
+#define HOMA_SKB_PAGE_ORDER 4
+
+	/**
+	 * @page_inuse: offset of first byte in @skb_page that hasn't already
+	 * been allocated.
+	 */
+	int page_inuse;
+
+	/** @page_size: total number of bytes available in @skb_page. */
+	int page_size;
+
 	/** @metrics: performance statistics for this core. */
 	struct homa_metrics metrics;
 };
 
 /**
  * struct homa_skb_info - Additional information needed by Homa for each
- * sk_buff. Space is allocated for this at the very end of the skb.
+ * DATA packet. Space is allocated for this at the very end of the skb.
  */
 struct homa_skb_info {
 	/**
@@ -2900,6 +2939,12 @@ struct homa_skb_info {
 	 * segments in this packet.
 	 */
 	int data_bytes;
+
+	/**
+	 * @offset: offset within the message of the first byte of data in
+	 * this packet.
+	 */
+	int offset;
 };
 
 #define INC_METRIC(metric, count) \
@@ -3415,6 +3460,7 @@ extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
 		    int unsched);
 extern int      homa_message_out_fill(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int xmit);
+extern void     homa_message_out_init(struct homa_rpc *rpc, int length);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
 		    int whence);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
@@ -3423,6 +3469,10 @@ extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
 extern void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_rpc *rpc);
+extern struct sk_buff
+               *homa_new_data_packet(struct homa_rpc *rpc,
+		    struct iov_iter *iter, int offset, int length,
+		    int max_seg_data);
 extern int      homa_offload_end(void);
 extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
@@ -3503,12 +3553,23 @@ extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
                     sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
+extern int      homa_skb_append_from_iter(struct sk_buff *skb,
+		    struct iov_iter *iter, int length);
+extern int      homa_skb_append_from_skb(struct sk_buff *dst_skb,
+		    struct sk_buff *src_skb, int offset, int length);
+extern int      homa_skb_append_to_frag(struct sk_buff *skb, void *buf,
+		    int length);
+extern void     homa_skb_cleanup(struct homa *homa);
+extern void    *homa_skb_extend_frags(struct sk_buff *skb, int *length);
 extern void     homa_skb_free(struct sk_buff *skb);
 extern void     homa_skb_free_many(struct sk_buff **skbs, int count);
+extern void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
+				int length);
+extern bool     homa_skb_page_alloc(struct homa_core *core);
 extern struct sk_buff
 	       *homa_skb_new(int length);
 extern int      homa_snprintf(char *buffer, int size, int used,
-                    const char* format, ...)
+                    const char *format, ...)
                     __attribute__((format(printf, 4, 5)));
 extern int      homa_sock_bind(struct homa_socktab *socktab,
                     struct homa_sock *hsk, __u16 port);

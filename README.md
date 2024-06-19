@@ -125,14 +125,16 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- June 2024: refactored sk_buff management to use frags; improves
+  efficiency significantly.
 - April 2024: replaced `master` branch with `main`
 - December 2022: Version 2.0. This includes a new mechanism for managing
   buffer space for incoming messages, which improves throughput by
   50-100% in many situations. In addition, Homa now uses the sendmsg
   and recvmsg system calls, rather than ioctls, for sending and receiving
   messages. The API for receiving messages is incompatible with 1.01.
-- November 2022: Implemented software GSO for Homa.
-- September 2022: Added support for IPv6, as well as completion cookies.
+- November 2022: implemented software GSO for Homa.
+- September 2022: added support for IPv6, as well as completion cookies.
   This required small but incompatible changes to the API.
   Many thanks to Dan Manjarres for contributing these
   improvements.

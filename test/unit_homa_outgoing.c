@@ -9,13 +9,6 @@
 #include "mock.h"
 #include "utils.h"
 
-int get_offset(struct sk_buff *skb)
-{
-	struct data_header *h = ((struct data_header *)
-					skb_transport_header(skb));
-	return ntohl(h->seg.offset);
-}
-
 /* The following hook function frees hook_rpc. */
 static struct homa_rpc *hook_rpc = NULL;
 static void unlock_hook(char *id)
@@ -82,6 +75,131 @@ TEST_F(homa_outgoing, set_priority__priority_mapping)
 	EXPECT_STREQ("7 3", mock_xmit_prios);
 }
 
+TEST_F(homa_outgoing, homa_new_data_packet__one_segment)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *) 1000, 5000);
+	homa_message_out_init(crpc, 500);
+
+	unit_log_clear();
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 5000, 500,
+			2000);
+	EXPECT_STREQ("_copy_from_iter 500 bytes at 1000", unit_log_get());
+
+	char buffer[1000];
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
+			"message_length 500, offset 5000, data_length 500, "
+			"incoming 500",
+			homa_print_packet(skb, buffer, sizeof(buffer)));
+
+	EXPECT_EQ(0, skb_shinfo(skb)->gso_segs);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_new_data_packet__cant_allocate_skb)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 500);
+
+	unit_log_clear();
+	mock_alloc_skb_errors = 1;
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 0, 500, 2000);
+	EXPECT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_new_data_packet__multiple_segments)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+						    &self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 10000);
+
+	unit_log_clear();
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 10000, 5000,
+			1500);
+	EXPECT_STREQ("_copy_from_iter 1500 bytes at 1000; "
+			"_copy_from_iter 1500 bytes at 2500; "
+			"_copy_from_iter 1500 bytes at 4000; "
+			"_copy_from_iter 500 bytes at 5500", unit_log_get());
+
+	char buffer[1000];
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
+			"message_length 10000, offset 10000, data_length 1500, "
+			"incoming 10000, extra segs 1500@11500 1500@13000 "
+			"500@14500",
+		     homa_print_packet(skb, buffer, sizeof(buffer)));
+
+	EXPECT_EQ(4*(sizeof(struct data_header) + sizeof(struct data_segment) + crpc->hsk->ip_header_length + HOMA_ETH_OVERHEAD) + 5000, homa_get_skb_info(skb)->wire_bytes);
+	EXPECT_EQ(5000, homa_get_skb_info(skb)->data_bytes);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_new_data_packet__cant_allocate_frag)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+						    &self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 500);
+
+	unit_log_clear();
+	mock_alloc_page_errors = -1;
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 0, 500, 2000);
+	EXPECT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_new_data_packet__cant_copy_data)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+						    &self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 500);
+
+	unit_log_clear();
+	mock_copy_data_errors = 1;
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 0, 500, 2000);
+	EXPECT_TRUE(IS_ERR(skb));
+	EXPECT_EQ(EFAULT, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_new_data_packet__gso_information)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+						    &self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 10000);
+
+	unit_log_clear();
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 10000, 5000,
+						   1500);
+
+	EXPECT_EQ(4, skb_shinfo(skb)->gso_segs);
+	EXPECT_EQ(1500 + sizeof(struct data_segment),
+		  skb_shinfo(skb)->gso_size);
+	EXPECT_EQ(SKB_GSO_TCPV6, skb_shinfo(skb)->gso_type);
+	kfree_skb(skb);
+}
+TEST_F(homa_outgoing, homa_new_data_packet__gso_force_software)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+						    &self->server_addr);
+	homa_rpc_unlock(crpc);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	homa_message_out_init(crpc, 10000);
+	self->homa.gso_force_software = 1;
+
+	unit_log_clear();
+	struct sk_buff *skb = homa_new_data_packet(crpc, iter, 10000, 5000,
+						   1500);
+	EXPECT_EQ(13, skb_shinfo(skb)->gso_type);
+	kfree_skb(skb);
+}
+
 TEST_F(homa_outgoing, homa_message_out_fill__basics)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -92,8 +210,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__basics)
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(3000, crpc->msgout.granted);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_STREQ("mtu 1500, max_pkt_data 1400, gso_size 1500, "
-			"gso_pkt_data 1400; "
+	EXPECT_STREQ("mtu 1500, max_seg_data 1400, max_gso_data 1400; "
 			"_copy_from_iter 1400 bytes at 1000; "
 			"_copy_from_iter 1400 bytes at 2400; "
 			"_copy_from_iter 200 bytes at 3800", unit_log_get());
@@ -111,6 +228,25 @@ TEST_F(homa_outgoing, homa_message_out_fill__basics)
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 	EXPECT_EQ(3000, crpc->msgout.copied_from_user);
+}
+TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+1),
+			0));
+	homa_rpc_unlock(crpc);
+}
+TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+	ASSERT_FALSE(crpc == NULL);
+	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 0), 0));
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_message_out_fill__gso_force_software)
 {
@@ -139,49 +275,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_force_software)
 	homa_xmit_data(crpc2, false);
 	EXPECT_SUBSTR("TSO disabled", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+1),
-			0));
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	EXPECT_EQ(EINVAL, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 0), 0));
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__max_gso_size_limit)
-{
-	// First RPC: not limited by homa.gso_max_size.
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc1 == NULL);
-	unit_log_clear();
-	mock_net_device.gso_max_size = 10000;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	homa_rpc_unlock(crpc1);
-	EXPECT_SUBSTR("gso_size 8600, gso_pkt_data 8400;", unit_log_get());
-
-	// Second RPC: limited by homa.gso_max_size.
-	self->homa.max_gso_size = 3000;
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc2 == NULL);
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	homa_rpc_unlock(crpc2);
-	EXPECT_SUBSTR("gso_size 2920, gso_pkt_data 2800;", unit_log_get());
-}
 TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -193,103 +286,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 5000), 0));
 	homa_rpc_unlock(crpc);
-	EXPECT_SUBSTR("gso_size 1500, gso_pkt_data 1400;", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_fill__packet_header)
-{
-	mock_net_device.gso_max_size = 5000;
-	self->homa.max_gso_size = 20000;
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 20000), 0));
-	homa_rpc_unlock(crpc);
-	char buffer[1000];
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 20000, offset 0, data_length 1400, "
-			"incoming 10000, extra segs 1400@1400 1400@2800",
-			homa_print_packet(crpc->msgout.packets, buffer,
-			sizeof(buffer)));
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 20000, offset 4200, data_length 1400, "
-			"incoming 10000, extra segs 1400@5600 1400@7000",
-			homa_print_packet(homa_get_skb_info(
-					crpc->msgout.packets)->next_skb,
-					buffer, sizeof(buffer)));
-}
-TEST_F(homa_outgoing, homa_message_out_fill__compute_skb_length)
-{
-	mock_net_device.gso_max_size = 3000;
-	self->homa.unsched_bytes = 2000;
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 6000), 0));
-	homa_rpc_unlock(crpc);
-	EXPECT_EQ(2000, crpc->msgout.granted);
-	unit_log_clear();
-	unit_log_message_out_packets(&crpc->msgout, 1);
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 6000, offset 0, data_length 1400, "
-			"incoming 2000, extra segs 600@1400; "
-			"DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 6000, offset 2000, data_length 1400, "
-			"incoming 2000, extra segs 1400@3400; "
-			"DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 6000, offset 4800, data_length 1200, "
-			"incoming 2000",
-		     unit_log_get());
-	EXPECT_EQ(3, crpc->msgout.num_skbs);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__cant_alloc_skb)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	mock_alloc_skb_errors = 1;
-	ASSERT_EQ(ENOMEM, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 5000), 0));
-	homa_rpc_unlock(crpc);
-}
-TEST_F(homa_outgoing, homa_message_out_fill__set_gso_info)
-{
-	// First RPC: uses GSO.
-	mock_net_device.gso_max_size = 10000;
-	self->homa.max_gso_size = 4000;
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc1 == NULL);
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
-			unit_iov_iter((void *) 1000, 2000), 0));
-	homa_rpc_unlock(crpc1);
-	EXPECT_EQ(1420, skb_shinfo(crpc1->msgout.packets)->gso_size);
-
-	// Second RPC: no GSO (message fits in one packet).
-	mock_net_device.gso_max_size = 10000;
-	self->homa.max_gso_size = 4200;
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc2 == NULL);
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
-			unit_iov_iter((void *) 1000, 1000), 0));
-	homa_rpc_unlock(crpc2);
-	EXPECT_EQ(0, skb_shinfo(crpc2->msgout.packets)->gso_size);
-
-	// Thired RPC: GSO limit is one packet
-	mock_net_device.gso_max_size = 10000;
-	self->homa.max_gso_size = 1000;
-	struct homa_rpc *crpc3 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc3 == NULL);
-	unit_log_clear();
-	ASSERT_EQ(0, -homa_message_out_fill(crpc3,
-			unit_iov_iter((void *) 1000, 1000), 0));
-	homa_rpc_unlock(crpc3);
-	EXPECT_EQ(0, skb_shinfo(crpc3->msgout.packets)->gso_size);
+	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 1400;", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 {
@@ -304,19 +301,10 @@ TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 	ASSERT_EQ(0, -homa_message_out_fill(crpc,
 			unit_iov_iter((void *) 1000, 500), 0));
 	homa_rpc_unlock(crpc);
-	struct data_header *h = (struct data_header *) crpc->msgout.packets->data;
+	struct data_header h;
+	homa_skb_get(crpc->msgout.packets, &h, 0, sizeof(h));
 	EXPECT_STREQ("client_port 100, server_port 200, client_id 1000",
-			unit_ack_string(&h->seg.ack));
-}
-TEST_F(homa_outgoing, homa_message_out_fill__cant_copy_data)
-{
-	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	ASSERT_FALSE(crpc == NULL);
-	mock_copy_data_errors = 2;
-	ASSERT_EQ(EFAULT, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 3000), 0));
-	homa_rpc_unlock(crpc);
+			unit_ack_string(&h.seg.ack));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 {
@@ -635,21 +623,6 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
 }
-TEST_F(homa_outgoing, homa_xmit_data__update_next_xmit_offset)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 6000, 1000);
-	unit_log_clear();
-
-	crpc->msgout.granted = 3000;
-	homa_xmit_data(crpc, false);
-	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
-	crpc->msgout.granted = 6000;
-	crpc->msgout.copied_from_user = 8000;
-	homa_xmit_data(crpc, false);
-	EXPECT_EQ(8000, crpc->msgout.next_xmit_offset);
-}
 
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)
 {
@@ -761,6 +734,18 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	homa_resend_data(crpc, 16000, 17000, 7);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_resend_data__cant_allocate_skb)
+{
+	mock_net_device.gso_max_size = 5000;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 16000, 1000);
+	unit_log_clear();
+	mock_clear_xmit_prios();
+	mock_alloc_skb_errors = 1;
+	homa_resend_data(crpc, 7000, 10000, 2);
+	EXPECT_STREQ("skb allocation error", unit_log_get());
+}
 TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 {
 	mock_net_device.gso_max_size = 5000;
@@ -781,6 +766,19 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	homa_resend_data(crpc, 15700, 16500, 2);
 	EXPECT_SUBSTR("incoming 16000", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
+{
+	mock_net_device.gso_max_size = 5000;
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 16000, 1000);
+	unit_log_clear();
+	mock_clear_xmit_prios();
+	mock_max_skb_frags = 0;
+	homa_resend_data(crpc, 7000, 10000, 2);
+	EXPECT_STREQ("homa_resend_data got error 22 while copying data",
+			unit_log_get());
+}
 TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 {
 	mock_net_device.gso_max_size = 5000;
@@ -791,41 +789,8 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 	mock_xmit_log_homa_info = 1;
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
-			"homa_info: wire_bytes 1542, data_bytes 1400",
+			"homa_info: wire_bytes 1542, data_bytes 1400, offset 8400",
 			unit_log_get());
-}
-TEST_F(homa_outgoing, homa_resend_data__advance_next_xmit)
-{
-	char buffer[1000];
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 4500, 1000);
-	unit_log_clear();
-	mock_clear_xmit_prios();
-
-	/* First resend ends just short of a full packet. */
-	homa_resend_data(crpc, 2000, 2799, 2);
-	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
-	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
-	EXPECT_SUBSTR("offset 1400", buffer);
-
-	/* Second resend ends on a packet boundary. */
-	homa_resend_data(crpc, 2000, 4200, 2);
-	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
-	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
-	EXPECT_SUBSTR("offset 4200", buffer);
-
-	/* Third resend ends just before message end. */
-	homa_resend_data(crpc, 2000, 4499, 2);
-	EXPECT_EQ(4200, crpc->msgout.next_xmit_offset);
-	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
-	EXPECT_SUBSTR("offset 4200", buffer);
-
-	/* Fourth resend covers entire message. */
-	homa_resend_data(crpc, 2000, 4500, 2);
-	EXPECT_EQ(4500, crpc->msgout.next_xmit_offset);
-	homa_print_packet(*crpc->msgout.next_xmit, buffer, sizeof(buffer));
-	EXPECT_STREQ("skb is NULL!", buffer);
 }
 
 TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
