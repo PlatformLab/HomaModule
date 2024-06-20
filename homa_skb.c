@@ -34,15 +34,31 @@ void homa_skb_cleanup(struct homa *homa)
 
 /**
  * homa_skb_new() - Allocate a new sk_buff.
- * @length:       Number of bytes of data to allocate in the linear part
- *                of the skb.
+ * @length:       Number of bytes of data that the caller would like to
+ *                have available in the linear part of the sk_buff for
+ *                the Homa header and additional data beyond that. This
+ *                function will allocate additional space for IP and
+ *                Ethernet headers, as well as for the homa_skb_info.
  * Return:        New sk_buff, or NULL if there was insufficient memory.
+ *                The sk_buff will be configured with so that the next
+ *                skb_put will be for the transport (Homa) header. The
+ *                homa_skb_info is not initialized.
  */
 struct sk_buff *homa_skb_new(int length)
 {
 	struct sk_buff *skb;
 	__u64 start = get_cycles();
-	skb = alloc_skb(length, GFP_KERNEL);
+
+	/* Note: allocate space for an IPv6 header, which is larger than
+	 * an IPv4 header.
+	 */
+	skb = alloc_skb(HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH +
+			sizeof(struct homa_skb_info) + length,
+			GFP_KERNEL);
+	if (likely(skb)) {
+		skb_reserve(skb, HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH);
+		skb_reset_transport_header(skb);
+	}
 	INC_METRIC(skb_allocs, 1);
 	INC_METRIC(skb_alloc_cycles, get_cycles() - start);
 	return skb;

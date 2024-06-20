@@ -77,17 +77,14 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	int segs, bytes_left, err;
 
 	/* Initialize the overall skb. */
-	skb = homa_skb_new(HOMA_SKB_EXTRA + rpc->hsk->ip_header_length
-			+ sizeof32(struct data_header)
-			+ sizeof32(struct homa_skb_info));
+	skb = homa_skb_new(sizeof32(struct data_header)
+			- sizeof32(struct data_segment));
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
 
 	/* Fill in the Homa header (which will be replicated in every
 	 * network packet by GSO/TSO).
 	 */
-	skb_reserve(skb, rpc->hsk->ip_header_length + HOMA_SKB_EXTRA);
-	skb_reset_transport_header(skb);
 	h = (struct data_header *) skb_put(skb,
 			sizeof(*h) - sizeof(struct data_segment));
 	h->common.sport = htons(rpc->hsk->port);
@@ -341,14 +338,12 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
          * packets (better reuse of sk_buffs?).
 	 */
 	dst = homa_get_dst(peer, hsk);
-	skb = homa_skb_new(HOMA_MAX_HEADER + HOMA_SKB_EXTRA + sizeof32(void*));
+	skb = homa_skb_new(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
 	dst_hold(dst);
 	skb_dst_set(skb, dst);
 
-	skb_reserve(skb, hsk->ip_header_length + HOMA_SKB_EXTRA);
-	skb_reset_transport_header(skb);
 	h = (struct common_header *) skb_put(skb, length);
 	memcpy(h, contents, length);
 	extra_bytes = HOMA_MIN_PKT_LENGTH - length;
@@ -610,11 +605,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				continue;
 
 			/* This segment must be retransmitted. */
-			new_skb = homa_skb_new(HOMA_SKB_EXTRA
-					+ rpc->hsk->ip_header_length
-					+ sizeof(struct data_header)
-					- sizeof(struct data_segment)
-					+ sizeof(struct homa_skb_info));
+			new_skb = homa_skb_new(sizeof(struct data_header)
+					- sizeof(struct data_segment));
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
 					printk(KERN_NOTICE "homa_resend_data "
@@ -622,9 +614,6 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				UNIT_LOG("; ", "skb allocation error");
 				goto resend_done;
 			}
-			skb_reserve(new_skb, HOMA_SKB_EXTRA
-					+ rpc->hsk->ip_header_length);
-			skb_reset_transport_header(new_skb);
 			h = (struct data_header *) __skb_put_data(new_skb,
 					skb_transport_header(skb),
 					sizeof32(struct data_header)

@@ -15,7 +15,7 @@
  */
 static struct sk_buff *test_skb(void)
 {
-	struct sk_buff *skb = homa_skb_new(200);
+	struct sk_buff *skb = homa_skb_new(100);
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
 
 	int32_t data[1000];
@@ -25,7 +25,6 @@ static struct sk_buff *test_skb(void)
 	for (i = 0; i < 1000; i++)
 		data[i] = 1000000 + 4*i;
 	src = (char *) data;
-	skb_reserve(skb, 100);
 	memcpy(skb_put(skb, 100), src, 100);
 
 	/* Make sure that the first skb fragment will have a nonzero offset
