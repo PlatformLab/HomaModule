@@ -83,6 +83,18 @@ extern void mock_get_page(struct page *page);
 #define put_page mock_put_page
 extern void mock_put_page(struct page *page);
 
+#define compound_order mock_compound_order
+extern unsigned int mock_compound_order(struct page *page);
+
+#define page_to_nid mock_page_to_nid
+extern int mock_page_to_nid(struct page *page);
+
+#define page_ref_count mock_page_refs
+extern int mock_page_refs(struct page *page);
+
+#define cpu_to_node mock_cpu_to_node
+extern int mock_cpu_to_node(int cpu);
+
 #ifdef page_address
 #undef page_address
 #endif
@@ -115,6 +127,7 @@ extern void     homa_sock_lock_slow(struct homa_sock *hsk);
 extern void     homa_throttle_lock_slow(struct homa *homa);
 
 extern struct homa_core *homa_cores[];
+extern struct homa_numa *homa_numas[];
 
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
@@ -203,6 +216,18 @@ enum homa_packet_type {
  * this.
  */
 #define HOMA_MAX_GRANTS 10
+
+/**
+ * define HOMA_PAGE_ORDER: power-of-two exponent determining how
+ * many pages to allocate in a high-order page for skb pages (e.g.,
+ * 2 means allocate in units of 4 pages).
+ */
+#define HOMA_SKB_PAGE_ORDER 4
+
+/**
+ * define HOMA_PAGE_SIZE: number of bytes corresponding to HOMA_PAGE_ORDER.
+ */
+#define HOMA_SKB_PAGE_SIZE (PAGE_SIZE << HOMA_SKB_PAGE_ORDER)
 
 /**
  * struct homa_cache_line - An object whose size equals that of a cache line.
@@ -1583,6 +1608,26 @@ enum homa_freeze_type {
 };
 
 /**
+ * struct homa_page_pool - A cache of free pages available for use in tx skbs.
+ * Each page is of size HOMA_SKB_PAGE_SIZE, and a pool is dedicated for
+ * use by a single NUMA node. Access to these objects is synchronized with
+ * @homa->page_pool_mutex.
+ */
+struct homa_page_pool
+{
+	/** @avail: Number of free pages currently in the pool. */
+	int avail;
+
+#define HOMA_PAGE_POOL_SIZE 1000
+
+	/**
+	 * @pages: Pointers to pages that are currently free; the ref count
+	 * is 1 in each of these pages.
+	 */
+	struct page *pages[HOMA_PAGE_POOL_SIZE];
+};
+
+/**
  * struct homa - Overall information about the Homa protocol implementation.
  *
  * There will typically only exist one of these at a time, except during
@@ -1790,6 +1835,11 @@ struct homa {
 	 * @peertab: Info about all the other hosts we have communicated with.
 	 */
 	struct homa_peertab peers;
+
+        /**
+	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools.
+	 */
+	struct spinlock page_pool_mutex __attribute__((aligned(CACHE_LINE_SIZE)));
 
 	/**
 	 * @unsched_bytes: The number of bytes that may be sent in a
@@ -2228,18 +2278,19 @@ struct homa_metrics {
 	__u64 priority_packets[HOMA_MAX_PRIORITIES];
 
 	/**
-	 * @skb_allocs: total number of calls to homa_skb_new.
+	 * @skb_allocs: total number of calls to homa_skb_new_tx.
 	 */
 	__u64 skb_allocs;
 
 	/**
-	 * @skb_alloc_cycles: total time spent in homa_skb_new, as
+	 * @skb_alloc_cycles: total time spent in homa_skb_new_tx, as
 	 * measured with get_cycles().
 	 */
 	__u64 skb_alloc_cycles;
 
 	/**
-	 * @skb_frees: total number of calls to homa_skb_free.
+	 * @skb_frees: total number of sk_buffs for data packets that have
+	 * been freed (counts normal paths only).
 	 */
 	__u64 skb_frees;
 
@@ -2806,10 +2857,22 @@ struct homa_metrics {
 };
 
 /**
+ * struct homa_numa - Homa allocates one of these structures for each
+ * NUMA node, for information that needs to be kept separately for each
+ * NUMA node.
+ */
+struct homa_numa {
+	/** Used to speed up allocation of tx skbs for cores in this node. */
+	struct homa_page_pool page_pool;
+};
+
+/**
  * struct homa_core - Homa allocates one of these structures for each
  * core, to hold information that needs to be kept on a per-core basis.
  */
 struct homa_core {
+	/** Information about the NUMA node to which this node belongs. */
+	struct homa_numa *numa;
 
 	/**
 	 * @last_active: the last time (in get_cycle() units) that
@@ -2896,13 +2959,6 @@ struct homa_core {
 	struct page *skb_page;
 
 	/**
-	 * define HOMA_PAGE_ORDER: power-of-two exponent determining how
-	 * many pages to allocate in a high-order page for skb_page (e.g.,
-	 * 2 means allocate in units of 4 pages).
-	 */
-#define HOMA_SKB_PAGE_ORDER 4
-
-	/**
 	 * @page_inuse: offset of first byte in @skb_page that hasn't already
 	 * been allocated.
 	 */
@@ -2911,13 +2967,36 @@ struct homa_core {
 	/** @page_size: total number of bytes available in @skb_page. */
 	int page_size;
 
+	/**
+	 * define HOMA_MAX_STASHED: maximum number of stashed pages that
+	 * can be consumed by a message of a given size (assumes page_inuse
+	 * is 0). This is a rough guess, since it doesn't consider all of
+	 * the data_segments that will be needed for the packets.
+	 */
+#define HOMA_MAX_STASHED(size) (((size - 1) / HOMA_SKB_PAGE_SIZE) + 1)
+
+	/**
+	 * @num_stashed_pages: number of pages currently available in
+	 * stashed_pages.
+	 */
+	int num_stashed_pages;
+
+        /**
+	 * @stashed_pages: use to prefetch from the cache all of the pages a
+	 * message will need with a single operation, to avoid having to
+	 * synchronize separately for each page. Note: these pages are all
+	 * HOMA_SKB_PAGE_SIZE in length.
+	 */
+	struct page *stashed_pages[HOMA_MAX_STASHED(HOMA_MAX_MESSAGE_LENGTH)];
+
 	/** @metrics: performance statistics for this core. */
 	struct homa_metrics metrics;
 };
 
 /**
  * struct homa_skb_info - Additional information needed by Homa for each
- * DATA packet. Space is allocated for this at the very end of the skb.
+ * DATA packet. Space is allocated for this at the very end of the linear
+ * part of the skb.
  */
 struct homa_skb_info {
 	/**
@@ -3415,7 +3494,6 @@ extern struct homa_rpc
 extern struct homa_rpc
                *homa_find_server_rpc(struct homa_sock *hsk,
 		const struct in6_addr *saddr, __u16 sport, __u64 id);
-extern void     homa_free_skbs(struct sk_buff *skb);
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		    char *format);
 extern void     homa_freeze_peers(struct homa *homa);
@@ -3553,21 +3631,28 @@ extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
                     sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
-extern int      homa_skb_append_from_iter(struct sk_buff *skb,
-		    struct iov_iter *iter, int length);
-extern int      homa_skb_append_from_skb(struct sk_buff *dst_skb,
-		    struct sk_buff *src_skb, int offset, int length);
-extern int      homa_skb_append_to_frag(struct sk_buff *skb, void *buf,
-		    int length);
+extern int      homa_skb_append_from_iter(struct homa *homa,
+		    struct sk_buff *skb, struct iov_iter *iter, int length);
+extern int      homa_skb_append_from_skb(struct homa *homa,
+		    struct sk_buff *dst_skb, struct sk_buff *src_skb,
+		    int offset, int length);
+extern int      homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb,
+		    void *buf, int length);
+extern void     homa_skb_cache_pages(struct homa *homa, struct page **pages,
+		    int count);
 extern void     homa_skb_cleanup(struct homa *homa);
-extern void    *homa_skb_extend_frags(struct sk_buff *skb, int *length);
-extern void     homa_skb_free(struct sk_buff *skb);
-extern void     homa_skb_free_many(struct sk_buff **skbs, int count);
+extern void    *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb,
+		    int *length);
+extern void     homa_skb_free_tx(struct homa *homa, struct sk_buff *skb);
+extern void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
+		    int count);
 extern void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
 				int length);
-extern bool     homa_skb_page_alloc(struct homa_core *core);
 extern struct sk_buff
-	       *homa_skb_new(int length);
+	       *homa_skb_new_tx(int length);
+extern bool     homa_skb_page_alloc(struct homa *homa, struct homa_core *core);
+extern void     homa_skb_page_pool_init(struct homa_page_pool *pool);
+extern void     homa_skb_stash_pages(struct homa *homa, int length);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char *format, ...)
                     __attribute__((format(printf, 4, 5)));

@@ -159,7 +159,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	tt_record4("homa_add_packet discarding packet for id %d, "
 			"offset %d, length %d, retransmit %d",
 			rpc->id, start, length, h->retransmit);
-	homa_skb_free(skb);
+	kfree_skb(skb);
 	return;
 
 	keep:
@@ -188,6 +188,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 	int start_offset = 0;
 	int end_offset = 0;
 	int i;
+	__u64 start;
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
 	 * copying to user space, because (a) it's illegal to hold a spinlock
@@ -273,7 +274,11 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					start_offset, end_offset, rpc->id);
 			end_offset = 0;
 		}
-		homa_skb_free_many(skbs, n);
+		start = get_cycles();
+		for (i = 0; i < n; i++)
+			kfree_skb(skbs[i]);
+		INC_METRIC(skb_free_cycles, get_cycles() - start);
+		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
 				n, rpc->id);
 		n = 0;
@@ -373,7 +378,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 						h->common.type);
 		while (skb != NULL) {
 			next = skb->next;
-			homa_skb_free(skb);
+			kfree_skb(skb);
 			skb = next;
 		}
 		return;
@@ -507,7 +512,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 		continue;
 
 		discard:
-		homa_skb_free(skb);
+		kfree_skb(skb);
 	}
 	if (rpc != NULL)
 		homa_grant_check_rpc(rpc);
@@ -616,7 +621,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	return;
 
     discard:
-	homa_skb_free(skb);
+	kfree_skb(skb);
 	UNIT_LOG("; ", "homa_data_pkt discarded packet");
 }
 
@@ -649,7 +654,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		rpc->msgout.sched_priority = h->priority;
 		homa_xmit_data(rpc, false);
 	}
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**
@@ -724,7 +729,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 
     done:
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**
@@ -774,7 +779,7 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		INC_METRIC(server_rpcs_unknown, 1);
 	}
 done:
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**
@@ -797,7 +802,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
 		peer->cutoff_version = h->cutoff_version;
 	}
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**
@@ -852,7 +857,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			"other acks", id, tt_addr(saddr), ntohs(ack.num_acks));
 
     done:
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**
@@ -883,7 +888,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 			homa_local_id(h->common.sender_id),
 			tt_addr(saddr), count);
-	homa_skb_free(skb);
+	kfree_skb(skb);
 }
 
 /**

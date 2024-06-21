@@ -77,7 +77,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	int segs, bytes_left, err;
 
 	/* Initialize the overall skb. */
-	skb = homa_skb_new(sizeof32(struct data_header)
+	skb = homa_skb_new_tx(sizeof32(struct data_header)
 			- sizeof32(struct data_segment));
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
@@ -118,10 +118,12 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 		seg.segment_length = htonl(seg_size);
 		seg.ack.client_id = 0;
 		homa_peer_get_acks(rpc->peer, 1, &seg.ack);
-		err = homa_skb_append_to_frag(skb, &seg, sizeof(seg));
+		err = homa_skb_append_to_frag(rpc->hsk->homa, skb, &seg,
+				sizeof(seg));
 		if (err != 0)
 			goto error;
-		err = homa_skb_append_from_iter(skb, iter, seg_size);
+		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
+				seg_size);
 		if (err != 0)
 			goto error;
 		bytes_left -= seg_size;
@@ -149,7 +151,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	return skb;
 
 	error:
-	homa_skb_free(skb);
+	homa_skb_free_tx(rpc->hsk->homa, skb);
 	return ERR_PTR(err);
 }
 
@@ -260,7 +262,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		if (rpc->state == RPC_DEAD) {
 			/* RPC was freed while we were copying. */
 			err = -EINVAL;
-			homa_skb_free(skb);
+			homa_skb_free_tx(rpc->hsk->homa, skb);
 			goto error;
 		}
 		*last_link = skb;
@@ -338,7 +340,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
          * packets (better reuse of sk_buffs?).
 	 */
 	dst = homa_get_dst(peer, hsk);
-	skb = homa_skb_new(HOMA_MAX_HEADER);
+	skb = homa_skb_new_tx(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
 	dst_hold(dst);
@@ -369,7 +371,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		/* It appears that ip*_xmit frees skbuffs after
 		 * errors; the following code is to raise an alert if
 		 * this isn't actually the case. The extra skb_get above
-		 * and homa_skb_free call below are needed to do the check
+		 * and kfree_skb call below are needed to do the check
 		 * accurately (otherwise the buffer could be freed and
 		 * its memory used for some other purpose, resulting in
 		 * a bogus "reference count").
@@ -395,7 +397,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
-	homa_skb_free(skb);
+	kfree_skb(skb);
 	return result;
 }
 
@@ -605,7 +607,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				continue;
 
 			/* This segment must be retransmitted. */
-			new_skb = homa_skb_new(sizeof(struct data_header)
+			new_skb = homa_skb_new_tx(sizeof(struct data_header)
 					- sizeof(struct data_segment));
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
@@ -625,8 +627,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				h->incoming = htonl(rpc->msgout.length);
 			else
 				h->incoming = htonl(offset + length);
-			err = homa_skb_append_from_skb(new_skb, skb, seg_offset,
-					sizeof32(seg) + length);
+			err = homa_skb_append_from_skb(rpc->hsk->homa, new_skb,
+					skb, seg_offset, sizeof32(seg) + length);
 			if (err != 0) {
 				printk(KERN_ERR "homa_resend_data got error %d "
 						"from homa_skb_append_from_skb\n",
@@ -638,7 +640,9 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			}
 
 			new_homa_info = homa_get_skb_info(new_skb);
-			new_homa_info->wire_bytes = rpc->hsk->ip_header_length + sizeof(struct data_header) + length + HOMA_ETH_OVERHEAD;
+			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
+					+ sizeof(struct data_header) + length
+					+ HOMA_ETH_OVERHEAD;
 			new_homa_info->data_bytes = length;
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",

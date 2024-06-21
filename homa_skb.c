@@ -14,14 +14,24 @@ extern int mock_max_skb_frags;
 #endif
 
 /**
+ * homa_skb_page_pool_init() - Invoked when a struct homa is created to
+ * initialize a page pool.
+ * @homa:         Overall data about the Homa protocol implementation.
+ */
+void homa_skb_page_pool_init(struct homa_page_pool *pool)
+{
+	pool->avail = 0;
+	memset(pool->pages, 0, sizeof(pool->pages));
+}
+
+/**
  * homa_skb_cleanup() - Invoked when a struct homa is deleted; cleans
  * up information related to skb allocation.
  */
 void homa_skb_cleanup(struct homa *homa)
 {
-	int i;
-	for (i = 0; i < nr_cpu_ids; i++)
-	{
+	int i, j;
+	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_core *core = homa_cores[i];
 		if (core->skb_page != NULL) {
 			put_page(core->skb_page);
@@ -29,11 +39,23 @@ void homa_skb_cleanup(struct homa *homa)
 			core->page_size = 0;
 			core->page_inuse = 0;
 		}
+		for (j = 0; j < core->num_stashed_pages; j++)
+			put_page(core->stashed_pages[j]);
+		core->num_stashed_pages = 0;
+	}
+
+	for (i = 0; i < MAX_NUMNODES; i++) {
+		struct homa_numa *numa = homa_numas[i];
+		if (!numa)
+			continue;
+		for (j = numa->page_pool.avail - 1; j >= 0; j--)
+			put_page(numa->page_pool.pages[j]);
+		numa->page_pool.avail = 0;
 	}
 }
 
 /**
- * homa_skb_new() - Allocate a new sk_buff.
+ * homa_skb_new_tx() - Allocate a new sk_buff for outgoing data.
  * @length:       Number of bytes of data that the caller would like to
  *                have available in the linear part of the sk_buff for
  *                the Homa header and additional data beyond that. This
@@ -44,7 +66,7 @@ void homa_skb_cleanup(struct homa *homa)
  *                skb_put will be for the transport (Homa) header. The
  *                homa_skb_info is not initialized.
  */
-struct sk_buff *homa_skb_new(int length)
+struct sk_buff *homa_skb_new_tx(int length)
 {
 	struct sk_buff *skb;
 	__u64 start = get_cycles();
@@ -65,16 +87,45 @@ struct sk_buff *homa_skb_new(int length)
 }
 
 /**
+ * homa_skb_stash_pages() - Typically invoked at the beginning of
+ * preparing an output message; will collect from the page cache enough
+ * pages to meet the needs of the message and stash them locally for this
+ * core, so that the global lock for the page cache only needs to be acquired
+ * once.
+ * @homa:      Overall data about the Homa protocol implementation.
+ * @length:    Length of the message being prepared. Must be <=
+ *             HOMA_MAX_MESSAGE_LENGTH.
+ */
+void homa_skb_stash_pages(struct homa *homa, int length)
+{
+	struct homa_core *core = homa_cores[raw_smp_processor_id()];
+	struct homa_page_pool *pool = &core->numa->page_pool;
+	int pages_needed = HOMA_MAX_STASHED(length);
+
+	if ((pages_needed < 2) || (core->num_stashed_pages >= pages_needed))
+		return;
+	spin_lock_bh(&homa->page_pool_mutex);
+	while (pool->avail && (core->num_stashed_pages < pages_needed)) {
+		pool->avail--;
+		core->stashed_pages[core->num_stashed_pages] =
+				pool->pages[pool->avail];
+		core->num_stashed_pages++;
+	}
+	spin_unlock_bh(&homa->page_pool_mutex);
+}
+
+/**
  * homa_skb_extend_frags() - Allocate additional space in the frags part
  * of an skb (ideally by just expanding the last fragment). Returns
  * one contiguous chunk, whose size is <= @length.
+ * @homa:     Overall data about the Homa protocol implementation.
  * @skb:      Skbuff for which additional space is needed.
  * @length:   The preferred number of bytes to append; modified to hold
  *            the actual number allocated, which may be less.
  * Return:    Pointer to the new space, or NULL if space couldn't be
  *            allocated.
  */
-void *homa_skb_extend_frags(struct sk_buff *skb, int *length)
+void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 {
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
@@ -100,7 +151,7 @@ void *homa_skb_extend_frags(struct sk_buff *skb, int *length)
 	/* Need to add a new fragment to the skb. */
 	core->page_inuse = ALIGN(core->page_inuse, SMP_CACHE_BYTES);
 	if (core->page_inuse >= core->page_size) {
-		if (!homa_skb_page_alloc(core))
+		if (!homa_skb_page_alloc(homa, core))
 			return NULL;
 	}
 	if ((core->page_size - core->page_inuse) < actual_size)
@@ -121,34 +172,68 @@ void *homa_skb_extend_frags(struct sk_buff *skb, int *length)
 /**
  * homa_skb_page_alloc() - Allocate a new page for skb allocation for a
  * given core. Any existing page is released.
+ * @homa:         Overall data about the Homa protocol implementation.
  * @core:         Allocate page in this core.
  * @Return:       True if successful, false if memory not available.
  */
-bool homa_skb_page_alloc(struct homa_core * core)
+bool homa_skb_page_alloc(struct homa *homa, struct homa_core * core)
 {
-	__u64 start = get_cycles();
-	INC_METRIC(skb_page_allocs, 1);
-	if (core->skb_page)
+	struct homa_page_pool *pool;
+	    __u64 start;
+	if (core->skb_page) {
+		if (page_ref_count(core->skb_page) == 1) {
+			/* The existing page is no longer in use, so we can
+			 * reuse it.
+			 */
+			core->page_inuse = 0;
+			goto success;
+		}
 		put_page(core->skb_page);
-	core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
-			| __GFP_NOWARN | __GFP_NORETRY, HOMA_SKB_PAGE_ORDER);
-	if (likely(core->skb_page))
-	{
-		core->page_inuse = 0;
-		core->page_size = PAGE_SIZE << HOMA_SKB_PAGE_ORDER;
+	}
+
+	/* Step 1: does this core have a stashed page? */
+	core->page_size = HOMA_SKB_PAGE_SIZE;
+	core->page_inuse = 0;
+	if (core->num_stashed_pages > 0) {
+		core->num_stashed_pages--;
+		core->skb_page = core->stashed_pages[core->num_stashed_pages];
 		goto success;
 	}
+
+	/* Step 2: can we retreive a page from the pool for this NUMA node? */
+	pool = &core->numa->page_pool;
+	if (pool->avail) {
+		struct homa_page_pool *pool = &core->numa->page_pool;
+		spin_lock_bh(&homa->page_pool_mutex);
+		if (pool->avail) {
+			pool->avail--;
+			core->skb_page = pool->pages[pool->avail];
+		}
+		spin_unlock_bh(&homa->page_pool_mutex);
+		goto success;
+	}
+
+	/* Step 3: can we allocate a new big page? */
+	INC_METRIC(skb_page_allocs, 1);
+	start = get_cycles();
+	core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
+			| __GFP_NOWARN | __GFP_NORETRY, HOMA_SKB_PAGE_ORDER);
+	if (likely(core->skb_page)) {
+		INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
+		goto success;
+	}
+
+	/* Step 4: can we allocate a normal page? */
 	core->skb_page = alloc_page(GFP_KERNEL);
-	if (likely(core->skb_page))
-	{
-		core->page_inuse = 0;
+	INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
+	if (likely(core->skb_page)) {
 		core->page_size = PAGE_SIZE;
 		goto success;
 	}
+	core->page_size = core->page_inuse = 0;
 	return false;
 
 	success:
-	INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
 	return true;
 }
 
@@ -156,12 +241,14 @@ bool homa_skb_page_alloc(struct homa_core * core)
  * homa_skb_append_to_frag() - Append a block of data to an sk_buff
  * by allocating new space at the end of the frags area and copying the
  * data into that new space.
+ * @homa:     Overall data about the Homa protocol implementation.
  * @skb:      Append to this sk_buff.
  * @buf:      Address of first byte of data to be appended.
  * @length:   Number of byte to append.
  * Return: 0 or a negative errno.
  */
-int homa_skb_append_to_frag(struct sk_buff *skb, void *buf, int length)
+int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb, void *buf,
+		int length)
 {
 	int chunk_length;
 	char *src = (char *) buf;
@@ -169,7 +256,7 @@ int homa_skb_append_to_frag(struct sk_buff *skb, void *buf, int length)
 
 	while (length > 0) {
 		chunk_length = length;
-		dst = (char *) homa_skb_extend_frags(skb, &chunk_length);
+		dst = (char *) homa_skb_extend_frags(homa, skb, &chunk_length);
 		if (!dst)
 			return -ENOMEM;
 		memcpy(dst, src, chunk_length);
@@ -182,14 +269,15 @@ int homa_skb_append_to_frag(struct sk_buff *skb, void *buf, int length)
 /**
  * homa_skb_append_from_iter() - Append data to an sk_buff by allocating
  * new space at the end of the frags area and copying data into that space
+ * @homa:     Overall data about the Homa protocol implementation.
  * @skb:      Append to this sk_buff.
  * @iter:     Describes location of data to append; modified to reflect
  *            copies data.
  * @length:   Number of byte to append; iter must have at least this many bytes.
  * Return: 0 or a negative errno.
  */
-int homa_skb_append_from_iter(struct sk_buff *skb, struct iov_iter *iter,
-		int length)
+int homa_skb_append_from_iter(struct homa *homa, struct sk_buff *skb,
+		struct iov_iter *iter, int length)
 {
 	int chunk_length;
 	char *dst;
@@ -197,7 +285,7 @@ int homa_skb_append_from_iter(struct sk_buff *skb, struct iov_iter *iter,
 	while (length > 0)
 	{
 		chunk_length = length;
-		dst = (char *)homa_skb_extend_frags(skb, &chunk_length);
+		dst = (char *) homa_skb_extend_frags(homa, skb, &chunk_length);
 		if (!dst)
 			return -ENOMEM;
 		if (copy_from_iter(dst, chunk_length, iter) != chunk_length)
@@ -211,6 +299,7 @@ int homa_skb_append_from_iter(struct sk_buff *skb, struct iov_iter *iter,
  * homa_skb_append_from_skb() - Copy data from one skb to another. The
  * data is appended into new frags at the destination. The copies are done
  * virtually when possible.
+ * @homa:        Overall data about the Homa protocol implementation.
  * @dst_skb:     Data gets added to the end of this skb.
  * @src_skb:     Data is copied out of this skb.
  * @offset:      Offset within @src_skb of first byte to copy.
@@ -219,8 +308,8 @@ int homa_skb_append_from_iter(struct sk_buff *skb, struct iov_iter *iter,
  *               desired bytes.
  * Return:       0 for success or a negative errno if an error occurred.
  */
-int homa_skb_append_from_skb(struct sk_buff *dst_skb, struct sk_buff *src_skb,
-		int offset, int length)
+int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
+		struct sk_buff *src_skb, int offset, int length)
 {
 	struct skb_shared_info *src_shinfo = skb_shinfo(src_skb);
 	struct skb_shared_info *dst_shinfo = skb_shinfo(dst_skb);
@@ -234,8 +323,8 @@ int homa_skb_append_from_skb(struct sk_buff *dst_skb, struct sk_buff *src_skb,
 		chunk_size = length;
 		if (chunk_size > (head_len - offset))
 			chunk_size = head_len - offset;
-		err = homa_skb_append_to_frag(dst_skb, src_skb->data + offset,
-				chunk_size);
+		err = homa_skb_append_to_frag(homa, dst_skb,
+				src_skb->data + offset, chunk_size);
 		if (err)
 			return err;
 		offset += chunk_size;
@@ -270,31 +359,90 @@ int homa_skb_append_from_skb(struct sk_buff *dst_skb, struct sk_buff *src_skb,
 }
 
 /**
- * homa_skb_free() - Release the storage for an sk_buff.
- * @skb:       sk_buff to free.
+ * homa_skb_free_tx() - Release the storage for an sk_buff.
+ * @homa:      Overall data about the Homa protocol implementation.
+ * @skb:       sk_buff to free; should have been allocated by
+ *             homa_skb_new_tx.
  */
-void homa_skb_free(struct sk_buff *skb)
+void homa_skb_free_tx(struct homa *homa, struct sk_buff *skb)
 {
+	homa_skb_free_many_tx(homa, &skb, 1);
+}
+
+/**
+ * homa_skb_free_many_tx() - Release the storage for multiple sk_buffs.
+ * @homa:      Overall data about the Homa protocol implementation.
+ * @skbs:      Pointer to first entry in array of sk_buffs to free.  All of
+ *             these should have been allocated by homa_skb_new_tx.
+ * @count:     Total number of sk_buffs to free.
+ */
+void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
+{
+#ifdef __UNIT_TEST__
+#define MAX_PAGES_AT_ONCE 3
+#else
+#define MAX_PAGES_AT_ONCE 50
+#endif
+	struct page *pages_to_cache[MAX_PAGES_AT_ONCE];
+	int num_pages = 0;
 	__u64 start = get_cycles();
-	kfree_skb(skb);
-	INC_METRIC(skb_frees, 1);
+	int i, j;
+
+	for (i = 0; i < count; i++) {
+		struct sk_buff *skb = skbs[i];
+		struct skb_shared_info *shinfo = skb_shinfo(skb);
+
+		/* Reclaim cacheable pages. */
+		for (j = 0; j < shinfo->nr_frags; j++) {
+			struct page *page = skb_frag_page(&shinfo->frags[j]);
+			if ((compound_order(page) == HOMA_SKB_PAGE_ORDER)
+					&& (page_ref_count(page) == 1)) {
+				pages_to_cache[num_pages] = page;
+				num_pages++;
+				if (num_pages == MAX_PAGES_AT_ONCE) {
+					homa_skb_cache_pages(homa, pages_to_cache,
+							num_pages);
+					num_pages = 0;
+				}
+			} else
+				put_page(page);
+		}
+		shinfo->nr_frags = 0;
+		kfree_skb(skb);
+	}
+	if (num_pages > 0)
+		homa_skb_cache_pages(homa, pages_to_cache, num_pages);
+	INC_METRIC(skb_frees, count);
 	INC_METRIC(skb_free_cycles, get_cycles() - start);
 }
 
 /**
- * homa_skb_free_many() - Release the storage for multiple sk_buffs.
- * @skbs:      Pointer to first entry in array of sk_buffs to free.
- * @count:     Total number of sk_buffs to free.
+ * homa_skb_cache_pages() - Return pages to the global Homa cache of
+ * pages for sk_buffs.
+ * @homa:        Overall data about the Homa protocol implementation.
+ * @pages:       Array of pages to cache.
+ * @count:       Number of pages in @count.
  */
-void homa_skb_free_many(struct sk_buff **skbs, int count)
+void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
 {
-	__u64 start = get_cycles();
+#ifdef __UNIT_TEST__
+#define LIMIT 4
+#else
+#define LIMIT HOMA_PAGE_POOL_SIZE
+#endif
 	int i;
-
-	for (i = 0; i < count; i++)
-		kfree_skb(skbs[i]);
-	INC_METRIC(skb_frees, count);
-	INC_METRIC(skb_free_cycles, get_cycles() - start);
+	spin_lock_bh(&homa->page_pool_mutex);
+	for (i = 0; i < count; i++) {
+		struct page *page = pages[i];
+		struct homa_page_pool *pool =
+				&homa_numas[page_to_nid(page)]->page_pool;
+		if (pool->avail < LIMIT) {
+			pool->pages[pool->avail] = page;
+			pool->avail++;
+		} else
+			put_page(pages[i]);
+	}
+	spin_unlock_bh(&homa->page_pool_mutex);
 }
 
 /**

@@ -11,6 +11,9 @@
  */
 struct homa_core *homa_cores[NR_CPUS];
 
+/* Information specific to individual NUMA nodes. */
+struct homa_numa *homa_numas[MAX_NUMNODES];
+
 /* Points to block of memory holding all homa_cores; used to free it. */
 char *core_memory;
 
@@ -28,9 +31,24 @@ int homa_init(struct homa *homa)
 {
 	size_t aligned_size;
 	char *first;
-	int i, err;
+	int i, err, num_numas;
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
-			"homa_init assumes at least 8 priority levels");
+		       "homa_init assumes at least 8 priority levels");
+
+	/* Initialize data specific to NUMA nodes. */
+	memset(homa_numas, 0, sizeof(homa_numas));
+	num_numas = 0;
+	for (i = 0; i < nr_cpu_ids; i++) {
+		struct homa_numa *numa;
+		int n = cpu_to_node(i);
+		if (homa_numas[n])
+			continue;
+		numa = kmalloc(sizeof(struct homa_numa), GFP_KERNEL);
+		homa_numas[n] = numa;
+		homa_skb_page_pool_init(&numa->page_pool);
+		num_numas++;
+	}
+	printk(KERN_NOTICE "Homa initialized %d homa_numas\n", num_numas);
 
 	/* Initialize core-specific info (if no-one else has already done it),
 	 * making sure that each core has private cache lines.
@@ -50,6 +68,7 @@ int homa_init(struct homa *homa)
 
 			core = (struct homa_core *) (first + i*aligned_size);
 			homa_cores[i] = core;
+			core->numa = homa_numas[cpu_to_node(i)];
 			core->last_active = 0;
 			core->last_gro = 0;
 			atomic_set(&core->softirq_backlog, 0);
@@ -64,6 +83,7 @@ int homa_init(struct homa *homa)
 			core->skb_page = NULL;
 			core->page_inuse = 0;
 			core->page_size = 0;
+			core->num_stashed_pages = 0;
 			memset(&core->metrics, 0, sizeof(core->metrics));
 		}
 	}
@@ -105,6 +125,7 @@ int homa_init(struct homa *homa)
 			-err);
 		return err;
 	}
+	spin_lock_init(&homa->page_pool_mutex);
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;
@@ -190,6 +211,14 @@ void homa_destroy(struct homa *homa)
 	homa_socktab_destroy(&homa->port_map);
 	homa_peertab_destroy(&homa->peers);
 	homa_skb_cleanup(homa);
+
+	for (i = 0; i < MAX_NUMNODES; i++) {
+		struct homa_numa *numa = homa_numas[i];
+		if (numa != NULL) {
+			kfree(numa);
+			homa_numas[i] = NULL;
+		}
+	}
 	if (core_memory) {
 		vfree(core_memory);
 		core_memory = NULL;
@@ -559,6 +588,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
 	int i, batch_size;
+	int rx_frees = 0;
 	int result;
 
 	INC_METRIC(reaper_calls, 1);
@@ -596,6 +626,10 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 				continue;
 			}
 			rpc->magic = 0;
+
+			/* For Tx sk_buffs, collect them here but defer
+			 * freeing until after releasing the socket lock.
+			 */
 			if (rpc->msgout.length >= 0) {
 				while (rpc->msgout.packets) {
 					skbs[num_skbs] = rpc->msgout.packets;
@@ -608,17 +642,20 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 						goto release;
 				}
 			}
-			i = 0;
+
+			/* In the normal case rx sk_buffs will already have been
+			 * freed before we got here. Thus it's OK to free
+			 * immediately in rare situations where there are
+			 * buffers left.
+			 */
 			if (rpc->msgin.length >= 0) {
 				while (1) {
 					struct sk_buff *skb;
 					skb = skb_dequeue(&rpc->msgin.packets);
 					if (!skb)
 						break;
-					skbs[num_skbs] = skb;
-					num_skbs++;
-					if (num_skbs >= batch_size)
-						goto release;
+					kfree_skb(skb);
+					rx_frees++;
 				}
 			}
 
@@ -636,11 +673,11 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		 * lock while doing this.
 		 */
 	release:
-		hsk->dead_skbs -= num_skbs;
+		hsk->dead_skbs -= num_skbs + rx_frees;
 		result = !list_empty(&hsk->dead_rpcs)
 				&& ((num_skbs + num_rpcs) != 0);
 		homa_sock_unlock(hsk);
-		homa_skb_free_many(skbs, num_skbs);
+		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
 			rpc = rpcs[i];
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
@@ -677,7 +714,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			kfree(rpc);
 		}
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
-				num_skbs, num_rpcs, hsk->dead_skbs, hsk->port);
+				num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
+				hsk->port);
 		if (!result)
 			break;
 	}
@@ -1547,11 +1585,11 @@ char *homa_print_metrics(struct homa *homa)
 				m->skb_alloc_cycles);
 		homa_append_metric(homa,
 				"skb_frees                 %15llu  "
-				"sk_buffs freed\n",
+				"Data sk_buffs freed in normal paths\n",
 				m->skb_frees);
 		homa_append_metric(homa,
 				"skb_free_cycles           %15llu  "
-				"Time spent freeing sk_buffs\n",
+				"Time spent freeing data sk_buffs\n",
 				m->skb_free_cycles);
 		homa_append_metric(homa,
 				"skb_page_allocs           %15llu  "
@@ -2014,19 +2052,6 @@ void homa_spin(int ns)
 	end = get_cycles() + (ns*cpu_khz)/1000000;
 	while (get_cycles() < end) {
 		/* Empty loop body.*/
-	}
-}
-
-/**
- * homa_free_skbs() - Free all of the skbs in a list.
- * @head:    First in a list of socket buffers linked through homa_next_skb.
- */
-void homa_free_skbs(struct sk_buff *head)
-{
-	while (head) {
-		struct sk_buff *next = homa_get_skb_info(head)->next_skb;
-		homa_skb_free(head);
-		head = next;
 	}
 }
 

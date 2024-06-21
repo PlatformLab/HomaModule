@@ -654,7 +654,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
 	sockaddr_in_union *addr_in = (sockaddr_in_union *) addr;
-	int port;
+	int port = 0;
 
 	if (unlikely(addr->sa_family != sock->sk->sk_family)) {
 		return -EAFNOSUPPORT;
@@ -1345,7 +1345,7 @@ int homa_softirq(struct sk_buff *skb) {
 
 		discard:
 		*prev_link = skb->next;
-		homa_skb_free(skb);
+		kfree_skb(skb);
 	}
 
 	/* Now process the longer packets. Each iteration of this loop
@@ -1408,7 +1408,7 @@ int homa_softirq(struct sk_buff *skb) {
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	printk(KERN_WARNING "unimplemented backlog_rcv invoked on Homa socket\n");
-	homa_skb_free(skb);
+	kfree_skb(skb);
 	return 0;
 }
 

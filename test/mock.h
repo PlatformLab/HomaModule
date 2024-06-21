@@ -7,8 +7,9 @@
 extern int         cpu_number;
 extern int         mock_alloc_page_errors;
 extern int         mock_alloc_skb_errors;
-extern             int mock_bpage_size;
-extern             int mock_bpage_shift;
+extern int         mock_bpage_size;
+extern int         mock_bpage_shift;
+extern int         mock_compound_order_mask;
 extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
@@ -28,6 +29,8 @@ extern int         mock_max_skb_frags;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
+extern int         mock_numa_mask;
+extern int         mock_page_nid_mask;
 extern int         mock_route_errors;
 extern int         mock_spin_lock_held;
 extern struct task_struct
@@ -44,6 +47,7 @@ extern cycles_t    mock_get_cycles(void);
 extern unsigned int
 		   mock_get_mtu(const struct dst_entry *dst);
 extern void        mock_get_page(struct page *page);
+extern int         mock_page_refs(struct page *page);
 extern int         mock_page_refs(struct page *page);
 extern void        mock_put_page(struct page *page);
 extern void        mock_rcu_read_lock(void);

@@ -502,7 +502,7 @@ TEST_F(homa_utils, homa_rpc_reap__basics)
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 	unit_log_clear();
 	EXPECT_STREQ("1236 1238", dead_rpcs(&self->hsk));
-	EXPECT_EQ(4, self->hsk.dead_skbs);
+	EXPECT_EQ(2, self->hsk.dead_skbs);
 }
 TEST_F(homa_utils, homa_rpc_reap__protected)
 {
@@ -584,18 +584,18 @@ TEST_F(homa_utils, homa_rpc_reap__grant_in_progress)
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, 3));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 }
-TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgin_packets)
+TEST_F(homa_utils, homa_rpc_reap__hit_limit_in_msgout_packets)
 {
-	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 10000, 100);
-	ASSERT_NE(NULL, srpc1);
-	homa_rpc_free(srpc1);
-	EXPECT_EQ(8, self->hsk.dead_skbs);
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 10000, 100);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_free(crpc);
+	EXPECT_EQ(9, self->hsk.dead_skbs);
 	unit_log_clear();
 	homa_rpc_reap(&self->hsk, 5);
-	EXPECT_STREQ("1235", dead_rpcs(&self->hsk));
-	EXPECT_EQ(3, self->hsk.dead_skbs);
+	EXPECT_STREQ("1234", dead_rpcs(&self->hsk));
+	EXPECT_EQ(4, self->hsk.dead_skbs);
 }
 TEST_F(homa_utils, homa_rpc_reap__release_buffers)
 {

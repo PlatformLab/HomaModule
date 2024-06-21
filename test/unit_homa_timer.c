@@ -216,7 +216,7 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 {
 	struct homa_rpc *dead = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 20000, 20000);
+			self->server_port, self->client_id, 40000, 1000);
 	ASSERT_NE(NULL, dead);
 	homa_rpc_free(dead);
 	EXPECT_EQ(31, self->hsk.dead_skbs);

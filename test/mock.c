@@ -153,6 +153,19 @@ int mock_mtu = 0;
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
 int mock_max_skb_frags = MAX_SKB_FRAGS;
 
+/* Each bit gives the NUMA node (0 or 1) for a particular core.*/
+int mock_numa_mask = 5;
+
+/* Bits determine the result of successive calls to compound order, starting
+ * at the lowest bit. 0 means return HOMA_SKB_PAGE_ORDER, 1 means return 0.
+ */
+int mock_compound_order_mask = 0;
+
+/* Bits specify the NUMA node number that will be returned by the next
+ * calls to mock_page_to_nid, starting with the low-order bit.
+ */
+int mock_page_nid_mask = 0;
+
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
@@ -1153,6 +1166,31 @@ void mock_clear_xmit_prios()
 }
 
 /**
+ * mock_compound_order() - Replacement for compound_order function.
+ */
+unsigned int mock_compound_order(struct page *page)
+{
+	unsigned int result;
+	if (mock_compound_order_mask & 1)
+		result = 0;
+	else
+		result = HOMA_SKB_PAGE_ORDER;
+	mock_compound_order_mask >>= 1;
+	return result;
+}
+
+/**
+ * mock_cpu_to_node() - Replaces cpu_to_node to determine NUMA node for
+ * a CPU.
+ */
+int mock_cpu_to_node(int core)
+{
+	if (mock_numa_mask & (1<<core))
+		return 1;
+	return 0;
+}
+
+/**
  * mock_data_ready() - Invoked through sk->sk_data_ready; logs a message
  * to indicate that it was invoked.
  * @sk:    Associated socket; not used here.
@@ -1202,6 +1240,20 @@ void mock_get_page(struct page *page)
 int mock_page_refs(struct page *page)
 {
 	return (int64_t) unit_hash_get(pages_in_use, page);
+}
+
+/**
+ * mock_page_to_nid() - Replacement for page_to_nid function.
+ */
+int mock_page_to_nid(struct page *page)
+{
+	int result;
+	if (mock_page_nid_mask & 1)
+		result = 1;
+	else
+		result = 0;
+	mock_page_nid_mask >>= 1;
+	return result;
 }
 
 void mock_put_page(struct page *page)
@@ -1416,6 +1468,9 @@ void mock_teardown(void)
 	mock_xmit_log_homa_info = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = MAX_SKB_FRAGS;
+	mock_numa_mask = 5;
+	mock_compound_order_mask = 0;
+	mock_page_nid_mask = 0;
 	mock_net_device.gso_max_size = 0;
 
 	int count = unit_hash_size(skbs_in_use);
