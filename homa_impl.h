@@ -3568,8 +3568,6 @@ extern struct homa_gap
 	       *homa_gap_new(struct list_head *next, int start, int end);
 extern void     homa_gap_retry(struct homa_rpc *rpc);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
-extern void     homa_get_resend_range(struct homa_message_in *msgin,
-                    struct resend_header *resend);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
                     char __user *optval, int __user *option);
 extern void     homa_grant_add_rpc(struct homa_rpc *rpc);

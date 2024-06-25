@@ -336,44 +336,6 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 }
 
 /**
- * homa_get_resend_range() - Find the first range of data in a message
- * that has been granted but not yet received.
- * @msgin:     Message to examine.
- * @resend:    The @offset and @length fields of this structure will be
- *             filled in with information about the first missing range
- *             in @msgin. If there is no missing data to resend (i.e. all
- *             granted data has been received), the @length field will be zero.
- */
-void homa_get_resend_range(struct homa_message_in *msgin,
-		struct resend_header *resend)
-{
-
-	if (msgin->length < 0) {
-		/* Haven't received any data for this message; request
-		 * retransmission of just the first packet (the sender
-		 * will send at least one full packet, regardless of
-		 * the length below).
-		 */
-		resend->offset = htonl(0);
-		resend->length = htonl(100);
-		return;
-	}
-
-	if (!list_empty(&msgin->gaps)) {
-		struct homa_gap *gap = list_first_entry(&msgin->gaps,
-				struct homa_gap, links);
-		resend->offset = htonl(gap->start);
-		resend->length = htonl(gap->end - gap->start);
-	} else {
-		resend->offset = htonl(msgin->recv_end);
-		if (msgin->granted >= msgin->recv_end)
-			resend->length = htonl(msgin->granted - msgin->recv_end);
-		else
-			resend->length = htonl(0);
-	}
-}
-
-/**
  * homa_dispatch_pkts() - Top-level function that processes a batch of packets,
  * all related to the same RPC.
  * @skb:       First packet in the batch, linked through skb->next.
@@ -731,23 +693,12 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			h->priority);
 
 	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
-		/* We are the server for this RPC. If we haven't received
-		 * all of the bytes we've granted then request a resend
-		 * of the missing bytes; otherwise just send a BUSY.
+		/* We are the server for this RPC and don't yet have a
+		 * response packet, so just send BUSY.
 		 */
-		homa_get_resend_range(&rpc->msgin, h);
-		if (ntohl(h->length) > 0) {
-			tt_record4("sending RESEND from resend RPC id %llu, "
-					"client 0x%x:%d offset %d",
-					rpc->id, tt_addr(rpc->peer->addr),
-					rpc->dport, ntohl(h->offset));
-			h->priority = rpc->hsk->homa->num_priorities -1;
-			homa_xmit_control(RESEND, h, sizeof(*h), rpc);
-		} else {
-			tt_record2("sending BUSY from resend, id %d, state %d",
-					rpc->id, rpc->state);
-			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-		}
+		tt_record2("sending BUSY from resend, id %d, state %d",
+				rpc->id, rpc->state);
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 		goto done;
 	}
 	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {

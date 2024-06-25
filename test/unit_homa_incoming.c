@@ -791,61 +791,6 @@ TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
 	tt_destroy();
 }
 
-TEST_F(homa_incoming, homa_get_resend_range__uninitialized_rpc)
-{
-	struct homa_message_in msgin;
-	struct resend_header resend;
-
-	msgin.length = -1;
-	homa_get_resend_range(&msgin, &resend);
-	EXPECT_EQ(0, ntohl(resend.offset));
-	EXPECT_EQ(100, ntohl(resend.length));
-}
-TEST_F(homa_incoming, homa_get_resend_range__first_gap)
-{
-	struct resend_header resend;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, 99, 1000, 1000);
-	homa_message_in_init(crpc, 10000, 0);
-	unit_log_clear();
-	self->data.seg.offset = htonl(0);
-	homa_add_packet(crpc, mock_skb_new(self->client_ip,
-			&self->data.common, 1400, 0));
-
-	self->data.seg.offset = htonl(4200);
-	homa_add_packet(crpc, mock_skb_new(self->client_ip,
-			&self->data.common, 1400, 4200));
-	EXPECT_STREQ("start 1400, end 4200", unit_print_gaps(crpc));
-
-	homa_get_resend_range(&crpc->msgin, &resend);
-	EXPECT_EQ(1400, ntohl(resend.offset));
-	EXPECT_EQ(2800, ntohl(resend.length));
-}
-TEST_F(homa_incoming, homa_get_resend_range__no_gaps)
-{
-	struct resend_header resend;
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, 99, 1000, 1000);
-	homa_message_in_init(crpc, 10000, 0);
-	unit_log_clear();
-	self->data.seg.offset = htonl(0);
-	homa_add_packet(crpc, mock_skb_new(self->client_ip,
-			&self->data.common, 1400, 0));
-
-	crpc->msgin.granted = 60000;
-	homa_get_resend_range(&crpc->msgin, &resend);
-	EXPECT_EQ(1400, ntohl(resend.offset));
-	EXPECT_EQ(58600, ntohl(resend.length));
-
-	/* Second call: bytes received past granted. */
-	crpc->msgin.granted = 1000;
-	homa_get_resend_range(&crpc->msgin, &resend);
-	EXPECT_EQ(1400, ntohl(resend.offset));
-	EXPECT_EQ(0, ntohl(resend.length));
-}
-
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv4)
 {
 	struct sk_buff *skb;
@@ -1476,26 +1421,6 @@ TEST_F(homa_incoming, homa_resend_pkt__rpc_incoming_server_sends_busy)
 			&self->homa);
 	// The server might send a GRANT right after BUSY so just check substr
 	EXPECT_SUBSTR("xmit BUSY", unit_log_get());
-}
-TEST_F(homa_incoming, homa_resend_pkt__server_sends_resend)
-{
-	struct resend_header h = {{.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
-			.sender_id = cpu_to_be64(self->client_id),
-			.type = RESEND},
-		        .offset = htonl(1400),
-			.length = htonl(200),
-			.priority = 3};
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 2000, 20000);
-	ASSERT_NE(NULL, srpc);
-	unit_log_clear();
-
-	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
-			&self->homa);
-	// Doesn't really matter what range is requested
-	EXPECT_STREQ("xmit RESEND 1400-1999@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 {
