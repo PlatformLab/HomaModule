@@ -327,6 +327,9 @@ const char *unit_print_gaps(struct homa_rpc *rpc)
 					"; ");
 		used += snprintf(buffer + used, sizeof(buffer) - used,
 				"start %d, end %d", gap->start, gap->end);
+		if (gap->time != 0)
+			used += snprintf(buffer + used, sizeof(buffer) - used,
+					", time %llu", gap->time);
 	}
 	return buffer;
 }

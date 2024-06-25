@@ -168,6 +168,8 @@ int homa_init(struct homa *homa)
 	homa->resend_interval = 5;
 	homa->timeout_ticks = 100;
 	homa->timeout_resends = 5;
+	homa->ooo_window_usecs = 100;
+	homa->ooo_window_cycles = 0;
 	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;

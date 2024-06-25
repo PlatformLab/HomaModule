@@ -659,6 +659,18 @@ struct homa_gap {
 	/** @end: offset of byte just after last one in this gap. */
 	int end;
 
+	/**
+	 * @time: time (in get_cycles units) when the gap was first detected.
+	 */
+	__u64 time;
+
+	/**
+	 * @retry_timer_ticks: the value of homa->timer_ticks the last time
+	 * a resend was issued for this gap, or 0 if no resend has been
+	 * issued.
+	 */
+	int retry_timer_ticks;
+
 	/** @links: for linking into list in homa_message_in. */
 	struct list_head links;
 };
@@ -2023,6 +2035,20 @@ struct homa {
 	 * responded after this many RESENDs have been sent to it.
 	 */
 	int timeout_resends;
+
+	/**
+	 * ooo_window_usecs: Out-of-order window, in microseconds. A resend
+	 * request will be sent for a packet if it has not been received
+	 * within this much time after receipt of a later packet. Set
+	 * externally via sysctl.
+	 * */
+	int ooo_window_usecs;
+
+	/**
+	 * @ooo_window_cycles: Same as ooo_window_usecs, except in
+	 * get_cycles() units.
+	 */
+	int ooo_window_cycles;
 
 	/**
 	 * @request_ack_ticks: How many timer ticks we'll wait for the
@@ -3538,7 +3564,9 @@ extern struct homa_rpc
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		    char *format);
 extern void     homa_freeze_peers(struct homa *homa);
-extern void     homa_gap_new(struct list_head *next, int start, int end);
+extern struct homa_gap
+	       *homa_gap_new(struct list_head *next, int start, int end);
+extern void     homa_gap_retry(struct homa_rpc *rpc);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern void     homa_get_resend_range(struct homa_message_in *msgin,
                     struct resend_header *resend);

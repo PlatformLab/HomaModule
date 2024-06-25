@@ -56,14 +56,54 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
  * @next:   Add the new gap just before this list element.
  * @start:  Offset of first byte covered by the gap.
  * @end:    Offset of byte just after the last one covered by the gap.
+ * Return:  Pointer to the new gap.
  */
-void homa_gap_new(struct list_head *next, int start, int end)
+struct homa_gap * homa_gap_new(struct list_head *next, int start, int end)
 {
 	struct homa_gap *gap;
 	gap = (struct homa_gap *) kmalloc(sizeof(struct homa_gap), GFP_KERNEL);
 	gap->start = start;
 	gap->end = end;
+	gap->time = get_cycles();
+	gap->retry_timer_ticks = 0;
 	list_add_tail(& gap-> links, next);
+	return gap;
+}
+
+/**
+ * homa_gap_retry() - Scan all of the gaps for an incoming message and
+ * send RESEND requests for any whose @retry_ticks time has passed.
+ * @rpc:     RPC to check; must be locked by caller.
+ */
+void homa_gap_retry(struct homa_rpc *rpc)
+{
+	struct homa *homa = rpc->hsk->homa;
+	struct homa_gap *gap;
+	__u64 now = get_cycles();
+	struct resend_header resend;
+	int i = 0;
+
+	list_for_each_entry(gap, &rpc->msgin.gaps, links)
+	{
+		/* Note: the first retry for a gap is fast (ooo_window_cycles),
+		 * but subsequent ones are slower (resend_interval).
+		 */
+		i++;
+		if (now < (gap->time + homa->ooo_window_cycles))
+			continue;
+		if ((gap->retry_timer_ticks != 0) &&
+				((homa->timer_ticks - gap->retry_timer_ticks)
+				< homa->resend_interval))
+			continue;
+		gap->retry_timer_ticks = homa->timer_ticks;
+		resend.offset = htonl(gap->start);
+		resend.length = htonl(gap->end - gap->start);
+		resend.priority = rpc->hsk->homa->num_priorities - 1;
+		tt_record3("homa_retry_gaps sending RESEND for id %d, start %d, "
+			   "end %d",
+			   rpc->id, gap->start, gap->end);
+		homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+	}
 }
 
 /**
@@ -79,7 +119,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	int start = ntohl(h->seg.offset);
 	int length = ntohl(h->seg.segment_length);
 	int end = start + length;
-	struct homa_gap *gap, *dummy;
+	struct homa_gap *gap, *dummy, *gap2;
 
 	if ((start + length) > rpc->msgin.length) {
 		tt_record3("Packet extended past message end; id %d, "
@@ -122,7 +162,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				goto discard;
 			}
 			gap->start = end;
-			if (gap-> start >= gap->end) {
+			if (gap->start >= gap->end) {
 				list_del(&gap->links);
 				kfree(gap);
 			}
@@ -146,7 +186,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		}
 
 		/* Packet is in the middle of the gap; must split the gap. */
-		homa_gap_new(&gap->links, gap->start, start);
+		gap2 = homa_gap_new(&gap->links, gap->start, start);
+		gap2->time = gap->time;
 		gap->start = end;
 		goto keep;
 	}
@@ -514,8 +555,11 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 		discard:
 		kfree_skb(skb);
 	}
-	if (rpc != NULL)
+	if (rpc != NULL) {
+		if (rpc->state == RPC_INCOMING)
+			homa_gap_retry(rpc);
 		homa_grant_check_rpc(rpc);
+	}
 
 	while (num_acks > 0) {
 		num_acks--;
@@ -1548,4 +1592,8 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = homa->bpage_lease_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->bpage_lease_cycles = tmp;
+
+	tmp = homa->ooo_window_usecs;
+	tmp = (tmp * cpu_khz) / 1000;
+	homa->ooo_window_cycles = tmp;
 }

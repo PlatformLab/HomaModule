@@ -620,9 +620,10 @@ TEST_F(homa_utils, homa_rpc_reap__free_gaps)
 			4000, 98, 1000,	150000);
 	ASSERT_NE(NULL, crpc);
 	homa_gap_new(&crpc->msgin.gaps, 1000, 2000);
+	mock_cycles = 1000;
 	homa_gap_new(&crpc->msgin.gaps, 5000, 6000);
 
-	EXPECT_STREQ("start 1000, end 2000; start 5000, end 6000",
+	EXPECT_STREQ("start 1000, end 2000; start 5000, end 6000, time 1000",
 			unit_print_gaps(crpc));
 	homa_rpc_free(crpc);
 	homa_rpc_reap(&self->hsk, 5);

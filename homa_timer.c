@@ -43,6 +43,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->state == RPC_INCOMING) {
+		homa_gap_retry(rpc);
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
 			>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
@@ -98,17 +99,20 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			!= 0)
 		return;
 
-	/* Issue a resend for this RPC. */
-	homa_get_resend_range(&rpc->msgin, &resend);
+	/* Issue a resend for the bytes just after the last ones received
+	 * (gaps in the middle were already handled by homa_gap_retry above).
+	 */
+	resend.offset = htonl(rpc->msgin.recv_end);
+	resend.length = htonl(rpc->msgin.granted - rpc->msgin.recv_end);
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 	if (homa_is_client(rpc->id)) {
 		us = "client";
 		them = "server";
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "
-				"offset %d",
-				rpc->id, tt_addr(rpc->peer->addr),
-				rpc->dport, ntohl(resend.offset));
+			   "offset %d",
+			   rpc->id, tt_addr(rpc->peer->addr),
+			   rpc->dport, rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 				rpc->msgin.length, rpc->msgin.granted,
 				rpc->msgin.bytes_remaining,
@@ -119,7 +123,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d "
 				"offset %d",
 				rpc->id, tt_addr(rpc->peer->addr),
-				rpc->dport, ntohl(resend.offset));
+				rpc->dport, rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 				rpc->msgin.length, rpc->msgin.granted,
 				rpc->msgin.bytes_remaining,
@@ -129,8 +133,8 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		printk(KERN_NOTICE "Homa %s RESEND to %s %s:%d for id %llu, "
 				"offset %d, length %d\n", us, them,
 				homa_print_ipv6_addr(&rpc->peer->addr),
-				rpc->dport, rpc->id, ntohl(resend.offset),
-				ntohl(resend.length));
+				rpc->dport, rpc->id, rpc->msgin.recv_end,
+				rpc->msgin.granted - rpc->msgin.recv_end);
 }
 
 /**
