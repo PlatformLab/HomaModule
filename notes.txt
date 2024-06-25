@@ -35,10 +35,6 @@ Notes for Homa implementation in Linux:
     runs simultaenously in several threads, resulting in long blocks for
     RPC locks.
 
-* Work in progress (1/29/2024): refactoring of homa_timer to simplify,
-  allow faster retries. Performance with this code got significantly
-  worse (W4 tput of 22 Gbps instead of 60 Gbps before).
-
 * Notes on refactoring of grant mechanism:
   * Need to reimplement FIFO grants
   * Replace fifo_grant_increment with fifo_grant_interval
@@ -52,11 +48,6 @@ Notes for Homa implementation in Linux:
     freed.
   * Eventually SoftIRQ wakes up to handle the original packet, which re-creates
     the RPC and it gets serviced a second time.
-
-* Don't need to detect timeouts on servers; do it on clients, and if
-  a server gets a RESEND for a request whose incoming message isn't
-  complete, it can use the incoming RESEND request to issue RESENDs
-  back to the client.
 
 * SoftIRQ processing can lock out kernel-to-user copies; add a preemption
   mechanism where the copying code can set a flag that it needs the lock,
