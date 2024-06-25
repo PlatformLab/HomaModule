@@ -53,6 +53,19 @@ static void add_to_pool(struct homa *homa, int num_pages, int core)
 	}
 }
 
+static struct homa_page_pool *hook_pool = NULL;
+
+/* Used to remove a page from hook_pool when a lock is acquired. */
+static void spinlock_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if ((hook_pool == NULL) || (hook_pool->avail == 0))
+		return;
+	hook_pool->avail--;
+	put_page(hook_pool->pages[hook_pool->avail]);
+}
+
 FIXTURE(homa_skb) {
 	struct homa homa;
 	struct sk_buff *skb;
@@ -262,6 +275,20 @@ TEST_F(homa_skb, homa_skb_page_alloc__from_pool)
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, core));
 	EXPECT_NE(NULL, core->skb_page);
 	EXPECT_EQ(4, core->numa->page_pool.avail);
+}
+TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
+{
+	struct homa_core *core = homa_cores[cpu_number];
+	add_to_pool(&self->homa, 1, cpu_number);
+	EXPECT_EQ(1, core->numa->page_pool.avail);
+	EXPECT_EQ(0, core->num_stashed_pages);
+	hook_pool = &core->numa->page_pool;
+	unit_hook_register(spinlock_hook);
+	mock_alloc_page_errors = 3;
+
+	EXPECT_FALSE(homa_skb_page_alloc(&self->homa, core));
+	EXPECT_EQ(NULL, core->skb_page);
+	EXPECT_EQ(0, core->numa->page_pool.avail);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__new_large_page)
 {
@@ -556,4 +583,77 @@ TEST_F(homa_skb, homa_skb_get)
 	EXPECT_EQ(0, data[10]);
 
 	kfree_skb(skb);
+}
+
+TEST_F(homa_skb, homa_skb_release_pages__basics)
+{
+	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
+	mock_cycles = 1000000;
+	self->homa.skb_page_free_time = 500000;
+	self->homa.skb_page_frees_per_sec = 10;
+	self->homa.skb_page_pool_min_kb = 0;
+	add_to_pool(&self->homa, 10, 0);
+	homa_cores[0]->numa->page_pool.low_mark = 7;
+	add_to_pool(&self->homa, 3, 1);
+	homa_cores[1]->numa->page_pool.low_mark = 2;
+
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(5, homa_cores[0]->numa->page_pool.avail);
+	EXPECT_EQ(3, homa_cores[1]->numa->page_pool.avail);
+	EXPECT_EQ(501000000UL, self->homa.skb_page_free_time);
+}
+TEST_F(homa_skb, homa_skb_release_pages__not_time_to_free)
+{
+	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
+	mock_cycles = 1000000;
+	self->homa.skb_page_free_time = 1000001;
+	self->homa.skb_page_frees_per_sec = 10;
+	self->homa.skb_page_pool_min_kb = 0;
+	add_to_pool(&self->homa, 10, 0);
+	homa_cores[0]->numa->page_pool.low_mark = 7;
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(10, homa_cores[0]->numa->page_pool.avail);
+}
+TEST_F(homa_skb, homa_skb_release_pages__allocate_skb_pages_to_free)
+{
+	EXPECT_EQ(0, self->homa.pages_to_free_slots);
+	mock_cycles = 1000000;
+	self->homa.skb_page_frees_per_sec = 10;
+	self->homa.skb_page_free_time = 500000;
+
+	/* First call: no current allocation. */
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(5, self->homa.pages_to_free_slots);
+
+	/* Second call: free current allocation. */
+	self->homa.pages_to_free_slots -= 1;
+	self->homa.skb_page_free_time = 500000;
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(5, self->homa.pages_to_free_slots);
+}
+TEST_F(homa_skb, homa_skb_release_pages__limited_by_min_kb)
+{
+	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
+	mock_cycles = 1000000;
+	self->homa.skb_page_free_time = 500000;
+	self->homa.skb_page_frees_per_sec = 20;
+	self->homa.skb_page_pool_min_kb = (5 * HOMA_SKB_PAGE_SIZE) / 1000;
+	add_to_pool(&self->homa, 10, 0);
+	homa_cores[0]->numa->page_pool.low_mark = 9;
+
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(6, homa_cores[0]->numa->page_pool.avail);
+}
+TEST_F(homa_skb, homa_skb_release_pages__empty_pool)
+{
+	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
+	mock_cycles = 2000000;
+	self->homa.skb_page_free_time = 500000;
+	self->homa.skb_page_frees_per_sec = 1000;
+	self->homa.skb_page_pool_min_kb = 0;
+	add_to_pool(&self->homa, 5, 0);
+	homa_cores[0]->numa->page_pool.low_mark = 5;
+
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(0, homa_cores[0]->numa->page_pool.avail);
 }

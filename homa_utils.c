@@ -14,6 +14,9 @@ struct homa_core *homa_cores[NR_CPUS];
 /* Information specific to individual NUMA nodes. */
 struct homa_numa *homa_numas[MAX_NUMNODES];
 
+/* Total number of  NUMA nodes actually defined in homa_numas. */
+int homa_num_numas = 0;
+
 /* Points to block of memory holding all homa_cores; used to free it. */
 char *core_memory;
 
@@ -46,9 +49,12 @@ int homa_init(struct homa *homa)
 		numa = kmalloc(sizeof(struct homa_numa), GFP_KERNEL);
 		homa_numas[n] = numa;
 		homa_skb_page_pool_init(&numa->page_pool);
+		if (n >= homa_num_numas)
+			homa_num_numas = n+1;
 		num_numas++;
 	}
-	printk(KERN_NOTICE "Homa initialized %d homa_numas\n", num_numas);
+	printk(KERN_NOTICE "Homa initialized %d homa_numas, highest "
+			"number %d\n", num_numas, homa_num_numas-1);
 
 	/* Initialize core-specific info (if no-one else has already done it),
 	 * making sure that each core has private cache lines.
@@ -126,6 +132,11 @@ int homa_init(struct homa *homa)
 		return err;
 	}
 	spin_lock_init(&homa->page_pool_mutex);
+	homa->skb_page_frees_per_sec = 1000;
+	homa->skb_pages_to_free = NULL;
+	homa->pages_to_free_slots = 0;
+	homa->skb_page_free_time = 0;
+	homa->skb_page_pool_min_kb = (3*HOMA_MAX_MESSAGE_LENGTH)/1000;
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;

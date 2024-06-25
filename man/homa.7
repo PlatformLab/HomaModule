@@ -524,6 +524,22 @@ into two different parameters:
 and
 .IR window .
 .TP
+.IR skb_page_frees_per_sec
+Homa maintains a pool of free pages on each NUMA node for use in
+outgoing sk_buffs, in order to eliminate the overhead of allocating
+new pages from scratch. This option specifies the total rate (across all
+pools, not per-pool) at which pages should be released from pools back to
+Linux, in pages per second. The idea behind this parameter is to release
+pages slowly enough that replenishing them won't add significant overhead if
+they are still needed, while also ensuring that pools don't retain a lot more
+pages than needed.
+.TP
+.IR skb_page_pool_min_kb
+When releasing pages from the sk_buff page pools back to Linux, Homa will
+not release pages from a pool if the total capacity of free pages in
+the pool has been less than this option (specified in Kbytes) at any point
+in the recent past.
+.TP
 .IR throttle_min_bytes
 An integer value specifying the smallest packet size subject to
 output queue throttling.

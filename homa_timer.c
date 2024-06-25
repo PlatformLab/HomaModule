@@ -235,6 +235,7 @@ void homa_timer(struct homa *homa)
 //	if (total_rpcs > 0)
 //		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
 
+	homa_skb_release_pages(homa);
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);
 }

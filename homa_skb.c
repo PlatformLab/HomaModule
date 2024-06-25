@@ -21,6 +21,7 @@ extern int mock_max_skb_frags;
 void homa_skb_page_pool_init(struct homa_page_pool *pool)
 {
 	pool->avail = 0;
+	pool->low_mark = 0;
 	memset(pool->pages, 0, sizeof(pool->pages));
 }
 
@@ -51,6 +52,12 @@ void homa_skb_cleanup(struct homa *homa)
 		for (j = numa->page_pool.avail - 1; j >= 0; j--)
 			put_page(numa->page_pool.pages[j]);
 		numa->page_pool.avail = 0;
+	}
+
+	if (homa->skb_pages_to_free != NULL) {
+		kfree(homa->skb_pages_to_free);
+		homa->skb_pages_to_free = NULL;
+		homa->pages_to_free_slots = 0;
 	}
 }
 
@@ -107,6 +114,8 @@ void homa_skb_stash_pages(struct homa *homa, int length)
 	spin_lock_bh(&homa->page_pool_mutex);
 	while (pool->avail && (core->num_stashed_pages < pages_needed)) {
 		pool->avail--;
+		if (pool->avail < pool->low_mark )
+			pool->low_mark = pool->avail;
 		core->stashed_pages[core->num_stashed_pages] =
 				pool->pages[pool->avail];
 		core->num_stashed_pages++;
@@ -207,10 +216,13 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_core * core)
 		spin_lock_bh(&homa->page_pool_mutex);
 		if (pool->avail) {
 			pool->avail--;
+			if (pool->avail < pool->low_mark)
+				pool->low_mark = pool->avail;
 			core->skb_page = pool->pages[pool->avail];
+			spin_unlock_bh(&homa->page_pool_mutex);
+			goto success;
 		}
 		spin_unlock_bh(&homa->page_pool_mutex);
-		goto success;
 	}
 
 	/* Step 3: can we allocate a new big page? */
@@ -487,5 +499,70 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 		offset += chunk_size;
 		length -= chunk_size;
 		dst += chunk_size;
+	}
+}
+
+/**
+ * homa_skb_release_pages() - This function is invoked occasionally; it's
+ * job is to gradually release pages from the sk_buff page pools back to
+ * Linux, based on sysctl parameters such as skb_page_frees_per_sec.
+ */
+void homa_skb_release_pages(struct homa *homa)
+{
+	__u64 now = get_cycles();
+	__s64 interval;
+	int i, max_low_mark, min_pages, release, release_max;
+	struct homa_page_pool *max_pool;
+
+	if (now < homa->skb_page_free_time)
+		return;
+
+        /* Free pages every 0.5 second. */
+	interval = cpu_khz*500;
+	homa->skb_page_free_time = now + interval;
+	release_max = homa->skb_page_frees_per_sec/2;
+	if (homa->pages_to_free_slots < release_max) {
+		if (homa->skb_pages_to_free != NULL)
+			kfree(homa->skb_pages_to_free);
+		homa->skb_pages_to_free = kmalloc(release_max *
+				sizeof(struct page *), GFP_KERNEL);
+		homa->pages_to_free_slots = release_max;
+	}
+
+	/* Find the pool with the largest low-water mark. */
+	max_low_mark = -1;
+	spin_lock_bh(&homa->page_pool_mutex);
+	for (i = 0; i < homa_num_numas; i++) {
+		struct homa_page_pool *pool = &homa_numas[i]->page_pool;
+		if (pool->low_mark > max_low_mark) {
+			max_low_mark = pool->low_mark;
+			max_pool = pool;
+		}
+		tt_record3("NUMA node %d has %d pages in skb page pool, "
+				"low mark %d", i, pool->avail, pool->low_mark);
+		pool->low_mark = pool->avail;
+	}
+
+	/* Collect pages to free (but don't free them until after
+	 * releasing the lock, since freeing is expensive).
+	 */
+	min_pages = ((homa->skb_page_pool_min_kb * 1000)
+			+ (HOMA_SKB_PAGE_SIZE - 1))/ HOMA_SKB_PAGE_SIZE;
+	release = max_low_mark - min_pages;
+	if (release > release_max)
+		release = release_max;
+	for (i = 0; i < release; i++) {
+		max_pool->avail--;
+		homa->skb_pages_to_free[i] = max_pool->pages[max_pool->avail];
+	}
+	max_pool->low_mark = max_pool->avail;
+	spin_unlock_bh(&homa->page_pool_mutex);
+
+	/* Free the pages that were collected. */
+	for (i = 0; i < release; i++) {
+		struct page *page = homa->skb_pages_to_free[i];
+		tt_record2("homa_skb_release_pages releasing page 0x%08x%08x",
+				tt_hi(page), tt_lo(page));
+		put_page(page);
 	}
 }

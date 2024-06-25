@@ -423,6 +423,20 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= proc_dointvec
 	},
 	{
+		.procname	= "skb_page_frees_per_sec",
+		.data		= &homa_data.skb_page_frees_per_sec,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	= "skb_page_pool_min_kb",
+		.data		= &homa_data.skb_page_pool_min_kb,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
 		.procname	= "temp",
 		.data		= homa_data.temp,
 		.maxlen		= sizeof(homa_data.temp),
@@ -514,7 +528,7 @@ static int __init homa_load(void) {
 			"tcp_sock %u homa_rpc %u sk_buff %u "
 			"rcvmsg_control %u sockaddr_in_union %u "
 			"HOMA_MAX_BPAGES %u NR_CPUS %u "
-			"nr_cpu_ids %u\n",
+			"nr_cpu_ids %u, MAX_NUMNODES %d\n",
 			sizeof32(struct data_header),
 			sizeof32(struct data_segment),
 			sizeof32(struct homa_ack),
@@ -531,7 +545,8 @@ static int __init homa_load(void) {
 			sizeof32(sockaddr_in_union),
 			HOMA_MAX_BPAGES,
 			NR_CPUS,
-			nr_cpu_ids);
+			nr_cpu_ids,
+			MAX_NUMNODES);
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		printk(KERN_ERR "proto_register failed for homa_prot: %d\n",

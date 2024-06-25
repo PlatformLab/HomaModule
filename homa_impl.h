@@ -128,6 +128,7 @@ extern void     homa_throttle_lock_slow(struct homa *homa);
 
 extern struct homa_core *homa_cores[];
 extern struct homa_numa *homa_numas[];
+extern int homa_num_numas;
 
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
@@ -1618,6 +1619,12 @@ struct homa_page_pool
 	/** @avail: Number of free pages currently in the pool. */
 	int avail;
 
+	/**
+	 * @low_mark: Low water mark: smallest value of avail since the
+	 * last time homa_skb_release_pages reset it.
+	 */
+	int low_mark;
+
 #define HOMA_PAGE_POOL_SIZE 1000
 
 	/**
@@ -1837,9 +1844,43 @@ struct homa {
 	struct homa_peertab peers;
 
         /**
-	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools.
+	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
+	 * used for outgoing sk_buff data.
 	 */
 	struct spinlock page_pool_mutex __attribute__((aligned(CACHE_LINE_SIZE)));
+
+	/**
+	 * @skb_page_frees_per_sec: Rate at which to return pages from sk_buff
+	 * page pools back to Linux. This is the total rate across all pools.
+	 * Set externally via sysctl.
+	 */
+	int skb_page_frees_per_sec;
+
+	/**
+	 * @skb_pages_to_free: Space in which to collect pages that are
+	 * about to be released. Dynamically allocated.
+	 */
+	struct page **skb_pages_to_free;
+
+        /**
+	 * @pages_to_free_slot: Maximum number of pages that can be
+	 * stored in skb_pages_to_free;
+	 */
+	int pages_to_free_slots;
+
+	/**
+	 * @skb_page_free_time: Time (in get_cycles() units) when the
+	 * next sk_buff page should be freed. Could be in the past.
+	 */
+	__u64 skb_page_free_time;
+
+	/**
+	 * @skb_page_pool_min_mb: Don't return pages from a pool to Linux
+	 * if the amount of cached data in the pool has been less than this
+	 * many KBytes at any time in the recent past. Set externally via
+	 * sysctl.
+	 */
+	int skb_page_pool_min_kb;
 
 	/**
 	 * @unsched_bytes: The number of bytes that may be sent in a
@@ -3652,6 +3693,7 @@ extern struct sk_buff
 	       *homa_skb_new_tx(int length);
 extern bool     homa_skb_page_alloc(struct homa *homa, struct homa_core *core);
 extern void     homa_skb_page_pool_init(struct homa_page_pool *pool);
+extern void     homa_skb_release_pages(struct homa *homa);
 extern void     homa_skb_stash_pages(struct homa *homa, int length);
 extern int      homa_snprintf(char *buffer, int size, int used,
                     const char *format, ...)

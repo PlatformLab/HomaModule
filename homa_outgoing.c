@@ -107,6 +107,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	 */
 	bytes_left = length;
 	segs = 0;
+	homa_skb_stash_pages(rpc->hsk->homa, length);
 	do {
 		int seg_size;
 		struct data_segment seg;
