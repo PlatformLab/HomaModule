@@ -4003,9 +4003,9 @@ class AnalyzeIntervals:
                         'tx_grant_gro', increment)
 
             if 'nic' in grant:
-                node_xmits[grant['tx_node']].append([pkt['nic'], grant_bytes])
+                node_xmits[grant['tx_node']].append([grant['nic'], grant_bytes])
             elif 'xmit' in grant:
-                node_xmits[grant['tx_node']].append([pkt['xmit'], grant_bytes])
+                node_xmits[grant['tx_node']].append([grant['xmit'], grant_bytes])
 
         # Extract information from RPCs
         for id, rpc in rpcs.items():
