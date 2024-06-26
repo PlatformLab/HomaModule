@@ -1251,7 +1251,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			/* Give NAPI and SoftIRQ tasks a chance to run. */
 			schedule();
 		}
-		tt_record1("Checking nonblocking, flags %d", flags);
 		if (flags & HOMA_RECVMSG_NONBLOCKING) {
 			result = ERR_PTR(-EAGAIN);
 			goto found_rpc;
