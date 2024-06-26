@@ -292,6 +292,10 @@ def get_parser(description, usage, defaults = {}):
             metavar='count', default=defaults['tcp_server_ports'],
             help='Number of ports on which TCP servers should listen '
             '(default: %d)'% (defaults['tcp_server_ports']))
+    parser.add_argument('--tt-freeze', dest='tt_freeze', type=boolean,
+            default=True, metavar="T/F", help="Boolean value: if true, "
+            "timetraces will be frozen on all nodes at the end of the "
+            "Homa benchmark run (default: false)")
     parser.add_argument('--unsched', type=int, dest='unsched',
             metavar='count', default=defaults['unsched'],
             help='If nonzero, homa_prio will always use this number of '
@@ -710,6 +714,9 @@ def run_experiment(name, clients, options):
             do_cmd("debug 2000 3000", clients)
             log("Finished setting debug info")
         time.sleep(options.seconds - debug_delay)
+        if options.protocol == "homa" and options.tt_freeze:
+            log("Freezing timetraces via node%d" % nodes[0])
+            set_sysctl_parameter(".net.homa.action", "7", nodes[0:1])
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
