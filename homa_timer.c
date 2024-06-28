@@ -102,8 +102,18 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	/* Issue a resend for the bytes just after the last ones received
 	 * (gaps in the middle were already handled by homa_gap_retry above).
 	 */
-	resend.offset = htonl(rpc->msgin.recv_end);
-	resend.length = htonl(rpc->msgin.granted - rpc->msgin.recv_end);
+	if (rpc->msgin.length < 0) {
+		/* Haven't received any data for this message; request
+		 * retransmission of just the first packet (the sender
+		 * will send at least one full packet, regardless of
+		 * the length below).
+		 */
+		resend.offset = htonl(0);
+		resend.length = htonl(100);
+	} else {
+		resend.offset = htonl(rpc->msgin.recv_end);
+		resend.length = htonl(rpc->msgin.granted - rpc->msgin.recv_end);
+	}
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 	if (homa_is_client(rpc->id)) {

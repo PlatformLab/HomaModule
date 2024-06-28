@@ -191,6 +191,28 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 	homa_check_rpc(crpc);
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 }
+TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 10000);
+	ASSERT_NE(NULL, crpc);
+	crpc->msgout.granted = 5000;
+	crpc->msgout.next_xmit_offset = 5000;
+	self->homa.resend_ticks = 3;
+
+	/* First call: resend_ticks-1. */
+	crpc->silent_ticks = 2;
+	unit_log_clear();
+	homa_check_rpc(crpc);
+	EXPECT_STREQ("", unit_log_get());
+
+	/* Second call: resend_ticks. */
+	crpc->silent_ticks = 3;
+	unit_log_clear();
+	homa_check_rpc(crpc);
+	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
+}
 
 TEST_F(homa_timer, homa_timer__basics)
 {
