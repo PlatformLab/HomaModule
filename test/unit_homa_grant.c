@@ -408,14 +408,12 @@ TEST_F(homa_grant, homa_grant_remove_rpc__reposition_peer_in_homa_list)
 TEST_F(homa_grant, homa_grant_send__basics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	rpc->silent_ticks = 10;
 	rpc->msgin.priority = 3;
 
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
 	EXPECT_EQ(10000, rpc->msgin.granted);
-	EXPECT_EQ(0, rpc->silent_ticks);
 	EXPECT_STREQ("xmit GRANT 10000@3", unit_log_get());
 }
 TEST_F(homa_grant, homa_grant_send__incoming_negative)
@@ -464,6 +462,15 @@ TEST_F(homa_grant, homa_grant_send__nothing_available)
 	EXPECT_EQ(0, granted);
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_grant, homa_grant_send__skip_because_of_silent_ticks)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	rpc->silent_ticks = 2;
+
+	unit_log_clear();
+	int granted = homa_grant_send(rpc, &self->homa);
+	EXPECT_EQ(0, granted);
 }
 TEST_F(homa_grant, homa_grant_send__resend_all)
 {

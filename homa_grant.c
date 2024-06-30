@@ -230,13 +230,12 @@ int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
 	if (increment <= 0)
 		return 0;
 
-	/* The following line is needed to prevent spurious resends. Without
-	 * it, if the timer fires right after we update rpc->msgin.granted,
-	 * it might think the RPC is slow and request a resend (timeouts
-	 * won't occur before modifying rpc->msgin.granted because there's
-	 * no granted data).
+	/* Don't increment the grant if the node has been slow to send
+	 * data already granted: no point in wasting grants on this
+	 * node.
 	 */
-	rpc->silent_ticks = 0;
+	if (rpc->silent_ticks > 1)
+		return 0;
 
 	rpc->msgin.granted += increment;
 
