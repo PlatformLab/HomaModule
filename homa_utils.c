@@ -928,7 +928,8 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			struct freeze_header freeze;
 			count++;
-			homa_rpc_log_tt(rpc);
+			if (count < 250)
+				homa_rpc_log_tt(rpc);
 			if (freeze_count == 0) {
 				continue;
 			}
