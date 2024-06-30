@@ -1356,8 +1356,13 @@ int homa_softirq(struct sk_buff *skb) {
 			goto discard;
 		}
 
-		/* Process the packet immediately if it is short. */
-		if (skb->len < 1400) {
+		/* Process the packet now if it is a control packet or
+		 * if it contains an entire short message.
+		 */
+		if ((h->type != DATA) || (ntohl(((struct data_header *) h)
+				->message_length) < 1400)) {
+			UNIT_LOG("; ", "homa_softirq shortcut type 0x%x",
+					h->type);
 			*prev_link = skb->next;
 			skb->next = NULL;
 			homa_dispatch_pkts(skb, homa);

@@ -195,7 +195,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.gro_grant_bypasses);
-	EXPECT_STREQ("xmit DATA 1400@10000", unit_log_get());
+	EXPECT_SUBSTR("xmit DATA 1400@10000", unit_log_get());
 
 	/* Third attempt: core is too busy for fast grants. */
 	homa_cores[cpu_number]->last_gro = 600;

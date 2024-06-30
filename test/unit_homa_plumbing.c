@@ -691,7 +691,7 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
 }
-TEST_F(homa_plumbing, homa_softirq__process_short_packets_first)
+TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
 
@@ -700,12 +700,17 @@ TEST_F(homa_plumbing, homa_softirq__process_short_packets_first)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(300);
 	self->data.message_length = htonl(300);
+	self->data.seg.segment_length = htonl(300);
 	skb2 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
 	self->data.common.sender_id = cpu_to_be64(200);
-	self->data.message_length = htonl(200);
+	self->data.message_length = htonl(1600);
+	self->data.seg.offset = htonl(1400);
+	self->data.seg.segment_length = htonl(200);
 	skb3 = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
 	self->data.message_length = htonl(5000);
+	self->data.seg.offset = 0;
+	self->data.seg.segment_length = htonl(1400);
 	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
 	skb_shinfo(skb)->frag_list = skb2;
 	skb2->next = skb3;
@@ -714,7 +719,28 @@ TEST_F(homa_plumbing, homa_softirq__process_short_packets_first)
 	homa_softirq(skb);
 	unit_log_clear();
 	unit_log_active_ids(&self->hsk);
-	EXPECT_STREQ("301 201 2001 5001", unit_log_get());
+	EXPECT_STREQ("301 2001 201 5001", unit_log_get());
+}
+TEST_F(homa_plumbing, homa_softirq__process_control_first)
+{
+	struct sk_buff *skb, *skb2;
+	struct common_header unknown = {
+		.sport = htons(self->client_port),
+		.dport = htons(self->server_port),
+		.type = UNKNOWN,
+		.sender_id = cpu_to_be64(self->client_id)
+	};
+
+	self->data.common.sender_id = cpu_to_be64(2000);
+	self->data.message_length = htonl(2000);
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
+	skb2 = mock_skb_new(self->client_ip, &unknown, 0, 0);
+
+	skb_shinfo(skb)->frag_list = skb2;
+	skb2->next = NULL;
+	unit_log_clear();
+	homa_softirq(skb);
+	EXPECT_SUBSTR("homa_softirq shortcut type 0x13", unit_log_get());
 }
 TEST_F(homa_plumbing, homa_softirq__nothing_to_reorder)
 {
