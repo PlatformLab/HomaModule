@@ -695,6 +695,10 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	unit_log_clear();
 	mock_clear_xmit_prios();
 	mock_xmit_log_verbose = 1;
+
+	/* Helps to detect errors in computing seg_offset. */
+	skb_push(crpc->msgout.packets, 8);
+
 	homa_resend_data(crpc, 7000, 10000, 2);
 	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, "
 			"message_length 16000, offset 7000, data_length 1400, "

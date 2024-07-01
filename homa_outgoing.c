@@ -582,12 +582,12 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		struct data_header *h;
 
 		homa_info = homa_get_skb_info(skb);
-		if ((homa_info->offset >= end) || (start >=
-				(homa_info->offset + homa_info->data_bytes)))
+		if (homa_info->offset >= end)
+			break;
+		if (start >=(homa_info->offset + homa_info->data_bytes))
 			continue;
 
-		seg_offset = (skb_transport_header(skb) - skb->data)
-				+ sizeof32(struct data_header)
+		seg_offset = sizeof32(struct data_header)
 				- sizeof32(struct data_segment);
 		segs_left = skb_shinfo(skb)->gso_segs;
 		if (segs_left < 1)
