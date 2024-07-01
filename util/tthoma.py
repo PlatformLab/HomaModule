@@ -1090,10 +1090,7 @@ class Dispatcher:
         id = int(match.group(1))
         offset = int(match.group(2))
         qid = int(match.group(3))
-        if match.group(5) != None:
-            msg_length = int(match.group(5))
-        else:
-            msg_length = None
+        msg_length = int(match.group(4))
         for interest in interests:
             interest.tt_free_tx_skb(trace, time, core, id, offset, qid,
                     msg_length)
@@ -1101,7 +1098,7 @@ class Dispatcher:
     patterns.append({
         'name': 'free_tx_skb',
         'regexp': 'napi freeing tx skb for homa data, id ([0-9]+), '
-                'offset ([0-9]+), qid ([0-9]+)(, msg_length ([0-9]+))?'
+                'offset ([0-9]+), qid ([0-9]+), msg_length ([0-9]+)'
     })
 
     def __sendmsg_request(self, trace, time, core, match, interests):
@@ -2132,6 +2129,85 @@ class AnalyzeCore:
                     interval['gro_grant'], interval['softirq_data'],
                     interval['softirq_grant'], interval['resends'],
                     interval['busy'], interval['grant_sends']))
+
+#------------------------------------------------
+# Analyzer: coregaps
+#------------------------------------------------
+class AnalyzeCoregaps:
+    """
+    Analyzes events on all cores to identify long gaps (periods of time
+    where there were no trace records for an individual core).
+    """
+
+    def __init__(self, dispatcher):
+
+        # node -> dictionary mapping core -> time of most recent
+        # event on that core.
+        self.last_event = {}
+
+        # node -> list of <node, core, start, length> tuples: node and core
+        # identify a particular core, and start and length describe
+        # a gap where that core was idle.
+        self.node_gaps = {}
+
+        self.gap_threshold = 5000
+
+    def init_trace(self, trace):
+        self.cur_node = {}
+        self.last_event[trace['node']] = self.cur_node
+        self.node_gaps[trace['node']] = []
+
+    def tt_all(self, trace, t, core, msg):
+        if core in self.cur_node:
+            gap = t - self.cur_node[core]
+            if gap > self.gap_threshold:
+                self.node_gaps[trace['node']].append([trace['node'], core,
+                        self.cur_node[core], gap])
+        self.cur_node[core] = t
+
+    def output(self):
+        global options
+        max_per_node = 5
+
+        print('\n-------------------')
+        print('Analyzer: coregaps')
+        print('-------------------')
+        print('')
+        print('Longest time intervals where no timetrace events were recorded')
+        print('for a core (limit: %d gaps per node):' % (max_per_node))
+        print('')
+
+        # Identify gaps that occurred at the end of the traces (no
+        # terminating record for the gap).
+        for node, core_times in self.last_event.items():
+            trace_last = traces[node]['last_time']
+            for core in core_times.keys():
+                gap = trace_last - core_times[core]
+                if gap > self.gap_threshold:
+                    self.node_gaps[node].append([node, core, core_times[core], gap])
+
+        if len(self.node_gaps) == 0:
+            print('There were no gaps longer than %.1f ms' %
+                    (self.gap_threshold/1000))
+            return
+
+        print('Node       Core     Start   Length (ms)')
+        for node in get_sorted_nodes():
+            if not node in self.last_event:
+                continue
+            node_cores = self.last_event[node]
+            gaps = sorted(self.node_gaps[node], key=lambda t : t[3],
+                    reverse=True)
+            count = 0
+            for gap in gaps:
+                if len(gap) != 4:
+                    print('Bad gap: %s' % (gap))
+            for gap_node, core, start, length in gaps:
+                print('%-10s %4d %9.1f   %6.1f' % (gap_node, core, start,
+                        length/1000))
+                count += 1
+                if count >= max_per_node:
+                    break
 
 #------------------------------------------------
 # Analyzer: delay
@@ -4934,8 +5010,7 @@ class AnalyzePackets:
         p['free_tx_skb'] = t
         p['tx_qid'] = qid
         p['tx_node'] = trace['node']
-        if msg_length != None:
-            p['msg_length'] = msg_length
+        p['msg_length'] = msg_length
 
     def tt_gro_data(self, trace, t, core, peer, id, offset, prio):
         global packets, recv_offsets
@@ -6645,7 +6720,7 @@ class AnalyzeTxintervals:
             qid_msg = ''
 
         for node in get_sorted_nodes():
-            f = open('%s/tx_%s.dat' % (options.data, node), 'w')
+            f = open('%s/txintervals_%s.dat' % (options.data, node), 'w')
             f.write('# Node: %s\n' % (node))
             f.write('# Generated at %s.\n' %
                     (time.strftime('%I:%M %p on %m/%d/%Y')))
@@ -6691,10 +6766,10 @@ class AnalyzeTxintervals:
             f.write('#             this interval\n')
             f.write('# MinGF:      Smallest p[\'gro\'] - p[\'free_tx_skb\'] '
                     'for any segment of\n')
-            f.write('#             a packet freed in this interval')
-            f.write('# MaxGF:     Largest p[\'gro\'] - p[\'free_tx_skb\'] '
+            f.write('#             a packet freed in this interval\n')
+            f.write('# MaxGF:      Largest p[\'gro\'] - p[\'free_tx_skb\'] '
                     'for any segment of\n')
-            f.write('#             a packet freed in this interval')
+            f.write('#             a packet freed in this interval\n')
             f.write('# GXmit:      KB of grants that have been sent by peer '
                     'but not yet\n')
             f.write('              received by GRO\n')
@@ -6939,10 +7014,10 @@ class AnalyzeTxpkts:
 #------------------------------------------------
 class AnalyzeTxqueues:
     """
-    Prints statistics about the amount of outbound packet data queued
-    in the NIC of each node. The --gbps option specifies the rate at
-    which packets are transmitted. With --data option, generates detailed
-    timelines of NIC queue lengths.
+    Prints estimates of the amount of outbound packet data queued in the
+    NIC of each node, assuming that the NIC transmits at full link speed.
+    The --gbps option specifies the rate at which packets are transmitted.
+    With --data option, generates detailed timelines of NIC queue lengths.
     """
 
     def __init__(self, dispatcher):
