@@ -38,6 +38,11 @@ static struct sk_buff *test_skb(struct homa *homa)
 	homa_skb_append_to_frag(homa, skb, src + 300, 300);
 	core->page_inuse = core->page_size;
 	homa_skb_append_to_frag(homa, skb, src + 600, 400);
+
+	/* Add some data before the transport header, just to make sure
+	 * that functions offset from the proper location.
+	 */
+	skb_push(skb, 8);
 	return skb;
 }
 

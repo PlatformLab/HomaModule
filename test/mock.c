@@ -994,6 +994,15 @@ void *skb_pull(struct sk_buff *skb, unsigned int len)
 	return skb->data += len;
 }
 
+void *skb_push(struct sk_buff *skb, unsigned int len)
+{
+	skb->data -= len;
+	skb->len += len;
+	if (unlikely(skb->data < skb->head))
+		FAIL("sk_buff underflow during skb_push");
+	return skb->data;
+}
+
 void *skb_put(struct sk_buff *skb, unsigned int len)
 {
 	unsigned char *result = skb_tail_pointer(skb);

@@ -314,7 +314,8 @@ int homa_skb_append_from_iter(struct homa *homa, struct sk_buff *skb,
  * @homa:        Overall data about the Homa protocol implementation.
  * @dst_skb:     Data gets added to the end of this skb.
  * @src_skb:     Data is copied out of this skb.
- * @offset:      Offset within @src_skb of first byte to copy.
+ * @offset:      Offset within @src_skb of first byte to copy, relative
+ * 		 to the transport header.
  * @length:      Total number of bytes to copy; fewer bytes than this may
  *               be copied if @src_skb isn't long enough to hold all of the
  *               desired bytes.
@@ -329,14 +330,15 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 	skb_frag_t *src_frag, *dst_frag;
 
 	/* Copy bytes from the linear part of the source, if any. */
-	head_len = skb_headlen(src_skb);
+	head_len = skb_tail_pointer(src_skb) - skb_transport_header(src_skb);
 	if (offset < head_len)
 	{
 		chunk_size = length;
 		if (chunk_size > (head_len - offset))
 			chunk_size = head_len - offset;
 		err = homa_skb_append_to_frag(homa, dst_skb,
-				src_skb->data + offset, chunk_size);
+				skb_transport_header(src_skb) + offset,
+				chunk_size);
 		if (err)
 			return err;
 		offset += chunk_size;
@@ -461,7 +463,8 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
  * homa_skb_get() - Copy out part of the contents of a packet.
  * @skb:       sk_buff from which to copy data.
  * @dest:      Where to copy the data.
- * @offset:    Offset within skb of first byte to copy.
+ * @offset:    Offset within skb of first byte to copy, measured
+ *             relative to the transport header.
  * @length:    Total number of bytes to copy; will copy fewer bytes than
  *             this if the packet doesn't contain @length bytes at @offset.
  */
@@ -473,12 +476,12 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 	skb_frag_t *frag;
 
 	/* Copy bytes from the linear part of the skb, if any. */
-	head_len = skb_headlen(skb);
+	head_len = skb_tail_pointer(skb) - skb_transport_header(skb);
 	if (offset < head_len) {
 		chunk_size = length;
 		if (chunk_size > (head_len - offset))
 			chunk_size = head_len - offset;
-		memcpy(dst, skb->data + offset, chunk_size);
+		memcpy(dst, skb_transport_header(skb) + offset, chunk_size);
 		offset += chunk_size;
 		length -= chunk_size;
 		dst += chunk_size;
