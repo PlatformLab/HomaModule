@@ -14,6 +14,7 @@
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[];
+extern void       (*tt_linux_freeze)(void);
 extern atomic_t  *tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
 extern int       *tt_linux_homa_temp;
@@ -135,6 +136,7 @@ int tt_init(char *proc_file, int *temp)
 		tt_linux_buffers[i] = tt_buffers[i];
 	}
 	tt_linux_buffer_mask = TT_BUF_SIZE-1;
+	tt_linux_freeze = tt_freeze;
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
 	tt_linux_printk = tt_printk;
@@ -175,6 +177,7 @@ void tt_destroy(void)
 	tt_freeze_count.counter = 1;
 
 #ifdef TT_KERNEL
+	tt_linux_freeze = tt_linux_nop;
 	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
 	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = NULL;
