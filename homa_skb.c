@@ -406,6 +406,13 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 		struct sk_buff *skb = skbs[i];
 		struct skb_shared_info *shinfo = skb_shinfo(skb);
 
+		if (refcount_read(&skb->users) != 1) {
+			/* This sk_buff is still in use somewhere, so can't
+			 * reclaim its pages. */
+			kfree_skb(skb);
+			continue;
+		}
+
 		/* Reclaim cacheable pages. */
 		for (j = 0; j < shinfo->nr_frags; j++) {
 			struct page *page = skb_frag_page(&shinfo->frags[j]);

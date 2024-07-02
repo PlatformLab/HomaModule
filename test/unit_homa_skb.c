@@ -503,6 +503,26 @@ TEST_F(homa_skb, homa_skb_free_many_tx__basics)
 	homa_skb_free_many_tx(&self->homa, skbs, 2);
 	EXPECT_EQ(3, homa_numas[0]->page_pool.avail);
 }
+TEST_F(homa_skb, homa_skb_free_many_tx__skb_ref_count_not_one)
+{
+	struct sk_buff *skb;
+	int length;
+	struct page *page;
+
+	skb = homa_skb_new_tx(100);
+	length = HOMA_SKB_PAGE_SIZE;
+	homa_skb_extend_frags(&self->homa, skb, &length);
+	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, length);
+	page = skb_shinfo(skb)->frags[0].bv_page;
+	EXPECT_EQ(2, page_ref_count(page));
+	skb_get(skb);
+	EXPECT_EQ(2, refcount_read(&skb->users));
+
+	homa_skb_free_many_tx(&self->homa, &skb, 1);
+	EXPECT_EQ(2, page_ref_count(page));
+	EXPECT_EQ(1, refcount_read(&skb->users));
+	kfree_skb(skb);
+}
 TEST_F(homa_skb, homa_skb_free_many_tx__check_page_order)
 {
 	struct sk_buff *skb;
