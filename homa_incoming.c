@@ -99,7 +99,7 @@ void homa_gap_retry(struct homa_rpc *rpc)
 		resend.offset = htonl(gap->start);
 		resend.length = htonl(gap->end - gap->start);
 		resend.priority = rpc->hsk->homa->num_priorities - 1;
-		tt_record3("homa_retry_gaps sending RESEND for id %d, start %d, "
+		tt_record3("homa_gap_retry sending RESEND for id %d, start %d, "
 			   "end %d",
 			   rpc->id, gap->start, gap->end);
 		homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
@@ -188,6 +188,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		/* Packet is in the middle of the gap; must split the gap. */
 		gap2 = homa_gap_new(&gap->links, gap->start, start);
 		gap2->time = gap->time;
+		gap2->retry_timer_ticks = gap->retry_timer_ticks;
 		gap->start = end;
 		goto keep;
 	}

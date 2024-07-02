@@ -536,15 +536,18 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 	self->data.seg.offset = htonl(4200);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 4200));
-	EXPECT_STREQ("start 1400, end 4200, time 1000", unit_print_gaps(crpc));
+	list_first_entry(&crpc->msgin.gaps, struct homa_gap,
+			links)->retry_timer_ticks = 7;
+	EXPECT_STREQ("start 1400, end 4200, time 1000, retry ticks 7",
+			unit_print_gaps(crpc));
 
 	self->data.seg.offset = htonl(2000);
 	mock_cycles = 2000;
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2000));
 	EXPECT_EQ(3, skb_queue_len(&crpc->msgin.packets));
-	EXPECT_STREQ("start 1400, end 2000, time 1000; "
-			"start 3400, end 4200, time 1000",
+	EXPECT_STREQ("start 1400, end 2000, time 1000, retry ticks 7; "
+			"start 3400, end 4200, time 1000, retry ticks 7",
 		     	unit_print_gaps(crpc));
 }
 TEST_F(homa_incoming, homa_add_packet__scan_multiple_gaps)
