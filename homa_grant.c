@@ -298,7 +298,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_grant_update_incoming(rpc,homa);
 		homa_grantable_lock(homa, 0);
 		homa_grant_add_rpc(rpc);
-		recalc = ((homa->num_grantable_rpcs <= homa->max_overcommit)
+		recalc = ((homa->num_active_rpcs < homa->max_overcommit)
 				|| (rpc->msgin.bytes_remaining < atomic_read(
 				&homa->active_remaining[homa->max_overcommit-1])));
 		homa_rpc_unlock(rpc);
