@@ -440,7 +440,9 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  * @rpc:       RPC to check for transmittable packets. Must be locked by
  *             caller. Note: this function will release the RPC lock while
  *             passing packets through the RPC stack, then reacquire it
- *             before returning.
+ *             before returning. It is possible that the RPC gets freed
+ *             when the lock isn't held, in which case the state will
+ *             be RPC_DEAD on return.
  * @force:     True means send at least one packet, even if the NIC queue
  *             is too long. False means that zero packets may be sent, if
  *             the NIC queue is sufficiently long.
@@ -489,6 +491,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		__homa_xmit_data(skb, rpc, priority);
 		force = false;
 		homa_rpc_lock(rpc, "homa_xmit_data");
+		if (rpc->state == RPC_DEAD)
+			break;
 	}
 	atomic_dec(&rpc->msgout.active_xmits);
 }
@@ -861,6 +865,10 @@ void homa_pacer_xmit(struct homa *homa)
 				rpc->msgout.next_xmit_offset,
 				rpc->msgout.length - rpc->msgout.next_xmit_offset);
 		homa_xmit_data(rpc, true);
+
+		/* Note: rpc->state could be RPC_DEAD here, but the code
+		 * below should work anyway.
+		 */
 		if (!*rpc->msgout.next_xmit || (rpc->msgout.next_xmit_offset
 				>= rpc->msgout.granted)) {
 			/* Nothing more to transmit from this message (right now),

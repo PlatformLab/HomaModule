@@ -216,6 +216,10 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
  * packet buffers to buffers in user space.
  * @rpc:     RPC for which data should be copied. Must be locked by caller.
  * Return:   Zero for success or a negative errno if there is an error.
+ *           It is possible for the RPC to be freed while this function
+ *           executes (it releases and reacquires the RPC lock). If that
+ *           happens, -EINVAL will be returned and the state of @rpc
+ *           will be RPC_DEAD.
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
 {
@@ -327,6 +331,8 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_copy_to_user");
 		atomic_andnot(APP_NEEDS_LOCK|RPC_COPYING_TO_USER, &rpc->flags);
+		if (rpc->state == RPC_DEAD)
+			error = -EINVAL;
 		if (error)
 			break;
 	}

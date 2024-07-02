@@ -15,6 +15,7 @@
 struct homa_rpc *hook_rpc = NULL;
 struct homa_sock *hook_hsk = NULL;
 int delete_count = 0;
+int lock_delete_count = 0;
 int hook_granted = 0;
 void handoff_hook(char *id)
 {
@@ -70,7 +71,7 @@ void handoff_hook3(char *id)
 	homa_rpc_free(hook_rpc);
 }
 
-/* The following hook function deletes an RPC. */
+/* The following hook function frees an RPC. */
 void delete_hook(char *id)
 {
 	if (strcmp(id, "schedule") != 0)
@@ -79,6 +80,18 @@ void delete_hook(char *id)
 		homa_rpc_free(hook_rpc);
 	}
 	delete_count--;
+}
+
+/* The following hook function frees an RPC when it is locked. */
+void lock_delete_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (lock_delete_count == 0)
+	{
+		homa_rpc_free(hook_rpc);
+	}
+	lock_delete_count--;
 }
 
 /* The following function is used via unit_hook to delete an RPC after it
@@ -159,6 +172,7 @@ FIXTURE_SETUP(homa_incoming)
 				.ack = {0, 0, 0}}};
 	unit_log_clear();
 	delete_count = 0;
+	lock_delete_count = 0;
 }
 FIXTURE_TEARDOWN(homa_incoming)
 {
@@ -755,6 +769,27 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_skb_copy_datagram_iter)
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
+}
+TEST_F(homa_incoming, homa_copy_to_user__rpc_freed)
+{
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 4000);
+	ASSERT_NE(NULL, crpc);
+	self->data.message_length = htonl(4000);
+	self->data.seg.offset = htonl(1400);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			1400, 101000), crpc);
+
+	unit_log_clear();
+	mock_copy_to_user_dont_copy = -1;
+	unit_hook_register(lock_delete_hook);
+	hook_rpc = crpc;
+	EXPECT_EQ(EINVAL, -homa_copy_to_user(crpc));
+	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
 TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)

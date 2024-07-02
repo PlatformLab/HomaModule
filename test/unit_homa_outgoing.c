@@ -18,6 +18,17 @@ static void unlock_hook(char *id)
 	homa_rpc_free(hook_rpc);
 }
 
+/* The following hook function frees an RPC when it is locked. */
+void lock_free_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_rpc) {
+		homa_rpc_free(hook_rpc);
+		hook_rpc = NULL;
+	}
+}
+
 FIXTURE(homa_outgoing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -622,6 +633,22 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 6000, 1000);
+	crpc->msgout.unscheduled = 2000;
+	crpc->msgout.granted = 5000;
+
+	unit_log_clear();
+	unit_hook_register(lock_free_hook);
+	hook_rpc = crpc;
+	homa_xmit_data(crpc, false);
+	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_free invoked",
+			unit_log_get());
+	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
 }
 
 TEST_F(homa_outgoing, __homa_xmit_data__update_cutoff_version)

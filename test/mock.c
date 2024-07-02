@@ -907,6 +907,7 @@ void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 
 int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 {
+	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_spin_lock_held))
 		return 0;
 	mock_active_locks++;
