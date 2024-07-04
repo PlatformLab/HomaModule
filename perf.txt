@@ -2,6 +2,24 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+54. (June 2024): New sk_buff allocation mechanism. Up until now, Homa
+    allocated an entire tx sk_buff with alloc_skb: both the packet header
+    and the packet data were allocated in the head. However, this resulted
+    in high overheads for sk_buff allocation. Introduced a new mechanism
+    (in homa_skb.c) for tx sk_buffs, where only the packet header is in the
+    head. The data for data packets is allocated using frags and high-order
+    pages (currently 64 KB). In addition, when sk_buffs are freed, Homa
+    saves the pages in pools (one per NUMA node) to eliminate the overhead
+    of page allocation. Here are before/after measurements taken with the
+    W4 workload on a 9-node c6525-100g cluster:
+                                      Before        After
+    Avg. time to allocate sk_buff     7-9 us        0.85 us
+    Cores spent in sk_buff alloc      3.6-4.5       0.4-0.5
+    Cores spent in kfree_skb          1.1-1.3       0.3-0.4
+    Goodput/core                      5.9-7.2 Gbps  8.4-10 Gbps
+    Time to allocate page                           12 us
+    Cores spent allocating pages                    0.04-0.08
+
 53. (May 2024) Strange NIC behavior (observed with Mellanox ConnectX5 NICs
     on the c6525-100g CloudLab cluster, using W4 with offerred load 80 Gbps
     and actual throughput more like 60 Gbps).
