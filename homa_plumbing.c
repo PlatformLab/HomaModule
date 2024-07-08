@@ -374,13 +374,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "ooo_window_usecs",
-		.data		= &homa_data.ooo_window_usecs,
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "pacer_fifo_fraction",
 		.data		= &homa_data.pacer_fifo_fraction,
 		.maxlen		= sizeof(int),

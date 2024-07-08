@@ -1,9 +1,23 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Try switching to alloc_skb_fclone?
+* homa_grant_recalc is being invoked a *lot* and it takes a lot of time each
+  call (13 usec/call, duty cycle > 100%):
+  * Does it need to relock every ranked RPC every call?
+  * About 25% of calls are failed attempts to promote an unranked RPC
+    (perhaps because the slots for its host are all taken?)
+  * Could it abort early if there is no incoming headroom?
+
+* Notes on hijacking TCP:
+  * inet_offloads[protocol] contains pointters to struct net_offload
+  * The protocol in outgoing packets is set from sk->sk_protocol
+  * If change the value of sk->sk_protocol to TCP, will this cause
+    problems? Where is this value used, other than setting an IP header field?
+
 * Loose ends from experiment ending 4/29/2024:
   * traces/100g and traces/100g2 both show significant qdisc queueing,
-    and the system appears to have difficulty clearing the queues (it
+    and the system appears to have difficulty clearing the09 queues (it
     takes a very long time).
   * Looked into packet drops:
     * The switch is not reporting any packet drops.
@@ -12,8 +26,6 @@ Notes for Homa implementation in Linux:
     to help; see traces/100g4.
 
 * Experiments to try with c6525-100g cluster:
-  * Recompile with new timetrace for napi freeing that includes message
-    length, update tthoma.
   * For packets that seem to be experiencing long times in the NIC,
     see if perhaps the NIC doorbell isn't getting rung.
   * Check whether Homa may be exceeding max_incoming
@@ -63,7 +75,7 @@ Notes for Homa implementation in Linux:
   W3 has way more active outgoing messages than W4.
 
 * When requesting ACKs, must eventually give up and delete RPC.
-* Eliminate msgin.scheduled: just compute when needed.
+* Eliminate msgin.scheduled: just compute when needed?
 * Replace msgin.bytes_remaining with bytes_received?
 * Include the GSO packet size in the initial packet, so the receiver
   can predict how much grants will get rounded up.
@@ -74,18 +86,12 @@ Notes for Homa implementation in Linux:
   * amd272 had a problem where all xmits from core 47 incurred a 1-2 ms
     delay; power-cycling it fixed the problem.
 
-* TODO list for Homa based on the 9/22-10/6 experiment:
-  * Rework the retransmission mechanism. Instead being entirely time-based,
-    detect missing packets at the front of in msgin->packets to retry
-    more aggressively. Also, perhaps keep copying data even when there
-    is a missing packet?
-
 * Notes on performance data from buffer benchmarking 8/2023:
   * Restricting buffer space ("buffers"):
     * Homa W5: unrestricted usage 3.8 MB/20 nodes
       Performance degrades significantly below 80% of this (3 MB/20 nodes)
       Homa still has better performance than DCTCP down to 1.9 MB
-    * DCTCP W5: unrestrcited usage 5.8 MB/20 nodes
+    * DCTCP W5: unrestricted usage 5.8 MB/20 nodes
       Performance degrades significantly below 25% of this (1.4 MB/20 nodes)
     * TCP W5: unrestricted usage 13.1 MB/20 nodes (all available space)
       Performance degrades significantly below 80% of this (10.5 MB/20 nodes)

@@ -330,10 +330,6 @@ const char *unit_print_gaps(struct homa_rpc *rpc)
 		if (gap->time != 0)
 			used += snprintf(buffer + used, sizeof(buffer) - used,
 					 ", time %llu", gap->time);
-		if (gap->retry_timer_ticks != 0)
-			used += snprintf(buffer + used, sizeof(buffer) - used,
-					 ", retry ticks %d",
-					 gap->retry_timer_ticks);
 	}
 	return buffer;
 }

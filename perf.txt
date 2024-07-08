@@ -2,6 +2,16 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+55. (June/July 2024): Reworked retry mechanism to retry more agressively.
+    Introduced ooo_window_usecs sysctl parameter with an initial value of
+    100 us; retry gaps once they reach this age. However, this increased the
+    number of resent packets by 20x and reduced throughput as well.
+    Hypothesis: many packets suffer quite long delays but eventually get
+    through; with fast retries, these get resent unnecessarily. Tried
+    increasing the value of ooo_window_usecs, and this helped a bit, but
+    performance is best if retries only happen when homa_timer hits its
+    resend_ticks value. So, backed out support for ooo_window_usecs.
+
 54. (June 2024): New sk_buff allocation mechanism. Up until now, Homa
     allocated an entire tx sk_buff with alloc_skb: both the packet header
     and the packet data were allocated in the head. However, this resulted

@@ -229,49 +229,22 @@ TEST_F(homa_incoming, homa_message_in_init__update_metrics)
 	EXPECT_EQ(1900000, homa_cores[cpu_number]->metrics.large_msg_bytes);
 }
 
-TEST_F(homa_incoming, homa_gap_retry__basics)
+TEST_F(homa_incoming, homa_gap_retry)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
-	struct homa_gap *gap1 = homa_gap_new(&srpc->msgin.gaps, 1000, 2000);
-	struct homa_gap *gap2 = homa_gap_new(&srpc->msgin.gaps, 4000, 6000);
-	struct homa_gap *gap3 = homa_gap_new(&srpc->msgin.gaps, 7000, 8000);
+	homa_gap_new(&srpc->msgin.gaps, 1000, 2000);
+	homa_gap_new(&srpc->msgin.gaps, 4000, 6000);
+	homa_gap_new(&srpc->msgin.gaps, 7000, 8000);
 	self->homa.num_priorities = 8;
-	self->homa.ooo_window_cycles = 1000;
-	self->homa.timer_ticks = 7;
-	mock_cycles = 2000;
-	gap1->time = 1000;
-	gap2->time = 1001;
-	gap3->time = 999;
 	unit_log_clear();
 
 	homa_gap_retry(srpc);
-	EXPECT_STREQ("xmit RESEND 1000-1999@7; xmit RESEND 7000-7999@7",
-			unit_log_get());
-	EXPECT_EQ(7, gap1->retry_timer_ticks);
-	EXPECT_EQ(0, gap2->retry_timer_ticks);
-	EXPECT_EQ(7, gap3->retry_timer_ticks);
-}
-TEST_F(homa_incoming, homa_gap_retry__secondary_resends)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 10000, 100);
-	struct homa_gap *gap1 = homa_gap_new(&srpc->msgin.gaps, 1000, 2000);
-	struct homa_gap *gap2 = homa_gap_new(&srpc->msgin.gaps, 4000, 6000);
-	mock_cycles = 2000;
-	self->homa.ooo_window_cycles = 1000;
-	self->homa.resend_interval = 5;
-	self->homa.timer_ticks = 7;
-	gap1->retry_timer_ticks = 4;
-	gap2->retry_timer_ticks = 2;
-	unit_log_clear();
-
-	homa_gap_retry(srpc);
-	EXPECT_STREQ("xmit RESEND 4000-5999@0", unit_log_get());
-	EXPECT_EQ(4, gap1->retry_timer_ticks);
-	EXPECT_EQ(7, gap2->retry_timer_ticks);
+	EXPECT_STREQ("xmit RESEND 1000-1999@7; "
+			"xmit RESEND 4000-5999@7; "
+			"xmit RESEND 7000-7999@7",
+		     	unit_log_get());
 }
 
 TEST_F(homa_incoming, homa_add_packet__basics)
@@ -550,9 +523,7 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 	self->data.seg.offset = htonl(4200);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 4200));
-	list_first_entry(&crpc->msgin.gaps, struct homa_gap,
-			links)->retry_timer_ticks = 7;
-	EXPECT_STREQ("start 1400, end 4200, time 1000, retry ticks 7",
+	EXPECT_STREQ("start 1400, end 4200, time 1000",
 			unit_print_gaps(crpc));
 
 	self->data.seg.offset = htonl(2000);
@@ -560,8 +531,8 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2000));
 	EXPECT_EQ(3, skb_queue_len(&crpc->msgin.packets));
-	EXPECT_STREQ("start 1400, end 2000, time 1000, retry ticks 7; "
-			"start 3400, end 4200, time 1000, retry ticks 7",
+	EXPECT_STREQ("start 1400, end 2000, time 1000; "
+			"start 3400, end 4200, time 1000",
 		     	unit_print_gaps(crpc));
 }
 TEST_F(homa_incoming, homa_add_packet__scan_multiple_gaps)
@@ -1090,20 +1061,6 @@ TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_grant_check_rpc)
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
 	EXPECT_SUBSTR("id 1235", unit_log_get());
-}
-TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_gap_retry)
-{
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_RCVD_ONE_PKT,
-			self->client_ip, self->server_ip, self->client_port,
-			self->server_id, 10000, 5000);
-	ASSERT_NE(NULL, srpc);
-	homa_gap_new(&srpc->msgin.gaps, 4000, 5000);
-	self->homa.ooo_window_cycles = 500;
-	mock_cycles = 1000;
-	unit_log_clear();
-	homa_dispatch_pkts(mock_skb_new(self->client_ip, &self->data.common,
-			0, 0), &self->homa);
-	EXPECT_SUBSTR("xmit RESEND 4000-4999@0", unit_log_get());
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 {

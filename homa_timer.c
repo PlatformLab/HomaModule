@@ -43,7 +43,6 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->state == RPC_INCOMING) {
-		homa_gap_retry(rpc);
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
 			>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
@@ -111,8 +110,11 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		resend.offset = htonl(0);
 		resend.length = htonl(100);
 	} else {
+		homa_gap_retry(rpc);
 		resend.offset = htonl(rpc->msgin.recv_end);
 		resend.length = htonl(rpc->msgin.granted - rpc->msgin.recv_end);
+		if (resend.length == 0)
+			return;
 	}
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
@@ -161,7 +163,8 @@ void homa_timer(struct homa *homa)
 	int rpc_count = 0;
 	int total_rpcs = 0;
 	int total_incoming_rpcs = 0;
-	int total_incoming_bytes = 0;
+	int sum_incoming = 0;
+	int sum_incoming_rec = 0;
 	static __u64 prev_grant_count = 0;
 	static int zero_count = 0;
 	int core;
@@ -176,10 +179,12 @@ void homa_timer(struct homa *homa)
 		total_grants += m->packets_sent[GRANT-DATA];
 	}
 
-	tt_record3("homa_timer found total_incoming %d, num_grantable_rpcs %d, "
-			"new grants %d",
-			atomic_read(&homa->total_incoming),
-			homa->num_grantable_rpcs, total_grants - prev_grant_count);
+	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, "
+		   "num_active_rpcs %d, new grants %d",
+		   atomic_read(&homa->total_incoming),
+		   homa->num_grantable_rpcs,
+		   homa->num_active_rpcs,
+		   total_grants - prev_grant_count);
 	if ((total_grants == prev_grant_count)
 			&& (homa->num_grantable_rpcs > 20)) {
 		zero_count++;
@@ -224,8 +229,11 @@ void homa_timer(struct homa *homa)
 				homa_rpc_unlock(rpc);
 				continue;
 			} else if (rpc->state == RPC_INCOMING) {
-				total_incoming_rpcs++;
-				total_incoming_bytes += rpc->msgin.length;
+				total_incoming_rpcs += 1;
+				sum_incoming_rec += rpc->msgin.rec_incoming;
+				sum_incoming += rpc->msgin.granted
+						- (rpc->msgin.length
+						- rpc->msgin.bytes_remaining);
 			}
 			rpc->silent_ticks++;
 			homa_check_rpc(rpc);
@@ -245,6 +253,10 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
+	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, "
+			"rec_sum %d, homa->total_incoming %d",
+			total_incoming_rpcs, sum_incoming, sum_incoming_rec,
+			atomic_read(&homa->total_incoming));
 
 //	if (total_rpcs > 0)
 //		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);

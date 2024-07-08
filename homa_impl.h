@@ -661,15 +661,9 @@ struct homa_gap {
 
 	/**
 	 * @time: time (in get_cycles units) when the gap was first detected.
+	 * As of 7/2024 this isn't used for anything.
 	 */
 	__u64 time;
-
-	/**
-	 * @retry_timer_ticks: the value of homa->timer_ticks the last time
-	 * a resend was issued for this gap, or 0 if no resend has been
-	 * issued.
-	 */
-	int retry_timer_ticks;
 
 	/** @links: for linking into list in homa_message_in. */
 	struct list_head links;
@@ -2035,20 +2029,6 @@ struct homa {
 	 * responded after this many RESENDs have been sent to it.
 	 */
 	int timeout_resends;
-
-	/**
-	 * ooo_window_usecs: Out-of-order window, in microseconds. A resend
-	 * request will be sent for a packet if it has not been received
-	 * within this much time after receipt of a later packet. Set
-	 * externally via sysctl.
-	 * */
-	int ooo_window_usecs;
-
-	/**
-	 * @ooo_window_cycles: Same as ooo_window_usecs, except in
-	 * get_cycles() units.
-	 */
-	int ooo_window_cycles;
 
 	/**
 	 * @request_ack_ticks: How many timer ticks we'll wait for the

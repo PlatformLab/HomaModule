@@ -77,19 +77,6 @@ TEST_F(homa_timer, homa_check_rpc__request_ack)
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
 }
-TEST_F(homa_timer, homa_check_rpc__call_gap_retry_for_incoming)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 100, 5000);
-	ASSERT_NE(NULL, crpc);
-	homa_gap_new(&crpc->msgin.gaps, 1000, 2000);
-	self->homa.ooo_window_cycles = 500;
-	mock_cycles = 1000;
-	unit_log_clear();
-	homa_check_rpc(crpc);
-	EXPECT_STREQ("xmit RESEND 1000-1999@7", unit_log_get());
-}
 TEST_F(homa_timer, homa_check_rpc__all_granted_bytes_received)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -212,6 +199,24 @@ TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 	unit_log_clear();
 	homa_check_rpc(crpc);
 	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
+}
+TEST_F(homa_timer, homa_check_rpc__call_homa_gap_retry)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 200, 20000);
+	ASSERT_NE(NULL, crpc);
+	crpc->silent_ticks = 3;
+	crpc->msgin.granted = 10000;
+	crpc->msgin.recv_end = 10000;
+	crpc->msgin.bytes_remaining = 15000;
+	homa_gap_new(&crpc->msgin.gaps, 7000, 8000);
+	self->homa.resend_ticks = 3;
+	self->homa.resend_interval = 2;
+
+	unit_log_clear();
+	homa_check_rpc(crpc);
+	EXPECT_STREQ("xmit RESEND 7000-7999@7", unit_log_get());
 }
 
 TEST_F(homa_timer, homa_timer__basics)

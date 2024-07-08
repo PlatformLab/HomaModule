@@ -65,37 +65,22 @@ struct homa_gap * homa_gap_new(struct list_head *next, int start, int end)
 	gap->start = start;
 	gap->end = end;
 	gap->time = get_cycles();
-	gap->retry_timer_ticks = 0;
-	list_add_tail(& gap-> links, next);
+	list_add_tail(&gap->links, next);
 	return gap;
 }
 
 /**
- * homa_gap_retry() - Scan all of the gaps for an incoming message and
- * send RESEND requests for any whose @retry_ticks time has passed.
+ * homa_gap_retry() - Send RESEND requests for all of the unreceived
+ * gaps in a message.
  * @rpc:     RPC to check; must be locked by caller.
  */
 void homa_gap_retry(struct homa_rpc *rpc)
 {
-	struct homa *homa = rpc->hsk->homa;
 	struct homa_gap *gap;
-	__u64 now = get_cycles();
 	struct resend_header resend;
-	int i = 0;
 
 	list_for_each_entry(gap, &rpc->msgin.gaps, links)
 	{
-		/* Note: the first retry for a gap is fast (ooo_window_cycles),
-		 * but subsequent ones are slower (resend_interval).
-		 */
-		i++;
-		if (now < (gap->time + homa->ooo_window_cycles))
-			continue;
-		if ((gap->retry_timer_ticks != 0) &&
-				((homa->timer_ticks - gap->retry_timer_ticks)
-				< homa->resend_interval))
-			continue;
-		gap->retry_timer_ticks = homa->timer_ticks;
 		resend.offset = htonl(gap->start);
 		resend.length = htonl(gap->end - gap->start);
 		resend.priority = rpc->hsk->homa->num_priorities - 1;
@@ -188,7 +173,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		/* Packet is in the middle of the gap; must split the gap. */
 		gap2 = homa_gap_new(&gap->links, gap->start, start);
 		gap2->time = gap->time;
-		gap2->retry_timer_ticks = gap->retry_timer_ticks;
 		gap->start = end;
 		goto keep;
 	}
@@ -524,11 +508,8 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 		discard:
 		kfree_skb(skb);
 	}
-	if (rpc != NULL) {
-		if (rpc->state == RPC_INCOMING)
-			homa_gap_retry(rpc);
+	if (rpc != NULL)
 		homa_grant_check_rpc(rpc);
-	}
 
 	while (num_acks > 0) {
 		num_acks--;
@@ -832,8 +813,9 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 */
 	if ((rpc != NULL) && ((rpc->state != RPC_INCOMING)
 			|| rpc->msgin.bytes_remaining)) {
-		tt_record1("NEED_ACK arrived for id %d before message received",
-				rpc->id);
+		tt_record3("NEED_ACK arrived for id %d before message "
+				"received, state %d, remaining %d",
+				rpc->id, rpc->state, rpc->msgin.bytes_remaining);
 		homa_freeze(rpc, NEED_ACK_MISSING_DATA,
 				"Freezing because NEED_ACK received before "
 				"message complete, id %d, peer 0x%x");
@@ -1549,8 +1531,4 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	tmp = homa->bpage_lease_usecs;
 	tmp = (tmp*cpu_khz)/1000;
 	homa->bpage_lease_cycles = tmp;
-
-	tmp = homa->ooo_window_usecs;
-	tmp = (tmp * cpu_khz) / 1000;
-	homa->ooo_window_cycles = tmp;
 }
