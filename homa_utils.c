@@ -1908,6 +1908,10 @@ char *homa_print_metrics(struct homa *homa)
 				"Number of calls to homa_grant_recalc\n",
 				m->grant_recalc_calls);
 		homa_append_metric(homa,
+				"grant_recalc_cycles       %15llu  "
+				"Time spent in homa_grant_recalc\n",
+				m->grant_recalc_cycles);
+		homa_append_metric(homa,
 				"grant_recalc_skips        %15llu  "
 				"Number of times homa_grant_recalc skipped "
 				"redundant work\n",

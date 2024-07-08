@@ -369,6 +369,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 void homa_grant_recalc(struct homa *homa, int locked)
 {
 	int i, active, try_again;
+	__u64 start;
 
 	/* The tricky part of this method is that we need to release
 	 * homa->grantable_lock before actually sending grants, because
@@ -387,6 +388,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			return;
 		}
 	}
+	start = get_cycles();
 
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
@@ -473,6 +475,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			break;
 		}
 	}
+	INC_METRIC(grant_recalc_cycles, get_cycles() - start);
 }
 
 /**

@@ -423,7 +423,7 @@ if elapsed_secs != 0:
                 /(total_cores_used * elapsed_secs)))
     if deltas["pacer_cycles"] != 0:
         pacer_secs = float(deltas["pacer_cycles"])/(cpu_khz * 1000.0)
-        print("Pacer throughput:     %5.2f  Gbps (pacer output when pacer running)" % (
+        print("Pacer throughput:    %6.2f  Gbps (pacer output when pacer running)" % (
                 deltas["pacer_bytes"]*8e-09/pacer_secs))
     if deltas["throttled_cycles"] != 0:
         throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
@@ -434,9 +434,13 @@ if elapsed_secs != 0:
                 float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
     if deltas["skb_page_allocs"] != 0:
-        print("Skb page alloc time:   %4.2f  usec/skb" % (
+        print("Skb page alloc time:  %5.2f  usec/skb" % (
                 float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_page_allocs"]))
+    if deltas["grant_recalc_calls"] != 0:
+        print("homa_grant_recalc:    %5.2f  usec/call" % (
+                float(deltas["grant_recalc_cycles"]) / (cpu_khz / 1000.0) /
+                deltas["grant_recalc_calls"]))
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")

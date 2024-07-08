@@ -2780,6 +2780,12 @@ struct homa_metrics {
 	__u64 grant_recalc_calls;
 
 	/**
+	 * @grant_recalc_cycles: total time spent in homa_grant_recalc,
+	 * in get_cycles() units.
+	 */
+	__u64 grant_recalc_cycles;
+
+	/**
 	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
 	 * has looped back to recalculate again.
 	 */

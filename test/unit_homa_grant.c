@@ -718,6 +718,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 	rpc4 = test_rpc(self, 106, self->server_ip+1, 35000);
 	self->homa.max_incoming = 100000;
 	self->homa.max_overcommit = 3;
+	mock_cycles = ~0;
 
 	unit_log_clear();
 	homa_grant_recalc(&self->homa, 0);
@@ -738,6 +739,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 
 	EXPECT_EQ(2, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(-1, atomic_read(&rpc4->msgin.rank));
+	EXPECT_NE(0, homa_cores[cpu_number]->metrics.grant_recalc_cycles);
 }
 TEST_F(homa_grant, homa_grant_recalc__already_locked)
 {
