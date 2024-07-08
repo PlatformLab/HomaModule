@@ -1743,7 +1743,7 @@ struct homa {
 
 	/**
 	 * @active_rpcs: pointers to all of the RPCs that we will grant to
-	 * right now.
+	 * right now. Slot 0 is highest priority.
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 
@@ -3580,6 +3580,7 @@ extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
 extern void     homa_grant_check_rpc(struct homa_rpc *rpc);
 extern void     homa_grant_find_oldest(struct homa *homa);
 extern void     homa_grant_free_rpc(struct homa_rpc *rpc);
+extern void     homa_grant_log_tt(struct homa *homa);
 extern int      homa_grant_outranks(struct homa_rpc *rpc1,
 		    struct homa_rpc *rpc2);
 extern int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,

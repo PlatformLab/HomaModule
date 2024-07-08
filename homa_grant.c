@@ -41,7 +41,7 @@ int inline homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
  */
 int inline homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa) {
 	int incoming = rpc->msgin.granted - (rpc->msgin.length
-		- rpc->msgin.bytes_remaining);
+			- rpc->msgin.bytes_remaining);
 	if (incoming < 0)
 		incoming = 0;
 	if (incoming != rpc->msgin.rec_incoming) {
@@ -277,7 +277,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int rank, recalc;
 
-	tt_record1("homa_grant_check_rpc starting for id %d", rpc->id);
 
 	if ((rpc->msgin.length < 0) || (rpc->state == RPC_DEAD)
 			|| (rpc->msgin.num_bpages <= 0)) {
@@ -290,6 +289,10 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_rpc_unlock(rpc);
 		return;
 	}
+
+	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, "
+			"recv_end %d, length %d", rpc->id, rpc->msgin.granted,
+			rpc->msgin.recv_end, rpc->msgin.length);
 
 	/* This message requires grants; if it is a new message, set up
 	 * granting.
@@ -655,4 +658,23 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 	INC_METRIC(grantable_lock_misses, 1);
 	INC_METRIC(grantable_lock_miss_cycles, get_cycles() - start);
 	return result;
+}
+
+/**
+ * homa_grant_log_tt() - Generate timetrace records describing all of
+ * the active RPCs (those we are currently granting to).
+ */
+void homa_grant_log_tt(struct homa *homa)
+{
+	int i;
+
+	homa_grantable_lock(homa, 0);
+	tt_record1("homa_grant_log_tt found %d active RPCs:",
+			homa->num_active_rpcs);
+	for (i = 0; i < homa->num_active_rpcs; i++) {
+		tt_record2("active_rpcs[%d]: id %d", i,
+				homa->active_rpcs[i]->id);
+		homa_rpc_log_tt(homa->active_rpcs[i]);
+	}
+	homa_grantable_unlock(homa);
 }

@@ -916,6 +916,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 	struct homa_rpc *rpc;
 	int count = 0;
 
+	homa_grant_log_tt(homa);
 	tt_record("Logging active Homa RPCs:");
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
@@ -945,7 +946,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
-	tt_record1("Finished logging %d active Homa RPCs", count);
+	tt_record1("Finished logging (%d active Homa RPCs)", count);
 }
 
 /**
@@ -1332,6 +1333,7 @@ void homa_freeze_peers(struct homa *homa)
 	freeze.common.dport = 0;
 	freeze.common.sender_id = 0;
 	for (i = 0; i < num_peers; i++) {
+		tt_record1("Sending freeze to 0x%x", tt_addr(peers[i]->addr));
 		err = __homa_xmit_control(&freeze, sizeof(freeze), peers[i], hsk);
 		if (err != 0)
 			printk(KERN_NOTICE "homa_freeze_peers got error %d "
