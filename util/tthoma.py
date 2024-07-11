@@ -81,7 +81,6 @@ import time
 # granted:           # of bytes granted for the incoming message
 # sent:              # of bytes that have been sent for the outgoing message
 #                    as of the end of the trace
-#
 rpcs = {}
 
 # Largest amount of unscheduled data seen any message; set by AnalyzeRpcs.
@@ -708,18 +707,12 @@ class Dispatcher:
         # Values are the corresponding objects.
         self.analyzers = {}
 
-        # Keys are pattern names, values are lists of objects interested in
-        # that pattern.
+        # Pattern name -> list of objects interested in that pattern.
         self.interests = {}
 
         # List of objects with tt_all methods, which will be invoked for
         # every record.
         self.all_interests= []
-
-        # List (in same order as patterns) of all patterns that appear in
-        # interests. Created lazily by parse, can be set to None to force
-        # regeneration.
-        self.active = []
 
         # Pattern prefix -> list of patterns with that prefix. All of the
         # keys have the same length, given by self.prefix_length. Entries
@@ -800,7 +793,6 @@ class Dispatcher:
                 found_pattern = True
                 if not name in self.interests:
                     self.interests[name] = []
-                    self.active = None
                 self.interests[name].append(obj)
                 break
             if not name in self.interests:
@@ -816,7 +808,6 @@ class Dispatcher:
 
         global traces
         start_ns = time.time_ns()
-        self.__build_active()
         self.__build_parse_table()
         prefix_matcher = re.compile(' *([-0-9.]+) us .* \[C([0-9]+)\] (.*)')
 
@@ -886,7 +877,7 @@ class Dispatcher:
             return
         self.parse_table = defaultdict(list)
 
-        # Pass 1: cirst compute self.prefix_length and set the 'parser'
+        # Pass 1: first compute self.prefix_length and set the 'parser'
         # and 'cregexp' elements of pattern entries.
         self.prefix_length = 1000
         for pattern in self.patterns:
@@ -908,25 +899,9 @@ class Dispatcher:
                 prefix = pattern['regexp'][0:self.prefix_length]
                 self.parse_table[prefix].append(pattern)
 
-    def __build_active(self):
-        """
-        Build the list of patterns that must be matched against the trace file.
-        Also, fill in the 'parser' element for each pattern.
-        """
-
-        if self.active:
-            return
-        self.active = []
-        for pattern in self.patterns:
-            pattern['parser'] = getattr(self, '_Dispatcher__' + pattern['name'])
-            pattern['cregexp'] = re.compile(pattern['regexp'])
-            if pattern['name'] in self.interests:
-                self.active.append(pattern)
-
     # Each entry in this list represents one pattern that can be matched
-    # against the lines of timetrace files. For efficiency, the patterns
-    # most likely to match should be at the front of the list. Each pattern
-    # is a dictionary containing the following elements:
+    # against the lines of timetrace files. Each pattern is a dictionary
+    # containing the following elements:
     # name:       Name for this pattern. Used for auto-configuration (e.g.
     #             methods named tt_<name> are invoked to handle matching
     #             lines).
