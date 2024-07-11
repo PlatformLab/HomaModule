@@ -737,6 +737,9 @@ class Dispatcher:
         # files (whether they matched or not)
         self.regex_tries = 0
 
+        for pattern in self.patterns:
+            pattern['matches'] = 0
+
     def get_analyzer(self, name):
         """
         Return the analyzer object associated with name, or None if
@@ -847,6 +850,7 @@ class Dispatcher:
                     self.regex_tries += 1
                     match = pattern['cregexp'].match(msg)
                     if match:
+                        pattern['matches'] += 1
                         pattern['parser'](trace, t, core, match,
                                 self.interests[pattern['name']])
                         break
@@ -855,6 +859,26 @@ class Dispatcher:
         f.close()
         trace['elapsed_time'] = trace['last_time'] - trace['first_time']
         self.parse_ns += time.time_ns() - start_ns;
+
+    def print_no_matches(self):
+        """
+        Print out information about patterns that didn't match any lines
+        in any trace file.
+        """
+        no_matches = []
+        for patterns in self.parse_table.values():
+            for pattern in patterns:
+                if pattern['matches'] > 0:
+                    continue
+                no_matches.append(pattern)
+        if no_matches:
+            print('No lines matched the following patterns:', file=sys.stderr)
+            for pattern in no_matches:
+                print_string = pattern['regexp']
+                match = re.search('[()[\].+*?\\^${}]', print_string)
+                if match:
+                    print_string = print_string[:match.start()]
+                print('  %s...' % (print_string), file=sys.stderr)
 
     def print_stats(self):
         """
@@ -4935,10 +4959,6 @@ class AnalyzePackets:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
 
-        # Used to detect when the trace contains no mlx data records
-        # (probably Homa's timetrace wasn't configured properly).
-        self.mlx_data_pkts = 0
-
         # RPC id -> dictionary with one entry for each grant offset
         # observed for the RPC. The value will (eventually) be the
         # number of incremental bytes in the grant for this offset.
@@ -4973,7 +4993,6 @@ class AnalyzePackets:
 
     def tt_mlx_data(self, trace, t, core, peer, id, offset):
         global packets
-        self.mlx_data_pkts += 1
         p = packets[pkt_id(id, offset)]
         if not 'retransmits' in p:
             p['nic'] = t
@@ -5082,11 +5101,6 @@ class AnalyzePackets:
         """
         global packets, rpcs, grants
         sync_error_printed = False
-
-        if self.mlx_data_pkts == 0:
-            print('No \'mlx sent homa data packet\' records in timetraces; '
-                    'perhaps Homa wasn\'t\nconfigured correctly?',
-                    file=sys.stderr)
 
         missing_rpc = {'send_data': []}
         new_pkts = []
@@ -7218,6 +7232,8 @@ for name in options.analyzers.split():
 # Parse the timetrace files; this will invoke handlers in the analyzers.
 for file in tt_files:
     d.parse(file)
+
+d.print_no_matches()
 
 if options.verbose:
     d.print_stats()
