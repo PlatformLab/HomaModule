@@ -166,7 +166,13 @@ recv_offsets = {}
 # offset:       Offset specified in the grant
 # increment:    How much previously ungranted data is covered by this grant;
 #               0 if the traces don't contain info about the previous grant
-grants = defaultdict(dict)
+class GrantDict(dict):
+    def __missing__(self, key):
+        id_str, offset_str = key.split(':')
+        self[key] = {'id': int(id_str), 'offset': int(offset_str),
+                'increment': 0}
+        return self[key]
+grants = GrantDict()
 
 # Node -> list of intervals for that node. Created by the intervals analyzer.
 # Each interval contains information about a particular time range, including
@@ -997,12 +1003,16 @@ class Dispatcher:
     def __softirq_grant(self, trace, time, core, match, interests):
         id = int(match.group(1))
         offset = int(match.group(2))
+        priority = int(match.group(3))
+        increment = int(match.group(4))
         for interest in interests:
-            interest.tt_softirq_grant(trace, time, core, id, offset)
+            interest.tt_softirq_grant(trace, time, core, id, offset, priority,
+                    increment)
 
     patterns.append({
         'name': 'softirq_grant',
-        'regexp': 'processing grant for id ([0-9]+), offset ([0-9]+)'
+        'regexp': 'processing grant for id ([0-9]+), offset ([0-9]+), '
+                'priority ([0-9]+), increment ([0-9]+)'
     })
 
     def __ip_xmit(self, trace, time, core, match, interests):
@@ -2056,7 +2066,8 @@ class AnalyzeCore:
     def tt_softirq_data(self, trace, time, core, id, offset, msg_length):
         self.inc_counter(trace, time, core, 'softirq_data')
 
-    def tt_softirq_grant(self, trace, time, core, id, offset):
+    def tt_softirq_grant(self, trace, time, core, id, offset, priority,
+            increment):
         self.inc_counter(trace, time, core, 'softirq_grant')
 
     def tt_softirq_resend(self, trace, time, core, id, offset, length, prio):
@@ -3060,11 +3071,13 @@ class AnalyzeGrants:
             check_time = self.node_check_time[node] - recalc_time - grant_time
             elapsed = traces[node]['elapsed_time']
             print('%-10s %5.1f %5.2f  %5.2f ' % (node, 1000*checks/elapsed,
-                    check_time/checks, check_time/elapsed), end='')
-            print('%5.2f %5.2f  %5.2f ' % (recalcs/checks, recalc_time/recalcs,
+                    check_time/checks if checks else 0, check_time/elapsed),
+                    end='')
+            print('%5.2f %5.2f  %5.2f ' % (recalcs/checks if checks else 0,
+                    recalc_time/recalcs if recalcs else 0,
                     recalc_time/elapsed), end='')
-            print('%5.2f %5.2f  %5.2f' % (grants/checks, grant_time/grants,
-                    grant_time/elapsed))
+            print('%5.2f %5.2f  %5.2f' % (grants/checks if checks else 0,
+                    grant_time/grants if grants else 0, grant_time/elapsed))
 
     def get_events(self):
         """
@@ -4050,10 +4063,14 @@ class AnalyzeIntervals:
 
         # Extract information from grants
         for grant in grants.values():
+            print('\ngrant: %s' % (grant))
             offset = grant['offset']
             increment = grant['increment']
+            if not 'id' in grant:
+                print('bad grant: %s' % (grant))
             rx_id = grant['id']^1
             if not rx_id in rpcs:
+                print('skipping previous grant')
                 continue
 
             # rx_* refers to the RPC that received the grant and tx'ed data
@@ -4070,6 +4087,7 @@ class AnalyzeIntervals:
             if 'softirq' in grant:
                 tsoftirq = grant['softirq']
                 get_interval(rx_node, tsoftirq)['tx_new_grants'] += increment
+                print('%9.3f: softirq grant increment %d' % (tsoftirq, increment))
                 if tgro != None:
                     add_to_intervals(rx_node, tgro, tsoftirq, 'tx_grant_gro',
                             increment)
@@ -4959,13 +4977,6 @@ class AnalyzePackets:
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
 
-        # RPC id -> dictionary with one entry for each grant offset
-        # observed for the RPC. The value will (eventually) be the
-        # number of incremental bytes in the grant for this offset.
-        # Unscheduled data is included as a grant offset, with 0
-        # incremental bytes.
-        self.grant_offsets = defaultdict(dict)
-
         # offset -> Largest length that has occurred for that offset in a
         # TSO packet.  Used to compute tso_offset field if it is
         # missing
@@ -5056,44 +5067,30 @@ class AnalyzePackets:
         else:
             p['retransmits'].append(t)
 
-    def tt_unsched(self, trace, t, core, id, num_bytes):
-        self.grant_offsets[id][num_bytes] = -1
-
     def tt_send_grant(self, trace, t, core, id, offset, priority):
         global grants
         g = grants[pkt_id(id, offset)]
         g['xmit'] = t
-        g['id'] = id
-        g['offset'] = offset
         g['tx_node'] = trace['node']
-        self.grant_offsets[id][offset] = -1
 
     def tt_mlx_grant(self, trace, t, core, peer, id, offset):
         global grants
         g = grants[pkt_id(id, offset)]
         g['nic'] = t
-        g['id'] = id
-        g['offset'] = offset
         g['tx_node'] = trace['node']
-        self.grant_offsets[id][offset] = -1
 
     def tt_gro_grant(self, trace, t, core, peer, id, offset, priority):
         global grants
         g = grants[pkt_id(id^1, offset)]
         g['gro'] = t
         g['gro_core'] = core
-        g['id'] = id^1
-        g['offset']  = offset
-        self.grant_offsets[id^1][offset] = -1
 
-    def tt_softirq_grant(self, trace, t, core, id, offset):
+    def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         global grants
         g = grants[pkt_id(id^1, offset)]
         g['softirq'] = t
         g['softirq_core'] = core
-        g['id'] = id^1
-        g['offset'] = offset
-        self.grant_offsets[id^1][offset] = -1
+        g['increment'] = increment
 
     def analyze(self):
         """
@@ -5169,18 +5166,6 @@ class AnalyzePackets:
                         pkt['segments'].append(pkt2)
         for pid, pkt in new_pkts:
             packets[pid] = pkt
-
-        # Fill in the increment fields of grants. First, fill in the
-        # missing information in grant_offsets (offset of previous grant).
-        for id, rpc_offsets in self.grant_offsets.items():
-            offsets = sorted(rpc_offsets.keys())
-            prev = offsets[0]     # Unscheduled data
-            for offset in offsets:
-                rpc_offsets[offset] = offset - prev
-                prev = offset
-        for grant in grants.values():
-            grant['increment'] = self.grant_offsets[grant['id']][grant['offset']]
-
 
 #------------------------------------------------
 # Analyzer: rpcs
@@ -5363,7 +5348,7 @@ class AnalyzeRpcs:
         self.append(trace, id, t, 'softirq_data', [t, offset])
         rpcs[id]['in_length'] = length
 
-    def tt_softirq_grant(self, trace, t, core, id, offset):
+    def tt_softirq_grant(self, trace, t, core, id, offset, priority, increment):
         self.append(trace, id, t, 'softirq_grant', [t, offset])
 
     def tt_send_data(self, trace, t, core, id, offset, length):
@@ -6768,9 +6753,8 @@ class AnalyzeTxintervals:
             f.write('# GAvail:     KB of grants that have been received by '
                     'SoftIRQ but data hasn\'t\n')
             f.write('              been transmitted yet\n')
-            f.write('# GNew:       Gbps rate at which new grants were reeived '
-                    'by SoftIRQ during\n')
-            f.write('              the interval\n')
+            f.write('# GNew:       KB of new grants received by SoftIRQ '
+                    'during the interval\n')
 
             f.write('\n#   Time   Gbps  TxKB  RPCs   Reqs  Resps')
             f.write(' Pkts Qdisc NicKB NQEst InNic FreeKB')
@@ -6805,11 +6789,11 @@ class AnalyzeTxintervals:
                 max_gro_free = '%.1f' % v if v != None else ''
                 f.write(' %6s %6s %6s %6s' % (min_free, max_free, min_gro_free,
                         max_gro_free))
-                f.write(' %5.0f %5.0f  %5.0f %6.1f\n'
+                f.write(' %5.0f %5.0f  %5.0f %5.0f\n'
                         % (interval['tx_grant_xmit'] * 1e-3,
                         interval['tx_grant_gro'] * 1e-3,
                         interval['tx_grant_avl'] * 1e-3,
-                        interval['tx_new_grants'] * 8 / (options.interval * 1000)))
+                        interval['tx_new_grants'] * 1e-3))
             f.close()
             print('%-10s %6.1f Gbps' % (node, total/len(intervals[node])))
 
