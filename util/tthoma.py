@@ -57,20 +57,20 @@ import time
 # softirq_grant:     List of <time, offset> tuples for all incoming
 #                    grant packets processed by SoftIRQ
 # recvmsg_done:      Time when homa_recvmsg returned
-# rx_active:         Range of times [start, end] when the incoming message
+# rx_live:           Range of times [start, end] when the incoming message
 #                    was in the process of being received. Starts when first
 #                    packet is passed to ip*xmit, ends when home_recvmsg
-#                    returns. Missing if rx not active during trace.
+#                    returns. Missing if rx not live during trace.
 # sendmsg:           Time when homa_sendmsg was invoked
 # send_data:         List of <time, offset, length> tuples for outgoing
 #                    data packets (length is message data); time is when
 #                    packet was passed to ip*xmit.
 # send_grant:        List of <time, offset, priority> tuples for
 #                    outgoing grant packets
-# tx_active:         Range of times [start, end] when the outgoing message was
+# tx_live:           Range of times [start, end] when the outgoing message was
 #                    partially transmitted. Starts when homa_sendmsg is called,
 #                    ends when last data packet is transmitted by the NIC.
-#                    Missing if tx isn't active during the trace.
+#                    Missing if tx isn't live during the trace.
 # unsched:           # of bytes of unscheduled data in the incoming message
 # free               Time when the RPC was passed to homa_rpc_free
 #
@@ -181,10 +181,10 @@ grants = GrantDict()
 # the following fields:repo_
 # time:           Ending time of the interval (integer usecs); this time is
 #                 included in the interval
-# rpcs_active:    Number of active RPCs for which this node is the client
-# tx_active_req:  Number of outgoing request messages with unsent data as
+# rpcs_live:      Number of live RPCs for which this node is the client
+# tx_live_req:    Number of outgoing request messages with unsent data as
 #                 of the end of the interval
-# tx_active_resp: Number of outgoing response messages with unsent data as
+# tx_live_resp:   Number of outgoing response messages with unsent data as
 #                 of the end of the interval
 # tx_starts:      Number of new outgoing messages that started in the interval
 # tx_pkts:        Number of data packets passed to ip*xmit during the interval
@@ -222,7 +222,7 @@ grants = GrantDict()
 #
 # rx_starts:      Number of new incoming messages whose first packet was
 #                 transmitted by the sender in the interval
-# rx_active:      Number of incoming messages that have been partially
+# rx_live:        Number of incoming messages that have been partially
 #                 transmitted and/or received as of the end of the interval
 # rx_pkts:        Number of data packets received by GRO during the interval
 # rx_bytes:       Number of bytes of data received by GRO during the interval
@@ -238,6 +238,8 @@ grants = GrantDict()
 #                 at least 100 us ago but haven't yet been seen by GRO
 # rx_data_gro:    Number of bytes of data that have been received by GRO
 #                 but not SoftIRQ, as of the end of the interval
+# rx_new_grants:  Number of bytes of additional grants passed to ip*xmit
+#                 during the interval
 #
 # The following fields are present only if the grants analyzer is used:
 # rx_grants:      Number of incoming RPCs with outstanding grants
@@ -1046,13 +1048,15 @@ class Dispatcher:
         id = int(match.group(1))
         offset = int(match.group(2))
         priority = int(match.group(3))
+        increment = int(match.group(4))
         for interest in interests:
-            interest.tt_send_grant(trace, time, core, id, offset, priority)
+            interest.tt_send_grant(trace, time, core, id, offset, priority,
+                    increment)
 
     patterns.append({
         'name': 'send_grant',
         'regexp': 'sending grant for id ([0-9]+), offset ([0-9]+), '
-                  'priority ([0-9]+)'
+                  'priority ([0-9]+), increment ([0-9]+)'
     })
 
     def __qdisc_queue_data(self, trace, time, core, match, interests):
@@ -1446,7 +1450,7 @@ class Dispatcher:
 #------------------------------------------------
 class AnalyzeActivity:
     """
-    Prints statistics about how many RPCs are active and data throughput.
+    Prints statistics about how many RPCs are live and data throughput.
     If --data is specified, generates activity_<node>.data files that
     describe activity over small intervals across the traces. The information
     in the .dat files includes new and total incoming messages, messages
@@ -1504,13 +1508,13 @@ class AnalyzeActivity:
             if ('peer' in rpc) and ('gro_core' in rpc):
                 self.node_peer_cores[node][rpc['peer']] = rpc['gro_core']
 
-            if 'rx_active' in rpc:
-                in_start, in_end = rpc['rx_active']
+            if 'rx_live' in rpc:
+                in_start, in_end = rpc['rx_live']
                 self.node_in_msgs[node].append([in_start, 'start'])
                 self.node_in_msgs[node].append([in_end, 'end'])
 
-            if 'tx_active' in rpc:
-                out_start, out_end = rpc['tx_active']
+            if 'tx_live' in rpc:
+                out_start, out_end = rpc['tx_live']
                 self.node_out_msgs[node].append([out_start, 'start'])
                 self.node_out_msgs[node].append([out_end, 'end'])
 
@@ -1552,62 +1556,62 @@ class AnalyzeActivity:
     def sum_list(self, events):
         """
         Given a list of <time, event> entries where event is 'start' or 'end',
-        return a list <num_starts, active_frac, avg_active>:
+        return a list <num_starts, live_frac, avg_live>:
         num_starts:    Total number of 'start' events
-        active_frac:   Fraction of all time when #starts > #ends
-        avg_active:    Average value of #starts - #ends
+        live_frac:     Fraction of all time when #starts > #ends
+        avg_live:      Average value of #starts - #ends
         The input list should be sorted in order of time by the caller.
         """
         num_starts = 0
-        cur_active = 0
-        active_time = 0
-        active_integral = 0
+        cur_live = 0
+        live_time = 0
+        live_integral = 0
         last_time = events[0][0]
 
         for time, event in events:
-            # print("%9.3f: %s, cur_active %d, active_time %.1f, active_integral %.1f" %
-            #         (time, event, cur_active, active_time, active_integral))
+            # print("%9.3f: %s, cur_live %d, live_time %.1f, live_integral %.1f" %
+            #         (time, event, cur_live, live_time, live_integral))
             delta = time - last_time
-            if cur_active:
-                active_time += delta
-            active_integral += delta * cur_active
+            if cur_live:
+                live_time += delta
+            live_integral += delta * cur_live
             if event == 'start':
                 num_starts += 1
-                cur_active += 1
+                cur_live += 1
             else:
-                cur_active -= 1
+                cur_live -= 1
             last_time = time
         total_time = events[-1][0] - events[0][0]
-        return num_starts, active_time/total_time, active_integral/total_time
+        return num_starts, live_time/total_time, live_integral/total_time
 
     def output(self):
         global rpcs, traces
 
         def print_list(node, events, num_bytes, extra):
             global traces
-            msgs, activeFrac, avgActive = self.sum_list(events)
+            msgs, liveFrac, avgLive = self.sum_list(events)
             rate = msgs/(events[-1][0] - events[0][0])
             gbps = num_bytes*8e-3/(traces[node]['elapsed_time'])
             print('%-10s %6d %7.3f %9.3f %8.2f %7.2f  %7.2f%s' % (
-                    node, msgs, rate, activeFrac, avgActive, gbps,
-                    gbps/activeFrac, extra))
+                    node, msgs, rate, liveFrac, avgLive, gbps,
+                    gbps/liveFrac, extra))
 
         print('\n-------------------')
         print('Analyzer: activity')
         print('-------------------\n')
         print('Msgs:          Total number of incoming/outgoing messages that were')
-        print('               active at some point during the traces')
+        print('               live at some point during the traces')
         print('MsgRate:       Rate at which new messages arrived (M/sec)')
-        print('ActvFrac:      Fraction of time when at least one message was active')
-        print('AvgActv:       Average number of active messages')
+        print('ActvFrac:      Fraction of time when at least one message was live')
+        print('AvgLive:       Average number of live messages')
         print('Gbps:          Total message throughput (Gbps)')
-        print('ActvGbps:      Total throughput when at least one message was active (Gbps)')
+        print('LiveGbps:      Total throughput when at least one message was live (Gbps)')
         print('MaxCore:       Highest incoming throughput via a single GRO core (Gbps)')
         print('MaxPend:       Highest # partially received RPCs (at end of trace) handled')
         print('               by a single GRO core')
         print('MaxPeers:      Highest number of peers serviced by a single GRO core')
         print('\nIncoming messages:')
-        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps'
+        print('Node         Msgs MsgRate  LiveFrac  AvgLive    Gbps LiveGbps'
                 '       MaxCore    MaxPend  MaxPeers')
         print('-------------------------------------------------------------'
                 '-----------------------------------')
@@ -1687,7 +1691,7 @@ class AnalyzeActivity:
                     f.write('%8.1f' % (interval['time']))
                     if 'rx_starts' in interval:
                         f.write(' %5d %5d' % (interval['rx_starts'],
-                                interval['rx_active']))
+                                interval['rx_live']))
                     else:
                         f.write(' '*12)
                     if 'rx_grants' in interval:
@@ -1704,8 +1708,8 @@ class AnalyzeActivity:
                         f.write(' '*12)
                     if 'tx_starts' in interval:
                         f.write(' %5d %5d' % (interval['tx_starts'],
-                                interval['tx_active_req']
-                                + interval['tx_active_resp']))
+                                interval['tx_live_req']
+                                + interval['tx_live_resp']))
                     else:
                         f.write(' '*12)
                     f.write('\n')
@@ -2076,7 +2080,7 @@ class AnalyzeCore:
     def tt_resend_busy(self, trace, time, core, id, state):
         self.inc_counter(trace, time, core, 'busy')
 
-    def tt_send_grant(self, trace, time, core, id, offset, priority):
+    def tt_send_grant(self, trace, time, core, id, offset, priority, increment):
         self.inc_counter(trace, time, core, 'grant_sends')
 
     def output(self):
@@ -3814,10 +3818,10 @@ class AnalyzeIntervals:
             while t < end:
                 node_intervals.append({
                     'time':             t,
-                    'rpcs_active':      0,
+                    'rpcs_live':        0,
                     'tx_starts':        0,
-                    'tx_active_req':    0,
-                    'tx_active_resp':   0,
+                    'tx_live_req':      0,
+                    'tx_live_resp':     0,
                     'tx_pkts':          0,
                     'tx_bytes':         0,
                     'tx_nic_pkts':      0,
@@ -3835,7 +3839,7 @@ class AnalyzeIntervals:
                     'tx_grant_avl':     0,
                     'tx_new_grants':    0,
                     'rx_starts':        0,
-                    'rx_active':        0,
+                    'rx_live':          0,
                     'rx_pkts':          0,
                     'rx_bytes':         0,
                     'rx_granted':       0,
@@ -3843,6 +3847,7 @@ class AnalyzeIntervals:
                     'rx_data_net':      0,
                     'rx_overdue':       0,
                     'rx_data_gro':      0,
+                    'rx_new_grants':    0,
                     'rx_grants':        0,
                     'rx_grant_bytes':   0,
                     'rx_grant_info':    None,
@@ -4073,14 +4078,18 @@ class AnalyzeIntervals:
                 print('skipping previous grant')
                 continue
 
+            if 'xmit' in grant:
+                txmit = grant['xmit']
+                get_interval(grant['tx_node'], txmit)['rx_new_grants'] += increment
+
             # rx_* refers to the RPC that received the grant and tx'ed data
             rx_rpc = rpcs[rx_id]
             rx_node = rx_rpc['node']
             if 'gro' in grant:
                 tgro = grant['gro']
                 if 'xmit' in grant:
-                    add_to_intervals(rx_node, grant['xmit'], tgro,
-                            'tx_grant_xmit', increment)
+                    add_to_intervals(rx_node, txmit, tgro, 'tx_grant_xmit',
+                            increment)
             else:
                 tgro = None
 
@@ -4098,13 +4107,13 @@ class AnalyzeIntervals:
             if 'nic' in grant:
                 node_xmits[grant['tx_node']].append([grant['nic'], grant_bytes])
             elif 'xmit' in grant:
-                node_xmits[grant['tx_node']].append([grant['xmit'], grant_bytes])
+                node_xmits[grant['tx_node']].append([txmit, grant_bytes])
 
         # Extract information from RPCs
         for id, rpc in rpcs.items():
             node = rpc['node']
             if not id & 1:
-                # rpcs_active
+                # rpcs_live
                 start = None
                 if 'sendmsg' in rpc:
                     start = rpc['sendmsg']
@@ -4119,18 +4128,18 @@ class AnalyzeIntervals:
                     start = traces[node]['first_time']
                     end =   traces[node]['last_time']
                 if start != None:
-                    add_to_intervals(node, start, end, 'rpcs_active', 1)
+                    add_to_intervals(node, start, end, 'rpcs_live', 1)
 
-            # tx_active, rx_active
-            if 'tx_active' in rpc:
-                start, end = rpc['tx_active']
+            # tx_live, rx_live
+            if 'tx_live' in rpc:
+                start, end = rpc['tx_live']
                 if id & 1:
-                    add_to_intervals(node, start, end, 'tx_active_resp', 1)
+                    add_to_intervals(node, start, end, 'tx_live_resp', 1)
                 else:
-                    add_to_intervals(node, start, end, 'tx_active_req', 1)
-            if 'rx_active' in rpc:
-                start, end = rpc['rx_active']
-                add_to_intervals(node, start, end, 'rx_active', 1)
+                    add_to_intervals(node, start, end, 'tx_live_req', 1)
+            if 'rx_live' in rpc:
+                start, end = rpc['rx_live']
+                add_to_intervals(node, start, end, 'rx_live', 1)
 
             # tx_starts
             if 'sendmsg' in rpc:
@@ -4984,10 +4993,10 @@ class AnalyzePackets:
         return
 
     def init_trace(self, trace):
-        # RPC id -> list of active data packets for that RPC (packets that
+        # RPC id -> list of live data packets for that RPC (packets that
         # have been received by homa_gro_receive but not yet copied to user
         # space).
-        self.active = defaultdict(list)
+        self.live = defaultdict(list)
 
         # Core -> list of packets that have been copied out to user space by
         # that core (but not yet freed).
@@ -5025,7 +5034,7 @@ class AnalyzePackets:
         p['gro_core'] = core
         p['rx_node'] = trace['node']
         recv_offsets[offset] = True
-        self.active[id].append(p)
+        self.live[id].append(p)
 
     def tt_softirq_data(self, trace, t, core, id, offset, msg_length):
         global packets
@@ -5036,7 +5045,7 @@ class AnalyzePackets:
         p['rx_node'] = trace['node']
 
     def tt_copy_out_done(self, trace, t, core, id, start, end):
-        pkts = self.active[id^1]
+        pkts = self.live[id^1]
         for i in range(len(pkts) -1, -1, -1):
             p = pkts[i]
             if (p['offset'] >= start) and (p['offset'] < end):
@@ -5067,11 +5076,12 @@ class AnalyzePackets:
         else:
             p['retransmits'].append(t)
 
-    def tt_send_grant(self, trace, t, core, id, offset, priority):
+    def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         global grants
         g = grants[pkt_id(id, offset)]
         g['xmit'] = t
         g['tx_node'] = trace['node']
+        g['increment'] = increment
 
     def tt_mlx_grant(self, trace, t, core, peer, id, offset):
         global grants
@@ -5224,7 +5234,7 @@ class AnalyzeRpcs:
 
     def tx_end(self, rpc):
         """
-        Returns the end of the tx_active interval for RPC; this may be the
+        Returns the end of the tx_live interval for RPC; this may be the
         last_time in the trace if transmission was incomplete at the end
         of the trace, or None if there doesn't appear to be any tx activity
         for RPC during the traces.
@@ -5253,15 +5263,15 @@ class AnalyzeRpcs:
                         return rpc['send_data'][-1][0]
         return ceiling
 
-    def set_active(self, rpc, peer):
+    def set_live(self, rpc, peer):
         """
-        Sets the rx_active and tx_active fields in the given RPC. Peer is
+        Sets the rx_live and tx_live fields in the given RPC. Peer is
         the matching RPC on the peer node, or None if none.
         """
 
         global rpcs
 
-        # tx_active
+        # tx_live
         node = rpc['node']
         end = self.tx_end(rpc)
         start = None
@@ -5269,13 +5279,13 @@ class AnalyzeRpcs:
             start = rpc['sendmsg']
         if start != None:
             if end != None:
-                rpc['tx_active'] = [start, end]
+                rpc['tx_live'] = [start, end]
             else:
-                rpc['tx_active'] = [start, traces[node]['last_time'],]
+                rpc['tx_live'] = [start, traces[node]['last_time'],]
         elif end != None:
-            rpc['tx_active'] = [traces[node]['first_time'], end]
+            rpc['tx_live'] = [traces[node]['first_time'], end]
 
-        # rx_active
+        # rx_live
         start = None
         if peer and peer['send_data']:
                 start = peer['send_data'][0][0]
@@ -5293,7 +5303,7 @@ class AnalyzeRpcs:
         else:
             end = None
         if (start != None) and (end != None):
-            rpc['rx_active'] = [start, end]
+            rpc['rx_live'] = [start, end]
 
     def tt_gro_data(self, trace, t, core, peer, id, offset, prio):
         global rpcs, recv_offsets
@@ -5361,7 +5371,7 @@ class AnalyzeRpcs:
         self.append(trace, id, t, 'send_data', [ip_xmits[offset], offset, length])
         del ip_xmits[offset]
 
-    def tt_send_grant(self, trace, t, core, id, offset, priority):
+    def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         self.append(trace, id, t, 'send_grant', [t, offset, priority])
 
     def tt_sendmsg_request(self, trace, t, core, peer, id, length):
@@ -5488,8 +5498,8 @@ class AnalyzeRpcs:
                     if length >= 0:
                         rpc['out_length'] = length
 
-        # Deduce in_length if not already present. Also set rx_active
-        # and tx_active.
+        # Deduce in_length if not already present. Also set rx_live
+        # and tx_live.
         for id, rpc in rpcs.items():
             if rpc['in_length'] == None:
                 sender_id = id^1
@@ -5497,7 +5507,7 @@ class AnalyzeRpcs:
                     sender = rpcs[sender_id]
                     if 'out_length' in sender:
                         rpc['in_length'] = sender['out_length']
-            self.set_active(rpc, peer_rpc)
+            self.set_live(rpc, peer_rpc)
 
 #------------------------------------------------
 # Analyzer: rtt
@@ -5770,7 +5780,7 @@ class AnalyzeRx:
     """
     Generates one data file for each node showing various statistics
     related to incoming message reception as a function of time, including
-    data rate, active messages, info about outstnanding grants, and where
+    data rate, live messages, info about outstnanding grants, and where
     incoming data packets are curently located (qdisc, net, gro). Requires
     the --data and --gbps options.
     """
@@ -5800,12 +5810,14 @@ class AnalyzeRx:
             f.write('%s over %d usec intervals:\n' % (node, options.interval))
             f.write('# Time:       End of the time interval\n')
             f.write('# Gbps:       Rate of data received by GRO during the interval\n')
-            f.write('# Active:     Messages for which at least one packet has '
+            f.write('# Live:       Messages for which at least one packet has '
                     'been transmitted\n')
             f.write('#             by the peer, but which have not been fully '
                     'received by SoftIRQ,\n')
             f.write('#             as of the end of the interval\n')
             f.write('# Pkts:       Packets received by GRO during the interval\n')
+            f.write('# TxGrant:    KB of new grants passed to ip*xmit during '
+                    'the interval\n')
             f.write('# Granted:    KB of grants that have been sent, but for '
                     'which corresponding\n')
             f.write('#             data packets have not been transmitted by '
@@ -5826,17 +5838,18 @@ class AnalyzeRx:
                     'GRO but not yet\n')
             f.write('#             received by SoftIRQ\n')
 
-            f.write('\n#   Time   Gbps  Active  Pkts  Granted    IP   Net  Late   GRO\n')
+            f.write('\n#   Time   Gbps  Live  Pkts TxGrant Granted    IP   Net  Late   GRO\n')
             total = 0
             for interval in intervals[node]:
                 if not 'rx_bytes' in interval:
                     print('Strange interval for %s: %s' % (node, interval))
                 gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f   %5d  %4d    %5.0f %5.0f %5.0f %5.0f %5.0f\n'
+                f.write('%8.1f %6.1f %5d  %4d   %5.0f   %5.0f %5.0f %5.0f %5.0f %5.0f\n'
                         % (interval['time'], gbps,
-                        interval['rx_active'],
+                        interval['rx_live'],
                         interval['rx_pkts'],
+                        interval['rx_new_grants'] * 1e-3,
                         interval['rx_granted'] * 1e-3,
                         interval['rx_data_qdisc'] * 1e-3,
                         interval['rx_data_net'] * 1e-3,
@@ -6000,11 +6013,11 @@ class AnalyzeSnapshot:
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzePackets')
 
-    def pkt_active(self, pkt, t):
+    def pkt_live(self, pkt, t):
         """
-        Determines if a packet is active at a given time (i.e. has been
+        Determines if a packet is live at a given time (i.e. has been
         transmitted but hasn't been processed by SofIRQ). Returns 0 for
-        not active, 1 if transmitted but not received by GRO, and 2 if
+        not live, 1 if transmitted but not received by GRO, and 2 if
         received by GRO but not SoftIRQ.
         pkt:             Dictionary containing packet information. Must be a
                          member of either packets or grants.
@@ -6059,7 +6072,7 @@ class AnalyzeSnapshot:
         #                 but not yet by SoftIRQ
         # min_time:       Earliest time of any interesting event for any
         #                 packet for this RPC.
-        self.active_rpcs = defaultdict(lambda : {'rx_net_pkts': [],
+        self.live_rpcs = defaultdict(lambda : {'rx_net_pkts': [],
                         'rx_gro_pkts': [], 'tx_net_grants': [],
                         'tx_gro_grants': []})
 
@@ -6067,22 +6080,22 @@ class AnalyzeSnapshot:
         node = options.node
         trace_start = traces[node]['first_time']
 
-        # Identify all of the RPCs with active incoming messages.
+        # Identify all of the RPCs with live incoming messages.
         for id, rpc in rpcs.items():
-            if not 'rx_active' in rpc:
+            if not 'rx_live' in rpc:
                 continue
             if rpc['node'] != node:
                 continue
-            start, end = rpc['rx_active']
+            start, end = rpc['rx_live']
             if (start <= t) and (end > t):
-                self.active_rpcs[id] = {
+                self.live_rpcs[id] = {
                     'rx_net_pkts': [],
                     'rx_gro_pkts': [],
                     'tx_net_grants': [],
                     'tx_gro_grants': []
                 }
 
-        # Collect and classify active incoming packets
+        # Collect and classify live incoming packets
         for pkt in packets.values():
             id = pkt['id']^1
             if not id in rpcs:
@@ -6090,22 +6103,22 @@ class AnalyzeSnapshot:
             rpc = rpcs[id]
             if rpc['node'] != node:
                 continue
-            if not 'rx_active' in rpc:
+            if not 'rx_live' in rpc:
                 continue
-            start, end = rpc['rx_active']
+            start, end = rpc['rx_live']
             if (start > t) or (end <= t):
                 continue
-            status = self.pkt_active(pkt, t)
+            status = self.pkt_live(pkt, t)
             if status != 0 and id == 1002147925:
                 print('Packet accepted: %s' % (pkt))
             if status == 0:
                 continue
             elif status == 1:
-                self.active_rpcs[id]['rx_net_pkts'].append(pkt)
+                self.live_rpcs[id]['rx_net_pkts'].append(pkt)
             else:
-                self.active_rpcs[id]['rx_gro_pkts'].append(pkt)
+                self.live_rpcs[id]['rx_gro_pkts'].append(pkt)
 
-        # Collect and classify active outoing grants
+        # Collect and classify live outoing grants
         for pkt in grants.values():
             id = pkt['id']
             if not id in rpcs:
@@ -6113,42 +6126,42 @@ class AnalyzeSnapshot:
             rpc = rpcs[id]
             if rpc['node'] != node:
                 continue
-            if not 'rx_active' in rpc:
+            if not 'rx_live' in rpc:
                 continue
-            start, end = rpc['rx_active']
+            start, end = rpc['rx_live']
             if (start > t) or (end <= t):
                 continue
-            status = self.pkt_active(pkt, t)
+            status = self.pkt_live(pkt, t)
             if status != 0 and id == 1002147925:
                 print('Grant accepted: %s' % (pkt))
             if status == 0:
                 continue
             elif status == 1:
-                self.active_rpcs[id]['tx_net_grants'].append(pkt)
+                self.live_rpcs[id]['tx_net_grants'].append(pkt)
             else:
-                self.active_rpcs[id]['tx_gro_grants'].append(pkt)
+                self.live_rpcs[id]['tx_gro_grants'].append(pkt)
 
-        # Collect additional information for each active RPC.
-        for id, active_rpc in self.active_rpcs.items():
+        # Collect additional information for each live RPC.
+        for id, live_rpc in self.live_rpcs.items():
 
             # Compute rpc['min_time']
-            active_rpc['min_time'] = 1e20
+            live_rpc['min_time'] = 1e20
             for key in ['rx_net_pkts', 'rx_gro_pkts', 'tx_net_grants',
                     'tx_gro_grants']:
-                for pkt in active_rpc[key]:
+                for pkt in live_rpc[key]:
                     for event in ['xmit', 'gro', 'softirq']:
                         if event in pkt:
                             t = pkt[event]
-                            if t < active_rpc['min_time']:
-                                active_rpc['min_time'] = t
+                            if t < live_rpc['min_time']:
+                                live_rpc['min_time'] = t
 
             # Compute rpc['lost']
             lost = 0
-            for pkt in active_rpc['rx_net_pkts']:
+            for pkt in live_rpc['rx_net_pkts']:
                 if (('xmit' in pkt) and (not 'gro' in pkt)
                         and ((options.time - pkt['xmit']) > 200)):
                     lost += 1
-            active_rpc['lost'] = lost
+            live_rpc['lost'] = lost
 
     def output(self):
         global packets, rpcs, options, traces
@@ -6159,8 +6172,8 @@ class AnalyzeSnapshot:
         print('A snapshot of the state of %s at time %.1f' % (options.node,
                 options.time))
 
-        print('\n%d RPCs have active packets for incoming messages:' %
-                (len(self.active_rpcs)))
+        print('\n%d RPCs have live packets for incoming messages:' %
+                (len(self.live_rpcs)))
         print('Id:        RPC identifier on the receiver side')
         print('Length:    Length of incoming message, if known')
         print('Rcvd:      Offset just after last byte received by SoftIRQ; '
@@ -6172,8 +6185,8 @@ class AnalyzeSnapshot:
         print('Gro:       Packets that have been received by GRO but not by SoftIRQ')
         print('Incoming:  Granted - Rcvd')
         print('GTrans:    Bytes of incremental grant in transit to sender')
-        sorted_ids = sorted(self.active_rpcs.keys(),
-                key = lambda id2 : self.active_rpcs[id2]['min_time'])
+        sorted_ids = sorted(self.live_rpcs.keys(),
+                key = lambda id2 : self.live_rpcs[id2]['min_time'])
         print('\n        Id  Length    Rcvd Granted Lost  Net  Gro  Incoming  GTrans')
         print('-------------------------------------------------------------------')
         total_lost = 0
@@ -6188,22 +6201,22 @@ class AnalyzeSnapshot:
         other_output = ''
         for id in sorted_ids:
             rpc = rpcs[id]
-            active_rpc = self.active_rpcs[id]
+            live_rpc = self.live_rpcs[id]
             granted = get_granted(rpc, options.time)
             received = get_received(rpc, options.time)
             if received != None:
-                total_lost += active_rpc['lost']
-                total_net += len(active_rpc['rx_net_pkts'])
-                total_gro += len(active_rpc['rx_gro_pkts'])
+                total_lost += live_rpc['lost']
+                total_net += len(live_rpc['rx_net_pkts'])
+                total_gro += len(live_rpc['rx_gro_pkts'])
             lost_info = ''
-            if active_rpc['lost'] > 0:
-                lost_info = '%d' % (active_rpc['lost'])
+            if live_rpc['lost'] > 0:
+                lost_info = '%d' % (live_rpc['lost'])
             net_info = ''
-            if len(active_rpc['rx_net_pkts']) > 0:
-                net_info = '%d' % (len(active_rpc['rx_net_pkts']))
+            if len(live_rpc['rx_net_pkts']) > 0:
+                net_info = '%d' % (len(live_rpc['rx_net_pkts']))
             gro_info = ''
-            if len(active_rpc['rx_gro_pkts']) > 0:
-                gro_info = '%d' % (len(active_rpc['rx_gro_pkts']))
+            if len(live_rpc['rx_gro_pkts']) > 0:
+                gro_info = '%d' % (len(live_rpc['rx_gro_pkts']))
             incoming_info = ''
             if (granted != None) and (received != None):
                 incoming_info = '%d' % (granted - received)
@@ -6213,16 +6226,16 @@ class AnalyzeSnapshot:
             grant_in_transit_info = ""
             max_grant_in_transit = 0
             for key in ['tx_net_grants', 'tx_gro_grants']:
-                if active_rpc[key]:
+                if live_rpc[key]:
                     max_grant_in_transit = max(max_grant_in_transit,
-                            max(active_rpc[key],
+                            max(live_rpc[key],
                             key = lambda g : g['offset'])['offset'])
             if max_grant_in_transit > 0:
                 max_txed_data = 0
                 for key in ['rx_net_pkts', 'rx_gro_pkts']:
-                    if active_rpc[key]:
+                    if live_rpc[key]:
                         max_txed_data = max(max_txed_data,
-                                max(active_rpc[key],
+                                max(live_rpc[key],
                                 key = lambda p : p['offset'])['offset'])
                 max_txed_data += get_recv_length(max_txed_data,
                         rpc['in_length'])
@@ -6241,7 +6254,7 @@ class AnalyzeSnapshot:
                     grant_in_transit_info)
             if granted == None:
                 new_output += output
-            elif active_rpc['lost'] > 0:
+            elif live_rpc['lost'] > 0:
                 lost_output += output
             else:
                 other_output += output
@@ -6267,7 +6280,7 @@ class AnalyzeSnapshot:
         print('and the reference time')
 
         for id in sorted_ids:
-            active_rpc = self.active_rpcs[id]
+            live_rpc = self.live_rpcs[id]
             rpc = rpcs[id]
             info = ''
             prefix = ' ('
@@ -6285,10 +6298,10 @@ class AnalyzeSnapshot:
                 info += ')'
             print('\nRPC id %d%s:' % (id, info))
 
-            if active_rpc['rx_net_pkts']:
+            if live_rpc['rx_net_pkts']:
                 print('Incoming packets that have not been received by GRO:')
                 print('Offset      Xmit             Peer    TxCore       Gro        GCore')
-                for pkt in sorted(active_rpc['rx_net_pkts'],
+                for pkt in sorted(live_rpc['rx_net_pkts'],
                         key = lambda d : d['offset']):
                     print('%6d %7s %9s    %-10s %4s %7s %8s %5s' % (
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
@@ -6302,11 +6315,11 @@ class AnalyzeSnapshot:
                                      lambda t : t - options.time),
                             print_field_if(pkt, 'gro_core', '%3d')))
 
-            if active_rpc['rx_gro_pkts']:
+            if live_rpc['rx_gro_pkts']:
                 print('Incoming packets that have been seen by GRO but not '
                         'yet by SoftIRQ:')
                 print('Offset        Gro         GCore     SoftIRQ        SCore')
-                for pkt in sorted(active_rpc['rx_gro_pkts'],
+                for pkt in sorted(live_rpc['rx_gro_pkts'],
                         key = lambda d : d['offset']):
                     print('%6d  %7s %9s %5s %7s %8s %7s' % (
                             pkt['offset'], print_field_if(pkt, 'gro', '%7.1f'),
@@ -6318,10 +6331,10 @@ class AnalyzeSnapshot:
                                      lambda t : t - options.time),
                             print_field_if(pkt, 'softirq_core', '%3d')))
 
-            if active_rpc['tx_net_grants']:
+            if live_rpc['tx_net_grants']:
                 print('Outgoing grants that have not been received by GRO:')
                 print('Offset      Xmit             Peer    TxCore       Gro        GCore')
-                for pkt in sorted(active_rpc['tx_net_grants'],
+                for pkt in sorted(live_rpc['tx_net_grants'],
                         key = lambda d : d['offset']):
                     print('%6d %7s %9s    %-10s %4s %7s %8s %5s' % (
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
@@ -6332,11 +6345,11 @@ class AnalyzeSnapshot:
                             print_field_if(pkt, 'gro', '(%6.1f)',
                                      lambda t : t - options.time),
                             print_field_if(pkt, 'gro_core', '%3d')))
-            if active_rpc['tx_gro_grants']:
+            if live_rpc['tx_gro_grants']:
                 print('Outgoing grants that have been seen by GRO but not '
                         'yet by SoftIRQ:')
                 print('Offset        Gro         GCore     SoftIRQ        SCore')
-                for pkt in sorted(active_rpc['tx_gro_grants'],
+                for pkt in sorted(live_rpc['tx_gro_grants'],
                         key = lambda d : d['offset']):
                     print('%6d  %7s %9s %5s %7s %8s %7s' % (
                             pkt['offset'], print_field_if(pkt, 'gro', '%7.1f'),
@@ -6706,7 +6719,7 @@ class AnalyzeTxintervals:
                     'the interval\n')
             f.write('# TxKB:       KB of data passed to ip*xmit during '
                     'the interval\n')
-            f.write('# RPCs:       Number of active client RPCs at the end '
+            f.write('# RPCs:       Number of live client RPCs at the end '
                     'of the interval\n')
             f.write('# Reqs:       Request messages that have been started '
                     'but not fully\n')
@@ -6770,9 +6783,9 @@ class AnalyzeTxintervals:
                 f.write('%8.1f %6.1f %5.0f %5d  %5d  %5d' %
                         (interval['time'], gbps,
                         interval['tx_bytes'] * 1e-3,
-                        interval['rpcs_active'],
-                        interval['tx_active_req'],
-                        interval['tx_active_resp']))
+                        interval['rpcs_live'],
+                        interval['tx_live_req'],
+                        interval['tx_live_resp']))
                 f.write(' %4d %5.0f %5.0f %5.1f %5.0f  %5.0f' % (
                         interval['tx_pkts'], interval['tx_qdisc'] * 1e-3,
                         interval['tx_nic_bytes'] * 1e-3,
@@ -7004,7 +7017,7 @@ class AnalyzeTxqueues:
     def tt_send_data(self, trace, time, core, id, offset, length):
         self.nodes[trace['node']].append([time, length + 60, 0])
 
-    def tt_send_grant(self, trace, time, core, id, offset, priority):
+    def tt_send_grant(self, trace, time, core, id, offset, priority, increment):
         self.nodes[trace['node']].append([time, 34, 0])
 
     def output(self):
