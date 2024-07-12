@@ -513,10 +513,7 @@ the client issues a RESEND. Since the message has not yet been processed on the
 server, it sends UNKNOWN, causing the client to restart. A larger value of
 .IR resend_ticks
 reduces the likelihood of restarts (but doesn't completely eliminate the
-problem). In June of 2024 the
-.IR ooo_window_usecs
-paramter was added to request resends more quickly when packets arrive
-out of order.
+problem).
 .TP
 .IR rtt_bytes
 This configuration parameter is no longer supported; it has been split
