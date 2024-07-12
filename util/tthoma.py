@@ -31,8 +31,12 @@ import time
 # gro_core:          Core that handled GRO processing for this RPC
 # gro_data:          List of <time, offset, priority> tuples for all incoming
 #                    data packets processed by GRO
+# gro_data_pkts:     List of packets processed by GRO for this RPC, sorted
+#                    in order of 'gro'
 # gro_grant:         List of <time, offset> tuples for all incoming
-#                    grant packets processed by GRO
+#                    grant packets processed by GRO. Deprecated: use
+#                    gro_grant_pkts instead
+# gro_grant_pkts:    List of all incoming grant packets processed by GRO
 # handoff:           Time when RPC was handed off to waiting thread
 # id:                RPC's identifier
 # in_length:         Size of the incoming message, in bytes, or None if unknown
@@ -53,9 +57,14 @@ import time
 # retransmits:       One entry for each packet retransmitted; maps from offset
 #                    to <time, length> tuple
 # softirq_data:      List of <time, offset> tuples for all incoming
-#                    data packets processed by SoftIRQ
+#                    data packets processed by SoftIRQ. Deprecated: used
+#                    softirq_data_pkts instead
+# softirq_data_pkts: List of all incoming data packets processed by SoftIRQ,
+#                    sorted in order of 'softirq'
 # softirq_grant:     List of <time, offset> tuples for all incoming
-#                    grant packets processed by SoftIRQ
+#                    grant packets processed by SoftIRQ. Deprecated: use
+#                    softirq_grant_pkts instead
+# softirq_grant_pkts:List of all incoming grant packets processed by SoftIRQ
 # recvmsg_done:      Time when homa_recvmsg returned
 # rx_live:           Range of times [start, end] when the incoming message
 #                    was in the process of being received. Starts when first
@@ -64,9 +73,13 @@ import time
 # sendmsg:           Time when homa_sendmsg was invoked
 # send_data:         List of <time, offset, length> tuples for outgoing
 #                    data packets (length is message data); time is when
-#                    packet was passed to ip*xmit.
-# send_grant:        List of <time, offset, priority> tuples for
-#                    outgoing grant packets
+#                    packet was passed to ip*xmit. Deprecated: used
+#                    send_data_pkts instead.
+# send_data_pkts:    List of outgoing data packets, sorted in order of
+#                    'xmit'.
+# send_grant:        List of <time, offset, priority> tuples for outgoing
+#                    grant packets. Deprecated: used send_grant_pkts instead
+# send_grant_pkts:   List of all outgoing grant packets
 # tx_live:           Range of times [start, end] when the outgoing message was
 #                    partially transmitted. Starts when homa_sendmsg is called,
 #                    ends when last data packet is transmitted by the NIC.
@@ -226,6 +239,7 @@ grants = GrantDict()
 #                 transmitted and/or received as of the end of the interval
 # rx_pkts:        Number of data packets received by GRO during the interval
 # rx_bytes:       Number of bytes of data received by GRO during the interval
+# rx_grantable:   Number of incoming RPCs that have not been fully granted
 # rx_granted:     Bytes of grant that have been transmitted, but for which
 #                 corresponding data has not been transmitted
 # rx_data_xmit:   Number of bytes of data that have been passed to ip*xmit by
@@ -380,7 +394,7 @@ def get_granted(rpc, time):
     or None if no data available. Assumes that the rpc analyzer has run.
     """
     max_offset = -1
-    for pkt_time, offset, prio in rpc['send_grant']:
+    for pkt_time, offset, prio, increment in rpc['send_grant']:
         if (pkt_time < time) and (offset > max_offset):
             max_offset = offset
     if max_offset >= 0:
@@ -784,6 +798,9 @@ class Dispatcher:
 
         if analyzer in self.analyzers:
             return self.analyzers[analyzer]
+
+        # This line breaks circular dependency chains.
+        self.analyzers[analyzer] = None
         obj = getattr(sys.modules[__name__], analyzer)(self)
         self.analyzers[analyzer] = obj
         self.objs.append(obj)
@@ -3011,7 +3028,7 @@ class AnalyzeGrants:
             self.node_grant_send_time[node] += t - self.core_first_grant_send[core]
             del self.core_first_grant_send[core]
 
-    def tt_send_grant(self, trace, t, core, id, offset, priority):
+    def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         if not core in self.core_check_start:
             return
         self.node_grants_sent[trace['node']] += 1
@@ -3132,7 +3149,7 @@ class AnalyzeGrants:
                     events.append([time, 'rxdata', node, id, offset,
                             get_recv_length(offset, rpc['in_length'])])
             if 'send_grant' in rpc:
-                for time, offset, priority in rpc['send_grant']:
+                for time, offset, priority, increment in rpc['send_grant']:
                     events.append([time, 'txgrant', node, id, offset])
             if 'softirq_grant' in rpc:
                 for time, offset in rpc['softirq_grant']:
@@ -3842,6 +3859,7 @@ class AnalyzeIntervals:
                     'rx_live':          0,
                     'rx_pkts':          0,
                     'rx_bytes':         0,
+                    'rx_grantable':     0,
                     'rx_granted':       0,
                     'rx_data_qdisc':    0,
                     'rx_data_net':      0,
@@ -3877,7 +3895,7 @@ class AnalyzeIntervals:
         if id^1 in rpcs:
             peer = rpcs[id^1]
             peer_node = peer['node']
-            for t, offset, prio in peer['send_grant']:
+            for t, offset, prio, increment in peer['send_grant']:
                 events.append([t, 'grant_xmit', offset])
 
         grant_xmit_offset = 0
@@ -4068,14 +4086,10 @@ class AnalyzeIntervals:
 
         # Extract information from grants
         for grant in grants.values():
-            print('\ngrant: %s' % (grant))
             offset = grant['offset']
             increment = grant['increment']
-            if not 'id' in grant:
-                print('bad grant: %s' % (grant))
             rx_id = grant['id']^1
             if not rx_id in rpcs:
-                print('skipping previous grant')
                 continue
 
             if 'xmit' in grant:
@@ -4096,7 +4110,6 @@ class AnalyzeIntervals:
             if 'softirq' in grant:
                 tsoftirq = grant['softirq']
                 get_interval(rx_node, tsoftirq)['tx_new_grants'] += increment
-                print('%9.3f: softirq grant increment %d' % (tsoftirq, increment))
                 if tgro != None:
                     add_to_intervals(rx_node, tgro, tsoftirq, 'tx_grant_gro',
                             increment)
@@ -4153,6 +4166,20 @@ class AnalyzeIntervals:
 
             # tx_grant_avl
             self.add_grant_info(rpc)
+
+            # rx_grantable
+            if rpc['send_grant'] or (('unsched' in rpc) and ('in_length' in rpc)
+                    and (rpc['in_length'] > rpc['unsched'])):
+                start = traces[rpc['node']]['first_time']
+                if rpc['softirq_data_pkts']:
+                    start = rpc['softirq_data_pkts'][0]['softirq']
+
+                end = traces[rpc['node']]['last_time']
+                if rpc['send_grant_pkts']:
+                    last_grant = rpc['send_grant_pkts'][-1]
+                    if last_grant['offset'] >= rpc['in_length']:
+                        end = last_grant['xmit']
+                add_to_intervals(node, start, end, 'rx_grantable', 1)
 
         # Compute NIC queue lengths
         for node, xmits in node_xmits.items():
@@ -5187,6 +5214,7 @@ class AnalyzeRpcs:
     """
 
     def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
         return
 
     def new_rpc(self, id, t, node):
@@ -5198,13 +5226,19 @@ class AnalyzeRpcs:
         rpcs[id] = {'node': node,
             'first_event': t,
             'gro_data': [],
+            'gro_data_pkts': [],
             'gro_grant': [],
+            'gro_grant_pkts': [],
             'id': id,
             'in_length': None,
             'softirq_data': [],
+            'softirq_data_pkts': [],
             'softirq_grant': [],
+            'softirq_grant_pkts': [],
             'send_data': [],
+            'send_data_pkts': [],
             'send_grant': [],
+            'send_grant_pkts': [],
             'ip_xmits': {},
             'resend_rx': [],
             'resend_tx': [],
@@ -5372,7 +5406,7 @@ class AnalyzeRpcs:
         del ip_xmits[offset]
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
-        self.append(trace, id, t, 'send_grant', [t, offset, priority])
+        self.append(trace, id, t, 'send_grant', [t, offset, priority, increment])
 
     def tt_sendmsg_request(self, trace, t, core, peer, id, length):
         global rpcs
@@ -5467,7 +5501,41 @@ class AnalyzeRpcs:
         """
         global rpcs, traces, peer_nodes
 
+        # Collect packets
+        for pkt in packets.values():
+            id = pkt['id']
+            if id in rpcs:
+                tx_rpc = rpcs[id]
+                if 'xmit' in pkt:
+                    tx_rpc['send_data_pkts'].append(pkt)
+            if id^1 in rpcs:
+                rx_rpc = rpcs[id^1]
+                if 'gro' in pkt:
+                    rx_rpc['gro_data_pkts'].append(pkt)
+                if 'softirq' in pkt:
+                    rx_rpc['softirq_data_pkts'].append(pkt)
+
+        # Collect grants
+        for grant in grants.values():
+            id = grant['id']
+            if id in rpcs:
+                tx_rpc = rpcs[id]
+                if 'xmit' in grant:
+                    tx_rpc['send_grant_pkts'].append(grant)
+            if id^1 in rpcs:
+                rx_rpc = rpcs[id^1]
+                if 'gro' in grant:
+                    rx_rpc['gro_grant_pkts'].append(grant)
+                if 'softirq' in grant:
+                    rx_rpc['softirq_grant_pkts'].append(grant)
+
         for id, rpc in rpcs.items():
+            rpc['send_data_pkts'].sort(key=lambda d : d['xmit'])
+            rpc['gro_data_pkts'].sort(key=lambda d : d['gro'])
+            rpc['softirq_data_pkts'].sort(key=lambda d : d['softirq'])
+            rpc['send_grant_pkts'].sort(key=lambda d : d['xmit'])
+            rpc['gro_grant_pkts'].sort(key=lambda d : d['gro'])
+            rpc['softirq_grant_pkts'].sort(key=lambda d : d['softirq'])
             peer_id = id ^ 1
             if peer_id in rpcs:
                 peer_rpc = rpcs[peer_id]
@@ -5816,6 +5884,8 @@ class AnalyzeRx:
                     'received by SoftIRQ,\n')
             f.write('#             as of the end of the interval\n')
             f.write('# Pkts:       Packets received by GRO during the interval\n')
+            f.write('# Grantable:  # of incoming RPCs that are not fully '
+                    'granted\n')
             f.write('# TxGrant:    KB of new grants passed to ip*xmit during '
                     'the interval\n')
             f.write('# Granted:    KB of grants that have been sent, but for '
@@ -5838,17 +5908,20 @@ class AnalyzeRx:
                     'GRO but not yet\n')
             f.write('#             received by SoftIRQ\n')
 
-            f.write('\n#   Time   Gbps  Live  Pkts TxGrant Granted    IP   Net  Late   GRO\n')
+            f.write('\n#   Time   Gbps  Live  Pkts Grantable TxGrant Granted'
+                    '    IP   Net  Late   GRO\n')
             total = 0
             for interval in intervals[node]:
                 if not 'rx_bytes' in interval:
                     print('Strange interval for %s: %s' % (node, interval))
                 gbps = interval['rx_bytes'] * 8 / (options.interval * 1000)
                 total += gbps
-                f.write('%8.1f %6.1f %5d  %4d   %5.0f   %5.0f %5.0f %5.0f %5.0f %5.0f\n'
+                f.write('%8.1f %6.1f %5d  %4d      %4d   %5.0f   %5.0f '
+                        '%5.0f %5.0f %5.0f %5.0f\n'
                         % (interval['time'], gbps,
                         interval['rx_live'],
                         interval['rx_pkts'],
+                        interval['rx_grantable'],
                         interval['rx_new_grants'] * 1e-3,
                         interval['rx_granted'] * 1e-3,
                         interval['rx_data_qdisc'] * 1e-3,
