@@ -628,14 +628,13 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct grant_header *h = (struct grant_header *) skb->data;
+	int new_offset = ntohl(h->offset);
 
 	tt_record4("processing grant for id %llu, offset %d, priority %d, "
-			"resend_all %d",
+			"increment %d",
 			homa_local_id(h->common.sender_id), ntohl(h->offset),
-			h->priority, h->resend_all);
+			h->priority, new_offset - rpc->msgout.granted);
 	if (rpc->state == RPC_OUTGOING) {
-		int new_offset = ntohl(h->offset);
-
 		if (h->resend_all)
 			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
 					h->priority);
