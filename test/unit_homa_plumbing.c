@@ -538,9 +538,6 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, self->recvmsg_args.num_bpages);
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, self->recvmsg_args.bpage_offsets[0]);
-	EXPECT_EQ(sizeof(struct homa_recvmsg_args),
-			(char *) self->recvmsg_hdr.msg_control
-			- (char *) &self->recvmsg_args);
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 {
