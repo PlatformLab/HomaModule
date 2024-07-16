@@ -1011,7 +1011,7 @@ error:
  * @sk:          Socket on which the system call was invoked.
  * @msg:         Controlling information for the receive.
  * @len:         Total bytes of space available in msg->msg_iov; not used.
- * @flags:       Flags from system call, only handle MSG_DONTWAIT.
+ * @flags:       Flags from system call; only MSG_DONTWAIT is used.
  * @addr_len:    Store the length of the sender address here
  * Return:       The length of the message on success, otherwise a negative
  *               errno.
