@@ -81,10 +81,10 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, "
 				"state %d",
 				rpc->id, tt_addr(rpc->peer->addr), rpc->state);
-//		homa_rpc_log_active_tt(homa, 0);
-//		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
-//		homa_freeze_peers(homa);
-//		tt_freeze();
+		homa_rpc_log_active_tt(homa, 0);
+		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
+		homa_freeze_peers(homa);
+		tt_freeze();
 		if (homa->verbose)
 			printk(KERN_NOTICE "RPC id %llu, peer %s, aborted "
 					"because of timeout, state %d\n",

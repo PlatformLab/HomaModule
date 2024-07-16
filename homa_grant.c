@@ -281,13 +281,13 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	if ((rpc->msgin.length < 0) || (rpc->state == RPC_DEAD)
 			|| (rpc->msgin.num_bpages <= 0)) {
 		homa_rpc_unlock(rpc);
-		return;
+		goto done;
 	}
 
 	if (rpc->msgin.granted >= rpc->msgin.length) {
 		homa_grant_update_incoming(rpc,homa);
 		homa_rpc_unlock(rpc);
-		return;
+		goto done;
 	}
 
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, "
@@ -309,7 +309,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			homa_grant_recalc(homa, 1);
 		else
 			homa_grantable_unlock(homa);
-		return;
+		goto done;
 	}
 
 	/* Not a new message; see if we can upgrade the message's priority. */
@@ -324,7 +324,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		} else {
 			homa_rpc_unlock(rpc);
 		}
-		return;
+		goto done;
 	}
 	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if ((rank > 0) && (rpc->msgin.bytes_remaining < atomic_read(
@@ -333,7 +333,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_rpc_unlock(rpc);
 		INC_METRIC(grant_priority_bumps, 1);
 		homa_grant_recalc(homa, 0);
-		return;
+		goto done;
 	}
 
 	/* Getting here should be the normal case: see if we can send a new
@@ -348,12 +348,14 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_grantable_lock(homa, 0);
 		homa_grant_remove_rpc(rpc);
 		homa_grant_recalc(homa, 1);
-		return;
+		goto done;
 	}
 
 	homa_rpc_unlock(rpc);
 	if (recalc)
 		homa_grant_recalc(homa, 0);
+	done:
+	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
 
 /**
