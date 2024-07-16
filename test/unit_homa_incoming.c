@@ -167,9 +167,9 @@ FIXTURE_SETUP(homa_incoming)
 			.sender_id = cpu_to_be64(self->client_id)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
+			.ack = {0, 0, 0},
 		        .retransmit = 0,
-			.seg = {.offset = 0, .segment_length = htonl(1400),
-				.ack = {0, 0, 0}}};
+			.seg = {.offset = 0, .segment_length = htonl(1400)}};
 	unit_log_clear();
 	delete_count = 0;
 	lock_delete_count = 0;
@@ -1021,7 +1021,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__handle_ack)
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 3000);
 	ASSERT_NE(NULL, srpc);
-	self->data.seg.ack = (struct homa_ack) {
+	self->data.ack = (struct homa_ack) {
 			.client_port = htons(self->client_port),
 		       .server_port = htons(self->server_port),
 		       .client_id = cpu_to_be64(self->client_id)};
@@ -1035,16 +1035,16 @@ TEST_F(homa_incoming, homa_dispatch_pkts__handle_ack)
 TEST_F(homa_incoming, homa_dispatch_pkts__too_many_acks)
 {
 	struct sk_buff *skb, *skb2, *skb3;
-	self->data.seg.ack = (struct homa_ack) {
+	self->data.ack = (struct homa_ack) {
 			.client_port = htons(self->client_port),
 		       .server_port = htons(self->server_port),
 		       .client_id = cpu_to_be64(self->client_id)};
 	self->data.common.sender_id = cpu_to_be64(self->client_id+10);
 	unit_log_clear();
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.seg.ack.client_id = cpu_to_be64(self->client_id+2);
+	self->data.ack.client_id = cpu_to_be64(self->client_id+2);
 	skb2 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
-	self->data.seg.ack.client_id = cpu_to_be64(self->client_id+4);
+	self->data.ack.client_id = cpu_to_be64(self->client_id+4);
 	skb3 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
 	skb->next = skb2;
 	skb2->next = skb3;

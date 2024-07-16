@@ -47,8 +47,9 @@ FIXTURE_SETUP(homa_utils)
 			.sender_id = self->client_id},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
+			.ack = {0, 0, 0},
 		        .retransmit = 0,
-			.seg = {.offset = 0, .ack = {0, 0, 0}}};
+			.seg = {.offset = 0}};
 	self->iovec.iov_base = (void *) 2000;
 	self->iovec.iov_len = 10000;
 	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);

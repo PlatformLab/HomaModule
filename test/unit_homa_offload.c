@@ -52,10 +52,10 @@ FIXTURE_SETUP(homa_offload)
 			.sender_id = cpu_to_be64(1000)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
+			.ack = {0, 0, 0},
 			.retransmit = 0,
 			.seg = {.offset = htonl(2000),
-			        .segment_length = htonl(1400),
-	                        .ack = {0, 0, 0}}};
+			        .segment_length = htonl(1400)}};
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
 		INIT_LIST_HEAD(&self->napi.gro_hash[i].list);
 		self->napi.gro_hash[i].count = 0;
@@ -225,10 +225,10 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 			.sender_id = cpu_to_be64(client_id)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
+			.ack = {0, 0, 0},
 			.retransmit = 0,
 			.seg = {.offset = htonl(2000),
-			        .segment_length = htonl(1400),
-	                        .ack = {0, 0, 0}}};
+			        .segment_length = htonl(1400)}};
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
 
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,

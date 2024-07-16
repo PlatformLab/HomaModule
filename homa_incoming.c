@@ -449,12 +449,12 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 
 		switch (h->common.type) {
 			case DATA:
-			if (h->seg.ack.client_id != 0) {
+			if (h->ack.client_id != 0) {
 				/* Save the ack for processing later, when we
 				 * have released the RPC lock.
 				 */
 				if (num_acks < MAX_ACKS) {
-					acks[num_acks] = h->seg.ack;
+					acks[num_acks] = h->ack;
 					num_acks++;
 				}
 			}

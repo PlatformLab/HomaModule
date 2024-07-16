@@ -361,11 +361,6 @@ struct data_segment {
 	/** @segment_length: Number of bytes of data in this segment. */
 	__be32 segment_length;
 
-	/** @ack: If the @client_id field is nonzero, provides info about
-	 * an RPC that the recipient can now safely free.
-	 */
-	struct homa_ack ack;
-
 	/** @data: the payload of this segment. */
 	char data[0];
 } __attribute__((packed));
@@ -387,6 +382,15 @@ struct data_header {
 	 * transmits unilaterally (e.g., to round up to a full GSO batch).
 	 */
 	__be32 incoming;
+
+	/** @ack: If the @client_id field of this is nonzero, provides info
+	 * about an RPC that the recipient can now safely free. Note: in
+	 * TSO packets this will get duplicated in each of the segments;
+	 * in order to avoid repeated attempts to ack the same RPC,
+	 * homa_gro_receive will clear this field in all segments but the
+	 * first.
+	 */
+	struct homa_ack ack;
 
 	/**
 	 * @cutoff_version: The cutoff_version from the most recent

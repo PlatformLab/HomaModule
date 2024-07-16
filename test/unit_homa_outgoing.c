@@ -315,7 +315,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 	struct data_header h;
 	homa_skb_get(crpc->msgout.packets, &h, 0, sizeof(h));
 	EXPECT_STREQ("client_port 100, server_port 200, client_id 1000",
-			unit_ack_string(&h.seg.ack));
+			unit_ack_string(&h.ack));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 {

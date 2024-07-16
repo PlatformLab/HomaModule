@@ -89,7 +89,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 			sizeof(*h) - sizeof(struct data_segment));
 	h->common.sport = htons(rpc->hsk->port);
 	h->common.dport = htons(rpc->dport);
-	h->common.sequence = 0;
+	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
 	homa_set_doff(h);
 	h->common.flags = HOMA_TCP_FLAGS;
@@ -98,6 +98,8 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
 	h->incoming = htonl(rpc->msgout.unscheduled);
+	h->ack.client_id = 0;
+	homa_peer_get_acks(rpc->peer, 1, &h->ack);
 	h->cutoff_version = rpc->peer->cutoff_version;
 	h->retransmit = 0;
 	homa_info = homa_get_skb_info(skb);
@@ -121,8 +123,6 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 		else
 			seg_size = max_seg_data;
 		seg.segment_length = htonl(seg_size);
-		seg.ack.client_id = 0;
-		homa_peer_get_acks(rpc->peer, 1, &seg.ack);
 		err = homa_skb_append_to_frag(rpc->hsk->homa, skb, &seg,
 				sizeof(seg));
 		if (err != 0)

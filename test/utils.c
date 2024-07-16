@@ -66,11 +66,11 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		},
 		.message_length = htonl(resp_length),
 		.incoming = htonl(10000),
+		.ack = {0, 0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET),
-		        .ack = {0, 0, 0}}
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
@@ -364,11 +364,11 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		},
 		.message_length = htonl(req_length),
 		.incoming = htonl(10000),
+		.ack = {0, 0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET),
-		        .ack = {0, 0, 0}}
+			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
 	};
 	if (req_length < UNIT_TEST_DATA_PER_PACKET)
 		h.seg.segment_length = htonl(req_length);
