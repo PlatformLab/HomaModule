@@ -497,6 +497,17 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_homa_wait_for_message)
 			&self->recvmsg_hdr.msg_namelen));
 	self->hsk.shutdown = false;
 }
+TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 100, 2000);
+	EXPECT_NE(NULL, crpc);
+
+	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk,
+			&self->recvmsg_hdr, 0, MSG_DONTWAIT,
+			&self->recvmsg_hdr.msg_namelen));
+}
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 {
 	// Make sure the test uses IPv4.

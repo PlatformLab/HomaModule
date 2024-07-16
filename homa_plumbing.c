@@ -1011,7 +1011,7 @@ error:
  * @sk:          Socket on which the system call was invoked.
  * @msg:         Controlling information for the receive.
  * @len:         Total bytes of space available in msg->msg_iov; not used.
- * @flags:       Flags from system call, not including MSG_DONTWAIT; ignored.
+ * @flags:       Flags from system call, only handle MSG_DONTWAIT.
  * @addr_len:    Store the length of the sender address here
  * Return:       The length of the message on success, otherwise a negative
  *               errno.
@@ -1060,7 +1060,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 			control.bpage_offsets);
 	control.num_bpages = 0;
 
-	rpc = homa_wait_for_message(hsk, control.flags, control.id);
+	rpc = homa_wait_for_message(hsk, (flags & MSG_DONTWAIT)
+			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
+			: control.flags, control.id);
 	if (IS_ERR(rpc)) {
 		/* If we get here, it means there was an error that prevented
 		 * us from finding an RPC to return. If there's an error in
