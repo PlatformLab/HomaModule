@@ -20,6 +20,19 @@ static const struct net_offload homa_offload = {
 
 extern struct homa *homa;
 
+/* Pointers to TCP's net_offload structures. NULL means homa_gro_hook_tcp
+ * hasn't been called yet.
+ */
+const struct net_offload *tcp_net_offload = NULL;
+const struct net_offload *tcp6_net_offload = NULL;
+
+/*
+ * Identical to *tcp_net_offload except that the gro_receive function
+ * has been replaced.
+ */
+static struct net_offload hook_tcp_net_offload;
+static struct net_offload hook_tcp6_net_offload;
+
 /**
  * homa_offload_init() - Invoked to enable GRO and GSO. Typically invoked
  * when the Homa module loads.
@@ -43,6 +56,72 @@ int homa_offload_end(void)
 	int res1 = inet_del_offload(&homa_offload, IPPROTO_HOMA);
 	int res2 = inet6_del_offload(&homa_offload, IPPROTO_HOMA);
 	return res1 ? res1 : res2;
+}
+
+/**
+ * homa_gro_hook_tcp() - Arranges for TCP gro_receive calls to be
+ * mediated by this file, so that Homa-over-TCP packets can be retrieved
+ * and funneled through Homa.
+ */
+void homa_gro_hook_tcp(void)
+{
+	if (tcp_net_offload != NULL)
+		return;
+
+	tcp_net_offload = inet_offloads[IPPROTO_TCP];
+	hook_tcp_net_offload = *tcp_net_offload;
+	hook_tcp_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
+	inet_offloads[IPPROTO_TCP] = &hook_tcp_net_offload;
+
+	tcp6_net_offload = inet6_offloads[IPPROTO_TCP];
+	hook_tcp6_net_offload = *tcp6_net_offload;
+	hook_tcp6_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
+	inet6_offloads[IPPROTO_TCP] = &hook_tcp6_net_offload;
+}
+
+/**
+ * homa_gro_unhook_tcp() - Reverses the effects of a previous call to
+ * homa_hook_tcp_gro, so that TCP packets are now passed directly to
+ * Tcp's gro_receive function without mediation.
+ */
+void homa_gro_unhook_tcp(void)
+{
+	if (tcp_net_offload == NULL)
+		return;
+	inet_offloads[IPPROTO_TCP] = tcp_net_offload;
+	tcp_net_offload = NULL;
+	inet6_offloads[IPPROTO_TCP] = tcp6_net_offload;
+	tcp6_net_offload = NULL;
+}
+
+/**
+ * homa_tcp_gro_receive() - Invoked instead of TCP's normal gro_receive function
+ * when hooking is enabled. Identifies Homa-over-TCP packets and passes them
+ * to Homa; sends real TCP packets to TCP's gro_receive function.
+ */
+struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
+		struct sk_buff *skb)
+{
+	struct common_header *h = (struct common_header *)
+			skb_transport_header(skb);
+	// tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
+	// 		"urgent 0x%x, id %d", h->type, h->flags,
+	// 		ntohs(h->urgent), homa_local_id(h->sender_id));
+	if ((h->flags != HOMA_TCP_FLAGS) || (ntohs(h->urgent) != HOMA_TCP_URGENT))
+		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
+
+	/* Change the packet's IP protocol to Homa so that it will get
+	 * dispatched directly to Homa in the future.
+	 */
+	if (skb_is_ipv6(skb)) {
+		ipv6_hdr(skb)->nexthdr = IPPROTO_HOMA;
+	} else {
+		ip_hdr(skb)->check = ~csum16_add(csum16_sub(~ip_hdr(skb)->check,
+				htons(ip_hdr(skb)->protocol)),
+				htons(IPPROTO_HOMA));
+		ip_hdr(skb)->protocol = IPPROTO_HOMA;
+	}
+	return homa_gro_receive(held_list, skb);
 }
 
 /**
@@ -434,9 +513,10 @@ void homa_gro_gen3(struct sk_buff *skb)
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
-//	tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-//			h->type, homa_local_id(h->sender_id), ntohl(d->seg.offset),
-//			NAPI_GRO_CB(skb)->count);
+	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
+	// 		h->common.type, homa_local_id(h->common.sender_id),
+	// 		ntohl(h->seg.offset),
+	// 		NAPI_GRO_CB(skb)->count);
 
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(skb);

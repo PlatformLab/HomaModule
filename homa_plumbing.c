@@ -608,11 +608,13 @@ static int __init homa_load(void) {
 		goto out_cleanup;
 	}
 
+	homa_gro_hook_tcp();
 	tt_init("timetrace", homa->temp);
 
 	return 0;
 
 out_cleanup:
+	homa_gro_unhook_tcp();
 	homa_offload_end();
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
@@ -636,6 +638,7 @@ static void __exit homa_unload(void) {
 
 	tt_destroy();
 
+	homa_gro_unhook_tcp();
 	if (timer_kthread)
 		wake_up_process(timer_kthread);
 	if (homa_offload_end() != 0)

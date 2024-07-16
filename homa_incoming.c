@@ -832,6 +832,8 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
+	ack.common.flags = HOMA_TCP_FLAGS;
+	ack.common.urgent = htons(HOMA_TCP_URGENT);
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 			NUM_PEER_UNACKED_IDS, ack.acks));

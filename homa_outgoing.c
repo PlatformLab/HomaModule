@@ -89,8 +89,12 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 			sizeof(*h) - sizeof(struct data_segment));
 	h->common.sport = htons(rpc->hsk->port);
 	h->common.dport = htons(rpc->dport);
-	homa_set_doff(h);
+	h->common.sequence = 0;
 	h->common.type = DATA;
+	homa_set_doff(h);
+	h->common.flags = HOMA_TCP_FLAGS;
+	h->common.checksum = 0;
+	h->common.urgent = htons(HOMA_TCP_URGENT);
 	h->common.sender_id = cpu_to_be64(rpc->id);
 	h->message_length = htonl(rpc->msgout.length);
 	h->incoming = htonl(rpc->msgout.unscheduled);
@@ -311,6 +315,8 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
 	h->dport = htons(rpc->dport);
+	h->flags = HOMA_TCP_FLAGS;
+	h->urgent = htons(HOMA_TCP_URGENT);
 	h->sender_id = cpu_to_be64(rpc->id);
 	return __homa_xmit_control(contents, length, rpc->peer, rpc->hsk);
 }
@@ -425,8 +431,10 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 			homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
-	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	unknown.common.type = UNKNOWN;
+	unknown.common.flags = HOMA_TCP_FLAGS;
+	unknown.common.urgent = htons(HOMA_TCP_URGENT);
+	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
 	peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);
 	if (!IS_ERR(peer))
 		 __homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);

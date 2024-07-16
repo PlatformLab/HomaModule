@@ -1316,27 +1316,28 @@ void homa_freeze_peers(struct homa *homa)
 	/* Find a socket to use (any will do). */
 	hsk = homa_socktab_start_scan(&homa->port_map, &scan);
 	if (hsk == NULL) {
-		printk(KERN_NOTICE "homa_freeze_peers couldn't find a socket\n");
+		tt_record("homa_freeze_peers couldn't find a socket");
 		return;
 	}
 
 	peers = homa_peertab_get_peers(&homa->peers, &num_peers);
 	if (peers == NULL) {
-		printk(KERN_NOTICE "homa_freeze_peers couldn't find peers "
-				"to freeze\n");
+		tt_record("homa_freeze_peers couldn't find peers to freeze");
 		return;
 	}
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);;
 	freeze.common.dport = 0;
+	freeze.common.flags = HOMA_TCP_FLAGS;
+	freeze.common.urgent = htons(HOMA_TCP_URGENT);
 	freeze.common.sender_id = 0;
 	for (i = 0; i < num_peers; i++) {
 		tt_record1("Sending freeze to 0x%x", tt_addr(peers[i]->addr));
 		err = __homa_xmit_control(&freeze, sizeof(freeze), peers[i], hsk);
 		if (err != 0)
-			printk(KERN_NOTICE "homa_freeze_peers got error %d "
-					"in xmit to %s\n", err,
-					homa_print_ipv6_addr(&peers[i]->addr));
+			tt_record2("homa_freeze_peers got error %d in xmit "
+					"to 0x%x\n", err,
+					tt_addr(peers[i]->addr));
 	}
 	kfree(peers);
 }

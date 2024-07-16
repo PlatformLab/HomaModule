@@ -239,9 +239,9 @@ struct homa_cache_line {
 
 /**
  * struct common_header - Wire format for the first bytes in every Homa
- * packet. This must partially match the format of a TCP header so that
- * Homa can piggyback on TCP segmentation offload (and possibly other
- * features, such as RSS).
+ * packet. This must (mostly) match the format of a TCP header to enable
+ * Homa packets to actually be transmitted as TCP packets (and thereby
+ * take advantage of TSO and other features).
  */
 struct common_header {
 	/**
@@ -257,13 +257,21 @@ struct common_header {
 	__be16 dport;
 
 	/**
-	 * @unused1: corresponds to the sequence number field in TCP headers;
+	 * @sequence: corresponds to the sequence number field in TCP headers;
 	 * must not be used by Homa, in case it gets incremented during TCP
 	 * offload.
 	 */
-	__be32 unused1;
+	__be32 sequence;
 
-	__be32 unused2;
+	/**
+	 * The fields below correspond to the acknowledgment field in TCP
+	 * headers; not used by Homa, except for the low-order 8 bits, which
+	 * specify the Homa packet type (one of the values in the
+	 * homa_packet_type enum).
+	 */
+	__be16 ack1;
+	__u8 ack2;
+	__u8 type;
 
 	/**
 	 * @doff: High order 4 bits holds the number of 4-byte chunks in a
@@ -272,17 +280,35 @@ struct common_header {
 	 */
 	__u8 doff;
 
-	/** @type: One of the values of &enum packet_type. */
-	__u8 type;
+	/**
+	 * @flags: Holds TCP flags such as URG, ACK, etc. The special value
+	 * HOMA_TCP_FLAGS is stored here to distinguish Homa-over-TCP packets
+	 * from real TCP packets. It includes the SYN and RST flags,
+	 * which TCP would never use together; must not include URG or FIN
+	 * (TSO will turn off FIN for all but the last segment).
+	 */
+	__u8 flags;
+#define HOMA_TCP_FLAGS 6
 
-	__u16 unused3;
+	/**
+	 * @window: Corresponds to the window field in TCP headers. Not used
+	 * by HOMA.
+	 */
+	__be16 window;
 
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
 	 * the checksum in a TCP header (TSO may modify this?).*/
 	__be16 checksum;
 
-	__u16 unused4;
+	/**
+	 * @urgent: occupies the same bytes as the urgent pointer in a TCP
+	 * header. When Homa packets are transmitted over TCP, this has the
+	 * special value HOMA_TCP_URGENT (which is set even though URG is
+	 * not set) to indicate that the packet is actually a Homa packet.
+	 */
+	__be16 urgent;
+#define HOMA_TCP_URGENT 0xb97d
 
 	/**
 	 * @sender_id: the identifier of this RPC as used on the sender (i.e.,
@@ -3482,6 +3508,14 @@ static inline bool is_mapped_ipv4(const struct in6_addr x)
 		(x.in6_u.u6_addr32[2] == htonl(0xffff)));
 }
 
+static inline bool is_homa_pkt(struct sk_buff *skb)
+{
+	struct iphdr *iph = ip_hdr(skb);
+	return ((iph->protocol == IPPROTO_HOMA) ||
+			((iph->protocol == IPPROTO_TCP) &&
+			(tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
+}
+
 /**
  * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
  * provide a unique identifier for the address in a timetrace record.
@@ -3574,6 +3608,8 @@ extern int      homa_grant_update_incoming(struct homa_rpc *rpc,
 extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
 extern void     homa_gro_gen2(struct sk_buff *skb);
 extern void     homa_gro_gen3(struct sk_buff *skb);
+extern void     homa_gro_hook_tcp(void);
+extern void     homa_gro_unhook_tcp(void);
 extern struct sk_buff
                *homa_gro_receive(struct list_head *gro_list,
                     struct sk_buff *skb);
@@ -3732,6 +3768,9 @@ extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
                     void __user *buffer, size_t *lenp, loff_t *ppos);
+extern struct sk_buff
+               *homa_tcp_gro_receive(struct list_head *held_list,
+		    struct sk_buff *skb);
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
