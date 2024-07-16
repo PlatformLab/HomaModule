@@ -198,7 +198,8 @@ it will fail with an
 value of
 .BR EAGAIN .
 .SH RETURN VALUE
-The return value is 0 for success and -1 if an error occurred. If
+The return value is the length of the message in bytes for success and
+-1 if an error occurred. If
 .B id
 is zero after an error, it means that the failure prevented a message
 from being received.
