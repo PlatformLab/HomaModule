@@ -113,6 +113,7 @@ void homa_server(int port)
 
 		recv_args.id = 0;
 		recv_args.flags = HOMA_RECVMSG_REQUEST;
+		hdr.msg_controllen = sizeof(recv_args);
 		length = recvmsg(fd, &hdr, 0);
 		if (length < 0) {
 			printf("recvmsg failed: %s\n", strerror(errno));

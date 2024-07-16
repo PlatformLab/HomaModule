@@ -171,6 +171,10 @@ is irrelevant, and a single
 .B recvmsg
 call can include bpages from multiple messages; all that matters is
 that each bpage is returned to Homa exactly once.
+.IP \[bu]
+.IR msg ->\c
+.B msg_controllen
+will be set to zero by the call.
 .PP
 .B recvmsg
 normally waits until a suitable message has arrived, but nonblocking

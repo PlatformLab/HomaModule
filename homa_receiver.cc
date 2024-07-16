@@ -85,6 +85,7 @@ size_t homa::receiver::receive(int flags, uint64_t id)
 	control.flags = flags;
 	control.id = id;
 	hdr.msg_namelen = sizeof(source);
+	hdr.msg_controllen = sizeof(control);
 	msg_length = recvmsg(fd, &hdr, 0);
 	if (msg_length < 0) {
 		control.num_bpages = 0;

@@ -1661,15 +1661,15 @@ class AnalyzeActivity:
         print('Msgs:          Total number of incoming/outgoing messages that were')
         print('               live at some point during the traces')
         print('MsgRate:       Rate at which new messages arrived (M/sec)')
-        print('ActvFrac:      Fraction of time when at least one message was live')
+        print('LiveFrac:      Fraction of time when at least one message was live')
         print('AvgLive:       Average number of live messages')
         print('Gbps:          Total message throughput (Gbps)')
         print('LiveGbps:      Total throughput when at least one message was live (Gbps)')
         print('MaxCore:       Highest incoming throughput via a single GRO core (Gbps)')
         print('MaxPend:       Highest # partially received RPCs (at end of trace) handled')
         print('               by a single GRO core')
-        print('MaxPeers:      Highest number of peers serviced by a single GRO core')
-        print('\nIncoming messages:')
+        print('MaxPeers:      Highest number of peers serviced by a single GRO core\n')
+        print('Incoming messages:')
         print('Node         Msgs MsgRate  LiveFrac  AvgLive    Gbps LiveGbps'
                 '       MaxCore    MaxPend  MaxPeers')
         print('-------------------------------------------------------------'
@@ -1677,7 +1677,7 @@ class AnalyzeActivity:
         for node in get_sorted_nodes():
             if not node in self.node_in_msgs:
                 continue
-            events = sorted(self.node_in_msgs[node])
+            events = sorted(self.node_in_msgs[node], key=lambda t : t[0])
             max_core = 0
             max_bytes = 0
             total_bytes = 0
@@ -1708,7 +1708,7 @@ class AnalyzeActivity:
                     max_peers, max_peers_core)
             print_list(node, events, total_bytes, extra)
         print('\nOutgoing messages:')
-        print('Node         Msgs MsgRate  ActvFrac  AvgActv    Gbps ActvGbps')
+        print('Node         Msgs MsgRate  LiveFrac  AvgLive    Gbps LiveGbps')
         print('-------------------------------------------------------------')
         for node in get_sorted_nodes():
             if not node in self.node_out_msgs:
@@ -4210,8 +4210,9 @@ class AnalyzeIntervals:
             self.add_grant_info(rpc)
 
             # rx_grantable
-            if rpc['send_grant'] or (('unsched' in rpc) and ('in_length' in rpc)
-                    and (rpc['in_length'] > rpc['unsched'])):
+            in_length = rpc['in_length']
+            if rpc['send_grant'] or (('unsched' in rpc) and (in_length != None)
+                    and (in_length > rpc['unsched'])):
                 start = traces[rpc['node']]['first_time']
                 if rpc['softirq_data_pkts']:
                     start = rpc['softirq_data_pkts'][0]['softirq']
@@ -5497,7 +5498,7 @@ class AnalyzeRpcs:
                 if (not peer in peer_nodes) and peer_rpc:
                     peer_nodes[peer] = peer_rpc['node']
 
-            # Deduce  if not already present.
+            # Deduce out_length if not already present.
             if not 'out_length' in rpc:
                 if peer_rpc and (peer_rpc['in_length'] != None):
                     rpc['out_length'] = peer_rpc['in_length']
@@ -5515,8 +5516,10 @@ class AnalyzeRpcs:
                     if length >= 0:
                         rpc['out_length'] = length
 
-        # Deduce in_length if not already present. Also set rx_live
-        # and tx_live.
+            # Set rx_live and tx_live
+            self.set_live(rpc, peer_rpc)
+
+        # Deduce in_length if not already present.
         for id, rpc in rpcs.items():
             if rpc['in_length'] == None:
                 sender_id = id^1
@@ -5524,7 +5527,6 @@ class AnalyzeRpcs:
                     sender = rpcs[sender_id]
                     if 'out_length' in sender:
                         rpc['in_length'] = sender['out_length']
-            self.set_live(rpc, peer_rpc)
 
 #------------------------------------------------
 # Analyzer: rtt
@@ -7292,6 +7294,7 @@ if options.verbose:
 # postprocessing now that all the trace data has been read.
 for analyzer in d.get_analyzers():
     if hasattr(analyzer, 'analyze'):
+        # print('Calling %s.analyze' % (type(analyzer).__name__), file=sys.stderr)
         analyzer.analyze()
 
 # Give each analyzer a chance to output its findings (includes

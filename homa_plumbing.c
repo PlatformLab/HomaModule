@@ -1142,14 +1142,6 @@ done:
 		result = -EFAULT;
 	}
 
-	/* This is needed to compensate for ____sys_recvmsg (which writes the
-	 * after-before difference for this value back as msg_controllen in
-	 * the user's struct msghdr) so that the value in the user's struct
-	 * doesn't change.
-	 */
-	msg->msg_control = ((char *) msg->msg_control)
-			+ sizeof(struct homa_recvmsg_args);
-
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 			control.id, result,
