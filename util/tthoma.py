@@ -145,7 +145,7 @@ peer_nodes = {}
 # value is a dictionary containing the following fields (some may not
 # be present, depending on which events were present in the traces):
 # xmit:         Time when ip*xmit was invoked
-# nic:          Time when the NIC transmitted the packet (if available)
+# nic:          Time when packet was handed off to the NIC (if available)
 # gro:          Time when GRO received the packet
 # softirq:      Time when homa_softirq processed the packet
 # copied:       Time when packet data was copied to user space on receiver
@@ -1543,13 +1543,13 @@ class AnalyzeActivity:
         # Node name -> total bytes output by that node
         self.node_out_bytes = {}
 
-        # Node name -> dictionary that maps from peer address to the core
-        # that handles incoming packets from that (sending) peer on this
-        # (receiving) node.
-        self.node_peer_cores = {}
+        # Node name -> dictionary that maps from core number to total RPCs
+        # that used the given core for GRO.
+        self.node_core_rpcs = {}
 
         # Node name -> dictionary that maps from core number to total RPCs
-        # still in incoming state at the end of the trace.
+        # still in incoming state at the end of the trace that use the given
+        # core for GRO.
         self.node_core_pending = {}
 
         for node in get_sorted_nodes():
@@ -1557,15 +1557,18 @@ class AnalyzeActivity:
             self.node_out_msgs[node] = []
             self.node_core_in_bytes[node] = {}
             self.node_out_bytes[node] = 0
-            self.node_peer_cores[node] = {}
+            self.node_core_rpcs[node] = defaultdict(lambda: 0)
             self.node_core_pending[node] = defaultdict(lambda: 0)
 
         # Scan RPCs to collect data
         for id, rpc in rpcs.items():
             node = rpc['node']
 
-            if ('peer' in rpc) and ('gro_core' in rpc):
-                self.node_peer_cores[node][rpc['peer']] = rpc['gro_core']
+            if 'gro_core' in rpc:
+                core = rpc['gro_core']
+                self.node_core_rpcs[node][core] += 1
+                if 'remaining' in rpc:
+                    self.node_core_pending[node][core] += 1
 
             if 'rx_live' in rpc:
                 in_start, in_end = rpc['rx_live']
@@ -1603,14 +1606,6 @@ class AnalyzeActivity:
 
             for time, offset, length in rpc['send_data']:
                 self.node_out_bytes[node] += length
-
-        for rpc in rpcs.values():
-            if 'remaining' in rpc:
-                node = rpc['node']
-                if not 'peer' in rpc:
-                    print('RPC missing peer: %s' % (rpc))
-                core = self.node_peer_cores[node][rpc['peer']]
-                self.node_core_pending[node][core] += 1
 
     def sum_list(self, events):
         """
@@ -1666,14 +1661,16 @@ class AnalyzeActivity:
         print('Gbps:          Total message throughput (Gbps)')
         print('LiveGbps:      Total throughput when at least one message was live (Gbps)')
         print('MaxCore:       Highest incoming throughput via a single GRO core (Gbps)')
-        print('MaxPend:       Highest # partially received RPCs (at end of trace) handled')
-        print('               by a single GRO core')
-        print('MaxPeers:      Highest number of peers serviced by a single GRO core\n')
+        print('MaxFrac:       Highest fraction of all RPCs serviced by a '
+                'single GRO core')
+        print('MaxPFrac:      Highest fraction of partially received RPCs (at '
+                'end of trace)')
+        print('               handled by a single GRO core\n')
         print('Incoming messages:')
         print('Node         Msgs MsgRate  LiveFrac  AvgLive    Gbps LiveGbps'
-                '       MaxCore    MaxPend  MaxPeers')
+                '       MaxCore     MaxFrac    MaxPFrac')
         print('-------------------------------------------------------------'
-                '-----------------------------------')
+                '--------------------------------------')
         for node in get_sorted_nodes():
             if not node in self.node_in_msgs:
                 continue
@@ -1689,23 +1686,24 @@ class AnalyzeActivity:
             max_gbps = max_bytes*8e-3/(traces[node]['elapsed_time'])
             max_pending = -1
             max_pending_core = -1
+            total_pending = 0
             for core, pending in self.node_core_pending[node].items():
+                total_pending += pending
                 if pending > max_pending:
                     max_pending = pending
                     max_pending_core = core
-            core_peers = defaultdict(list)
-            max_peers = -1
-            max_peers_core = -1
-            for peer, core in self.node_peer_cores[node].items():
-                core_peers[core].append(peer)
-                num_peers = len(core_peers[core])
-                if num_peers > max_peers:
-                    max_peers = num_peers
-                    max_peers_core = core
+            max_rpcs = -1
+            max_rpcs_core = -1
+            total_rpcs = 0
+            for core, rpcs in self.node_core_rpcs[node].items():
+                total_rpcs += rpcs
+                if rpcs > max_rpcs:
+                    max_rpcs = rpcs
+                    max_rpcs_core = core
             # print('core_peers for %s: %s' % (node, core_peers))
-            extra = ' %7.2f (C%02d) %4d (C%02d) %3d (C%02d)' % (
-                    max_gbps, max_core, max_pending, max_pending_core,
-                    max_peers, max_peers_core)
+            extra = ' %7.2f (C%02d) %4.3f (C%02d) %4.3f (C%02d)' % (
+                    max_gbps, max_core, max_rpcs/total_rpcs, max_rpcs_core,
+                    max_pending/total_pending, max_pending_core)
             print_list(node, events, total_bytes, extra)
         print('\nOutgoing messages:')
         print('Node         Msgs MsgRate  LiveFrac  AvgLive    Gbps LiveGbps')
@@ -3999,7 +3997,7 @@ class AnalyzeIntervals:
         global rpcs, packets, grants, max_unsched, traces, options, intervals
 
         # Node name -> list of <time, length> pairs, where time gives the
-        # time when a packet was transmitted by the NIC and length gives
+        # time when a packet was handed off to the NIC and length gives
         # the total length of the packet in bytes.
         node_xmits = defaultdict(list)
 
@@ -4911,8 +4909,11 @@ class AnalyzePacket:
         print('%.3f: Packet passed to ip*xmit on %s, core %d' % (xmit_time,
                 tx_node, pkt['tx_core']))
         if 'nic' in pkt:
-            print('%.3f: Packet transmitted by NIC on %s' % (pkt['nic'],
+            print('%.3f: Packet handed off to NIC on %s' % (pkt['nic'],
                     tx_node))
+        if 'free_tx_skb' in pkt:
+            print('%.3f: sk_buff returned by NIC and freed' % (
+                    pkt['free_tx_skb']))
         print('%.3f: Packet received by %s on core %d with priority %d'
                 % (recv_time, pkt['rx_node'], pkt['gro_core'], pkt['priority']))
 
@@ -6070,6 +6071,12 @@ class AnalyzeSnapshot:
         #                    for this RPC
         # lost:              Number of packets that appear to have been lost
         #                    (transmitted but not received after long delay)
+        #
+        # The following offsets are derived from those above and used for
+        # sorting the RPCs in "closest to completion" order.
+        # sort_grant_xmit    pre_grant_xmit (if nonzero) else sort_grant_gro
+        # sort_grant_gro     pre_grant_gro (if nonzero) else sort_grant_softirq
+        # sort_grant_softirq pre_grant_softirq (if nonzero) else pre_xmit
         self.live_rpcs = defaultdict(lambda : {'pkts': [], 'grants': [],
                 'pre_xmit': 0, 'post_xmit': 1e20,
                 'pre_gro': 0, 'post_gro': 1e20,
@@ -6183,6 +6190,20 @@ class AnalyzeSnapshot:
                 if live_rpc[pre_field] <= unsched:
                     live_rpc[pre_field] = 0
 
+            # Fields for sorting.
+            if live_rpc['pre_grant_softirq']:
+                live_rpc['sort_grant_softirq'] = live_rpc['pre_grant_softirq']
+            else:
+                live_rpc['sort_grant_softirq'] = live_rpc['pre_xmit']
+            if live_rpc['pre_grant_gro']:
+                live_rpc['sort_grant_gro'] = live_rpc['pre_grant_gro']
+            else:
+                live_rpc['sort_grant_gro'] = live_rpc['sort_grant_softirq']
+            if live_rpc['pre_grant_xmit']:
+                live_rpc['sort_grant_xmit'] = live_rpc['pre_grant_xmit']
+            else:
+                live_rpc['sort_grant_xmit'] = live_rpc['sort_grant_gro']
+
             # Count lost packets in the RPC.
             for pkt in live_rpc['pkts']:
                 if (('xmit' in pkt) and (not 'gro' in pkt)
@@ -6222,35 +6243,59 @@ class AnalyzeSnapshot:
         print('-------------------------------------------', end='')
         print('---------------------------------------------')
 
+        # Sort the RPCs so that the ones closest to finished will be first
+        def sort_key(self, id, field):
+            length = rpcs[id]['in_length']
+            if length == None:
+                length = 0
+            if not field in self.live_rpcs[id]:
+                print('Missing field %s in id %d: %s' % (field, id, self.live_rpcs[id]))
+            return length - self.live_rpcs[id][field]
         sorted_ids = sorted(self.live_rpcs.keys(),
-                key = lambda id2 : self.live_rpcs[id2]['min_time'])
+                key = lambda id : self.live_rpcs[id]['pre_copied'],
+                reverse = True)
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'pre_copied'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'pre_softirq'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'pre_gro'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'pre_xmit'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'sort_grant_softirq'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'sort_grant_gro'))
+        sorted_ids = sorted(sorted_ids,
+                key = lambda id : sort_key(self, id, 'sort_grant_xmit'))
 
-        # Separate out messsage that have been granted from those that have
-        # never been given a grant.
-        granted = ''
-        ungranted = ''
+        # Separate out messsages for which some packets have been received
+        # by GRO from those that have no received packets.
+        got_gro = []
+        no_gro = []
+        for id in sorted_ids:
+            if self.live_rpcs[id]['pre_gro'] > 0:
+                got_gro.append(id)
+            else:
+                no_gro.append(id)
+        sorted_ids = got_gro + no_gro
+
         for id in sorted_ids:
             rpc = rpcs[id]
             live_rpc = self.live_rpcs[id]
             incoming = (live_rpc['pre_grant_xmit'] - live_rpc['pre_softirq']
                     if live_rpc['pre_grant_xmit'] > 0 else 0)
-            line = '%10d %7s %7s %7s %7s ' % (id,
+            print('%10d %7s %7s %7s %7s ' % (id,
                     rpc['in_length'] if rpc['in_length'] != None else "",
                     str(live_rpc['pre_grant_xmit'])
                     if live_rpc['pre_grant_xmit'] > 0 else "",
                     str(live_rpc['pre_grant_gro'])
                     if live_rpc['pre_grant_gro'] > 0 else "",
                     str(live_rpc['pre_grant_softirq'])
-                    if live_rpc['pre_grant_softirq'] > 0 else "")
-            line += '%7d %7d %7d %7d  %7d %4d\n' % (live_rpc['pre_xmit'],
+                    if live_rpc['pre_grant_softirq'] > 0 else ""), end='')
+            print('%7d %7d %7d %7d  %7d %4d' % (live_rpc['pre_xmit'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
-                    live_rpc['pre_copied'], incoming, live_rpc['lost'])
-            if live_rpc['pre_grant_xmit'] > 0:
-                granted += line
-            else:
-                ungranted += line
-        print(granted, end='')
-        print(ungranted, end='')
+                    live_rpc['pre_copied'], incoming, live_rpc['lost']))
 
         print('\nFields in the tables below:')
         print('Id:        Packet\'s RPC identifier on the receiver side')
@@ -6259,6 +6304,8 @@ class AnalyzeSnapshot:
         print('GCore:     Core where receiver GRO processed packet')
         print('SCore:     Core where receiver SoftIRQ processed packet')
         print('Xmit:      Time when sender passed packet to ip*xmit')
+        print('Nic:       Time when sender handed off packet to NIC')
+        print('Free:      Time when packet buffer freed after tx')
         print('Gro:       Time when receiver GRO processed packet')
         print('SoftIrq:   Time when receiver SoftIRQ processed packet')
         print('Numbers in parentheses give the difference between the '
@@ -6277,9 +6324,9 @@ class AnalyzeSnapshot:
             if received != None:
                 info += '%sreceived %d' % (prefix, received)
                 prefix = ', '
-            granted = get_granted(rpc, options.time)
-            if granted != None:
-                info += '%sgranted %d' % (prefix, granted)
+            got_gro = get_granted(rpc, options.time)
+            if got_gro != None:
+                info += '%sgranted %d' % (prefix, got_gro)
                 prefix = ', '
             if 'peer' in rpc:
                 info += '%speer %s' % (prefix, peer_nodes[rpc['peer']])
@@ -6360,15 +6407,22 @@ class AnalyzeSnapshot:
             if net_pkts:
                 print('Incoming data packets that have been transmitted but '
                         'not received by GRO:')
-                print('Offset      Xmit           TxCore       Gro        GCore')
+                print('Offset      Xmit           TxCore       Nic              '
+                        'Gro             Free        GCore')
                 for pkt in net_pkts:
-                    print('%6d %7s   %-10s  %4s %7s %8s %5s' % (
+                    print('%6d %7s   %-10s  %4s %7s %8s %7s %8s %7s %8s %5s' % (
                             pkt['offset'], print_field_if(pkt, 'xmit', '%7.1f'),
                             print_field_if(pkt, 'xmit', '(%7.1f)',
                                      lambda t : t - options.time ),
                             print_field_if(pkt, 'tx_core', '%4d'),
+                            print_field_if(pkt, 'nic', '%7.1f'),
+                            print_field_if(pkt, 'nic', '(%6.1f)',
+                                     lambda t : t - options.time),
                             print_field_if(pkt, 'gro', '%7.1f'),
                             print_field_if(pkt, 'gro', '(%6.1f)',
+                                     lambda t : t - options.time),
+                            print_field_if(pkt, 'free_tx_skb', '%7.1f'),
+                            print_field_if(pkt, 'free_tx_skb', '(%6.1f)',
                                      lambda t : t - options.time),
                             print_field_if(pkt, 'gro_core', '%3d')))
 
@@ -6792,7 +6846,7 @@ class AnalyzeTxintervals:
                     'of the interval,\n')
             f.write('#             measured in usecs to xmit (assumes the NIC '
                     'can transmit at\n')
-            f.write('              link speed)\n')
+            f.write('#             link speed)\n')
             f.write('# InNic:      KB of data that have been queued for the '
                     'NIC but whose packets\n')
             f.write('#             haven\'t been returned after transmission, '
@@ -6874,6 +6928,9 @@ class AnalyzeTxpkts:
     data packet transmitted from that node, in time order. Also generates
     aggregate delay statistics by node and core. If either --node or --tx-qid
     is specified, only packets matching those options will be considered.
+    Packets will normally be sorted by their 'Xmit' column, but the --sort
+    option can be used to specify a different column to use for sorting
+    ('Xmit', 'Nic', 'MaxGro', or 'Free').
     """
 
     def __init__(self, dispatcher):
@@ -6894,6 +6951,15 @@ class AnalyzeTxpkts:
             if (not 'nic' in pkt) or (not 'gro' in pkt) or (not 'tx_qid' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
+
+        sort_keys = {'Xmit': 'xmit', 'Nic': 'nic', 'MaxGro': 'gro',
+                'Free': 'free_tx_skb'}
+        sort_key = 'xmit'
+        if options.sort != None:
+            if not options.sort in sort_keys.keys():
+                raise Exception('Invalid --sort option %s: must be one of %s' % (
+                        options.sort, sort_keys.keys()))
+            sort_key = sort_keys[options.sort]
 
         print('\n----------------')
         print('Analyzer: txpkts')
@@ -6926,7 +6992,10 @@ class AnalyzeTxpkts:
                 continue
 
             # Create a data file for this node with packets in time order.
-            pkts = sorted(node_pkts[node], key = lambda d : d['xmit'])
+            if sort_key == 'gro':
+                pkts = sorted(node_pkts[node], key = lambda pkt : get_max_gro(pkt))
+            else:
+                pkts = sorted(node_pkts[node], key = lambda pkt : pkt[sort_key])
             if len(pkts) == 0:
                 continue
 
@@ -7231,6 +7300,10 @@ parser.add_option('--rx-node', dest='rx_node', default=None,
 parser.add_option('--rx-start', dest='rx_start', type=float, default=None,
         metavar='T', help='If specified, some analyzers will ignore packets '
         'received before time T')
+parser.add_option('--sort', dest='sort', default=None,
+        metavar='S', help='Used by some analyzers to select a field to use '
+        'for sorting data. The supported values depend on the analyzer; '
+        'see analyzer documentation for details')
 parser.add_option('--time', dest='time', type=float, default=None,
         metavar='T', help='Time of interest; required by some analyzers')
 parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
