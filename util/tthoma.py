@@ -163,6 +163,8 @@ peer_nodes = {}
 #               list of all the other segments deriving from the same
 #               TSO packet.
 # msg_length:   Total number of bytes in the message, or None if unknown
+# pacer:        If this field exists it has the value True and it means that
+#               this is a TSO packet that was transmitted by the pacer
 # priority:     Priority at which packet was transmitted
 # tx_node:      Name of node from which the packet was transmitted (always
 #               present if xmit is present)
@@ -170,7 +172,7 @@ peer_nodes = {}
 # tx_qid:       NIC channel on which packet was transmitted
 # rx_node:      Name of node on which packet was received
 # gro_core:     Core on which homa_gro_receive was invoked
-# softirq_core: Core on with SoftIRQ processed the packet
+# softirq_core: Core on which SoftIRQ processed the packet
 # free_tx_skb:  Time when NAPI released the skb on the sender, which can't
 #               happen until the packet has been fully transmitted.
 # retransmits:  If the packet was retransmitted, this will be a list of all
@@ -1502,6 +1504,21 @@ class Dispatcher:
     patterns.append({
         'name': 'discard_unknown',
         'regexp': 'Discarding packet for unknown RPC, id ([0-9]+),'
+    })
+
+    def __pacer_xmit(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        port = int(match.group(2))
+        offset = int(match.group(3))
+        bytes_left = int(match.group(4))
+        for interest in interests:
+            interest.tt_pacer_xmit(trace, time, core, id, offset, port,
+                    bytes_left)
+
+    patterns.append({
+        'name': 'pacer_xmit',
+        'regexp': 'pacer calling homa_xmit_data for rpc id ([0-9]+), port '
+                '([0-9]+), offset ([0-9]+), bytes_left ([0-9]+)'
     })
 
 #------------------------------------------------
@@ -5145,6 +5162,10 @@ class AnalyzePackets:
         if not 'retransmits' in p:
             p['tso_length'] = length
 
+    def tt_pacer_xmit(self, trace, t, core, id, offset, port, bytes_left):
+        global packets
+        packets[pkt_id(id, offset)]['pacer'] = True
+
     def tt_retransmit(self, trace, t, core, id, offset, length):
         global packets
         p = packets[pkt_id(id, offset)]
@@ -6926,10 +6947,10 @@ class AnalyzeTxpkts:
     """
     Generates one data file for each node showing information about every
     data packet transmitted from that node, in time order. Also generates
-    aggregate delay statistics by node and core. If either --node or --tx-qid
-    is specified, only packets matching those options will be considered.
-    Packets will normally be sorted by their 'Xmit' column, but the --sort
-    option can be used to specify a different column to use for sorting
+    aggregate statistics for each tx queue on each node. If either --node or
+    --tx-qid is specified, only packets matching those options will be
+    considered. Packets will normally be sorted by the 'Xmit' column, but the
+    --sort option can be used to specify a different column to use for sorting
     ('Xmit', 'Nic', 'MaxGro', or 'Free').
     """
 
@@ -6968,7 +6989,24 @@ class AnalyzeTxpkts:
         print('Summary statistics on delays related to outgoing packets:')
         print('Node:      Name of node')
         print('Qid:       Identifier of transmit queue')
-        print('Pkts:      Total number of packets transmitted by node or queue')
+        print('Tsos:      Total number of TSO frames transmitted by node '
+                'or queue')
+        print('Segs:      Total number of segments (packets received by GRO) '
+                'transmitted by')
+        print('           node or queue')
+        print('PSegs:     Total number of segments that were transmitted '
+                'by the pacer')
+        print('Backlog:   Average KB of tx data that have been in the '
+                'posession of the NIC')
+        print('           (presumably without being transmitted) longer than '
+                '%d usec' % (options.threshold))
+        print('           (%d is the value of the --threshold option)'
+                % (options.threshold))
+        print('BFrac:     Fraction of all bytes passing through this queue '
+                'that spent more')
+        print('           than %d usec in the NIC (where %d is the value of '
+                'the --threshold' % (options.threshold, options.threshold))
+        print('           option)')
         print('NicP10:    10th percentile of NIC delay (time from xmit to NIC '
                 'handoff)')
         print('NicP50:    Median NIC delay')
@@ -7007,8 +7045,31 @@ class AnalyzeTxpkts:
             # free:       delay from xmit to sk_buff free on sender
             delays = defaultdict(lambda: defaultdict(list))
 
-            # Tx queue number -> total number of packets transmitted on that queue
-            qid_counts = defaultdict(lambda: 0)
+            # Tx queue number -> total number of TSO frames transmitted on
+            # that queue
+            qid_tsos = defaultdict(lambda: 0)
+
+            # Tx queue number -> total number of packets (segments) transmitted
+            # on that queue
+            qid_segs = defaultdict(lambda: 0)
+
+            # Tx queue number -> total number of packets (segments) transmitted
+            # by the pacer on that queue
+            qid_pacer_segs = defaultdict(lambda: 0)
+
+            # Tx queue number -> integral of (excess time * KB) for TSO packets
+            # that have spent "too much time" in the NIC.  Excess time is
+            # pkt['tx_fre_skb'] - pkt['nic'] - options.threshold, and KB is
+            # the length of the TSO packet.
+            qid_backlog = defaultdict(lambda: 0.0)
+
+            # Tx queue number -> total number of bytes that passed through
+            # this queue.
+            qid_total_bytes = defaultdict(lambda: 0)
+
+            # Tx queue number -> total number of messages bytes that spent
+            # longer than options.threshold in the NIC.
+            qid_slow_bytes = defaultdict(lambda: 0)
 
             total_pkts = 0
 
@@ -7040,10 +7101,17 @@ class AnalyzeTxpkts:
                 nic = pkt['nic']
                 max_gro = get_max_gro(pkt)
                 free = pkt['free_tx_skb']
+                length = pkt['tso_length']
 
                 if 'tx_qid' in pkt:
                     qid = pkt['tx_qid']
-                    qid_counts[qid] += 1
+                    qid_tsos[qid] += 1
+                    segs = 1
+                    if 'segments' in pkt:
+                        segs += len(pkt['segments'])
+                    qid_segs[qid] += segs
+                    if 'pacer' in pkt:
+                        qid_pacer_segs[qid] += segs
                     qid_string = str(qid)
                     if (options.tx_qid != None) and (qid != options.tx_qid):
                         continue
@@ -7068,6 +7136,12 @@ class AnalyzeTxpkts:
                     delays[qid]['gro'].append(max_gro - nic)
                     delays[qid]['free'].append(free - nic)
 
+                excess = (free - nic) - options.threshold
+                if excess > 0:
+                    qid_backlog[qid] += excess * length
+                    qid_slow_bytes[qid] += length
+                qid_total_bytes[qid] += length
+
                 f.write('%9.3f %10d %6d  %6d %3s' % (xmit, pkt['id'],
                         pkt['offset'], pkt['tso_length'], qid_string))
                 f.write(' %9.3f %7.1f %9.3f %7.1f' % (nic, nic - xmit,
@@ -7088,23 +7162,28 @@ class AnalyzeTxpkts:
             if not first_node:
                 q_details += '\n'
             q_details += 'Transmit queues for %s\n' % (node)
-            q_details += 'Qid   Pkts NicP10 NicP50 NicP90   GroP10 GroP50 '
-            q_details += 'GroP90   FreP10 FreP50 FreP90\n'
-            q_details += '------------------------------------------------'
-            q_details += '------------------------------\n'
+            q_details += 'Qid   Tsos  Segs PSegs Backlog BFrac  NicP10 NicP50 NicP90  '
+            q_details += 'GroP10 GroP50 GroP90  FreP10 FreP50 FreP90\n'
+            q_details += '------------------------------------------------------------'
+            q_details += '------------------------------------------\n'
             first_node = False
             totals = defaultdict(list)
+            total_time = traces[node]['last_time'] - traces[node]['first_time']
             for qid in sorted(delays.keys()):
                 q_delays = delays[qid]
                 for type, d in q_delays.items():
                     totals[type].extend(d)
-                q_details += '%4d %5d %s   %s   %s\n' % (
-                        qid, qid_counts[qid],
+                q_details += '%4d %5d %5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
+                        qid, qid_tsos[qid], qid_segs[qid], qid_pacer_segs[qid],
+                        1e-3*qid_backlog[qid]/total_time,
+                        qid_slow_bytes[qid]/qid_total_bytes[qid],
                         print_type(q_delays['nic']),
                         print_type(q_delays['gro']),
                         print_type(q_delays['free']))
-            node_info += '%-10s %5d %s   %s   %s\n' % (
+            node_info += '%-10s %5d  %6.1f %5.2f  %s  %s  %s\n' % (
                     node, total_pkts,
+                    1e-3*sum(qid_backlog.values())/total_time,
+                    sum(qid_slow_bytes.values())/sum(qid_total_bytes.values()),
                     print_type(totals['nic']),
                     print_type(totals['gro']),
                     print_type(totals['free']))
@@ -7112,10 +7191,10 @@ class AnalyzeTxpkts:
             print('No packet data available')
         else:
             print('\nNode totals')
-            print('Node        Pkts NicP10 NicP50 NicP90   GroP10 GroP50 GroP90'
-                    '   FreP10 FreP50 FreP90')
-            print('------------------------------------------------------------'
-                    '-----------------------')
+            print('Node        Tsos Backlog BFrac  NicP10 NicP50 NicP90  '
+                    'GroP10 GroP50 GroP90  FreP10 FreP50 FreP90')
+            print('------------------------------------------------------'
+                    '------------------------------------------')
             print(node_info)
             print(q_details, end='')
 
@@ -7304,6 +7383,9 @@ parser.add_option('--sort', dest='sort', default=None,
         metavar='S', help='Used by some analyzers to select a field to use '
         'for sorting data. The supported values depend on the analyzer; '
         'see analyzer documentation for details')
+parser.add_option('--threshold', dest='threshold', type=int, default=100,
+        metavar='T', help='Used by some analyzers as a threshold time value, '
+        'in microseconds (default: 100)')
 parser.add_option('--time', dest='time', type=float, default=None,
         metavar='T', help='Time of interest; required by some analyzers')
 parser.add_option('--tx-core', dest='tx_core', type=int, default=None,
