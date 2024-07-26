@@ -2139,17 +2139,24 @@ struct homa {
 	int max_gso_size;
 
 	/**
-	 * @max_gro_skbs: Maximum number of socket buffers that can be
-	 * aggregated by the GRO mechanism.  Set externally via sysctl.
-	 */
-	int max_gro_skbs;
-
-	/**
 	 * @gso_force_software: A non-zero value will cause Home to perform
 	 * segmentation in software using GSO; zero means ask the NIC to
 	 * perform TSO. Set externally via sysctl.
 	 */
 	int gso_force_software;
+
+	/**
+	 * @hijack_tcp: Non-zero means encapsulate outgoing Homa packets
+	 * as TCP packets (i.e. use TCP as the IP protocol). This makes TSO
+	 * and RSS work better. Set externally via sysctl.
+	 */
+	int hijack_tcp;
+
+	/**
+	 * @max_gro_skbs: Maximum number of socket buffers that can be
+	 * aggregated by the GRO mechanism.  Set externally via sysctl.
+	 */
+	int max_gro_skbs;
 
 	/**
 	 * @gro_policy: An OR'ed together collection of bits that determine

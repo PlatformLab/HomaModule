@@ -154,11 +154,8 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 	}
 	memset(&hsk->buffer_pool, 0, sizeof(hsk->buffer_pool));
-
-	/* This line will cause outgoing packets to be sent with TCP
-	 * as the IP protocol (so that TSO and RSS will work better).
-	 */
-	hsk->sock.sk_protocol = IPPROTO_TCP;
+	if (homa->hijack_tcp)
+		hsk->sock.sk_protocol = IPPROTO_TCP;
 	spin_unlock_bh(&socktab->write_lock);
 }
 

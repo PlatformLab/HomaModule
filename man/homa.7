@@ -354,6 +354,13 @@ If this value is nonzero, Homa will perform GSO in software instead of
 asking the NIC to perform TSO in hardware. This can be useful when running
 with NICs that refuse to perform TSO on Homa packets.
 .TP
+.IR hijack_tcp
+An integer value; if nonzero, Homa will transmit its packets as TCP
+packets (e.g., using IPPROTO_TCP instead of IPPROTO_HOMA). This allows Homa
+to make better use of NIC hardware support such as TSO and RSS, but it
+requires Homa to intercept all incoming TCP packets to see if they are
+actually Homa packets. Some might object to this interference with the
+rest of the Linux kernel.
 .TP
 .IR link_mbps
 An integer value specifying the bandwidth of this machine's uplink to
