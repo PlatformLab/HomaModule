@@ -54,8 +54,7 @@ FIXTURE_SETUP(homa_offload)
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
 			.retransmit = 0,
-			.seg = {.offset = htonl(2000),
-			        .segment_length = htonl(1400)}};
+			.seg = {.offset = htonl(2000)}};
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
 		INIT_LIST_HEAD(&self->napi.gro_hash[i].list);
 		self->napi.gro_hash[i].count = 0;
@@ -227,8 +226,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
 			.retransmit = 0,
-			.seg = {.offset = htonl(2000),
-			        .segment_length = htonl(1400)}};
+			.seg = {.offset = htonl(2000)}};
 	struct sk_buff *skb, *skb2, *skb3, *skb4;
 
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
@@ -254,8 +252,8 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.gro_data_bypasses);
 
 	/* Third attempt: bypass should happen. */
-	h.message_length = h.seg.segment_length;
-	h.incoming = h.seg.segment_length;
+	h.message_length = htonl(1400);
+	h.incoming = htonl(1400);
 	homa_cores[cpu_number]->last_gro = 400;
 	skb3 = mock_skb_new(&self->ip, &h.common, 1400, 4000);
 	result = homa_gro_receive(&self->empty_list, skb3);

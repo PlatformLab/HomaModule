@@ -209,7 +209,6 @@ TEST_F(homa_utils, homa_rpc_new_server__allocate_buffers)
 {
 	int created;
 	self->data.message_length = N(3*HOMA_BPAGE_SIZE);
-	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
@@ -221,7 +220,6 @@ TEST_F(homa_utils, homa_rpc_new_server__no_buffer_pool)
 {
 	int created;
 	self->data.message_length = N(1400);
-	self->data.seg.segment_length = N(1400);
 	homa_pool_destroy(&self->hsk.buffer_pool);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
@@ -232,7 +230,6 @@ TEST_F(homa_utils, homa_rpc_new_server__handoff_rpc)
 {
 	int created;
 	self->data.message_length = N(1400);
-	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
@@ -246,7 +243,6 @@ TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_no_buffers)
 {
 	int created;
 	self->data.message_length = N(1400);
-	self->data.seg.segment_length = N(1400);
 	atomic_set(&self->hsk.buffer_pool.free_bpages,0 );
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
@@ -260,7 +256,6 @@ TEST_F(homa_utils, homa_rpc_new_server__dont_handoff_rpc)
 	int created;
 	self->data.message_length = N(2800);
 	self->data.seg.offset = N(1400);
-	self->data.seg.segment_length = N(1400);
 	struct homa_rpc *srpc = homa_rpc_new_server(&self->hsk,
 			self->client_ip, &self->data, &created);
 	ASSERT_FALSE(IS_ERR(srpc));
@@ -427,7 +422,6 @@ TEST_F(homa_utils, homa_rpc_free__free_gaps)
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
 	self->data.seg.offset = htonl(1400);
-	self->data.seg.segment_length = htonl(1400);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
 

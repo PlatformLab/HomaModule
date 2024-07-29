@@ -122,7 +122,6 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 			seg_size = bytes_left;
 		else
 			seg_size = max_seg_data;
-		seg.segment_length = htonl(seg_size);
 		err = homa_skb_append_to_frag(rpc->hsk->homa, skb, &seg,
 				sizeof(seg));
 		if (err != 0)
@@ -589,7 +588,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 	 */
 	for (skb = rpc->msgout.packets; skb !=  NULL;
 			skb = homa_info->next_skb) {
-		int seg_offset, offset, length, segs_left;
+		int seg_offset, offset, seg_length, segs_left, data_left;
 		struct data_segment seg;
 		struct data_header *h;
 
@@ -602,21 +601,27 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		seg_offset = sizeof32(struct data_header)
 				- sizeof32(struct data_segment);
 		segs_left = skb_shinfo(skb)->gso_segs;
-		if (segs_left < 1)
+		data_left = homa_info->data_bytes;
+		if (segs_left < 1) {
 			segs_left = 1;
+			seg_length = homa_rx_data_len(skb);
+		} else
+			seg_length = skb_shinfo(skb)->gso_size - sizeof32(seg);
 		for ( ; segs_left > 0; segs_left--,
-				seg_offset += sizeof32(seg) + length) {
+				seg_offset += sizeof32(seg) + seg_length) {
 			struct sk_buff *new_skb;
 			struct homa_skb_info *new_homa_info;
 			int err;
 
 			homa_skb_get(skb, &seg, seg_offset, sizeof(seg));
 			offset = ntohl(seg.offset);
-			length = ntohl(seg.segment_length);
+			if (seg_length > data_left)
+				seg_length = data_left;
+			data_left -= seg_length;
 
 			if (end <= offset)
 				goto resend_done;
-			if ((offset + length) <= start)
+			if ((offset + seg_length) <= start)
 				continue;
 
 			/* This segment must be retransmitted. */
@@ -634,14 +639,14 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 					sizeof32(struct data_header)
 					- sizeof32(struct data_segment));
 			h->retransmit = 1;
-			if ((offset + length) <= rpc->msgout.granted)
+			if ((offset + seg_length) <= rpc->msgout.granted)
 				h->incoming = htonl(rpc->msgout.granted);
-			else if ((offset + length) > rpc->msgout.length)
+			else if ((offset + seg_length) > rpc->msgout.length)
 				h->incoming = htonl(rpc->msgout.length);
 			else
-				h->incoming = htonl(offset + length);
+				h->incoming = htonl(offset + seg_length);
 			err = homa_skb_append_from_skb(rpc->hsk->homa, new_skb,
-					skb, seg_offset, sizeof32(seg) + length);
+					skb, seg_offset, sizeof32(seg) + seg_length);
 			if (err != 0) {
 				printk(KERN_ERR "homa_resend_data got error %d "
 						"from homa_skb_append_from_skb\n",
@@ -654,12 +659,12 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 
 			new_homa_info = homa_get_skb_info(new_skb);
 			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
-					+ sizeof(struct data_header) + length
-					+ HOMA_ETH_OVERHEAD;
-			new_homa_info->data_bytes = length;
+					+ sizeof(struct data_header)
+					+ seg_length + HOMA_ETH_OVERHEAD;
+			new_homa_info->data_bytes = seg_length;
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",
-					offset, length, rpc->id);
+					offset, seg_length, rpc->id);
 			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
 			__homa_xmit_data(new_skb, rpc, priority);
 			INC_METRIC(resent_packets, 1);

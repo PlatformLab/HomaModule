@@ -221,7 +221,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__basics)
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(3000, crpc->msgout.granted);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_STREQ("mtu 1500, max_seg_data 1400, max_gso_data 1400; "
+	EXPECT_STREQ("mtu 1496, max_seg_data 1400, max_gso_data 1400; "
 			"_copy_from_iter 1400 bytes at 1000; "
 			"_copy_from_iter 1400 bytes at 2400; "
 			"_copy_from_iter 200 bytes at 3800", unit_log_get());
@@ -765,6 +765,15 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	homa_resend_data(crpc, 16000, 17000, 7);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_outgoing, homa_resend_data__packet_doesnt_use_gso)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 2000);
+	unit_log_clear();
+	homa_resend_data(crpc, 500, 1500, 2);
+	EXPECT_STREQ("xmit DATA retrans 1000@0", unit_log_get());
+}
 TEST_F(homa_outgoing, homa_resend_data__cant_allocate_skb)
 {
 	mock_net_device.gso_max_size = 5000;
@@ -820,7 +829,7 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 	mock_xmit_log_homa_info = 1;
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
-			"homa_info: wire_bytes 1542, data_bytes 1400, offset 8400",
+			"homa_info: wire_bytes 1538, data_bytes 1400, offset 8400",
 			unit_log_get());
 }
 

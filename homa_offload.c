@@ -278,7 +278,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset), priority);
-		if ((h_new->seg.segment_length == h_new->message_length)
+		if ((homa_rx_data_len(skb) == ntohl(h_new->message_length))
 				&& (homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
 				&& !busy) {
 			INC_METRIC(gro_data_bypasses, 1);

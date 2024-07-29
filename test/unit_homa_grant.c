@@ -87,7 +87,7 @@ FIXTURE_SETUP(homa_grant)
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
 		        .retransmit = 0,
-			.seg = {.offset = 0, .segment_length = htonl(1400)}};
+			.seg = {.offset = 0}};
 	unit_log_clear();
 	self->incoming_delta = 0;
 }

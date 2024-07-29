@@ -708,17 +708,14 @@ TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
 	self->data.common.sender_id = cpu_to_be64(300);
 	self->data.message_length = htonl(300);
-	self->data.seg.segment_length = htonl(300);
 	skb2 = mock_skb_new(self->client_ip, &self->data.common, 300, 0);
 	self->data.common.sender_id = cpu_to_be64(200);
 	self->data.message_length = htonl(1600);
 	self->data.seg.offset = htonl(1400);
-	self->data.seg.segment_length = htonl(200);
 	skb3 = mock_skb_new(self->client_ip, &self->data.common, 200, 0);
 	self->data.common.sender_id = cpu_to_be64(5000);
 	self->data.message_length = htonl(5000);
 	self->data.seg.offset = 0;
-	self->data.seg.segment_length = htonl(1400);
 	skb4 = mock_skb_new(self->client_ip, &self->data.common, 1400, 0);
 	skb_shinfo(skb)->frag_list = skb2;
 	skb2->next = skb3;

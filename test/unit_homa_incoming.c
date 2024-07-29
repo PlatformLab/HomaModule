@@ -169,7 +169,7 @@ FIXTURE_SETUP(homa_incoming)
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
 		        .retransmit = 0,
-			.seg = {.offset = 0, .segment_length = htonl(1400)}};
+			.seg = {.offset = 0}};
 	unit_log_clear();
 	delete_count = 0;
 	lock_delete_count = 0;
@@ -260,7 +260,6 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 			&self->data.common, 1400, 1400));
 
 	self->data.seg.offset = htonl(4200);
-	self->data.seg.segment_length = htonl(800);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 800, 4200));
 	EXPECT_STREQ("start 0, end 1400, time 5000; "
@@ -269,7 +268,6 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 
 	unit_log_clear();
 	self->data.seg.offset = 0;
-	self->data.seg.segment_length = htonl(1400);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 0));
 	EXPECT_STREQ("start 2800, end 4200, time 5000", unit_print_gaps(crpc));
@@ -601,9 +599,8 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 101000), crpc);
 	self->data.seg.offset = htonl(2800);
-	self->data.seg.segment_length = htonl(1200);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			1400, 201800), crpc);
+			1200, 201800), crpc);
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
@@ -691,7 +688,6 @@ TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 			1000, 4000);
 	ASSERT_NE(NULL, crpc);
 	self->data.message_length = htonl(4000);
-	self->data.seg.segment_length = htonl(3000);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			3000, 101000), crpc);
 
@@ -1120,7 +1116,6 @@ TEST_F(homa_incoming, homa_data_pkt__wrong_client_rpc_state)
 	crpc->state = RPC_DEAD;
 	self->data.message_length = htonl(2000);
 	self->data.seg.offset = htonl(1400);
-	self->data.seg.segment_length = htonl(600);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			600, 1400), crpc);
 	EXPECT_EQ(600, crpc->msgin.bytes_remaining);
@@ -1226,10 +1221,9 @@ TEST_F(homa_incoming, homa_data_pkt__handoff)
 	 */
 	self->data.message_length = htonl(3000);
 	self->data.seg.offset = htonl(2800);
-	self->data.seg.segment_length = htonl(200);
 	unit_log_clear();
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			1400, 0), crpc);
+			200, 0), crpc);
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_incoming, homa_data_pkt__send_cutoffs)

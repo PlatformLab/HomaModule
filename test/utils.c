@@ -69,13 +69,11 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		.ack = {0, 0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
-		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
+		.seg = {.offset = 0}
 	};
 
 	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
-	h.seg.segment_length = htonl(this_size);
 	homa_dispatch_pkts(mock_skb_new(server_ip, &h.common, this_size, 0),
 			hsk->homa);
 	if (state == UNIT_RCVD_ONE_PKT)
@@ -87,7 +85,6 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
-		h.seg.segment_length = htonl(this_size);
 		homa_dispatch_pkts(mock_skb_new(server_ip, &h.common,
 				this_size , 0), hsk->homa);
 	}
@@ -367,11 +364,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		.ack = {0, 0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
-		.seg = {.offset = 0,
-			.segment_length = htonl(UNIT_TEST_DATA_PER_PACKET)}
+		.seg = {.offset = 0}
 	};
-	if (req_length < UNIT_TEST_DATA_PER_PACKET)
-		h.seg.segment_length = htonl(req_length);
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h,
 			&created);
 	if (IS_ERR(srpc))
@@ -391,7 +385,6 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
-		h.seg.segment_length = htonl(this_size);
 		homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
 				this_size , 0), hsk->homa);
 	}

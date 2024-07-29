@@ -1024,8 +1024,7 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
-	length = ntohl(h.seg.segment_length);
-	h.seg.segment_length = htonl(length/2);
+	length = homa_rx_data_len(head_skb);
 	skb1 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
 			offset);
 	offset += length/2;

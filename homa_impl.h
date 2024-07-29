@@ -358,9 +358,6 @@ struct data_segment {
 	 */
 	__be32 offset;
 
-	/** @segment_length: Number of bytes of data in this segment. */
-	__be32 segment_length;
-
 	/** @data: the payload of this segment. */
 	char data[0];
 } __attribute__((packed));
@@ -421,6 +418,16 @@ _Static_assert(((sizeof(struct data_header) - sizeof(struct data_segment))
 		& 0x3) == 0,
 		" data_header length not a multiple of 4 bytes (required "
 		"for TCP/TSO compatibility");
+
+/**
+ * homa_rx_data_len() - Returns the total amount of message data contained
+ * in an incoming DATA packet. This function works only for incoming
+ * packets and ougoing packets that don't use GSO.
+ */
+static inline int homa_rx_data_len(struct sk_buff *skb)
+{
+	return skb->len - skb_transport_offset(skb) - sizeof(struct data_header);
+}
 
 /**
  * struct grant_header - Wire format for GRANT packets, which are sent by
