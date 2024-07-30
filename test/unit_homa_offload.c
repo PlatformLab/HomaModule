@@ -210,6 +210,34 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 	kfree_skb(segs);
 }
 
+TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
+{
+	struct sk_buff *skb, *skb2;
+	struct data_header *h;
+
+	/* First call: copy offset from sequence number. */
+	self->header.common.sequence = htonl(6000);
+	self->header.seg.offset = -1;
+	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	NAPI_GRO_CB(skb)->same_flow = 0;
+	homa_cores[cpu_number]->held_skb = NULL;
+	homa_cores[cpu_number]->held_bucket = 99;
+	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb));
+	h = (struct data_header *) skb_transport_header(skb);
+	EXPECT_EQ(6000, htonl(h->seg.offset));
+
+	/* Second call: offset already valid. */
+	self->header.common.sequence = htonl(6000);
+	self->header.seg.offset = ntohl(5000);
+	skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	NAPI_GRO_CB(skb2)->same_flow = 0;
+	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb2));
+	h = (struct data_header *)skb_transport_header(skb2);
+	EXPECT_EQ(5000, htonl(h->seg.offset));
+
+	kfree_skb(skb);
+	kfree_skb(skb2);
+}
 TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");

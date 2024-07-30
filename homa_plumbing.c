@@ -529,7 +529,7 @@ static int __init homa_load(void) {
 
 	printk(KERN_NOTICE "Homa module loading\n");
 	printk(KERN_NOTICE "Homa structure sizes: data_header %u, "
-			"data_segment %u, ack %u, "
+			"seg_header %u, ack %u, "
 			"grant_header %u, peer %u, ip_hdr %u flowi %u "
 			"ipv6_hdr %u, flowi6 %u "
 			"tcp_sock %u homa_rpc %u sk_buff %u "
@@ -537,7 +537,7 @@ static int __init homa_load(void) {
 			"HOMA_MAX_BPAGES %u NR_CPUS %u "
 			"nr_cpu_ids %u, MAX_NUMNODES %d\n",
 			sizeof32(struct data_header),
-			sizeof32(struct data_segment),
+			sizeof32(struct seg_header),
 			sizeof32(struct homa_ack),
 			sizeof32(struct grant_header),
 			sizeof32(struct homa_peer),

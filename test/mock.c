@@ -611,8 +611,9 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 		struct homa_skb_info *homa_info;
 		homa_info = homa_get_skb_info(skb);
 		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d, "
-				"offset %d", homa_info->wire_bytes,
-				homa_info->data_bytes, homa_info->offset);
+				"seg_length %d, offset %d", homa_info->wire_bytes,
+				homa_info->data_bytes, homa_info->seg_length,
+				homa_info->offset);
 	}
 	kfree_skb(skb);
 	return 0;
@@ -1024,7 +1025,7 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
-	length = homa_rx_data_len(head_skb);
+	length = homa_data_len(head_skb);
 	skb1 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
 			offset);
 	offset += length/2;

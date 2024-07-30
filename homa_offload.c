@@ -200,7 +200,7 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	 * in each segment) from data, which is divided among the segments.
 	 */
 	__skb_pull(skb, sizeof(struct data_header)
-			- sizeof(struct data_segment));
+			- sizeof(struct seg_header));
 	segs = skb_segment(skb, features);
 
 	/* Set incrementing ids in each of the segments (mimics behavior
@@ -274,11 +274,17 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
 	if (h_new->common.type == DATA) {
+		if (h_new->seg.offset == -1) {
+			tt_record2("homa_gro_receive replaced offset %d with %d",
+					ntohl(h_new->seg.offset),
+					ntohl(h_new->common.sequence));
+			h_new->seg.offset = h_new->common.sequence;
+		}
 		tt_record4("homa_gro_receive got packet from 0x%x "
 				"id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset), priority);
-		if ((homa_rx_data_len(skb) == ntohl(h_new->message_length))
+		if ((homa_data_len(skb) == ntohl(h_new->message_length))
 				&& (homa->gro_policy & HOMA_GRO_SHORT_BYPASS)
 				&& !busy) {
 			INC_METRIC(gro_data_bypasses, 1);

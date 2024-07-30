@@ -1127,23 +1127,24 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	case DATA: {
 		struct data_header *h = (struct data_header *) header;
 		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
-		int data_left, i, seg_length, pos;
+		int data_left, i, seg_length, pos, offset;
 		if (skb_shinfo(skb)->gso_segs == 0) {
-			seg_length = homa_rx_data_len(skb);
+			seg_length = homa_data_len(skb);
 			data_left = 0;
 		} else {
-			seg_length = skb_shinfo(skb)->gso_size
-				- sizeof(struct data_segment);
+			seg_length = homa_info->seg_length;
 			if (seg_length > homa_info->data_bytes)
 				seg_length = homa_info->data_bytes;
 			data_left = homa_info->data_bytes - seg_length;
 		}
+		offset = ntohl(h->seg.offset);
+		if (offset == -1)
+			offset = ntohl(h->common.sequence);
 		used = homa_snprintf(buffer, buf_len, used,
 				", message_length %d, offset %d, "
 				"data_length %d, incoming %d",
-				ntohl(h->message_length),
-				ntohl(h->seg.offset), seg_length,
-				ntohl(h->incoming));
+				ntohl(h->message_length), offset,
+				seg_length, ntohl(h->incoming));
 		if (ntohs(h->cutoff_version != 0))
 			used = homa_snprintf(buffer, buf_len, used,
 					", cutoff_version %d",
@@ -1159,15 +1160,19 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		pos = skb_transport_offset(skb) + sizeof32(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			struct data_segment seg;
-			homa_skb_get(skb, &seg, pos, sizeof(seg));
+			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
+				struct seg_header seg;
+				homa_skb_get(skb, &seg, pos, sizeof(seg));
+				offset = ntohl(seg.offset);
+			} else {
+				offset += seg_length;
+			}
 			if (seg_length > data_left)
 				seg_length = data_left;
 			used = homa_snprintf(buffer, buf_len, used,
-					" %d@%d", seg_length,
-					ntohl(seg.offset));
+					" %d@%d", seg_length, offset);
 			data_left -= seg_length;
-			pos += seg_length + sizeof(struct data_segment);
+			pos += skb_shinfo(skb)->gso_size;
 		};
 		break;
 	}
@@ -1254,31 +1259,37 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	case DATA: {
 		struct data_header *h = (struct data_header *)header;
 		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
-		struct data_segment seg;
-		int data_left, used, i, seg_length, pos;
+		int data_left, used, i, seg_length, pos, offset;
+
 		if (skb_shinfo(skb)->gso_segs == 0) {
-			seg_length = homa_rx_data_len(skb);
+			seg_length = homa_data_len(skb);
 			data_left = 0;
 		} else {
-			seg_length = skb_shinfo(skb)->gso_size - sizeof32(seg);
-			if (seg_length > homa_info->data_bytes)
-				seg_length = homa_info->data_bytes;
+			seg_length = homa_info->seg_length;
 			data_left = homa_info->data_bytes - seg_length;
 		}
+		offset = ntohl(h->seg.offset);
+		if (offset == -1)
+			offset = ntohl(h->common.sequence);
 
 		pos = skb_transport_offset(skb) + sizeof32(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				h->retransmit ? " retrans" : "",
-				seg_length, ntohl(h->seg.offset));
+				seg_length, offset);
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
-			homa_skb_get(skb, &seg, pos, sizeof(seg));
+			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
+				struct seg_header seg;
+				homa_skb_get(skb, &seg, pos, sizeof(seg));
+				offset = ntohl(seg.offset);
+			} else {
+				offset += seg_length;
+			}
 			if (seg_length > data_left)
 				seg_length = data_left;
 			used = homa_snprintf(buffer, buf_len, used,
-					" %d@%d", seg_length,
-					ntohl(seg.offset));
+					" %d@%d", seg_length, offset);
 			data_left -= seg_length;
-			pos += seg_length + sizeof32(struct data_segment);
+			pos += skb_shinfo(skb)->gso_size;
 		}
 		break;
 	}

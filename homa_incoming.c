@@ -102,7 +102,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
 	int start = ntohl(h->seg.offset);
-	int length = homa_rx_data_len(skb);
+	int length = homa_data_len(skb);
 	int end = start + length;
 	struct homa_gap *gap, *dummy, *gap2;
 
@@ -253,7 +253,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			struct data_header *h = (struct data_header *)
 					skbs[i]->data;
 			int offset = ntohl(h->seg.offset);
-			int pkt_length = homa_rx_data_len(skbs[i]);
+			int pkt_length = homa_data_len(skbs[i]);
 			int copied = 0;
 			char *dst;
 			struct iovec iov;
@@ -574,9 +574,9 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		tt_record4("Dropping packet because no buffer space available: "
 				"id %d, offset %d, length %d, old incoming %d",
 				rpc->id, ntohl(h->seg.offset),
-				homa_rx_data_len(skb),
+				homa_data_len(skb),
 				rpc->msgin.granted);
-		INC_METRIC(dropped_data_no_bufs, homa_rx_data_len(skb));
+		INC_METRIC(dropped_data_no_bufs, homa_data_len(skb));
 		goto discard;
 	}
 
