@@ -344,9 +344,9 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	/* Is the message now fully granted? */
 	if (rpc->msgin.granted >= rpc->msgin.length) {
-		homa_rpc_unlock(rpc);
 		homa_grantable_lock(homa, 0);
 		homa_grant_remove_rpc(rpc);
+		homa_rpc_unlock(rpc);
 		homa_grant_recalc(homa, 1);
 		goto done;
 	}
