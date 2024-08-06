@@ -2229,13 +2229,13 @@ struct homa {
 	 * HOMA_GRO_GEN3              Use the "Gen3" mechanisms for load
 	 *                            balancing.
 	 */
-	#define HOMA_GRO_SAME_CORE       2
-	#define HOMA_GRO_IDLE            4
-	#define HOMA_GRO_NEXT            8
-	#define HOMA_GRO_GEN2           16
-	#define HOMA_GRO_FAST_GRANTS    32
-	#define HOMA_GRO_SHORT_BYPASS   64
-	#define HOMA_GRO_GEN3          128
+	#define HOMA_GRO_SAME_CORE         2
+	#define HOMA_GRO_IDLE              4
+	#define HOMA_GRO_NEXT              8
+	#define HOMA_GRO_GEN2           0x10
+	#define HOMA_GRO_FAST_GRANTS    0x20
+	#define HOMA_GRO_SHORT_BYPASS   0x40
+	#define HOMA_GRO_GEN3           0x80
 	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_GEN2 \
 			|HOMA_GRO_SHORT_BYPASS|HOMA_GRO_FAST_GRANTS)
 
