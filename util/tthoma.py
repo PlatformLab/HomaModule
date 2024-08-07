@@ -238,6 +238,8 @@ grants = GrantDict()
 # tx_q:           Estimate of the number of unsent bytes in the NIC (based
 #                 on when packets passed to the NIC if available, otherwise
 #                 when passed to ip*xmit)
+# tx_gro_bytes    Bytes of data from this node received by GRO on other nodes
+#                 during the interval
 # tx_free_bytes:  Bytes of data freed after NIC notified tx completion
 # tx_max_free:    Largest value of pkt['free_tx_skb'] - pkt['nic'] for
 #                 a packet freed in this interval (0 if no packets freed)
@@ -3909,6 +3911,7 @@ class AnalyzeIntervals:
                     'tx_in_nic':        0,
                     'tx_qdisc':         0,
                     'tx_q':             0,
+                    'tx_gro_bytes':     0,
                     'tx_free_bytes':    0,
                     'tx_max_free':      0,
                     'tx_min_free':      0,
@@ -4058,8 +4061,8 @@ class AnalyzeIntervals:
             tfree = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
             tgro = pkt['gro'] if 'gro' in pkt else None
 
-            # For tx statistics, process only the overall TSO frame, not the
-            # individual segments
+            # For most tx statistics, process only the overall TSO frame,
+            # not the individual segments
             if ('tso_length' in pkt):
                 tso_length = pkt['tso_length']
 
@@ -4098,6 +4101,11 @@ class AnalyzeIntervals:
                         start = traces[tx_node]['first_time']
                         add_to_intervals(tx_node, start, tfree, 'tx_in_nic',
                                 tso_length)
+
+            if tgro != None:
+                interval = get_interval(tx_node, tgro)
+                if interval != None:
+                    interval['tx_gro_bytes'] += length
 
             if not 'rx_node' in pkt:
                 continue
@@ -4865,6 +4873,72 @@ class AnalyzeNet:
                         core_data['avg_backlog'] * 1e-3,
                         core_data['max_backlog'] * 1e-3,
                         core_data['max_backlog_time']))
+
+#------------------------------------------------
+# Analyzer: nictx
+#------------------------------------------------
+class AnalyzeNictx:
+    """
+    Generates statistics about NIC transmit throughput, intended for debugging
+    situations where the NIC does not seem to be transmitting at line rate.
+    Requires the --data option; also uses the --interval option.
+    """
+
+    def __init__(self, dispatcher):
+        interval_analyzer = dispatcher.interest('AnalyzeIntervals')
+        require_options('nictx', 'data')
+
+    def output(self):
+        global intervals, options, traces
+
+        print('\n---------------')
+        print('Analyzer: nictx')
+        print('---------------')
+        if options.data == None:
+            print('--data option wasn\'t specified, so no output generated.')
+            return
+        print('See data files nictx_*.dat in %s\n' % (options.data))
+
+        for node in get_sorted_nodes():
+            f = open('%s/nictx_%s.dat' % (options.data, node), 'w')
+            f.write('# Node: %s\n' % (node))
+            f.write('# Generated at %s.\n' %
+                    (time.strftime('%I:%M %p on %m/%d/%Y')))
+            f.write('# Statistics about NIC transmit throughput from node ')
+            f.write('%s over %d usec intervals\n' % (node, options.interval))
+            f.write('All rates are in gbps, averaged over the 5 preceding intervals\n')
+            f.write('# Time:       End of the time interval\n')
+            f.write('# Tx:         Rate at which new data bytes were passed to ip*xmit\n')
+            f.write('# ToNic:      Rate at which new data bytes were queued in the NIC\n')
+            f.write('# Gro:        Rate at which data bytes reached GRO on receivers\n')
+            f.write('# Free:       Rate at which packet buffers were freed '
+                    'after transmission complete\n')
+            f.write('# InNIC       KB of data that has been queued in the NIC '
+                    'but not yet freed\n')
+
+            f.write('\n#   Time     Tx  ToNic    Gro   Free InNIC\n')
+
+            node_intervals = intervals[node]
+            bytes_to_gbps = 8 / (options.interval * 5 * 1000)
+            for i in range(4, len(node_intervals)):
+                tx_bytes = 0
+                to_nic_bytes = 0
+                gro_bytes = 0
+                free_bytes = 0
+                for interval in node_intervals[i-4:i+1]:
+                    tx_bytes += interval['tx_bytes']
+                    to_nic_bytes += interval['tx_nic_bytes']
+                    gro_bytes += interval['tx_gro_bytes']
+                    free_bytes += interval['tx_free_bytes']
+                interval = node_intervals[i]
+                f.write('%8.1f %6.1f %6.1f %6.1f %6.1f %5d\n' %
+                        (interval['time'],
+                         tx_bytes * bytes_to_gbps,
+                         to_nic_bytes * bytes_to_gbps,
+                         gro_bytes * bytes_to_gbps,
+                         free_bytes * bytes_to_gbps,
+                         interval['tx_in_nic'] * 1e-3))
+            f.close()
 
 #------------------------------------------------
 # Analyzer: ooo
@@ -7036,13 +7110,13 @@ class AnalyzeTxintervals:
     def output(self):
         global intervals, options, traces
 
-        print('\n------------')
-        print('Analyzer: tx')
-        print('------------')
+        print('\n---------------------')
+        print('Analyzer: txintervals')
+        print('---------------------')
         if options.data == None:
             print('--data option wasn\'t specified, so no output generated.')
             return
-        print('See data files tx_*.dat in %s\n' % (options.data))
+        print('See data files txintervals_*.dat in %s\n' % (options.data))
         print('Average transmit throughput:')
 
         if options.tx_qid != None:
