@@ -287,7 +287,7 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('--tcp-port-threads', type=int, dest='tcp_port_threads',
             metavar='count', default=defaults['tcp_port_threads'],
             help='Number of threads listening on each TCP server port '
-            '(default: %d)'% (defaults['port_threads']))
+            '(default: %d)'% (defaults['tcp_port_threads']))
     parser.add_argument('--tcp-server-ports', type=int, dest='tcp_server_ports',
             metavar='count', default=defaults['tcp_server_ports'],
             help='Number of ports on which TCP servers should listen '
@@ -1192,11 +1192,21 @@ def get_digest(experiment):
             slowdown = rtt/optimal
             bucket_slowdowns.append(slowdown)
             slowdown_sum += slowdown
-    digest["avg_slowdown"] = slowdown_sum/digest["total_messages"]
-    log("Digest finished for %s, %d RPCs, average slowdown %.2f, "
-            "best-case RTT %.1f us" % (experiment, digest["total_messages"],
-            digest["avg_slowdown"], min_rtt))
 
+    # Get stats for shortest 10% of messages
+    small_rtts = []
+    small_count = 0
+    for length in lengths:
+        small_rtts.extend(rtts[length])
+        if len(small_rtts)/digest["total_messages"] > 0.1:
+            break
+    small_rtts.sort()
+    digest["avg_slowdown"] = slowdown_sum/digest["total_messages"]
+    log("%s has %d RPCs, avg slowdown %.2f, %d messages < %d bytes "
+            "(min %.1f us P50 %.1f us P99 %.1f us)" % (experiment,
+            digest["total_messages"], digest["avg_slowdown"], len(small_rtts),
+            length, small_rtts[0], small_rtts[len(small_rtts)//2],
+            small_rtts[99*len(small_rtts)//100]))
 
     dir = "%s/reports" % (log_dir)
     f = open("%s/reports/%s.data" % (log_dir, experiment), "w")
