@@ -520,7 +520,7 @@ def get_recv_length(offset, msg_length=None):
         for i in range(len(sorted_offsets)-1):
             length = sorted_offsets[i+1] - sorted_offsets[i]
             if length > max:
-                max = length;
+                max = length
             get_recv_length.lengths[sorted_offsets[i]] = length
         get_recv_length.lengths[sorted_offsets[-1]] = max
         get_recv_length.mtu = max
@@ -528,8 +528,9 @@ def get_recv_length(offset, msg_length=None):
         length = get_recv_length.lengths[offset]
     else:
         length = get_recv_length.mtu
-    if (msg_length != None) and ((offset + length) > msg_length):
-        length = msg_length - offset
+    if msg_length != None:
+        if ((offset + length) > msg_length) or (length == 0):
+            length = msg_length - offset
     return length
 
 def get_received(rpc, time):
@@ -2406,6 +2407,8 @@ class AnalyzeDelay:
 
         # Collect statistics about delays within individual packets.
         mtu = get_mtu()
+        if mtu == 0:
+            mtu = 1000000
         for p, pkt in packets.items():
             if (pkt['msg_length'] != None) and (pkt['msg_length'] <= mtu):
                 if ('xmit' in pkt) and ('nic' in pkt):
@@ -4399,6 +4402,144 @@ class AnalyzeLost:
                     rx_node, core_info, id_info, pkt['offset']))
 
 #------------------------------------------------
+# Analyzer: msgrange
+#------------------------------------------------
+class AnalyzeMsgrange:
+    """
+    Selects messages within a given range of lengths (--min and --max options),
+    divides those messages into a few percentile ranges, then prints statistics
+    on delays for each phase of message transmission for each percentile range.
+    """
+
+    def __init__(self, dispatcher):
+        require_options('msgrange', 'min', 'max')
+        dispatcher.interest('AnalyzeRpcs')
+        dispatcher.interest('AnalyzePackets')
+
+    def get_stats(self, tx_rpcs):
+        """
+        Given a collection of RPCs, returns a dictionary with the following
+        elements, each of which is a list of elapsed times extracted from all
+        of the messages or their packets:
+        elapsed:            Times from sendmsg to recvmsg_done
+        xmit:               Times from sendmsg to first packet xmit
+        nic:                Times from xmit to nic for all packets
+        free:               Times from nic to free for all packets
+        gro:                Times from nic to gro for all packets
+        softirq:            Times from gro to softirq for all packets
+        notify:             Times from last softirq to recvmsg_done
+        """
+
+        global rpcs
+        elapsed = []
+        xmit = []
+        nic = []
+        free = []
+        gro = []
+        softirq = []
+        notify = []
+
+        for tx_rpc in tx_rpcs:
+            rx_rpc = rpcs[tx_rpc['id']^1]
+            max_softirq = -1e20
+            elapsed.append(rx_rpc['recvmsg_done'] - tx_rpc['sendmsg'])
+            xmit.append(tx_rpc['send_data_pkts'][0]['xmit'] - tx_rpc['sendmsg'])
+            for pkt in tx_rpc['send_data_pkts']:
+                if ('nic' in pkt) and ('xmit' in pkt):
+                    nic.append(pkt['nic'] - pkt['xmit'])
+                if ('free' in pkt) and ('nic' in pkt):
+                    free.append(pkt['free'] - pkt['nic'])
+                if ('gro' in pkt) and ('nic' in pkt):
+                    gro.append(pkt['gro'] - pkt['nic'])
+                if 'softirq' in pkt:
+                    if 'gro' in pkt:
+                        softirq.append(pkt['softirq'] - pkt['gro'])
+                    max_softirq = max(max_softirq, pkt['softirq'])
+            if max_softirq != -1e20:
+                notify.append(rx_rpc['recvmsg_done'] - max_softirq)
+        return {'elapsed': elapsed, 'xmit': xmit, 'nic': nic, 'free': free,
+                'gro': gro, 'softirq': softirq, 'notify': notify}
+
+    def output(self):
+        global rpcs, packets, traces, options
+
+        # List of <elapsed, rpc> where elapsed it time from sendmsg to
+        # recvmsg_done and rpc is the RPC that sent the message.
+        msgs = []
+
+        # Collect messages within the desired range of elapsed times.
+        # We must have "complete" information for each message.
+        for tx_rpc in rpcs.values():
+            id = tx_rpc['id']
+            if id^1 not in rpcs:
+                continue
+            rx_rpc = rpcs[id^1]
+            if not 'sendmsg' in tx_rpc:
+                continue
+            start = tx_rpc['sendmsg']
+            if not 'recvmsg_done' in rx_rpc:
+                continue
+            end = rx_rpc['recvmsg_done']
+            elapsed = end - start
+            if traces[rx_rpc['node']]['first_time'] > start:
+                continue
+            if traces[tx_rpc['node']]['last_time'] < end:
+                continue
+            length = tx_rpc['out_length']
+            if (length < options.min) or (length >= options.max):
+                continue
+            msgs.append([elapsed, tx_rpc])
+
+        msgs.sort(key=lambda t: t[0])
+        sorted_rpcs = list(map(lambda t : t[1], msgs))
+        stats = {}
+        for key, pmin, pmax in [
+                ['all', 0, 100],
+                ['p10', 0, 10],
+                ['p50', 40, 60],
+                ['p90', 90, 95],
+                ['p99', 99, 100]]:
+            first = pmin*len(sorted_rpcs)//100
+            last = pmax*len(sorted_rpcs)//100
+            stats[key] = self.get_stats(sorted_rpcs[first:last])
+
+        print('\n------------------')
+        print('Analyzer: msgrange')
+        print('------------------')
+        print('')
+        print('Delay statistics for messages with sizes between %d and %d '
+                'bytes,' % (options.min, options.max))
+        print('divided into various percentile ranges by total elapsed time:')
+        print('Count:    Total number of messages in this percentile range')
+        print('Elapsed:  Average time from sendmsg to recvmsg_done')
+        print('Xmit:     Average time from sendmsg to first NIC handoff')
+        print('Gro:      Avg. time from NIC handoff to homa_gro_receive for packets')
+        print('Free:     Avg. time from NIC handoff to tx packet free')
+        print('Softirq:  Avg. time from homa_gro_receive to homa_softirq')
+        print('Notify:   Avg. time from last homa_softirq call to recvmsg_done')
+        print('')
+        print('           Count Elapsed   Xmit    Nic    Gro   Free Softirq Notify')
+        print('-------------------------------------------------------------------')
+        for key, label in [
+                ['all', 'All'],
+                ['p10', 'P0-10'],
+                ['p50', 'P40-60'],
+                ['p90', 'P90-95'],
+                ['p99', 'P99-100'],
+                ]:
+            s = stats[key]
+            print('%-10s %5d  %6.1f %6.1f %6.1f %6.1f %6.1f  %6.1f %6.1f' % (
+                    label, len(s['elapsed']),
+                    sum(s['elapsed'])/len(s['elapsed']),
+                    sum(s['xmit'])/len(s['xmit']),
+                    sum(s['nic'])/len(s['nic']),
+                    sum(s['gro'])/len(s['gro']),
+                    sum(s['free'])/len(s['free']),
+                    sum(s['softirq'])/len(s['softirq']),
+                    sum(s['notify'])/len(s['notify']))
+            )
+
+#------------------------------------------------
 # Analyzer: net
 #------------------------------------------------
 class AnalyzeNet:
@@ -5266,6 +5407,10 @@ class AnalyzePackets:
                 while offset < end:
                     pid = pkt_id(id, offset)
                     length = get_recv_length(offset, end)
+                    if length == 0:
+                        print('get_recv_length returned 0 length for offset '
+                                '%d for pkt %s' % (offset, pkt), file=sys.stderr)
+                        break
                     if pid in packets:
                         pkt2 = packets[pid]
                     else:
@@ -5336,7 +5481,7 @@ class AnalyzeRpcs:
             if rpc['gro_data']:
                 ceiling = rpc['gro_data'][0][0]
             elif 'recvmsg_done' in rpc:
-                ceiling = rpc['recmvsg_done']
+                ceiling = rpc['recvmsg_done']
         if rpc['send_data']:
             if ceiling != None:
                 return rpc['send_data'][-1][0]
@@ -5683,7 +5828,7 @@ class AnalyzeRtt:
                 result['handoff'] = None
             else:
                 result['softirq'] = get_phase(srpc, 'softirq_data', srpc, 'handoff')
-                if result['softirq'] < 0:
+                if (result['softirq'] != None) and (result['softirq'] < 0):
                     result['softirq'] = 0
                 result['handoff'] = get_phase(srpc, 'handoff', srpc, 'found')
                 result['queue'] = None
@@ -7503,6 +7648,12 @@ parser.add_option('--interval', dest='interval', type=int, default=20,
 parser.add_option('--late', dest='late', type=int, default=100,
         metavar='T', help='Specifies how long a packet must be delayed '
         'before it is considered overdue, in microseconds (default: 100)')
+parser.add_option('--max', dest='max', type=float, default=None,
+        metavar='T', help='Upper bound to consider for some parameter; '
+        'specific meaning depends on analyzer')
+parser.add_option('--min', dest='min', type=float, default=None,
+        metavar='T', help='Lower bound to consider for some parameter; '
+        'specific meaning depends on analyzer')
 parser.add_option('--negative-ok', action='store_true', default=False,
         dest='negative_ok',
         help='Don\'t print warnings when negative delays are encountered')
