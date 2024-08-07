@@ -1,7 +1,24 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Try switching to alloc_skb_fclone?
+* Rework cp_node so that there aren't separate senders and receivers on the
+  client. Instead, have each client thread send, then conditionally receive,
+  then send again, etc.
+
+* (July 2024) Found throughput problem in 2-node "--workload 50000 --one-way"
+  benchmark. The first packet for message N doesn't get sent until message
+  N-1 has been completely transmitted. This results in a gap between the
+  completion of message N and the arrival of a grant for message N+1, which
+  wastes throughput. Perhaps send an empty data packet for message N+1 so that
+  the grant can return earlier? Or, make a bigger change:
+  * Either a message is entirely scheduled or entirely unscheduled.
+  * For a scheduled message, send a 0-length data packet immediately,
+    before staring to copy in from user space.
+  * The round-trip for a grant can now happen in parallel with copying
+    bytes in from user space (it takes 16 usec to copy in 60 KB at 30 Gbps).
+  * The grant will be sent more quickly by the server because it doesn't
+    have to process a batch of data packets first
+
 * homa_grant_recalc is being invoked a *lot* and it takes a lot of time each
   call (13 usec/call, duty cycle > 100%):
   * Does it need to relock every ranked RPC every call?
@@ -9,15 +26,9 @@ Notes for Homa implementation in Linux:
     (perhaps because the slots for its host are all taken?)
   * Could it abort early if there is no incoming headroom?
 
-* Notes on hijacking TCP:
-  * inet_offloads[protocol] contains pointters to struct net_offload
-  * The protocol in outgoing packets is set from sk->sk_protocol
-  * If change the value of sk->sk_protocol to TCP, will this cause
-    problems? Where is this value used, other than setting an IP header field?
-
 * Loose ends from experiment ending 4/29/2024:
   * traces/100g and traces/100g2 both show significant qdisc queueing,
-    and the system appears to have difficulty clearing the09 queues (it
+    and the system appears to have difficulty clearing the queues (it
     takes a very long time).
   * Looked into packet drops:
     * The switch is not reporting any packet drops.

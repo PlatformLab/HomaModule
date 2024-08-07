@@ -2,6 +2,44 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+57. (August 2024): Best known parameters for c6525-100g cluster:
+    Homa:
+    hijack_tcp=1 .unsched_bytes=20000 window=0 max_incoming=1000000
+    gro_policy=0xe2 throttle_min_bytes=1000
+    --client-ports 4 --port-receivers 6 --server-ports 4 --port-threads 6
+    TCP:
+    --tcp-client-ports 4 --tcp-server-ports 6
+
+56. (August 2024): Performance challenges with c6525-100g cluster (AMD CPUs,
+    100 Gbps links):
+    * The highest achievable throughput for Homa with W4 is 72-75 Gbps.
+    * TCP can get 78-79 Gbps with W4.
+    * The bottleneck is NIC packet transmission: 1 MB or more of data can
+      accumulate in NIC queues, and data can be queued in the NIC for 1 ms
+      or more.
+    * Memory bandwidth appears to be the limiting factor (not, say,
+      per-packet overheads for mapping addresses). For example, W2 can
+      transmit more packets than W4 without any problem.
+    * NIC queue buildup is not even across output queues. The queue used by
+      the pacer has significantly more buildup than the other queues. This
+      suggests that the NIC services queues in round-robin order. The pacer
+      queue gets a large fraction of all outbound traffic but it receives
+      only a 1/Nth share of the NIC's output bandwidth, so when the NIC can't
+      keep up, packets accumulate primarily in this one queue.
+    * Priorities don't make a significant difference in latency! It appears
+      that the NIC queuing issue is the primary contribution to P99 latency
+      even for short messages (too short to use the pacer). This is evident
+      because not only do P99 packets take a long time to reach the receiver's
+      GRO, they also take a long time to get returned to the sender to be
+      freed; this suggests that they are waiting a long time to get
+      transmitted. Perhaps the P99 packets are using the same output queue
+      as the pacer?
+    * Even at relatively low throughputs (e.g. 40 Gbps), P99 latency still
+      seems to be caused by slow NIC transmission, not incast queueing.
+    * Increasing throttle_min_bytes improves latency significantly, because
+      packets transmitted by the pacer are much more likely to experience
+      high NIC delays.
+
 55. (June/July 2024): Reworked retry mechanism to retry more agressively.
     Introduced ooo_window_usecs sysctl parameter with an initial value of
     100 us; retry gaps once they reach this age. However, this increased the
@@ -30,9 +68,9 @@ order.
     Time to allocate page                           12 us
     Cores spent allocating pages                    0.04-0.08
 
-53. (May 2024) Strange NIC behavior (observed with Mellanox ConnectX5 NICs
-    on the c6525-100g CloudLab cluster, using W4 with offerred load 80 Gbps
-    and actual throughput more like 60 Gbps).
+53. (May 2024; superceded by #56) Strange NIC behavior (observed with Mellanox
+    ConnectX5 NICs on the c6525-100g CloudLab cluster, using W4 with offerred
+    load 80 Gbps and actual throughput more like 60 Gbps).
     * The NIC is not returning tx packets to the host promptly after
       transmission. In one set of traces (W4 at 80% offered load), 20% of
       all packets weren't freed until at least 50 us after the packets had
