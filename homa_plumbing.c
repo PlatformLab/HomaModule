@@ -714,7 +714,7 @@ void homa_close(struct sock *sk, long timeout) {
 
 /**
  * homa_shutdown() - Implements the shutdown system call for Homa sockets.
- * @sk:      Socket to shut down.
+ * @sock:    Socket to shut down.
  * @how:     Ignored: for other sockets, can independently shut down
  *           sending and receiving, but for Homa any shutdown will
  *           shut down everything.
@@ -883,10 +883,10 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 
 /**
  * homa_sendmsg() - Send a request or response message on a Homa socket.
- * @sk:    Socket on which the system call was invoked.
- * @msg:   Structure describing the message to send; the msg_control
- *         field points to additional information.
- * @len:   Number of bytes of the message.
+ * @sk:     Socket on which the system call was invoked.
+ * @msg:    Structure describing the message to send; the msg_control
+ *          field points to additional information.
+ * @length: Number of bytes of the message.
  * Return: 0 on success, otherwise a negative errno.
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length) {
@@ -1478,8 +1478,12 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 /**
  * homa_err_handler_v6() - Invoked by IP to handle an incoming error
  * packet, such as ICMP UNREACHABLE.
- * @skb:   The incoming packet.
- * @info:  Information about the error that occurred?
+ * @skb:    The incoming packet.
+ * @opt:    Not used.
+ * @type:   Type of ICMP packet.
+ * @code:   Additional information about the error.
+ * @offset: Not used.
+ * @info:   Information about the error that occurred?
  *
  * Return: zero, or a negative errno if the error couldn't be handled here.
  */

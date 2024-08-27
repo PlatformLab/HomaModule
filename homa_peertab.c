@@ -254,7 +254,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 }
 
 /**
- * homa_peer_unsched_priority() - Returns the priority level to use for
+ * homa_unsched_priority() - Returns the priority level to use for
  * unscheduled packets of a message.
  * @homa:     Overall data about the Homa protocol implementation.
  * @peer:     The destination of the message.

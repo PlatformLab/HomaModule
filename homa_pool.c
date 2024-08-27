@@ -27,6 +27,7 @@
  * set_bpages_needed() - Set the bpages_needed field of @pool based
  * on the length of the first RPC that's waiting for buffer space.
  * The caller must own the lock for @pool->hsk.
+ * @pool: Pool to update.
  */
 static void inline set_bpages_needed(struct homa_pool *pool) {
 	struct homa_rpc *rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
@@ -41,7 +42,7 @@ static void inline set_bpages_needed(struct homa_pool *pool) {
  * @hsk:          Socket containing the pool to initialize.
  * @region:       First byte of the memory region for the pool, allocated
  *                by the application; must be page-aligned.
- * @region_size   Total number of bytes available at @buf_region.
+ * @region_size:  Total number of bytes available at @buf_region.
  * Return: Either zero (for success) or a negative errno for failure.
  */
 int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)

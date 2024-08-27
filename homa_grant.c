@@ -12,8 +12,8 @@
  * homa_grant_outranks() - Returns nonzero if rpc1 should be considered
  * higher priority for grants than rpc2, and zero if the two RPCS are
  * equivalent or rpc2 is higher priority.
- * @rpc1     First RPC to consider.
- * @rpc2     Second RPC to consider.
+ * @rpc1:     First RPC to consider.
+ * @rpc2:     Second RPC to consider.
  */
 int inline homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 {
@@ -143,8 +143,8 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 }
 
 /**
- * homa_remove_rpc() - Unlink an RPC from the grantable lists, so it will no
- * longer be considered for grants. The caller must hold the grantable lock.
+ * homa_grant_remove_rpc() - Unlink an RPC from the grantable lists, so it will
+ * no longer be considered for grants. The caller must hold the grantable lock.
  * @rpc:     RPC to remove from grantable lists.  Must currently be in
  *           a grantable list.
  */
@@ -205,6 +205,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
  * homa_grant_send() - See if it is appropriate to send a grant to an RPC;
  * if so, create the grant and send it.
  * @rpc:   The RPC to check for possible grant. Must be locked by the caller.
+ * @homa:  Overall information about the Homa transport.
  * Return: Nonzero if a grant was sent, 0 if not.
  */
 int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
@@ -665,6 +666,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 /**
  * homa_grant_log_tt() - Generate timetrace records describing all of
  * the active RPCs (those we are currently granting to).
+ * @homa:  Overall information about the Homa transport.
  */
 void homa_grant_log_tt(struct homa *homa)
 {

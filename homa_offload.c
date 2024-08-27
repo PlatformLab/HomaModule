@@ -98,6 +98,9 @@ void homa_gro_unhook_tcp(void)
  * homa_tcp_gro_receive() - Invoked instead of TCP's normal gro_receive function
  * when hooking is enabled. Identifies Homa-over-TCP packets and passes them
  * to Homa; sends real TCP packets to TCP's gro_receive function.
+ * @held_list:  Pointer to header for list of packets that are being
+ *              held for possible GRO merging.
+ * @skb:        The newly arrived packet.
  */
 struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 		struct sk_buff *skb)

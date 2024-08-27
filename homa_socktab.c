@@ -66,7 +66,7 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 }
 
 /**
- * homa_starttab_next() - Return the next socket in an iteration over a socktab.
+ * homa_socktab_next() - Return the next socket in an iteration over a socktab.
  * @scan:      State of the scan.
  *
  * Return:     The next socket in the table, or NULL if the iteration has

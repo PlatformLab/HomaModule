@@ -9,7 +9,7 @@
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-//#define TT_KERNEL 1
+#define TT_KERNEL 1
 #endif
 #ifdef TT_KERNEL
 extern int        tt_linux_buffer_mask;
@@ -158,7 +158,7 @@ int tt_init(char *proc_file, int *temp)
 }
 
 /**
- * @tt_destroy(): Disable time tracing and disable the /proc file for
+ * tt_destroy(): Disable time tracing and disable the /proc file for
  * reading traces.
  */
 void tt_destroy(void)
@@ -198,8 +198,8 @@ void tt_destroy(void)
 }
 
 /**
- * Stop recording timetrace events until the trace has been read
- * using the /proc file. When recording resumes after reading the
+ * tt_freeze() - Stop recording timetrace events until the trace has been
+ * read using the /proc file. When recording resumes after reading the
  * file, the buffers will be cleared.
  */
 void tt_freeze(void)
@@ -230,10 +230,10 @@ void tt_freeze(void)
  *             to this method. This pointer is stored in the buffer, so
  *             the caller must ensure that its contents will not change
  *             over its lifetime in the trace.
- * @arg0       Argument to use when printing a message about this event.
- * @arg1       Argument to use when printing a message about this event.
- * @arg2       Argument to use when printing a message about this event.
- * @arg3       Argument to use when printing a message about this event.
+ * @arg0:      Argument to use when printing a message about this event.
+ * @arg1:      Argument to use when printing a message about this event.
+ * @arg2:      Argument to use when printing a message about this event.
+ * @arg3:      Argument to use when printing a message about this event.
  */
 void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 		const char* format, __u32 arg0, __u32 arg1, __u32 arg2,
@@ -353,12 +353,12 @@ int tt_proc_open(struct inode *inode, struct file *file)
 /**
  * tt_proc_read() - This function is invoked to handle read kernel calls on
  * /proc/timetrace.
- * @file:    Information about the file being read.
- * @buffer:  Address in user space of the buffer in which data from the file
- *           should be returned.
- * @length:  Number of bytes available at @buffer.
- * @offset:  Current read offset within the file. For now, we assume I/O
- *           is done sequentially, so we ignore this.
+ * @file:     Information about the file being read.
+ * @user_buf: Address in user space of the buffer in which data from the file
+ *            should be returned.
+ * @length:   Number of bytes available at @buffer.
+ * @offset:   Current read offset within the file. For now, we assume I/O
+ *            is done sequentially, so we ignore this.
  *
  * Return: the number of bytes returned at @buffer. 0 means the end of the
  * file was reached, and a negative number indicates an error (-errno).
@@ -540,7 +540,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
  * As of 2/2024, this function is not reliable in situations where the machine
  * is about to crash.  It seems to print the trace, but after reboot the
  * file isn't there.
- * @file:  Name of the file in which to print the timetrace; should be
+ * @path:  Name of the file in which to print the timetrace; should be
  *         an absolute file name.
  */
 void tt_print_file(char *path)
@@ -800,6 +800,7 @@ void tt_get_messages(char *buffer, size_t length)
 /**
  * tt_dbg1() - Invoked by the Linux kernel for various temporary debugging
  * purposes. Arguments are defined as needed for a specific situation.
+ * @msg:   String message providing useful debugging information.
  */
 void tt_dbg1(char *msg, ...)
 {
@@ -808,6 +809,7 @@ void tt_dbg1(char *msg, ...)
 /**
  * tt_dbg2() - Invoked by the Linux kernel for various temporary debugging
  * purposes. Arguments are defined as needed for a specific situation.
+ * @msg:   String message providing useful debugging information.
  */
 void tt_dbg2(char *msg, ...)
 {
@@ -816,6 +818,7 @@ void tt_dbg2(char *msg, ...)
 /**
  * tt_dbg3() - Invoked by the Linux kernel for various temporary debugging
  * purposes. Arguments are defined as needed for a specific situation.
+ * @msg:   String message providing useful debugging information.
  */
 void tt_dbg3(char *msg, ...)
 {

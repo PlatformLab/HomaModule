@@ -16,7 +16,7 @@ extern int mock_max_skb_frags;
 /**
  * homa_skb_page_pool_init() - Invoked when a struct homa is created to
  * initialize a page pool.
- * @homa:         Overall data about the Homa protocol implementation.
+ * @pool:         Pool to initialize.
  */
 void homa_skb_page_pool_init(struct homa_page_pool *pool)
 {
@@ -28,6 +28,7 @@ void homa_skb_page_pool_init(struct homa_page_pool *pool)
 /**
  * homa_skb_cleanup() - Invoked when a struct homa is deleted; cleans
  * up information related to skb allocation.
+ * @homa:  Overall inforamtion about the Homa transport.
  */
 void homa_skb_cleanup(struct homa *homa)
 {
@@ -183,7 +184,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
  * given core. Any existing page is released.
  * @homa:         Overall data about the Homa protocol implementation.
  * @core:         Allocate page in this core.
- * @Return:       True if successful, false if memory not available.
+ * Return:       True if successful, false if memory not available.
  */
 bool homa_skb_page_alloc(struct homa *homa, struct homa_core * core)
 {
@@ -516,6 +517,7 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
  * homa_skb_release_pages() - This function is invoked occasionally; it's
  * job is to gradually release pages from the sk_buff page pools back to
  * Linux, based on sysctl parameters such as skb_page_frees_per_sec.
+ * @homa:  Overall information about the Homa transport.
  */
 void homa_skb_release_pages(struct homa *homa)
 {

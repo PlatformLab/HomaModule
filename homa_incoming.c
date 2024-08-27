@@ -52,7 +52,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 }
 
 /**
- * homa_new_gap() - Create a new gap and add it to a list.
+ * homa_gap_new() - Create a new gap and add it to a list.
  * @next:   Add the new gap just before this list element.
  * @start:  Offset of first byte covered by the gap.
  * @end:    Offset of byte just after the last one covered by the gap.
@@ -1180,7 +1180,7 @@ int homa_register_interests(struct homa_interest *interest,
 }
 
 /**
- * @homa_wait_for_message() - Wait for receipt of an incoming message
+ * homa_wait_for_message() - Wait for receipt of an incoming message
  * that matches the parameters. Various other activities can occur while
  * waiting, such as reaping dead RPCs and copying data to user space.
  * @hsk:          Socket where messages will arrive.
@@ -1372,7 +1372,7 @@ done:
 }
 
 /**
- * @homa_choose_interest() - Given a list of interests for an incoming
+ * homa_choose_interest() - Given a list of interests for an incoming
  * message, choose the best one to handle it (if any).
  * @homa:        Overall information about the Homa transport.
  * @head:        Head pointers for the list of interest: either
@@ -1408,7 +1408,7 @@ struct homa_interest *homa_choose_interest(struct homa *homa,
 }
 
 /**
- * @homa_rpc_handoff() - This function is called when the input message for
+ * homa_rpc_handoff() - This function is called when the input message for
  * an RPC is ready for attention from a user thread. It either notifies
  * a waiting reader or queues the RPC.
  * @rpc:                RPC to handoff; must be locked. The caller must

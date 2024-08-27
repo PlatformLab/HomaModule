@@ -21,13 +21,13 @@
 /**
  * homa_reply() - Send a response message for an RPC previously received
  * with a call to recvmsg.
- * @sockfd:     File descriptor for the socket on which to send the message.
- * @response:   First byte of buffer containing the response message.
- * @resplen:    Number of bytes at @response.
- * @dest_addr:  Address of the RPC's client (returned by recvmsg when
- *              the message was received).
- * @id:         Unique identifier for the request, as returned by recvmsg
- *              when the request was received.
+ * @sockfd:       File descriptor for the socket on which to send the message.
+ * @message_buf:  First byte of buffer containing the response message.
+ * @length:       Number of bytes in the message at @message_buf.
+ * @dest_addr:    Address of the RPC's client (returned by recvmsg when
+ *                the message was received).
+ * @id:           Unique identifier for the request, as returned by recvmsg
+ *                when the request was received.
  *
  * @dest_addr and @id must correspond to a previously-received request
  * for which no reply has yet been sent; if there is no such active request,
