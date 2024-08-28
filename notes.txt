@@ -1,9 +1,18 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Remedies to consider for the performance problems at 100 Gbps, where
+  one tx channel gets very backed up:
+  * Implement zero-copy on output in order to reduce memory bandwidth
+    consumption (presumed with this will increase throughput?)
+  * Reserve one channel for the pacer, and don't send non-paced packets
+    on that channel; this should eliminate the latency problems caused
+    by short messages getting queued on that channel
+
 * Rework cp_node so that there aren't separate senders and receivers on the
   client. Instead, have each client thread send, then conditionally receive,
-  then send again, etc.
+  then send again, etc. Hmmm, I believe there is a reason why this won't
+  work, but I have forgotten what it is.
 
 * (July 2024) Found throughput problem in 2-node "--workload 50000 --one-way"
   benchmark. The first packet for message N doesn't get sent until message
@@ -178,15 +187,6 @@ Notes for Homa implementation in Linux:
   * pin_user_page (not sure the difference from get_user_page)
 
 * Performance-related tasks:
-  * Improve software GSO by making segments refer to the initial large
-    buffer instead of copying?
-  * Implement sk_buff caching for output buffers:
-    * Allocation is slow (2-10 us on AMD processors; check on Intel?)
-    * Large buffers exceed KMALLOC_MAX_CACHE_SIZE, so they aren't cached
-      in slabs
-    * Keep free lists in Homa for different sizes (e.g. pre-GSO and GSO),
-      append output buffers there
-    * Can recycle an sk_buff by calling build_skb_around().
   * Rework FIFO granting so that it doesn't consider homa->max_overcommit
     (just find the oldest message that doesn't have a pity grant)? Also,
     it doesn't look like homa_grant_fifo is keeping track of pity grants
@@ -296,115 +296,9 @@ Notes for Homa implementation in Linux:
   * Is there a better way to compute packet hashes than Homa's approach
     in gro_complete?
 
-* Notes on IP packet transmission and reception:
-  * ip_queue_xmit -> ip_local_out -> dst_output
-  * Ultimately, output is handled by skb_dst(skb)->output(net, sk, skb),
-    which probably is ip_output
-  * ip_output -> ip_finish_output -> ip_finish_output2 -> neigh_output?
-  * Incoming packets:
-    * Interrupt handlers pass packets to netif_rx
-    * It queues them in a per-CPU softnet_data structure
-    * RPS: Receive Packet Steering
-    * On the destination core, __netif_receive_skb_core is eventually invoked?
-    * ip_rcv eventually gets called to handle all incoming IP packets
-    * ip_local_deliver_finish finally calls Homa
-
-* Notes on skbuff usage:
-  * skb->destructor: invoked when skbuff is freed.
-  * sk->sk_wmem_alloc:
-    * Keeps track of memory in write buffers that are being transmitted.
-    * Prevents final socket cleanup
-    * Has an extra increment of 1, set when socket allocated
-      and removed in sk_free (so cleanup won't be done until socket
-      has been freed)
-  * sk->sk_write_space: invoked to signal that write space has become available
-  * skb->truesize: total amount of memory required by this skbuff, including
-    both the data block and the skbuff header.
-  * sock_wmalloc: allocates new buffer for writing, limiting to sk->sk_sndbuf
-    and charging against sk->sk_wm_alloc
-  * sk->sk_sndbuf: Maximum about of write buffer space that this socket can
-    consume
-  * sk->sk_wmem_queued: "persistent queue size" (perhaps buffers that are
-    queued but not yet ready to transmit?)
-  * sk->sk_rmem_alloc: appears to count space in read buffers, but it isn't
-    invoked automatically in the current Homa call structure.
-  * skb_set_owner_r, sock_rfree: assist in managing sk_rmem_alloc
-  * nr_free_buffer_pages: appears to return info about total available
-    memory space, for autosizing buffer usage?
-  * sysctl_wmem_default: default write buffer space per socket.
-  * net.ipv4.tcp_mem[0]: if memory usage is below this, no pressure
-                    [1]: start applying memory pressure at this level
-                    [2]: maximum allowed memory usage
-  * net.ipv4.sysctl_tcp_wmem[0]: minimum sk_sndbuf for a socket
-                            [1]: default sk_sndbuf
-                            [2]: maximum allowable sk_sndbuf
-  * sk_memory_allocated_add, sk_memory_allocated_sub: keep track of memory
-   allocated for socket.
-
-* Leads still to follow for skbuff usage:
-  * Read sock_def_write_space, track variables used to wait for write space,
-    see how these are used.
-  * What's the meaning of SOCK_USE_WRITE_QUEUE in sock_wfree?
-  * Check out sock_alloc_send_pskb
-  * Check out skb_head_from_pool: allocate faster from processor-specific pool?
-  * Check out sk_forward_alloc
-  * Check out tcp_under_memory_pressure
-  * Check out sk_mem_charge
-
-* How buffer memory can accumulate in Homa:
-  * Incoming packets: messages not complete, or application doesn't read.
-  * Outgoing packets: receiver doesn't grant to us.
-
-* Possible remedies for memory congestion:
-  * Delete incoming messages that aren't active
-  * Delete incoming messages that application is ignoring
-  * Delete outgoing messages that aren't getting grants
-  * Stop receiving data from incoming messages (discard packets, send BUSY)
-  * Don't accept outbound data: stall in write, or reject
-
 * Notes on timers:
   * hrtimers execute at irq level, not softirq
   * Functions to tell what level is current: in_irq(), in_softirq(), in_task()
-
-* Detailed switches from normal module builds:
-gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isystem /usr/lib/gcc/x86_64-linux-gnu/4.9/include -I./arch/x86/include -I./arch/x86/include/generated  -I./include -I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi -I./include/uapi -I./include/generated/uapi -include ./include/linux/kconfig.h -D__KERNEL__ -DCONFIG_CC_STACKPROTECTOR -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -fshort-wchar -Werror-implicit-function-declaration -Wno-format-security -std=gnu89 -fno-PIE -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -m64 -falign-jumps=1 -falign-loops=1 -mno-80387 -mno-fp-ret-in-387 -mpreferred-stack-boundary=3 -mtune=generic -mno-red-zone -mcmodel=kernel -funit-at-a-time -DCONFIG_X86_X32_ABI -DCONFIG_AS_CFI=1 -DCONFIG_AS_CFI_SIGNAL_FRAME=1 -DCONFIG_AS_CFI_SECTIONS=1 -DCONFIG_AS_FXSAVEQ=1 -DCONFIG_AS_SSSE3=1 -DCONFIG_AS_CRC32=1 -DCONFIG_AS_AVX=1 -DCONFIG_AS_AVX2=1 -DCONFIG_AS_AVX512=1 -DCONFIG_AS_SHA1_NI=1 -DCONFIG_AS_SHA256_NI=1 -pipe -Wno-sign-compare -fno-asynchronous-unwind-tables -mindirect-branch=thunk-extern -mindirect-branch-register -DRETPOLINE -fno-delete-null-pointer-checks -O2 --param=allow-store-data-races=0 -DCC_HAVE_ASM_GOTO -Wframe-larger-than=2048 -fstack-protector -Wno-unused-but-set-variable -fno-var-tracking-assignments -g -pg -mfentry -DCC_USING_FENTRY -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow -fno-merge-all-constants -fmerge-constants -fno-stack-check -fconserve-stack -Werror=implicit-int -Werror=strict-prototypes -Werror=date-time  -DMODULE  -DKBUILD_BASENAME='"homa_plumbing"'  -DKBUILD_MODNAME='"homa"' -c -o /home/ouster/remote/homaModule/.tmp_homa_plumbing.o /home/ouster/remote/homaModule/homa_plumbing.c
-   ./tools/objtool/objtool orc generate  --module --no-fp  --retpoline "/home/ouster/remote/homaModule/.tmp_homa_plumbing.o"
-
-* TCP socket close: socket_file_ops in socket.c (.release)
-  -> sock_close -> sock_release -> proto_ops.release
-  -> inet_release (af_inet.c) -> sk->sk_prot->close
-  -> tcp_close (tcp.c)
-
-* How to pair requests and responses?
-  * Choice #1: extend addresses to include an RPC id:
-    * On client send, destination address has an id of 0; kernel fills in
-      correct id.
-    * On receive, the source address includes the RPC id (both client and server)
-    * On server send, destination address has a non-zero id (the one from
-      the receive): this is used to pair the response with a particular request.
-    Analysis:
-    * The RPC ID doesn't exactly fit as part of addresses, though it is close.
-    * Doesn't require a change in API.
-    * Can the kernel modify the address passed to sendmsg? What if the
-      application invokes write instead of sendmsg?
-  * Choice #2: perform sends and receives with an ioctl that can be used
-    to pass RPC ids.
-    Analysis:
-    * Results in what is effectively a new interface.
-  * Choice #3: put the RPC Id in the message at the beginning. The client
-    selects the id, not the kernel, but the kernel will interpret these
-    ids both on sends and receives.
-    Analysis:
-    * Awkward interaction between client and kernel, with the kernel
-      now interpreting what used to be just an uninterpreted blob of data.
-    * Will probably result in more application code to read and write
-      the ids; unclear that this can be hidden from app.
-  * Choice #4: define a new higher-level application API; it won't matter
-    what the underlying kernel calls are:
-    homa_send(fd, address, msg) -> id
-    homa_recv(fd, buffer) -> id, length, sender_address, is_request
-    homa_invoke(fd, address, request, response) -> response_length
-    homa_reply(fd, address, id, msg)
 
 * Notes on managing network buffers:
   * tcp_sendmsg_locked (tcp.c) invokes sk_stream_alloc_skb, which returns 0
@@ -427,87 +321,9 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
     * __sk_mem_raise_allocated is invoked from __sk_mem_schedule
     * __sk_mem_schedule is invoked from sk_wmem_schedule and sk_rmem_schedule
 
-* Waiting for input in TCP:
-  * tcp_recvmsg (tcp.c) -> sk_wait_data (sock.c)
-    * Waits for a packet to arrive in sk->sk_receive_queue (loops)
-  * tcp_v4_rcv (tcp_ipv4.c) -> tcp_v4_do_rcv
-    -> tcp_rcv_established  (tcp_input.c) -> sk->sk_data_ready
-    -> sock_def_readable (sock.c)
-    * Wakes up sk->sk_wq
-
-* Waiting for input in UDP:
-  * udp_recvmsg -> __skb_recv_udp -> __skb_wait_for_more_packets (datagram.c)
-    * Sleeps process with no loop
-  * udp_rcv -> __udp4_lib_rcv -> udp_queue_rcv_skb -> __udp_queue_rcv_skb
-    -> __udp_enqueue_schedule_skb -> sk->sk_data_ready
-    -> sock_def_readable (sock.c)
-    * Wakes up sk->sk_wq
-
-* Notes on waiting:
-  * sk_data_ready function looks like it will do most of the work for waking
-    up a sleeping process. sock_def_readable is the default implementation.
-
-* On send:
-  * Immediately copy message into sk_buffs.
-  * Client assigns message id; it's the first 8 bytes of the message data.
-  * Return before sending entire message.
-  * Homa keeps track of outstanding requests (some limit per socket?).
-  * If message fails, kernel must fabricate a response. Perhaps all
-    responses start with an id and a status?
-
-* Tables needed:
-  * All Homa sockets
-    * Used to assign new port numbers
-    * Used to dispatch incoming packets
-    * Need RCU or some other kind of locking?
-  * Outgoing RPCs (for a socket?)
-    * Used to find state for incoming packets
-    * Used for cleanup operations (socket closure, cancellation, etc.)
-    * Used for detecting timeouts
-    * No locks needed: use existing socket lock
-    * Or, have one table for all sockets?
-  * Outgoing requests that haven't yet been transmitted:
-    * For scheduling outbound traffic
-    * Must be global?
-  * Outgoing responses that haven't yet been transmitted:
-    * For scheduling outbound traffic
-    * Must be global?
-  * Incoming RPCs:
-    * Use to find state for incoming packets
-
 * Miscellaneous information:
   * For raw sockets: "man 7 raw"
   * Per-cpu data structures: linux/percpu.h, percpu-defs.h
-
-* API for applications
-  * Ideally, sends are asynchronous:
-    * The send returns before the message has been sent
-    * Data has been copied out of application-level buffers, so
-      buffers can be reused
-  * Must associate requests and responses:
-    * A response is different from a request.
-    * Kernel may need to keep track of open requests, so that it
-      can handle RESEND packets appropriately; what if application
-      doesn't respond, and an infinite backlog of open requests
-      builds up? Must limit the kernel state that accumulates.
-    * Maybe application must be involved in RESENDs?
-  * On receive, application must provide space for largest possible message
-    * Or, receives must take 2 system calls, one to get the size and
-      one to get the message.
-  * Support a polling API for incoming messages?
-    * Client provides buffer space in advance
-    * Kernel fills in data as packets arrive
-    * Client can poll memory to see when new messages arrive
-    * This would minimize sk_buff usage in the kernel
-    * Is there a way for the kernel to access client memory when
-      the process isn't active?
-    * Can buffer space get fragmented? For example, the first part of
-      a long message arrives, but the rest doesn't; meanwhile, buffers
-      fill up and wrap around.
-  * On receive, avoid copies of large message bodies? E.g., deliver only
-    header to the application, then it can come back later and request
-    that the body be copied to a particular spot.
-  * Provide a batching mechanism to avoid a kernel call for each message?
 
 * What happens when a socket is closed?
   * socket.c:sock_close
@@ -518,19 +334,6 @@ gcc -Wp,-MD,/home/ouster/remote/homaModule/.homa_plumbing.o.d  -nostdinc -isyste
           * proto.unhash
           * sock_orphan
           * sock_put (decrements ref count, frees)
-
-* What happens in a connect syscall (UDP)?
-  * socket.c:sys_connect
-    * proto_ops.connect -> af_inet.c:inet_dgram_connect
-      * proto.connect -> datagram.c:ip4_datagram_connect
-        * datagram.c: __ip4_datagram_connect
-
-* What happens in a bind syscall (UDP)?
-  * socket.c:sys_bind
-    * proto_ops.bind -> afinet.c:inet_bind
-      * proto.bind -> (not defined for UDP)
-      * If no proto.bind handler, then a bunch of obscure -looking stuff
-        happens.
 
 * What happens in a sendmsg syscall (UDP)?
   * socket.c:sys_sendmsg
