@@ -38,7 +38,7 @@ int mock_copy_data_errors = 0;
 int mock_copy_to_iter_errors = 0;
 int mock_copy_to_user_errors = 0;
 int mock_cpu_idle = 0;
-int mock_import_single_range_errors = 0;
+int mock_import_ubuf_errors = 0;
 int mock_import_iovec_errors = 0;
 int mock_ip6_xmit_errors = 0;
 int mock_ip_queue_xmit_errors = 0;
@@ -136,9 +136,6 @@ bool mock_ipv6 = true;
 /* The value to use for mock_ipv6 in each test unless overridden. */
 bool mock_ipv6_default;
 
-/* Linux's idea of the current CPU number. */
-int cpu_number = 1;
-
 /* List of priorities for all outbound packets. */
 char mock_xmit_prios[1000];
 int mock_xmit_prios_offset = 0;
@@ -184,25 +181,15 @@ unsigned long page_offset_base = 0;
 unsigned long phys_base = 0;
 unsigned long vmemmap_base = 0;
 int __preempt_count = 0;
+struct pcpu_hot pcpu_hot = {.cpu_number = 1};
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
-struct rps_sock_flow_table *rps_sock_flow_table
-		= (struct rps_sock_flow_table *) sock_flow_table;
-__u32 rps_cpu_mask = 0x1f;
+struct net_hotdata net_hotdata = {
+	.rps_cpu_mask = 0x1f,
+	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
+};
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry) {}
-
-struct page *alloc_pages(gfp_t gfp, unsigned order)
-{
-	struct page *page;
-	if (mock_check_error(&mock_alloc_page_errors))
-		return NULL;
-	page = (struct page *) malloc(PAGE_SIZE << order);
-	if (!pages_in_use)
-	    pages_in_use = unit_hash_new();
-	unit_hash_set(pages_in_use, page, (char *) 1);
-	return page;
-}
 
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
@@ -257,7 +244,7 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 		return 0;
 	}
 	while (bytes_left > 0) {
-		struct iovec *iov = (struct iovec *) iter->iov;
+		struct iovec *iov = (struct iovec *) iter_iov(iter);
 		__u64 int_base = (__u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 		if (chunk_bytes > bytes_left)
@@ -269,7 +256,7 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 		iov->iov_base = (void *) (int_base + chunk_bytes);
 		iov->iov_len -= chunk_bytes;
 		if (iov->iov_len == 0)
-			iter->iov++;
+			iter->__iov++;
 	}
 	return bytes;
 }
@@ -336,8 +323,8 @@ void dst_release(struct dst_entry *dst)
 {
 	if (!dst)
 		return;
-	dst->__refcnt.counter--;
-	if (dst->__refcnt.counter > 0)
+	atomic_dec(&dst->__rcuref.refcnt);
+	if (atomic_read(&dst->__rcuref.refcnt) > 0)
 		return;
 	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
 		FAIL("dst_release on unknown route");
@@ -422,14 +409,11 @@ ssize_t import_iovec(int type, const struct iovec __user * uvector,
 	return size;
 }
 
-int import_single_range(int type, void __user *buf, size_t len,
-		struct iovec *iov, struct iov_iter *i)
+int import_ubuf(int rw, void __user *buf, size_t len, struct iov_iter *i)
 {
-	if (mock_check_error(&mock_import_single_range_errors))
+	if (mock_check_error(&mock_import_ubuf_errors))
 		return -EACCES;
-	iov->iov_base = buf;
-	iov->iov_len = len;
-	iov_iter_init(i, type, iov, 1, len);
+	iov_iter_ubuf(i, rw,  buf, len);
 	return 0;
 }
 
@@ -540,7 +524,7 @@ void iov_iter_init(struct iov_iter *i, unsigned int direction,
 {
 	direction &= READ | WRITE;
 	i->iter_type = ITER_IOVEC | direction;
-	i->iov = iov;
+	i->__iov = iov;
 	i->nr_segs = nr_segs;
 	i->iov_offset = 0;
 	i->count = count;
@@ -572,7 +556,7 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		FAIL("malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	route->dst.__refcnt.counter = 1;
+	atomic_set(&route->dst.__rcuref.refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_net_device;
 	route->dst.obsolete = 0;
@@ -667,7 +651,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		FAIL("malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
-	route->dst.__refcnt.counter = 1;
+	atomic_set(&route->dst.__rcuref.refcnt, 1);
 	route->dst.ops = &mock_dst_ops;
 	route->dst.dev = &mock_net_device;
 	route->dst.obsolete = 0;
@@ -738,7 +722,7 @@ void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 		shinfo->frag_list = next;
 	}
 	for (i = 0; i < shinfo->nr_frags; i++) {
-		put_page(shinfo->frags[i].bv_page);
+		put_page(skb_frag_page(&shinfo->frags[i]));
 	}
 	free(skb->head);
 	free(skb);
@@ -917,13 +901,12 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	return 1;
 }
 
-void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
-
-struct ctl_table_header *register_net_sysctl(struct net *net,
-	const char *path, struct ctl_table *table)
+bool rcuref_get_slowpath(rcuref_t *ref)
 {
-	return NULL;
+	return true;
 }
+
+void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
 
 void release_sock(struct sock *sk)
 {
@@ -939,7 +922,8 @@ void schedule(void)
 	UNIT_HOOK("schedule");
 }
 
-void security_sk_classify_flow(struct sock *sk, struct flowi_common *flic) {}
+void security_sk_classify_flow(const struct sock *sk,
+		struct flowi_common *flic) {}
 
 void __show_free_areas(unsigned int filter, nodemask_t *nodemask,
 		int max_zone_idx) {}
@@ -965,7 +949,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		return 0;
 	}
 	while (bytes_left > 0) {
-		struct iovec *iov = (struct iovec *) iter->iov;
+		struct iovec *iov = (struct iovec *) iter_iov(iter);
 		__u64 int_base = (__u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 		if (chunk_bytes > bytes_left)
@@ -980,7 +964,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		iov->iov_base = (void *) (int_base + chunk_bytes);
 		iov->iov_len -= chunk_bytes;
 		if (iov->iov_len == 0)
-			iter->iov++;
+			iter->__iov++;
 	}
 	return 0;
 }
@@ -1049,8 +1033,8 @@ int sock_common_setsockopt(struct socket *sock, int level, int optname,
 	return 0;
 }
 
-int sock_no_accept(struct socket *sock, struct socket *newsock, int flags,
-		bool kern)
+int sock_no_accept(struct socket *sock, struct socket *newsock,
+		struct proto_accept_arg *arg)
 {
 	return 0;
 }
@@ -1108,21 +1092,6 @@ int vfs_fsync(struct file *file, int datasync)
 	return 0;
 }
 
-void *vmalloc(size_t size)
-{
-	if (mock_check_error(&mock_vmalloc_errors))
-		return NULL;
-	void *block = malloc(size);
-	if (!block) {
-		FAIL("malloc failed");
-		return NULL;
-	}
-	if (!vmallocs_in_use)
-		vmallocs_in_use = unit_hash_new();
-	unit_hash_set(vmallocs_in_use, block, "used");
-	return block;
-}
-
 void wait_for_completion(struct completion *x) {}
 
 long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
@@ -1149,6 +1118,22 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 		int sync, void *key)
 {
 	return 0;
+}
+
+/**
+ * mock_alloc_pages() - Called instead of alloc_pages when Homa is compiled
+ * for unit testing.
+ */
+struct page *mock_alloc_pages(gfp_t gfp, unsigned order)
+{
+	struct page *page;
+	if (mock_check_error(&mock_alloc_page_errors))
+		return NULL;
+	page = (struct page *)malloc(PAGE_SIZE << order);
+	if (!pages_in_use)
+		pages_in_use = unit_hash_new();
+	unit_hash_set(pages_in_use, page, (char *)1);
+	return page;
 }
 
 /**
@@ -1305,6 +1290,25 @@ void mock_rcu_read_unlock(void)
 }
 
 /**
+ * mock_register_net_sysctl() - Called instead of register_net_sysctl
+ * when Homa is compiled for unit testing.
+ */
+struct ctl_table_header *mock_register_net_sysctl(struct net *net,
+		const char *path, struct ctl_table *table)
+{
+	return NULL;
+}
+
+/**
+ * mock_set_core() - Set internal state that indicates the "current core".
+ * @num:     Integer identifier for a core.
+ */
+void mock_set_core(int num)
+{
+	pcpu_hot.cpu_number = num;
+}
+
+/**
  * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in
@@ -1451,7 +1455,7 @@ void mock_spin_unlock(spinlock_t *lock)
  */
 void mock_teardown(void)
 {
-	cpu_number = 1;
+	pcpu_hot.cpu_number = 1;
 	cpu_khz = 1000000;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
@@ -1461,7 +1465,7 @@ void mock_teardown(void)
 	mock_cpu_idle = 0;
 	mock_cycles = 0;
 	mock_ipv6 = mock_ipv6_default;
-	mock_import_single_range_errors = 0;
+	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
@@ -1534,4 +1538,25 @@ void mock_teardown(void)
 	mock_active_rcu_locks = 0;
 
 	unit_hook_clear();
+}
+
+/**
+ * mock_vmalloc() - Called instead of vmalloc when Homa is compiled
+ * for unit testing.
+ * @size:   Number of bytes to allocate.
+ */
+void *mock_vmalloc(size_t size)
+{
+	if (mock_check_error(&mock_vmalloc_errors))
+		return NULL;
+	void *block = malloc(size);
+	if (!block)
+	{
+		FAIL("malloc failed");
+		return NULL;
+	}
+	if (!vmallocs_in_use)
+		vmallocs_in_use = unit_hash_new();
+	unit_hash_set(vmallocs_in_use, block, "used");
+	return block;
 }

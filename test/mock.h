@@ -4,7 +4,6 @@
 
 /* Functions for mocking that are exported to test code. */
 
-extern int         cpu_number;
 extern int         mock_alloc_page_errors;
 extern int         mock_alloc_skb_errors;
 extern int         mock_bpage_size;
@@ -16,7 +15,7 @@ extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
 extern cycles_t    mock_cycles;
 extern int         mock_import_iovec_errors;
-extern int         mock_import_single_range_errors;
+extern int         mock_import_ubuf_errors;
 extern int         mock_ip6_xmit_errors;
 extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;
@@ -40,6 +39,8 @@ extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 extern int         mock_xmit_log_homa_info;
 
+extern struct page *
+		   mock_alloc_pages(gfp_t gfp, unsigned order);
 extern int         mock_check_error(int *errorMask);
 extern void        mock_clear_xmit_prios(void);
 extern void        mock_data_ready(struct sock *sk);
@@ -52,6 +53,10 @@ extern int         mock_page_refs(struct page *page);
 extern void        mock_put_page(struct page *page);
 extern void        mock_rcu_read_lock(void);
 extern void        mock_rcu_read_unlock(void);
+extern struct ctl_table_header *
+		   mock_register_net_sysctl(struct net *net,
+		       const char *path, struct ctl_table *table);
+extern void        mock_set_core(int num);
 extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);
@@ -63,3 +68,4 @@ extern void        mock_sock_destroy(struct homa_sock *hsk,
 extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
 			int port);
 extern void        mock_teardown(void);
+extern void       *mock_vmalloc(size_t size);
