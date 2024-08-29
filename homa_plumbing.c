@@ -63,7 +63,6 @@ const struct proto_ops homa_proto_ops = {
 	.sendmsg	   = inet_sendmsg,
 	.recvmsg	   = inet_recvmsg,
 	.mmap		   = sock_no_mmap,
-	.sendpage	   = sock_no_sendpage,
 	.set_peek_off	   = sk_set_peek_off,
 };
 
@@ -85,7 +84,6 @@ const struct proto_ops homav6_proto_ops = {
 	.sendmsg	   = inet_sendmsg,
 	.recvmsg	   = inet_recvmsg,
 	.mmap		   = sock_no_mmap,
-	.sendpage	   = sock_no_sendpage,
 	.set_peek_off	   = sk_set_peek_off,
 };
 
@@ -108,7 +106,6 @@ struct proto homa_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.sendpage	   = homa_sendpage,
 	.backlog_rcv       = homa_backlog_rcv,
 	.release_cb	   = ip4_datagram_release_cb,
 	.hash		   = homa_hash,
@@ -136,7 +133,6 @@ struct proto homav6_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.sendpage	   = homa_sendpage,
 	.backlog_rcv       = homa_backlog_rcv,
 	.release_cb	   = ip6_datagram_release_cb,
 	.hash		   = homa_hash,
@@ -744,17 +740,17 @@ int homa_disconnect(struct sock *sk, int flags) {
  * homa_ioc_abort() - The top-level function for the ioctl that implements
  * the homa_abort user-level API.
  * @sk:       Socket for this request.
- * @arg:      Used to pass information from user space.
+ * @karg:     Used to pass information from user space.
  *
  * Return: 0 on success, otherwise a negative errno.
  */
-int homa_ioc_abort(struct sock *sk, unsigned long arg) {
+int homa_ioc_abort(struct sock *sk, int *karg) {
 	int ret = 0;
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_abort_args args;
 	struct homa_rpc *rpc;
 
-	if (unlikely(copy_from_user(&args, (void *) arg, sizeof(args))))
+	if (unlikely(copy_from_user(&args, (void *) karg, sizeof(args))))
 		return -EFAULT;
 
 	if (args._pad1 || args._pad2[0] || args._pad2[1]) {
@@ -781,18 +777,18 @@ int homa_ioc_abort(struct sock *sk, unsigned long arg) {
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
  * @sk:    Socket on which the system call was invoked.
  * @cmd:   Identifier for a particular ioctl operation.
- * @arg:   Operation-specific argument; typically the address of a block
+ * @karg:  Operation-specific argument; typically the address of a block
  *         of data in user address space.
  *
  * Return: 0 on success, otherwise a negative errno.
  */
-int homa_ioctl(struct sock *sk, int cmd, unsigned long arg) {
+int homa_ioctl(struct sock *sk, int cmd, int *karg) {
 	int result;
 	__u64 start = get_cycles();
 
 	switch (cmd) {
 	case HOMAIOCABORT:
-		result = homa_ioc_abort(sk, arg);
+		result = homa_ioc_abort(sk, karg);
 		INC_METRIC(abort_calls, 1);
 		INC_METRIC(abort_cycles, get_cycles() - start);
 		break;
@@ -1155,21 +1151,6 @@ done:
 			control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
 	INC_METRIC(recv_cycles, finish - start);
 	return result;
-}
-
-/**
- * homa_sendpage() - ??.
- * @sk:     Socket for the operation
- * @page:   ??
- * @offset: ??
- * @size:   ??
- * @flags:  ??
- * Return:  0 on success, otherwise a negative errno.
- */
-int homa_sendpage(struct sock *sk, struct page *page, int offset,
-		  size_t size, int flags) {
-	printk(KERN_WARNING "unimplemented sendpage invoked on Homa socket\n");
-	return -ENOSYS;
 }
 
 /**

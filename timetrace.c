@@ -9,18 +9,19 @@
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-#define TT_KERNEL 1
+//#define TT_KERNEL 1
 #endif
 #ifdef TT_KERNEL
-extern int        tt_linux_buffer_mask;
 extern struct tt_buffer *tt_linux_buffers[];
 extern void       (*tt_linux_freeze)(void);
 extern atomic_t  *tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
 extern int       *tt_linux_homa_temp;
 extern int        tt_linux_homa_temp_default[];
-extern void       tt_inc_metric(int metric, __u64 count);
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
+extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
+		      const char* format, __u32 arg0, __u32 arg1, __u32 arg2,
+		      __u32 arg3);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
 extern void       (*tt_linux_printk)(void);
 extern void       (*tt_linux_dbg1)(char *msg, ...);
@@ -28,7 +29,12 @@ extern void       (*tt_linux_dbg2)(char *msg, ...);
 extern void       (*tt_linux_dbg3)(char *msg, ...);
 extern void       tt_linux_nop(void);
 extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
+
+extern void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
+		      const char *format, __u32 arg0, __u32 arg1,
+		      __u32 arg2, __u32 arg3);
 #endif
+extern void       tt_inc_metric(int metric, __u64 count);
 
 /* Separate buffers for each core: this eliminates the need for
  * synchronization in tt_record, which improves performance significantly.
@@ -135,7 +141,7 @@ int tt_init(char *proc_file, int *temp)
 	for (i = 0; i < nr_cpu_ids; i++) {
 		tt_linux_buffers[i] = tt_buffers[i];
 	}
-	tt_linux_buffer_mask = TT_BUF_SIZE-1;
+	tt_linux_record = tt_record_buf;
 	tt_linux_freeze = tt_freeze;
 	tt_linux_freeze_count = &tt_freeze_count;
 	tt_linux_inc_metrics = tt_inc_metric;
@@ -177,6 +183,7 @@ void tt_destroy(void)
 	tt_freeze_count.counter = 1;
 
 #ifdef TT_KERNEL
+	tt_linux_record = ltt_record_nop;
 	tt_linux_freeze = tt_linux_nop;
 	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
 	for (i = 0; i < nr_cpu_ids; i++) {

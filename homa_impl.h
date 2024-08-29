@@ -38,13 +38,15 @@
 #include <linux/proc_fs.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
-#include <linux/version.h>
 #include <linux/socket.h>
+#include <linux/version.h>
+#include <linux/vmalloc.h>
 #include <net/icmp.h>
 #include <net/ip.h>
 #include <net/protocol.h>
 #include <net/inet_common.h>
 #include <net/gro.h>
+#include <net/rps.h>
 #pragma GCC diagnostic warning "-Wpointer-sign"
 #pragma GCC diagnostic warning "-Wunused-variable"
 
@@ -53,15 +55,46 @@ typedef unsigned int __poll_t;
 #endif
 
 #ifdef __UNIT_TEST__
-#define spin_unlock mock_spin_unlock
-extern void mock_spin_unlock(spinlock_t *lock);
+#undef alloc_pages
+#define alloc_pages mock_alloc_pages
+extern struct page *mock_alloc_pages(gfp_t gfp, unsigned order);
+
+#define compound_order mock_compound_order
+extern unsigned int mock_compound_order(struct page *page);
+
+#define cpu_to_node mock_cpu_to_node
+extern int mock_cpu_to_node(int cpu);
+
+#undef current
+#define current current_task
+extern struct task_struct *current_task;
 
 #undef get_cycles
 #define get_cycles mock_get_cycles
 extern cycles_t mock_get_cycles(void);
 
-#define signal_pending(xxx) mock_signal_pending
-extern int mock_signal_pending;
+#define get_page mock_get_page
+    extern void mock_get_page(struct page *page);
+
+#undef kmalloc
+#define kmalloc mock_kmalloc
+extern void *mock_kmalloc(size_t size, gfp_t flags);
+
+#define kthread_complete_and_exit(comp, code)
+
+#ifdef page_address
+#undef page_address
+#endif
+#define page_address(page) ((void *) page)
+
+#define page_ref_count mock_page_refs
+extern int mock_page_refs(struct page *page);
+
+#define page_to_nid mock_page_to_nid
+extern int mock_page_to_nid(struct page *page);
+
+#define put_page mock_put_page
+extern void mock_put_page(struct page *page);
 
 #define rcu_read_lock mock_rcu_read_lock
 extern void mock_rcu_read_lock(void);
@@ -69,37 +102,21 @@ extern void mock_rcu_read_lock(void);
 #define rcu_read_unlock mock_rcu_read_unlock
 extern void mock_rcu_read_unlock(void);
 
-#undef current
-#define current current_task
+#undef register_net_sysctl
+#define register_net_sysctl mock_register_net_sysctl
+extern struct ctl_table_header *mock_register_net_sysctl(struct net *net,
+		const char *path, struct ctl_table *table);
 
-#define kthread_complete_and_exit(comp, code)
+#define signal_pending(xxx) mock_signal_pending
+extern int mock_signal_pending;
 
-#define kmalloc mock_kmalloc
-extern void *mock_kmalloc(size_t size, gfp_t flags);
+#define spin_unlock mock_spin_unlock
+extern void mock_spin_unlock(spinlock_t *lock);
 
-#define get_page mock_get_page
-extern void mock_get_page(struct page *page);
-
-#define put_page mock_put_page
-extern void mock_put_page(struct page *page);
-
-#define compound_order mock_compound_order
-extern unsigned int mock_compound_order(struct page *page);
-
-#define page_to_nid mock_page_to_nid
-extern int mock_page_to_nid(struct page *page);
-
-#define page_ref_count mock_page_refs
-extern int mock_page_refs(struct page *page);
-
-#define cpu_to_node mock_cpu_to_node
-extern int mock_cpu_to_node(int cpu);
-
-#ifdef page_address
-#undef page_address
-#endif
-#define page_address(page) ((void *) page)
-#endif
+#undef vmalloc
+#define vmalloc mock_vmalloc
+extern void *mock_vmalloc(size_t size);
+#endif /* __UNIT_TEST__ */
 
 /* Null out things that confuse VSCode Intellisense */
 #ifdef __VSCODE__
@@ -879,7 +896,7 @@ struct homa_interest {
  * of a struct homa_interest.
  * @interest:   Struct to initialize.
  */
-static void inline homa_interest_init(struct homa_interest *interest)
+inline static void homa_interest_init(struct homa_interest *interest)
 {
 	interest->thread = current;
 	atomic_long_set(&interest->ready_rpc, 0);
@@ -3682,8 +3699,8 @@ extern enum hrtimer_restart
                 homa_hrtimer(struct hrtimer *timer);
 extern int      homa_init(struct homa *homa);
 extern void     homa_incoming_sysctl_changed(struct homa *homa);
-extern int      homa_ioc_abort(struct sock *sk, unsigned long arg);
-extern int      homa_ioctl(struct sock *sk, int cmd, unsigned long arg);
+extern int      homa_ioc_abort(struct sock *sk, int *karg);
+extern int      homa_ioctl(struct sock *sk, int cmd, int *karg);
 extern void     homa_log_throttled(struct homa *homa);
 extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
 		    int unsched);
@@ -3777,8 +3794,6 @@ extern struct homa_rpc
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
 extern void     homa_send_ipis(void);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
-extern int      homa_sendpage(struct sock *sk, struct page *page, int offset,
-                    size_t size, int flags);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
                     sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);

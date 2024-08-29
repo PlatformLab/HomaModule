@@ -189,7 +189,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
@@ -197,8 +197,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__cant_read_user_args)
 {
 	struct homa_abort_args args = {self->client_id, 0};
 	mock_copy_data_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) &args));
+	EXPECT_EQ(EFAULT, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
 TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 {
@@ -211,7 +210,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 			self->server_port, self->client_id, 10000, 200);
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
-	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (unsigned long) &args));
+	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 	EXPECT_EQ(-ECANCELED, crpc1->error);
 	EXPECT_EQ(-ECANCELED, crpc2->error);
 	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
@@ -219,8 +218,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
 	struct homa_abort_args args = {99, 0};
-	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk,
-			(unsigned long) &args));
+	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
 
 TEST_F(homa_plumbing, homa_set_sock_opt__bad_level)
@@ -270,7 +268,7 @@ TEST_F(homa_plumbing, homa_set_sock_opt__success)
 			sizeof(struct homa_set_buf_args)));
 	EXPECT_EQ(args.start, self->hsk.buffer_pool.region);
 	EXPECT_EQ(64, self->hsk.buffer_pool.num_bpages);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.so_set_buf_calls);
+	EXPECT_EQ(1, core_metrics.so_set_buf_calls);
 }
 
 TEST_F(homa_plumbing, homa_sendmsg__args_not_in_user_space)
@@ -688,7 +686,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	skb->len -= 1;
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
+	EXPECT_EQ(1, core_metrics.short_packets);
 }
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
@@ -697,7 +695,7 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.short_packets);
+	EXPECT_EQ(1, core_metrics.short_packets);
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {

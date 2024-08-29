@@ -559,7 +559,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	mock_ip_queue_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
+	EXPECT_EQ(1, core_metrics.control_xmit_errors);
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 {
@@ -583,7 +583,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	mock_ip6_xmit_errors = 1;
 	EXPECT_EQ(ENETDOWN, -homa_xmit_control(GRANT, &h, sizeof(h), srpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.control_xmit_errors);
+	EXPECT_EQ(1, core_metrics.control_xmit_errors);
 }
 
 TEST_F(homa_outgoing, homa_xmit_unknown)
@@ -741,13 +741,13 @@ TEST_F(homa_outgoing, __homa_xmit_data__fill_dst)
 			self->server_port, self->client_id, 1000, 1000);
 	unit_log_clear();
 	dst = crpc->peer->dst;
-	old_refcount = dst->__refcnt.counter;
+	old_refcount = atomic_read(&dst->__rcuref.refcnt);
 
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 6);
 	EXPECT_STREQ("xmit DATA 1000@0", unit_log_get());
 	EXPECT_EQ(dst, skb_dst(crpc->msgout.packets));
-	EXPECT_EQ(old_refcount+1, dst->__refcnt.counter);
+	EXPECT_EQ(old_refcount+1, atomic_read(&dst->__rcuref.refcnt));
 }
 TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 {
@@ -763,7 +763,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 	mock_ip_queue_xmit_errors = 1;
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
+	EXPECT_EQ(1, core_metrics.data_xmit_errors);
 }
 TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 {
@@ -779,7 +779,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 	mock_ip6_xmit_errors = 1;
 	skb_get(crpc->msgout.packets);
 	__homa_xmit_data(crpc->msgout.packets, crpc, 5);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.data_xmit_errors);
+	EXPECT_EQ(1, core_metrics.data_xmit_errors);
 }
 
 TEST_F(homa_outgoing, homa_resend_data__basics)
@@ -984,8 +984,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__pacer_metrics)
 	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			true));
 	EXPECT_EQ(10500, atomic64_read(&self->homa.link_idle_time));
-	EXPECT_EQ(500, homa_cores[cpu_number]->metrics.pacer_bytes);
-	EXPECT_EQ(200, homa_cores[cpu_number]->metrics.pacer_lost_cycles);
+	EXPECT_EQ(500, core_metrics.pacer_bytes);
+	EXPECT_EQ(200, core_metrics.pacer_lost_cycles);
 }
 TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 {
@@ -1141,7 +1141,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	mock_trylock_errors = ~1;
 	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.pacer_skipped_rpcs);
+	EXPECT_EQ(1, core_metrics.pacer_skipped_rpcs);
 	unit_log_clear();
 	mock_trylock_errors = 0;
 	homa_pacer_xmit(&self->homa);
@@ -1234,16 +1234,16 @@ TEST_F(homa_outgoing, homa_add_to_throttled__inc_metrics)
 			self->server_port, self->client_id+4, 15000, 1000);
 
 	homa_add_to_throttled(crpc1);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_adds);
-	EXPECT_EQ(0, homa_cores[cpu_number]->metrics.throttle_list_checks);
+	EXPECT_EQ(1, core_metrics.throttle_list_adds);
+	EXPECT_EQ(0, core_metrics.throttle_list_checks);
 
 	homa_add_to_throttled(crpc2);
-	EXPECT_EQ(2, homa_cores[cpu_number]->metrics.throttle_list_adds);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.throttle_list_checks);
+	EXPECT_EQ(2, core_metrics.throttle_list_adds);
+	EXPECT_EQ(1, core_metrics.throttle_list_checks);
 
 	homa_add_to_throttled(crpc3);
-	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_adds);
-	EXPECT_EQ(3, homa_cores[cpu_number]->metrics.throttle_list_checks);
+	EXPECT_EQ(3, core_metrics.throttle_list_adds);
+	EXPECT_EQ(3, core_metrics.throttle_list_checks);
 }
 
 TEST_F(homa_outgoing, homa_remove_from_throttled)

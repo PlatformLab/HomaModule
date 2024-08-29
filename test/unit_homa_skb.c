@@ -95,7 +95,7 @@ TEST_F(homa_skb, homa_skb_cleanup)
 	core->skb_page = alloc_pages(GFP_KERNEL, 2);
 	add_to_pool(&self->homa, 5, 2);
 	add_to_pool(&self->homa, 4, 3);
-	cpu_number = 3;
+	mock_set_core(3);
 	homa_skb_stash_pages(&self->homa, 2 * HOMA_SKB_PAGE_SIZE - 100);
 	EXPECT_EQ(5, homa_cores[2]->numa->page_pool.avail);
 	EXPECT_EQ(2, homa_cores[3]->numa->page_pool.avail);
@@ -195,7 +195,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_allocate_new_page)
 	EXPECT_NE(NULL, p3);
 	EXPECT_EQ(1000, length);
 	EXPECT_EQ(2, skb_shinfo(self->skb)->nr_frags);
-	EXPECT_EQ(0, skb_shinfo(self->skb)->frags[1].bv_offset);
+	EXPECT_EQ(0, skb_shinfo(self->skb)->frags[1].offset);
 	EXPECT_EQ(2000, self->skb->len);
 
 	EXPECT_EQ(1000, core->page_inuse);
@@ -223,7 +223,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_use_same_page_reduce_length)
 	EXPECT_EQ(p2 + 512, p3);
 	EXPECT_EQ(512, length);
 	EXPECT_EQ(2, skb_shinfo(self->skb)->nr_frags);
-	EXPECT_EQ(1536, skb_shinfo(self->skb)->frags[1].bv_offset);
+	EXPECT_EQ(1536, skb_shinfo(self->skb)->frags[1].offset);
 
 	EXPECT_EQ(2048, core->page_inuse);
 	kfree_skb(skb2);
@@ -246,7 +246,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__free_previous_page)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__reuse_existing_page)
 {
-	struct homa_core *core = homa_cores[cpu_number];
+	struct homa_core *core = cur_core;
 	struct sk_buff *skb = homa_skb_new_tx(100);
 	struct page *page;
 	int length = 100;
@@ -262,8 +262,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__reuse_existing_page)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__from_stash)
 {
-	struct homa_core *core = homa_cores[cpu_number];
-	add_to_pool(&self->homa, 5, cpu_number);
+	struct homa_core *core = cur_core;
+	add_to_pool(&self->homa, 5, raw_smp_processor_id());
 	homa_skb_stash_pages(&self->homa, 3*HOMA_SKB_PAGE_SIZE - 100);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, core));
 	EXPECT_NE(NULL, core->skb_page);
@@ -273,8 +273,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__from_stash)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__from_pool)
 {
-	struct homa_core *core = homa_cores[cpu_number];
-	add_to_pool(&self->homa, 5, cpu_number);
+	struct homa_core *core = cur_core;
+	add_to_pool(&self->homa, 5, raw_smp_processor_id());
 	EXPECT_EQ(5, core->numa->page_pool.avail);
 	EXPECT_EQ(0, core->num_stashed_pages);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, core));
@@ -283,8 +283,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__from_pool)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
 {
-	struct homa_core *core = homa_cores[cpu_number];
-	add_to_pool(&self->homa, 1, cpu_number);
+	struct homa_core *core = cur_core;
+	add_to_pool(&self->homa, 1, raw_smp_processor_id());
 	EXPECT_EQ(1, core->numa->page_pool.avail);
 	EXPECT_EQ(0, core->num_stashed_pages);
 	hook_pool = &core->numa->page_pool;
@@ -297,15 +297,15 @@ TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__new_large_page)
 {
-	struct homa_core *core = homa_cores[cpu_number];
+	struct homa_core *core = cur_core;
 	mock_cycles = ~0;
 	EXPECT_EQ(0, core->numa->page_pool.avail);
 	EXPECT_EQ(0, core->num_stashed_pages);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, core));
 	EXPECT_NE(NULL, core->skb_page);
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, core->page_size);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.skb_page_allocs);
-	EXPECT_NE(0, homa_cores[cpu_number]->metrics.skb_page_alloc_cycles);
+	EXPECT_EQ(1, core_metrics.skb_page_allocs);
+	EXPECT_NE(0, core_metrics.skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 {
@@ -317,8 +317,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 	EXPECT_NE(NULL, core->skb_page);
 	EXPECT_EQ(PAGE_SIZE, core->page_size);
 	EXPECT_EQ(0, core->page_inuse);
-	EXPECT_EQ(1, homa_cores[cpu_number]->metrics.skb_page_allocs);
-	EXPECT_NE(0, homa_cores[cpu_number]->metrics.skb_page_alloc_cycles);
+	EXPECT_EQ(1, core_metrics.skb_page_allocs);
+	EXPECT_NE(0, core_metrics.skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__no_pages_available)
 {
@@ -342,15 +342,15 @@ TEST_F(homa_skb, homa_skb_append_to_frag__basics)
 			"0123456789ABCDEFGHIJ", 21));
 
 	EXPECT_EQ(2, shinfo->nr_frags);
-	EXPECT_EQ(10, shinfo->frags[0].bv_len);
-	char *p = ((char *) page_address(shinfo->frags[0].bv_page))
-			+ shinfo->frags[0].bv_offset;
-	p[shinfo->frags[0].bv_len] = 0;
+	EXPECT_EQ(10, skb_frag_size(&shinfo->frags[0]));
+	char *p = ((char *) page_address(skb_frag_page(&shinfo->frags[0])))
+			+ shinfo->frags[0].offset;
+	p[skb_frag_size(&shinfo->frags[0])] = 0;
 	EXPECT_STREQ("abcd012345", p);
 
-	EXPECT_EQ(15, shinfo->frags[1].bv_len);
-	p = ((char *) page_address(shinfo->frags[1].bv_page))
-			+ shinfo->frags[1].bv_offset;
+	EXPECT_EQ(15, skb_frag_size(&shinfo->frags[1]));
+	p = ((char *) page_address(skb_frag_page(&shinfo->frags[1])))
+			+ shinfo->frags[1].offset;
 	EXPECT_STREQ("6789ABCDEFGHIJ", p);
 }
 TEST_F(homa_skb, homa_skb_append_to_frag__no_memory)
@@ -383,8 +383,8 @@ TEST_F(homa_skb, homa_skb_append_from_iter__basics)
 		     	unit_log_get());
 
 	EXPECT_EQ(2, shinfo->nr_frags);
-	EXPECT_EQ(4096, shinfo->frags[0].bv_len);
-	EXPECT_EQ(904, shinfo->frags[1].bv_len);
+	EXPECT_EQ(4096, skb_frag_size(&shinfo->frags[0]));
+	EXPECT_EQ(904, skb_frag_size(&shinfo->frags[1]));
 }
 TEST_F(homa_skb, homa_skb_append_from_iter__no_memory)
 {
@@ -513,7 +513,7 @@ TEST_F(homa_skb, homa_skb_free_many_tx__skb_ref_count_not_one)
 	length = HOMA_SKB_PAGE_SIZE;
 	homa_skb_extend_frags(&self->homa, skb, &length);
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, length);
-	page = skb_shinfo(skb)->frags[0].bv_page;
+	page = skb_frag_page(&skb_shinfo(skb)->frags[0]);
 	EXPECT_EQ(2, page_ref_count(page));
 	skb_get(skb);
 	EXPECT_EQ(2, refcount_read(&skb->users));
@@ -535,7 +535,7 @@ TEST_F(homa_skb, homa_skb_free_many_tx__check_page_order)
 		homa_skb_extend_frags(&self->homa, skb, &length);
 	}
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, length);
-	struct page *page = skb_shinfo(skb)->frags[2].bv_page;
+	struct page *page = skb_frag_page(&skb_shinfo(skb)->frags[2]);
 
 	mock_compound_order_mask = 3;
 	homa_skb_free_many_tx(&self->homa, &skb, 1);

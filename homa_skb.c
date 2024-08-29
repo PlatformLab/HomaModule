@@ -13,6 +13,11 @@ extern int mock_max_skb_frags;
 #define HOMA_MAX_SKB_FRAGS MAX_SKB_FRAGS
 #endif
 
+static inline void frag_page_set(skb_frag_t *frag, struct page *page)
+{
+	frag->netmem = page_to_netmem(page);
+}
+
 /**
  * homa_skb_page_pool_init() - Invoked when a struct homa is created to
  * initialize a page pool.
@@ -144,15 +149,15 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	int actual_size = *length;
 
 	/* Can we just extend the skb's last fragment? */
-	if ((shinfo->nr_frags > 0) && (frag->bv_page == core->skb_page)
+	if ((shinfo->nr_frags > 0) && (skb_frag_page(frag) == core->skb_page)
 			&& (core->page_inuse < core->page_size)
-			&& ((frag->bv_offset + frag->bv_len)
+			&& ((frag->offset + skb_frag_size(frag))
 			== core->page_inuse)) {
 		if ((core->page_size - core->page_inuse) < actual_size)
 			actual_size = core->page_size - core->page_inuse;
 		*length = actual_size;
-		frag->bv_len += actual_size;
-		result = page_address(frag->bv_page) + core->page_inuse;
+		skb_frag_size_add(frag, actual_size);
+		result = page_address(skb_frag_page(frag)) + core->page_inuse;
 		core->page_inuse += actual_size;
 		skb_len_add(skb, actual_size);
 		return result;
@@ -168,12 +173,12 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 		actual_size = core->page_size - core->page_inuse;
 	frag = &shinfo->frags[shinfo->nr_frags];
 	shinfo->nr_frags++;
-	frag->bv_page = core->skb_page;
+	frag_page_set(frag, core->skb_page);
 	get_page(core->skb_page);
-	frag->bv_offset = core->page_inuse;
+	frag->offset = core->page_inuse;
 	*length = actual_size;
-	frag->bv_len = actual_size;
-	result = page_address(frag->bv_page) + core->page_inuse;
+	skb_frag_size_set(frag, actual_size);
+	result = page_address(skb_frag_page(frag)) + core->page_inuse;
 	core->page_inuse += actual_size;
 	skb_len_add(skb, actual_size);
 	return result;
@@ -350,22 +355,23 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 	src_frag_offset = head_len;
 	for (src_frags_left = src_shinfo->nr_frags, src_frag = &src_shinfo->frags[0];
 	    	(src_frags_left > 0) && (length > 0);
-	     	src_frags_left--, src_frag_offset += src_frag->bv_len, src_frag++)
+	     	src_frags_left--, src_frag_offset += skb_frag_size(src_frag),
+		src_frag++)
 	{
-		if (offset >= (src_frag_offset + src_frag->bv_len))
+		if (offset >= (src_frag_offset + skb_frag_size(src_frag)))
 			continue;
-		chunk_size = src_frag->bv_len - (offset - src_frag_offset);
+		chunk_size = skb_frag_size(src_frag) - (offset - src_frag_offset);
 		if (chunk_size > length)
 			chunk_size = length;
 		if (dst_shinfo->nr_frags == HOMA_MAX_SKB_FRAGS)
 			return -EINVAL;
 		dst_frag = &dst_shinfo->frags[dst_shinfo->nr_frags];
 		dst_shinfo->nr_frags++;
-		dst_frag->bv_page = src_frag->bv_page;
-		get_page(src_frag->bv_page);
-		dst_frag->bv_offset = src_frag->bv_offset
+		frag_page_set(dst_frag, skb_frag_page(src_frag));
+		get_page(skb_frag_page(src_frag));
+		dst_frag->offset = src_frag->offset
 				+ (offset - src_frag_offset);
-		dst_frag->bv_len = chunk_size;
+		skb_frag_size_set(dst_frag, chunk_size);
 		offset += chunk_size;
 		length -= chunk_size;
 		skb_len_add(dst_skb, chunk_size);
@@ -498,13 +504,14 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 	frag_offset = head_len;
 	for (frags_left = shinfo->nr_frags, frag = &shinfo->frags[0];
 			(frags_left > 0) && (length > 0);
-			frags_left--, frag_offset += frag->bv_len, frag++) {
-		if (offset >= (frag_offset + frag->bv_len))
+			frags_left--,
+			frag_offset += skb_frag_size(frag), frag++) {
+		if (offset >= (frag_offset + skb_frag_size(frag)))
 			continue;
-		chunk_size = frag->bv_len - (offset - frag_offset);
+		chunk_size = skb_frag_size(frag) - (offset - frag_offset);
 		if (chunk_size > length)
 			chunk_size = length;
-		memcpy(dst, page_address(frag->bv_page) + frag->bv_offset
+		memcpy(dst, page_address(skb_frag_page(frag)) + frag->offset
 				+ (offset - frag_offset),
 				chunk_size);
 		offset += chunk_size;

@@ -7,7 +7,7 @@
 # or more target machines; it also loads the Homa kernel module.
 #
 # Usage:
-# install num_nodes [first]
+# install_homa num_nodes [first]
 #
 # The "num_nodes" arguments indicates how many servers should be updated.
 # The "first" argument is optional; it is an integer identifying the
@@ -24,7 +24,7 @@ if [ $# -eq 2 ]; then
 elif [ $# -eq 1 ]; then
     first=0
 else
-    echo "Usage: install num_nodes [first]"
+    echo "Usage: install_homa num_nodes [first]"
     exit 1
 fi
 last=`expr $first + $1 - 1` || true
@@ -32,7 +32,7 @@ last=`expr $first + $1 - 1` || true
 for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo
-    echo '*** Installing on' $node '***'
+    echo '*** Installing Homa on' $node '***'
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/

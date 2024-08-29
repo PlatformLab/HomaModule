@@ -140,13 +140,14 @@ static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 	struct rps_sock_flow_table *sock_flow_table;
 	int hash;
 
-	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+	sock_flow_table = rcu_dereference(net_hotdata.rps_sock_flow_table);
 	if (sock_flow_table == NULL)
 		return;
-	hash = cpu + rps_cpu_mask + 1;
+	hash = cpu + net_hotdata.rps_cpu_mask + 1;
 	if (sock_flow_table->ents[hash] != hash) {
 		rcu_read_lock();
-		sock_flow_table = rcu_dereference(rps_sock_flow_table);
+		sock_flow_table = rcu_dereference(
+				net_hotdata.rps_sock_flow_table);
 		sock_flow_table->ents[hash] = hash;
 		rcu_read_unlock();
 	}

@@ -25,10 +25,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- The head is known to work under Linux 6.1.38. In the past, Homa has
-  run under several earlier versions of Linux, including 5.17.7,
-  5.4.80, and 4.15.18. There is a separate branch for each of these
-  older versions, with a names such as linux_4.15.18. Older branches are
+- The head is known to work under Linux 6.10.6. In the past, Homa has
+  run under several earlier versions of Linux. There is a separate branch
+  for each of these
+  older versions, with names such as linux_4.15.18. Older branches are
   out of date feature-wise: recent commits have not been back-ported to them.
   Other versions of Linux have not been tested and
   may require code changes (these upgrades rarely take more than a couple
@@ -47,7 +47,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   invoke it with no parameters to install and configure Homa on the current
   machine.
 
-- The script `cloudlab/bin/install` will copy relevant Homa files
+- The script `cloudlab/bin/install_homa` will copy relevant Homa files
   across a cluster of machines and configure Homa on each node. It assumes
   that nodes have names `nodeN` where N is a small integer, and it also
   assumes that you have already run `make` both in the top-level directory and
