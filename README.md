@@ -125,6 +125,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- August 2024: upgraded to Linux 6.10.6.
 - July 2024: introduced "TCP hijacking", where Homa packets are sent as
   legitimate TCP segments (using TCP as the IP protocol) and then reclaimed
   from TCP on the destination. This allows Homa to make better use of
@@ -132,6 +133,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - June 2024: refactored sk_buff management to use frags; improves
   efficiency significantly.
 - April 2024: replaced `master` branch with `main`
+- July 2023: upgraded to Linux 6.1.38.
 - December 2022: Version 2.0. This includes a new mechanism for managing
   buffer space for incoming messages, which improves throughput by
   50-100% in many situations. In addition, Homa now uses the sendmsg
