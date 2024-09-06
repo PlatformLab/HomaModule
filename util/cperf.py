@@ -704,7 +704,7 @@ def run_experiment(name, clients, options):
             for id in exp_nodes:
                 do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
-            do_cmd("dump_times /dev/null", clients)
+            do_cmd("dump_times %s /dev/null" % (options.protocol), clients)
         do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
         debug_delay = 0
         if debug_delay > 0:
@@ -720,7 +720,7 @@ def run_experiment(name, clients, options):
         do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
-        do_cmd("dump_times rtts", clients)
+        do_cmd("dump_times %s rtts" % (options.protocol), clients)
     if (options.protocol == "homa") and not "unloaded" in options:
         vlog("Recording final metrics from nodes %s" % (exp_nodes))
         for id in exp_nodes:
@@ -777,12 +777,12 @@ def scan_log(file, node, experiments):
             experiment = ""
         if experiment != "":
             gbps = -1.0
-            match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
+            match = re.match('.*clients: ([0-9.]+) Kops/sec, '
                         '([0-9.]+) Gbps.*P50 ([0-9.]+)', line)
             if match:
                 gbps = float(match.group(2))
             else:
-                match = re.match('.*Clients: ([0-9.]+) Kops/sec, '
+                match = re.match('.*clients: ([0-9.]+) Kops/sec, '
                             '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
                 if match:
                     gbps = 8.0*float(match.group(2))
@@ -799,12 +799,12 @@ def scan_log(file, node, experiments):
                 continue
 
             gbps = -1.0
-            match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+            match = re.match('.*servers: ([0-9.]+) Kops/sec, '
                     '([0-9.]+) Gbps', line)
             if match:
                 gbps = float(match.group(2))
             else:
-                match = re.match('.*Servers: ([0-9.]+) Kops/sec, '
+                match = re.match('.*servers: ([0-9.]+) Kops/sec, '
                             '([0-9.]+) MB/sec', line)
                 if match:
                     gbps = 8.0*float(match.group(2))

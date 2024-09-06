@@ -54,9 +54,9 @@ using std::string;
 uint32_t client_max = 1;
 uint32_t client_port_max = 1;
 int client_ports = 0;
-int first_port = 4000;
+int first_port = -1;
 bool is_server = false;
-int id = -1;
+int node_id = -1;
 double net_gbps = 0.0;
 bool tcp_trunc = true;
 bool one_way = false;
@@ -75,7 +75,7 @@ int inet_family = AF_INET;
 int server_core = -1;
 int buf_bpages = 1000;
 
-/* Node ids for clients to send requests to. */
+/* Node ids for client to send requests to. */
 std::vector<int> server_ids;
 
 /** @rand_gen: random number generator. */
@@ -123,95 +123,76 @@ struct conn_id {
 };
 
 /**
- * @server_addrs: Internet addresses for each of the server threads available
- * to receive a Homa RPC.
- */
-std::vector<sockaddr_in_union> server_addrs;
-
-/**
- * @server_conns: for each entry in @server_addrs, a connection identifier
- * with all fields filled in except client_port, which will be 0.
- */
-std::vector<conn_id> server_conns;
-
-/**
- * @freeze: one entry for each node index; 1 means messages to that
- * node should contain a flag telling the node to freeze its time trace.
- */
-std::vector<int> freeze;
-
-/**
- * @first_id: entry i contains the index in server_addrs of the first
- * entry for the server ports on node i. Used to map from node+port to
- * server id.
- */
-std::vector<int> first_id;
+ * enum protocol - Used to distinguish things using Homa vs. TCP.
+*/
+enum protocol {PROT_HOMA, PROT_TCP};
+#define NUM_PROTOCOLS 2
 
 /** @message_id: used to generate unique identifiers for outgoing messages.*/
 std::atomic<uint32_t> message_id;
 
 /**
  * @last_stats_time: time (in rdtsc cycles) when we last printed
- * staticsics. Zero means that none of the statistics below are valid.
+ * statistics. Zero means that none of the statistics below are valid.
  */
 uint64_t last_stats_time = 0;
 
 /**
  * @last_client_rpcs: total number of client RPCS completed by this
- * application as of the last time we printed statistics.
+ * application for each protocol as of the last time we printed statistics.
  */
-uint64_t last_client_rpcs = 0;
+uint64_t last_client_rpcs[NUM_PROTOCOLS];
 
 /**
  * @last_client_bytes_out: total amount of data in request messages for
- * client RPCS completed by this application as of the last time we printed
- * statistics.
+ * client RPCS completed by this application for each protocol as of the
+ * last time we printed statistics.
  */
-uint64_t last_client_bytes_out = 0;
+uint64_t last_client_bytes_out[NUM_PROTOCOLS];
 
 /**
  * @last_client_bytes_in: total amount of data in response messages for
- * client RPCS completed by this application as of the last time we printed
- * statistics.
+ * client RPCS completed by this application for each protocol as of the
+ * last time we printed statistics.
  */
-uint64_t last_client_bytes_in = 0;
+uint64_t last_client_bytes_in[NUM_PROTOCOLS];
 
 /**
  * @last_total_elapsed: total amount of elapsed time for all client RPCs
- * issued by this application (in units of rdtsc cycles), as of the last
- * time we printed statistics.
+ * issued by this application (in units of rdtsc cycles) for each protocol
+ * as of the last time we printed statistics.
  */
-uint64_t last_total_rtt = 0;
+uint64_t last_total_rtt[NUM_PROTOCOLS];
 
 /**
  * @last_lag: total lag across all clients (measured in rdtsc cycles)
- * as of the last time we printed statistics.
+ * for each protocol as of the last time we printed statistics.
  */
-uint64_t last_lag = 0;
+uint64_t last_lag[NUM_PROTOCOLS];
 
 /**
- * @last_backups: total # of backed-up sends as of the last time we
- * printed statistics.
+ * @last_backups: total # of backed-up sends for each protocol as of the
+ * last time we printed statistics.
  */
-uint64_t last_backups = 0;
+uint64_t last_backups[NUM_PROTOCOLS];
 
 /**
  * @last_server_rpcs: total number of server RPCS handled by this
- * application as of the last time we printed statistics.
+ * application for each protocol as of the last time we printed statistics.
  */
-uint64_t last_server_rpcs = 0;
+uint64_t last_server_rpcs[NUM_PROTOCOLS];
 
 /**
  * @last_server_bytes_in: total amount of data in incoming requests handled by
- * this application as of the last time we printed statistics.
+ * this application for each protocol as of the last time we printed statistics.
  */
-uint64_t last_server_bytes_in = 0;
+uint64_t last_server_bytes_in[NUM_PROTOCOLS];
 
 /**
  * @last_server_bytes_out: total amount of data in responses sent by
- * this application as of the last time we printed statistics.
+ * this application for each protcool as of the last time we printed statistics.
  */
-uint64_t last_server_bytes_out = 0;
+uint64_t last_server_bytes_out[NUM_PROTOCOLS];
 
 /**
  * @last_per_server_rpcs: server->requests for each individual server,
@@ -277,8 +258,8 @@ void print_help(const char *name)
 	printf("    --client-max      Maximum number of outstanding requests from a single\n"
 		"                      client machine (divided equally among client ports)\n"
 		"                      (default: %d)\n", client_max);
-	printf("    --first-port      Lowest port number to use for each server (default: %d)\n",
-			first_port);
+	printf("    --first-port      Lowest port number to use for each server (default: \n");
+	printf("                      4000 for Homa, 5000 for TCP)\n");
 	printf("    --first-server    Id of first server node (default: 1, meaning node1)\n");
 	printf("    --gbps            Target network utilization, including only message data,\n"
 		"                      Gbps; 0 means send continuously (default: %.1f)\n",
@@ -313,7 +294,8 @@ void print_help(const char *name)
 			workload);
 	printf("debug value value ... Set one or more int64_t values that may be used for\n"
 		"                      various debugging purposes\n\n");
-	printf("dump_times file       Log RTT times (and lengths) to file\n\n");
+	printf("dump_times prot file  Log RTT times (and lengths) for clients running the\n"
+		"                      protocol given by prot (homa or tcp) to file\n\n");
 	printf("exit                  Exit the application\n\n");
 	printf("log [options] [msg]   Configure logging as determined by the options. If\n"
 		"                      there is an \"option\" that doesn't start with \"--\",\n"
@@ -326,8 +308,8 @@ void print_help(const char *name)
 	printf("    --buf-bpages      Number of bpages to allocate in the buffer poool for\n"
 		"                      incoming messages (default: %d)\n",
 			buf_bpages);
-	printf("    --first-port      Lowest port number to use (default: %d)\n",
-			first_port);
+	printf("    --first-port      Lowest port number to use (default: 4000 for Homa,\n");
+	printf("                      5000 for TCP)\n");
 	printf("    --iovec           Use homa_replyv instead of homa_reply\n");
 	printf("    --ipv6            Use IPv6 instead of IPv4\n");
 	printf("    --pin             All server threads will be restricted to run only\n"
@@ -497,55 +479,6 @@ struct message_header {
 	 */
 	uint32_t msg_id;
 };
-
-/**
- * init_server_addrs() - Set up the server_addrs table (addresses of the
- * server/port combinations that clients will communicate with), based on
- * current configuration parameters. Any previous contents of the table
- * are discarded. This also initializes related arrays @server_ids and
- * @freeze.
- */
-void init_server_addrs(void)
-{
-	server_addrs.clear();
-	server_conns.clear();
-	freeze.clear();
-	first_id.clear();
-	for (int node: server_ids) {
-		char host[100];
-		struct addrinfo hints;
-		struct addrinfo *matching_addresses;
-		sockaddr_in_union *dest;
-
-		if (node == id)
-			continue;
-		snprintf(host, sizeof(host), "node%d", node);
-		memset(&hints, 0, sizeof(struct addrinfo));
-		hints.ai_family = inet_family;
-		hints.ai_socktype = SOCK_DGRAM;
-		int status = getaddrinfo(host, NULL, &hints,
-				&matching_addresses);
-		if (status != 0) {
-			log(NORMAL, "FATAL: couldn't look up address "
-					"for %s: %s\n",
-					host, gai_strerror(status));
-			exit(1);
-		}
-		dest = reinterpret_cast<sockaddr_in_union *>
-				(matching_addresses->ai_addr);
-		while (((int) first_id.size()) < node)
-			first_id.push_back(-1);
-		first_id.push_back((int) server_addrs.size());
-		for (int thread = 0; thread < server_ports; thread++) {
-			dest->in4.sin_port = htons(first_port + thread);
-			server_addrs.push_back(*dest);
-			server_conns.emplace_back(node, thread, id, 0);
-		}
-		while (((int) freeze.size()) <= node)
-			freeze.push_back(0);
-		freeaddrinfo(matching_addresses);
-	}
-}
 
 /**
  * class spin_lock - Implements simple spin lock guards: lock is acquired by
@@ -938,6 +871,9 @@ bool tcp_connection::xmit()
  */
 class server_metrics {
 public:
+	/** @protocol: Was Homa used by this server, or TCP? */
+	enum protocol protocol;
+
 	/** @requests: Total number of requests handled so far. */
 	uint64_t requests;
 
@@ -953,7 +889,8 @@ public:
 	 */
 	uint64_t bytes_out;
 
-	server_metrics() :requests(0), bytes_in(0), bytes_out(0) {}
+	server_metrics(enum protocol protocol) : protocol(protocol),
+			requests(0), bytes_in(0), bytes_out(0) {}
 };
 
 /**
@@ -1063,7 +1000,7 @@ homa_server::homa_server(int port, int id, int inet_family,
 	}
 
 	for (int i = 0; i < num_threads; i++) {
-		server_metrics *thread_metrics = new server_metrics;
+		server_metrics *thread_metrics = new server_metrics(PROT_HOMA);
 		metrics.push_back(thread_metrics);
 		threads.emplace_back([this, i, thread_metrics] () {
 			server(i, thread_metrics);
@@ -1300,7 +1237,7 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 		exit(1);
 	}
 
-	metrics = new server_metrics;
+	metrics = new server_metrics(PROT_TCP);
 	::metrics.push_back(metrics);
 
 	for (int i = 0; i < num_threads; i++)
@@ -1555,12 +1492,15 @@ public:
 		rinfo() : start_time(0), request_length(0), active(false) {}
 	};
 
-	client(int id);
+	client(enum protocol protocol, int id);
 	virtual ~client();
 	void check_completion(const char *protocol);
 	int get_rinfo();
 	void record(uint64_t end_time, message_header *header);
 	virtual void stop_sender(void) {}
+
+        /** @protocol: indicates whether Homa or TCP is used by this client. */
+	enum protocol protocol;
 
 	/**
 	 * @id: unique identifier for this client (index starting at
@@ -1568,8 +1508,30 @@ public:
 	 */
 	int id;
 
-	/** @num_servers: Number of servers this client will send requests to. */
-	size_t num_servers;
+	/**
+	 * @server_addrs: Internet addresses for each of the server ports
+	 * where this client will send RPCs.
+	 */
+	std::vector<sockaddr_in_union> server_addrs;
+
+	/**
+	 * @server_conns: for each entry in @server_addrs, a connection
+	 * identifier with all fields filled in except client_port, which
+	 * will be 0.
+	 */
+	std::vector<conn_id> server_conns;
+
+	/**
+	 * @freeze: one entry for each node index; 1 means messages to that
+	 * node should contain a flag telling the node to freeze its time trace.
+	 */
+	std::vector<int> freeze;
+
+	/**
+	 * @first_id: entry i contains the index in server_addrs of the first
+	 * entry for the server ports on node i.
+	 */
+	std::vector<int> first_id;
 
 	/**
 	 * @rinfos: storage for more than enough rinfos to handle all of the
@@ -1672,17 +1634,22 @@ public:
 std::vector<client *> clients;
 
 /**
- * client::client() - Constructor for client objects.
+ * client::client() - Constructor for client objects. Uses configuration
+ * information from global variables to initialize.
  *
  * @id: Unique identifier for this client (index starting at 0?)
  */
-client::client(int id)
-	: id(id)
-        , num_servers(server_addrs.size())
+client::client(enum protocol protocol, int id)
+	: protocol(protocol)
+	, id(id)
+	, server_addrs()
+	, server_conns()
+	, freeze()
+	, first_id()
         , last_rinfo(0)
 	, receivers_running(0)
 	, cycles_per_second(get_cycles_per_sec())
-	, server_dist(0, static_cast<int>(num_servers - 1))
+	, server_dist()
 	, length_dist(workload, HOMA_MAX_MESSAGE_LENGTH)
 	, actual_lengths(NUM_CLIENT_STATS, 0)
 	, actual_rtts(NUM_CLIENT_STATS, 0)
@@ -1693,13 +1660,55 @@ client::client(int id)
         , total_rtt(0)
         , lag(0)
 {
+	server_addrs.clear();
+	server_conns.clear();
+	freeze.clear();
+	first_id.clear();
+	for (int node: server_ids) {
+		char host[100];
+		struct addrinfo hints;
+		struct addrinfo *matching_addresses;
+		sockaddr_in_union *dest;
+
+		if (node == node_id)
+			continue;
+		snprintf(host, sizeof(host), "node%d", node);
+		memset(&hints, 0, sizeof(struct addrinfo));
+		hints.ai_family = inet_family;
+		hints.ai_socktype = SOCK_DGRAM;
+		int status = getaddrinfo(host, NULL, &hints,
+				&matching_addresses);
+		if (status != 0) {
+			log(NORMAL, "FATAL: couldn't look up address "
+					"for %s: %s\n",
+					host, gai_strerror(status));
+			exit(1);
+		}
+		dest = reinterpret_cast<sockaddr_in_union *>
+				(matching_addresses->ai_addr);
+		while (((int) first_id.size()) < node)
+			first_id.push_back(-1);
+		first_id.push_back((int) server_addrs.size());
+		for (int thread = 0; thread < server_ports; thread++) {
+			dest->in4.sin_port = htons(first_port + thread);
+			server_addrs.push_back(*dest);
+			server_conns.emplace_back(node, thread, node_id, 0);
+		}
+		while (((int) freeze.size()) <= node)
+			freeze.push_back(0);
+		freeaddrinfo(matching_addresses);
+	}
+
+	server_dist.param(std::uniform_int_distribution<>::param_type(0,
+			static_cast<int>(server_addrs.size() - 1)));
+
 	rinfos.resize(2*client_port_max + 5);
 	double avg_length = length_dist.get_mean();
 	double rate = 1e09*(net_gbps/8.0)/(avg_length*client_ports);
 	interval_dist = std::exponential_distribution<double>(rate);
 	requests.resize(server_addrs.size());
-	responses = new std::atomic<uint64_t>[num_servers];
-	for (size_t i = 0; i < num_servers; i++)
+	responses = new std::atomic<uint64_t>[server_addrs.size()];
+	for (size_t i = 0; i < server_addrs.size(); i++)
 		responses[i] = 0;
 	log(NORMAL, "Average message length %.1f KB, rate %.2f K/sec, "
 			"expected BW %.1f Gbps\n",
@@ -1889,7 +1898,7 @@ public:
  * @id: Unique identifier for this client (index starting at 0?)
  */
 homa_client::homa_client(int id)
-	: client(id)
+	: client(PROT_HOMA, id)
 	, fd(-1)
         , buf_region(nullptr)
 	, buf_size(buf_bpages*HOMA_BPAGE_SIZE)
@@ -2087,7 +2096,7 @@ void homa_client::sender()
 				&server_addrs[server], &rpc_id, 0);
 		} else
 			status = homa_send(fd, sender_buffer, header->length,
-		&server_addrs[server], &rpc_id, 0);
+					&server_addrs[server], &rpc_id, 0);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2114,7 +2123,7 @@ void homa_client::sender()
 void homa_client::receiver(int receiver_id)
 {
 	char thread_name[50];
-	snprintf(thread_name, sizeof(thread_name), "R%d.%d", id, receiver_id);
+	snprintf(thread_name, sizeof(thread_name), "R%d.%d", node_id, receiver_id);
 	time_trace::thread_buffer thread_buffer(thread_name);
 	homa::receiver receiver(fd, buf_region);
 
@@ -2291,7 +2300,7 @@ public:
  * @id: Unique identifier for this client (index starting at 0?)
  */
 tcp_client::tcp_client(int id)
-	: client(id)
+	: client(PROT_TCP, id)
 	, connections()
         , blocked()
         , bytes_sent()
@@ -2303,8 +2312,8 @@ tcp_client::tcp_client(int id)
         , receiving_threads()
         , sending_thread()
 {
-	bytes_rcvd = new std::atomic<uint64_t>[num_servers];
-	for (size_t i = 0; i < num_servers; i++) {
+	bytes_rcvd = new std::atomic<uint64_t>[server_addrs.size()];
+	for (size_t i = 0; i < server_addrs.size(); i++) {
 		bytes_sent.push_back(0);
 		bytes_rcvd[i] = 0;
 	}
@@ -2582,46 +2591,60 @@ void tcp_client::read(tcp_connection *connection, int pid)
  */
 void server_stats(uint64_t now)
 {
-	char details[10000];
-	int offset = 0;
-	int length;
-	uint64_t server_rpcs = 0;
-	uint64_t server_bytes_in = 0;
-	uint64_t server_bytes_out = 0;
-	details[0] = 0;
-	for (uint32_t i = 0; i < metrics.size(); i++) {
-		server_metrics *server = metrics[i];
-		server_rpcs += server->requests;
-		server_bytes_in += server->bytes_in;
-		server_bytes_out += server->bytes_out;
-		length = snprintf(details + offset, sizeof(details) - offset,
-				"%s%lu", (offset != 0) ? " " : "",
-				server->requests - last_per_server_rpcs[i]);
-		offset += length;
-		if (i > last_per_server_rpcs.size())
-			printf("last_per_server_rpcs has %lu entries, needs %lu\n",
-					last_per_server_rpcs.size(),
-					metrics.size());
-		last_per_server_rpcs[i] = server->requests;
+	int prot;
+	for (prot = PROT_HOMA; prot <= PROT_TCP; prot++) {
+		char details[10000];
+		int offset = 0;
+		int length;
+		uint64_t server_rpcs = 0;
+		uint64_t server_bytes_in = 0;
+		uint64_t server_bytes_out = 0;
+		const char *prot_string = (prot == PROT_HOMA) ? "Homa" : "TCP";
+
+		details[0] = 0;
+		for (uint32_t i = 0; i < metrics.size(); i++) {
+			server_metrics *server = metrics[i];
+			if (server->protocol != prot)
+				continue;
+			server_rpcs += server->requests;
+			server_bytes_in += server->bytes_in;
+			server_bytes_out += server->bytes_out;
+			length = snprintf(details + offset,
+					sizeof(details) - offset,
+					"%s%lu", (offset != 0) ? " " : "",
+					server->requests - last_per_server_rpcs[i]);
+			offset += length;
+			if (i > last_per_server_rpcs.size())
+				printf("last_per_server_rpcs has %lu "
+						"entries, needs %lu\n",
+						last_per_server_rpcs.size(),
+						metrics.size());
+			last_per_server_rpcs[i] = server->requests;
+		}
+		if ((last_stats_time != 0) && (server_bytes_in
+				!= last_server_bytes_in[prot])) {
+			double elapsed = to_seconds(now - last_stats_time);
+			double rpcs = (double) (server_rpcs
+					- last_server_rpcs[prot]);
+			double in_delta = (double) (server_bytes_in
+					- last_server_bytes_in[prot]);
+			double out_delta = (double) (server_bytes_out
+					- last_server_bytes_out[prot]);
+			log(NORMAL, "%s servers: %.2f Kops/sec, %.2f Gbps in, "
+					"%.2f Gbps out, avg. req. length "
+					"%.1f bytes\n",
+					prot_string,
+					rpcs/(1000.0*elapsed),
+					8.0*in_delta/(1e09*elapsed),
+					8.0*out_delta/(1e09*elapsed),
+					in_delta/rpcs);
+			log(NORMAL, "RPCs per %s server: %s\n", prot_string,
+					details);
+		}
+		last_server_rpcs[prot] = server_rpcs;
+		last_server_bytes_in[prot] = server_bytes_in;
+		last_server_bytes_out[prot] = server_bytes_out;
 	}
-	if ((last_stats_time != 0) && (server_bytes_in != last_server_bytes_in)) {
-		double elapsed = to_seconds(now - last_stats_time);
-		double rpcs = (double) (server_rpcs - last_server_rpcs);
-		double in_delta = (double) (server_bytes_in
-				- last_server_bytes_in);
-		double out_delta = (double) (server_bytes_out
-				- last_server_bytes_out);
-		log(NORMAL, "Servers: %.2f Kops/sec, %.2f Gbps in, "
-				"%.2f Gbps out, avg. req. length %.1f bytes\n",
-				rpcs/(1000.0*elapsed),
-				8.0*in_delta/(1e09*elapsed),
-				8.0*out_delta/(1e09*elapsed),
-				in_delta/rpcs);
-		log(NORMAL, "RPCs per server: %s\n", details);
-	}
-	last_server_rpcs = server_rpcs;
-	last_server_bytes_in = server_bytes_in;
-	last_server_bytes_out = server_bytes_out;
 }
 
 /**
@@ -2633,95 +2656,117 @@ void server_stats(uint64_t now)
 void client_stats(uint64_t now)
 {
 #define CDF_VALUES 100000
-	uint64_t client_rpcs = 0;
-	uint64_t request_bytes = 0;
-	uint64_t response_bytes = 0;
-	uint64_t total_rtt = 0;
-	uint64_t lag = 0;
-	uint64_t outstanding_rpcs = 0;
-	uint64_t cdf_times[CDF_VALUES];
-	uint64_t backups = 0;
-	int times_per_client;
-	int cdf_index = 0;
+	int prot;
+	for (prot = PROT_HOMA; prot <= PROT_TCP; prot++) {
+		uint64_t client_rpcs = 0;
+		uint64_t request_bytes = 0;
+		uint64_t response_bytes = 0;
+		uint64_t total_rtt = 0;
+		uint64_t lag = 0;
+		uint64_t outstanding_rpcs = 0;
+		uint64_t cdf_times[CDF_VALUES];
+		uint64_t backups = 0;
+		int num_clients = 0;
+		int times_per_client;
+		int cdf_index = 0;
+		const char *prot_string = (prot == PROT_HOMA) ? "Homa" : "TCP";
 
-	if (clients.size() == 0)
-		return;
+		for (client *client: clients) {
+			if (client->protocol == prot)
+				num_clients++;
+		}
+		if (num_clients == 0)
+			continue;
 
-	times_per_client = CDF_VALUES/clients.size();
-	if (times_per_client > NUM_CLIENT_STATS)
-		times_per_client = NUM_CLIENT_STATS;
-	for (client *client: clients) {
-		for (size_t i = 0; i < client->num_servers; i++)
-			client_rpcs += client->responses[i];
-		request_bytes += client->request_bytes;
-		response_bytes += client->response_bytes;
-		total_rtt += client->total_rtt;
-		lag += client->lag;
-		outstanding_rpcs += client->total_requests
-			- client->total_responses;
-		for (int i = 1; i <= times_per_client; i++) {
-			/* Collect the most recent RTTs from the client for
-			 * computing a CDF.
-			 */
-			int src = (client->total_responses - i)
-					% NUM_CLIENT_STATS;
-			if (client->actual_rtts[src] == 0) {
-				/* Client hasn't accumulated times_per_client
-				 * entries yet; just use what it has. */
-				break;
+		times_per_client = CDF_VALUES/num_clients;
+		if (times_per_client > NUM_CLIENT_STATS)
+			times_per_client = NUM_CLIENT_STATS;
+		for (client *client: clients) {
+			if (client->protocol != prot)
+				continue;
+			for (size_t i = 0; i < client->server_addrs.size(); i++)
+				client_rpcs += client->responses[i];
+			request_bytes += client->request_bytes;
+			response_bytes += client->response_bytes;
+			total_rtt += client->total_rtt;
+			lag += client->lag;
+			outstanding_rpcs += client->total_requests
+				- client->total_responses;
+			for (int i = 1; i <= times_per_client; i++) {
+				/* Collect the most recent RTTs from the client
+				 * for computing a CDF.
+				 */
+				int src = (client->total_responses - i)
+						% NUM_CLIENT_STATS;
+				if (client->actual_rtts[src] == 0) {
+					/* Client hasn't accumulated
+					 * times_per_client entries yet; just
+					 * use what it has.
+					 */
+					break;
+				}
+				cdf_times[cdf_index] = client->actual_rtts[src];
+				cdf_index++;
 			}
-			cdf_times[cdf_index] = client->actual_rtts[src];
-			cdf_index++;
+			tcp_client *tclient = dynamic_cast<tcp_client *>(client);
+			if (tclient)
+				backups += tclient->backups;
 		}
-		tcp_client *tclient = dynamic_cast<tcp_client *>(client);
-		if (tclient)
-			backups += tclient->backups;
-	}
-	std::sort(cdf_times, cdf_times + cdf_index);
-	if ((last_stats_time != 0) && ((request_bytes != last_client_bytes_out)
-				|| (outstanding_rpcs != 0))){
-		double elapsed = to_seconds(now - last_stats_time);
-		double rpcs = (double) (client_rpcs - last_client_rpcs);
-		double delta_out = (double) (request_bytes
-				- last_client_bytes_out);
-		double delta_in = (double) (response_bytes
-				- last_client_bytes_in);
-		log(NORMAL, "Clients: %.2f Kops/sec, %.2f Gbps out, "
-				"%.2f Gbps in, RTT (us) P50 %.2f P99 %.2f "
-				"P99.9 %.2f, avg. req. length %.1f bytes\n",
-				rpcs/(1000.0*elapsed),
-				8.0*delta_out/(1e09*elapsed),
-				8.0*delta_in/(1e09*elapsed),
-				to_seconds(cdf_times[cdf_index/2])*1e06,
-				to_seconds(cdf_times[99*cdf_index/100])*1e06,
-				to_seconds(cdf_times[999*cdf_index/1000])*1e06,
-			        delta_out/rpcs);
-		double lag_fraction;
-		if (lag > last_lag)
-			lag_fraction = (to_seconds(lag - last_lag)/elapsed)
-				/ clients.size();
-		else
-			lag_fraction = -(to_seconds(last_lag - lag)/elapsed)
-				/ clients.size();
-		if (lag_fraction >= .01)
-			log(NORMAL, "Lag due to overload: %.1f%%\n",
-					lag_fraction*100.0);
-		if (backups != 0) {
-			log(NORMAL, "Backed-up sends: %lu/%lu (%.1f%%)\n",
-					backups - last_backups,
-					client_rpcs - last_client_rpcs,
-					100.0*(backups - last_backups)
-					/(client_rpcs - last_client_rpcs));
+		if (num_clients == 0)
+			continue;
+		std::sort(cdf_times, cdf_times + cdf_index);
+		if ((last_stats_time != 0) && ((request_bytes
+					!= last_client_bytes_out[prot])
+					|| (outstanding_rpcs != 0))){
+			double elapsed = to_seconds(now - last_stats_time);
+			double rpcs = (double) (client_rpcs - last_client_rpcs[prot]);
+			double delta_out = (double) (request_bytes
+					- last_client_bytes_out[prot]);
+			double delta_in = (double) (response_bytes
+					- last_client_bytes_in[prot]);
+			log(NORMAL, "%s clients: %.2f Kops/sec, %.2f Gbps out, "
+					"%.2f Gbps in, RTT (us) P50 %.2f "
+					"P99 %.2f P99.9 %.2f, avg. req. length "
+					"%.1f bytes\n",
+					prot_string,
+					rpcs/(1000.0*elapsed),
+					8.0*delta_out/(1e09*elapsed),
+					8.0*delta_in/(1e09*elapsed),
+					to_seconds(cdf_times[cdf_index/2])*1e06,
+					to_seconds(cdf_times[99*cdf_index/100])*1e06,
+					to_seconds(cdf_times[999*cdf_index/1000])*1e06,
+					delta_out/rpcs);
+			double lag_fraction;
+			if (lag > last_lag[prot])
+				lag_fraction = (to_seconds(lag
+					- last_lag[prot])/elapsed)
+					/ num_clients;
+			else
+				lag_fraction = -(to_seconds(last_lag[prot]
+					- lag)/elapsed) / num_clients;
+			if (lag_fraction >= .01)
+				log(NORMAL, "%s lag due to overload: %.1f%%\n",
+						prot_string,
+						lag_fraction*100.0);
+			if (backups != 0) {
+				log(NORMAL, "Backed-up %s sends: %lu/%lu (%.1f%%)\n",
+						prot_string,
+						backups - last_backups[prot],
+						client_rpcs - last_client_rpcs[prot],
+						100.0*(backups - last_backups[prot])
+						/(client_rpcs - last_client_rpcs[prot]));
+			}
 		}
+		if (outstanding_rpcs != 0)
+			log(NORMAL, "Outstanding %s client RPCs: %lu\n",
+					prot_string, outstanding_rpcs);
+		last_client_rpcs[prot] = client_rpcs;
+		last_client_bytes_out[prot] = request_bytes;
+		last_client_bytes_in[prot] = response_bytes;
+		last_total_rtt[prot] = total_rtt;
+		last_lag[prot] = lag;
+		last_backups[prot] = backups;
 	}
-	if (outstanding_rpcs != 0)
-		log(NORMAL, "Outstanding client RPCs: %lu\n", outstanding_rpcs);
-	last_client_rpcs = client_rpcs;
-	last_client_bytes_out = request_bytes;
-	last_client_bytes_in = response_bytes;
-	last_total_rtt = total_rtt;
-	last_lag = lag;
-	last_backups = backups;
 }
 
 /**
@@ -2757,7 +2802,7 @@ int client_cmd(std::vector<string> &words)
 	client_iovec = false;
 	client_max = 1;
 	client_ports = 1;
-	first_port = 4000;
+	first_port = -1;
 	inet_family = AF_INET;
 	net_gbps = 0.0;
 	port_receivers = 1;
@@ -2791,7 +2836,7 @@ int client_cmd(std::vector<string> &words)
 				return 0;
 			i++;
 		} else if (strcmp(option, "--id") == 0) {
-			if (!parse(words, i+1, &id, option, "integer"))
+			if (!parse(words, i+1, &node_id, option, "integer"))
 				return 0;
 			i++;
 		} else if (strcmp(option, "--iovec") == 0) {
@@ -2855,7 +2900,7 @@ int client_cmd(std::vector<string> &words)
 	}
 
 	/* Figure out which nodes to use for servers (--servers,
-	 * --server-ports, --first-server).
+	 * --server-nodes, --first-server).
 	 */
 	server_ids.clear();
 	if (!servers.empty()) {
@@ -2879,17 +2924,21 @@ int client_cmd(std::vector<string> &words)
 			server_ids.push_back(first_server + i);
 	}
 
-	init_server_addrs();
 	client_port_max = client_max/client_ports;
 	if (client_port_max < 1)
 		client_port_max = 1;
 
 	/* Create clients. */
 	for (int i = 0; i < client_ports; i++) {
-		if (strcmp(protocol, "homa") == 0)
+		if (strcmp(protocol, "homa") == 0) {
+			if (first_port == -1)
+				first_port = 4000;
 			clients.push_back(new homa_client(i));
-		else
+		} else {
+			if (first_port == -1)
+				first_port = 5000;
 			clients.push_back(new tcp_client(i));
+		}
 	}
 	last_stats_time = 0;
 	time_trace::cleanup();
@@ -2931,12 +2980,22 @@ int dump_times_cmd(std::vector<string> &words)
 	FILE *f;
 	time_t now;
 	char time_buffer[100];
+	int prot;
 
-	if (words.size() != 2) {
-		printf("Wrong # args; must be 'dump_times file'\n");
+	if (words.size() != 3) {
+		printf("Wrong # args; must be 'dump_times protocol file'\n");
 		return 0;
 	}
-	f = fopen(words[1].c_str(), "w");
+	if (words[1] == "homa")
+		prot = PROT_HOMA;
+	else if (words[1] == "tcp")
+		prot = PROT_TCP;
+	else {
+		printf("Unknown protocol %s: must be homa or tcp\n",
+			words[1].c_str());
+		return 0;
+	}
+	f = fopen(words[2].c_str(), "w");
 	if (f == NULL) {
 		printf("Couldn't open file %s: %s\n", words[1].c_str(),
 				strerror(errno));
@@ -2954,6 +3013,8 @@ int dump_times_cmd(std::vector<string> &words)
 			server_ids.size(), server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");
 	for (client *client: clients) {
+		if (client->protocol != prot)
+			continue;
 		__u32 start = client->total_responses % NUM_CLIENT_STATS;
 		__u32 i = start;
 		while (1) {
@@ -3087,7 +3148,7 @@ int log_cmd(std::vector<string> &words)
 int server_cmd(std::vector<string> &words)
 {
 	buf_bpages = 1000;
-	first_port = 4000;
+	first_port = -1;
 	inet_family = AF_INET;
         protocol = "homa";
 	port_threads = 1;
@@ -3138,12 +3199,16 @@ int server_cmd(std::vector<string> &words)
 	}
 
 	if (strcmp(protocol, "homa") == 0) {
+		if (first_port == -1)
+			first_port = 4000;
 		for (int i = 0; i < server_ports; i++) {
 			homa_server *server = new homa_server(first_port + i,
 					i, inet_family, port_threads);
 			homa_servers.push_back(server);
 		}
 	} else {
+		if (first_port == -1)
+			first_port = 5000;
 		for (int i = 0; i < server_ports; i++) {
 			tcp_server *server = new tcp_server(first_port + i,
 					i, port_threads);
