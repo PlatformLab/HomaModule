@@ -25,6 +25,9 @@ parser.add_argument('--servers', dest='num_servers', type=int, metavar='count',
         "and this value indicates the number of server nodes; all other "
         "nodes will be clients. If 0, each node runs both a client and a "
         "server (default: 0)")
+parser.add_argument('--skip-unloaded', dest='skip_unloaded', type=boolean,
+        default=True, help="Boolean value:: true means don't measure"
+	    "Homa latency under low (default: true)")
 options = parser.parse_args()
 init(options)
 
@@ -59,15 +62,16 @@ if not options.plot_only:
         dctcp_exp = "dctcp_" + workload
         try:
             options.protocol = "homa"
-            start_servers(options.nodes[1:2], options)
 
-            o = copy.deepcopy(options)
-            o.gbps = 0.0
-            o.client_ports = 1
-            o.client_max = 1
-            o.server_ports = 1
-            o.unloaded = 500
-            run_experiment(unloaded_exp, options.nodes[0:1], o)
+            if not options.skip_unloaded:
+                start_servers(options.nodes[1:2], options)
+                o = copy.deepcopy(options)
+                o.gbps = 0.0
+                o.client_ports = 1
+                o.client_max = 1
+                o.server_ports = 1
+                o.unloaded = 500
+                run_experiment(unloaded_exp, options.nodes[0:1], o)
 
             start_servers(options.servers, options)
             run_experiment(homa_exp, options.clients, options)
@@ -104,7 +108,8 @@ for workload, bw, seconds in load_info:
     dctcp_exp = "dctcp_" + workload
     scan_metrics(homa_exp)
 
-    set_unloaded(unloaded_exp)
+    if not options.skip_unloaded:
+        set_unloaded(unloaded_exp)
 
     # Generate slowdown plot.
     log("Generating slowdown plot for %s" % (workload))
@@ -125,7 +130,8 @@ for workload, bw, seconds in load_info:
 
     # Generate CDF of small-message RTTs.
     log("Generating short message CDF for %s" % (workload))
-    unloaded_x, unloaded_y = get_short_cdf(unloaded_exp)
+    if not options.skip_unloaded:
+        unloaded_x, unloaded_y = get_short_cdf(unloaded_exp)
     homa_x, homa_y = get_short_cdf(homa_exp)
     if options.tcp:
         tcp_x, tcp_y = get_short_cdf(tcp_exp)
@@ -138,6 +144,8 @@ for workload, bw, seconds in load_info:
     if options.dctcp:
         plt.plot(dctcp_x, dctcp_y, label="DCTCP", color=dctcp_color)
     plt.plot(homa_x, homa_y, label="Homa", color=homa_color)
-    plt.plot(unloaded_x, unloaded_y, label="Homa best case", color=unloaded_color)
+    if not options.skip_unloaded:
+        plt.plot(unloaded_x, unloaded_y, label="Homa best case",
+                 color=unloaded_color)
     plt.legend(loc="upper right", prop={'size': 9})
     plt.savefig("%s/reports/short_cdf_%s.pdf" % (options.log_dir, workload))

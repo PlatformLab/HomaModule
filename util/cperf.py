@@ -1142,7 +1142,7 @@ def get_digest(experiment):
             log("Outlier alt-slowdown in %s: %.1f vs. %.1f overall average"
                     % (info[0], info[1], overall_avg))
 
-    if len(unloaded_p50) == 0:
+    if old_slowdown and (len(unloaded_p50) == 0):
         raise Exception("No unloaded data: must invoke set_unloaded")
 
     rtts = digest["rtts"]
@@ -1184,7 +1184,7 @@ def get_digest(experiment):
             next_bucket += 1
         if old_slowdown:
             optimal = unloaded_p50[length]
-        elif length in unloaded_p50:
+        else:
             optimal = 15 + length*8/link_mbps
         bucket_count += len(rtts[length])
         for rtt in rtts[length]:
