@@ -274,6 +274,10 @@ or
 .I sockfd
 was not a Homa socket.
 .TP
+.B ECONNRESET
+Any RPC is interested but the RPC selected internally is aborted while being
+copied.
+.TP
 .B ENOMEM
 Memory could not be allocated for internal data structures needed
 for the message, or space in the application-supplied buffer pool

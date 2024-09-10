@@ -1343,8 +1343,11 @@ found_rpc:
 			}
 			if (!rpc->error)
 				rpc->error = homa_copy_to_user(rpc);
-			if (rpc->error)
+			if (rpc->error) {
+				if (id == 0)
+					rpc->error = -ECONNRESET;
 				goto done;
+			}
 			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
 			if ((rpc->msgin.bytes_remaining == 0)
 					&& (!skb_queue_len(&rpc->msgin.packets)))
