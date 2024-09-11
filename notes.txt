@@ -1,6 +1,26 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
+* Ideas for making TCP and Homa play well together:
+  * Goals:
+    * Balance queue lengths for the protocols?
+    * If one protocol is using a lot less bandwidth, give it preference
+      for transmission?
+  * Keep track of recent bandwidth consumed by each protocol; when there
+    is overload, restrict each protocol to its fraction of recent bandwidth.
+  * "Consumed" has to be measured in terms of bytes offered, not bytes actually
+    transmitted (otherwise a protocol could get "stuck" at a low transmittion
+    rate?).
+  * Maybe use a mechanism like fair-share scheduling? Keep track of
+    recent usage by each protocol, give priority to the protocol that
+    used least bandwidth recently?
+  * Could this be implemented with a mechanism like a token bucket?
+  * Use a token bucket for each protocol with 50% of available bandwidth
+    (or maybe less?). Split any extra available bandwidth among the
+    protocols. Maybe adjust rates for the token buckets based on recent
+    traffic?
+  * Also consider the amount of data that has been "stuck" in the NIC?
+
 * Remedies to consider for the performance problems at 100 Gbps, where
   one tx channel gets very backed up:
   * Implement zero-copy on output in order to reduce memory bandwidth
@@ -34,38 +54,6 @@ Notes for Homa implementation in Linux:
   * About 25% of calls are failed attempts to promote an unranked RPC
     (perhaps because the slots for its host are all taken?)
   * Could it abort early if there is no incoming headroom?
-
-* Loose ends from experiment ending 4/29/2024:
-  * traces/100g and traces/100g2 both show significant qdisc queueing,
-    and the system appears to have difficulty clearing the queues (it
-    takes a very long time).
-  * Looked into packet drops:
-    * The switch is not reporting any packet drops.
-    * ifconfig is not showing any packet drops, either tx or rx.
-  * Tried to configure switch for priority queues, but it didn't seem
-    to help; see traces/100g4.
-
-* Experiments to try with c6525-100g cluster:
-  * For packets that seem to be experiencing long times in the NIC,
-    see if perhaps the NIC doorbell isn't getting rung.
-  * Check whether Homa may be exceeding max_incoming
-  * Analyze homa_grant_recalc: it seems to be using a lot of time, and
-    it sometimes runs simultaneously in several threads, resulting in
-    long waits for RPC locks.
-  * Figure out how to program the switch: are buffer sizes too small?
-  * Better data on actual packet loss rates
-
-* Notes on poor 100 Gbps throughput as of Feb. 2024:
-  * One node (node3) has 1400 incoming RPCs blocked waiting for buffers
-  * Tried increasing max_overcommit to 16, but throughput cratered: only
-    a few Gbps.
-  * On node3, one core (12) has a huge backup of data packets waiting for
-    SoftIRQ processing (1-2 MB, delays of 1 ms or more):
-    * Need to analyze why there are large delays in sending control packets
-    * Also, homa_grant_check_rpc seems to take a long time.
-  * Found times (e.g. in 100g2/node5 around 13368.354) when homa_grant_recalc
-    runs simultaenously in several threads, resulting in long blocks for
-    RPC locks.
 
 * Notes on refactoring of grant mechanism:
   * Need to reimplement FIFO grants
