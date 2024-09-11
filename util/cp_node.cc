@@ -122,14 +122,14 @@ struct conn_id {
 	}
 };
 
-/**
- * enum protocol - Used to distinguish things using Homa vs. TCP.
-*/
-enum protocol {PROT_HOMA, PROT_TCP};
-#define NUM_PROTOCOLS 2
-
 /** @message_id: used to generate unique identifiers for outgoing messages.*/
 std::atomic<uint32_t> message_id;
+
+/**
+ * @experiments: names of all known experiments (may include some that are
+ * no longer in use)
+ */
+std::vector<std::string> experiments;
 
 /**
  * @last_stats_time: time (in rdtsc cycles) when we last printed
@@ -138,61 +138,66 @@ std::atomic<uint32_t> message_id;
 uint64_t last_stats_time = 0;
 
 /**
- * @last_client_rpcs: total number of client RPCS completed by this
- * application for each protocol as of the last time we printed statistics.
+ * @last_client_rpcs: entries correspond to @experiments; total number of
+ * client RPCS completed by that experiment as of the last time we printed
+ * statistics.
  */
-uint64_t last_client_rpcs[NUM_PROTOCOLS];
+std::vector<uint64_t> last_client_rpcs;
 
 /**
- * @last_client_bytes_out: total amount of data in request messages for
- * client RPCS completed by this application for each protocol as of the
- * last time we printed statistics.
+ * @last_client_bytes_out: entries correspond to @experiments; total amount
+ * of data sent in request messages by client RPCS in that experiment as
+ * of the last time we printed statistics.
  */
-uint64_t last_client_bytes_out[NUM_PROTOCOLS];
+std::vector<uint64_t> last_client_bytes_out;
 
 /**
- * @last_client_bytes_in: total amount of data in response messages for
- * client RPCS completed by this application for each protocol as of the
- * last time we printed statistics.
+ * @last_client_bytes_in: entries correspond to @experiments; total
+ * amount of data received in response messages for client RPCS in that
+ * experiment as of the last time we printed statistics.
  */
-uint64_t last_client_bytes_in[NUM_PROTOCOLS];
+std::vector<uint64_t> last_client_bytes_in;
 
 /**
- * @last_total_elapsed: total amount of elapsed time for all client RPCs
- * issued by this application (in units of rdtsc cycles) for each protocol
+ * @last_total_rtt: entries correspond to @experiments; total amount of
+ * elapsed time for all client RPCs in that experiment (units of rdtsc cycles)
  * as of the last time we printed statistics.
  */
-uint64_t last_total_rtt[NUM_PROTOCOLS];
+std::vector<uint64_t> last_total_rtt;
 
 /**
- * @last_lag: total lag across all clients (measured in rdtsc cycles)
- * for each protocol as of the last time we printed statistics.
+ * @last_lag: entries correspond to @experiments; total lag (measured in rdtsc
+ * cycles) for all clients in that experiment, as of the last time we printed
+ * statistics.
  */
-uint64_t last_lag[NUM_PROTOCOLS];
+std::vector<uint64_t> last_lag;
 
 /**
- * @last_backups: total # of backed-up sends for each protocol as of the
- * last time we printed statistics.
+ * @last_backups: entries correspond to @experiments; total # of backed-up
+ * sends for client RPCs issued by that experiment as of the last time we
+ * printed statistics.
  */
-uint64_t last_backups[NUM_PROTOCOLS];
+std::vector<uint64_t> last_backups;
 
 /**
- * @last_server_rpcs: total number of server RPCS handled by this
- * application for each protocol as of the last time we printed statistics.
+ * @last_server_rpcs: entries correspond to @experiments; total # of server
+ * RPCs handled by that experiment as of the last time we printed statistics.
  */
-uint64_t last_server_rpcs[NUM_PROTOCOLS];
+std::vector<uint64_t> last_server_rpcs;
 
 /**
- * @last_server_bytes_in: total amount of data in incoming requests handled by
- * this application for each protocol as of the last time we printed statistics.
+ * @last_server_bytes_in: entries correspond to @experiments; total amount
+ * of data in incoming requests handled by that experiment as of the last
+ * time we printed statistics.
  */
-uint64_t last_server_bytes_in[NUM_PROTOCOLS];
+std::vector<uint64_t> last_server_bytes_in;
 
 /**
- * @last_server_bytes_out: total amount of data in responses sent by
- * this application for each protcool as of the last time we printed statistics.
+ * @last_server_bytes_out: entries correspond to @experiments; total amount
+ * of data in responses sent by that experiment as of the last time we printed
+ * statistics.
  */
-uint64_t last_server_bytes_out[NUM_PROTOCOLS];
+std::vector<uint64_t> last_server_bytes_out;
 
 /**
  * @last_per_server_rpcs: server->requests for each individual server,
@@ -258,6 +263,9 @@ void print_help(const char *name)
 	printf("    --client-max      Maximum number of outstanding requests from a single\n"
 		"                      client machine (divided equally among client ports)\n"
 		"                      (default: %d)\n", client_max);
+	printf("    --exp             Name of the experiment in which these client threads\n");
+	printf("                      will be participating; used to label measurement data\n");
+	printf("                      (defaults to <protocol>_<workload>)\n");
 	printf("    --first-port      Lowest port number to use for each server (default: \n");
 	printf("                      4000 for Homa, 5000 for TCP)\n");
 	printf("    --first-server    Id of first server node (default: 1, meaning node1)\n");
@@ -294,8 +302,9 @@ void print_help(const char *name)
 			workload);
 	printf("debug value value ... Set one or more int64_t values that may be used for\n"
 		"                      various debugging purposes\n\n");
-	printf("dump_times prot file  Log RTT times (and lengths) for clients running the\n"
-		"                      protocol given by prot (homa or tcp) to file\n\n");
+	printf("dump_times file [exp] Log RTT times (and lengths) for clients running\n");
+	printf("                      experiment exp to file; if exp is omitted, dump\n");
+	printf("                      all RTTs\n\n");
 	printf("exit                  Exit the application\n\n");
 	printf("log [options] [msg]   Configure logging as determined by the options. If\n"
 		"                      there is an \"option\" that doesn't start with \"--\",\n"
@@ -308,6 +317,9 @@ void print_help(const char *name)
 	printf("    --buf-bpages      Number of bpages to allocate in the buffer poool for\n"
 		"                      incoming messages (default: %d)\n",
 			buf_bpages);
+	printf("    --exp             Name of the experiment in which these server ports\n");
+	printf("                      will be participating; used to label measurement data\n");
+	printf("                      (defaults to <protocol>_<workload>)\n");
 	printf("    --first-port      Lowest port number to use (default: 4000 for Homa,\n");
 	printf("                      5000 for TCP)\n");
 	printf("    --iovec           Use homa_replyv instead of homa_reply\n");
@@ -871,8 +883,8 @@ bool tcp_connection::xmit()
  */
 class server_metrics {
 public:
-	/** @protocol: Was Homa used by this server, or TCP? */
-	enum protocol protocol;
+	/** @experiment: Name of experiment for this server thread */
+	std::string experiment;
 
 	/** @requests: Total number of requests handled so far. */
 	uint64_t requests;
@@ -889,7 +901,7 @@ public:
 	 */
 	uint64_t bytes_out;
 
-	server_metrics(enum protocol protocol) : protocol(protocol),
+	server_metrics(std::string& experiment) : experiment(experiment),
 			requests(0), bytes_in(0), bytes_out(0) {}
 };
 
@@ -906,7 +918,8 @@ std::vector<server_metrics *> metrics;
  */
 class homa_server {
 public:
-	homa_server(int port, int id, int inet_family, int num_threads);
+	homa_server(int port, int id, int inet_family, int num_threads,
+			std::string& experiment);
 	~homa_server();
 	void server(int thread_id, server_metrics *metrics);
 
@@ -918,6 +931,9 @@ public:
 
 	/** @port: Homa port number managed by this object. */
 	int port;
+
+	/**  @experiment: name of the experiment this server is running. */
+	string experiment;
 
 	/**
 	 * @buf_region: mmapped region of memory in which receive buffers
@@ -944,18 +960,24 @@ std::vector<homa_server *> homa_servers;
  * @inet_family:  AF_INET or AF_INET6: determines whether we use IPv4 or IPv6.
  * @num_threads:  How many threads should collctively service requests on
  *                @port.
+ * @experiment:   Name of the experiment in which this server is participating.
  */
-homa_server::homa_server(int port, int id, int inet_family,
-		int num_threads)
+homa_server::homa_server(int port, int id, int inet_family, int num_threads,
+		std::string& experiment)
 	: id(id)
         , fd(-1)
         , port(port)
+	, experiment(experiment)
         , buf_region(NULL)
         , buf_size(0)
         , threads()
 {
 	sockaddr_in_union addr;
 	struct homa_set_buf_args arg;
+
+	if (std::find(experiments.begin(), experiments.end(), experiment)
+			== experiments.end())
+		experiments.emplace_back(experiment);
 
 	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -1000,7 +1022,7 @@ homa_server::homa_server(int port, int id, int inet_family,
 	}
 
 	for (int i = 0; i < num_threads; i++) {
-		server_metrics *thread_metrics = new server_metrics(PROT_HOMA);
+		server_metrics *thread_metrics = new server_metrics(experiment);
 		metrics.push_back(thread_metrics);
 		threads.emplace_back([this, i, thread_metrics] () {
 			server(i, thread_metrics);
@@ -1105,7 +1127,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
  */
 class tcp_server {
 public:
-	tcp_server(int port, int id, int num_threads);
+	tcp_server(int port, int id, int num_threads, std::string& experiment);
 	~tcp_server();
 	void accept(int epoll_fd);
 	void read(int fd, int pid);
@@ -1122,6 +1144,9 @@ public:
 
 	/** @id: Unique identifier for this server. */
 	int id;
+
+	/**  @experiment: name of the experiment this server is running. */
+	string experiment;
 
 	/** @listen_fd: File descriptor for the listen socket. */
 	int listen_fd;
@@ -1166,8 +1191,10 @@ std::vector<tcp_server *> tcp_servers;
  * @id:           Unique identifier for this server.
  * @num_threads:  Number of threads to service this listening socket and
  *                all of the other sockets excepted from it.
+ * @experiment:   Name of the experiment in which this server is participating.
  */
-tcp_server::tcp_server(int port, int id, int num_threads)
+tcp_server::tcp_server(int port, int id, int num_threads,
+		std::string& experiment)
 	: mutex(0)
 	, port(port)
         , id(id)
@@ -1179,6 +1206,10 @@ tcp_server::tcp_server(int port, int id, int num_threads)
         , threads()
         , stop(false)
 {
+	if (std::find(experiments.begin(), experiments.end(), experiment)
+			== experiments.end())
+		experiments.emplace_back(experiment);
+
 	memset(connections, 0, sizeof(connections));
 	listen_fd = socket(inet_family, SOCK_STREAM, 0);
 	if (listen_fd == -1) {
@@ -1237,7 +1268,7 @@ tcp_server::tcp_server(int port, int id, int num_threads)
 		exit(1);
 	}
 
-	metrics = new server_metrics(PROT_TCP);
+	metrics = new server_metrics(experiment);
 	::metrics.push_back(metrics);
 
 	for (int i = 0; i < num_threads; i++)
@@ -1492,21 +1523,21 @@ public:
 		rinfo() : start_time(0), request_length(0), active(false) {}
 	};
 
-	client(enum protocol protocol, int id);
+	client(int id, std::string& experiment);
 	virtual ~client();
 	void check_completion(const char *protocol);
 	int get_rinfo();
 	void record(uint64_t end_time, message_header *header);
 	virtual void stop_sender(void) {}
 
-        /** @protocol: indicates whether Homa or TCP is used by this client. */
-	enum protocol protocol;
-
 	/**
 	 * @id: unique identifier for this client (index starting at
 	 * 0 for the first client.
 	 */
 	int id;
+
+	/**  @experiment: name of the experiment this client is running. */
+	string experiment;
 
 	/**
 	 * @server_addrs: Internet addresses for each of the server ports
@@ -1637,11 +1668,12 @@ std::vector<client *> clients;
  * client::client() - Constructor for client objects. Uses configuration
  * information from global variables to initialize.
  *
- * @id: Unique identifier for this client (index starting at 0?)
+ * @id:         Unique identifier for this client (index starting at 0?)
+ * @experiment: Name of experiment in which this client will participate.
  */
-client::client(enum protocol protocol, int id)
-	: protocol(protocol)
-	, id(id)
+client::client(int id, std::string& experiment)
+	: id(id)
+	, experiment(experiment)
 	, server_addrs()
 	, server_conns()
 	, freeze()
@@ -1660,6 +1692,10 @@ client::client(enum protocol protocol, int id)
         , total_rtt(0)
         , lag(0)
 {
+	if (std::find(experiments.begin(), experiments.end(), experiment)
+			== experiments.end())
+		experiments.emplace_back(experiment);
+
 	server_addrs.clear();
 	server_conns.clear();
 	freeze.clear();
@@ -1845,7 +1881,7 @@ void client::record(uint64_t end_time, message_header *header)
  */
 class homa_client : public client {
 public:
-	homa_client(int id);
+	homa_client(int id, std::string& experiment);
 	virtual ~homa_client();
 	void measure_unloaded(int count);
 	uint64_t measure_rtt(int server, int length, char *buffer,
@@ -1895,10 +1931,11 @@ public:
 /**
  * homa_client::homa_client() - Constructor for homa_client objects.
  *
- * @id: Unique identifier for this client (index starting at 0?)
+ * @id:          Unique identifier for this client (index starting at 0?).
+ * @experiment:  Name of experiment in which this client will participate.
  */
-homa_client::homa_client(int id)
-	: client(PROT_HOMA, id)
+homa_client::homa_client(int id, std::string& experiment)
+	: client(id, experiment)
 	, fd(-1)
         , buf_region(nullptr)
 	, buf_size(buf_bpages*HOMA_BPAGE_SIZE)
@@ -2233,7 +2270,7 @@ void homa_client::measure_unloaded(int count)
  */
 class tcp_client : public client {
 public:
-	tcp_client(int id);
+	tcp_client(int id, std::string& experiment);
 	virtual ~tcp_client();
 	void read(tcp_connection *connection, int pid);
 	void receiver(int id);
@@ -2297,10 +2334,11 @@ public:
 /**
  * tcp_client::tcp_client() - Constructor for tcp_client objects.
  *
- * @id: Unique identifier for this client (index starting at 0?)
+ * @id:         Unique identifier for this client (index starting at 0?)
+ * @experiment: Name of experiment in which this client will participate.
  */
-tcp_client::tcp_client(int id)
-	: client(PROT_TCP, id)
+tcp_client::tcp_client(int id, std::string& experiment)
+	: client(id, experiment)
 	, connections()
         , blocked()
         , bytes_sent()
@@ -2591,59 +2629,58 @@ void tcp_client::read(tcp_connection *connection, int pid)
  */
 void server_stats(uint64_t now)
 {
-	int prot;
-	for (prot = PROT_HOMA; prot <= PROT_TCP; prot++) {
+	last_per_server_rpcs.resize(metrics.size(), 0);
+	last_server_rpcs.resize(experiments.size(), 0);
+	last_server_bytes_in.resize(experiments.size(), 0);
+	last_server_bytes_out.resize(experiments.size(), 0);
+
+	for (size_t i = 0; i < experiments.size(); i++) {
+		std::string& exp = experiments[i];
 		char details[10000];
 		int offset = 0;
 		int length;
 		uint64_t server_rpcs = 0;
 		uint64_t server_bytes_in = 0;
 		uint64_t server_bytes_out = 0;
-		const char *prot_string = (prot == PROT_HOMA) ? "Homa" : "TCP";
 
 		details[0] = 0;
 		for (uint32_t i = 0; i < metrics.size(); i++) {
-			server_metrics *server = metrics[i];
-			if (server->protocol != prot)
+			server_metrics *smetrics = metrics[i];
+			if (smetrics->experiment != exp)
 				continue;
-			server_rpcs += server->requests;
-			server_bytes_in += server->bytes_in;
-			server_bytes_out += server->bytes_out;
+			server_rpcs += smetrics->requests;
+			server_bytes_in += smetrics->bytes_in;
+			server_bytes_out += smetrics->bytes_out;
 			length = snprintf(details + offset,
 					sizeof(details) - offset,
 					"%s%lu", (offset != 0) ? " " : "",
-					server->requests - last_per_server_rpcs[i]);
+					smetrics->requests - last_per_server_rpcs[i]);
 			offset += length;
-			if (i > last_per_server_rpcs.size())
-				printf("last_per_server_rpcs has %lu "
-						"entries, needs %lu\n",
-						last_per_server_rpcs.size(),
-						metrics.size());
-			last_per_server_rpcs[i] = server->requests;
+			last_per_server_rpcs[i] = smetrics->requests;
 		}
 		if ((last_stats_time != 0) && (server_bytes_in
-				!= last_server_bytes_in[prot])) {
+				!= last_server_bytes_in[i])) {
 			double elapsed = to_seconds(now - last_stats_time);
 			double rpcs = (double) (server_rpcs
-					- last_server_rpcs[prot]);
+					- last_server_rpcs[i]);
 			double in_delta = (double) (server_bytes_in
-					- last_server_bytes_in[prot]);
+					- last_server_bytes_in[i]);
 			double out_delta = (double) (server_bytes_out
-					- last_server_bytes_out[prot]);
+					- last_server_bytes_out[i]);
 			log(NORMAL, "%s servers: %.2f Kops/sec, %.2f Gbps in, "
 					"%.2f Gbps out, avg. req. length "
 					"%.1f bytes\n",
-					prot_string,
+					exp.c_str(),
 					rpcs/(1000.0*elapsed),
 					8.0*in_delta/(1e09*elapsed),
 					8.0*out_delta/(1e09*elapsed),
 					in_delta/rpcs);
-			log(NORMAL, "RPCs per %s server: %s\n", prot_string,
-					details);
+			log(NORMAL, "RPCs per %s server thread: %s\n",
+					exp.c_str(), details);
 		}
-		last_server_rpcs[prot] = server_rpcs;
-		last_server_bytes_in[prot] = server_bytes_in;
-		last_server_bytes_out[prot] = server_bytes_out;
+		last_server_rpcs[i] = server_rpcs;
+		last_server_bytes_in[i] = server_bytes_in;
+		last_server_bytes_out[i] = server_bytes_out;
 	}
 }
 
@@ -2656,8 +2693,28 @@ void server_stats(uint64_t now)
 void client_stats(uint64_t now)
 {
 #define CDF_VALUES 100000
-	int prot;
-	for (prot = PROT_HOMA; prot <= PROT_TCP; prot++) {
+	std::vector<int> num_clients(sizeof(experiments), 0);
+	size_t i;
+
+	for (client *client: clients) {
+		for (i = 0; i < experiments.size(); i++) {
+			if (experiments[i] == client->experiment)
+				break;
+		}
+		if (i == experiments.size())
+			experiments.emplace_back(client->experiment);
+		num_clients[i]++;
+	}
+
+	last_client_rpcs.resize(experiments.size(), 0);
+	last_client_bytes_out.resize(experiments.size(), 0);
+	last_client_bytes_in.resize(experiments.size(), 0);
+	last_total_rtt.resize(experiments.size(), 0);
+	last_lag.resize(experiments.size(), 0);
+	last_backups.resize(experiments.size(), 0);
+
+	for (i = 0; i < experiments.size(); i++) {
+		std::string& exp = experiments[i];
 		uint64_t client_rpcs = 0;
 		uint64_t request_bytes = 0;
 		uint64_t response_bytes = 0;
@@ -2666,26 +2723,20 @@ void client_stats(uint64_t now)
 		uint64_t outstanding_rpcs = 0;
 		uint64_t cdf_times[CDF_VALUES];
 		uint64_t backups = 0;
-		int num_clients = 0;
 		int times_per_client;
 		int cdf_index = 0;
-		const char *prot_string = (prot == PROT_HOMA) ? "Homa" : "TCP";
 
-		for (client *client: clients) {
-			if (client->protocol == prot)
-				num_clients++;
-		}
-		if (num_clients == 0)
+		if (num_clients[i] == 0)
 			continue;
 
-		times_per_client = CDF_VALUES/num_clients;
+		times_per_client = CDF_VALUES/num_clients[i];
 		if (times_per_client > NUM_CLIENT_STATS)
 			times_per_client = NUM_CLIENT_STATS;
 		for (client *client: clients) {
-			if (client->protocol != prot)
+			if (client->experiment != exp)
 				continue;
-			for (size_t i = 0; i < client->server_addrs.size(); i++)
-				client_rpcs += client->responses[i];
+			for (size_t j = 0; j < client->server_addrs.size(); j++)
+				client_rpcs += client->responses[j];
 			request_bytes += client->request_bytes;
 			response_bytes += client->response_bytes;
 			total_rtt += client->total_rtt;
@@ -2712,23 +2763,21 @@ void client_stats(uint64_t now)
 			if (tclient)
 				backups += tclient->backups;
 		}
-		if (num_clients == 0)
-			continue;
 		std::sort(cdf_times, cdf_times + cdf_index);
 		if ((last_stats_time != 0) && ((request_bytes
-					!= last_client_bytes_out[prot])
+					!= last_client_bytes_out[i])
 					|| (outstanding_rpcs != 0))){
 			double elapsed = to_seconds(now - last_stats_time);
-			double rpcs = (double) (client_rpcs - last_client_rpcs[prot]);
+			double rpcs = (double) (client_rpcs - last_client_rpcs[i]);
 			double delta_out = (double) (request_bytes
-					- last_client_bytes_out[prot]);
+					- last_client_bytes_out[i]);
 			double delta_in = (double) (response_bytes
-					- last_client_bytes_in[prot]);
+					- last_client_bytes_in[i]);
 			log(NORMAL, "%s clients: %.2f Kops/sec, %.2f Gbps out, "
 					"%.2f Gbps in, RTT (us) P50 %.2f "
 					"P99 %.2f P99.9 %.2f, avg. req. length "
 					"%.1f bytes\n",
-					prot_string,
+					exp.c_str(),
 					rpcs/(1000.0*elapsed),
 					8.0*delta_out/(1e09*elapsed),
 					8.0*delta_in/(1e09*elapsed),
@@ -2737,35 +2786,36 @@ void client_stats(uint64_t now)
 					to_seconds(cdf_times[999*cdf_index/1000])*1e06,
 					delta_out/rpcs);
 			double lag_fraction;
-			if (lag > last_lag[prot])
+			if (lag > last_lag[i])
 				lag_fraction = (to_seconds(lag
-					- last_lag[prot])/elapsed)
-					/ num_clients;
+					- last_lag[i])/elapsed)
+					/ num_clients[i];
 			else
-				lag_fraction = -(to_seconds(last_lag[prot]
-					- lag)/elapsed) / num_clients;
+				lag_fraction = -(to_seconds(last_lag[i]
+					- lag)/elapsed) / num_clients[i];
 			if (lag_fraction >= .01)
-				log(NORMAL, "%s lag due to overload: %.1f%%\n",
-						prot_string,
-						lag_fraction*100.0);
+				log(NORMAL, "Lag due to overload for %s "
+						"experiment: %.1f%%\n",
+						exp.c_str(), lag_fraction*100.0);
 			if (backups != 0) {
 				log(NORMAL, "Backed-up %s sends: %lu/%lu (%.1f%%)\n",
-						prot_string,
-						backups - last_backups[prot],
-						client_rpcs - last_client_rpcs[prot],
-						100.0*(backups - last_backups[prot])
-						/(client_rpcs - last_client_rpcs[prot]));
+						exp.c_str(),
+						backups - last_backups[i],
+						client_rpcs - last_client_rpcs[i],
+						100.0*(backups - last_backups[i])
+						/(client_rpcs - last_client_rpcs[i]));
 			}
 		}
 		if (outstanding_rpcs != 0)
-			log(NORMAL, "Outstanding %s client RPCs: %lu\n",
-					prot_string, outstanding_rpcs);
-		last_client_rpcs[prot] = client_rpcs;
-		last_client_bytes_out[prot] = request_bytes;
-		last_client_bytes_in[prot] = response_bytes;
-		last_total_rtt[prot] = total_rtt;
-		last_lag[prot] = lag;
-		last_backups[prot] = backups;
+			log(NORMAL, "Outstanding client RPCS for %s "
+					"experiment: %lu\n",
+					exp.c_str(), outstanding_rpcs);
+		last_client_rpcs[i] = client_rpcs;
+		last_client_bytes_out[i] = request_bytes;
+		last_client_bytes_in[i] = response_bytes;
+		last_total_rtt[i] = total_rtt;
+		last_lag[i] = lag;
+		last_backups[i] = backups;
 	}
 }
 
@@ -2797,6 +2847,7 @@ int client_cmd(std::vector<string> &words)
 	int first_server = 1;
 	int server_nodes = 1;
 	std::string servers;
+	std::string experiment;
 
 	buf_bpages = 1000;
 	client_iovec = false;
@@ -2822,6 +2873,14 @@ int client_cmd(std::vector<string> &words)
 			if (!parse(words, i+1, (int *) &client_max,
 					option, "integer"))
 				return 0;
+			i++;
+		} else if (strcmp(option, "--exp") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			experiment = words[i+1];
 			i++;
 		} else if (strcmp(option, "--first-port") == 0) {
 			if (!parse(words, i+1, &first_port, option, "integer"))
@@ -2898,6 +2957,11 @@ int client_cmd(std::vector<string> &words)
 			return 0;
 		}
 	}
+	if (experiment.empty()) {
+		experiment = protocol;
+		experiment += "_";
+		experiment += workload;
+	}
 
 	/* Figure out which nodes to use for servers (--servers,
 	 * --server-nodes, --first-server).
@@ -2933,11 +2997,11 @@ int client_cmd(std::vector<string> &words)
 		if (strcmp(protocol, "homa") == 0) {
 			if (first_port == -1)
 				first_port = 4000;
-			clients.push_back(new homa_client(i));
+			clients.push_back(new homa_client(i, experiment));
 		} else {
 			if (first_port == -1)
 				first_port = 5000;
-			clients.push_back(new tcp_client(i));
+			clients.push_back(new tcp_client(i, experiment));
 		}
 	}
 	last_stats_time = 0;
@@ -2980,22 +3044,15 @@ int dump_times_cmd(std::vector<string> &words)
 	FILE *f;
 	time_t now;
 	char time_buffer[100];
-	int prot;
+	std::string exp;
 
-	if (words.size() != 3) {
-		printf("Wrong # args; must be 'dump_times protocol file'\n");
+	if (words.size() == 3)
+		exp = words[2];
+	else if (words.size() != 2) {
+		printf("Wrong # args; must be 'dump_times file [experiment]'\n");
 		return 0;
 	}
-	if (words[1] == "homa")
-		prot = PROT_HOMA;
-	else if (words[1] == "tcp")
-		prot = PROT_TCP;
-	else {
-		printf("Unknown protocol %s: must be homa or tcp\n",
-			words[1].c_str());
-		return 0;
-	}
-	f = fopen(words[2].c_str(), "w");
+	f = fopen(words[1].c_str(), "w");
 	if (f == NULL) {
 		printf("Couldn't open file %s: %s\n", words[1].c_str(),
 				strerror(errno));
@@ -3005,15 +3062,16 @@ int dump_times_cmd(std::vector<string> &words)
 	time(&now);
 	strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S",
 			localtime(&now));
-	fprintf(f, "# Round-trip times measured by cp_node at %s\n",
-			time_buffer);
+	fprintf(f, "# Round-trip times measured by cp_node at %s for "
+			"experiment %s\n",
+			time_buffer, exp.empty() ? "<none>" : exp.c_str());
 	fprintf(f, "# --protocol %s, --workload %s, --gpbs %.1f --threads %d,\n",
 			protocol, workload, net_gbps, client_ports);
 	fprintf(f, "# --server-nodes %lu --server-ports %d, --client-max %d\n",
 			server_ids.size(), server_ports, client_max);
 	fprintf(f, "# Length   RTT (usec)\n");
 	for (client *client: clients) {
-		if (client->protocol != prot)
+		if (!exp.empty() && (client->experiment != exp))
 			continue;
 		__u32 start = client->total_responses % NUM_CLIENT_STATS;
 		__u32 i = start;
@@ -3147,6 +3205,7 @@ int log_cmd(std::vector<string> &words)
  */
 int server_cmd(std::vector<string> &words)
 {
+	std::string experiment;
 	buf_bpages = 1000;
 	first_port = -1;
 	inet_family = AF_INET;
@@ -3162,6 +3221,14 @@ int server_cmd(std::vector<string> &words)
 		if (strcmp(option, "--buf-bpages") == 0) {
 			if (!parse(words, i+1, &buf_bpages, option, "integer"))
 				return 0;
+			i++;
+		} else if (strcmp(option, "--exp") == 0) {
+			if ((i + 1) >= words.size()) {
+				printf("No value provided for %s\n",
+						option);
+				return 0;
+			}
+			experiment = words[i+1];
 			i++;
 		} else if (strcmp(option, "--first-port") == 0) {
 			if (!parse(words, i+1, &first_port, option, "integer"))
@@ -3197,13 +3264,19 @@ int server_cmd(std::vector<string> &words)
 			return 0;
 		}
 	}
+	if (experiment.empty()) {
+		experiment = protocol;
+		experiment += "_";
+		experiment += workload;
+	}
 
 	if (strcmp(protocol, "homa") == 0) {
 		if (first_port == -1)
 			first_port = 4000;
 		for (int i = 0; i < server_ports; i++) {
 			homa_server *server = new homa_server(first_port + i,
-					i, inet_family, port_threads);
+					i, inet_family, port_threads,
+					experiment);
 			homa_servers.push_back(server);
 		}
 	} else {
@@ -3211,11 +3284,10 @@ int server_cmd(std::vector<string> &words)
 			first_port = 5000;
 		for (int i = 0; i < server_ports; i++) {
 			tcp_server *server = new tcp_server(first_port + i,
-					i, port_threads);
+					i, port_threads, experiment);
 			tcp_servers.push_back(server);
 		}
 	}
-	last_per_server_rpcs.resize(server_ports*port_threads, 0);
 	last_stats_time = 0;
 	return 1;
 }

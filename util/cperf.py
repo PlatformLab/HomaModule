@@ -7,6 +7,7 @@
 # tests for the Linux kernel implementation of Homa.
 
 import argparse
+from collections import defaultdict
 import copy
 import datetime
 import glob
@@ -38,7 +39,7 @@ active_nodes = {}
 # If a server's id appears as a key in this dictionary, it means we
 # have started homa_prio running on that node. The value of each entry is
 # a Popen object for the homa_prio instance; if this is terminated, then
-# the homa_prio process will end
+# the homa_prio process will end.
 homa_prios = {}
 
 # The range of nodes currently running cp_node servers.
@@ -208,8 +209,8 @@ def get_parser(description, usage, defaults = {}):
             '(default: %.2f)' % (defaults['gbps']))
     parser.add_argument('--client-max', type=int, dest='client_max',
             metavar='count', default=defaults['client_max'],
-            help='Maximum number of requests each client machine can have '
-            'outstanding at a time (divided evenly among its ports) '
+            help='Maximum number of Homa requests each client machine can have '
+            'outstanding at a time (divided evenly among the Homa ports) '
             '(default: %d)' % (defaults['client_max']))
     parser.add_argument('--client-ports', type=int, dest='client_ports',
             metavar='count', default=defaults['client_ports'],
@@ -275,6 +276,12 @@ def get_parser(description, usage, defaults = {}):
             metavar='nodes',
             help='List of node numbers not to use in the experiment; can '
             ' contain ranges, such as "3,5-8,12"')
+    parser.add_argument('--tcp-client-max', dest='tcp_client_max', type=int,
+            metavar='count', default=0, help="Maximum number of TCP requests "
+            "that can be outstanding from a client node at once (divided evenly "
+            "among the TCP ports); if zero, the "
+            "--client-max option is used for TCP as well (i.e. each protocol "
+            "can have that many outstanding requests) (default: 0)")
     parser.add_argument('--tcp-client-ports', type=int, dest='tcp_client_ports',
             metavar='count', default=defaults['tcp_client_ports'],
             help='Number of ports on which each TCP client should issue requests '
@@ -412,7 +419,7 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
                 if print_data.endswith(string):
                     print_data = print_data[:(len(data) - len(string))]
                 if print_data != "":
-                    log("output from node%d: '%s'" % (id, print_data))
+                    log("extra output from node%d: '%s'" % (id, print_data))
                 outputs[id] += data
         bad_node = -1
         for id in nodes:
@@ -433,44 +440,43 @@ def wait_output(string, nodes, cmd, time_limit=10.0):
 
 def start_nodes(ids, options):
     """
-    Start up cp_node on a group of nodes.
+    Start up cp_node on a group of nodes. Also starts homa_prio on the
+    nodes, if protocol is "homa".
 
     ids:      List of node ids on which to start cp_node, if it isn't already
               running
-    options:  Command-line options that may affect experiment
+    options:  Command-line options that may affect node configuration
     """
-    global active_nodes
+    global active_nodes, homa_prios, verbose
     started = []
     for id in ids:
-        if id in active_nodes:
-            continue
-        vlog("Starting cp_node on node%d" % (id))
-        node = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
-                "node%d" % (id), "cp_node"], encoding="utf-8",
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT)
-        fl = fcntl.fcntl(node.stdin, fcntl.F_GETFL)
-        fcntl.fcntl(node.stdin, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-        fl = fcntl.fcntl(node.stdout, fcntl.F_GETFL)
-        fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-        active_nodes[id] = node
-        if not options.no_homa_prio:
-            f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
-            homa_prios[id] = subprocess.Popen(["ssh", "-o",
-                    "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
-                    "bin/homa_prio", "--interval", "500", "--unsched",
-                    str(options.unsched), "--unsched-boost",
-                    str(options.unsched_boost)], encoding="utf-8",
-                    stdout=f, stderr=subprocess.STDOUT)
-            f.close
-        if options.set_ids:
-            set_sysctl_parameter(".net.homa.next_id", str(100000000*(id+1)),
-                    [id])
-        started.append(id)
+        if not id in active_nodes:
+            vlog("Starting cp_node on node%d" % (id))
+            node = subprocess.Popen(["ssh", "-o", "StrictHostKeyChecking=no",
+                    "node%d" % (id), "cp_node"], encoding="utf-8",
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT)
+            fl = fcntl.fcntl(node.stdin, fcntl.F_GETFL)
+            fcntl.fcntl(node.stdin, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            fl = fcntl.fcntl(node.stdout, fcntl.F_GETFL)
+            fcntl.fcntl(node.stdout, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+            active_nodes[id] = node
+            started.append(id)
+        if options.protocol == "homa":
+            if options.set_ids:
+                set_sysctl_parameter(".net.homa.next_id",
+                        str(100000000*(id+1)), [id])
+            if not options.no_homa_prio:
+                f = open("%s/homa_prio-%d.log" % (log_dir,id), "w")
+                homa_prios[id] = subprocess.Popen(["ssh", "-o",
+                        "StrictHostKeyChecking=no", "node%d" % (id), "sudo",
+                        "bin/homa_prio", "--interval", "500", "--unsched",
+                        str(options.unsched), "--unsched-boost",
+                        str(options.unsched_boost)], encoding="utf-8",
+                        stdout=f, stderr=subprocess.STDOUT)
+                f.close
     wait_output("% ", started, "ssh")
-    log_level = "normal"
-    if verbose:
-        log_level = "verbose"
+    log_level = "verbose" if verbose else "normal"
     command = "log --file node.log --level %s" % (log_level)
     for id in started:
         active_nodes[id].stdin.write(command + "\n")
@@ -597,10 +603,11 @@ def do_subprocess(words):
         log("Error output from %s: %s" % (words, result.stderr.rstrip()))
     return result.stdout.rstrip()
 
-def start_servers(ids, options):
+def start_servers(exp, ids, options):
     """
     Starts cp_node servers running on a group of nodes
 
+    exp:     Name of experiment these servers will be part of
     ids:     A list of node ids on which to start cp_node servers
     options: A namespace that must contain at least the following
              keys, which will be used to configure the servers:
@@ -609,19 +616,19 @@ def start_servers(ids, options):
                  protocol
     """
     global server_nodes
-    log("Starting %s servers on nodes %s" % (options.protocol, ids))
+    log("Starting servers for %s experiment on nodes %s" % (exp, ids))
     if len(server_nodes) > 0:
         do_cmd("stop servers", server_nodes)
         server_nodes = []
     start_nodes(ids, options)
     if options.protocol == "homa":
-        do_cmd("server --ports %d --port-threads %d --protocol %s %s" % (
-                options.server_ports, options.port_threads,
-                options.protocol, options.ipv6), ids)
+        do_cmd("server --ports %d --port-threads %d --protocol %s --exp %s %s"
+               % (options.server_ports, options.port_threads,
+                options.protocol, exp, options.ipv6), ids)
     else:
-        do_cmd("server --ports %d --port-threads %d --protocol %s %s" % (
-                options.tcp_server_ports, options.tcp_port_threads,
-                options.protocol, options.ipv6), ids)
+        do_cmd("server --ports %d --port-threads %d --protocol %s --exp %s %s"
+               % (options.tcp_server_ports, options.tcp_port_threads,
+                options.protocol, exp, options.ipv6), ids)
     server_nodes = ids
 
 def run_experiment(name, clients, options):
@@ -651,12 +658,12 @@ def run_experiment(name, clients, options):
     exp_nodes = list(set(options.servers + list(clients)))
     start_nodes(clients, options)
     nodes = []
-    log("Starting %s experiment with clients %s" % (name, clients))
+    log("Starting clients for %s experiment on nodes %s" % (name, clients))
     for id in clients:
         if options.protocol == "homa":
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --servers %s --gbps %.3f --client-max %d " \
-                    "--protocol %s --id %d %s" % (
+                    "--protocol %s --id %d --exp %s %s" % (
                     options.client_ports,
                     options.port_receivers,
                     options.server_ports,
@@ -666,6 +673,7 @@ def run_experiment(name, clients, options):
                     options.client_max,
                     options.protocol,
                     id,
+                    name,
                     options.ipv6)
             if "unloaded" in options:
                 command += " --unloaded %d" % (options.unloaded)
@@ -674,9 +682,12 @@ def run_experiment(name, clients, options):
                 trunc = '--no-trunc'
             else:
                 trunc = ''
+            client_max = options.tcp_client_max
+            if not client_max:
+                client_max = options.client_max
             command = "client --ports %d --port-receivers %d --server-ports %d " \
                     "--workload %s --servers %s --gbps %.3f %s --client-max %d " \
-                    "--protocol %s --id %d %s" % (
+                    "--protocol %s --id %d --exp %s %s" % (
                     options.tcp_client_ports,
                     options.tcp_port_receivers,
                     options.tcp_server_ports,
@@ -684,9 +695,10 @@ def run_experiment(name, clients, options):
                     ",".join([str(x) for x in options.servers]),
                     options.gbps,
                     trunc,
-                    options.client_max,
+                    client_max,
                     options.protocol,
                     id,
+                    name,
                     options.ipv6)
         active_nodes[id].stdin.write(command + "\n")
         try:
@@ -704,8 +716,10 @@ def run_experiment(name, clients, options):
             for id in exp_nodes:
                 do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
-            do_cmd("dump_times %s /dev/null" % (options.protocol), clients)
-        do_cmd("log Starting %s experiment" % (name), server_nodes, clients)
+            do_cmd("dump_times /dev/null %s" % (name), clients)
+        do_cmd("log Starting measurements for %s experiment" % (name),
+                server_nodes, clients)
+        log("Starting measurements")
         debug_delay = 0
         if debug_delay > 0:
             time.sleep(debug_delay)
@@ -717,10 +731,11 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa" and options.tt_freeze:
             log("Freezing timetraces via node%d" % nodes[0])
             set_sysctl_parameter(".net.homa.action", "7", nodes[0:1])
-        do_cmd("log Ending %s experiment" % (name), server_nodes, clients)
+        do_cmd("log Ending measurements for %s experiment" % (name),
+               server_nodes, clients)
     log("Retrieving data for %s experiment" % (name))
     if not "no_rtt_files" in options:
-        do_cmd("dump_times %s rtts" % (options.protocol), clients)
+        do_cmd("dump_times rtts %s" % (name), clients)
     if (options.protocol == "homa") and not "unloaded" in options:
         vlog("Recording final metrics from nodes %s" % (exp_nodes))
         for id in exp_nodes:
@@ -743,6 +758,161 @@ def run_experiment(name, clients, options):
             do_subprocess(["rsync", "-rtvq", "node%d:rtts" % (id),
                     "%s/%s-%d.rtts" % (options.log_dir, name, id)])
 
+def run_experiments(*args):
+    """
+    Run multiple experiments simultaneously and collect statistics.
+
+    args:    Each argument is a namespace describing an experiment to
+             run. The namespace must contain the following values:
+             name:       The name of the experiment; used to create files
+                         with the experiment's results.
+             clients:    List of node numbers on which to run clients for the
+                         experiment.
+             servers:    List of node numbers on which to run servers for the
+                         experiment (if the same server is in multiple
+                         experiments, the parameters from the first experiment
+                         are used to start the server).
+             protocol:   tcp or homa
+             gbps
+             seconds
+             workload
+
+             For Homa experiments the following values must be present:
+             client_max
+             client_ports
+             port_receivers
+             server_ports
+             port_threads
+
+             For TCP experiments the following values must be present:
+             tcp_client_max (or client_max)
+             tcp_client_ports
+             tcp_server_ports
+
+             There may be additional optional values that used if present.
+    """
+
+    global active_nodes
+
+    homa_nodes = []
+    homa_clients = []
+    homa_servers= []
+    tcp_nodes = []
+    for exp in args:
+        if exp.protocol == "homa":
+            homa_clients.extend(exp.clients)
+            homa_nodes.extend(exp.clients)
+            homa_servers.extend(exp.servers)
+            homa_nodes.extend(exp.servers)
+        elif exp.protocol == "tcp":
+            tcp_nodes.extend(exp.clients)
+            tcp_nodes.extend(exp.servers)
+    homa_clients = sorted(list(set(homa_clients)))
+    homa_servers = sorted(list(set(homa_servers)))
+    homa_nodes = sorted(list(set(homa_nodes)))
+    tcp_nodes = sorted(list(set(tcp_nodes)))
+    all_nodes = sorted(list(set(homa_nodes + tcp_nodes)))
+
+    # Start servers for all experiments
+    stop_nodes()
+    for exp in args:
+        if exp.servers:
+            log("Starting servers for %s experiment on nodes %s" % (exp.name,
+                    exp.servers))
+            start_nodes(exp.servers, exp)
+            if exp.protocol == "homa":
+                do_cmd("server --ports %d --port-threads %d --protocol homa "
+                       "--exp %s %s"
+                        % (exp.server_ports, exp.port_threads,
+                        exp.name, exp.ipv6), exp.servers)
+            else:
+                do_cmd("server --ports %d --port-threads %d --protocol tcp "
+                       "--exp %s %s"
+                        % (exp.tcp_server_ports, exp.tcp_port_threads,
+                        exp.name, exp.ipv6), exp.servers)
+
+    # Start clients for all experiments
+    for exp in args:
+        log("Starting clients for %s experiment on nodes %s" % (exp.name,
+                exp.clients))
+        start_nodes(exp.clients, exp)
+        for id in exp.clients:
+            if exp.protocol == "homa":
+                command = "client --ports %d --port-receivers %d --server-ports %d " \
+                        "--workload %s --servers %s --gbps %.3f --client-max %d " \
+                        "--protocol homa --id %d --exp %s %s" % (
+                        exp.client_ports,
+                        exp.port_receivers,
+                        exp.server_ports,
+                        exp.workload,
+                        ",".join([str(x) for x in exp.servers]),
+                        exp.gbps,
+                        exp.client_max,
+                        id,
+                        exp.name,
+                        exp.ipv6)
+            else:
+                client_max = exp.tcp_client_max
+                if not client_max:
+                    client_max = exp.client_max
+                command = "client --ports %d --port-receivers %d --server-ports %d " \
+                        "--workload %s --servers %s --gbps %.3f --client-max %d " \
+                        "--protocol tcp --id %d --exp %s %s" % (
+                        exp.tcp_client_ports,
+                        exp.tcp_port_receivers,
+                        exp.tcp_server_ports,
+                        exp.workload,
+                        ",".join([str(x) for x in exp.servers]),
+                        exp.gbps,
+                        client_max,
+                        id,
+                        exp.name,
+                        exp.ipv6)
+            active_nodes[id].stdin.write(command + "\n")
+            try:
+                active_nodes[id].stdin.flush()
+            except BrokenPipeError:
+                log("Broken pipe to node%d while starting %s client" % (id,
+                        exp.protocol))
+            vlog("Command for node%d: %s" % (id, command))
+        wait_output("% ", exp.clients, command, 40.0)
+    if homa_clients:
+        # Wait a bit so that homa_prio can set priorities appropriately
+        time.sleep(2)
+    if homa_nodes:
+        vlog("Initializing metrics and timetracing")
+        do_ssh(["metrics.py; ttprint.py > /dev/null"], homa_nodes)
+    do_cmd("dump_times /dev/null", all_nodes)
+    do_cmd("log Starting measurements", all_nodes)
+    log("Starting measurements")
+
+    time.sleep(exp.seconds)
+
+    # Collect results
+    if homa_nodes and exp.tt_freeze:
+        log("Freezing timetraces via node%d" % all_nodes[0])
+        set_sysctl_parameter(".net.homa.action", "7", all_nodes[0:1])
+    do_cmd("log Ending measurements", all_nodes)
+    log("Retrieving data")
+    for exp in args:
+        do_cmd("dump_times %s.rtts %s" % (exp.name, exp.name), exp.clients)
+    if homa_nodes:
+        vlog("Recording final metrics from nodes %s" % (homa_nodes))
+        for id in homa_nodes:
+            f = open("%s/%d.metrics" % (exp.log_dir, id), 'w')
+            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
+            f.close()
+        shutil.copyfile("%s/%d.metrics" % (exp.log_dir, homa_clients[0]),
+                "%s/reports/%d.metrics" % (exp.log_dir, homa_clients[0]))
+        shutil.copyfile("%s/%d.metrics" % (exp.log_dir, homa_servers[0]),
+                "%s/reports/%d.metrics" % (exp.log_dir, homa_servers[0]))
+    do_cmd("stop senders", all_nodes)
+    do_cmd("stop clients", all_nodes)
+    for exp in args:
+        for id in exp.clients:
+            do_subprocess(["rsync", "-rtvq", "node%d:%s.rtts" % (id, exp.name),
+                    "%s/%s-%d.rtts" % (exp.log_dir, exp.name, id)])
+
 def scan_log(file, node, experiments):
     """
     Read a log file and extract various useful information, such as fatal
@@ -762,76 +932,9 @@ def scan_log(file, node, experiments):
     exited = False
     experiment = ""
     node_data = None
+    active = False
 
     for line in open(file):
-        match = re.match('.*Starting (.*) experiment', line)
-        if match:
-            experiment = match.group(1)
-            if not experiment in experiments:
-                experiments[experiment] = {}
-            if not node in experiments[experiment]:
-                experiments[experiment][node] = {}
-            node_data = experiments[experiment][node]
-            continue
-        if re.match('.*Ending .* experiment', line):
-            experiment = ""
-        if experiment != "":
-            gbps = -1.0
-            match = re.match('.*clients: ([0-9.]+) Kops/sec, '
-                        '([0-9.]+) Gbps.*P50 ([0-9.]+)', line)
-            if match:
-                gbps = float(match.group(2))
-            else:
-                match = re.match('.*clients: ([0-9.]+) Kops/sec, '
-                            '([0-9.]+) MB/sec.*P50 ([0-9.]+)', line)
-                if match:
-                    gbps = 8.0*float(match.group(2))
-            if gbps >= 0.0:
-                if not "client_kops" in node_data:
-                    node_data["client_kops"] = []
-                node_data["client_kops"].append(float(match.group(1)))
-                if not "client_gbps" in node_data:
-                    node_data["client_gbps"] = []
-                node_data["client_gbps"].append(gbps)
-                if not "client_latency" in node_data:
-                    node_data["client_latency"] = []
-                node_data["client_latency"].append(float(match.group(3)))
-                continue
-
-            gbps = -1.0
-            match = re.match('.*servers: ([0-9.]+) Kops/sec, '
-                    '([0-9.]+) Gbps', line)
-            if match:
-                gbps = float(match.group(2))
-            else:
-                match = re.match('.*servers: ([0-9.]+) Kops/sec, '
-                            '([0-9.]+) MB/sec', line)
-                if match:
-                    gbps = 8.0*float(match.group(2))
-            if gbps >= 0.0:
-                if not "server_kops" in node_data:
-                    node_data["server_kops"] = []
-                node_data["server_kops"].append(float(match.group(1)))
-                if not "server_gbps" in node_data:
-                    node_data["server_gbps"] = []
-                node_data["server_gbps"].append(gbps)
-                continue
-
-            match = re.match('.*Outstanding client RPCs: ([0-9.]+)', line)
-            if match:
-                if not "outstanding_rpcs" in node_data:
-                    node_data["outstanding_rpcs"] = []
-                node_data["outstanding_rpcs"].append(int(match.group(1)))
-                continue
-
-            match = re.match('.*Backed-up sends: ([0-9.]+)/([0-9.]+)', line)
-            if match:
-                if not "backups" in node_data:
-                    node_data["backups"] = []
-                total = float(match.group(2))
-                if total > 0:
-                    node_data["backups"].append(float(match.group(1))/total)
-                continue
         if "FATAL:" in line:
             log("%s: %s" % (file, line[:-1]))
             exited = True
@@ -839,6 +942,68 @@ def scan_log(file, node, experiments):
             log("%s: %s" % (file, line[:-1]))
         if "cp_node exiting" in line:
             exited = True
+
+        match = re.match('.*Starting measurements', line)
+        if match:
+            active = True
+            continue
+
+        match = re.match('.*Ending measurements', line)
+        if match:
+            active = False
+            continue
+
+        if active:
+            match = re.match('[0-9.]+ (.*) clients: ([0-9.]+) Kops/sec, '
+                        '([0-9.]+) Gbps.*P50 ([0-9.]+)', line)
+            if match:
+                node_data = experiments[match.group(1)][node]
+                gbps = float(match.group(3))
+                if gbps >= 0.0:
+                    if not "client_kops" in node_data:
+                        node_data["client_kops"] = []
+                    node_data["client_kops"].append(float(match.group(2)))
+                    if not "client_gbps" in node_data:
+                        node_data["client_gbps"] = []
+                    node_data["client_gbps"].append(gbps)
+                    if not "client_latency" in node_data:
+                        node_data["client_latency"] = []
+                    node_data["client_latency"].append(float(match.group(4)))
+                continue
+
+            match = re.match('[0-9.]+ (.*) servers: ([0-9.]+) Kops/sec, '
+                    '([0-9.]+) Gbps', line)
+            if match:
+                node_data = experiments[match.group(1)][node]
+                gbps = float(match.group(3))
+                if gbps >= 0.0:
+                    if not "server_kops" in node_data:
+                        node_data["server_kops"] = []
+                    node_data["server_kops"].append(float(match.group(2)))
+                    if not "server_gbps" in node_data:
+                        node_data["server_gbps"] = []
+                    node_data["server_gbps"].append(gbps)
+                continue
+
+            match = re.match('.*Outstanding client RPCs for (.*) '
+                    'experiment: ([0-9.]+)', line)
+            if match:
+                node_data = experiments[match.group(1)][node]
+                if not "outstanding_rpcs" in node_data:
+                    node_data["outstanding_rpcs"] = []
+                node_data["outstanding_rpcs"].append(int(match.group(2)))
+                continue
+
+            match = re.match('.*Backed-up (.*) sends: ([0-9.]+)/([0-9.]+)',
+                    line)
+            if match:
+                node_data = experiments[match.group(1)][node]
+                if not "backups" in node_data:
+                    node_data["backups"] = []
+                total = float(match.group(3))
+                if total > 0:
+                    node_data["backups"].append(float(match.group(2))/total)
+                continue
     if not exited:
         log("%s appears to have crashed (didn't exit)" % (node))
 
@@ -849,8 +1014,9 @@ def scan_logs():
     """
     global log_dir, verbose
 
-    # This value is described in the header doc for scan_log.
-    experiments = {}
+    # Data collected so far for all experiments. See scan_log header
+    # comment for more info.
+    experiments = defaultdict(lambda : defaultdict(dict))
 
     for file in sorted(glob.glob(log_dir + "/node*.log")):
         node = re.match('.*/(node[0-9]+)\.log', file).group(1)
