@@ -1086,9 +1086,6 @@ class Dispatcher:
         id = int(match.group(1))
         offset = int(match.group(2))
         length = int(match.group(3))
-        if length == 0:
-            # Temporary fix to compensate for Homa bug; delete this code soon.
-            return
         for interest in interests:
             interest.tt_send_data(trace, time, core, id, offset, length)
 
@@ -5311,8 +5308,8 @@ class AnalyzePackets:
     def tt_ip_xmit(self, trace, t, core, id, offset):
         global packets, rpcs
         p = packets[pkt_id(id, offset)]
-        # If packet retransmitted, only record first transmission
-        if not 'retransmits' in p:
+        # Only record first transmission (packet might be retransmitted)
+        if not 'xmit' in p:
             p['xmit'] = t
             p['tx_node'] = trace['node']
             p['tx_core'] = core
@@ -7248,7 +7245,7 @@ class AnalyzeTxpkts:
         dispatcher.interest('AnalyzePackets')
 
     def output(self):
-        global packets, options
+        global packets, options, traces
 
         # node -> list of packets transmitted by that node
         node_pkts = defaultdict(list)
@@ -7256,8 +7253,6 @@ class AnalyzeTxpkts:
         # Bucket all of the packets by transmitting node.
         for pkt in packets.values():
             if (not 'xmit' in pkt) or not ('tso_length' in pkt):
-                continue
-            if (not 'nic' in pkt) or (not 'gro' in pkt) or (not 'tx_qid' in pkt):
                 continue
             node_pkts[pkt['tx_node']].append(pkt)
 
@@ -7317,11 +7312,13 @@ class AnalyzeTxpkts:
             if (options.node != None) and (node != options.node):
                 continue
 
-            # Create a data file for this node with packets in time order.
+            # Create a data file for this node with packets in time order
+            # (or whatever order was requested on the command line).
+            pkts = sorted(node_pkts[node], key = lambda pkt : pkt['xmit'])
             if sort_key == 'gro':
-                pkts = sorted(node_pkts[node], key = lambda pkt : get_max_gro(pkt))
-            else:
-                pkts = sorted(node_pkts[node], key = lambda pkt : pkt[sort_key])
+                pkts = sorted(pkts, key = lambda pkt : get_max_gro(pkt))
+            elif sort_key != 'xmit':
+                pkts = sorted(pkts, key = lambda pkt : pkt[sort_key])
             if len(pkts) == 0:
                 continue
 
@@ -7381,14 +7378,14 @@ class AnalyzeTxpkts:
             f.write('# Rx:         Number of times segments in the packet were '
                     'retransmitted\n\n')
 
-            f.write('#    Xmit      RpcId Offset  Length Qid')
-            f.write('       Nic  NDelay    MaxGro  GDelay')
-            f.write('      Free  FDelay Rx\n')
+            f.write('#     Xmit      RpcId Offset  Length Qid')
+            f.write('        Nic  NDelay     MaxGro  GDelay')
+            f.write('       Free  FDelay Rx\n')
             for pkt in pkts:
                 xmit = pkt['xmit']
-                nic = pkt['nic']
+                nic = pkt['nic'] if 'nic' in pkt else None
                 max_gro = get_max_gro(pkt)
-                free = pkt['free_tx_skb']
+                free = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
                 length = pkt['tso_length']
 
                 if 'tx_qid' in pkt:
@@ -7419,23 +7416,37 @@ class AnalyzeTxpkts:
                             rx += len(seg['retransmits'])
                 rx_msg = str(rx) if rx > 0 else ""
 
-                if rx == 0 and qid != None:
+                gro_string = ""
+                if rx == 0 and qid != None and nic != None:
                     delays[qid]['nic'].append(nic - xmit)
-                    delays[qid]['gro'].append(max_gro - nic)
-                    delays[qid]['free'].append(free - nic)
+                    if max_gro != None:
+                        delays[qid]['gro'].append(max_gro - nic)
+                        gro_string = '%.1f' % (max_gro - nic)
+                    if free != None:
+                        delays[qid]['free'].append(free - nic)
 
-                excess = (free - nic) - options.threshold
-                if excess > 0:
-                    qid_backlog[qid] += excess * length
-                    qid_slow_bytes[qid] += length
+                if nic != None:
+                    t = free if free != None else traces[node]['last_time']
+                    excess = (t - nic) - options.threshold
+                    if excess > 0:
+                        qid_backlog[qid] += excess * length
+                        qid_slow_bytes[qid] += length
                 qid_total_bytes[qid] += length
 
-                f.write('%9.3f %10d %6d  %6d %3s' % (xmit, pkt['id'],
+
+                f.write('%10.3f %10d %6d  %6d %3s' % (xmit, pkt['id'],
                         pkt['offset'], pkt['tso_length'], qid_string))
-                f.write(' %9.3f %7.1f %9.3f %7.1f' % (nic, nic - xmit,
-                        max_gro, max_gro - nic))
-                f.write(' %9.3f %7.1f %2s\n' % (pkt['free_tx_skb'],
-                        pkt['free_tx_skb'] - nic, rx_msg))
+                nic_delay_string = ''
+                if (nic != None) and (xmit != None):
+                    nic_delay_string = '%.1f' % (nic - xmit)
+                f.write(' %10s %7s %10s %7s' % (print_if(nic, '%.3f'),
+                        nic_delay_string, print_if(max_gro, '%.3f'),
+                        gro_string))
+                free_delay_string = ''
+                if (nic != None) and (free != None):
+                    free_delay_string = '%.1f' % (free - nic)
+                f.write(' %10s %7s %2s\n' % (print_if(free, '%.3f'),
+                        free_delay_string, rx_msg))
             f.close()
 
             def print_type(delays):
