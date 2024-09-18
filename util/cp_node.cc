@@ -2053,14 +2053,15 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 	if (length < 0) {
 		if (exit_receivers)
 			return false;
-		log(NORMAL, "FATAL: error in recvmsg: %s (id %lu, server %s)\n",
+		log(NORMAL, "FATAL: error in Homa recvmsg: %s (id %lu, "
+				"server %s)\n",
 				strerror(errno), rpc_id,
 				print_address(receiver->src_addr()));
 		exit(1);
 	}
 	header = receiver->get<message_header>(0);
 	if (header == nullptr) {
-		log(NORMAL, "FATAL: response message contained %lu bytes; "
+		log(NORMAL, "FATAL: Homa response message contained %lu bytes; "
 			"need at least %lu", length, sizeof(*header));
 		exit(1);
 	}
