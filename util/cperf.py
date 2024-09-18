@@ -880,8 +880,8 @@ def run_experiments(*args):
         # Wait a bit so that homa_prio can set priorities appropriately
         time.sleep(2)
     if homa_nodes:
-        vlog("Initializing metrics and timetracing")
-        do_ssh(["metrics.py; ttprint.py > /dev/null"], homa_nodes)
+        vlog("Initializing metrics")
+        do_ssh(["metrics.py > /dev/null"], homa_nodes)
     do_cmd("dump_times /dev/null", all_nodes)
     do_cmd("log Starting measurements", all_nodes)
     log("Starting measurements")
