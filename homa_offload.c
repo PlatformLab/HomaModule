@@ -68,6 +68,7 @@ void homa_gro_hook_tcp(void)
 	if (tcp_net_offload != NULL)
 		return;
 
+	printk(KERN_NOTICE "Homa setting up TCP hijacking\n");
 	tcp_net_offload = inet_offloads[IPPROTO_TCP];
 	hook_tcp_net_offload = *tcp_net_offload;
 	hook_tcp_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
@@ -88,6 +89,7 @@ void homa_gro_unhook_tcp(void)
 {
 	if (tcp_net_offload == NULL)
 		return;
+	printk(KERN_NOTICE "Homa cancelling TCP hijacking\n");
 	inet_offloads[IPPROTO_TCP] = tcp_net_offload;
 	tcp_net_offload = NULL;
 	inet6_offloads[IPPROTO_TCP] = tcp6_net_offload;
@@ -251,7 +253,6 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-//	int hdr_offset, hdr_end;
 	struct sk_buff *held_skb;
 	struct sk_buff *result = NULL;
 	struct homa_core *core = homa_cores[raw_smp_processor_id()];
@@ -332,11 +333,29 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		struct napi_struct *napi = container_of(gro_list,
 				struct napi_struct, gro_hash[hash]);
 
-		/* Make sure that core->held_skb is on the list. */
+		/* Must verify that core->held_skb points to a packet on
+		 * the list, and that the packet is a Homa packet.
+		 * homa_gro_complete isn't always invoked before removing
+		 * packets from the list, so core->held_skb could be a
+		 * dangling pointer (or the skb could have been reused for
+		 * some other protocol).
+		  */
 		list_for_each_entry(held_skb,
 				&napi->gro_hash[core->held_bucket].list, list) {
+			int protocol;
+
 			if (held_skb != core->held_skb)
 				continue;
+			if (skb_is_ipv6(held_skb))
+				protocol = ipv6_hdr(held_skb)->nexthdr;
+			else
+				protocol = ip_hdr(held_skb)->protocol;
+			if (protocol != IPPROTO_HOMA) {
+				tt_record3("homa_gro_receive held_skb 0x%0x%0x "
+						"isn't Homa: protocol %d",
+						SPLIT_64(held_skb), protocol);
+				continue;
+			}
 
 			/* Aggregate skb into held_skb. We don't update the
 			 * length of held_skb because we'll eventually split
@@ -528,6 +547,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	// 		ntohl(h->seg.offset),
 	// 		NAPI_GRO_CB(skb)->count);
 
+	homa_cores[raw_smp_processor_id()]->held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {
