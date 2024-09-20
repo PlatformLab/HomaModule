@@ -373,10 +373,8 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	int result, priority;
 	struct dst_entry *dst;
 	struct sk_buff *skb;
+	struct netdev_queue *txq;
 
-	/* Allocate the same size sk_buffs as for the smallest data
-         * packets (better reuse of sk_buffs?).
-	 */
 	dst = homa_get_dst(peer, hsk);
 	skb = homa_skb_new_tx(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
@@ -432,6 +430,13 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			}
 		}
 	}
+	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
+	if (!netif_tx_queue_stopped(txq))
+		tt_record4("__homa_xmit_control found stopped txq for id %d, "
+				"qid %d, num_queued %d, limit %d",
+				be64_to_cpu(h->sender_id),
+				skb->queue_mapping, txq->dql.num_queued,
+				txq->dql.adj_limit);
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
@@ -489,8 +494,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
 	struct homa *homa = rpc->hsk->homa;
-
-	tt_record("homa_xmit_data starting");
+	struct netdev_queue *txq;
 
 	atomic_inc(&rpc->msgout.active_xmits);
 	while (*rpc->msgout.next_xmit) {
@@ -528,6 +532,12 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
+		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
+		if (netif_tx_queue_stopped(txq))
+			tt_record4("homa_xmit_data found stopped txq for id %d, "
+					"qid %d, num_queued %d, limit %d",
+					rpc->id, skb->queue_mapping,
+					txq->dql.num_queued, txq->dql.adj_limit);
 		force = false;
 		homa_rpc_lock(rpc, "homa_xmit_data");
 		if (rpc->state == RPC_DEAD)
@@ -584,10 +594,10 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
 	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, "
-			"granted %d",
+			"qid %d",
 			rpc->id, homa_info->offset,
 			homa_get_skb_info(skb)->data_bytes,
-			rpc->msgout.granted);
+			skb->queue_mapping);
 	if (err) {
 		INC_METRIC(data_xmit_errors, 1);
 	}

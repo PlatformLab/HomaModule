@@ -164,9 +164,11 @@ int mock_compound_order_mask = 0;
 int mock_page_nid_mask = 0;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
+struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
-		.gso_max_size = 0};
+		.gso_max_size = 0,
+		._tx = &mock_net_queue};
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 
@@ -221,6 +223,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->_skb_refdst = 0;
 	ip_hdr(skb)->saddr = 0;
 	skb->truesize = size;
+	skb->dev = &mock_net_device;
 	return skb;
 }
 
@@ -1395,6 +1398,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	skb->_skb_refdst = 0;
 	skb->hash = 3;
 	skb->next = NULL;
+	skb->dev = &mock_net_device;
 	return skb;
 }
 
@@ -1489,6 +1493,7 @@ void mock_teardown(void)
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_net_device.gso_max_size = 0;
+	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
 
