@@ -431,7 +431,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		}
 	}
 	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
-	if (!netif_tx_queue_stopped(txq))
+	if (netif_tx_queue_stopped(txq))
 		tt_record4("__homa_xmit_control found stopped txq for id %d, "
 				"qid %d, num_queued %d, limit %d",
 				be64_to_cpu(h->sender_id),
