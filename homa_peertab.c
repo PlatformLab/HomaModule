@@ -378,7 +378,7 @@ void homa_peer_add_ack(struct homa_rpc *rpc)
 	struct ack_header ack;
 
 	homa_peer_lock(peer);
-	if (peer->num_acks < NUM_PEER_UNACKED_IDS) {
+	if (peer->num_acks < HOMA_MAX_ACKS_PER_PKT) {
 		peer->acks[peer->num_acks].client_id = cpu_to_be64(rpc->id);
 		peer->acks[peer->num_acks].client_port = htons(rpc->hsk->port);
 		peer->acks[peer->num_acks].server_port = htons(rpc->dport);

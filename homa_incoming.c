@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_wire.h"
 
 /**
  * homa_message_in_init() - Constructor for homa_message_in.
@@ -814,7 +815,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.urgent = htons(HOMA_TCP_URGENT);
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
-			NUM_PEER_UNACKED_IDS, ack.acks));
+			HOMA_MAX_ACKS_PER_PKT, ack.acks));
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d other acks",
 			id, tt_addr(saddr), ntohs(ack.num_acks));

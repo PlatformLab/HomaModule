@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_wire.h"
 
 /**
  * homa_grant_outranks() - Returns nonzero if rpc1 should be considered

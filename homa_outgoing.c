@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_wire.h"
 
 /**
  * set_priority() - Arrange for an outgoing packet to have a particular
