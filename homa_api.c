@@ -35,7 +35,7 @@
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
-		const sockaddr_in_union *dest_addr, uint64_t id)
+		const union sockaddr_in_union *dest_addr, uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct iovec vec;
@@ -78,7 +78,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-		const sockaddr_in_union *dest_addr, uint64_t id)
+		const union sockaddr_in_union *dest_addr, uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -113,7 +113,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *message_buf, size_t length,
-		const sockaddr_in_union *dest_addr, uint64_t *id,
+		const union sockaddr_in_union *dest_addr, uint64_t *id,
 		uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
@@ -162,7 +162,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-		const sockaddr_in_union *dest_addr, uint64_t *id,
+		const union sockaddr_in_union *dest_addr, uint64_t *id,
 		uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;

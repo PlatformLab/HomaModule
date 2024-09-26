@@ -28,7 +28,7 @@ extern double  get_cycles_per_sec();
 extern int     get_int(const char *s, const char *msg);
 extern void    pin_thread(int core);
 extern const char*
-               print_address(const sockaddr_in_union *addr);
+               print_address(const union sockaddr_in_union *addr);
 extern void    print_dist(uint64_t times[], int count);
 extern void    seed_buffer(void *buffer, size_t length, int seed);
 #ifdef __cplusplus

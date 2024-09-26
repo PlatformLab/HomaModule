@@ -25,7 +25,7 @@
 int main(int argc, char** argv) {
 	int fd, port;
 	int optval = 1;
-	sockaddr_in_union bindAddress;
+	union sockaddr_in_union bindAddress;
 
 	if (argc < 2) {
 		printf("Usage: %s port\n", argv[0]);
