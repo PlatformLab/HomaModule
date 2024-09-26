@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+/* SPDX-License-Identifier: BSD-2-Clause */
 
 #ifndef HOMA_TIMETRACE_H
 #define HOMA_TIMETRACE_H
@@ -15,7 +13,7 @@
  * Timetrace implements a circular buffer of entries, each of which
  * consists of a fine-grain timestamp, a short descriptive string, and
  * a few additional values. It's typically used to record times at
- * various points in in kernel operations, in order to find performance
+ * various points in kernel operations, in order to find performance
  * bottlenecks. It can record a trace relatively efficiently (< 10ns as
  * of 6/2018), and the trace can be retrieved by user programs for
  * analysis by reading a file in /proc.
@@ -33,7 +31,7 @@ struct tt_event {
 	 * Format string describing the event. NULL means that this
 	 * entry has never been occupied.
 	 */
-	const char* format;
+	const char *format;
 
 	/**
 	 * Up to 4 additional arguments that may be referenced by
@@ -74,7 +72,7 @@ struct tt_buffer {
  */
 struct tt_proc_file {
 	/* Identifies a particular open file. */
-	struct file* file;
+	struct file *file;
 
 	/* Index of the next entry to return from each tt_buffer. */
 	int pos[NR_CPUS];
@@ -97,8 +95,8 @@ struct tt_proc_file {
 extern void   tt_destroy(void);
 extern void   tt_freeze(void);
 extern int    tt_init(char *proc_file, int *temp);
-extern void   tt_record_buf(struct tt_buffer* buffer, __u64 timestamp,
-		const char* format, __u32 arg0, __u32 arg1,
+extern void   tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
+		const char *format, __u32 arg0, __u32 arg1,
 		__u32 arg2, __u32 arg3);
 
 /* Private methods and variables: exposed so they can be accessed
@@ -127,7 +125,7 @@ extern bool      tt_test_no_khz;
  * the kernel.
  */
 extern int64_t    tt_debug_int64[100];
-extern void *     tt_debug_ptr[100];
+extern void      *tt_debug_ptr[100];
 
 /**
  * tt_rdtsc(): return the current value of the fine-grain CPU cycle counter
@@ -136,6 +134,7 @@ extern void *     tt_debug_ptr[100];
 static inline __u64 tt_rdtsc(void)
 {
 	__u32 lo, hi;
+
 	__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
 	return (((__u64)hi << 32) | lo);
 }
@@ -157,7 +156,7 @@ static inline __u64 tt_rdtsc(void)
  * @arg2       Argument to use when printing a message about this event.
  * @arg3       Argument to use when printing a message about this event.
  */
-static inline void tt_record4(const char* format, __u32 arg0, __u32 arg1,
+static inline void tt_record4(const char *format, __u32 arg0, __u32 arg1,
 		__u32 arg2, __u32 arg3)
 {
 #if ENABLE_TIME_TRACE
@@ -165,7 +164,7 @@ static inline void tt_record4(const char* format, __u32 arg0, __u32 arg1,
 			arg0, arg1, arg2, arg3);
 #endif
 }
-static inline void tt_record3(const char* format, __u32 arg0, __u32 arg1,
+static inline void tt_record3(const char *format, __u32 arg0, __u32 arg1,
 		__u32 arg2)
 {
 #if ENABLE_TIME_TRACE
@@ -173,21 +172,21 @@ static inline void tt_record3(const char* format, __u32 arg0, __u32 arg1,
 			arg0, arg1, arg2, 0);
 #endif
 }
-static inline void tt_record2(const char* format, __u32 arg0, __u32 arg1)
+static inline void tt_record2(const char *format, __u32 arg0, __u32 arg1)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, arg1, 0, 0);
 #endif
 }
-static inline void tt_record1(const char* format, __u32 arg0)
+static inline void tt_record1(const char *format, __u32 arg0)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
 			arg0, 0, 0, 0);
 #endif
 }
-static inline void tt_record(const char* format)
+static inline void tt_record(const char *format)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,

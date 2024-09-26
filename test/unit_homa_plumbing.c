@@ -29,8 +29,8 @@ FIXTURE(homa_plumbing) {
 	__u64 server_id;
 	struct homa homa;
 	struct homa_sock hsk;
-	sockaddr_in_union client_addr;
-	sockaddr_in_union server_addr;
+	union sockaddr_in_union client_addr;
+	union sockaddr_in_union server_addr;
 	struct data_header data;
 	int starting_skb_count;
 	struct msghdr recvmsg_hdr;
@@ -40,7 +40,7 @@ FIXTURE(homa_plumbing) {
 	struct homa_sendmsg_args sendmsg_args;
 	char buffer[2000];
 	sockptr_t optval;
-	sockaddr_in_union addr;
+	union sockaddr_in_union addr;
 };
 FIXTURE_SETUP(homa_plumbing)
 {
@@ -128,7 +128,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	sockaddr_in_union addr = {};
+	union sockaddr_in_union addr = {};
 	addr.in6.sin6_family = AF_INET6;
 	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
@@ -142,7 +142,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	sockaddr_in_union addr = {};
+	union sockaddr_in_union addr = {};
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
 	struct socket sock = {};
@@ -158,7 +158,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	sockaddr_in_union addr = {};
+	union sockaddr_in_union addr = {};
 	addr.in4.sin_family = AF_INET;
 	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
@@ -172,7 +172,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	sockaddr_in_union addr = {};
+	union sockaddr_in_union addr = {};
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
 	struct socket sock = {};

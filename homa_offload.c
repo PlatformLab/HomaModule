@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file implements GSO (Generic Segmentation Offload) and GRO (Generic
  * Receive Offload) for Homa.
@@ -23,8 +21,8 @@ extern struct homa *homa;
 /* Pointers to TCP's net_offload structures. NULL means homa_gro_hook_tcp
  * hasn't been called yet.
  */
-const struct net_offload *tcp_net_offload = NULL;
-const struct net_offload *tcp6_net_offload = NULL;
+const struct net_offload *tcp_net_offload;
+const struct net_offload *tcp6_net_offload;
 
 /*
  * Identical to *tcp_net_offload except that the gro_receive function
@@ -42,6 +40,7 @@ int homa_offload_init(void)
 {
 	int res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
 	int res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
+
 	return res1 ? res1 : res2;
 }
 
@@ -55,6 +54,7 @@ int homa_offload_end(void)
 {
 	int res1 = inet_del_offload(&homa_offload, IPPROTO_HOMA);
 	int res2 = inet6_del_offload(&homa_offload, IPPROTO_HOMA);
+
 	return res1 ? res1 : res2;
 }
 
@@ -68,7 +68,7 @@ void homa_gro_hook_tcp(void)
 	if (tcp_net_offload != NULL)
 		return;
 
-	printk(KERN_NOTICE "Homa setting up TCP hijacking\n");
+	pr_notice("Homa setting up TCP hijacking\n");
 	tcp_net_offload = inet_offloads[IPPROTO_TCP];
 	hook_tcp_net_offload = *tcp_net_offload;
 	hook_tcp_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
@@ -89,7 +89,7 @@ void homa_gro_unhook_tcp(void)
 {
 	if (tcp_net_offload == NULL)
 		return;
-	printk(KERN_NOTICE "Homa cancelling TCP hijacking\n");
+	pr_notice("Homa cancelling TCP hijacking\n");
 	inet_offloads[IPPROTO_TCP] = tcp_net_offload;
 	tcp_net_offload = NULL;
 	inet6_offloads[IPPROTO_TCP] = tcp6_net_offload;
@@ -110,8 +110,8 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	struct common_header *h = (struct common_header *)
 			skb_transport_header(skb);
 	// tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
-	// 		"urgent 0x%x, id %d", h->type, h->flags,
-	// 		ntohs(h->urgent), homa_local_id(h->sender_id));
+	//		"urgent 0x%x, id %d", h->type, h->flags,
+	//		ntohs(h->urgent), homa_local_id(h->sender_id));
 	if ((h->flags != HOMA_TCP_FLAGS) || (ntohs(h->urgent) != HOMA_TCP_URGENT))
 		return tcp_net_offload->callbacks.gro_receive(held_list, skb);
 
@@ -199,6 +199,7 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 		netdev_features_t features)
 {
 	struct sk_buff *segs;
+
 	tt_record2("homa_gso_segment invoked, frags %d, headlen %d",
 			skb_shinfo(skb)->nr_frags, skb_headlen(skb));
 
@@ -215,6 +216,7 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	if (ip_hdr(segs)->version == 4) {
 		struct sk_buff *seg;
 		int i = 0;
+
 		for (seg = segs; seg != NULL; seg = seg->next) {
 			ip_hdr(seg)->id = htons(i);
 			i++;
@@ -285,8 +287,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 					ntohl(h_new->common.sequence));
 			h_new->seg.offset = h_new->common.sequence;
 		}
-		tt_record4("homa_gro_receive got packet from 0x%x "
-				"id %llu, offset %d, priority %d",
+		tt_record4("homa_gro_receive got packet from 0x%x id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(h_new->seg.offset), priority);
 		if ((homa_data_len(skb) == ntohl(h_new->message_length))
@@ -296,8 +297,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			goto bypass;
 		}
 	} else if (h_new->common.type == GRANT) {
-		tt_record4("homa_gro_receive got grant from 0x%x "
-				"id %llu, offset %d, priority %d",
+		tt_record4("homa_gro_receive got grant from 0x%x id %llu, offset %d, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				ntohl(((struct grant_header *) h_new)->offset),
 				priority);
@@ -312,8 +312,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			goto bypass;
 		}
 	} else
-		tt_record4("homa_gro_receive got packet from 0x%x "
-				"id %llu, type 0x%x, priority %d",
+		tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
 				saddr, homa_local_id(h_new->common.sender_id),
 				h_new->common.type, priority);
 
@@ -339,7 +338,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		 * packets from the list, so core->held_skb could be a
 		 * dangling pointer (or the skb could have been reused for
 		 * some other protocol).
-		  */
+		 */
 		list_for_each_entry(held_skb,
 				&napi->gro_hash[core->held_bucket].list, list) {
 			int protocol;
@@ -351,8 +350,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			else
 				protocol = ip_hdr(held_skb)->protocol;
 			if (protocol != IPPROTO_HOMA) {
-				tt_record3("homa_gro_receive held_skb 0x%0x%0x "
-						"isn't Homa: protocol %d",
+				tt_record3("homa_gro_receive held_skb 0x%0x%0x isn't Homa: protocol %d",
 						SPLIT_64(held_skb), protocol);
 				continue;
 			}
@@ -406,13 +404,13 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, raw_smp_processor_id());
 
-    done:
+done:
 	homa_check_pacer(homa, 1);
 	core->last_gro = get_cycles();
 	return result;
 
-    bypass:
-        /* Record SoftIRQ cycles in a different metric to reflect that
+bypass:
+	/* Record SoftIRQ cycles in a different metric to reflect that
 	 * they happened during bypass.
 	 */
 	saved_softirq_metric = core->metrics.softirq_cycles;
@@ -449,6 +447,7 @@ void homa_gro_gen2(struct sk_buff *skb)
 	int candidate = this_core;
 	__u64 now = get_cycles();
 	struct homa_core *core;
+
 	for (i = CORES_TO_CHECK; i > 0; i--) {
 		candidate++;
 		if (unlikely(candidate >= nr_cpu_ids))
@@ -458,8 +457,7 @@ void homa_gro_gen2(struct sk_buff *skb)
 			continue;
 		if ((core->last_gro + homa->busy_cycles) > now)
 			continue;
-		tt_record3("homa_gro_gen2 chose core %d for id %d "
-				"offset %d",
+		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d",
 				candidate, homa_local_id(h->common.sender_id),
 				ntohl(h->seg.offset));
 		break;
@@ -469,16 +467,15 @@ void homa_gro_gen2(struct sk_buff *skb)
 		 * rotate among them.
 		 */
 		int offset = homa_cores[this_core]->softirq_offset;
+
 		offset += 1;
 		if (offset > CORES_TO_CHECK)
 			offset = 1;
 		homa_cores[this_core]->softirq_offset = offset;
 		candidate = this_core + offset;
-		while (candidate >= nr_cpu_ids) {
+		while (candidate >= nr_cpu_ids)
 			candidate -= nr_cpu_ids;
-		}
-		tt_record3("homa_gro_gen2 chose core %d for id %d "
-				"offset %d (all cores busy)",
+		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d (all cores busy)",
 				candidate, homa_local_id(h->common.sender_id),
 				ntohl(h->seg.offset));
 	}
@@ -510,9 +507,9 @@ void homa_gro_gen3(struct sk_buff *skb)
 	core = candidates[0];
 	for (i = 0; i <  NUM_GEN3_SOFTIRQ_CORES; i++) {
 		int candidate = candidates[i];
-		if (candidate < 0) {
+
+		if (candidate < 0)
 			break;
-		}
 		if (homa_cores[candidate]->last_app_active < busy_time) {
 			core = candidate;
 			break;
@@ -543,9 +540,9 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
 	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
-	// 		h->common.type, homa_local_id(h->common.sender_id),
-	// 		ntohl(h->seg.offset),
-	// 		NAPI_GRO_CB(skb)->count);
+	//		h->common.type, homa_local_id(h->common.sender_id),
+	//		ntohl(h->seg.offset),
+	//		NAPI_GRO_CB(skb)->count);
 
 	homa_cores[raw_smp_processor_id()]->held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
@@ -576,8 +573,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			}
 		}
 		homa_set_softirq_cpu(skb, best);
-		tt_record3("homa_gro_complete chose core %d for id %d "
-				"offset %d with IDLE policy",
+		tt_record3("homa_gro_complete chose core %d for id %d offset %d with IDLE policy",
 				best, homa_local_id(h->common.sender_id),
 				ntohl(h->seg.offset));
 	} else if (homa->gro_policy & HOMA_GRO_NEXT) {
@@ -585,11 +581,11 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * SoftIRQ processing.
 		 */
 		int target = raw_smp_processor_id() + 1;
+
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;
 		homa_set_softirq_cpu(skb, target);
-		tt_record3("homa_gro_complete chose core %d for id %d "
-				"offset %d with NEXT policy",
+		tt_record3("homa_gro_complete chose core %d for id %d offset %d with NEXT policy",
 				target, homa_local_id(h->common.sender_id),
 				ntohl(h->seg.offset));
 	}

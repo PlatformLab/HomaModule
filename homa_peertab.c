@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file manages homa_peertab objects and is responsible for creating
  * and deleting homa_peer objects.
@@ -21,15 +19,15 @@ int homa_peertab_init(struct homa_peertab *peertab)
 	 * an error.
 	 */
 	int i;
+
 	spin_lock_init(&peertab->write_lock);
 	INIT_LIST_HEAD(&peertab->dead_dsts);
-	peertab->buckets = (struct hlist_head *) vmalloc(
+	peertab->buckets = vmalloc(
 			HOMA_PEERTAB_BUCKETS * sizeof(*peertab->buckets));
 	if (!peertab->buckets)
 		return -ENOMEM;
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
+	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&peertab->buckets[i]);
-	}
 	return 0;
 }
 
@@ -45,6 +43,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	int i;
 	struct homa_peer *peer;
 	struct hlist_node *next;
+
 	if (!peertab->buckets)
 		return;
 
@@ -68,7 +67,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
  *		caller must free this. If there is an error, or if there
  *	        are no peers, NULL is returned.
  */
-struct homa_peer ** homa_peertab_get_peers(struct homa_peertab *peertab,
+struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 		int *num_peers)
 {
 	int i, count;
@@ -91,7 +90,7 @@ struct homa_peer ** homa_peertab_get_peers(struct homa_peertab *peertab,
 	if (count == 0)
 		return NULL;
 
-	result = (struct homa_peer **) kmalloc(count*sizeof(peer), GFP_KERNEL);
+	result = kmalloc_array(count, sizeof(peer), GFP_KERNEL);
 	if (result == NULL)
 		return NULL;
 	*num_peers = count;
@@ -149,16 +148,17 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	 */
 	struct homa_peer *peer;
 	struct dst_entry *dst;
+
 	// Should use siphash or jhash here:
 	__u32 bucket = hash_32(addr->in6_u.u6_addr32[0], HOMA_PEERTAB_BUCKET_BITS);
+
 	bucket ^= hash_32(addr->in6_u.u6_addr32[1], HOMA_PEERTAB_BUCKET_BITS);
 	bucket ^= hash_32(addr->in6_u.u6_addr32[2], HOMA_PEERTAB_BUCKET_BITS);
 	bucket ^= hash_32(addr->in6_u.u6_addr32[3], HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 			peertab_links) {
-		if (ipv6_addr_equal(&peer->addr, addr)) {
+		if (ipv6_addr_equal(&peer->addr, addr))
 			return peer;
-		}
 		INC_METRIC(peer_hash_links, 1);
 	}
 
@@ -206,7 +206,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
 
-    done:
+done:
 	spin_unlock_bh(&peertab->write_lock);
 	return peer;
 }
@@ -228,8 +228,8 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 	if (IS_ERR(dst)) {
 		/* Retain the existing dst if we can't create a new one. */
 		if (hsk->homa->verbose)
-			printk(KERN_NOTICE "homa_refresh couldn't recreate "
-					"dst: error %ld", PTR_ERR(dst));
+			pr_notice("%s couldn't recreate dst: error %ld",
+					__func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
 	} else {
 		struct homa_dead_dst *dead = (struct homa_dead_dst *)
@@ -266,6 +266,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 		int length)
 {
 	int i;
+
 	for (i = homa->num_priorities-1; ; i--) {
 		if (peer->unsched_cutoffs[i] >= length)
 			return i;
@@ -287,6 +288,7 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 	memset(&peer->flow, 0, sizeof(peer->flow));
 	if (inet->sk.sk_family == AF_INET) {
 		struct rtable *rt;
+
 		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
 				inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
 				inet->sk.sk_protocol, 0,
@@ -298,27 +300,26 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 		if (IS_ERR(rt))
 			return (struct dst_entry *)(PTR_ERR(rt));
 		return &rt->dst;
-	} else {
-		peer->flow.u.ip6.flowi6_oif = inet->sk.sk_bound_dev_if;
-		peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
-		peer->flow.u.ip6.flowi6_mark = inet->sk.sk_mark;
-		peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
-		peer->flow.u.ip6.flowi6_proto = inet->sk.sk_protocol;
-		peer->flow.u.ip6.flowi6_flags = 0;
-		peer->flow.u.ip6.flowi6_secid = 0;
-		peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
-		peer->flow.u.ip6.flowi6_uid = inet->sk.sk_uid;
-		peer->flow.u.ip6.daddr = peer->addr;
-		peer->flow.u.ip6.saddr = inet->pinet6->saddr;
-		peer->flow.u.ip6.fl6_dport = 0;
-		peer->flow.u.ip6.fl6_sport = 0;
-		peer->flow.u.ip6.mp_hash = 0;
-		peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
-		peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
-		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
-		return ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk,
-				&peer->flow.u.ip6, NULL);
 	}
+	peer->flow.u.ip6.flowi6_oif = inet->sk.sk_bound_dev_if;
+	peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
+	peer->flow.u.ip6.flowi6_mark = inet->sk.sk_mark;
+	peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
+	peer->flow.u.ip6.flowi6_proto = inet->sk.sk_protocol;
+	peer->flow.u.ip6.flowi6_flags = 0;
+	peer->flow.u.ip6.flowi6_secid = 0;
+	peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
+	peer->flow.u.ip6.flowi6_uid = inet->sk.sk_uid;
+	peer->flow.u.ip6.daddr = peer->addr;
+	peer->flow.u.ip6.saddr = inet->pinet6->saddr;
+	peer->flow.u.ip6.fl6_dport = 0;
+	peer->flow.u.ip6.fl6_sport = 0;
+	peer->flow.u.ip6.mp_hash = 0;
+	peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
+	peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
+	security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
+	return ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk,
+			&peer->flow.u.ip6, NULL);
 }
 
 /**
@@ -357,6 +358,7 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 void homa_peer_lock_slow(struct homa_peer *peer)
 {
 	__u64 start = get_cycles();
+
 	tt_record("beginning wait for peer lock");
 	spin_lock_bh(&peer->ack_lock);
 	tt_record("ending wait for peer lock");

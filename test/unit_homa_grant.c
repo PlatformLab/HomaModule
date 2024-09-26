@@ -42,7 +42,7 @@ FIXTURE(homa_grant) {
 	int server_port;
 	__u64 client_id;
 	__u64 server_id;
-	sockaddr_in_union server_addr;
+	union sockaddr_in_union server_addr;
 	struct homa homa;
 	struct homa_sock hsk;
 	struct data_header data;

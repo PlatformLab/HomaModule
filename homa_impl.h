@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+/* SPDX-License-Identifier: BSD-2-Clause */
 
 /* This file contains definitions that are shared across the files
  * that implement Homa for Linux.
@@ -50,14 +48,10 @@
 #pragma GCC diagnostic warning "-Wpointer-sign"
 #pragma GCC diagnostic warning "-Wunused-variable"
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,16,0)
-typedef unsigned int __poll_t;
-#endif
-
 #ifdef __UNIT_TEST__
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
-extern struct page *mock_alloc_pages(gfp_t gfp, unsigned order);
+extern struct page *mock_alloc_pages(gfp_t gfp, unsigned int order);
 
 #define compound_order mock_compound_order
 extern unsigned int mock_compound_order(struct page *page);
@@ -74,11 +68,14 @@ extern struct task_struct *current_task;
 extern cycles_t mock_get_cycles(void);
 
 #define get_page mock_get_page
-    extern void mock_get_page(struct page *page);
+extern void mock_get_page(struct page *page);
 
 #undef kmalloc
 #define kmalloc mock_kmalloc
 extern void *mock_kmalloc(size_t size, gfp_t flags);
+
+#undef kmalloc_array
+#define kmalloc_array(count, size, type) mock_kmalloc(count*size, type)
 
 #define kthread_complete_and_exit(comp, code)
 
@@ -317,7 +314,8 @@ struct common_header {
 
 	/**
 	 * @checksum: not used by Homa, but must occupy the same bytes as
-	 * the checksum in a TCP header (TSO may modify this?).*/
+	 * the checksum in a TCP header (TSO may modify this?).
+	 */
 	__be16 checksum;
 
 	/**
@@ -335,7 +333,7 @@ struct common_header {
 	 * this RPC).
 	 */
 	__be64 sender_id;
-} __attribute__((packed));
+} __packed;
 
 /**
  * struct homa_ack - Identifies an RPC that can be safely deleted by its
@@ -359,7 +357,7 @@ struct homa_ack {
 
 	/** @server_port: The server-side port for the RPC. */
 	__be16 server_port;
-} __attribute__((packed));
+} __packed;
 
 /* struct data_header - Contains data for part or all of a Homa message.
  * An incoming packet consists of a data_header followed by message data.
@@ -415,7 +413,7 @@ struct seg_header {
 	 * value will always be valid once the packet reaches homa_softirq.
 	 */
 	__be32 offset;
-} __attribute__((packed));
+} __packed;
 
 struct data_header {
 	struct common_header common;
@@ -459,17 +457,14 @@ struct data_header {
 
 	/** @seg: First of possibly many segments. */
 	struct seg_header seg;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
-		"data_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 _Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
-		"data_header too small: Homa doesn't currently have code"
-		"to pad data packets");
+		"data_header too small: Homa doesn't currently have codeto pad data packets");
 _Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header))
 		& 0x3) == 0,
-		" data_header length not a multiple of 4 bytes (required "
-		"for TCP/TSO compatibility");
+		" data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");
 
 /**
  * homa_data_len() - Returns the total number of bytes in a DATA packet
@@ -511,10 +506,9 @@ struct grant_header {
 	 * that no packets have been successfully received).
 	 */
 	__u8 resend_all;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
-		"grant_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"grant_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct resend_header - Wire format for RESEND packets.
@@ -550,10 +544,9 @@ struct resend_header {
 	 * priority.
 	 */
 	__u8 priority;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
-		"resend_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"resend_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct unknown_header - Wire format for UNKNOWN packets.
@@ -567,10 +560,9 @@ _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
 struct unknown_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
-		"unknown_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"unknown_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -581,10 +573,9 @@ _Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
 struct busy_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
-		"busy_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"busy_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct cutoffs_header - Wire format for CUTOFFS packets.
@@ -609,10 +600,9 @@ struct cutoffs_header {
 	 * this packet.
 	 */
 	__be16 cutoff_version;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
-		"cutoffs_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"cutoffs_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct freeze_header - Wire format for FREEZE packets.
@@ -623,10 +613,9 @@ _Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
 struct freeze_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
-		"freeze_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"freeze_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct need_ack_header - Wire format for NEED_ACK packets.
@@ -637,10 +626,9 @@ _Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
 struct need_ack_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct need_ack_header) <= HOMA_MAX_HEADER,
-		"need_ack_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"need_ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct ack_header - Wire format for ACK packets.
@@ -657,10 +645,9 @@ struct ack_header {
 	__be16 num_acks;
 
 	struct homa_ack acks[NUM_PEER_UNACKED_IDS];
-} __attribute__((packed));
+} __packed;
 _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
-		"ack_header too large for HOMA_MAX_HEADER; must "
-		"adjust HOMA_MAX_HEADER");
+		"ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_message_out - Describes a message (either request or response)
@@ -799,7 +786,7 @@ struct homa_message_in {
 	 * Never larger than @length. Note: once initialized, this
 	 * may not be modified without holding @homa->grantable_lock.
 	 */
-        int granted;
+	int granted;
 
 	/**
 	 * @rec_incoming: Number of bytes in homa->total_incoming currently
@@ -896,7 +883,7 @@ struct homa_interest {
  * of a struct homa_interest.
  * @interest:   Struct to initialize.
  */
-inline static void homa_interest_init(struct homa_interest *interest)
+static inline void homa_interest_init(struct homa_interest *interest)
 {
 	interest->thread = current;
 	atomic_long_set(&interest->ready_rpc, 0);
@@ -1132,10 +1119,11 @@ struct homa_rpc {
  * trace.
  * @rpc:   RPC to validate.
  */
-inline static void homa_rpc_validate(struct homa_rpc *rpc) {
+static inline void homa_rpc_validate(struct homa_rpc *rpc)
+{
 	if (rpc->magic == HOMA_RPC_MAGIC)
 		return;
-	printk(KERN_ERR "Accessing reaped Homa RPC!\n");
+	pr_err("Accessing reaped Homa RPC!\n");
 	BUG();
 }
 
@@ -1158,7 +1146,7 @@ struct homa_socktab {
 	 * for socket lookups (RCU is used instead). Also used to
 	 * synchronize port allocation.
 	 */
-	struct spinlock write_lock;
+	spinlock_t write_lock;
 
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
@@ -1221,7 +1209,7 @@ struct homa_rpc_bucket {
 	 * this bucket. This dual purpose permits clean and safe
 	 * deletion and garbage collection of RPCs.
 	 */
-	struct spinlock lock;
+	spinlock_t lock;
 
 	/** @rpcs: list of RPCs that hash to this bucket. */
 	struct hlist_head rpcs;
@@ -1247,7 +1235,7 @@ struct homa_bpage {
 		struct homa_cache_line cache_line;
 		struct {
 			/** @lock: to synchronize shared access. */
-			struct spinlock lock;
+			spinlock_t lock;
 
 			/**
 			 * @refs: Counts number of distinct uses of this
@@ -1393,11 +1381,12 @@ struct homa_sock {
 	 * spin lock).  See sync.txt for more on Homa's synchronization
 	 * strategy.
 	 */
-	struct spinlock lock;
+	spinlock_t lock;
 
 	/**
 	 * @last_locker: identifies the code that most recently acquired
-	 * @lock successfully. Occasionally used for debugging. */
+	 * @lock successfully. Occasionally used for debugging.
+	 */
 	char *last_locker;
 
 	/**
@@ -1552,7 +1541,7 @@ struct homa_peertab {
 	 * @write_lock: Synchronizes addition of new entries; not needed
 	 * for lookups (RCU is used instead).
 	 */
-	struct spinlock write_lock;
+	spinlock_t write_lock;
 
 	/**
 	 * @dead_dsts: List of dst_entries that are waiting to be deleted.
@@ -1687,7 +1676,7 @@ struct homa_peer {
 	/**
 	 * @ack_lock: used to synchronize access to @num_acks and @acks.
 	 */
-	struct spinlock ack_lock;
+	spinlock_t ack_lock;
 };
 
 /**
@@ -1709,8 +1698,7 @@ enum homa_freeze_type {
  * use by a single NUMA node. Access to these objects is synchronized with
  * @homa->page_pool_mutex.
  */
-struct homa_page_pool
-{
+struct homa_page_pool {
 	/** @avail: Number of free pages currently in the pool. */
 	int avail;
 
@@ -1751,13 +1739,13 @@ struct homa {
 	 * it could be a severe underestimate if there is competing traffic
 	 * from, say, TCP. Access only with atomic ops.
 	 */
-	atomic64_t link_idle_time __attribute__((aligned(CACHE_LINE_SIZE)));
+	atomic64_t link_idle_time __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @grantable_lock: Used to synchronize access to grant-related
 	 * fields below, from @grantable_peers to @last_grantable_change.
 	 */
-	struct spinlock grantable_lock __attribute__((aligned(CACHE_LINE_SIZE)));
+	spinlock_t grantable_lock __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @grantable_lock_time: get_cycles() time when grantable_lock
@@ -1856,7 +1844,7 @@ struct homa {
 	 * @pacer_mutex: Ensures that only one instance of homa_pacer_xmit
 	 * runs at a time. Only used in "try" mode: never block on this.
 	 */
-	struct spinlock pacer_mutex __attribute__((aligned(CACHE_LINE_SIZE)));
+	spinlock_t pacer_mutex __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when
@@ -1882,7 +1870,7 @@ struct homa {
 	 * insert or remove an RPC from throttled_rpcs, must first acquire
 	 * the RPC's socket lock, then this lock.
 	 */
-	struct spinlock throttle_lock;
+	spinlock_t throttle_lock;
 
 	/**
 	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
@@ -1918,7 +1906,7 @@ struct homa {
 	 * a peer sends more bytes than granted (see synchronization note in
 	 * homa_send_grants for why we have to allow this possibility).
 	 */
-	atomic_t total_incoming __attribute__((aligned(CACHE_LINE_SIZE)));
+	atomic_t total_incoming __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @next_client_port: A client port number to consider for the
@@ -1926,23 +1914,23 @@ struct homa {
 	 * be in the range allocated for servers; must check before using.
 	 * This port may also be in use already; must check.
 	 */
-	__u16 next_client_port __attribute__((aligned(CACHE_LINE_SIZE)));
+	__u16 next_client_port __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @port_map: Information about all open sockets.
 	 */
-	struct homa_socktab port_map __attribute__((aligned(CACHE_LINE_SIZE)));
+	struct homa_socktab port_map __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated with.
 	 */
 	struct homa_peertab peers;
 
-        /**
+	/**
 	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
 	 * used for outgoing sk_buff data.
 	 */
-	struct spinlock page_pool_mutex __attribute__((aligned(CACHE_LINE_SIZE)));
+	spinlock_t page_pool_mutex __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @skb_page_frees_per_sec: Rate at which to return pages from sk_buff
@@ -1957,7 +1945,7 @@ struct homa {
 	 */
 	struct page **skb_pages_to_free;
 
-        /**
+	/**
 	 * @pages_to_free_slot: Maximum number of pages that can be
 	 * stored in skb_pages_to_free;
 	 */
@@ -2290,7 +2278,7 @@ struct homa {
 	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
 	 * and updates to @metrics.
 	 */
-	struct spinlock metrics_lock;
+	spinlock_t metrics_lock;
 
 	/*
 	 * @metrics: a human-readable string containing recent values
@@ -2298,7 +2286,7 @@ struct homa {
 	 * homa_append_metric. This string is kmalloc-ed; NULL means
 	 * homa_append_metric has never been called.
 	 */
-	char* metrics;
+	char *metrics;
 
 	/** @metrics_capacity: number of bytes available at metrics. */
 	size_t metrics_capacity;
@@ -2547,7 +2535,8 @@ struct homa_metrics {
 	__u64 send_cycles;
 
 	/** @send_calls: total number of invocations of homa_semdmsg
-	 * for requests. */
+	 * for requests.
+	 */
 	__u64 send_calls;
 
 	/**
@@ -3068,17 +3057,17 @@ struct homa_core {
 	 */
 	__u64 last_app_active;
 
-        /**
-         * held_skb: last packet buffer known to be available for
-         * merging other packets into on this core (note: may not still
-         * be available), or NULL if none.
-         */
-        struct sk_buff *held_skb;
+	/**
+	 * held_skb: last packet buffer known to be available for
+	 * merging other packets into on this core (note: may not still
+	 * be available), or NULL if none.
+	 */
+	struct sk_buff *held_skb;
 
 	/**
 	 * @held_bucket: the index, within napi->gro_hash, of the list
-         * containing @held_skb; undefined if @held_skb is NULL. Used to
-         * verify that @held_skb is still available.
+	 * containing @held_skb; undefined if @held_skb is NULL. Used to
+	 * verify that @held_skb is still available.
 	 */
 	int held_bucket;
 
@@ -3101,7 +3090,7 @@ struct homa_core {
 	 */
 	int rpcs_locked;
 
-        /**
+	/**
 	 * @skb_page: a page of data available being used for skb frags.
 	 * This pointer is included in the page's reference count.
 	 */
@@ -3130,7 +3119,7 @@ struct homa_core {
 	 */
 	int num_stashed_pages;
 
-        /**
+	/**
 	 * @stashed_pages: use to prefetch from the cache all of the pages a
 	 * message will need with a single operation, to avoid having to
 	 * synchronize separately for each page. Note: these pages are all
@@ -3168,7 +3157,7 @@ struct homa_skb_info {
 	 */
 	int data_bytes;
 
-        /** @seg_length: maximum number of data bytes in each GSO segment. */
+	/** @seg_length: maximum number of data bytes in each GSO segment. */
 	int seg_length;
 
 	/**
@@ -3224,13 +3213,14 @@ static inline __u64 homa_local_id(__be64 sender_id)
  * @locker:    Static string identifying the locking code. Normally ignored,
  *             but used occasionally for diagnostics and debugging.
  */
-inline static void homa_bucket_lock(struct homa_rpc_bucket *bucket,
-		__u64 id, char *locker)
+static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket,
+		__u64 id, const char *locker)
 {
 	int core = raw_smp_processor_id();
+
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);
-	homa_cores[core]->rpcs_locked ++;
+	homa_cores[core]->rpcs_locked++;
 	BUG_ON(homa_cores[core]->rpcs_locked > 1);
 }
 
@@ -3244,13 +3234,14 @@ inline static void homa_bucket_lock(struct homa_rpc_bucket *bucket,
  * Return:     Nonzero if lock was successfully acquired, zero if it is
  *             currently owned by someone else.
  */
-inline static int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
-		__u64 id, char *locker)
+static inline int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
+		__u64 id, const char *locker)
 {
 	int core = raw_smp_processor_id();
+
 	if (!spin_trylock_bh(&bucket->lock))
 		return 0;
-	homa_cores[core]->rpcs_locked ++;
+	homa_cores[core]->rpcs_locked++;
 	BUG_ON(homa_cores[core]->rpcs_locked > 1);
 	return 1;
 }
@@ -3260,7 +3251,7 @@ inline static int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
  * @bucket:   Bucket to unlock.
  * @id:       ID of the RPC that was using the lock.
  */
-inline static void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
+static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
 {
 	homa_cores[raw_smp_processor_id()]->rpcs_locked--;
 	spin_unlock_bh(&bucket->lock);
@@ -3279,7 +3270,8 @@ inline static void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
  * @locker: Static string identifying the locking code. Normally ignored,
  *          but used occasionally for diagnostics and debugging.
  */
-inline static void homa_rpc_lock(struct homa_rpc *rpc, char *locker) {
+static inline void homa_rpc_lock(struct homa_rpc *rpc, const char *locker)
+{
 	homa_bucket_lock(rpc->bucket, rpc->id, locker);
 }
 
@@ -3287,7 +3279,8 @@ inline static void homa_rpc_lock(struct homa_rpc *rpc, char *locker) {
  * homa_rpc_unlock() - Release the lock for an RPC.
  * @rpc:   RPC to unlock.
  */
-inline static void homa_rpc_unlock(struct homa_rpc *rpc) {
+static inline void homa_rpc_unlock(struct homa_rpc *rpc)
+{
 	homa_bucket_unlock(rpc->bucket, rpc->id);
 }
 
@@ -3321,7 +3314,7 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
  */
 static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
 {
-	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char*));
+	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char *));
 }
 
 /**
@@ -3384,7 +3377,8 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
  * @locker:  Static string identifying where the socket was locked;
  *           used to track down deadlocks.
  */
-static inline void homa_sock_lock(struct homa_sock *hsk, char *locker) {
+static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
+{
 	if (!spin_trylock_bh(&hsk->lock)) {
 //		printk(KERN_NOTICE "Slow path for socket %d, last locker %s",
 //				hsk->client_port, hsk->last_locker);
@@ -3397,7 +3391,8 @@ static inline void homa_sock_lock(struct homa_sock *hsk, char *locker) {
  * homa_sock_unlock() - Release the lock for a socket.
  * @hsk:   Socket to lock.
  */
-static inline void homa_sock_unlock(struct homa_sock *hsk) {
+static inline void homa_sock_unlock(struct homa_sock *hsk)
+{
 	spin_unlock_bh(&hsk->lock);
 }
 
@@ -3408,9 +3403,8 @@ static inline void homa_sock_unlock(struct homa_sock *hsk) {
  */
 static inline void homa_peer_lock(struct homa_peer *peer)
 {
-	if (!spin_trylock_bh(&peer->ack_lock)) {
+	if (!spin_trylock_bh(&peer->ack_lock))
 		homa_peer_lock_slow(peer);
-	}
 }
 
 /**
@@ -3424,10 +3418,9 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
 
 /**
  * homa_protect_rpcs() - Ensures that no RPCs will be reaped for a given
- * socket until until homa_sock_unprotect is called. Typically
- * used by functions that want to scan the active RPCs for a socket
- * without holding the socket lock.  Multiple calls to this function may
- * be in effect at once.
+ * socket until homa_sock_unprotect is called. Typically used by functions
+ * that want to scan the active RPCs for a socket without holding the socket
+ * lock.  Multiple calls to this function may be in effect at once.
  * @hsk:    Socket whose RPCs should be protected. Must not be locked
  *          by the caller; will be locked here.
  *
@@ -3437,7 +3430,8 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
 static inline int homa_protect_rpcs(struct homa_sock *hsk)
 {
 	int result;
-	homa_sock_lock(hsk, "homa_sock_protect");
+
+	homa_sock_lock(hsk, __func__);
 	result = !hsk->shutdown;
 	if (result)
 		atomic_inc(&hsk->protect_count);
@@ -3496,9 +3490,8 @@ static inline void homa_grantable_unlock(struct homa *homa)
  */
 static inline void homa_throttle_lock(struct homa *homa)
 {
-	if (!spin_trylock_bh(&homa->throttle_lock)) {
+	if (!spin_trylock_bh(&homa->throttle_lock))
 		homa_throttle_lock_slow(homa);
-	}
 }
 
 /**
@@ -3526,7 +3519,9 @@ static inline bool skb_is_ipv6(const struct sk_buff *skb)
 static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
 {
 	struct in6_addr ret = {};
-	if (ip4 == INADDR_ANY) return in6addr_any;
+
+	if (ip4 == INADDR_ANY)
+		return in6addr_any;
 	ret.in6_u.u6_addr32[2] = htonl(0xffff);
 	ret.in6_u.u6_addr32[3] = ip4;
 	return ret;
@@ -3548,7 +3543,7 @@ static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
  * was IPv4, convert it to an IPv4-mapped IPv6 address.
  * @addr:   Address to canonicalize.
  */
-static inline struct in6_addr canonical_ipv6_addr(const sockaddr_in_union *addr)
+static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union *addr)
 {
 	if (addr) {
 		return (addr->sa.sa_family == AF_INET6)
@@ -3587,6 +3582,7 @@ static inline bool is_mapped_ipv4(const struct in6_addr x)
 static inline bool is_homa_pkt(struct sk_buff *skb)
 {
 	struct iphdr *iph = ip_hdr(skb);
+
 	return ((iph->protocol == IPPROTO_HOMA) ||
 			((iph->protocol == IPPROTO_TCP) &&
 			(tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
@@ -3605,8 +3601,8 @@ static inline __be32 tt_addr(const struct in6_addr x)
 }
 
 #ifdef __UNIT_TEST__
-extern void unit_log_printf(const char *separator, const char* format, ...)
-		__attribute__((format(printf, 2, 3)));
+extern void unit_log_printf(const char *separator, const char *format, ...)
+		__printf(2, 3);
 #define UNIT_LOG unit_log_printf
 extern void unit_hook(char *id);
 #define UNIT_HOOK(msg) unit_hook(msg)
@@ -3622,42 +3618,43 @@ extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_rpc *rpc);
 extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
 extern void     homa_add_to_throttled(struct homa_rpc *rpc);
-extern void     homa_append_metric(struct homa *homa, const char* format, ...);
+extern void     homa_append_metric(struct homa *homa, const char *format, ...);
 extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
-                    int addr_len);
+		    int addr_len);
 extern void     homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id);
 extern void     homa_check_rpc(struct homa_rpc *rpc);
 extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
-                    bool force);
+		    bool force);
 extern struct homa_rpc
 	       *homa_choose_fifo_grant(struct homa *homa);
 extern struct homa_interest
-               *homa_choose_interest(struct homa *homa, struct list_head *head,
-	            int offset);
+	       *homa_choose_interest(struct homa *homa, struct list_head *head,
+		    int offset);
 extern void     homa_close(struct sock *sock, long timeout);
 extern int      homa_copy_to_user(struct homa_rpc *rpc);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 extern void     homa_data_from_server(struct sk_buff *skb,
-                    struct homa_rpc *crpc);
+		    struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
 extern int      homa_dointvec(struct ctl_table *table, int write,
-                    void __user *buffer, size_t *lenp, loff_t *ppos);
+		    void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_dst_refresh(struct homa_peertab *peertab,
-                    struct homa_peer *peer, struct homa_sock *hsk);
+		    struct homa_peer *peer, struct homa_sock *hsk);
 extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
-extern int      homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *
-                    , u8,  u8,  int,  __be32);
+extern int      homa_err_handler_v6(struct sk_buff *skb,
+		    struct inet6_skb_parm *opt, u8 type,  u8 code,  int offset,
+		    __be32 info);
 extern int      homa_fill_data_interleaved(struct homa_rpc *rpc,
 		    struct sk_buff *skb, struct iov_iter *iter);
 extern struct homa_rpc
-               *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
+	       *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 extern struct homa_rpc
-               *homa_find_server_rpc(struct homa_sock *hsk,
+	       *homa_find_server_rpc(struct homa_sock *hsk,
 		const struct in6_addr *saddr, __u16 sport, __u64 id);
 extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		    char *format);
@@ -3667,7 +3664,7 @@ extern struct homa_gap
 extern void     homa_gap_retry(struct homa_rpc *rpc);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
-                    char __user *optval, int __user *option);
+		   char __user *optval, int __user *option);
 extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
 extern void     homa_grant_check_rpc(struct homa_rpc *rpc);
 extern void     homa_grant_find_oldest(struct homa *homa);
@@ -3689,14 +3686,14 @@ extern void     homa_gro_gen3(struct sk_buff *skb);
 extern void     homa_gro_hook_tcp(void);
 extern void     homa_gro_unhook_tcp(void);
 extern struct sk_buff
-               *homa_gro_receive(struct list_head *gro_list,
-                    struct sk_buff *skb);
+	       *homa_gro_receive(struct list_head *gro_list,
+		    struct sk_buff *skb);
 extern struct sk_buff
-               *homa_gso_segment(struct sk_buff *skb,
+	       *homa_gso_segment(struct sk_buff *skb,
 		    netdev_features_t features);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
-                homa_hrtimer(struct hrtimer *timer);
+		homa_hrtimer(struct hrtimer *timer);
 extern int      homa_init(struct homa *homa);
 extern void     homa_incoming_sysctl_changed(struct homa *homa);
 extern int      homa_ioc_abort(struct sock *sk, int *karg);
@@ -3711,12 +3708,12 @@ extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
 		    int whence);
 extern int      homa_metrics_open(struct inode *inode, struct file *file);
 extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
-                    size_t length, loff_t *offset);
+		    size_t length, loff_t *offset);
 extern int      homa_metrics_release(struct inode *inode, struct file *file);
 extern void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		    struct homa_rpc *rpc);
 extern struct sk_buff
-               *homa_new_data_packet(struct homa_rpc *rpc,
+	       *homa_new_data_packet(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int offset, int length,
 		    int max_seg_data);
 extern int      homa_offload_end(void);
@@ -3732,18 +3729,18 @@ extern struct homa_peer **
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern void     homa_peer_add_ack(struct homa_rpc *rpc);
 extern struct homa_peer
-               *homa_peer_find(struct homa_peertab *peertab,
+	       *homa_peer_find(struct homa_peertab *peertab,
 		    const struct in6_addr *addr, struct inet_sock *inet);
 extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
 		    struct homa_ack *dst);
 extern struct dst_entry
-               *homa_peer_get_dst(struct homa_peer *peer,
+	       *homa_peer_get_dst(struct homa_peer *peer,
 		    struct inet_sock *inet);
 extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
-                    int c2, int c3, int c4, int c5, int c6, int c7);
+		    int c2, int c3, int c4, int c5, int c6, int c7);
 extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 extern __poll_t homa_poll(struct file *file, struct socket *sock,
-                    struct poll_table_struct *wait);
+		    struct poll_table_struct *wait);
 extern int      homa_pool_allocate(struct homa_rpc *rpc);
 extern void     homa_pool_check_waiting(struct homa_pool *pool);
 extern void     homa_pool_destroy(struct homa_pool *pool);
@@ -3760,20 +3757,20 @@ extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 extern char    *homa_print_metrics(struct homa *homa);
 extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
-                    int buf_len);
+		    int buf_len);
 extern void     homa_prios_changed(struct homa *homa);
 extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
-                    int count, int *eof, void *data);
+		    int count, int *eof, void *data);
 extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-                    int flags, int *addr_len);
+		    int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
-                    struct homa_sock *hsk, int flags, __u64 id);
+		    struct homa_sock *hsk, int flags, __u64 id);
 extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_from_throttled(struct homa_rpc *rpc);
 extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
-                    int priority);
+		    int priority);
 extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
-                    struct homa_sock *hsk);
+		    struct homa_sock *hsk);
 extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 extern void     homa_rpc_acked(struct homa_sock *hsk,
 		    const struct in6_addr *saddr, struct homa_ack *ack);
@@ -3785,17 +3782,17 @@ extern void     homa_rpc_log_tt(struct homa_rpc *rpc);
 extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 extern void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 extern struct homa_rpc
-               *homa_rpc_new_client(struct homa_sock *hsk,
-                    const sockaddr_in_union *dest);
+	       *homa_rpc_new_client(struct homa_sock *hsk,
+	    const union sockaddr_in_union *dest);
 extern struct homa_rpc
-               *homa_rpc_new_server(struct homa_sock *hsk,
+	       *homa_rpc_new_server(struct homa_sock *hsk,
 		    const struct in6_addr *source, struct data_header *h,
 		    int *created);
 extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
 extern void     homa_send_ipis(void);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-                    sockptr_t __user optval, unsigned int optlen);
+		    sockptr_t __user optval, unsigned int optlen);
 extern int      homa_shutdown(struct socket *sock, int how);
 extern int      homa_skb_append_from_iter(struct homa *homa,
 		    struct sk_buff *skb, struct iov_iter *iter, int length);
@@ -3821,52 +3818,51 @@ extern void     homa_skb_page_pool_init(struct homa_page_pool *pool);
 extern void     homa_skb_release_pages(struct homa *homa);
 extern void     homa_skb_stash_pages(struct homa *homa, int length);
 extern int      homa_snprintf(char *buffer, int size, int used,
-                    const char *format, ...)
-                    __attribute__((format(printf, 4, 5)));
+		    const char *format, ...) __printf(4, 5);
 extern int      homa_sock_bind(struct homa_socktab *socktab,
-                    struct homa_sock *hsk, __u16 port);
+		    struct homa_sock *hsk, __u16 port);
 extern void     homa_sock_destroy(struct homa_sock *hsk);
 extern struct homa_sock *
-                    homa_sock_find(struct homa_socktab *socktab, __u16 port);
+		    homa_sock_find(struct homa_socktab *socktab, __u16 port);
 extern void     homa_sock_init(struct homa_sock *hsk, struct homa *homa);
 extern void     homa_sock_shutdown(struct homa_sock *hsk);
 extern int      homa_socket(struct sock *sk);
 extern void     homa_socktab_destroy(struct homa_socktab *socktab);
 extern void     homa_socktab_init(struct homa_socktab *socktab);
 extern struct homa_sock
-               *homa_socktab_next(struct homa_socktab_scan *scan);
+	       *homa_socktab_next(struct homa_socktab_scan *scan);
 extern struct homa_sock
-               *homa_socktab_start_scan(struct homa_socktab *socktab,
-                    struct homa_socktab_scan *scan);
+	       *homa_socktab_start_scan(struct homa_socktab *socktab,
+		    struct homa_socktab_scan *scan);
 extern int      homa_softirq(struct sk_buff *skb);
 extern void     homa_spin(int ns);
 extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
-                    void __user *buffer, size_t *lenp, loff_t *ppos);
+		    void __user *buffer, size_t *lenp, loff_t *ppos);
 extern struct sk_buff
-               *homa_tcp_gro_receive(struct list_head *held_list,
+	       *homa_tcp_gro_receive(struct list_head *held_list,
 		    struct sk_buff *skb);
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
 extern void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_unsched_priority(struct homa *homa,
-                    struct homa_peer *peer, int length);
+		    struct homa_peer *peer, int length);
 extern int      homa_v4_early_demux(struct sk_buff *skb);
 extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int      homa_validate_incoming(struct homa *homa, int verbose,
 		    int *link_errors);
 extern struct homa_rpc
-               *homa_wait_for_message(struct homa_sock *hsk, int flags,
-                    __u64 id);
+	       *homa_wait_for_message(struct homa_sock *hsk, int flags,
+		    __u64 id);
 extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
-                    size_t length, struct homa_rpc *rpc);
+		    size_t length, struct homa_rpc *rpc);
 extern int      __homa_xmit_control(void *contents, size_t length,
-                    struct homa_peer *peer, struct homa_sock *hsk);
+		    struct homa_peer *peer, struct homa_sock *hsk);
 extern void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
-                    int priority);
+		    int priority);
 extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 /**

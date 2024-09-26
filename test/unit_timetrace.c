@@ -90,7 +90,7 @@ TEST_F(timetrace, tt_record_buf__wraparound)
 
 TEST_F(timetrace, tt_find_oldest)
 {
-	int pos[NR_CPUS];
+	int pos[nr_cpu_ids];
 	tt_buffer_size = 4;
 
 	tt_record_buf(tt_buffers[0], 1500, "Buf0", 0, 0, 0, 0);

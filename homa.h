@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+/* SPDX-License-Identifier: BSD-2-Clause */
 
 /* This file defines the kernel call interface for the Homa
  * transport protocol.
@@ -57,11 +55,11 @@ extern "C"
  * Holds either an IPv4 or IPv6 address (smaller and easier to use than
  * sockaddr_storage).
  */
-typedef union sockaddr_in_union {
+union sockaddr_in_union {
 	struct sockaddr sa;
 	struct sockaddr_in in4;
 	struct sockaddr_in6 in6;
-} sockaddr_in_union;
+};
 
 /**
  * struct homa_sendmsg_args - Provides information needed by Homa's
@@ -122,7 +120,7 @@ struct homa_recvmsg_args {
 	 * always be set when peer information is available, which includes
 	 * some error cases.
 	 */
-	sockaddr_in_union peer_addr;
+	union sockaddr_in_union peer_addr;
 
 	/**
 	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
@@ -216,16 +214,16 @@ struct homa_set_buf_args {
 extern int     homa_abortp(int fd, struct homa_abort_args *args);
 
 extern int     homa_send(int sockfd, const void *message_buf,
-		size_t length, const sockaddr_in_union *dest_addr,
+		size_t length, const union sockaddr_in_union *dest_addr,
 		uint64_t *id, uint64_t completion_cookie);
 extern int     homa_sendv(int sockfd, const struct iovec *iov,
-		int iovcnt, const sockaddr_in_union *dest_addr,
+		int iovcnt, const union sockaddr_in_union *dest_addr,
 		uint64_t *id, uint64_t completion_cookie);
 extern ssize_t homa_reply(int sockfd, const void *message_buf,
-		size_t length, const sockaddr_in_union *dest_addr,
+		size_t length, const union sockaddr_in_union *dest_addr,
 		uint64_t id);
 extern ssize_t homa_replyv(int sockfd, const struct iovec *iov,
-		int iovcnt, const sockaddr_in_union *dest_addr,
+		int iovcnt, const union sockaddr_in_union *dest_addr,
 		uint64_t id);
 extern int     homa_abort(int sockfd, uint64_t id, int error);
 

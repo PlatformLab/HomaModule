@@ -1,6 +1,4 @@
-/* Copyright (c) 2022-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 
@@ -29,7 +27,8 @@
  * The caller must own the lock for @pool->hsk.
  * @pool: Pool to update.
  */
-inline static void set_bpages_needed(struct homa_pool *pool) {
+static inline void set_bpages_needed(struct homa_pool *pool)
+{
 	struct homa_rpc *rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
 			struct homa_rpc, buf_links);
 	pool->bpages_needed = (rpc->msgin.length + HOMA_BPAGE_SIZE - 1)
@@ -61,15 +60,15 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 		result = -EINVAL;
 		goto error;
 	}
-	pool->descriptors = (struct homa_bpage *) kmalloc(
-			pool->num_bpages * sizeof(struct homa_bpage),
-			GFP_ATOMIC);
+	pool->descriptors = kmalloc_array(pool->num_bpages,
+			sizeof(struct homa_bpage), GFP_ATOMIC);
 	if (!pool->descriptors) {
 		result = -ENOMEM;
 		goto error;
 	}
 	for (i = 0; i < pool->num_bpages; i++) {
 		struct homa_bpage *bp = &pool->descriptors[i];
+
 		spin_lock_init(&bp->lock);
 		atomic_set(&bp->refs, 0);
 		bp->owner = -1;
@@ -79,8 +78,8 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 	pool->bpages_needed = INT_MAX;
 
 	/* Allocate and initialize core-specific data. */
-	pool->cores = (struct homa_pool_core *) kmalloc(nr_cpu_ids *
-			sizeof(struct homa_pool_core), GFP_ATOMIC);
+	pool->cores = kmalloc_array(nr_cpu_ids, sizeof(struct homa_pool_core),
+			GFP_ATOMIC);
 	if (!pool->cores) {
 		result = -ENOMEM;
 		goto error;
@@ -95,11 +94,9 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 
 	return 0;
 
-	error:
-	if (pool->descriptors)
-		kfree(pool->descriptors);
-	if (pool->cores)
-		kfree(pool->cores);
+error:
+	kfree(pool->descriptors);
+	kfree(pool->cores);
 	pool->region = NULL;
 	return result;
 }
@@ -130,7 +127,7 @@ void homa_pool_destroy(struct homa_pool *pool)
  *                of the allocated pages (and the expiration time is also
  *                set). Otherwise the pages are left unowned.
  * Return: 0 for success, -1 if there wasn't enough free space in the pool.
-*/
+ */
 int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		int set_owner)
 {
@@ -163,6 +160,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		 */
 		if (limit == 0) {
 			int extra;
+
 			limit = pool->num_bpages
 					- atomic_read(&pool->free_bpages);
 			extra = limit>>2;
@@ -295,7 +293,7 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	goto allocate_partial;
 
 	/* Can't use the current page; get another one. */
-	new_page:
+new_page:
 	if (homa_pool_get_pages(pool, 1, pages, 1) != 0) {
 		homa_pool_release_buffers(pool, rpc->msgin.num_bpages,
 				rpc->msgin.bpage_offsets);
@@ -305,15 +303,14 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	core->page_hint = pages[0];
 	core->allocated = 0;
 
-	allocate_partial:
+allocate_partial:
 	rpc->msgin.bpage_offsets[rpc->msgin.num_bpages] = core->allocated
 			+ (core->page_hint << HOMA_BPAGE_SHIFT);
 	rpc->msgin.num_bpages++;
 	core->allocated += partial;
 
-	success:
-	tt_record4("Allocated %d bpage pointers on port %d for id %d, "
-			"free_bpages now %d",
+success:
+	tt_record4("Allocated %d bpage pointers on port %d for id %d, free_bpages now %d",
 			rpc->msgin.num_bpages, pool->hsk->port, rpc->id,
 			atomic_read(&pool->free_bpages));
 	return 0;
@@ -321,10 +318,10 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	/* We get here if there wasn't enough buffer space for this
 	 * message; add the RPC to hsk->waiting_for_bufs.
 	 */
-	out_of_space:
+out_of_space:
 	INC_METRIC(buffer_alloc_failures, 1);
-	tt_record4("Buffer allocation failed, port %d, id %d, length %d, "
-			"free_bpages %d", pool->hsk->port, rpc->id,
+	tt_record4("Buffer allocation failed, port %d, id %d, length %d, free_bpages %d",
+			pool->hsk->port, rpc->id,
 			rpc->msgin.length,
 			atomic_read(&pool->free_bpages));
 	homa_sock_lock(pool->hsk, "homa_pool_allocate");
@@ -336,7 +333,7 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	}
 	list_add_tail_rcu(&rpc->buf_links, &pool->hsk->waiting_for_bufs);
 
-	queued:
+queued:
 	set_bpages_needed(pool);
 	homa_sock_unlock(pool->hsk);
 	return 0;
@@ -386,10 +383,11 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 		return;
 	for (i = 0; i < num_buffers; i++) {
 		__u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
-		struct homa_bpage *bpage= &pool->descriptors[bpage_index];
+		struct homa_bpage *bpage = &pool->descriptors[bpage_index];
+
 		if (bpage_index < pool->num_bpages) {
-			 if (atomic_dec_return(&bpage->refs) == 0)
-				 atomic_inc(&pool->free_bpages);
+			if (atomic_dec_return(&bpage->refs) == 0)
+				atomic_inc(&pool->free_bpages);
 		}
 	}
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
@@ -413,6 +411,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #endif
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
+
 		homa_sock_lock(pool->hsk, "buffer pool");
 		if (list_empty(&pool->hsk->waiting_for_bufs)) {
 			pool->bpages_needed = INT_MAX;
@@ -429,8 +428,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			 * operation again.
 			 */
 			homa_sock_unlock(pool->hsk);
-			UNIT_LOG("; ", "rpc lock unavailable in "
-					"homa_pool_release_buffers");
+			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
 			continue;
 		}
 		list_del_init(&rpc->buf_links);
@@ -439,8 +437,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		else
 			set_bpages_needed(pool);
 		homa_sock_unlock(pool->hsk);
-		tt_record4("Retrying buffer allocation for id %d, length %d, "
-				"free_bpages %d, new bpages_needed %d",
+		tt_record4("Retrying buffer allocation for id %d, length %d, free_bpages %d, new bpages_needed %d",
 				rpc->id, rpc->msgin.length,
 				atomic_read(&pool->free_bpages),
 				pool->bpages_needed);

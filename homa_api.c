@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file contains functions that implement the Homa API visible to
  * applications. It is intended to be part of the user-level run-time library.
@@ -204,5 +202,6 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 int homa_abort(int sockfd, uint64_t id, int error)
 {
 	struct homa_abort_args args = {id, error};
+
 	return ioctl(sockfd, HOMAIOCABORT, &args);
 }

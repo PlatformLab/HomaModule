@@ -21,7 +21,7 @@ FIXTURE(homa_utils) {
 	__u64 server_id;
 	struct homa homa;
 	struct homa_sock hsk;
-	sockaddr_in_union server_addr;
+	union sockaddr_in_union server_addr;
 	struct data_header data;
 	struct homa_rpc *crpc;
 	struct iovec iovec;

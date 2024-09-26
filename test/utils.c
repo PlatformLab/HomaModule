@@ -34,7 +34,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		int req_length, int resp_length)
 {
 	int bytes_received;
-	sockaddr_in_union server_addr;
+	union sockaddr_in_union server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
 
 	server_addr.in6.sin6_family = AF_INET6;

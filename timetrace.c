@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 
@@ -20,7 +18,7 @@ extern int       *tt_linux_homa_temp;
 extern int        tt_linux_homa_temp_default[];
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
-		      const char* format, __u32 arg0, __u32 arg1, __u32 arg2,
+		      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
 		      __u32 arg3);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
 extern void       (*tt_linux_printk)(void);
@@ -40,7 +38,7 @@ extern void       tt_inc_metric(int metric, __u64 count);
  * synchronization in tt_record, which improves performance significantly.
  * NR_CPUS is an overestimate of the actual number of cores; we use it
  * here, rather than nr_cpu_ids, because it allows for static allocation
- * of this array. And
+ * of this array.
  */
 struct tt_buffer *tt_buffers[NR_CPUS];
 
@@ -87,7 +85,7 @@ int tt_buffer_size = TT_BUF_SIZE;
 int tt_pf_storage = TT_PF_BUF_SIZE;
 
 /* Set during tests to disable "cpu_khz" line in trace output. */
-bool tt_test_no_khz = false;
+bool tt_test_no_khz;
 
 /**
  * tt_init(): Enable time tracing, create /proc file for reading traces.
@@ -105,16 +103,15 @@ int tt_init(char *proc_file, int *temp)
 {
 	int i;
 
-	if (init) {
+	if (init)
 		return 0;
-	}
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct tt_buffer *buffer;
+
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
 		if (buffer == NULL) {
-			printk(KERN_ERR "timetrace couldn't allocate "
-					"tt_buffers\n");
+			pr_err("timetrace couldn't allocate tt_buffers\n");
 			goto error;
 		}
 		memset(buffer, 0, sizeof(*buffer));
@@ -122,10 +119,10 @@ int tt_init(char *proc_file, int *temp)
 	}
 
 	if (proc_file != NULL) {
-		tt_dir_entry = proc_create(proc_file, S_IRUGO, NULL, &tt_pops);
+		tt_dir_entry = proc_create(proc_file, 0444, NULL, &tt_pops);
 		if (!tt_dir_entry) {
-			printk(KERN_ERR "couldn't create /proc/%s for timetrace "
-					"reading\n", proc_file);
+			pr_err("couldn't create /proc/%s for timetrace reading\n",
+					proc_file);
 			goto error;
 		}
 	} else {
@@ -138,9 +135,8 @@ int tt_init(char *proc_file, int *temp)
 	init = true;
 
 #ifdef TT_KERNEL
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for (i = 0; i < nr_cpu_ids; i++)
 		tt_linux_buffers[i] = tt_buffers[i];
-	}
 	tt_linux_record = tt_record_buf;
 	tt_linux_freeze = tt_freeze;
 	tt_linux_freeze_count = &tt_freeze_count;
@@ -155,7 +151,7 @@ int tt_init(char *proc_file, int *temp)
 
 	return 0;
 
-	error:
+error:
 	for (i = 0; i < nr_cpu_ids; i++) {
 		kfree(tt_buffers[i]);
 		tt_buffers[i] = NULL;
@@ -170,6 +166,7 @@ int tt_init(char *proc_file, int *temp)
 void tt_destroy(void)
 {
 	int i;
+
 	spin_lock(&tt_lock);
 	if (init) {
 		init = false;
@@ -186,9 +183,8 @@ void tt_destroy(void)
 	tt_linux_record = ltt_record_nop;
 	tt_linux_freeze = tt_linux_nop;
 	tt_linux_freeze_count = &tt_linux_freeze_no_homa;
-	for (i = 0; i < nr_cpu_ids; i++) {
+	for (i = 0; i < nr_cpu_ids; i++)
 		tt_linux_buffers[i] = NULL;
-	}
 	tt_linux_inc_metrics = tt_linux_skip_metrics;
 	tt_linux_printk = tt_linux_nop;
 	tt_linux_dbg1 = (void (*)(char *, ...)) tt_linux_nop;
@@ -214,7 +210,7 @@ void tt_freeze(void)
 	if (tt_frozen)
 		return;
 	tt_record("timetrace frozen");
-	printk(KERN_NOTICE "tt_freeze invoked\n");
+	pr_notice("%s invoked\n", __func__);
 	spin_lock(&tt_lock);
 	if (!tt_frozen) {
 		tt_frozen = true;
@@ -243,10 +239,11 @@ void tt_freeze(void)
  * @arg3:      Argument to use when printing a message about this event.
  */
 void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
-		const char* format, __u32 arg0, __u32 arg1, __u32 arg2,
+		const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
 		__u32 arg3)
 {
 	struct tt_event *event;
+
 	if (unlikely(atomic_read(&tt_freeze_count) > 0)) {
 		// In order to ensure that reads produce consistent
 		// results, don't record concurrently (this could cause
@@ -285,7 +282,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
  */
 void tt_find_oldest(int *pos)
 {
-	struct tt_buffer* buffer;
+	struct tt_buffer *buffer;
 	int i;
 	__u64 start_time = 0;
 
@@ -297,10 +294,10 @@ void tt_find_oldest(int *pos)
 			int index = (buffer->next_index + 1)
 					& (tt_buffer_size-1);
 			struct tt_event *event = &buffer->events[index];
+
 			pos[i] = index;
-			if (event->timestamp > start_time) {
+			if (event->timestamp > start_time)
 				start_time = event->timestamp;
-			}
 		}
 	}
 
@@ -326,7 +323,7 @@ void tt_find_oldest(int *pos)
  */
 int tt_proc_open(struct inode *inode, struct file *file)
 {
-	struct tt_proc_file* pf = NULL;
+	struct tt_proc_file *pf = NULL;
 	int result = 0;
 
 	spin_lock(&tt_lock);
@@ -352,7 +349,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 				"cpu_khz: %u\n", cpu_khz);
 	}
 
-	done:
+done:
 	spin_unlock(&tt_lock);
 	return result;
 }
@@ -381,8 +378,8 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 
 	spin_lock(&tt_lock);
 	if ((pf == NULL) || (pf->file != file)) {
-		printk(KERN_ERR "tt_metrics_read found damaged "
-				"private_data: 0x%p\n", file->private_data);
+		pr_err("tt_metrics_read found damaged private_data: 0x%p\n",
+				file->private_data);
 		copied_to_user = -EINVAL;
 		goto done;
 	}
@@ -403,16 +400,17 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
+
 			event = &buffer->events[pf->pos[i]];
 			if ((pf->pos[i] != buffer->next_index)
 					&& (event->timestamp < earliest_time)) {
-			    current_core = i;
-			    earliest_time = event->timestamp;
+				current_core = i;
+				earliest_time = event->timestamp;
 			}
 		}
 		if (current_core < 0) {
-		    /* None of the traces have any more events to process. */
-		    goto flush;
+			/* None of the traces have any more events. */
+			goto flush;
 		}
 
 		/* Format one event. */
@@ -420,13 +418,12 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 				pf->pos[current_core]]);
 		available = tt_pf_storage - (pf->next_byte + pf->bytes_available
 				- pf->msg_storage);
-		if (available == 0) {
+		if (available == 0)
 			goto flush;
-		}
 		entry_length = snprintf(pf->next_byte + pf->bytes_available,
 				available, "%lu [C%02d] ",
-				(long unsigned int) event->timestamp,
-			        current_core);
+				(unsigned long) event->timestamp,
+				current_core);
 		if (available >= entry_length)
 			entry_length += snprintf(pf->next_byte
 					+ pf->bytes_available + entry_length,
@@ -437,7 +434,8 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			/* Not enough room for this entry. */
 			if (pf->bytes_available == 0) {
 				/* Even a full buffer isn't enough for
-				 * this entry; truncate the entry. */
+				 * this entry; truncate the entry.
+				 */
 				entry_length = available - 1;
 			} else {
 				goto flush;
@@ -450,11 +448,10 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 				& (tt_buffer_size-1);
 		continue;
 
-		flush:
+flush:
 		chunk_size = pf->bytes_available;
-		if (chunk_size > (length - copied_to_user)) {
+		if (chunk_size > (length - copied_to_user))
 			chunk_size = length - copied_to_user;
-		}
 		if (chunk_size == 0)
 			goto done;
 		failed_to_copy = copy_to_user(user_buf + copied_to_user,
@@ -473,7 +470,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		}
 	}
 
-	done:
+done:
 	spin_unlock(&tt_lock);
 	return copied_to_user;
 }
@@ -503,11 +500,11 @@ loff_t tt_proc_lseek(struct file *file, loff_t offset, int whence)
 int tt_proc_release(struct inode *inode, struct file *file)
 {
 	int i;
-
 	struct tt_proc_file *pf = file->private_data;
+
 	if ((pf == NULL) || (pf->file != file)) {
-		printk(KERN_ERR "tt_metrics_release found damaged "
-				"private_data: 0x%p\n", file->private_data);
+		pr_err("tt_metrics_release found damaged private_data: 0x%p\n",
+				file->private_data);
 		return -EINVAL;
 	}
 
@@ -528,6 +525,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 			 */
 			for (i = 0; i < nr_cpu_ids; i++) {
 				struct tt_buffer *buffer = tt_buffers[i];
+
 				buffer->events[tt_buffer_size-1].format = NULL;
 				buffer->next_index = 0;
 			}
@@ -569,10 +567,8 @@ void tt_print_file(char *path)
 	int bytes_used = 0;
 	loff_t offset = 0;
 
-	printk(KERN_ERR "tt_print_file starting, file %s\n", path);
-
 	if (atomic_xchg(&active, 1)) {
-		printk(KERN_ERR "concurrent call to tt_print_file aborting\n");
+		pr_err("concurrent call to %s aborting\n", __func__);
 		return;
 	}
 	if (!init)
@@ -580,13 +576,12 @@ void tt_print_file(char *path)
 
 	filp = filp_open(path, O_WRONLY | O_CREAT, 0666);
 	if (IS_ERR(filp)) {
-		printk(KERN_ERR "tt_print_file couldn't open %s: "
-				"error %ld\n", path, -PTR_ERR(filp));
+		pr_err("%s couldn't open %s: error %ld\n", __func__, path,
+				-PTR_ERR(filp));
 		filp = NULL;
 		goto done;
 	}
 
-	tt_record("tt_print_file printing timetrace");
 	atomic_inc(&tt_freeze_count);
 	tt_find_oldest(pos);
 
@@ -604,16 +599,17 @@ void tt_print_file(char *path)
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
+
 			event = &buffer->events[pos[i]];
 			if ((pos[i] != buffer->next_index)
 					&& (event->timestamp < earliest_time)) {
-			    current_core = i;
-			    earliest_time = event->timestamp;
+				current_core = i;
+				earliest_time = event->timestamp;
 			}
 		}
 		if (current_core < 0) {
-		    /* None of the traces have any more events to process. */
-		    break;
+			/* None of the traces have any more events. */
+			break;
 		}
 		event = &(tt_buffers[current_core]->events[
 				pos[current_core]]);
@@ -623,7 +619,7 @@ void tt_print_file(char *path)
 		bytes_used += snprintf(buffer + bytes_used,
 				sizeof(buffer) - bytes_used,
 				"%lu [C%02d] ",
-				(long unsigned int) event->timestamp,
+				(unsigned long) event->timestamp,
 				current_core);
 		bytes_used += snprintf(buffer + bytes_used,
 				sizeof(buffer) - bytes_used,
@@ -637,9 +633,8 @@ void tt_print_file(char *path)
 			err = kernel_write(filp, buffer, bytes_used,
 					&offset);
 			if (err < 0) {
-				printk(KERN_NOTICE "tt_print_file got "
-						"error %d writing %s\n",
-						-err, path);
+				pr_notice("%s got error %d writing %s\n",
+						__func__, -err, path);
 				goto done;
 			}
 			bytes_used = 0;
@@ -648,25 +643,22 @@ void tt_print_file(char *path)
 	if (bytes_used > 0) {
 		err = kernel_write(filp, buffer, bytes_used, &offset);
 		if (err < 0)
-			printk(KERN_ERR "tt_print_file got error %d "
-					"writing %s\n", -err, path);
+			pr_err("%s got error %d writing %s\n",
+					__func__, -err, path);
 	}
 
-	printk(KERN_ERR "tt_print_file finishing up\n");
-	done:
+done:
 	if (filp != NULL) {
 		err = vfs_fsync(filp, 0);
 		if (err < 0)
-			printk(KERN_ERR "tt_print_file got error %d "
-					"in fsync\n", -err);
+			pr_err("%s got error %d in fsync\n", __func__, -err);
 		err = filp_close(filp, NULL);
 		if (err < 0)
-			printk(KERN_ERR "tt_print_file got error %d "
-					"in filp_close\n", -err);
+			pr_err("%s got error %d in filp_close\n", __func__,
+					-err);
 	}
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
-	printk(KERN_ERR "tt_print_file(%s) finished\n", path);
 }
 
 /**
@@ -687,7 +679,7 @@ void tt_printk(void)
 	static atomic_t active;
 
 	if (atomic_xchg(&active, 1)) {
-		printk(KERN_NOTICE "concurrent call to tt_printk aborting\n");
+		pr_notice("concurrent call to %s aborting\n", __func__);
 		return;
 	}
 	if (!init)
@@ -695,7 +687,7 @@ void tt_printk(void)
 	atomic_inc(&tt_freeze_count);
 	tt_find_oldest(pos);
 
-	printk(KERN_NOTICE "cpu_khz: %u\n", cpu_khz);
+	pr_notice("cpu_khz: %u\n", cpu_khz);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
@@ -708,16 +700,17 @@ void tt_printk(void)
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
+
 			event = &buffer->events[pos[i]];
 			if ((pos[i] != buffer->next_index)
 					&& (event->timestamp < earliest_time)) {
-			    current_core = i;
-			    earliest_time = event->timestamp;
+				current_core = i;
+				earliest_time = event->timestamp;
 			}
 		}
 		if (current_core < 0) {
-		    /* None of the traces have any more events to process. */
-		    break;
+			/* None of the traces have any more events. */
+			break;
 		}
 		event = &(tt_buffers[current_core]->events[
 				pos[current_core]]);
@@ -726,8 +719,8 @@ void tt_printk(void)
 
 		snprintf(msg, sizeof(msg), event->format, event->arg0,
 				event->arg1, event->arg2, event->arg3);
-		printk(KERN_NOTICE  "%lu [C%02d] %s\n",
-				(long unsigned int) event->timestamp,
+		pr_notice("%lu [C%02d] %s\n",
+				(unsigned long) event->timestamp,
 				current_core, msg);
 	}
 
@@ -748,7 +741,7 @@ void tt_get_messages(char *buffer, size_t length)
 	/* Index of the next entry to return from each tt_buffer (too
 	 * large to allocate on stack, so allocate dynamically).
 	 */
-	int *pos = kmalloc(NR_CPUS * sizeof(int), GFP_KERNEL);
+	int *pos = kmalloc(nr_cpu_ids * sizeof(int), GFP_KERNEL);
 	int printed = 0;
 
 	*buffer = 0;
@@ -767,16 +760,17 @@ void tt_get_messages(char *buffer, size_t length)
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
+
 			event = &buffer->events[pos[i]];
 			if ((pos[i] != buffer->next_index)
 					&& (event->timestamp < earliest_time)) {
-			    current_core = i;
-			    earliest_time = event->timestamp;
+				current_core = i;
+				earliest_time = event->timestamp;
 			}
 		}
 		if (current_core < 0) {
-		    /* None of the traces have any more events to process. */
-		    break;
+			/* None of the traces have any more events. */
+			break;
 		}
 		event = &(tt_buffers[current_core]->events[
 				pos[current_core]]);
@@ -800,7 +794,7 @@ void tt_get_messages(char *buffer, size_t length)
 
 	atomic_dec(&tt_freeze_count);
 
-	done:
+done:
 	kfree(pos);
 }
 

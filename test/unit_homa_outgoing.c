@@ -38,7 +38,7 @@ FIXTURE(homa_outgoing) {
 	__u64 server_id;
 	struct homa homa;
 	struct homa_sock hsk;
-	sockaddr_in_union server_addr;
+	union sockaddr_in_union server_addr;
 	struct homa_peer *peer;
 };
 FIXTURE_SETUP(homa_outgoing)

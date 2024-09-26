@@ -1,6 +1,4 @@
-/* Copyright (c) 2024 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file contains functions related to issuing grants for incoming
  * messages.
@@ -39,14 +37,17 @@ inline int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
  *         may be possible to send out additional grants to some RPCs (doing
  *         this is left to the caller).
  */
-inline int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa) {
+inline int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
+{
 	int incoming = rpc->msgin.granted - (rpc->msgin.length
 			- rpc->msgin.bytes_remaining);
+
 	if (incoming < 0)
 		incoming = 0;
 	if (incoming != rpc->msgin.rec_incoming) {
 		int delta = incoming - rpc->msgin.rec_incoming;
 		int old = atomic_fetch_add(delta, &homa->total_incoming);
+
 		rpc->msgin.rec_incoming = incoming;
 		return ((old >= homa->max_incoming)
 				&& ((old + delta) < homa->max_incoming));
@@ -76,6 +77,7 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		 * the peer's list.
 		 */
 		__u64 time = get_cycles();
+
 		INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
 				* (time - homa->last_grantable_change));
 		homa->last_grantable_change = time;
@@ -94,20 +96,22 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 			}
 		}
 		list_add_tail(&rpc->grantable_links, &peer->grantable_rpcs);
-	} else while (rpc != list_first_entry(&peer->grantable_rpcs,
-			struct homa_rpc, grantable_links)) {
-		/* Message is on the list, but its priority may have
-		 * increased because of the recent packet arrival. If so,
-		 * adjust its position in the list.
-		 */
-		candidate = list_prev_entry(rpc, grantable_links);
-		if (!homa_grant_outranks(rpc, candidate))
-			goto position_peer;
-		__list_del_entry(&candidate->grantable_links);
-		list_add(&candidate->grantable_links, &rpc->grantable_links);
+	} else {
+		while (rpc != list_first_entry(&peer->grantable_rpcs,
+				struct homa_rpc, grantable_links)) {
+			/* Message is on the list, but its priority may have
+			 * increased because of the recent packet arrival. If
+			 * so, adjust its position in the list.
+			 */
+			candidate = list_prev_entry(rpc, grantable_links);
+			if (!homa_grant_outranks(rpc, candidate))
+				goto position_peer;
+			__list_del_entry(&candidate->grantable_links);
+			list_add(&candidate->grantable_links, &rpc->grantable_links);
+		}
 	}
 
-    position_peer:
+position_peer:
 	/* At this point rpc is positioned correctly on the list for its peer.
 	 * However, the peer may need to be added to, or moved upward on,
 	 * homa->grantable_peers.
@@ -127,8 +131,8 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		list_add_tail(&peer->grantable_links, &homa->grantable_peers);
 		goto done;
 	}
-        /* The peer is on Homa's list, but it may need to move upward. */
-        while (peer != list_first_entry(&homa->grantable_peers,
+	/* The peer is on Homa's list, but it may need to move upward. */
+	while (peer != list_first_entry(&homa->grantable_peers,
 			struct homa_peer, grantable_links)) {
 		struct homa_peer *prev_peer = list_prev_entry(
 			peer, grantable_links);
@@ -139,7 +143,7 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		__list_del_entry(&prev_peer->grantable_links);
 		list_add(&prev_peer->grantable_links, &peer->grantable_links);
 	}
-	done:
+done:
 }
 
 /**
@@ -188,7 +192,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	 */
 	head =  list_first_entry(&peer->grantable_rpcs,
 			struct homa_rpc, grantable_links);
-        while (peer != list_last_entry(&homa->grantable_peers, struct homa_peer,
+	while (peer != list_last_entry(&homa->grantable_peers, struct homa_peer,
 			grantable_links)) {
 		struct homa_peer *next_peer = list_next_entry(
 				peer, grantable_links);
@@ -245,10 +249,10 @@ int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
 	grant.priority = rpc->msgin.priority;
 	grant.resend_all = rpc->msgin.resend_all;
 	rpc->msgin.resend_all = 0;
-	tt_record4("sending grant for id %llu, offset %d, priority %d, "
-			"increment %d", rpc->id, rpc->msgin.granted,
-			rpc->msgin.priority, increment);
-	homa_xmit_control(GRANT, &grant, sizeof(grant),rpc);
+	tt_record4("sending grant for id %llu, offset %d, priority %d, increment %d",
+			rpc->id, rpc->msgin.granted, rpc->msgin.priority,
+			increment);
+	homa_xmit_control(GRANT, &grant, sizeof(grant), rpc);
 	return 1;
 }
 
@@ -286,20 +290,20 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->msgin.granted >= rpc->msgin.length) {
-		homa_grant_update_incoming(rpc,homa);
+		homa_grant_update_incoming(rpc, homa);
 		homa_rpc_unlock(rpc);
 		goto done;
 	}
 
-	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, "
-			"recv_end %d, length %d", rpc->id, rpc->msgin.granted,
-			rpc->msgin.recv_end, rpc->msgin.length);
+	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
+			rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
+			rpc->msgin.length);
 
 	/* This message requires grants; if it is a new message, set up
 	 * granting.
 	 */
 	if (list_empty(&rpc->grantable_links)) {
-		homa_grant_update_incoming(rpc,homa);
+		homa_grant_update_incoming(rpc, homa);
 		homa_grantable_lock(homa, 0);
 		homa_grant_add_rpc(rpc);
 		recalc = ((homa->num_active_rpcs < homa->max_overcommit)
@@ -355,7 +359,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	homa_rpc_unlock(rpc);
 	if (recalc)
 		homa_grant_recalc(homa, 0);
-	done:
+done:
 	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
 
@@ -405,9 +409,8 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		atomic_inc(&homa->grant_recalc_count);
 
 		/* Clear the existing grant calculation. */
-		for (i = 0; i < homa->num_active_rpcs; i++) {
+		for (i = 0; i < homa->num_active_rpcs; i++)
 			atomic_set(&homa->active_rpcs[i]->msgin.rank, -1);
-		}
 
 		/* Recompute which RPCs we'll grant to and initialize info
 		 * about them.
@@ -653,8 +656,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 		}
 		if (recalc && atomic_read(&homa->grant_recalc_count)
 				!= starting_count) {
-			tt_record("skipping wait for grantable lock: recalc "
-					"elsewhere");
+			tt_record("skipping wait for grantable lock: recalc elsewhere");
 			break;
 		}
 	}

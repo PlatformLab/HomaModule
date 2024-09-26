@@ -1,9 +1,8 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file handles timing-related functions for Homa, such as retries
- * and timeouts. */
+ * and timeouts.
+ */
 
 #include "homa_impl.h"
 
@@ -31,9 +30,9 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			if ((rpc->done_timer_ticks + homa->request_ack_ticks
 					- 1 - homa->timer_ticks) & 1<<31) {
 				struct need_ack_header h;
+
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
-				tt_record4("Sent NEED_ACK for RPC id %d to "
-						"peer 0x%x, port %d, ticks %d",
+				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
 						rpc->id,
 						tt_addr(rpc->peer->addr),
 						rpc->dport, homa->timer_ticks
@@ -78,16 +77,14 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		return;
 	if (rpc->silent_ticks >= homa->timeout_ticks) {
 		INC_METRIC(rpc_timeouts, 1);
-		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, "
-				"state %d",
+		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
 				rpc->id, tt_addr(rpc->peer->addr), rpc->state);
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
 		homa_freeze_peers(homa);
 		tt_freeze();
 		if (homa->verbose)
-			printk(KERN_NOTICE "RPC id %llu, peer %s, aborted "
-					"because of timeout, state %d\n",
+			pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
 					rpc->id,
 					homa_print_ipv6_addr(&rpc->peer->addr),
 					rpc->state);
@@ -121,8 +118,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	if (homa_is_client(rpc->id)) {
 		us = "client";
 		them = "server";
-		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, "
-			   "offset %d",
+		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   rpc->dport, rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
@@ -132,8 +128,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	} else {
 		us = "server";
 		them = "client";
-		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d "
-				"offset %d",
+		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d offset %d",
 				rpc->id, tt_addr(rpc->peer->addr),
 				rpc->dport, rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
@@ -142,8 +137,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 				rpc->msgin.rec_incoming);
 	}
 	if (homa->verbose)
-		printk(KERN_NOTICE "Homa %s RESEND to %s %s:%d for id %llu, "
-				"offset %d, length %d\n", us, them,
+		pr_notice("Homa %s RESEND to %s %s:%d for id %llu, offset %d, length %d\n", us, them,
 				homa_print_ipv6_addr(&rpc->peer->addr),
 				rpc->dport, rpc->id, rpc->msgin.recv_end,
 				rpc->msgin.granted - rpc->msgin.recv_end);
@@ -165,8 +159,8 @@ void homa_timer(struct homa *homa)
 	int total_incoming_rpcs = 0;
 	int sum_incoming = 0;
 	int sum_incoming_rec = 0;
-	static __u64 prev_grant_count = 0;
-	static int zero_count = 0;
+	static __u64 prev_grant_count;
+	static int zero_count;
 	int core;
 	__u64 total_grants;
 
@@ -176,11 +170,11 @@ void homa_timer(struct homa *homa)
 	total_grants = 0;
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &homa_cores[core]->metrics;
+
 		total_grants += m->packets_sent[GRANT-DATA];
 	}
 
-	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, "
-		   "num_active_rpcs %d, new grants %d",
+	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
 		   atomic_read(&homa->total_incoming),
 		   homa->num_grantable_rpcs,
 		   homa->num_active_rpcs,
@@ -189,7 +183,7 @@ void homa_timer(struct homa *homa)
 			&& (homa->num_grantable_rpcs > 20)) {
 		zero_count++;
 		if ((zero_count > 3) && !tt_frozen && 0) {
-			printk(KERN_ERR "homa timer found no grants going out\n");
+			pr_err("%s found no grants going out\n", __func__);
 			homa_rpc_log_active_tt(homa, 0);
 			tt_record("freezing because no grants are going out");
 			homa_freeze_peers(homa);
@@ -208,8 +202,10 @@ void homa_timer(struct homa *homa)
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
 			/* If we get here, it means that homa_wait_for_message
 			 * isn't keeping up with RPC reaping, so we'll help
-			 * out.  See reap.txt for more info. */
+			 * out.  See reap.txt for more info.
+			 */
 			uint64_t start = get_cycles();
+
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, hsk->homa->reap_limit) == 0)
 				break;
@@ -253,8 +249,7 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	rcu_read_unlock();
-	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, "
-			"rec_sum %d, homa->total_incoming %d",
+	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 			total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 			atomic_read(&homa->total_incoming));
 

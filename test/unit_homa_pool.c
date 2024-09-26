@@ -519,8 +519,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 	unit_log_clear();
 	atomic_set(&pool->free_bpages, 1);
 	homa_pool_check_waiting(pool);
-	EXPECT_SUBSTR("rpc lock unavailable in homa_pool_release_buffers; "
-			"rpc lock unavailable in homa_pool_release_buffers",
+	EXPECT_SUBSTR("rpc lock unavailable in homa_pool_check_waiting; "
+			"rpc lock unavailable in homa_pool_check_waiting",
 			unit_log_get());
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
 	EXPECT_TRUE(list_empty(&self->hsk.waiting_for_bufs));

@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file manages homa_socktab objects; it also implements several
  * operations on homa_sock objects, such as construction and destruction.
@@ -15,10 +13,10 @@
 void homa_socktab_init(struct homa_socktab *socktab)
 {
 	int i;
+
 	spin_lock_init(&socktab->write_lock);
-	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++) {
+	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
-	}
 }
 
 /**
@@ -78,6 +76,7 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
 	struct homa_sock *hsk;
 	struct homa_socktab_links *links;
+
 	while (1) {
 		while (scan->next == NULL) {
 			scan->current_bucket++;
@@ -118,12 +117,10 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 			? HOMA_IPV4_HEADER_LENGTH : HOMA_IPV6_HEADER_LENGTH;
 	hsk->shutdown = false;
 	while (1) {
-		if (homa->next_client_port < HOMA_MIN_DEFAULT_PORT) {
+		if (homa->next_client_port < HOMA_MIN_DEFAULT_PORT)
 			homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
-		}
-		if (!homa_sock_find(socktab, homa->next_client_port)) {
+		if (!homa_sock_find(socktab, homa->next_client_port))
 			break;
-		}
 		homa->next_client_port++;
 	}
 	hsk->port = homa->next_client_port;
@@ -143,12 +140,14 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	INIT_LIST_HEAD(&hsk->response_interests);
 	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {
 		struct homa_rpc_bucket *bucket = &hsk->client_rpc_buckets[i];
+
 		spin_lock_init(&bucket->lock);
 		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i;
 	}
 	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++) {
 		struct homa_rpc_bucket *bucket = &hsk->server_rpc_buckets[i];
+
 		spin_lock_init(&bucket->lock);
 		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i + 1000000;
@@ -251,9 +250,8 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 
 	if (port == 0)
 		return result;
-	if (port >= HOMA_MIN_DEFAULT_PORT) {
+	if (port >= HOMA_MIN_DEFAULT_PORT)
 		return -EINVAL;
-	}
 	homa_sock_lock(hsk, "homa_sock_bind");
 	spin_lock_bh(&socktab->write_lock);
 	if (hsk->shutdown) {
@@ -273,7 +271,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
 			&socktab->buckets[homa_port_hash(port)]);
-    done:
+done:
 	spin_unlock_bh(&socktab->write_lock);
 	homa_sock_unlock(hsk);
 	return result;
@@ -293,9 +291,11 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 {
 	struct homa_socktab_links *link;
 	struct homa_sock *result = NULL;
+
 	hlist_for_each_entry_rcu(link, &socktab->buckets[homa_port_hash(port)],
 			hash_links) {
 		struct homa_sock *hsk = link->sock;
+
 		if (hsk->port == port) {
 			result = hsk;
 			break;
@@ -314,6 +314,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 void homa_sock_lock_slow(struct homa_sock *hsk)
 {
 	__u64 start = get_cycles();
+
 	tt_record("beginning wait for socket lock");
 	spin_lock_bh(&hsk->lock);
 	tt_record("ending wait for socket lock");
