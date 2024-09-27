@@ -845,8 +845,7 @@ void tt_inc_metric(int metric, __u64 count)
 		offsetof(struct homa_metrics, linux_softirq_cycles),
 		offsetof(struct homa_metrics, linux_pkt_alloc_bytes),
 	};
-	__u64 *metric_addr = (__u64 *)(((char *)
-			&homa_cores[raw_smp_processor_id()]->metrics)
+	__u64 *metric_addr = (__u64 *)(((char *) homa_metrics_per_cpu())
 			+ offsets[metric]);
 	*metric_addr += count;
 }

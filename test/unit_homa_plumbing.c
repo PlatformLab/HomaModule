@@ -268,7 +268,7 @@ TEST_F(homa_plumbing, homa_set_sock_opt__success)
 			sizeof(struct homa_set_buf_args)));
 	EXPECT_EQ(args.start, self->hsk.buffer_pool.region);
 	EXPECT_EQ(64, self->hsk.buffer_pool.num_bpages);
-	EXPECT_EQ(1, core_metrics.so_set_buf_calls);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->so_set_buf_calls);
 }
 
 TEST_F(homa_plumbing, homa_sendmsg__args_not_in_user_space)
@@ -686,7 +686,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	skb->len -= 1;
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, core_metrics.short_packets);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
 }
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
@@ -695,7 +695,7 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, core_metrics.short_packets);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {
@@ -823,58 +823,4 @@ TEST_F(homa_plumbing, homa_softirq__per_rpc_batching)
 			"id 2005, offsets 0 1400 5600; "
 			"sk->sk_data_ready invoked",
 			unit_log_get());
-}
-
-TEST_F(homa_plumbing, homa_metrics_open)
-{
-	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
-	EXPECT_NE(NULL, self->homa.metrics);
-
-	strcpy(self->homa.metrics, "12345");
-	EXPECT_EQ(0, homa_metrics_open(NULL, NULL));
-	EXPECT_EQ(5, strlen(self->homa.metrics));
-	EXPECT_EQ(2, self->homa.metrics_active_opens);
-}
-TEST_F(homa_plumbing, homa_metrics_read__basics)
-{
-	char buffer[1000];
-	loff_t offset = 10;
-	self->homa.metrics = kmalloc(100, GFP_KERNEL);
-	self->homa.metrics_capacity = 100;
-	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
-	self->homa.metrics_length = 26;
-	EXPECT_EQ(5, homa_metrics_read(NULL, buffer, 5, &offset));
-	EXPECT_SUBSTR("_copy_to_user copied 5 bytes", unit_log_get());
-	EXPECT_EQ(15, offset);
-
-	unit_log_clear();
-	EXPECT_EQ(11, homa_metrics_read(NULL, buffer, 1000, &offset));
-	EXPECT_SUBSTR("_copy_to_user copied 11 bytes", unit_log_get());
-	EXPECT_EQ(26, offset);
-
-	unit_log_clear();
-	EXPECT_EQ(0, homa_metrics_read(NULL, buffer, 1000, &offset));
-	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(26, offset);
-}
-TEST_F(homa_plumbing, homa_metrics_read__error_copying_to_user)
-{
-	char buffer[1000];
-	loff_t offset = 10;
-	self->homa.metrics = kmalloc(100, GFP_KERNEL);
-	self->homa.metrics_capacity = 100;
-	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
-	self->homa.metrics_length = 26;
-	mock_copy_to_user_errors = 1;
-	EXPECT_EQ(EFAULT, -homa_metrics_read(NULL, buffer, 5, &offset));
-}
-
-TEST_F(homa_plumbing, homa_metrics_release)
-{
-	self->homa.metrics_active_opens = 2;
-	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
-	EXPECT_EQ(1, self->homa.metrics_active_opens);
-
-	EXPECT_EQ(0, homa_metrics_release(NULL, NULL));
-	EXPECT_EQ(0, self->homa.metrics_active_opens);
 }

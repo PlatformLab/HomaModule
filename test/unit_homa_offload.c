@@ -267,7 +267,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	skb = mock_skb_new(&self->ip, &h.common, 1400, 2000);
 	struct sk_buff *result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
-	EXPECT_EQ(0, core_metrics.gro_data_bypasses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	/* Second attempt: HOMA_GRO_SHORT_BYPASS enabled but message longer
 	 * than one packet.
@@ -277,7 +277,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	skb2 = mock_skb_new(&self->ip, &h.common, 1400, 2000);
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(0, -PTR_ERR(result));
-	EXPECT_EQ(0, core_metrics.gro_data_bypasses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	/* Third attempt: bypass should happen. */
 	h.message_length = htonl(1400);
@@ -286,14 +286,14 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	skb3 = mock_skb_new(&self->ip, &h.common, 1400, 4000);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
-	EXPECT_EQ(1, core_metrics.gro_data_bypasses);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	/* Third attempt: no bypass because core busy. */
 	cur_core->last_gro = 600;
 	skb4 = mock_skb_new(&self->ip, &h.common, 1400, 4000);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(0, -PTR_ERR(result));
-	EXPECT_EQ(1, core_metrics.gro_data_bypasses);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	kfree_skb(skb);
 	kfree_skb(skb2);
@@ -326,7 +326,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct sk_buff *skb = mock_skb_new(&client_ip, &h.common, 0, 0);
 	struct sk_buff *result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
-	EXPECT_EQ(0, core_metrics.gro_grant_bypasses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_grant_bypasses);
 	EXPECT_STREQ("", unit_log_get());
 
 	/* Second attempt: HOMA_FAST_GRANTS is enabled. */
@@ -335,7 +335,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct sk_buff *skb2 = mock_skb_new(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
-	EXPECT_EQ(1, core_metrics.gro_grant_bypasses);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
 	EXPECT_SUBSTR("xmit DATA 1400@10000", unit_log_get());
 
 	/* Third attempt: core is too busy for fast grants. */
@@ -343,7 +343,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct sk_buff *skb3 = mock_skb_new(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(0, -PTR_ERR(result));
-	EXPECT_EQ(1, core_metrics.gro_grant_bypasses);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
 	kfree_skb(skb);
 	kfree_skb(skb3);
 }

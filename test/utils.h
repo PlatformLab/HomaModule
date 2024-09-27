@@ -30,8 +30,6 @@ enum unit_rpc_state {
 	UNIT_IN_SERVICE     = 24,
 };
 
-#define core_metrics homa_cores[raw_smp_processor_id()]->metrics
-
 #define cur_core homa_cores[raw_smp_processor_id()]
 
 extern char         *unit_ack_string(struct homa_ack *ack);

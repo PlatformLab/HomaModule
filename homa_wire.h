@@ -5,6 +5,8 @@
 #ifndef _HOMA_WIRE_H
 #define _HOMA_WIRE_H
 
+#include <linux/skbuff.h>
+
 /**
  * enum homa_packet_type - Defines the possible types of Homa packets.
  *

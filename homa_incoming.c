@@ -5,7 +5,6 @@
  */
 
 #include "homa_impl.h"
-#include "homa_wire.h"
 
 /**
  * homa_message_in_init() - Constructor for homa_message_in.

@@ -304,8 +304,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__new_large_page)
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, core));
 	EXPECT_NE(NULL, core->skb_page);
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, core->page_size);
-	EXPECT_EQ(1, core_metrics.skb_page_allocs);
-	EXPECT_NE(0, core_metrics.skb_page_alloc_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->skb_page_allocs);
+	EXPECT_NE(0, homa_metrics_per_cpu()->skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 {
@@ -317,8 +317,8 @@ TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 	EXPECT_NE(NULL, core->skb_page);
 	EXPECT_EQ(PAGE_SIZE, core->page_size);
 	EXPECT_EQ(0, core->page_inuse);
-	EXPECT_EQ(1, core_metrics.skb_page_allocs);
-	EXPECT_NE(0, core_metrics.skb_page_alloc_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->skb_page_allocs);
+	EXPECT_NE(0, homa_metrics_per_cpu()->skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__no_pages_available)
 {

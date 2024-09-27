@@ -5,6 +5,7 @@ ifneq ($(KERNELRELEASE),)
 obj-m += homa.o
 homa-y = homa_grant.o \
 	    homa_incoming.o \
+	    homa_metrics.o \
             homa_offload.o \
             homa_outgoing.o \
             homa_peertab.o \

@@ -136,11 +136,11 @@ TEST_F(homa_timer, homa_check_rpc__timeout)
 	unit_log_clear();
 	crpc->silent_ticks = self->homa.timeout_ticks-1;
 	homa_check_rpc(crpc);
-	EXPECT_EQ(0, core_metrics.rpc_timeouts);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->rpc_timeouts);
 	EXPECT_EQ(0, crpc->error);
 	crpc->silent_ticks = self->homa.timeout_ticks;
 	homa_check_rpc(crpc);
-	EXPECT_EQ(1, core_metrics.rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
 TEST_F(homa_timer, homa_check_rpc__issue_resend)
@@ -250,7 +250,7 @@ TEST_F(homa_timer, homa_timer__basics)
 	unit_log_clear();
 	crpc->peer->outstanding_resends = self->homa.timeout_resends;
 	homa_timer(&self->homa);
-	EXPECT_EQ(1, core_metrics.rpc_timeouts);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)

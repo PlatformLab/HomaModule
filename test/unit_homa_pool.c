@@ -320,7 +320,7 @@ TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(2000, pool->cores[raw_smp_processor_id()].allocated);
 	EXPECT_EQ(raw_smp_processor_id(), pool->descriptors[2].owner);
-	EXPECT_EQ(1, core_metrics.bpage_reuses);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->bpage_reuses);
 }
 TEST_F(homa_pool, homa_pool_allocate__owned_page_overflow)
 {
@@ -405,7 +405,7 @@ TEST_F(homa_pool, homa_pool_allocate__out_of_space)
 	rpc = list_next_entry(rpc, buf_links);
 	EXPECT_EQ(100, rpc->id);
 	EXPECT_TRUE(list_is_last(&rpc->buf_links, &self->hsk.waiting_for_bufs));
-	EXPECT_EQ(3, core_metrics.buffer_alloc_failures);
+	EXPECT_EQ(3, homa_metrics_per_cpu()->buffer_alloc_failures);
 	EXPECT_EQ(1, pool->bpages_needed);
 }
 

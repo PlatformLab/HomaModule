@@ -280,18 +280,18 @@ TEST_F(homa_utils, homa_bucket_lock_slow)
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
 
-	EXPECT_EQ(0, core_metrics.client_lock_misses);
-	EXPECT_EQ(0, core_metrics.client_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_lock_misses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_lock_miss_cycles);
 	homa_bucket_lock_slow(crpc->bucket, crpc->id);
 	homa_rpc_unlock(crpc);
-	EXPECT_EQ(1, core_metrics.client_lock_misses);
-	EXPECT_NE(0, core_metrics.client_lock_miss_cycles);
-	EXPECT_EQ(0, core_metrics.server_lock_misses);
-	EXPECT_EQ(0, core_metrics.server_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->client_lock_misses);
+	EXPECT_NE(0, homa_metrics_per_cpu()->client_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_lock_misses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_lock_miss_cycles);
 	homa_bucket_lock_slow(srpc->bucket, srpc->id);
 	homa_rpc_unlock(srpc);
-	EXPECT_EQ(1, core_metrics.server_lock_misses);
-	EXPECT_NE(0, core_metrics.server_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->server_lock_misses);
+	EXPECT_NE(0, homa_metrics_per_cpu()->server_lock_miss_cycles);
 }
 
 TEST_F(homa_utils, homa_rpc_acked__basics)
@@ -739,26 +739,6 @@ TEST_F(homa_utils, homa_snprintf)
 	EXPECT_EQ(49, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
 			buffer);
-}
-
-TEST_F(homa_utils, homa_append_metric)
-{
-	self->homa.metrics_length = 0;
-	homa_append_metric(&self->homa,  "x: %d, y: %d", 10, 20);
-	EXPECT_EQ(12, self->homa.metrics_length);
-	EXPECT_STREQ("x: 10, y: 20", self->homa.metrics);
-
-	homa_append_metric(&self->homa, ", z: %d", 12345);
-	EXPECT_EQ(22, self->homa.metrics_length);
-	EXPECT_STREQ("x: 10, y: 20, z: 12345", self->homa.metrics);
-	EXPECT_EQ(30, self->homa.metrics_capacity);
-
-	homa_append_metric(&self->homa, ", q: %050d", 88);
-	EXPECT_EQ(77, self->homa.metrics_length);
-	EXPECT_STREQ("x: 10, y: 20, z: 12345, "
-			"q: 00000000000000000000000000000000000000000000000088",
-			self->homa.metrics);
-	EXPECT_EQ(120, self->homa.metrics_capacity);
 }
 
 TEST_F(homa_utils, homa_prios_changed__basics)

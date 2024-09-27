@@ -1542,6 +1542,8 @@ void mock_teardown(void)
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;
 
+	memset(homa_metrics, 0, sizeof(homa_metrics));
+
 	unit_hook_clear();
 }
 

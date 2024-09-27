@@ -192,7 +192,7 @@ TEST_F(homa_grant, homa_grant_add_rpc__update_metrics)
 	mock_cycles = 200;
 	test_rpc(self, 100, self->server_ip, 100000);
 	EXPECT_EQ(4, self->homa.num_grantable_rpcs);
-	EXPECT_EQ(300, core_metrics.grantable_rpcs_integral);
+	EXPECT_EQ(300, homa_metrics_per_cpu()->grantable_rpcs_integral);
 	EXPECT_EQ(200, self->homa.last_grantable_change);
 }
 TEST_F(homa_grant, homa_grant_add_rpc__insert_in_peer_list)
@@ -335,7 +335,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__update_metrics)
 
 	homa_grant_remove_rpc(rpc);
 	EXPECT_EQ(2, self->homa.num_grantable_rpcs);
-	EXPECT_EQ(300, core_metrics.grantable_rpcs_integral);
+	EXPECT_EQ(300, homa_metrics_per_cpu()->grantable_rpcs_integral);
 	EXPECT_EQ(200, self->homa.last_grantable_change);
 }
 TEST_F(homa_grant, homa_grant_remove_rpc__not_first_in_peer_list)
@@ -739,7 +739,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 
 	EXPECT_EQ(2, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(-1, atomic_read(&rpc4->msgin.rank));
-	EXPECT_NE(0, core_metrics.grant_recalc_cycles);
+	EXPECT_NE(0, homa_metrics_per_cpu()->grant_recalc_cycles);
 }
 TEST_F(homa_grant, homa_grant_recalc__already_locked)
 {
@@ -763,7 +763,7 @@ TEST_F(homa_grant, homa_grant_recalc__skip_recalc)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_EQ(2, atomic_read(&self->homa.grant_recalc_count));
-	EXPECT_EQ(1, core_metrics.grant_recalc_skips);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_recalc_skips);
 }
 TEST_F(homa_grant, homa_grant_recalc__clear_existing_active_rpcs)
 {
@@ -871,14 +871,14 @@ TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted_but_skip_recalc)
 	unit_hook_register(grantable_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xfe0;
-	EXPECT_EQ(0, core_metrics.grant_recalc_skips);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_recalc_skips);
 
 	homa_grant_recalc(&self->homa, 0);
 	EXPECT_EQ(10000, rpc1->msgin.granted);
 	EXPECT_EQ(10000, rpc2->msgin.granted);
 	EXPECT_EQ(0, rpc3->msgin.granted);
 	EXPECT_EQ(0, rpc4->msgin.granted);
-	EXPECT_EQ(1, core_metrics.grant_recalc_skips);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_recalc_skips);
 }
 
 TEST_F(homa_grant, homa_grant_pick_rpcs__basics)
@@ -1073,8 +1073,8 @@ TEST_F(homa_grant, homa_grantable_lock_slow__basics)
 	EXPECT_EQ(1, homa_grantable_lock_slow(&self->homa, 0));
 	homa_grantable_unlock(&self->homa);
 
-	EXPECT_EQ(1, core_metrics.grantable_lock_misses);
-	EXPECT_EQ(500, core_metrics.grantable_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_cycles);
 }
 TEST_F(homa_grant, homa_grantable_lock_slow__recalc_count)
 {
@@ -1086,12 +1086,12 @@ TEST_F(homa_grant, homa_grantable_lock_slow__recalc_count)
 	EXPECT_EQ(0, homa_grantable_lock_slow(&self->homa, 1));
 	hook_homa = NULL;
 
-	EXPECT_EQ(1, core_metrics.grantable_lock_misses);
-	EXPECT_EQ(500, core_metrics.grantable_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_cycles);
 
 	/* Make sure the check only occurs if the recalc argument is set. */
 	mock_trylock_errors = 0xff;
 	EXPECT_EQ(1, homa_grantable_lock_slow(&self->homa, 0));
-	EXPECT_EQ(2, core_metrics.grantable_lock_misses);
+	EXPECT_EQ(2, homa_metrics_per_cpu()->grantable_lock_misses);
 	homa_grantable_unlock(&self->homa);
 }

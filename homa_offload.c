@@ -262,6 +262,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	int busy = (now - core->last_gro) < homa->gro_busy_cycles;
 	__u32 hash;
 	__u64 saved_softirq_metric, softirq_cycles;
+	__u64 *softirq_cycles_metric;
 	struct data_header *h_new = (struct data_header *)
 			skb_transport_header(skb);
 	int priority;
@@ -413,10 +414,11 @@ bypass:
 	/* Record SoftIRQ cycles in a different metric to reflect that
 	 * they happened during bypass.
 	 */
-	saved_softirq_metric = core->metrics.softirq_cycles;
+	softirq_cycles_metric = &homa_metrics_per_cpu()->softirq_cycles;
+	saved_softirq_metric = *softirq_cycles_metric;
 	homa_softirq(skb);
-	softirq_cycles = core->metrics.softirq_cycles - saved_softirq_metric;
-	core->metrics.softirq_cycles = saved_softirq_metric;
+	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
+	*softirq_cycles_metric = saved_softirq_metric;
 	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
 	core->last_gro = get_cycles();
 

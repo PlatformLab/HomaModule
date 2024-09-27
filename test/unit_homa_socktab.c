@@ -294,13 +294,13 @@ TEST_F(homa_socktab, homa_sock_lock_slow)
 	mock_cycles = ~0;
 
 	homa_sock_lock(&self->hsk, "unit test");
-	EXPECT_EQ(0, core_metrics.socket_lock_misses);
-	EXPECT_EQ(0, core_metrics.socket_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_misses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
 
 	mock_trylock_errors = 1;
 	homa_sock_lock(&self->hsk, "unit test");
-	EXPECT_EQ(1, core_metrics.socket_lock_misses);
-	EXPECT_NE(0, core_metrics.socket_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->socket_lock_misses);
+	EXPECT_NE(0, homa_metrics_per_cpu()->socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
 }

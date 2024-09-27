@@ -40,6 +40,7 @@ CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 TEST_SRCS :=  unit_homa_grant.c \
 	      unit_homa_incoming.c \
 	      unit_homa_offload.c \
+	      unit_homa_metrics.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peertab.c \
 	      unit_homa_pool.c \
@@ -53,6 +54,7 @@ TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
 HOMA_SRCS :=  homa_grant.c \
 	      homa_incoming.c \
+	      homa_metrics.c \
 	      homa_offload.c \
 	      homa_outgoing.c \
 	      homa_peertab.c \

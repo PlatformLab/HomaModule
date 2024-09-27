@@ -72,7 +72,7 @@ TEST_F(homa_peertab, homa_peer_find__basics)
 	peer2 = homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
 
-	EXPECT_EQ(2, core_metrics.peer_new_entries);
+	EXPECT_EQ(2, homa_metrics_per_cpu()->peer_new_entries);
 }
 
 static struct _test_data_homa_peertab *test_data;
@@ -191,7 +191,7 @@ TEST_F(homa_peertab, homa_peer_find__kmalloc_error)
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 
-	EXPECT_EQ(1, core_metrics.peer_kmalloc_errors);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
 }
 TEST_F(homa_peertab, homa_peer_find__route_error)
 {
@@ -201,7 +201,7 @@ TEST_F(homa_peertab, homa_peer_find__route_error)
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 
-	EXPECT_EQ(1, core_metrics.peer_route_errors);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
 }
 
 TEST_F(homa_peertab, homa_dst_refresh__basics)
@@ -229,7 +229,7 @@ TEST_F(homa_peertab, homa_dst_refresh__routing_error)
 	mock_route_errors = 1;
 	homa_dst_refresh(&self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
-	EXPECT_EQ(1, core_metrics.peer_route_errors);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
 	EXPECT_EQ(0, dead_count(&self->homa.peers));
 }
 TEST_F(homa_peertab, homa_dst_refresh__malloc_error)
@@ -324,15 +324,15 @@ TEST_F(homa_peertab, homa_peer_lock_slow)
 	ASSERT_NE(NULL, peer);
 
 	homa_peer_lock(peer);
-	EXPECT_EQ(0, core_metrics.peer_ack_lock_misses);
-	EXPECT_EQ(0, core_metrics.peer_ack_lock_miss_cycles);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_misses);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 
 	mock_trylock_errors = 1;
 	unit_hook_register(peer_spinlock_hook);
 	homa_peer_lock(peer);
-	EXPECT_EQ(1, core_metrics.peer_ack_lock_misses);
-	EXPECT_EQ(1000, core_metrics.peer_ack_lock_miss_cycles);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_ack_lock_misses);
+	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 }
 
