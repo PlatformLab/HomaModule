@@ -88,15 +88,13 @@ void lock_delete_hook(char *id)
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	if (lock_delete_count == 0)
-	{
 		homa_rpc_free(hook_rpc);
-	}
 	lock_delete_count--;
 }
 
-/* The following function is used via unit_hook to delete an RPC after it
+/* The following function is used via unit_hook to free an RPC after it
  * has been matched in homa_wait_for_message. */
-void match_delete_hook(char *id)
+void match_free_hook(char *id)
 {
 	if (strcmp(id, "found_rpc") == 0)
 		homa_rpc_free(hook_rpc);
@@ -615,6 +613,24 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 			unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
+TEST_F(homa_incoming, homa_copy_to_user__rpc_freed)
+{
+	struct homa_rpc *crpc;
+
+	mock_bpage_size = 2048;
+	mock_bpage_shift = 11;
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 4000);
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_free(crpc);
+
+	unit_log_clear();
+	mock_copy_to_user_dont_copy = -1;
+	EXPECT_EQ(EINVAL, -homa_copy_to_user(crpc));
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
+}
 TEST_F(homa_incoming, homa_copy_to_user__multiple_batches)
 {
 	struct homa_rpc *crpc;
@@ -736,27 +752,6 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_skb_copy_datagram_iter)
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
-}
-TEST_F(homa_incoming, homa_copy_to_user__rpc_freed)
-{
-	struct homa_rpc *crpc;
-
-	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
-			self->server_ip, self->server_port, self->client_id,
-			1000, 4000);
-	ASSERT_NE(NULL, crpc);
-	self->data.message_length = htonl(4000);
-	self->data.seg.offset = htonl(1400);
-	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
-			1400, 101000), crpc);
-
-	unit_log_clear();
-	mock_copy_to_user_dont_copy = -1;
-	unit_hook_register(lock_delete_hook);
-	hook_rpc = crpc;
-	EXPECT_EQ(EINVAL, -homa_copy_to_user(crpc));
-	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
 TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
@@ -2265,30 +2260,6 @@ TEST_F(homa_incoming, homa_wait_for_message__explicit_rpc_deleted_while_sleeping
 			self->client_id);
 	EXPECT_EQ(EINVAL, -PTR_ERR(rpc));
 }
-TEST_F(homa_incoming, homa_wait_for_message__rpc_deleted_after_matching)
-{
-	/* Arrange for 2 RPCs to be ready, but delete the first one after
-	 * it has matched; this should cause the second one to be matched.
-	 */
-	struct homa_rpc *rpc;
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 20000, 1600);
-	ASSERT_NE(NULL, crpc1);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
-			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
-			self->server_port, self->client_id+2, 20000, 1600);
-	ASSERT_NE(NULL, crpc2);
-	unit_log_clear();
-
-	hook_rpc = crpc1;
-	unit_hook_register(match_delete_hook);
-	rpc = homa_wait_for_message(&self->hsk,
-			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
-	EXPECT_EQ(RPC_DEAD, crpc1->state);
-	EXPECT_EQ(crpc2, rpc);
-	homa_rpc_unlock(rpc);
-}
 TEST_F(homa_incoming, homa_wait_for_message__socket_shutdown_while_sleeping)
 {
 	struct homa_rpc *rpc;
@@ -2320,6 +2291,30 @@ TEST_F(homa_incoming, homa_wait_for_message__copy_to_user)
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
 	EXPECT_EQ(0, atomic_read(&crpc->flags)
 			& (RPC_PKTS_READY|RPC_COPYING_TO_USER));
+}
+TEST_F(homa_incoming, homa_wait_for_message__rpc_freed_after_matching)
+{
+	/* Arrange for 2 RPCs to be ready, but delete the first one after
+	 * it has matched; this should cause the second one to be matched.
+	 */
+	struct homa_rpc *rpc;
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	ASSERT_NE(NULL, crpc1);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+2, 20000, 1600);
+	ASSERT_NE(NULL, crpc2);
+	unit_log_clear();
+
+	hook_rpc = crpc1;
+	unit_hook_register(match_free_hook);
+	rpc = homa_wait_for_message(&self->hsk,
+			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
+	EXPECT_EQ(RPC_DEAD, crpc1->state);
+	EXPECT_EQ(crpc2, rpc);
+	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__copy_to_user_fails)
 {

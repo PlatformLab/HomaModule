@@ -221,8 +221,14 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 	 * copy them, and reacquire the lock.
 	 */
 	while (true) {
-		struct sk_buff *skb = __skb_dequeue(&rpc->msgin.packets);
+		struct sk_buff *skb;
 
+		if (rpc->state == RPC_DEAD) {
+			error = -EINVAL;
+			break;
+		}
+
+		skb = __skb_dequeue(&rpc->msgin.packets);
 		if (skb != NULL) {
 			skbs[n] = skb;
 			n++;
@@ -308,8 +314,6 @@ free_skbs:
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_copy_to_user");
 		atomic_andnot(APP_NEEDS_LOCK|RPC_COPYING_TO_USER, &rpc->flags);
-		if (rpc->state == RPC_DEAD)
-			error = -EINVAL;
 		if (error)
 			break;
 	}
@@ -1318,12 +1322,12 @@ found_rpc:
 						&rpc->flags);
 			} else
 				atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
+			if (!rpc->error)
+				rpc->error = homa_copy_to_user(rpc);
 			if (rpc->state == RPC_DEAD) {
 				homa_rpc_unlock(rpc);
 				continue;
 			}
-			if (!rpc->error)
-				rpc->error = homa_copy_to_user(rpc);
 			if (rpc->error)
 				goto done;
 			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
