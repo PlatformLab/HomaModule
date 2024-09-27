@@ -701,8 +701,6 @@ release:
 						rpc->msgin.num_bpages,
 						rpc->msgin.bpage_offsets);
 			if (rpc->msgin.length >= 0) {
-				rpc->hsk->dead_skbs += skb_queue_len(
-						&rpc->msgin.packets);
 				while (1) {
 					struct homa_gap *gap = list_first_entry_or_null(
 							&rpc->msgin.gaps,
