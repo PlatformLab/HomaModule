@@ -899,13 +899,13 @@ def run_experiments(*args):
     if homa_nodes:
         vlog("Recording final metrics from nodes %s" % (homa_nodes))
         for id in homa_nodes:
-            f = open("%s/%d.metrics" % (exp.log_dir, id), 'w')
+            f = open("%s/node%d.metrics" % (exp.log_dir, id), 'w')
             subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
             f.close()
-        shutil.copyfile("%s/%d.metrics" % (exp.log_dir, homa_clients[0]),
-                "%s/reports/%d.metrics" % (exp.log_dir, homa_clients[0]))
-        shutil.copyfile("%s/%d.metrics" % (exp.log_dir, homa_servers[0]),
-                "%s/reports/%d.metrics" % (exp.log_dir, homa_servers[0]))
+        shutil.copyfile("%s/node%d.metrics" % (exp.log_dir, homa_clients[0]),
+                "%s/reports/node%d.metrics" % (exp.log_dir, homa_clients[0]))
+        shutil.copyfile("%s/node%d.metrics" % (exp.log_dir, homa_servers[0]),
+                "%s/reports/node%d.metrics" % (exp.log_dir, homa_servers[0]))
     do_cmd("stop senders", all_nodes)
     do_cmd("stop clients", all_nodes)
     for exp in args:
