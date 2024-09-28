@@ -156,6 +156,7 @@ extern struct homa_numa *homa_numas[];
 extern int homa_num_numas;
 
 #define sizeof32(type) ((int) (sizeof(type)))
+#define SPLIT_64(num) ((uint64_t) (num) >> 32), ((uint64_t) (num) & 0xffffffff)
 
 /** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
 #define CACHE_LINE_SIZE 64
