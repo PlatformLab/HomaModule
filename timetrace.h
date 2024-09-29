@@ -204,5 +204,7 @@ static inline __u32 tt_lo(void *p)
 	return ((__u64) p) & 0xffffffff;
 }
 
+#define SPLIT_64(value) (int) (((__u64) (value)) >> 32), (int) (((__u64) (value)) & 0xffffffff)
+
 #endif // HOMA_TIMETRACE_H
 
