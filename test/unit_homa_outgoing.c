@@ -3,6 +3,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -58,7 +59,7 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	self->peer = homa_peer_find(&self->homa.peers,
+	self->peer = homa_peer_find(self->homa.peers,
 			&self->server_addr.in6.sin6_addr, &self->hsk.inet);
 	unit_log_clear();
 }

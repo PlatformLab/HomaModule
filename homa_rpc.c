@@ -3,6 +3,7 @@
 /* This file contains functions for managing homa_rpc structs. */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 /**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
@@ -35,7 +36,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->state = RPC_OUTGOING;
 	atomic_set(&crpc->flags, 0);
 	atomic_set(&crpc->grants_in_progress, 0);
-	crpc->peer = homa_peer_find(&hsk->homa->peers, &dest_addr_as_ipv6,
+	crpc->peer = homa_peer_find(hsk->homa->peers, &dest_addr_as_ipv6,
 			&hsk->inet);
 	if (IS_ERR(crpc->peer)) {
 		tt_record("error in homa_peer_find");
@@ -137,7 +138,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->state = RPC_INCOMING;
 	atomic_set(&srpc->flags, 0);
 	atomic_set(&srpc->grants_in_progress, 0);
-	srpc->peer = homa_peer_find(&hsk->homa->peers, source, &hsk->inet);
+	srpc->peer = homa_peer_find(hsk->homa->peers, source, &hsk->inet);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
 		goto error;

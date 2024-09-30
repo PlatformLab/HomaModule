@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 /* Core-specific information. NR_CPUS is an overestimate of the actual
  * number, but allows us to allocate the array statically.
@@ -123,7 +124,8 @@ int homa_init(struct homa *homa)
 	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa_socktab_init(&homa->port_map);
-	err = homa_peertab_init(&homa->peers);
+	homa->peers = kmalloc(sizeof *homa->peers, GFP_KERNEL);
+	err = homa_peertab_init(homa->peers);
 	if (err) {
 		pr_err("Couldn't initialize peer table (errno %d)\n", -err);
 		return err;
@@ -218,7 +220,8 @@ void homa_destroy(struct homa *homa)
 
 	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(&homa->port_map);
-	homa_peertab_destroy(&homa->peers);
+	homa_peertab_destroy(homa->peers);
+	kfree(homa->peers);
 	homa_skb_cleanup(homa);
 
 	for (i = 0; i < MAX_NUMNODES; i++) {
@@ -583,7 +586,7 @@ void homa_freeze_peers(struct homa *homa)
 		return;
 	}
 
-	peers = homa_peertab_get_peers(&homa->peers, &num_peers);
+	peers = homa_peertab_get_peers(homa->peers, &num_peers);
 	if (peers == NULL) {
 		tt_record("homa_freeze_peers couldn't find peers to freeze");
 		return;

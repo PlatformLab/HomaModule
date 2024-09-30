@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/* This file manages homa_peertab objects and is responsible for creating
- * and deleting homa_peer objects.
+/* This file provides functions related to homa_peer and homa_peertab
+ * objects.
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 /**
  * homa_peertab_init() - Constructor for homa_peertabs.

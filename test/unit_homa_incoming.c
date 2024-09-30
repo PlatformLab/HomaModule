@@ -3,6 +3,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -943,7 +944,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 			.cutoff_version = 400};
 	homa_dispatch_pkts(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->homa);
-	peer = homa_peer_find(&self->homa.peers, self->server_ip,
+	peer = homa_peer_find(self->homa.peers, self->server_ip,
 			&self->hsk.inet);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(400, peer->cutoff_version);
@@ -1594,7 +1595,7 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	mock_kmalloc_errors = 1;
 	homa_cutoffs_pkt(skb, &self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-	peer = homa_peer_find(&self->homa.peers, self->server_ip,
+	peer = homa_peer_find(self->homa.peers, self->server_ip,
 			&self->hsk.inet);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(0, peer->cutoff_version);
@@ -1660,7 +1661,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
 }
 TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 {
-	struct homa_peer *peer = homa_peer_find(&self->homa.peers,
+	struct homa_peer *peer = homa_peer_find(self->homa.peers,
 			self->server_ip, &self->hsk.inet);
 	peer->acks[0].client_port = htons(self->client_port);
 	peer->acks[0].server_port = htons(self->server_port);

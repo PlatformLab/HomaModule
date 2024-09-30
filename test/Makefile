@@ -42,7 +42,7 @@ TEST_SRCS :=  unit_homa_grant.c \
 	      unit_homa_offload.c \
 	      unit_homa_metrics.c \
 	      unit_homa_outgoing.c \
-	      unit_homa_peertab.c \
+	      unit_homa_peer.c \
 	      unit_homa_pool.c \
 	      unit_homa_plumbing.c \
 	      unit_homa_rpc.c \
@@ -58,7 +58,7 @@ HOMA_SRCS :=  homa_grant.c \
 	      homa_metrics.c \
 	      homa_offload.c \
 	      homa_outgoing.c \
-	      homa_peertab.c \
+	      homa_peer.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
 	      homa_rpc.c \

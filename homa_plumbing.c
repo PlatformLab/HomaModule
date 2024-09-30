@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 #ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");

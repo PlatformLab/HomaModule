@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 #include "homa_wire.h"
 
 /**
@@ -463,7 +464,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.flags = HOMA_TCP_FLAGS;
 	unknown.common.urgent = htons(HOMA_TCP_URGENT);
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
-	peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);
+	peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
 	if (!IS_ERR(peer))
 		__homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
 }

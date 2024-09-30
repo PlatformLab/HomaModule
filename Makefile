@@ -8,7 +8,7 @@ homa-y = homa_grant.o \
 	    homa_metrics.o \
             homa_offload.o \
             homa_outgoing.o \
-            homa_peertab.o \
+            homa_peer.o \
 	    homa_pool.o \
             homa_plumbing.o \
             homa_rpc.o \

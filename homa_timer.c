@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 /**
  * homa_check_rpc() -  Invoked for each RPC during each timer pass; does

@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_peer.h"
 
 /**
  * homa_message_in_init() - Constructor for homa_message_in.
@@ -759,7 +760,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	int i;
 	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
-	struct homa_peer *peer = homa_peer_find(&hsk->homa->peers,
+	struct homa_peer *peer = homa_peer_find(hsk->homa->peers,
 		&saddr, &hsk->inet);
 
 	if (!IS_ERR(peer)) {
@@ -802,7 +803,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 				"Freezing because NEED_ACK received before message complete, id %d, peer 0x%x");
 		goto done;
 	} else {
-		peer = homa_peer_find(&hsk->homa->peers, &saddr, &hsk->inet);
+		peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
 		if (IS_ERR(peer))
 			goto done;
 	}
