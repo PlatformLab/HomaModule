@@ -309,7 +309,7 @@ char *homa_metrics_print(struct homa *homa)
 				m->disabled_rpc_reaps);
 		M("reaper_calls              %15llu  Reaper invocations that were not disabled\n",
 				m->reaper_calls);
-		M("reaper_dead_skbs          %15llu  Sum of hsk->dead_skbs across all reaper alls\n",
+		M("reaper_dead_skbs          %15llu  Sum of hsk->dead_skbs across all reaper calls\n",
 				m->reaper_dead_skbs);
 		M("forced_reaps              %15llu  Reaps forced by accumulation of dead RPCs\n",
 				m->forced_reaps);

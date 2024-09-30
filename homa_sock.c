@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/* This file manages homa_socktab objects; it also implements several
- * operations on homa_sock objects, such as construction and destruction.
- */
+/* This file manages homa_sock and homa_socktab objects. */
 
 #include "homa_impl.h"
 
@@ -152,7 +150,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i + 1000000;
 	}
-	memset(&hsk->buffer_pool, 0, sizeof(hsk->buffer_pool));
+	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_KERNEL);
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
 	spin_unlock_bh(&socktab->write_lock);
@@ -207,7 +205,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
 
-	homa_pool_destroy(&hsk->buffer_pool);
+	homa_pool_destroy(hsk->buffer_pool);
+	kfree(hsk->buffer_pool);
 
 	i = 0;
 	while (!list_empty(&hsk->dead_rpcs)) {
@@ -320,4 +319,31 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
 	tt_record("ending wait for socket lock");
 	INC_METRIC(socket_lock_misses, 1);
 	INC_METRIC(socket_lock_miss_cycles, get_cycles() - start);
+}
+
+/**
+ * homa_bucket_lock_slow() - This function implements the slow path for
+ * locking a bucket in one of the hash tables of RPCs. It is invoked when a
+ * lock isn't immediately available. It waits for the lock, but also records
+ * statistics about the waiting time.
+ * @bucket:    The hash table bucket to lock.
+ * @id:        ID of the particular RPC being locked (multiple RPCs may
+ *             share a single bucket lock).
+ */
+void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
+{
+	__u64 start = get_cycles();
+
+	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
+			id, bucket->id);
+	spin_lock_bh(&bucket->lock);
+	tt_record2("ending wait for bucket lock, id %d (bucket %d)",
+			id, bucket->id);
+	if (homa_is_client(id)) {
+		INC_METRIC(client_lock_misses, 1);
+		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
+	} else {
+		INC_METRIC(server_lock_misses, 1);
+		INC_METRIC(server_lock_miss_cycles, get_cycles() - start);
+	}
 }

@@ -12,7 +12,7 @@
 #define n(x) htons(x)
 #define N(x) htonl(x)
 
-FIXTURE(homa_socktab) {
+FIXTURE(homa_sock) {
 	struct homa homa;
 	struct homa_sock hsk;
 	struct in6_addr client_ip[1];
@@ -21,7 +21,7 @@ FIXTURE(homa_socktab) {
 	int server_port;
 	__u64 client_id;
 };
-FIXTURE_SETUP(homa_socktab)
+FIXTURE_SETUP(homa_sock)
 {
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
@@ -31,20 +31,20 @@ FIXTURE_SETUP(homa_socktab)
 	self->server_port = 99;
 	self->client_id = 1234;
 }
-FIXTURE_TEARDOWN(homa_socktab)
+FIXTURE_TEARDOWN(homa_sock)
 {
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
 
-TEST_F(homa_socktab, homa_port_hash)
+TEST_F(homa_sock, homa_port_hash)
 {
 	EXPECT_EQ(1023, homa_port_hash(0xffff));
 	EXPECT_EQ(18, homa_port_hash(0x6012));
 	EXPECT_EQ(99, homa_port_hash(99));
 }
 
-TEST_F(homa_socktab, homa_socktab_start_scan)
+TEST_F(homa_sock, homa_socktab_start_scan)
 {
 	struct homa_socktab_scan scan;
 	homa_destroy(&self->homa);
@@ -55,7 +55,7 @@ TEST_F(homa_socktab, homa_socktab_start_scan)
 	EXPECT_EQ(100, scan.current_bucket);
 }
 
-TEST_F(homa_socktab, homa_socktab_next__basics)
+TEST_F(homa_sock, homa_socktab_next__basics)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4, *hsk;
 	struct homa_socktab_scan scan;
@@ -81,7 +81,7 @@ TEST_F(homa_socktab, homa_socktab_next__basics)
 	homa_sock_destroy(&hsk3);
 	homa_sock_destroy(&hsk4);
 }
-TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
+TEST_F(homa_sock, homa_socktab_next__deleted_socket)
 {
 	struct homa_sock hsk1, hsk2, hsk3, *hsk;
 	struct homa_socktab_scan scan;
@@ -105,7 +105,7 @@ TEST_F(homa_socktab, homa_socktab_next__deleted_socket)
 	homa_sock_destroy(&hsk3);
 }
 
-TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)
+TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 {
 	struct homa_sock hsk2, hsk3;
 	self->homa.next_client_port = 0xffff;
@@ -116,7 +116,7 @@ TEST_F(homa_socktab, homa_sock_init__skip_port_in_use)
 	homa_sock_destroy(&hsk2);
 	homa_sock_destroy(&hsk3);
 }
-TEST_F(homa_socktab, homa_sock_init__ip_header_length)
+TEST_F(homa_sock, homa_sock_init__ip_header_length)
 {
 	struct homa_sock hsk_v4, hsk_v6;
 	mock_ipv6 = false;
@@ -128,7 +128,7 @@ TEST_F(homa_socktab, homa_sock_init__ip_header_length)
 	homa_sock_destroy(&hsk_v4);
 	homa_sock_destroy(&hsk_v6);
 }
-TEST_F(homa_socktab, homa_sock_init__hijack_tcp)
+TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
 	struct homa_sock hijack, no_hijack;
         self->homa.hijack_tcp = 0;
@@ -141,7 +141,7 @@ TEST_F(homa_socktab, homa_sock_init__hijack_tcp)
 	homa_sock_destroy(&no_hijack);
 }
 
-TEST_F(homa_socktab, homa_sock_shutdown__basics)
+TEST_F(homa_sock, homa_sock_shutdown__basics)
 {
 	int client2, client3;
 	struct homa_sock hsk2, hsk3;
@@ -167,7 +167,7 @@ TEST_F(homa_socktab, homa_sock_shutdown__basics)
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, 100));
 	EXPECT_EQ(NULL, homa_sock_find(&self->homa.port_map, client3));
 }
-TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
+TEST_F(homa_sock, homa_sock_shutdown__already_shutdown)
 {
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
@@ -181,7 +181,7 @@ TEST_F(homa_socktab, homa_sock_shutdown__already_shutdown)
 	EXPECT_EQ(2 ,unit_list_length(&self->hsk.active_rpcs));
 	self->hsk.shutdown = 0;
 }
-TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
+TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 {
 	unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
@@ -193,7 +193,7 @@ TEST_F(homa_socktab, homa_sock_shutdown__delete_rpcs)
 	EXPECT_TRUE(self->hsk.shutdown);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
-TEST_F(homa_socktab, homa_sock_shutdown__wakeup_interests)
+TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 {
 	struct homa_interest interest1, interest2, interest3;
 	struct task_struct task1, task2, task3;
@@ -214,7 +214,7 @@ TEST_F(homa_socktab, homa_sock_shutdown__wakeup_interests)
 			unit_log_get());
 }
 
-TEST_F(homa_socktab, homa_sock_bind)
+TEST_F(homa_sock, homa_sock_bind)
 {
 	struct homa_sock hsk2;
 	mock_sock_init(&hsk2, &self->homa, 0);
@@ -240,14 +240,14 @@ TEST_F(homa_socktab, homa_sock_bind)
 	EXPECT_EQ(&self->hsk, homa_sock_find(&self->homa.port_map, 120));
 	homa_sock_destroy(&hsk2);
 }
-TEST_F(homa_socktab, homa_sock_bind__socket_shutdown)
+TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
 {
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_EQ(ESHUTDOWN, -homa_sock_bind(&self->homa.port_map, &self->hsk,
 			100));
 }
 
-TEST_F(homa_socktab, homa_sock_find__basics)
+TEST_F(homa_sock, homa_sock_find__basics)
 {
 	struct homa_sock hsk2;
 	mock_sock_init(&hsk2, &self->homa, 0);
@@ -261,7 +261,7 @@ TEST_F(homa_socktab, homa_sock_find__basics)
 	homa_sock_destroy(&hsk2);
 }
 
-TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
+TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 {
 	struct homa_sock hsk2, hsk3, hsk4;
 	EXPECT_EQ(0, homa_sock_bind(&self->homa.port_map, &self->hsk, 13));
@@ -289,7 +289,7 @@ TEST_F(homa_socktab, homa_sock_find__long_hash_chain)
 	homa_sock_destroy(&hsk4);
 }
 
-TEST_F(homa_socktab, homa_sock_lock_slow)
+TEST_F(homa_sock, homa_sock_lock_slow)
 {
 	mock_cycles = ~0;
 

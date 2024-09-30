@@ -47,7 +47,7 @@ static inline void set_bpages_needed(struct homa_pool *pool)
 int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 {
 	int i, result;
-	struct homa_pool *pool = &hsk->buffer_pool;
+	struct homa_pool *pool = hsk->buffer_pool;
 
 	if (((__u64) region) & ~PAGE_MASK)
 		return -EINVAL;
@@ -231,7 +231,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
  */
 int homa_pool_allocate(struct homa_rpc *rpc)
 {
-	struct homa_pool *pool = &rpc->hsk->buffer_pool;
+	struct homa_pool *pool = rpc->hsk->buffer_pool;
 	int full_pages, partial, i, core_id;
 	__u32 pages[HOMA_MAX_BPAGES];
 	struct homa_pool_core *core;
@@ -361,7 +361,7 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 	*available = (bpage_index < (rpc->msgin.num_bpages-1))
 			? HOMA_BPAGE_SIZE - bpage_offset
 			: rpc->msgin.length - offset;
-	return rpc->hsk->buffer_pool.region + rpc->msgin.bpage_offsets[bpage_index]
+	return rpc->hsk->buffer_pool->region + rpc->msgin.bpage_offsets[bpage_index]
 			+ bpage_offset;
 }
 

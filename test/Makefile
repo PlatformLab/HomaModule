@@ -45,8 +45,9 @@ TEST_SRCS :=  unit_homa_grant.c \
 	      unit_homa_peertab.c \
 	      unit_homa_pool.c \
 	      unit_homa_plumbing.c \
+	      unit_homa_rpc.c \
 	      unit_homa_skb.c \
-	      unit_homa_socktab.c \
+	      unit_homa_sock.c \
 	      unit_homa_timer.c \
 	      unit_homa_utils.c \
 	      unit_timetrace.c
@@ -60,8 +61,9 @@ HOMA_SRCS :=  homa_grant.c \
 	      homa_peertab.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
+	      homa_rpc.c \
 	      homa_skb.c \
-	      homa_socktab.c \
+	      homa_sock.c \
 	      homa_timer.c \
 	      homa_utils.c \
 	      timetrace.c

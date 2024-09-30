@@ -194,7 +194,7 @@ TEST_F(homa_incoming, homa_message_in_init__pool_doesnt_exist)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
-	homa_pool_destroy(&self->hsk.buffer_pool);
+	homa_pool_destroy(self->hsk.buffer_pool);
 	EXPECT_EQ(ENOMEM, -homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 0));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 }
@@ -203,7 +203,7 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
-	atomic_set(&self->hsk.buffer_pool.free_bpages, 0);
+	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	EXPECT_EQ(0, homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 10000));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 	EXPECT_EQ(0, crpc->msgin.granted);
@@ -1135,7 +1135,7 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffer_pool)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 1600);
 	ASSERT_NE(NULL, crpc);
-	homa_pool_destroy(&self->hsk.buffer_pool);
+	homa_pool_destroy(self->hsk.buffer_pool);
 	unit_log_clear();
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc);
@@ -1161,7 +1161,7 @@ TEST_F(homa_incoming, homa_data_pkt__no_buffers)
 	EXPECT_NE(NULL, crpc);
 	unit_log_clear();
 
-	atomic_set(&self->hsk.buffer_pool.free_bpages, 0);
+	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
 			1400, 0), crpc);
 	EXPECT_EQ(1400, homa_metrics_per_cpu()->dropped_data_no_bufs);

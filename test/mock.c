@@ -746,6 +746,11 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 	return block;
 }
 
+void *__kmalloc_noprof(size_t size, gfp_t flags)
+{
+	return mock_kmalloc(size, flags);
+}
+
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 					   void *data, int node,
 					   const char namefmt[],
