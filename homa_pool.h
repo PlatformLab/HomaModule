@@ -6,6 +6,8 @@
 #ifndef _HOMA_POOL_H
 #define _HOMA_POOL_H
 
+#include "homa_rpc.h"
+
 /**
  * struct homa_bpage - Contains information about a single page in
  * a buffer pool.

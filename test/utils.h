@@ -4,6 +4,8 @@
 
 /* Utility functions for unit tests, implemented in C. */
 
+struct homa_message_out;
+struct homa_rpc;
 struct unit_hash;
 
 /**

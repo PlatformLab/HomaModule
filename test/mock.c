@@ -1438,7 +1438,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	if (port != 0)
 		homa->next_client_port = saved_port;
 	if (port < HOMA_MIN_DEFAULT_PORT)
-		homa_sock_bind(&homa->port_map, hsk, port);
+		homa_sock_bind(homa->port_map, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct data_header);

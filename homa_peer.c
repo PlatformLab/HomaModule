@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_rpc.h"
 
 /**
  * homa_peertab_init() - Constructor for homa_peertabs.

@@ -10,6 +10,8 @@
 #include "homa_wire.h"
 #include "homa_sock.h"
 
+struct homa_rpc;
+
 /**
  * struct homa_dead_dst - Used to retain dst_entries that are no longer
  * needed, until it is safe to delete them (I'm not confident that the RCU

@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_rpc.h"
 
 /* Core-specific information. NR_CPUS is an overestimate of the actual
  * number, but allows us to allocate the array statically.
@@ -123,7 +124,8 @@ int homa_init(struct homa *homa)
 	homa->throttle_min_bytes = 200;
 	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
-	homa_socktab_init(&homa->port_map);
+	homa->port_map = kmalloc(sizeof *homa->port_map, GFP_KERNEL);
+	homa_socktab_init(homa->port_map);
 	homa->peers = kmalloc(sizeof *homa->peers, GFP_KERNEL);
 	err = homa_peertab_init(homa->peers);
 	if (err) {
@@ -219,7 +221,8 @@ void homa_destroy(struct homa *homa)
 	}
 
 	/* The order of the following 2 statements matters! */
-	homa_socktab_destroy(&homa->port_map);
+	homa_socktab_destroy(homa->port_map);
+	kfree(homa->port_map);
 	homa_peertab_destroy(homa->peers);
 	kfree(homa->peers);
 	homa_skb_cleanup(homa);
@@ -580,7 +583,7 @@ void homa_freeze_peers(struct homa *homa)
 	struct homa_socktab_scan scan;
 
 	/* Find a socket to use (any will do). */
-	hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	hsk = homa_socktab_start_scan(homa->port_map, &scan);
 	if (hsk == NULL) {
 		tt_record("homa_freeze_peers couldn't find a socket");
 		return;

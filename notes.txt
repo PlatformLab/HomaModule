@@ -1,25 +1,39 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Ideas for making TCP and Homa play well together:
+* Notes on splitting homa_impl.h:
+  * Remove homa_wire.h include from homa_impl.h?
+  * Where should homa_rpc_bucket be declared (currently in homa_impl.h)?
+  * Move homa_message_in_init to homa_rpc.c?
+
+* Thoughts on making TCP and Homa play better together:
   * Goals:
-    * Balance queue lengths for the protocols?
+    * Keep the NIC tx queue from growing long.
+    * Share bandwidth fairly between TCP and Homa
     * If one protocol is using a lot less bandwidth, give it preference
       for transmission?
-  * Keep track of recent bandwidth consumed by each protocol; when there
-    is overload, restrict each protocol to its fraction of recent bandwidth.
-  * "Consumed" has to be measured in terms of bytes offered, not bytes actually
-    transmitted (otherwise a protocol could get "stuck" at a low transmittion
-    rate?).
-  * Maybe use a mechanism like fair-share scheduling? Keep track of
-    recent usage by each protocol, give priority to the protocol that
-    used least bandwidth recently?
-  * Could this be implemented with a mechanism like a token bucket?
-  * Use a token bucket for each protocol with 50% of available bandwidth
-    (or maybe less?). Split any extra available bandwidth among the
-    protocols. Maybe adjust rates for the token buckets based on recent
-    traffic?
-  * Also consider the amount of data that has been "stuck" in the NIC?
+    * Balance queue lengths for the protocols?
+  * Approach #1: analogous to "fair share" CPU scheduling
+    * Keep separate tx queues for Homa and TCP
+    * Try to equalize the queue lengths while pacing packets at
+      network speed?
+    * Keep track of lengths for each of many queues
+    * Each queue paces itself based on relative lengths
+    * Do all pacing centrally, call back to individual queues for output?
+  * Approach #2:
+    * Keep track of recent bandwidth consumed by each protocol; when there
+      is overload, restrict each protocol to its fraction of recent bandwidth.
+    * "Consumed" has to be measured in terms of bytes offered, not bytes
+      actually transmitted (otherwise a protocol could get "stuck" at a low
+      transmittion rate?).
+  * Approach #3: token bucket
+    * Use a token bucket for each protocol with 50% of available bandwidth
+      (or maybe less?). Split any extra available bandwidth among the
+      protocols. Maybe adjust rates for the token buckets based on recent
+      traffic?
+  * Also consider the amount of data that is "stuck" in the NIC?
+
+* Notes on Linux qdiscs:
 
 * Remedies to consider for the performance problems at 100 Gbps, where
   one tx channel gets very backed up:
@@ -280,7 +294,6 @@ Notes for Homa implementation in Linux:
   * If there is an error in ip_queue_xmit, does it free the packet?
     * The answer appears to be "yes", and Homa contains code to check this
       and log if not.
-  * How to compute the *real* number of CPUS (<< NR_CPUS?)
   * Is there a better way to compute packet hashes than Homa's approach
     in gro_complete?
 
@@ -395,3 +408,6 @@ Notes for Homa implementation in Linux:
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
+
+
+ gcc -g -Wp,-MMD,/users/ouster/homaModule/.homa_offload.o.d -nostdinc -I./arch/x86/include -I./arch/x86/include/generated  -I./include -I./arch/x86/include/uapi -I./arch/x86/include/generated/uapi -I./include/uapi -I./include/generated/uapi -include ./include/linux/compiler-version.h -include ./include/linux/kconfig.h -include ./include/linux/compiler_types.h -D__KERNEL__ -fmacro-prefix-map=./= -std=gnu11 -fshort-wchar -funsigned-char -fno-common -fno-PIE -fno-strict-aliasing -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -fcf-protection=none -m64 -falign-jumps=1 -falign-loops=1 -mno-80387 -mno-fp-ret-in-387 -mpreferred-stack-boundary=3 -mskip-rax-setup -mtune=generic -mno-red-zone -mcmodel=kernel -Wno-sign-compare -fno-asynchronous-unwind-tables -mindirect-branch=thunk-extern -mindirect-branch-register -mindirect-branch-cs-prefix -mfunction-return=thunk-extern -fno-jump-tables -fpatchable-function-entry=16,16 -fno-delete-null-pointer-checks -O2 -fno-allow-store-data-races -fstack-protector-strong -fno-omit-frame-pointer -fno-optimize-sibling-calls -fno-stack-clash-protection -pg -mrecord-mcount -mfentry -DCC_USING_FENTRY -falign-functions=16 -fno-strict-overflow -fno-stack-check -fconserve-stack -Wall -Wundef -Werror=implicit-function-declaration -Werror=implicit-int -Werror=return-type -Werror=strict-prototypes -Wno-format-security -Wno-trigraphs -Wno-frame-address -Wno-address-of-packed-member -Wmissing-declarations -Wmissing-prototypes -Wframe-larger-than=2048 -Wno-main -Wvla -Wno-pointer-sign -Wcast-function-type -Wno-stringop-overflow -Wno-array-bounds -Wno-alloc-size-larger-than -Wimplicit-fallthrough=5 -Werror=date-time -Werror=incompatible-pointer-types -Werror=designated-init -Wenum-conversion -Wextra -Wunused -Wno-unused-but-set-variable -Wno-unused-const-variable -Wno-packed-not-aligned -Wno-format-overflow -Wno-format-truncation -Wno-stringop-truncation -Wno-override-init -Wno-missing-field-initializers -Wno-type-limits -Wno-shift-negative-value -Wno-maybe-uninitialized -Wno-sign-compare -Wno-unused-parameter -g -gdwarf-4 -g  -DMODULE  -DKBUILD_BASENAME='"homa_offload"' -DKBUILD_MODNAME='"homa"' -D__KBUILD_MODNAME=kmod_homa -E -o /users/ouster/homaModule/homa_offload.e /users/ouster/homaModule/homa_offload.c   ; ./tools/objtool/objtool --hacks=jump_label --hacks=noinstr --hacks=skylake --retpoline --rethunk --stackval --static-call --uaccess --prefix=16   --module /users/ouster/homaModule/homa_offload.o

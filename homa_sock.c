@@ -104,7 +104,7 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
  */
 void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
-	struct homa_socktab *socktab = &homa->port_map;
+	struct homa_socktab *socktab = homa->port_map;
 	int i;
 
 	spin_lock_bh(&socktab->write_lock);
@@ -189,9 +189,9 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * See sync.txt for additional information about locking.
 	 */
 	hsk->shutdown = true;
-	spin_lock_bh(&hsk->homa->port_map.write_lock);
+	spin_lock_bh(&hsk->homa->port_map->write_lock);
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
-	spin_unlock_bh(&hsk->homa->port_map.write_lock);
+	spin_unlock_bh(&hsk->homa->port_map->write_lock);
 	homa_sock_unlock(hsk);
 
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {

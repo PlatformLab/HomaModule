@@ -510,4 +510,14 @@ static inline void homa_rpc_validate(struct homa_rpc *rpc)
 	BUG();
 }
 
+/**
+ * homa_is_client(): returns true if we are the client for a particular RPC,
+ * false if we are the server.
+ * @id:  Id of the RPC in question.
+ */
+static inline bool homa_is_client(__u64 id)
+{
+	return (id & 1) == 0;
+}
+
 #endif /* _HOMA_RPC_H */

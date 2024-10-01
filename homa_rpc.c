@@ -218,7 +218,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		 * out from under us.
 		 */
 		rcu_read_lock();
-		hsk2 = homa_sock_find(&hsk->homa->port_map, server_port);
+		hsk2 = homa_sock_find(hsk->homa->port_map, server_port);
 		if (!hsk2)
 			goto done;
 	}
@@ -569,7 +569,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 
 	pr_notice("Logging active Homa RPCs:\n");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -646,7 +646,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 	homa_grant_log_tt(homa);
 	tt_record("Logging active Homa RPCs:");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -698,7 +698,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 			atomic_read(&homa->total_incoming));
 	*link_errors = 0;
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;

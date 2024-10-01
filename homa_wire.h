@@ -476,4 +476,18 @@ struct ack_header {
 _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
 		"ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
+/**
+ * homa_local_id(): given an RPC identifier from an input packet (which
+ * is network-encoded), return the decoded id we should use for that
+ * RPC on this machine.
+ * @sender_id:  RPC id from an incoming packet, such as h->common.sender_id
+ */
+static inline __u64 homa_local_id(__be64 sender_id)
+{
+	/* If the client bit was set on the sender side, it needs to be
+	 * removed here, and conversely.
+	 */
+	return be64_to_cpu(sender_id) ^ 1;
+}
+
 #endif /* _HOMA_WIRE_H */

@@ -67,7 +67,7 @@ FIXTURE_SETUP(homa_plumbing)
 		self->server_addr.in4.sin_addr.s_addr =
 			ipv6_to_ipv4(self->server_addr.in6.sin6_addr);
 	}
-	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
+	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
 	                .dport = htons(self->server_port),

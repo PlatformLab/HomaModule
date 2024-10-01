@@ -356,7 +356,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 	int num_acks = 0;
 
 	/* Find the appropriate socket.*/
-	hsk = homa_sock_find(&homa->port_map, dport);
+	hsk = homa_sock_find(homa->port_map, dport);
 	if (!hsk) {
 		if (skb_is_ipv6(skb))
 			icmp6_send(skb, ICMPV6_DEST_UNREACH,
@@ -985,7 +985,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 	struct homa_rpc *rpc, *tmp;
 
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.

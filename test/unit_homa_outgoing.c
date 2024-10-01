@@ -4,6 +4,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -464,7 +465,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	struct homa_rpc *srpc;
 	struct grant_header h;
 
-	homa_sock_bind(&self->homa.port_map, &self->hsk, self->server_port);
+	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			10000, 10000);

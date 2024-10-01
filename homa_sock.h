@@ -296,6 +296,22 @@ static inline void homa_sock_unlock(struct homa_sock *hsk)
 }
 
 /**
+ * port_hash() - Hash function for port numbers.
+ * @port:   Port number being looked up.
+ *
+ * Return:  The index of the bucket in which this port will be found (if
+ *          it exists.
+ */
+static inline int homa_port_hash(__u16 port)
+{
+	/* We can use a really simple hash function here because client
+	 * port numbers are allocated sequentially and server port numbers
+	 * are unpredictable.
+	 */
+	return port & (HOMA_SOCKTAB_BUCKETS - 1);
+}
+
+/**
  * homa_client_rpc_bucket() - Find the bucket containing a given
  * client RPC.
  * @hsk:      Socket associated with the RPC.
@@ -373,6 +389,11 @@ static inline int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
 static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
 {
 	spin_unlock_bh(&bucket->lock);
+}
+
+static inline struct homa_sock *homa_sk(const struct sock *sk)
+{
+	return (struct homa_sock *)sk;
 }
 
 #endif /* _HOMA_SOCK_H */

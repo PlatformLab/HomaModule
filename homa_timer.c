@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_rpc.h"
 
 /**
  * homa_check_rpc() -  Invoked for each RPC during each timer pass; does
@@ -198,7 +199,7 @@ void homa_timer(struct homa *homa)
 	 * below prevents sockets from being deleted during the scan.
 	 */
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(&homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
 			/* If we get here, it means that homa_wait_for_message

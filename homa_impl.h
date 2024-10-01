@@ -7,9 +7,6 @@
 #ifndef _HOMA_IMPL_H
 #define _HOMA_IMPL_H
 
-#pragma GCC diagnostic ignored "-Wpointer-sign"
-#pragma GCC diagnostic ignored "-Wunused-variable"
-
 #include <linux/bug.h>
 #ifdef __UNIT_TEST__
 #undef WARN
@@ -45,8 +42,6 @@
 #include <net/inet_common.h>
 #include <net/gro.h>
 #include <net/rps.h>
-#pragma GCC diagnostic warning "-Wpointer-sign"
-#pragma GCC diagnostic warning "-Wunused-variable"
 
 #ifdef __UNIT_TEST__
 #undef alloc_pages
@@ -133,13 +128,12 @@ extern void *mock_vmalloc(size_t size);
 #endif
 
 /* Forward declarations. */
+struct homa_peer;
 struct homa_sock;
 struct homa;
 
 #include "homa.h"
 #include "timetrace.h"
-#include "homa_rpc.h"
-#include "homa_wire.h"
 #include "homa_metrics.h"
 
 /* Declarations used in this file, so they can't be made at the end. */
@@ -487,9 +481,10 @@ struct homa {
 	__u16 next_client_port __aligned(CACHE_LINE_SIZE);
 
 	/**
-	 * @port_map: Information about all open sockets.
+	 * @port_map: Information about all open sockets. Dynamically
+	 * allocated; must be kfreed.
 	 */
-	struct homa_socktab port_map __aligned(CACHE_LINE_SIZE);
+	struct homa_socktab *port_map __aligned(CACHE_LINE_SIZE);
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated with.
@@ -1090,30 +1085,6 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 }
 
 /**
- * homa_is_client(): returns true if we are the client for a particular RPC,
- * false if we are the server.
- * @id:  Id of the RPC in question.
- */
-static inline bool homa_is_client(__u64 id)
-{
-	return (id & 1) == 0;
-}
-
-/**
- * homa_local_id(): given an RPC identifier from an input packet (which
- * is network-encoded), return the decoded id we should use for that
- * RPC on this machine.
- * @sender_id:  RPC id from an incoming packet, such as h->common.sender_id
- */
-static inline __u64 homa_local_id(__be64 sender_id)
-{
-	/* If the client bit was set on the sender side, it needs to be
-	 * removed here, and conversely.
-	 */
-	return be64_to_cpu(sender_id) ^ 1;
-}
-
-/**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
  * @skb:     Socket buffer containing private link field.
  *
@@ -1129,22 +1100,6 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
 }
 
 /**
- * port_hash() - Hash function for port numbers.
- * @port:   Port number being looked up.
- *
- * Return:  The index of the bucket in which this port will be found (if
- *          it exists.
- */
-static inline int homa_port_hash(__u16 port)
-{
-	/* We can use a really simple hash function here because client
-	 * port numbers are allocated sequentially and server port numbers
-	 * are unpredictable.
-	 */
-	return port & (HOMA_SOCKTAB_BUCKETS - 1);
-}
-
-/**
  * homa_set_doff() - Fills in the doff TCP header field for a Homa packet.
  * @h:     Packet header whose doff field is to be set.
  * @size:  Size of the "header", bytes (must be a multiple of 4). This
@@ -1155,11 +1110,6 @@ static inline int homa_port_hash(__u16 port)
 static inline void homa_set_doff(struct data_header *h, int size)
 {
 	h->common.doff = size << 2;
-}
-
-static inline struct homa_sock *homa_sk(const struct sock *sk)
-{
-	return (struct homa_sock *)sk;
 }
 
 /**
