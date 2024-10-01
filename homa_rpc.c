@@ -4,6 +4,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_pool.h"
 
 /**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used

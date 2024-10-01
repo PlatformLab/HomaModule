@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_pool.h"
 
 /**
  * homa_message_in_init() - Constructor for homa_message_in.

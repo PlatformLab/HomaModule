@@ -4,6 +4,7 @@
 
 #include "homa_impl.h"
 #include "homa_peer.h"
+#include "homa_pool.h"
 
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.

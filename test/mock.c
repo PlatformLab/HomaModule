@@ -3,11 +3,12 @@
  */
 
 /* This file provides simplified substitutes for many Linux variables and
- * functions, in order to allow Homa unit tests to be run outside a Linux
+ * functions in order to allow Homa unit tests to be run outside a Linux
  * kernel.
  */
 
 #include "homa_impl.h"
+#include "homa_pool.h"
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
