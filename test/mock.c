@@ -9,6 +9,7 @@
 
 #include "homa_impl.h"
 #include "homa_pool.h"
+#include "homa_skb.h"
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"

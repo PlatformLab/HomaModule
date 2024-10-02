@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/* This file contains functions for allocating and freeing sk_buffs. */
+/* This file contains functions for allocating and freeing sk_buffs. In
+ * particular, this file implements efficient management of the memory used
+ * by sk_buffs.
+ */
 
 #include "homa_impl.h"
+#include "homa_skb.h"
+
+DEFINE_PER_CPU(struct homa_skb_core, homa_skb_core);
 
 #ifdef __UNIT_TEST__
 extern int mock_max_skb_frags;
@@ -17,15 +23,42 @@ static inline void frag_page_set(skb_frag_t *frag, struct page *page)
 }
 
 /**
- * homa_skb_page_pool_init() - Invoked when a struct homa is created to
- * initialize a page pool.
- * @pool:         Pool to initialize.
+ * homa_skb_init() - Invoked when a struct homa is created to initialize
+ * information related to sk_buff management.
  */
-void homa_skb_page_pool_init(struct homa_page_pool *pool)
+void homa_skb_init(struct homa *homa)
 {
-	pool->avail = 0;
-	pool->low_mark = 0;
-	memset(pool->pages, 0, sizeof(pool->pages));
+	int i;
+
+	spin_lock_init(&homa->page_pool_mutex);
+	memset(homa->page_pools, 0, sizeof(homa->page_pools));
+	homa->skb_page_frees_per_sec = 1000;
+	homa->skb_pages_to_free = NULL;
+	homa->pages_to_free_slots = 0;
+	homa->skb_page_free_time = 0;
+	homa->skb_page_pool_min_kb = (3*HOMA_MAX_MESSAGE_LENGTH)/1000;
+
+	/* Initialize NUMA-specfific page pools. */
+	homa->max_numa = -1;
+	for (i = 0; i < nr_cpu_ids; i++) {
+		struct homa_skb_core *skb_core = &per_cpu(homa_skb_core, i);
+		int numa = cpu_to_node(i);
+		BUG_ON(numa >= MAX_NUMNODES);
+
+		if (numa > homa->max_numa)
+			homa->max_numa = numa;
+		if (homa->page_pools[numa] == NULL) {
+			struct homa_page_pool *pool;
+
+			pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+			pool->avail = 0;
+			pool->low_mark = 0;
+			memset(pool->pages, 0, sizeof(pool->pages));
+			homa->page_pools[numa] = pool;
+		}
+		skb_core->pool = homa->page_pools[numa];
+	}
+	pr_notice("homa_skb_init found max NUMA node %d\n", homa->max_numa);
 }
 
 /**
@@ -38,27 +71,30 @@ void homa_skb_cleanup(struct homa *homa)
 	int i, j;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
-		struct homa_core *core = homa_cores[i];
+		struct homa_skb_core *skb_core = &per_cpu(homa_skb_core, i);
 
-		if (core->skb_page != NULL) {
-			put_page(core->skb_page);
-			core->skb_page = NULL;
-			core->page_size = 0;
-			core->page_inuse = 0;
+		if (skb_core->skb_page != NULL) {
+			put_page(skb_core->skb_page);
+			skb_core->skb_page = NULL;
+			skb_core->page_size = 0;
+			skb_core->page_inuse = 0;
 		}
-		for (j = 0; j < core->num_stashed_pages; j++)
-			put_page(core->stashed_pages[j]);
-		core->num_stashed_pages = 0;
+		for (j = 0; j < skb_core->num_stashed_pages; j++)
+			put_page(skb_core->stashed_pages[j]);
+		skb_core->pool = NULL;
+		skb_core->num_stashed_pages = 0;
 	}
 
 	for (i = 0; i < MAX_NUMNODES; i++) {
-		struct homa_numa *numa = homa_numas[i];
+		struct homa_page_pool *pool = homa->page_pools[i];
 
-		if (!numa)
+		if (pool == NULL)
 			continue;
-		for (j = numa->page_pool.avail - 1; j >= 0; j--)
-			put_page(numa->page_pool.pages[j]);
-		numa->page_pool.avail = 0;
+		for (j = pool->avail - 1; j >= 0; j--)
+			put_page(pool->pages[j]);
+		pool->avail = 0;
+		kfree(pool);
+		homa->page_pools[i] = NULL;
 	}
 
 	if (homa->skb_pages_to_free != NULL) {
@@ -112,20 +148,21 @@ struct sk_buff *homa_skb_new_tx(int length)
  */
 void homa_skb_stash_pages(struct homa *homa, int length)
 {
-	struct homa_core *core = homa_cores[raw_smp_processor_id()];
-	struct homa_page_pool *pool = &core->numa->page_pool;
+	struct homa_skb_core *skb_core = &per_cpu(homa_skb_core,
+			raw_smp_processor_id());
+	struct homa_page_pool *pool = skb_core->pool;
 	int pages_needed = HOMA_MAX_STASHED(length);
 
-	if ((pages_needed < 2) || (core->num_stashed_pages >= pages_needed))
+	if ((pages_needed < 2) || (skb_core->num_stashed_pages >= pages_needed))
 		return;
 	spin_lock_bh(&homa->page_pool_mutex);
-	while (pool->avail && (core->num_stashed_pages < pages_needed)) {
+	while (pool->avail && (skb_core->num_stashed_pages < pages_needed)) {
 		pool->avail--;
 		if (pool->avail < pool->low_mark)
 			pool->low_mark = pool->avail;
-		core->stashed_pages[core->num_stashed_pages] =
+		skb_core->stashed_pages[skb_core->num_stashed_pages] =
 				pool->pages[pool->avail];
-		core->num_stashed_pages++;
+		skb_core->num_stashed_pages++;
 	}
 	spin_unlock_bh(&homa->page_pool_mutex);
 }
@@ -144,43 +181,44 @@ void homa_skb_stash_pages(struct homa *homa, int length)
 void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 {
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
-	struct homa_core *core = homa_cores[raw_smp_processor_id()];
+	struct homa_skb_core *skb_core = &per_cpu(homa_skb_core,
+			raw_smp_processor_id());
 	skb_frag_t *frag = &shinfo->frags[shinfo->nr_frags - 1];
 	char *result;
 	int actual_size = *length;
 
 	/* Can we just extend the skb's last fragment? */
-	if ((shinfo->nr_frags > 0) && (skb_frag_page(frag) == core->skb_page)
-			&& (core->page_inuse < core->page_size)
+	if ((shinfo->nr_frags > 0) && (skb_frag_page(frag) == skb_core->skb_page)
+			&& (skb_core->page_inuse < skb_core->page_size)
 			&& ((frag->offset + skb_frag_size(frag))
-			== core->page_inuse)) {
-		if ((core->page_size - core->page_inuse) < actual_size)
-			actual_size = core->page_size - core->page_inuse;
+			== skb_core->page_inuse)) {
+		if ((skb_core->page_size - skb_core->page_inuse) < actual_size)
+			actual_size = skb_core->page_size - skb_core->page_inuse;
 		*length = actual_size;
 		skb_frag_size_add(frag, actual_size);
-		result = page_address(skb_frag_page(frag)) + core->page_inuse;
-		core->page_inuse += actual_size;
+		result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
+		skb_core->page_inuse += actual_size;
 		skb_len_add(skb, actual_size);
 		return result;
 	}
 
 	/* Need to add a new fragment to the skb. */
-	core->page_inuse = ALIGN(core->page_inuse, SMP_CACHE_BYTES);
-	if (core->page_inuse >= core->page_size) {
-		if (!homa_skb_page_alloc(homa, core))
+	skb_core->page_inuse = ALIGN(skb_core->page_inuse, SMP_CACHE_BYTES);
+	if (skb_core->page_inuse >= skb_core->page_size) {
+		if (!homa_skb_page_alloc(homa, skb_core))
 			return NULL;
 	}
-	if ((core->page_size - core->page_inuse) < actual_size)
-		actual_size = core->page_size - core->page_inuse;
+	if ((skb_core->page_size - skb_core->page_inuse) < actual_size)
+		actual_size = skb_core->page_size - skb_core->page_inuse;
 	frag = &shinfo->frags[shinfo->nr_frags];
 	shinfo->nr_frags++;
-	frag_page_set(frag, core->skb_page);
-	get_page(core->skb_page);
-	frag->offset = core->page_inuse;
+	frag_page_set(frag, skb_core->skb_page);
+	get_page(skb_core->skb_page);
+	frag->offset = skb_core->page_inuse;
 	*length = actual_size;
 	skb_frag_size_set(frag, actual_size);
-	result = page_address(skb_frag_page(frag)) + core->page_inuse;
-	core->page_inuse += actual_size;
+	result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
+	skb_core->page_inuse += actual_size;
 	skb_len_add(skb, actual_size);
 	return result;
 }
@@ -189,45 +227,46 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
  * homa_skb_page_alloc() - Allocate a new page for skb allocation for a
  * given core. Any existing page is released.
  * @homa:         Overall data about the Homa protocol implementation.
- * @core:         Allocate page in this core.
+ * @skb_core:     Core-specific info; the page will be allocated in this core.
  * Return:       True if successful, false if memory not available.
  */
-bool homa_skb_page_alloc(struct homa *homa, struct homa_core *core)
+bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 {
 	struct homa_page_pool *pool;
 	__u64 start;
 
-	if (core->skb_page) {
-		if (page_ref_count(core->skb_page) == 1) {
+	if (skb_core->skb_page) {
+		if (page_ref_count(skb_core->skb_page) == 1) {
 			/* The existing page is no longer in use, so we can
 			 * reuse it.
 			 */
-			core->page_inuse = 0;
+			skb_core->page_inuse = 0;
 			goto success;
 		}
-		put_page(core->skb_page);
+		put_page(skb_core->skb_page);
 	}
 
 	/* Step 1: does this core have a stashed page? */
-	core->page_size = HOMA_SKB_PAGE_SIZE;
-	core->page_inuse = 0;
-	if (core->num_stashed_pages > 0) {
-		core->num_stashed_pages--;
-		core->skb_page = core->stashed_pages[core->num_stashed_pages];
+	skb_core->page_size = HOMA_SKB_PAGE_SIZE;
+	skb_core->page_inuse = 0;
+	if (skb_core->num_stashed_pages > 0) {
+		skb_core->num_stashed_pages--;
+		skb_core->skb_page =skb_core->stashed_pages[
+				skb_core->num_stashed_pages];
 		goto success;
 	}
 
 	/* Step 2: can we retreive a page from the pool for this NUMA node? */
-	pool = &core->numa->page_pool;
+	pool = skb_core->pool;
 	if (pool->avail) {
-		struct homa_page_pool *pool = &core->numa->page_pool;
-
 		spin_lock_bh(&homa->page_pool_mutex);
+
+		/* Must recheck: could have changed before locked. */
 		if (pool->avail) {
 			pool->avail--;
 			if (pool->avail < pool->low_mark)
 				pool->low_mark = pool->avail;
-			core->skb_page = pool->pages[pool->avail];
+			skb_core->skb_page = pool->pages[pool->avail];
 			spin_unlock_bh(&homa->page_pool_mutex);
 			goto success;
 		}
@@ -237,21 +276,21 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_core *core)
 	/* Step 3: can we allocate a new big page? */
 	INC_METRIC(skb_page_allocs, 1);
 	start = get_cycles();
-	core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
+	skb_core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
 			| __GFP_NOWARN | __GFP_NORETRY, HOMA_SKB_PAGE_ORDER);
-	if (likely(core->skb_page)) {
+	if (likely(skb_core->skb_page)) {
 		INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
 		goto success;
 	}
 
 	/* Step 4: can we allocate a normal page? */
-	core->skb_page = alloc_page(GFP_KERNEL);
+	skb_core->skb_page = alloc_page(GFP_KERNEL);
 	INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
-	if (likely(core->skb_page)) {
-		core->page_size = PAGE_SIZE;
+	if (likely(skb_core->skb_page)) {
+		skb_core->page_size = PAGE_SIZE;
 		goto success;
 	}
-	core->page_size = core->page_inuse = 0;
+	skb_core->page_size = skb_core->page_inuse = 0;
 	return false;
 
 success:
@@ -465,8 +504,8 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
 	spin_lock_bh(&homa->page_pool_mutex);
 	for (i = 0; i < count; i++) {
 		struct page *page = pages[i];
-		struct homa_page_pool *pool =
-				&homa_numas[page_to_nid(page)]->page_pool;
+		struct homa_page_pool *pool = homa->page_pools[
+				page_to_nid(page)];
 		if (pool->avail < LIMIT) {
 			pool->pages[pool->avail] = page;
 			pool->avail++;
@@ -554,9 +593,11 @@ void homa_skb_release_pages(struct homa *homa)
 	/* Find the pool with the largest low-water mark. */
 	max_low_mark = -1;
 	spin_lock_bh(&homa->page_pool_mutex);
-	for (i = 0; i < homa_num_numas; i++) {
-		struct homa_page_pool *pool = &homa_numas[i]->page_pool;
+	for (i = 0; i <= homa->max_numa; i++) {
+		struct homa_page_pool *pool = homa->page_pools[i];
 
+		if (pool == NULL)
+			continue;
 		if (pool->low_mark > max_low_mark) {
 			max_low_mark = pool->low_mark;
 			max_pool = pool;

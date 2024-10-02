@@ -7,17 +7,12 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#include "homa_skb.h"
 
 /* Core-specific information. NR_CPUS is an overestimate of the actual
  * number, but allows us to allocate the array statically.
  */
 struct homa_core *homa_cores[NR_CPUS];
-
-/* Information specific to individual NUMA nodes. */
-struct homa_numa *homa_numas[MAX_NUMNODES];
-
-/* Total number of  NUMA nodes actually defined in homa_numas. */
-int homa_num_numas;
 
 /* Points to block of memory holding all homa_cores; used to free it. */
 char *core_memory;
@@ -36,28 +31,10 @@ int homa_init(struct homa *homa)
 {
 	size_t aligned_size;
 	char *first;
-	int i, err, num_numas;
+	int i, err;
 
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 		       "homa_init assumes at least 8 priority levels");
-
-	/* Initialize data specific to NUMA nodes. */
-	memset(homa_numas, 0, sizeof(homa_numas));
-	num_numas = 0;
-	for (i = 0; i < nr_cpu_ids; i++) {
-		struct homa_numa *numa;
-		int n = cpu_to_node(i);
-
-		if (homa_numas[n])
-			continue;
-		numa = kmalloc(sizeof(struct homa_numa), GFP_KERNEL);
-		homa_numas[n] = numa;
-		homa_skb_page_pool_init(&numa->page_pool);
-		if (n >= homa_num_numas)
-			homa_num_numas = n+1;
-		num_numas++;
-	}
-	pr_notice("Homa initialized %d homa_numas, highest number %d\n", num_numas, homa_num_numas-1);
 
 	/* Initialize core-specific info (if no-one else has already done it),
 	 * making sure that each core has private cache lines.
@@ -76,7 +53,6 @@ int homa_init(struct homa *homa)
 
 			core = (struct homa_core *) (first + i*aligned_size);
 			homa_cores[i] = core;
-			core->numa = homa_numas[cpu_to_node(i)];
 			core->last_active = 0;
 			core->last_gro = 0;
 			atomic_set(&core->softirq_backlog, 0);
@@ -87,10 +63,6 @@ int homa_init(struct homa *homa)
 			core->last_app_active = 0;
 			core->held_skb = NULL;
 			core->held_bucket = 0;
-			core->skb_page = NULL;
-			core->page_inuse = 0;
-			core->page_size = 0;
-			core->num_stashed_pages = 0;
 		}
 	}
 
@@ -132,12 +104,7 @@ int homa_init(struct homa *homa)
 		pr_err("Couldn't initialize peer table (errno %d)\n", -err);
 		return err;
 	}
-	spin_lock_init(&homa->page_pool_mutex);
-	homa->skb_page_frees_per_sec = 1000;
-	homa->skb_pages_to_free = NULL;
-	homa->pages_to_free_slots = 0;
-	homa->skb_page_free_time = 0;
-	homa->skb_page_pool_min_kb = (3*HOMA_MAX_MESSAGE_LENGTH)/1000;
+	homa_skb_init(homa);
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;
@@ -227,14 +194,6 @@ void homa_destroy(struct homa *homa)
 	kfree(homa->peers);
 	homa_skb_cleanup(homa);
 
-	for (i = 0; i < MAX_NUMNODES; i++) {
-		struct homa_numa *numa = homa_numas[i];
-
-		if (numa != NULL) {
-			kfree(numa);
-			homa_numas[i] = NULL;
-		}
-	}
 	if (core_memory) {
 		vfree(core_memory);
 		core_memory = NULL;
