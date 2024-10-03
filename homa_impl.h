@@ -139,8 +139,6 @@ struct homa;
 /* Declarations used in this file, so they can't be made at the end. */
 extern void     homa_throttle_lock_slow(struct homa *homa);
 
-extern struct homa_core *homa_cores[];
-
 #define sizeof32(type) ((int) (sizeof(type)))
 
 /** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
@@ -876,88 +874,6 @@ struct homa {
 	 */
 	int temp[4];
 };
-
-/**
- * struct homa_core - Homa allocates one of these structures for each
- * core, to hold information that needs to be kept on a per-core basis.
- */
-struct homa_core {
-	/** NUMA-specific page pool from which to allocate skb pages. */
-	struct homa_page_pool *pool;
-
-	/**
-	 * @last_active: the last time (in get_cycle() units) that
-	 * there was system activity, such NAPI or SoftIRQ, on this
-	 * core. Used for load balancing.
-	 */
-	__u64 last_active;
-
-	/**
-	 * @last_gro: the last time (in get_cycle() units) that
-	 * homa_gro_receive returned on this core. Used to determine
-	 * whether GRO is keeping a core busy.
-	 */
-	__u64 last_gro;
-
-	/**
-	 * @softirq_backlog: the number of batches of packets that have
-	 * been queued for SoftIRQ processing on this core but haven't
-	 * yet been processed.
-	 */
-	atomic_t softirq_backlog;
-
-	/**
-	 * @softirq_offset: used when rotating SoftIRQ assignment among
-	 * the next cores; contains an offset to add to the current core
-	 * to produce the core for SoftIRQ.
-	 */
-	int softirq_offset;
-
-	/**
-	 * @gen3_softirq_cores: when the Gen3 load balancer is in use,
-	 * GRO will arrange for SoftIRQ processing to occur on one of
-	 * these cores; -1 values are ignored (see balance.txt for more
-	 * on lewd balancing). This information is filled in via sysctl.
-	 */
-#define NUM_GEN3_SOFTIRQ_CORES 3
-	int gen3_softirq_cores[NUM_GEN3_SOFTIRQ_CORES];
-
-	/**
-	 * @last_app_active: the most recent time (get_cycles() units)
-	 * when an application was actively using Homa on this core (e.g.,
-	 * by sending or receiving messages). Used for load balancing
-	 * (see balance.txt).
-	 */
-	__u64 last_app_active;
-
-	/**
-	 * held_skb: last packet buffer known to be available for
-	 * merging other packets into on this core (note: may not still
-	 * be available), or NULL if none.
-	 */
-	struct sk_buff *held_skb;
-
-	/**
-	 * @held_bucket: the index, within napi->gro_hash, of the list
-	 * containing @held_skb; undefined if @held_skb is NULL. Used to
-	 * verify that @held_skb is still available.
-	 */
-	int held_bucket;
-
-	/**
-	 * @thread: the most recent thread to invoke a Homa system call
-	 * on this core, or NULL if none.
-	 */
-	struct task_struct *thread;
-
-	/**
-	 * @syscall_end_time: the time, in get_cycle() units, when the last
-	 * Homa system call completed on this core. Meaningless if thread
-	 * is NULL.
-	 */
-	__u64 syscall_end_time;
-};
-
 /**
  * struct homa_skb_info - Additional information needed by Homa for each
  * outbound DATA packet. Space is allocated for this at the very end of the
@@ -1205,17 +1121,6 @@ extern void     homa_gap_retry(struct homa_rpc *rpc);
 extern int      homa_get_port(struct sock *sk, unsigned short snum);
 extern int      homa_getsockopt(struct sock *sk, int level, int optname,
 		   char __user *optval, int __user *option);
-extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
-extern void     homa_gro_gen2(struct sk_buff *skb);
-extern void     homa_gro_gen3(struct sk_buff *skb);
-extern void     homa_gro_hook_tcp(void);
-extern void     homa_gro_unhook_tcp(void);
-extern struct sk_buff
-	       *homa_gro_receive(struct list_head *gro_list,
-		    struct sk_buff *skb);
-extern struct sk_buff
-	       *homa_gso_segment(struct sk_buff *skb,
-		    netdev_features_t features);
 extern int      homa_hash(struct sock *sk);
 extern enum hrtimer_restart
 		homa_hrtimer(struct hrtimer *timer);
@@ -1235,8 +1140,6 @@ extern struct sk_buff
 	       *homa_new_data_packet(struct homa_rpc *rpc,
 		    struct iov_iter *iter, int offset, int length,
 		    int max_seg_data);
-extern int      homa_offload_end(void);
-extern int      homa_offload_init(void);
 extern void     homa_outgoing_sysctl_changed(struct homa *homa);
 extern int      homa_pacer_main(void *transportInfo);
 extern void     homa_pacer_stop(struct homa *homa);
@@ -1264,7 +1167,6 @@ extern void     homa_rpc_acked(struct homa_sock *hsk,
 		    const struct in6_addr *saddr, struct homa_ack *ack);
 extern void     homa_rpc_free(struct homa_rpc *rpc);
 extern void     homa_rpc_handoff(struct homa_rpc *rpc);
-extern void     homa_send_ipis(void);
 extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 extern int      homa_setsockopt(struct sock *sk, int level, int optname,
 		    sockptr_t __user optval, unsigned int optlen);
@@ -1276,9 +1178,6 @@ extern void     homa_spin(int ns);
 extern char    *homa_symbol_for_type(uint8_t type);
 extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 		    void __user *buffer, size_t *lenp, loff_t *ppos);
-extern struct sk_buff
-	       *homa_tcp_gro_receive(struct list_head *held_list,
-		    struct sk_buff *skb);
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);

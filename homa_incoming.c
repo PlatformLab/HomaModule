@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
+#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 
@@ -1267,7 +1268,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		INC_METRIC(poll_cycles, now - poll_start);
 
 		/* Now it's time to sleep. */
-		homa_cores[interest.core]->last_app_active = now;
+		per_cpu(homa_offload_core, interest.core).last_app_active = now;
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = (struct homa_rpc *) atomic_long_read(&interest.ready_rpc);
 		if (!rpc && !hsk->shutdown) {
@@ -1381,7 +1382,8 @@ struct homa_interest *homa_choose_interest(struct homa *homa,
 
 	list_for_each(pos, head) {
 		interest = (struct homa_interest *) (((char *) pos) - offset);
-		if (homa_cores[interest->core]->last_active < busy_time) {
+		if (per_cpu(homa_offload_core, interest->core).last_active
+				< busy_time) {
 			if (backup != NULL)
 				INC_METRIC(handoffs_alt_thread, 1);
 			return interest;
@@ -1463,7 +1465,7 @@ thread_waiting:
 	/* Update the last_app_active time for the thread's core, so Homa
 	 * will try to avoid doing any work there.
 	 */
-	homa_cores[interest->core]->last_app_active = get_cycles();
+	per_cpu(homa_offload_core, interest->core).last_app_active = get_cycles();
 
 	/* Clear the interest. This serves two purposes. First, it saves
 	 * the waking thread from acquiring the socket lock again, which

@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 
@@ -889,14 +890,13 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	struct homa_rpc *rpc = NULL;
 	union sockaddr_in_union *addr = (union sockaddr_in_union *) msg->msg_name;
 
-	homa_cores[raw_smp_processor_id()]->last_app_active = start;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
 	if (unlikely(!msg->msg_control_is_user)) {
 		tt_record("homa_sendmsg error: !msg->msg_control_is_user");
 		result = -EINVAL;
 		goto error;
 	}
-	if (unlikely(copy_from_user(&args, msg->msg_control,
-			sizeof(args)))) {
+	if (unlikely(copy_from_user(&args, msg->msg_control, sizeof(args)))) {
 		result = -EFAULT;
 		goto error;
 	}
@@ -1023,7 +1023,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	int result;
 
 	INC_METRIC(recv_calls, 1);
-	homa_cores[raw_smp_processor_id()]->last_app_active = start;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
 	if (unlikely(!msg->msg_control)) {
 		/* This test isn't strictly necessary, but it provides a
 		 * hook for testing kernel call times.
@@ -1245,7 +1245,7 @@ int homa_softirq(struct sk_buff *skb)
 
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	homa_cores[raw_smp_processor_id()]->last_active = start;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int) (10*(start-last)/cpu_khz);
 
@@ -1393,7 +1393,7 @@ discard:
 		packets = other_pkts;
 	}
 
-	atomic_dec(&homa_cores[raw_smp_processor_id()]->softirq_backlog);
+	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
 	INC_METRIC(softirq_cycles, get_cycles() - start);
 	return 0;
 }
@@ -1621,7 +1621,7 @@ int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 {
 	int result, i;
 	struct ctl_table table_copy;
-	struct homa_core *core;
+	struct homa_offload_core *offload_core;
 	int max_values, *values;
 
 	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
@@ -1647,9 +1647,9 @@ int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 
 			if (values[i] < 0)
 				break;
-			core = homa_cores[values[i]];
+			offload_core = &per_cpu(homa_offload_core, values[i]);
 			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
-				core->gen3_softirq_cores[j] = values[i+j+1];
+				offload_core->gen3_softirq_cores[j] = values[i+j+1];
 		}
 	} else {
 		/* Read: return values from all of the cores. */
@@ -1663,9 +1663,9 @@ int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 			*dst = i;
 			dst++;
 			table_copy.maxlen += sizeof(int);
-			core = homa_cores[i];
+			offload_core = &per_cpu(homa_offload_core, i);
 			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++) {
-				*dst = core->gen3_softirq_cores[j];
+				*dst = offload_core->gen3_softirq_cores[j];
 				dst++;
 				table_copy.maxlen += sizeof(int);
 			}

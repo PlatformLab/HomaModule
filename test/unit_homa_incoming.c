@@ -3,6 +3,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_offload.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -2387,9 +2388,9 @@ TEST_F(homa_incoming, homa_choose_interest__find_idle_core)
 
 	mock_cycles = 5000;
 	self->homa.busy_cycles = 1000;
-	homa_cores[1]->last_active = 4100;
-	homa_cores[2]->last_active = 3500;
-	homa_cores[3]->last_active = 2000;
+	per_cpu(homa_offload_core, 1).last_active = 4100;
+	per_cpu(homa_offload_core, 2).last_active = 3500;
+	per_cpu(homa_offload_core, 3).last_active = 2000;
 
 	struct homa_interest *result = homa_choose_interest(&self->homa,
 			&self->hsk.request_interests,
@@ -2413,9 +2414,9 @@ TEST_F(homa_incoming, homa_choose_interest__all_cores_busy)
 
 	mock_cycles = 5000;
 	self->homa.busy_cycles = 1000;
-	homa_cores[1]->last_active = 4100;
-	homa_cores[2]->last_active = 4001;
-	homa_cores[3]->last_active = 4800;
+	per_cpu(homa_offload_core, 1).last_active = 4100;
+	per_cpu(homa_offload_core, 2).last_active = 4001;
+	per_cpu(homa_offload_core, 3).last_active = 4800;
 
 	struct homa_interest *result = homa_choose_interest(&self->homa,
 			&self->hsk.request_interests,
@@ -2607,10 +2608,10 @@ TEST_F(homa_incoming, homa_rpc_handoff__update_last_app_active)
 	interest.core = 2;
 	crpc->interest = &interest;
 	mock_cycles = 10000;
-	homa_cores[2]->last_app_active = 444;
+	per_cpu(homa_offload_core, 2).last_app_active = 444;
 	homa_rpc_handoff(crpc);
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
-	EXPECT_EQ(10000, homa_cores[2]->last_app_active);
+	EXPECT_EQ(10000, per_cpu(homa_offload_core, 2).last_app_active);
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
 }
 

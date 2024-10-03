@@ -9,14 +9,6 @@
 #include "homa_rpc.h"
 #include "homa_skb.h"
 
-/* Core-specific information. NR_CPUS is an overestimate of the actual
- * number, but allows us to allocate the array statically.
- */
-struct homa_core *homa_cores[NR_CPUS];
-
-/* Points to block of memory holding all homa_cores; used to free it. */
-char *core_memory;
-
 struct completion homa_pacer_kthread_done;
 
 /**
@@ -29,42 +21,10 @@ struct completion homa_pacer_kthread_done;
  */
 int homa_init(struct homa *homa)
 {
-	size_t aligned_size;
-	char *first;
 	int i, err;
 
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 		       "homa_init assumes at least 8 priority levels");
-
-	/* Initialize core-specific info (if no-one else has already done it),
-	 * making sure that each core has private cache lines.
-	 */
-	if (!core_memory) {
-		aligned_size = (sizeof(struct homa_core) + 0x3f) & ~0x3f;
-		core_memory = vmalloc(0x3f + (nr_cpu_ids*aligned_size));
-		if (!core_memory) {
-			pr_err("Homa couldn't allocate memory for core-specific data\n");
-			return -ENOMEM;
-		}
-		first = (char *) (((__u64) core_memory + 0x3f) & ~0x3f);
-		for (i = 0; i < nr_cpu_ids; i++) {
-			struct homa_core *core;
-			int j;
-
-			core = (struct homa_core *) (first + i*aligned_size);
-			homa_cores[i] = core;
-			core->last_active = 0;
-			core->last_gro = 0;
-			atomic_set(&core->softirq_backlog, 0);
-			core->softirq_offset = 0;
-			core->gen3_softirq_cores[0] = i^1;
-			for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
-				core->gen3_softirq_cores[j] = -1;
-			core->last_app_active = 0;
-			core->held_skb = NULL;
-			core->held_bucket = 0;
-		}
-	}
 
 	homa->pacer_kthread = NULL;
 	init_completion(&homa_pacer_kthread_done);
@@ -180,8 +140,6 @@ int homa_init(struct homa *homa)
  */
 void homa_destroy(struct homa *homa)
 {
-	int i;
-
 	if (homa->pacer_kthread) {
 		homa_pacer_stop(homa);
 		wait_for_completion(&homa_pacer_kthread_done);
@@ -193,13 +151,6 @@ void homa_destroy(struct homa *homa)
 	homa_peertab_destroy(homa->peers);
 	kfree(homa->peers);
 	homa_skb_cleanup(homa);
-
-	if (core_memory) {
-		vfree(core_memory);
-		core_memory = NULL;
-		for (i = 0; i < nr_cpu_ids; i++)
-			homa_cores[i] = NULL;
-	}
 	kfree(homa->metrics);
 }
 

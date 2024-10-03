@@ -5,6 +5,9 @@
  */
 
 #include "homa_impl.h"
+#include "homa_offload.h"
+
+DEFINE_PER_CPU(struct homa_offload_core, homa_offload_core);
 
 #define CORES_TO_CHECK 4
 
@@ -38,6 +41,25 @@ static struct net_offload hook_tcp6_net_offload;
  */
 int homa_offload_init(void)
 {
+	int i;
+
+	for (i = 0; i < nr_cpu_ids; i++) {
+		struct homa_offload_core *offload_core;
+		int j;
+
+		offload_core = &per_cpu(homa_offload_core, i);
+		offload_core->last_active = 0;
+		offload_core->last_gro = 0;
+		atomic_set(&offload_core->softirq_backlog, 0);
+		offload_core->softirq_offset = 0;
+		offload_core->gen3_softirq_cores[0] = i^1;
+		for (j = 1; j < NUM_GEN3_SOFTIRQ_CORES; j++)
+			offload_core->gen3_softirq_cores[j] = -1;
+		offload_core->last_app_active = 0;
+		offload_core->held_skb = NULL;
+		offload_core->held_bucket = 0;
+	}
+
 	int res1 = inet_add_offload(&homa_offload, IPPROTO_HOMA);
 	int res2 = inet6_add_offload(&homa_offload, IPPROTO_HOMA);
 
@@ -257,9 +279,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 */
 	struct sk_buff *held_skb;
 	struct sk_buff *result = NULL;
-	struct homa_core *core = homa_cores[raw_smp_processor_id()];
+	struct homa_offload_core *offload_core = &per_cpu(homa_offload_core,
+			raw_smp_processor_id());
 	__u64 now = get_cycles();
-	int busy = (now - core->last_gro) < homa->gro_busy_cycles;
+	int busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
 	__u32 hash;
 	__u64 saved_softirq_metric, softirq_cycles;
 	__u64 *softirq_cycles_metric;
@@ -268,7 +291,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	int priority;
 	__u32 saddr;
 
-	core->last_active = now;
+	offload_core->last_active = now;
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
 		saddr = ntohl(ipv6_hdr(skb)->saddr.in6_u.u6_addr32[3]);
@@ -324,7 +347,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 * core added a Homa packet (if there is such a list).
 	 */
 	hash = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
-	if (core->held_skb) {
+	if (offload_core->held_skb) {
 		/* Reverse-engineer the location of the napi_struct, so we
 		 * can verify that held_skb is still valid.
 		 */
@@ -333,18 +356,19 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		struct napi_struct *napi = container_of(gro_list,
 				struct napi_struct, gro_hash[hash]);
 
-		/* Must verify that core->held_skb points to a packet on
+		/* Must verify that offload_core->held_skb points to a packet on
 		 * the list, and that the packet is a Homa packet.
 		 * homa_gro_complete isn't always invoked before removing
-		 * packets from the list, so core->held_skb could be a
+		 * packets from the list, so offload_core->held_skb could be a
 		 * dangling pointer (or the skb could have been reused for
 		 * some other protocol).
 		 */
 		list_for_each_entry(held_skb,
-				&napi->gro_hash[core->held_bucket].list, list) {
+				&napi->gro_hash[offload_core->held_bucket].list,
+				list) {
 			int protocol;
 
-			if (held_skb != core->held_skb)
+			if (held_skb != offload_core->held_skb)
 				continue;
 			if (skb_is_ipv6(held_skb))
 				protocol = ipv6_hdr(held_skb)->nexthdr;
@@ -382,9 +406,9 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				homa_gro_complete(held_skb, 0);
 				netif_receive_skb(held_skb);
 				homa_send_ipis();
-				napi->gro_hash[core->held_bucket].count--;
-				if (napi->gro_hash[core->held_bucket].count == 0)
-					__clear_bit(core->held_bucket,
+				napi->gro_hash[offload_core->held_bucket].count--;
+				if (napi->gro_hash[offload_core->held_bucket].count == 0)
+					__clear_bit(offload_core->held_bucket,
 							&napi->gro_bitmask);
 				result = ERR_PTR(-EINPROGRESS);
 			}
@@ -400,14 +424,14 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 * means we aren't heavily loaded; if batching does occur,
 	 * homa_gro_complete will pick a different core).
 	 */
-	core->held_skb = skb;
-	core->held_bucket = hash;
+	offload_core->held_skb = skb;
+	offload_core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
 		homa_set_softirq_cpu(skb, raw_smp_processor_id());
 
 done:
 	homa_check_pacer(homa, 1);
-	core->last_gro = get_cycles();
+	offload_core->last_gro = get_cycles();
 	return result;
 
 bypass:
@@ -420,7 +444,7 @@ bypass:
 	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
 	*softirq_cycles_metric = saved_softirq_metric;
 	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
-	core->last_gro = get_cycles();
+	offload_core->last_gro = get_cycles();
 
 	/* This return value indicates that we have freed skb. */
 	return ERR_PTR(-EINPROGRESS);
@@ -448,16 +472,16 @@ void homa_gro_gen2(struct sk_buff *skb)
 	int this_core = raw_smp_processor_id();
 	int candidate = this_core;
 	__u64 now = get_cycles();
-	struct homa_core *core;
+	struct homa_offload_core *offload_core;
 
 	for (i = CORES_TO_CHECK; i > 0; i--) {
 		candidate++;
 		if (unlikely(candidate >= nr_cpu_ids))
 			candidate = 0;
-		core = homa_cores[candidate];
-		if (atomic_read(&core->softirq_backlog)  > 0)
+		offload_core = &per_cpu(homa_offload_core, candidate);
+		if (atomic_read(&offload_core->softirq_backlog)  > 0)
 			continue;
-		if ((core->last_gro + homa->busy_cycles) > now)
+		if ((offload_core->last_gro + homa->busy_cycles) > now)
 			continue;
 		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d",
 				candidate, homa_local_id(h->common.sender_id),
@@ -468,12 +492,12 @@ void homa_gro_gen2(struct sk_buff *skb)
 		/* All of the candidates appear to be busy; just
 		 * rotate among them.
 		 */
-		int offset = homa_cores[this_core]->softirq_offset;
+		int offset = per_cpu(homa_offload_core, this_core).softirq_offset;
 
 		offset += 1;
 		if (offset > CORES_TO_CHECK)
 			offset = 1;
-		homa_cores[this_core]->softirq_offset = offset;
+		per_cpu(homa_offload_core, this_core).softirq_offset = offset;
 		candidate = this_core + offset;
 		while (candidate >= nr_cpu_ids)
 			candidate -= nr_cpu_ids;
@@ -481,7 +505,7 @@ void homa_gro_gen2(struct sk_buff *skb)
 				candidate, homa_local_id(h->common.sender_id),
 				ntohl(h->seg.offset));
 	}
-	atomic_inc(&homa_cores[candidate]->softirq_backlog);
+	atomic_inc(&per_cpu(homa_offload_core, candidate).softirq_backlog);
 	homa_set_softirq_cpu(skb, candidate);
 }
 
@@ -501,7 +525,8 @@ void homa_gro_gen3(struct sk_buff *skb)
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
 	int i, core;
 	__u64 now, busy_time;
-	int *candidates = homa_cores[raw_smp_processor_id()]->gen3_softirq_cores;
+	int *candidates = per_cpu(homa_offload_core, raw_smp_processor_id())
+			.gen3_softirq_cores;
 
 	now = get_cycles();
 	busy_time = now - homa->busy_cycles;
@@ -512,17 +537,18 @@ void homa_gro_gen3(struct sk_buff *skb)
 
 		if (candidate < 0)
 			break;
-		if (homa_cores[candidate]->last_app_active < busy_time) {
+		if (per_cpu(homa_offload_core, candidate).last_app_active
+				< busy_time) {
 			core = candidate;
 			break;
 		}
 	}
 	homa_set_softirq_cpu(skb, core);
-	homa_cores[core]->last_active = now;
+	per_cpu(homa_offload_core, core).last_active = now;
 	tt_record4("homa_gro_gen3 chose core %d for id %d, offset %d, delta %d",
 			core, homa_local_id(h->common.sender_id),
 			ntohl(h->seg.offset),
-			now - homa_cores[core]->last_app_active);
+			now - per_cpu(homa_offload_core, core).last_app_active);
 	INC_METRIC(gen3_handoffs, 1);
 	if (core != candidates[0])
 		INC_METRIC(gen3_alt_handoffs, 1);
@@ -546,7 +572,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	//		ntohl(h->seg.offset),
 	//		NAPI_GRO_CB(skb)->count);
 
-	homa_cores[raw_smp_processor_id()]->held_skb = NULL;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {
@@ -568,7 +594,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 			core++;
 			if (unlikely(core >= nr_cpu_ids))
 				core = 0;
-			last_active = homa_cores[core]->last_active;
+			last_active = per_cpu(homa_offload_core, core).last_active;
 			if (last_active < best_time) {
 				best_time = last_active;
 				best = core;
