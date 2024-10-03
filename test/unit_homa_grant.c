@@ -3,6 +3,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"

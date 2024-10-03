@@ -5,6 +5,7 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#include "homa_grant.h"
 #include "homa_skb.h"
 
 /**
