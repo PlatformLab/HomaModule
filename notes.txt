@@ -1,11 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Notes on splitting homa_impl.h:
-  * Remove homa_wire.h include from homa_impl.h?
-  * Where should homa_rpc_bucket be declared (currently in homa_impl.h)?
-  * Move homa_message_in_init to homa_rpc.c?
-
 * Thoughts on making TCP and Homa play better together:
   * Goals:
     * Keep the NIC tx queue from growing long.
