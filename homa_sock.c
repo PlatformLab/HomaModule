@@ -186,6 +186,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 *    synchronize with any operations in progress.
 	 * 4. Perform other socket cleanup: at this point we know that
 	 *    there will be no concurrent activities on individual RPCs.
+	 * 5. Don't delete the buffer pool until after all of the RPCs
+	 *    have been reaped.
 	 * See sync.txt for additional information about locking.
 	 */
 	hsk->shutdown = true;
@@ -207,9 +209,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
 
-	homa_pool_destroy(hsk->buffer_pool);
-	kfree(hsk->buffer_pool);
-
 	i = 0;
 	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, 1000);
@@ -219,6 +218,10 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 			tt_freeze();
 		}
 	}
+
+	homa_pool_destroy(hsk->buffer_pool);
+	kfree(hsk->buffer_pool);
+	hsk->buffer_pool = NULL;
 }
 
 /**

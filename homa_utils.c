@@ -148,10 +148,13 @@ void homa_destroy(struct homa *homa)
 	/* The order of the following 2 statements matters! */
 	homa_socktab_destroy(homa->port_map);
 	kfree(homa->port_map);
+	homa->port_map = NULL;
 	homa_peertab_destroy(homa->peers);
 	kfree(homa->peers);
+	homa->peers = NULL;
 	homa_skb_cleanup(homa);
 	kfree(homa->metrics);
+	homa->metrics = NULL;
 }
 
 /**
