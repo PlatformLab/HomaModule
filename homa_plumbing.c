@@ -108,16 +108,13 @@ struct proto homa_prot = {
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
 	.backlog_rcv       = homa_backlog_rcv,
-	.release_cb	   = ip4_datagram_release_cb,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
-	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
 	.sysctl_rmem	   = &sysctl_homa_rmem_min,
 	.obj_size	   = sizeof(struct homa_sock),
-	.diag_destroy	   = homa_diag_destroy,
 	.no_autobind       = 1,
 };
 
@@ -135,10 +132,8 @@ struct proto homav6_prot = {
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
 	.backlog_rcv       = homa_backlog_rcv,
-	.release_cb	   = ip6_datagram_release_cb,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
-	.rehash		   = homa_rehash,
 	.get_port	   = homa_get_port,
 	.sysctl_mem	   = sysctl_homa_mem,
 	.sysctl_wmem	   = &sysctl_homa_wmem_min,
@@ -148,7 +143,6 @@ struct proto homav6_prot = {
 	 * struct homa_sock.
 	 */
 	.obj_size	   = sizeof(struct homa_sock) + sizeof(struct ipv6_pinfo),
-	.diag_destroy	   = homa_diag_destroy,
 	.no_autobind       = 1,
 };
 
@@ -1148,32 +1142,21 @@ done:
 }
 
 /**
- * homa_hash() - ??.
+ * homa_hash() - Not needed for Homa.
  * @sk:    Socket for the operation
  * Return: ??
  */
 int homa_hash(struct sock *sk)
 {
-	pr_warn("unimplemented hash invoked on Homa socket\n");
 	return 0;
 }
 
 /**
- * homa_unhash() - ??.
+ * homa_unhash() - Not needed for Homa.
  * @sk:    Socket for the operation
  */
 void homa_unhash(struct sock *sk)
 {
-	pr_warn("unimplemented unhash invoked on Homa socket\n");
-}
-
-/**
- * homa_rehash() - ??.
- * @sk:    Socket for the operation
- */
-void homa_rehash(struct sock *sk)
-{
-	pr_warn("unimplemented rehash invoked on Homa socket\n");
 }
 
 /**
@@ -1188,41 +1171,6 @@ int homa_get_port(struct sock *sk, unsigned short snum)
 	/* Homa always assigns ports immediately when a socket is created,
 	 * so there is nothing to do here.
 	 */
-	return 0;
-}
-
-/**
- * homa_diag_destroy() - ??.
- * @sk:    Socket for the operation
- * @err:   ??
- * Return: ??
- */
-int homa_diag_destroy(struct sock *sk, int err)
-{
-	pr_warn("unimplemented diag_destroy invoked on Homa socket\n");
-	return -EINVAL;
-
-}
-
-/**
- * homa_v4_early_demux() - Invoked by IP for ??.
- * @skb:    Socket buffer.
- * Return: Always 0?
- */
-int homa_v4_early_demux(struct sk_buff *skb)
-{
-	pr_warn("unimplemented early_demux invoked on Homa socket\n");
-	return 0;
-}
-
-/**
- * homa_v4_early_demux_handler() - invoked by IP for ??.
- * @skb:    Socket buffer.
- * @return: Always 0?
- */
-int homa_v4_early_demux_handler(struct sk_buff *skb)
-{
-	pr_warn("unimplemented early_demux_handler invoked on Homa socket\n");
 	return 0;
 }
 

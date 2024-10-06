@@ -1101,7 +1101,6 @@ extern void     homa_data_from_server(struct sk_buff *skb,
 		    struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
-extern int      homa_diag_destroy(struct sock *sk, int err);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
 extern int      homa_dointvec(struct ctl_table *table, int write,
@@ -1156,7 +1155,6 @@ extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		    int flags, int *addr_len);
 extern int      homa_register_interests(struct homa_interest *interest,
 		    struct homa_sock *hsk, int flags, __u64 id);
-extern void     homa_rehash(struct sock *sk);
 extern void     homa_remove_from_throttled(struct homa_rpc *rpc);
 extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		    int priority);
@@ -1184,8 +1182,6 @@ extern void     homa_unhash(struct sock *sk);
 extern void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern int      homa_unsched_priority(struct homa *homa,
 		    struct homa_peer *peer, int length);
-extern int      homa_v4_early_demux(struct sk_buff *skb);
-extern int      homa_v4_early_demux_handler(struct sk_buff *skb);
 extern int      homa_validate_incoming(struct homa *homa, int verbose,
 		    int *link_errors);
 extern struct homa_rpc
