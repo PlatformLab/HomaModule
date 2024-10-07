@@ -4,19 +4,19 @@ ifneq ($(KERNELRELEASE),)
 
 obj-m += homa.o
 homa-y = homa_grant.o \
-	    homa_incoming.o \
-	    homa_metrics.o \
-            homa_offload.o \
-            homa_outgoing.o \
-            homa_peer.o \
-	    homa_pool.o \
-            homa_plumbing.o \
-            homa_rpc.o \
-            homa_skb.o \
-            homa_sock.o \
-            homa_timer.o \
-            homa_utils.o \
-            timetrace.o
+	homa_incoming.o \
+	homa_metrics.o \
+	homa_offload.o \
+	homa_outgoing.o \
+	homa_peer.o \
+	homa_pool.o \
+	homa_plumbing.o \
+	homa_rpc.o \
+	homa_skb.o \
+	homa_sock.o \
+	homa_timer.o \
+	homa_utils.o \
+	timetrace.o
 
 MY_CFLAGS += -g
 ccflags-y += ${MY_CFLAGS}
