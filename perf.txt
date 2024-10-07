@@ -31,11 +31,17 @@ order.
 
     Overall observations:
     * Short messages:
-      * Homa: 10x increase for P99, not much changes for P50
-      * TCP: 25-60% increases for both P50 and P99
+      * Homa: 2x for P50, 10x increase for P99, 2x for P50
+      * TCP: 25% increase for P50, 10% increase for P99
+      * The TCP degradation is caused by Homa using priorities. If the
+        experiment is run without priorities for Homa, TCP's short-message
+        latencies are significantly better than TCP by itself: 571 us for P50,
+        3835 us for P99.
     * Long messages:
-      * TCP latency improves up to 2x as Homa traffic share increases (perhaps
-        because Homa throttles itself to link speed?)
+      * TCP P50 and P99 latency drop by up to 40% as Homa traffic share
+        increases (perhaps because Homa throttles itself to link speed?)
+      * Running Homa without priorities improves TCP even more (2x gain for TCP
+        P50 and P99 under even traffic split, relative to TCP alone)
       * Homa latency not much affected
     * Other workloads:
       * W5 similar to W4
