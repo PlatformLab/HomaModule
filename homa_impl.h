@@ -141,22 +141,12 @@ extern void     homa_throttle_lock_slow(struct homa *homa);
 
 #define sizeof32(type) ((int) (sizeof(type)))
 
-/** define CACHE_LINE_SIZE - The number of bytes in a cache line. */
-#define CACHE_LINE_SIZE 64
-
 /**
  * define HOMA_MAX_GRANTS - Used to size various data structures for grant
  * management; the max_overcommit sysctl parameter must never be greater than
  * this.
  */
 #define HOMA_MAX_GRANTS 10
-
-/**
- * struct homa_cache_line - An object whose size equals that of a cache line.
- */
-struct homa_cache_line {
-	char bytes[64];
-};
 
 /**
  * struct homa_interest - Contains various information used while waiting
@@ -261,13 +251,13 @@ struct homa {
 	 * it could be a severe underestimate if there is competing traffic
 	 * from, say, TCP. Access only with atomic ops.
 	 */
-	atomic64_t link_idle_time __aligned(CACHE_LINE_SIZE);
+	atomic64_t link_idle_time __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @grantable_lock: Used to synchronize access to grant-related
 	 * fields below, from @grantable_peers to @last_grantable_change.
 	 */
-	spinlock_t grantable_lock __aligned(CACHE_LINE_SIZE);
+	spinlock_t grantable_lock __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @grantable_lock_time: get_cycles() time when grantable_lock
@@ -366,7 +356,7 @@ struct homa {
 	 * @pacer_mutex: Ensures that only one instance of homa_pacer_xmit
 	 * runs at a time. Only used in "try" mode: never block on this.
 	 */
-	spinlock_t pacer_mutex __aligned(CACHE_LINE_SIZE);
+	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when
@@ -428,7 +418,7 @@ struct homa {
 	 * a peer sends more bytes than granted (see synchronization note in
 	 * homa_send_grants for why we have to allow this possibility).
 	 */
-	atomic_t total_incoming __aligned(CACHE_LINE_SIZE);
+	atomic_t total_incoming __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @next_client_port: A client port number to consider for the
@@ -436,13 +426,13 @@ struct homa {
 	 * be in the range allocated for servers; must check before using.
 	 * This port may also be in use already; must check.
 	 */
-	__u16 next_client_port __aligned(CACHE_LINE_SIZE);
+	__u16 next_client_port __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @port_map: Information about all open sockets. Dynamically
 	 * allocated; must be kfreed.
 	 */
-	struct homa_socktab *port_map __aligned(CACHE_LINE_SIZE);
+	struct homa_socktab *port_map __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @peertab: Info about all the other hosts we have communicated with.
@@ -454,7 +444,7 @@ struct homa {
 	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
 	 * used for outgoing sk_buff data.
 	 */
-	spinlock_t page_pool_mutex __aligned(CACHE_LINE_SIZE);
+	spinlock_t page_pool_mutex __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @page_pools: One page pool for each NUMA node on the machine.

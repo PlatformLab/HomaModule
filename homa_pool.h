@@ -18,7 +18,7 @@ struct homa_bpage {
 		 * @cache_line: Ensures that each homa_bpage object
 		 * is exactly one cache line long.
 		 */
-		struct homa_cache_line cache_line;
+		char cache_line[L1_CACHE_BYTES];
 		struct {
 			/** @lock: to synchronize shared access. */
 			spinlock_t lock;
@@ -46,7 +46,7 @@ struct homa_bpage {
 		};
 	};
 };
-_Static_assert(sizeof(struct homa_bpage) == sizeof(struct homa_cache_line),
+_Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
 		"homa_bpage overflowed a cache line");
 
 /**
@@ -59,7 +59,7 @@ struct homa_pool_core {
 		 * @cache_line: Ensures that each object is exactly one
 		 * cache line long.
 		 */
-		struct homa_cache_line cache_line;
+		char cache_line[L1_CACHE_BYTES];
 		struct {
 			/**
 			 * @page_hint: Index of bpage in pool->descriptors,
