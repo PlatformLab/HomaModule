@@ -43,8 +43,8 @@ void homa_skb_init(struct homa *homa)
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_skb_core *skb_core = &per_cpu(homa_skb_core, i);
 		int numa = cpu_to_node(i);
-		BUG_ON(numa >= MAX_NUMNODES);
 
+		BUG_ON(numa >= MAX_NUMNODES);
 		if (numa > homa->max_numa)
 			homa->max_numa = numa;
 		if (homa->page_pools[numa] == NULL) {
@@ -118,8 +118,8 @@ void homa_skb_cleanup(struct homa *homa)
  */
 struct sk_buff *homa_skb_new_tx(int length)
 {
-	struct sk_buff *skb;
 	__u64 start = get_cycles();
+	struct sk_buff *skb;
 
 	/* Note: allocate space for an IPv6 header, which is larger than
 	 * an IPv4 header.
@@ -181,13 +181,14 @@ void homa_skb_stash_pages(struct homa *homa, int length)
 void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 {
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
-	struct homa_skb_core *skb_core = &per_cpu(homa_skb_core,
-			raw_smp_processor_id());
-	skb_frag_t *frag = &shinfo->frags[shinfo->nr_frags - 1];
-	char *result;
+	struct homa_skb_core *skb_core;
 	int actual_size = *length;
+	skb_frag_t *frag;
+	char *result;
 
 	/* Can we just extend the skb's last fragment? */
+	skb_core = &per_cpu(homa_skb_core, raw_smp_processor_id());
+	frag = &shinfo->frags[shinfo->nr_frags - 1];
 	if ((shinfo->nr_frags > 0) && (skb_frag_page(frag) == skb_core->skb_page)
 			&& (skb_core->page_inuse < skb_core->page_size)
 			&& ((frag->offset + skb_frag_size(frag))
@@ -310,8 +311,8 @@ success:
 int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb, void *buf,
 		int length)
 {
-	int chunk_length;
 	char *src = (char *) buf;
+	int chunk_length;
 	char *dst;
 
 	while (length > 0) {
@@ -371,9 +372,9 @@ int homa_skb_append_from_iter(struct homa *homa, struct sk_buff *skb,
 int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 		struct sk_buff *src_skb, int offset, int length)
 {
+	int src_frag_offset, src_frags_left, chunk_size, err, head_len;
 	struct skb_shared_info *src_shinfo = skb_shinfo(src_skb);
 	struct skb_shared_info *dst_shinfo = skb_shinfo(dst_skb);
-	int src_frag_offset, src_frags_left, chunk_size, err, head_len;
 	skb_frag_t *src_frag, *dst_frag;
 
 	/* Copy bytes from the linear part of the source, if any. */
@@ -444,14 +445,15 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 #define MAX_PAGES_AT_ONCE 50
 #endif
 	struct page *pages_to_cache[MAX_PAGES_AT_ONCE];
-	int num_pages = 0;
 	__u64 start = get_cycles();
+	int num_pages = 0;
 	int i, j;
 
 	for (i = 0; i < count; i++) {
+		struct skb_shared_info *shinfo;
 		struct sk_buff *skb = skbs[i];
-		struct skb_shared_info *shinfo = skb_shinfo(skb);
 
+		shinfo = skb_shinfo(skb);
 		if (refcount_read(&skb->users) != 1) {
 			/* This sk_buff is still in use somewhere, so can't
 			 * reclaim its pages.
@@ -504,8 +506,9 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
 	spin_lock_bh(&homa->page_pool_mutex);
 	for (i = 0; i < count; i++) {
 		struct page *page = pages[i];
-		struct homa_page_pool *pool = homa->page_pools[
-				page_to_nid(page)];
+		struct homa_page_pool *pool;
+
+		pool = homa->page_pools[page_to_nid(page)];
 		if (pool->avail < LIMIT) {
 			pool->pages[pool->avail] = page;
 			pool->avail++;
@@ -526,9 +529,9 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
  */
 void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 {
+	int chunk_size, frags_left, frag_offset, head_len;
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
 	char *dst = (char *) dest;
-	int chunk_size, frags_left, frag_offset, head_len;
 	skb_frag_t *frag;
 
 	/* Copy bytes from the linear part of the skb, if any. */
@@ -570,10 +573,10 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
  */
 void homa_skb_release_pages(struct homa *homa)
 {
-	__u64 now = get_cycles();
-	__s64 interval;
 	int i, max_low_mark, min_pages, release, release_max;
 	struct homa_page_pool *max_pool;
+	__u64 now = get_cycles();
+	__s64 interval;
 
 	if (now < homa->skb_page_free_time)
 		return;

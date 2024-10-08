@@ -48,6 +48,7 @@ TEST_F(homa_sock, homa_port_hash)
 TEST_F(homa_sock, homa_socktab_start_scan)
 {
 	struct homa_socktab_scan scan;
+
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_DEFAULT_PORT+100);
@@ -60,6 +61,7 @@ TEST_F(homa_sock, homa_socktab_next__basics)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4, *hsk;
 	struct homa_socktab_scan scan;
+
 	int first_port = 34000;
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
@@ -87,6 +89,7 @@ TEST_F(homa_sock, homa_socktab_next__deleted_socket)
 	struct homa_sock hsk1, hsk2, hsk3, *hsk;
 	struct homa_socktab_scan scan;
 	int first_port = 34000;
+
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
 	mock_sock_init(&hsk1, &self->homa, first_port);
@@ -109,6 +112,7 @@ TEST_F(homa_sock, homa_socktab_next__deleted_socket)
 TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 {
 	struct homa_sock hsk2, hsk3;
+
 	self->homa.next_client_port = 0xffff;
 	mock_sock_init(&hsk2, &self->homa, 0);
 	mock_sock_init(&hsk3, &self->homa, 0);
@@ -120,6 +124,7 @@ TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 TEST_F(homa_sock, homa_sock_init__ip_header_length)
 {
 	struct homa_sock hsk_v4, hsk_v6;
+
 	mock_ipv6 = false;
 	mock_sock_init(&hsk_v4, &self->homa, 0);
 	mock_ipv6 = true;
@@ -132,6 +137,7 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
 	struct homa_sock hijack, no_hijack;
+
         self->homa.hijack_tcp = 0;
 	mock_sock_init(&no_hijack, &self->homa, 0);
         self->homa.hijack_tcp = 1;
@@ -144,8 +150,9 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 
 TEST_F(homa_sock, homa_sock_shutdown__basics)
 {
-	int client2, client3;
 	struct homa_sock hsk2, hsk3;
+	int client2, client3;
+
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk2, 100));
 	client2 = hsk2.port;
@@ -198,6 +205,7 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 {
 	struct homa_interest interest1, interest2, interest3;
 	struct task_struct task1, task2, task3;
+
 	interest1.thread = &task1;
 	task1.pid = 100;
 	interest2.thread = &task2;
@@ -218,6 +226,7 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 TEST_F(homa_sock, homa_sock_bind)
 {
 	struct homa_sock hsk2;
+
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk2, 100));
 
@@ -251,6 +260,7 @@ TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
 TEST_F(homa_sock, homa_sock_find__basics)
 {
 	struct homa_sock hsk2;
+
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk2, 100));
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->homa.port_map,
@@ -265,6 +275,7 @@ TEST_F(homa_sock, homa_sock_find__basics)
 TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 {
 	struct homa_sock hsk2, hsk3, hsk4;
+
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &self->hsk, 13));
 	mock_sock_init(&hsk2, &self->homa, 0);
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk2,

@@ -122,10 +122,10 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 		struct iov_iter *iter, int offset, int length,
 		int max_seg_data)
 {
-	struct data_header *h;
-	struct sk_buff *skb;
 	struct homa_skb_info *homa_info;
 	int segs, err, gso_size;
+	struct data_header *h;
+	struct sk_buff *skb;
 
 	/* Initialize the overall skb. */
 	skb = homa_skb_new_tx(sizeof32(struct data_header));
@@ -225,14 +225,15 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 */
 	int mtu, max_seg_data, max_gso_data;
 
+	int overlap_xmit, segs_per_gso;
+	struct sk_buff **last_link;
+	struct dst_entry *dst;
+
 	/* Bytes of the message that haven't yet been copied into skbs. */
 	int bytes_left;
 
-	int err;
-	struct sk_buff **last_link;
-	struct dst_entry *dst;
-	int overlap_xmit, segs_per_gso;
 	int gso_size;
+	int err;
 
 	homa_message_out_init(rpc, iter->count);
 	if (unlikely((rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH)
@@ -371,12 +372,12 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		struct homa_sock *hsk)
 {
-	struct common_header *h;
-	int extra_bytes;
-	int result, priority;
-	struct dst_entry *dst;
-	struct sk_buff *skb;
 	struct netdev_queue *txq;
+	struct common_header *h;
+	struct dst_entry *dst;
+	int result, priority;
+	struct sk_buff *skb;
+	int extra_bytes;
 
 	dst = homa_get_dst(peer, hsk);
 	skb = homa_skb_new_tx(HOMA_MAX_HEADER);
@@ -449,9 +450,9 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct common_header *h = (struct common_header *) skb->data;
+	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct unknown_header unknown;
 	struct homa_peer *peer;
-	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
 	if (hsk->homa->verbose)
 		pr_notice("sending UNKNOWN to peer %s:%d for id %llu",
@@ -548,9 +549,9 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
  */
 void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 {
-	int err;
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 	struct dst_entry *dst;
+	int err;
 
 	/* Update info that may have changed since the message was initially
 	 * created.
@@ -607,8 +608,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		int priority)
 {
-	struct sk_buff *skb;
 	struct homa_skb_info *homa_info;
+	struct sk_buff *skb;
 
 	if (end <= start)
 		return;
@@ -640,8 +641,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		for ( ; data_left > 0; data_left -= seg_length,
 				offset += seg_length,
 				seg_offset += skb_shinfo(skb)->gso_size) {
-			struct sk_buff *new_skb;
 			struct homa_skb_info *new_homa_info;
+			struct sk_buff *new_skb;
 			int err;
 
 			if (seg_length > data_left)
@@ -740,8 +741,8 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
  */
 int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
-	__u64 idle, new_idle, clock;
 	int cycles_for_packet, bytes;
+	__u64 idle, new_idle, clock;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
 	cycles_for_packet = (bytes * homa->cycles_per_kbyte)/1000;
@@ -874,8 +875,8 @@ void homa_pacer_xmit(struct homa *homa)
 		homa_throttle_lock(homa);
 		homa->pacer_fifo_count -= homa->pacer_fifo_fraction;
 		if (homa->pacer_fifo_count <= 0) {
-			__u64 oldest = ~0;
 			struct homa_rpc *cur;
+			__u64 oldest = ~0;
 
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
@@ -1031,8 +1032,8 @@ void homa_remove_from_throttled(struct homa_rpc *rpc)
 void homa_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	int rpcs = 0;
 	int64_t bytes = 0;
+	int rpcs = 0;
 
 	pr_notice("Printing throttled list\n");
 	homa_throttle_lock(homa);

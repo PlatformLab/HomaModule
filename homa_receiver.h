@@ -83,6 +83,7 @@ public:
 	template<typename T>
 	inline T* get(size_t offset, T* storage = nullptr) const {
 		int buf_num = offset >> HOMA_BPAGE_SHIFT;
+
 		if (static_cast<ssize_t>(offset + sizeof(T)) > msg_length)
 			return nullptr;
 		if (contiguous(offset) >= sizeof(T))

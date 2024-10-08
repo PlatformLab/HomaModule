@@ -874,6 +874,7 @@ struct homa {
 	 */
 	int temp[4];
 };
+
 /**
  * struct homa_skb_info - Additional information needed by Homa for each
  * outbound DATA packet. Space is allocated for this at the very end of the

@@ -176,10 +176,11 @@ char *homa_print_ipv4_addr(__be32 addr)
 #define NUM_BUFS_IPV4 4
 #define BUF_SIZE_IPV4 30
 	static char buffers[NUM_BUFS_IPV4][BUF_SIZE_IPV4];
-	static int next_buf;
 	__u32 a2 = ntohl(addr);
-	char *buffer = buffers[next_buf];
+	static int next_buf;
+	char *buffer;
 
+	buffer = buffers[next_buf];
 	next_buf++;
 	if (next_buf >= NUM_BUFS_IPV4)
 		next_buf = 0;
@@ -204,8 +205,9 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 #define BUF_SIZE 64
 	static char buffers[NUM_BUFS][BUF_SIZE];
 	static int next_buf;
-	char *buffer = buffers[next_buf];
+	char *buffer;
 
+	buffer = buffers[next_buf];
 	next_buf++;
 	if (next_buf >= NUM_BUFS)
 		next_buf = 0;
@@ -245,10 +247,10 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
  */
 char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
-	int used = 0;
 	struct common_header *common;
-	struct in6_addr saddr;
 	char header[HOMA_MAX_HEADER];
+	struct in6_addr saddr;
+	int used = 0;
 
 	if (skb == NULL) {
 		snprintf(buffer, buf_len, "skb is NULL!");
@@ -267,8 +269,8 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		be64_to_cpu(common->sender_id));
 	switch (common->type) {
 	case DATA: {
-		struct data_header *h = (struct data_header *) header;
 		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
+		struct data_header *h = (struct data_header *) header;
 		int data_left, i, seg_length, pos, offset;
 
 		if (skb_shinfo(skb)->gso_segs == 0) {
@@ -399,8 +401,9 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
 	char header[HOMA_MAX_HEADER];
-	struct common_header *common = (struct common_header *) header;
+	struct common_header *common;
 
+	common = (struct common_header *) header;
 	homa_skb_get(skb, header, 0, HOMA_MAX_HEADER);
 	switch (common->type) {
 	case DATA: {
@@ -489,11 +492,11 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
  */
 void homa_freeze_peers(struct homa *homa)
 {
+	struct homa_socktab_scan scan;
+	struct freeze_header freeze;
 	struct homa_peer **peers;
 	int num_peers, i, err;
-	struct freeze_header freeze;
 	struct homa_sock *hsk;
-	struct homa_socktab_scan scan;
 
 	/* Find a socket to use (any will do). */
 	hsk = homa_socktab_start_scan(homa->port_map, &scan);

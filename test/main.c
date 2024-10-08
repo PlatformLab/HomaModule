@@ -31,8 +31,9 @@ static char * helpMessage =
         "double-checking.\n";
 
 int main(int argc, char **argv) {
-	int i;
 	int verbose = 0;
+	int i;
+
 	mock_ipv6_default = true;
 	for (i = 1; i < argc; i++) {
 		if ((strcmp(argv[i], "-h") == 0) ||

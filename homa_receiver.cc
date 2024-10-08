@@ -52,13 +52,14 @@ homa::receiver::~receiver()
  */
 void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
 {
-	ssize_t limit = offset + count;
 	char *cdest = static_cast<char *>(dest);
+	ssize_t limit = offset + count;
 
 	if (limit > msg_length)
 		limit = msg_length;
 	while (static_cast<ssize_t>(offset) < limit) {
 		size_t chunk_size = contiguous(offset);
+
 		memcpy(cdest, get<char>(offset), chunk_size);
 		offset += chunk_size;
 		cdest += chunk_size;

@@ -45,6 +45,7 @@ TEST_F(timetrace, tt_freeze)
 TEST_F(timetrace, tt_record__basics)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_record("Message with no args");
 	mock_cycles++;
@@ -69,6 +70,7 @@ TEST_F(timetrace, tt_record__basics)
 TEST_F(timetrace, tt_record_buf__wraparound)
 {
 	char buffer[100];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_buffer_size = 4;
 	tt_record("Message 1");
@@ -91,8 +93,8 @@ TEST_F(timetrace, tt_record_buf__wraparound)
 TEST_F(timetrace, tt_find_oldest)
 {
 	int pos[nr_cpu_ids];
-	tt_buffer_size = 4;
 
+	tt_buffer_size = 4;
 	tt_record_buf(tt_buffers[0], 1500, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1600, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1700, "Buf0", 0, 0, 0, 0);
@@ -138,6 +140,7 @@ TEST_F(timetrace, tt_proc_open__increment_frozen)
 TEST_F(timetrace, tt_proc_read__bogus_file)
 {
 	struct tt_proc_file pf;
+
 	pf.file = NULL;
 	int err = -tt_proc_read(&self->file, (char *) 1000, 100, 0);
 	EXPECT_EQ(EINVAL, err);
@@ -156,6 +159,7 @@ TEST_F(timetrace, tt_proc_read__uninitialized)
 TEST_F(timetrace, tt_proc_read__nothing_to_read)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	buffer[0] = 0;
 	tt_proc_open(NULL, &self->file);
@@ -166,6 +170,7 @@ TEST_F(timetrace, tt_proc_read__nothing_to_read)
 TEST_F(timetrace, tt_proc_read__leftovers)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 100;
 	tt_record_buf(tt_buffers[0], 1000,
@@ -190,6 +195,7 @@ TEST_F(timetrace, tt_proc_read__leftovers)
 TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_record_buf(tt_buffers[0], 1000, "Buf0", 0, 0, 0, 0);
 	tt_record_buf(tt_buffers[0], 1100, "Buf0", 0, 0, 0, 0);
@@ -217,6 +223,7 @@ TEST_F(timetrace, tt_proc_read__sort_events_by_time)
 TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 25;
 	tt_record_buf(tt_buffers[0], 1000,
@@ -235,6 +242,7 @@ TEST_F(timetrace, tt_proc_read__event_barely_fits_in_buffer)
 TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 {
 	char buffer[1000];
+
 	memset(buffer, 0, sizeof(buffer));
 	tt_pf_storage = 20;
 	tt_record_buf(tt_buffers[0], 1000,
@@ -248,6 +256,7 @@ TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 TEST_F(timetrace, tt_proc_release__bogus_file)
 {
 	struct tt_proc_file pf;
+
 	pf.file = NULL;
 	int err = -tt_proc_release(NULL, &self->file);
 	EXPECT_EQ(EINVAL, err);

@@ -74,8 +74,8 @@ int homa_offload_init(void)
  */
 int homa_offload_end(void)
 {
-	int res1 = inet_del_offload(&homa_offload, IPPROTO_HOMA);
 	int res2 = inet6_del_offload(&homa_offload, IPPROTO_HOMA);
+	int res1 = inet_del_offload(&homa_offload, IPPROTO_HOMA);
 
 	return res1 ? res1 : res2;
 }
@@ -131,6 +131,7 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 {
 	struct common_header *h = (struct common_header *)
 			skb_transport_header(skb);
+
 	// tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
 	//		"urgent 0x%x, id %d", h->type, h->flags,
 	//		ntohs(h->urgent), homa_local_id(h->sender_id));
@@ -277,20 +278,21 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	struct sk_buff *held_skb;
-	struct sk_buff *result = NULL;
-	struct homa_offload_core *offload_core = &per_cpu(homa_offload_core,
-			raw_smp_processor_id());
-	__u64 now = get_cycles();
-	int busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
-	__u32 hash;
 	__u64 saved_softirq_metric, softirq_cycles;
+	struct homa_offload_core *offload_core;
+	struct sk_buff *result = NULL;
 	__u64 *softirq_cycles_metric;
-	struct data_header *h_new = (struct data_header *)
-			skb_transport_header(skb);
+	struct data_header *h_new;
+	struct sk_buff *held_skb;
+	__u64 now = get_cycles();
 	int priority;
 	__u32 saddr;
+	__u32 hash;
+	int busy;
 
+	h_new = (struct data_header *) skb_transport_header(skb);
+	offload_core = &per_cpu(homa_offload_core, raw_smp_processor_id());
+	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
 	offload_core->last_active = now;
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
@@ -468,11 +470,11 @@ void homa_gro_gen2(struct sk_buff *skb)
 	 * balancing.
 	 */
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
-	int i;
 	int this_core = raw_smp_processor_id();
+	struct homa_offload_core *offload_core;
 	int candidate = this_core;
 	__u64 now = get_cycles();
-	struct homa_offload_core *offload_core;
+	int i;
 
 	for (i = CORES_TO_CHECK; i > 0; i--) {
 		candidate++;
@@ -523,11 +525,12 @@ void homa_gro_gen3(struct sk_buff *skb)
 	 * load balancer.
 	 */
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
-	int i, core;
 	__u64 now, busy_time;
-	int *candidates = per_cpu(homa_offload_core, raw_smp_processor_id())
-			.gen3_softirq_cores;
+	int *candidates;
+	int i, core;
 
+	candidates = per_cpu(homa_offload_core,
+			raw_smp_processor_id()).gen3_softirq_cores;
 	now = get_cycles();
 	busy_time = now - homa->busy_cycles;
 
@@ -567,6 +570,7 @@ void homa_gro_gen3(struct sk_buff *skb)
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
 	struct data_header *h = (struct data_header *) skb_transport_header(skb);
+
 	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 	//		h->common.type, homa_local_id(h->common.sender_id),
 	//		ntohl(h->seg.offset),

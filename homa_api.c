@@ -38,8 +38,8 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 		const union sockaddr_in_union *dest_addr, uint64_t id)
 {
 	struct homa_sendmsg_args args;
-	struct iovec vec;
 	struct msghdr hdr;
+	struct iovec vec;
 	int result;
 
 	args.id = id;
@@ -117,8 +117,8 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 		uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
-	struct iovec vec;
 	struct msghdr hdr;
+	struct iovec vec;
 	int result;
 
 	args.id = 0;

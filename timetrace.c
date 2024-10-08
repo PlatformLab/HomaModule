@@ -283,8 +283,8 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 void tt_find_oldest(int *pos)
 {
 	struct tt_buffer *buffer;
-	int i;
 	__u64 start_time = 0;
+	int i;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
@@ -370,11 +370,12 @@ done:
 ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		size_t length, loff_t *offset)
 {
+	struct tt_proc_file *pf = file->private_data;
+
 	/* # bytes of data that have accumulated in pf->msg_storage but
 	 * haven't been copied to user space yet.
 	 */
 	int copied_to_user = 0;
-	struct tt_proc_file *pf = file->private_data;
 
 	spin_lock(&tt_lock);
 	if ((pf == NULL) || (pf->file != file)) {
@@ -499,8 +500,8 @@ loff_t tt_proc_lseek(struct file *file, loff_t offset, int whence)
  */
 int tt_proc_release(struct inode *inode, struct file *file)
 {
-	int i;
 	struct tt_proc_file *pf = file->private_data;
+	int i;
 
 	if ((pf == NULL) || (pf->file != file)) {
 		pr_err("tt_metrics_release found damaged private_data: 0x%p\n",
@@ -550,6 +551,10 @@ int tt_proc_release(struct inode *inode, struct file *file)
  */
 void tt_print_file(char *path)
 {
+	/* Static buffer for accumulating output data. */
+	static char buffer[10000];
+	struct file *filp = NULL;
+
 	/* Index of the next entry to return from each tt_buffer.
 	 * This array is too large to allocate on the stack, and we don't
 	 * want to allocate space dynamically (this function could be
@@ -559,13 +564,9 @@ void tt_print_file(char *path)
 	 */
 	static int pos[NR_CPUS];
 	static atomic_t active;
-	struct file *filp = NULL;
-	int err;
-
-	/* Also use a static buffer for accumulating output data. */
-	static char buffer[10000];
 	int bytes_used = 0;
 	loff_t offset = 0;
+	int err;
 
 	if (atomic_xchg(&active, 1)) {
 		pr_err("concurrent call to %s aborting\n", __func__);
@@ -591,10 +592,10 @@ void tt_print_file(char *path)
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
-		struct tt_event *event;
-		int i;
-		int current_core = -1;
 		__u64 earliest_time = ~0;
+		struct tt_event *event;
+		int current_core = -1;
+		int i;
 
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
@@ -691,11 +692,11 @@ void tt_printk(void)
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
-		struct tt_event *event;
-		int i;
-		int current_core = -1;
 		__u64 earliest_time = ~0;
+		struct tt_event *event;
+		int current_core = -1;
 		char msg[200];
+		int i;
 
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
@@ -752,10 +753,10 @@ void tt_get_messages(char *buffer, size_t length)
 
 	/* Each iteration of this loop prints one event. */
 	while (true) {
-		struct tt_event *event;
-		int i, result;
-		int current_core = -1;
 		__u64 earliest_time = ~0;
+		struct tt_event *event;
+		int current_core = -1;
+		int i, result;
 
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {

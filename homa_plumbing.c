@@ -1182,14 +1182,14 @@ int homa_get_port(struct sock *sk, unsigned short snum)
  */
 int homa_softirq(struct sk_buff *skb)
 {
-	struct common_header *h;
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
-	static __u64 last;
-	__u64 start;
-	int header_offset;
+	struct common_header *h;
 	int first_packet = 1;
+	static __u64 last;
+	int header_offset;
 	int pull_length;
+	__u64 start;
 
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
@@ -1372,14 +1372,14 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	const struct iphdr *iph = ip_hdr(skb);
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
-	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
 	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
-		struct common_header *h;
 		char *icmp = (char *) icmp_hdr(skb);
+		struct common_header *h;
 
 		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
 		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
@@ -1420,8 +1420,8 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
 
 	if ((type == ICMPV6_DEST_UNREACH) && (code == ICMPV6_PORT_UNREACH)) {
-		struct common_header *h;
 		char *icmp = (char *) icmp_hdr(skb);
+		struct common_header *h;
 
 		iph = (struct ipv6hdr *) (icmp + sizeof(struct icmphdr));
 		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
@@ -1567,10 +1567,10 @@ int homa_dointvec(struct ctl_table *table, int write,
 int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
-	int result, i;
-	struct ctl_table table_copy;
 	struct homa_offload_core *offload_core;
+	struct ctl_table table_copy;
 	int max_values, *values;
+	int result, i;
 
 	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
 	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL);
@@ -1647,9 +1647,9 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 int homa_timer_main(void *transportInfo)
 {
 	struct homa *homa = (struct homa *) transportInfo;
-	u64 nsec;
-	ktime_t tick_interval;
 	struct hrtimer hrtimer;
+	ktime_t tick_interval;
+	u64 nsec;
 
 	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer.function = &homa_hrtimer;

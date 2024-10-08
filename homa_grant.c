@@ -68,10 +68,10 @@ inline int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
  */
 void homa_grant_add_rpc(struct homa_rpc *rpc)
 {
-	struct homa_rpc *candidate;
+	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
 	struct homa_peer *peer_cand;
-	struct homa *homa = rpc->hsk->homa;
+	struct homa_rpc *candidate;
 
 	/* Make sure this message is in the right place in the grantable_rpcs
 	 * list for its peer.
@@ -158,11 +158,11 @@ done:
  */
 void homa_grant_remove_rpc(struct homa_rpc *rpc)
 {
-	struct homa_rpc *head;
+	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
-	struct homa *homa = rpc->hsk->homa;
 	__u64 time = get_cycles();
+	struct homa_rpc *head;
 
 	if (list_empty(&rpc->grantable_links))
 		return;
@@ -382,9 +382,6 @@ done:
  */
 void homa_grant_recalc(struct homa *homa, int locked)
 {
-	int i, active, try_again;
-	__u64 start;
-
 	/* The tricky part of this method is that we need to release
 	 * homa->grantable_lock before actually sending grants, because
 	 * (a) we need to hold the RPC lock while sending grants, and
@@ -393,6 +390,8 @@ void homa_grant_recalc(struct homa *homa, int locked)
 	 * This array hold a copy of homa->active_rpcs.
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
+	int i, active, try_again;
+	__u64 start;
 
 	tt_record("homa_grant_recalc starting");
 	INC_METRIC(grant_recalc_calls, 1);
@@ -423,8 +422,8 @@ void homa_grant_recalc(struct homa *homa, int locked)
 				homa->max_overcommit);
 		homa->num_active_rpcs = active;
 		for (i = 0; i < active; i++) {
-			int extra_levels;
 			struct homa_rpc *rpc = homa->active_rpcs[i];
+			int extra_levels;
 
 			active_rpcs[i] = rpc;
 			atomic_inc(&rpc->grants_in_progress);
@@ -563,10 +562,10 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
  */
 void homa_grant_find_oldest(struct homa *homa)
 {
+	int max_incoming = homa->grant_window + 2*homa->fifo_grant_increment;
 	struct homa_rpc *rpc, *oldest;
 	struct homa_peer *peer;
 	__u64 oldest_birth;
-	int max_incoming = homa->grant_window + 2*homa->fifo_grant_increment;
 
 	oldest = NULL;
 	oldest_birth = ~0;
@@ -647,9 +646,9 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
  */
 int homa_grantable_lock_slow(struct homa *homa, int recalc)
 {
-	int result = 0;
-	__u64 start = get_cycles();
 	int starting_count = atomic_read(&homa->grant_recalc_count);
+	__u64 start = get_cycles();
+	int result = 0;
 
 	tt_record("beginning wait for grantable lock");
 	while (1) {

@@ -43,6 +43,7 @@ static struct sk_buff *tcp6_gro_receive(struct list_head *held_list,
 FIXTURE_SETUP(homa_offload)
 {
 	int i;
+
 	homa_init(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	homa = &self->homa;
@@ -133,8 +134,9 @@ TEST_F(homa_offload, homa_gro_hook_tcp)
 
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 {
-	struct sk_buff *skb;
 	struct common_header *h;
+	struct sk_buff *skb;
+
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
@@ -155,8 +157,9 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 }
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 {
-	struct sk_buff *skb;
 	struct common_header *h;
+	struct sk_buff *skb;
+
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
@@ -176,8 +179,9 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 }
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 {
-	struct sk_buff *skb;
 	struct common_header *h;
+	struct sk_buff *skb;
+
 	mock_ipv6 = false;
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
@@ -200,9 +204,10 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
+	struct sk_buff *skb;
 	mock_ipv6 = false;
-	struct sk_buff *skb = mock_skb_new(&self->ip, &self->header.common,
-			1400, 2000);
+
+	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 2000);
 	int version = ip_hdr(skb)->version;
 	EXPECT_EQ(4, version);
 	struct sk_buff *segs = homa_gso_segment(skb, 0);
@@ -248,22 +253,28 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
+	struct sk_buff *skb, *skb2, *skb3, *skb4;
 	int client_port = 40000;
-	int server_port = 99;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
-	struct data_header h = {.common = {
-			.sport = htons(40000), .dport = htons(server_port),
-			.type = DATA,
-			.sender_id = cpu_to_be64(client_id)},
-			.message_length = htonl(10000),
-			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0, 0},
-			.retransmit = 0,
-			.seg = {.offset = htonl(2000)}};
-	struct sk_buff *skb, *skb2, *skb3, *skb4;
+	struct homa_rpc *srpc;
+	int server_port = 99;
+	struct data_header h;
 
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
+	h.common.sport = htons(40000);
+	h.common.dport = htons(server_port);
+	h.common.type = DATA;
+	h.common.sender_id = cpu_to_be64(client_id);
+	h.message_length = htonl(10000);
+	h.incoming = htonl(10000);
+	h.cutoff_version = 0;
+	h.ack.client_id = 0;
+	h.ack.client_port= 0;
+	h.ack.server_port = 0;
+	h.retransmit = 0;
+	h.seg.offset = htonl(2000);
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			&client_ip, &server_ip, client_port, server_id, 10000,
 			200);
 	ASSERT_NE(NULL, srpc);
@@ -312,20 +323,23 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	int client_port = 40000;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
-	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
+	struct homa_rpc *srpc;
+	struct grant_header h;
+
+	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			&client_ip, &server_ip, client_port, server_id, 100,
 			20000);
 	ASSERT_NE(NULL, srpc);
 	homa_xmit_data(srpc, false);
 	unit_log_clear();
 
-	struct grant_header h = {{.sport = htons(srpc->dport),
-	                .dport = htons(self->hsk.port),
-			.sender_id = cpu_to_be64(client_id),
-			.type = GRANT},
-		        .offset = htonl(11000),
-			.priority = 3,
-			.resend_all = 0};
+	h.common.sport = htons(srpc->dport);
+	h.common.dport = htons(self->hsk.port);
+	h.common.sender_id = cpu_to_be64(client_id);
+	h.common.type = GRANT;
+	h.offset = htonl(11000);
+	h.priority = 3;
+	h.resend_all = 0;
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
 	self->homa.gro_policy = 0;
@@ -357,6 +371,7 @@ TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 {
 	struct sk_buff *skb;
 	int same_flow;
+
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 2;
@@ -374,6 +389,7 @@ TEST_F(homa_offload, homa_gro_receive__empty_merge_list)
 {
 	struct sk_buff *skb;
 	int same_flow;
+
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 2;
@@ -391,6 +407,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb_not_in_merge_list)
 {
 	struct sk_buff *skb;
 	int same_flow;
+
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 3;
@@ -408,6 +425,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb__in_merge_list_but_wrong_proto)
 {
 	struct sk_buff *skb;
 	int same_flow;
+
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 3;
@@ -429,6 +447,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 {
 	struct sk_buff *skb, *skb2;
 	int same_flow;
+
 	cur_offload_core->held_skb = self->skb2;
 	cur_offload_core->held_bucket = 2;
 

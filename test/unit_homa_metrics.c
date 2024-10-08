@@ -55,8 +55,9 @@ TEST_F(homa_metrics, homa_metrics_open)
 }
 TEST_F(homa_metrics, homa_metrics_read__basics)
 {
-	char buffer[1000];
 	loff_t offset = 10;
+	char buffer[1000];
+
 	self->homa.metrics = kmalloc(100, GFP_KERNEL);
 	self->homa.metrics_capacity = 100;
 	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");
@@ -77,8 +78,9 @@ TEST_F(homa_metrics, homa_metrics_read__basics)
 }
 TEST_F(homa_metrics, homa_metrics_read__error_copying_to_user)
 {
-	char buffer[1000];
 	loff_t offset = 10;
+	char buffer[1000];
+
 	self->homa.metrics = kmalloc(100, GFP_KERNEL);
 	self->homa.metrics_capacity = 100;
 	strcpy(self->homa.metrics, "0123456789abcdefghijklmnop");

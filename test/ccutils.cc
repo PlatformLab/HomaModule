@@ -160,6 +160,7 @@ void unit_log_clear(void)
 void unit_fill_data(unsigned char *data, int length, int first_value)
 {
 	int i;
+
 	for (i = 0; i <= length-4; i += 4) {
 		*reinterpret_cast<int32_t *>(data + i) = first_value + i;
 	}
@@ -193,6 +194,7 @@ void unit_log_add_separator(char *sep)
 void unit_log_data(const char *separator, unsigned char *data, int length)
 {
 	int i, range_start, expected_next;
+
 	if (length == 0) {
 		unit_log_printf(separator, "empty block");
 		return;
@@ -204,6 +206,7 @@ void unit_log_data(const char *separator, unsigned char *data, int length)
 	expected_next = range_start;
 	for (i = 0; i <= length-4; i += 4) {
 		int current = *reinterpret_cast<int32_t *>(data + i);
+
 		if (current != expected_next) {
 			unit_log_printf(separator, "%d-%d", range_start,
 				expected_next-1);
@@ -247,6 +250,7 @@ const char *unit_log_get(void)
 void unit_log_printf(const char *separator, const char* format, ...)
 {
 	va_list ap;
+
 	va_start(ap, format);
 
 	if (!unit_log.empty() && (separator != NULL))
@@ -257,10 +261,12 @@ void unit_log_printf(const char *separator, const char* format, ...)
 	int buf_size = 1024;
 	while (true) {
 		char buf[buf_size];
-		// vsnprintf trashes the va_list, so copy it first
 		va_list aq;
+		int length;
+
+		// vsnprintf trashes the va_list, so copy it first
 		__va_copy(aq, ap);
-		int length = vsnprintf(buf, buf_size, format, aq);
+		length = vsnprintf(buf, buf_size, format, aq);
 		assert(length >= 0); // old glibc versions returned -1
 		if (length < buf_size) {
 			unit_log.append(buf, length);

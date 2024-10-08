@@ -199,6 +199,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
 	int shinfo_size;
+
 	if (mock_check_error(&mock_alloc_skb_errors))
 		return NULL;
 	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
@@ -241,6 +242,7 @@ void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 {
 	size_t bytes_left = bytes;
+
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
 	if (bytes > iter->count) {
@@ -306,6 +308,7 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
 	__u64 int_from = (__u64) from;
+
 	if (mock_check_error(&mock_copy_data_errors))
 		return 1;
 	if (int_from > 200000)
@@ -606,8 +609,9 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 
 int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 {
-	char buffer[200];
 	const char *prefix = " ";
+	char buffer[200];
+
 	if (mock_check_error(&mock_ip_queue_xmit_errors)) {
 		/* Latest data (as of 1/2019) suggests that ip_queue_xmit
 		 * frees packets after errors.
@@ -645,6 +649,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		const struct sock *sk)
 {
 	struct rtable *route;
+
 	if (mock_check_error(&mock_route_errors))
 		return ERR_PTR(-EHOSTUNREACH);
 	route = malloc(sizeof(struct rtable));
@@ -830,6 +835,7 @@ struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 				   const struct proc_ops *proc_ops)
 {
 	struct proc_dir_entry *entry = malloc(40);
+
 	if (!entry) {
 		FAIL("malloc failed");
 		return ERR_PTR(-ENOMEM);
@@ -956,6 +962,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		struct iovec *iov = (struct iovec *) iter_iov(iter);
 		__u64 int_base = (__u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
+
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
 		unit_log_printf("; ",
@@ -998,6 +1005,7 @@ void *skb_push(struct sk_buff *skb, unsigned int len)
 void *skb_put(struct sk_buff *skb, unsigned int len)
 {
 	unsigned char *result = skb_tail_pointer(skb);
+
 	skb->tail += len;
 	skb->len += len;
 	return result;
@@ -1006,9 +1014,9 @@ void *skb_put(struct sk_buff *skb, unsigned int len)
 struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		netdev_features_t features)
 {
+	struct sk_buff *skb1, *skb2;
 	struct data_header h;
 	int offset, length;
-	struct sk_buff *skb1, *skb2;
 
 	/* Split the existing packet into two packets. */
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
@@ -1131,6 +1139,7 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 struct page *mock_alloc_pages(gfp_t gfp, unsigned order)
 {
 	struct page *page;
+
 	if (mock_check_error(&mock_alloc_page_errors))
 		return NULL;
 	page = (struct page *)malloc(PAGE_SIZE << order);
@@ -1172,6 +1181,7 @@ void mock_clear_xmit_prios()
 unsigned int mock_compound_order(struct page *page)
 {
 	unsigned int result;
+
 	if (mock_compound_order_mask & 1)
 		result = 0;
 	else
@@ -1228,6 +1238,7 @@ unsigned int mock_get_mtu(const struct dst_entry *dst)
 void mock_get_page(struct page *page)
 {
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
+
 	if (ref_count == 0)
 		FAIL(" unallocated page passed to mock_get_page");
 	else
@@ -1249,6 +1260,7 @@ int mock_page_refs(struct page *page)
 int mock_page_to_nid(struct page *page)
 {
 	int result;
+
 	if (mock_page_nid_mask & 1)
 		result = 1;
 	else
@@ -1260,6 +1272,7 @@ int mock_page_to_nid(struct page *page)
 void mock_put_page(struct page *page)
 {
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
+
 	if (ref_count == 0)
 		FAIL(" unallocated page passed to mock_put_page");
 	else {
@@ -1331,6 +1344,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;
+	struct sk_buff *skb;
 	unsigned char *p;
 
 	switch (h->type) {
@@ -1365,7 +1379,7 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 		header_size = sizeof(struct common_header);
 		break;
 	}
-	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	skb = malloc(sizeof(struct sk_buff));
 	memset(skb, 0, sizeof(*skb));
 	if (!skbs_in_use)
 		skbs_in_use = unit_hash_new();
@@ -1421,9 +1435,10 @@ int mock_skb_count(void)
  */
 void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
+	int saved_port = homa->next_client_port;
 	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = &hsk->sock;
-	int saved_port = homa->next_client_port;
+
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
@@ -1460,6 +1475,8 @@ void mock_spin_unlock(spinlock_t *lock)
  */
 void mock_teardown(void)
 {
+	int count;
+
 	pcpu_hot.cpu_number = 1;
 	cpu_khz = 1000000;
 	mock_alloc_page_errors = 0;
@@ -1498,7 +1515,7 @@ void mock_teardown(void)
 	memset(inet_offloads, 0, sizeof(inet_offloads));
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
 
-	int count = unit_hash_size(skbs_in_use);
+	count = unit_hash_size(skbs_in_use);
 	if (count > 0)
 		FAIL(" %u sk_buff(s) still in use after test", count);
 	unit_hash_free(skbs_in_use);

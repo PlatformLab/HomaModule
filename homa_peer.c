@@ -42,9 +42,9 @@ int homa_peertab_init(struct homa_peertab *peertab)
  */
 void homa_peertab_destroy(struct homa_peertab *peertab)
 {
-	int i;
-	struct homa_peer *peer;
 	struct hlist_node *next;
+	struct homa_peer *peer;
+	int i;
 
 	if (!peertab->buckets)
 		return;
@@ -72,10 +72,10 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 		int *num_peers)
 {
-	int i, count;
-	struct homa_peer *peer;
-	struct hlist_node *next;
 	struct homa_peer **result;
+	struct hlist_node *next;
+	struct homa_peer *peer;
+	int i, count;
 
 	*num_peers = 0;
 	if (!peertab->buckets)

@@ -80,8 +80,8 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
  */
 void homa_gap_retry(struct homa_rpc *rpc)
 {
-	struct homa_gap *gap;
 	struct resend_header resend;
+	struct homa_gap *gap;
 
 	list_for_each_entry(gap, &rpc->msgin.gaps, links) {
 		resend.offset = htonl(gap->start);
@@ -103,10 +103,10 @@ void homa_gap_retry(struct homa_rpc *rpc)
 void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
 	struct data_header *h = (struct data_header *) skb->data;
+	struct homa_gap *gap, *dummy, *gap2;
 	int start = ntohl(h->seg.offset);
 	int length = homa_data_len(skb);
 	int end = start + length;
-	struct homa_gap *gap, *dummy, *gap2;
 
 	if ((start + length) > rpc->msgin.length) {
 		tt_record3("Packet extended past message end; id %d, offset %d, length %d",
@@ -210,12 +210,12 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 #define MAX_SKBS 20
 #endif
 	struct sk_buff *skbs[MAX_SKBS];
-	int n = 0;             /* Number of filled entries in skbs. */
-	int error = 0;
 	int start_offset = 0;
 	int end_offset = 0;
-	int i;
+	int error = 0;
 	__u64 start;
+	int n = 0;             /* Number of filled entries in skbs. */
+	int i;
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
 	 * copying to user space, because (a) it's illegal to hold a spinlock
@@ -256,12 +256,12 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		for (i = 0; i < n; i++) {
 			struct data_header *h = (struct data_header *)
 					skbs[i]->data;
-			int offset = ntohl(h->seg.offset);
 			int pkt_length = homa_data_len(skbs[i]);
+			int offset = ntohl(h->seg.offset);
+			int buf_bytes, chunk_size;
+			struct iov_iter iter;
 			int copied = 0;
 			char *dst;
-			struct iov_iter iter;
-			int buf_bytes, chunk_size;
 
 			/* Each iteration of this loop copies to one
 			 * user buffer.
@@ -335,19 +335,16 @@ free_skbs:
  */
 void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 {
-	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct data_header *h = (struct data_header *) skb->data;
-	__u64 id = homa_local_id(h->common.sender_id);
-	int dport = ntohs(h->common.dport);
-	struct homa_sock *hsk;
-	struct homa_rpc *rpc = NULL;
-	struct sk_buff *next;
-
 #ifdef __UNIT_TEST__
 #define MAX_ACKS 2
 #else
 #define MAX_ACKS 10
 #endif
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+	struct data_header *h = (struct data_header *) skb->data;
+	__u64 id = homa_local_id(h->common.sender_id);
+	int dport = ntohs(h->common.dport);
+
 	/* Used to collect acks from data packets so we can process them
 	 * all at the end (can't process them inline because that may
 	 * require locking conflicting RPCs). If we run out of space just
@@ -355,6 +352,9 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 	 * explicit mechanism.
 	 */
 	struct homa_ack acks[MAX_ACKS];
+	struct homa_rpc *rpc = NULL;
+	struct homa_sock *hsk;
+	struct sk_buff *next;
 	int num_acks = 0;
 
 	/* Find the appropriate socket.*/
@@ -536,8 +536,8 @@ discard:
  */
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct homa *homa = rpc->hsk->homa;
 	struct data_header *h = (struct data_header *) skb->data;
+	struct homa *homa = rpc->hsk->homa;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 			homa_local_id(h->common.sender_id),
@@ -760,12 +760,12 @@ done:
  */
 void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 {
-	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	int i;
 	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
-	struct homa_peer *peer = homa_peer_find(hsk->homa->peers,
-		&saddr, &hsk->inet);
+	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+	struct homa_peer *peer;
+	int i;
 
+	peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
 		for (i = 1; i < HOMA_MAX_PRIORITIES; i++)
@@ -789,8 +789,8 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	struct common_header *h = (struct common_header *) skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	__u64 id = homa_local_id(h->sender_id);
-	struct ack_header ack;
 	struct homa_peer *peer;
+	struct ack_header ack;
 
 	tt_record1("Received NEED_ACK for id %d", id);
 
@@ -843,8 +843,8 @@ done:
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		struct homa_rpc *rpc)
 {
-	struct ack_header *h = (struct ack_header *) skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
+	struct ack_header *h = (struct ack_header *) skb->data;
 	int i, count;
 
 	if (rpc != NULL) {
@@ -983,8 +983,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		int port, int error)
 {
 	struct homa_socktab_scan scan;
-	struct homa_sock *hsk;
 	struct homa_rpc *rpc, *tmp;
+	struct homa_sock *hsk;
 
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
@@ -1181,11 +1181,11 @@ claim_rpc:
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		__u64 id)
 {
+	int error, blocked = 0, polled = 0;
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
 	struct homa_rpc *rpc = NULL;
 	uint64_t poll_start, now;
-	int error, blocked = 0, polled = 0;
 
 	/* Each iteration of this loop finds an RPC, but it might not be
 	 * in a state where we can return it (e.g., there might be packets
@@ -1375,10 +1375,10 @@ done:
 struct homa_interest *homa_choose_interest(struct homa *homa,
 		struct list_head *head, int offset)
 {
-	struct homa_interest *backup = NULL;
-	struct list_head *pos;
-	struct homa_interest *interest;
 	__u64 busy_time = get_cycles() - homa->busy_cycles;
+	struct homa_interest *backup = NULL;
+	struct homa_interest *interest;
+	struct list_head *pos;
 
 	list_for_each(pos, head) {
 		interest = (struct homa_interest *) (((char *) pos) - offset);
@@ -1405,8 +1405,8 @@ struct homa_interest *homa_choose_interest(struct homa *homa,
  */
 void homa_rpc_handoff(struct homa_rpc *rpc)
 {
-	struct homa_interest *interest;
 	struct homa_sock *hsk = rpc->hsk;
+	struct homa_interest *interest;
 
 	if ((atomic_read(&rpc->flags) & RPC_HANDING_OFF)
 			|| !list_empty(&rpc->ready_links))

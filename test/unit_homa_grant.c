@@ -105,6 +105,7 @@ static struct homa_rpc *test_rpc(FIXTURE_DATA(homa_grant) *self,
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, server_ip, self->server_port,
 			id, 1000, size);
+
 	homa_message_in_init(rpc, size, 0);
 	homa_grant_add_rpc(rpc);
 	return rpc;
@@ -215,9 +216,11 @@ TEST_F(homa_grant, homa_grant_add_rpc__insert_in_peer_list)
 }
 TEST_F(homa_grant, homa_grant_add_rpc__adjust_order_in_peer_list)
 {
+	struct homa_rpc *rpc3;
+
 	test_rpc(self, 200, self->server_ip, 20000);
 	test_rpc(self, 300, self->server_ip, 30000);
-	struct homa_rpc *rpc3 = test_rpc(self, 400, self->server_ip, 40000);
+	rpc3 = test_rpc(self, 400, self->server_ip, 40000);
 	test_rpc(self, 500, self->server_ip, 50000);
 
 	unit_log_clear();
@@ -267,10 +270,13 @@ TEST_F(homa_grant, homa_grant_add_rpc__insert_peer_in_homa_list)
 }
 TEST_F(homa_grant, homa_grant_add_rpc__move_peer_in_homa_list)
 {
+	struct homa_rpc *rpc3;
+	struct homa_rpc *rpc4;
+
 	test_rpc(self, 200, self->server_ip, 20000);
 	test_rpc(self, 300, self->server_ip+1, 30000);
-	struct homa_rpc *rpc3 = test_rpc(self, 400, self->server_ip+2, 40000);
-	struct homa_rpc *rpc4 = test_rpc(self, 500, self->server_ip+3, 50000);
+	rpc3 = test_rpc(self, 400, self->server_ip+2, 40000);
+	rpc4 = test_rpc(self, 500, self->server_ip+3, 50000);
 
 	unit_log_clear();
 	unit_log_grantables(&self->homa);
@@ -307,6 +313,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__skip_if_not_linked)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
+
 	unit_log_grantables(&self->homa);
 	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 
@@ -317,6 +324,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__clear_oldest_rpc)
 {
 	struct homa_rpc *rpc1 = test_rpc(self, 200, self->server_ip, 20000);
 	struct homa_rpc *rpc2 = test_rpc(self, 300, self->server_ip, 10000);
+
 	EXPECT_EQ(2, self->homa.num_grantable_rpcs);
 	self->homa.oldest_rpc = rpc2;
 
@@ -330,6 +338,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__clear_oldest_rpc)
 TEST_F(homa_grant, homa_grant_remove_rpc__update_metrics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 20000);
+
 	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
 	self->homa.last_grantable_change = 100;
 	self->homa.num_grantable_rpcs = 3;
@@ -342,8 +351,10 @@ TEST_F(homa_grant, homa_grant_remove_rpc__update_metrics)
 }
 TEST_F(homa_grant, homa_grant_remove_rpc__not_first_in_peer_list)
 {
+	struct homa_rpc *rpc2;
+
 	test_rpc(self, 200, self->server_ip, 20000);
-	struct homa_rpc *rpc2 = test_rpc(self, 300, self->server_ip, 30000);
+	rpc2 = test_rpc(self, 300, self->server_ip, 30000);
 	test_rpc(self, 400, self->server_ip+1, 25000);
 
 	unit_log_clear();
@@ -364,6 +375,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__not_first_in_peer_list)
 TEST_F(homa_grant, homa_grant_remove_rpc__only_entry_in_peer_list)
 {
 	struct homa_rpc *rpc1 = test_rpc(self, 200, self->server_ip, 30000);
+
 	test_rpc(self, 300, self->server_ip+1, 40000);
 	test_rpc(self, 400, self->server_ip+2, 20000);
 
@@ -385,6 +397,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__only_entry_in_peer_list)
 TEST_F(homa_grant, homa_grant_remove_rpc__reposition_peer_in_homa_list)
 {
 	struct homa_rpc *rpc1 = test_rpc(self, 200, self->server_ip, 20000);
+
 	test_rpc(self, 300, self->server_ip, 50000);
 	test_rpc(self, 400, self->server_ip+1, 30000);
 	test_rpc(self, 500, self->server_ip+2, 40000);
@@ -410,8 +423,8 @@ TEST_F(homa_grant, homa_grant_remove_rpc__reposition_peer_in_homa_list)
 TEST_F(homa_grant, homa_grant_send__basics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	rpc->msgin.priority = 3;
 
+	rpc->msgin.priority = 3;
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
@@ -421,6 +434,7 @@ TEST_F(homa_grant, homa_grant_send__basics)
 TEST_F(homa_grant, homa_grant_send__incoming_negative)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
 	rpc->msgin.bytes_remaining = 5000;
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
 
@@ -433,8 +447,8 @@ TEST_F(homa_grant, homa_grant_send__incoming_negative)
 TEST_F(homa_grant, homa_grant_send__end_of_message)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	rpc->msgin.bytes_remaining = 5000;
 
+	rpc->msgin.bytes_remaining = 5000;
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
@@ -444,6 +458,7 @@ TEST_F(homa_grant, homa_grant_send__end_of_message)
 TEST_F(homa_grant, homa_grant_send__not_enough_available_bytes)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
 	rpc->msgin.granted = 3000;
 	rpc->msgin.rec_incoming = 4000;
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming - 4000);
@@ -457,8 +472,8 @@ TEST_F(homa_grant, homa_grant_send__not_enough_available_bytes)
 TEST_F(homa_grant, homa_grant_send__nothing_available)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
 
+	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(0, granted);
@@ -468,8 +483,8 @@ TEST_F(homa_grant, homa_grant_send__nothing_available)
 TEST_F(homa_grant, homa_grant_send__skip_because_of_silent_ticks)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	rpc->silent_ticks = 2;
 
+	rpc->silent_ticks = 2;
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(0, granted);
@@ -477,8 +492,8 @@ TEST_F(homa_grant, homa_grant_send__skip_because_of_silent_ticks)
 TEST_F(homa_grant, homa_grant_send__resend_all)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	rpc->msgin.resend_all = 1;
 
+	rpc->msgin.resend_all = 1;
 	unit_log_clear();
 	int granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
@@ -492,6 +507,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__msgin_not_initialized)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
+
 	rpc->msgin.bytes_remaining = 500;
 	rpc->msgin.granted = 2000;
 	rpc->msgin.rec_incoming = 0;
@@ -505,8 +521,8 @@ TEST_F(homa_grant, homa_grant_check_rpc__rpc_dead)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
-	homa_message_in_init(rpc, 2000, 0);
 
+	homa_message_in_init(rpc, 2000, 0);
 	homa_rpc_lock(rpc, "test");
 	homa_grant_check_rpc(rpc);
 	EXPECT_EQ(2000, rpc->msgin.rec_incoming);
@@ -526,6 +542,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__message_doesnt_need_grants)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
+
 	homa_message_in_init(rpc, 2000, 0);
 	rpc->msgin.granted = 2000;
 	rpc->msgin.bytes_remaining = 500;
@@ -546,6 +563,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__add_new_message_to_grantables)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 20000);
+
 	homa_message_in_init(rpc, 20000, 0);
 	rpc->msgin.bytes_remaining = 12000;
 
@@ -559,6 +577,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__add_new_message_to_grantables)
 TEST_F(homa_grant, homa_grant_check_rpc__new_message_bumps_existing)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	self->homa.max_overcommit = 2;
@@ -580,6 +599,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__new_message_bumps_existing)
 TEST_F(homa_grant, homa_grant_check_rpc__new_message_cant_be_granted)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	self->homa.max_overcommit = 2;
@@ -602,6 +622,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__new_message_cant_be_granted)
 TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_negative_rank)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 40000);
@@ -624,6 +645,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_negative_rank)
 TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_positive_rank)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 40000);
@@ -648,6 +670,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_positive_rank)
 TEST_F(homa_grant, homa_grant_check_rpc__send_new_grant)
 {
 	struct homa_rpc *rpc;
+
 	rpc = test_rpc(self, 100, self->server_ip, 40000);
 	homa_grant_recalc(&self->homa, 0);
 	EXPECT_EQ(0, atomic_read(&rpc->msgin.rank));
@@ -666,6 +689,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__send_new_grant)
 TEST_F(homa_grant, homa_grant_check_rpc__remove_from_grantable)
 {
 	struct homa_rpc *rpc;
+
 	rpc = test_rpc(self, 100, self->server_ip, 40000);
 	homa_grant_recalc(&self->homa, 0);
 	EXPECT_EQ(0, atomic_read(&rpc->msgin.rank));
@@ -689,6 +713,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__remove_from_grantable)
 TEST_F(homa_grant, homa_grant_check_rpc__recalc_because_of_headroom)
 {
 	struct homa_rpc *rpc1, *rpc2;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	self->homa.max_incoming = 15000;
@@ -714,6 +739,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__recalc_because_of_headroom)
 TEST_F(homa_grant, homa_grant_recalc__basics)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 104, self->server_ip+1, 25000);
@@ -756,6 +782,7 @@ TEST_F(homa_grant, homa_grant_recalc__already_locked)
 TEST_F(homa_grant, homa_grant_recalc__skip_recalc)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
 	unit_hook_register(grantable_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xff;
@@ -770,6 +797,7 @@ TEST_F(homa_grant, homa_grant_recalc__skip_recalc)
 TEST_F(homa_grant, homa_grant_recalc__clear_existing_active_rpcs)
 {
 	struct homa_rpc *rpc1;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 40000);
 	test_rpc(self, 102, self->server_ip, 30000);
 	test_rpc(self, 104, self->server_ip, 25000);
@@ -788,6 +816,7 @@ TEST_F(homa_grant, homa_grant_recalc__clear_existing_active_rpcs)
 TEST_F(homa_grant, homa_grant_recalc__use_only_lowest_priorities)
 {
 	struct homa_rpc *rpc1, *rpc2;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	self->homa.max_incoming = 100000;
@@ -802,6 +831,7 @@ TEST_F(homa_grant, homa_grant_recalc__use_only_lowest_priorities)
 TEST_F(homa_grant, homa_grant_recalc__share_lowest_priority_level)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 100, self->server_ip, 40000);
@@ -823,6 +853,7 @@ TEST_F(homa_grant, homa_grant_recalc__share_lowest_priority_level)
 TEST_F(homa_grant, homa_grant_recalc__compute_window_size)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 30000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 40000);
 	rpc3 = test_rpc(self, 100, self->server_ip, 50000);
@@ -848,6 +879,7 @@ TEST_F(homa_grant, homa_grant_recalc__compute_window_size)
 TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 10000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 10000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 10000);
@@ -864,6 +896,7 @@ TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted)
 TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted_but_skip_recalc)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 10000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 10000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 10000);
@@ -993,6 +1026,7 @@ TEST_F(homa_grant, homa_grant_find_oldest__basics)
 TEST_F(homa_grant, homa_grant_find_oldest__fifo_grant_unused)
 {
 	struct homa_rpc *srpc1, *srpc2;
+
 	mock_cycles = ~0;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 11, 400000, 100);
@@ -1028,6 +1062,7 @@ TEST_F(homa_grant, homa_grant_rpc_free__rpc_not_grantable)
 TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 40000);
@@ -1049,6 +1084,7 @@ TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
 TEST_F(homa_grant, homa_grant_free_rpc__not_in_active_list)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
+
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
 	rpc3 = test_rpc(self, 104, self->server_ip, 40000);

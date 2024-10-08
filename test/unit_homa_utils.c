@@ -54,12 +54,12 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
-	char *p1, *p2;
-	int i;
-
 	struct in6_addr test_addr1 = unit_get_in_addr("192.168.0.1");
 	struct in6_addr test_addr2 = unit_get_in_addr("1.2.3.4");
 	struct in6_addr test_addr3 = unit_get_in_addr("5.6.7.8");
+	char *p1, *p2;
+	int i;
+
 	p1 = homa_print_ipv6_addr(&test_addr1);
 	p2 = homa_print_ipv6_addr(&test_addr2);
 	EXPECT_STREQ("192.168.0.1", p1);
@@ -75,6 +75,7 @@ TEST_F(homa_utils, homa_snprintf)
 {
 	char buffer[50];
 	int used = 0;
+
 	used = homa_snprintf(buffer, sizeof32(buffer), used,
 			"Test message with values: %d and %d", 100, 1000);
 	EXPECT_EQ(38, used);

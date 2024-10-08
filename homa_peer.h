@@ -199,7 +199,7 @@ extern void     homa_dst_refresh(struct homa_peertab *peertab,
 		    struct homa_peer *peer, struct homa_sock *hsk);
 extern void     homa_peertab_destroy(struct homa_peertab *peertab);
 extern struct homa_peer **
-		    homa_peertab_get_peers(struct homa_peertab *peertab,
+		homa_peertab_get_peers(struct homa_peertab *peertab,
 		    int *num_peers);
 extern int      homa_peertab_init(struct homa_peertab *peertab);
 extern void     homa_peer_add_ack(struct homa_rpc *rpc);

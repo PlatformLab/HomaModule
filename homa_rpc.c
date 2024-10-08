@@ -22,10 +22,10 @@
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		const union sockaddr_in_union *dest)
 {
-	int err;
-	struct homa_rpc *crpc;
-	struct homa_rpc_bucket *bucket;
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
+	struct homa_rpc_bucket *bucket;
+	struct homa_rpc *crpc;
+	int err;
 
 	crpc = kmalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
@@ -109,14 +109,15 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		const struct in6_addr *source, struct data_header *h,
 		int *created)
 {
-	int err;
-	struct homa_rpc *srpc = NULL;
 	__u64 id = homa_local_id(h->common.sender_id);
-	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
+	struct homa_rpc_bucket *bucket;
+	struct homa_rpc *srpc = NULL;
+	int err;
 
 	/* Lock the bucket, and make sure no-one else has already created
 	 * the desired RPC.
 	 */
+	bucket = homa_server_rpc_bucket(hsk, id);
 	homa_bucket_lock(bucket, id, "homa_rpc_new_server");
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
 		if ((srpc->id == id) &&
@@ -208,11 +209,11 @@ error:
 void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		struct homa_ack *ack)
 {
-	struct homa_rpc *rpc;
-	struct homa_sock *hsk2 = hsk;
-	__u64 id = homa_local_id(ack->client_id);
 	__u16 client_port = ntohs(ack->client_port);
 	__u16 server_port = ntohs(ack->server_port);
+	__u64 id = homa_local_id(ack->client_id);
+	struct homa_sock *hsk2 = hsk;
+	struct homa_rpc *rpc;
 
 	UNIT_LOG("; ", "ack %llu", id);
 	if (hsk2->port != server_port) {
@@ -333,8 +334,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 #else
 #define BATCH_MAX 20
 #endif
-	struct sk_buff *skbs[BATCH_MAX];
 	struct homa_rpc *rpcs[BATCH_MAX];
+	struct sk_buff *skbs[BATCH_MAX];
 	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
 	int i, batch_size;
@@ -482,8 +483,8 @@ release:
  */
 struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 {
-	struct homa_rpc *crpc;
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
+	struct homa_rpc *crpc;
 
 	homa_bucket_lock(bucket, id, __func__);
 	hlist_for_each_entry_rcu(crpc, &bucket->rpcs, hash_links) {
@@ -509,8 +510,8 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 		const struct in6_addr *saddr, __u16 sport, __u64 id)
 {
-	struct homa_rpc *srpc;
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
+	struct homa_rpc *srpc;
 
 	homa_bucket_lock(bucket, id, __func__);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
@@ -691,9 +692,9 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 {
 	struct homa_socktab_scan scan;
+	int total_incoming = 0;
 	struct homa_sock *hsk;
 	struct homa_rpc *rpc;
-	int total_incoming = 0;
 	int actual;
 
 	tt_record1("homa_validate_incoming starting, total_incoming %d",

@@ -50,8 +50,8 @@ static inline void set_bpages_needed(struct homa_pool *pool)
  */
 int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 {
-	int i, result;
 	struct homa_pool *pool = hsk->buffer_pool;
+	int i, result;
 
 	if (((__u64) region) & ~PAGE_MASK)
 		return -EINVAL;
@@ -135,12 +135,13 @@ void homa_pool_destroy(struct homa_pool *pool)
 int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		int set_owner)
 {
-	int alloced = 0;
-	__u64 now = get_cycles();
-	int limit = 0;
 	int core_num = raw_smp_processor_id();
-	struct homa_pool_core *core = &pool->cores[core_num];
+	struct homa_pool_core *core;
+	__u64 now = get_cycles();
+	int alloced = 0;
+	int limit = 0;
 
+	core = &pool->cores[core_num];
 	if (atomic_sub_return(num_pages, &pool->free_bpages) < 0) {
 		atomic_add(num_pages, &pool->free_bpages);
 		return -1;

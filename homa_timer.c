@@ -19,9 +19,9 @@
  */
 void homa_check_rpc(struct homa_rpc *rpc)
 {
-	const char *us, *them;
-	struct resend_header resend;
 	struct homa *homa = rpc->hsk->homa;
+	struct resend_header resend;
+	const char *us, *them;
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
@@ -46,7 +46,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 
 	if (rpc->state == RPC_INCOMING) {
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
-			>= rpc->msgin.granted) {
+				>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
 			 * shouldn't expect to hear anything until we grant more.
 			 */
@@ -154,18 +154,18 @@ void homa_check_rpc(struct homa_rpc *rpc)
 void homa_timer(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
-	struct homa_sock *hsk;
-	struct homa_rpc *rpc;
-	cycles_t start, end;
-	int rpc_count = 0;
-	int total_rpcs = 0;
-	int total_incoming_rpcs = 0;
-	int sum_incoming = 0;
-	int sum_incoming_rec = 0;
 	static __u64 prev_grant_count;
+	int total_incoming_rpcs = 0;
+	int sum_incoming_rec = 0;
+	struct homa_sock *hsk;
 	static int zero_count;
-	int core;
+	struct homa_rpc *rpc;
+	int sum_incoming = 0;
+	cycles_t start, end;
 	__u64 total_grants;
+	int total_rpcs = 0;
+	int rpc_count = 0;
+	int core;
 
 	start = get_cycles();
 	homa->timer_ticks++;

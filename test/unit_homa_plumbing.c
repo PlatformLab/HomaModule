@@ -111,85 +111,95 @@ FIXTURE_TEARDOWN(homa_plumbing)
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
 {
+	struct sockaddr addr = {};
+	struct socket sock = {};
+	int result;
+
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-
-	struct sockaddr addr = {};
 	addr.sa_family = AF_INET6;
-	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
-	int result = homa_bind(&sock, &addr, sizeof(addr));
+	result = homa_bind(&sock, &addr, sizeof(addr));
 	EXPECT_EQ(EAFNOSUPPORT, -result);
 }
 TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 {
+	union sockaddr_in_union addr = {};
+	struct socket sock = {};
+	int result;
+
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	union sockaddr_in_union addr = {};
 	addr.in6.sin6_family = AF_INET6;
-	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
-	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
+	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6)-1);
 	EXPECT_EQ(EINVAL, -result);
 }
 TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 {
+	union sockaddr_in_union addr = {};
+	struct socket sock = {};
+	int result;
+
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	union sockaddr_in_union addr = {};
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
-	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
-	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
+	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(123, self->hsk.port);
 }
 TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 {
+	union sockaddr_in_union addr = {};
+	struct socket sock = {};
+	int result;
+
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	union sockaddr_in_union addr = {};
 	addr.in4.sin_family = AF_INET;
-	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
-	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
+	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4)-1);
 	EXPECT_EQ(EINVAL, -result);
 }
 TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 {
+	union sockaddr_in_union addr = {};
+	struct socket sock = {};
+	int result;
+
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 
-	union sockaddr_in_union addr = {};
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
-	struct socket sock = {};
 	sock.sk = &self->hsk.inet.sk;
-	int result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
+	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
 }
 
 TEST_F(homa_plumbing, homa_ioc_abort__basics)
 {
-	struct homa_abort_args args = {self->client_id, 0};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
+	struct homa_abort_args args = {self->client_id, 0};
+
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
@@ -198,18 +208,20 @@ TEST_F(homa_plumbing, homa_ioc_abort__basics)
 TEST_F(homa_plumbing, homa_ioc_abort__cant_read_user_args)
 {
 	struct homa_abort_args args = {self->client_id, 0};
+
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
 TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 {
-	struct homa_abort_args args = {0, ECANCELED};
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 200);
+	struct homa_abort_args args = {0, ECANCELED};
+
 	ASSERT_NE(NULL, crpc1);
 	ASSERT_NE(NULL, crpc2);
 	EXPECT_EQ(0, homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
@@ -220,6 +232,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__abort_multiple_rpcs)
 TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 {
 	struct homa_abort_args args = {99, 0};
+
 	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
 
@@ -249,6 +262,7 @@ TEST_F(homa_plumbing, homa_set_sock_opt__copy_from_sockptr_fails)
 TEST_F(homa_plumbing, homa_set_sock_opt__copy_to_user_fails)
 {
 	struct homa_set_buf_args args = {(void *) 0x100000, 5*HOMA_BPAGE_SIZE};
+
 	self->optval.user = &args;
 	mock_copy_to_user_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
@@ -336,6 +350,7 @@ TEST_F(homa_plumbing, homa_sendmsg__cant_update_user_arguments)
 TEST_F(homa_plumbing, homa_sendmsg__request_sent_successfully)
 {
 	struct homa_rpc *crpc;
+
 	atomic64_set(&self->homa.next_outgoing_id, 1234);
 	self->sendmsg_args.completion_cookie = 88888;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -353,6 +368,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_nonzero_completion_cookie)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = self->server_id;
 	self->sendmsg_args.completion_cookie = 12345;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
@@ -365,6 +381,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_cant_find_rpc)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = self->server_id + 1;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
@@ -376,6 +393,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_error_in_rpc)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = srpc->id;
 	srpc->error = -ENOMEM;
 	EXPECT_EQ(ENOMEM, -homa_sendmsg(&self->hsk.inet.sk,
@@ -388,6 +406,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
@@ -399,6 +418,7 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = self->server_id;
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH + 1;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
@@ -411,6 +431,7 @@ TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_fill)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	unit_hook_register(unlock_hook);
 	hook_rpc = srpc;
 	self->sendmsg_args.id = self->server_id;
@@ -425,6 +446,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 2000, 100);
+
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
@@ -502,6 +524,7 @@ TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
+
 	EXPECT_NE(NULL, crpc);
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk,
@@ -510,16 +533,18 @@ TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 {
+	struct homa_rpc *crpc;
+	__u32 pages[2];
+
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	__u32 pages[2];
 
 	EXPECT_EQ(0, -homa_pool_get_pages(self->hsk.buffer_pool, 2, pages, 0));
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, self->server_ip, self->server_port,
-			self->client_id, 100, 2000);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			100, 2000);
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
@@ -541,15 +566,18 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 }
 TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 {
+	struct in6_addr server_ip6;
+	struct homa_rpc *crpc;
+
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	struct in6_addr server_ip6 = unit_get_in_addr("1::3:5:7");
+	server_ip6 = unit_get_in_addr("1::3:5:7");
 
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
-			self->client_ip, &server_ip6, self->server_port,
-			self->client_id, 100, 2000);
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			&server_ip6, self->server_port, self->client_id,
+			100, 2000);
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
@@ -571,6 +599,7 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
+
 	EXPECT_NE(NULL, crpc);
 	crpc->completion_cookie = 44444;
 	homa_rpc_abort(crpc, -ETIMEDOUT);
@@ -591,6 +620,7 @@ TEST_F(homa_plumbing, homa_recvmsg__add_ack)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
+
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	crpc->completion_cookie = 44444;
@@ -604,8 +634,8 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 100, 200);
-	EXPECT_NE(NULL, srpc);
 
+	EXPECT_NE(NULL, srpc);
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->server_id, self->recvmsg_args.id);
@@ -618,6 +648,7 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
 		        self->server_id, 100, 200);
+
 	EXPECT_NE(NULL, srpc);
 	srpc->error = -ENOMEM;
 
@@ -632,6 +663,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_copying_out_args)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
+
 	EXPECT_NE(NULL, crpc);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	mock_copy_to_user_errors = 1;
@@ -659,6 +691,7 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 TEST_F(homa_plumbing, homa_softirq__basics)
 {
 	struct sk_buff *skb;
+
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
@@ -666,6 +699,7 @@ TEST_F(homa_plumbing, homa_softirq__basics)
 TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
 {
 	struct sk_buff *skb;
+
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	skb->data_len = skb->len - 20;
 	homa_softirq(skb);
@@ -674,6 +708,7 @@ TEST_F(homa_plumbing, homa_softirq__cant_pull_header)
 TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 {
 	struct sk_buff *skb;
+
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	__skb_push(skb, 10);
 	homa_softirq(skb);
@@ -683,6 +718,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 {
 	struct sk_buff *skb;
 	struct ack_header h;
+
 	h.common.type = ACK;
 	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
 	skb->len -= 1;
@@ -693,6 +729,7 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
 	struct sk_buff *skb;
+
 	self->data.common.type = BOGUS;
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
@@ -728,13 +765,13 @@ TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 }
 TEST_F(homa_plumbing, homa_softirq__process_control_first)
 {
-	struct sk_buff *skb, *skb2;
 	struct common_header unknown = {
 		.sport = htons(self->client_port),
 		.dport = htons(self->server_port),
 		.type = UNKNOWN,
 		.sender_id = cpu_to_be64(self->client_id)
 	};
+	struct sk_buff *skb, *skb2;
 
 	self->data.common.sender_id = cpu_to_be64(2000);
 	self->data.message_length = htonl(2000);

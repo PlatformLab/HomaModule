@@ -74,8 +74,8 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
-	struct homa_sock *hsk;
 	struct homa_socktab_links *links;
+	struct homa_sock *hsk;
 
 	while (1) {
 		while (scan->next == NULL) {
@@ -249,8 +249,8 @@ void homa_sock_destroy(struct homa_sock *hsk)
 int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 		__u16 port)
 {
-	int result = 0;
 	struct homa_sock *owner;
+	int result = 0;
 
 	if (port == 0)
 		return result;
