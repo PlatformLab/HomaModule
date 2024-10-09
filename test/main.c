@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* Main program for running Homa unit tests. */
 
@@ -8,29 +6,23 @@
 #include "kselftest_harness.h"
 #include "mock.h"
 
-static char * helpMessage =
-	"This program runs unit tests written in the Linux kernel kselftest "
-	"style.\n"
+static char *helpMessage =
+	"This program runs unit tests written in the Linux kernel kselftest style.\n"
 	"    Usage: %s options test_name test_name ...\n"
 	"The following options are supported:\n"
 	"    --help or -h      Print this message\n"
-        "    --ipv4            Simulate IPv4 for all packets (default: "
-	"use IPv6)\n"
-	"    --verbose or -v   Print the names of all tests as they run "
-	"(default:\n"
+	"    --ipv4            Simulate IPv4 for all packets (default: use IPv6)\n"
+	"    --verbose or -v   Print the names of all tests as they run (default:\n"
 	"                      print only tests that fail)\n"
-	"If one or more test_name arguments are provided, then only those "
-	"tests are\n"
+	"If one or more test_name arguments are provided, then only those tests are\n"
 	"run; if no test names are provided, then all tests are run.\n"
-        "\n"
-        "Note: the tests should provide complete coverage of both IPv4 and "
-        "IPv6 without\n"
-        "using the --ipv4 argument (code that depends on IPv4 vs. IPv6 "
-        "already has\n"
-        "special test cases for each); --ipv4 is provided for occasional "
-        "double-checking.\n";
+	"\n"
+	"Note: the tests should provide complete coverage of both IPv4 and IPv6 without\n"
+	"using the --ipv4 argument (code that depends on IPv4 vs. IPv6 already has\n"
+	"special test cases for each); --ipv4 is provided for occasional double-checking.\n";
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
 	int verbose = 0;
 	int i;
 
@@ -49,9 +41,8 @@ int main(int argc, char **argv) {
 			printf("Unknown option %s; type '%s --help' for help\n",
 				argv[i], argv[0]);
 			return 1;
-		} else {
+		} else
 			break;
-		}
 	}
 	test_harness_run(argc-i, argv+i, verbose);
 }

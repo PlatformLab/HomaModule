@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -14,7 +12,7 @@
 extern struct homa *homa;
 
 /* The following hook function frees hook_rpc. */
-static struct homa_rpc *hook_rpc = NULL;
+static struct homa_rpc *hook_rpc;
 static void unlock_hook(char *id)
 {
 	if (strcmp(id, "unlock") != 0)
@@ -70,12 +68,12 @@ FIXTURE_SETUP(homa_plumbing)
 	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
+			.dport = htons(self->server_port),
 			.type = DATA,
 			.sender_id = cpu_to_be64(self->client_id)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .retransmit = 0,
-			.seg={.offset = 0}};
+			.seg = {.offset = 0}};
 	self->recvmsg_args.id = 0;
 	self->recvmsg_hdr.msg_name = &self->addr;
 	self->recvmsg_hdr.msg_namelen = 0;
@@ -367,7 +365,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_nonzero_completion_cookie)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id;
 	self->sendmsg_args.completion_cookie = 12345;
@@ -380,7 +378,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_cant_find_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id + 1;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -392,7 +390,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_error_in_rpc)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = srpc->id;
 	srpc->error = -ENOMEM;
@@ -405,7 +403,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_wrong_state)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
@@ -417,7 +415,7 @@ TEST_F(homa_plumbing, homa_sendmsg__homa_message_out_fill_returns_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id;
 	self->sendmsg_hdr.msg_iter.count = HOMA_MAX_MESSAGE_LENGTH + 1;
@@ -430,7 +428,7 @@ TEST_F(homa_plumbing, homa_sendmsg__rpc_freed_during_homa_message_out_fill)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	unit_hook_register(unlock_hook);
 	hook_rpc = srpc;
@@ -445,7 +443,7 @@ TEST_F(homa_plumbing, homa_sendmsg__response_succeeds)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 2000, 100);
+			self->server_id, 2000, 100);
 
 	self->sendmsg_args.id = self->server_id;
 	EXPECT_EQ(0, -homa_sendmsg(&self->hsk.inet.sk,
@@ -633,7 +631,7 @@ TEST_F(homa_plumbing, homa_recvmsg__server_normal_completion)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 100, 200);
+			self->server_id, 100, 200);
 
 	EXPECT_NE(NULL, srpc);
 	EXPECT_EQ(100, homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
@@ -647,7 +645,7 @@ TEST_F(homa_plumbing, homa_recvmsg__delete_server_rpc_after_error)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_MSG,
 			self->client_ip, self->server_ip, self->client_port,
-		        self->server_id, 100, 200);
+			self->server_id, 100, 200);
 
 	EXPECT_NE(NULL, srpc);
 	srpc->error = -ENOMEM;

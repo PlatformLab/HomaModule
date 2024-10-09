@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -13,7 +11,7 @@
 #include "utils.h"
 
 /* The following hook function frees hook_rpc. */
-static struct homa_rpc *hook_rpc = NULL;
+static struct homa_rpc *hook_rpc;
 static void unlock_hook(char *id)
 {
 	if (strcmp(id, "unlock") != 0)
@@ -93,9 +91,10 @@ TEST_F(homa_outgoing, homa_fill_data_interleaved)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr);
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	char buffer[1000];
 
 	homa_rpc_unlock(crpc);
-	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
 	homa_message_out_init(crpc, 10000);
 
 	unit_log_clear();
@@ -106,12 +105,8 @@ TEST_F(homa_outgoing, homa_fill_data_interleaved)
 			"_copy_from_iter 1500 bytes at 4000; "
 			"_copy_from_iter 500 bytes at 5500", unit_log_get());
 
-	char buffer[1000];
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 10000, offset 10000, data_length 1500, "
-			"incoming 10000, extra segs 1500@11500 1500@13000 "
-			"500@14500",
-		     	homa_print_packet(skb, buffer, sizeof(buffer)));
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
+			homa_print_packet(skb, buffer, sizeof(buffer)));
 	EXPECT_EQ(5000 + sizeof32(struct data_header)
 			+ 3*sizeof32(struct seg_header), skb->len);
 	kfree_skb(skb);
@@ -147,9 +142,7 @@ TEST_F(homa_outgoing, homa_new_data_packet__one_segment)
 	skb = homa_new_data_packet(crpc, iter, 5000, 500, 2000);
 	EXPECT_STREQ("_copy_from_iter 500 bytes at 1000", unit_log_get());
 
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 500, offset 5000, data_length 500, "
-			"incoming 500",
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 500, offset 5000, data_length 500, incoming 500",
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	EXPECT_EQ(0, skb_shinfo(skb)->gso_segs);
@@ -177,6 +170,7 @@ TEST_F(homa_outgoing, homa_new_data_packet__multiple_segments_homa_fill_data_int
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr);
 	struct sk_buff *skb;
+	char buffer[1000];
 
 	homa_rpc_unlock(crpc);
 	homa_message_out_init(crpc, 10000);
@@ -187,13 +181,8 @@ TEST_F(homa_outgoing, homa_new_data_packet__multiple_segments_homa_fill_data_int
 			"_copy_from_iter 1500 bytes at 2500; "
 			"_copy_from_iter 1500 bytes at 4000; "
 			"_copy_from_iter 500 bytes at 5500", unit_log_get());
-
-	char buffer[1000];
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 10000, offset 10000, data_length 1500, "
-			"incoming 10000, extra segs 1500@11500 1500@13000 "
-			"500@14500",
-		     	homa_print_packet(skb, buffer, sizeof(buffer)));
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
+			homa_print_packet(skb, buffer, sizeof(buffer)));
 
 	EXPECT_EQ(4*(sizeof(struct data_header) + crpc->hsk->ip_header_length
 			+ HOMA_ETH_OVERHEAD) + 5000,
@@ -235,11 +224,8 @@ TEST_F(homa_outgoing, homa_new_data_packet__multiple_segments_tcp_hijacking)
 	skb = homa_new_data_packet(crpc, iter, 10000, 5000, 1500);
 	EXPECT_STREQ("_copy_from_iter 5000 bytes at 1000", unit_log_get());
 
-	EXPECT_STREQ("DATA from 0.0.0.0:40001, dport 99, id 2, "
-			"message_length 10000, offset 10000, data_length 1500, "
-			"incoming 10000, extra segs 1500@11500 1500@13000 "
-			"500@14500",
-		     	homa_print_packet(skb, buffer, sizeof(buffer)));
+	EXPECT_STREQ("DATA from 0.0.0.0:40001, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
+			homa_print_packet(skb, buffer, sizeof(buffer)));
 	kfree_skb(skb);
 	homa_sock_destroy(&hsk);
 }
@@ -312,15 +298,9 @@ TEST_F(homa_outgoing, homa_message_out_fill__basics)
 			"_copy_from_iter 200 bytes at 3800", unit_log_get());
 	unit_log_clear();
 	unit_log_message_out_packets(&crpc->msgout, 1);
-	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 3000, offset 0, data_length 1400, "
-			"incoming 3000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 3000, offset 1400, data_length 1400, "
-			"incoming 3000; "
-		     "DATA from 0.0.0.0:40000, dport 99, id 2, "
-			"message_length 3000, offset 2800, data_length 200, "
-			"incoming 3000",
+	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 0, data_length 1400, incoming 3000; "
+		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 1400, data_length 1400, incoming 3000; "
+		     "DATA from 0.0.0.0:40000, dport 99, id 2, message_length 3000, offset 2800, data_length 200, incoming 3000",
 		     unit_log_get());
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 	EXPECT_EQ(3000, crpc->msgout.copied_from_user);
@@ -501,8 +481,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	h.common.sender_id = cpu_to_be64(self->client_id);
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), srpc));
-	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1235, "
-			"offset 12345, grant_prio 4",
+	EXPECT_STREQ("xmit GRANT from 0.0.0.0:99, dport 40000, id 1235, offset 12345, grant_prio 4",
 			unit_log_get());
 	EXPECT_STREQ("7", mock_xmit_prios);
 }
@@ -522,8 +501,7 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 	h.resend_all = 0;
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(0, homa_xmit_control(GRANT, &h, sizeof(h), crpc));
-	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1234, "
-			"offset 12345, grant_prio 4",
+	EXPECT_STREQ("xmit GRANT from 0.0.0.0:40000, dport 99, id 1234, offset 12345, grant_prio 4",
 			unit_log_get());
 	EXPECT_STREQ("7", mock_xmit_prios);
 }
@@ -614,10 +592,10 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 TEST_F(homa_outgoing, homa_xmit_unknown)
 {
 	struct grant_header h = {{.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
+			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(99990),
 			.type = GRANT},
-		        .offset = htonl(11200),
+			.offset = htonl(11200),
 			.priority = 3,
 			.resend_all = 0};
 	struct sk_buff *skb;
@@ -790,7 +768,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 
-	crpc = unit_client_rpc(&self->hsk,UNIT_OUTGOING, self->client_ip,
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
 			1000, 1000);
 	unit_log_clear();
@@ -834,15 +812,9 @@ TEST_F(homa_outgoing, homa_resend_data__basics)
 	skb_push(crpc->msgout.packets, 8);
 
 	homa_resend_data(crpc, 7000, 10000, 2);
-	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, "
-			"message_length 16000, offset 7000, data_length 1400, "
-			"incoming 10000, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, "
-			"message_length 16000, offset 8400, data_length 1400, "
-			"incoming 10000, RETRANSMIT; "
-			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, "
-			"message_length 16000, offset 9800, data_length 200, "
-			"incoming 10000, RETRANSMIT",
+	EXPECT_STREQ("xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 7000, data_length 1400, incoming 10000, RETRANSMIT; "
+			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 8400, data_length 1400, incoming 10000, RETRANSMIT; "
+			"xmit DATA from 0.0.0.0:40000, dport 99, id 1234, message_length 16000, offset 9800, data_length 200, incoming 10000, RETRANSMIT",
 			unit_log_get());
 	EXPECT_STREQ("2 2 2", mock_xmit_prios);
 
@@ -946,8 +918,7 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 	mock_xmit_log_homa_info = 1;
 	homa_resend_data(crpc, 8400, 8800, 2);
 	EXPECT_STREQ("xmit DATA retrans 1400@8400; "
-		     "homa_info: wire_bytes 1538, data_bytes 1400, "
-		     "seg_length 1400, offset 8400",
+		     "homa_info: wire_bytes 1538, data_bytes 1400, seg_length 1400, offset 8400",
 		     unit_log_get());
 }
 

@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file provides simplified substitutes for many Linux variables and
  * functions in order to allow Homa unit tests to be run outside a Linux
@@ -34,24 +32,24 @@ extern void      *memcpy(void *dest, const void *src, size_t n);
  * the next call to the function will fail; bit 1 corresponds to the next
  * call after that, and so on.
  */
-int mock_alloc_page_errors = 0;
-int mock_alloc_skb_errors = 0;
-int mock_copy_data_errors = 0;
-int mock_copy_to_iter_errors = 0;
-int mock_copy_to_user_errors = 0;
-int mock_cpu_idle = 0;
-int mock_import_ubuf_errors = 0;
-int mock_import_iovec_errors = 0;
-int mock_ip6_xmit_errors = 0;
-int mock_ip_queue_xmit_errors = 0;
-int mock_kmalloc_errors = 0;
-int mock_route_errors = 0;
-int mock_spin_lock_held = 0;
-int mock_trylock_errors = 0;
-int mock_vmalloc_errors = 0;
+int mock_alloc_page_errors;
+int mock_alloc_skb_errors;
+int mock_copy_data_errors;
+int mock_copy_to_iter_errors;
+int mock_copy_to_user_errors;
+int mock_cpu_idle;
+int mock_import_ubuf_errors;
+int mock_import_iovec_errors;
+int mock_ip6_xmit_errors;
+int mock_ip_queue_xmit_errors;
+int mock_kmalloc_errors;
+int mock_route_errors;
+int mock_spin_lock_held;
+int mock_trylock_errors;
+int mock_vmalloc_errors;
 
 /* The return value from calls to signal_pending(). */
-int mock_signal_pending = 0;
+int mock_signal_pending;
 
 /* Used as current task during tests. */
 struct task_struct mock_task;
@@ -59,24 +57,24 @@ struct task_struct mock_task;
 /* If a test sets this variable to nonzero, ip_queue_xmit will log
  * outgoing packets using the long format rather than short.
  */
-int mock_xmit_log_verbose = 0;
+int mock_xmit_log_verbose;
 
 /* If a test sets this variable to nonzero, ip_queue_xmit will log
  * the contents of the homa_info from packets.
  */
-int mock_xmit_log_homa_info = 0;
+int mock_xmit_log_homa_info;
 
 /* If a test sets this variable to nonzero, call_rcu_sched will log
  * whenever it is invoked.
  */
-int mock_log_rcu_sched = 0;
+int mock_log_rcu_sched;
 
 /* A zero value means that copy_to_user will actually copy bytes to
  * the destination address; if nonzero, then 0 bits determine which
  * copies actually occur (bit 0 for the first copy, etc., just like
  * error masks).
  */
-int mock_copy_to_user_dont_copy = 0;
+int mock_copy_to_user_dont_copy;
 
 /* HOMA_BPAGE_SIZE will evaluate to this. */
 int mock_bpage_size = 0x10000;
@@ -87,48 +85,49 @@ int mock_bpage_shift = 16;
 /* Keeps track of all the blocks of memory that have been allocated by
  * kmalloc but not yet freed by kfree. Reset for each test.
  */
-static struct unit_hash *kmallocs_in_use = NULL;
+static struct unit_hash *kmallocs_in_use;
 
 /* Keeps track of all the results returned by proc_create that have not
  * yet been closed by calling proc_remove. Reset for each test.
  */
-static struct unit_hash *proc_files_in_use = NULL;
+static struct unit_hash *proc_files_in_use;
 
 /* Keeps track of all the results returned by alloc_pages that have
  * not yet been released by calling put_page. The value of each entry is
  * a (char *) giving the reference count for the page. Reset for each test.
  */
-static struct unit_hash *pages_in_use = NULL;
+static struct unit_hash *pages_in_use;
 
 /* Keeps track of all the results returned by ip_route_output_flow that
- * have not yet been freed. Reset for each test. */
-static struct unit_hash *routes_in_use = NULL;
+ * have not yet been freed. Reset for each test.
+ */
+static struct unit_hash *routes_in_use;
 
 /* Keeps track of all sk_buffs that are alive in the current test.
  * Reset for each test.
  */
-static struct unit_hash *skbs_in_use = NULL;
+static struct unit_hash *skbs_in_use;
 
 /* Keeps track of all the blocks of memory that have been allocated by
  * vmalloc but not yet freed by vfree. Reset for each test.
  */
-static struct unit_hash *vmallocs_in_use = NULL;
+static struct unit_hash *vmallocs_in_use;
 
 /* The number of locks that have been acquired but not yet released.
  * Should be 0 at the end of each test.
  */
-static int mock_active_locks = 0;
+static int mock_active_locks;
 
 /* The number of times rcu_read_lock has been called minus the number
  * of times rcu_read_unlock has been called.
  * Should be 0 at the end of each test.
  */
-static int mock_active_rcu_locks = 0;
+static int mock_active_rcu_locks;
 
 /* Used as the return value for calls to get_cycles. A value of ~0 means
  * return actual clock time.
  */
-cycles_t mock_cycles = 0;
+cycles_t mock_cycles;
 
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
@@ -140,14 +139,14 @@ bool mock_ipv6_default;
 
 /* List of priorities for all outbound packets. */
 char mock_xmit_prios[1000];
-int mock_xmit_prios_offset = 0;
+int mock_xmit_prios_offset;
 
 /* Maximum packet size allowed by "network" (see homa_message_out_fill;
  * chosen so that data packets will have UNIT_TEST_DATA_PER_PACKET bytes
  * of payload. The variable can be modified if useful in some tests.
  * Set by mock_sock_init.
  */
-int mock_mtu = 0;
+int mock_mtu;
 
 /* Used instead of MAX_SKB_FRAGS when running some unit tests. */
 int mock_max_skb_frags = MAX_SKB_FRAGS;
@@ -158,12 +157,12 @@ int mock_numa_mask = 5;
 /* Bits determine the result of successive calls to compound order, starting
  * at the lowest bit. 0 means return HOMA_SKB_PAGE_ORDER, 1 means return 0.
  */
-int mock_compound_order_mask = 0;
+int mock_compound_order_mask;
 
 /* Bits specify the NUMA node number that will be returned by the next
  * calls to mock_page_to_nid, starting with the low-order bit.
  */
-int mock_page_nid_mask = 0;
+int mock_page_nid_mask;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
@@ -177,14 +176,14 @@ const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
 struct task_struct *current_task = &mock_task;
-unsigned long ex_handler_refcount = 0;
+unsigned long ex_handler_refcount;
 struct net init_net;
 unsigned long volatile jiffies = 1100;
 unsigned int nr_cpu_ids = 8;
-unsigned long page_offset_base = 0;
-unsigned long phys_base = 0;
-unsigned long vmemmap_base = 0;
-int __preempt_count = 0;
+unsigned long page_offset_base;
+unsigned long phys_base;
+unsigned long vmemmap_base;
+int __preempt_count;
 struct pcpu_hot pcpu_hot = {.cpu_number = 1};
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
 struct net_hotdata net_hotdata = {
@@ -193,18 +192,20 @@ struct net_hotdata net_hotdata = {
 };
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
-		struct wait_queue_entry *wq_entry) {}
+		struct wait_queue_entry *wq_entry)
+{}
 
 struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		int node)
 {
+	struct sk_buff *skb;
 	int shinfo_size;
 
 	if (mock_check_error(&mock_alloc_skb_errors))
 		return NULL;
-	struct sk_buff *skb = malloc(sizeof(struct sk_buff));
+	skb = malloc(sizeof(struct sk_buff));
 	if (skb == NULL)
-		FAIL("skb malloc failed in __alloc_skb");
+		FAIL("skb malloc failed in %s", __func__);
 	memset(skb, 0, sizeof(*skb));
 	if (!skbs_in_use)
 		skbs_in_use = unit_hash_new();
@@ -214,7 +215,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->head = malloc(size + shinfo_size);
 	memset(skb->head, 0, size + shinfo_size);
 	if (skb->head == NULL)
-		FAIL("data malloc failed in __alloc_skb");
+		FAIL("data malloc failed in %s", __func__);
 	skb->data = skb->head;
 	skb_reset_tail_pointer(skb);
 	skb->end = skb->tail + size;
@@ -230,13 +231,6 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	return skb;
 }
 
-void call_rcu_sched(struct rcu_head *head, rcu_callback_t func)
-{
-	if (mock_log_rcu_sched)
-		unit_log_printf("; ", "call_rcu_sched");
-	func(head);
-}
-
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
 
 size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
@@ -246,14 +240,15 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 	if (mock_check_error(&mock_copy_data_errors))
 		return false;
 	if (bytes > iter->count) {
-		unit_log_printf("; ", "copy_from_iter needs %lu bytes, but "
-				"iov_iter has only %lu", bytes, iter->count);
+		unit_log_printf("; ", "copy_from_iter needs %lu bytes, but iov_iter has only %lu", bytes,
+				iter->count);
 		return 0;
 	}
 	while (bytes_left > 0) {
 		struct iovec *iov = (struct iovec *) iter_iov(iter);
 		__u64 int_base = (__u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
+
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
 		unit_log_printf("; ", "_copy_from_iter %lu bytes at %llu",
@@ -322,11 +317,6 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
-void do_exit(long error_code)
-{
-	while(1) {}
-}
-
 void dst_release(struct dst_entry *dst)
 {
 	if (!dst)
@@ -335,7 +325,7 @@ void dst_release(struct dst_entry *dst)
 	if (atomic_read(&dst->__rcuref.refcnt) > 0)
 		return;
 	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
-		FAIL("dst_release on unknown route");
+		FAIL("%s on unknown route", __func__);
 		return;
 	}
 	unit_hash_erase(routes_in_use, dst);
@@ -343,9 +333,10 @@ void dst_release(struct dst_entry *dst)
 }
 
 void finish_wait(struct wait_queue_head *wq_head,
-		struct wait_queue_entry *wq_entry) {}
+		struct wait_queue_entry *wq_entry)
+{}
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,18,0)
+#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 	void get_random_bytes(void *buf, int nbytes)
 #else
 	void get_random_bytes(void *buf, size_t nbytes)
@@ -378,7 +369,8 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 }
 
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
-		u64 range_ns, const enum hrtimer_mode mode) {}
+		u64 range_ns, const enum hrtimer_mode mode)
+{}
 
 void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 		const struct ip_options *opt)
@@ -398,14 +390,14 @@ int idle_cpu(int cpu)
 	return mock_check_error(&mock_cpu_idle);
 }
 
-ssize_t import_iovec(int type, const struct iovec __user * uvector,
-		unsigned nr_segs, unsigned fast_segs,
+ssize_t import_iovec(int type, const struct iovec __user *uvector,
+		unsigned int nr_segs, unsigned int fast_segs,
 		struct iovec **iov, struct iov_iter *iter)
 {
 	ssize_t size;
-	unsigned i;
+	unsigned int i;
 
-	*iov = (struct iovec *) kmalloc(nr_segs*sizeof(struct iovec), GFP_KERNEL);
+	*iov = kmalloc(nr_segs*sizeof(struct iovec), GFP_KERNEL);
 	if (mock_check_error(&mock_import_iovec_errors))
 		return -EINVAL;
 	size = 0;
@@ -509,7 +501,8 @@ int inet_recvmsg(struct socket *sock, struct msghdr *msg, size_t size,
 	return 0;
 }
 
-void inet_register_protosw(struct inet_protosw *p) {}
+void inet_register_protosw(struct inet_protosw *p)
+{}
 
 int inet_release(struct socket *sock)
 {
@@ -521,10 +514,12 @@ int inet_sendmsg(struct socket *sock, struct msghdr *msg, size_t size)
 	return 0;
 }
 
-void inet_unregister_protosw(struct inet_protosw *p) {}
+void inet_unregister_protosw(struct inet_protosw *p)
+{}
 
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
-		struct lock_class_key *key) {}
+		struct lock_class_key *key)
+{}
 
 void iov_iter_init(struct iov_iter *i, unsigned int direction,
 			const struct iovec *iov, unsigned long nr_segs,
@@ -551,10 +546,10 @@ int ip6_datagram_connect(struct sock *sk, struct sockaddr *addr, int addr_len)
 struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		struct flowi6 *fl6, const struct in6_addr *final_dst)
 {
+	struct rtable *route;
+
 	if (mock_check_error(&mock_route_errors))
 		return ERR_PTR(-EHOSTUNREACH);
-
-	struct rtable *route;
 	route = malloc(sizeof(struct rtable));
 	if (!route) {
 		FAIL("malloc failed");
@@ -580,6 +575,7 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 {
 	char buffer[200];
 	const char *prefix = " ";
+
 	if (mock_check_error(&mock_ip6_xmit_errors)) {
 		kfree_skb(skb);
 		return -ENETDOWN;
@@ -597,11 +593,11 @@ int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
 	unit_log_printf("; ", "xmit %s", buffer);
 	if (mock_xmit_log_homa_info) {
 		struct homa_skb_info *homa_info;
+
 		homa_info = homa_get_skb_info(skb);
-		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d, "
-				"seg_length %d, offset %d", homa_info->wire_bytes,
-				homa_info->data_bytes, homa_info->seg_length,
-				homa_info->offset);
+		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d, seg_length %d, offset %d",
+				homa_info->wire_bytes, homa_info->data_bytes,
+				homa_info->seg_length, homa_info->offset);
 	}
 	kfree_skb(skb);
 	return 0;
@@ -632,6 +628,7 @@ int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
 	unit_log_printf("; ", "xmit %s", buffer);
 	if (mock_xmit_log_homa_info) {
 		struct homa_skb_info *homa_info;
+
 		homa_info = homa_get_skb_info(skb);
 		unit_log_printf("; ", "homa_info: wire_bytes %d, data_bytes %d",
 				homa_info->wire_bytes, homa_info->data_bytes);
@@ -699,7 +696,7 @@ void kfree(const void *block)
 	if (block == NULL)
 		return;
 	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL("kfree on unknown block");
+		FAIL("%s on unknown block", __func__);
 		return;
 	}
 	unit_hash_erase(kmallocs_in_use, block);
@@ -722,21 +719,23 @@ void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
 	unit_hash_erase(skbs_in_use, skb);
 	while (shinfo->frag_list) {
 		struct sk_buff *next = shinfo->frag_list->next;
+
 		kfree_skb(shinfo->frag_list);
 		shinfo->frag_list = next;
 	}
-	for (i = 0; i < shinfo->nr_frags; i++) {
+	for (i = 0; i < shinfo->nr_frags; i++)
 		put_page(skb_frag_page(&shinfo->frags[i]));
-	}
 	free(skb->head);
 	free(skb);
 }
 
 void *mock_kmalloc(size_t size, gfp_t flags)
 {
+	void *block;
+
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
-	void *block = malloc(size);
+	block = malloc(size);
 	if (!block) {
 		FAIL("malloc failed");
 		return NULL;
@@ -856,7 +855,7 @@ void proc_remove(struct proc_dir_entry *de)
 {
 	if (!proc_files_in_use
 			|| unit_hash_get(proc_files_in_use, de) == NULL) {
-		FAIL("proc_remove on unknown dir_entry");
+		FAIL("%s on unknown dir_entry", __func__);
 		return;
 	}
 	unit_hash_erase(proc_files_in_use, de);
@@ -925,7 +924,8 @@ void release_sock(struct sock *sk)
 }
 
 void remove_wait_queue(struct wait_queue_head *wq_head,
-		struct wait_queue_entry *wq_entry) {}
+		struct wait_queue_entry *wq_entry)
+{}
 
 void schedule(void)
 {
@@ -933,12 +933,15 @@ void schedule(void)
 }
 
 void security_sk_classify_flow(const struct sock *sk,
-		struct flowi_common *flic) {}
+		struct flowi_common *flic)
+{}
 
 void __show_free_areas(unsigned int filter, nodemask_t *nodemask,
-		int max_zone_idx) {}
+		int max_zone_idx)
+{}
 
-void sk_common_release(struct sock *sk) {}
+void sk_common_release(struct sock *sk)
+{}
 
 int sk_set_peek_off(struct sock *sk, int val)
 {
@@ -953,9 +956,8 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 	if (mock_check_error(&mock_copy_data_errors))
 		return -EFAULT;
 	if (bytes_left > iter->count) {
-		unit_log_printf("; ", "skb_copy_datagram_iter needs %lu bytes, "
-				"but iov_iter has only %lu",
-				bytes_left, iter->count);
+		unit_log_printf("; ", "%s needs %lu bytes, but iov_iter has only %lu",
+				__func__, bytes_left, iter->count);
 		return 0;
 	}
 	while (bytes_left > 0) {
@@ -966,7 +968,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 		if (chunk_bytes > bytes_left)
 			chunk_bytes = bytes_left;
 		unit_log_printf("; ",
-				"skb_copy_datagram_iter: %lu bytes to 0x%llx: ",
+				"%s: %lu bytes to 0x%llx: ", __func__,
 				chunk_bytes, int_base);
 		unit_log_data(NULL, from->data + offset + size - bytes_left,
 				chunk_bytes);
@@ -988,7 +990,7 @@ struct sk_buff *skb_dequeue(struct sk_buff_head *list)
 void *skb_pull(struct sk_buff *skb, unsigned int len)
 {
 	if ((skb_tail_pointer(skb) - skb->data) < len)
-		FAIL("sk_buff underflow during pull");
+		FAIL("sk_buff underflow during %s", __func__);
 	skb->len -= len;
 	return skb->data += len;
 }
@@ -998,7 +1000,7 @@ void *skb_push(struct sk_buff *skb, unsigned int len)
 	skb->data -= len;
 	skb->len += len;
 	if (unlikely(skb->data < skb->head))
-		FAIL("sk_buff underflow during skb_push");
+		FAIL("sk_buff underflow during %s", __func__);
 	return skb->data;
 }
 
@@ -1078,21 +1080,23 @@ int sock_no_socketpair(struct socket *sock1, struct socket *sock2)
 	return 0;
 }
 
-void synchronize_sched(void) {}
-
-void __tasklet_hi_schedule(struct tasklet_struct *t) {}
+void __tasklet_hi_schedule(struct tasklet_struct *t)
+{}
 
 void tasklet_init(struct tasklet_struct *t,
-		void (*func)(unsigned long), unsigned long data) {}
+		void (*func)(unsigned long), unsigned long data)
+{}
 
-void tasklet_kill(struct tasklet_struct *t) {}
+void tasklet_kill(struct tasklet_struct *t)
+{}
 
-void unregister_net_sysctl_table(struct ctl_table_header *header) {}
+void unregister_net_sysctl_table(struct ctl_table_header *header)
+{}
 
 void vfree(const void *block)
 {
 	if (!vmallocs_in_use || unit_hash_get(vmallocs_in_use, block) == NULL) {
-		FAIL("vfree on unknown block");
+		FAIL("%s on unknown block", __func__);
 		return;
 	}
 	unit_hash_erase(vmallocs_in_use, block);
@@ -1106,7 +1110,7 @@ int vfs_fsync(struct file *file, int datasync)
 
 void wait_for_completion(struct completion *x) {}
 
-long wait_woken(struct wait_queue_entry *wq_entry, unsigned mode,
+long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode,
 		long timeout)
 {
 	return 0;
@@ -1126,7 +1130,7 @@ int wake_up_process(struct task_struct *tsk)
 
 void __warn_printk(const char *s, ...) {}
 
-int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
+int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned int mode,
 		int sync, void *key)
 {
 	return 0;
@@ -1136,7 +1140,7 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
  * mock_alloc_pages() - Called instead of alloc_pages when Homa is compiled
  * for unit testing.
  */
-struct page *mock_alloc_pages(gfp_t gfp, unsigned order)
+struct page *mock_alloc_pages(gfp_t gfp, unsigned int order)
 {
 	struct page *page;
 
@@ -1169,7 +1173,7 @@ int mock_check_error(int *errorMask)
  * mock_clear_xmit_prios() - Remove all information from the list of
  * transmit priorities.
  */
-void mock_clear_xmit_prios()
+void mock_clear_xmit_prios(void)
 {
 	mock_xmit_prios_offset = 0;
 	mock_xmit_prios[0] = 0;
@@ -1219,6 +1223,7 @@ cycles_t mock_get_cycles(void)
 {
 	if (mock_cycles == ~0) {
 		uint32_t lo, hi;
+
 		__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
 		return (((uint64_t)hi << 32) | lo);
 	}
@@ -1240,7 +1245,7 @@ void mock_get_page(struct page *page)
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
 
 	if (ref_count == 0)
-		FAIL(" unallocated page passed to mock_get_page");
+		FAIL("unallocated page passed to %s", __func__);
 	else
 		unit_hash_set(pages_in_use, page, (void *) (ref_count+1));
 }
@@ -1274,7 +1279,7 @@ void mock_put_page(struct page *page)
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
 
 	if (ref_count == 0)
-		FAIL(" unallocated page passed to mock_put_page");
+		FAIL("unallocated page passed to %s", __func__);
 	else {
 		ref_count--;
 		if (ref_count == 0) {
@@ -1459,7 +1464,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 /**
  * mock_spin_unlock() - Called instead of spin_unlock when Homa is compiled
  * for unit testing.
- * @lock:   Lock to be be released (ignored).
+ * @lock:   Lock to be released (ignored).
  */
 void mock_spin_unlock(spinlock_t *lock)
 {
@@ -1572,11 +1577,12 @@ void mock_teardown(void)
  */
 void *mock_vmalloc(size_t size)
 {
+	void *block;
+
 	if (mock_check_error(&mock_vmalloc_errors))
 		return NULL;
-	void *block = malloc(size);
-	if (!block)
-	{
+	block = malloc(size);
+	if (!block) {
 		FAIL("malloc failed");
 		return NULL;
 	}

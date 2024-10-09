@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_offload.h"
@@ -28,7 +26,7 @@ static struct sk_buff *tcp6_gro_receive(struct list_head *held_list,
 	return NULL;
 }
 
-    FIXTURE(homa_offload)
+FIXTURE(homa_offload)
 {
 	struct homa homa;
 	struct homa_sock hsk;
@@ -70,9 +68,9 @@ FIXTURE_SETUP(homa_offload)
 	NAPI_GRO_CB(self->skb)->same_flow = 0;
 	NAPI_GRO_CB(self->skb)->last = self->skb;
 	NAPI_GRO_CB(self->skb)->count = 1;
-        self->header.seg.offset = htonl(4000);
-        self->header.common.dport = htons(88);
-        self->header.common.sender_id = cpu_to_be64(1002);
+	self->header.seg.offset = htonl(4000);
+	self->header.common.dport = htons(88);
+	self->header.common.sender_id = cpu_to_be64(1002);
 	self->skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(self->skb2)->same_flow = 0;
 	NAPI_GRO_CB(self->skb2)->last = self->skb2;
@@ -97,7 +95,7 @@ FIXTURE_SETUP(homa_offload)
 }
 FIXTURE_TEARDOWN(homa_offload)
 {
-        struct sk_buff *skb, *tmp;
+	struct sk_buff *skb, *tmp;
 
 	homa_offload_end();
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
@@ -204,13 +202,14 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 
 TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 {
-	struct sk_buff *skb;
-	mock_ipv6 = false;
+	struct sk_buff *skb, *segs;
+	int version;
 
+	mock_ipv6 = false;
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 2000);
-	int version = ip_hdr(skb)->version;
+	version = ip_hdr(skb)->version;
 	EXPECT_EQ(4, version);
-	struct sk_buff *segs = homa_gso_segment(skb, 0);
+	segs = homa_gso_segment(skb, 0);
 	ASSERT_NE(NULL, segs);
 	ASSERT_NE(NULL, segs->next);
 	EXPECT_EQ(NULL, segs->next->next);
@@ -253,7 +252,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
-	struct sk_buff *skb, *skb2, *skb3, *skb4;
+	struct sk_buff *skb, *skb2, *skb3, *skb4, *result;
 	int client_port = 40000;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
@@ -269,7 +268,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	h.incoming = htonl(10000);
 	h.cutoff_version = 0;
 	h.ack.client_id = 0;
-	h.ack.client_port= 0;
+	h.ack.client_port = 0;
 	h.ack.server_port = 0;
 	h.retransmit = 0;
 	h.seg.offset = htonl(2000);
@@ -282,7 +281,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 
 	/* First attempt: HOMA_GRO_SHORT_BYPASS not enabled. */
 	skb = mock_skb_new(&self->ip, &h.common, 1400, 2000);
-	struct sk_buff *result = homa_gro_receive(&self->empty_list, skb);
+	result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
 
@@ -320,6 +319,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 {
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
+	struct sk_buff *skb, *skb2, *skb3, *result;
 	int client_port = 40000;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
@@ -343,8 +343,8 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
 	self->homa.gro_policy = 0;
-	struct sk_buff *skb = mock_skb_new(&client_ip, &h.common, 0, 0);
-	struct sk_buff *result = homa_gro_receive(&self->empty_list, skb);
+	skb = mock_skb_new(&client_ip, &h.common, 0, 0);
+	result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_grant_bypasses);
 	EXPECT_STREQ("", unit_log_get());
@@ -352,7 +352,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	/* Second attempt: HOMA_FAST_GRANTS is enabled. */
 	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
 	cur_offload_core->last_gro = 400;
-	struct sk_buff *skb2 = mock_skb_new(&client_ip, &h.common, 0, 0);
+	skb2 = mock_skb_new(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
@@ -360,7 +360,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 
 	/* Third attempt: core is too busy for fast grants. */
 	cur_offload_core->last_gro = 600;
-	struct sk_buff *skb3 = mock_skb_new(&client_ip, &h.common, 0, 0);
+	skb3 = mock_skb_new(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
@@ -470,12 +470,8 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 	EXPECT_EQ(3, NAPI_GRO_CB(self->skb2)->count);
 
 	unit_log_frag_list(self->skb2, 1);
-	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, "
-			"message_length 10000, offset 6000, "
-			"data_length 1400, incoming 10000; "
-			"DATA from 196.168.0.1:40000, dport 88, id 1004, "
-			"message_length 10000, offset 7000, "
-			"data_length 1400, incoming 10000",
+	EXPECT_STREQ("DATA from 196.168.0.1:40000, dport 88, id 1002, message_length 10000, offset 6000, data_length 1400, incoming 10000; "
+			"DATA from 196.168.0.1:40000, dport 88, id 1004, message_length 10000, offset 7000, data_length 1400, incoming 10000",
 			unit_log_get());
 }
 TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
@@ -583,8 +579,9 @@ TEST_F(homa_offload, homa_gro_gen3__basics)
 }
 TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
 {
-	homa->gro_policy = HOMA_GRO_GEN3;
 	struct homa_offload_core *offload_core = cur_offload_core;
+
+	homa->gro_policy = HOMA_GRO_GEN3;
 	offload_core->gen3_softirq_cores[0] = 3;
 	offload_core->gen3_softirq_cores[1] = -1;
 	offload_core->gen3_softirq_cores[2] = 5;
@@ -599,8 +596,9 @@ TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
 }
 TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
 {
-	homa->gro_policy = HOMA_GRO_GEN3;
 	struct homa_offload_core *offload_core = cur_offload_core;
+
+	homa->gro_policy = HOMA_GRO_GEN3;
 	offload_core->gen3_softirq_cores[0] = 3;
 	offload_core->gen3_softirq_cores[1] = 7;
 	offload_core->gen3_softirq_cores[2] = 5;

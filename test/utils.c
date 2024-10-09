@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 /* This file various utility functions for unit testing; this file
  * is implemented entirely in C, and accesses Homa and kernel internals.
@@ -35,16 +33,17 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		struct in6_addr *server_ip, int server_port, int id,
 		int req_length, int resp_length)
 {
-	int bytes_received;
-	union sockaddr_in_union server_addr;
 	int saved_id = atomic64_read(&hsk->homa->next_outgoing_id);
+	union sockaddr_in_union server_addr;
+	int bytes_received, this_size;
+	struct homa_rpc *crpc;
 
 	server_addr.in6.sin6_family = AF_INET6;
 	server_addr.in6.sin6_addr = *server_ip;
 	server_addr.in6.sin6_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
-	struct homa_rpc *crpc = homa_rpc_new_client(hsk, &server_addr);
+	crpc = homa_rpc_new_client(hsk, &server_addr);
 	if (IS_ERR(crpc))
 		return NULL;
 	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length), 0)) {
@@ -62,7 +61,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	struct data_header h = {
 		.common = {
 			.sport = htons(server_port),
-	                .dport = htons(hsk->port),
+			.dport = htons(hsk->port),
 			.type = DATA,
 			.sender_id = cpu_to_be64(id ^ 1)
 		},
@@ -74,7 +73,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		.seg = {.offset = 0}
 	};
 
-	int this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
+	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
 	homa_dispatch_pkts(mock_skb_new(server_ip, &h.common, this_size, 0),
 			hsk->homa);
@@ -88,11 +87,11 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_new(server_ip, &h.common,
-				this_size , 0), hsk->homa);
+				this_size, 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return crpc;
-	FAIL("unit_client_rpc received unexpected state %d", state);
+	FAIL("%s received unexpected state %d", __func__, state);
 	homa_rpc_free(crpc);
 	return NULL;
 }
@@ -110,15 +109,15 @@ struct in6_addr unit_get_in_addr(char *s)
 {
 	struct in6_addr ret = {};
 	unsigned int a, b, c, d;
+
 	if (sscanf(s, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
 		ret.s6_addr32[3] = htonl((a<<24) + (b<<16) + (c<<8) + d);
 		ret.s6_addr32[2] = htonl(0x0000ffff);
 	} else {
-		int inet_pton(int af, const char *src, void *dst);
 		int res = inet_pton(AF_INET6, s, &ret);
-		if (res <= 0) {
+
+		if (res <= 0)
 			abort();
-		}
 	}
 	return ret;
 }
@@ -132,6 +131,7 @@ int unit_list_length(struct list_head *head)
 {
 	struct list_head *pos;
 	int count = 0;
+
 	list_for_each(pos, head) {
 		count++;
 	}
@@ -146,6 +146,7 @@ int unit_list_length(struct list_head *head)
 void unit_log_active_ids(struct homa_sock *hsk)
 {
 	struct homa_rpc *rpc;
+
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links)
 		unit_log_printf(" ", "%llu", rpc->id);
 }
@@ -157,8 +158,9 @@ void unit_log_active_ids(struct homa_sock *hsk)
  */
 void unit_log_hashed_rpcs(struct homa_sock *hsk)
 {
-	int i;
 	struct homa_rpc *rpc;
+	int i;
+
 	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {
 		hlist_for_each_entry_rcu(rpc, &hsk->client_rpc_buckets[i].rpcs,
 				hash_links) {
@@ -187,11 +189,10 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 
 	for (frag = skb_shinfo(skb)->frag_list; frag != NULL;
 			frag = frag->next) {
-		if (verbose) {
+		if (verbose)
 			homa_print_packet(frag, buffer, sizeof(buffer));
-		} else {
+		else
 			homa_print_packet_short(frag, buffer, sizeof(buffer));
-		}
 		unit_log_printf("; ", "%s", buffer);
 	}
 }
@@ -205,15 +206,15 @@ void unit_log_grantables(struct homa *homa)
 {
 	struct homa_peer *peer;
 	struct homa_rpc *rpc;
+
 	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
 				grantable_links) {
-			unit_log_printf("; ", "%s from %s, id %lu, "
-					"remaining %d",
+			unit_log_printf("; ", "%s from %s, id %llu, remaining %d",
 					homa_is_client(rpc->id) ? "response"
 					: "request",
 					homa_print_ipv6_addr(&peer->addr),
-					(long unsigned int) rpc->id,
+					rpc->id,
 					rpc->msgin.bytes_remaining);
 		}
 	}
@@ -237,11 +238,10 @@ void unit_log_message_out_packets(struct homa_message_out *message, int verbose)
 
 	for (skb = message->packets; skb != NULL;
 			skb = homa_get_skb_info(skb)->next_skb) {
-		if (verbose) {
+		if (verbose)
 			homa_print_packet(skb, buffer, sizeof(buffer));
-		} else {
+		else
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
-		}
 		unit_log_printf("; ", "%s", buffer);
 	}
 }
@@ -260,11 +260,10 @@ void unit_log_filled_skbs(struct sk_buff *skb, int verbose)
 	char buffer[400];
 
 	while (skb != NULL) {
-		if (verbose) {
+		if (verbose)
 			homa_print_packet(skb, buffer, sizeof(buffer));
-		} else {
+		else
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
-		}
 		unit_log_printf("; ", "%s", buffer);
 		skb = homa_get_skb_info(skb)->next_skb;
 	}
@@ -283,11 +282,10 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 	char buffer[200];
 
 	skb_queue_walk(packets, skb) {
-		if (verbose) {
+		if (verbose)
 			homa_print_packet(skb, buffer, sizeof(buffer));
-		} else {
+		else
 			homa_print_packet_short(skb, buffer, sizeof(buffer));
-		}
 		unit_log_printf("; ", "%s", buffer);
 	}
 }
@@ -300,11 +298,11 @@ void unit_log_skb_list(struct sk_buff_head *packets, int verbose)
 void unit_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
+
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
-		unit_log_printf("; ", "%s id %lu, next_offset %d",
+		unit_log_printf("; ", "%s id %llu, next_offset %d",
 				homa_is_client(rpc->id) ? "request"
-				: "response",
-				(long unsigned int) rpc->id,
+				: "response", rpc->id,
 				rpc->msgout.next_xmit_offset);
 	}
 }
@@ -357,7 +355,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	struct data_header h = {
 		.common = {
 			.sport = htons(client_port),
-	                .dport = htons(hsk->port),
+			.dport = htons(hsk->port),
 			.type = DATA,
 			.sender_id = cpu_to_be64(id ^ 1)
 		},
@@ -370,13 +368,14 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	};
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h,
 			&created);
+
 	if (IS_ERR(srpc))
 		return NULL;
 	EXPECT_EQ(srpc->completion_cookie, 0);
 	homa_rpc_unlock(srpc);
 	homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
-			? UNIT_TEST_DATA_PER_PACKET : req_length , 0),
+			? UNIT_TEST_DATA_PER_PACKET : req_length, 0),
 			hsk->homa);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return srpc;
@@ -384,11 +383,12 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 			bytes_received < req_length;
 			bytes_received += UNIT_TEST_DATA_PER_PACKET) {
 		int this_size = req_length - bytes_received;
+
 		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
-				this_size , 0), hsk->homa);
+				this_size, 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)
 		return srpc;
@@ -402,9 +402,9 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	srpc->state = RPC_OUTGOING;
 	if (state == UNIT_OUTGOING)
 		return srpc;
-	FAIL("unit_server_rpc received unexpected state %d", state);
+	FAIL("%s received unexpected state %d", __func__, state);
 
-    error:
+error:
 	homa_rpc_free(srpc);
 	return NULL;
 }
@@ -429,6 +429,7 @@ struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 {
 	static struct iovec iovec;
 	static struct iov_iter iter;
+
 	iovec.iov_base = buffer;
 	iovec.iov_len = length;
 	iov_iter_init(&iter, WRITE, &iovec, 1, length);
@@ -443,6 +444,7 @@ struct iov_iter *unit_iov_iter(void *buffer, size_t length)
 char *unit_ack_string(struct homa_ack *ack)
 {
 	static char buffer[1000];
+
 	snprintf(buffer, sizeof(buffer),
 			"client_port %d, server_port %d, client_id %llu",
 			ntohs(ack->client_port), ntohs(ack->server_port),

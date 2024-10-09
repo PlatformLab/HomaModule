@@ -38,8 +38,7 @@ TEST_F(homa_metrics, homa_metric_append)
 
 	homa_metric_append(&self->homa, ", q: %050d", 88);
 	EXPECT_EQ(77, self->homa.metrics_length);
-	EXPECT_STREQ("x: 10, y: 20, z: 12345, "
-			"q: 00000000000000000000000000000000000000000000000088",
+	EXPECT_STREQ("x: 10, y: 20, z: 12345, q: 00000000000000000000000000000000000000000000000088",
 			self->homa.metrics);
 	EXPECT_EQ(120, self->homa.metrics_capacity);
 }

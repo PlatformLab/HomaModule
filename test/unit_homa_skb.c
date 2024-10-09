@@ -1,6 +1,4 @@
-/* Copyright (c) 2022-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_skb.h"
@@ -63,7 +61,7 @@ static void add_to_pool(struct homa *homa, int num_pages, int core)
 	}
 }
 
-static struct homa_page_pool *hook_pool = NULL;
+static struct homa_page_pool *hook_pool;
 
 /* Used to remove a page from hook_pool when a lock is acquired. */
 static void spinlock_hook(char *id)
@@ -99,7 +97,7 @@ TEST_F(homa_skb, homa_skb_init)
 	homa_skb_cleanup(&self->homa);
 	EXPECT_EQ(NULL, self->homa.page_pools[0]);
 	mock_numa_mask = 0x83;
-        homa_skb_init(&self->homa);
+	homa_skb_init(&self->homa);
 	EXPECT_NE(NULL, self->homa.page_pools[0]);
 	EXPECT_NE(NULL, self->homa.page_pools[1]);
 	EXPECT_EQ(NULL, self->homa.page_pools[2]);
@@ -207,9 +205,10 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_allocate_new_page)
 	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
 	struct sk_buff *skb2 = alloc_skb_fclone(200, GFP_KERNEL);
 	char *p1, *p2, *p3;
+	int length;
 
 	ASSERT_NE(NULL, skb2);
-	int length = 1000;
+	length = 1000;
 	p1 = homa_skb_extend_frags(&self->homa, self->skb, &length);
 	EXPECT_EQ(1000, length);
 	EXPECT_NE(NULL, p1);
@@ -238,9 +237,10 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_use_same_page_reduce_length)
 	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
 	struct sk_buff *skb2 = alloc_skb_fclone(200, GFP_KERNEL);
 	char *p1, *p2, *p3;
+	int length;
 
 	ASSERT_NE(NULL, skb2);
-	int length = 1000;
+	length = 1000;
 	p1 = homa_skb_extend_frags(&self->homa, self->skb, &length);
 	EXPECT_EQ(1000, length);
 	EXPECT_NE(NULL, p1);
@@ -413,7 +413,7 @@ TEST_F(homa_skb, homa_skb_append_from_iter__basics)
 	EXPECT_EQ(0, homa_skb_append_from_iter(&self->homa, self->skb, iter,
 			2000));
 	EXPECT_STREQ("_copy_from_iter 2000 bytes at 1000",
-		     	unit_log_get());
+			unit_log_get());
 
 	/* Second append spills into a new frag. */
 	skb_core->page_size = 4096;
@@ -422,7 +422,7 @@ TEST_F(homa_skb, homa_skb_append_from_iter__basics)
 			3000));
 	EXPECT_STREQ("_copy_from_iter 2096 bytes at 3000; "
 			"_copy_from_iter 904 bytes at 5096",
-		     	unit_log_get());
+			unit_log_get());
 
 	EXPECT_EQ(2, shinfo->nr_frags);
 	EXPECT_EQ(4096, skb_frag_size(&shinfo->frags[0]));
@@ -575,8 +575,7 @@ TEST_F(homa_skb, homa_skb_free_many_tx__check_page_order)
 	int i, length;
 
 	skb = homa_skb_new_tx(100);
-	for (i = 0; i < 4; i++)
-	{
+	for (i = 0; i < 4; i++) {
 		length = 2 * HOMA_SKB_PAGE_SIZE;
 		homa_skb_extend_frags(&self->homa, skb, &length);
 	}
@@ -621,7 +620,7 @@ TEST_F(homa_skb, homa_skb_get)
 	struct sk_buff *skb = test_skb(&self->homa);
 	int32_t data[500];
 
-        /* Data is entirely in the head. */
+	/* Data is entirely in the head. */
 	memset(data, 0, sizeof(data));
 	homa_skb_get(skb, data, 20, 40);
 	EXPECT_EQ(1000020, data[0]);

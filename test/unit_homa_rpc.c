@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -44,13 +42,13 @@ FIXTURE_SETUP(homa_rpc)
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
+			.dport = htons(self->server_port),
 			.type = DATA,
 			.sender_id = self->client_id},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
-		        .retransmit = 0,
+			.retransmit = 0,
 			.seg = {.offset = 0}};
 	self->iovec.iov_base = (void *) 2000;
 	self->iovec.iov_len = 10000;
@@ -242,7 +240,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_no_buffers)
 	int created;
 
 	self->data.message_length = N(1400);
-	atomic_set(&self->hsk.buffer_pool->free_bpages,0 );
+	atomic_set(&self->hsk.buffer_pool->free_bpages, 0);
 	srpc = homa_rpc_new_server(&self->hsk, self->client_ip, &self->data,
 			&created);
 	ASSERT_FALSE(IS_ERR(srpc));
@@ -451,7 +449,7 @@ TEST_F(homa_rpc, homa_rpc_free__free_gaps)
 			unit_print_gaps(crpc));
 
 	homa_rpc_free(crpc);
-        /* (Test infrastructure will complain if gaps aren't freed) */
+	/* (Test infrastructure will complain if gaps aren't freed) */
 }
 TEST_F(homa_rpc, homa_rpc_free__dead_buffs)
 {

@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_grant.h"
@@ -82,13 +80,13 @@ FIXTURE_SETUP(homa_grant)
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	self->data = (struct data_header){.common = {
 			.sport = htons(self->client_port),
-	                .dport = htons(self->server_port),
+			.dport = htons(self->server_port),
 			.type = DATA,
 			.sender_id = cpu_to_be64(self->client_id)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
 			.ack = {0, 0, 0},
-		        .retransmit = 0,
+			.retransmit = 0,
 			.seg = {.offset = 0}};
 	unit_log_clear();
 	self->incoming_delta = 0;
@@ -113,16 +111,16 @@ static struct homa_rpc *test_rpc(FIXTURE_DATA(homa_grant) *self,
 
 TEST_F(homa_grant, homa_grant_outranks)
 {
-	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,UNIT_OUTGOING,
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 20000);
-	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,UNIT_OUTGOING,
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			102, 1000, 30000);
-	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk,UNIT_OUTGOING,
+	struct homa_rpc *crpc3 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			104, 1000, 30000);
-	struct homa_rpc *crpc4 = unit_client_rpc(&self->hsk,UNIT_OUTGOING,
+	struct homa_rpc *crpc4 = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			106, 1000, 30000);
 
@@ -423,10 +421,11 @@ TEST_F(homa_grant, homa_grant_remove_rpc__reposition_peer_in_homa_list)
 TEST_F(homa_grant, homa_grant_send__basics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->msgin.priority = 3;
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
 	EXPECT_EQ(10000, rpc->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 10000@3", unit_log_get());
@@ -434,12 +433,13 @@ TEST_F(homa_grant, homa_grant_send__basics)
 TEST_F(homa_grant, homa_grant_send__incoming_negative)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->msgin.bytes_remaining = 5000;
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
 
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(0, granted);
 	EXPECT_EQ(15000, rpc->msgin.granted);
 	EXPECT_STREQ("", unit_log_get());
@@ -447,10 +447,11 @@ TEST_F(homa_grant, homa_grant_send__incoming_negative)
 TEST_F(homa_grant, homa_grant_send__end_of_message)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->msgin.bytes_remaining = 5000;
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
 	EXPECT_EQ(20000, rpc->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
@@ -458,13 +459,14 @@ TEST_F(homa_grant, homa_grant_send__end_of_message)
 TEST_F(homa_grant, homa_grant_send__not_enough_available_bytes)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->msgin.granted = 3000;
 	rpc->msgin.rec_incoming = 4000;
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming - 4000);
 
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
 	EXPECT_EQ(8000, rpc->msgin.granted);
 	EXPECT_STREQ("xmit GRANT 8000@0", unit_log_get());
@@ -472,10 +474,11 @@ TEST_F(homa_grant, homa_grant_send__not_enough_available_bytes)
 TEST_F(homa_grant, homa_grant_send__nothing_available)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(0, granted);
 	EXPECT_EQ(0, rpc->msgin.granted);
 	EXPECT_STREQ("", unit_log_get());
@@ -483,19 +486,21 @@ TEST_F(homa_grant, homa_grant_send__nothing_available)
 TEST_F(homa_grant, homa_grant_send__skip_because_of_silent_ticks)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->silent_ticks = 2;
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(0, granted);
 }
 TEST_F(homa_grant, homa_grant_send__resend_all)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+	int granted;
 
 	rpc->msgin.resend_all = 1;
 	unit_log_clear();
-	int granted = homa_grant_send(rpc, &self->homa);
+	granted = homa_grant_send(rpc, &self->homa);
 	EXPECT_EQ(1, granted);
 	EXPECT_EQ(10000, rpc->msgin.granted);
 	EXPECT_EQ(0, rpc->msgin.resend_all);
@@ -521,6 +526,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__rpc_dead)
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
 			100, 1000, 2000);
+	int old_state;
 
 	homa_message_in_init(rpc, 2000, 0);
 	homa_rpc_lock(rpc, "test");
@@ -528,7 +534,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__rpc_dead)
 	EXPECT_EQ(2000, rpc->msgin.rec_incoming);
 	EXPECT_EQ(2000, atomic_read(&self->homa.total_incoming));
 
-	int old_state = rpc->state;
+	old_state = rpc->state;
 	rpc->state = RPC_DEAD;
 	rpc->msgin.bytes_remaining = 0;
 	homa_rpc_lock(rpc, "test");
@@ -859,7 +865,7 @@ TEST_F(homa_grant, homa_grant_recalc__compute_window_size)
 	rpc3 = test_rpc(self, 100, self->server_ip, 50000);
 	self->homa.max_incoming = 100000;
 
-        /* First try: fixed window size. */
+	/* First try: fixed window size. */
 	homa_grantable_lock(&self->homa, 0);
 	self->homa.window_param = 5000;
 	homa_grant_recalc(&self->homa, 1);
@@ -868,7 +874,7 @@ TEST_F(homa_grant, homa_grant_recalc__compute_window_size)
 	EXPECT_EQ(5000, rpc2->msgin.granted);
 	EXPECT_EQ(5000, rpc3->msgin.granted);
 
-        /* Second try: dynamic window size. */
+	/* Second try: dynamic window size. */
 	self->homa.window_param = 0;
 	homa_grant_recalc(&self->homa, 0);
 	EXPECT_EQ(25000, self->homa.grant_window);

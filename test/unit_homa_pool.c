@@ -1,6 +1,4 @@
-/* Copyright (c) 2022-2023 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_pool.h"
@@ -308,7 +306,7 @@ TEST_F(homa_pool, homa_pool_allocate__owned_page_locked_and_page_stolen)
 	// Try a second allocation; the lock hook steals the partial bpage,
 	// so a new one has to be allocated.
 	crpc->msgin.num_bpages = 0;
-        mock_trylock_errors = 1;
+	mock_trylock_errors = 1;
 	unit_hook_register(change_owner_hook);
 	EXPECT_EQ(0, homa_pool_allocate(crpc));
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
@@ -488,7 +486,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__basics)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc2, *crpc3;
 
-        /* Queue up 2 RPCs that together need a total of 5 bpages. */
+	/* Queue up 2 RPCs that together need a total of 5 bpages. */
 	atomic_set(&pool->free_bpages, 0);
 	crpc2 = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 3*HOMA_BPAGE_SIZE);
@@ -575,7 +573,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
-        /* Queue up an RPC that needs 2 bpages. */
+	/* Queue up an RPC that needs 2 bpages. */
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 2*HOMA_BPAGE_SIZE);
@@ -595,7 +593,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	struct homa_rpc *crpc;
 
-        /* Queue up an RPC that needs 4 bpages. */
+	/* Queue up an RPC that needs 4 bpages. */
 	atomic_set(&pool->free_bpages, 0);
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
 			&self->server_ip, 4000, 98, 1000, 4*HOMA_BPAGE_SIZE);

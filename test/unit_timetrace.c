@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -121,14 +119,18 @@ TEST_F(timetrace, tt_find_oldest)
 
 TEST_F(timetrace, tt_proc_open__not_initialized)
 {
+	int err;
+
 	tt_destroy();
-	int err = -tt_proc_open(NULL, &self->file);
+	err = -tt_proc_open(NULL, &self->file);
 	EXPECT_EQ(EINVAL, err);
 }
 TEST_F(timetrace, tt_proc_open__no_memory)
 {
+	int err;
+
 	mock_kmalloc_errors = 1;
-	int err = -tt_proc_open(NULL, &self->file);
+	err = -tt_proc_open(NULL, &self->file);
 	EXPECT_EQ(ENOMEM, err);
 }
 TEST_F(timetrace, tt_proc_open__increment_frozen)
@@ -140,9 +142,10 @@ TEST_F(timetrace, tt_proc_open__increment_frozen)
 TEST_F(timetrace, tt_proc_read__bogus_file)
 {
 	struct tt_proc_file pf;
+	int err;
 
 	pf.file = NULL;
-	int err = -tt_proc_read(&self->file, (char *) 1000, 100, 0);
+	err = -tt_proc_read(&self->file, (char *) 1000, 100, 0);
 	EXPECT_EQ(EINVAL, err);
 	self->file.private_data = &pf;
 	err = -tt_proc_read(&self->file, (char *) 1000, 100, 0);
@@ -151,9 +154,11 @@ TEST_F(timetrace, tt_proc_read__bogus_file)
 }
 TEST_F(timetrace, tt_proc_read__uninitialized)
 {
+	int result;
+
 	tt_proc_open(NULL, &self->file);
 	tt_destroy();
-	int result = tt_proc_read(&self->file, (char *) 1000, 100, 0);
+	result = tt_proc_read(&self->file, (char *) 1000, 100, 0);
 	EXPECT_EQ(0, result);
 }
 TEST_F(timetrace, tt_proc_read__nothing_to_read)
@@ -256,9 +261,10 @@ TEST_F(timetrace, tt_proc_read__single_entry_too_large)
 TEST_F(timetrace, tt_proc_release__bogus_file)
 {
 	struct tt_proc_file pf;
+	int err;
 
 	pf.file = NULL;
-	int err = -tt_proc_release(NULL, &self->file);
+	err = -tt_proc_release(NULL, &self->file);
 	EXPECT_EQ(EINVAL, err);
 	self->file.private_data = &pf;
 	err = -tt_proc_release(NULL, &self->file);

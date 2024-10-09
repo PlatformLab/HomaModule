@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_sock.h"
@@ -61,8 +59,8 @@ TEST_F(homa_sock, homa_socktab_next__basics)
 {
 	struct homa_sock hsk1, hsk2, hsk3, hsk4, *hsk;
 	struct homa_socktab_scan scan;
-
 	int first_port = 34000;
+
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
 	mock_sock_init(&hsk1, &self->homa, first_port);
@@ -138,13 +136,13 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
 	struct homa_sock hijack, no_hijack;
 
-        self->homa.hijack_tcp = 0;
+	self->homa.hijack_tcp = 0;
 	mock_sock_init(&no_hijack, &self->homa, 0);
-        self->homa.hijack_tcp = 1;
-        mock_sock_init(&hijack, &self->homa, 0);
-        EXPECT_EQ(0, no_hijack.sock.sk_protocol);
-        EXPECT_EQ(IPPROTO_TCP, hijack.sock.sk_protocol);
-        homa_sock_destroy(&hijack);
+	self->homa.hijack_tcp = 1;
+	mock_sock_init(&hijack, &self->homa, 0);
+	EXPECT_EQ(0, no_hijack.sock.sk_protocol);
+	EXPECT_EQ(IPPROTO_TCP, hijack.sock.sk_protocol);
+	homa_sock_destroy(&hijack);
 	homa_sock_destroy(&no_hijack);
 }
 
@@ -186,7 +184,7 @@ TEST_F(homa_sock, homa_sock_shutdown__already_shutdown)
 	self->hsk.shutdown = 1;
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
-	EXPECT_EQ(2 ,unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(2, unit_list_length(&self->hsk.active_rpcs));
 	self->hsk.shutdown = 0;
 }
 TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)

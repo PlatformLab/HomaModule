@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+/* SPDX-License-Identifier: BSD-2-Clause */
 
 /* Utility functions for unit tests, implemented in C. */
 
@@ -34,14 +32,14 @@ enum unit_rpc_state {
 
 extern char         *unit_ack_string(struct homa_ack *ack);
 extern struct homa_rpc
-                    *unit_client_rpc(struct homa_sock *hsk,
-		        enum unit_rpc_state state, struct in6_addr *client_ip,
-		        struct in6_addr *server_ip, int server_port, int id,
-		        int req_length, int resp_length);
+		*unit_client_rpc(struct homa_sock *hsk,
+			enum unit_rpc_state state, struct in6_addr *client_ip,
+			struct in6_addr *server_ip, int server_port, int id,
+			int req_length, int resp_length);
 extern struct in6_addr
-                     unit_get_in_addr(char *s);
+		     unit_get_in_addr(char *s);
 extern struct iov_iter
-                    *unit_iov_iter(void *buffer, size_t length);
+		    *unit_iov_iter(void *buffer, size_t length);
 extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_active_ids(struct homa_sock *hsk);
 extern void          unit_log_filled_skbs(struct sk_buff *skb, int verbose);
@@ -49,14 +47,19 @@ extern void          unit_log_frag_list(struct sk_buff *skb, int verbose);
 extern void          unit_log_grantables(struct homa *homa);
 extern void          unit_log_hashed_rpcs(struct homa_sock *hsk);
 extern void          unit_log_message_out_packets(
-                        struct homa_message_out *message, int verbose);
+			struct homa_message_out *message, int verbose);
 extern const char   *unit_print_gaps(struct homa_rpc *rpc);
 extern struct homa_rpc
-                    *unit_server_rpc(struct homa_sock *hsk,
-		        enum unit_rpc_state state, struct in6_addr *server_ip,
-		        struct in6_addr *client_ip, int client_port, int id,
-		        int req_length, int resp_length);
+		    *unit_server_rpc(struct homa_sock *hsk,
+			enum unit_rpc_state state, struct in6_addr *server_ip,
+			struct in6_addr *client_ip, int client_port, int id,
+			int req_length, int resp_length);
 extern void          unit_log_skb_list(struct sk_buff_head *packets,
-                        int verbose);
+			int verbose);
 extern void          unit_log_throttled(struct homa *homa);
 extern void          unit_teardown(void);
+
+/* Kludge to avoid including arpa/inet.h, which causes definition
+ * conflicts with kernel header files.
+ */
+extern int inet_pton(int af, const char *src, void *dst);

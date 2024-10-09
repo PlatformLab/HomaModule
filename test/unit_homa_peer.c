@@ -1,6 +1,4 @@
-/* Copyright (c) 2019-2022 Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+// SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
 #include "homa_peer.h"
@@ -79,16 +77,18 @@ TEST_F(homa_peer, homa_peer_find__basics)
 }
 
 static struct _test_data_homa_peer *test_data;
-static struct homa_peer *conflicting_peer = NULL;
-static int peer_lock_hook_invocations = 0;
-static void peer_lock_hook(char *id) {
+static struct homa_peer *conflicting_peer;
+static int peer_lock_hook_invocations;
+static void peer_lock_hook(char *id)
+{
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	if (peer_lock_hook_invocations > 0)
 		return;
-	peer_lock_hook_invocations ++;
+	peer_lock_hook_invocations++;
 	/* Creates a peer with the same address as the one being created
-	 * by the main test function below. */
+	 * by the main test function below.
+	 */
 	conflicting_peer = homa_peer_find(&test_data->peertab, ip3333,
 		&test_data->hsk.inet);
 }
@@ -135,6 +135,7 @@ TEST_F(homa_peer, homa_peertab_get_peers__not_init)
 TEST_F(homa_peer, homa_peertab_get_peers__table_empty)
 {
 	int num_peers = 45;
+
 	EXPECT_EQ(NULL, homa_peertab_get_peers(&self->peertab, &num_peers));
 	EXPECT_EQ(0, num_peers);
 }
@@ -397,10 +398,7 @@ TEST_F(homa_peer, homa_peer_add_ack)
 	mock_xmit_log_verbose = 1;
 	homa_peer_add_ack(crpc3);
 	EXPECT_EQ(0, peer->num_acks);
-	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 103, acks "
-			"[cp 1000, sp 99, id 90] [cp 1001, sp 99, id 91] "
-			"[cp 1002, sp 99, id 92] [cp 32768, sp 99, id 101] "
-			"[cp 32768, sp 99, id 102]",
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 103, acks [cp 1000, sp 99, id 90] [cp 1001, sp 99, id 91] [cp 1002, sp 99, id 92] [cp 32768, sp 99, id 101] [cp 32768, sp 99, id 102]",
 			unit_log_get());
 }
 
