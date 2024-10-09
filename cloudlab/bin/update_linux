@@ -32,9 +32,8 @@ for ((i = $first ; i <= $last; i++)); do
     node=node$i
     echo
     echo $node
-    ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot tmp/8021q'
+    ssh $node 'rm -rf tmp; mkdir -p tmp tmp/boot'
     rsync -rtv /boot/initrd.img-$v /boot/config-$v /boot/System.map-$v \
             /boot/vmlinuz-$v $node:tmp/boot/
-    rsync -rtv /lib/modules/$v/kernel/net/8021q/ $node:tmp/8021q/
-    ssh $node "sudo cp -f tmp/boot/* /boot; sudo cp -f tmp/8021q/8021q.ko /lib/modules/$v/kernel/net/8021q; sudo reboot"
+    ssh $node "sudo cp -f tmp/boot/* /boot; sudo reboot"
 done
