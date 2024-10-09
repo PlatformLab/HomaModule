@@ -56,7 +56,10 @@
  * and compiling them into a normal Linux executable along with the
  * unit tests). This creates potential problems with conflicts between
  * kernel header files and user-level header files. To avoid these conflicts,
- * this file must be very careful about what headers it includes.
+ * this file must be very careful about what headers it includes. This file
+ * is based on a relatively old version of the official file; new versions
+ * generate even more header file conflicts, which appear very difficult
+ * to resolve.
  * This file also contains several other changes, such as:
  *   - All tests run in a single process, rather than forking a child process
  *     for each test.
