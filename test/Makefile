@@ -15,9 +15,7 @@ CINCLUDES := -I. \
 	    -I$(KDIR)/arch/x86/include/generated/uapi \
 	    -I$(KDIR)/include/uapi \
 	    -I$(KDIR)/include/generated/uapi \
-	    -include $(KDIR)/include/linux/kconfig.h \
-	    -include $(KDIR)/include/linux/compiler-version.h \
-	    -include $(KDIR)/include/linux/compiler_types.h
+	    -include $(KDIR)/include/linux/kconfig.h
 CCINCLUDES := -I. \
 	    -I.. \
 	    -I$(KDIR)/arch/x86/include \
