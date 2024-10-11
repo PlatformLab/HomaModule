@@ -207,7 +207,6 @@ struct homa_set_buf_args {
  * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
  */
 
-#define HOMAIOCREPLY  _IOWR(0x89, 0xe2, struct homa_reply_args)
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
