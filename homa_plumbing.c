@@ -1488,7 +1488,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_dointvec(struct ctl_table *table, int write,
+int homa_dointvec(const struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	int result;
@@ -1564,7 +1564,7 @@ int homa_dointvec(struct ctl_table *table, int write,
  *
  * Return: 0 for success, nonzero for error.
  */
-int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_offload_core *offload_core;

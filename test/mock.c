@@ -845,7 +845,7 @@ struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 	return entry;
 }
 
-int proc_dointvec(struct ctl_table *table, int write,
+int proc_dointvec(const struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
 {
 	return 0;

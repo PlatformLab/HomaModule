@@ -1088,13 +1088,11 @@ extern struct homa_interest
 extern void     homa_close(struct sock *sock, long timeout);
 extern int      homa_copy_to_user(struct homa_rpc *rpc);
 extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
-extern void     homa_data_from_server(struct sk_buff *skb,
-		    struct homa_rpc *crpc);
 extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
-extern int      homa_dointvec(struct ctl_table *table, int write,
+extern int      homa_dointvec(const struct ctl_table *table, int write,
 		    void __user *buffer, size_t *lenp, loff_t *ppos);
 extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 extern int      homa_err_handler_v6(struct sk_buff *skb,
@@ -1165,8 +1163,8 @@ extern int      homa_snprintf(char *buffer, int size, int used,
 extern int      homa_softirq(struct sk_buff *skb);
 extern void     homa_spin(int ns);
 extern char    *homa_symbol_for_type(uint8_t type);
-extern int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
-		    void __user *buffer, size_t *lenp, loff_t *ppos);
+extern int      homa_sysctl_softirq_cores(const struct ctl_table *table,
+		    int write, void __user *buffer, size_t *lenp, loff_t *ppos);
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
