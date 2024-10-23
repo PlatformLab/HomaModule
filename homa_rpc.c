@@ -20,7 +20,7 @@
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
-		const union sockaddr_in_union *dest)
+				     const union sockaddr_in_union *dest)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 	struct homa_rpc_bucket *bucket;
@@ -40,7 +40,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	atomic_set(&crpc->flags, 0);
 	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(hsk->homa->peers, &dest_addr_as_ipv6,
-			&hsk->inet);
+				    &hsk->inet);
 	if (IS_ERR(crpc->peer)) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
@@ -106,8 +106,8 @@ error:
  *          to h, then it is returned instead of creating a new RPC.
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
-		const struct in6_addr *source, struct data_header *h,
-		int *created)
+				     const struct in6_addr *source,
+				     struct data_header *h, int *created)
 {
 	__u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;
@@ -120,9 +120,9 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	bucket = homa_server_rpc_bucket(hsk, id);
 	homa_bucket_lock(bucket, id, "homa_rpc_new_server");
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
-		if ((srpc->id == id) &&
-				(srpc->dport == ntohs(h->common.sport)) &&
-				ipv6_addr_equal(&srpc->peer->addr, source)) {
+		if (srpc->id == id &&
+		    srpc->dport == ntohs(h->common.sport) &&
+		    ipv6_addr_equal(&srpc->peer->addr, source)) {
 			/* RPC already exists; just return it instead
 			 * of creating a new RPC.
 			 */
@@ -167,9 +167,9 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_cycles = get_cycles();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
-			srpc->id, ntohl(h->incoming));
+		   srpc->id, ntohl(h->incoming));
 	err = homa_message_in_init(srpc, ntohl(h->message_length),
-			ntohl(h->incoming));
+				   ntohl(h->incoming));
 	if (err != 0)
 		goto error;
 
@@ -182,7 +182,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
-	if ((ntohl(h->seg.offset) == 0) && (srpc->msgin.num_bpages > 0)) {
+	if (ntohl(h->seg.offset) == 0 && srpc->msgin.num_bpages > 0) {
 		atomic_or(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
@@ -207,7 +207,7 @@ error:
  * @ack:     Information about an RPC from @saddr that may now be deleted safely.
  */
 void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
-		struct homa_ack *ack)
+		    struct homa_ack *ack)
 {
 	__u16 client_port = ntohs(ack->client_port);
 	__u16 server_port = ntohs(ack->server_port);
@@ -259,7 +259,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 * function should only make changes needed to make the RPC
 	 * inaccessible.
 	 */
-	if (!rpc || (rpc->state == RPC_DEAD))
+	if (!rpc || rpc->state == RPC_DEAD)
 		return;
 	UNIT_LOG("; ", "homa_rpc_free invoked");
 	tt_record1("homa_rpc_free invoked for id %d", rpc->id);
@@ -279,7 +279,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->buf_links);
-	if (rpc->interest != NULL) {
+	if (rpc->interest) {
 		rpc->interest->reg_rpc = NULL;
 		wake_up_process(rpc->interest->thread);
 		rpc->interest = NULL;
@@ -291,9 +291,9 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	if (rpc->msgin.length >= 0) {
 		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
 		while (1) {
-			struct homa_gap *gap = list_first_entry_or_null(
-					&rpc->msgin.gaps, struct homa_gap, links);
-			if (gap == NULL)
+			struct homa_gap *gap = list_first_entry_or_null(&rpc->msgin.gaps,
+					struct homa_gap, links);
+			if (!gap)
 				break;
 			list_del(&gap->links);
 			kfree(gap);
@@ -353,25 +353,24 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		if (batch_size > BATCH_MAX)
 			batch_size = BATCH_MAX;
 		count -= batch_size;
-		num_skbs = num_rpcs = 0;
+		num_skbs = 0;
+		num_rpcs = 0;
 
 		homa_sock_lock(hsk, "homa_rpc_reap");
 		if (atomic_read(&hsk->protect_count)) {
 			INC_METRIC(disabled_reaps, 1);
 			tt_record2("homa_rpc_reap returning: protect_count %d, dead_skbs %d",
-					atomic_read(&hsk->protect_count),
-					hsk->dead_skbs);
+				   atomic_read(&hsk->protect_count),
+				   hsk->dead_skbs);
 			homa_sock_unlock(hsk);
 			return 0;
 		}
 
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
-			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP)
-					|| (atomic_read(&rpc->grants_in_progress)
-					!= 0)
-					|| (atomic_read(&rpc->msgout.active_xmits)
-					!= 0)) {
+			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP) ||
+			    atomic_read(&rpc->grants_in_progress)!= 0 ||
+			    atomic_read(&rpc->msgout.active_xmits) != 0) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;
 			}
@@ -383,9 +382,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			if (rpc->msgout.length >= 0) {
 				while (rpc->msgout.packets) {
 					skbs[num_skbs] = rpc->msgout.packets;
-					rpc->msgout.packets = homa_get_skb_info(
-							rpc->msgout.packets)
-							->next_skb;
+					rpc->msgout.packets = homa_get_skb_info(rpc
+							->msgout.packets)->next_skb;
 					num_skbs++;
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
@@ -425,8 +423,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		 */
 release:
 		hsk->dead_skbs -= num_skbs + rx_frees;
-		result = !list_empty(&hsk->dead_rpcs)
-				&& ((num_skbs + num_rpcs) != 0);
+		result = !list_empty(&hsk->dead_rpcs) &&
+				(num_skbs + num_rpcs) != 0;
 		homa_sock_unlock(hsk);
 		homa_skb_free_many_tx(hsk->homa, skbs, num_skbs);
 		for (i = 0; i < num_rpcs; i++) {
@@ -441,29 +439,28 @@ release:
 			homa_rpc_unlock(rpc);
 
 			if (unlikely(rpc->msgin.num_bpages))
-				homa_pool_release_buffers(
-						rpc->hsk->buffer_pool,
-						rpc->msgin.num_bpages,
-						rpc->msgin.bpage_offsets);
+				homa_pool_release_buffers(rpc->hsk->buffer_pool,
+							  rpc->msgin.num_bpages,
+							  rpc->msgin.bpage_offsets);
 			if (rpc->msgin.length >= 0) {
 				while (1) {
-					struct homa_gap *gap = list_first_entry_or_null(
-							&rpc->msgin.gaps,
+					struct homa_gap *gap = list_first_entry_or_null(&rpc
+							->msgin.gaps,
 							struct homa_gap, links);
-					if (gap == NULL)
+					if (!gap)
 						break;
 					list_del(&gap->links);
 					kfree(gap);
 				}
 			}
 			tt_record1("homa_rpc_reap finished reaping id %d",
-					rpc->id);
+				   rpc->id);
 			rpc->state = 0;
 			kfree(rpc);
 		}
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
-				num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
-				hsk->port);
+			   num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
+			   hsk->port);
 		if (!result)
 			break;
 	}
@@ -508,15 +505,16 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *            unlock it by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-		const struct in6_addr *saddr, __u16 sport, __u64 id)
+				      const struct in6_addr *saddr, __u16 sport,
+				      __u64 id)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;
 
 	homa_bucket_lock(bucket, id, __func__);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
-		if ((srpc->id == id) && (srpc->dport == sport) &&
-				ipv6_addr_equal(&srpc->peer->addr, saddr))
+		if (srpc->id == id && srpc->dport == sport &&
+		    ipv6_addr_equal(&srpc->peer->addr, saddr))
 			return srpc;
 	}
 	homa_bucket_unlock(bucket, id);

@@ -7,24 +7,32 @@
 # or more target machines; it also loads the Homa kernel module.
 #
 # Usage:
-# install_homa num_nodes [first]
+# install_homa [--net-next] num_nodes [first]
 #
 # The "num_nodes" arguments indicates how many servers should be updated.
 # The "first" argument is optional; it is an integer identifying the
 # first node on which installation will occur (e.g. "install 4 2" means
 # node2 through node5 will be updated. "first" defaults to 0.
-# This script assumes that Homa has been built in ~/homaModule on the
-# current machine (this includes both homa.ko and all of the binaries in util).
+# This script assumes that the Homa module binary (homa.ko) has already
+# been built. If --net-next is specified, it will be in the kernel build
+# directory (see code below for path), otherwise it will be in ~/homaModule.
+# In addition, the utility programs in ~/homaModule/util must have been built.
 
 root=~/homaModule
 
 set -e
+
+homa_ko=$root/homa.ko
+if [ $1 = "--net-next" ]; then
+    homa_ko=/netnext/net-next/net/homa/homa.ko
+    shift
+fi
 if [ $# -eq 2 ]; then
     first=$2
 elif [ $# -eq 1 ]; then
     first=0
 else
-    echo "Usage: install_homa num_nodes [first]"
+    echo "Usage: install_homa [--net-next] num_nodes [first]"
     exit 1
 fi
 last=`expr $first + $1 - 1` || true
@@ -35,7 +43,7 @@ for ((i = $first ; i <= $last; i++)); do
     echo '*** Installing Homa on' $node '***'
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
-    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $root/homa.ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $homa_ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
     ssh -4 $node 'sudo sysctl .kernel.printk="5 4 1 7"'
     ssh -4 $node 'echo $PATH'
     ssh -4 $node 'config default'

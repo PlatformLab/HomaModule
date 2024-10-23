@@ -40,7 +40,7 @@ struct homa_dead_dst {
 #define HOMA_PEERTAB_BUCKET_BITS 16
 
 /** define HOME_PEERTAB_BUCKETS - Number of buckets in a homa_peertab. */
-#define HOMA_PEERTAB_BUCKETS (1 << HOMA_PEERTAB_BUCKET_BITS)
+#define HOMA_PEERTAB_BUCKETS BIT(HOMA_PEERTAB_BUCKET_BITS)
 
 /**
  * struct homa_peertab - A hash table that maps from IPv6 addresses
@@ -195,26 +195,26 @@ struct homa_peer {
 	spinlock_t ack_lock;
 };
 
-extern void     homa_dst_refresh(struct homa_peertab *peertab,
-		    struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_peertab_destroy(struct homa_peertab *peertab);
-extern struct homa_peer **
+void     homa_dst_refresh(struct homa_peertab *peertab,
+			  struct homa_peer *peer, struct homa_sock *hsk);
+void     homa_peertab_destroy(struct homa_peertab *peertab);
+struct homa_peer **
 		homa_peertab_get_peers(struct homa_peertab *peertab,
-		    int *num_peers);
-extern int      homa_peertab_init(struct homa_peertab *peertab);
-extern void     homa_peer_add_ack(struct homa_rpc *rpc);
-extern struct homa_peer
+				       int *num_peers);
+int      homa_peertab_init(struct homa_peertab *peertab);
+void     homa_peer_add_ack(struct homa_rpc *rpc);
+struct homa_peer
 	       *homa_peer_find(struct homa_peertab *peertab,
-		    const struct in6_addr *addr, struct inet_sock *inet);
-extern int      homa_peer_get_acks(struct homa_peer *peer, int count,
-		    struct homa_ack *dst);
-extern struct dst_entry
+			       const struct in6_addr *addr, struct inet_sock *inet);
+int      homa_peer_get_acks(struct homa_peer *peer, int count,
+			    struct homa_ack *dst);
+struct dst_entry
 	       *homa_peer_get_dst(struct homa_peer *peer,
-		    struct inet_sock *inet);
-extern void     homa_peer_lock_slow(struct homa_peer *peer);
-extern void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
-		    int c2, int c3, int c4, int c5, int c6, int c7);
-extern void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
+				  struct inet_sock *inet);
+void     homa_peer_lock_slow(struct homa_peer *peer);
+void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
+			       int c2, int c3, int c4, int c5, int c6, int c7);
+void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
 
 /**
  * homa_peer_lock() - Acquire the lock for a peer's @unacked_lock. If the lock
@@ -244,7 +244,7 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
  * Return   Up-to-date destination for peer.
  */
 static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
-	struct homa_sock *hsk)
+					     struct homa_sock *hsk)
 {
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(hsk->homa->peers, peer, hsk);

@@ -10,29 +10,29 @@
 //#define TT_KERNEL 1
 #endif
 #ifdef TT_KERNEL
-extern struct tt_buffer *tt_linux_buffers[];
-extern void       (*tt_linux_freeze)(void);
-extern atomic_t  *tt_linux_freeze_count;
-extern atomic_t   tt_linux_freeze_no_homa;
-extern int       *tt_linux_homa_temp;
-extern int        tt_linux_homa_temp_default[];
-extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
-extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
-		      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
-		      __u32 arg3);
-extern void       tt_linux_skip_metrics(int metric, __u64 count);
-extern void       (*tt_linux_printk)(void);
-extern void       (*tt_linux_dbg1)(char *msg, ...);
-extern void       (*tt_linux_dbg2)(char *msg, ...);
-extern void       (*tt_linux_dbg3)(char *msg, ...);
-extern void       tt_linux_nop(void);
-extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
+struct tt_buffer *tt_linux_buffers[];
+void       (*tt_linux_freeze)(void);
+atomic_t  *tt_linux_freeze_count;
+atomic_t   tt_linux_freeze_no_homa;
+int       *tt_linux_homa_temp;
+int        tt_linux_homa_temp_default[];
+void       (*tt_linux_inc_metrics)(int metric, __u64 count);
+void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
+			      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
+			      __u32 arg3);
+void       tt_linux_skip_metrics(int metric, __u64 count);
+void       (*tt_linux_printk)(void);
+void       (*tt_linux_dbg1)(char *msg, ...);
+void       (*tt_linux_dbg2)(char *msg, ...);
+void       (*tt_linux_dbg3)(char *msg, ...);
+void       tt_linux_nop(void);
+void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 
-extern void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
-		      const char *format, __u32 arg0, __u32 arg1,
-		      __u32 arg2, __u32 arg3);
+void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
+			  const char *format, __u32 arg0, __u32 arg1,
+			  __u32 arg2, __u32 arg3);
 #endif
-extern void       tt_inc_metric(int metric, __u64 count);
+void       tt_inc_metric(int metric, __u64 count);
 
 /* Separate buffers for each core: this eliminates the need for
  * synchronization in tt_record, which improves performance significantly.
@@ -110,19 +110,19 @@ int tt_init(char *proc_file, int *temp)
 		struct tt_buffer *buffer;
 
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
-		if (buffer == NULL) {
-			pr_err("timetrace couldn't allocate tt_buffers\n");
+		if (!buffer) {
+			pr_err("%s couldn't allocate tt_buffers\n", __func__);
 			goto error;
 		}
 		memset(buffer, 0, sizeof(*buffer));
 		tt_buffers[i] = buffer;
 	}
 
-	if (proc_file != NULL) {
+	if (proc_file) {
 		tt_dir_entry = proc_create(proc_file, 0444, NULL, &tt_pops);
 		if (!tt_dir_entry) {
 			pr_err("couldn't create /proc/%s for timetrace reading\n",
-					proc_file);
+			       proc_file);
 			goto error;
 		}
 	} else {
@@ -170,7 +170,7 @@ void tt_destroy(void)
 	spin_lock(&tt_lock);
 	if (init) {
 		init = false;
-		if (tt_dir_entry != NULL)
+		if (tt_dir_entry)
 			proc_remove(tt_dir_entry);
 	}
 	for (i = 0; i < nr_cpu_ids; i++) {
@@ -239,8 +239,8 @@ void tt_freeze(void)
  * @arg3:      Argument to use when printing a message about this event.
  */
 void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
-		const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
-		__u32 arg3)
+		   const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
+		   __u32 arg3)
 {
 	struct tt_event *event;
 
@@ -254,9 +254,9 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 	event = &buffer->events[buffer->next_index];
 	buffer->next_index = (buffer->next_index + 1)
 #ifdef __UNIT_TEST__
-		& (tt_buffer_size-1);
+		& (tt_buffer_size - 1);
 #else
-		& (TT_BUF_SIZE-1);
+		& (TT_BUF_SIZE - 1);
 #endif
 
 	event->timestamp = timestamp;
@@ -288,11 +288,11 @@ void tt_find_oldest(int *pos)
 
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
-		if (buffer->events[tt_buffer_size-1].format == NULL) {
+		if (!buffer->events[tt_buffer_size - 1].format) {
 			pos[i] = 0;
 		} else {
 			int index = (buffer->next_index + 1)
-					& (tt_buffer_size-1);
+					& (tt_buffer_size - 1);
 			struct tt_event *event = &buffer->events[index];
 
 			pos[i] = index;
@@ -306,9 +306,9 @@ void tt_find_oldest(int *pos)
 	 */
 	for (i = 0; i < nr_cpu_ids; i++) {
 		buffer = tt_buffers[i];
-		while ((buffer->events[pos[i]].timestamp < start_time)
-				&& (pos[i] != buffer->next_index)) {
-			pos[i] = (pos[i] + 1) & (tt_buffer_size-1);
+		while (buffer->events[pos[i]].timestamp < start_time &&
+		       pos[i] != buffer->next_index) {
+			pos[i] = (pos[i] + 1) & (tt_buffer_size - 1);
 		}
 	}
 }
@@ -332,7 +332,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 		goto done;
 	}
 	pf = kmalloc(sizeof(*pf), GFP_KERNEL);
-	if (pf == NULL) {
+	if (!pf) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -346,7 +346,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 
 	if (!tt_test_no_khz) {
 		pf->bytes_available = snprintf(pf->msg_storage, TT_PF_BUF_SIZE,
-				"cpu_khz: %u\n", cpu_khz);
+					       "cpu_khz: %u\n", cpu_khz);
 	}
 
 done:
@@ -368,7 +368,7 @@ done:
  * file was reached, and a negative number indicates an error (-errno).
  */
 ssize_t tt_proc_read(struct file *file, char __user *user_buf,
-		size_t length, loff_t *offset)
+		     size_t length, loff_t *offset)
 {
 	struct tt_proc_file *pf = file->private_data;
 
@@ -378,9 +378,9 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	int copied_to_user = 0;
 
 	spin_lock(&tt_lock);
-	if ((pf == NULL) || (pf->file != file)) {
+	if (!pf || pf->file != file) {
 		pr_err("tt_metrics_read found damaged private_data: 0x%p\n",
-				file->private_data);
+		       file->private_data);
 		copied_to_user = -EINVAL;
 		goto done;
 	}
@@ -403,8 +403,8 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pf->pos[i]];
-			if ((pf->pos[i] != buffer->next_index)
-					&& (event->timestamp < earliest_time)) {
+			if (pf->pos[i] != buffer->next_index &&
+			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
 			}
@@ -415,16 +415,15 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		}
 
 		/* Format one event. */
-		event = &(tt_buffers[current_core]->events[
-				pf->pos[current_core]]);
+		event = &(tt_buffers[current_core]->events[pf->pos[current_core]]);
 		available = tt_pf_storage - (pf->next_byte + pf->bytes_available
 				- pf->msg_storage);
 		if (available == 0)
 			goto flush;
 		entry_length = snprintf(pf->next_byte + pf->bytes_available,
-				available, "%lu [C%02d] ",
-				(unsigned long) event->timestamp,
-				current_core);
+					available, "%lu [C%02d] ",
+					(unsigned long)event->timestamp,
+					current_core);
 		if (available >= entry_length)
 			entry_length += snprintf(pf->next_byte
 					+ pf->bytes_available + entry_length,
@@ -446,7 +445,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		pf->next_byte[pf->bytes_available + entry_length] = '\n';
 		pf->bytes_available += entry_length + 1;
 		pf->pos[current_core] = (pf->pos[current_core] + 1)
-				& (tt_buffer_size-1);
+				& (tt_buffer_size - 1);
 		continue;
 
 flush:
@@ -456,7 +455,7 @@ flush:
 		if (chunk_size == 0)
 			goto done;
 		failed_to_copy = copy_to_user(user_buf + copied_to_user,
-				pf->next_byte, chunk_size);
+					      pf->next_byte, chunk_size);
 		chunk_size -= failed_to_copy;
 		pf->bytes_available -= chunk_size;
 		if (pf->bytes_available == 0)
@@ -475,7 +474,6 @@ done:
 	spin_unlock(&tt_lock);
 	return copied_to_user;
 }
-
 
 /**
  * tt_proc_lseek() - This function is invoked to handle seeks on
@@ -503,9 +501,9 @@ int tt_proc_release(struct inode *inode, struct file *file)
 	struct tt_proc_file *pf = file->private_data;
 	int i;
 
-	if ((pf == NULL) || (pf->file != file)) {
-		pr_err("tt_metrics_release found damaged private_data: 0x%p\n",
-				file->private_data);
+	if (!pf || pf->file != file) {
+		pr_err("%s found damaged private_data: 0x%p\n", __func__,
+		       file->private_data);
 		return -EINVAL;
 	}
 
@@ -527,7 +525,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 			for (i = 0; i < nr_cpu_ids; i++) {
 				struct tt_buffer *buffer = tt_buffers[i];
 
-				buffer->events[tt_buffer_size-1].format = NULL;
+				buffer->events[tt_buffer_size - 1].format = NULL;
 				buffer->next_index = 0;
 			}
 		}
@@ -578,7 +576,7 @@ void tt_print_file(char *path)
 	filp = filp_open(path, O_WRONLY | O_CREAT, 0666);
 	if (IS_ERR(filp)) {
 		pr_err("%s couldn't open %s: error %ld\n", __func__, path,
-				-PTR_ERR(filp));
+		       -PTR_ERR(filp));
 		filp = NULL;
 		goto done;
 	}
@@ -602,8 +600,8 @@ void tt_print_file(char *path)
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pos[i]];
-			if ((pos[i] != buffer->next_index)
-					&& (event->timestamp < earliest_time)) {
+			if (pos[i] != buffer->next_index &&
+			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
 			}
@@ -612,15 +610,14 @@ void tt_print_file(char *path)
 			/* None of the traces have any more events. */
 			break;
 		}
-		event = &(tt_buffers[current_core]->events[
-				pos[current_core]]);
-		pos[current_core] = (pos[current_core] + 1)
-				& (tt_buffer_size-1);
+		event = &(tt_buffers[current_core]->events[pos[current_core]]);
+		pos[current_core] = (pos[current_core] + 1) &
+				(tt_buffer_size - 1);
 
 		bytes_used += snprintf(buffer + bytes_used,
 				sizeof(buffer) - bytes_used,
 				"%lu [C%02d] ",
-				(unsigned long) event->timestamp,
+				(unsigned long)event->timestamp,
 				current_core);
 		bytes_used += snprintf(buffer + bytes_used,
 				sizeof(buffer) - bytes_used,
@@ -632,10 +629,10 @@ void tt_print_file(char *path)
 		}
 		if ((bytes_used + 1000) >= sizeof(buffer)) {
 			err = kernel_write(filp, buffer, bytes_used,
-					&offset);
+					   &offset);
 			if (err < 0) {
 				pr_notice("%s got error %d writing %s\n",
-						__func__, -err, path);
+					  __func__, -err, path);
 				goto done;
 			}
 			bytes_used = 0;
@@ -645,18 +642,18 @@ void tt_print_file(char *path)
 		err = kernel_write(filp, buffer, bytes_used, &offset);
 		if (err < 0)
 			pr_err("%s got error %d writing %s\n",
-					__func__, -err, path);
+			       __func__, -err, path);
 	}
 
 done:
-	if (filp != NULL) {
+	if (filp) {
 		err = vfs_fsync(filp, 0);
 		if (err < 0)
 			pr_err("%s got error %d in fsync\n", __func__, -err);
 		err = filp_close(filp, NULL);
 		if (err < 0)
 			pr_err("%s got error %d in filp_close\n", __func__,
-					-err);
+			       -err);
 	}
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
@@ -703,8 +700,8 @@ void tt_printk(void)
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pos[i]];
-			if ((pos[i] != buffer->next_index)
-					&& (event->timestamp < earliest_time)) {
+			if (pos[i] != buffer->next_index &&
+			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
 			}
@@ -713,16 +710,15 @@ void tt_printk(void)
 			/* None of the traces have any more events. */
 			break;
 		}
-		event = &(tt_buffers[current_core]->events[
-				pos[current_core]]);
+		event = &(tt_buffers[current_core]->events[pos[current_core]]);
 		pos[current_core] = (pos[current_core] + 1)
-				& (tt_buffer_size-1);
+				& (tt_buffer_size - 1);
 
 		snprintf(msg, sizeof(msg), event->format, event->arg0,
-				event->arg1, event->arg2, event->arg3);
+			 event->arg1, event->arg2, event->arg3);
 		pr_notice("%lu [C%02d] %s\n",
-				(unsigned long) event->timestamp,
-				current_core, msg);
+			  (unsigned long)event->timestamp,
+			  current_core, msg);
 	}
 
 	atomic_dec(&tt_freeze_count);
@@ -763,8 +759,8 @@ void tt_get_messages(char *buffer, size_t length)
 			struct tt_buffer *buffer = tt_buffers[i];
 
 			event = &buffer->events[pos[i]];
-			if ((pos[i] != buffer->next_index)
-					&& (event->timestamp < earliest_time)) {
+			if (pos[i] != buffer->next_index &&
+			    event->timestamp < earliest_time) {
 				current_core = i;
 				earliest_time = event->timestamp;
 			}
@@ -773,22 +769,21 @@ void tt_get_messages(char *buffer, size_t length)
 			/* None of the traces have any more events. */
 			break;
 		}
-		event = &(tt_buffers[current_core]->events[
-				pos[current_core]]);
+		event = &(tt_buffers[current_core]->events[pos[current_core]]);
 		pos[current_core] = (pos[current_core] + 1)
-				& (tt_buffer_size-1);
+				& (tt_buffer_size - 1);
 
 		if (printed > 0) {
 			result = snprintf(buffer + printed, length - printed,
-					"; ");
-			if ((result < 0) || (result >= (length - printed)))
+					  "; ");
+			if (result < 0 || result >= (length - printed))
 				break;
 			printed += result;
 		}
 		result = snprintf(buffer + printed, length - printed,
-				event->format, event->arg0, event->arg1,
-				event->arg2, event->arg3);
-		if ((result < 0) || (result >= (length - printed)))
+				  event->format, event->arg0, event->arg1,
+				  event->arg2, event->arg3);
+		if (result < 0 || result >= (length - printed))
 			break;
 		printed += result;
 	}

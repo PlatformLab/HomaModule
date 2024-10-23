@@ -28,7 +28,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
-	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk !=  NULL;
+	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
 		homa_sock_destroy(hsk);
 	}
@@ -55,7 +55,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
  * being reclaimed during the scan.
  */
 struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
-	struct homa_socktab_scan *scan)
+					  struct homa_socktab_scan *scan)
 {
 	scan->socktab = socktab;
 	scan->current_bucket = -1;
@@ -78,18 +78,18 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 	struct homa_sock *hsk;
 
 	while (1) {
-		while (scan->next == NULL) {
+		while (!scan->next) {
 			scan->current_bucket++;
 			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS)
 				return NULL;
 			scan->next = (struct homa_socktab_links *)
-				hlist_first_rcu(
-				&scan->socktab->buckets[scan->current_bucket]);
+				      hlist_first_rcu(&scan->socktab->buckets
+				      [scan->current_bucket]);
 		}
 		links = scan->next;
 		hsk = links->sock;
-		scan->next = (struct homa_socktab_links *) hlist_next_rcu(
-				&links->hash_links);
+		scan->next = (struct homa_socktab_links *)hlist_next_rcu(&links
+				->hash_links);
 		return hsk;
 	}
 }
@@ -129,7 +129,7 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	homa->next_client_port++;
 	hsk->socktab_links.sock = hsk;
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
-			&socktab->buckets[homa_port_hash(hsk->port)]);
+			   &socktab->buckets[homa_port_hash(hsk->port)]);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
@@ -213,10 +213,12 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, 1000);
 		i++;
+#if 1 /* See strip.py */
 		if (i == 5) {
 			tt_record("Freezing because reap seems hung");
 			tt_freeze();
 		}
+#endif /* See strip.py */
 	}
 
 	homa_pool_destroy(hsk->buffer_pool);
@@ -247,7 +249,7 @@ void homa_sock_destroy(struct homa_sock *hsk)
  * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
-		__u16 port)
+		   __u16 port)
 {
 	struct homa_sock *owner;
 	int result = 0;
@@ -264,7 +266,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	}
 
 	owner = homa_sock_find(socktab, port);
-	if (owner != NULL) {
+	if (owner) {
 		if (owner != hsk)
 			result = -EADDRINUSE;
 		goto done;
@@ -274,7 +276,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
-			&socktab->buckets[homa_port_hash(port)]);
+			   &socktab->buckets[homa_port_hash(port)]);
 done:
 	spin_unlock_bh(&socktab->write_lock);
 	homa_sock_unlock(hsk);
@@ -297,7 +299,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 	struct homa_sock *result = NULL;
 
 	hlist_for_each_entry_rcu(link, &socktab->buckets[homa_port_hash(port)],
-			hash_links) {
+				 hash_links) {
 		struct homa_sock *hsk = link->sock;
 
 		if (hsk->port == port) {
@@ -340,10 +342,10 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
 	__u64 start = get_cycles();
 
 	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
-			id, bucket->id);
+		   id, bucket->id);
 	spin_lock_bh(&bucket->lock);
 	tt_record2("ending wait for bucket lock, id %d (bucket %d)",
-			id, bucket->id);
+		   id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);

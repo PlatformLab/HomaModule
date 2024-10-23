@@ -1,9 +1,6 @@
 # Makefile to build Homa as a Linux module.
 
-ifneq ($(KERNELRELEASE),)
-
-obj-m += homa.o
-homa-y = homa_grant.o \
+HOMA_OBJS = homa_grant.o \
 	homa_incoming.o \
 	homa_metrics.o \
 	homa_offload.o \
@@ -17,6 +14,11 @@ homa-y = homa_grant.o \
 	homa_timer.o \
 	homa_utils.o \
 	timetrace.o
+
+ifneq ($(KERNELRELEASE),)
+
+obj-m += homa.o
+homa-y = $(HOMA_OBJS)
 
 MY_CFLAGS += -g
 ccflags-y += ${MY_CFLAGS}
@@ -40,6 +42,24 @@ install:
 
 check:
 	../homaLinux/scripts/kernel-doc -none *.c
+
+# Copy stripped source files to a Linux source tree
+LINUX_SRC_DIR ?= ../net-next
+HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
+CP_HDRS := homa_impl.h \
+	   homa_peer.h \
+	   homa_pool.h \
+	   homa_rpc.h \
+	   homa_sock.h \
+	   homa_stub.h \
+	   homa_wire.h
+CP_SRCS := $(patsubst %.o,%.c,$(filter-out timetrace.o, $(HOMA_OBJS)))
+CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS))
+net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
+$(HOMA_TARGET)/%: % util/strip.py
+	util/strip.py $< > $@
+$(LINUX_SRC_DIR)/include/uapi/linux/homa.h: homa.h util/strip.py
+	util/strip.py $< > $@
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) clean

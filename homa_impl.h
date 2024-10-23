@@ -8,9 +8,10 @@
 #define _HOMA_IMPL_H
 
 #include <linux/bug.h>
+#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 #undef WARN
-#define WARN(condition, format...)
+#define WARN(...)
 
 #undef WARN_ON
 #define WARN_ON(condition) ({						\
@@ -21,6 +22,7 @@
 #undef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition) WARN_ON(condition)
 #endif
+#endif /* See strip.py */
 
 #include <linux/audit.h>
 #include <linux/icmp.h>
@@ -43,16 +45,24 @@
 #include <net/gro.h>
 #include <net/rps.h>
 
+#if 1 /* See strip.py */
+#include "homa.h"
+#else /* See strip.py */
+#include <uapi/linux/homa.h>
+#endif /* See strip.py */
+#include "homa_wire.h"
+
+#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
-extern struct page *mock_alloc_pages(gfp_t gfp, unsigned int order);
+struct page *mock_alloc_pages(gfp_t gfp, unsigned int order);
 
 #define compound_order mock_compound_order
-extern unsigned int mock_compound_order(struct page *page);
+unsigned int mock_compound_order(struct page *page);
 
 #define cpu_to_node mock_cpu_to_node
-extern int mock_cpu_to_node(int cpu);
+int mock_cpu_to_node(int cpu);
 
 #undef current
 #define current current_task
@@ -60,60 +70,61 @@ extern struct task_struct *current_task;
 
 #undef get_cycles
 #define get_cycles mock_get_cycles
-extern cycles_t mock_get_cycles(void);
+cycles_t mock_get_cycles(void);
 
 #define get_page mock_get_page
-extern void mock_get_page(struct page *page);
+void mock_get_page(struct page *page);
 
 #undef kmalloc
 #define kmalloc mock_kmalloc
-extern void *mock_kmalloc(size_t size, gfp_t flags);
+void *mock_kmalloc(size_t size, gfp_t flags);
 
 #undef kmalloc_array
-#define kmalloc_array(count, size, type) mock_kmalloc(count*size, type)
+#define kmalloc_array(count, size, type) mock_kmalloc((count) * (size), type)
 
-#define kthread_complete_and_exit(comp, code)
+#define kthread_complete_and_exit(...)
 
 #ifdef page_address
 #undef page_address
 #endif
-#define page_address(page) ((void *) page)
+#define page_address(page) ((void *)page)
 
 #define page_ref_count mock_page_refs
-extern int mock_page_refs(struct page *page);
+int mock_page_refs(struct page *page);
 
 #define page_to_nid mock_page_to_nid
-extern int mock_page_to_nid(struct page *page);
+int mock_page_to_nid(struct page *page);
 
 #define put_page mock_put_page
-extern void mock_put_page(struct page *page);
+void mock_put_page(struct page *page);
 
 #define rcu_read_lock mock_rcu_read_lock
-extern void mock_rcu_read_lock(void);
+void mock_rcu_read_lock(void);
 
 #define rcu_read_unlock mock_rcu_read_unlock
-extern void mock_rcu_read_unlock(void);
+void mock_rcu_read_unlock(void);
 
 #undef register_net_sysctl
 #define register_net_sysctl mock_register_net_sysctl
-extern struct ctl_table_header *mock_register_net_sysctl(struct net *net,
-		const char *path, struct ctl_table *table);
+struct ctl_table_header *mock_register_net_sysctl(struct net *net,
+						  const char *path,
+						  struct ctl_table *table);
 
-#define signal_pending(xxx) mock_signal_pending
+#define signal_pending(...) mock_signal_pending
 extern int mock_signal_pending;
 
 #define spin_unlock mock_spin_unlock
-extern void mock_spin_unlock(spinlock_t *lock);
+void mock_spin_unlock(spinlock_t *lock);
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
-extern void *mock_vmalloc(size_t size);
+void *mock_vmalloc(size_t size);
 
 #undef DECLARE_PER_CPU
-#define DECLARE_PER_CPU(type, name) extern type name[10];
+#define DECLARE_PER_CPU(type, name) extern type name[10]
 
 #undef DEFINE_PER_CPU
-#define DEFINE_PER_CPU(type, name) type name[10];
+#define DEFINE_PER_CPU(type, name) type name[10]
 
 #undef per_cpu
 #define per_cpu(name, core) (name[core])
@@ -126,20 +137,22 @@ extern void *mock_vmalloc(size_t size);
 #define BUG_ON(...)
 #define set_current_state(...)
 #endif
+#endif /* See strip.py */
 
 /* Forward declarations. */
 struct homa_peer;
 struct homa_sock;
 struct homa;
 
-#include "homa.h"
+#if 1 /* See strip.py */
 #include "timetrace.h"
+#endif /* See strip.py */
 #include "homa_metrics.h"
 
 /* Declarations used in this file, so they can't be made at the end. */
-extern void     homa_throttle_lock_slow(struct homa *homa);
+void     homa_throttle_lock_slow(struct homa *homa);
 
-#define sizeof32(type) ((int) (sizeof(type)))
+#define sizeof32(type) ((int)(sizeof(type)))
 
 /**
  * define HOMA_MAX_GRANTS - Used to size various data structures for grant
@@ -764,8 +777,8 @@ struct homa {
 	#define HOMA_GRO_FAST_GRANTS    0x20
 	#define HOMA_GRO_SHORT_BYPASS   0x40
 	#define HOMA_GRO_GEN3           0x80
-	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE|HOMA_GRO_GEN2 \
-			|HOMA_GRO_SHORT_BYPASS|HOMA_GRO_FAST_GRANTS)
+	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE | HOMA_GRO_GEN2 | \
+				      HOMA_GRO_SHORT_BYPASS | HOMA_GRO_FAST_GRANTS)
 
 	/*
 	 * @busy_usecs: if there has been activity on a core within the
@@ -908,7 +921,7 @@ struct homa_skb_info {
  */
 static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 {
-	return (struct homa_skb_info *) (skb_end_pointer(skb)
+	return (struct homa_skb_info *)(skb_end_pointer(skb)
 			- sizeof(struct homa_skb_info));
 }
 
@@ -924,7 +937,7 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
  */
 static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
 {
-	return (struct sk_buff **) (skb_end_pointer(skb) - sizeof(char *));
+	return (struct sk_buff **)(skb_end_pointer(skb) - sizeof(char *));
 }
 
 /**
@@ -1020,8 +1033,8 @@ static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union 
  */
 static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
-	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr : ipv4_to_ipv6(
-			ip_hdr(skb)->saddr);
+	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr
+				: ipv4_to_ipv6(ip_hdr(skb)->saddr);
 }
 
 /**
@@ -1058,14 +1071,14 @@ static inline __be32 tt_addr(const struct in6_addr x)
 }
 
 #ifdef __UNIT_TEST__
-extern void unit_log_printf(const char *separator, const char *format, ...)
+void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);
 #define UNIT_LOG unit_log_printf
-extern void unit_hook(char *id);
+void unit_hook(char *id);
 #define UNIT_HOOK(msg) unit_hook(msg)
 #else
 #define UNIT_LOG(...)
-#define UNIT_HOOK(msg)
+#define UNIT_HOOK(...)
 #endif
 
 extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
@@ -1204,7 +1217,7 @@ static inline void homa_check_pacer(struct homa *homa, int softirq)
 	 * to queue new packets; if the NIC queue becomes more than half
 	 * empty, then we will help out here.
 	 */
-	if ((get_cycles() + homa->max_nic_queue_cycles/2) <
+	if ((get_cycles() + homa->max_nic_queue_cycles / 2) <
 			atomic64_read(&homa->link_idle_time))
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");

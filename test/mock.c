@@ -703,7 +703,11 @@ void kfree(const void *block)
 	free((void *) block);
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
+#else
+void __kfree_skb(struct sk_buff *skb)
+#endif
 {
 	int i;
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
@@ -946,6 +950,12 @@ void sk_common_release(struct sock *sk)
 int sk_set_peek_off(struct sock *sk, int val)
 {
 	return 0;
+}
+
+void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
+		enum skb_drop_reason reason)
+{
+	__kfree_skb(skb);
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,

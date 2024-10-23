@@ -1,6 +1,4 @@
-/* Copyright (c) Homa Developers
- * SPDX-License-Identifier: BSD-1-Clause
- */
+/* SPDX-License-Identifier: BSD-2-Clause */
 
 #pragma once
 
@@ -10,7 +8,6 @@
 #include "homa.h"
 
 namespace homa {
-
 /**
  * class homa::receiver - Helper class for receiving a series of messages
  * from a Homa socket. This class serves two purposes: first, it implements
@@ -48,9 +45,9 @@ public:
 	{
 		if (static_cast<ssize_t>(offset) >= msg_length)
 			return 0;
-		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_bpages-1))
+		if ((offset >> HOMA_BPAGE_SHIFT) == (control.num_bpages - 1))
 			return msg_length - offset;
-		return HOMA_BPAGE_SIZE - (offset & (HOMA_BPAGE_SIZE-1));
+		return HOMA_BPAGE_SIZE - (offset & (HOMA_BPAGE_SIZE - 1));
 	}
 
 	/**
@@ -58,7 +55,7 @@ public:
 	 * cookie associated with the current message; result is undefined
 	 * if there is no current message.
 	 */
-	uint64_t completion_cookie() const
+	uint64_t completion_cookie(void) const
 	{
 		return control.completion_cookie;
 	}
@@ -99,7 +96,7 @@ public:
 	 * id() - Return the Homa RPC identifier for the current message,
 	 * or 0 if there is no current message.
 	 */
-	inline uint64_t id() const
+	inline uint64_t id(void) const
 	{
 		return control.id;
 	}
@@ -109,7 +106,7 @@ public:
 	 * is a request, and false if it is a response or if there is no
 	 * current message.
 	 */
-	bool is_request() const
+	bool is_request(void) const
 	{
 		return control.id & 1;
 	}
@@ -119,20 +116,20 @@ public:
 	 * current message, or a negative value if there is no current
 	 * message.
 	 */
-	ssize_t length() const
+	ssize_t length(void) const
 	{
 		return msg_length;
 	}
 
 	size_t receive(int flags, uint64_t id);
-	void release();
+	void release(void);
 
 	/**
 	 * homa::receiver::src_addr() - Return a pointer to the address
 	 * of the sender of the current message. The result is undefined
 	 * if there is no current message.
 	 */
-	const sockaddr_in_union *src_addr() const
+	const sockaddr_in_union *src_addr(void) const
 	{
 		return &source;
 	}
@@ -161,4 +158,5 @@ protected:
 	/** @buf_region: First byte of buffer space for this message. */
 	char *buf_region;
 };
+
 }    // namespace homa

@@ -45,7 +45,7 @@ struct tt_event {
 
 /* The number of events in a tt_buffer, as a power of 2. */
 #define TT_BUF_SIZE_EXP 14
-#define TT_BUF_SIZE (1<<TT_BUF_SIZE_EXP)
+#define TT_BUF_SIZE BIT(TT_BUF_SIZE_EXP)
 
 /**
  * Represents a sequence of events, typically consisting of all those
@@ -92,28 +92,28 @@ struct tt_proc_file {
 	char *next_byte;
 };
 
-extern void   tt_destroy(void);
-extern void   tt_freeze(void);
-extern int    tt_init(char *proc_file, int *temp);
-extern void   tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
-		const char *format, __u32 arg0, __u32 arg1,
-		__u32 arg2, __u32 arg3);
+void      tt_destroy(void);
+void      tt_freeze(void);
+int       tt_init(char *proc_file, int *temp);
+void      tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
+			const char *format, __u32 arg0, __u32 arg1,
+			__u32 arg2, __u32 arg3);
 
 /* Private methods and variables: exposed so they can be accessed
  * by unit tests.
  */
-extern void      tt_dbg1(char *msg, ...);
-extern void      tt_dbg2(char *msg, ...);
-extern void      tt_dbg3(char *msg, ...);
-extern void      tt_find_oldest(int *pos);
-extern void      tt_get_messages(char *buffer, size_t length);
-extern void      tt_print_file(char *path);
-extern void      tt_printk(void);
-extern int       tt_proc_open(struct inode *inode, struct file *file);
-extern ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
-			size_t length, loff_t *offset);
-extern int       tt_proc_release(struct inode *inode, struct file *file);
-extern loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
+void      tt_dbg1(char *msg, ...);
+void      tt_dbg2(char *msg, ...);
+void      tt_dbg3(char *msg, ...);
+void      tt_find_oldest(int *pos);
+void      tt_get_messages(char *buffer, size_t length);
+void      tt_print_file(char *path);
+void      tt_printk(void);
+int       tt_proc_open(struct inode *inode, struct file *file);
+ssize_t   tt_proc_read(struct file *file, char __user *user_buf,
+		       size_t length, loff_t *offset);
+int       tt_proc_release(struct inode *inode, struct file *file);
+loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
 extern struct    tt_buffer *tt_buffers[];
 extern int       tt_buffer_size;
 extern atomic_t  tt_freeze_count;
@@ -124,7 +124,7 @@ extern bool      tt_test_no_khz;
 /* Debugging variables exposed by the version of timetrace built into
  * the kernel.
  */
-extern int64_t    tt_debug_int64[100];
+extern s64       tt_debug_int64[100];
 extern void      *tt_debug_ptr[100];
 
 /**
@@ -157,54 +157,56 @@ static inline __u64 tt_rdtsc(void)
  * @arg3       Argument to use when printing a message about this event.
  */
 static inline void tt_record4(const char *format, __u32 arg0, __u32 arg1,
-		__u32 arg2, __u32 arg3)
+			      __u32 arg2, __u32 arg3)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-			arg0, arg1, arg2, arg3);
+		      arg0, arg1, arg2, arg3);
 #endif
 }
+
 static inline void tt_record3(const char *format, __u32 arg0, __u32 arg1,
-		__u32 arg2)
+			      __u32 arg2)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-			arg0, arg1, arg2, 0);
+		      arg0, arg1, arg2, 0);
 #endif
 }
+
 static inline void tt_record2(const char *format, __u32 arg0, __u32 arg1)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-			arg0, arg1, 0, 0);
+		      arg0, arg1, 0, 0);
 #endif
 }
+
 static inline void tt_record1(const char *format, __u32 arg0)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-			arg0, 0, 0, 0);
+		      arg0, 0, 0, 0);
 #endif
 }
+
 static inline void tt_record(const char *format)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-			0, 0, 0, 0);
+		      0, 0, 0, 0);
 #endif
 }
 
 static inline __u32 tt_hi(void *p)
 {
-	return ((__u64) p) >> 32;
+	return ((__u64)p) >> 32;
 }
 
 static inline __u32 tt_lo(void *p)
 {
-	return ((__u64) p) & 0xffffffff;
+	return ((__u64)p) & 0xffffffff;
 }
-
-#define SPLIT_64(value) (int) (((__u64) (value)) >> 32), (int) (((__u64) (value)) & 0xffffffff)
 
 #endif // HOMA_TIMETRACE_H
 

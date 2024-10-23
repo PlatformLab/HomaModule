@@ -35,7 +35,7 @@
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
-		const union sockaddr_in_union *dest_addr, uint64_t id)
+		   const union sockaddr_in_union *dest_addr, uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -45,10 +45,10 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 	args.id = id;
 	args.completion_cookie = 0;
 
-	vec.iov_base = (void *) message_buf;
+	vec.iov_base = (void *)message_buf;
 	vec.iov_len = length;
 
-	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_name = (void *)dest_addr;
 	hdr.msg_namelen = sizeof(*dest_addr);
 	hdr.msg_iov = &vec;
 	hdr.msg_iovlen = 1;
@@ -78,7 +78,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-		const union sockaddr_in_union *dest_addr, uint64_t id)
+		    const union sockaddr_in_union *dest_addr, uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -87,9 +87,9 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.id = id;
 	args.completion_cookie = 0;
 
-	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_name = (void *)dest_addr;
 	hdr.msg_namelen = sizeof(*dest_addr);
-	hdr.msg_iov = (struct iovec *) iov;
+	hdr.msg_iov = (struct iovec *)iov;
 	hdr.msg_iovlen = iovcnt;
 	hdr.msg_control = &args;
 	hdr.msg_controllen = 0;
@@ -113,8 +113,8 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *message_buf, size_t length,
-		const union sockaddr_in_union *dest_addr, uint64_t *id,
-		uint64_t completion_cookie)
+	      const union sockaddr_in_union *dest_addr, uint64_t *id,
+	      uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -124,10 +124,10 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
 
-	vec.iov_base = (void *) message_buf;
+	vec.iov_base = (void *)message_buf;
 	vec.iov_len = length;
 
-	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_name = (void *)dest_addr;
 	/* For some unknown reason, this change improves short-message P99
 	 * latency by 20% in W3 under IPv4 (as of December 2022).
 	 */
@@ -139,7 +139,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 	hdr.msg_control = &args;
 	hdr.msg_controllen = 0;
 	result = sendmsg(sockfd, &hdr, 0);
-	if ((result >= 0) && (id != NULL))
+	if (result >= 0 && id)
 		*id = args.id;
 	return result;
 }
@@ -162,8 +162,8 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-		const union sockaddr_in_union *dest_addr, uint64_t *id,
-		uint64_t completion_cookie)
+	       const union sockaddr_in_union *dest_addr, uint64_t *id,
+	       uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -172,14 +172,14 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
 
-	hdr.msg_name = (void *) dest_addr;
+	hdr.msg_name = (void *)dest_addr;
 	hdr.msg_namelen = sizeof(*dest_addr);
-	hdr.msg_iov = (struct iovec *) iov;
+	hdr.msg_iov = (struct iovec *)iov;
 	hdr.msg_iovlen = iovcnt;
 	hdr.msg_control = &args;
 	hdr.msg_controllen = 0;
 	result = sendmsg(sockfd, &hdr, 0);
-	if ((result >= 0) && (id != NULL))
+	if (result >= 0 && id)
 		*id = args.id;
 	return result;
 }

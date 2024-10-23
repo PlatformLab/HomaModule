@@ -24,22 +24,22 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	const char *us, *them;
 
 	/* See if we need to request an ack for this RPC. */
-	if (!homa_is_client(rpc->id) && (rpc->state == RPC_OUTGOING)
-			&& (rpc->msgout.next_xmit_offset >= rpc->msgout.length)) {
-		if (rpc->done_timer_ticks == 0)
+	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
+	    rpc->msgout.next_xmit_offset >= rpc->msgout.length) {
+		if (rpc->done_timer_ticks == 0) {
 			rpc->done_timer_ticks = homa->timer_ticks;
-		else {
+		} else {
 			/* >= comparison that handles tick wrap-around. */
 			if ((rpc->done_timer_ticks + homa->request_ack_ticks
-					- 1 - homa->timer_ticks) & 1<<31) {
+					- 1 - homa->timer_ticks) & 1 << 31) {
 				struct need_ack_header h;
 
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
 				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",
-						rpc->id,
-						tt_addr(rpc->peer->addr),
-						rpc->dport, homa->timer_ticks
-						- rpc->done_timer_ticks);
+					   rpc->id,
+					   tt_addr(rpc->peer->addr),
+					   rpc->dport, homa->timer_ticks
+					   - rpc->done_timer_ticks);
 			}
 		}
 	}
@@ -81,16 +81,16 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	if (rpc->silent_ticks >= homa->timeout_ticks) {
 		INC_METRIC(rpc_timeouts, 1);
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
-				rpc->id, tt_addr(rpc->peer->addr), rpc->state);
+			   rpc->id, tt_addr(rpc->peer->addr), rpc->state);
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
 		homa_freeze_peers(homa);
 		tt_freeze();
 		if (homa->verbose)
 			pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
-					rpc->id,
-					homa_print_ipv6_addr(&rpc->peer->addr),
-					rpc->state);
+				  rpc->id,
+				  homa_print_ipv6_addr(&rpc->peer->addr),
+				  rpc->state);
 		homa_rpc_abort(rpc, -ETIMEDOUT);
 		return;
 	}
@@ -118,6 +118,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 	resend.priority = homa->num_priorities-1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+#if 1 /* See strip.py */
 	if (homa_is_client(rpc->id)) {
 		us = "client";
 		them = "server";
@@ -125,25 +126,26 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   rpc->dport, rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
-				rpc->msgin.length, rpc->msgin.granted,
-				rpc->msgin.bytes_remaining,
-				rpc->msgin.rec_incoming);
+			   rpc->msgin.length, rpc->msgin.granted,
+			   rpc->msgin.bytes_remaining,
+			   rpc->msgin.rec_incoming);
 	} else {
 		us = "server";
 		them = "client";
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d offset %d",
-				rpc->id, tt_addr(rpc->peer->addr),
-				rpc->dport, rpc->msgin.recv_end);
+			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
+			   rpc->msgin.recv_end);
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
-				rpc->msgin.length, rpc->msgin.granted,
-				rpc->msgin.bytes_remaining,
-				rpc->msgin.rec_incoming);
+			   rpc->msgin.length, rpc->msgin.granted,
+			   rpc->msgin.bytes_remaining,
+			   rpc->msgin.rec_incoming);
 	}
+#endif /* See strip.py */
 	if (homa->verbose)
 		pr_notice("Homa %s RESEND to %s %s:%d for id %llu, offset %d, length %d\n", us, them,
-				homa_print_ipv6_addr(&rpc->peer->addr),
-				rpc->dport, rpc->id, rpc->msgin.recv_end,
-				rpc->msgin.granted - rpc->msgin.recv_end);
+			  homa_print_ipv6_addr(&rpc->peer->addr),
+			  rpc->dport, rpc->id, rpc->msgin.recv_end,
+			  rpc->msgin.granted - rpc->msgin.recv_end);
 }
 
 /**
@@ -201,7 +203,7 @@ void homa_timer(struct homa *homa)
 	 */
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
-			hsk !=  NULL; hsk = homa_socktab_next(&scan)) {
+			hsk; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
 			/* If we get here, it means that homa_wait_for_message
 			 * isn't keeping up with RPC reaping, so we'll help

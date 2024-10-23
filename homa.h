@@ -4,8 +4,8 @@
  * transport protocol.
  */
 
-#ifndef _HOMA_H
-#define _HOMA_H
+#ifndef _UAPI_LINUX_HOMA_H
+#define _UAPI_LINUX_HOMA_H
 
 #include <linux/types.h>
 #ifndef __KERNEL__
@@ -81,11 +81,12 @@ struct homa_sendmsg_args {
 	 */
 	uint64_t completion_cookie;
 };
+
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_sendmsg_args) >= 16,
-		"homa_sendmsg_args shrunk");
+	       "homa_sendmsg_args shrunk");
 _Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
-		"homa_sendmsg_args grew");
+	       "homa_sendmsg_args grew");
 #endif
 
 /**
@@ -93,7 +94,6 @@ _Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
  * recvmsg; passed to recvmsg using the msg_control field.
  */
 struct homa_recvmsg_args {
-
 	/**
 	 * @id: (in/out) Initially specifies the id of the desired RPC, or 0
 	 * if any RPC is OK; returns the actual id received.
@@ -143,11 +143,12 @@ struct homa_recvmsg_args {
 	 */
 	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };
+
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_recvmsg_args) >= 120,
-		"homa_recvmsg_args shrunk");
+	       "homa_recvmsg_args shrunk");
 _Static_assert(sizeof(struct homa_recvmsg_args) <= 120,
-		"homa_recvmsg_args grew");
+	       "homa_recvmsg_args grew");
 #endif
 
 /* Flag bits for homa_recvmsg_args.flags (see man page for documentation):
@@ -174,6 +175,7 @@ struct homa_abort_args {
 	int _pad1;
 	uint64_t _pad2[2];
 };
+
 #if !defined(__cplusplus)
 _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
 _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
@@ -210,24 +212,24 @@ struct homa_set_buf_args {
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
-extern int     homa_abortp(int fd, struct homa_abort_args *args);
+int     homa_abortp(int fd, struct homa_abort_args *args);
 
-extern int     homa_send(int sockfd, const void *message_buf,
-		size_t length, const union sockaddr_in_union *dest_addr,
-		uint64_t *id, uint64_t completion_cookie);
-extern int     homa_sendv(int sockfd, const struct iovec *iov,
-		int iovcnt, const union sockaddr_in_union *dest_addr,
-		uint64_t *id, uint64_t completion_cookie);
-extern ssize_t homa_reply(int sockfd, const void *message_buf,
-		size_t length, const union sockaddr_in_union *dest_addr,
-		uint64_t id);
-extern ssize_t homa_replyv(int sockfd, const struct iovec *iov,
-		int iovcnt, const union sockaddr_in_union *dest_addr,
-		uint64_t id);
-extern int     homa_abort(int sockfd, uint64_t id, int error);
+int     homa_send(int sockfd, const void *message_buf,
+		  size_t length, const union sockaddr_in_union *dest_addr,
+		  uint64_t *id, uint64_t completion_cookie);
+int     homa_sendv(int sockfd, const struct iovec *iov,
+		   int iovcnt, const union sockaddr_in_union *dest_addr,
+		   uint64_t *id, uint64_t completion_cookie);
+ssize_t homa_reply(int sockfd, const void *message_buf,
+		   size_t length, const union sockaddr_in_union *dest_addr,
+		   uint64_t id);
+ssize_t homa_replyv(int sockfd, const struct iovec *iov,
+		    int iovcnt, const union sockaddr_in_union *dest_addr,
+		    uint64_t id);
+int     homa_abort(int sockfd, uint64_t id, int error);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _HOMA_H */
+#endif /* _UAPI_LINUX_HOMA_H */

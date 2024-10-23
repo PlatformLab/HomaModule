@@ -173,7 +173,7 @@ static struct net_protocol homa_protocol = {
 static struct inet6_protocol homav6_protocol = {
 	.handler =	homa_softirq,
 	.err_handler =	homa_err_handler_v6,
-	.flags =        INET6_PROTO_NOPOLICY|INET6_PROTO_FINAL,
+	.flags =        INET6_PROTO_NOPOLICY | INET6_PROTO_FINAL,
 };
 
 /* Describes file operations implemented for /proc/net/homa_metrics. */
@@ -521,24 +521,24 @@ static int __init homa_load(void)
 
 	pr_notice("Homa module loading\n");
 	pr_notice("Homa structure sizes: data_header %u, seg_header %u, ack %u, grant_header %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
-			sizeof32(struct data_header),
-			sizeof32(struct seg_header),
-			sizeof32(struct homa_ack),
-			sizeof32(struct grant_header),
-			sizeof32(struct homa_peer),
-			sizeof32(struct iphdr),
-			sizeof32(struct flowi),
-			sizeof32(struct ipv6hdr),
-			sizeof32(struct flowi6),
-			sizeof32(struct tcp_sock),
-			sizeof32(struct homa_rpc),
-			sizeof32(struct sk_buff),
-			sizeof32(struct homa_recvmsg_args),
-			sizeof32(union sockaddr_in_union),
-			HOMA_MAX_BPAGES,
-			NR_CPUS,
-			nr_cpu_ids,
-			MAX_NUMNODES);
+		  sizeof32(struct data_header),
+		  sizeof32(struct seg_header),
+		  sizeof32(struct homa_ack),
+		  sizeof32(struct grant_header),
+		  sizeof32(struct homa_peer),
+		  sizeof32(struct iphdr),
+		  sizeof32(struct flowi),
+		  sizeof32(struct ipv6hdr),
+		  sizeof32(struct flowi6),
+		  sizeof32(struct tcp_sock),
+		  sizeof32(struct homa_rpc),
+		  sizeof32(struct sk_buff),
+		  sizeof32(struct homa_recvmsg_args),
+		  sizeof32(union sockaddr_in_union),
+		  HOMA_MAX_BPAGES,
+		  NR_CPUS,
+		  nr_cpu_ids,
+		  MAX_NUMNODES);
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
@@ -554,13 +554,13 @@ static int __init homa_load(void)
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet_add_protocol failed in %s: %d\n", __func__,
-			status);
+		       status);
 		goto out_cleanup;
 	}
 	status = inet6_add_protocol(&homav6_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet6_add_protocol failed in %s: %d\n",  __func__,
-				status);
+		       status);
 		goto out_cleanup;
 	}
 
@@ -593,13 +593,15 @@ static int __init homa_load(void)
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
 		pr_err("couldn't create homa pacer thread: error %d\n",
-				status);
+		       status);
 		timer_kthread = NULL;
 		goto out_cleanup;
 	}
 
 	homa_gro_hook_tcp();
+#if 1 /* See strip.py */
 	tt_init("timetrace", homa->temp);
+#endif /* See strip.py */
 
 	return 0;
 
@@ -627,7 +629,9 @@ static void __exit homa_unload(void)
 	pr_notice("Homa module unloading\n");
 	exiting = true;
 
+#if 1 /* See strip.py */
 	tt_destroy();
+#endif /* See strip.py */
 
 	homa_gro_unhook_tcp();
 	if (timer_kthread)
@@ -662,7 +666,7 @@ module_exit(homa_unload);
 int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
-	union sockaddr_in_union *addr_in = (union sockaddr_in_union *) addr;
+	union sockaddr_in_union *addr_in = (union sockaddr_in_union *)addr;
 	int port = 0;
 
 	if (unlikely(addr->sa_family != sock->sk->sk_family))
@@ -739,7 +743,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 	struct homa_abort_args args;
 	struct homa_rpc *rpc;
 
-	if (unlikely(copy_from_user(&args, (void *) karg, sizeof(args))))
+	if (unlikely(copy_from_user(&args, (void *)karg, sizeof(args))))
 		return -EFAULT;
 
 	if (args._pad1 || args._pad2[0] || args._pad2[1])
@@ -750,7 +754,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 	}
 
 	rpc = homa_find_client_rpc(hsk, args.id);
-	if (rpc == NULL)
+	if (!rpc)
 		return -EINVAL;
 	if (args.error == 0)
 		homa_rpc_free(rpc);
@@ -819,15 +823,15 @@ int homa_socket(struct sock *sk)
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
-		unsigned int optlen)
+		    unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_set_buf_args args;
 	__u64 start = get_cycles();
 	int ret;
 
-	if ((level != IPPROTO_HOMA) || (optname != SO_HOMA_SET_BUF)
-			|| (optlen != sizeof(struct homa_set_buf_args)))
+	if (level != IPPROTO_HOMA || optname != SO_HOMA_SET_BUF ||
+	    optlen != sizeof(struct homa_set_buf_args))
 		return -EINVAL;
 
 	if (copy_from_sockptr(&args, optval, optlen))
@@ -845,7 +849,6 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 	INC_METRIC(so_set_buf_calls, 1);
 	INC_METRIC(so_set_buf_cycles, get_cycles() - start);
 	return ret;
-
 }
 
 /**
@@ -858,12 +861,11 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_getsockopt(struct sock *sk, int level, int optname,
-		char __user *optval, int __user *option)
+		    char __user *optval, int __user *option)
 {
 	pr_warn("unimplemented getsockopt invoked on Homa socket: level %d, optname %d\n",
-			level, optname);
+		level, optname);
 	return -EINVAL;
-
 }
 
 /**
@@ -882,7 +884,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	__u64 finish;
 	int result = 0;
 	struct homa_rpc *rpc = NULL;
-	union sockaddr_in_union *addr = (union sockaddr_in_union *) msg->msg_name;
+	union sockaddr_in_union *addr = (union sockaddr_in_union *)msg->msg_name;
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
 	if (unlikely(!msg->msg_control_is_user)) {
@@ -898,9 +900,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = -EAFNOSUPPORT;
 		goto error;
 	}
-	if ((msg->msg_namelen < sizeof(struct sockaddr_in))
-			|| ((msg->msg_namelen < sizeof(struct sockaddr_in6))
-			&& (addr->in6.sin6_family == AF_INET6))) {
+	if (msg->msg_namelen < sizeof(struct sockaddr_in) ||
+	    (msg->msg_namelen < sizeof(struct sockaddr_in6) &&
+	     addr->in6.sin6_family == AF_INET6)) {
 		tt_record("homa_sendmsg error: msg_namelen too short");
 		result = -EINVAL;
 		goto error;
@@ -916,11 +918,10 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		INC_METRIC(send_calls, 1);
 		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
-				(addr->in6.sin6_family == AF_INET)
-				? ntohl(addr->in4.sin_addr.s_addr)
-				: tt_addr(addr->in6.sin6_addr),
-				ntohs(addr->in6.sin6_port), rpc->id,
-				length);
+			   (addr->in6.sin6_family == AF_INET)
+			   ? ntohl(addr->in4.sin_addr.s_addr)
+			   : tt_addr(addr->in6.sin6_addr),
+			   ntohs(addr->in6.sin6_port), rpc->id, length);
 		rpc->completion_cookie = args.completion_cookie;
 		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result)
@@ -930,7 +931,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		rpc = NULL;
 
 		if (unlikely(copy_to_user(msg->msg_control, &args,
-				sizeof(args)))) {
+					  sizeof(args)))) {
 			rpc = homa_find_client_rpc(hsk, args.id);
 			result = -EFAULT;
 			goto error;
@@ -943,7 +944,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 		INC_METRIC(reply_calls, 1);
 		tt_record4("homa_sendmsg response, id %llu, port %d, pid %d, length %d",
-				args.id, hsk->port, current->pid, length);
+			   args.id, hsk->port, current->pid, length);
 		if (args.completion_cookie != 0) {
 			tt_record("homa_sendmsg error: nonzero cookie");
 			result = -EINVAL;
@@ -952,14 +953,14 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		canonical_dest = canonical_ipv6_addr(addr);
 
 		rpc = homa_find_server_rpc(hsk, &canonical_dest,
-				ntohs(addr->in6.sin6_port), args.id);
+					   ntohs(addr->in6.sin6_port), args.id);
 		if (!rpc) {
 			/* Return without an error if the RPC doesn't exist;
 			 * this could be totally valid (e.g. client is
 			 * no longer interested in it).
 			 */
 			tt_record2("homa_sendmsg error: RPC id %d, peer 0x%x, doesn't exist",
-					args.id, tt_addr(canonical_dest));
+				   args.id, tt_addr(canonical_dest));
 			return 0;
 		}
 		if (rpc->error) {
@@ -967,7 +968,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			goto error;
 		}
 		if (rpc->state != RPC_IN_SERVICE) {
-			tt_record2("homa_sendmsg error: RPC id %d in bad state %d", rpc->id, rpc->state);
+			tt_record2("homa_sendmsg error: RPC id %d in bad state %d",
+				   rpc->id, rpc->state);
 			homa_rpc_unlock(rpc);
 			rpc = 0;
 			result = -EINVAL;
@@ -976,7 +978,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		rpc->state = RPC_OUTGOING;
 
 		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
-		if (result && (rpc->state != RPC_DEAD))
+		if (result && rpc->state != RPC_DEAD)
 			goto error;
 		homa_rpc_unlock(rpc);
 		finish = get_cycles();
@@ -991,7 +993,7 @@ error:
 		homa_rpc_unlock(rpc);
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
-			result, args.id);
+		   result, args.id);
 	tt_freeze();
 	return result;
 }
@@ -1029,7 +1031,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		goto done;
 	}
 	if (unlikely(copy_from_user(&control, msg->msg_control,
-			sizeof(control)))) {
+				    sizeof(control)))) {
 		result = -EFAULT;
 		goto done;
 	}
@@ -1039,15 +1041,15 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		goto done;
 	}
 	tt_record3("homa_recvmsg starting, port %d, pid %d, flags %d",
-			hsk->port, current->pid, control.flags);
+		   hsk->port, current->pid, control.flags);
 
-	if ((control.num_bpages > HOMA_MAX_BPAGES)
-			|| (control.flags & ~HOMA_RECVMSG_VALID_FLAGS)) {
+	if (control.num_bpages > HOMA_MAX_BPAGES ||
+	    (control.flags & ~HOMA_RECVMSG_VALID_FLAGS)) {
 		result = -EINVAL;
 		goto done;
 	}
 	homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
-			control.bpage_offsets);
+				  control.bpage_offsets);
 	control.num_bpages = 0;
 
 	rpc = homa_wait_for_message(hsk, (flags & MSG_DONTWAIT)
@@ -1088,7 +1090,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	if (likely(rpc->msgin.length >= 0)) {
 		control.num_bpages = rpc->msgin.num_bpages;
 		memcpy(control.bpage_offsets, rpc->msgin.bpage_offsets,
-				sizeof(control.bpage_offsets));
+		       sizeof(control.bpage_offsets));
 	}
 	if (sk->sk_family == AF_INET6) {
 		struct sockaddr_in6 *in6 = msg->msg_name;
@@ -1102,8 +1104,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 
 		in4->sin_family = AF_INET;
 		in4->sin_port = htons(rpc->dport);
-		in4->sin_addr.s_addr = ipv6_to_ipv4(
-				rpc->peer->addr);
+		in4->sin_addr.s_addr = ipv6_to_ipv4(rpc->peer->addr);
 		*addr_len = sizeof(*in4);
 	}
 	memcpy(&control.peer_addr, msg->msg_name, *addr_len);
@@ -1135,8 +1136,8 @@ done:
 
 	finish = get_cycles();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
-			control.id, result,
-			control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
+		   control.id, result,
+		   control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
 	INC_METRIC(recv_cycles, finish - start);
 	return result;
 }
@@ -1195,9 +1196,9 @@ int homa_softirq(struct sk_buff *skb)
 	INC_METRIC(softirq_calls, 1);
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 	if ((start - last) > 1000000) {
-		int scaled_ms = (int) (10*(start-last)/cpu_khz);
+		int scaled_ms = (int)(10 * (start - last) / cpu_khz);
 
-		if ((scaled_ms >= 50) && (scaled_ms < 10000)) {
+		if (scaled_ms >= 50 && scaled_ms < 10000) {
 //			tt_record3("Gap in incoming packets: %d cycles "
 //					"(%d.%1d ms)",
 //					(int) (start - last), scaled_ms/10,
@@ -1219,9 +1220,11 @@ int homa_softirq(struct sk_buff *skb)
 	skb_shinfo(skb)->frag_list = NULL;
 	packets = skb;
 	prev_link = &packets;
-	for (skb = packets; skb != NULL; skb = next) {
+	for (skb = packets; skb; skb = next) {
+#if 1 /* See strip.py */
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
+#endif /* See strip.py */
 		next = skb->next;
 
 		/* Make the header available at skb->data, even if the packet
@@ -1244,23 +1247,22 @@ int homa_softirq(struct sk_buff *skb)
 
 		/* Reject packets that are too short or have bogus types. */
 		h = (struct common_header *) skb->data;
-		if (unlikely((skb->len < sizeof(struct common_header))
-				|| (h->type < DATA)
-				|| (h->type >= BOGUS)
-				|| (skb->len < header_lengths[h->type-DATA]))) {
+		if (unlikely(skb->len < sizeof(struct common_header) ||
+				h->type < DATA || h->type >= BOGUS ||
+				skb->len < header_lengths[h->type-DATA])) {
 			if (homa->verbose)
 				pr_warn("Homa %s packet from %s too short: %d bytes\n",
-						homa_symbol_for_type(h->type),
-						homa_print_ipv6_addr(&saddr),
-						skb->len - header_offset);
+					homa_symbol_for_type(h->type),
+					homa_print_ipv6_addr(&saddr),
+					skb->len - header_offset);
 			INC_METRIC(short_packets, 1);
 			goto discard;
 		}
 
 		if (first_packet) {
 			tt_record4("homa_softirq: first packet from 0x%x:%d, id %llu, type %d",
-					tt_addr(saddr), ntohs(h->sport),
-					homa_local_id(h->sender_id), h->type);
+				   tt_addr(saddr), ntohs(h->sport),
+				   homa_local_id(h->sender_id), h->type);
 			first_packet = 0;
 		}
 
@@ -1282,15 +1284,16 @@ int homa_softirq(struct sk_buff *skb)
 		/* Process the packet now if it is a control packet or
 		 * if it contains an entire short message.
 		 */
-		if ((h->type != DATA) || (ntohl(((struct data_header *) h)
-				->message_length) < 1400)) {
+		if (h->type != DATA || ntohl(((struct data_header *)h)
+				->message_length) < 1400) {
 			UNIT_LOG("; ", "homa_softirq shortcut type 0x%x",
-					h->type);
+				 h->type);
 			*prev_link = skb->next;
 			skb->next = NULL;
 			homa_dispatch_pkts(skb, homa);
-		} else
+		} else {
 			prev_link = &skb->next;
+		}
 		continue;
 
 discard:
@@ -1302,7 +1305,7 @@ discard:
 	 * collects all of the packets for a particular RPC and dispatches
 	 * them.
 	 */
-	while (packets != NULL) {
+	while (packets) {
 		struct in6_addr saddr, saddr2;
 		struct common_header *h2;
 		struct sk_buff *skb2;
@@ -1312,10 +1315,10 @@ discard:
 		saddr = skb_canonical_ipv6_saddr(skb);
 		other_pkts = NULL;
 		other_link = &other_pkts;
-		h = (struct common_header *) skb->data;
-		for (skb2 = skb->next; skb2 != NULL; skb2 = next) {
+		h = (struct common_header *)skb->data;
+		for (skb2 = skb->next; skb2; skb2 = next) {
 			next = skb2->next;
-			h2 = (struct common_header *) skb2->data;
+			h2 = (struct common_header *)skb2->data;
 			if (h2->sender_id == h->sender_id) {
 				saddr2 = skb_canonical_ipv6_saddr(skb2);
 				if (ipv6_addr_equal(&saddr, &saddr2)) {
@@ -1331,7 +1334,7 @@ discard:
 		*other_link = NULL;
 #ifdef __UNIT_TEST__
 		UNIT_LOG("; ", "id %lld, offsets", homa_local_id(h->sender_id));
-		for (skb2 = packets; skb2 != NULL; skb2 = skb2->next) {
+		for (skb2 = packets; skb2; skb2 = skb2->next) {
 			struct data_header *h3 = (struct data_header *)
 					skb2->data;
 			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
@@ -1377,13 +1380,13 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
 
-	if ((type == ICMP_DEST_UNREACH) && (code == ICMP_PORT_UNREACH)) {
-		char *icmp = (char *) icmp_hdr(skb);
+	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
+		char *icmp = (char *)icmp_hdr(skb);
 		struct common_header *h;
 
-		iph = (struct iphdr *) (icmp + sizeof(struct icmphdr));
-		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
-				+ iph->ihl*4);
+		iph = (struct iphdr *)(icmp + sizeof(struct icmphdr));
+		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
+				+ iph->ihl * 4);
 		homa_abort_rpcs(homa, &saddr, htons(h->dport), -ENOTCONN);
 	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
@@ -1393,11 +1396,11 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-				iph->saddr, iph->daddr);
+			   iph->saddr, iph->daddr);
 		homa_abort_rpcs(homa, &saddr, 0, error);
 	} else {
 		pr_notice("%s invoked with info %x, ICMP type %d, ICMP code %d\n",
-			__func__, info, type, code);
+			  __func__, info, type, code);
 	}
 	return 0;
 }
@@ -1419,12 +1422,12 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
 
-	if ((type == ICMPV6_DEST_UNREACH) && (code == ICMPV6_PORT_UNREACH)) {
-		char *icmp = (char *) icmp_hdr(skb);
+	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
+		char *icmp = (char *)icmp_hdr(skb);
 		struct common_header *h;
 
-		iph = (struct ipv6hdr *) (icmp + sizeof(struct icmphdr));
-		h = (struct common_header *) (icmp + sizeof(struct icmphdr)
+		iph = (struct ipv6hdr *)(icmp + sizeof(struct icmphdr));
+		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
 				+ HOMA_IPV6_HEADER_LENGTH);
 		homa_abort_rpcs(homa, &iph->daddr, htons(h->dport), -ENOTCONN);
 	} else if (type == ICMPV6_DEST_UNREACH) {
@@ -1435,7 +1438,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMPv6 destination unreachable: 0x%x (daddr 0x%x)",
-				tt_addr(iph->saddr), tt_addr(iph->daddr));
+			   tt_addr(iph->saddr), tt_addr(iph->daddr));
 		homa_abort_rpcs(homa, &iph->daddr, 0, error);
 	} else {
 		if (homa->verbose)
@@ -1457,7 +1460,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
  *         state of the socket.
  */
 __poll_t homa_poll(struct file *file, struct socket *sock,
-	       struct poll_table_struct *wait)
+		   struct poll_table_struct *wait)
 {
 	struct sock *sk = sock->sk;
 	__poll_t mask;
@@ -1471,7 +1474,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	mask = POLLOUT | POLLWRNORM;
 
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
-			!list_empty(&homa_sk(sk)->ready_responses))
+	    !list_empty(&homa_sk(sk)->ready_responses))
 		mask |= POLLIN | POLLRDNORM;
 	return mask;
 }
@@ -1640,13 +1643,13 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 
 /**
  * homa_timer_main() - Top-level function for the timer thread.
- * @transportInfo:  Pointer to struct homa.
+ * @transport:  Pointer to struct homa.
  *
  * Return:         Always 0.
  */
-int homa_timer_main(void *transportInfo)
+int homa_timer_main(void *transport)
 {
-	struct homa *homa = (struct homa *) transportInfo;
+	struct homa *homa = (struct homa *)transport;
 	struct hrtimer hrtimer;
 	ktime_t tick_interval;
 	u64 nsec;

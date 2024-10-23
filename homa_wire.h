@@ -285,12 +285,11 @@ struct data_header {
 	struct seg_header seg;
 } __packed;
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
-		"data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 _Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
-		"data_header too small: Homa doesn't currently have codeto pad data packets");
-_Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header))
-		& 0x3) == 0,
-		" data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");
+	       "data_header too small: Homa doesn't currently have codeto pad data packets");
+_Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) & 0x3) == 0,
+	       " data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");
 
 /**
  * homa_data_len() - Returns the total number of bytes in a DATA packet
@@ -372,7 +371,7 @@ struct resend_header {
 	__u8 priority;
 } __packed;
 _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
-		"resend_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "resend_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct unknown_header - Wire format for UNKNOWN packets.
@@ -388,7 +387,7 @@ struct unknown_header {
 	struct common_header common;
 } __packed;
 _Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
-		"unknown_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "unknown_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -401,7 +400,7 @@ struct busy_header {
 	struct common_header common;
 } __packed;
 _Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
-		"busy_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "busy_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct cutoffs_header - Wire format for CUTOFFS packets.
@@ -454,7 +453,7 @@ struct need_ack_header {
 	struct common_header common;
 } __packed;
 _Static_assert(sizeof(struct need_ack_header) <= HOMA_MAX_HEADER,
-		"need_ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "need_ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct ack_header - Wire format for ACK packets.
@@ -474,7 +473,7 @@ struct ack_header {
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
 _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
-		"ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * homa_local_id(): given an RPC identifier from an input packet (which

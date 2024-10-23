@@ -64,7 +64,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  *                  space.
  */
 int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
-		struct iov_iter *iter)
+			       struct iov_iter *iter)
 {
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 	int seg_length = homa_info->seg_length;
@@ -82,7 +82,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 		if (bytes_left < seg_length)
 			seg_length = bytes_left;
 		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
-				seg_length);
+						seg_length);
 		if (err != 0)
 			return err;
 		bytes_left -= seg_length;
@@ -93,7 +93,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 
 		seg.offset = htonl(offset);
 		err = homa_skb_append_to_frag(rpc->hsk->homa, skb, &seg,
-				sizeof(seg));
+					      sizeof(seg));
 		if (err != 0)
 			return err;
 	}
@@ -119,8 +119,8 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  * Return: A pointer to the new packet, or a negative errno.
  */
 struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
-		struct iov_iter *iter, int offset, int length,
-		int max_seg_data)
+				     struct iov_iter *iter, int offset,
+				     int length, int max_seg_data)
 {
 	struct homa_skb_info *homa_info;
 	int segs, err, gso_size;
@@ -171,7 +171,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	} else {
 		gso_size = max_seg_data;
 		err = homa_skb_append_from_iter(rpc->hsk->homa, skb, iter,
-			length);
+						length);
 	}
 	if (err)
 		goto error;
@@ -236,10 +236,10 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int err;
 
 	homa_message_out_init(rpc, iter->count);
-	if (unlikely((rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH)
-			|| (rpc->msgout.length == 0))) {
+	if (unlikely(rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH ||
+		     rpc->msgout.length == 0)) {
 		tt_record2("homa_message_out_fill found bad length %d for id %d",
-				rpc->msgout.length, rpc->id);
+			   rpc->msgout.length, rpc->id);
 		err = -EINVAL;
 		goto error;
 	}
@@ -255,21 +255,21 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	/* Round gso_size down to an even # of mtus. */
 	segs_per_gso = (gso_size - rpc->hsk->ip_header_length
-			- sizeof(struct data_header))/max_seg_data;
+			- sizeof(struct data_header)) / max_seg_data;
 	if (segs_per_gso == 0)
 		segs_per_gso = 1;
 	max_gso_data = segs_per_gso * max_seg_data;
 	UNIT_LOG("; ", "mtu %d, max_seg_data %d, max_gso_data %d",
-			mtu, max_seg_data, max_gso_data);
+		 mtu, max_seg_data, max_gso_data);
 
-	overlap_xmit = rpc->msgout.length > 2*max_gso_data;
+	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
 	atomic_or(RPC_COPYING_FROM_USER, &rpc->flags);
 	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
 
 	/* Each iteration of the loop below creates one GSO packet. */
 	tt_record3("starting copy from user space for id %d, length %d, unscheduled %d",
-			rpc->id, rpc->msgout.length, rpc->msgout.unscheduled);
+		   rpc->id, rpc->msgout.length, rpc->msgout.unscheduled);
 	last_link = &rpc->msgout.packets;
 	for (bytes_left = rpc->msgout.length; bytes_left > 0; ) {
 		int skb_data_bytes, offset;
@@ -289,7 +289,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		if (skb_data_bytes > bytes_left)
 			skb_data_bytes = bytes_left;
 		skb = homa_new_data_packet(rpc, iter, offset, skb_data_bytes,
-				max_seg_data);
+					   max_seg_data);
 		if (unlikely(!skb)) {
 			err = PTR_ERR(skb);
 			homa_rpc_lock(rpc, "homa_message_out_fill");
@@ -316,7 +316,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		}
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
-			rpc->id, rpc->msgout.length);
+		   rpc->id, rpc->msgout.length);
 	atomic_andnot(RPC_COPYING_FROM_USER, &rpc->flags);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
 	if (!overlap_xmit && xmit)
@@ -343,9 +343,9 @@ error:
  *             was a problem.
  */
 int homa_xmit_control(enum homa_packet_type type, void *contents,
-	size_t length, struct homa_rpc *rpc)
+		      size_t length, struct homa_rpc *rpc)
 {
-	struct common_header *h = (struct common_header *) contents;
+	struct common_header *h = contents;
 
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
@@ -370,9 +370,11 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
  *             was a problem.
  */
 int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
-		struct homa_sock *hsk)
+			struct homa_sock *hsk)
 {
+#if 1 /* See strip.py */
 	struct netdev_queue *txq;
+#endif /* See strip.py */
 	struct common_header *h;
 	struct dst_entry *dst;
 	int result, priority;
@@ -386,20 +388,21 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	dst_hold(dst);
 	skb_dst_set(skb, dst);
 
-	h = (struct common_header *) skb_put(skb, length);
+	h = skb_put(skb, length);
 	memcpy(h, contents, length);
 	extra_bytes = HOMA_MIN_PKT_LENGTH - length;
 	if (extra_bytes > 0) {
 		memset(skb_put(skb, extra_bytes), 0, extra_bytes);
 		UNIT_LOG(",", "padded control packet with %d bytes",
-				extra_bytes);
+			 extra_bytes);
 	}
 	priority = hsk->homa->num_priorities-1;
 	skb->ooo_okay = 1;
 	skb_get(skb);
 	if (hsk->inet.sk.sk_family == AF_INET6) {
 		result = ip6_xmit(&hsk->inet.sk, skb, &peer->flow.u.ip6, 0,
-				NULL, hsk->homa->priority_map[priority] << 4, 0);
+				  NULL, hsk->homa->priority_map[priority] << 4,
+				  0);
 	} else {
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
 		hsk->inet.tos = hsk->homa->priority_map[priority]<<5;
@@ -417,23 +420,33 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		 * a bogus "reference count").
 		 */
 		if (refcount_read(&skb->users) > 1) {
+#if 1 /* See strip.py */
 			if (hsk->inet.sk.sk_family == AF_INET6) {
 				pr_notice("ip6_xmit didn't free Homa control packet (type %d) after error %d\n",
-						h->type, result);
+					  h->type, result);
 			} else {
 				pr_notice("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
-						h->type, result);
+					  h->type, result);
 				tt_record2("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
-						h->type, result);
+					   h->type, result);
 			}
+#else /* See strip.py */
+			if (hsk->inet.sk.sk_family == AF_INET6)
+				pr_notice("ip6_xmit didn't free Homa control packet (type %d) after error %d\n",
+					  h->type, result);
+			else
+				pr_notice("ip_queue_xmit didn't free Homa control packet (type %d) after error %d\n",
+					  h->type, result);
+#endif /* See strip.py */
 		}
 	}
+#if 1 /* See strip.py */
 	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 	if (netif_tx_queue_stopped(txq))
 		tt_record4("__homa_xmit_control found stopped txq for id %d, qid %d, num_queued %d, limit %d",
-				be64_to_cpu(h->sender_id),
-				skb->queue_mapping, txq->dql.num_queued,
-				txq->dql.adj_limit);
+			   be64_to_cpu(h->sender_id), skb->queue_mapping,
+			   txq->dql.num_queued, txq->dql.adj_limit);
+#endif /* See strip.py */
 	INC_METRIC(packets_sent[h->type - DATA], 1);
 	INC_METRIC(priority_bytes[priority], skb->len);
 	INC_METRIC(priority_packets[priority], 1);
@@ -449,7 +462,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  */
 void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 {
-	struct common_header *h = (struct common_header *) skb->data;
+	struct common_header *h = (struct common_header *)skb->data;
 	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct unknown_header unknown;
 	struct homa_peer *peer;
@@ -459,8 +472,8 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 				homa_print_ipv6_addr(&saddr),
 				ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
-			tt_addr(saddr), ntohs(h->sport),
-			homa_local_id(h->sender_id));
+		   tt_addr(saddr), ntohs(h->sport),
+		   homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
 	unknown.common.type = UNKNOWN;
@@ -490,7 +503,9 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
 {
 	struct homa *homa = rpc->hsk->homa;
+#if 1 /* See strip.py */
 	struct netdev_queue *txq;
+#endif /* See strip.py */
 
 	atomic_inc(&rpc->msgout.active_xmits);
 	while (*rpc->msgout.next_xmit) {
@@ -507,7 +522,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		if ((rpc->msgout.length - rpc->msgout.next_xmit_offset)
 				>= homa->throttle_min_bytes) {
 			if (!homa_check_nic_queue(homa, skb, force)) {
-				tt_record1("homa_xmit_data adding id %u to throttle queue", rpc->id);
+				tt_record1("homa_xmit_data adding id %u to throttle queue",
+					   rpc->id);
 				homa_add_to_throttled(rpc);
 				break;
 			}
@@ -526,11 +542,13 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
+#if 1 /* See strip.py */
 		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 		if (netif_tx_queue_stopped(txq))
 			tt_record4("homa_xmit_data found stopped txq for id %d, qid %d, num_queued %d, limit %d",
-					rpc->id, skb->queue_mapping,
-					txq->dql.num_queued, txq->dql.adj_limit);
+				   rpc->id, skb->queue_mapping,
+				   txq->dql.num_queued, txq->dql.adj_limit);
+#endif /* See strip.py */
 		force = false;
 		homa_rpc_lock(rpc, "homa_xmit_data");
 		if (rpc->state == RPC_DEAD)
@@ -549,7 +567,9 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
  */
 void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 {
+#if 1 /* See strip.py */
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
+#endif /* See strip.py */
 	struct dst_entry *dst;
 	int err;
 
@@ -569,25 +589,24 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->csum_offset = offsetof(struct common_header, checksum);
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-				homa_get_skb_info(skb)->wire_bytes,
-				tt_addr(rpc->peer->addr), rpc->id,
-				homa_info->offset);
+			   homa_get_skb_info(skb)->wire_bytes,
+			   tt_addr(rpc->peer->addr), rpc->id,
+			   homa_info->offset);
 		err = ip6_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow.u.ip6,
-				0, NULL,
-				rpc->hsk->homa->priority_map[priority] << 4, 0);
+			       0, NULL,
+			       rpc->hsk->homa->priority_map[priority] << 4, 0);
 	} else {
 		tt_record4("calling ip_queue_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
-				homa_get_skb_info(skb)->wire_bytes,
-				tt_addr(rpc->peer->addr), rpc->id,
-				homa_info->offset);
+			   homa_get_skb_info(skb)->wire_bytes,
+			   tt_addr(rpc->peer->addr), rpc->id,
+			   homa_info->offset);
 
 		rpc->hsk->inet.tos = rpc->hsk->homa->priority_map[priority]<<5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
 	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
-			rpc->id, homa_info->offset,
-			homa_get_skb_info(skb)->data_bytes,
-			skb->queue_mapping);
+		   rpc->id, homa_info->offset,
+		   homa_get_skb_info(skb)->data_bytes, skb->queue_mapping);
 	if (err)
 		INC_METRIC(data_xmit_errors, 1);
 	INC_METRIC(packets_sent[0], 1);
@@ -617,8 +636,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 	/* Each iteration of this loop checks one packet in the message
 	 * to see if it contains segments that need to be retransmitted.
 	 */
-	for (skb = rpc->msgout.packets; skb !=  NULL;
-			skb = homa_info->next_skb) {
+	for (skb = rpc->msgout.packets; skb; skb = homa_info->next_skb) {
 		int seg_offset, offset, seg_length, data_left;
 		struct data_header *h;
 
@@ -632,15 +650,15 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 		offset = homa_info->offset;
 		seg_offset = sizeof32(struct data_header);
 		data_left = homa_info->data_bytes;
-		if (skb_shinfo(skb)->gso_segs <= 1)
+		if (skb_shinfo(skb)->gso_segs <= 1) {
 			seg_length = data_left;
-		else {
+		} else {
 			seg_length = homa_info->seg_length;
-			h = (struct data_header *) skb_transport_header(skb);
+			h = (struct data_header *)skb_transport_header(skb);
 		}
 		for ( ; data_left > 0; data_left -= seg_length,
-				offset += seg_length,
-				seg_offset += skb_shinfo(skb)->gso_size) {
+		     offset += seg_length,
+		     seg_offset += skb_shinfo(skb)->gso_size) {
 			struct homa_skb_info *new_homa_info;
 			struct sk_buff *new_skb;
 			int err;
@@ -663,9 +681,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				UNIT_LOG("; ", "skb allocation error");
 				goto resend_done;
 			}
-			h = (struct data_header *) __skb_put_data(new_skb,
-					skb_transport_header(skb),
-					sizeof32(struct data_header));
+			h = __skb_put_data(new_skb, skb_transport_header(skb),
+					   sizeof32(struct data_header));
 			h->common.sequence = htonl(offset);
 			h->seg.offset = htonl(offset);
 			h->retransmit = 1;
@@ -676,12 +693,13 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			else
 				h->incoming = htonl(offset + seg_length);
 			err = homa_skb_append_from_skb(rpc->hsk->homa, new_skb,
-					skb, seg_offset, seg_length);
+						       skb, seg_offset,
+						       seg_length);
 			if (err != 0) {
 				pr_err("%s got error %d from homa_skb_append_from_skb\n",
-						__func__, err);
+				       __func__, err);
 				UNIT_LOG("; ", "%s got error %d while copying data",
-						__func__, -err);
+					 __func__, -err);
 				kfree_skb(new_skb);
 				goto resend_done;
 			}
@@ -694,7 +712,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			new_homa_info->seg_length = seg_length;
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",
-					offset, seg_length, rpc->id);
+				   offset, seg_length, rpc->id);
 			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
 			__homa_xmit_data(new_skb, rpc, priority);
 			INC_METRIC(resent_packets, 1);
@@ -716,10 +734,10 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!
 	 */
-	homa->cycles_per_kbyte = (8*(__u64) cpu_khz)/homa->link_mbps;
-	homa->cycles_per_kbyte = (101*homa->cycles_per_kbyte)/100;
+	homa->cycles_per_kbyte = (8 * (__u64)cpu_khz) / homa->link_mbps;
+	homa->cycles_per_kbyte = (101 * homa->cycles_per_kbyte) / 100;
 	tmp = homa->max_nic_queue_ns;
-	tmp = (tmp*cpu_khz)/1000000;
+	tmp = (tmp * cpu_khz) / 1000000;
 	homa->max_nic_queue_cycles = tmp;
 }
 
@@ -745,15 +763,16 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 	__u64 idle, new_idle, clock;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
-	cycles_for_packet = (bytes * homa->cycles_per_kbyte)/1000;
+	cycles_for_packet = (bytes * homa->cycles_per_kbyte) / 1000;
 	while (1) {
 		clock = get_cycles();
 		idle = atomic64_read(&homa->link_idle_time);
-		if (((clock + homa->max_nic_queue_cycles) < idle) && !force
-				&& !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
+		if ((clock + homa->max_nic_queue_cycles) < idle && !force &&
+		    !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
 		if (!list_empty(&homa->throttled_rpcs))
 			INC_METRIC(pacer_bytes, bytes);
+#if 1 /* See strip.py */
 		if (idle < clock) {
 			if (homa->pacer_wake_time) {
 				__u64 lost = (homa->pacer_wake_time > idle)
@@ -763,12 +782,19 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 				tt_record1("pacer lost %d cycles", lost);
 			}
 			new_idle = clock + cycles_for_packet;
-		} else
+		} else {
 			new_idle = idle + cycles_for_packet;
+		}
+#else /* See strip.py */
+		if (idle < clock)
+			new_idle = clock + cycles_for_packet;
+		else
+			new_idle = idle + cycles_for_packet;
+#endif /* See strip.py */
 
 		/* This method must be thread-safe. */
 		if (atomic64_cmpxchg_relaxed(&homa->link_idle_time, idle,
-				new_idle) == idle)
+					     new_idle) == idle)
 			break;
 	}
 	return 1;
@@ -776,13 +802,13 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 
 /**
  * homa_pacer_main() - Top-level function for the pacer thread.
- * @transportInfo:  Pointer to struct homa.
+ * @transport:  Pointer to struct homa.
  *
  * Return:         Always 0.
  */
-int homa_pacer_main(void *transportInfo)
+int homa_pacer_main(void *transport)
 {
-	struct homa *homa = (struct homa *) transportInfo;
+	struct homa *homa = (struct homa *)transport;
 
 	homa->pacer_wake_time = get_cycles();
 	while (1) {
@@ -799,10 +825,16 @@ int homa_pacer_main(void *transportInfo)
 		 * incoming packets from being handled).
 		 */
 		set_current_state(TASK_INTERRUPTIBLE);
+#if 1 /* See strip.py */
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
-				struct homa_rpc, throttled_links) == NULL)
+					   struct homa_rpc, throttled_links) == NULL)
 			tt_record("pacer sleeping");
 		else
+#else /* See strip.py */
+		if (list_first_or_null_rcu(&homa->throttled_rpcs,
+					   struct homa_rpc,
+					   throttled_links) != NULL)
+#endif /* See strip.py */
 			__set_current_state(TASK_RUNNING);
 		INC_METRIC(pacer_cycles, get_cycles() - homa->pacer_wake_time);
 		homa->pacer_wake_time = 0;
@@ -881,21 +913,23 @@ void homa_pacer_xmit(struct homa *homa)
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
 			list_for_each_entry_rcu(cur, &homa->throttled_rpcs,
-					throttled_links) {
+						throttled_links) {
 				if (cur->msgout.init_cycles < oldest) {
 					rpc = cur;
 					oldest = cur->msgout.init_cycles;
 				}
 			}
-		} else
+		} else {
 			rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
-					struct homa_rpc, throttled_links);
-		if (rpc == NULL) {
+						     struct homa_rpc,
+						     throttled_links);
+		}
+		if (!rpc) {
 			homa_throttle_unlock(homa);
 			break;
 		}
 		if (!homa_bucket_try_lock(rpc->bucket, rpc->id,
-				"homa_pacer_xmit")) {
+					  "homa_pacer_xmit")) {
 			homa_throttle_unlock(homa);
 			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
@@ -903,9 +937,9 @@ void homa_pacer_xmit(struct homa *homa)
 		homa_throttle_unlock(homa);
 
 		tt_record4("pacer calling homa_xmit_data for rpc id %llu, port %d, offset %d, bytes_left %d",
-				rpc->id, rpc->hsk->port,
-				rpc->msgout.next_xmit_offset,
-				rpc->msgout.length - rpc->msgout.next_xmit_offset);
+			   rpc->id, rpc->hsk->port,
+			   rpc->msgout.next_xmit_offset,
+			   rpc->msgout.length - rpc->msgout.next_xmit_offset);
 		homa_xmit_data(rpc, true);
 
 		/* Note: rpc->state could be RPC_DEAD here, but the code
@@ -919,8 +953,7 @@ void homa_pacer_xmit(struct homa *homa)
 			homa_throttle_lock(homa);
 			if (!list_empty(&rpc->throttled_links)) {
 				tt_record2("pacer removing id %d from throttled list, offset %d",
-						rpc->id,
-						rpc->msgout.next_xmit_offset);
+					   rpc->id, rpc->msgout.next_xmit_offset);
 				list_del_rcu(&rpc->throttled_links);
 				if (list_empty(&homa->throttled_rpcs))
 					INC_METRIC(throttled_cycles, get_cycles()
@@ -980,7 +1013,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
-			throttled_links) {
+				throttled_links) {
 		int bytes_left_cand;
 
 		checks++;
@@ -992,7 +1025,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 				candidate->msgout.next_xmit_offset;
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail_rcu(&rpc->throttled_links,
-					&candidate->throttled_links);
+					  &candidate->throttled_links);
 			goto done;
 		}
 	}

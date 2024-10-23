@@ -46,8 +46,9 @@ struct homa_bpage {
 		};
 	};
 };
+
 _Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
-		"homa_bpage overflowed a cache line");
+	       "homa_bpage overflowed a cache line");
 
 /**
  * struct homa_pool_core - Holds core-specific data for a homa_pool (a bpage
@@ -84,8 +85,9 @@ struct homa_pool_core {
 		};
 	};
 };
+
 _Static_assert(sizeof(struct homa_pool_core) == L1_CACHE_BYTES,
-		"homa_pool_core overflowed a cache line");
+	       "homa_pool_core overflowed a cache line");
 
 /**
  * struct homa_pool - Describes a pool of buffer space for incoming
@@ -141,16 +143,16 @@ struct homa_pool {
 	int check_waiting_invoked;
 };
 
-extern int      homa_pool_allocate(struct homa_rpc *rpc);
-extern void     homa_pool_check_waiting(struct homa_pool *pool);
-extern void     homa_pool_destroy(struct homa_pool *pool);
-extern void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
-		    int *available);
-extern int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
-		    __u32 *pages, int leave_locked);
-extern int      homa_pool_init(struct homa_sock *hsk, void *buf_region,
-		    __u64 region_size);
-extern void     homa_pool_release_buffers(struct homa_pool *pool,
-		    int num_buffers, __u32 *buffers);
+int      homa_pool_allocate(struct homa_rpc *rpc);
+void     homa_pool_check_waiting(struct homa_pool *pool);
+void     homa_pool_destroy(struct homa_pool *pool);
+void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
+			      int *available);
+int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
+			     __u32 *pages, int leave_locked);
+int      homa_pool_init(struct homa_sock *hsk, void *buf_region,
+			__u64 region_size);
+void     homa_pool_release_buffers(struct homa_pool *pool,
+				   int num_buffers, __u32 *buffers);
 
 #endif /* _HOMA_POOL_H */

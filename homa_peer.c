@@ -24,8 +24,8 @@ int homa_peertab_init(struct homa_peertab *peertab)
 
 	spin_lock_init(&peertab->write_lock);
 	INIT_LIST_HEAD(&peertab->dead_dsts);
-	peertab->buckets = vmalloc(
-			HOMA_PEERTAB_BUCKETS * sizeof(*peertab->buckets));
+	peertab->buckets = vmalloc(HOMA_PEERTAB_BUCKETS *
+				   sizeof(*peertab->buckets));
 	if (!peertab->buckets)
 		return -ENOMEM;
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++)
@@ -51,7 +51,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-				peertab_links) {
+					  peertab_links) {
 			dst_release(peer->dst);
 			kfree(peer);
 		}
@@ -118,9 +118,9 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
 {
 	while (!list_empty(&peertab->dead_dsts)) {
-		struct homa_dead_dst *dead = list_first_entry(
-				&peertab->dead_dsts, struct homa_dead_dst,
-				dst_links);
+		struct homa_dead_dst *dead = list_first_entry(&peertab->dead_dsts,
+							      struct homa_dead_dst,
+							dst_links);
 		if (dead->gc_time > now)
 			break;
 		dst_release(dead->dst);
@@ -143,7 +143,8 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
  *              homa_peertab_destroy.
  */
 struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
-		const struct in6_addr *addr, struct inet_sock *inet)
+				 const struct in6_addr *addr,
+				 struct inet_sock *inet)
 {
 	/* Note: this function uses RCU operators to ensure safety even
 	 * if a concurrent call is adding a new entry.
@@ -158,7 +159,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	bucket ^= hash_32(addr->in6_u.u6_addr32[2], HOMA_PEERTAB_BUCKET_BITS);
 	bucket ^= hash_32(addr->in6_u.u6_addr32[3], HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
-			peertab_links) {
+				 peertab_links) {
 		if (ipv6_addr_equal(&peer->addr, addr))
 			return peer;
 		INC_METRIC(peer_hash_links, 1);
@@ -172,13 +173,13 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	 */
 	spin_lock_bh(&peertab->write_lock);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
-			peertab_links) {
+				 peertab_links) {
 		if (ipv6_addr_equal(&peer->addr, addr))
 			goto done;
 	}
 	peer = kmalloc(sizeof(*peer), GFP_ATOMIC);
 	if (!peer) {
-		peer = (struct homa_peer *) ERR_PTR(-ENOMEM);
+		peer = (struct homa_peer *)ERR_PTR(-ENOMEM);
 		INC_METRIC(peer_kmalloc_errors, 1);
 		goto done;
 	}
@@ -186,7 +187,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	dst = homa_peer_get_dst(peer, inet);
 	if (IS_ERR(dst)) {
 		kfree(peer);
-		peer = (struct homa_peer *) PTR_ERR(dst);
+		peer = (struct homa_peer *)PTR_ERR(dst);
 		INC_METRIC(peer_route_errors, 1);
 		goto done;
 	}
@@ -221,7 +222,7 @@ done:
  * @hsk:      Socket that will be used to transmit data to the peer.
  */
 void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
-		struct homa_sock *hsk)
+		      struct homa_sock *hsk)
 {
 	struct dst_entry *dst;
 
@@ -246,7 +247,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			__u64 now = get_cycles();
 
 			dead->dst = peer->dst;
-			dead->gc_time = now + (cpu_khz<<7);
+			dead->gc_time = now + (cpu_khz << 7);
 			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
 			homa_peertab_gc_dsts(peertab, now);
 		}
@@ -285,20 +286,20 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
  * Return:  The dst structure (or an ERR_PTR).
  */
 struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
-		struct inet_sock *inet)
+				    struct inet_sock *inet)
 {
 	memset(&peer->flow, 0, sizeof(peer->flow));
 	if (inet->sk.sk_family == AF_INET) {
 		struct rtable *rt;
 
 		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
-				inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
-				inet->sk.sk_protocol, 0,
-				peer->addr.in6_u.u6_addr32[3], inet->inet_saddr,
-				0, 0, inet->sk.sk_uid);
+				   inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
+				   inet->sk.sk_protocol, 0,
+				   peer->addr.in6_u.u6_addr32[3], inet->inet_saddr,
+				   0, 0, inet->sk.sk_uid);
 		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
 		rt = ip_route_output_flow(sock_net(&inet->sk),
-				&peer->flow.u.ip4, &inet->sk);
+					  &peer->flow.u.ip4, &inet->sk);
 		if (IS_ERR(rt))
 			return (struct dst_entry *)(PTR_ERR(rt));
 		return &rt->dst;
@@ -420,7 +421,7 @@ int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
 	if (count > peer->num_acks)
 		count = peer->num_acks;
 	memcpy(dst, &peer->acks[peer->num_acks - count],
-			count * sizeof(peer->acks[0]));
+	       count * sizeof(peer->acks[0]));
 	peer->num_acks -= count;
 
 	homa_peer_unlock(peer);

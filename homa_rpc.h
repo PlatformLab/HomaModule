@@ -408,39 +408,40 @@ struct homa_rpc {
 	 * @start_cycles: time (from get_cycles()) when this RPC was created.
 	 * Used (sometimes) for testing.
 	 */
-	uint64_t start_cycles;
+	u64 start_cycles;
 };
 
-extern void     homa_check_rpc(struct homa_rpc *rpc);
-extern struct homa_rpc
+void     homa_check_rpc(struct homa_rpc *rpc);
+struct homa_rpc
 	       *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
-extern struct homa_rpc
+struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk,
-		    const struct in6_addr *saddr, __u16 sport, __u64 id);
-extern void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
-		struct homa_ack *ack);
-extern void     homa_rpc_free(struct homa_rpc *rpc);
-extern void     homa_rpc_log(struct homa_rpc *rpc);
-extern void     homa_rpc_log_active(struct homa *homa, uint64_t id);
-extern void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
-extern void     homa_rpc_log_tt(struct homa_rpc *rpc);
-extern struct homa_rpc
+				     const struct in6_addr *saddr, __u16 sport,
+				     __u64 id);
+void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
+			struct homa_ack *ack);
+void     homa_rpc_free(struct homa_rpc *rpc);
+void     homa_rpc_log(struct homa_rpc *rpc);
+void     homa_rpc_log_active(struct homa *homa, uint64_t id);
+void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
+void     homa_rpc_log_tt(struct homa_rpc *rpc);
+struct homa_rpc
 	       *homa_rpc_new_client(struct homa_sock *hsk,
-		const union sockaddr_in_union *dest);
-extern struct homa_rpc
+				    const union sockaddr_in_union *dest);
+struct homa_rpc
 	       *homa_rpc_new_server(struct homa_sock *hsk,
-		    const struct in6_addr *source, struct data_header *h,
-		    int *created);
-extern int      homa_rpc_reap(struct homa_sock *hsk, int count);
-extern char    *homa_symbol_for_state(struct homa_rpc *rpc);
-extern int      homa_validate_incoming(struct homa *homa, int verbose,
-		    int *link_errors);
+				    const struct in6_addr *source,
+				    struct data_header *h, int *created);
+int      homa_rpc_reap(struct homa_sock *hsk, int count);
+char    *homa_symbol_for_state(struct homa_rpc *rpc);
+int      homa_validate_incoming(struct homa *homa, int verbose,
+				int *link_errors);
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.
  * @rpc:    RPC to lock. Note: this function is only safe under
  *          limited conditions (in most cases homa_bucket_lock should be
- * 	    used). The caller must ensure that the RPC cannot be reaped
+ *          used). The caller must ensure that the RPC cannot be reaped
  *          before the lock is acquired. It cannot do that by acquirin
  *          the socket lock, since that violates lock ordering constraints.
  *          One approach is to use homa_protect_rpcs. Don't use this function
@@ -494,20 +495,6 @@ static inline int homa_protect_rpcs(struct homa_sock *hsk)
 static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
 {
 	atomic_dec(&hsk->protect_count);
-}
-
-/**
- * homa_rpc_validate() - Check to see if an RPC has been reaped (which
- * would mean it is no longer valid); if so, crash the kernel with a stack
- * trace.
- * @rpc:   RPC to validate.
- */
-static inline void homa_rpc_validate(struct homa_rpc *rpc)
-{
-	if (rpc->magic == HOMA_RPC_MAGIC)
-		return;
-	pr_err("Accessing reaped Homa RPC!\n");
-	BUG();
 }
 
 /**

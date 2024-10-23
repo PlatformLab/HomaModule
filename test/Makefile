@@ -6,18 +6,9 @@ CXX ?= g++
 PERL ?= perl
 ARCH ?= x86
 
-CINCLUDES := -I. \
-	    -I.. \
-	    -I$(KDIR)/arch/x86/include \
-	    -I$(KDIR)/arch/x86/include/generated \
-	    -I$(KDIR)/include \
-	    -I$(KDIR)/arch/x86/include/uapi \
-	    -I$(KDIR)/arch/x86/include/generated/uapi \
-	    -I$(KDIR)/include/uapi \
-	    -I$(KDIR)/include/generated/uapi \
-	    -include $(KDIR)/include/linux/kconfig.h
-CCINCLUDES := -I. \
-	    -I.. \
+all: test
+
+KERN_INCLUDES := \
 	    -I$(KDIR)/arch/x86/include \
 	    -I$(KDIR)/arch/x86/include/generated \
 	    -I$(KDIR)/include \
@@ -25,6 +16,15 @@ CCINCLUDES := -I. \
 	    -I$(KDIR)/arch/x86/include/generated/uapi \
 	    -I$(KDIR)/include/uapi \
 	    -I$(KDIR)/include/generated/uapi
+CINCLUDES := \
+	    -I. \
+	    -I.. \
+	    $(KERN_INCLUDES) \
+	    -include $(KDIR)/include/linux/kconfig.h
+CCINCLUDES := \
+	    -I. \
+	    -I.. \
+	    $(KERN_KINCLUDES)
 
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
@@ -71,14 +71,11 @@ OTHER_SRCS := ccutils.cc \
 	      main.c \
 	      mock.c \
 	      utils.c
-
 OTHER_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(OTHER_SRCS)))
 
 OBJS := $(TEST_OBJS) $(HOMA_OBJS) $(OTHER_OBJS)
 
 CLEANS = unit $(OBJS) *.d .deps
-
-all: run_tests
 
 # This seems to be the only way to disable the built-in implicit rules
 # for %:%.c and %:%.cc.
@@ -100,8 +97,48 @@ all: run_tests
 unit: $(OBJS)
 	$(CXX) $(CFLAGS) $^ -o $@ -lasan
 
-run_tests: unit
+test: unit
 	./unit
+
+# Additional definitions for running unit tests using stripped sources.
+
+S_HOMA_SRCS := $(patsubst %,stripped/%,$(filter-out timetrace.c, $(HOMA_SRCS)))
+S_HOMA_OBJS :=  $(patsubst %.c,%.o,$(S_HOMA_SRCS))
+S_HOMA_HDRS := stripped/homa.h \
+		stripped/homa_impl.h \
+		stripped/homa_peer.h \
+		stripped/homa_pool.h \
+		stripped/homa_receiver.h \
+		stripped/homa_rpc.h \
+		stripped/homa_sock.h \
+		stripped/homa_stub.h \
+		stripped/homa_wire.h
+stripped/%.c: ../%.c
+	../util/strip.py $< > $@
+stripped/%.h: ../%.h
+	../util/strip.py $< > $@
+S_TEST_OBJS := $(patsubst %,stripped/%,$(filter-out unit_timetrace.o, $(TEST_OBJS)))
+S_OBJS := $(S_HOMA_OBJS) $(S_TEST_OBJS) $(patsubst %,stripped/%,$(OTHER_OBJS))
+
+$(S_OBJS): | stripped $(S_HOMA_HDRS)
+
+stripped:
+	mkdir -p stripped
+
+stripped/%.o: stripped/%.c
+	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
+stripped/%.o: %.c
+	$(CC) -c $(patsubst -I..,-Istripped,$(CFLAGS)) $< -o $@
+stripped/%.o: %.cc
+	$(CXX) -c $(patsubst -I..,-Istripped,$(CCFLAGS)) $< -o $@
+
+s_unit: $(S_OBJS)
+	$(CXX) $(CFLAGS) $^ -o $@ -lasan
+
+s_test: s_unit
+	./s_unit
+
+CLEANS += s_unit
 
 # The target below shouldn't be needed: theoretically, any code that is
 # sensitive to IPv4 vs. IPv6 should be tested explicitly, regardless of
@@ -113,13 +150,14 @@ test_both: unit
 	./unit
 
 clean:
-	rm -f unit $(CLEANS)
+	rm -f $(CLEANS)
+	rm -rf stripped
 
 # This magic (along with the -MD gcc option) automatically generates makefile
 # dependencies for header files included from C source files we compile,
 # and keeps those dependencies up-to-date every time we recompile.
 # See 'mergedep.pl' for more information.
-.deps: $(wildcard *.d)
+.deps: $(wildcard *.d stripped/*.d)
 	@mkdir -p $(@D)
 	$(PERL) mergedep.pl $@ $^
 -include .deps
@@ -128,4 +166,3 @@ clean:
 # prints the value of a make variable.
 print-%:
 	@echo $* = $($*)
-

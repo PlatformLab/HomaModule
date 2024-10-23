@@ -754,6 +754,7 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_skb_copy_datagram_iter)
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
+#ifdef HOMA_TIMETRACE_H
 TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
 {
 	struct homa_rpc *crpc;
@@ -790,6 +791,7 @@ TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
 			traces);
 	tt_destroy();
 }
+#endif
 
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv4)
 {

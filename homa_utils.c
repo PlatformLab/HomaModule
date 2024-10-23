@@ -56,9 +56,9 @@ int homa_init(struct homa *homa)
 	homa->throttle_min_bytes = 200;
 	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
-	homa->port_map = kmalloc(sizeof *homa->port_map, GFP_KERNEL);
+	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	homa_socktab_init(homa->port_map);
-	homa->peers = kmalloc(sizeof *homa->peers, GFP_KERNEL);
+	homa->peers = kmalloc(sizeof(*homa->peers), GFP_KERNEL);
 	err = homa_peertab_init(homa->peers);
 	if (err) {
 		pr_err("Couldn't initialize peer table (errno %d)\n", -err);
@@ -101,7 +101,7 @@ int homa_init(struct homa *homa)
 	homa->dead_buffs_limit = 5000;
 	homa->max_dead_buffs = 0;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
-			"homa_pacer");
+					  "homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
 		err = PTR_ERR(homa->pacer_kthread);
 		homa->pacer_kthread = NULL;
@@ -650,7 +650,7 @@ void homa_spin(int ns)
 {
 	__u64 end;
 
-	end = get_cycles() + (ns*cpu_khz)/1000000;
+	end = get_cycles() + (ns * cpu_khz) / 1000000;
 	while (get_cycles() < end)
 		/* Empty loop body.*/
 		;
