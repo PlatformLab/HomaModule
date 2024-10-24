@@ -45,7 +45,7 @@
 #include <net/gro.h>
 #include <net/rps.h>
 
-#if 1 /* See strip.py */
+#if 1 /* See strip.py --alt */
 #include "homa.h"
 #else /* See strip.py */
 #include <uapi/linux/homa.h>

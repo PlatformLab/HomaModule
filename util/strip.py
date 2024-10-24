@@ -7,7 +7,7 @@ This script is used to copy information from the Homa GitHub repo to
 a Linux kernel repo, removing information that doesn't belong in the
 official kernel version (primarily calls to tt_record).
 
-Usage: strip.py file file file ... destdir
+Usage: strip.py [--alt] file file file ... destdir
 
 Each of the files will be read, stripped as appropriate, and copied to a
 file by the same name in destdir. If there is only a single file and no
@@ -34,6 +34,16 @@ the following ways:
     #else /* See strip.py */
     ...
     #endif /* See strip.py */
+
+* It is also possible to strip using "alt" mode, with lines like this:
+    #if 1 /* See strip.py --alt */
+    #if 0 /* See strip.py --alt */
+  If the --alt option was not specified then these lines are handled as
+  if "--alt" wasn't present in the comments. However, if the --alt option
+  was specified then these lines are ignored.
+
+If the --alt option is specified, it means the output is intended for
+testing outside the Linux kernel. In this case, the lines
 """
 
 from collections import defaultdict
@@ -101,11 +111,12 @@ def last_non_blank(s):
         return s2[-1]
     return None
 
-def scan(file):
+def scan(file, alt_mode):
     """
     Read a file, remove information that shouldn't appear in the Linux kernel
     version, and return an array of lines representing the stripped file.
-    file:   Pathname of file to read
+    file:     Pathname of file to read
+    alt_mode: True means the --alt option was specified
     """
 
     global exit_code
@@ -188,13 +199,17 @@ def scan(file):
                 continue
             if in_labeled_skip == 1:
                 continue
-        if line.startswith('#if 1 /* See strip.py */'):
+        if line.startswith('#if 1 /* See strip.py */') or (
+                line.startswith('#if 1 /* See strip.py --alt */')
+                and not alt_mode):
             if slines[-1].strip() == '':
                 slines.pop()
             in_labeled_skip = 1
             check_braces = False
             continue
-        if line.startswith('#if 0 /* See strip.py */'):
+        if line.startswith('#if 0 /* See strip.py */')or (
+                line.startswith('#if 0 /* See strip.py --alt */')
+                and not alt_mode):
             if slines[-1].strip() == '':
                 slines.pop()
             in_labeled_skip = 0
@@ -280,17 +295,21 @@ def scan(file):
 
 if __name__ == '__main__':
     f = sys.stdin
+    alt_mode = False;
+    if (len(sys.argv) >= 2) and (sys.argv[1] == '--alt'):
+        alt_mode = True;
+        del sys.argv[1]
     if len(sys.argv) < 2:
-        print('Usage: strip.py file [file ... destdir]', file=sys.stderr)
+        print('Usage: strip.py [--alt] file [file ... destdir]', file=sys.stderr)
         exit(1)
     if len(sys.argv) == 2:
-        for line in scan(sys.argv[1]):
+        for line in scan(sys.argv[1], alt_mode):
             print(line, end='')
     else:
         for file in sys.argv[1:-1]:
             dst_file = '%s/%s' % (sys.argv[-1], file)
             print('Stripping %s into %s' % (file, dst_file))
-            slines = scan(file)
+            slines = scan(file, alt_mode)
             dst = open(dst_file, 'w')
             for line in slines:
                 print(line, end='', file=dst)

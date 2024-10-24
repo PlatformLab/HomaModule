@@ -114,9 +114,9 @@ S_HOMA_HDRS := stripped/homa.h \
 		stripped/homa_stub.h \
 		stripped/homa_wire.h
 stripped/%.c: ../%.c
-	../util/strip.py $< > $@
+	../util/strip.py --alt $< > $@
 stripped/%.h: ../%.h
-	../util/strip.py $< > $@
+	../util/strip.py --alt $< > $@
 S_TEST_OBJS := $(patsubst %,stripped/%,$(filter-out unit_timetrace.o, $(TEST_OBJS)))
 S_OBJS := $(S_HOMA_OBJS) $(S_TEST_OBJS) $(patsubst %,stripped/%,$(OTHER_OBJS))
 
