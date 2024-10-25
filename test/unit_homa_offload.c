@@ -195,7 +195,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 	EXPECT_EQ(skb, cur_offload_core->held_skb);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(IPPROTO_HOMA, ip_hdr(skb)->protocol);
-	EXPECT_EQ(2303, ip_hdr(skb)->check);
+	EXPECT_EQ(29695, ip_hdr(skb)->check);
 	kfree_skb(skb);
 	homa_gro_unhook_tcp();
 }

@@ -18,10 +18,8 @@ extern "C"
 {
 #endif
 
-/* Homa's protocol number within the IP protocol space (this is not an
- * officially allocated slot).
- */
-#define IPPROTO_HOMA 0xFD
+/* IANA-assigned Internet Protocol number for Homa. */
+#define IPPROTO_HOMA 146
 
 /**
  * define HOMA_MAX_MESSAGE_LENGTH - Maximum bytes of payload in a Homa
