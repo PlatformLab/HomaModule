@@ -849,8 +849,13 @@ struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 	return entry;
 }
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+int proc_dointvec(struct ctl_table *table, int write,
+		     void __user *buffer, size_t *lenp, loff_t *ppos)
+#else
 int proc_dointvec(const struct ctl_table *table, int write,
 		     void __user *buffer, size_t *lenp, loff_t *ppos)
+#endif
 {
 	return 0;
 }
@@ -955,7 +960,7 @@ int sk_set_peek_off(struct sock *sk, int val)
 void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 		enum skb_drop_reason reason)
 {
-	__kfree_skb(skb);
+	kfree_skb(skb);
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,

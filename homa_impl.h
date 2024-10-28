@@ -1105,8 +1105,13 @@ extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 extern void     homa_destroy(struct homa *homa);
 extern int      homa_disconnect(struct sock *sk, int flags);
 extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+extern int      homa_dointvec(struct ctl_table *table, int write,
+		    void __user *buffer, size_t *lenp, loff_t *ppos);
+#else
 extern int      homa_dointvec(const struct ctl_table *table, int write,
 		    void __user *buffer, size_t *lenp, loff_t *ppos);
+#endif
 extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 extern int      homa_err_handler_v6(struct sk_buff *skb,
 		    struct inet6_skb_parm *opt, u8 type,  u8 code,  int offset,
@@ -1176,8 +1181,13 @@ extern int      homa_snprintf(char *buffer, int size, int used,
 extern int      homa_softirq(struct sk_buff *skb);
 extern void     homa_spin(int ns);
 extern char    *homa_symbol_for_type(uint8_t type);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+extern int      homa_sysctl_softirq_cores(struct ctl_table *table,
+		    int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+#else
 extern int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 		    int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+#endif
 extern void     homa_timer(struct homa *homa);
 extern int      homa_timer_main(void *transportInfo);
 extern void     homa_unhash(struct sock *sk);
