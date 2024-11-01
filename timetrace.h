@@ -200,12 +200,15 @@ static inline void tt_record(const char *format)
 
 static inline __u32 tt_hi(void *p)
 {
-	return ((__u64)p) >> 32;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshift-count-overflow"
+	return ((uintptr_t)p) >> 32;
+#pragma GCC diagnostic pop
 }
 
 static inline __u32 tt_lo(void *p)
 {
-	return ((__u64)p) & 0xffffffff;
+	return ((uintptr_t)p) & 0xffffffff;
 }
 
 #endif // HOMA_TIMETRACE_H

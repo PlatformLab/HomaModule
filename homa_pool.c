@@ -53,7 +53,7 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 	struct homa_pool *pool = hsk->buffer_pool;
 	int i, result;
 
-	if (((__u64)region) & ~PAGE_MASK)
+	if (((uintptr_t)region) & ~PAGE_MASK)
 		return -EINVAL;
 	pool->hsk = hsk;
 	pool->region = (char *)region;
