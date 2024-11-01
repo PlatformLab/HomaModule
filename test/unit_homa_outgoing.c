@@ -16,7 +16,10 @@ static void unlock_hook(char *id)
 {
 	if (strcmp(id, "unlock") != 0)
 		return;
-	homa_rpc_free(hook_rpc);
+	if (hook_rpc) {
+		homa_rpc_free(hook_rpc);
+		hook_rpc = NULL;
+	}
 }
 
 /* The following hook function frees an RPC when it is locked. */

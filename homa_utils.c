@@ -140,6 +140,10 @@ int homa_init(struct homa *homa)
  */
 void homa_destroy(struct homa *homa)
 {
+#ifdef __UNIT_TEST__
+#include "utils.h"
+	unit_homa_destroy(homa);
+#endif /* __UNIT_TEST__ */
 	if (homa->pacer_kthread) {
 		homa_pacer_stop(homa);
 		wait_for_completion(&homa_pacer_kthread_done);
@@ -500,6 +504,7 @@ void homa_freeze_peers(struct homa *homa)
 
 	/* Find a socket to use (any will do). */
 	hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	homa_socktab_end_scan(&scan);
 	if (hsk == NULL) {
 		tt_record("homa_freeze_peers couldn't find a socket");
 		return;

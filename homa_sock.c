@@ -17,6 +17,7 @@ void homa_socktab_init(struct homa_socktab *socktab)
 	spin_lock_init(&socktab->write_lock);
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
+	INIT_LIST_HEAD(&socktab->active_scans);
 }
 
 /**
@@ -32,6 +33,7 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 			hsk = homa_socktab_next(&scan)) {
 		homa_sock_destroy(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 }
 
 /**
@@ -51,8 +53,12 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
  * delete them while the scan is in progress. If a socket is removed from
  * the table during the scan, it may or may not be returned by
  * homa_socktab_next. New entries added during the scan may or may not be
- * returned. The caller should use RCU to prevent socket storage from
- * being reclaimed during the scan.
+ * returned. The caller must hold an RCU read lock when invoking the
+ * scan-related methods here, as well as when manipulating sockets returned
+ * during the scan. It is safe to release and reacquire the RCU read lock
+ * during a scan, as long as no socket is held when the read lock is
+ * released and homa_socktab_next isn't invoked until the RCU read lock
+ * is reacquired.
  */
 struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 					  struct homa_socktab_scan *scan)
@@ -60,6 +66,11 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 	scan->socktab = socktab;
 	scan->current_bucket = -1;
 	scan->next = NULL;
+
+	spin_lock_bh(&socktab->write_lock);
+	list_add_tail_rcu(&scan->scan_links, &socktab->active_scans);
+	spin_unlock_bh(&socktab->write_lock);
+
 	return homa_socktab_next(scan);
 }
 
@@ -94,6 +105,17 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 	}
 }
 
+/**
+ * homa_socktab_end_scan() - Must be invoked on completion of each scan
+ * to clean up state associated with the scan.
+ * @scan:      State of the scan.
+ */
+void homa_socktab_end_scan(struct homa_socktab_scan *scan)
+{
+	spin_lock_bh(&scan->socktab->write_lock);
+	list_del(&scan->scan_links);
+	spin_unlock_bh(&scan->socktab->write_lock);
+}
 /**
  * homa_sock_init() - Constructor for homa_sock objects. This function
  * initializes only the parts of the socket that are owned by Homa.
@@ -158,6 +180,30 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	spin_unlock_bh(&socktab->write_lock);
 }
 
+/*
+ * homa_sock_unlink() - Unlinks a socket from its socktab and does
+ * related cleanups. Once this method returns, the socket will not be
+ * discoverable through the socktab.
+ */
+void homa_sock_unlink(struct homa_sock *hsk)
+{
+	struct homa_socktab *socktab = hsk->homa->port_map;
+	struct homa_socktab_scan *scan;
+
+	/* If any scans refer to this socket, advance them to refer to
+	 * the next socket instead.
+	 */
+	spin_lock_bh(&socktab->write_lock);
+	list_for_each_entry(scan, &socktab->active_scans, scan_links) {
+		if (!scan->next || (scan->next->sock != hsk))
+			continue;
+		scan->next = (struct homa_socktab_links *)hlist_next_rcu(
+			      &scan->next->hash_links);
+	}
+	hlist_del_rcu(&hsk->socktab_links.hash_links);
+	spin_unlock_bh(&socktab->write_lock);
+}
+
 /**
  * homa_sock_shutdown() - Disable a socket so that it can no longer
  * be used for either sending or receiving messages. Any system calls
@@ -180,7 +226,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * active operations that hold RPC locks but not the socket lock.
 	 * 1. Set @shutdown; this ensures that no new RPCs will be created for
 	 *    this socket (though some creations might already be in progress).
-	 * 2. Remove the socket from the port map: this ensures that
+	 * 2. Remove the socket from its socktab: this ensures that
 	 *    incoming packets for the socket will be dropped.
 	 * 3. Go through all of the RPCs and delete them; this will
 	 *    synchronize with any operations in progress.
@@ -191,9 +237,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 * See sync.txt for additional information about locking.
 	 */
 	hsk->shutdown = true;
-	spin_lock_bh(&hsk->homa->port_map->write_lock);
-	hlist_del_rcu(&hsk->socktab_links.hash_links);
-	spin_unlock_bh(&hsk->homa->port_map->write_lock);
+	homa_sock_unlink(hsk);
 	homa_sock_unlock(hsk);
 
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {

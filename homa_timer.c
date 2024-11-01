@@ -253,6 +253,7 @@ void homa_timer(struct homa *homa)
 		}
 		homa_unprotect_rpcs(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 			total_incoming_rpcs, sum_incoming, sum_incoming_rec,

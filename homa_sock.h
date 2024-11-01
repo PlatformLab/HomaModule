@@ -37,6 +37,12 @@ struct homa_socktab {
 	 * consist of homa_socktab_link objects.
 	 */
 	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
+
+	/**
+	 * @active_scans: List of homa_socktab_scan structs for all scans
+	 * currently underway on this homa_socktab.
+	 */
+	struct list_head active_scans;
 };
 
 /**
@@ -71,6 +77,11 @@ struct homa_socktab_scan {
 	 * more sockets in the current bucket.
 	 */
 	struct homa_socktab_links *next;
+
+	/**
+	 * @scan_links: Used to link this scan into @socktab->scans.
+	 */
+	struct list_head scan_links;
 };
 
 /**
@@ -252,22 +263,22 @@ struct homa_sock {
 	struct homa_pool *buffer_pool;
 };
 
-void     homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id);
-int      homa_sock_bind(struct homa_socktab *socktab,
-			struct homa_sock *hsk, __u16 port);
-void     homa_sock_destroy(struct homa_sock *hsk);
-struct homa_sock *
-		    homa_sock_find(struct homa_socktab *socktab, __u16 port);
-void     homa_sock_init(struct homa_sock *hsk, struct homa *homa);
-void     homa_sock_shutdown(struct homa_sock *hsk);
-int      homa_socket(struct sock *sk);
-void     homa_socktab_destroy(struct homa_socktab *socktab);
-void     homa_socktab_init(struct homa_socktab *socktab);
-struct homa_sock
-	       *homa_socktab_next(struct homa_socktab_scan *scan);
-struct homa_sock
-	       *homa_socktab_start_scan(struct homa_socktab *socktab,
-		    struct homa_socktab_scan *scan);
+void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
+					 __u64 id);
+int                homa_sock_bind(struct homa_socktab *socktab,
+				  struct homa_sock *hsk, __u16 port);
+void               homa_sock_destroy(struct homa_sock *hsk);
+struct homa_sock  *homa_sock_find(struct homa_socktab *socktab, __u16 port);
+void               homa_sock_init(struct homa_sock *hsk, struct homa *homa);
+void               homa_sock_shutdown(struct homa_sock *hsk);
+void               homa_sock_unlink(struct homa_sock *hsk);
+int                homa_socket(struct sock *sk);
+void               homa_socktab_destroy(struct homa_socktab *socktab);
+void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
+void               homa_socktab_init(struct homa_socktab *socktab);
+struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
+struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
+		    			   struct homa_socktab_scan *scan);
 
 /**
  * homa_sock_lock() - Acquire the lock for a socket. If the socket

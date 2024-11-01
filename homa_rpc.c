@@ -585,6 +585,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 					}
 		homa_unprotect_rpcs(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	pr_notice("Finished logging active Homa RPCs: %d active RPCs\n", count);
 }
@@ -672,6 +673,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 		}
 		homa_unprotect_rpcs(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	tt_record1("Finished logging (%d active Homa RPCs)", count);
 }
@@ -738,6 +740,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		}
 		homa_unprotect_rpcs(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	actual = atomic_read(&homa->total_incoming);
 	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",

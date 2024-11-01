@@ -1013,6 +1013,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		}
 		homa_unprotect_rpcs(hsk);
 	}
+	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 }
 

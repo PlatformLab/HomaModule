@@ -451,3 +451,14 @@ char *unit_ack_string(struct homa_ack *ack)
 			be64_to_cpu(ack->client_id));
 	return buffer;
 }
+
+/**
+ * unit_homa_destroy() - When unit tests are run, this function is invoked
+ * by homa_destroy. It checks for various errors and reports them.
+ * @homa:       Homa shared data that is about to be deleted.
+ */
+void unit_homa_destroy(struct homa *homa)
+{
+	if (!list_empty(&homa->port_map->active_scans))
+		FAIL("struct homa deleted with active socktab scans");
+}

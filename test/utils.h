@@ -38,6 +38,7 @@ extern struct homa_rpc
 			int req_length, int resp_length);
 extern struct in6_addr
 		     unit_get_in_addr(char *s);
+extern void          unit_homa_destroy(struct homa *homa);
 extern struct iov_iter
 		    *unit_iov_iter(void *buffer, size_t length);
 extern int           unit_list_length(struct list_head *head);
