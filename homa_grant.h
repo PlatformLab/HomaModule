@@ -41,7 +41,7 @@ static inline int homa_grantable_lock(struct homa *homa, int recalc)
 		result = 1;
 	else
 		result = homa_grantable_lock_slow(homa, recalc);
-	homa->grantable_lock_time = get_cycles();
+	homa->grantable_lock_time = sched_clock();
 	return result;
 }
 
@@ -51,8 +51,8 @@ static inline int homa_grantable_lock(struct homa *homa, int recalc)
  */
 static inline void homa_grantable_unlock(struct homa *homa)
 {
-	INC_METRIC(grantable_lock_cycles, get_cycles()
-			- homa->grantable_lock_time);
+	INC_METRIC(grantable_lock_ns, sched_clock() -
+		   homa->grantable_lock_time);
 	spin_unlock_bh(&homa->grantable_lock);
 }
 

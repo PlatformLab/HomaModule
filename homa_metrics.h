@@ -78,11 +78,8 @@ struct homa_metrics {
 	 */
 	__u64 skb_allocs;
 
-	/**
-	 * @skb_alloc_cycles: total time spent in homa_skb_new_tx, as
-	 * measured with get_cycles().
-	 */
-	__u64 skb_alloc_cycles;
+	/** @skb_alloc_ns: total time spent in homa_skb_new_tx. */
+	__u64 skb_alloc_ns;
 
 	/**
 	 * @skb_frees: total number of sk_buffs for data packets that have
@@ -90,22 +87,16 @@ struct homa_metrics {
 	 */
 	__u64 skb_frees;
 
-	/**
-	 *  @skb_free_cycles: total time spent freeing sk_buffs, as
-	 * measured with get_cycles().
-	 */
-	__u64 skb_free_cycles;
+	/** @skb_free_ns: total time spent freeing sk_buffs. */
+	__u64 skb_free_ns;
 
 	/**
 	 * @skb_page_allocs: total number of calls to homa_skb_page_alloc.
 	 */
 	__u64 skb_page_allocs;
 
-	/**
-	 * @skb_page_alloc_cycles: total time spent in homa_skb_page_alloc, as
-	 * measured with get_cycles().
-	 */
-	__u64 skb_page_alloc_cycles;
+	/** @skb_page_alloc_ns: total time spent in homa_skb_page_alloc. */
+	__u64 skb_page_alloc_ns;
 
 	/**
 	 * @requests_received: total number of request messages received.
@@ -155,10 +146,10 @@ struct homa_metrics {
 	__u64 handoffs_alt_thread;
 
 	/**
-	 * @poll_cycles: total time spent in the polling loop in
-	 * homa_wait_for_message, as measured with get_cycles().
+	 * @poll_ns: total time spent in the polling loop in
+	 * homa_wait_for_message.
 	 */
-	__u64 poll_cycles;
+	__u64 poll_ns;
 
 	/**
 	 * @softirq_calls: total number of calls to homa_softirq (i.e.,
@@ -168,36 +159,36 @@ struct homa_metrics {
 	__u64 softirq_calls;
 
 	/**
-	 * @softirq_cycles: total time spent executing homa_softirq when
-	 * invoked under Linux's SoftIRQ handler, as measured with get_cycles().
+	 * @softirq_ns: total time spent executing homa_softirq when
+	 * invoked under Linux's SoftIRQ handler.
 	 */
-	__u64 softirq_cycles;
+	__u64 softirq_ns;
 
 	/**
-	 * @bypass_softirq_cycles: total time spent executing homa_softirq when
+	 * @bypass_softirq_ns: total time spent executing homa_softirq when
 	 * invoked during GRO, bypassing the SoftIRQ mechanism.
 	 */
-	__u64 bypass_softirq_cycles;
+	__u64 bypass_softirq_ns;
 
 	/**
-	 * @linux_softirq_cycles: total time spent executing all softirq
-	 * activities, as measured by the linux softirq module, in get_cycles()
-	 * units. Only available with modified Linux kernels.
+	 * @linux_softirq_ns: total time spent executing all softirq
+	 * activities, as measured by the linux softirq module. Only
+	 * available with modified Linux kernels.
 	 */
-	__u64 linux_softirq_cycles;
+	__u64 linux_softirq_ns;
 
 	/**
-	 * @napi_cycles: total time spent executing all NAPI activities,
-	 * as measured by the linux softirq module, in get_cycles() units.
-	 * Only available with modified Linux kernels.
+	 * @napi_ns: total time spent executing all NAPI activities, as
+	 * measured by the linux softirq module. Only available with modified
+	 * Linux kernels.
 	 */
-	__u64 napi_cycles;
+	__u64 napi_ns;
 
 	/**
-	 * @send_cycles: total time spent executing the homa_sendmsg kernel
-	 * call handler to send requests, as measured with get_cycles().
+	 * @send_ns: total time spent executing the homa_sendmsg kernel
+	 * call handler to send requests.
 	 */
-	__u64 send_cycles;
+	__u64 send_ns;
 
 	/** @send_calls: total number of invocations of homa_semdmsg
 	 * for requests.
@@ -205,25 +196,25 @@ struct homa_metrics {
 	__u64 send_calls;
 
 	/**
-	 * @recv_cycles: total time spent executing homa_recvmsg (including
-	 * time when the thread is blocked), as measured with get_cycles().
+	 * @recv_ns: total time spent executing homa_recvmsg (including
+	 * time when the thread is blocked).
 	 */
-	__u64 recv_cycles;
+	__u64 recv_ns;
 
 	/** @recv_calls: total number of invocations of homa_recvmsg. */
 	__u64 recv_calls;
 
 	/**
-	 * @blocked_cycles: total time threads spend in blocked state
+	 * @blocked_ns: total time spent by threads in blocked state
 	 * while executing the homa_recvmsg kernel call handler.
 	 */
-	__u64 blocked_cycles;
+	__u64 blocked_ns;
 
 	/**
-	 * @reply_cycles: total time spent executing the homa_sendmsg kernel
-	 * call handler to send responses, as measured with get_cycles().
+	 * @reply_ns: total time spent executing the homa_sendmsg kernel
+	 * call handler to send responses.
 	 */
-	__u64 reply_cycles;
+	__u64 reply_ns;
 
 	/**
 	 * @reply_calls: total number of invocations of homa_semdmsg
@@ -232,10 +223,10 @@ struct homa_metrics {
 	__u64 reply_calls;
 
 	/**
-	 * @abort_cycles: total time spent executing the homa_ioc_abort
-	 * kernel call handler, as measured with get_cycles().
+	 * @abort_ns: total time spent executing the homa_ioc_abort
+	 * kernel call handler.
 	 */
-	__u64 abort_cycles;
+	__u64 abort_ns;
 
 	/**
 	 * @abort_calls: total number of invocations of the homa_ioc_abort
@@ -244,10 +235,10 @@ struct homa_metrics {
 	__u64 abort_calls;
 
 	/**
-	 * @so_set_buf_cycles: total time spent executing the homa_ioc_set_buf
-	 * kernel call handler, as measured with get_cycles().
+	 * @so_set_buf_ns: total time spent executing the homa_ioc_set_buf
+	 * kernel call handler.
 	 */
-	__u64 so_set_buf_cycles;
+	__u64 so_set_buf_ns;
 
 	/**
 	 * @so_set_buf_calls: total number of invocations of the homa_ioc_set_buf
@@ -256,42 +247,38 @@ struct homa_metrics {
 	__u64 so_set_buf_calls;
 
 	/**
-	 * @grantable_lock_cycles: total time spent with homa->grantable_lock
+	 * @grantable_lock_ns: total time spent with homa->grantable_lock
 	 * locked.
 	 */
-	__u64 grantable_lock_cycles;
+	__u64 grantable_lock_ns;
+
+	/** @timer_ns: total time spent in homa_timer. */
+	__u64 timer_ns;
 
 	/**
-	 * @timer_cycles: total time spent in homa_timer, as measured with
-	 * get_cycles().
+	 * @timer_reap_ns: total time spent by homa_timer to reap dead
+	 * RPCs. This time is included in @timer_ns.
 	 */
-	__u64 timer_cycles;
+	__u64 timer_reap_ns;
 
 	/**
-	 * @timer_reap_cycles: total time spent by homa_timer to reap dead
-	 * RPCs, as measured with get_cycles(). This time is included in
-	 * @timer_cycles.
+	 * @data_pkt_reap_ns: total time spent by homa_data_pkt to reap
+	 * dead RPCs.
 	 */
-	__u64 timer_reap_cycles;
+	__u64 data_pkt_reap_ns;
 
 	/**
-	 * @data_pkt_reap_cycles: total time spent by homa_data_pkt to reap
-	 * dead RPCs, as measured with get_cycles().
+	 * @pacer_ns: total time spent executing in homa_pacer_main
+	 * (not including blocked time).
 	 */
-	__u64 data_pkt_reap_cycles;
+	__u64 pacer_ns;
 
 	/**
-	 * @pacer_cycles: total time spent executing in homa_pacer_main
-	 * (not including blocked time), as measured with get_cycles().
-	 */
-	__u64 pacer_cycles;
-
-	/**
-	 * @pacer_lost_cycles: unnecessary delays in transmitting packets
+	 * @pacer_lost_ns: unnecessary delays in transmitting packets
 	 * (i.e. wasted output bandwidth) because the pacer was slow or got
 	 * descheduled.
 	 */
-	__u64 pacer_lost_cycles;
+	__u64 pacer_lost_ns;
 
 	/**
 	 * @pacer_bytes: total number of bytes transmitted when
@@ -313,10 +300,10 @@ struct homa_metrics {
 	__u64 pacer_needed_help;
 
 	/**
-	 * @throttled_cycles: total amount of time that @homa->throttled_rpcs
-	 * is nonempty, as measured with get_cycles().
+	 * @throttled_ns: total amount of time that @homa->throttled_rpcs
+	 * is nonempty.
 	 */
-	__u64 throttled_cycles;
+	__u64 throttled_ns;
 
 	/**
 	 * @resent_packets: total number of data packets issued in response to
@@ -431,10 +418,10 @@ struct homa_metrics {
 	__u64 client_lock_misses;
 
 	/**
-	 * @client_lock_miss_cycles: total time spent waiting for client
-	 * bucket lock misses, measured by get_cycles().
+	 * @client_lock_miss_ns: total time spent waiting for client
+	 * bucket lock misses.
 	 */
-	__u64 client_lock_miss_cycles;
+	__u64 client_lock_miss_ns;
 
 	/**
 	 * @server_lock_misses: total number of times that Homa had to wait
@@ -443,16 +430,16 @@ struct homa_metrics {
 	__u64 server_lock_misses;
 
 	/**
-	 * @server_lock_miss_cycles: total time spent waiting for server
-	 * bucket lock misses, measured by get_cycles().
+	 * @server_lock_miss_ns: total time spent waiting for server
+	 * bucket lock misses.
 	 */
-	__u64 server_lock_miss_cycles;
+	__u64 server_lock_miss_ns;
 
 	/**
-	 * @socket_lock_miss_cycles: total time spent waiting for socket
-	 * lock misses, measured by get_cycles().
+	 * @socket_lock_miss_ns: total time spent waiting for socket
+	 * lock misses.
 	 */
-	__u64 socket_lock_miss_cycles;
+	__u64 socket_lock_miss_ns;
 
 	/**
 	 * @socket_lock_misses: total number of times that Homa had to wait
@@ -461,10 +448,10 @@ struct homa_metrics {
 	__u64 socket_lock_misses;
 
 	/**
-	 * @throttle_lock_miss_cycles: total time spent waiting for throttle
-	 * lock misses, measured by get_cycles().
+	 * @throttle_lock_miss_ns: total time spent waiting for throttle
+	 * lock misses.
 	 */
-	__u64 throttle_lock_miss_cycles;
+	__u64 throttle_lock_miss_ns;
 
 	/**
 	 * @throttle_lock_misses: total number of times that Homa had to wait
@@ -473,10 +460,9 @@ struct homa_metrics {
 	__u64 throttle_lock_misses;
 
 	/**
-	 * @peer_acklock_miss_cycles: total time spent waiting for peer
-	 * lock misses, measured by get_cycles().
+	 * @peer_acklock_miss_ns: total time spent waiting for peer lock misses.
 	 */
-	__u64 peer_ack_lock_miss_cycles;
+	__u64 peer_ack_lock_miss_ns;
 
 	/**
 	 * @peer_ack_lock_misses: total number of times that Homa had to wait
@@ -485,10 +471,10 @@ struct homa_metrics {
 	__u64 peer_ack_lock_misses;
 
 	/**
-	 * @grantable_lock_miss_cycles: total time spent waiting for grantable
-	 * lock misses, measured by get_cycles().
+	 * @grantable_lock_miss_ns: total time spent waiting for grantable
+	 * lock misses.
 	 */
-	__u64 grantable_lock_miss_cycles;
+	__u64 grantable_lock_miss_ns;
 
 	/**
 	 * @grantable_lock_misses: total number of times that Homa had to wait
@@ -498,8 +484,8 @@ struct homa_metrics {
 
 	/**
 	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,
-	 * where time_delta is a get_cycles time and grantable is the
-	 * value of homa->num_grantable_rpcs over that time period.
+	 * where time_delta is in nanoseconds and grantable is the value of
+	 * homa->num_grantable_rpcs over that time period.
 	 */
 	__u64 grantable_rpcs_integral;
 
@@ -509,11 +495,8 @@ struct homa_metrics {
 	 */
 	__u64 grant_recalc_calls;
 
-	/**
-	 * @grant_recalc_cycles: total time spent in homa_grant_recalc,
-	 * in get_cycles() units.
-	 */
-	__u64 grant_recalc_cycles;
+	/** @grant_recalc_ns: total time spent in homa_grant_recalc. */
+	__u64 grant_recalc_ns;
 
 	/**
 	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
@@ -676,7 +659,7 @@ static inline struct homa_metrics *homa_metrics_per_cpu(void)
  * happens is that one of the INC_METRICs is lost, which isn't a big deal.
  */
 #define INC_METRIC(metric, count) per_cpu(homa_metrics, \
-		raw_smp_processor_id()).metric+= (count)
+		raw_smp_processor_id()).metric += (count)
 
 extern void     homa_metric_append(struct homa *homa, const char *format, ...);
 extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,

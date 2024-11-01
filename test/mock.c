@@ -125,9 +125,16 @@ static int mock_active_locks;
 static int mock_active_rcu_locks;
 
 /* Used as the return value for calls to get_cycles. A value of ~0 means
- * return actual clock time.
+ * return actual clock time. Shouldn't be used much anymore (get_cycles
+ * shouldn't be used).
  */
 cycles_t mock_cycles;
+
+/* Used as the return value for calls to sched_clock. */
+__u64 mock_ns;
+
+/* Add this value to mock_ns every time sched_clock is invoked. */
+__u64 mock_ns_tick;
 
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
@@ -936,6 +943,12 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
+__u64 sched_clock(void)
+{
+	mock_ns += mock_ns_tick;
+	return mock_ns;
+}
+
 void schedule(void)
 {
 	UNIT_HOOK("schedule");
@@ -1510,6 +1523,8 @@ void mock_teardown(void)
 	mock_copy_to_user_errors = 0;
 	mock_cpu_idle = 0;
 	mock_cycles = 0;
+	mock_ns = 0;
+	mock_ns_tick = 0;
 	mock_ipv6 = mock_ipv6_default;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;

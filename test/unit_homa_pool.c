@@ -44,11 +44,11 @@ static void steal_bpages_hook(char *id)
 	case 2:
 		atomic_set(&cur_pool->descriptors[1].refs, 1);
 		cur_pool->descriptors[1].owner = 3;
-		cur_pool->descriptors[1].expiration = mock_cycles + 1;
+		cur_pool->descriptors[1].expiration = mock_ns + 1;
 	case 3:
 		atomic_set(&cur_pool->descriptors[2].refs, 1);
 		cur_pool->descriptors[2].owner = 3;
-		cur_pool->descriptors[2].expiration = mock_cycles - 1;
+		cur_pool->descriptors[2].expiration = mock_ns - 1;
 	case 4:
 		atomic_set(&cur_pool->descriptors[3].refs, 1);
 	}
@@ -168,14 +168,14 @@ TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	__u32 pages[10];
 
-	mock_cycles = 1000;
+	mock_ns = 1000;
 	atomic_set(&pool->descriptors[0].refs, 2);
 	atomic_set(&pool->descriptors[1].refs, 1);
 	pool->descriptors[1].owner = 3;
-	pool->descriptors[1].expiration = mock_cycles + 1;
+	pool->descriptors[1].expiration = mock_ns + 1;
 	atomic_set(&pool->descriptors[2].refs, 1);
 	pool->descriptors[2].owner = 3;
-	pool->descriptors[2].expiration = mock_cycles - 1;
+	pool->descriptors[2].expiration = mock_ns - 1;
 	atomic_set(&pool->descriptors[3].refs, 1);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(2, pages[0]);
@@ -186,7 +186,7 @@ TEST_F(homa_pool, homa_pool_get_pages__cant_lock_pages)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	__u32 pages[10];
 
-	mock_cycles = 1000;
+	mock_ns = 1000;
 	mock_trylock_errors = 3;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(2, pages[0]);
@@ -197,7 +197,7 @@ TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	__u32 pages[10];
 
-	mock_cycles = 1000;
+	mock_ns = 1000;
 	unit_hook_register(steal_bpages_hook);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(2, pages[0]);
@@ -209,8 +209,8 @@ TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 	__u32 pages[10];
 
 	pool->descriptors[0].owner = 5;
-	mock_cycles = 5000;
-	pool->descriptors[0].expiration = mock_cycles - 1;
+	mock_ns = 5000;
+	pool->descriptors[0].expiration = mock_ns - 1;
 	atomic_set(&pool->free_bpages, 20);
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(0, pages[0]);
@@ -223,11 +223,11 @@ TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 	struct homa_pool *pool = self->hsk.buffer_pool;
 	__u32 pages[10];
 
-	self->homa.bpage_lease_cycles = 1000;
-	mock_cycles = 5000;
+	self->homa.bpage_lease_usecs = 1;
+	mock_ns = 5000;
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 1));
 	EXPECT_EQ(1, pool->descriptors[pages[0]].owner);
-	EXPECT_EQ(mock_cycles + 1000,
+	EXPECT_EQ(mock_ns + 1000,
 			pool->descriptors[pages[1]].expiration);
 	EXPECT_EQ(2, atomic_read(&pool->descriptors[1].refs));
 }

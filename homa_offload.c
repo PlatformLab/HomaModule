@@ -278,13 +278,13 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	__u64 saved_softirq_metric, softirq_cycles;
+	__u64 saved_softirq_metric, softirq_ns;
 	struct homa_offload_core *offload_core;
 	struct sk_buff *result = NULL;
-	__u64 *softirq_cycles_metric;
+	__u64 *softirq_ns_metric;
 	struct data_header *h_new;
 	struct sk_buff *held_skb;
-	__u64 now = get_cycles();
+	__u64 now = sched_clock();
 	int priority;
 	__u32 saddr;
 	__u32 hash;
@@ -292,7 +292,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 	h_new = (struct data_header *) skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, raw_smp_processor_id());
-	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;
+	busy = (now - offload_core->last_gro) < homa->gro_busy_ns;
 	offload_core->last_active = now;
 	if (skb_is_ipv6(skb)) {
 		priority = ipv6_hdr(skb)->priority;
@@ -433,20 +433,20 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 
 done:
 	homa_check_pacer(homa, 1);
-	offload_core->last_gro = get_cycles();
+	offload_core->last_gro = sched_clock();
 	return result;
 
 bypass:
 	/* Record SoftIRQ cycles in a different metric to reflect that
 	 * they happened during bypass.
 	 */
-	softirq_cycles_metric = &homa_metrics_per_cpu()->softirq_cycles;
-	saved_softirq_metric = *softirq_cycles_metric;
+	softirq_ns_metric = &homa_metrics_per_cpu()->softirq_ns;
+	saved_softirq_metric = *softirq_ns_metric;
 	homa_softirq(skb);
-	softirq_cycles = *softirq_cycles_metric - saved_softirq_metric;
-	*softirq_cycles_metric = saved_softirq_metric;
-	INC_METRIC(bypass_softirq_cycles, softirq_cycles);
-	offload_core->last_gro = get_cycles();
+	softirq_ns = *softirq_ns_metric - saved_softirq_metric;
+	*softirq_ns_metric = saved_softirq_metric;
+	INC_METRIC(bypass_softirq_ns, softirq_ns);
+	offload_core->last_gro = sched_clock();
 
 	/* This return value indicates that we have freed skb. */
 	return ERR_PTR(-EINPROGRESS);
@@ -473,7 +473,7 @@ void homa_gro_gen2(struct sk_buff *skb)
 	int this_core = raw_smp_processor_id();
 	struct homa_offload_core *offload_core;
 	int candidate = this_core;
-	__u64 now = get_cycles();
+	__u64 now = sched_clock();
 	int i;
 
 	for (i = CORES_TO_CHECK; i > 0; i--) {
@@ -483,7 +483,7 @@ void homa_gro_gen2(struct sk_buff *skb)
 		offload_core = &per_cpu(homa_offload_core, candidate);
 		if (atomic_read(&offload_core->softirq_backlog)  > 0)
 			continue;
-		if ((offload_core->last_gro + homa->busy_cycles) > now)
+		if ((offload_core->last_gro + homa->busy_ns) > now)
 			continue;
 		tt_record3("homa_gro_gen2 chose core %d for id %d offset %d",
 				candidate, homa_local_id(h->common.sender_id),
@@ -531,8 +531,8 @@ void homa_gro_gen3(struct sk_buff *skb)
 
 	candidates = per_cpu(homa_offload_core,
 			raw_smp_processor_id()).gen3_softirq_cores;
-	now = get_cycles();
-	busy_time = now - homa->busy_cycles;
+	now = sched_clock();
+	busy_time = now - homa->busy_ns;
 
 	core = candidates[0];
 	for (i = 0; i <  NUM_GEN3_SOFTIRQ_CORES; i++) {

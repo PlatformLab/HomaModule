@@ -118,7 +118,7 @@ void homa_skb_cleanup(struct homa *homa)
  */
 struct sk_buff *homa_skb_new_tx(int length)
 {
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	struct sk_buff *skb;
 
 	/* Note: allocate space for an IPv6 header, which is larger than
@@ -132,7 +132,7 @@ struct sk_buff *homa_skb_new_tx(int length)
 		skb_reset_transport_header(skb);
 	}
 	INC_METRIC(skb_allocs, 1);
-	INC_METRIC(skb_alloc_cycles, get_cycles() - start);
+	INC_METRIC(skb_alloc_ns, sched_clock() - start);
 	return skb;
 }
 
@@ -276,17 +276,17 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 
 	/* Step 3: can we allocate a new big page? */
 	INC_METRIC(skb_page_allocs, 1);
-	start = get_cycles();
+	start = sched_clock();
 	skb_core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
 			| __GFP_NOWARN | __GFP_NORETRY, HOMA_SKB_PAGE_ORDER);
 	if (likely(skb_core->skb_page)) {
-		INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
+		INC_METRIC(skb_page_alloc_ns, sched_clock() - start);
 		goto success;
 	}
 
 	/* Step 4: can we allocate a normal page? */
 	skb_core->skb_page = alloc_page(GFP_KERNEL);
-	INC_METRIC(skb_page_alloc_cycles, get_cycles() - start);
+	INC_METRIC(skb_page_alloc_ns, sched_clock() - start);
 	if (likely(skb_core->skb_page)) {
 		skb_core->page_size = PAGE_SIZE;
 		goto success;
@@ -445,7 +445,7 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 #define MAX_PAGES_AT_ONCE 50
 #endif
 	struct page *pages_to_cache[MAX_PAGES_AT_ONCE];
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	int num_pages = 0;
 	int i, j;
 
@@ -484,7 +484,7 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 	if (num_pages > 0)
 		homa_skb_cache_pages(homa, pages_to_cache, num_pages);
 	INC_METRIC(skb_frees, count);
-	INC_METRIC(skb_free_cycles, get_cycles() - start);
+	INC_METRIC(skb_free_ns, sched_clock() - start);
 }
 
 /**
@@ -575,15 +575,13 @@ void homa_skb_release_pages(struct homa *homa)
 {
 	int i, max_low_mark, min_pages, release, release_max;
 	struct homa_page_pool *max_pool;
-	__u64 now = get_cycles();
-	__s64 interval;
+	__u64 now = sched_clock();
 
 	if (now < homa->skb_page_free_time)
 		return;
 
 	/* Free pages every 0.5 second. */
-	interval = cpu_khz*500;
-	homa->skb_page_free_time = now + interval;
+	homa->skb_page_free_time = now + 500000000ULL;
 	release_max = homa->skb_page_frees_per_sec/2;
 	if (homa->pages_to_free_slots < release_max) {
 		if (homa->skb_pages_to_free != NULL)

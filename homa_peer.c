@@ -111,7 +111,7 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
  * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
  * safe to do so.
  * @peertab:       The table in which to free entries.
- * @now:           Current time, in get_cycles units; entries with expiration
+ * @now:           Current time, in sched_clock() units; entries with expiration
  *                 dates no later than this will be freed. Specify ~0 to
  *                 free all entries.
  */
@@ -120,7 +120,7 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
 	while (!list_empty(&peertab->dead_dsts)) {
 		struct homa_dead_dst *dead = list_first_entry(&peertab->dead_dsts,
 							      struct homa_dead_dst,
-							dst_links);
+							      dst_links);
 		if (dead->gc_time > now)
 			break;
 		dst_release(dead->dst);
@@ -244,10 +244,10 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			 */
 			dst_release(peer->dst);
 		} else {
-			__u64 now = get_cycles();
+			__u64 now = sched_clock();
 
 			dead->dst = peer->dst;
-			dead->gc_time = now + (cpu_khz << 7);
+			dead->gc_time = now + 125000000;
 			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
 			homa_peertab_gc_dsts(peertab, now);
 		}
@@ -360,13 +360,13 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
  */
 void homa_peer_lock_slow(struct homa_peer *peer)
 {
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 
 	tt_record("beginning wait for peer lock");
 	spin_lock_bh(&peer->ack_lock);
 	tt_record("ending wait for peer lock");
 	INC_METRIC(peer_ack_lock_misses, 1);
-	INC_METRIC(peer_ack_lock_miss_cycles, get_cycles() - start);
+	INC_METRIC(peer_ack_lock_miss_ns, sched_clock() - start);
 }
 
 /**

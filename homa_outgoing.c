@@ -48,7 +48,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
 	rpc->msgout.sched_priority = 0;
-	rpc->msgout.init_cycles = get_cycles();
+	rpc->msgout.init_ns= sched_clock();
 }
 
 /**
@@ -734,16 +734,12 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 {
 	__u64 tmp;
 
-	/* Code below is written carefully to avoid integer underflow or
-	 * overflow under expected usage patterns. Be careful when changing!
-	 */
-	homa->cycles_per_kbyte = 8 * (__u64)cpu_khz;
-	do_div(homa->cycles_per_kbyte, homa->link_mbps);
-	homa->cycles_per_kbyte = 101 * homa->cycles_per_kbyte;
-	do_div(homa->cycles_per_kbyte, 100);
-	tmp = homa->max_nic_queue_ns * cpu_khz;
-	do_div(tmp, 1000000);
-	homa->max_nic_queue_cycles = tmp;
+	tmp = 8 * 1000ULL * 1000ULL * 1000ULL;
+
+	/* Underestimate link bandwidth (overestimate time) by 1%. */
+	tmp = tmp * 101 / 100;
+	do_div(tmp, homa->link_mbps);
+	homa->ns_per_mbyte = tmp;
 }
 
 /**
@@ -764,16 +760,17 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
  */
 int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
-	int cycles_for_packet, bytes;
-	__u64 idle, new_idle, clock;
+	__u64 idle, new_idle, clock, ns_for_packet;
+	int bytes;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
-	cycles_for_packet = bytes * homa->cycles_per_kbyte;
-	do_div(cycles_for_packet, 1000);
+	ns_for_packet = homa->ns_per_mbyte;
+	ns_for_packet *= bytes;
+	do_div(ns_for_packet, 1000000);
 	while (1) {
-		clock = get_cycles();
+		clock = sched_clock();
 		idle = atomic64_read(&homa->link_idle_time);
-		if ((clock + homa->max_nic_queue_cycles) < idle && !force &&
+		if ((clock + homa->max_nic_queue_ns) < idle && !force &&
 		    !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
 		if (!list_empty(&homa->throttled_rpcs))
@@ -784,18 +781,18 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 				__u64 lost = (homa->pacer_wake_time > idle)
 						? clock - homa->pacer_wake_time
 						: clock - idle;
-				INC_METRIC(pacer_lost_cycles, lost);
+				INC_METRIC(pacer_lost_ns, lost);
 				tt_record1("pacer lost %d cycles", lost);
 			}
-			new_idle = clock + cycles_for_packet;
+			new_idle = clock + ns_for_packet;
 		} else {
-			new_idle = idle + cycles_for_packet;
+			new_idle = idle + ns_for_packet;
 		}
 #else /* See strip.py */
 		if (idle < clock)
-			new_idle = clock + cycles_for_packet;
+			new_idle = clock + ns_for_packet;
 		else
-			new_idle = idle + cycles_for_packet;
+			new_idle = idle + ns_for_packet;
 #endif /* See strip.py */
 
 		/* This method must be thread-safe. */
@@ -816,7 +813,7 @@ int homa_pacer_main(void *transport)
 {
 	struct homa *homa = (struct homa *)transport;
 
-	homa->pacer_wake_time = get_cycles();
+	homa->pacer_wake_time = sched_clock();
 	while (1) {
 		if (homa->pacer_exit) {
 			homa->pacer_wake_time = 0;
@@ -842,10 +839,10 @@ int homa_pacer_main(void *transport)
 					   throttled_links) != NULL)
 #endif /* See strip.py */
 			__set_current_state(TASK_RUNNING);
-		INC_METRIC(pacer_cycles, get_cycles() - homa->pacer_wake_time);
+		INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);
 		homa->pacer_wake_time = 0;
 		schedule();
-		homa->pacer_wake_time = get_cycles();
+		homa->pacer_wake_time = sched_clock();
 		__set_current_state(TASK_RUNNING);
 	}
 	kthread_complete_and_exit(&homa_pacer_kthread_done, 0);
@@ -885,16 +882,16 @@ void homa_pacer_xmit(struct homa *homa)
 		__u64 idle_time, now;
 
 		/* If the NIC queue is too long, wait until it gets shorter. */
-		now = get_cycles();
+		now = sched_clock();
 		idle_time = atomic64_read(&homa->link_idle_time);
-		while ((now + homa->max_nic_queue_cycles) < idle_time) {
+		while ((now + homa->max_nic_queue_ns) < idle_time) {
 			/* If we've xmitted at least one packet then
 			 * return (this helps with testing and also
 			 * allows homa_pacer_main to yield the core).
 			 */
 			if (i != 0)
 				goto done;
-			now = get_cycles();
+			now = sched_clock();
 		}
 		/* Note: when we get here, it's possible that the NIC queue is
 		 * still too long because other threads have queued packets,
@@ -920,9 +917,9 @@ void homa_pacer_xmit(struct homa *homa)
 			rpc = NULL;
 			list_for_each_entry_rcu(cur, &homa->throttled_rpcs,
 						throttled_links) {
-				if (cur->msgout.init_cycles < oldest) {
+				if (cur->msgout.init_ns < oldest) {
 					rpc = cur;
-					oldest = cur->msgout.init_cycles;
+					oldest = cur->msgout.init_ns;
 				}
 			}
 		} else {
@@ -962,7 +959,7 @@ void homa_pacer_xmit(struct homa *homa)
 					   rpc->id, rpc->msgout.next_xmit_offset);
 				list_del_rcu(&rpc->throttled_links);
 				if (list_empty(&homa->throttled_rpcs))
-					INC_METRIC(throttled_cycles, get_cycles()
+					INC_METRIC(throttled_ns, sched_clock()
 							- homa->throttle_add);
 
 				/* Note: this reinitialization is only safe
@@ -1012,9 +1009,9 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 
 	if (!list_empty(&rpc->throttled_links))
 		return;
-	now = get_cycles();
+	now = sched_clock();
 	if (!list_empty(&homa->throttled_rpcs))
-		INC_METRIC(throttled_cycles, now - homa->throttle_add);
+		INC_METRIC(throttled_ns, now - homa->throttle_add);
 	homa->throttle_add = now;
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_throttle_lock(homa);
@@ -1056,7 +1053,7 @@ void homa_remove_from_throttled(struct homa_rpc *rpc)
 		homa_throttle_lock(rpc->hsk->homa);
 		list_del(&rpc->throttled_links);
 		if (list_empty(&rpc->hsk->homa->throttled_rpcs))
-			INC_METRIC(throttled_cycles, get_cycles()
+			INC_METRIC(throttled_ns, sched_clock()
 					- rpc->hsk->homa->throttle_add);
 		homa_throttle_unlock(rpc->hsk->homa);
 		INIT_LIST_HEAD(&rpc->throttled_links);

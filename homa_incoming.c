@@ -68,7 +68,7 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
 	gap = kmalloc(sizeof(*gap), GFP_KERNEL);
 	gap->start = start;
 	gap->end = end;
-	gap->time = get_cycles();
+	gap->time = sched_clock();
 	list_add_tail(&gap->links, next);
 	return gap;
 }
@@ -313,10 +313,10 @@ free_skbs:
 			end_offset = 0;
 		}
 #endif /* See strip.py */
-		start = get_cycles();
+		start = sched_clock();
 		for (i = 0; i < n; i++)
 			kfree_skb(skbs[i]);
-		INC_METRIC(skb_free_cycles, get_cycles() - start);
+		INC_METRIC(skb_free_ns, sched_clock() - start);
 		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
 			   n, rpc->id);
@@ -524,12 +524,11 @@ discard:
 		 * nor homa_timer can keep up with reaping dead
 		 * RPCs. See reap.txt for details.
 		 */
-		uint64_t start = get_cycles();
+		uint64_t start = sched_clock();
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
 		homa_rpc_reap(hsk, hsk->homa->reap_limit);
-		INC_METRIC(data_pkt_reap_cycles,
-				get_cycles() - start);
+		INC_METRIC(data_pkt_reap_ns, sched_clock() - start);
 	}
 }
 
@@ -1186,11 +1185,11 @@ claim_rpc:
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				       __u64 id)
 {
+	uint64_t poll_start, poll_end, now;
 	int error, blocked = 0, polled = 0;
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
 	struct homa_rpc *rpc = NULL;
-	uint64_t poll_start, now;
 
 	/* Each iteration of this loop finds an RPC, but it might not be
 	 * in a state where we can return it (e.g., there might be packets
@@ -1207,9 +1206,6 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			result = ERR_PTR(error);
 			goto found_rpc;
 		}
-
-//		tt_record3("Preparing to poll, socket %d, flags 0x%x, pid %d",
-//				hsk->client_port, flags, current->pid);
 
 		/* There is no ready RPC so far. Clean up dead RPCs before
 		 * going to sleep (or returning, if in nonblocking mode).
@@ -1237,10 +1233,15 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			goto found_rpc;
 		}
 
+		// tt_record4("Preparing to poll, socket %d, flags 0x%x, pid %d, poll_usecs %d",
+		// 	   hsk->port, flags, current->pid,
+		// 	   hsk->homa->poll_usecs);
+
 		/* Busy-wait for a while before going to sleep; this avoids
 		 * context-switching overhead to wake up.
 		 */
-		poll_start = now = get_cycles();
+		poll_start = now = sched_clock();
+		poll_end = now + (1000 * hsk->homa->poll_usecs);
 		while (1) {
 			__u64 blocked;
 
@@ -1251,26 +1252,23 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 						rpc->id, hsk->port,
 						current->pid);
 				polled = 1;
-				INC_METRIC(poll_cycles, now - poll_start);
+				INC_METRIC(poll_ns, now - poll_start);
 				goto found_rpc;
 			}
-			if (now >= (poll_start + hsk->homa->poll_cycles))
+			if (now >= poll_end) {
+				INC_METRIC(poll_ns, now - poll_start);
 				break;
-			blocked = get_cycles();
-			schedule();
-			now = get_cycles();
-			blocked = now - blocked;
-			if (blocked > 5000) {
-				/* Looks like another thread ran (or perhaps
-				 * SoftIRQ). Count this time as blocked.
-				 */
-				INC_METRIC(blocked_cycles, blocked);
-				poll_start += blocked;
 			}
+			blocked = sched_clock();
+			schedule();
+			now = sched_clock();
+			blocked = now - blocked;
+			INC_METRIC(blocked_ns, blocked);
+			poll_start += blocked;
 		}
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
 				hsk->port, current->pid);
-		INC_METRIC(poll_cycles, now - poll_start);
+		INC_METRIC(poll_ns, now - poll_start);
 
 		/* Now it's time to sleep. */
 		per_cpu(homa_offload_core, interest.core).last_app_active = now;
@@ -1278,14 +1276,14 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
 		if (!rpc && !hsk->shutdown) {
 			__u64 end;
-			__u64 start = get_cycles();
+			__u64 start = sched_clock();
 
 			tt_record1("homa_wait_for_message sleeping, pid %d",
 				   current->pid);
 			schedule();
-			end = get_cycles();
+			end = sched_clock();
 			blocked = 1;
-			INC_METRIC(blocked_cycles, end - start);
+			INC_METRIC(blocked_ns, end - start);
 		}
 		__set_current_state(TASK_RUNNING);
 
@@ -1379,7 +1377,7 @@ done:
 struct homa_interest *homa_choose_interest(struct homa *homa,
 					   struct list_head *head, int offset)
 {
-	__u64 busy_time = get_cycles() - homa->busy_cycles;
+	__u64 busy_time = sched_clock() - homa->busy_ns;
 	struct homa_interest *backup = NULL;
 	struct homa_interest *interest;
 	struct list_head *pos;
@@ -1470,7 +1468,8 @@ thread_waiting:
 	/* Update the last_app_active time for the thread's core, so Homa
 	 * will try to avoid doing any work there.
 	 */
-	per_cpu(homa_offload_core, interest->core).last_app_active = get_cycles();
+	per_cpu(homa_offload_core, interest->core).last_app_active =
+			sched_clock();
 
 	/* Clear the interest. This serves two purposes. First, it saves
 	 * the waking thread from acquiring the socket lock again, which
@@ -1508,22 +1507,6 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	if (homa->max_overcommit > HOMA_MAX_GRANTS)
 		homa->max_overcommit = HOMA_MAX_GRANTS;
 
-	/* Code below is written carefully to avoid integer underflow or
-	 * overflow under expected usage patterns. Be careful when changing!
-	 */
-	tmp = homa->poll_usecs;
-	tmp = (tmp*cpu_khz)/1000;
-	homa->poll_cycles = tmp;
-
-	tmp = homa->busy_usecs * cpu_khz;
-	do_div(tmp, 1000);
-	homa->busy_cycles = tmp;
-
-	tmp = homa->gro_busy_usecs * cpu_khz;
-	do_div(tmp, 1000);
-	homa->gro_busy_cycles = tmp;
-
-	tmp = homa->bpage_lease_usecs * cpu_khz;
-	do_div(tmp, 1000);
-	homa->bpage_lease_cycles = tmp;
+	homa->busy_ns = homa->busy_usecs * 1000;
+	homa->gro_busy_ns = homa->gro_busy_usecs * 1000;
 }

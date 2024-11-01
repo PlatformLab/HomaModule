@@ -38,7 +38,7 @@ struct homa_bpage {
 			int owner;
 
 			/**
-			 * @expiration: time (in get_cycles units) after
+			 * @expiration: time (in sched_clock() units) after
 			 * which it's OK to steal this page from its current
 			 * owner (if @refs is 1).
 			 */

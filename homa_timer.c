@@ -169,7 +169,7 @@ void homa_timer(struct homa *homa)
 	int rpc_count = 0;
 	int core;
 
-	start = get_cycles();
+	start = sched_clock();
 	homa->timer_ticks++;
 
 	total_grants = 0;
@@ -209,12 +209,12 @@ void homa_timer(struct homa *homa)
 			 * isn't keeping up with RPC reaping, so we'll help
 			 * out.  See reap.txt for more info.
 			 */
-			uint64_t start = get_cycles();
+			uint64_t start = sched_clock();
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, hsk->homa->reap_limit) == 0)
 				break;
-			INC_METRIC(timer_reap_cycles, get_cycles() - start);
+			INC_METRIC(timer_reap_ns, sched_clock() - start);
 		}
 
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
@@ -259,6 +259,6 @@ void homa_timer(struct homa *homa)
 			total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 			atomic_read(&homa->total_incoming));
 	homa_skb_release_pages(homa);
-	end = get_cycles();
-	INC_METRIC(timer_cycles, end-start);
+	end = sched_clock();
+	INC_METRIC(timer_ns, end-start);
 }

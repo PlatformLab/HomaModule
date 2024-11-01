@@ -15,7 +15,7 @@ void       (*tt_linux_freeze)(void);
 atomic_t  *tt_linux_freeze_count;
 atomic_t   tt_linux_freeze_no_homa;
 int       *tt_linux_homa_temp;
-int        tt_linux_homa_temp_default[];
+int        tt_linux_homa_temp_default[16];
 void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
 			      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
@@ -837,8 +837,8 @@ void tt_inc_metric(int metric, __u64 count)
 	 * for the legal values of metric.
 	 */
 	static int offsets[] = {
-		offsetof(struct homa_metrics, napi_cycles),
-		offsetof(struct homa_metrics, linux_softirq_cycles),
+		offsetof(struct homa_metrics, napi_ns),
+		offsetof(struct homa_metrics, linux_softirq_ns),
 		offsetof(struct homa_metrics, linux_pkt_alloc_bytes),
 	};
 	__u64 *metric_addr = (__u64 *)(((char *) homa_metrics_per_cpu())

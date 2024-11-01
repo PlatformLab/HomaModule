@@ -89,8 +89,8 @@ FIXTURE_SETUP(homa_offload)
 	unit_log_clear();
 
 	/* Configure so core isn't considered too busy for bypasses. */
-	mock_cycles = 1000;
-	self->homa.gro_busy_cycles = 500;
+	mock_ns = 1000;
+	self->homa.gro_busy_ns = 500;
 	cur_offload_core->last_gro = 400;
 }
 FIXTURE_TEARDOWN(homa_offload)
@@ -521,8 +521,8 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 TEST_F(homa_offload, homa_gro_gen2)
 {
 	homa->gro_policy = HOMA_GRO_GEN2;
-	mock_cycles = 1000;
-	homa->busy_cycles = 100;
+	mock_ns = 1000;
+	homa->busy_ns = 100;
 	mock_set_core(5);
 	atomic_set(&per_cpu(homa_offload_core, 6).softirq_backlog, 1);
 	per_cpu(homa_offload_core, 6).last_gro = 0;
@@ -569,8 +569,8 @@ TEST_F(homa_offload, homa_gro_gen3__basics)
 	offload3->last_app_active = 4100;
 	offload7->last_app_active = 3900;
 	offload5->last_app_active = 2000;
-	mock_cycles = 5000;
-	self->homa.busy_cycles = 1000;
+	mock_ns = 5000;
+	self->homa.busy_ns = 1000;
 
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(7, self->skb->hash - 32);
@@ -587,8 +587,8 @@ TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
 	offload_core->gen3_softirq_cores[2] = 5;
 	per_cpu(homa_offload_core, 3).last_app_active = 4100;
 	per_cpu(homa_offload_core, 5).last_app_active = 2000;
-	mock_cycles = 5000;
-	self->homa.busy_cycles = 1000;
+	mock_ns = 5000;
+	self->homa.busy_ns = 1000;
 
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(3, self->skb->hash - 32);
@@ -605,8 +605,8 @@ TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
 	per_cpu(homa_offload_core, 3).last_app_active = 4100;
 	per_cpu(homa_offload_core, 7).last_app_active = 4001;
 	per_cpu(homa_offload_core, 5).last_app_active = 4500;
-	mock_cycles = 5000;
-	self->homa.busy_cycles = 1000;
+	mock_ns = 5000;
+	self->homa.busy_ns = 1000;
 
 	homa_gro_complete(self->skb, 0);
 	EXPECT_EQ(3, self->skb->hash - 32);

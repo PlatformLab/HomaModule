@@ -80,7 +80,7 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		/* Message not yet tracked; add it in priority order to
 		 * the peer's list.
 		 */
-		__u64 time = get_cycles();
+		__u64 time = sched_clock();
 
 		INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
 				* (time - homa->last_grantable_change));
@@ -161,7 +161,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
-	__u64 time = get_cycles();
+	__u64 time = sched_clock();
 	struct homa_rpc *head;
 
 	if (list_empty(&rpc->grantable_links))
@@ -401,7 +401,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			return;
 		}
 	}
-	start = get_cycles();
+	start = sched_clock();
 
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
@@ -487,7 +487,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			break;
 		}
 	}
-	INC_METRIC(grant_recalc_cycles, get_cycles() - start);
+	INC_METRIC(grant_recalc_ns, sched_clock() - start);
 }
 
 /**
@@ -647,7 +647,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 int homa_grantable_lock_slow(struct homa *homa, int recalc)
 {
 	int starting_count = atomic_read(&homa->grant_recalc_count);
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	int result = 0;
 
 	tt_record("beginning wait for grantable lock");
@@ -664,7 +664,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 		}
 	}
 	INC_METRIC(grantable_lock_misses, 1);
-	INC_METRIC(grantable_lock_miss_cycles, get_cycles() - start);
+	INC_METRIC(grantable_lock_miss_ns, sched_clock() - start);
 	return result;
 }
 

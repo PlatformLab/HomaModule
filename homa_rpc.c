@@ -63,7 +63,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->done_timer_ticks = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
-	crpc->start_cycles = get_cycles();
+	crpc->start_ns = sched_clock();
 
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
@@ -165,7 +165,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->done_timer_ticks = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
-	srpc->start_cycles = get_cycles();
+	srpc->start_ns = sched_clock();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 		   srpc->id, ntohl(h->incoming));
 	err = homa_message_in_init(srpc, ntohl(h->message_length),

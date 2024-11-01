@@ -84,10 +84,10 @@ struct homa_message_out {
 	__u8 sched_priority;
 
 	/**
-	 * @init_cycles: Time in get_cycles units when this structure was
+	 * @init_ns: Time in sched_clock units when this structure was
 	 * initialized.  Used to find the oldest outgoing message.
 	 */
-	__u64 init_cycles;
+	__u64 init_ns;
 };
 
 /**
@@ -102,7 +102,7 @@ struct homa_gap {
 	int end;
 
 	/**
-	 * @time: time (in get_cycles units) when the gap was first detected.
+	 * @time: time (in sched_clock units) when the gap was first detected.
 	 * As of 7/2024 this isn't used for anything.
 	 */
 	__u64 time;
@@ -174,7 +174,7 @@ struct homa_message_in {
 	__u8 resend_all;
 
 	/**
-	 * @birth: get_cycles time when this RPC was added to the grantable
+	 * @birth: sched_clock() time when this RPC was added to the grantable
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	__u64 birth;
@@ -405,10 +405,10 @@ struct homa_rpc {
 	int magic;
 
 	/**
-	 * @start_cycles: time (from get_cycles()) when this RPC was created.
+	 * @start_ns: time (from sched_clock()) when this RPC was created.
 	 * Used (sometimes) for testing.
 	 */
-	u64 start_cycles;
+	u64 start_ns;
 };
 
 void     homa_check_rpc(struct homa_rpc *rpc);

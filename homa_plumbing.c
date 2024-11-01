@@ -696,7 +696,7 @@ void homa_close(struct sock *sk, long timeout)
 
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
-	tt_record1("closed socket, port %d\n", hsk->port);
+	tt_record1("closed socket, port %d", hsk->port);
 	if (hsk->homa->freeze_type == SOCKET_CLOSE)
 		tt_freeze();
 }
@@ -778,13 +778,13 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 int homa_ioctl(struct sock *sk, int cmd, int *karg)
 {
 	int result;
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 
 	switch (cmd) {
 	case HOMAIOCABORT:
 		result = homa_ioc_abort(sk, karg);
 		INC_METRIC(abort_calls, 1);
-		INC_METRIC(abort_cycles, get_cycles() - start);
+		INC_METRIC(abort_ns, sched_clock() - start);
 		break;
 	case HOMAIOCFREEZE:
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, pid %d", current->pid);
@@ -829,7 +829,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_set_buf_args args;
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	int ret;
 
 	if (level != IPPROTO_HOMA || optname != SO_HOMA_SET_BUF ||
@@ -849,7 +849,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 	ret = homa_pool_init(hsk, args.start, args.length);
 	homa_sock_unlock(hsk);
 	INC_METRIC(so_set_buf_calls, 1);
-	INC_METRIC(so_set_buf_cycles, get_cycles() - start);
+	INC_METRIC(so_set_buf_ns, sched_clock() - start);
 	return ret;
 }
 
@@ -882,7 +882,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	__u64 finish;
 	int result = 0;
 	struct homa_rpc *rpc = NULL;
@@ -938,8 +938,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			result = -EFAULT;
 			goto error;
 		}
-		finish = get_cycles();
-		INC_METRIC(send_cycles, finish - start);
+		finish = sched_clock();
+		INC_METRIC(send_ns, finish - start);
 	} else {
 		/* This is a response message. */
 		struct in6_addr canonical_dest;
@@ -983,8 +983,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
 		homa_rpc_unlock(rpc);
-		finish = get_cycles();
-		INC_METRIC(reply_cycles, finish - start);
+		finish = sched_clock();
+		INC_METRIC(reply_ns, finish - start);
 	}
 	tt_record1("homa_sendmsg finished, id %d", args.id);
 	return 0;
@@ -1015,7 +1015,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 	struct homa_rpc *rpc;
 	__u64 finish;
 	int result;
@@ -1071,7 +1071,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	 * for performance debugging).
 	 */
 	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
-		uint64_t elapsed = (get_cycles() - rpc->start_cycles)>>10;
+		uint64_t elapsed = (sched_clock() - rpc->start_ns)>>10;
 
 		if ((elapsed <= hsk->homa->temp[1])
 				&& (elapsed >= hsk->homa->temp[0])
@@ -1136,11 +1136,11 @@ done:
 		result = -EFAULT;
 	}
 
-	finish = get_cycles();
+	finish = sched_clock();
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 		   control.id, result,
 		   control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
-	INC_METRIC(recv_cycles, finish - start);
+	INC_METRIC(recv_ns, finish - start);
 	return result;
 }
 
@@ -1193,7 +1193,7 @@ int homa_softirq(struct sk_buff *skb)
 	int pull_length;
 	__u64 start;
 
-	start = get_cycles();
+	start = sched_clock();
 	INC_METRIC(softirq_calls, 1);
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 
@@ -1332,7 +1332,7 @@ discard:
 	}
 
 	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
-	INC_METRIC(softirq_cycles, get_cycles() - start);
+	INC_METRIC(softirq_ns, sched_clock() - start);
 	return 0;
 }
 

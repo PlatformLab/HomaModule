@@ -5,6 +5,12 @@
 
 #include <asm/types.h>
 
+#ifdef __UNIT_TEST__
+#undef get_cycles
+#define get_cycles mock_get_cycles
+cycles_t mock_get_cycles(void);
+#endif /* __UNIT_TEST__ */
+
 // Change 1 -> 0 in the following line to disable time tracing globally.
 // Used only in debugging.
 #define ENABLE_TIME_TRACE 1

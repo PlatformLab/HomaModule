@@ -137,7 +137,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 {
 	int core_num = raw_smp_processor_id();
 	struct homa_pool_core *core;
-	__u64 now = get_cycles();
+	__u64 now = sched_clock();
 	int alloced = 0;
 	int limit = 0;
 
@@ -211,8 +211,8 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		if (set_owner) {
 			atomic_set(&bpage->refs, 2);
 			bpage->owner = core_num;
-			bpage->expiration = now
-					+ pool->hsk->homa->bpage_lease_cycles;
+			bpage->expiration = now + 1000 *
+					pool->hsk->homa->bpage_lease_usecs;
 		} else {
 			atomic_set(&bpage->refs, 1);
 			bpage->owner = -1;
@@ -241,7 +241,6 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	__u32 pages[HOMA_MAX_BPAGES];
 	struct homa_pool_core *core;
 	struct homa_bpage *bpage;
-	__u64 now = get_cycles();
 	struct homa_rpc *other;
 
 	if (!pool->region)
@@ -292,7 +291,8 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 			goto new_page;
 		}
 	}
-	bpage->expiration = now + pool->hsk->homa->bpage_lease_cycles;
+	bpage->expiration = sched_clock() +
+			1000 * pool->hsk->homa->bpage_lease_usecs;
 	atomic_inc(&bpage->refs);
 	spin_unlock_bh(&bpage->lock);
 	goto allocate_partial;

@@ -23,7 +23,7 @@ struct homa_dead_dst {
 	struct dst_entry *dst;
 
 	/**
-	 * @gc_time: Time (in units of get_cycles) when it is safe
+	 * @gc_time: Time (in units of sched_clock()) when it is safe
 	 * to free @dst.
 	 */
 	__u64 gc_time;

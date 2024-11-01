@@ -29,14 +29,14 @@ int homa_init(struct homa *homa)
 	homa->pacer_kthread = NULL;
 	init_completion(&homa_pacer_kthread_done);
 	atomic64_set(&homa->next_outgoing_id, 2);
-	atomic64_set(&homa->link_idle_time, get_cycles());
+	atomic64_set(&homa->link_idle_time, sched_clock());
 	spin_lock_init(&homa->grantable_lock);
 	homa->grantable_lock_time = 0;
 	atomic_set(&homa->grant_recalc_count, 0);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->num_grantable_rpcs = 0;
-	homa->last_grantable_change = get_cycles();
+	homa->last_grantable_change = sched_clock();
 	homa->max_grantable_rpcs = 0;
 	homa->oldest_rpc = NULL;
 	homa->num_active_rpcs = 0;
@@ -110,7 +110,7 @@ int homa_init(struct homa *homa)
 	}
 	homa->pacer_exit = false;
 	homa->max_nic_queue_ns = 2000;
-	homa->cycles_per_kbyte = 0;
+	homa->ns_per_mbyte = 0;
 	homa->verbose = 0;
 	homa->max_gso_size = 10000;
 	homa->gso_force_software = 0;
@@ -655,10 +655,8 @@ void homa_spin(int ns)
 {
 	__u64 end;
 
-	end = ns * cpu_khz;
-	do_div(end, 1000000);
-	end += get_cycles();
-	while (get_cycles() < end)
+	end = sched_clock() + ns;
+	while (sched_clock() < end)
 		/* Empty loop body.*/
 		;
 }
@@ -672,13 +670,13 @@ void homa_spin(int ns)
  */
 void homa_throttle_lock_slow(struct homa *homa)
 {
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 
 	tt_record("beginning wait for throttle lock");
 	spin_lock_bh(&homa->throttle_lock);
 	tt_record("ending wait for throttle lock");
 	INC_METRIC(throttle_lock_misses, 1);
-	INC_METRIC(throttle_lock_miss_cycles, get_cycles() - start);
+	INC_METRIC(throttle_lock_miss_ns, sched_clock() - start);
 }
 
 /**

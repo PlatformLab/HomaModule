@@ -32,7 +32,7 @@ static void grantable_spinlock_hook(char *id)
 		return;
 	if (hook_homa != NULL)
 		atomic_inc(&hook_homa->grant_recalc_count);
-	mock_cycles = 1000;
+	mock_ns = 1000;
 }
 
 FIXTURE(homa_grant) {
@@ -66,7 +66,7 @@ FIXTURE_SETUP(homa_grant)
 	self->server_id = 1235;
 	homa_init(&self->homa);
 	self->homa.num_priorities = 1;
-	self->homa.poll_cycles = 0;
+	self->homa.poll_usecs = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
@@ -190,7 +190,7 @@ TEST_F(homa_grant, homa_grant_add_rpc__update_metrics)
 {
 	self->homa.last_grantable_change = 100;
 	self->homa.num_grantable_rpcs = 3;
-	mock_cycles = 200;
+	mock_ns = 200;
 	test_rpc(self, 100, self->server_ip, 100000);
 	EXPECT_EQ(4, self->homa.num_grantable_rpcs);
 	EXPECT_EQ(300, homa_metrics_per_cpu()->grantable_rpcs_integral);
@@ -340,7 +340,7 @@ TEST_F(homa_grant, homa_grant_remove_rpc__update_metrics)
 	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
 	self->homa.last_grantable_change = 100;
 	self->homa.num_grantable_rpcs = 3;
-	mock_cycles = 200;
+	mock_ns = 200;
 
 	homa_grant_remove_rpc(rpc);
 	EXPECT_EQ(2, self->homa.num_grantable_rpcs);
@@ -752,7 +752,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 	rpc4 = test_rpc(self, 106, self->server_ip+1, 35000);
 	self->homa.max_incoming = 100000;
 	self->homa.max_overcommit = 3;
-	mock_cycles = ~0;
+	mock_ns_tick = 10;
 
 	unit_log_clear();
 	homa_grant_recalc(&self->homa, 0);
@@ -773,7 +773,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 
 	EXPECT_EQ(2, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(-1, atomic_read(&rpc4->msgin.rank));
-	EXPECT_NE(0, homa_metrics_per_cpu()->grant_recalc_cycles);
+	EXPECT_NE(0, homa_metrics_per_cpu()->grant_recalc_ns);
 }
 TEST_F(homa_grant, homa_grant_recalc__already_locked)
 {
@@ -1016,7 +1016,7 @@ TEST_F(homa_grant, homa_grant_pick_rpcs__first_rpc_of_peer_doesnt_fit)
 
 TEST_F(homa_grant, homa_grant_find_oldest__basics)
 {
-	mock_cycles = ~0;
+	mock_ns_tick = 10;
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 11, 40000, 100);
 	unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
@@ -1033,7 +1033,7 @@ TEST_F(homa_grant, homa_grant_find_oldest__fifo_grant_unused)
 {
 	struct homa_rpc *srpc1, *srpc2;
 
-	mock_cycles = ~0;
+	mock_ns_tick = 10;
 	srpc1 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, 11, 400000, 100);
 	srpc2 = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip+1,
@@ -1111,18 +1111,18 @@ TEST_F(homa_grant, homa_grant_free_rpc__not_in_active_list)
 
 TEST_F(homa_grant, homa_grantable_lock_slow__basics)
 {
-	mock_cycles = 500;
+	mock_ns = 500;
 	unit_hook_register(grantable_spinlock_hook);
 
 	EXPECT_EQ(1, homa_grantable_lock_slow(&self->homa, 0));
 	homa_grantable_unlock(&self->homa);
 
 	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
-	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_cycles);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_ns);
 }
 TEST_F(homa_grant, homa_grantable_lock_slow__recalc_count)
 {
-	mock_cycles = 500;
+	mock_ns = 500;
 	unit_hook_register(grantable_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xff;
@@ -1131,7 +1131,7 @@ TEST_F(homa_grant, homa_grantable_lock_slow__recalc_count)
 	hook_homa = NULL;
 
 	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
-	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_cycles);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_ns);
 
 	/* Make sure the check only occurs if the recalc argument is set. */
 	mock_trylock_errors = 0xff;

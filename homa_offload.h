@@ -13,14 +13,14 @@
  */
 struct homa_offload_core {
 	/**
-	 * @last_active: the last time (in get_cycle() units) that
+	 * @last_active: the last time (in sched_clock() units) that
 	 * there was system activity, such NAPI or SoftIRQ, on this
 	 * core. Used for load balancing.
 	 */
 	__u64 last_active;
 
 	/**
-	 * @last_gro: the last time (in get_cycle() units) that
+	 * @last_gro: the last time (in sched_clock() units) that
 	 * homa_gro_receive returned on this core. Used to determine
 	 * whether GRO is keeping a core busy.
 	 */
@@ -50,7 +50,7 @@ struct homa_offload_core {
 	int gen3_softirq_cores[NUM_GEN3_SOFTIRQ_CORES];
 
 	/**
-	 * @last_app_active: the most recent time (get_cycles() units)
+	 * @last_app_active: the most recent time (sched_clock() units)
 	 * when an application was actively using Homa on this core (e.g.,
 	 * by sending or receiving messages). Used for load balancing
 	 * (see balance.txt).

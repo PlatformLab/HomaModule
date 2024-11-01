@@ -54,9 +54,9 @@ FIXTURE_SETUP(homa_outgoing)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
-	mock_cycles = 10000;
+	mock_ns = 10000;
 	atomic64_set(&self->homa.link_idle_time, 10000);
-	self->homa.cycles_per_kbyte = 1000;
+	self->homa.ns_per_mbyte = 1000000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 	self->server_addr.in6.sin6_family = AF_INET;
@@ -657,7 +657,7 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 11000);
-	self->homa.max_nic_queue_cycles = 500;
+	self->homa.max_nic_queue_ns = 500;
 	self->homa.throttle_min_bytes = 250;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_xmit_data(crpc, false);
@@ -677,7 +677,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 
 	/* First, get an RPC on the throttled list. */
 	atomic64_set(&self->homa.link_idle_time, 11000);
-	self->homa.max_nic_queue_cycles = 3000;
+	self->homa.max_nic_queue_ns = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_xmit_data(crpc1, false);
 	unit_log_clear();
@@ -702,7 +702,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 11000);
-	self->homa.max_nic_queue_cycles = 3000;
+	self->homa.max_nic_queue_ns = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
 	homa_xmit_data(crpc, false);
@@ -929,20 +929,15 @@ TEST_F(homa_outgoing, homa_outgoing_sysctl_changed)
 {
 	self->homa.link_mbps = 10000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(808, self->homa.cycles_per_kbyte);
+	EXPECT_EQ(808000, self->homa.ns_per_mbyte);
 
 	self->homa.link_mbps = 1000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(8080, self->homa.cycles_per_kbyte);
+	EXPECT_EQ(8080000, self->homa.ns_per_mbyte);
 
 	self->homa.link_mbps = 40000;
 	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(202, self->homa.cycles_per_kbyte);
-
-	self->homa.max_nic_queue_ns = 200;
-	cpu_khz = 2000000;
-	homa_outgoing_sysctl_changed(&self->homa);
-	EXPECT_EQ(400, self->homa.max_nic_queue_cycles);
+	EXPECT_EQ(202000, self->homa.ns_per_mbyte);
 }
 
 TEST_F(homa_outgoing, homa_check_nic_queue__basics)
@@ -954,8 +949,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__basics)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
-	mock_cycles = 8000;
-	self->homa.max_nic_queue_cycles = 1000;
+	mock_ns = 8000;
+	self->homa.max_nic_queue_ns = 1000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			false));
@@ -970,8 +965,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
-	mock_cycles = 7999;
-	self->homa.max_nic_queue_cycles = 1000;
+	mock_ns = 7999;
+	self->homa.max_nic_queue_ns = 1000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	EXPECT_EQ(0, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			false));
@@ -986,8 +981,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_full_but_force)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
-	mock_cycles = 7999;
-	self->homa.max_nic_queue_cycles = 1000;
+	mock_ns = 7999;
+	self->homa.max_nic_queue_ns = 1000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			true));
@@ -1004,14 +999,14 @@ TEST_F(homa_outgoing, homa_check_nic_queue__pacer_metrics)
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
 	self->homa.pacer_wake_time = 9800;
-	mock_cycles = 10000;
-	self->homa.max_nic_queue_cycles = 1000;
+	mock_ns = 10000;
+	self->homa.max_nic_queue_ns = 1000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			true));
 	EXPECT_EQ(10500, atomic64_read(&self->homa.link_idle_time));
 	EXPECT_EQ(500, homa_metrics_per_cpu()->pacer_bytes);
-	EXPECT_EQ(200, homa_metrics_per_cpu()->pacer_lost_cycles);
+	EXPECT_EQ(200, homa_metrics_per_cpu()->pacer_lost_ns);
 }
 TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 {
@@ -1022,8 +1017,8 @@ TEST_F(homa_outgoing, homa_check_nic_queue__queue_empty)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.link_idle_time, 9000);
-	mock_cycles = 10000;
-	self->homa.max_nic_queue_cycles = 1000;
+	mock_ns = 10000;
+	self->homa.max_nic_queue_ns = 1000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	EXPECT_EQ(1, homa_check_nic_queue(&self->homa, crpc->msgout.packets,
 			true));
@@ -1050,7 +1045,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	homa_add_to_throttled(crpc1);
 	homa_add_to_throttled(crpc2);
 	homa_add_to_throttled(crpc3);
-	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
@@ -1066,13 +1061,13 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 {
 	struct homa_rpc *crpc1, *crpc2, *crpc3;
 
-	mock_cycles = 10000;
+	mock_ns = 10000;
 	crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, 2, 20000, 1000);
-	mock_cycles = 11000;
+	mock_ns = 11000;
 	crpc2 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, 4, 10000, 1000);
-	mock_cycles = 12000;
+	mock_ns = 12000;
 	crpc3 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, 6, 30000, 1000);
 	homa_add_to_throttled(crpc1);
@@ -1080,10 +1075,10 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	homa_add_to_throttled(crpc3);
 
 	/* First attempt: pacer_fifo_count doesn't reach zero. */
-	self->homa.max_nic_queue_cycles = 1300;
+	self->homa.max_nic_queue_ns = 1300;
 	self->homa.pacer_fifo_count = 200;
 	self->homa.pacer_fifo_fraction = 150;
-	mock_cycles = 13000;
+	mock_ns= 13000;
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
@@ -1119,7 +1114,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 			10000, 1000);
 
 	homa_add_to_throttled(crpc);
-	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	mock_trylock_errors = 1;
 	unit_log_clear();
@@ -1131,7 +1126,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 {
-	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);
@@ -1146,8 +1141,8 @@ TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
 			10000, 1000);
 
 	homa_add_to_throttled(crpc);
-	self->homa.max_nic_queue_cycles = 2001;
-	mock_cycles = 10000;
+	self->homa.max_nic_queue_ns = 2001;
+	mock_ns = 10000;
 	atomic64_set(&self->homa.link_idle_time, 12000);
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
@@ -1165,7 +1160,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 			5000, 1000);
 
 	homa_add_to_throttled(crpc);
-	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	mock_trylock_errors = ~1;
@@ -1191,7 +1186,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 
 	homa_add_to_throttled(crpc1);
 	homa_add_to_throttled(crpc2);
-	self->homa.max_nic_queue_cycles = 2000;
+	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	homa_pacer_xmit(&self->homa);

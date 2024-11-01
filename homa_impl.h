@@ -31,6 +31,7 @@
 #include <linux/kthread.h>
 #include <linux/completion.h>
 #include <linux/proc_fs.h>
+#include <linux/sched/clock.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
 #include <linux/socket.h>
@@ -64,10 +65,6 @@ int mock_cpu_to_node(int cpu);
 #undef current
 #define current current_task
 extern struct task_struct *current_task;
-
-#undef get_cycles
-#define get_cycles mock_get_cycles
-cycles_t mock_get_cycles(void);
 
 #define get_page mock_get_page
 void mock_get_page(struct page *page);
@@ -255,7 +252,7 @@ struct homa {
 	atomic64_t next_outgoing_id;
 
 	/**
-	 * @link_idle_time: The time, measured by get_cycles() at which we
+	 * @link_idle_time: The time, measured by sched_clock, at which we
 	 * estimate that all of the packets we have passed to Linux for
 	 * transmission will have been transmitted. May be in the past.
 	 * This estimate assumes that only Homa is transmitting data, so
@@ -271,7 +268,7 @@ struct homa {
 	spinlock_t grantable_lock __aligned(L1_CACHE_BYTES);
 
 	/**
-	 * @grantable_lock_time: get_cycles() time when grantable_lock
+	 * @grantable_lock_time: sched_clock() time when grantable_lock
 	 * was last locked.
 	 */
 	__u64 grantable_lock_time;
@@ -302,7 +299,7 @@ struct homa {
 	/** @num_grantable_rpcs: The number of RPCs in grantable_rpcs. */
 	int num_grantable_rpcs;
 
-	/** @last_grantable_change: The get_cycles time of the most recent
+	/** @last_grantable_change: The sched_clock() time of the most recent
 	 * increment or decrement of num_grantable_rpcs; used for computing
 	 * statistics.
 	 */
@@ -316,7 +313,7 @@ struct homa {
 	int max_grantable_rpcs;
 
 	/**
-	 * @oldest_rpc: The RPC with incoming data whose start_cycles is
+	 * @oldest_rpc: The RPC with incoming data whose start_ns is
 	 * farthest in the past). NULL means either there are no incoming
 	 * RPCs or the oldest needs to be recomputed. Must hold grantable_lock
 	 * to update.
@@ -383,8 +380,8 @@ struct homa {
 	int pacer_fifo_count;
 
 	/**
-	 * @pacer_start: get_cycles() time when the pacer last woke up
-	 * (if the pacer is running) or 0 if the pacer is sleeping.
+	 * @pacer_wake_time: time (in sched_clock units) when the pacer last
+	 * woke up (if the pacer is running) or 0 if the pacer is sleeping.
 	 */
 	__u64 pacer_wake_time;
 
@@ -404,8 +401,8 @@ struct homa {
 	struct list_head throttled_rpcs;
 
 	/**
-	 * @throttle_add: The get_cycles() time when the most recent RPC
-	 * was added to @throttled_rpcs.
+	 * @throttle_add: The time (in sched_clock() units) when the most
+	 * recent RPC was added to @throttled_rpcs.
 	 */
 	__u64 throttle_add;
 
@@ -486,7 +483,7 @@ struct homa {
 	int pages_to_free_slots;
 
 	/**
-	 * @skb_page_free_time: Time (in get_cycles() units) when the
+	 * @skb_page_free_time: Time (in sched_clock() units) when the
 	 * next sk_buff page should be freed. Could be in the past.
 	 */
 	__u64 skb_page_free_time;
@@ -533,12 +530,6 @@ struct homa {
 	 * going to sleep. Set externally via sysctl.
 	 */
 	int poll_usecs;
-
-	/**
-	 * @poll_cycles: The value of @poll_usecs in the units returned
-	 * by get_cycles().
-	 */
-	int poll_cycles;
 
 	/**
 	 * @num_priorities: The total number of priority levels available for
@@ -693,18 +684,12 @@ struct homa {
 	int max_nic_queue_ns;
 
 	/**
-	 * @max_nic_queue_cycles: Same as max_nic_queue_ns, except in units
-	 * of get_cycles().
+	 * @ns_per_mbyte: the number of ns that it takes to transmit
+	 * 10**6 bytes on our uplink. This is actually a slight overestimate
+	 * of the value, to ensure that we don't underestimate NIC queue
+	 * length and queue too many packets.
 	 */
-	int max_nic_queue_cycles;
-
-	/**
-	 * @cycles_per_kbyte: the number of cycles, as measured by get_cycles(),
-	 * that it takes to transmit 1000 bytes on our uplink. This is actually
-	 * a slight overestimate of the value, to ensure that we don't
-	 * underestimate NIC queue length and queue too many packets.
-	 */
-	__u32 cycles_per_kbyte;
+	__u32 ns_per_mbyte;
 
 	/**
 	 * @verbose: Nonzero enables additional logging. Set externally via
@@ -786,8 +771,8 @@ struct homa {
 	 */
 	int busy_usecs;
 
-	/** @busy_cycles: Same as busy_usecs except in get_cycles() units. */
-	int busy_cycles;
+	/** @busy_ns: Same as busy_usecs except in sched_clock() units. */
+	int busy_ns;
 
 	/*
 	 * @gro_busy_usecs: if the gap between the completion of
@@ -799,8 +784,8 @@ struct homa {
 	 */
 	int gro_busy_usecs;
 
-	/** @gro_busy_cycles: Same as busy_usecs except in get_cycles() units. */
-	int gro_busy_cycles;
+	/** @gro_busy_ns: Same as busy_usecs except in sched_clock() units. */
+	int gro_busy_ns;
 
 	/**
 	 * @timer_ticks: number of times that homa_timer has been invoked
@@ -854,12 +839,6 @@ struct homa {
 	 * before its ownership can be revoked to reclaim the page.
 	 */
 	int bpage_lease_usecs;
-
-	/**
-	 * @bpage_lease_cycles: The value of @bpage_lease_usecs in get_cycles
-	 * units.
-	 */
-	int bpage_lease_cycles;
 
 	/**
 	 * @next_id: Set via sysctl; causes next_outgoing_id to be set to
@@ -1227,7 +1206,7 @@ static inline void homa_check_pacer(struct homa *homa, int softirq)
 	 * to queue new packets; if the NIC queue becomes more than half
 	 * empty, then we will help out here.
 	 */
-	if ((get_cycles() +(homa->max_nic_queue_cycles >> 1)) <
+	if ((sched_clock() + (homa->max_nic_queue_ns >> 1)) <
 			atomic64_read(&homa->link_idle_time))
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");

@@ -363,13 +363,13 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
  */
 void homa_sock_lock_slow(struct homa_sock *hsk)
 {
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 
 	tt_record("beginning wait for socket lock");
 	spin_lock_bh(&hsk->lock);
 	tt_record("ending wait for socket lock");
 	INC_METRIC(socket_lock_misses, 1);
-	INC_METRIC(socket_lock_miss_cycles, get_cycles() - start);
+	INC_METRIC(socket_lock_miss_ns, sched_clock() - start);
 }
 
 /**
@@ -383,7 +383,7 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  */
 void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
 {
-	__u64 start = get_cycles();
+	__u64 start = sched_clock();
 
 	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
 		   id, bucket->id);
@@ -392,9 +392,9 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
 		   id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
-		INC_METRIC(client_lock_miss_cycles, get_cycles() - start);
+		INC_METRIC(client_lock_miss_ns, sched_clock() - start);
 	} else {
 		INC_METRIC(server_lock_misses, 1);
-		INC_METRIC(server_lock_miss_cycles, get_cycles() - start);
+		INC_METRIC(server_lock_miss_ns, sched_clock() - start);
 	}
 }

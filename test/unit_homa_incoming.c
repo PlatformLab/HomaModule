@@ -148,7 +148,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_id = 1235;
 	homa_init(&self->homa);
 	self->homa.num_priorities = 1;
-	self->homa.poll_cycles = 0;
+	self->homa.poll_usecs = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
@@ -257,7 +257,7 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
-	mock_cycles = 5000;
+	mock_ns = 5000;
 	self->data.seg.offset = htonl(1400);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 1400));
@@ -527,7 +527,7 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
-	mock_cycles = 1000;
+	mock_ns = 1000;
 	self->data.seg.offset = htonl(0);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 0));
@@ -539,7 +539,7 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 			unit_print_gaps(crpc));
 
 	self->data.seg.offset = htonl(2000);
-	mock_cycles = 2000;
+	mock_ns = 2000;
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,
 			&self->data.common, 1400, 2000));
 	EXPECT_EQ(3, skb_queue_len(&crpc->msgin.packets));
@@ -1074,6 +1074,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 20000);
 	struct homa_rpc *srpc;
+	mock_ns_tick = 10;
 
 	homa_rpc_free(dead);
 	EXPECT_EQ(31, self->hsk.dead_skbs);
@@ -1082,14 +1083,13 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 			10000, 5000);
 	ASSERT_NE(NULL, srpc);
 	self->homa.dead_buffs_limit = 16;
-	mock_cycles = ~0;
 
 	/* First packet: below the threshold for reaps. */
 	self->data.common.dport = htons(self->hsk.port);
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->homa);
 	EXPECT_EQ(31, self->hsk.dead_skbs);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->data_pkt_reap_ns);
 
 	/* Second packet: must reap. */
 	self->homa.dead_buffs_limit = 15;
@@ -1097,7 +1097,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &self->data.common,
 			1400, 0), &self->homa);
 	EXPECT_EQ(21, self->hsk.dead_skbs);
-	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
+	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_ns);
 }
 
 TEST_F(homa_incoming, homa_data_pkt__basics)
@@ -2214,7 +2214,6 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_polling)
 	ASSERT_NE(NULL, crpc1);
 	hook_rpc = crpc1;
 	poll_count = 5;
-	self->homa.poll_cycles = 1000000;
 	unit_hook_register(poll_hook);
 	unit_log_clear();
 	rpc = homa_wait_for_message(&self->hsk, 0, self->client_id);
@@ -2454,8 +2453,8 @@ TEST_F(homa_incoming, homa_choose_interest__find_idle_core)
 	interest3.core = 3;
 	list_add_tail(&interest3.request_links, &self->hsk.request_interests);
 
-	mock_cycles = 5000;
-	self->homa.busy_cycles = 1000;
+	mock_ns = 5000;
+	self->homa.busy_ns = 1000;
 	per_cpu(homa_offload_core, 1).last_active = 4100;
 	per_cpu(homa_offload_core, 2).last_active = 3500;
 	per_cpu(homa_offload_core, 3).last_active = 2000;
@@ -2481,8 +2480,8 @@ TEST_F(homa_incoming, homa_choose_interest__all_cores_busy)
 	interest3.core = 3;
 	list_add_tail(&interest3.request_links, &self->hsk.request_interests);
 
-	mock_cycles = 5000;
-	self->homa.busy_cycles = 1000;
+	mock_ns = 5000;
+	self->homa.busy_ns = 1000;
 	per_cpu(homa_offload_core, 1).last_active = 4100;
 	per_cpu(homa_offload_core, 2).last_active = 4001;
 	per_cpu(homa_offload_core, 3).last_active = 4800;
@@ -2683,7 +2682,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__update_last_app_active)
 	interest.reg_rpc = crpc;
 	interest.core = 2;
 	crpc->interest = &interest;
-	mock_cycles = 10000;
+	mock_ns = 10000;
 	per_cpu(homa_offload_core, 2).last_app_active = 444;
 	homa_rpc_handoff(crpc);
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
@@ -2692,13 +2691,6 @@ TEST_F(homa_incoming, homa_rpc_handoff__update_last_app_active)
 }
 
 TEST_F(homa_incoming, homa_incoming_sysctl_changed__grant_nonfifo)
-{
-	cpu_khz = 2000000;
-	self->homa.poll_usecs = 40;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(80000, self->homa.poll_cycles);
-}
-TEST_F(homa_incoming, homa_incoming_sysctl_changed__poll_cycles)
 {
 	self->homa.fifo_grant_increment = 10000;
 	self->homa.grant_fifo_fraction = 0;
@@ -2716,4 +2708,26 @@ TEST_F(homa_incoming, homa_incoming_sysctl_changed__poll_cycles)
 	self->homa.grant_fifo_fraction = 2000;
 	homa_incoming_sysctl_changed(&self->homa);
 	EXPECT_EQ(10000, self->homa.grant_nonfifo);
+}
+TEST_F(homa_incoming, homa_incoming_sysctl_changed__limit_on_max_overcommit)
+{
+	self->homa.max_overcommit = 2;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(2, self->homa.max_overcommit);
+
+	self->homa.max_overcommit = HOMA_MAX_GRANTS;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.max_overcommit);
+
+	self->homa.max_overcommit = HOMA_MAX_GRANTS+1;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.max_overcommit);
+}
+TEST_F(homa_incoming, homa_incoming_sysctl_changed__convert_usec_to_ns)
+{
+	self->homa.busy_usecs = 53;
+	self->homa.gro_busy_usecs = 140;
+	homa_incoming_sysctl_changed(&self->homa);
+	EXPECT_EQ(53000, self->homa.busy_ns);
+	EXPECT_EQ(140000, self->homa.gro_busy_ns);
 }

@@ -28,6 +28,8 @@ extern int         mock_max_skb_frags;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
+extern __u64       mock_ns;
+extern __u64       mock_ns_tick;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern int         mock_route_errors;
