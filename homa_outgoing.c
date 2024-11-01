@@ -123,9 +123,10 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 				     int length, int max_seg_data)
 {
 	struct homa_skb_info *homa_info;
-	int segs, err, gso_size;
 	struct data_header *h;
 	struct sk_buff *skb;
+	int err, gso_size;
+	uint64_t segs;
 
 	/* Initialize the overall skb. */
 	skb = homa_skb_new_tx(sizeof32(struct data_header));
@@ -153,7 +154,8 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	h->retransmit = 0;
 	h->seg.offset = -1;
 
-	segs = (length + max_seg_data - 1) / max_seg_data;
+	segs = length + max_seg_data - 1;
+	do_div(segs, max_seg_data);
 	homa_info = homa_get_skb_info(skb);
 	homa_info->next_skb = NULL;
 	homa_info->wire_bytes = length + segs * (sizeof(struct data_header)
@@ -254,8 +256,9 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		gso_size = rpc->hsk->homa->max_gso_size;
 
 	/* Round gso_size down to an even # of mtus. */
-	segs_per_gso = (gso_size - rpc->hsk->ip_header_length
-			- sizeof(struct data_header)) / max_seg_data;
+	segs_per_gso = gso_size - rpc->hsk->ip_header_length
+			- sizeof(struct data_header);
+	do_div(segs_per_gso, max_seg_data);
 	if (segs_per_gso == 0)
 		segs_per_gso = 1;
 	max_gso_data = segs_per_gso * max_seg_data;
@@ -734,10 +737,12 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
 	/* Code below is written carefully to avoid integer underflow or
 	 * overflow under expected usage patterns. Be careful when changing!
 	 */
-	homa->cycles_per_kbyte = (8 * (__u64)cpu_khz) / homa->link_mbps;
-	homa->cycles_per_kbyte = (101 * homa->cycles_per_kbyte) / 100;
-	tmp = homa->max_nic_queue_ns;
-	tmp = (tmp * cpu_khz) / 1000000;
+	homa->cycles_per_kbyte = 8 * (__u64)cpu_khz;
+	do_div(homa->cycles_per_kbyte, homa->link_mbps);
+	homa->cycles_per_kbyte = 101 * homa->cycles_per_kbyte;
+	do_div(homa->cycles_per_kbyte, 100);
+	tmp = homa->max_nic_queue_ns * cpu_khz;
+	do_div(tmp, 1000000);
 	homa->max_nic_queue_cycles = tmp;
 }
 
@@ -763,7 +768,8 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 	__u64 idle, new_idle, clock;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
-	cycles_for_packet = (bytes * homa->cycles_per_kbyte) / 1000;
+	cycles_for_packet = bytes * homa->cycles_per_kbyte;
+	do_div(cycles_for_packet, 1000);
 	while (1) {
 		clock = get_cycles();
 		idle = atomic64_read(&homa->link_idle_time);

@@ -655,7 +655,9 @@ void homa_spin(int ns)
 {
 	__u64 end;
 
-	end = get_cycles() + (ns * cpu_khz) / 1000000;
+	end = ns * cpu_khz;
+	do_div(end, 1000000);
+	end += get_cycles();
 	while (get_cycles() < end)
 		/* Empty loop body.*/
 		;

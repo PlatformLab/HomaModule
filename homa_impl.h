@@ -1223,11 +1223,11 @@ static inline void homa_check_pacer(struct homa *homa, int softirq)
 	if (list_empty(&homa->throttled_rpcs))
 		return;
 
-	/* The "/2" in the line below gives homa_pacer_main the first chance
+	/* The ">> 1" in the line below gives homa_pacer_main the first chance
 	 * to queue new packets; if the NIC queue becomes more than half
 	 * empty, then we will help out here.
 	 */
-	if ((get_cycles() + homa->max_nic_queue_cycles / 2) <
+	if ((get_cycles() +(homa->max_nic_queue_cycles >> 1)) <
 			atomic64_read(&homa->link_idle_time))
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");

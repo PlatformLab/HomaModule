@@ -1190,31 +1190,12 @@ int homa_softirq(struct sk_buff *skb)
 	struct common_header *h;
 	int first_packet = 1;
 	int header_offset;
-#if 1 /* See strip.py */
-	static __u64 last;
 	int pull_length;
 	__u64 start;
 
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active
-			= start;
-	if ((start - last) > 1000000) {
-		int scaled_ms = (int)(10 * (start - last) / cpu_khz);
-
-		if (scaled_ms >= 50 && scaled_ms < 10000) {
-//			tt_record3("Gap in incoming packets: %d cycles (%d.%1d ms)",
-//				   (int) (start - last), scaled_ms/10,
-//				   scaled_ms%10);
-//			pr_notice("Gap in incoming packets: %llu cycles, (%d.%1d ms)",
-//				  (start - last),
-//				  scaled_ms/10, scaled_ms%10);
-		}
-	}
-	last = start;
-#else /* See strip.py */
-	int pull_length;
-#endif /* See strip.py */
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 
 	/* skb may actually contain many distinct packets, linked through
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Make a
