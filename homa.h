@@ -109,7 +109,7 @@ struct homa_recvmsg_args {
 	 * @flags: (in) OR-ed combination of bits that control the operation.
 	 * See below for values.
 	 */
-	int flags;
+	uint32_t flags;
 
 	/**
 	 * @error_addr: the address of the peer is stored here when available.
@@ -127,6 +127,7 @@ struct homa_recvmsg_args {
 	 */
 	uint32_t num_bpages;
 
+        /* Reserved for future use; must be zero. */
 	uint32_t _pad[1];
 
 	/**
