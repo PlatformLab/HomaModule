@@ -17,7 +17,7 @@ extern int mock_max_skb_frags;
 #define HOMA_MAX_SKB_FRAGS MAX_SKB_FRAGS
 #endif
 
-static inline void frag_page_set(skb_frag_t *frag, struct page *page)
+static void frag_page_set(skb_frag_t *frag, struct page *page)
 {
 	frag->netmem = page_to_netmem(page);
 }

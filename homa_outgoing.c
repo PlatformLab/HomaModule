@@ -11,26 +11,6 @@
 #include "homa_wire.h"
 
 /**
- * set_priority() - Arrange for an outgoing packet to have a particular
- * priority level.
- * @skb:        The packet was priority should be set.
- * @hsk:        Socket on which the packet will be sent.
- * @priority:   Priority level for the packet; must be less than
- *              HOMA_MAX_PRIORITIES.
- */
-static inline void set_priority(struct sk_buff *skb, struct homa_sock *hsk,
-		int priority)
-{
-	/* Note: this code initially specified the priority in the VLAN
-	 * header, but as of 3/2020, this performed badly on the CloudLab
-	 * cluster being used for testing: 100 us of extra delay occurred
-	 * whenever a packet's VLAN priority differed from the previous
-	 * packet. So, now we use the DSCP field in the IP header instead.
-	 */
-	hsk->inet.tos = hsk->homa->priority_map[priority]<<5;
-}
-
-/**
  * homa_message_out_init() - Initialize rpc->msgout.
  * @rpc:       RPC whose output message should be initialized.
  * @length:    Number of bytes that will eventually be in rpc->msgout.

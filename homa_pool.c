@@ -31,7 +31,7 @@
  * The caller must own the lock for @pool->hsk.
  * @pool: Pool to update.
  */
-static inline void set_bpages_needed(struct homa_pool *pool)
+static void set_bpages_needed(struct homa_pool *pool)
 {
 	struct homa_rpc *rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
 			struct homa_rpc, buf_links);

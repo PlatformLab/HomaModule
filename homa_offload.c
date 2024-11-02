@@ -160,7 +160,7 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
  * @cpu:  Index of core to which the packet should be directed for
  *        SoftIRQ processing.
  */
-static inline void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
+static void homa_set_softirq_cpu(struct sk_buff *skb, int cpu)
 {
 	struct rps_sock_flow_table *sock_flow_table;
 	int hash;

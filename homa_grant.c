@@ -17,7 +17,7 @@
  * @rpc1:     First RPC to consider.
  * @rpc2:     Second RPC to consider.
  */
-inline int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
+int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 {
 	/* Fewest bytes remaining is the primary criterion; if those are
 	 * equal, then favor the older RPC.
@@ -41,7 +41,7 @@ inline int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
  *         may be possible to send out additional grants to some RPCs (doing
  *         this is left to the caller).
  */
-inline int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
+int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
 {
 	int incoming = rpc->msgin.granted - (rpc->msgin.length
 			- rpc->msgin.bytes_remaining);
