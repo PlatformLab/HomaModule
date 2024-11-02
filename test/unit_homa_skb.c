@@ -92,12 +92,12 @@ FIXTURE_TEARDOWN(homa_skb)
 	unit_teardown();
 }
 
-TEST_F(homa_skb, homa_skb_init)
+TEST_F(homa_skb, homa_skb_init__success)
 {
 	homa_skb_cleanup(&self->homa);
 	EXPECT_EQ(NULL, self->homa.page_pools[0]);
 	mock_numa_mask = 0x83;
-	homa_skb_init(&self->homa);
+	EXPECT_EQ(0, homa_skb_init(&self->homa));
 	EXPECT_NE(NULL, self->homa.page_pools[0]);
 	EXPECT_NE(NULL, self->homa.page_pools[1]);
 	EXPECT_EQ(NULL, self->homa.page_pools[2]);
@@ -107,6 +107,17 @@ TEST_F(homa_skb, homa_skb_init)
 	EXPECT_EQ(self->homa.page_pools[0], get_skb_core(6)->pool);
 	EXPECT_EQ(self->homa.page_pools[1], get_skb_core(7)->pool);
 	EXPECT_EQ(1, self->homa.max_numa);
+}
+TEST_F(homa_skb, homa_skb_init__kmalloc_failure)
+{
+	homa_skb_cleanup(&self->homa);
+	EXPECT_EQ(NULL, self->homa.page_pools[0]);
+	mock_numa_mask = 0x2;
+	mock_kmalloc_errors = 0x2;
+	EXPECT_EQ(ENOMEM, -homa_skb_init(&self->homa));
+	EXPECT_NE(NULL, self->homa.page_pools[0]);
+	EXPECT_EQ(NULL, self->homa.page_pools[1]);
+	EXPECT_EQ(NULL, self->homa.page_pools[2]);
 }
 
 TEST_F(homa_skb, homa_skb_cleanup)

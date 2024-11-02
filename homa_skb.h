@@ -113,7 +113,7 @@ extern void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
 		    int count);
 extern void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
 		    int length);
-extern void     homa_skb_init(struct homa *homa);
+extern int      homa_skb_init(struct homa *homa);
 extern struct sk_buff
 	       *homa_skb_new_tx(int length);
 extern bool     homa_skb_page_alloc(struct homa *homa,

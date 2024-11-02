@@ -50,6 +50,49 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[7] = c7;
 }
 
+TEST_F(homa_utils, homa_init__kmalloc_failure_for_port_map)
+{
+	struct homa homa2;
+
+	memset(&homa2, 0, sizeof(homa2));
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_EQ(NULL, homa2.port_map);
+	homa_destroy(&homa2);
+}
+TEST_F(homa_utils, homa_init__kmalloc_failure_for_peers)
+{
+	struct homa homa2;
+
+	memset(&homa2, 0, sizeof(homa2));
+	mock_kmalloc_errors = 2;
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_NE(NULL, homa2.port_map);
+	EXPECT_EQ(NULL, homa2.peers);
+	homa_destroy(&homa2);
+}
+TEST_F(homa_utils, homa_init__homa_skb_init_failure)
+{
+	struct homa homa2;
+
+	memset(&homa2, 0, sizeof(homa2));
+	mock_kmalloc_errors = 4;
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
+		      mock_printk_output);
+	homa_destroy(&homa2);
+}
+TEST_F(homa_utils, homa_init__cant_create_pacer_thread)
+{
+	struct homa homa2;
+
+	memset(&homa2, 0, sizeof(homa2));
+	mock_kthread_create_errors = 1;
+	EXPECT_EQ(EACCES, -homa_init(&homa2));
+	EXPECT_EQ(NULL, homa2.pacer_kthread);
+	homa_destroy(&homa2);
+}
+
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
 	struct in6_addr test_addr1 = unit_get_in_addr("192.168.0.1");

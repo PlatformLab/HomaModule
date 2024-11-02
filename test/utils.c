@@ -459,6 +459,6 @@ char *unit_ack_string(struct homa_ack *ack)
  */
 void unit_homa_destroy(struct homa *homa)
 {
-	if (!list_empty(&homa->port_map->active_scans))
+	if (homa->port_map && !list_empty(&homa->port_map->active_scans))
 		FAIL("struct homa deleted with active socktab scans");
 }

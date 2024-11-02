@@ -339,6 +339,25 @@ TEST_F(homa_incoming, homa_add_packet__new_gap)
 	EXPECT_EQ(5600, crpc->msgin.recv_end);
 	EXPECT_EQ(2, skb_queue_len(&crpc->msgin.packets));
 }
+TEST_F(homa_incoming, homa_add_packet__no_memory_for_new_gap)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+
+	homa_message_in_init(crpc, 10000, 0);
+	unit_log_clear();
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 0));
+
+	self->data.seg.offset = htonl(4200);
+	mock_kmalloc_errors = 1;
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 4200));
+	EXPECT_STREQ("", unit_print_gaps(crpc));
+	EXPECT_EQ(1400, crpc->msgin.recv_end);
+	EXPECT_EQ(1, skb_queue_len(&crpc->msgin.packets));
+}
 TEST_F(homa_incoming, homa_add_packet__packet_before_gap)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -545,6 +564,33 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 	EXPECT_EQ(3, skb_queue_len(&crpc->msgin.packets));
 	EXPECT_STREQ("start 1400, end 2000, time 1000; start 3400, end 4200, time 1000",
 			unit_print_gaps(crpc));
+}
+TEST_F(homa_incoming, homa_add_packet__kmalloc_failure_while_splitting_gap)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, 99, 1000, 1000);
+
+	homa_message_in_init(crpc, 10000, 0);
+	unit_log_clear();
+	mock_ns = 1000;
+	self->data.seg.offset = htonl(0);
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 0));
+
+	self->data.seg.offset = htonl(4200);
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 4200));
+	EXPECT_STREQ("start 1400, end 4200, time 1000",
+			unit_print_gaps(crpc));
+
+	self->data.seg.offset = htonl(2000);
+	mock_ns = 2000;
+	mock_kmalloc_errors = 1;
+	homa_add_packet(crpc, mock_skb_new(self->client_ip,
+			&self->data.common, 1400, 2000));
+	EXPECT_EQ(2, skb_queue_len(&crpc->msgin.packets));
+	EXPECT_STREQ("start 1400, end 4200, time 1000", unit_print_gaps(crpc));
 }
 TEST_F(homa_incoming, homa_add_packet__scan_multiple_gaps)
 {

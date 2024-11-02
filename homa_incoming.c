@@ -59,13 +59,16 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
  * @next:   Add the new gap just before this list element.
  * @start:  Offset of first byte covered by the gap.
  * @end:    Offset of byte just after the last one covered by the gap.
- * Return:  Pointer to the new gap.
+ * Return:  Pointer to the new gap, or NULL if memory couldn't be allocated
+ *          for the gap object.
  */
 struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
 {
 	struct homa_gap *gap;
 
 	gap = kmalloc(sizeof(*gap), GFP_KERNEL);
+	if (!gap)
+		return NULL;
 	gap->start = start;
 	gap->end = end;
 	gap->time = sched_clock();
@@ -122,7 +125,12 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 
 	if (start > rpc->msgin.recv_end) {
 		/* Packet creates a new gap. */
-		homa_gap_new(&rpc->msgin.gaps, rpc->msgin.recv_end, start);
+		if (!homa_gap_new(&rpc->msgin.gaps, rpc->msgin.recv_end, start)) {
+			pr_err("Homa couldn't allocate gap: insufficient memory\n");
+			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
+				  rpc->id, start);
+			goto discard;
+		}
 		rpc->msgin.recv_end = end;
 		goto keep;
 	}
@@ -170,6 +178,12 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 
 		/* Packet is in the middle of the gap; must split the gap. */
 		gap2 = homa_gap_new(&gap->links, gap->start, start);
+		if (!gap2) {
+			pr_err("Homa couldn't allocate gap for split: insufficient memory\n");
+			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
+				  rpc->id, end);
+			goto discard;
+		}
 		gap2->time = gap->time;
 		gap->start = end;
 		goto keep;

@@ -57,14 +57,27 @@ int homa_init(struct homa *homa)
 	atomic_set(&homa->total_incoming, 0);
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
+	if (!homa->port_map) {
+		pr_err("homa_init could create port_map: kmalloc failure");
+		return -ENOMEM;
+	}
 	homa_socktab_init(homa->port_map);
 	homa->peers = kmalloc(sizeof(*homa->peers), GFP_KERNEL);
+	if (!homa->peers) {
+		pr_err("homa_init could create peers: kmalloc failure");
+		return -ENOMEM;
+	}
 	err = homa_peertab_init(homa->peers);
 	if (err) {
 		pr_err("Couldn't initialize peer table (errno %d)\n", -err);
 		return err;
 	}
-	homa_skb_init(homa);
+	err = homa_skb_init(homa);
+	if (err) {
+		pr_err("Couldn't initialize skb management (errno %d)\n",
+		       -err);
+		return err;
+	}
 
 	/* Wild guesses to initialize configuration values... */
 	homa->unsched_bytes = 10000;
@@ -149,13 +162,17 @@ void homa_destroy(struct homa *homa)
 		wait_for_completion(&homa_pacer_kthread_done);
 	}
 
-	/* The order of the following 2 statements matters! */
-	homa_socktab_destroy(homa->port_map);
-	kfree(homa->port_map);
-	homa->port_map = NULL;
-	homa_peertab_destroy(homa->peers);
-	kfree(homa->peers);
-	homa->peers = NULL;
+	/* The order of the following statements matters! */
+	if (homa->port_map) {
+		homa_socktab_destroy(homa->port_map);
+		kfree(homa->port_map);
+		homa->port_map = NULL;
+	}
+	if (homa->peers) {
+		homa_peertab_destroy(homa->peers);
+		kfree(homa->peers);
+		homa->peers = NULL;
+	}
 	homa_skb_cleanup(homa);
 	kfree(homa->metrics);
 	homa->metrics = NULL;

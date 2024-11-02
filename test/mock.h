@@ -21,6 +21,7 @@ extern int         mock_ip_queue_xmit_errors;
 extern bool        mock_ipv6;
 extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
+extern int         mock_kthread_create_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
@@ -32,6 +33,7 @@ extern __u64       mock_ns;
 extern __u64       mock_ns_tick;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
+extern char        mock_printk_output[];
 extern int         mock_route_errors;
 extern int         mock_spin_lock_held;
 extern struct task_struct

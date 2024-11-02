@@ -25,8 +25,10 @@ static inline void frag_page_set(skb_frag_t *frag, struct page *page)
 /**
  * homa_skb_init() - Invoked when a struct homa is created to initialize
  * information related to sk_buff management.
+ * @homa:        Shared information about the Homa transport
+ * Return:       0 for success, negative errno on error
  */
-void homa_skb_init(struct homa *homa)
+int homa_skb_init(struct homa *homa)
 {
 	int i;
 
@@ -51,6 +53,8 @@ void homa_skb_init(struct homa *homa)
 			struct homa_page_pool *pool;
 
 			pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+			if (!pool)
+				return -ENOMEM;
 			pool->avail = 0;
 			pool->low_mark = 0;
 			memset(pool->pages, 0, sizeof(pool->pages));
@@ -59,6 +63,7 @@ void homa_skb_init(struct homa *homa)
 		skb_core->pool = homa->page_pools[numa];
 	}
 	pr_notice("homa_skb_init found max NUMA node %d\n", homa->max_numa);
+	return 0;
 }
 
 /**

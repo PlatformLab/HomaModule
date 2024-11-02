@@ -43,6 +43,7 @@ int mock_import_iovec_errors;
 int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
+int mock_kthread_create_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
 int mock_trylock_errors;
@@ -170,6 +171,9 @@ int mock_compound_order_mask;
  * calls to mock_page_to_nid, starting with the low-order bit.
  */
 int mock_page_nid_mask;
+
+/* Used to collect printk output. */
+char mock_printk_output [5000];
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
@@ -767,6 +771,8 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 					   const char namefmt[],
 					   ...)
 {
+	if (mock_check_error(&mock_kthread_create_errors))
+		return ERR_PTR(-EACCES);
 	return NULL;
 }
 
@@ -835,8 +841,28 @@ long prepare_to_wait_event(struct wait_queue_head *wq_head,
 	return 0;
 }
 
-int _printk(const char *fmt, ...)
+int _printk(const char *format, ...)
 {
+	int len = strlen(mock_printk_output);
+	int available;
+	va_list ap;
+
+	available = sizeof(mock_printk_output) - len;
+	if (available >= 10) {
+		if (len != 0) {
+			strcpy(mock_printk_output + len, "; ");
+			len += 2;
+			available -= 2;
+		}
+		va_start(ap, format);
+		vsnprintf(mock_printk_output + len, available, format, ap);
+		va_end(ap);
+
+		/* Remove trailing newline. */
+		len += strlen(mock_printk_output + len);
+		if (mock_printk_output[len-1]  == '\n')
+			mock_printk_output[len-1] = 0;
+	}
 	return 0;
 }
 
@@ -1531,6 +1557,7 @@ void mock_teardown(void)
 	mock_ip6_xmit_errors = 0;
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
+	mock_kthread_create_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;
@@ -1549,6 +1576,7 @@ void mock_teardown(void)
 	mock_numa_mask = 5;
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
+	mock_printk_output[0] = 0;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
