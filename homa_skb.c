@@ -257,7 +257,7 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 	skb_core->page_inuse = 0;
 	if (skb_core->num_stashed_pages > 0) {
 		skb_core->num_stashed_pages--;
-		skb_core->skb_page =skb_core->stashed_pages[
+		skb_core->skb_page = skb_core->stashed_pages[
 				skb_core->num_stashed_pages];
 		goto success;
 	}

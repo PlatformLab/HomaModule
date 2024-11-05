@@ -127,7 +127,7 @@ struct homa_recvmsg_args {
 	 */
 	uint32_t num_bpages;
 
-        /* Reserved for future use; must be zero. */
+	/* Reserved for future use; must be zero. */
 	uint32_t _pad[1];
 
 	/**

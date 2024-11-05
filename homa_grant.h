@@ -5,22 +5,22 @@
 #ifndef _HOMA_GRANT_H
 #define _HOMA_GRANT_H
 
-extern int      homa_grantable_lock_slow(struct homa *homa, int recalc);
-extern void     homa_grant_add_rpc(struct homa_rpc *rpc);
-extern void     homa_grant_check_rpc(struct homa_rpc *rpc);
-extern void     homa_grant_find_oldest(struct homa *homa);
-extern void     homa_grant_free_rpc(struct homa_rpc *rpc);
-extern void     homa_grant_log_tt(struct homa *homa);
-extern int      homa_grant_outranks(struct homa_rpc *rpc1,
-		    struct homa_rpc *rpc2);
-extern int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
-		    int max_rpcs);
-extern void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern void     homa_grant_recalc(struct homa *homa, int locked);
-extern void     homa_grant_remove_rpc(struct homa_rpc *rpc);
-extern int      homa_grant_send(struct homa_rpc *rpc, struct homa *homa);
-extern int      homa_grant_update_incoming(struct homa_rpc *rpc,
-		    struct homa *homa);
+int      homa_grantable_lock_slow(struct homa *homa, int recalc);
+void     homa_grant_add_rpc(struct homa_rpc *rpc);
+void     homa_grant_check_rpc(struct homa_rpc *rpc);
+void     homa_grant_find_oldest(struct homa *homa);
+void     homa_grant_free_rpc(struct homa_rpc *rpc);
+void     homa_grant_log_tt(struct homa *homa);
+int      homa_grant_outranks(struct homa_rpc *rpc1,
+			     struct homa_rpc *rpc2);
+int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
+			      int max_rpcs);
+void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+void     homa_grant_recalc(struct homa *homa, int locked);
+void     homa_grant_remove_rpc(struct homa_rpc *rpc);
+int      homa_grant_send(struct homa_rpc *rpc, struct homa *homa);
+int      homa_grant_update_incoming(struct homa_rpc *rpc,
+				    struct homa *homa);
 
 /**
  * homa_grantable_lock() - Acquire the grantable lock. If the lock
@@ -34,6 +34,7 @@ extern int      homa_grant_update_incoming(struct homa_rpc *rpc,
  *           thread started a fresh calculation after this method was invoked.
  */
 static inline int homa_grantable_lock(struct homa *homa, int recalc)
+	__acquires(&homa->grantable_lock)
 {
 	int result;
 
@@ -50,6 +51,7 @@ static inline int homa_grantable_lock(struct homa *homa, int recalc)
  * @homa:    Overall data about the Homa protocol implementation.
  */
 static inline void homa_grantable_unlock(struct homa *homa)
+	__releases(&homa->grantable_lock)
 {
 	INC_METRIC(grantable_lock_ns, sched_clock() -
 		   homa->grantable_lock_time);

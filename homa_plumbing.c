@@ -17,14 +17,19 @@ MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
 
 /* Not yet sure what these variables are for */
-long sysctl_homa_mem[3] __read_mostly;
-int sysctl_homa_rmem_min __read_mostly;
-int sysctl_homa_wmem_min __read_mostly;
+static long sysctl_homa_mem[3] __read_mostly;
+static int sysctl_homa_rmem_min __read_mostly;
+static int sysctl_homa_wmem_min __read_mostly;
 
 /* Global data for Homa. Never reference homa_data directory. Always use
  * the homa variable instead; this allows overriding during unit tests.
  */
-struct homa homa_data;
+static struct homa homa_data;
+
+/* This variable should almost never be used directly; it is normally
+ * passed as a parameter to functions that need it. Thus it is not declared
+ * in a header file.
+ */
 struct homa *homa = &homa_data;
 
 /* True means that the Homa module is in the process of unloading itself,
@@ -46,7 +51,7 @@ static int action;
  * be implemented by PF_INET6 functions that are independent of the
  * Homa protocol.
  */
-const struct proto_ops homa_proto_ops = {
+static const struct proto_ops homa_proto_ops = {
 	.family		   = PF_INET,
 	.owner		   = THIS_MODULE,
 	.release	   = inet_release,
@@ -67,7 +72,7 @@ const struct proto_ops homa_proto_ops = {
 	.set_peek_off	   = sk_set_peek_off,
 };
 
-const struct proto_ops homav6_proto_ops = {
+static const struct proto_ops homav6_proto_ops = {
 	.family		   = PF_INET6,
 	.owner		   = THIS_MODULE,
 	.release	   = inet6_release,
@@ -94,7 +99,7 @@ const struct proto_ops homav6_proto_ops = {
  * protocol family, and in many cases they are invoked by functions in
  * homa_proto_ops. Most of these functions have Homa-specific implementations.
  */
-struct proto homa_prot = {
+static struct proto homa_prot = {
 	.name		   = "HOMA",
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
@@ -102,7 +107,7 @@ struct proto homa_prot = {
 	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
-	.destroy	   = 0,
+	.destroy	   = NULL,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
@@ -118,7 +123,7 @@ struct proto homa_prot = {
 	.no_autobind       = 1,
 };
 
-struct proto homav6_prot = {
+static struct proto homav6_prot = {
 	.name		   = "HOMAv6",
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
@@ -126,7 +131,7 @@ struct proto homav6_prot = {
 	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
-	.destroy	   = 0,
+	.destroy	   = NULL,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
@@ -147,7 +152,7 @@ struct proto homav6_prot = {
 };
 
 /* Top-level structure describing the Homa protocol. */
-struct inet_protosw homa_protosw = {
+static struct inet_protosw homa_protosw = {
 	.type              = SOCK_DGRAM,
 	.protocol          = IPPROTO_HOMA,
 	.prot              = &homa_prot,
@@ -155,7 +160,7 @@ struct inet_protosw homa_protosw = {
 	.flags             = INET_PROTOSW_REUSE,
 };
 
-struct inet_protosw homav6_protosw = {
+static struct inet_protosw homav6_protosw = {
 	.type              = SOCK_DGRAM,
 	.protocol          = IPPROTO_HOMA,
 	.prot              = &homav6_prot,
@@ -745,7 +750,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 	struct homa_abort_args args;
 	struct homa_rpc *rpc;
 
-	if (unlikely(copy_from_user(&args, (void *)karg, sizeof(args))))
+	if (unlikely(copy_from_user(&args, (void __user *)karg, sizeof(args))))
 		return -EFAULT;
 
 	if (args._pad1 || args._pad2[0] || args._pad2[1])
@@ -824,8 +829,8 @@ int homa_socket(struct sock *sk)
  * @optlen:  Number of bytes of data at @optval.
  * Return:   0 on success, otherwise a negative errno.
  */
-int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
-		    unsigned int optlen)
+int homa_setsockopt(struct sock *sk, int level, int optname,
+		    sockptr_t optval, unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_set_buf_args args;
@@ -842,7 +847,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname, sockptr_t optval,
 	/* Do a trivial test to make sure we can at least write the first
 	 * page of the region.
 	 */
-	if (copy_to_user(args.start, &args, sizeof(args)))
+	if (copy_to_user((void __user *)args.start, &args, sizeof(args)))
 		return -EFAULT;
 
 	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_SET_BUF");
@@ -888,13 +893,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	struct homa_rpc *rpc = NULL;
 	union sockaddr_in_union *addr = (union sockaddr_in_union *)msg->msg_name;
 
-	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
+			start;
 	if (unlikely(!msg->msg_control_is_user)) {
 		tt_record("homa_sendmsg error: !msg->msg_control_is_user");
 		result = -EINVAL;
 		goto error;
 	}
-	if (unlikely(copy_from_user(&args, msg->msg_control, sizeof(args)))) {
+	if (unlikely(copy_from_user(&args, (void __user *)msg->msg_control,
+		     sizeof(args)))) {
 		result = -EFAULT;
 		goto error;
 	}
@@ -932,8 +939,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		homa_rpc_unlock(rpc);
 		rpc = NULL;
 
-		if (unlikely(copy_to_user(msg->msg_control, &args,
-					  sizeof(args)))) {
+		if (unlikely(copy_to_user((void __user *)msg->msg_control,
+					  &args, sizeof(args)))) {
 			rpc = homa_find_client_rpc(hsk, args.id);
 			result = -EFAULT;
 			goto error;
@@ -973,7 +980,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			tt_record2("homa_sendmsg error: RPC id %d in bad state %d",
 				   rpc->id, rpc->state);
 			homa_rpc_unlock(rpc);
-			rpc = 0;
+			rpc = NULL;
 			result = -EINVAL;
 			goto error;
 		}
@@ -1032,7 +1039,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
-	if (unlikely(copy_from_user(&control, msg->msg_control,
+	if (unlikely(copy_from_user(&control, (void __user *)msg->msg_control,
 				    sizeof(control)))) {
 		result = -EFAULT;
 		goto done;
@@ -1130,7 +1137,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	homa_rpc_unlock(rpc);
 
 done:
-	if (unlikely(copy_to_user(msg->msg_control, &control, sizeof(control)))) {
+	if (unlikely(copy_to_user((void __user *)msg->msg_control, &control,
+		     sizeof(control)))) {
 		/* Note: in this case the message's buffers will be leaked. */
 		pr_notice("%s couldn't copy back args\n", __func__);
 		result = -EFAULT;
@@ -1374,7 +1382,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 		iph = (struct iphdr *)(icmp + sizeof(struct icmphdr));
 		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
 				+ iph->ihl * 4);
-		homa_abort_rpcs(homa, &saddr, htons(h->dport), -ENOTCONN);
+		homa_abort_rpcs(homa, &saddr, ntohs(h->dport), -ENOTCONN);
 	} else if (type == ICMP_DEST_UNREACH) {
 		int error;
 
@@ -1383,7 +1391,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 		else
 			error = -EHOSTUNREACH;
 		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-			   iph->saddr, iph->daddr);
+			   ntohl(iph->saddr), ntohl(iph->daddr));
 		homa_abort_rpcs(homa, &saddr, 0, error);
 	} else {
 		pr_notice("%s invoked with info %x, ICMP type %d, ICMP code %d\n",
@@ -1416,7 +1424,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 		iph = (struct ipv6hdr *)(icmp + sizeof(struct icmphdr));
 		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
 				+ HOMA_IPV6_HEADER_LENGTH);
-		homa_abort_rpcs(homa, &iph->daddr, htons(h->dport), -ENOTCONN);
+		homa_abort_rpcs(homa, &iph->daddr, ntohs(h->dport), -ENOTCONN);
 	} else if (type == ICMPV6_DEST_UNREACH) {
 		int error;
 
@@ -1450,7 +1458,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait)
 {
 	struct sock *sk = sock->sk;
-	__poll_t mask;
+	__u32 mask;
 
 	/* It seems to be standard practice for poll functions *not* to
 	 * acquire the socket lock, so we don't do it here; not sure
@@ -1463,7 +1471,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
 	    !list_empty(&homa_sk(sk)->ready_responses))
 		mask |= POLLIN | POLLRDNORM;
-	return mask;
+	return (__poll_t)mask;
 }
 
 /**
@@ -1483,7 +1491,7 @@ int homa_dointvec(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_dointvec(const struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
 	int result;
@@ -1564,7 +1572,7 @@ int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 		void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+		void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
 	struct homa_offload_core *offload_core;

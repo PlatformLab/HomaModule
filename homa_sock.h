@@ -278,7 +278,7 @@ void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
 void               homa_socktab_init(struct homa_socktab *socktab);
 struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
 struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
-		    			   struct homa_socktab_scan *scan);
+					   struct homa_socktab_scan *scan);
 
 /**
  * homa_sock_lock() - Acquire the lock for a socket. If the socket
@@ -288,6 +288,7 @@ struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
  *           used to track down deadlocks.
  */
 static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
+	__acquires(&hsk->lock)
 {
 	if (!spin_trylock_bh(&hsk->lock)) {
 //		printk(KERN_NOTICE "Slow path for socket %d, last locker %s",
@@ -302,6 +303,7 @@ static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
  * @hsk:   Socket to lock.
  */
 static inline void homa_sock_unlock(struct homa_sock *hsk)
+	__releases(&hsk->lock)
 {
 	spin_unlock_bh(&hsk->lock);
 }
@@ -398,6 +400,7 @@ static inline int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
  * @id:       ID of the RPC that was using the lock.
  */
 static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
+	__releases(&bucket->lock)
 {
 	spin_unlock_bh(&bucket->lock);
 }

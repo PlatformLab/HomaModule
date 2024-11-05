@@ -21,6 +21,7 @@
  */
 struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 				     const union sockaddr_in_union *dest)
+	__acquires(&crpc->bucket->lock)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 	struct homa_rpc_bucket *bucket;
@@ -108,6 +109,7 @@ error:
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 				     const struct in6_addr *source,
 				     struct data_header *h, int *created)
+	__acquires(&srpc->bucket->lock)
 {
 	__u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;
@@ -244,6 +246,8 @@ done:
  *        not be locked.
  */
 void homa_rpc_free(struct homa_rpc *rpc)
+	__acquires(&rpc->hsk->lock)
+	__releases(&rpc->hsk->lock)
 {
 	/* The goal for this function is to make the RPC inaccessible,
 	 * so that no other code will ever access it again. However, don't
@@ -369,7 +373,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
 			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP) ||
-			    atomic_read(&rpc->grants_in_progress)!= 0 ||
+			    atomic_read(&rpc->grants_in_progress) != 0 ||
 			    atomic_read(&rpc->msgout.active_xmits) != 0) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;
@@ -479,6 +483,7 @@ release:
  *            by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
+	__acquires(&crpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
 	struct homa_rpc *crpc;
@@ -507,6 +512,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 				      const struct in6_addr *saddr, __u16 sport,
 				      __u64 id)
+	__acquires(&srpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;

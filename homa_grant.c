@@ -148,6 +148,7 @@ position_peer:
 		list_add(&prev_peer->grantable_links, &peer->grantable_links);
 	}
 done:
+	return;
 }
 
 /**
@@ -270,6 +271,7 @@ int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
  *          WILL RELEASE THE LOCK before returning.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
+	__releases(rpc->bucket_lock)
 {
 	/* Overall design notes:
 	 * The grantable lock has proven to be a performance bottleneck,
@@ -605,6 +607,7 @@ void homa_grant_find_oldest(struct homa *homa)
  * @rpc:   The RPC to clean up. Must be locked by the caller.
  */
 void homa_grant_free_rpc(struct homa_rpc *rpc)
+	__releases(rpc->bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 
@@ -645,6 +648,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
  *           thread started a fresh calculation after this method was invoked.
  */
 int homa_grantable_lock_slow(struct homa *homa, int recalc)
+	__acquires(&homa->grantable_lock)
 {
 	int starting_count = atomic_read(&homa->grant_recalc_count);
 	__u64 start = sched_clock();

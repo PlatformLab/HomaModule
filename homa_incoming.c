@@ -217,6 +217,8 @@ keep:
  *           will be RPC_DEAD.
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
+	__releases(rpc->bucket_lock)
+	__acquires(rpc->bucket_lock)
 {
 #ifdef __UNIT_TEST__
 #define MAX_SKBS 3
@@ -295,8 +297,8 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					}
 					chunk_size = buf_bytes;
 				}
-				error = import_ubuf(READ, dst, chunk_size,
-						    &iter);
+				error = import_ubuf(READ, (void __user *)dst,
+						    chunk_size, &iter);
 				if (error)
 					goto free_skbs;
 				error = skb_copy_datagram_iter(skbs[i],
@@ -861,6 +863,7 @@ done:
  */
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		  struct homa_rpc *rpc)
+	__releases(rpc->bucket_lock)
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct ack_header *h = (struct ack_header *)skb->data;
@@ -1198,6 +1201,7 @@ claim_rpc:
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				       __u64 id)
+	__acquires(&rpc->bucket_lock)
 {
 	uint64_t poll_start, poll_end, now;
 	int error, blocked = 0, polled = 0;

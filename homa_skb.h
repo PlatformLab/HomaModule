@@ -96,29 +96,30 @@ struct homa_skb_core {
 };
 DECLARE_PER_CPU(struct homa_skb_core, homa_skb_core);
 
-extern int      homa_skb_append_from_iter(struct homa *homa,
-		    struct sk_buff *skb, struct iov_iter *iter, int length);
-extern int      homa_skb_append_from_skb(struct homa *homa,
-		    struct sk_buff *dst_skb, struct sk_buff *src_skb,
-		    int offset, int length);
-extern int      homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb,
-		    void *buf, int length);
-extern void     homa_skb_cache_pages(struct homa *homa, struct page **pages,
-		    int count);
-extern void     homa_skb_cleanup(struct homa *homa);
-extern void    *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb,
-		    int *length);
-extern void     homa_skb_free_tx(struct homa *homa, struct sk_buff *skb);
-extern void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
-		    int count);
-extern void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
-		    int length);
-extern int      homa_skb_init(struct homa *homa);
-extern struct sk_buff
-	       *homa_skb_new_tx(int length);
-extern bool     homa_skb_page_alloc(struct homa *homa,
-		    struct homa_skb_core *core);
-extern void     homa_skb_release_pages(struct homa *homa);
-extern void     homa_skb_stash_pages(struct homa *homa, int length);
+int      homa_skb_append_from_iter(struct homa *homa,
+				   struct sk_buff *skb, struct iov_iter *iter,
+				   int length);
+int      homa_skb_append_from_skb(struct homa *homa,
+				  struct sk_buff *dst_skb,
+				  struct sk_buff *src_skb, int offset,
+				  int length);
+int      homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb,
+				 void *buf, int length);
+void     homa_skb_cache_pages(struct homa *homa, struct page **pages,
+			      int count);
+void     homa_skb_cleanup(struct homa *homa);
+void    *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb,
+			       int *length);
+void     homa_skb_free_tx(struct homa *homa, struct sk_buff *skb);
+void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
+			       int count);
+void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
+		      int length);
+int      homa_skb_init(struct homa *homa);
+struct sk_buff *homa_skb_new_tx(int length);
+bool     homa_skb_page_alloc(struct homa *homa,
+			     struct homa_skb_core *core);
+void     homa_skb_release_pages(struct homa *homa);
+void     homa_skb_stash_pages(struct homa *homa, int length);
 
 #endif /* _HOMA_SKB_H */

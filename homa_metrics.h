@@ -661,15 +661,15 @@ static inline struct homa_metrics *homa_metrics_per_cpu(void)
 #define INC_METRIC(metric, count) per_cpu(homa_metrics, \
 		raw_smp_processor_id()).metric += (count)
 
-extern void     homa_metric_append(struct homa *homa, const char *format, ...);
-extern loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
-		    int whence);
-extern int      homa_metrics_open(struct inode *inode, struct file *file);
-extern char    *homa_metrics_print(struct homa *homa);
-extern ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
-		    size_t length, loff_t *offset);
-extern int      homa_metrics_release(struct inode *inode, struct file *file);
-extern int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
-		    int count, int *eof, void *data);
+void     homa_metric_append(struct homa *homa, const char *format, ...);
+loff_t   homa_metrics_lseek(struct file *file, loff_t offset,
+			    int whence);
+int      homa_metrics_open(struct inode *inode, struct file *file);
+char    *homa_metrics_print(struct homa *homa);
+ssize_t  homa_metrics_read(struct file *file, char __user *buffer,
+			   size_t length, loff_t *offset);
+int      homa_metrics_release(struct inode *inode, struct file *file);
+int      homa_proc_read_metrics(char *buffer, char **start, off_t offset,
+				int count, int *eof, void *data);
 
 #endif /* _HOMA_METRICS_H */

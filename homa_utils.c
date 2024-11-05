@@ -58,18 +58,19 @@ int homa_init(struct homa *homa)
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
-		pr_err("homa_init could create port_map: kmalloc failure");
+		pr_err("%s couldn't create port_map: kmalloc failure", __func__);
 		return -ENOMEM;
 	}
 	homa_socktab_init(homa->port_map);
 	homa->peers = kmalloc(sizeof(*homa->peers), GFP_KERNEL);
 	if (!homa->peers) {
-		pr_err("homa_init could create peers: kmalloc failure");
+		pr_err("%s couldn't create peers: kmalloc failure", __func__);
 		return -ENOMEM;
 	}
 	err = homa_peertab_init(homa->peers);
 	if (err) {
-		pr_err("Couldn't initialize peer table (errno %d)\n", -err);
+		pr_err("%s couldn't initialize peer table (errno %d)\n",
+		       __func__, -err);
 		return err;
 	}
 	err = homa_skb_init(homa);
@@ -310,7 +311,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 				", message_length %d, offset %d, data_length %d, incoming %d",
 				ntohl(h->message_length), offset,
 				seg_length, ntohl(h->incoming));
-		if (ntohs(h->cutoff_version != 0))
+		if (ntohs(h->cutoff_version) != 0)
 			used = homa_snprintf(buffer, buf_len, used,
 					", cutoff_version %d",
 					ntohs(h->cutoff_version));
@@ -686,6 +687,7 @@ void homa_spin(int ns)
  * @homa:    Overall data about the Homa protocol implementation.
  */
 void homa_throttle_lock_slow(struct homa *homa)
+	__acquires(&homa->throttle_lock)
 {
 	__u64 start = sched_clock();
 

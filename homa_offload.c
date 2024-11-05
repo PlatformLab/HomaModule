@@ -24,8 +24,8 @@ extern struct homa *homa;
 /* Pointers to TCP's net_offload structures. NULL means homa_gro_hook_tcp
  * hasn't been called yet.
  */
-const struct net_offload *tcp_net_offload;
-const struct net_offload *tcp6_net_offload;
+static const struct net_offload *tcp_net_offload;
+static const struct net_offload *tcp6_net_offload;
 
 /*
  * Identical to *tcp_net_offload except that the gro_receive function
@@ -91,15 +91,17 @@ void homa_gro_hook_tcp(void)
 		return;
 
 	pr_notice("Homa setting up TCP hijacking\n");
-	tcp_net_offload = inet_offloads[IPPROTO_TCP];
+	tcp_net_offload = rcu_dereference(inet_offloads[IPPROTO_TCP]);
 	hook_tcp_net_offload = *tcp_net_offload;
 	hook_tcp_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
-	inet_offloads[IPPROTO_TCP] = &hook_tcp_net_offload;
+	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
+			&hook_tcp_net_offload;
 
-	tcp6_net_offload = inet6_offloads[IPPROTO_TCP];
+	tcp6_net_offload = rcu_dereference(inet6_offloads[IPPROTO_TCP]);
 	hook_tcp6_net_offload = *tcp6_net_offload;
 	hook_tcp6_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
-	inet6_offloads[IPPROTO_TCP] = &hook_tcp6_net_offload;
+	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
+			&hook_tcp6_net_offload;
 }
 
 /**
@@ -112,9 +114,11 @@ void homa_gro_unhook_tcp(void)
 	if (tcp_net_offload == NULL)
 		return;
 	pr_notice("Homa cancelling TCP hijacking\n");
-	inet_offloads[IPPROTO_TCP] = tcp_net_offload;
+	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
+			tcp_net_offload;
 	tcp_net_offload = NULL;
-	inet6_offloads[IPPROTO_TCP] = tcp6_net_offload;
+	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
+			tcp6_net_offload;
 	tcp6_net_offload = NULL;
 }
 
@@ -307,7 +311,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 //		tt_record("homa_gro_receive can't pull enough data "
 //				"from packet for trace");
 	if (h_new->common.type == DATA) {
-		if (h_new->seg.offset == -1) {
+		if (h_new->seg.offset == (__force __be32)-1) {
 			tt_record2("homa_gro_receive replaced offset %d with %d",
 					ntohl(h_new->seg.offset),
 					ntohl(h_new->common.sequence));

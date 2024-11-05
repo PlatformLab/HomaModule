@@ -936,6 +936,7 @@ static inline void homa_set_doff(struct data_header *h, int size)
  * @homa:    Overall data about the Homa protocol implementation.
  */
 static inline void homa_throttle_lock(struct homa *homa)
+	__acquires(&homa->throttle_lock)
 {
 	if (!spin_trylock_bh(&homa->throttle_lock))
 		homa_throttle_lock_slow(homa);
@@ -946,6 +947,7 @@ static inline void homa_throttle_lock(struct homa *homa)
  * @homa:    Overall data about the Homa protocol implementation.
  */
 static inline void homa_throttle_unlock(struct homa *homa)
+	__releases(&homa->throttle_lock)
 {
 	spin_unlock_bh(&homa->throttle_lock);
 }
@@ -967,7 +969,7 @@ static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
 {
 	struct in6_addr ret = {};
 
-	if (ip4 == INADDR_ANY)
+	if (ip4 == htonl(INADDR_ANY))
 		return in6addr_any;
 	ret.in6_u.u6_addr32[2] = htonl(0xffff);
 	ret.in6_u.u6_addr32[3] = ip4;
@@ -1040,7 +1042,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
  * provide a unique identifier for the address in a timetrace record.
  * @x:  Address (either IPv6 or IPv4-mapped IPv6)
  */
-static inline __be32 tt_addr(const struct in6_addr x)
+static inline uint32_t tt_addr(const struct in6_addr x)
 {
 	return is_mapped_ipv4(x) ? ntohl(x.in6_u.u6_addr32[3])
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
@@ -1060,132 +1062,129 @@ void unit_hook(char *id);
 #endif /* __UNIT_TEST__ */
 #endif /* See strip.py */
 
-extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-		    int port, int error);
-extern void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
-extern void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_rpc *rpc);
-extern void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-extern void     homa_add_to_throttled(struct homa_rpc *rpc);
-extern int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
-extern int      homa_bind(struct socket *sk, struct sockaddr *addr,
-		    int addr_len);
-extern int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
-		    bool force);
-extern struct homa_rpc
-	       *homa_choose_fifo_grant(struct homa *homa);
-extern struct homa_interest
-	       *homa_choose_interest(struct homa *homa, struct list_head *head,
-		    int offset);
-extern void     homa_close(struct sock *sock, long timeout);
-extern int      homa_copy_to_user(struct homa_rpc *rpc);
-extern void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
-extern void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern void     homa_destroy(struct homa *homa);
-extern int      homa_disconnect(struct sock *sk, int flags);
-extern void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
+void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
+			 int port, int error);
+void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
+void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+		      struct homa_rpc *rpc);
+void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
+void     homa_add_to_throttled(struct homa_rpc *rpc);
+int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
+int      homa_bind(struct socket *sk, struct sockaddr *addr,
+		   int addr_len);
+int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
+			      bool force);
+struct homa_rpc *homa_choose_fifo_grant(struct homa *homa);
+struct homa_interest *homa_choose_interest(struct homa *homa,
+					   struct list_head *head,
+					   int offset);
+void     homa_close(struct sock *sock, long timeout);
+int      homa_copy_to_user(struct homa_rpc *rpc);
+void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
+void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+void     homa_destroy(struct homa *homa);
+int      homa_disconnect(struct sock *sk, int flags);
+void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-extern int      homa_dointvec(struct ctl_table *table, int write,
-		    void __user *buffer, size_t *lenp, loff_t *ppos);
+int      homa_dointvec(struct ctl_table *table, int write,
+		       void __user *buffer, size_t *lenp, loff_t *ppos);
 #else
-extern int      homa_dointvec(const struct ctl_table *table, int write,
-		    void __user *buffer, size_t *lenp, loff_t *ppos);
+int      homa_dointvec(const struct ctl_table *table, int write,
+		       void *buffer, size_t *lenp, loff_t *ppos);
 #endif
-extern int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
-extern int      homa_err_handler_v6(struct sk_buff *skb,
-		    struct inet6_skb_parm *opt, u8 type,  u8 code,  int offset,
-		    __be32 info);
-extern int      homa_fill_data_interleaved(struct homa_rpc *rpc,
-		    struct sk_buff *skb, struct iov_iter *iter);
-extern void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
-		    char *format);
-extern void     homa_freeze_peers(struct homa *homa);
-extern struct homa_gap
-	       *homa_gap_new(struct list_head *next, int start, int end);
-extern void     homa_gap_retry(struct homa_rpc *rpc);
-extern int      homa_get_port(struct sock *sk, unsigned short snum);
-extern int      homa_getsockopt(struct sock *sk, int level, int optname,
-		   char __user *optval, int __user *option);
-extern int      homa_hash(struct sock *sk);
-extern enum hrtimer_restart
-		homa_hrtimer(struct hrtimer *timer);
-extern int      homa_init(struct homa *homa);
-extern void     homa_incoming_sysctl_changed(struct homa *homa);
-extern int      homa_ioc_abort(struct sock *sk, int *karg);
-extern int      homa_ioctl(struct sock *sk, int cmd, int *karg);
-extern void     homa_log_throttled(struct homa *homa);
-extern int      homa_message_in_init(struct homa_rpc *rpc, int length,
-		    int unsched);
-extern int      homa_message_out_fill(struct homa_rpc *rpc,
-		    struct iov_iter *iter, int xmit);
-extern void     homa_message_out_init(struct homa_rpc *rpc, int length);
-extern void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
-		    struct homa_rpc *rpc);
-extern struct sk_buff
-	       *homa_new_data_packet(struct homa_rpc *rpc,
-		    struct iov_iter *iter, int offset, int length,
-		    int max_seg_data);
-extern void     homa_outgoing_sysctl_changed(struct homa *homa);
-extern int      homa_pacer_main(void *transportInfo);
-extern void     homa_pacer_stop(struct homa *homa);
-extern void     homa_pacer_xmit(struct homa *homa);
-extern __poll_t homa_poll(struct file *file, struct socket *sock,
-		    struct poll_table_struct *wait);
-extern char    *homa_print_ipv4_addr(__be32 addr);
-extern char    *homa_print_ipv6_addr(const struct in6_addr *addr);
-extern char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
-extern char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
-		    int buf_len);
-extern void     homa_prios_changed(struct homa *homa);
-extern int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
-		    int flags, int *addr_len);
-extern int      homa_register_interests(struct homa_interest *interest,
-		    struct homa_sock *hsk, int flags, __u64 id);
-extern void     homa_remove_from_throttled(struct homa_rpc *rpc);
-extern void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
-		    int priority);
-extern void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
-		    struct homa_sock *hsk);
-extern void     homa_rpc_abort(struct homa_rpc *crpc, int error);
-extern void     homa_rpc_acked(struct homa_sock *hsk,
-		    const struct in6_addr *saddr, struct homa_ack *ack);
-extern void     homa_rpc_free(struct homa_rpc *rpc);
-extern void     homa_rpc_handoff(struct homa_rpc *rpc);
-extern int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
-extern int      homa_setsockopt(struct sock *sk, int level, int optname,
-		    sockptr_t __user optval, unsigned int optlen);
-extern int      homa_shutdown(struct socket *sock, int how);
-extern int      homa_snprintf(char *buffer, int size, int used,
-		    const char *format, ...) __printf(4, 5);
-extern int      homa_softirq(struct sk_buff *skb);
-extern void     homa_spin(int ns);
-extern char    *homa_symbol_for_type(uint8_t type);
+int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
+int      homa_err_handler_v6(struct sk_buff *skb,
+			     struct inet6_skb_parm *opt, u8 type,  u8 code,
+			     int offset, __be32 info);
+int      homa_fill_data_interleaved(struct homa_rpc *rpc,
+				    struct sk_buff *skb, struct iov_iter *iter);
+void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
+		     char *format);
+void     homa_freeze_peers(struct homa *homa);
+struct homa_gap *homa_gap_new(struct list_head *next, int start, int end);
+void     homa_gap_retry(struct homa_rpc *rpc);
+int      homa_get_port(struct sock *sk, unsigned short snum);
+int      homa_getsockopt(struct sock *sk, int level, int optname,
+			 char __user *optval, int __user *option);
+int      homa_hash(struct sock *sk);
+enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
+int      homa_init(struct homa *homa);
+void     homa_incoming_sysctl_changed(struct homa *homa);
+int      homa_ioc_abort(struct sock *sk, int *karg);
+int      homa_ioctl(struct sock *sk, int cmd, int *karg);
+void     homa_log_throttled(struct homa *homa);
+int      homa_message_in_init(struct homa_rpc *rpc, int length,
+			      int unsched);
+int      homa_message_out_fill(struct homa_rpc *rpc,
+			       struct iov_iter *iter, int xmit);
+void     homa_message_out_init(struct homa_rpc *rpc, int length);
+void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
+			   struct homa_rpc *rpc);
+struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
+				     struct iov_iter *iter, int offset,
+				     int length, int max_seg_data);
+void     homa_outgoing_sysctl_changed(struct homa *homa);
+int      homa_pacer_main(void *transportInfo);
+void     homa_pacer_stop(struct homa *homa);
+void     homa_pacer_xmit(struct homa *homa);
+__poll_t homa_poll(struct file *file, struct socket *sock,
+		   struct poll_table_struct *wait);
+char    *homa_print_ipv4_addr(__be32 addr);
+char    *homa_print_ipv6_addr(const struct in6_addr *addr);
+char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
+char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
+				 int buf_len);
+void     homa_prios_changed(struct homa *homa);
+int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
+		      int flags, int *addr_len);
+int      homa_register_interests(struct homa_interest *interest,
+				 struct homa_sock *hsk, int flags, __u64 id);
+void     homa_remove_from_throttled(struct homa_rpc *rpc);
+void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
+			  int priority);
+void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
+			 struct homa_sock *hsk);
+void     homa_rpc_abort(struct homa_rpc *crpc, int error);
+void     homa_rpc_acked(struct homa_sock *hsk,
+			const struct in6_addr *saddr, struct homa_ack *ack);
+void     homa_rpc_free(struct homa_rpc *rpc);
+void     homa_rpc_handoff(struct homa_rpc *rpc);
+int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
+int      homa_setsockopt(struct sock *sk, int level, int optname,
+			 sockptr_t optval, unsigned int optlen);
+int      homa_shutdown(struct socket *sock, int how);
+int      homa_snprintf(char *buffer, int size, int used,
+		       const char *format, ...) __printf(4, 5);
+int      homa_softirq(struct sk_buff *skb);
+void     homa_spin(int ns);
+char    *homa_symbol_for_type(uint8_t type);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-extern int      homa_sysctl_softirq_cores(struct ctl_table *table,
-		    int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+				   void __user *buffer, size_t *lenp,
+				   loff_t *ppos);
 #else
-extern int      homa_sysctl_softirq_cores(const struct ctl_table *table,
-		    int write, void __user *buffer, size_t *lenp, loff_t *ppos);
+int      homa_sysctl_softirq_cores(const struct ctl_table *table,
+				   int write, void *buffer, size_t *lenp,
+				   loff_t *ppos);
 #endif
-extern void     homa_timer(struct homa *homa);
-extern int      homa_timer_main(void *transportInfo);
-extern void     homa_unhash(struct sock *sk);
-extern void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-extern int      homa_unsched_priority(struct homa *homa,
-		    struct homa_peer *peer, int length);
-extern int      homa_validate_incoming(struct homa *homa, int verbose,
-		    int *link_errors);
-extern struct homa_rpc
-	       *homa_wait_for_message(struct homa_sock *hsk, int flags,
-		    __u64 id);
-extern int      homa_xmit_control(enum homa_packet_type type, void *contents,
-		    size_t length, struct homa_rpc *rpc);
-extern int      __homa_xmit_control(void *contents, size_t length,
-		    struct homa_peer *peer, struct homa_sock *hsk);
-extern void     homa_xmit_data(struct homa_rpc *rpc, bool force);
-extern void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
-		    int priority);
-extern void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
+void     homa_timer(struct homa *homa);
+int      homa_timer_main(void *transportInfo);
+void     homa_unhash(struct sock *sk);
+void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
+			       int length);
+int      homa_validate_incoming(struct homa *homa, int verbose,
+				int *link_errors);
+struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
+				       __u64 id);
+int      homa_xmit_control(enum homa_packet_type type, void *contents,
+			   size_t length, struct homa_rpc *rpc);
+int      __homa_xmit_control(void *contents, size_t length,
+			     struct homa_peer *peer, struct homa_sock *hsk);
+void     homa_xmit_data(struct homa_rpc *rpc, bool force);
+void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
+			  int priority);
+void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 /**
  * homa_check_pacer() - This method is invoked at various places in Homa to

@@ -153,11 +153,15 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	struct dst_entry *dst;
 
 	// Should use siphash or jhash here:
-	__u32 bucket = hash_32(addr->in6_u.u6_addr32[0], HOMA_PEERTAB_BUCKET_BITS);
+	__u32 bucket = hash_32((__force __u32)addr->in6_u.u6_addr32[0],
+			       HOMA_PEERTAB_BUCKET_BITS);
 
-	bucket ^= hash_32(addr->in6_u.u6_addr32[1], HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32(addr->in6_u.u6_addr32[2], HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32(addr->in6_u.u6_addr32[3], HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[1],
+			  HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[2],
+			  HOMA_PEERTAB_BUCKET_BITS);
+	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[3],
+			  HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 				 peertab_links) {
 		if (ipv6_addr_equal(&peer->addr, addr))
@@ -359,6 +363,7 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
  * @peer:    Peer to  lock.
  */
 void homa_peer_lock_slow(struct homa_peer *peer)
+	__acquires(&peer->ack_lock)
 {
 	__u64 start = sched_clock();
 

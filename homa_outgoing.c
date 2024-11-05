@@ -28,7 +28,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
 	rpc->msgout.sched_priority = 0;
-	rpc->msgout.init_ns= sched_clock();
+	rpc->msgout.init_ns = sched_clock();
 }
 
 /**
@@ -132,7 +132,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	homa_peer_get_acks(rpc->peer, 1, &h->ack);
 	h->cutoff_version = rpc->peer->cutoff_version;
 	h->retransmit = 0;
-	h->seg.offset = -1;
+	h->seg.offset = htonl(-1);
 
 	segs = length + max_seg_data - 1;
 	do_div(segs, max_seg_data);
@@ -195,6 +195,8 @@ error:
  *           rpc->state will be RPC_DEAD.
  */
 int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
+	__releases(rpc->bucket_lock)
+	__acquires(rpc->bucket_lock)
 {
 	/* Geometry information for packets:
 	 * mtu:              largest size for an on-the-wire packet (including
@@ -484,6 +486,8 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
+	__releases(rpc->bucket_lock)
+	__acquires(rpc->bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 #if 1 /* See strip.py */
@@ -703,6 +707,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 	}
 
 resend_done:
+	return;
 }
 
 /**

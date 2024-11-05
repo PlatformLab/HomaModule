@@ -73,22 +73,19 @@ struct homa_offload_core {
 };
 DECLARE_PER_CPU(struct homa_offload_core, homa_offload_core);
 
-extern int      homa_gro_complete(struct sk_buff *skb, int thoff);
-extern void     homa_gro_gen2(struct sk_buff *skb);
-extern void     homa_gro_gen3(struct sk_buff *skb);
-extern void     homa_gro_hook_tcp(void);
-extern void     homa_gro_unhook_tcp(void);
-extern struct sk_buff
-	       *homa_gro_receive(struct list_head *gro_list,
-		    struct sk_buff *skb);
-extern struct sk_buff
-	       *homa_gso_segment(struct sk_buff *skb,
-		    netdev_features_t features);
-extern int      homa_offload_end(void);
-extern int      homa_offload_init(void);
-extern void     homa_send_ipis(void);
-extern struct sk_buff
-	       *homa_tcp_gro_receive(struct list_head *held_list,
-		    struct sk_buff *skb);
+int      homa_gro_complete(struct sk_buff *skb, int thoff);
+void     homa_gro_gen2(struct sk_buff *skb);
+void     homa_gro_gen3(struct sk_buff *skb);
+void     homa_gro_hook_tcp(void);
+void     homa_gro_unhook_tcp(void);
+struct sk_buff *homa_gro_receive(struct list_head *gro_list,
+				 struct sk_buff *skb);
+struct sk_buff *homa_gso_segment(struct sk_buff *skb,
+				 netdev_features_t features);
+int      homa_offload_end(void);
+int      homa_offload_init(void);
+void     homa_send_ipis(void);
+struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
+				     struct sk_buff *skb);
 
 #endif /* _HOMA_OFFLOAD_H */

@@ -90,17 +90,19 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 
 	while (1) {
 		while (!scan->next) {
+			struct hlist_head *bucket;
+
 			scan->current_bucket++;
 			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS)
 				return NULL;
+			bucket = &scan->socktab->buckets[scan->current_bucket];
 			scan->next = (struct homa_socktab_links *)
-				      hlist_first_rcu(&scan->socktab->buckets
-				      		      [scan->current_bucket]);
+				      rcu_dereference(hlist_first_rcu(bucket));
 		}
 		links = scan->next;
 		hsk = links->sock;
-		scan->next = (struct homa_socktab_links *)hlist_next_rcu(&links
-				->hash_links);
+		scan->next = (struct homa_socktab_links *)
+				rcu_dereference(hlist_next_rcu(&links->hash_links));
 		return hsk;
 	}
 }
@@ -116,6 +118,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 	list_del(&scan->scan_links);
 	spin_unlock_bh(&scan->socktab->write_lock);
 }
+
 /**
  * homa_sock_init() - Constructor for homa_sock objects. This function
  * initializes only the parts of the socket that are owned by Homa.
@@ -195,10 +198,10 @@ void homa_sock_unlink(struct homa_sock *hsk)
 	 */
 	spin_lock_bh(&socktab->write_lock);
 	list_for_each_entry(scan, &socktab->active_scans, scan_links) {
-		if (!scan->next || (scan->next->sock != hsk))
+		if (!scan->next || scan->next->sock != hsk)
 			continue;
-		scan->next = (struct homa_socktab_links *)hlist_next_rcu(
-			      &scan->next->hash_links);
+		scan->next = (struct homa_socktab_links *)rcu_dereference(
+				hlist_next_rcu(&scan->next->hash_links));
 	}
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
 	spin_unlock_bh(&socktab->write_lock);
@@ -211,6 +214,8 @@ void homa_sock_unlink(struct homa_sock *hsk)
  * @hsk:       Socket to shut down.
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
+	__acquires(&hsk->lock)
+	__releases(&hsk->lock)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
@@ -362,6 +367,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
  * @hsk:    socket to  lock.
  */
 void homa_sock_lock_slow(struct homa_sock *hsk)
+	__acquires(&hsk->lock)
 {
 	__u64 start = sched_clock();
 
@@ -382,6 +388,7 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  *             share a single bucket lock).
  */
 void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
+	__acquires(&bucket->lock)
 {
 	__u64 start = sched_clock();
 

@@ -222,6 +222,7 @@ void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
  * @peer:    Peer to lock.
  */
 static inline void homa_peer_lock(struct homa_peer *peer)
+	__acquires(&peer->ack_lock)
 {
 	if (!spin_trylock_bh(&peer->ack_lock))
 		homa_peer_lock_slow(peer);
@@ -232,6 +233,7 @@ static inline void homa_peer_lock(struct homa_peer *peer)
  * @peer:   Peer to lock.
  */
 static inline void homa_peer_unlock(struct homa_peer *peer)
+	__releases(&peer->ack_lock)
 {
 	spin_unlock_bh(&peer->ack_lock);
 }
