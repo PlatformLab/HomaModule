@@ -21,6 +21,7 @@
 #include <sys/socket.h>
 
 #include "homa.h"
+#include "test_utils.h"
 
 int main(int argc, char** argv) {
 	int fd, port;

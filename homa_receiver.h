@@ -129,9 +129,9 @@ public:
 	 * of the sender of the current message. The result is undefined
 	 * if there is no current message.
 	 */
-	const sockaddr_in_union *src_addr(void) const
+	const struct sockaddr *src_addr(void) const
 	{
-		return &source;
+		return &source.sa;
 	}
 
 protected:
@@ -150,7 +150,11 @@ protected:
 	struct homa_recvmsg_args control;
 
 	/** @source: Address of the node that sent the current message. */
-	sockaddr_in_union source;
+	union {
+		struct sockaddr sa;
+		struct sockaddr_in in4;
+		struct sockaddr_in6 in6;
+	} source;
 
 	/** @length: Length of the current message, or < 0  if none. */
 	ssize_t msg_length;

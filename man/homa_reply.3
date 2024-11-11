@@ -1,4 +1,4 @@
-.TH HOMA_REPLY 3 2022-12-13 "Homa" "Linux Programmer's Manual"
+.TH HOMA_REPLY 3 2024-11-11 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa_reply, homa_replyv \- send a Homa response message
 .SH SYNOPSIS
@@ -46,23 +46,10 @@ descriptors at
 In either case the total message length must not exceed
 .BR HOMA_MAX_MESSAGE_LENGTH .
 The destination for the response is given by
-.I dest_addr ,
-which can hold either an IPv4 or an IPv6 address:
-.PP
-.in +4n
-.ps -1
-.vs -2
-.EX
-typedef union sockaddr_in_union {
-    struct sockaddr sa;
-    struct sockaddr_in in4;
-    struct sockaddr_in6 in6;
-} sockaddr_in_union;
-.EE
-.vs +2
-.ps +1
-.in
-.PP
+.IR dest_addr ,
+which can hold either an IPv4 or an IPv6 address. The length
+of the address is given by
+.IR addrlen .
 The argument
 .I id
 is an identifier previously returned by

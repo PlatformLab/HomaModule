@@ -1,4 +1,4 @@
-.TH HOMA_SEND 3 2022-12-13 "Homa" "Linux Programmer's Manual"
+.TH HOMA_SEND 3 2024-11-11 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa_send, homa_sendv \- send a request message
 .SH SYNOPSIS
@@ -6,13 +6,13 @@ homa_send, homa_sendv \- send a request message
 .B #include <homa.h>
 .PP
 .BI "int homa_send(int " sockfd ", const void *" message_buf ", size_t " length \
-", const sockaddr_in_union *" dest_addr ",
-.BI "              uint64_t *" id ", uint64_t " \
+", const struct sockaddr *" dest_addr ",
+.BI "              size_t " addrlen ", uint64_t *" id ", uint64_t " \
 "completion_cookie" );
 .PP
 .BI "int homa_sendv(int " sockfd ", const struct iovec *" iov ", size_t " \
-iovcnt ", const sockaddr_in_union *" dest_addr ,
-.BI "              uint64_t *" id ", uint64_t " \
+iovcnt ", const sockaddr *" dest_addr ,
+.BI "              size_t " addrlen ", uint64_t *" id ", uint64_t " \
 "completion_cookie" );
 .fi
 .SH DESCRIPTION
@@ -45,22 +45,9 @@ In either case, the total message length must not exceed
 .BR HOMA_MAX_MESSAGE_LENGTH .
 The destination socket for the request is given by
 .IR dest_addr ,
-which can hold either an IPv4 or IPv6 address:
-.PP
-.in +4n
-.ps -1
-.vs -2
-.EX
-typedef union sockaddr_in_union {
-    struct sockaddr sa;
-    struct sockaddr_in in4;
-    struct sockaddr_in6 in6;
-} sockaddr_in_union;
-.EE
-.vs +2
-.ps +1
-.in
-.PP
+which can hold either an IPv4 or IPv6 address. The length of
+the address is given by
+.IR addrlen .
 If
 .I id
 is not NULL, an identifier for the request is returned at

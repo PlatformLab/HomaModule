@@ -147,7 +147,8 @@ void homa_server(int port)
 			resp_length -= vecs[num_vecs].iov_len;
 			num_vecs++;
 		}
-		result = homa_replyv(fd, vecs, num_vecs, &source, recv_args.id);
+		result = homa_replyv(fd, vecs, num_vecs, &source.sa,
+				     sockaddr_size(&source.sa), recv_args.id);
 		if (result < 0) {
 			printf("homa_reply failed: %s\n", strerror(errno));
 		}

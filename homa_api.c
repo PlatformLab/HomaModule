@@ -24,6 +24,7 @@
  * @length:       Number of bytes in the message at @message_buf.
  * @dest_addr:    Address of the RPC's client (returned by recvmsg when
  *                the message was received).
+ * @addrlen:      # bytes at *dest_addr.
  * @id:           Unique identifier for the request, as returned by recvmsg
  *                when the request was received.
  *
@@ -35,7 +36,8 @@
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
-		   const union sockaddr_in_union *dest_addr, uint64_t id)
+		   const struct sockaddr *dest_addr, uint32_t addrlen,
+		   uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -49,7 +51,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 	vec.iov_len = length;
 
 	hdr.msg_name = (void *)dest_addr;
-	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_namelen = addrlen;
 	hdr.msg_iov = &vec;
 	hdr.msg_iovlen = 1;
 	hdr.msg_control = &args;
@@ -67,6 +69,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  * @iovcnt:     Number of elements in @iov.
  * @dest_addr:  Address of the RPC's client (returned by recvmsg when
  *              the message was received).
+ * @addrlen:    # bytes at *dest_addr.
  * @id:         Unique identifier for the request, as returned by recvmsg
  *              when the request was received.
  *
@@ -78,7 +81,8 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-		    const union sockaddr_in_union *dest_addr, uint64_t id)
+		    const struct sockaddr *dest_addr, uint32_t addrlen,
+		    uint64_t id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -88,7 +92,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.completion_cookie = 0;
 
 	hdr.msg_name = (void *)dest_addr;
-	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_namelen = addrlen;
 	hdr.msg_iov = (struct iovec *)iov;
 	hdr.msg_iovlen = iovcnt;
 	hdr.msg_control = &args;
@@ -104,6 +108,7 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  * @message_buf:       First byte of buffer containing the request message.
  * @length:            Number of bytes at @message_buf.
  * @dest_addr:         Address of server to which the request should be sent.
+ * @addrlen:           # bytes at *dest_addr.
  * @id:                A unique identifier for the request will be returned
  *                     here; this can be used later to find the response for
  *                     this request.
@@ -113,8 +118,8 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *message_buf, size_t length,
-	      const union sockaddr_in_union *dest_addr, uint64_t *id,
-	      uint64_t completion_cookie)
+	      const struct sockaddr *dest_addr, uint32_t addrlen,
+	      uint64_t *id, uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -128,12 +133,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 	vec.iov_len = length;
 
 	hdr.msg_name = (void *)dest_addr;
-	/* For some unknown reason, this change improves short-message P99
-	 * latency by 20% in W3 under IPv4 (as of December 2022).
-	 */
-//	hdr.msg_namelen = sizeof(*dest_addr);
-	hdr.msg_namelen = dest_addr->in4.sin_family == AF_INET ?
-			sizeof(dest_addr->in4) : sizeof(dest_addr->in6);
+	hdr.msg_namelen = addrlen;
 	hdr.msg_iov = &vec;
 	hdr.msg_iovlen = 1;
 	hdr.msg_control = &args;
@@ -153,6 +153,7 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *                     message.
  * @iovcnt:            Number of elements in @iov.
  * @dest_addr:         Address of server to which the request should be sent.
+ * @addrlen:           # bytes at *dest_addr.
  * @id:                A unique identifier for the request will be returned
  *                     here; this can be used later to find the response for
  *                     this request.
@@ -162,8 +163,8 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-	       const union sockaddr_in_union *dest_addr, uint64_t *id,
-	       uint64_t completion_cookie)
+	       const struct sockaddr *dest_addr, uint32_t addrlen,
+	       uint64_t *id, uint64_t completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -173,7 +174,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	args.completion_cookie = completion_cookie;
 
 	hdr.msg_name = (void *)dest_addr;
-	hdr.msg_namelen = sizeof(*dest_addr);
+	hdr.msg_namelen = addrlen;
 	hdr.msg_iov = (struct iovec *)iov;
 	hdr.msg_iovlen = iovcnt;
 	hdr.msg_control = &args;

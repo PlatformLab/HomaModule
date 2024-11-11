@@ -477,14 +477,6 @@ TEST_F(homa_plumbing, homa_recvmsg__clear_cookie)
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.completion_cookie);
 }
-TEST_F(homa_plumbing, homa_recvmsg__nonzero_pad)
-{
-	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
-	self->recvmsg_args._pad[0] = 1;
-	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
-}
 TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 {
 	self->recvmsg_args.num_bpages = HOMA_MAX_BPAGES + 1;
@@ -557,8 +549,6 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
 	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
 			self->addr.in4.sin_addr.s_addr));
-	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
-			self->recvmsg_args.peer_addr.in4.sin_addr.s_addr));
 	EXPECT_EQ(sizeof32(struct sockaddr_in),
 			self->recvmsg_hdr.msg_namelen);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -610,9 +600,9 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 			&self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(self->client_id, self->recvmsg_args.id);
 	EXPECT_EQ(44444, self->recvmsg_args.completion_cookie);
-	EXPECT_EQ(AF_INET6, self->recvmsg_args.peer_addr.in6.sin6_family);
+	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
 	EXPECT_STREQ("1.2.3.4", homa_print_ipv6_addr(
-			&self->recvmsg_args.peer_addr.in6.sin6_addr));
+			&self->addr.in6.sin6_addr));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }

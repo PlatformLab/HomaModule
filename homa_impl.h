@@ -156,6 +156,15 @@ void     homa_throttle_lock_slow(struct homa *homa);
  */
 #define HOMA_MAX_GRANTS 10
 
+/* Holds either an IPv4 or IPv6 address (smaller and easier to use than
+ * sockaddr_storage).
+ */
+union sockaddr_in_union {
+	struct sockaddr sa;
+	struct sockaddr_in in4;
+	struct sockaddr_in6 in6;
+};
+
 /**
  * struct homa_interest - Contains various information used while waiting
  * for incoming messages (indicates what kinds of messages a particular
@@ -990,7 +999,7 @@ static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
  * skb_canonical_ipv6_addr() - Convert a socket address to the "standard"
  * form used in Homa, which is always an IPv6 address; if the original address
  * was IPv4, convert it to an IPv4-mapped IPv6 address.
- * @addr:   Address to canonicalize.
+ * @addr:   Address to canonicalize (if NULL, "any" is returned).
  */
 static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union *addr)
 {

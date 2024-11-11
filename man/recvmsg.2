@@ -1,4 +1,4 @@
-.TH RECVMSG 2 2024-7-16 "Homa" "Linux Programmer's Manual"
+.TH RECVMSG 2 2024-11-11 "Homa" "Linux Programmer's Manual"
 .SH NAME
 recvmsg \- receive a Homa message
 .SH SYNOPSIS
@@ -57,13 +57,13 @@ field must refer to a structure of the following type:
 .vs -2
 .EX
 struct homa_recvmsg_args {
-	  uint64_t id;                             /* If nonzero, specifies id of
+    uint64_t id;                             /* If nonzero, specifies id of
                                               * desired RPC. */
-	  uint64_t completion_cookie;              /* Value from sendmsg for request. */
-	  int flags;                               /* OR-ed combination of bits. */
-	  uint32_t num_bpages;                     /* Number of valid entries in
+    uint64_t completion_cookie;              /* Value from sendmsg for request. */
+    int flags;                               /* OR-ed combination of bits. */
+    uint32_t num_bpages;                     /* Number of valid entries in
                                               * bpage_offsets. */
-	  uint32_t bpage_offsets[HOMA_MAX_BPAGES]  /* Tokens for buffer pages. */
+    uint32_t bpage_offsets[HOMA_MAX_BPAGES]; /* Tokens for buffer pages. */
 };
 .EE
 .vs +2
@@ -98,8 +98,8 @@ is nonzero, then the caller is interested in receiving a response
 for the RPC given by
 .B id.
 .IP \[bu]
-Homa will use the structs to return information about the message received.
-The
+On a successful return Homa will use the structs to return information
+about the message received. The
 .B id
 field will be set to the RPC identifier for the received message (if
 .B id
@@ -111,7 +111,7 @@ is not NULL, then a
 .B sockaddr_in
 or
 .B sockaddr_in6
-will be stored at its target (depnding on the address family of
+will be stored at its target (depending on the address family of
 .IR sockfd ),
 describing the sender of the message.
 For response messages, the
@@ -209,7 +209,7 @@ is zero after an error, it means that the failure prevented a message
 from being received.
 If
 .B id
-is zero, it means that a specific RPC has failed.
+is nonzero, it means that a specific RPC has failed.
 For request messages, this can happen after errors such as
 .B EFAULT
 errors (the kernel couldn't write to user space to return
@@ -226,7 +226,11 @@ or
 can occur if there was no server at the specified address, it couldn't
 be reached, or it timed out, respectively.
 .B ENOMEM
-can also occur for responses.
+can also occur for responses.  If
+.B id
+is nonzero and even (i.e. the message that failed was a response) then the
+.B completion_cookie
+field will also be set.
 .PP
 After sucessfully receiving a message, an application has two responsibilities.
 First, it must eventually return the message's bpages to Homa as described

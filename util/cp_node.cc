@@ -661,9 +661,8 @@ int tcp_connection::read(bool loop,
 					&& (errno == ECONNRESET))) {
 				/* Connection was closed by the client. */
 				snprintf(error_message, sizeof(error_message),
-						"TCP connection on port %d "
-						"(fd %d) closed by peer %s",
-						port, fd, print_address(&peer));
+					 "TCP connection on port %d (fd %d) closed by peer %s",
+					port, fd, print_address(&peer));
 				return 1;
 			}
 
@@ -1108,7 +1107,8 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 			num_vecs++;
 		}
 		result = homa_replyv(fd, vecs, num_vecs, receiver.src_addr(),
-				receiver.id());
+				     sockaddr_size(receiver.src_addr()),
+				     receiver.id());
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed for server "
 					"port %d: %s\n",
@@ -2056,7 +2056,8 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 		log(NORMAL, "FATAL: error in Homa recvmsg: %s (id %lu, "
 				"server %s)\n",
 				strerror(errno), rpc_id,
-				print_address(receiver->src_addr()));
+				print_address((union sockaddr_in_union *)
+					      receiver->src_addr()));
 		exit(1);
 	}
 	header = receiver->get<message_header>(0);
@@ -2131,10 +2132,14 @@ void homa_client::sender()
 			vec[1].iov_base = sender_buffer + 20;
 			vec[1].iov_len = header->length - 20;
 			status = homa_sendv(fd, vec, 2,
-				&server_addrs[server], &rpc_id, 0);
+				            &server_addrs[server].sa,
+					    sockaddr_size(&server_addrs[server].sa),
+					    &rpc_id, 0);
 		} else
 			status = homa_send(fd, sender_buffer, header->length,
-					&server_addrs[server], &rpc_id, 0);
+					   &server_addrs[server].sa,
+					   sockaddr_size(&server_addrs[server].sa),
+					   &rpc_id, 0);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2196,8 +2201,8 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	header->cid = server_conns[server];
 	header->cid.client_port = id;
 	start = rdtsc();
-	status = homa_send(fd, buffer, header->length,
-		&server_addrs[server], &rpc_id, 0);
+	status = homa_send(fd, buffer, header->length, &server_addrs[server].sa,
+			   sockaddr_size(&server_addrs[server].sa), &rpc_id, 0);
 	if (status < 0) {
 		log(NORMAL, "FATAL: error in homa_send: %s (request "
 				"length %d)\n", strerror(errno),
@@ -2211,7 +2216,8 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 		log(NORMAL, "FATAL: measure_rtt got error in recvmsg: %s "
 				"(id %lu, server %s)\n",
 				strerror(errno), rpc_id,
-				print_address(receiver->src_addr()));
+				print_address((union sockaddr_in_union *)
+					      receiver->src_addr()));
 		exit(1);
 	}
 	return rdtsc() - start;

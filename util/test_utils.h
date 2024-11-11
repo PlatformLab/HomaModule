@@ -19,6 +19,26 @@ extern "C"
 {
 #endif
 
+/**
+ * Holds either an IPv4 or IPv6 address (smaller and easier to use than
+ * sockaddr_storage).
+ */
+union sockaddr_in_union {
+	struct sockaddr sa;
+	struct sockaddr_in in4;
+	struct sockaddr_in6 in6;
+};
+
+/**
+ * sockaddr_size() - Return the number of bytes used by the argument.
+ * @sa:     Pointer to either an IPv4 or an IPv6 address.
+ */
+static inline uint32_t sockaddr_size(const struct sockaddr *sa)
+{
+	return (sa->sa_family == AF_INET) ? sizeof(struct sockaddr_in) :
+			sizeof(struct sockaddr_in6);
+}
+
 #define sizeof32(type) static_cast<int>(sizeof(type))
 
 extern int     check_buffer(void *buffer, size_t length);

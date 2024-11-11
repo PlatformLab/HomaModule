@@ -50,16 +50,6 @@ extern "C"
 #define HOMA_MIN_DEFAULT_PORT 0x8000
 
 /**
- * Holds either an IPv4 or IPv6 address (smaller and easier to use than
- * sockaddr_storage).
- */
-union sockaddr_in_union {
-	struct sockaddr sa;
-	struct sockaddr_in in4;
-	struct sockaddr_in6 in6;
-};
-
-/**
  * struct homa_sendmsg_args - Provides information needed by Homa's
  * sendmsg; passed to sendmsg using the msg_control field.
  */
@@ -112,23 +102,11 @@ struct homa_recvmsg_args {
 	uint32_t flags;
 
 	/**
-	 * @error_addr: the address of the peer is stored here when available.
-	 * This field is different from the msg_name field in struct msghdr
-	 * in that the msg_name field isn't set after errors. This field will
-	 * always be set when peer information is available, which includes
-	 * some error cases.
-	 */
-	union sockaddr_in_union peer_addr;
-
-	/**
 	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
 	 * Passes in bpages from previous messages that can now be
 	 * recycled; returns bpages from the new message.
 	 */
 	uint32_t num_bpages;
-
-	/* Reserved for future use; must be zero. */
-	uint32_t _pad[1];
 
 	/**
 	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer
@@ -144,9 +122,9 @@ struct homa_recvmsg_args {
 };
 
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recvmsg_args) >= 120,
+_Static_assert(sizeof(struct homa_recvmsg_args) >= 88,
 	       "homa_recvmsg_args shrunk");
-_Static_assert(sizeof(struct homa_recvmsg_args) <= 120,
+_Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
 	       "homa_recvmsg_args grew");
 #endif
 
@@ -214,18 +192,17 @@ struct homa_set_buf_args {
 int     homa_abortp(int fd, struct homa_abort_args *args);
 
 int     homa_send(int sockfd, const void *message_buf,
-		  size_t length, const union sockaddr_in_union *dest_addr,
-		  uint64_t *id, uint64_t completion_cookie);
+		  size_t length, const struct sockaddr *dest_addr,
+		  uint32_t addrlen,  uint64_t *id, uint64_t completion_cookie);
 int     homa_sendv(int sockfd, const struct iovec *iov,
-		   int iovcnt, const union sockaddr_in_union *dest_addr,
-		   uint64_t *id, uint64_t completion_cookie);
+		   int iovcnt, const struct sockaddr *dest_addr,
+		   uint32_t addrlen,  uint64_t *id, uint64_t completion_cookie);
 ssize_t homa_reply(int sockfd, const void *message_buf,
-		   size_t length, const union sockaddr_in_union *dest_addr,
-		   uint64_t id);
+		   size_t length, const struct sockaddr *dest_addr,
+		   uint32_t addrlen,  uint64_t id);
 ssize_t homa_replyv(int sockfd, const struct iovec *iov,
-		    int iovcnt, const union sockaddr_in_union *dest_addr,
-		    uint64_t id);
-int     homa_abort(int sockfd, uint64_t id, int error);
+		    int iovcnt, const struct sockaddr *dest_addr,
+		    uint32_t addrlen,  uint64_t id);
 
 #ifdef __cplusplus
 }

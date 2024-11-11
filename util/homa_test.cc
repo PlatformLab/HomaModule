@@ -81,7 +81,8 @@ void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 	int status;
 
 	sleep(1);
-	status = homa_send(fd, request, length, addr, &id, 0);
+	status = homa_send(fd, request, length, &addr->sa,
+			   sockaddr_size(&addr->sa), &id, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
@@ -168,7 +169,8 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	uint64_t start = rdtsc();
 
 	for (int i = 1; i <= count; i++) {
-		status = homa_send(fd, request, length, dest, &id, 0);
+		status = homa_send(fd, request, length, &dest->sa,
+				   sockaddr_size(&dest->sa), &id, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
 				strerror(errno));
@@ -216,7 +218,8 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 	int status;
 	ssize_t resp_length;
 
-	status = homa_send(fd, request, length, dest, &id, 0);
+	status = homa_send(fd, request, length, &dest->sa,
+			   sockaddr_size(&dest->sa), &id, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n", strerror(errno));
 		return;
@@ -370,7 +373,8 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 
 	for (int i = -10; i < count; i++) {
 		start = rdtsc();
-		status = homa_send(fd, request, length, dest, NULL, 0);
+		status = homa_send(fd, request, length, &dest->sa,
+				   sockaddr_size(&dest->sa), NULL, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
 					strerror(errno));
@@ -407,7 +411,8 @@ void test_send(int fd, const sockaddr_in_union *dest, char *request)
 	uint64_t id;
 	int status;
 
-	status = homa_send(fd, request, length, dest, &id, 0);
+	status = homa_send(fd, request, length, &dest->sa,
+			   sockaddr_size(&dest->sa), &id, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
@@ -509,7 +514,8 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		seed_buffer(buffers[i]+2, length - 2*sizeof32(int), 1000*i);
 	}
 	for (i = 0; i < count; i++) {
-		status = homa_send(fd, buffers[i], length, dest, &id, 0);
+		status = homa_send(fd, buffers[i], length, &dest->sa,
+				   sockaddr_size(&dest->sa), &id, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n", strerror(errno));
 			return;
@@ -537,7 +543,8 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 					resp_length);
 		response = (int *) (buf_region + recv_args.bpage_offsets[0]);
 		status = homa_send(fd, buffers[(response[2]/1000) %count],
-				length, dest, &id, 0);
+				   length, &dest->sa, sockaddr_size(&dest->sa),
+				   &id, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n", strerror(errno));
 			return;

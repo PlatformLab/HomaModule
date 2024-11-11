@@ -226,7 +226,7 @@ void seed_buffer(void *buffer, size_t length, int seed)
  * strings, so callers don't have to worry about allocating space, even if
  * several addresses are in use at once. This function is also thread-safe.
  */
-const char *print_address(const sockaddr_in_union *addr)
+const char *print_address(const union sockaddr_in_union *addr)
 {
 
 // Avoid cache line conflicts:
