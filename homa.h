@@ -189,8 +189,8 @@ struct homa_set_buf_args {
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
-int     homa_abortp(int fd, struct homa_abort_args *args);
-
+#if 1 /* See strip.py */
+int     homa_abort(int sockfd, uint64_t id, int error);
 int     homa_send(int sockfd, const void *message_buf,
 		  size_t length, const struct sockaddr *dest_addr,
 		  uint32_t addrlen,  uint64_t *id, uint64_t completion_cookie);
@@ -203,6 +203,7 @@ ssize_t homa_reply(int sockfd, const void *message_buf,
 ssize_t homa_replyv(int sockfd, const struct iovec *iov,
 		    int iovcnt, const struct sockaddr *dest_addr,
 		    uint32_t addrlen,  uint64_t id);
+#endif /* See strip.py */
 
 #ifdef __cplusplus
 }
