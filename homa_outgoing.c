@@ -210,9 +210,10 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	 */
 	int mtu, max_seg_data, max_gso_data;
 
-	int overlap_xmit, segs_per_gso;
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
+	uint64_t segs_per_gso;
+	int overlap_xmit;
 
 	/* Bytes of the message that haven't yet been copied into skbs. */
 	int bytes_left;
