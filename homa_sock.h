@@ -26,7 +26,7 @@ void     homa_sock_lock_slow(struct homa_sock *hsk);
  */
 struct homa_socktab {
 	/**
-	 * @mutex: Controls all modifications to this object; not needed
+	 * @write_lock: Controls all modifications to this object; not needed
 	 * for socket lookups (RCU is used instead). Also used to
 	 * synchronize port allocation.
 	 */
@@ -101,7 +101,8 @@ struct homa_rpc_bucket {
 	/** @rpcs: list of RPCs that hash to this bucket. */
 	struct hlist_head rpcs;
 
-	/** @id: identifier for this bucket, used in error messages etc.
+	/**
+	 * @id: identifier for this bucket, used in error messages etc.
 	 * It's the index of the bucket within its hash table bucket
 	 * array, with an additional offset to separate server and
 	 * client RPCs.
@@ -184,7 +185,7 @@ struct homa_sock {
 	int ip_header_length;
 
 	/**
-	 * @client_socktab_links: Links this socket into the homa_socktab
+	 * @socktab_links: Links this socket into the homa_socktab
 	 * based on @port.
 	 */
 	struct homa_socktab_links socktab_links;
@@ -309,7 +310,7 @@ static inline void homa_sock_unlock(struct homa_sock *hsk)
 }
 
 /**
- * port_hash() - Hash function for port numbers.
+ * homa_port_hash() - Hash function for port numbers.
  * @port:   Port number being looked up.
  *
  * Return:  The index of the bucket in which this port will be found (if
@@ -332,8 +333,8 @@ static inline int homa_port_hash(__u16 port)
  *
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *hsk,
-							     __u64 id)
+static inline struct homa_rpc_bucket *homa_client_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
 {
 	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
@@ -350,8 +351,8 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *h
  *
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct homa_rpc_bucket *homa_server_rpc_bucket(struct homa_sock *hsk,
-							     __u64 id)
+static inline struct homa_rpc_bucket *homa_server_rpc_bucket(
+		struct homa_sock *hsk, __u64 id)
 {
 	/* Each client allocates RPC ids sequentially, so they will
 	 * naturally distribute themselves across the hash space.

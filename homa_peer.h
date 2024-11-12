@@ -33,7 +33,7 @@ struct homa_dead_dst {
 };
 
 /**
- * define HOMA_PEERTAB_BUCKETS - Number of bits in the bucket index for a
+ * define HOMA_PEERTAB_BUCKET_BITS - Number of bits in the bucket index for a
  * homa_peertab.  Should be large enough to hold an entry for every server
  * in a datacenter without long hash chains.
  */
@@ -110,13 +110,13 @@ struct homa_peer {
 	__be16 cutoff_version;
 
 	/**
-	 * last_update_jiffies: time in jiffies when we sent the most
+	 * @last_update_jiffies: time in jiffies when we sent the most
 	 * recent CUTOFFS packet to this peer.
 	 */
 	unsigned long last_update_jiffies;
 
 	/**
-	 * grantable_rpcs: Contains all homa_rpcs (both requests and
+	 * @grantable_rpcs: Contains all homa_rpcs (both requests and
 	 * responses) involving this peer whose msgins require (or required
 	 * them in the past) and have not been fully received. The list is
 	 * sorted in priority order (head has fewest bytes_remaining).

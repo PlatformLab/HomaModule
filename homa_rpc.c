@@ -206,7 +206,8 @@ error:
  *           to the RPC, but can sometimes be used to avoid a socket lookup.
  * @saddr:   Source address from which the act was received (the client
  *           note for the RPC)
- * @ack:     Information about an RPC from @saddr that may now be deleted safely.
+ * @ack:     Information about an RPC from @saddr that may now be deleted
+ *           safely.
  */
 void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		    struct homa_ack *ack)
@@ -295,7 +296,8 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	if (rpc->msgin.length >= 0) {
 		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
 		while (1) {
-			struct homa_gap *gap = list_first_entry_or_null(&rpc->msgin.gaps,
+			struct homa_gap *gap = list_first_entry_or_null(
+					&rpc->msgin.gaps,
 					struct homa_gap, links);
 			if (!gap)
 				break;
@@ -386,8 +388,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 			if (rpc->msgout.length >= 0) {
 				while (rpc->msgout.packets) {
 					skbs[num_skbs] = rpc->msgout.packets;
-					rpc->msgout.packets = homa_get_skb_info(rpc
-							->msgout.packets)->next_skb;
+					rpc->msgout.packets = homa_get_skb_info(
+						rpc->msgout.packets)->next_skb;
 					num_skbs++;
 					rpc->msgout.num_skbs--;
 					if (num_skbs >= batch_size)
@@ -448,8 +450,10 @@ release:
 							  rpc->msgin.bpage_offsets);
 			if (rpc->msgin.length >= 0) {
 				while (1) {
-					struct homa_gap *gap = list_first_entry_or_null(&rpc
-							->msgin.gaps,
+					struct homa_gap *gap;
+
+					gap = list_first_entry_or_null(
+							&rpc->msgin.gaps,
 							struct homa_gap, links);
 					if (!gap)
 						break;

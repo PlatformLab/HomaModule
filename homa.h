@@ -31,11 +31,11 @@ extern "C"
  * define HOMA_BPAGE_SIZE - Number of bytes in pages used for receive
  * buffers. Must be power of two.
  */
-#define HOMA_BPAGE_SHIFT 16
 #define HOMA_BPAGE_SIZE (1 << HOMA_BPAGE_SHIFT)
+#define HOMA_BPAGE_SHIFT 16
 
 /**
- * define HOMA_MAX_BPAGES: The largest number of bpages that will be required
+ * define HOMA_MAX_BPAGES - The largest number of bpages that will be required
  * to store an incoming message.
  */
 #define HOMA_MAX_BPAGES ((HOMA_MAX_MESSAGE_LENGTH + HOMA_BPAGE_SIZE - 1) \
@@ -170,14 +170,18 @@ struct homa_set_buf_args {
 	size_t length;
 };
 
+/* Meanings of the bits in Homa's flag word, which can be set using
+ * "sysctl /net/homa/flags".
+ */
+
 /**
  * Meanings of the bits in Homa's flag word, which can be set using
  * "sysctl /net/homa/flags".
  */
 
 /**
- * Disable the output throttling mechanism: always send all packets
- * immediately.
+ * define HOMA_FLAG_DONT_THROTTLE - disable the output throttling mechanism:
+ * always send all packets immediately.
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
 

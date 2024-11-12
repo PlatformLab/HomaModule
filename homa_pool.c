@@ -48,7 +48,8 @@ static void set_bpages_needed(struct homa_pool *pool)
  * @region_size:  Total number of bytes available at @buf_region.
  * Return: Either zero (for success) or a negative errno for failure.
  */
-int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
+int homa_pool_init(struct homa_sock *hsk, void __user *region,
+		   __u64 region_size)
 {
 	struct homa_pool *pool = hsk->buffer_pool;
 	int i, result;
@@ -65,7 +66,8 @@ int homa_pool_init(struct homa_sock *hsk, void *region, __u64 region_size)
 		goto error;
 	}
 	pool->descriptors = kmalloc_array(pool->num_bpages,
-					  sizeof(struct homa_bpage), GFP_ATOMIC);
+					  sizeof(struct homa_bpage),
+					  GFP_ATOMIC);
 	if (!pool->descriptors) {
 		result = -ENOMEM;
 		goto error;
@@ -196,13 +198,13 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		 */
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-							  bpage->expiration > now)))
+				bpage->expiration > now)))
 			continue;
 		if (!spin_trylock_bh(&bpage->lock))
 			continue;
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-							  bpage->expiration > now))) {
+				bpage->expiration > now))) {
 			spin_unlock_bh(&bpage->lock);
 			continue;
 		}
@@ -252,7 +254,8 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 		if (homa_pool_get_pages(pool, full_pages, pages, 0) != 0)
 			goto out_of_space;
 		for (i = 0; i < full_pages; i++)
-			rpc->msgin.bpage_offsets[i] = pages[i] << HOMA_BPAGE_SHIFT;
+			rpc->msgin.bpage_offsets[i] = pages[i] <<
+					HOMA_BPAGE_SHIFT;
 	}
 	rpc->msgin.num_bpages = full_pages;
 
@@ -365,8 +368,8 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 	*available = (bpage_index < (rpc->msgin.num_bpages - 1))
 			? HOMA_BPAGE_SIZE - bpage_offset
 			: rpc->msgin.length - offset;
-	return rpc->hsk->buffer_pool->region + rpc->msgin.bpage_offsets[bpage_index]
-			+ bpage_offset;
+	return rpc->hsk->buffer_pool->region +
+			rpc->msgin.bpage_offsets[bpage_index] + bpage_offset;
 }
 
 /**

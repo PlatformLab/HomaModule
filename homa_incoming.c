@@ -125,7 +125,8 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 
 	if (start > rpc->msgin.recv_end) {
 		/* Packet creates a new gap. */
-		if (!homa_gap_new(&rpc->msgin.gaps, rpc->msgin.recv_end, start)) {
+		if (!homa_gap_new(&rpc->msgin.gaps,
+				  rpc->msgin.recv_end, start)) {
 			pr_err("Homa couldn't allocate gap: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				  rpc->id, start);
@@ -302,9 +303,8 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				if (error)
 					goto free_skbs;
 				error = skb_copy_datagram_iter(skbs[i],
-							       sizeof(*h) + copied,
-							       &iter,
-							       chunk_size);
+						sizeof(*h) + copied,  &iter,
+						chunk_size);
 				if (error)
 					goto free_skbs;
 				copied += chunk_size;
@@ -339,7 +339,8 @@ free_skbs:
 		n = 0;
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_copy_to_user");
-		atomic_andnot(APP_NEEDS_LOCK | RPC_COPYING_TO_USER, &rpc->flags);
+		atomic_andnot(APP_NEEDS_LOCK | RPC_COPYING_TO_USER,
+			      &rpc->flags);
 		if (error)
 			break;
 	}
@@ -439,8 +440,8 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 					}
 				} else {
 					rpc = homa_find_server_rpc(hsk, &saddr,
-								   ntohs(h->common.sport),
-								   id);
+							ntohs(h->common.sport),
+							id);
 				}
 			} else {
 				rpc = homa_find_client_rpc(hsk, id);

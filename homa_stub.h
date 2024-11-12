@@ -22,8 +22,9 @@ static inline int homa_skb_append_from_iter(struct homa *homa,
 	return 0;
 }
 
-static inline int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb,
-					  void *buf, int length)
+static inline int homa_skb_append_to_frag(struct homa *homa,
+					  struct sk_buff *skb, void *buf,
+					  int length)
 {
 	char *dst = skb_put(skb, length);
 

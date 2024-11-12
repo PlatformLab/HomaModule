@@ -147,7 +147,8 @@ static struct proto homav6_prot = {
 	/* IPv6 data comes *after* Homa's data, and isn't included in
 	 * struct homa_sock.
 	 */
-	.obj_size	   = sizeof(struct homa_sock) + sizeof(struct ipv6_pinfo),
+	.obj_size	   = sizeof(struct homa_sock) +
+			     sizeof(struct ipv6_pinfo),
 	.no_autobind       = 1,
 };
 
@@ -847,11 +848,13 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 	/* Do a trivial test to make sure we can at least write the first
 	 * page of the region.
 	 */
-	if (copy_to_user((void __user *)args.start, &args, sizeof(args)))
+	if (copy_to_user((__force void __user *)args.start, &args,
+			 sizeof(args)))
 		return -EFAULT;
 
 	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_SET_BUF");
-	ret = homa_pool_init(hsk, args.start, args.length);
+	ret = homa_pool_init(hsk, (__force void __user *)args.start,
+			     args.length);
 	homa_sock_unlock(hsk);
 	INC_METRIC(so_set_buf_calls, 1);
 	INC_METRIC(so_set_buf_ns, sched_clock() - start);
@@ -891,7 +894,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	__u64 finish;
 	int result = 0;
 	struct homa_rpc *rpc = NULL;
-	union sockaddr_in_union *addr = (union sockaddr_in_union *)msg->msg_name;
+	union sockaddr_in_union *addr = (union sockaddr_in_union *)
+			msg->msg_name;
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
 			start;
@@ -1133,8 +1137,8 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	homa_rpc_unlock(rpc);
 
 done:
-	if (unlikely(copy_to_user((void __user *)msg->msg_control, &control,
-		     sizeof(control)))) {
+	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
+				  &control, sizeof(control)))) {
 		/* Note: in this case the message's buffers will be leaked. */
 		pr_notice("%s couldn't copy back args\n", __func__);
 		result = -EFAULT;
@@ -1662,7 +1666,8 @@ int homa_timer_main(void *transport)
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 		if (!exiting) {
-			hrtimer_start(&hrtimer, tick_interval, HRTIMER_MODE_REL);
+			hrtimer_start(&hrtimer, tick_interval,
+				      HRTIMER_MODE_REL);
 			schedule();
 		}
 		__set_current_state(TASK_RUNNING);

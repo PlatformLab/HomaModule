@@ -42,6 +42,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  *                  homa_skb_info has been filled in with the packet geometry.
  * @iter:           Describes location(s) of (remaining) message data in user
  *                  space.
+ * Return:          Either a negative errno or 0 (for success).
  */
 int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 			       struct iov_iter *iter)
@@ -935,8 +936,8 @@ void homa_pacer_xmit(struct homa *homa)
 		 */
 		if (!*rpc->msgout.next_xmit || (rpc->msgout.next_xmit_offset
 				>= rpc->msgout.granted)) {
-			/* Nothing more to transmit from this message (right now),
-			 * so remove it from the throttled list.
+			/* Nothing more to transmit from this message (right
+			 * now), so remove it from the throttled list.
 			 */
 			homa_throttle_lock(homa);
 			if (!list_empty(&rpc->throttled_links)) {

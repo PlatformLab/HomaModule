@@ -185,7 +185,8 @@ struct homa_message_in {
 	 */
 	__u32 num_bpages;
 
-	/** @bpage_offsets: Describes buffer space allocated for this message.
+	/**
+	 * @bpage_offsets: Describes buffer space allocated for this message.
 	 * Each entry is an offset from the start of the buffer region.
 	 * All but the last pointer refer to areas of size HOMA_BPAGE_SIZE.
 	 */
@@ -201,7 +202,8 @@ struct homa_rpc {
 	/** @hsk:  Socket that owns the RPC. */
 	struct homa_sock *hsk;
 
-	/** @bucket: Pointer to the bucket in hsk->client_rpc_buckets or
+	/**
+	 * @bucket: Pointer to the bucket in hsk->client_rpc_buckets or
 	 * hsk->server_rpc_buckets where this RPC is linked. Used primarily
 	 * for locking the RPC (which is done by locking its bucket).
 	 */

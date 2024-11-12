@@ -126,9 +126,9 @@ struct homa_pool {
 	atomic_t free_bpages;
 
 	/**
-	 * The number of free bpages required to satisfy the needs of the
-	 * first RPC on @hsk->waiting_for_bufs, or INT_MAX if that queue
-	 * is empty.
+	 * @bpages_needed: the number of free bpages required to satisfy the
+	 * needs of the first RPC on @hsk->waiting_for_bufs, or INT_MAX if
+	 * that queue is empty.
 	 */
 	int bpages_needed;
 
@@ -148,8 +148,8 @@ struct homa_pool {
 int      homa_pool_allocate(struct homa_rpc *rpc);
 void     homa_pool_check_waiting(struct homa_pool *pool);
 void     homa_pool_destroy(struct homa_pool *pool);
-void    *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
-			      int *available);
+void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
+				  int *available);
 int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 			     __u32 *pages, int leave_locked);
 int      homa_pool_init(struct homa_sock *hsk, void *buf_region,

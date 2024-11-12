@@ -156,8 +156,9 @@ void     homa_throttle_lock_slow(struct homa *homa);
  */
 #define HOMA_MAX_GRANTS 10
 
-/* Holds either an IPv4 or IPv6 address (smaller and easier to use than
- * sockaddr_storage).
+/**
+ * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
+ * and easier to use than sockaddr_storage).
  */
 union sockaddr_in_union {
 	struct sockaddr sa;
@@ -745,8 +746,8 @@ struct homa {
 	/* Bits that can be specified for gro_policy. These were created for
 	 * testing, in order to evaluate various possible policies; you almost
 	 * certainly should not use any value other than HOMA_GRO_NORMAL.
-	 * HOMA_GRO_SAME_CORE         If isolated packets arrive (not part of
-	 *                            a batch) use the GRO core for SoftIRQ also.
+	 * HOMA_GRO_SAME_CORE         If isolated packets arrive (not part of a
+	 *                            batch) use the GRO core for SoftIRQ also.
 	 * HOMA_GRO_IDLE              Use old mechanism for selecting an idle
 	 *                            core for SoftIRQ (deprecated).
 	 * HOMA_GRO_NEXT              Always use the next core in circular
@@ -970,8 +971,8 @@ static inline bool skb_is_ipv6(const struct sk_buff *skb)
 }
 
 /**
- * Given an IPv4 address, return an equivalent IPv6 address (an IPv4-mapped
- * one)
+ * ipv4_to_ipv6() - Given an IPv4 address, return an equivalent IPv6 address
+ * (an IPv4-mapped one).
  * @ip4: IPv4 address, in network byte order.
  */
 static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
@@ -996,12 +997,13 @@ static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
 }
 
 /**
- * skb_canonical_ipv6_addr() - Convert a socket address to the "standard"
+ * canonical_ipv6_addr() - Convert a socket address to the "standard"
  * form used in Homa, which is always an IPv6 address; if the original address
  * was IPv4, convert it to an IPv4-mapped IPv6 address.
  * @addr:   Address to canonicalize (if NULL, "any" is returned).
  */
-static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union *addr)
+static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
+						  *addr)
 {
 	if (addr) {
 		return (addr->sa.sa_family == AF_INET6)
@@ -1046,6 +1048,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 			(tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
 }
 
+#if 1 /* See strip.py --alt */
 /**
  * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
  * provide a unique identifier for the address in a timetrace record.
@@ -1058,7 +1061,6 @@ static inline uint32_t tt_addr(const struct in6_addr x)
 			: ntohl(x.in6_u.u6_addr32[1]));
 }
 
-#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);

@@ -58,7 +58,8 @@ int homa_init(struct homa *homa)
 	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
-		pr_err("%s couldn't create port_map: kmalloc failure", __func__);
+		pr_err("%s couldn't create port_map: kmalloc failure",
+		       __func__);
 		return -ENOMEM;
 	}
 	homa_socktab_init(homa->port_map);

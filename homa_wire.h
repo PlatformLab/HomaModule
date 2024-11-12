@@ -104,8 +104,7 @@ struct common_header {
 	 */
 	__be32 sequence;
 
-	/**
-	 * The fields below correspond to the acknowledgment field in TCP
+	/* The fields below correspond to the acknowledgment field in TCP
 	 * headers; not used by Homa, except for the low-order 8 bits, which
 	 * specify the Homa packet type (one of the values in the
 	 * homa_packet_type enum).
@@ -173,7 +172,7 @@ struct common_header {
  */
 struct homa_ack {
 	/**
-	 * @id: The client's identifier for the RPC. 0 means this ack
+	 * @client_id: The client's identifier for the RPC. 0 means this ack
 	 * is invalid.
 	 */
 	__be64 client_id;
@@ -295,6 +294,7 @@ _Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) & 0x3) 
  * homa_data_len() - Returns the total number of bytes in a DATA packet
  * after the data_header. Note: if the packet is a GSO packet, the result
  * may include metadata as well as packet data.
+ * @skb:   Incoming data packet
  */
 static inline int homa_data_len(struct sk_buff *skb)
 {
@@ -466,10 +466,11 @@ struct ack_header {
 	/** @common: Fields common to all packet types. */
 	struct common_header common;
 
-	/** @num_acks: number of (leading) elements in @acks that are valid. */
+	/** @num_acks: Number of (leading) elements in @acks that are valid. */
 	__be16 num_acks;
 
 #define HOMA_MAX_ACKS_PER_PKT 5
+	/** @acks: Info about RPCs that are no longer active. */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
 _Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,

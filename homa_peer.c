@@ -118,9 +118,9 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
 {
 	while (!list_empty(&peertab->dead_dsts)) {
-		struct homa_dead_dst *dead = list_first_entry(&peertab->dead_dsts,
-							      struct homa_dead_dst,
-							      dst_links);
+		struct homa_dead_dst *dead =
+			list_first_entry(&peertab->dead_dsts,
+					 struct homa_dead_dst, dst_links);
 		if (dead->gc_time > now)
 			break;
 		dst_release(dead->dst);
@@ -299,8 +299,8 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
 				   inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
 				   inet->sk.sk_protocol, 0,
-				   peer->addr.in6_u.u6_addr32[3], inet->inet_saddr,
-				   0, 0, inet->sk.sk_uid);
+				   peer->addr.in6_u.u6_addr32[3],
+				   inet->inet_saddr, 0, 0, inet->sk.sk_uid);
 		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
 		rt = ip_route_output_flow(sock_net(&inet->sk),
 					  &peer->flow.u.ip4, &inet->sk);
