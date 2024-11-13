@@ -257,10 +257,6 @@ void homa_timer(struct homa *homa)
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 			total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 			atomic_read(&homa->total_incoming));
-
-//	if (total_rpcs > 0)
-//		tt_record1("homa_timer finished scanning %d RPCs", total_rpcs);
-
 	homa_skb_release_pages(homa);
 	end = get_cycles();
 	INC_METRIC(timer_cycles, end-start);

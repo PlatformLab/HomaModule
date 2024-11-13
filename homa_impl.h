@@ -8,7 +8,6 @@
 #define _HOMA_IMPL_H
 
 #include <linux/bug.h>
-#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 #undef WARN
 #define WARN(...)
@@ -21,8 +20,7 @@
 
 #undef WARN_ON_ONCE
 #define WARN_ON_ONCE(condition) WARN_ON(condition)
-#endif
-#endif /* See strip.py */
+#endif /* __UNIT_TEST__ */
 
 #include <linux/audit.h>
 #include <linux/icmp.h>
@@ -52,7 +50,6 @@
 #endif /* See strip.py */
 #include "homa_wire.h"
 
-#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
@@ -130,6 +127,7 @@ void *mock_vmalloc(size_t size);
 #define per_cpu(name, core) (name[core])
 #endif /* __UNIT_TEST__ */
 
+#if 1 /* See strip.py */
 /* Null out things that confuse VSCode Intellisense */
 #ifdef __VSCODE__
 #define raw_smp_processor_id() 1
@@ -1070,16 +1068,18 @@ static inline __be32 tt_addr(const struct in6_addr x)
 			: ntohl(x.in6_u.u6_addr32[1]));
 }
 
+#if 1 /* See strip.py --alt */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);
 #define UNIT_LOG unit_log_printf
 void unit_hook(char *id);
 #define UNIT_HOOK(msg) unit_hook(msg)
-#else
+#else /* __UNIT_TEST__ */
 #define UNIT_LOG(...)
 #define UNIT_HOOK(...)
-#endif
+#endif /* __UNIT_TEST__ */
+#endif /* See strip.py */
 
 extern void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		    int port, int error);

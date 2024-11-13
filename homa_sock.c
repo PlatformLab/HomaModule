@@ -84,7 +84,7 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 				return NULL;
 			scan->next = (struct homa_socktab_links *)
 				      hlist_first_rcu(&scan->socktab->buckets
-				      [scan->current_bucket]);
+				      		      [scan->current_bucket]);
 		}
 		links = scan->next;
 		hsk = links->sock;

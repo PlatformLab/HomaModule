@@ -5,7 +5,7 @@
 """
 This script is used to copy information from the Homa GitHub repo to
 a Linux kernel repo, removing information that doesn't belong in the
-official kernel version (primarily calls to tt_record).
+official kernel version (such as calls to tt_record).
 
 Usage: strip.py [--alt] file file file ... destdir
 
@@ -13,9 +13,9 @@ Each of the files will be read, stripped as appropriate, and copied to a
 file by the same name in destdir. If there is only a single file and no
 destdir, then the stripped file is printed on standard output.
 
-In some cases, such as calls to tt_record*, information is removed
-automatically. In other cases, it is controlled with #if statments in
-the following ways:
+In some cases, such as calls to tt_record* and code related to unit tests,
+information is removed automatically. In other cases, it is controlled with
+#if statments in the following ways:
 
 * This entire block will be removed in the stripped version:
     #if 1 /* See strip.py */
@@ -121,19 +121,28 @@ def scan(file, alt_mode):
 
     global exit_code
 
-    # True means we're in the middle of a '/* ... */' comment
+    # True means the current line is in the middle of a /* ... */ comment
     in_comment = False
 
-    # True means we're in the middle of a statement that should be skipped.
-    in_statement = False
+    # True means the current line is at least partially a comment line.
+    current_has_comment = False
+
+    # True means we're in the middle of a multi-line statement that
+    # should be skipped (drop until a semicolon is seen).
+    skip_statement = False
 
     # Values of 0 or 1 mean we're in the middle of a group of lines labeled
     # with '#if /* GitHubOnly */'. 0 means we're including lines, 1 means
     # we're stripping them. None means we're not in such a group.
     in_labeled_skip = None
 
-    # True means we're in the middle of an '#ifdef __UNIT_TEST__'
-    in_unit = False
+    # Used to strip out unit testing code. Value is one of:
+    # None:    We're not in the middle of an '#ifdef __UNIT_TEST__'
+    # 'if':    An '#idfdef __UNIT_TEST__" has been seen, but not the
+    #          corresponding #else or #endif not been seen yet
+    # 'else':  We are in the middle of an '#else' clause for an
+    #          '#ifdef __UNIT_TEST__'
+    in_unit = None
 
     # Array of lines containing the stripped version of the file
     slines = []
@@ -166,25 +175,22 @@ def scan(file, alt_mode):
         # uninteresting information such as comments and whitespace.
         pline = line.rstrip()
 
-        # Handle comments.
+        # See if (part of) this line is a comment.
+        current_has_comment = in_comment
         if in_comment:
             index = pline.find('*/')
-            if index < 0:
-                slines.append(line)
-                continue
-            pline = pline[index+2:]
-            in_comment = False
-        index = pline.find('/*')
-        if index >= 0:
-            index2 = pline.find('*/', index+2)
-            if index2 >= 0:
-                pline = pline[0:index] + pline[index2+2:]
-            else:
-                pline = pline[0:index]
-                in_comment = True
-        index = pline.find('//')
-        if index >= 0:
-                pline = pline[0:index]
+            if index >= 0:
+                in_comment = False
+        else:
+            index = pline.find('/*')
+            if index >= 0:
+                current_has_comment = True
+                index2 = pline.find('*/', index+2)
+                if index2 < 0:
+                    in_comment = True
+            index = pline.find('//')
+            if index >= 0:
+                    current_has_comment = True
 
         pline = pline.strip()
 
@@ -203,7 +209,7 @@ def scan(file, alt_mode):
                 line.startswith('#if 1 /* See strip.py --alt */')
                 and not alt_mode):
             if slines[-1].strip() == '':
-                slines.pop()
+                delete_empty_line = True
             in_labeled_skip = 1
             check_braces = False
             continue
@@ -224,38 +230,71 @@ def scan(file, alt_mode):
             continue
 
         # Strip tt_record statements.
-        if in_statement:
+        if skip_statement:
             if pline[-1] == ';':
-                in_statement = False
+                skip_statement = False
             check_braces = True
             continue
-        if re.match('tt_record[1-4]?[(]', pline):
+        match = re.match('(//[ \t]*)?tt_record[1-4]?[(]', pline)
+        if match:
             # If this is the only statement in its block, delete the
             # outer block statement (if, while, etc.).
-            indent = leading_space(line)
-            for i in range(len(slines)-1, -1, -1):
-                prev = slines[i]
-                prev_indent = leading_space(prev)
-                if last_non_blank(prev) == '{':
-                    break
-                if prev_indent == 0:
-                    # Label or method start; no need to continue further
-                    break
-                if leading_space(prev) < indent:
-                    if prev.lstrip().startswith('case'):
-                        print('%s:%d: \'case\' before tt_record; don\'t know how to handle'
-                                % (file, i), file=sys.stderr)
-                        exit_code = 1
+            if not match.group(1):
+                indent = leading_space(line)
+                for i in range(len(slines)-1, -1, -1):
+                    prev = slines[i]
+                    prev_indent = leading_space(prev)
+                    if last_non_blank(prev) == '{':
                         break
-                    slines = slines[:i]
-                    break
+                    if prev_indent == 0:
+                        # Label or method start; no need to continue further
+                        break
+                    if leading_space(prev) < indent:
+                        if prev.lstrip().startswith('case'):
+                            print('%s:%d: \'case\' before tt_record; don\'t know how to handle'
+                                    % (file, i), file=sys.stderr)
+                            exit_code = 1
+                            break
+                        slines = slines[:i]
+                        break
 
             if pline[-1] != ';':
-                  in_statement = True
+                  skip_statement = True
             if slines[-1].strip() == '':
                 delete_empty_line = True
             check_braces = True
             continue
+
+        # Strip UNIT_LOG and UNIT_HOOK statements.
+        if not alt_mode and (pline.startswith('UNIT_LOG(') or
+                pline.startswith('UNIT_HOOK(')):
+            if pline[-1] != ';':
+                  skip_statement = True
+            if slines[-1].strip() == '':
+                delete_empty_line = True
+            check_braces = True
+            continue
+
+        # Strip '#ifdef __UNIT_TEST__' blocks (keep #else clauses)
+        if in_unit:
+            if line.startswith('#endif /* __UNIT_TEST__ */'):
+                in_unit = None
+                continue
+            if line.startswith('#else /* __UNIT_TEST__ */'):
+                in_unit = 'else'
+                continue
+            if in_unit == 'if':
+                continue
+        elif line.startswith('#ifdef __UNIT_TEST__') and not alt_mode:
+                in_unit = 'if'
+                if slines[-1].strip() == '':
+                    delete_empty_line = True
+                continue
+        elif line.startswith('#ifndef __UNIT_TEST__') and not alt_mode:
+                in_unit = 'else'
+                if slines[-1].strip() == '':
+                    delete_empty_line = True
+                continue
 
         if not pline:
             if not line.isspace() or not delete_empty_line:
@@ -285,7 +324,7 @@ def scan(file, alt_mode):
             open_index = len(slines)
 
         # Count statements
-        if pline[-1] == ';':
+        if pline[-1] == ';' and not current_has_comment:
             statements_in_block += 1
 
         # The current line needs to be retained in the output.

@@ -8,7 +8,7 @@
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
 //#define TT_KERNEL 1
-#endif
+#endif /* __UNIT_TEST__ */
 #ifdef TT_KERNEL
 struct tt_buffer *tt_linux_buffers[];
 void       (*tt_linux_freeze)(void);
@@ -255,9 +255,9 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 	buffer->next_index = (buffer->next_index + 1)
 #ifdef __UNIT_TEST__
 		& (tt_buffer_size - 1);
-#else
+#else /* __UNIT_TEST__ */
 		& (TT_BUF_SIZE - 1);
-#endif
+#endif /* __UNIT_TEST__ */
 
 	event->timestamp = timestamp;
 	event->format = format;

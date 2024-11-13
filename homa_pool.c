@@ -14,16 +14,16 @@
 /* Used when determining how many bpages to consider for allocation. */
 #define MIN_EXTRA 4
 
+#ifdef __UNIT_TEST__
 /* When running unit tests, allow HOMA_BPAGE_SIZE and HOMA_BPAGE_SHIFT
  * to be overridden.
  */
-#ifdef __UNIT_TEST__
 #include "mock.h"
 #undef HOMA_BPAGE_SIZE
 #define HOMA_BPAGE_SIZE mock_bpage_size
 #undef HOMA_BPAGE_SHIFT
 #define HOMA_BPAGE_SHIFT mock_bpage_shift
-#endif
+#endif /* __UNIT_TEST__ */
 
 /**
  * set_bpages_needed() - Set the bpages_needed field of @pool based
@@ -412,7 +412,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 {
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
-#endif
+#endif /* __UNIT_TEST__ */
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 

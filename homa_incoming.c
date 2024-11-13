@@ -206,9 +206,9 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 {
 #ifdef __UNIT_TEST__
 #define MAX_SKBS 3
-#else
+#else /* __UNIT_TEST__ */
 #define MAX_SKBS 20
-#endif
+#endif /* __UNIT_TEST__ */
 	struct sk_buff *skbs[MAX_SKBS];
 #if 1 /* See strip.py */
 	int start_offset = 0;
@@ -343,9 +343,9 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 {
 #ifdef __UNIT_TEST__
 #define MAX_ACKS 2
-#else
+#else /* __UNIT_TEST__ */
 #define MAX_ACKS 10
-#endif
+#endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct data_header *h = (struct data_header *)skb->data;
 	__u64 id = homa_local_id(h->common.sender_id);

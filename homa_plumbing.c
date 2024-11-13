@@ -11,7 +11,7 @@
 
 #ifndef __UNIT_TEST__
 MODULE_LICENSE("Dual MIT/GPL");
-#endif
+#endif /* __UNIT_TEST__ */
 MODULE_AUTHOR("John Ousterhout");
 MODULE_DESCRIPTION("Homa transport protocol");
 MODULE_VERSION("0.01");
@@ -1189,28 +1189,32 @@ int homa_softirq(struct sk_buff *skb)
 	struct sk_buff **prev_link, **other_link;
 	struct common_header *h;
 	int first_packet = 1;
-	static __u64 last;
 	int header_offset;
+#if 1 /* See strip.py */
+	static __u64 last;
 	int pull_length;
 	__u64 start;
 
 	start = get_cycles();
 	INC_METRIC(softirq_calls, 1);
-	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
+	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active
+			= start;
 	if ((start - last) > 1000000) {
 		int scaled_ms = (int)(10 * (start - last) / cpu_khz);
 
 		if (scaled_ms >= 50 && scaled_ms < 10000) {
-//			tt_record3("Gap in incoming packets: %d cycles "
-//					"(%d.%1d ms)",
-//					(int) (start - last), scaled_ms/10,
-//					scaled_ms%10);
-//			pr_notice("Gap in incoming packets: %llu "
-//					"cycles, (%d.%1d ms)", (start - last),
-//					scaled_ms/10, scaled_ms%10);
+//			tt_record3("Gap in incoming packets: %d cycles (%d.%1d ms)",
+//				   (int) (start - last), scaled_ms/10,
+//				   scaled_ms%10);
+//			pr_notice("Gap in incoming packets: %llu cycles, (%d.%1d ms)",
+//				  (start - last),
+//				  scaled_ms/10, scaled_ms%10);
 		}
 	}
 	last = start;
+#else /* See strip.py */
+	int pull_length;
+#endif /* See strip.py */
 
 	/* skb may actually contain many distinct packets, linked through
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Make a
@@ -1341,7 +1345,7 @@ discard:
 					skb2->data;
 			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
 		}
-#endif
+#endif /* __UNIT_TEST__ */
 		homa_dispatch_pkts(packets, homa);
 		packets = other_pkts;
 	}
