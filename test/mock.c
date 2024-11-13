@@ -960,7 +960,11 @@ int sk_set_peek_off(struct sock *sk, int val)
 void sk_skb_reason_drop(struct sock *sk, struct sk_buff *skb,
 		enum skb_drop_reason reason)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	kfree_skb(skb);
+#else
+	__kfree_skb(skb);
+#endif
 }
 
 int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
