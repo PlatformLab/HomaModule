@@ -86,8 +86,10 @@ struct homa_pool_core {
 	};
 };
 
+#if 1 /* See strip.py */
 _Static_assert(sizeof(struct homa_pool_core) == L1_CACHE_BYTES,
 	       "homa_pool_core overflowed a cache line");
+#endif /* See strip.py */
 
 /**
  * struct homa_pool - Describes a pool of buffer space for incoming
