@@ -175,11 +175,6 @@ struct homa_set_buf_args {
  */
 
 /**
- * Meanings of the bits in Homa's flag word, which can be set using
- * "sysctl /net/homa/flags".
- */
-
-/**
  * define HOMA_FLAG_DONT_THROTTLE - disable the output throttling mechanism:
  * always send all packets immediately.
  */
