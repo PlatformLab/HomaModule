@@ -35,7 +35,6 @@
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
 #include <linux/socket.h>
-#include <linux/version.h>
 #include <linux/vmalloc.h>
 #include <net/icmp.h>
 #include <net/ip.h>
@@ -45,6 +44,7 @@
 #include <net/rps.h>
 
 #if 1 /* See strip.py --alt */
+#include <linux/version.h>
 #include "homa.h"
 #else /* See strip.py */
 #include <uapi/linux/homa.h>
