@@ -10,25 +10,25 @@
 //#define TT_KERNEL 1
 #endif /* __UNIT_TEST__ */
 #ifdef TT_KERNEL
-struct tt_buffer *tt_linux_buffers[];
-void       (*tt_linux_freeze)(void);
-atomic_t  *tt_linux_freeze_count;
-atomic_t   tt_linux_freeze_no_homa;
-int       *tt_linux_homa_temp;
-int        tt_linux_homa_temp_default[16];
-void       (*tt_linux_inc_metrics)(int metric, __u64 count);
-void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
+extern struct tt_buffer *tt_linux_buffers[];
+extern void       (*tt_linux_freeze)(void);
+extern atomic_t  *tt_linux_freeze_count;
+extern atomic_t   tt_linux_freeze_no_homa;
+extern int       *tt_linux_homa_temp;
+extern int        tt_linux_homa_temp_default[16];
+extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
+extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
 			      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
 			      __u32 arg3);
-void       tt_linux_skip_metrics(int metric, __u64 count);
-void       (*tt_linux_printk)(void);
-void       (*tt_linux_dbg1)(char *msg, ...);
-void       (*tt_linux_dbg2)(char *msg, ...);
-void       (*tt_linux_dbg3)(char *msg, ...);
-void       tt_linux_nop(void);
-void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
+extern void       tt_linux_skip_metrics(int metric, __u64 count);
+extern void       (*tt_linux_printk)(void);
+extern void       (*tt_linux_dbg1)(char *msg, ...);
+extern void       (*tt_linux_dbg2)(char *msg, ...);
+extern void       (*tt_linux_dbg3)(char *msg, ...);
+extern void       tt_linux_nop(void);
+extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 
-void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
+extern void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
 			  const char *format, __u32 arg0, __u32 arg1,
 			  __u32 arg2, __u32 arg3);
 #endif
