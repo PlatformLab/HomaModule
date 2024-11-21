@@ -171,6 +171,7 @@ peer_nodes = {}
 #               present if xmit is present)
 # tx_core:      Core on which ip*xmit was invoked
 # tx_qid:       NIC channel on which packet was transmitted
+# tx_queue:     Hex address of queue corresponding to tx_qid, if known
 # rx_node:      Name of node on which packet was received
 # gro_core:     Core on which homa_gro_receive was invoked
 # softirq_core: Core on which SoftIRQ processed the packet
@@ -234,7 +235,7 @@ grants = GrantDict()
 #                 but not yet returned via the tx completion queue, as of the
 #                 end of the interval
 # tx_qdisc:       Bytes of data that have been passed to ip*xmit but not
-#                 yet transmitted, as of the end of the interval (large
+#                 yet passed to the NIC, as of the end of the interval (large
 #                 numbers probably due to qdisc)
 # tx_q:           Estimate of the number of unsent bytes in the NIC (based
 #                 on when packets passed to the NIC if available, otherwise
@@ -1130,25 +1131,28 @@ class Dispatcher:
         peer = match.group(1)
         id = int(match.group(2))
         offset = int(match.group(3))
+        tx_queue = match.group(4)
         for interest in interests:
-            interest.tt_mlx_data(trace, time, core, peer, id, offset)
+            interest.tt_mlx_data(trace, time, core, peer, id, offset, tx_queue)
 
     patterns.append({
         'name': 'mlx_data',
         'regexp': 'mlx sent homa data packet to ([^,]+), id ([0-9]+), '
-                  'offset ([0-9]+)'
+                  'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
     def __mlx_grant(self, trace, time, core, match, interests):
         peer = match.group(1)
         id = int(match.group(2))
         offset = int(match.group(3))
+        tx_queue = match.group(4)
         for interest in interests:
-            interest.tt_mlx_grant(trace, time, core, peer, id, offset)
+            interest.tt_mlx_grant(trace, time, core, peer, id, offset, tx_queue)
 
     patterns.append({
         'name': 'mlx_grant',
-        'regexp': 'mlx sent homa grant to ([^,]+), id ([0-9]+), offset ([0-9]+)'
+        'regexp': 'mlx sent homa grant to ([^,]+), id ([0-9]+), '
+                  'offset ([0-9]+), queue (0x[0-9a-f]+)'
     })
 
     def __free_tx_skb(self, trace, time, core, match, interests):
@@ -5338,12 +5342,13 @@ class AnalyzePackets:
             p['tx_core'] = core
             rpcs[id]['send_data_pkts'].append(p)
 
-    def tt_mlx_data(self, trace, t, core, peer, id, offset):
+    def tt_mlx_data(self, trace, t, core, peer, id, offset, tx_queue):
         global packets
         p = packets[pkt_id(id, offset)]
         if not 'retransmits' in p:
             p['nic'] = t
             p['tx_node'] = trace['node']
+            p['tx_queue'] = tx_queue
 
     def tt_free_tx_skb(self, trace, t, core, id, offset, qid, msg_length):
         global packets
@@ -5421,11 +5426,12 @@ class AnalyzePackets:
         g['tx_node'] = trace['node']
         g['increment'] = increment
 
-    def tt_mlx_grant(self, trace, t, core, peer, id, offset):
+    def tt_mlx_grant(self, trace, t, core, peer, id, offset, tx_queue):
         global grants
         g = grants[pkt_id(id, offset)]
         g['nic'] = t
         g['tx_node'] = trace['node']
+        g['tx_queue'] = tx_queue
 
     def tt_gro_grant(self, trace, t, core, peer, id, offset, priority):
         global grants
@@ -7168,7 +7174,7 @@ class AnalyzeTxintervals:
             f.write('# Pkts:       Packets transmitted during the interval\n')
             f.write('# QDisc:      KB of data that have been passed to ip*xmit '
                     'but not yet\n')
-            f.write('#             transmitted by NIC, as of the end of the '
+            f.write('#             passed to the NIC, as of the end of the '
                     'interval\n')
             f.write('# NicKB:      KB of data passed to NIC during the interval\n')
             f.write('# NQEst:      Estimate of NIC queue length at the end '
@@ -7295,6 +7301,7 @@ class AnalyzeTxpkts:
         print('Summary statistics on delays related to outgoing packets:')
         print('Node:      Name of node')
         print('Qid:       Identifier of transmit queue')
+        print('TxQueue:  Address of netdev_queue struct for Qid')
         print('Tsos:      Total number of TSO frames transmitted by node '
                 'or queue')
         print('Segs:      Total number of segments (packets received by GRO) '
@@ -7379,6 +7386,9 @@ class AnalyzeTxpkts:
             # longer than options.threshold in the NIC.
             qid_slow_bytes = defaultdict(lambda: 0)
 
+            # Tx queue number -> hex address of netdev_queue
+            qid_tx_queue = defaultdict(lambda: '')
+
             total_pkts = 0
 
             f = open('%s/txpkts_%s.dat' % (options.data, node), 'w')
@@ -7420,6 +7430,8 @@ class AnalyzeTxpkts:
                     qid_segs[qid] += segs
                     if 'pacer' in pkt:
                         qid_pacer_segs[qid] += segs
+                    if 'tx_queue' in pkt:
+                        qid_tx_queue[qid] = pkt['tx_queue']
                     qid_string = str(qid)
                     if (options.tx_qid != None) and (qid != options.tx_qid):
                         continue
@@ -7484,9 +7496,11 @@ class AnalyzeTxpkts:
             if not first_node:
                 q_details += '\n'
             q_details += 'Transmit queues for %s\n' % (node)
-            q_details += 'Qid   Tsos  Segs PSegs Backlog BFrac  NicP10 NicP50 NicP90  '
+            q_details += 'Qid     TxQueue  Tsos  Segs PSegs Backlog BFrac  '
+            q_details += 'NicP10 NicP50 NicP90  '
             q_details += 'GroP10 GroP50 GroP90  FreP10 FreP50 FreP90\n'
-            q_details += '------------------------------------------------------------'
+            q_details += '-------------------------------------------------'
+            q_details += '----------------------'
             q_details += '------------------------------------------\n'
             first_node = False
             totals = defaultdict(list)
@@ -7495,8 +7509,9 @@ class AnalyzeTxpkts:
                 q_delays = delays[qid]
                 for type, d in q_delays.items():
                     totals[type].extend(d)
-                q_details += '%4d %5d %5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
-                        qid, qid_tsos[qid], qid_segs[qid], qid_pacer_segs[qid],
+                q_details += '%4d %10s %5d %5d %5d  %6.1f %5.2f  %s  %s  %s\n' % (
+                        qid, qid_tx_queue[qid], qid_tsos[qid], qid_segs[qid],
+                        qid_pacer_segs[qid],
                         1e-3*qid_backlog[qid]/total_time,
                         qid_slow_bytes[qid]/qid_total_bytes[qid],
                         print_type(q_delays['nic']),
