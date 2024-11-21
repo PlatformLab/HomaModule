@@ -1525,8 +1525,10 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			if (action == 2)
 				homa_rpc_log_active(homa, 0);
 			else if (action == 3) {
+#if 1 /* See strip.py */
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
+#endif /* See strip.py */
 			} else if (action == 4)
 				homa_log_throttled(homa);
 			else if (action == 5)

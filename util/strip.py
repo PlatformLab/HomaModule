@@ -43,7 +43,7 @@ information is removed automatically. In other cases, it is controlled with
   was specified then these lines are ignored.
 
 If the --alt option is specified, it means the output is intended for
-testing outside the Linux kernel. In this case, the lines
+testing outside the Linux kernel. In this case, the lines should remain.
 """
 
 from collections import defaultdict
@@ -138,11 +138,19 @@ def scan(file, alt_mode):
 
     # Used to strip out unit testing code. Value is one of:
     # None:    We're not in the middle of an '#ifdef __UNIT_TEST__'
-    # 'if':    An '#idfdef __UNIT_TEST__" has been seen, but not the
-    #          corresponding #else or #endif not been seen yet
+    # 'if':    An '#idfdef __UNIT_TEST__" has been seen, but the
+    #          corresponding #else or #endif has not been seen yet
     # 'else':  We are in the middle of an '#else' clause for an
     #          '#ifdef __UNIT_TEST__'
     in_unit = None
+
+    # Used to strip out conditional code based on version
+    # None:    We're not in the middle of an '#if LINUX_VERSION_CODE'
+    # 'if':    An '#if LINUX_VERSION_CODE" has been seen, but not the
+    #          corresponding #else or #endif (code should be stripped)
+    # 'else':  We are in the middle of an '#else' clause for an
+    #          '#if LINUX_VERSION_CODE' (this code should remain)
+    in_version = None
 
     # Array of lines containing the stripped version of the file
     slines = []
@@ -190,9 +198,13 @@ def scan(file, alt_mode):
                     in_comment = True
             index = pline.find('//')
             if index >= 0:
-                    current_has_comment = True
+                current_has_comment = True
 
         pline = pline.strip()
+        if pline.startswith('//') and not 'SPDX-License' in pline:
+            # Strip // comment lines: these are used only for commenting
+            # out debugging code.
+            continue
 
         # Strip groups of lines labeled with special '#if'
         if in_labeled_skip != None:
@@ -238,7 +250,8 @@ def scan(file, alt_mode):
         match = re.match('(//[ \t]*)?tt_record[1-4]?[(]', pline)
         if match:
             # If this is the only statement in its block, delete the
-            # outer block statement (if, while, etc.).
+            # outer block statement (if, while, etc.). Don't delete case
+            # statements.
             if not match.group(1):
                 indent = leading_space(line)
                 for i in range(len(slines)-1, -1, -1):
@@ -250,12 +263,8 @@ def scan(file, alt_mode):
                         # Label or method start; no need to continue further
                         break
                     if leading_space(prev) < indent:
-                        if prev.lstrip().startswith('case'):
-                            print('%s:%d: \'case\' before tt_record; don\'t know how to handle'
-                                    % (file, i), file=sys.stderr)
-                            exit_code = 1
-                            break
-                        slines = slines[:i]
+                        if not prev.lstrip().startswith('case'):
+                            slines = slines[:i]
                         break
 
             if pline[-1] != ';':
@@ -286,15 +295,31 @@ def scan(file, alt_mode):
             if in_unit == 'if':
                 continue
         elif line.startswith('#ifdef __UNIT_TEST__') and not alt_mode:
-                in_unit = 'if'
-                if slines[-1].strip() == '':
-                    delete_empty_line = True
-                continue
+            in_unit = 'if'
+            if slines[-1].strip() == '':
+                delete_empty_line = True
+            continue
         elif line.startswith('#ifndef __UNIT_TEST__') and not alt_mode:
-                in_unit = 'else'
-                if slines[-1].strip() == '':
-                    delete_empty_line = True
+            in_unit = 'else'
+            if slines[-1].strip() == '':
+                delete_empty_line = True
+            continue
+
+        # Strip 'if LINUX_VERSION_CODE' blocks (keep #else clauses)
+        if in_version:
+            if line.startswith('#endif'):
+                in_version = None
                 continue
+            if line.startswith('#else'):
+                in_version = 'else'
+                continue
+            if in_version == 'if':
+                continue
+        elif line.startswith('#if LINUX_VERSION_CODE') and not alt_mode:
+            in_version = 'if'
+            if slines[-1].strip() == '':
+                delete_empty_line = True
+            continue
 
         if not pline:
             if not line.isspace() or not delete_empty_line:

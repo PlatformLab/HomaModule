@@ -606,6 +606,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
  */
 void homa_rpc_log_tt(struct homa_rpc *rpc)
 {
+#if 1 /* See strip.py */
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;
@@ -639,6 +640,7 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 	} else {
 		tt_record2("RPC id %d is in state %d", rpc->id, rpc->state);
 	}
+#endif /* See strip.py */
 }
 
 /**
