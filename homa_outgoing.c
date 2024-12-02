@@ -107,7 +107,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	struct data_header *h;
 	struct sk_buff *skb;
 	int err, gso_size;
-	uint64_t segs;
+	__u64 segs;
 
 	/* Initialize the overall skb. */
 	skb = homa_skb_new_tx(sizeof32(struct data_header));
@@ -145,7 +145,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
 
-	if ((segs > 1) && (rpc->hsk->sock.sk_protocol != IPPROTO_TCP)) {
+	if (segs > 1 && rpc->hsk->sock.sk_protocol != IPPROTO_TCP) {
 		homa_set_doff(h, sizeof(struct data_header)  -
 				sizeof32(struct seg_header));
 		h->seg.offset = htonl(offset);
@@ -212,7 +212,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
-	uint64_t segs_per_gso;
+	__u64 segs_per_gso;
 	int overlap_xmit;
 
 	/* Bytes of the message that haven't yet been copied into skbs. */
@@ -265,9 +265,8 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		homa_rpc_unlock(rpc);
 		skb_data_bytes = max_gso_data;
 		offset = rpc->msgout.length - bytes_left;
-		if ((offset < rpc->msgout.unscheduled) &&
-				((offset + skb_data_bytes)
-				> rpc->msgout.unscheduled)) {
+		if (offset < rpc->msgout.unscheduled &&
+		    (offset + skb_data_bytes) > rpc->msgout.unscheduled) {
 			/* Insert a packet boundary at the unscheduled limit,
 			 * so we don't transmit extra data.
 			 */
@@ -296,8 +295,8 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
-		if (overlap_xmit && list_empty(&rpc->throttled_links) && xmit
-				&& (offset < rpc->msgout.granted)) {
+		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
+		    xmit && offset < rpc->msgout.granted) {
 			tt_record1("waking up pacer for id %d", rpc->id);
 			homa_add_to_throttled(rpc);
 		}
@@ -383,7 +382,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		UNIT_LOG(",", "padded control packet with %d bytes",
 			 extra_bytes);
 	}
-	priority = hsk->homa->num_priorities-1;
+	priority = hsk->homa->num_priorities - 1;
 	skb->ooo_okay = 1;
 	skb_get(skb);
 	if (hsk->inet.sk.sk_family == AF_INET6) {
@@ -392,7 +391,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 				  0);
 	} else {
 		/* This will find its way to the DSCP field in the IPv4 hdr. */
-		hsk->inet.tos = hsk->homa->priority_map[priority]<<5;
+		hsk->inet.tos = hsk->homa->priority_map[priority] << 5;
 		result = ip_queue_xmit(&hsk->inet.sk, skb, &peer->flow);
 	}
 	if (unlikely(result != 0)) {
@@ -456,8 +455,8 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 
 	if (hsk->homa->verbose)
 		pr_notice("sending UNKNOWN to peer %s:%d for id %llu",
-				homa_print_ipv6_addr(&saddr),
-				ntohs(h->sport), homa_local_id(h->sender_id));
+			  homa_print_ipv6_addr(&saddr),
+			  ntohs(h->sport), homa_local_id(h->sender_id));
 	tt_record3("sending unknown to 0x%x:%d for id %llu",
 		   tt_addr(saddr), ntohs(h->sport),
 		   homa_local_id(h->sender_id));
@@ -503,8 +502,8 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 
 		if (rpc->msgout.next_xmit_offset >= rpc->msgout.granted) {
 			tt_record3("homa_xmit_data stopping at offset %d for id %u: granted is %d",
-					rpc->msgout.next_xmit_offset, rpc->id,
-					rpc->msgout.granted);
+				   rpc->msgout.next_xmit_offset, rpc->id,
+				   rpc->msgout.granted);
 			break;
 		}
 
@@ -520,7 +519,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 
 		if (rpc->msgout.next_xmit_offset < rpc->msgout.unscheduled) {
 			priority = homa_unsched_priority(homa, rpc->peer,
-					rpc->msgout.length);
+							 rpc->msgout.length);
 		} else {
 			priority = rpc->msgout.sched_priority;
 		}
@@ -565,8 +564,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	/* Update info that may have changed since the message was initially
 	 * created.
 	 */
-	((struct data_header *) skb_transport_header(skb))->cutoff_version
-			= rpc->peer->cutoff_version;
+	((struct data_header *)skb_transport_header(skb))->cutoff_version =
+			rpc->peer->cutoff_version;
 
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
 	dst_hold(dst);
@@ -590,7 +589,8 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 			   tt_addr(rpc->peer->addr), rpc->id,
 			   homa_info->offset);
 
-		rpc->hsk->inet.tos = rpc->hsk->homa->priority_map[priority]<<5;
+		rpc->hsk->inet.tos =
+				rpc->hsk->homa->priority_map[priority] << 5;
 		err = ip_queue_xmit(&rpc->hsk->inet.sk, skb, &rpc->peer->flow);
 	}
 	tt_record4("Finished queueing packet: rpc id %llu, offset %d, len %d, qid %d",
@@ -614,7 +614,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
  * @priority: Priority level to use for the retransmitted data packets.
  */
 void homa_resend_data(struct homa_rpc *rpc, int start, int end,
-		int priority)
+		      int priority)
 {
 	struct homa_skb_info *homa_info;
 	struct sk_buff *skb;
@@ -666,7 +666,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
 					pr_notice("%s couldn't allocate skb\n",
-							__func__);
+						  __func__);
 				UNIT_LOG("; ", "skb allocation error");
 				goto resend_done;
 			}
@@ -935,8 +935,8 @@ void homa_pacer_xmit(struct homa *homa)
 		/* Note: rpc->state could be RPC_DEAD here, but the code
 		 * below should work anyway.
 		 */
-		if (!*rpc->msgout.next_xmit || (rpc->msgout.next_xmit_offset
-				>= rpc->msgout.granted)) {
+		if (!*rpc->msgout.next_xmit || rpc->msgout.next_xmit_offset >=
+				rpc->msgout.granted) {
 			/* Nothing more to transmit from this message (right
 			 * now), so remove it from the throttled list.
 			 */
@@ -1055,7 +1055,7 @@ void homa_remove_from_throttled(struct homa_rpc *rpc)
 void homa_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	int64_t bytes = 0;
+	__s64 bytes = 0;
 	int rpcs = 0;
 
 	pr_notice("Printing throttled list\n");
@@ -1063,11 +1063,11 @@ void homa_log_throttled(struct homa *homa)
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
 		rpcs++;
 		if (!homa_bucket_try_lock(rpc->bucket, rpc->id,
-				"homa_log_throttled")) {
+					  "homa_log_throttled")) {
 			pr_notice("Skipping throttled RPC: locked\n");
 			continue;
 		}
-		if (*rpc->msgout.next_xmit != NULL)
+		if (*rpc->msgout.next_xmit)
 			bytes += rpc->msgout.length
 					- rpc->msgout.next_xmit_offset;
 		if (rpcs <= 20)
@@ -1076,5 +1076,5 @@ void homa_log_throttled(struct homa *homa)
 	}
 	homa_throttle_unlock(homa);
 	pr_notice("Finished printing throttle list: %d rpcs, %lld bytes\n",
-			rpcs, bytes);
+		  rpcs, bytes);
 }

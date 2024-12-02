@@ -1044,8 +1044,8 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 	struct iphdr *iph = ip_hdr(skb);
 
 	return ((iph->protocol == IPPROTO_HOMA) ||
-			((iph->protocol == IPPROTO_TCP) &&
-			(tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
+		((iph->protocol == IPPROTO_TCP) &&
+		 (tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
 }
 
 #if 1 /* See strip.py --alt */
@@ -1135,7 +1135,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 				     struct iov_iter *iter, int offset,
 				     int length, int max_seg_data);
 void     homa_outgoing_sysctl_changed(struct homa *homa);
-int      homa_pacer_main(void *transportInfo);
+int      homa_pacer_main(void *transport);
 void     homa_pacer_stop(struct homa *homa);
 void     homa_pacer_xmit(struct homa *homa);
 __poll_t homa_poll(struct file *file, struct socket *sock,
@@ -1179,7 +1179,7 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   loff_t *ppos);
 #endif
 void     homa_timer(struct homa *homa);
-int      homa_timer_main(void *transportInfo);
+int      homa_timer_main(void *transport);
 void     homa_unhash(struct sock *sk);
 void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,

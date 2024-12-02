@@ -2,12 +2,17 @@
 
 #include "homa_impl.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#include <net/sch_generic.h>
+#pragma GCC diagnostic pop
+
 #ifndef __UNIT_TEST__
 /* Uncomment the line below if the main Linux kernel has been compiled with
  * timetrace stubs; we will then connect the timetrace mechanism here with
  * those stubs to allow the rest of the kernel to log in our buffers.
  */
-//#define TT_KERNEL 1
+#define TT_KERNEL 1
 #endif /* __UNIT_TEST__ */
 #ifdef TT_KERNEL
 extern struct tt_buffer *tt_linux_buffers[];
@@ -18,8 +23,8 @@ extern int       *tt_linux_homa_temp;
 extern int        tt_linux_homa_temp_default[16];
 extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
 extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
-			      const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
-			      __u32 arg3);
+				     const char *format, __u32 arg0, __u32 arg1,
+				     __u32 arg2, __u32 arg3);
 extern void       tt_linux_skip_metrics(int metric, __u64 count);
 extern void       (*tt_linux_printk)(void);
 extern void       (*tt_linux_dbg1)(char *msg, ...);
@@ -29,8 +34,8 @@ extern void       tt_linux_nop(void);
 extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
 
 extern void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
-			  const char *format, __u32 arg0, __u32 arg1,
-			  __u32 arg2, __u32 arg3);
+				 const char *format, __u32 arg0, __u32 arg1,
+				 __u32 arg2, __u32 arg3);
 #endif
 void       tt_inc_metric(int metric, __u64 count);
 
@@ -145,6 +150,7 @@ int tt_init(char *proc_file, int *temp)
 	tt_linux_dbg1 = tt_dbg1;
 	tt_linux_dbg2 = tt_dbg2;
 	tt_linux_dbg3 = tt_dbg3;
+	memset(tt_debug_int64, 0, sizeof(tt_debug_int64));
 	if (temp)
 		tt_linux_homa_temp = temp;
 #endif
@@ -841,7 +847,7 @@ void tt_inc_metric(int metric, __u64 count)
 		offsetof(struct homa_metrics, linux_softirq_ns),
 		offsetof(struct homa_metrics, linux_pkt_alloc_bytes),
 	};
-	__u64 *metric_addr = (__u64 *)(((char *) homa_metrics_per_cpu())
+	__u64 *metric_addr = (__u64 *)(((char *)homa_metrics_per_cpu())
 			+ offsets[metric]);
 	*metric_addr += count;
 }

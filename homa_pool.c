@@ -198,13 +198,13 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		 */
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-				bpage->expiration > now)))
+							  bpage->expiration > now)))
 			continue;
 		if (!spin_trylock_bh(&bpage->lock))
 			continue;
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-				bpage->expiration > now))) {
+							  bpage->expiration > now))) {
 			spin_unlock_bh(&bpage->lock);
 			continue;
 		}
@@ -453,7 +453,8 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			/* Allocation succeeded; "wake up" the RPC. */
 			rpc->msgin.resend_all = 1;
 			homa_grant_check_rpc(rpc);
-		} else
+		} else {
 			homa_rpc_unlock(rpc);
+		}
 	}
 }

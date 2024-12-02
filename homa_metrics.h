@@ -59,13 +59,13 @@ struct homa_metrics {
 	 * @packets_sent: total number of packets sent for each packet type
 	 * (entry 0 corresponds to DATA, and so on).
 	 */
-	__u64 packets_sent[BOGUS-DATA];
+	__u64 packets_sent[BOGUS - DATA];
 
 	/**
 	 * @packets_received: total number of packets received for each
 	 * packet type (entry 0 corresponds to DATA, and so on).
 	 */
-	__u64 packets_received[BOGUS-DATA];
+	__u64 packets_received[BOGUS - DATA];
 
 	/** @priority_bytes: total bytes sent at each priority level. */
 	__u64 priority_bytes[HOMA_MAX_PRIORITIES];

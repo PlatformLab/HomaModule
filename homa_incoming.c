@@ -43,10 +43,10 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 		 */
 		rpc->msgin.granted = 0;
 	}
-	if (length < HOMA_NUM_SMALL_COUNTS*64) {
-		INC_METRIC(small_msg_bytes[(length-1) >> 6], length);
-	} else if (length < HOMA_NUM_MEDIUM_COUNTS*1024) {
-		INC_METRIC(medium_msg_bytes[(length-1) >> 10], length);
+	if (length < HOMA_NUM_SMALL_COUNTS * 64) {
+		INC_METRIC(small_msg_bytes[(length - 1) >> 6], length);
+	} else if (length < HOMA_NUM_MEDIUM_COUNTS * 1024) {
+		INC_METRIC(medium_msg_bytes[(length - 1) >> 10], length);
 	} else {
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
@@ -129,7 +129,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 				  rpc->msgin.recv_end, start)) {
 			pr_err("Homa couldn't allocate gap: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
-				  rpc->id, start);
+				   rpc->id, start);
 			goto discard;
 		}
 		rpc->msgin.recv_end = end;
@@ -182,7 +182,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		if (!gap2) {
 			pr_err("Homa couldn't allocate gap for split: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
-				  rpc->id, end);
+				   rpc->id, end);
 			goto discard;
 		}
 		gap2->time = gap->time;
@@ -303,8 +303,9 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 				if (error)
 					goto free_skbs;
 				error = skb_copy_datagram_iter(skbs[i],
-						sizeof(*h) + copied,  &iter,
-						chunk_size);
+							       sizeof(*h) +
+							       copied,  &iter,
+							       chunk_size);
 				if (error)
 					goto free_skbs;
 				copied += chunk_size;
@@ -433,36 +434,37 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 								  h, &created);
 					if (IS_ERR(rpc)) {
 						pr_warn("homa_pkt_dispatch couldn't create server rpc: error %lu",
-								-PTR_ERR(rpc));
+							-PTR_ERR(rpc));
 						INC_METRIC(server_cant_create_rpcs, 1);
 						rpc = NULL;
 						goto discard;
 					}
 				} else {
 					rpc = homa_find_server_rpc(hsk, &saddr,
-							ntohs(h->common.sport),
-							id);
+								   ntohs(h->common.sport),
+								   id);
 				}
 			} else {
 				rpc = homa_find_client_rpc(hsk, id);
 			}
 		}
 		if (unlikely(!rpc)) {
-			if ((h->common.type != CUTOFFS)
-					&& (h->common.type != NEED_ACK)
-					&& (h->common.type != ACK)
-					&& (h->common.type != RESEND)) {
+			if (h->common.type != CUTOFFS &&
+			    h->common.type != NEED_ACK &&
+			    h->common.type != ACK &&
+			    h->common.type != RESEND) {
 				tt_record4("Discarding packet for unknown RPC, id %u, type %d, peer 0x%x:%d",
-						id, h->common.type,
-						tt_addr(saddr),
-						ntohs(h->common.sport));
-				if ((h->common.type != GRANT) || homa_is_client(id))
+					   id, h->common.type, tt_addr(saddr),
+					   ntohs(h->common.sport));
+				if (h->common.type != GRANT ||
+				    homa_is_client(id))
 					INC_METRIC(unknown_rpcs, 1);
 				goto discard;
 			}
 		} else {
-			if ((h->common.type == DATA) || (h->common.type == GRANT)
-					|| (h->common.type == BUSY))
+			if (h->common.type == DATA ||
+			    h->common.type == GRANT ||
+			    h->common.type == BUSY)
 				rpc->silent_ticks = 0;
 			rpc->peer->outstanding_resends = 0;
 		}
@@ -541,7 +543,7 @@ discard:
 		 * nor homa_timer can keep up with reaping dead
 		 * RPCs. See reap.txt for details.
 		 */
-		uint64_t start = sched_clock();
+		__u64 start = sched_clock();
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
 		homa_rpc_reap(hsk, hsk->homa->reap_limit);
@@ -558,7 +560,7 @@ discard:
  */
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct data_header *h = (struct data_header *) skb->data;
+	struct data_header *h = (struct data_header *)skb->data;
 	struct homa *homa = rpc->hsk->homa;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
@@ -572,7 +574,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
 		tt_record2("Incoming message for id %d has %d unscheduled bytes",
-				rpc->id, ntohl(h->incoming));
+			   rpc->id, ntohl(h->incoming));
 		if (homa_message_in_init(rpc, ntohl(h->message_length),
 					 ntohl(h->incoming)) != 0)
 			goto discard;
@@ -644,16 +646,16 @@ discard:
  */
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct grant_header *h = (struct grant_header *) skb->data;
+	struct grant_header *h = (struct grant_header *)skb->data;
 	int new_offset = ntohl(h->offset);
 
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
-			homa_local_id(h->common.sender_id), ntohl(h->offset),
-			h->priority, new_offset - rpc->msgout.granted);
+		   homa_local_id(h->common.sender_id), ntohl(h->offset),
+		   h->priority, new_offset - rpc->msgout.granted);
 	if (rpc->state == RPC_OUTGOING) {
 		if (h->resend_all)
 			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
-					h->priority);
+					 h->priority);
 
 		if (new_offset > rpc->msgout.granted) {
 			rpc->msgout.granted = new_offset;
@@ -708,8 +710,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		 * send BUSY instead.
 		 */
 		tt_record3("sending BUSY from resend, id %d, offset %d, granted %d",
-				rpc->id, rpc->msgout.next_xmit_offset,
-				rpc->msgout.granted);
+			   rpc->id, rpc->msgout.next_xmit_offset,
+			   rpc->msgout.granted);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 	} else {
 		if (ntohl(h->length) == 0)
@@ -745,25 +747,27 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			tt_record4("Restarting id %d to server 0x%x:%d, lost %d bytes",
 				   rpc->id, tt_addr(rpc->peer->addr),
 				   rpc->dport, rpc->msgout.next_xmit_offset);
-			homa_freeze(rpc, RESTART_RPC, "Freezing because of RPC restart, id %d, peer 0x%x");
+			homa_freeze(rpc, RESTART_RPC,
+				    "Freezing because of RPC restart, id %d, peer 0x%x");
 			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
 					 homa_unsched_priority(rpc->hsk->homa,
-					 rpc->peer, rpc->msgout.length));
+							       rpc->peer,
+							       rpc->msgout.length));
 			goto done;
 		}
 
 		pr_err("Received unknown for RPC id %llu, peer %s:%d in bogus state %d; discarding unknown\n",
-				rpc->id, homa_print_ipv6_addr(&rpc->peer->addr),
-				rpc->dport, rpc->state);
+		       rpc->id, homa_print_ipv6_addr(&rpc->peer->addr),
+		       rpc->dport, rpc->state);
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: bad state %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->state);
 	} else {
 		if (rpc->hsk->homa->verbose)
 			pr_notice("Freeing rpc id %llu from client %s:%d: unknown to client",
-					rpc->id,
-					homa_print_ipv6_addr(&rpc->peer->addr),
-					rpc->dport);
+				  rpc->id,
+				  homa_print_ipv6_addr(&rpc->peer->addr),
+				  rpc->dport);
 		homa_rpc_free(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
 	}
@@ -779,7 +783,7 @@ done:
  */
 void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 {
-	struct cutoffs_header *h = (struct cutoffs_header *) skb->data;
+	struct cutoffs_header *h = (struct cutoffs_header *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_peer *peer;
 	int i;
@@ -928,7 +932,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 		oldest = rpc;
 		oldest_birth = rpc->msgin.birth;
 	}
-	if (oldest == NULL)
+	if (!oldest)
 		return NULL;
 	INC_METRIC(fifo_grants, 1);
 	if ((oldest->msgin.length - oldest->msgin.bytes_remaining)
@@ -949,7 +953,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	 * will eventually get updated elsewhere.
 	 */
 	if (homa_bucket_try_lock(oldest->bucket, oldest->id,
-			"homa_choose_fifo_grant")) {
+				 "homa_choose_fifo_grant")) {
 		homa_grant_update_incoming(oldest, homa);
 		homa_rpc_unlock(oldest);
 	}
@@ -1204,7 +1208,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				       __u64 id)
 	__acquires(&rpc->bucket_lock)
 {
-	uint64_t poll_start, poll_end, now;
+	__u64 poll_start, poll_end, now;
 	int error, blocked = 0, polled = 0;
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
@@ -1259,17 +1263,17 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		/* Busy-wait for a while before going to sleep; this avoids
 		 * context-switching overhead to wake up.
 		 */
-		poll_start = now = sched_clock();
+		now = sched_clock();
+		poll_start = now;
 		poll_end = now + (1000 * hsk->homa->poll_usecs);
 		while (1) {
 			__u64 blocked;
 
-			rpc = (struct homa_rpc *) atomic_long_read(
-					&interest.ready_rpc);
+			rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
 			if (rpc) {
 				tt_record3("received RPC handoff while polling, id %d, socket %d, pid %d",
-						rpc->id, hsk->port,
-						current->pid);
+					   rpc->id, hsk->port,
+					   current->pid);
 				polled = 1;
 				INC_METRIC(poll_ns, now - poll_start);
 				goto found_rpc;
@@ -1286,7 +1290,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			poll_start += blocked;
 		}
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
-				hsk->port, current->pid);
+			   hsk->port, current->pid);
 		INC_METRIC(poll_ns, now - poll_start);
 
 		/* Now it's time to sleep. */
@@ -1402,14 +1406,14 @@ struct homa_interest *homa_choose_interest(struct homa *homa,
 	struct list_head *pos;
 
 	list_for_each(pos, head) {
-		interest = (struct homa_interest *) (((char *) pos) - offset);
+		interest = (struct homa_interest *)(((char *)pos) - offset);
 		if (per_cpu(homa_offload_core, interest->core).last_active <
 				busy_time) {
-			if (backup != NULL)
+			if (backup)
 				INC_METRIC(handoffs_alt_thread, 1);
 			return interest;
 		}
-		if (backup == NULL)
+		if (!backup)
 			backup = interest;
 	}
 
@@ -1519,8 +1523,8 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 		homa->grant_fifo_fraction = 500;
 	tmp = homa->grant_fifo_fraction;
 	if (tmp != 0)
-		tmp = (1000*homa->fifo_grant_increment)/tmp
-				- homa->fifo_grant_increment;
+		tmp = (1000 * homa->fifo_grant_increment) / tmp -
+				homa->fifo_grant_increment;
 	homa->grant_nonfifo = tmp;
 
 	if (homa->max_overcommit > HOMA_MAX_GRANTS)

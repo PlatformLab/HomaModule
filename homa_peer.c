@@ -70,7 +70,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
  *	        are no peers, NULL is returned.
  */
 struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
-		int *num_peers)
+					  int *num_peers)
 {
 	struct homa_peer **result;
 	struct hlist_node *next;
@@ -85,7 +85,7 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 	count = 0;
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-				peertab_links)
+					  peertab_links)
 			count++;
 	}
 
@@ -93,13 +93,13 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 		return NULL;
 
 	result = kmalloc_array(count, sizeof(peer), GFP_KERNEL);
-	if (result == NULL)
+	if (!result)
 		return NULL;
 	*num_peers = count;
 	count = 0;
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-				peertab_links) {
+					  peertab_links) {
 			result[count] = peer;
 			count++;
 		}
@@ -196,8 +196,8 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 		goto done;
 	}
 	peer->dst = dst;
-	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-1] = 0;
-	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2] = INT_MAX;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
 	peer->cutoff_version = 0;
 	peer->last_update_jiffies = 0;
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
@@ -236,7 +236,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 		/* Retain the existing dst if we can't create a new one. */
 		if (hsk->homa->verbose)
 			pr_notice("%s couldn't recreate dst: error %ld",
-					__func__, PTR_ERR(dst));
+				  __func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
 	} else {
 		struct homa_dead_dst *dead = (struct homa_dead_dst *)
@@ -270,11 +270,11 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
  * Return:    A priority level.
  */
 int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
-		int length)
+			  int length)
 {
 	int i;
 
-	for (i = homa->num_priorities-1; ; i--) {
+	for (i = homa->num_priorities - 1; ; i--) {
 		if (peer->unsched_cutoffs[i] >= length)
 			return i;
 	}
@@ -343,7 +343,7 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
  * @c7:     Largest message size that will use priority 7.
  */
 void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
-		int c3, int c4, int c5, int c6, int c7)
+			   int c3, int c4, int c5, int c6, int c7)
 {
 	peer->unsched_cutoffs[0] = c0;
 	peer->unsched_cutoffs[1] = c1;

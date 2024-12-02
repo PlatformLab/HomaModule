@@ -2535,9 +2535,9 @@ TEST_F(homa_incoming, homa_choose_interest__all_cores_busy)
 	struct homa_interest *result = homa_choose_interest(&self->homa,
 			&self->hsk.request_interests,
 			offsetof(struct homa_interest, request_links));
+	INIT_LIST_HEAD(&self->hsk.request_interests);
 	ASSERT_NE(NULL, result);
 	EXPECT_EQ(1, result->core);
-	INIT_LIST_HEAD(&self->hsk.request_interests);
 }
 
 TEST_F(homa_incoming, homa_rpc_handoff__handoff_already_in_progress)

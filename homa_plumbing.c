@@ -394,7 +394,7 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "priority_map",
 		.data		= &homa_data.priority_map,
-		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
+		.maxlen		= HOMA_MAX_PRIORITIES * sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
@@ -478,7 +478,7 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "unsched_cutoffs",
 		.data		= &homa_data.unsched_cutoffs,
-		.maxlen		= HOMA_MAX_PRIORITIES*sizeof(int),
+		.maxlen		= HOMA_MAX_PRIORITIES * sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
@@ -576,7 +576,7 @@ static int __init homa_load(void)
 	if (status)
 		goto out_cleanup;
 	metrics_dir_entry = proc_create("homa_metrics", 0444,
-			init_net.proc_net, &homa_metrics_pops);
+					init_net.proc_net, &homa_metrics_pops);
 	if (!metrics_dir_entry) {
 		pr_err("couldn't create /proc/net/homa_metrics\n");
 		status = -ENOMEM;
@@ -584,7 +584,7 @@ static int __init homa_load(void)
 	}
 
 	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
-			homa_ctl_table);
+					      homa_ctl_table);
 	if (!homa_ctl_header) {
 		pr_err("couldn't register Homa sysctl parameters\n");
 		status = -ENOMEM;
@@ -793,7 +793,8 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 		INC_METRIC(abort_ns, sched_clock() - start);
 		break;
 	case HOMAIOCFREEZE:
-		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, pid %d", current->pid);
+		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, pid %d",
+			   current->pid);
 		tt_freeze();
 		result = 0;
 		break;
@@ -905,7 +906,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		goto error;
 	}
 	if (unlikely(copy_from_user(&args, (void __user *)msg->msg_control,
-		     sizeof(args)))) {
+				    sizeof(args)))) {
 		result = -EFAULT;
 		goto error;
 	}
@@ -1078,18 +1079,18 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	 * for performance debugging).
 	 */
 	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
-		uint64_t elapsed = (sched_clock() - rpc->start_ns)>>10;
+		u64 elapsed = (sched_clock() - rpc->start_ns) >> 10;
 
-		if ((elapsed <= hsk->homa->temp[1])
-				&& (elapsed >= hsk->homa->temp[0])
-				&& homa_is_client(rpc->id)
-				&& (rpc->msgin.length >= hsk->homa->temp[2])
-				&& (rpc->msgin.length < hsk->homa->temp[3])) {
+		if (elapsed <= hsk->homa->temp[1] &&
+		    elapsed >= hsk->homa->temp[0] &&
+		    homa_is_client(rpc->id) &&
+		    rpc->msgin.length >= hsk->homa->temp[2] &&
+		    rpc->msgin.length < hsk->homa->temp[3]) {
 			tt_record4("Long RTT: kcycles %d, id %d, peer 0x%x, length %d",
-					elapsed, rpc->id,
-					tt_addr(rpc->peer->addr),
-					rpc->msgin.length);
-			homa_freeze(rpc, SLOW_RPC, "Freezing because of long elapsed time for RPC id %d, peer 0x%x");
+				   elapsed, rpc->id, tt_addr(rpc->peer->addr),
+				   rpc->msgin.length);
+			homa_freeze(rpc, SLOW_RPC,
+				    "Freezing because of long elapsed time for RPC id %d, peer 0x%x");
 		}
 	}
 
@@ -1241,10 +1242,10 @@ int homa_softirq(struct sk_buff *skb)
 			__skb_pull(skb, header_offset);
 
 		/* Reject packets that are too short or have bogus types. */
-		h = (struct common_header *) skb->data;
+		h = (struct common_header *)skb->data;
 		if (unlikely(skb->len < sizeof(struct common_header) ||
-				h->type < DATA || h->type >= BOGUS ||
-				skb->len < header_lengths[h->type-DATA])) {
+			     h->type < DATA || h->type >= BOGUS ||
+			     skb->len < header_lengths[h->type - DATA])) {
 			if (homa->verbose)
 				pr_warn("Homa %s packet from %s too short: %d bytes\n",
 					homa_symbol_for_type(h->type),
@@ -1268,9 +1269,9 @@ int homa_softirq(struct sk_buff *skb)
 			if (!tt_frozen) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
-						ntohs(h->dport), tt_addr(saddr),
-						ntohs(h->sport),
-						homa_local_id(h->sender_id));
+					   ntohs(h->dport), tt_addr(saddr),
+					   ntohs(h->sport),
+					   homa_local_id(h->sender_id));
 				tt_freeze();
 			}
 			goto discard;
@@ -1438,7 +1439,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	} else {
 		if (homa->verbose)
 			pr_notice("%s invoked with info %x, ICMP type %d, ICMP code %d\n",
-				__func__, info, type, code);
+				  __func__, info, type, code);
 	}
 	return 0;
 }
@@ -1488,10 +1489,10 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 int homa_dointvec(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+		  void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_dointvec(const struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos)
+		  void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
 	int result;
@@ -1508,8 +1509,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * particular value was written (don't want to increment
 		 * cutoff_version otherwise).
 		 */
-		if ((table->data == &homa_data.unsched_cutoffs)
-				|| (table->data == &homa_data.num_priorities)) {
+		if (table->data == &homa_data.unsched_cutoffs ||
+		    table->data == &homa_data.num_priorities) {
 			homa_prios_changed(homa);
 		}
 
@@ -1522,18 +1523,18 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * to print information to the log.
 		 */
 		if (table->data == &action) {
-			if (action == 2)
+			if (action == 2) {
 				homa_rpc_log_active(homa, 0);
-			else if (action == 3) {
+			} else if (action == 3) {
 #if 1 /* See strip.py */
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
 #endif /* See strip.py */
-			} else if (action == 4)
+			} else if (action == 4) {
 				homa_log_throttled(homa);
-			else if (action == 5)
+			} else if (action == 5) {
 				tt_printk();
-			else if (action == 6) {
+			} else if (action == 6) {
 				tt_record("Calling homa_rpc_log_active because of action 6");
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record("Freezing because of action 6");
@@ -1546,11 +1547,12 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				tt_freeze();
 			} else if (action == 8) {
 				pr_notice("homa_total_incoming is %d\n",
-						atomic_read(&homa->total_incoming));
+					  atomic_read(&homa->total_incoming));
 			} else if (action == 9) {
 				tt_print_file("/users/ouster/node.tt");
-			} else
+			} else {
 				homa_rpc_log_active(homa, action);
+			}
 			action = 0;
 		}
 	}
@@ -1571,10 +1573,10 @@ int homa_dointvec(const struct ctl_table *table, int write,
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
-		void __user *buffer, size_t *lenp, loff_t *ppos)
+			      void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
-		void *buffer, size_t *lenp, loff_t *ppos)
+			      void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
 	struct homa_offload_core *offload_core;
@@ -1584,7 +1586,7 @@ int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 
 	max_values = (NUM_GEN3_SOFTIRQ_CORES + 1) * nr_cpu_ids;
 	values = kmalloc_array(max_values, sizeof(int), GFP_KERNEL);
-	if (values == NULL)
+	if (!values)
 		return -ENOMEM;
 
 	table_copy = *table;
@@ -1607,7 +1609,8 @@ int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 				break;
 			offload_core = &per_cpu(homa_offload_core, values[i]);
 			for (j = 0; j < NUM_GEN3_SOFTIRQ_CORES; j++)
-				offload_core->gen3_softirq_cores[j] = values[i+j+1];
+				offload_core->gen3_softirq_cores[j] =
+						values[i +  j + 1];
 		}
 	} else {
 		/* Read: return values from all of the cores. */

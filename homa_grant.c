@@ -22,10 +22,10 @@ int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 	/* Fewest bytes remaining is the primary criterion; if those are
 	 * equal, then favor the older RPC.
 	 */
-	return (rpc1->msgin.bytes_remaining < rpc2->msgin.bytes_remaining)
-			|| ((rpc1->msgin.bytes_remaining
-			== rpc2->msgin.bytes_remaining)
-			&& (rpc1->msgin.birth < rpc2->msgin.birth));
+	return (rpc1->msgin.bytes_remaining < rpc2->msgin.bytes_remaining) ||
+			((rpc1->msgin.bytes_remaining ==
+			rpc2->msgin.bytes_remaining) &&
+			(rpc1->msgin.birth < rpc2->msgin.birth));
 }
 
 /**
@@ -53,8 +53,8 @@ int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
 		int old = atomic_fetch_add(delta, &homa->total_incoming);
 
 		rpc->msgin.rec_incoming = incoming;
-		return ((old >= homa->max_incoming)
-				&& ((old + delta) < homa->max_incoming));
+		return (old >= homa->max_incoming &&
+			(old + delta) < homa->max_incoming);
 	}
 	return 0;
 }
@@ -87,22 +87,23 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		homa->last_grantable_change = time;
 		homa->num_grantable_rpcs++;
 		tt_record2("Incremented num_grantable_rpcs to %d, id %d",
-				homa->num_grantable_rpcs, rpc->id);
+			   homa->num_grantable_rpcs, rpc->id);
 		if (homa->num_grantable_rpcs > homa->max_grantable_rpcs)
 			homa->max_grantable_rpcs = homa->num_grantable_rpcs;
 		rpc->msgin.birth = time;
 		list_for_each_entry(candidate, &peer->grantable_rpcs,
-				grantable_links) {
+				    grantable_links) {
 			if (homa_grant_outranks(rpc, candidate)) {
 				list_add_tail(&rpc->grantable_links,
-						&candidate->grantable_links);
+					      &candidate->grantable_links);
 				goto position_peer;
 			}
 		}
 		list_add_tail(&rpc->grantable_links, &peer->grantable_rpcs);
 	} else {
 		while (rpc != list_first_entry(&peer->grantable_rpcs,
-				struct homa_rpc, grantable_links)) {
+					       struct homa_rpc,
+					       grantable_links)) {
 			/* Message is on the list, but its priority may have
 			 * increased because of the recent packet arrival. If
 			 * so, adjust its position in the list.
@@ -123,12 +124,13 @@ position_peer:
 	if (list_empty(&peer->grantable_links)) {
 		/* Must add peer to the overall Homa list. */
 		list_for_each_entry(peer_cand, &homa->grantable_peers,
-				grantable_links) {
+				    grantable_links) {
 			candidate = list_first_entry(&peer_cand->grantable_rpcs,
-					struct homa_rpc, grantable_links);
+						     struct homa_rpc,
+						     grantable_links);
 			if (homa_grant_outranks(rpc, candidate)) {
 				list_add_tail(&peer->grantable_links,
-						&peer_cand->grantable_links);
+					      &peer_cand->grantable_links);
 				goto done;
 			}
 		}
@@ -137,11 +139,11 @@ position_peer:
 	}
 	/* The peer is on Homa's list, but it may need to move upward. */
 	while (peer != list_first_entry(&homa->grantable_peers,
-			struct homa_peer, grantable_links)) {
-		struct homa_peer *prev_peer = list_prev_entry(
-			peer, grantable_links);
+					struct homa_peer, grantable_links)) {
+		struct homa_peer *prev_peer = list_prev_entry(peer,
+							      grantable_links);
 		candidate = list_first_entry(&prev_peer->grantable_rpcs,
-				struct homa_rpc, grantable_links);
+					     struct homa_rpc, grantable_links);
 		if (!homa_grant_outranks(rpc, candidate))
 			goto done;
 		__list_del_entry(&prev_peer->grantable_links);
@@ -172,14 +174,14 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 		homa->oldest_rpc = NULL;
 
 	head =  list_first_entry(&peer->grantable_rpcs,
-			struct homa_rpc, grantable_links);
+				 struct homa_rpc, grantable_links);
 	list_del_init(&rpc->grantable_links);
 	INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
 			* (time - homa->last_grantable_change));
 	homa->last_grantable_change = time;
 	homa->num_grantable_rpcs--;
 	tt_record2("Decremented num_grantable_rpcs to %d, id %d",
-			homa->num_grantable_rpcs, rpc->id);
+		   homa->num_grantable_rpcs, rpc->id);
 	if (rpc != head)
 		return;
 
@@ -196,13 +198,13 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	 * an RPC can't cause the peer to move up).
 	 */
 	head =  list_first_entry(&peer->grantable_rpcs,
-			struct homa_rpc, grantable_links);
+				 struct homa_rpc, grantable_links);
 	while (peer != list_last_entry(&homa->grantable_peers, struct homa_peer,
-			grantable_links)) {
-		struct homa_peer *next_peer = list_next_entry(
-				peer, grantable_links);
+				       grantable_links)) {
+		struct homa_peer *next_peer = list_next_entry(peer,
+							      grantable_links);
 		candidate = list_first_entry(&next_peer->grantable_rpcs,
-				struct homa_rpc, grantable_links);
+					     struct homa_rpc, grantable_links);
 		if (!homa_grant_outranks(rpc, candidate))
 			break;
 		__list_del_entry(&peer->grantable_links);
@@ -255,8 +257,8 @@ int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
 	grant.resend_all = rpc->msgin.resend_all;
 	rpc->msgin.resend_all = 0;
 	tt_record4("sending grant for id %llu, offset %d, priority %d, increment %d",
-			rpc->id, rpc->msgin.granted, rpc->msgin.priority,
-			increment);
+		   rpc->id, rpc->msgin.granted, rpc->msgin.priority,
+		   increment);
 	homa_xmit_control(GRANT, &grant, sizeof(grant), rpc);
 	return 1;
 }
@@ -288,9 +290,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	int rank, recalc;
 
-
-	if ((rpc->msgin.length < 0) || (rpc->state == RPC_DEAD)
-			|| (rpc->msgin.num_bpages <= 0)) {
+	if (rpc->msgin.length < 0 || rpc->state == RPC_DEAD ||
+	    rpc->msgin.num_bpages <= 0) {
 		homa_rpc_unlock(rpc);
 		goto done;
 	}
@@ -302,8 +303,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
-			rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
-			rpc->msgin.length);
+		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
+		   rpc->msgin.length);
 
 	/* This message requires grants; if it is a new message, set up
 	 * granting.
@@ -312,9 +313,10 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_grant_update_incoming(rpc, homa);
 		homa_grantable_lock(homa, 0);
 		homa_grant_add_rpc(rpc);
-		recalc = ((homa->num_active_rpcs < homa->max_overcommit)
-				|| (rpc->msgin.bytes_remaining < atomic_read(
-				&homa->active_remaining[homa->max_overcommit-1])));
+		recalc = (homa->num_active_rpcs < homa->max_overcommit ||
+				rpc->msgin.bytes_remaining <
+				atomic_read(&homa->active_remaining
+				[homa->max_overcommit - 1]));
 		homa_rpc_unlock(rpc);
 		if (recalc)
 			homa_grant_recalc(homa, 1);
@@ -327,8 +329,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	rank = atomic_read(&rpc->msgin.rank);
 	if (rank < 0) {
 		homa_grant_update_incoming(rpc, homa);
-		if (rpc->msgin.bytes_remaining < atomic_read(
-				&homa->active_remaining[homa->max_overcommit-1])) {
+		if (rpc->msgin.bytes_remaining < atomic_read(&homa->active_remaining[homa->max_overcommit - 1])) {
 			homa_rpc_unlock(rpc);
 			INC_METRIC(grant_priority_bumps, 1);
 			homa_grant_recalc(homa, 0);
@@ -338,8 +339,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		goto done;
 	}
 	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
-	if ((rank > 0) && (rpc->msgin.bytes_remaining < atomic_read(
-			&homa->active_remaining[rank-1]))) {
+	if (rank > 0 && rpc->msgin.bytes_remaining <
+			atomic_read(&homa->active_remaining[rank - 1])) {
 		homa_grant_update_incoming(rpc, homa);
 		homa_rpc_unlock(rpc);
 		INC_METRIC(grant_priority_bumps, 1);
@@ -421,7 +422,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		 * about them.
 		 */
 		active = homa_grant_pick_rpcs(homa, homa->active_rpcs,
-				homa->max_overcommit);
+					      homa->max_overcommit);
 		homa->num_active_rpcs = active;
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = homa->active_rpcs[i];
@@ -431,7 +432,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			atomic_inc(&rpc->grants_in_progress);
 			atomic_set(&rpc->msgin.rank, i);
 			atomic_set(&homa->active_remaining[i],
-					rpc->msgin.bytes_remaining);
+				   rpc->msgin.bytes_remaining);
 
 			/* Compute the priority to use for this RPC's grants:
 			 * if there aren't enough RPCs to consume all of the
@@ -458,15 +459,14 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		if (homa->window_param != 0)
 			homa->grant_window = homa->window_param;
 		else
-			homa->grant_window = homa->max_incoming/
-					(homa->num_active_rpcs+1);
+			homa->grant_window = homa->max_incoming /
+					(homa->num_active_rpcs + 1);
 
 		/* See comment above, which explains why this is here. */
 		homa_grantable_unlock(homa);
 
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = active_rpcs[i];
-
 
 			homa_rpc_lock(rpc, "homa_grant_recalc");
 			homa_grant_send(rpc, homa);
@@ -502,7 +502,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
  * Return:     The number of RPCs actually stored in @rpcs.
  */
 int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
-		int max_rpcs)
+			 int max_rpcs)
 {
 	struct homa_peer *peer;
 	struct homa_rpc *rpc;
@@ -518,13 +518,13 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 		 * in decreasing order of priority.
 		 */
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
-				grantable_links) {
+				    grantable_links) {
 			int i, pos;
 
 			/* Figure out where this RPC should be positioned
 			 * in the result.
 			 */
-			for (i = num_rpcs-1; i >= 0; i--) {
+			for (i = num_rpcs - 1; i >= 0; i--) {
 				if (!homa_grant_outranks(rpc, rpcs[i]))
 					break;
 			}
@@ -534,12 +534,12 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 			if (pos >= max_rpcs)
 				break;
 			if (num_rpcs < max_rpcs) {
-				for (i = num_rpcs-1; i >= pos; i--)
-					rpcs[i+1] = rpcs[i];
+				for (i = num_rpcs - 1; i >= pos; i--)
+					rpcs[i + 1] = rpcs[i];
 				num_rpcs++;
 			} else {
-				for (i = max_rpcs-2; i >= pos; i--)
-					rpcs[i+1] = rpcs[i];
+				for (i = max_rpcs - 2; i >= pos; i--)
+					rpcs[i + 1] = rpcs[i];
 			}
 			rpcs[pos] = rpc;
 			rpcs_from_peer++;
@@ -556,7 +556,6 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 	return num_rpcs;
 }
 
-
 /**
  * homa_grant_find_oldest() - Recompute the value of homa->oldest_rpc.
  * @homa:    Overall data about the Homa protocol implementation. The
@@ -564,7 +563,7 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
  */
 void homa_grant_find_oldest(struct homa *homa)
 {
-	int max_incoming = homa->grant_window + 2*homa->fifo_grant_increment;
+	int max_incoming = homa->grant_window + 2 * homa->fifo_grant_increment;
 	struct homa_rpc *rpc, *oldest;
 	struct homa_peer *peer;
 	__u64 oldest_birth;
@@ -577,7 +576,7 @@ void homa_grant_find_oldest(struct homa *homa)
 	 */
 	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
-				grantable_links) {
+				    grantable_links) {
 			int received, incoming;
 
 			if (rpc->msgin.birth >= oldest_birth)
@@ -601,6 +600,7 @@ void homa_grant_find_oldest(struct homa *homa)
 	}
 	homa->oldest_rpc = oldest;
 }
+
 /**
  * homa_grant_free_rpc() - This function is invoked when an RPC is freed;
  * it cleans up any state related to grants for that RPC's incoming message.
@@ -626,8 +626,9 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 			homa_rpc_unlock(rpc);
 			homa_grant_recalc(homa, 1);
 			homa_rpc_lock(rpc, "homa_grant_free_rpc");
-		} else
+		} else {
 			homa_grantable_unlock(homa);
+		}
 	}
 
 	if (rpc->msgin.rec_incoming != 0)
@@ -683,10 +684,10 @@ void homa_grant_log_tt(struct homa *homa)
 
 	homa_grantable_lock(homa, 0);
 	tt_record1("homa_grant_log_tt found %d active RPCs:",
-			homa->num_active_rpcs);
+		   homa->num_active_rpcs);
 	for (i = 0; i < homa->num_active_rpcs; i++) {
 		tt_record2("active_rpcs[%d]: id %d", i,
-				homa->active_rpcs[i]->id);
+			   homa->active_rpcs[i]->id);
 		homa_rpc_log_tt(homa->active_rpcs[i]);
 	}
 	homa_grantable_unlock(homa);

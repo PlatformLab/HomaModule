@@ -333,7 +333,7 @@ struct grant_header {
 	__u8 resend_all;
 } __packed;
 _Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
-		"grant_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "grant_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct resend_header - Wire format for RESEND packets.
@@ -427,7 +427,7 @@ struct cutoffs_header {
 	__be16 cutoff_version;
 } __packed;
 _Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
-		"cutoffs_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "cutoffs_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct freeze_header - Wire format for FREEZE packets.
@@ -440,7 +440,7 @@ struct freeze_header {
 	struct common_header common;
 } __packed;
 _Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
-		"freeze_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       "freeze_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct need_ack_header - Wire format for NEED_ACK packets.

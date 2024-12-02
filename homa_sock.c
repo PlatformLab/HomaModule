@@ -200,8 +200,8 @@ void homa_sock_unlink(struct homa_sock *hsk)
 	list_for_each_entry(scan, &socktab->active_scans, scan_links) {
 		if (!scan->next || scan->next->sock != hsk)
 			continue;
-		scan->next = (struct homa_socktab_links *)rcu_dereference(
-				hlist_next_rcu(&scan->next->hash_links));
+		scan->next = (struct homa_socktab_links *)
+				rcu_dereference(hlist_next_rcu(&scan->next->hash_links));
 	}
 	hlist_del_rcu(&hsk->socktab_links.hash_links);
 	spin_unlock_bh(&socktab->write_lock);

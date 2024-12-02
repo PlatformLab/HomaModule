@@ -116,7 +116,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		if (resend.length == 0)
 			return;
 	}
-	resend.priority = homa->num_priorities-1;
+	resend.priority = homa->num_priorities - 1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 #if 1 /* See strip.py */
 	if (homa_is_client(rpc->id)) {
@@ -176,7 +176,7 @@ void homa_timer(struct homa *homa)
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = homa_metrics_per_cpu();
 
-		total_grants += m->packets_sent[GRANT-DATA];
+		total_grants += m->packets_sent[GRANT - DATA];
 	}
 
 	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
@@ -184,18 +184,19 @@ void homa_timer(struct homa *homa)
 		   homa->num_grantable_rpcs,
 		   homa->num_active_rpcs,
 		   total_grants - prev_grant_count);
-	if ((total_grants == prev_grant_count)
-			&& (homa->num_grantable_rpcs > 20)) {
+	if (total_grants == prev_grant_count &&
+	    homa->num_grantable_rpcs > 20) {
 		zero_count++;
-		if ((zero_count > 3) && !tt_frozen && 0) {
+		if (zero_count > 3 && !tt_frozen && 0) {
 			pr_err("%s found no grants going out\n", __func__);
 			homa_rpc_log_active_tt(homa, 0);
 			tt_record("freezing because no grants are going out");
 			homa_freeze_peers(homa);
 			tt_freeze();
 		}
-	} else
+	} else {
 		zero_count = 0;
+	}
 	prev_grant_count = total_grants;
 
 	/* Scan all existing RPCs in all sockets.  The rcu_read_lock
@@ -209,7 +210,7 @@ void homa_timer(struct homa *homa)
 			 * isn't keeping up with RPC reaping, so we'll help
 			 * out.  See reap.txt for more info.
 			 */
-			uint64_t start = sched_clock();
+			__u64 start = sched_clock();
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, hsk->homa->reap_limit) == 0)
@@ -256,9 +257,9 @@ void homa_timer(struct homa *homa)
 	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
-			total_incoming_rpcs, sum_incoming, sum_incoming_rec,
-			atomic_read(&homa->total_incoming));
+		   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
+		   atomic_read(&homa->total_incoming));
 	homa_skb_release_pages(homa);
 	end = sched_clock();
-	INC_METRIC(timer_ns, end-start);
+	INC_METRIC(timer_ns, end - start);
 }

@@ -38,7 +38,7 @@ int homa_skb_init(struct homa *homa)
 	homa->skb_pages_to_free = NULL;
 	homa->pages_to_free_slots = 0;
 	homa->skb_page_free_time = 0;
-	homa->skb_page_pool_min_kb = (3*HOMA_MAX_MESSAGE_LENGTH)/1000;
+	homa->skb_page_pool_min_kb = (3 * HOMA_MAX_MESSAGE_LENGTH) / 1000;
 
 	/* Initialize NUMA-specfific page pools. */
 	homa->max_numa = -1;
@@ -49,7 +49,7 @@ int homa_skb_init(struct homa *homa)
 		BUG_ON(numa >= MAX_NUMNODES);
 		if (numa > homa->max_numa)
 			homa->max_numa = numa;
-		if (homa->page_pools[numa] == NULL) {
+		if (!homa->page_pools[numa]) {
 			struct homa_page_pool *pool;
 
 			pool = kmalloc(sizeof(*pool), GFP_KERNEL);
@@ -62,7 +62,7 @@ int homa_skb_init(struct homa *homa)
 		}
 		skb_core->pool = homa->page_pools[numa];
 	}
-	pr_notice("homa_skb_init found max NUMA node %d\n", homa->max_numa);
+	pr_notice("%s found max NUMA node %d\n", __func__, homa->max_numa);
 	return 0;
 }
 
@@ -78,7 +78,7 @@ void homa_skb_cleanup(struct homa *homa)
 	for (i = 0; i < nr_cpu_ids; i++) {
 		struct homa_skb_core *skb_core = &per_cpu(homa_skb_core, i);
 
-		if (skb_core->skb_page != NULL) {
+		if (skb_core->skb_page) {
 			put_page(skb_core->skb_page);
 			skb_core->skb_page = NULL;
 			skb_core->page_size = 0;
@@ -93,7 +93,7 @@ void homa_skb_cleanup(struct homa *homa)
 	for (i = 0; i < MAX_NUMNODES; i++) {
 		struct homa_page_pool *pool = homa->page_pools[i];
 
-		if (pool == NULL)
+		if (!pool)
 			continue;
 		for (j = pool->avail - 1; j >= 0; j--)
 			put_page(pool->pages[j]);
@@ -102,7 +102,7 @@ void homa_skb_cleanup(struct homa *homa)
 		homa->page_pools[i] = NULL;
 	}
 
-	if (homa->skb_pages_to_free != NULL) {
+	if (homa->skb_pages_to_free) {
 		kfree(homa->skb_pages_to_free);
 		homa->skb_pages_to_free = NULL;
 		homa->pages_to_free_slots = 0;
@@ -158,7 +158,7 @@ void homa_skb_stash_pages(struct homa *homa, int length)
 	struct homa_page_pool *pool = skb_core->pool;
 	int pages_needed = HOMA_MAX_STASHED(length);
 
-	if ((pages_needed < 2) || (skb_core->num_stashed_pages >= pages_needed))
+	if (pages_needed < 2 || skb_core->num_stashed_pages >= pages_needed)
 		return;
 	spin_lock_bh(&homa->page_pool_mutex);
 	while (pool->avail && (skb_core->num_stashed_pages < pages_needed)) {
@@ -194,15 +194,18 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	/* Can we just extend the skb's last fragment? */
 	skb_core = &per_cpu(homa_skb_core, raw_smp_processor_id());
 	frag = &shinfo->frags[shinfo->nr_frags - 1];
-	if ((shinfo->nr_frags > 0) && (skb_frag_page(frag) == skb_core->skb_page)
-			&& (skb_core->page_inuse < skb_core->page_size)
-			&& ((frag->offset + skb_frag_size(frag))
-			== skb_core->page_inuse)) {
-		if ((skb_core->page_size - skb_core->page_inuse) < actual_size)
-			actual_size = skb_core->page_size - skb_core->page_inuse;
+	if (shinfo->nr_frags > 0 &&
+	    skb_frag_page(frag) == skb_core->skb_page &&
+	    skb_core->page_inuse < skb_core->page_size &&
+	    (frag->offset + skb_frag_size(frag)) == skb_core->page_inuse) {
+		if ((skb_core->page_size - skb_core->page_inuse) <
+		     actual_size)
+			actual_size = skb_core->page_size -
+					skb_core->page_inuse;
 		*length = actual_size;
 		skb_frag_size_add(frag, actual_size);
-		result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
+		result = page_address(skb_frag_page(frag)) +
+				skb_core->page_inuse;
 		skb_core->page_inuse += actual_size;
 		skb_len_add(skb, actual_size);
 		return result;
@@ -257,12 +260,11 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 	skb_core->page_inuse = 0;
 	if (skb_core->num_stashed_pages > 0) {
 		skb_core->num_stashed_pages--;
-		skb_core->skb_page = skb_core->stashed_pages[
-				skb_core->num_stashed_pages];
+		skb_core->skb_page = skb_core->stashed_pages[skb_core->num_stashed_pages];
 		goto success;
 	}
 
-	/* Step 2: can we retreive a page from the pool for this NUMA node? */
+	/* Step 2: can we retrieve a page from the pool for this NUMA node? */
 	pool = skb_core->pool;
 	if (pool->avail) {
 		spin_lock_bh(&homa->page_pool_mutex);
@@ -296,7 +298,8 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 		skb_core->page_size = PAGE_SIZE;
 		goto success;
 	}
-	skb_core->page_size = skb_core->page_inuse = 0;
+	skb_core->page_size = 0;
+	skb_core->page_inuse = 0;
 	return false;
 
 success:
@@ -314,15 +317,15 @@ success:
  * Return: 0 or a negative errno.
  */
 int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb, void *buf,
-		int length)
+			    int length)
 {
-	char *src = (char *) buf;
+	char *src = buf;
 	int chunk_length;
 	char *dst;
 
 	while (length > 0) {
 		chunk_length = length;
-		dst = (char *) homa_skb_extend_frags(homa, skb, &chunk_length);
+		dst = (char *)homa_skb_extend_frags(homa, skb, &chunk_length);
 		if (!dst)
 			return -ENOMEM;
 		memcpy(dst, src, chunk_length);
@@ -343,14 +346,14 @@ int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb, void *buf,
  * Return: 0 or a negative errno.
  */
 int homa_skb_append_from_iter(struct homa *homa, struct sk_buff *skb,
-		struct iov_iter *iter, int length)
+			      struct iov_iter *iter, int length)
 {
 	int chunk_length;
 	char *dst;
 
 	while (length > 0) {
 		chunk_length = length;
-		dst = (char *) homa_skb_extend_frags(homa, skb, &chunk_length);
+		dst = (char *)homa_skb_extend_frags(homa, skb, &chunk_length);
 		if (!dst)
 			return -ENOMEM;
 		if (copy_from_iter(dst, chunk_length, iter) != chunk_length)
@@ -375,7 +378,7 @@ int homa_skb_append_from_iter(struct homa *homa, struct sk_buff *skb,
  * Return:       0 for success or a negative errno if an error occurred.
  */
 int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
-		struct sk_buff *src_skb, int offset, int length)
+			     struct sk_buff *src_skb, int offset, int length)
 {
 	int src_frag_offset, src_frags_left, chunk_size, err, head_len;
 	struct skb_shared_info *src_shinfo = skb_shinfo(src_skb);
@@ -389,8 +392,8 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
 		if (chunk_size > (head_len - offset))
 			chunk_size = head_len - offset;
 		err = homa_skb_append_to_frag(homa, dst_skb,
-				skb_transport_header(src_skb) + offset,
-				chunk_size);
+					      skb_transport_header(src_skb) + offset,
+					      chunk_size);
 		if (err)
 			return err;
 		offset += chunk_size;
@@ -471,17 +474,18 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 		for (j = 0; j < shinfo->nr_frags; j++) {
 			struct page *page = skb_frag_page(&shinfo->frags[j]);
 
-			if ((compound_order(page) == HOMA_SKB_PAGE_ORDER)
-					&& (page_ref_count(page) == 1)) {
+			if (compound_order(page) == HOMA_SKB_PAGE_ORDER &&
+			    page_ref_count(page) == 1) {
 				pages_to_cache[num_pages] = page;
 				num_pages++;
 				if (num_pages == MAX_PAGES_AT_ONCE) {
 					homa_skb_cache_pages(homa, pages_to_cache,
-							num_pages);
+							     num_pages);
 					num_pages = 0;
 				}
-			} else
+			} else {
 				put_page(page);
+			}
 		}
 		shinfo->nr_frags = 0;
 		kfree_skb(skb);
@@ -517,8 +521,9 @@ void homa_skb_cache_pages(struct homa *homa, struct page **pages, int count)
 		if (pool->avail < LIMIT) {
 			pool->pages[pool->avail] = page;
 			pool->avail++;
-		} else
+		} else {
 			put_page(pages[i]);
+		}
 	}
 	spin_unlock_bh(&homa->page_pool_mutex);
 }
@@ -536,7 +541,7 @@ void homa_skb_get(struct sk_buff *skb, void *dest, int offset, int length)
 {
 	int chunk_size, frags_left, frag_offset, head_len;
 	struct skb_shared_info *shinfo = skb_shinfo(skb);
-	char *dst = (char *) dest;
+	char *dst = dest;
 	skb_frag_t *frag;
 
 	/* Copy bytes from the linear part of the skb, if any. */
@@ -587,12 +592,13 @@ void homa_skb_release_pages(struct homa *homa)
 
 	/* Free pages every 0.5 second. */
 	homa->skb_page_free_time = now + 500000000ULL;
-	release_max = homa->skb_page_frees_per_sec/2;
+	release_max = homa->skb_page_frees_per_sec / 2;
 	if (homa->pages_to_free_slots < release_max) {
-		if (homa->skb_pages_to_free != NULL)
+		if (homa->skb_pages_to_free)
 			kfree(homa->skb_pages_to_free);
 		homa->skb_pages_to_free = kmalloc_array(release_max,
-				sizeof(struct page *), GFP_KERNEL);
+							sizeof(struct page *),
+							GFP_KERNEL);
 		homa->pages_to_free_slots = release_max;
 	}
 
@@ -602,14 +608,14 @@ void homa_skb_release_pages(struct homa *homa)
 	for (i = 0; i <= homa->max_numa; i++) {
 		struct homa_page_pool *pool = homa->page_pools[i];
 
-		if (pool == NULL)
+		if (!pool)
 			continue;
 		if (pool->low_mark > max_low_mark) {
 			max_low_mark = pool->low_mark;
 			max_pool = pool;
 		}
 		tt_record3("NUMA node %d has %d pages in skb page pool, low mark %d",
-				i, pool->avail, pool->low_mark);
+			   i, pool->avail, pool->low_mark);
 		pool->low_mark = pool->avail;
 	}
 
@@ -633,7 +639,7 @@ void homa_skb_release_pages(struct homa *homa)
 		struct page *page = homa->skb_pages_to_free[i];
 
 		tt_record2("homa_skb_release_pages releasing page 0x%08x%08x",
-				tt_hi(page), tt_lo(page));
+			   tt_hi(page), tt_lo(page));
 		put_page(page);
 	}
 }

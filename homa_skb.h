@@ -78,7 +78,7 @@ struct homa_skb_core {
 	 * is 0). This is a rough guess, since it doesn't consider all of
 	 * the data_segments that will be needed for the packets.
 	 */
-#define HOMA_MAX_STASHED(size) (((size - 1) / HOMA_SKB_PAGE_SIZE) + 1)
+#define HOMA_MAX_STASHED(size) ((((size) - 1) / HOMA_SKB_PAGE_SIZE) + 1)
 
 	/**
 	 * @num_stashed_pages: number of pages currently available in
