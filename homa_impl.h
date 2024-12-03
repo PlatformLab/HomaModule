@@ -1073,6 +1073,8 @@ void unit_hook(char *id);
 #endif /* __UNIT_TEST__ */
 #endif /* See strip.py */
 
+extern struct homa *global_homa;
+
 void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			 int port, int error);
 void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);

@@ -9,8 +9,6 @@
 #include "mock.h"
 #include "utils.h"
 
-extern struct homa *homa;
-
 /* The following hook function frees hook_rpc. */
 static struct homa_rpc *hook_rpc;
 static void unlock_hook(char *id)
@@ -57,7 +55,7 @@ FIXTURE_SETUP(homa_plumbing)
 	self->client_addr.in6.sin6_port = htons(self->client_port);
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	homa = &self->homa;
+	global_homa = &self->homa;
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
@@ -107,7 +105,7 @@ FIXTURE_TEARDOWN(homa_plumbing)
 {
 	homa_destroy(&self->homa);
 	unit_teardown();
-	homa = NULL;
+	global_homa = NULL;
 }
 
 TEST_F(homa_plumbing, homa_bind__version_mismatch)

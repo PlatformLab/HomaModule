@@ -19,8 +19,6 @@ static const struct net_offload homa_offload = {
 	},
 };
 
-extern struct homa *homa;
-
 /* Pointers to TCP's net_offload structures. NULL means homa_gro_hook_tcp
  * hasn't been called yet.
  */
@@ -284,6 +282,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 */
 	__u64 saved_softirq_metric, softirq_ns;
 	struct homa_offload_core *offload_core;
+	struct homa *homa = global_homa;
 	struct sk_buff *result = NULL;
 	__u64 *softirq_ns_metric;
 	struct data_header *h_new;
@@ -461,11 +460,12 @@ bypass:
  * homa_gro_gen2() - When the Gen2 load balancer is being used this function
  * is invoked by homa_gro_complete to choose a core to handle SoftIRQ for a
  * batch of packets
+ * @homa:    Overall information about the Homa transport.
  * @skb:     First in a group of packets that are ready to be passed to SoftIRQ.
  *           Information will be updated in the packet so that Linux will
  *           direct it to the chosen core.
  */
-void homa_gro_gen2(struct sk_buff *skb)
+void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 {
 	/* Scan the next several cores in order after the current core,
 	 * trying to find one that is not already busy with SoftIRQ processing,
@@ -520,11 +520,12 @@ void homa_gro_gen2(struct sk_buff *skb)
  * homa_gro_gen3() - When the Gen3 load balancer is being used this function
  * is invoked by homa_gro_complete to choose a core to handle SoftIRQ for a
  * batch of packets
+ * @homa:    Overall information about the Homa transport.
  * @skb:     First in a group of packets that are ready to be passed to SoftIRQ.
  *           Information will be updated in the packet so that Linux will
  *           direct it to the chosen core.
  */
-void homa_gro_gen3(struct sk_buff *skb)
+void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 {
 	/* See balance.txt for overall design information on the Gen3
 	 * load balancer.
@@ -575,6 +576,7 @@ void homa_gro_gen3(struct sk_buff *skb)
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
 	struct data_header *h = (struct data_header *)skb_transport_header(skb);
+	struct homa *homa = global_homa;
 
 	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 	//		h->common.type, homa_local_id(h->common.sender_id),
@@ -583,9 +585,9 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
-		homa_gro_gen3(skb);
+		homa_gro_gen3(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {
-		homa_gro_gen2(skb);
+		homa_gro_gen2(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_IDLE) {
 		int i, core, best;
 		__u64 best_time = ~0;

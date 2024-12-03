@@ -7,19 +7,17 @@
 #include "mock.h"
 #include "utils.h"
 
-extern struct homa *homa;
-
 FIXTURE(homa_metrics) {
 	struct homa homa;
 };
 FIXTURE_SETUP(homa_metrics)
 {
 	homa_init(&self->homa);
-	homa = &self->homa;
+	global_homa = &self->homa;
 }
 FIXTURE_TEARDOWN(homa_metrics)
 {
-	homa = NULL;
+	global_homa = NULL;
 	homa_destroy(&self->homa);
 	unit_teardown();
 }

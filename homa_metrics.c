@@ -8,11 +8,6 @@
 
 DEFINE_PER_CPU(struct homa_metrics, homa_metrics);
 
-/* For functions that are invoked directly by Linux, so they can't be
- * passed a struct homa arguments.
- */
-extern struct homa *homa;
-
 /**
  * homa_metric_append() - Formats a new metric and appends it to homa->metrics.
  * @homa:        The new data will appended to the @metrics field of
@@ -351,6 +346,8 @@ char *homa_metrics_print(struct homa *homa)
  */
 int homa_metrics_open(struct inode *inode, struct file *file)
 {
+	struct homa *homa = global_homa;
+
 	/* Collect all of the metrics when the file is opened, and save
 	 * these for use by subsequent reads (don't want the metrics to
 	 * change between reads). If there are concurrent opens on the
@@ -381,6 +378,7 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 			  size_t length, loff_t *offset)
 {
+	struct homa *homa = global_homa;
 	size_t copied;
 
 	if (*offset >= homa->metrics_length)
@@ -417,6 +415,8 @@ loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
  */
 int homa_metrics_release(struct inode *inode, struct file *file)
 {
+	struct homa *homa = global_homa;
+
 	spin_lock(&homa->metrics_lock);
 	homa->metrics_active_opens--;
 	spin_unlock(&homa->metrics_lock);

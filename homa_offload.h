@@ -74,8 +74,8 @@ struct homa_offload_core {
 DECLARE_PER_CPU(struct homa_offload_core, homa_offload_core);
 
 int      homa_gro_complete(struct sk_buff *skb, int thoff);
-void     homa_gro_gen2(struct sk_buff *skb);
-void     homa_gro_gen3(struct sk_buff *skb);
+void     homa_gro_gen2(struct homa *homa, struct sk_buff *skb);
+void     homa_gro_gen3(struct homa *homa, struct sk_buff *skb);
 void     homa_gro_hook_tcp(void);
 void     homa_gro_unhook_tcp(void);
 struct sk_buff *homa_gro_receive(struct list_head *gro_list,

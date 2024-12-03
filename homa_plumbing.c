@@ -21,16 +21,18 @@ static long sysctl_homa_mem[3] __read_mostly;
 static int sysctl_homa_rmem_min __read_mostly;
 static int sysctl_homa_wmem_min __read_mostly;
 
-/* Global data for Homa. Never reference homa_data directory. Always use
- * the homa variable instead; this allows overriding during unit tests.
+/* Global data for Homa. Never reference homa_data directly. Always use
+ * the global_homa variable instead; this allows overriding during unit tests.
  */
 static struct homa homa_data;
 
-/* This variable should almost never be used directly; it is normally
- * passed as a parameter to functions that need it. Thus it is not declared
- * in a header file.
+/* This variable contains the address of the statically-allocated struct homa
+ * used throughout Homa. This variable should almost never be used directly:
+ * it should be passed as a parameter to functions that need it. This
+ * variable is used only by functions called from Linux (so they can't pass
+ * in a pointer).
  */
-struct homa *homa = &homa_data;
+struct homa *global_homa = &homa_data;
 
 /* True means that the Homa module is in the process of unloading itself,
  * so everyone should clean up.
@@ -523,6 +525,7 @@ static DECLARE_COMPLETION(timer_thread_done);
  */
 static int __init homa_load(void)
 {
+	struct homa *homa = global_homa;
 	int status;
 
 	pr_notice("Homa module loading\n");
@@ -632,6 +635,8 @@ out:
  */
 static void __exit homa_unload(void)
 {
+	struct homa *homa = global_homa;
+
 	pr_notice("Homa module unloading\n");
 	exiting = true;
 
@@ -671,8 +676,8 @@ module_exit(homa_unload);
  */
 int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 {
-	struct homa_sock *hsk = homa_sk(sock->sk);
 	union sockaddr_in_union *addr_in = (union sockaddr_in_union *)addr;
+	struct homa_sock *hsk = homa_sk(sock->sk);
 	int port = 0;
 
 	if (unlikely(addr->sa_family != sock->sk->sk_family))
@@ -686,7 +691,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 			return -EINVAL;
 		port = ntohs(addr_in->in6.sin6_port);
 	}
-	return homa_sock_bind(homa->port_map, hsk, port);
+	return homa_sock_bind(hsk->homa->port_map, hsk, port);
 }
 
 /**
@@ -814,6 +819,7 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+	struct homa *homa = global_homa;
 
 	homa_sock_init(hsk, homa);
 	return 0;
@@ -1194,6 +1200,7 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
+	struct homa *homa = global_homa;
 	struct common_header *h;
 	int first_packet = 1;
 	int header_offset;
@@ -1371,6 +1378,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	const struct iphdr *iph = ip_hdr(skb);
+	struct homa *homa = global_homa;
 	int type = icmp_hdr(skb)->type;
 	int code = icmp_hdr(skb)->code;
 
@@ -1415,6 +1423,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
+	struct homa *homa = global_homa;
 
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
 		char *icmp = (char *)icmp_hdr(skb);
@@ -1493,6 +1502,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
+	struct homa *homa = global_homa;
 	int result;
 
 	result = proc_dointvec(table, write, buffer, lenp, ppos);

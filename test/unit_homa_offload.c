@@ -11,8 +11,6 @@
 
 #define cur_offload_core (&per_cpu(homa_offload_core, raw_smp_processor_id()))
 
-extern struct homa *homa;
-
 static struct sk_buff *tcp_gro_receive(struct list_head *held_list,
 				       struct sk_buff *skb)
 {
@@ -44,7 +42,7 @@ FIXTURE_SETUP(homa_offload)
 
 	homa_init(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	homa = &self->homa;
+	global_homa = &self->homa;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	self->header = (struct data_header){.common = {
@@ -101,7 +99,7 @@ FIXTURE_TEARDOWN(homa_offload)
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
 		kfree_skb(skb);
 	homa_destroy(&self->homa);
-	homa = NULL;
+	global_homa = NULL;
 	unit_teardown();
 }
 
@@ -479,7 +477,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	struct sk_buff *skb;
 
 	// First packet: fits below the limit.
-	homa->max_gro_skbs = 3;
+	self->homa.max_gro_skbs = 3;
 	cur_offload_core->held_skb = self->skb2;
 	cur_offload_core->held_bucket = 2;
 	self->header.seg.offset = htonl(6000);
@@ -504,7 +502,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 
 	// Third packet also hits the limit for skb, causing the bucket
 	// to become empty.
-	homa->max_gro_skbs = 2;
+	self->homa.max_gro_skbs = 2;
 	cur_offload_core->held_skb = self->skb;
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	unit_log_clear();
@@ -520,9 +518,9 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 
 TEST_F(homa_offload, homa_gro_gen2)
 {
-	homa->gro_policy = HOMA_GRO_GEN2;
+	self->homa.gro_policy = HOMA_GRO_GEN2;
 	mock_ns = 1000;
-	homa->busy_ns = 100;
+	self->homa.busy_ns = 100;
 	mock_set_core(5);
 	atomic_set(&per_cpu(homa_offload_core, 6).softirq_backlog, 1);
 	per_cpu(homa_offload_core, 6).last_gro = 0;
@@ -562,7 +560,7 @@ TEST_F(homa_offload, homa_gro_gen3__basics)
 	struct homa_offload_core *offload5 = &per_cpu(homa_offload_core, 5);
 	struct homa_offload_core *offload7 = &per_cpu(homa_offload_core, 7);
 
-	homa->gro_policy = HOMA_GRO_GEN3;
+	self->homa.gro_policy = HOMA_GRO_GEN3;
 	offload_core->gen3_softirq_cores[0] = 3;
 	offload_core->gen3_softirq_cores[1] = 7;
 	offload_core->gen3_softirq_cores[2] = 5;
@@ -581,7 +579,7 @@ TEST_F(homa_offload, homa_gro_gen3__stop_on_negative_core_id)
 {
 	struct homa_offload_core *offload_core = cur_offload_core;
 
-	homa->gro_policy = HOMA_GRO_GEN3;
+	self->homa.gro_policy = HOMA_GRO_GEN3;
 	offload_core->gen3_softirq_cores[0] = 3;
 	offload_core->gen3_softirq_cores[1] = -1;
 	offload_core->gen3_softirq_cores[2] = 5;
@@ -598,7 +596,7 @@ TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
 {
 	struct homa_offload_core *offload_core = cur_offload_core;
 
-	homa->gro_policy = HOMA_GRO_GEN3;
+	self->homa.gro_policy = HOMA_GRO_GEN3;
 	offload_core->gen3_softirq_cores[0] = 3;
 	offload_core->gen3_softirq_cores[1] = 7;
 	offload_core->gen3_softirq_cores[2] = 5;
@@ -625,7 +623,7 @@ TEST_F(homa_offload, homa_gro_complete__clear_held_skb)
 }
 TEST_F(homa_offload, homa_gro_complete__GRO_IDLE)
 {
-	homa->gro_policy = HOMA_GRO_IDLE;
+	self->homa.gro_policy = HOMA_GRO_IDLE;
 	per_cpu(homa_offload_core, 6).last_active = 30;
 	per_cpu(homa_offload_core, 7).last_active = 25;
 	per_cpu(homa_offload_core, 0).last_active = 20;
