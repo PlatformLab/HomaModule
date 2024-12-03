@@ -264,6 +264,15 @@ struct homa_sock {
 	struct homa_pool *buffer_pool;
 };
 
+/**
+ * struct homa_v6_sock - For IPv6, additional IPv6-specific information
+ * is present in the socket struct after Homa-specific information.
+ */
+struct homa_v6_sock {
+	struct homa_sock homa;
+	struct ipv6_pinfo inet6;
+};
+
 void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 					 __u64 id);
 int                homa_sock_bind(struct homa_socktab *socktab,
