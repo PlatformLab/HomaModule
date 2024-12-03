@@ -44,6 +44,7 @@ int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
 int mock_kthread_create_errors;
+int mock_register_protosw_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
 int mock_trylock_errors;
@@ -183,6 +184,8 @@ struct net_device mock_net_device = {
 		._tx = &mock_net_queue};
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
+struct net_offload tcp_offload;
+struct net_offload tcp_v6_offload;
 
 static struct hrtimer_clock_base clock_base;
 unsigned int cpu_khz = 1000000;
@@ -460,6 +463,8 @@ int inet6_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 
 int inet6_register_protosw(struct inet_protosw *p)
 {
+	if (mock_check_error(&mock_register_protosw_errors))
+		return -EINVAL;
 	return 0;
 }
 
@@ -895,6 +900,8 @@ int proc_dointvec(const struct ctl_table *table, int write,
 
 void proc_remove(struct proc_dir_entry *de)
 {
+	if (!de)
+		return;
 	if (!proc_files_in_use
 			|| unit_hash_get(proc_files_in_use, de) == NULL) {
 		FAIL("%s on unknown dir_entry", __func__);
@@ -1376,7 +1383,7 @@ void mock_rcu_read_unlock(void)
 struct ctl_table_header *mock_register_net_sysctl(struct net *net,
 		const char *path, struct ctl_table *table)
 {
-	return NULL;
+	return (struct ctl_table_header *)11111;
 }
 
 /**
@@ -1558,6 +1565,7 @@ void mock_teardown(void)
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kthread_create_errors = 0;
+	mock_register_protosw_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;
@@ -1580,7 +1588,10 @@ void mock_teardown(void)
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));
+	inet_offloads[IPPROTO_TCP] = (struct net_offload __rcu *) &tcp_offload;
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
+	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
+			&tcp_v6_offload;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)

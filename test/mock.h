@@ -22,6 +22,7 @@ extern bool        mock_ipv6;
 extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
+extern int         mock_register_protosw_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;

@@ -108,6 +108,20 @@ FIXTURE_TEARDOWN(homa_plumbing)
 	global_homa = NULL;
 }
 
+TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
+{
+	homa_destroy(&self->homa);
+
+	/* First attempt fails. */
+	mock_register_protosw_errors = 1;
+	EXPECT_EQ(EINVAL, -homa_load());
+
+	/* Second attempt succeeds. */
+	EXPECT_EQ(0, -homa_load());
+
+	homa_unload();
+}
+
 TEST_F(homa_plumbing, homa_bind__version_mismatch)
 {
 	struct sockaddr addr = {};

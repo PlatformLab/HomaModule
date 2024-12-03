@@ -523,7 +523,7 @@ static DECLARE_COMPLETION(timer_thread_done);
  * homa_load() - invoked when this module is loaded into the Linux kernel
  * Return: 0 on success, otherwise a negative errno.
  */
-static int __init homa_load(void)
+int __init homa_load(void)
 {
 	struct homa *homa = global_homa;
 	int status;
@@ -559,7 +559,12 @@ static int __init homa_load(void)
 		goto out;
 	}
 	inet_register_protosw(&homa_protosw);
-	inet6_register_protosw(&homav6_protosw);
+	status = inet6_register_protosw(&homav6_protosw);
+	if (status != 0) {
+		pr_err("inet6_register_protosw failed in %s: %d\n", __func__,
+		       status);
+		goto out_cleanup;
+	}
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet_add_protocol failed in %s: %d\n", __func__,
@@ -633,7 +638,7 @@ out:
 /**
  * homa_unload() - invoked when this module is unloaded from the Linux kernel.
  */
-static void __exit homa_unload(void)
+void __exit homa_unload(void)
 {
 	struct homa *homa = global_homa;
 

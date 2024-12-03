@@ -1125,6 +1125,7 @@ int      homa_init(struct homa *homa);
 void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct sock *sk, int *karg);
 int      homa_ioctl(struct sock *sk, int cmd, int *karg);
+int      homa_load(void);
 void     homa_log_throttled(struct homa *homa);
 int      homa_message_in_init(struct homa_rpc *rpc, int length,
 			      int unsched);
@@ -1184,6 +1185,7 @@ void     homa_timer(struct homa *homa);
 int      homa_timer_main(void *transport);
 void     homa_unhash(struct sock *sk);
 void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+void     homa_unload(void);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
 int      homa_validate_incoming(struct homa *homa, int verbose,
