@@ -125,11 +125,12 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
  * @hsk:    Object to initialize.
  * @homa:   Homa implementation that will manage the socket.
  *
- * Return: always 0 (success).
+ * Return: 0 for success, otherwise a negative errno.
  */
-void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
+int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = homa->port_map;
+	int result = 0;
 	int i;
 
 	spin_lock_bh(&socktab->write_lock);
@@ -178,9 +179,12 @@ void homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 	}
 	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_KERNEL);
+	if (!hsk->buffer_pool)
+		result = -ENOMEM;
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
 	spin_unlock_bh(&socktab->write_lock);
+	return result;
 }
 
 /*
@@ -270,9 +274,11 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 #endif /* See strip.py */
 	}
 
-	homa_pool_destroy(hsk->buffer_pool);
-	kfree(hsk->buffer_pool);
-	hsk->buffer_pool = NULL;
+	if (hsk->buffer_pool) {
+		homa_pool_destroy(hsk->buffer_pool);
+		kfree(hsk->buffer_pool);
+		hsk->buffer_pool = NULL;
+	}
 }
 
 /**

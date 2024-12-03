@@ -249,6 +249,21 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
 
+TEST_F(homa_plumbing, homa_socket__success)
+{
+	struct homa_sock sock;
+
+	EXPECT_EQ(0, homa_socket(&sock.sock));
+	homa_sock_destroy(&sock);
+}
+TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
+{
+	struct homa_sock sock;
+
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_socket(&sock.sock));
+}
+
 TEST_F(homa_plumbing, homa_set_sock_opt__bad_level)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, 0, 0,

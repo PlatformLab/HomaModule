@@ -825,9 +825,12 @@ int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa *homa = global_homa;
+	int result;
 
-	homa_sock_init(hsk, homa);
-	return 0;
+	result = homa_sock_init(hsk, homa);
+	if (result != 0)
+		homa_sock_destroy(hsk);
+	return result;
 }
 
 /**

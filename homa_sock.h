@@ -279,7 +279,7 @@ int                homa_sock_bind(struct homa_socktab *socktab,
 				  struct homa_sock *hsk, __u16 port);
 void               homa_sock_destroy(struct homa_sock *hsk);
 struct homa_sock  *homa_sock_find(struct homa_socktab *socktab, __u16 port);
-void               homa_sock_init(struct homa_sock *hsk, struct homa *homa);
+int                homa_sock_init(struct homa_sock *hsk, struct homa *homa);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_socket(struct sock *sk);

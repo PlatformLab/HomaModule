@@ -712,7 +712,7 @@ void kfree(const void *block)
 	if (block == NULL)
 		return;
 	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL("%s on unknown block", __func__);
+		FAIL("%s on unknown block %p", __func__, block);
 		return;
 	}
 	unit_hash_erase(kmallocs_in_use, block);
@@ -760,6 +760,8 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 		FAIL("malloc failed");
 		return NULL;
 	}
+	if (flags & __GFP_ZERO)
+		memset(block, 0, size);
 	if (!kmallocs_in_use)
 		kmallocs_in_use = unit_hash_new();
 	unit_hash_set(kmallocs_in_use, block, "used");
