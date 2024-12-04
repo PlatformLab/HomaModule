@@ -9,13 +9,6 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
-#ifndef __UNIT_TEST__
-MODULE_LICENSE("Dual MIT/GPL");
-#endif /* __UNIT_TEST__ */
-MODULE_AUTHOR("John Ousterhout");
-MODULE_DESCRIPTION("Homa transport protocol");
-MODULE_VERSION("0.01");
-
 /* Not yet sure what these variables are for */
 static long sysctl_homa_mem[3] __read_mostly;
 static int sysctl_homa_rmem_min __read_mostly;
@@ -1700,3 +1693,17 @@ int homa_timer_main(void *transport)
 	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }
+
+#ifndef __UNIT_TEST__
+MODULE_LICENSE("Dual BSD/GPL");
+#endif /* __UNIT_TEST__ */
+MODULE_AUTHOR("John Ousterhout <ouster@cs.stanford.edu>");
+MODULE_DESCRIPTION("Homa transport protocol");
+MODULE_VERSION("1.0");
+
+/* Arrange for this module to be loaded automatically when a Homa socket is
+ * opened. Apparently symbols don't work in the macros below, so must use
+ * numeric values for IPPROTO_HOMA (146) and SOCK_DGRAM(2).
+ */
+MODULE_ALIAS_NET_PF_PROTO_TYPE(PF_INET, 146, 2);
+MODULE_ALIAS_NET_PF_PROTO_TYPE(PF_INET6, 146, 2);
