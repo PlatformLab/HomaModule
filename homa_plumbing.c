@@ -544,42 +544,42 @@ int __init homa_load(void)
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
-		goto out;
+		goto proto_register_err;
 	}
 	status = proto_register(&homav6_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homav6_prot: %d\n", status);
-		goto out;
+		goto proto_register_v6_err;
 	}
 	inet_register_protosw(&homa_protosw);
 	status = inet6_register_protosw(&homav6_protosw);
 	if (status != 0) {
 		pr_err("inet6_register_protosw failed in %s: %d\n", __func__,
 		       status);
-		goto out_cleanup;
+		goto register_protosw_v6_err;
 	}
 	status = inet_add_protocol(&homa_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet_add_protocol failed in %s: %d\n", __func__,
 		       status);
-		goto out_cleanup;
+		goto add_protocol_err;
 	}
 	status = inet6_add_protocol(&homav6_protocol, IPPROTO_HOMA);
 	if (status != 0) {
 		pr_err("inet6_add_protocol failed in %s: %d\n",  __func__,
 		       status);
-		goto out_cleanup;
+		goto add_protocol_v6_err;
 	}
 
 	status = homa_init(homa);
 	if (status)
-		goto out_cleanup;
+		goto homa_init_err;
 	metrics_dir_entry = proc_create("homa_metrics", 0444,
 					init_net.proc_net, &homa_metrics_pops);
 	if (!metrics_dir_entry) {
 		pr_err("couldn't create /proc/net/homa_metrics\n");
 		status = -ENOMEM;
-		goto out_cleanup;
+		goto metrics_err;
 	}
 
 	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
@@ -587,13 +587,13 @@ int __init homa_load(void)
 	if (!homa_ctl_header) {
 		pr_err("couldn't register Homa sysctl parameters\n");
 		status = -ENOMEM;
-		goto out_cleanup;
+		goto sysctl_err;
 	}
 
 	status = homa_offload_init();
 	if (status != 0) {
 		pr_err("Homa couldn't init offloads\n");
-		goto out_cleanup;
+		goto offload_err;
 	}
 
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
@@ -602,7 +602,7 @@ int __init homa_load(void)
 		pr_err("couldn't create homa pacer thread: error %d\n",
 		       status);
 		timer_kthread = NULL;
-		goto out_cleanup;
+		goto timer_err;
 	}
 
 	homa_gro_hook_tcp();
@@ -612,19 +612,26 @@ int __init homa_load(void)
 
 	return 0;
 
-out_cleanup:
-	homa_gro_unhook_tcp();
+timer_err:
 	homa_offload_end();
+offload_err:
 	unregister_net_sysctl_table(homa_ctl_header);
+sysctl_err:
 	proc_remove(metrics_dir_entry);
+metrics_err:
 	homa_destroy(homa);
-	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
-	inet_unregister_protosw(&homa_protosw);
+homa_init_err:
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
+add_protocol_v6_err:
+	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
+add_protocol_err:
 	inet6_unregister_protosw(&homav6_protosw);
-	proto_unregister(&homa_prot);
+register_protosw_v6_err:
+	inet_unregister_protosw(&homa_protosw);
 	proto_unregister(&homav6_prot);
-out:
+proto_register_v6_err:
+	proto_unregister(&homa_prot);
+proto_register_err:
 	return status;
 }
 
