@@ -340,10 +340,12 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 			INC_METRIC(gro_grant_bypasses, 1);
 			goto bypass;
 		}
+#if 1 /* See strip.py */
 	} else {
 		tt_record4("homa_gro_receive got packet from 0x%x id %llu, type 0x%x, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
 			   h_new->common.type, priority);
+#endif /* See strip.py */
 	}
 
 	/* The GRO mechanism tries to separate packets onto different
