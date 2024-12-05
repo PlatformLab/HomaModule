@@ -949,7 +949,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = -EFAULT;
 		goto error;
 	}
-	if (addr->in6.sin6_family != sk->sk_family) {
+	if (addr->sa.sa_family != sk->sk_family) {
 		result = -EAFNOSUPPORT;
 		goto error;
 	}
