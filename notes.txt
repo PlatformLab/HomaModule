@@ -29,6 +29,7 @@ Notes for Homa implementation in Linux:
   * Also consider the amount of data that is "stuck" in the NIC?
 
 * Notes on Linux qdiscs:
+  * Default qdisc is fq_codel
   * qdisc_create() is in sch_api.c
   * Packet transmission "starts" in __dev_xmit_skb in dev.c.
   * sch_direct_xmit is called once it's time to actually transmit a
