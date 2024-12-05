@@ -519,6 +519,15 @@ TEST_F(homa_pool, homa_pool_check_waiting__basics)
 	EXPECT_EQ(2, crpc3->msgin.num_bpages);
 	EXPECT_EQ(INT_MAX, pool->bpages_needed);
 }
+TEST_F(homa_pool, homa_pool_check_waiting__pool_not_initialized)
+{
+	struct homa_pool pool;
+
+	memset(&pool, 0, sizeof(pool));
+
+	/* Without the initialization check, this will crash. */
+	homa_pool_check_waiting(&pool);
+}
 TEST_F(homa_pool, homa_pool_check_waiting__bpages_needed_but_no_queued_rpcs)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;

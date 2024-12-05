@@ -433,6 +433,8 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 #ifdef __UNIT_TEST__
 	pool->check_waiting_invoked += 1;
 #endif /* __UNIT_TEST__ */
+	if (!pool->region)
+		return;
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 
