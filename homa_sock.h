@@ -387,24 +387,6 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket,
 }
 
 /**
- * homa_bucket_try_lock() - Acquire the lock for an RPC hash table bucket if
- * it is available.
- * @bucket:    Bucket to lock
- * @id:        ID of the RPC that is requesting the lock.
- * @locker:    Static string identifying the locking code. Normally ignored,
- *             but used when debugging deadlocks.
- * Return:     Nonzero if lock was successfully acquired, zero if it is
- *             currently owned by someone else.
- */
-static inline int homa_bucket_try_lock(struct homa_rpc_bucket *bucket,
-				       __u64 id, const char *locker)
-{
-	if (!spin_trylock_bh(&bucket->lock))
-		return 0;
-	return 1;
-}
-
-/**
  * homa_bucket_unlock() - Release the lock for an RPC hash table bucket.
  * @bucket:   Bucket to unlock.
  * @id:       ID of the RPC that was using the lock.

@@ -232,7 +232,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	if (rpc) {
 		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
 		homa_rpc_free(rpc);
-		homa_rpc_unlock(rpc);
+		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 	}
 
 done:

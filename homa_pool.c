@@ -451,8 +451,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		}
 		rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
 				       struct homa_rpc, buf_links);
-		if (!homa_bucket_try_lock(rpc->bucket, rpc->id,
-					  "homa_pool_check_waiting")) {
+		if (!homa_rpc_try_lock(rpc, "homa_pool_check_waiting")) {
 			/* Can't just spin on the RPC lock because we're
 			 * holding the socket lock (see sync.txt). Instead,
 			 * release the socket lock and try the entire
@@ -476,7 +475,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		if (rpc->msgin.num_bpages > 0) {
 			/* Allocation succeeded; "wake up" the RPC. */
 			rpc->msgin.resend_all = 1;
-			homa_grant_check_rpc(rpc);
+			homa_grant_check_rpc(rpc); /* Unlocks rpc. */
 		} else {
 			homa_rpc_unlock(rpc);
 		}

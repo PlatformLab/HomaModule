@@ -776,7 +776,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 		homa_rpc_free(rpc);
 	else
 		homa_rpc_abort(rpc, -args.error);
-	homa_rpc_unlock(rpc);
+	homa_rpc_unlock(rpc); /* Locked by homa_find_client_rpc. */
 	return ret;
 }
 
@@ -980,7 +980,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (result)
 			goto error;
 		args.id = rpc->id;
-		homa_rpc_unlock(rpc);
+		homa_rpc_unlock(rpc); /* Locked by homa_rpc_new_client. */
 		rpc = NULL;
 
 		if (unlikely(copy_to_user((void __user *)msg->msg_control,
@@ -1023,6 +1023,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (rpc->state != RPC_IN_SERVICE) {
 			tt_record2("homa_sendmsg error: RPC id %d in bad state %d",
 				   rpc->id, rpc->state);
+			/* Locked by homa_find_server_rpc. */
 			homa_rpc_unlock(rpc);
 			rpc = NULL;
 			result = -EINVAL;
@@ -1033,7 +1034,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
-		homa_rpc_unlock(rpc);
+		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 		finish = sched_clock();
 		INC_METRIC(reply_ns, finish - start);
 	}
@@ -1043,7 +1044,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 error:
 	if (rpc) {
 		homa_rpc_free(rpc);
-		homa_rpc_unlock(rpc);
+		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
 		   result, args.id);
@@ -1171,7 +1172,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		else
 			rpc->state = RPC_IN_SERVICE;
 	}
-	homa_rpc_unlock(rpc);
+	homa_rpc_unlock(rpc); /* Locked by homa_wait_for_message. */
 
 done:
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,

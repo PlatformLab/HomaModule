@@ -458,6 +458,21 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc, const char *locker)
 }
 
 /**
+ * homa_rpc_try_lock() - Acquire the lock for an RPC if it is available.
+ * @rpc:       RPC to lock.
+ * @locker:    Static string identifying the locking code. Normally ignored,
+ *             but used when debugging deadlocks.
+ * Return:     Nonzero if lock was successfully acquired, zero if it is
+ *             currently owned by someone else.
+ */
+static inline int homa_rpc_try_lock(struct homa_rpc *rpc, const char *locker)
+{
+	if (!spin_trylock_bh(&rpc->bucket->lock))
+		return 0;
+	return 1;
+}
+
+/**
  * homa_rpc_unlock() - Release the lock for an RPC.
  * @rpc:   RPC to unlock.
  */

@@ -531,7 +531,7 @@ discard:
 		kfree_skb(skb);
 	}
 	if (rpc)
-		homa_grant_check_rpc(rpc);
+		homa_grant_check_rpc(rpc); /* Unlocks rpc. */
 
 	while (num_acks > 0) {
 		num_acks--;
@@ -952,8 +952,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	 * the RPC, just skip it (waiting could deadlock), and it
 	 * will eventually get updated elsewhere.
 	 */
-	if (homa_bucket_try_lock(oldest->bucket, oldest->id,
-				 "homa_choose_fifo_grant")) {
+	if (homa_rpc_try_lock(oldest, "homa_choose_fifo_grant")) {
 		homa_grant_update_incoming(oldest, homa);
 		homa_rpc_unlock(oldest);
 	}
@@ -1106,7 +1105,7 @@ int homa_register_interests(struct homa_interest *interest,
 	if (id != 0) {
 		if (!homa_is_client(id))
 			return -EINVAL;
-		rpc = homa_find_client_rpc(hsk, id);
+		rpc = homa_find_client_rpc(hsk, id); /* Locks rpc. */
 		if (!rpc)
 			return -EINVAL;
 		if (rpc->interest && rpc->interest != interest) {
