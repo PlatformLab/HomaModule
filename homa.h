@@ -158,11 +158,11 @@ _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
 _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 #endif
 
-/** define SO_HOMA_SET_BUF: setsockopt option for specifying buffer region. */
-#define SO_HOMA_SET_BUF 10
+/** define SO_HOMA_RCVBUF: setsockopt option for specifying buffer region. */
+#define SO_HOMA_RCVBUF 10
 
-/** struct homa_set_buf - setsockopt argument for SO_HOMA_SET_BUF. */
-struct homa_set_buf_args {
+/** struct homa_rcvbuf_args - setsockopt argument for SO_HOMA_RCVBUF. */
+struct homa_rcvbuf_args {
 	/** @start: First byte of buffer region. */
 	void *start;
 

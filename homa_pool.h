@@ -152,6 +152,8 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 				  int *available);
 int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 			     __u32 *pages, int leave_locked);
+void     homa_pool_get_rcvbuf(struct homa_sock *hsk,
+			      struct homa_rcvbuf_args *args);
 int      homa_pool_init(struct homa_sock *hsk, void *buf_region,
 			__u64 region_size);
 void     homa_pool_release_buffers(struct homa_pool *pool,

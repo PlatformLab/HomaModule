@@ -40,8 +40,8 @@ static void set_bpages_needed(struct homa_pool *pool)
 }
 
 /**
- * homa_pool_init() - Initialize a homa_pool; any previous contents of the
- * objects are overwritten.
+ * homa_pool_init() - Initialize a homa_pool; any previous contents are
+ * destroyed.
  * @hsk:          Socket containing the pool to initialize.
  * @region:       First byte of the memory region for the pool, allocated
  *                by the application; must be page-aligned.
@@ -53,6 +53,8 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 {
 	struct homa_pool *pool = hsk->buffer_pool;
 	int i, result;
+
+	homa_pool_destroy(hsk->buffer_pool);
 
 	if (((uintptr_t)region) & ~PAGE_MASK)
 		return -EINVAL;
@@ -119,6 +121,21 @@ void homa_pool_destroy(struct homa_pool *pool)
 	kfree(pool->descriptors);
 	kfree(pool->cores);
 	pool->region = NULL;
+}
+
+/**
+ * homa_pool_get_rcvbuf() - Return information needed to handle getsockopt
+ * for HOMA_SO_RCVBUF.
+ * @hsk:          Socket on which getsockopt request was made.
+ * @args:         Store info here.
+ */
+void homa_pool_get_rcvbuf(struct homa_sock *hsk,
+			struct homa_rcvbuf_args *args)
+{
+	homa_sock_lock(hsk, "homa_pool_get_rcvbuf");
+	args->start = hsk->buffer_pool->region;
+	args->length = hsk->buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
+	homa_sock_unlock(hsk);
 }
 
 /**

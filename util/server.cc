@@ -61,7 +61,7 @@ void homa_server(int port)
 	int length;
 	struct homa_recvmsg_args recv_args;
 	struct msghdr hdr;
-	struct homa_set_buf_args arg;
+	struct homa_rcvbuf_args arg;
 	char *buf_region;
 	struct iovec vecs[HOMA_MAX_BPAGES];
 	int num_vecs;
@@ -91,10 +91,10 @@ void homa_server(int port)
 	}
 	arg.start = buf_region;
 	arg.length = 1000*HOMA_BPAGE_SIZE;
-	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
 	if (status < 0) {
-		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 		return;
 	}

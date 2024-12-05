@@ -264,42 +264,42 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 	EXPECT_EQ(ENOMEM, -homa_socket(&sock.sock));
 }
 
-TEST_F(homa_plumbing, homa_set_sock_opt__bad_level)
+TEST_F(homa_plumbing, homs_setsockopt__bad_level)
 {
-	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, 0, 0,
-		self->optval, sizeof(struct homa_set_buf_args)));
+	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, 0, 0,
+		self->optval, sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_set_sock_opt__bad_optname)
+TEST_F(homa_plumbing, homs_setsockopt__bad_optname)
 {
-	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
-		self->optval, sizeof(struct homa_set_buf_args)));
+	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
+		self->optval, sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_set_sock_opt__bad_optlen)
+TEST_F(homa_plumbing, homs_setsockopt__bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SET_BUF, self->optval,
-			sizeof(struct homa_set_buf_args) - 1));
+			SO_HOMA_RCVBUF, self->optval,
+			sizeof(struct homa_rcvbuf_args) - 1));
 }
-TEST_F(homa_plumbing, homa_set_sock_opt__copy_from_sockptr_fails)
+TEST_F(homa_plumbing, homs_setsockopt__copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SET_BUF, self->optval,
-			sizeof(struct homa_set_buf_args)));
+			SO_HOMA_RCVBUF, self->optval,
+			sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_set_sock_opt__copy_to_user_fails)
+TEST_F(homa_plumbing, homa_setsockopt__copy_to_user_fails)
 {
-	struct homa_set_buf_args args = {(void *) 0x100000, 5*HOMA_BPAGE_SIZE};
+	struct homa_rcvbuf_args args = {(void *) 0x100000, 5*HOMA_BPAGE_SIZE};
 
 	self->optval.user = &args;
 	mock_copy_to_user_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SET_BUF, self->optval,
-			sizeof(struct homa_set_buf_args)));
+			SO_HOMA_RCVBUF, self->optval,
+			sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_set_sock_opt__success)
+TEST_F(homa_plumbing, homa_setsockopt__success)
 {
-	struct homa_set_buf_args args;
+	struct homa_rcvbuf_args args;
 	char buffer[5000];
 
 	args.start = (void *) (((__u64) (buffer + PAGE_SIZE - 1))
@@ -308,11 +308,87 @@ TEST_F(homa_plumbing, homa_set_sock_opt__success)
 	self->optval.user = &args;
 	homa_pool_destroy(self->hsk.buffer_pool);
 	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
-			SO_HOMA_SET_BUF, self->optval,
-			sizeof(struct homa_set_buf_args)));
+			SO_HOMA_RCVBUF, self->optval,
+			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_EQ(args.start, self->hsk.buffer_pool->region);
 	EXPECT_EQ(64, self->hsk.buffer_pool->num_bpages);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->so_set_buf_calls);
+}
+
+
+TEST_F(homa_plumbing, homa_getsockopt__success)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val) + 10;
+
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
+		  10*HOMA_BPAGE_SIZE + 1000));
+	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF, (char *)&val, &size));
+	EXPECT_EQ((void *)0x40000, val.start);
+	EXPECT_EQ(10*HOMA_BPAGE_SIZE, val.length);
+	EXPECT_EQ(sizeof32(val), size);
+}
+TEST_F(homa_plumbing, homa_getsockopt__cant_read_size)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val);
+
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
+		(char *)&val, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__bad_level)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val);
+
+	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
+		(char *)&val, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__bad_optname)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val);
+
+	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF-1, (char *)&val, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__bad_length)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val) - 1;
+
+	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF, (char *)&val, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_size)
+{
+	struct homa_rcvbuf_args val = {.start = NULL, .length = 0};
+	int size = sizeof32(val) + 10;
+
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
+		  10*HOMA_BPAGE_SIZE + 1000));
+	mock_copy_to_user_errors = 1;
+
+	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF, (char *)&val, &size));
+	EXPECT_EQ(NULL, val.start);
+	EXPECT_EQ(sizeof32(val) + 10, size);
+}
+TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_value)
+{
+	struct homa_rcvbuf_args val = {.start = NULL, .length = 0};
+	int size = sizeof32(val) + 10;
+
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
+		  10*HOMA_BPAGE_SIZE + 1000));
+	mock_copy_to_user_errors = 2;
+
+	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF, (char *)&val, &size));
+	EXPECT_EQ(NULL, val.start);
+	EXPECT_EQ(sizeof32(val), size);
 }
 
 TEST_F(homa_plumbing, homa_sendmsg__args_not_in_user_space)

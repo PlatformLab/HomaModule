@@ -1,4 +1,4 @@
-.TH HOMA 7 2024-7-26 "Homa" "Linux Programmer's Manual"
+.TH HOMA 7 2024-12-4 "Homa" "Linux Programmer's Manual"
 .SH NAME
 homa \- Homa transport protocol
 .SH SYNOPSIS
@@ -147,7 +147,7 @@ is complete.
 Buffering must be set up by invoking
 .B setsockopt
 with the
-.BR SO_HOMA_SET_BUF
+.BR SO_HOMA_RCVBUF
 option.
 This call should be made exactly once per socket, before the first call to
 .BR recvmsg .
@@ -167,7 +167,7 @@ arguments must refer to a struct of the following type:
 .ps -1
 .vs -2
 .EX
-struct homa_set_buf_args {
+struct homa_rcvbuf_args {
     void *start;
     size_t length;
 };

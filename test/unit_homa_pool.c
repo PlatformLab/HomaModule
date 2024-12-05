@@ -112,10 +112,15 @@ TEST_F(homa_pool, homa_pool_init__cant_allocate_core_info)
 			100*HOMA_BPAGE_SIZE));
 }
 
-TEST_F(homa_pool, homa_pool_destroy__idempotent)
+TEST_F(homa_pool, homa_pool_get_rcvbuf)
 {
-	homa_pool_destroy(self->hsk.buffer_pool);
-	homa_pool_destroy(self->hsk.buffer_pool);
+	struct homa_rcvbuf_args args;
+
+	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
+		  10*HOMA_BPAGE_SIZE + 1000));
+	homa_pool_get_rcvbuf(&self->hsk, &args);
+	EXPECT_EQ(args.start, (void *)0x40000);
+	EXPECT_EQ(10*HOMA_BPAGE_SIZE, args.length);
 }
 
 TEST_F(homa_pool, homa_pool_get_pages__basics)

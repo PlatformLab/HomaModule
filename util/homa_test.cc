@@ -430,7 +430,7 @@ void test_set_buf(int fd)
 	int status;
 	char *region = (char *) mmap(NULL, 64*HOMA_BPAGE_SIZE,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
-	struct homa_set_buf_args arg;
+	struct homa_rcvbuf_args arg;
 
 	if (region == MAP_FAILED) {
 		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
@@ -439,10 +439,10 @@ void test_set_buf(int fd)
 
 	arg.start = region;
 	arg.length = 64*HOMA_BPAGE_SIZE;
-	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
 	if (status < 0)
-		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 }
 
@@ -925,13 +925,13 @@ int main(int argc, char** argv)
 		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
 		exit(1);
 	}
-	struct homa_set_buf_args arg;
+	struct homa_rcvbuf_args arg;
 	arg.start = buf_region;
 	arg.length = 1000*HOMA_BPAGE_SIZE;
-	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
 	if (status < 0) {
-		printf("Error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 		exit(1);
 	}

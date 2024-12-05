@@ -191,9 +191,9 @@ char *homa_metrics_print(struct homa *homa)
 		  m->reply_ns);
 		M("abort_calls               %15llu  Total invocations of abort kernel call\n",
 		  m->reply_calls);
-		M("so_set_buf_ns             %15llu  Time spent in setsockopt SO_HOMA_SET_BUF\n",
+		M("so_set_buf_ns             %15llu  Time spent in setsockopt SO_HOMA_RCVBUF\n",
 		  m->so_set_buf_ns);
-		M("so_set_buf_calls          %15llu  Total invocations of setsockopt SO_HOMA_SET_BUF\n",
+		M("so_set_buf_calls          %15llu  Total invocations of setsockopt SO_HOMA_RCVBUF\n",
 		  m->so_set_buf_calls);
 		M("grantable_lock_ns         %15llu  Time spent with homa->grantable_lock locked\n",
 		  m->grantable_lock_ns);

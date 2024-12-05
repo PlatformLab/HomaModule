@@ -972,7 +972,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
         , threads()
 {
 	sockaddr_in_union addr;
-	struct homa_set_buf_args arg;
+	struct homa_rcvbuf_args arg;
 
 	if (std::find(experiments.begin(), experiments.end(), experiment)
 			== experiments.end())
@@ -1012,10 +1012,10 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 	}
 	arg.start = buf_region;
 	arg.length = buf_size;
-	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
 	if (status < 0) {
-		printf("FATAL: error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+		printf("FATAL: error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 		exit(1);
 	}
@@ -1946,7 +1946,7 @@ homa_client::homa_client(int id, std::string& experiment)
         , receiving_threads()
         , sending_thread()
 {
-	struct homa_set_buf_args arg;
+	struct homa_rcvbuf_args arg;
 
 	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -1963,10 +1963,10 @@ homa_client::homa_client(int id, std::string& experiment)
 	}
 	arg.start = buf_region;
 	arg.length = buf_size;
-	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_SET_BUF, &arg,
+	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
 	if (status < 0) {
-		printf("FATAL: error in setsockopt(SO_HOMA_SET_BUF): %s\n",
+		printf("FATAL: error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
 		exit(1);
 	}

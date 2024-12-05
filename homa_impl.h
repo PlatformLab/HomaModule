@@ -1118,7 +1118,7 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end);
 void     homa_gap_retry(struct homa_rpc *rpc);
 int      homa_get_port(struct sock *sk, unsigned short snum);
 int      homa_getsockopt(struct sock *sk, int level, int optname,
-			 char __user *optval, int __user *option);
+			 char __user *optval, int __user *optlen);
 int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
 int      homa_init(struct homa *homa);

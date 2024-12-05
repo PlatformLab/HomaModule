@@ -10,7 +10,7 @@
  * homa::receiver::homa() - Constructor for receivers.
  * @fd:         Homa socket from which this object will receive incoming
  *              messages. The caller is responsible for setting up buffering
- *              on the socket using setsockopt with the SO_HOMA_SET_BUF option.
+ *              on the socket using setsockopt with the SO_HOMA_RCVBUF option.
  *              The file descriptor must be valid for the lifetime of this
  *              object.
  * @buf_region: Location of the buffer region that was allocated for

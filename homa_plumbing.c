@@ -847,12 +847,13 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		    sockptr_t optval, unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_set_buf_args args;
+	struct homa_rcvbuf_args args;
 	__u64 start = sched_clock();
 	int ret;
 
-	if (level != IPPROTO_HOMA || optname != SO_HOMA_SET_BUF ||
-	    optlen != sizeof(struct homa_set_buf_args))
+	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
+		return -ENOPROTOOPT;
+	if (optlen != sizeof(struct homa_rcvbuf_args))
 		return -EINVAL;
 
 	if (copy_from_sockptr(&args, optval, optlen))
@@ -865,7 +866,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			 sizeof(args)))
 		return -EFAULT;
 
-	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_SET_BUF");
+	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_RCV_BUF");
 	ret = homa_pool_init(hsk, (__force void __user *)args.start,
 			     args.length);
 	homa_sock_unlock(hsk);
@@ -877,18 +878,38 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 /**
  * homa_getsockopt() - Implements the getsockopt system call for Homa sockets.
  * @sk:      Socket on which the system call was invoked.
- * @level:   ??
+ * @level:   Selects level in the network stack to handle the request;
+ *           must be IPPROTO_HOMA.
  * @optname: Identifies a particular setsockopt operation.
  * @optval:  Address in user space where the option's value should be stored.
- * @option:  ??.
+ * @optlen:  Number of bytes available at optval; will be overwritten with
+ *           actual number of bytes stored.
  * Return:   0 on success, otherwise a negative errno.
  */
 int homa_getsockopt(struct sock *sk, int level, int optname,
-		    char __user *optval, int __user *option)
+		    char __user *optval, int __user *optlen)
 {
-	pr_warn("unimplemented getsockopt invoked on Homa socket: level %d, optname %d\n",
-		level, optname);
-	return -EINVAL;
+	struct homa_sock *hsk = homa_sk(sk);
+	struct homa_rcvbuf_args val;
+	int len;
+
+	if (copy_from_sockptr(&len, USER_SOCKPTR(optlen), sizeof(int)))
+		return -EFAULT;
+
+	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
+		return -ENOPROTOOPT;
+	if (len < sizeof(val))
+		return -EINVAL;
+
+	homa_pool_get_rcvbuf(hsk, &val);
+	len = sizeof(val);
+
+	if (copy_to_sockptr(USER_SOCKPTR(optlen), &len, sizeof(int)))
+		return -EFAULT;
+
+	if (copy_to_sockptr(USER_SOCKPTR(optval), &val, len))
+		return -EFAULT;
+	return 0;
 }
 
 /**
