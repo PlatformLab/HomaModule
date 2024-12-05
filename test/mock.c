@@ -1398,6 +1398,20 @@ void mock_set_core(int num)
 }
 
 /**
+ * mock_set_ipv6() - Invoked by some tests to make them work when tests
+ * are run with --ipv4. Changes the socket to an IPv6 socket and sets
+ * mock_mtu and mock_ipv6.
+ * @hsk:     Socket to reset for IPv6, if it's currently set for IPv4.
+ */
+void mock_set_ipv6(struct homa_sock *hsk)
+{
+	mock_ipv6 = true;
+	mock_mtu -= hsk->ip_header_length - HOMA_IPV6_HEADER_LENGTH;
+	hsk->ip_header_length = HOMA_IPV6_HEADER_LENGTH;
+	hsk->sock.sk_family = AF_INET6;
+}
+
+/**
  * mock_skb_new() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in

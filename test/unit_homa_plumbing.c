@@ -701,6 +701,7 @@ TEST_F(homa_plumbing, homa_recvmsg__rpc_has_error)
 			self->client_ip, self->server_ip, self->server_port,
 			self->client_id, 100, 2000);
 
+	mock_set_ipv6(&self->hsk);
 	EXPECT_NE(NULL, crpc);
 	crpc->completion_cookie = 44444;
 	homa_rpc_abort(crpc, -ETIMEDOUT);

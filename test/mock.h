@@ -62,6 +62,7 @@ extern struct ctl_table_header *
 		   mock_register_net_sysctl(struct net *net,
 		       const char *path, struct ctl_table *table);
 extern void        mock_set_core(int num);
+extern void        mock_set_ipv6(struct homa_sock *hsk);
 extern void        mock_spin_lock(spinlock_t *lock);
 extern void        mock_spin_unlock(spinlock_t *lock);
 extern int         mock_skb_count(void);

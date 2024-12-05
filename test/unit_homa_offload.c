@@ -156,6 +156,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 	struct common_header *h;
 	struct sk_buff *skb;
 
+	mock_ipv6 = true;
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
