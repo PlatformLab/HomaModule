@@ -1078,15 +1078,11 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		 */
 		return -EINVAL;
 	}
-	if (msg->msg_controllen != sizeof(control)) {
-		result = -EINVAL;
-		goto done;
-	}
+	if (msg->msg_controllen != sizeof(control))
+		return -EINVAL;
 	if (unlikely(copy_from_user(&control, (void __user *)msg->msg_control,
-				    sizeof(control)))) {
-		result = -EFAULT;
-		goto done;
-	}
+				    sizeof(control))))
+		return -EFAULT;
 	control.completion_cookie = 0;
 	tt_record3("homa_recvmsg starting, port %d, pid %d, flags %d",
 		   hsk->port, current->pid, control.flags);
