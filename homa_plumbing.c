@@ -1092,9 +1092,11 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
-	homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
+	result = homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
 				  control.bpage_offsets);
 	control.num_bpages = 0;
+	if (result != 0)
+		goto done;
 
 	rpc = homa_wait_for_message(hsk, (flags & MSG_DONTWAIT)
 			? (control.flags | HOMA_RECVMSG_NONBLOCKING)

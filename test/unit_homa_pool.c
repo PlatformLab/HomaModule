@@ -485,6 +485,13 @@ TEST_F(homa_pool, homa_pool_release_buffers__basics)
 	EXPECT_EQ(0, atomic_read(&pool->descriptors[0].refs));
 	pool->region = saved_region;
 }
+TEST_F(homa_pool, homa_pool_release_buffers__bogus_offset)
+{
+	__u32 buffer = self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
+
+	EXPECT_EQ(EINVAL, -homa_pool_release_buffers(self->hsk.buffer_pool,
+						       1, &buffer));
+}
 
 TEST_F(homa_pool, homa_pool_check_waiting__basics)
 {

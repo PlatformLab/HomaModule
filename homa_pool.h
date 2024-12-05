@@ -156,7 +156,7 @@ void     homa_pool_get_rcvbuf(struct homa_sock *hsk,
 			      struct homa_rcvbuf_args *args);
 int      homa_pool_init(struct homa_sock *hsk, void *buf_region,
 			__u64 region_size);
-void     homa_pool_release_buffers(struct homa_pool *pool,
+int      homa_pool_release_buffers(struct homa_pool *pool,
 				   int num_buffers, __u32 *buffers);
 
 #endif /* _HOMA_POOL_H */

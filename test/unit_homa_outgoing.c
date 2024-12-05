@@ -916,7 +916,6 @@ TEST_F(homa_outgoing, homa_resend_data__set_homa_info)
 	struct homa_rpc *crpc;
 
 	mock_set_ipv6(&self->hsk);
-	mock_ipv6 = true;
 	mock_net_device.gso_max_size = 5000;
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,

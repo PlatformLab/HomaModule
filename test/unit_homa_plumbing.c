@@ -614,6 +614,15 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
 }
+TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
+{
+	self->recvmsg_args.num_bpages = 1;
+	self->recvmsg_args.bpage_offsets[0] =
+			self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
+
+	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+}
 TEST_F(homa_plumbing, homa_recvmsg__error_in_homa_wait_for_message)
 {
 	self->hsk.shutdown = true;

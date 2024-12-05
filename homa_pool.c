@@ -397,14 +397,16 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
  * @num_buffers:  How many buffers to release.
  * @buffers:      Points to @num_buffers values, each of which is an offset
  *                from the start of the pool to the buffer to be released.
+ * Return:        0 for success, otherwise a negative errno.
  */
-void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
+int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 			       __u32 *buffers)
 {
+	int result = 0;
 	int i;
 
 	if (!pool->region)
-		return;
+		return result;
 	for (i = 0; i < num_buffers; i++) {
 		__u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
 		struct homa_bpage *bpage = &pool->descriptors[bpage_index];
@@ -412,11 +414,14 @@ void homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 		if (bpage_index < pool->num_bpages) {
 			if (atomic_dec_return(&bpage->refs) == 0)
 				atomic_inc(&pool->free_bpages);
+		} else {
+			result = -EINVAL;
 		}
 	}
 	tt_record3("Released %d bpages, free_bpages for port %d now %d",
 		   num_buffers, pool->hsk->port,
 		   atomic_read(&pool->free_bpages));
+	return result;
 }
 
 /**
