@@ -391,6 +391,13 @@ TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_value)
 	EXPECT_EQ(sizeof32(val), size);
 }
 
+TEST_F(homa_plumbing, homa_sendmsg__msg_name_null)
+{
+	self->sendmsg_hdr.msg_name = NULL;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__args_not_in_user_space)
 {
 	self->sendmsg_hdr.msg_control_is_user = 0;

@@ -924,15 +924,21 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
+	union sockaddr_in_union *addr;
 	__u64 start = sched_clock();
-	__u64 finish;
-	int result = 0;
 	struct homa_rpc *rpc = NULL;
-	union sockaddr_in_union *addr = (union sockaddr_in_union *)
-			msg->msg_name;
+	int result = 0;
+	__u64 finish;
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
 			start;
+
+	addr = (union sockaddr_in_union *)msg->msg_name;
+	if (!addr) {
+		result = -EINVAL;
+		goto error;
+	}
+
 	if (unlikely(!msg->msg_control_is_user)) {
 		tt_record("homa_sendmsg error: !msg->msg_control_is_user");
 		result = -EINVAL;
@@ -1041,7 +1047,6 @@ error:
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
 		   result, args.id);
-	tt_freeze();
 	return result;
 }
 
