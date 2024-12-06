@@ -227,7 +227,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 #define MAX_SKBS 20
 #endif /* __UNIT_TEST__ */
 	struct sk_buff *skbs[MAX_SKBS];
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	int start_offset = 0;
 	int end_offset = 0;
 #endif /* See strip.py */
@@ -310,7 +310,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					goto free_skbs;
 				copied += chunk_size;
 			}
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 			if (end_offset == 0) {
 				start_offset = offset;
 			} else if (end_offset != offset) {
@@ -323,7 +323,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		}
 
 free_skbs:
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		if (end_offset != 0) {
 			tt_record3("copied out bytes %d-%d for id %d",
 				   start_offset, end_offset, rpc->id);
@@ -681,7 +681,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		     struct homa_sock *hsk)
 {
 	struct resend_header *h = (struct resend_header *)skb->data;
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 #endif /* See strip.py */
 	struct busy_header busy;
@@ -823,7 +823,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 */
 	if (rpc && (rpc->state != RPC_INCOMING ||
 		    rpc->msgin.bytes_remaining)) {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		tt_record3("NEED_ACK arrived for id %d before message received, state %d, remaining %d",
 			   rpc->id, rpc->state, rpc->msgin.bytes_remaining);
 		homa_freeze(rpc, NEED_ACK_MISSING_DATA,

@@ -358,7 +358,7 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			struct homa_sock *hsk)
 {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	struct netdev_queue *txq;
 #endif /* See strip.py */
 	struct common_header *h;
@@ -406,7 +406,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 		 * a bogus "reference count").
 		 */
 		if (refcount_read(&skb->users) > 1) {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 			if (hsk->inet.sk.sk_family == AF_INET6) {
 				pr_notice("ip6_xmit didn't free Homa control packet (type %d) after error %d\n",
 					  h->type, result);
@@ -426,7 +426,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #endif /* See strip.py */
 		}
 	}
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 	if (netif_tx_queue_stopped(txq))
 		tt_record4("__homa_xmit_control found stopped txq for id %d, qid %d, num_queued %d, limit %d",
@@ -491,7 +491,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	__acquires(rpc->bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	struct netdev_queue *txq;
 #endif /* See strip.py */
 
@@ -530,7 +530,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
 		__homa_xmit_data(skb, rpc, priority);
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		txq = netdev_get_tx_queue(skb->dev, skb->queue_mapping);
 		if (netif_tx_queue_stopped(txq))
 			tt_record4("homa_xmit_data found stopped txq for id %d, qid %d, num_queued %d, limit %d",
@@ -555,7 +555,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
  */
 void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 #endif /* See strip.py */
 	struct dst_entry *dst;
@@ -762,7 +762,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 			return 0;
 		if (!list_empty(&homa->throttled_rpcs))
 			INC_METRIC(pacer_bytes, bytes);
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		if (idle < clock) {
 			if (homa->pacer_wake_time) {
 				__u64 lost = (homa->pacer_wake_time > idle)
@@ -815,7 +815,7 @@ int homa_pacer_main(void *transport)
 		 * incoming packets from being handled).
 		 */
 		set_current_state(TASK_INTERRUPTIBLE);
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		if (list_first_or_null_rcu(&homa->throttled_rpcs,
 					   struct homa_rpc, throttled_links) == NULL)
 			tt_record("pacer sleeping");

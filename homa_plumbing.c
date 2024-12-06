@@ -606,7 +606,7 @@ int __init homa_load(void)
 	}
 
 	homa_gro_hook_tcp();
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	tt_init("timetrace", homa->temp);
 #endif /* See strip.py */
 
@@ -645,7 +645,7 @@ void __exit homa_unload(void)
 	pr_notice("Homa module unloading\n");
 	exiting = true;
 
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
 
@@ -1255,7 +1255,7 @@ int homa_softirq(struct sk_buff *skb)
 	packets = skb;
 	prev_link = &packets;
 	for (skb = packets; skb; skb = next) {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 
 #endif /* See strip.py */
@@ -1567,7 +1567,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			if (action == 2) {
 				homa_rpc_log_active(homa, 0);
 			} else if (action == 3) {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
 #endif /* See strip.py */

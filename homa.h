@@ -188,7 +188,7 @@ struct homa_rcvbuf_args {
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 int     homa_abort(int sockfd, uint64_t id, int error);
 int     homa_send(int sockfd, const void *message_buf,
 		  size_t length, const struct sockaddr *dest_addr,

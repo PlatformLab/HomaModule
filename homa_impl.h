@@ -43,7 +43,7 @@
 #include <net/gro.h>
 #include <net/rps.h>
 
-#if 1 /* See strip.py --alt */
+#ifndef __STRIP__ /* See strip.py --alt */
 #include <linux/version.h>
 #include "homa.h"
 #else /* See strip.py */
@@ -124,7 +124,7 @@ void *mock_vmalloc(size_t size);
 #define per_cpu(name, core) (name[core])
 #endif /* __UNIT_TEST__ */
 
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 /* Null out things that confuse VSCode Intellisense */
 #ifdef __VSCODE__
 #define raw_smp_processor_id() 1
@@ -139,7 +139,7 @@ struct homa_peer;
 struct homa_sock;
 struct homa;
 
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
 #endif /* See strip.py */
 #include "homa_metrics.h"
@@ -1048,7 +1048,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
 		 (tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
 }
 
-#if 1 /* See strip.py --alt */
+#ifndef __STRIP__ /* See strip.py --alt */
 /**
  * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
  * provide a unique identifier for the address in a timetrace record.

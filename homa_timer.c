@@ -118,7 +118,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 	resend.priority = homa->num_priorities - 1;
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	if (homa_is_client(rpc->id)) {
 		us = "client";
 		them = "server";

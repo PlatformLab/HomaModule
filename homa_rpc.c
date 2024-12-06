@@ -602,7 +602,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
  */
 void homa_rpc_log_tt(struct homa_rpc *rpc)
 {
-#if 1 /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;

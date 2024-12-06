@@ -18,26 +18,26 @@ information is removed automatically. In other cases, it is controlled with
 #if statments in the following ways:
 
 * This entire block will be removed in the stripped version:
-    #if 1 /* See strip.py */
+    #ifndef __STRIP__ /* See strip.py */
     ...
     #endif /* See strip.py */
 
 * The #if and #endif statements will be removed, leaving just the code
   in between:
-    #if 0 /* See strip.py */
+    #ifdef __STRIP__ /* See strip.py */
     ...
     #endif /* See strip.py */
 
 * Everything will be removed except the code between #else and #endif:
-    #if 1 /* See strip.py */
+    #ifndef __STRIP__ /* See strip.py */
     ...
     #else /* See strip.py */
     ...
     #endif /* See strip.py */
 
 * It is also possible to strip using "alt" mode, with lines like this:
-    #if 1 /* See strip.py --alt */
-    #if 0 /* See strip.py --alt */
+    #ifndef __STRIP__ /* See strip.py --alt */
+    #ifdef __STRIP__ /* See strip.py --alt */
   If the --alt option was not specified then these lines are handled as
   if "--alt" wasn't present in the comments. However, if the --alt option
   was specified then these lines are ignored.
@@ -132,8 +132,9 @@ def scan(file, alt_mode):
     skip_statement = False
 
     # Values of 0 or 1 mean we're in the middle of a group of lines labeled
-    # with '#if /* GitHubOnly */'. 0 means we're including lines, 1 means
-    # we're stripping them. None means we're not in such a group.
+    # with '#ifndef __STRIP__' or "#ifdef __STRIP__". 0 means we're including
+    # lines, 1 means we're stripping them. None means we're not in such a
+    # group.
     in_labeled_skip = None
 
     # Used to strip out unit testing code. Value is one of:
@@ -217,16 +218,16 @@ def scan(file, alt_mode):
                 continue
             if in_labeled_skip == 1:
                 continue
-        if line.startswith('#if 1 /* See strip.py */') or (
-                line.startswith('#if 1 /* See strip.py --alt */')
+        if line.startswith('#ifndef __STRIP__ /* See strip.py */') or (
+                line.startswith('#ifndef __STRIP__ /* See strip.py --alt */')
                 and not alt_mode):
             if slines[-1].strip() == '':
                 delete_empty_line = True
             in_labeled_skip = 1
             check_braces = False
             continue
-        if line.startswith('#if 0 /* See strip.py */')or (
-                line.startswith('#if 0 /* See strip.py --alt */')
+        if line.startswith('#ifdef __STRIP__ /* See strip.py */') or (
+                line.startswith('#ifdef __STRIP__ /* See strip.py --alt */')
                 and not alt_mode):
             if slines[-1].strip() == '':
                 slines.pop()
