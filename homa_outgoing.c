@@ -983,9 +983,10 @@ void homa_pacer_stop(struct homa *homa)
  * homa_add_to_throttled() - Make sure that an RPC is on the throttled list
  * and wake up the pacer thread if necessary.
  * @rpc:     RPC with outbound packets that have been granted but can't be
- *           sent because of NIC queue restrictions.
+ *           sent because of NIC queue restrictions. Must be locked by caller.
  */
 void homa_add_to_throttled(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_rpc *candidate;

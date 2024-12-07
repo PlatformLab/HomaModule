@@ -47,8 +47,10 @@ struct homa_bpage {
 	};
 };
 
+#ifndef __STRIP__ /* See strip.py */
 _Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
 	       "homa_bpage overflowed a cache line");
+#endif /* See strip.py */
 
 /**
  * struct homa_pool_core - Holds core-specific data for a homa_pool (a bpage
