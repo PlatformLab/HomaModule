@@ -1054,7 +1054,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
  * provide a unique identifier for the address in a timetrace record.
  * @x:  Address (either IPv6 or IPv4-mapped IPv6)
  */
-static inline uint32_t tt_addr(const struct in6_addr x)
+static inline __u32 tt_addr(const struct in6_addr x)
 {
 	return is_mapped_ipv4(x) ? ntohl(x.in6_u.u6_addr32[3])
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
