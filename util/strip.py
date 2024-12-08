@@ -121,11 +121,8 @@ def scan(file, alt_mode):
 
     global exit_code
 
-    # True means the current line is in the middle of a /* ... */ comment
+    # True means the current line ends in the middle of a /* ... */ comment
     in_comment = False
-
-    # True means the current line is at least partially a comment line.
-    current_has_comment = False
 
     # True means we're in the middle of a multi-line statement that
     # should be skipped (drop until a semicolon is seen).
@@ -181,31 +178,33 @@ def scan(file, alt_mode):
         line_num += 1
 
         # pline is used for parsing; it is modified to remove
-        # uninteresting information such as comments and whitespace.
-        pline = line.rstrip()
+        # uninteresting information such as whitespace.
+        pline = line.strip()
 
-        # See if (part of) this line is a comment.
-        current_has_comment = in_comment
-        if in_comment:
-            index = pline.find('*/')
-            if index >= 0:
-                in_comment = False
-        else:
-            index = pline.find('/*')
-            if index >= 0:
-                current_has_comment = True
-                index2 = pline.find('*/', index+2)
-                if index2 < 0:
-                    in_comment = True
-            index = pline.find('//')
-            if index >= 0:
-                current_has_comment = True
-
-        pline = pline.strip()
         if pline.startswith('//') and not 'SPDX-License' in pline:
             # Strip // comment lines: these are used only for commenting
             # out debugging code.
             continue
+
+        # Extract the part of the line that is *not* in a /*...*/ comment
+        # (assume at most one comment per line).
+        cstart = pline.find('/*')
+        cend = pline.find('*/')
+        if cstart >= 0:
+            if cend >= 0:
+                non_comment = pline[0:cstart] + pline[cend+2:]
+                in_comment = False
+            else:
+                non_comment = pline[0:cstart]
+                in_comment = True
+        elif cend >= 0:
+                non_comment = pline[cend+2:]
+                in_comment = False
+        elif in_comment:
+            non_comment = ''
+        else:
+            non_comment = pline
+        non_comment = non_comment.strip()
 
         # Strip groups of lines labeled with special '#if'
         if in_labeled_skip != None:
@@ -350,7 +349,7 @@ def scan(file, alt_mode):
             open_index = len(slines)
 
         # Count statements
-        if pline[-1] == ';' and not current_has_comment:
+        if non_comment and non_comment[-1] == ';':
             statements_in_block += 1
 
         # The current line needs to be retained in the output.
