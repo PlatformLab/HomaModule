@@ -1041,7 +1041,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 
 	/* Don't reset silent_ticks for some packet types. */
-	h.common.type = NEED_ACK;
+	h.common.type = CUTOFFS;
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
 	homa_dispatch_pkts(mock_skb_new(self->server_ip, &h.common, 0, 0),
