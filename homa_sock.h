@@ -300,11 +300,8 @@ struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
 static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
 	__acquires(&hsk->lock)
 {
-	if (!spin_trylock_bh(&hsk->lock)) {
-//		printk(KERN_NOTICE "Slow path for socket %d, last locker %s",
-//				hsk->client_port, hsk->last_locker);
+	if (!spin_trylock_bh(&hsk->lock))
 		homa_sock_lock_slow(hsk);
-	}
 //	hsk->last_locker = locker;
 }
 
