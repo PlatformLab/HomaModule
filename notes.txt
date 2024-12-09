@@ -86,6 +86,9 @@ Notes for Homa implementation in Linux:
   * Eventually SoftIRQ wakes up to handle the original packet, which re-creates
     the RPC and it gets serviced a second time.
 
+* Use vmap to map the user-space buffer pool so that the kernel can use
+  memcpy rather than copy_to_user?
+
 * SoftIRQ processing can lock out kernel-to-user copies; add a preemption
   mechanism where the copying code can set a flag that it needs the lock,
   then SoftIRQ releases the lock until the flag is clear?
