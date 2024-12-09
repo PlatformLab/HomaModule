@@ -125,6 +125,7 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- October 2024: Homa now has an official IANA IP protocol number (146).
 - August 2024: upgraded to Linux 6.10.6.
 - July 2024: introduced "TCP hijacking", where Homa packets are sent as
   legitimate TCP segments (using TCP as the IP protocol) and then reclaimed
