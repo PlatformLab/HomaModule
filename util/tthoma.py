@@ -1288,7 +1288,7 @@ class Dispatcher:
 
     patterns.append({
         'name': 'softirq_start',
-        'regexp': 'homa_softirq: first packet'
+        'regexp': 'homa_softirq starting'
     })
 
     def __rpc_handoff(self, trace, time, core, match, interests):

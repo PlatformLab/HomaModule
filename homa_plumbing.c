@@ -1237,7 +1237,6 @@ int homa_softirq(struct sk_buff *skb)
 	struct sk_buff **prev_link, **other_link;
 	struct homa *homa = global_homa;
 	struct common_header *h;
-	int first_packet = 1;
 	int header_offset;
 	int pull_length;
 	__u64 start;
@@ -1252,15 +1251,12 @@ int homa_softirq(struct sk_buff *skb)
 	 * leaving the longer packets in the list. Also, perform various
 	 * prep/cleanup/error checking functions.
 	 */
+	tt_record("homa_softirq starting");
 	skb->next = skb_shinfo(skb)->frag_list;
 	skb_shinfo(skb)->frag_list = NULL;
 	packets = skb;
 	prev_link = &packets;
 	for (skb = packets; skb; skb = next) {
-#ifndef __STRIP__ /* See strip.py */
-		const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-
-#endif /* See strip.py */
 		next = skb->next;
 
 		/* Make the header available at skb->data, even if the packet
@@ -1286,6 +1282,8 @@ int homa_softirq(struct sk_buff *skb)
 		if (unlikely(skb->len < sizeof(struct common_header) ||
 			     h->type < DATA || h->type >= BOGUS ||
 			     skb->len < header_lengths[h->type - DATA])) {
+			const struct in6_addr saddr =
+					skb_canonical_ipv6_saddr(skb);
 			if (homa->verbose)
 				pr_warn("Homa %s packet from %s too short: %d bytes\n",
 					homa_symbol_for_type(h->type),
@@ -1295,13 +1293,6 @@ int homa_softirq(struct sk_buff *skb)
 			goto discard;
 		}
 
-		if (first_packet) {
-			tt_record4("homa_softirq: first packet from 0x%x:%d, id %llu, type %d",
-				   tt_addr(saddr), ntohs(h->sport),
-				   homa_local_id(h->sender_id), h->type);
-			first_packet = 0;
-		}
-
 		/* Check for FREEZE here, rather than in homa_incoming.c, so
 		 * it will work even if the RPC and/or socket are unknown.
 		 */
@@ -1309,7 +1300,8 @@ int homa_softirq(struct sk_buff *skb)
 			if (!tt_frozen) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
-					   ntohs(h->dport), tt_addr(saddr),
+					   ntohs(h->dport),
+					   tt_addr(skb_canonical_ipv6_saddr(skb)),
 					   ntohs(h->sport),
 					   homa_local_id(h->sender_id));
 				tt_freeze();
