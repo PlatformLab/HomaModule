@@ -381,7 +381,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 
 	ASSERT_FALSE(crpc == NULL);
 	crpc->peer->acks[0] = (struct homa_ack) {
-		.client_port = htons(100),
 		.server_port = htons(200),
 		.client_id = cpu_to_be64(1000)};
 	crpc->peer->num_acks = 1;
@@ -389,7 +388,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 			unit_iov_iter((void *) 1000, 500), 0));
 	homa_rpc_unlock(crpc);
 	homa_skb_get(crpc->msgout.packets, &h, 0, sizeof(h));
-	EXPECT_STREQ("client_port 100, server_port 200, client_id 1000",
+	EXPECT_STREQ("server_port 200, client_id 1000",
 			unit_ack_string(&h.ack));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)

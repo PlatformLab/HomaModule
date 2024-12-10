@@ -53,7 +53,7 @@ FIXTURE_SETUP(homa_offload)
 			.sender_id = cpu_to_be64(1000)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0, 0},
+			.ack = {0, 0},
 			.retransmit = 0,
 			.seg = {.offset = htonl(2000)}};
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
@@ -267,7 +267,6 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	h.incoming = htonl(10000);
 	h.cutoff_version = 0;
 	h.ack.client_id = 0;
-	h.ack.client_port = 0;
 	h.ack.server_port = 0;
 	h.retransmit = 0;
 	h.seg.offset = htonl(2000);

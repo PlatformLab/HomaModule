@@ -398,8 +398,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		used = homa_snprintf(buffer, buf_len, used, ", acks");
 		for (i = 0; i < count; i++) {
 			used = homa_snprintf(buffer, buf_len, used,
-					     " [cp %d, sp %d, id %llu]",
-					     ntohs(h->acks[i].client_port),
+					     " [sp %d, id %llu]",
 					     ntohs(h->acks[i].server_port),
 					     be64_to_cpu(h->acks[i].client_id));
 		}

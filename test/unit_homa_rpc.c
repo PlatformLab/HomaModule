@@ -47,7 +47,7 @@ FIXTURE_SETUP(homa_rpc)
 			.sender_id = self->client_id},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0, 0},
+			.ack = {0, 0},
 			.retransmit = 0,
 			.seg = {.offset = 0}};
 	self->iovec.iov_base = (void *) 2000;
@@ -305,7 +305,6 @@ TEST_F(homa_rpc, homa_rpc_acked__basics)
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.client_port = htons(self->client_port);
 	ack.server_port = htons(self->server_port);
 	ack.client_id = cpu_to_be64(self->client_id);
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
@@ -324,7 +323,6 @@ TEST_F(homa_rpc, homa_rpc_acked__lookup_socket)
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.client_port = htons(self->client_port);
 	ack.server_port = htons(self->server_port);
 	ack.client_id = cpu_to_be64(self->client_id);
 	homa_rpc_acked(&self->hsk, self->client_ip, &ack);
@@ -343,7 +341,6 @@ TEST_F(homa_rpc, homa_rpc_acked__no_such_socket)
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.client_port = htons(self->client_port);
 	ack.server_port = htons(self->server_port+1);
 	ack.client_id = cpu_to_be64(self->client_id);
 	homa_rpc_acked(&hsk, self->client_ip, &ack);
@@ -362,7 +359,6 @@ TEST_F(homa_rpc, homa_rpc_acked__no_such_rpc)
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
 	ASSERT_NE(NULL, srpc);
-	ack.client_port = htons(self->client_port);
 	ack.server_port = htons(self->server_port);
 	ack.client_id = cpu_to_be64(self->client_id+10);
 	homa_rpc_acked(&hsk, self->client_ip, &ack);

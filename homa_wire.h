@@ -177,9 +177,6 @@ struct homa_ack {
 	 */
 	__be64 client_id;
 
-	/** @client_port: The client-side port for the RPC. */
-	__be16 client_port;
-
 	/** @server_port: The server-side port for the RPC. */
 	__be16 server_port;
 } __packed;
@@ -278,7 +275,7 @@ struct data_header {
 	 */
 	__u8 retransmit;
 
-	__u8 pad;
+	char pad[3];
 
 	/** @seg: First of possibly many segments. */
 	struct seg_header seg;
@@ -286,7 +283,7 @@ struct data_header {
 _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
 	       "data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 _Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
-	       "data_header too small: Homa doesn't currently have codeto pad data packets");
+	       "data_header too small: Homa doesn't currently have code to pad data packets");
 _Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) &
 		0x3) == 0,
 	       " data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");

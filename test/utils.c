@@ -67,7 +67,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		},
 		.message_length = htonl(resp_length),
 		.incoming = htonl(10000),
-		.ack = {0, 0, 0},
+		.ack = {0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0}
@@ -361,7 +361,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		},
 		.message_length = htonl(req_length),
 		.incoming = htonl(10000),
-		.ack = {0, 0, 0},
+		.ack = {0, 0},
 		.cutoff_version = 0,
 		.retransmit = 0,
 		.seg = {.offset = 0}
@@ -446,9 +446,8 @@ char *unit_ack_string(struct homa_ack *ack)
 	static char buffer[1000];
 
 	snprintf(buffer, sizeof(buffer),
-			"client_port %d, server_port %d, client_id %llu",
-			ntohs(ack->client_port), ntohs(ack->server_port),
-			be64_to_cpu(ack->client_id));
+			"server_port %d, client_id %llu",
+			ntohs(ack->server_port), be64_to_cpu(ack->client_id));
 	return buffer;
 }
 

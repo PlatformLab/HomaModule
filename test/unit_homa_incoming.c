@@ -164,7 +164,7 @@ FIXTURE_SETUP(homa_incoming)
 			.sender_id = cpu_to_be64(self->client_id)},
 			.message_length = htonl(10000),
 			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0, 0},
+			.ack = {0, 0},
 			.retransmit = 0,
 			.seg = {.offset = 0}};
 	unit_log_clear();
@@ -1073,7 +1073,6 @@ TEST_F(homa_incoming, homa_dispatch_pkts__handle_ack)
 
 	ASSERT_NE(NULL, srpc);
 	self->data.ack = (struct homa_ack) {
-			.client_port = htons(self->client_port),
 		       .server_port = htons(self->server_port),
 		       .client_id = cpu_to_be64(self->client_id)};
 	self->data.common.sender_id = cpu_to_be64(self->client_id+10);
@@ -1088,7 +1087,6 @@ TEST_F(homa_incoming, homa_dispatch_pkts__too_many_acks)
 	struct sk_buff *skb, *skb2, *skb3;
 
 	self->data.ack = (struct homa_ack) {
-			.client_port = htons(self->client_port),
 		       .server_port = htons(self->server_port),
 		       .client_id = cpu_to_be64(self->client_id)};
 	self->data.common.sender_id = cpu_to_be64(self->client_id+10);
@@ -1748,14 +1746,13 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = NEED_ACK}};
 
-	peer->acks[0].client_port = htons(self->client_port);
 	peer->acks[0].server_port = htons(self->server_port);
 	peer->acks[0].client_id = cpu_to_be64(self->client_id+2);
 	peer->num_acks = 1;
 	mock_xmit_log_verbose = 1;
 	homa_dispatch_pkts(mock_skb_new(self->server_ip, &h.common, 0, 0),
 			&self->homa);
-	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 1234, acks [cp 40000, sp 99, id 1236]",
+	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 1234, acks [sp 99, id 1236]",
 			unit_log_get());
 }
 
@@ -1800,11 +1797,9 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 	EXPECT_EQ(2, unit_list_length(&self->hsk2.active_rpcs));
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
-	h.acks[0] = (struct homa_ack) {.client_port = htons(self->client_port),
-			.server_port = htons(self->server_port),
+	h.acks[0] = (struct homa_ack) {.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->server_id+5)};
-	h.acks[1] = (struct homa_ack) {.client_port = htons(self->client_port),
-			.server_port = htons(self->server_port),
+	h.acks[1] = (struct homa_ack) {.server_port = htons(self->server_port),
 			.client_id = cpu_to_be64(self->server_id+1)};
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->homa);
