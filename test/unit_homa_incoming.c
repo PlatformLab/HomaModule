@@ -1789,9 +1789,9 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id+2, 100, 5000);
 	struct ack_header h = {.common = {
-			.sport = htons(self->client_port + 1),
+			.sport = htons(self->client_port),
 			.dport = htons(self->hsk2.port),
-			.sender_id = cpu_to_be64(self->client_id),
+			.sender_id = cpu_to_be64(self->client_id + 10),
 			.type = ACK},
 			.num_acks = htons(2)};
 

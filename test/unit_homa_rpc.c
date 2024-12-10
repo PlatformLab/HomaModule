@@ -705,17 +705,16 @@ TEST_F(homa_rpc, homa_find_server_rpc)
 	ASSERT_NE(NULL, srpc3);
 	ASSERT_NE(NULL, srpc4);
 	EXPECT_EQ(srpc1, homa_find_server_rpc(&self->hsk, self->client_ip,
-			self->client_port, srpc1->id));
+		  srpc1->id));
 	homa_rpc_unlock(srpc1);
 	EXPECT_EQ(srpc2, homa_find_server_rpc(&self->hsk, self->client_ip,
-			self->client_port, srpc2->id));
+		  srpc2->id));
 	homa_rpc_unlock(srpc2);
 	EXPECT_EQ(srpc3, homa_find_server_rpc(&self->hsk, self->client_ip,
-			self->client_port+1, srpc3->id));
+		  srpc3->id));
 	homa_rpc_unlock(srpc3);
 	EXPECT_EQ(srpc4, homa_find_server_rpc(&self->hsk, self->client_ip,
-			self->client_port+1, srpc4->id));
+		  srpc4->id));
 	homa_rpc_unlock(srpc4);
-	EXPECT_EQ(NULL, homa_find_server_rpc(&self->hsk, self->client_ip,
-			self->client_port, 3));
+	EXPECT_EQ(NULL, homa_find_server_rpc(&self->hsk, self->client_ip, 3));
 }

@@ -212,7 +212,6 @@ error:
 void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		    struct homa_ack *ack)
 {
-	__u16 client_port = ntohs(ack->client_port);
 	__u16 server_port = ntohs(ack->server_port);
 	__u64 id = homa_local_id(ack->client_id);
 	struct homa_sock *hsk2 = hsk;
@@ -228,7 +227,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		if (!hsk2)
 			goto done;
 	}
-	rpc = homa_find_server_rpc(hsk2, saddr, client_port, id);
+	rpc = homa_find_server_rpc(hsk2, saddr, id);
 	if (rpc) {
 		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
 		homa_rpc_free(rpc);
@@ -507,7 +506,6 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  * a packet belongs to, if there is any. Thread-safe without socket lock.
  * @hsk:      Socket via which packet was received.
  * @saddr:    Address from which the packet was sent.
- * @sport:    Port at @saddr from which the packet was sent.
  * @id:       Unique identifier for the RPC (must have server bit set).
  *
  * Return:    A pointer to the homa_rpc matching the arguments, or NULL
@@ -515,8 +513,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *            unlock it by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-				      const struct in6_addr *saddr, __u16 sport,
-				      __u64 id)
+				      const struct in6_addr *saddr, __u64 id)
 	__acquires(&srpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
@@ -524,8 +521,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 
 	homa_bucket_lock(bucket, id, __func__);
 	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
-		if (srpc->id == id && srpc->dport == sport &&
-		    ipv6_addr_equal(&srpc->peer->addr, saddr))
+		if (srpc->id == id && ipv6_addr_equal(&srpc->peer->addr, saddr))
 			return srpc;
 	}
 	homa_bucket_unlock(bucket, id);

@@ -1007,8 +1007,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		canonical_dest = canonical_ipv6_addr(addr);
 
-		rpc = homa_find_server_rpc(hsk, &canonical_dest,
-					   ntohs(addr->in6.sin6_port), args.id);
+		rpc = homa_find_server_rpc(hsk, &canonical_dest, args.id);
 		if (!rpc) {
 			/* Return without an error if the RPC doesn't exist;
 			 * this could be totally valid (e.g. client is

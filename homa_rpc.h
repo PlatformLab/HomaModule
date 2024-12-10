@@ -418,8 +418,7 @@ struct homa_rpc
 	       *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
 struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk,
-				     const struct in6_addr *saddr, __u16 sport,
-				     __u64 id);
+				     const struct in6_addr *saddr, __u64 id);
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
 void     homa_rpc_free(struct homa_rpc *rpc);

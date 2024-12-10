@@ -441,7 +441,6 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 					}
 				} else {
 					rpc = homa_find_server_rpc(hsk, &saddr,
-								   ntohs(h->common.sport),
 								   id);
 				}
 			} else {
