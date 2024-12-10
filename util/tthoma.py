@@ -234,6 +234,10 @@ grants = GrantDict()
 # tx_in_nic:      Number of bytes of data that have been passed to the NIC
 #                 but not yet returned via the tx completion queue, as of the
 #                 end of the interval
+# tx_nic_rx:      Number of bytes of data that have been received by the
+#                 destination but their packet buffers haven't been returned
+#                 from the NIC via the completion queue, as of the end of
+#                 the interval
 # tx_qdisc:       Bytes of data that have been passed to ip*xmit but not
 #                 yet passed to the NIC, as of the end of the interval (large
 #                 numbers probably due to qdisc)
@@ -3929,6 +3933,7 @@ class AnalyzeIntervals:
                     'tx_nic_pkts':      0,
                     'tx_nic_bytes':     0,
                     'tx_in_nic':        0,
+                    'tx_nic_rx':        0,
                     'tx_qdisc':         0,
                     'tx_q':             0,
                     'tx_gro_bytes':     0,
@@ -4084,7 +4089,6 @@ class AnalyzeIntervals:
                 nic_interval = get_interval(tx_node, tnic)
             else:
                 tnic = None
-            tnic = pkt['nic'] if 'nic' in pkt else None
             tfree = pkt['free_tx_skb'] if 'free_tx_skb' in pkt else None
             tgro = pkt['gro'] if 'gro' in pkt else None
 
@@ -4103,6 +4107,7 @@ class AnalyzeIntervals:
 
                 if 'nic' in pkt:
                     tnic = pkt['nic']
+                    nic_interval = get_interval(tx_node, tnic)
                     node_xmits[tx_node].append([pkt['nic'],
                             tso_length + data_overhead_bytes])
                     nic_interval['tx_nic_pkts'] += 1
@@ -4127,6 +4132,9 @@ class AnalyzeIntervals:
                         start = traces[tx_node]['first_time']
                         add_to_intervals(tx_node, start, tfree, 'tx_in_nic',
                                 tso_length)
+                    if tgro != None:
+                        add_to_intervals(tx_node, tgro, tfree, 'tx_nic_rx',
+                                tso_length)
 
             if tgro != None:
                 interval = get_interval(tx_node, tgro)
@@ -4144,6 +4152,8 @@ class AnalyzeIntervals:
                             tnic, 'rx_data_qdisc', length)
             elif not nic_data:
                 tnic = txmit
+                if tnic != None:
+                    nic_interval = get_interval(tx_node, tnic)
             elif txmit != None:
                     add_to_intervals(rx_node, txmit, traces[tx_node]['last_time'],
                             'rx_data_qdisc', length)
@@ -7167,10 +7177,10 @@ class AnalyzeTxintervals:
                     'of the interval\n')
             f.write('# Reqs:       Request messages that have been started '
                     'but not fully\n')
-            f.write('              transmitted as of the end of the interval\n')
+            f.write('#             transmitted as of the end of the interval\n')
             f.write('# Resps:      Response messages that have been started '
                     'but not fully\n')
-            f.write('              transmitted as of the end of the interval\n')
+            f.write('#             transmitted as of the end of the interval\n')
             f.write('# Pkts:       Packets transmitted during the interval\n')
             f.write('# QDisc:      KB of data that have been passed to ip*xmit '
                     'but not yet\n')
@@ -7184,9 +7194,13 @@ class AnalyzeTxintervals:
             f.write('#             link speed)\n')
             f.write('# InNic:      KB of data that have been queued for the '
                     'NIC but whose packets\n')
-            f.write('#             haven\'t been returned after transmission, '
-                    'as of the end of\n')
-            f.write('#             the interval\n')
+            f.write('# NicRx:      KB of data that are still in the NIC\'s '
+                    'possession (their packets\n')
+            f.write('#             haven\'t been returned after transmission) '
+                    'even though the data\n')
+            f.write('#             has been received by the destination, as '
+                    'of the end of the\n')
+            f.write('#             interval\n')
             f.write('# FreeKB:     KB of skb data freed after NIC notified '
                     'transmission complete\n')
             f.write('# MinFr:      Smallest p[\'free_tx_skb\'] - p[\'nic\'] for a '
@@ -7214,7 +7228,7 @@ class AnalyzeTxintervals:
                     'during the interval\n')
 
             f.write('\n#   Time   Gbps  TxKB  RPCs   Reqs  Resps')
-            f.write(' Pkts Qdisc NicKB NQEst InNic FreeKB')
+            f.write(' Pkts Qdisc NicKB NQEst InNic NicRx FreeKB')
             f.write('  MinFr  MaxFr  MinGF  MaxGF')
             f.write(' GXmit  GGro GAvail   GNew\n')
             total = 0
@@ -7230,11 +7244,12 @@ class AnalyzeTxintervals:
                         interval['rpcs_live'],
                         interval['tx_live_req'],
                         interval['tx_live_resp']))
-                f.write(' %4d %5.0f %5.0f %5.1f %5.0f  %5.0f' % (
+                f.write(' %4d %5.0f %5.0f %5.1f %5.0f %5.0f  %5.0f' % (
                         interval['tx_pkts'], interval['tx_qdisc'] * 1e-3,
                         interval['tx_nic_bytes'] * 1e-3,
                         interval['tx_q'] * 8 / (options.gbps * 1000),
                         interval['tx_in_nic'] * 1e-3,
+                        interval['tx_nic_rx'] * 1e-3,
                         interval['tx_free_bytes'] * 1e-3))
                 v = interval['tx_min_free']
                 min_free = '%.1f' % v if v != 0 else ''
