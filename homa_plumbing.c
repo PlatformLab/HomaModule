@@ -1330,7 +1330,8 @@ discard:
 
 	/* Now process the longer packets. Each iteration of this loop
 	 * collects all of the packets for a particular RPC and dispatches
-	 * them.
+	 * them (batching the packets for an RPC allows more efficient
+	 * generation of grants).
 	 */
 	while (packets) {
 		struct in6_addr saddr, saddr2;
