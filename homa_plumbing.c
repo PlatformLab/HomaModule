@@ -1490,6 +1490,9 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	sock_poll_wait(file, sock, wait);
 	mask = POLLOUT | POLLWRNORM;
 
+	if (homa_sk(sk)->shutdown)
+		mask |= POLLIN;
+
 	if (!list_empty(&homa_sk(sk)->ready_requests) ||
 	    !list_empty(&homa_sk(sk)->ready_responses))
 		mask |= POLLIN | POLLRDNORM;

@@ -1078,3 +1078,27 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	kfree_skb(icmp);
 	kfree_skb(failed);
 }
+
+TEST_F(homa_plumbing, homa_poll__not_readable)
+{
+	struct socket sock = {.sk = &self->hsk.sock};
+
+	EXPECT_EQ(POLLOUT | POLLWRNORM, homa_poll(NULL, &sock, NULL));
+}
+TEST_F(homa_plumbing, homa_poll__socket_shutdown)
+{
+	struct socket sock = {.sk = &self->hsk.sock};
+
+	homa_sock_shutdown(&self->hsk);
+	EXPECT_EQ(POLLIN | POLLOUT | POLLWRNORM, homa_poll(NULL, &sock, NULL));
+}
+TEST_F(homa_plumbing, homa_poll__socket_readable)
+{
+	struct socket sock = {.sk = &self->hsk.sock};
+
+	unit_client_rpc(&self->hsk, UNIT_RCVD_MSG, self->client_ip,
+			       self->server_ip, self->server_port,
+			       self->client_id, 100, 100);
+	EXPECT_EQ(POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM,
+		  homa_poll(NULL, &sock, NULL));
+}
