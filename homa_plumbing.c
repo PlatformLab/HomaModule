@@ -1486,11 +1486,6 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	struct sock *sk = sock->sk;
 	__u32 mask;
 
-	/* It seems to be standard practice for poll functions *not* to
-	 * acquire the socket lock, so we don't do it here; not sure
-	 * why...
-	 */
-
 	sock_poll_wait(file, sock, wait);
 	mask = POLLOUT | POLLWRNORM;
 
