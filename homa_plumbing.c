@@ -1387,7 +1387,7 @@ discard:
  */
 int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
-	pr_warn("unimplemented backlog_rcv invoked on Homa socket\n");
+	pr_warn_once("unimplemented backlog_rcv invoked on Homa socket\n");
 	kfree_skb(skb);
 	return 0;
 }
@@ -1402,34 +1402,34 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
  */
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
-	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	const struct iphdr *iph = ip_hdr(skb);
+	const struct icmphdr *icmp = icmp_hdr(skb);
 	struct homa *homa = global_homa;
-	int type = icmp_hdr(skb)->type;
-	int code = icmp_hdr(skb)->code;
+	struct in6_addr daddr;
+	int type = icmp->type;
+	int code = icmp->code;
+	struct iphdr *iph;
+	int error = 0;
+	int port = 0;
 
+	iph = (struct iphdr *)(skb->data);
+	daddr = ipv4_to_ipv6(iph->daddr);
 	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
-		char *icmp = (char *)icmp_hdr(skb);
-		struct common_header *h;
+		struct common_header *h = (struct common_header *)(skb->data +
+				iph->ihl * 4);
 
-		iph = (struct iphdr *)(icmp + sizeof(struct icmphdr));
-		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
-				+ iph->ihl * 4);
-		homa_abort_rpcs(homa, &saddr, ntohs(h->dport), -ENOTCONN);
+		port = ntohs(h->dport);
+		error = -ENOTCONN;
 	} else if (type == ICMP_DEST_UNREACH) {
-		int error;
-
 		if (code == ICMP_PROT_UNREACH)
 			error = -EPROTONOSUPPORT;
 		else
 			error = -EHOSTUNREACH;
-		tt_record2("ICMP destination unreachable: 0x%x (daddr 0x%x)",
-			   ntohl(iph->saddr), ntohl(iph->daddr));
-		homa_abort_rpcs(homa, &saddr, 0, error);
 	} else {
 		pr_notice("%s invoked with info %x, ICMP type %d, ICMP code %d\n",
 			  __func__, info, type, code);
 	}
+	if (error != 0)
+		homa_abort_rpcs(homa, &daddr, port, error);
 	return 0;
 }
 
@@ -1450,30 +1450,22 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
 	struct homa *homa = global_homa;
+	int error = 0;
+	int port = 0;
 
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
-		char *icmp = (char *)icmp_hdr(skb);
-		struct common_header *h;
+		const struct common_header *h;
 
-		iph = (struct ipv6hdr *)(icmp + sizeof(struct icmphdr));
-		h = (struct common_header *)(icmp + sizeof(struct icmphdr)
-				+ HOMA_IPV6_HEADER_LENGTH);
-		homa_abort_rpcs(homa, &iph->daddr, ntohs(h->dport), -ENOTCONN);
-	} else if (type == ICMPV6_DEST_UNREACH) {
-		int error;
-
-		if (code == ICMP_PROT_UNREACH)
-			error = -EPROTONOSUPPORT;
-		else
-			error = -EHOSTUNREACH;
-		tt_record2("ICMPv6 destination unreachable: 0x%x (daddr 0x%x)",
-			   tt_addr(iph->saddr), tt_addr(iph->daddr));
-		homa_abort_rpcs(homa, &iph->daddr, 0, error);
-	} else {
-		if (homa->verbose)
-			pr_notice("%s invoked with info %x, ICMP type %d, ICMP code %d\n",
-				  __func__, info, type, code);
+		h = (struct common_header *)(skb->data + sizeof(*iph));
+		port = ntohs(h->dport);
+		error = -ENOTCONN;
+	} else if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_ADDR_UNREACH) {
+		error = -EHOSTUNREACH;
+	} else if (type == ICMPV6_PARAMPROB && code == ICMPV6_UNK_NEXTHDR) {
+		error = -EPROTONOSUPPORT;
 	}
+	if (error != 0)
+		homa_abort_rpcs(homa, &iph->daddr, port, error);
 	return 0;
 }
 

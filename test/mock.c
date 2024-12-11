@@ -1417,7 +1417,9 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
  * @h:            Header for the buffer; actual length and contents depend
- *                on the type.
+ *                on the type. If NULL then no Homa header is added;
+ *                extra_bytes of total space will be allocated for the
+ *                skb, initialized to zero.
  * @extra_bytes:  How much additional data to add to the buffer after
  *                the header.
  * @first_value:  Determines the data contents: the first __u32 will have
@@ -1433,37 +1435,41 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	struct sk_buff *skb;
 	unsigned char *p;
 
-	switch (h->type) {
-	case DATA:
-		header_size = sizeof(struct data_header);
-		break;
-	case GRANT:
-		header_size = sizeof(struct grant_header);
-		break;
-	case RESEND:
-		header_size = sizeof(struct resend_header);
-		break;
-	case UNKNOWN:
-		header_size = sizeof(struct unknown_header);
-		break;
-	case BUSY:
-		header_size = sizeof(struct busy_header);
-		break;
-	case CUTOFFS:
-		header_size = sizeof(struct cutoffs_header);
-		break;
-	case FREEZE:
-		header_size = sizeof(struct freeze_header);
-		break;
-	case NEED_ACK:
-		header_size = sizeof(struct need_ack_header);
-		break;
-	case ACK:
-		header_size = sizeof(struct ack_header);
-		break;
-	default:
-		header_size = sizeof(struct common_header);
-		break;
+	if (h) {
+		switch (h->type) {
+		case DATA:
+			header_size = sizeof(struct data_header);
+			break;
+		case GRANT:
+			header_size = sizeof(struct grant_header);
+			break;
+		case RESEND:
+			header_size = sizeof(struct resend_header);
+			break;
+		case UNKNOWN:
+			header_size = sizeof(struct unknown_header);
+			break;
+		case BUSY:
+			header_size = sizeof(struct busy_header);
+			break;
+		case CUTOFFS:
+			header_size = sizeof(struct cutoffs_header);
+			break;
+		case FREEZE:
+			header_size = sizeof(struct freeze_header);
+			break;
+		case NEED_ACK:
+			header_size = sizeof(struct need_ack_header);
+			break;
+		case ACK:
+			header_size = sizeof(struct ack_header);
+			break;
+		default:
+			header_size = sizeof(struct common_header);
+			break;
+		}
+	} else {
+		header_size = 0;
 	}
 	skb = malloc(sizeof(struct sk_buff));
 	memset(skb, 0, sizeof(*skb));
@@ -1474,17 +1480,27 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	ip_size = mock_ipv6 ? sizeof(struct ipv6hdr) : sizeof(struct iphdr);
 	data_size = SKB_DATA_ALIGN(ip_size + header_size + extra_bytes);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
-	skb->head = malloc(data_size + shinfo_size);
-	memset(skb->head, 0, data_size + shinfo_size);
+	if (h) {
+		skb->head = malloc(data_size + shinfo_size);
+		memset(skb->head, 0, data_size + shinfo_size);
+	} else {
+		skb->head = malloc(extra_bytes);
+		memset(skb->head, 0, extra_bytes);
+
+	}
 	skb->data = skb->head;
 	skb_reset_tail_pointer(skb);
 	skb->end = skb->tail + data_size;
 	skb_reserve(skb, ip_size);
 	skb_reset_transport_header(skb);
-	p = skb_put(skb, header_size);
-	memcpy(skb->data, h, header_size);
-	p = skb_put(skb, extra_bytes);
-	unit_fill_data(p, extra_bytes, first_value);
+	if (header_size != 0) {
+		p = skb_put(skb, header_size);
+		memcpy(skb->data, h, header_size);
+	}
+	if (h && extra_bytes != 0) {
+		p = skb_put(skb, extra_bytes);
+		unit_fill_data(p, extra_bytes, first_value);
+	}
 	skb->users.refs.counter = 1;
 	if (mock_ipv6) {
 		ipv6_hdr(skb)->version = 6;
