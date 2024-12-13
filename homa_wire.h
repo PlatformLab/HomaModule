@@ -64,13 +64,6 @@ enum homa_packet_type {
 #define HOMA_MAX_HEADER 90
 
 /**
- * define ETHERNET_MAX_PAYLOAD - Maximum length of an Ethernet packet,
- * excluding preamble, frame delimeter, VLAN header, CRC, and interpacket gap;
- * i.e. all of this space is available for Homa.
- */
-#define ETHERNET_MAX_PAYLOAD 1500
-
-/**
  * define HOMA_MAX_PRIORITIES - The maximum number of priority levels that
  * Homa can use (the actual number can be restricted to less than this at
  * runtime). Changing this value will affect packet formats.
