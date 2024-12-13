@@ -112,11 +112,11 @@ struct homa_recvmsg_args {
 	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer
 	 * region for the socket pool. When returned from recvmsg, the
 	 * offsets indicate where fragments of the new message are stored. All
-	 * entries but the last refer to full buffer pages (HOMA_BPAGE_SIZE bytes)
-	 * and are bpage-aligned. The last entry may refer to a bpage fragment and
-	 * is not necessarily aligned. The application now owns these bpages and
-	 * must eventually return them to Homa, using bpage_offsets in a future
-	 * recvmsg invocation.
+	 * entries but the last refer to full buffer pages (HOMA_BPAGE_SIZE
+	 * bytes) and are bpage-aligned. The last entry may refer to a bpage
+	 * fragment and is not necessarily aligned. The application now owns
+	 * these bpages and must eventually return them to Homa, using
+	 * bpage_offsets in a future recvmsg invocation.
 	 */
 	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
 };

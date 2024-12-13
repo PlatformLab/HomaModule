@@ -297,8 +297,8 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 		struct rtable *rt;
 
 		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
-				   inet->sk.sk_mark, inet->tos, RT_SCOPE_UNIVERSE,
-				   inet->sk.sk_protocol, 0,
+				   inet->sk.sk_mark, inet->tos,
+				   RT_SCOPE_UNIVERSE, inet->sk.sk_protocol, 0,
 				   peer->addr.in6_u.u6_addr32[3],
 				   inet->inet_saddr, 0, 0, inet->sk.sk_uid);
 		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);

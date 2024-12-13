@@ -130,7 +130,7 @@ void homa_pool_destroy(struct homa_pool *pool)
  * @args:         Store info here.
  */
 void homa_pool_get_rcvbuf(struct homa_sock *hsk,
-			struct homa_rcvbuf_args *args)
+			  struct homa_rcvbuf_args *args)
 {
 	homa_sock_lock(hsk, "homa_pool_get_rcvbuf");
 	args->start = hsk->buffer_pool->region;
@@ -215,13 +215,13 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
 		 */
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-							  bpage->expiration > now)))
+				bpage->expiration > now)))
 			continue;
 		if (!spin_trylock_bh(&bpage->lock))
 			continue;
 		ref_count = atomic_read(&bpage->refs);
 		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-							  bpage->expiration > now))) {
+				bpage->expiration > now))) {
 			spin_unlock_bh(&bpage->lock);
 			continue;
 		}
@@ -400,7 +400,7 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
  * Return:        0 for success, otherwise a negative errno.
  */
 int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
-			       __u32 *buffers)
+			      __u32 *buffers)
 {
 	int result = 0;
 	int i;

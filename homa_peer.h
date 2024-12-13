@@ -205,7 +205,8 @@ int      homa_peertab_init(struct homa_peertab *peertab);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
 	       *homa_peer_find(struct homa_peertab *peertab,
-			       const struct in6_addr *addr, struct inet_sock *inet);
+			       const struct in6_addr *addr,
+			       struct inet_sock *inet);
 int      homa_peer_get_acks(struct homa_peer *peer, int count,
 			    struct homa_ack *dst);
 struct dst_entry
@@ -243,7 +244,7 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
  * updating it if the cached information is stale.
  * @peer:   Peer whose destination information is desired.
  * @hsk:    Homa socket; needed by lower-level code to recreate the dst.
- * Return   Up-to-date destination for peer.
+ * Return:   Up-to-date destination for peer.
  */
 static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 					     struct homa_sock *hsk)

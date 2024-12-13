@@ -522,6 +522,7 @@ int __init homa_load(void)
 	int status;
 
 	pr_notice("Homa module loading\n");
+#ifndef __STRIP__ /* See strip.py */
 	pr_notice("Homa structure sizes: data_header %u, seg_header %u, ack %u, grant_header %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof32(struct data_header),
 		  sizeof32(struct seg_header),
@@ -541,6 +542,7 @@ int __init homa_load(void)
 		  NR_CPUS,
 		  nr_cpu_ids,
 		  MAX_NUMNODES);
+#endif /* See strip.py */
 	status = proto_register(&homa_prot, 1);
 	if (status != 0) {
 		pr_err("proto_register failed for homa_prot: %d\n", status);
@@ -1094,7 +1096,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		goto done;
 	}
 	result = homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
-				  control.bpage_offsets);
+					   control.bpage_offsets);
 	control.num_bpages = 0;
 	if (result != 0)
 		goto done;

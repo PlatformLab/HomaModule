@@ -287,7 +287,8 @@ _Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
 	       "data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 _Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
 	       "data_header too small: Homa doesn't currently have codeto pad data packets");
-_Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) & 0x3) == 0,
+_Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) &
+		0x3) == 0,
 	       " data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");
 
 /**
@@ -298,7 +299,8 @@ _Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) & 0x3) 
  */
 static inline int homa_data_len(struct sk_buff *skb)
 {
-	return skb->len - skb_transport_offset(skb) - sizeof(struct data_header);
+	return skb->len - skb_transport_offset(skb) -
+			sizeof(struct data_header);
 }
 
 /**

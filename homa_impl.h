@@ -161,8 +161,14 @@ void     homa_throttle_lock_slow(struct homa *homa);
  * and easier to use than sockaddr_storage).
  */
 union sockaddr_in_union {
+
+	/** @sa: Used to access as a generic sockaddr. */
 	struct sockaddr sa;
+
+	/** @in4: Used to access as IPv4 socket. */
 	struct sockaddr_in in4;
+
+	/** @in6: Used to access as IPv6 socket.  */
 	struct sockaddr_in6 in6;
 };
 
@@ -453,7 +459,7 @@ struct homa {
 	struct homa_socktab *port_map __aligned(L1_CACHE_BYTES);
 
 	/**
-	 * @peertab: Info about all the other hosts we have communicated with.
+	 * @peers: Info about all the other hosts we have communicated with.
 	 * Dynamically allocated; must be kfreed.
 	 */
 	struct homa_peertab *peers;
@@ -529,7 +535,7 @@ struct homa {
 	int window_param;
 
 	/**
-	 * @link_bandwidth: The raw bandwidth of the network uplink, in
+	 * @link_mbps: The raw bandwidth of the network uplink, in
 	 * units of 1e06 bits per second.  Set externally via sysctl.
 	 */
 	int link_mbps;
@@ -905,6 +911,7 @@ struct homa_skb_info {
  * homa_get_skb_info() - Return the address of Homa's private information
  * for an sk_buff.
  * @skb:     Socket buffer whose info is needed.
+ * Return: address of Homa's private information for @skb.
  */
 static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 {
@@ -915,6 +922,7 @@ static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 /**
  * homa_next_skb() - Compute address of Homa's private link field in @skb.
  * @skb:     Socket buffer containing private link field.
+ * Return: address of Homa's private link field for @skb.
  *
  * Homa needs to keep a list of buffers in a message, but it can't use the
  * links built into sk_buffs because Homa wants to retain its list even
@@ -974,6 +982,7 @@ static inline bool skb_is_ipv6(const struct sk_buff *skb)
  * ipv4_to_ipv6() - Given an IPv4 address, return an equivalent IPv6 address
  * (an IPv4-mapped one).
  * @ip4: IPv4 address, in network byte order.
+ * Return: IPv6 address that is equivalent to @ip4.
  */
 static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
 {
@@ -990,6 +999,7 @@ static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
  * ipv6_to_ipv4() - Given an IPv6 address produced by ipv4_to_ipv6, return
  * the original IPv4 address (in network byte order).
  * @ip6:  IPv6 address; assumed to be a mapped IPv4 address.
+ * Return: IPv4 address stored in @ip6.
  */
 static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
 {
@@ -1001,6 +1011,7 @@ static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
  * form used in Homa, which is always an IPv6 address; if the original address
  * was IPv4, convert it to an IPv4-mapped IPv6 address.
  * @addr:   Address to canonicalize (if NULL, "any" is returned).
+ * Return: IPv6 address corresponding to @addr.
  */
 static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
 						  *addr)
@@ -1020,6 +1031,7 @@ static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
  * address; if the original address was IPv4, convert it to an IPv4-mapped
  * IPv6 address.
  * @skb:   The source address will be extracted from this packet buffer.
+ * Return: IPv6 address for @skb's source machine.
  */
 static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
@@ -1031,6 +1043,7 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
  * is_mapped_ipv4() - Return true if an IPv6 address is actually an
  * IPv4-mapped address, false otherwise.
  * @x:  The address to check.
+ * Return: see above.
  */
 static inline bool is_mapped_ipv4(const struct in6_addr x)
 {

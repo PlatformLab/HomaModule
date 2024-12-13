@@ -518,6 +518,7 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
  * homa_is_client(): returns true if we are the client for a particular RPC,
  * false if we are the server.
  * @id:  Id of the RPC in question.
+ * Return: true if we are the client for RPC id, false otherwise
  */
 static inline bool homa_is_client(__u64 id)
 {

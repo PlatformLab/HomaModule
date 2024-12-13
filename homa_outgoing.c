@@ -109,6 +109,9 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	int err, gso_size;
 	__u64 segs;
 
+	segs = length + max_seg_data - 1;
+	do_div(segs, max_seg_data);
+
 	/* Initialize the overall skb. */
 	skb = homa_skb_new_tx(sizeof32(struct data_header));
 	if (!skb)
@@ -135,8 +138,6 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	h->retransmit = 0;
 	h->seg.offset = htonl(-1);
 
-	segs = length + max_seg_data - 1;
-	do_div(segs, max_seg_data);
 	homa_info = homa_get_skb_info(skb);
 	homa_info->next_skb = NULL;
 	homa_info->wire_bytes = length + segs * (sizeof(struct data_header)

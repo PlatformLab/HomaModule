@@ -594,8 +594,6 @@ int homa_snprintf(char *buffer, int size, int used, const char *format, ...)
  */
 char *homa_symbol_for_type(uint8_t type)
 {
-	static char buffer[20];
-
 	switch (type) {
 	case DATA:
 		return "DATA";
@@ -616,16 +614,7 @@ char *homa_symbol_for_type(uint8_t type)
 	case ACK:
 		return "ACK";
 	}
-
-	/* Using a static buffer can produce garbled text under concurrency,
-	 * but (a) it's unlikely (this code only executes if the opcode is
-	 * bogus), (b) this is mostly for testing and debugging, and (c) the
-	 * code below ensures that the string cannot run past the end of the
-	 * buffer, so the code is safe.
-	 */
-	snprintf(buffer, sizeof(buffer) - 1, "unknown(%u)", type);
-	buffer[sizeof(buffer) - 1] = 0;
-	return buffer;
+	return "??";
 }
 
 /**

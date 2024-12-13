@@ -50,8 +50,10 @@ struct homa_socktab {
  * of a homa_socktab.
  */
 struct homa_socktab_links {
-	/* Must be the first element of the struct! */
+	/** hash_links: links this element into the hash chain. */
 	struct hlist_node hash_links;
+
+	/** @sock: Homa socket structure. */
 	struct homa_sock *sock;
 };
 
@@ -269,7 +271,10 @@ struct homa_sock {
  * is present in the socket struct after Homa-specific information.
  */
 struct homa_v6_sock {
+	/** @homa: All socket info except for IPv6-specific stuff. */
 	struct homa_sock homa;
+
+	/** @inet6: Socket info specific to IPv6. */
 	struct ipv6_pinfo inet6;
 };
 
