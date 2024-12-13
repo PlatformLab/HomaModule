@@ -383,7 +383,7 @@ void homa_peer_lock_slow(struct homa_peer *peer)
 void homa_peer_add_ack(struct homa_rpc *rpc)
 {
 	struct homa_peer *peer = rpc->peer;
-	struct ack_header ack;
+	struct homa_ack_hdr ack;
 
 	homa_peer_lock(peer);
 	if (peer->num_acks < HOMA_MAX_ACKS_PER_PKT) {

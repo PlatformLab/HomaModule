@@ -22,7 +22,7 @@ FIXTURE(homa_rpc) {
 	struct homa homa;
 	struct homa_sock hsk;
 	union sockaddr_in_union server_addr;
-	struct data_header data;
+	struct homa_data_hdr data;
 	struct homa_rpc *crpc;
 	struct iovec iovec;
 	struct iov_iter iter;
@@ -40,7 +40,7 @@ FIXTURE_SETUP(homa_rpc)
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	self->data = (struct data_header){.common = {
+	self->data = (struct homa_data_hdr){.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.type = DATA,

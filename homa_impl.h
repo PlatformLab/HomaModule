@@ -943,7 +943,7 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
  *         that should be replicated in each segment. The bytes after
  *         this will be distributed among segments.
  */
-static inline void homa_set_doff(struct data_header *h, int size)
+static inline void homa_set_doff(struct homa_data_hdr *h, int size)
 {
 	h->common.doff = size << 2;
 }

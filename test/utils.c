@@ -58,7 +58,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
-	struct data_header h = {
+	struct homa_data_hdr h = {
 		.common = {
 			.sport = htons(server_port),
 			.dport = htons(hsk->port),
@@ -352,7 +352,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		int req_length, int resp_length)
 {
 	int bytes_received, created;
-	struct data_header h = {
+	struct homa_data_hdr h = {
 		.common = {
 			.sport = htons(client_port),
 			.dport = htons(hsk->port),

@@ -222,7 +222,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
 {
 	int incoming, increment, available;
-	struct grant_header grant;
+	struct homa_grant_hdr grant;
 
 	/* Compute how many additional bytes to grant. */
 	incoming = rpc->msgin.granted - (rpc->msgin.length

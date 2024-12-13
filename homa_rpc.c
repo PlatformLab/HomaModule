@@ -108,7 +108,7 @@ error:
  */
 struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 				     const struct in6_addr *source,
-				     struct data_header *h, int *created)
+				     struct homa_data_hdr *h, int *created)
 	__acquires(&srpc->bucket->lock)
 {
 	__u64 id = homa_local_id(h->common.sender_id);
@@ -660,7 +660,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			struct freeze_header freeze;
+			struct homa_freeze_hdr freeze;
 
 			count++;
 			homa_rpc_log_tt(rpc);

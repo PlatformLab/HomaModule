@@ -496,15 +496,15 @@ static struct ctl_table homa_ctl_table[] = {
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
 static __u16 header_lengths[] = {
-	sizeof32(struct data_header),
-	sizeof32(struct grant_header),
-	sizeof32(struct resend_header),
-	sizeof32(struct unknown_header),
-	sizeof32(struct busy_header),
-	sizeof32(struct cutoffs_header),
-	sizeof32(struct freeze_header),
-	sizeof32(struct need_ack_header),
-	sizeof32(struct ack_header)
+	sizeof32(struct homa_data_hdr),
+	sizeof32(struct homa_grant_hdr),
+	sizeof32(struct homa_resend_hdr),
+	sizeof32(struct homa_unknown_hdr),
+	sizeof32(struct homa_busy_hdr),
+	sizeof32(struct homa_cutoffs_hdr),
+	sizeof32(struct homa_freeze_hdr),
+	sizeof32(struct homa_need_ack_hdr),
+	sizeof32(struct homa_ack_hdr)
 };
 
 /* Used to remove sysctl values when the module is unloaded. */
@@ -523,11 +523,11 @@ int __init homa_load(void)
 
 	pr_notice("Homa module loading\n");
 #ifndef __STRIP__ /* See strip.py */
-	pr_notice("Homa structure sizes: data_header %u, seg_header %u, ack %u, grant_header %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
-		  sizeof32(struct data_header),
-		  sizeof32(struct seg_header),
+	pr_notice("Homa structure sizes: homa_data_hdr %u, homa_seg_hdr %u, ack %u, homa_grant_hdr %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+		  sizeof32(struct homa_data_hdr),
+		  sizeof32(struct homa_seg_hdr),
 		  sizeof32(struct homa_ack),
-		  sizeof32(struct grant_header),
+		  sizeof32(struct homa_grant_hdr),
 		  sizeof32(struct homa_peer),
 		  sizeof32(struct iphdr),
 		  sizeof32(struct flowi),
@@ -1235,7 +1235,7 @@ int homa_softirq(struct sk_buff *skb)
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
 	struct homa *homa = global_homa;
-	struct common_header *h;
+	struct homa_common_hdr *h;
 	int header_offset;
 	int pull_length;
 	__u64 start;
@@ -1277,8 +1277,8 @@ int homa_softirq(struct sk_buff *skb)
 			__skb_pull(skb, header_offset);
 
 		/* Reject packets that are too short or have bogus types. */
-		h = (struct common_header *)skb->data;
-		if (unlikely(skb->len < sizeof(struct common_header) ||
+		h = (struct homa_common_hdr *)skb->data;
+		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
 			     h->type < DATA || h->type >= BOGUS ||
 			     skb->len < header_lengths[h->type - DATA])) {
 			const struct in6_addr saddr =
@@ -1311,7 +1311,7 @@ int homa_softirq(struct sk_buff *skb)
 		/* Process the packet now if it is a control packet or
 		 * if it contains an entire short message.
 		 */
-		if (h->type != DATA || ntohl(((struct data_header *)h)
+		if (h->type != DATA || ntohl(((struct homa_data_hdr *)h)
 				->message_length) < 1400) {
 			UNIT_LOG("; ", "homa_softirq shortcut type 0x%x",
 				 h->type);
@@ -1335,7 +1335,7 @@ discard:
 	 */
 	while (packets) {
 		struct in6_addr saddr, saddr2;
-		struct common_header *h2;
+		struct homa_common_hdr *h2;
 		struct sk_buff *skb2;
 
 		skb = packets;
@@ -1343,10 +1343,10 @@ discard:
 		saddr = skb_canonical_ipv6_saddr(skb);
 		other_pkts = NULL;
 		other_link = &other_pkts;
-		h = (struct common_header *)skb->data;
+		h = (struct homa_common_hdr *)skb->data;
 		for (skb2 = skb->next; skb2; skb2 = next) {
 			next = skb2->next;
-			h2 = (struct common_header *)skb2->data;
+			h2 = (struct homa_common_hdr *)skb2->data;
 			if (h2->sender_id == h->sender_id) {
 				saddr2 = skb_canonical_ipv6_saddr(skb2);
 				if (ipv6_addr_equal(&saddr, &saddr2)) {
@@ -1363,7 +1363,7 @@ discard:
 #ifdef __UNIT_TEST__
 		UNIT_LOG("; ", "id %lld, offsets", homa_local_id(h->sender_id));
 		for (skb2 = packets; skb2; skb2 = skb2->next) {
-			struct data_header *h3 = (struct data_header *)
+			struct homa_data_hdr *h3 = (struct homa_data_hdr *)
 					skb2->data;
 			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
 		}
@@ -1415,7 +1415,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	iph = (struct iphdr *)(skb->data);
 	daddr = ipv4_to_ipv6(iph->daddr);
 	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
-		struct common_header *h = (struct common_header *)(skb->data +
+		struct homa_common_hdr *h = (struct homa_common_hdr *)(skb->data +
 				iph->ihl * 4);
 
 		port = ntohs(h->dport);
@@ -1455,9 +1455,9 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 	int port = 0;
 
 	if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_PORT_UNREACH) {
-		const struct common_header *h;
+		const struct homa_common_hdr *h;
 
-		h = (struct common_header *)(skb->data + sizeof(*iph));
+		h = (struct homa_common_hdr *)(skb->data + sizeof(*iph));
 		port = ntohs(h->dport);
 		error = -ENOTCONN;
 	} else if (type == ICMPV6_DEST_UNREACH && code == ICMPV6_ADDR_UNREACH) {

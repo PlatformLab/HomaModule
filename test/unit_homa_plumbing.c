@@ -32,7 +32,7 @@ FIXTURE(homa_plumbing) {
 	struct homa_sock hsk;
 	union sockaddr_in_union client_addr;
 	union sockaddr_in_union server_addr;
-	struct data_header data;
+	struct homa_data_hdr data;
 	int starting_skb_count;
 	struct msghdr recvmsg_hdr;
 	struct homa_recvmsg_args recvmsg_args;
@@ -67,7 +67,7 @@ FIXTURE_SETUP(homa_plumbing)
 			ipv6_to_ipv4(self->server_addr.in6.sin6_addr);
 	}
 	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
-	self->data = (struct data_header){.common = {
+	self->data = (struct homa_data_hdr){.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.type = DATA,
@@ -828,7 +828,7 @@ TEST_F(homa_plumbing, homa_softirq__remove_extra_headers)
 TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 {
 	struct sk_buff *skb;
-	struct ack_header h;
+	struct homa_ack_hdr h;
 
 	h.common.type = ACK;
 	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
@@ -876,7 +876,7 @@ TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 }
 TEST_F(homa_plumbing, homa_softirq__process_control_first)
 {
-	struct common_header unknown = {
+	struct homa_common_hdr unknown = {
 		.sport = htons(self->client_port),
 		.dport = htons(self->server_port),
 		.type = UNKNOWN,

@@ -71,12 +71,12 @@ enum homa_packet_type {
 #define HOMA_MAX_PRIORITIES 8
 
 /**
- * struct common_header - Wire format for the first bytes in every Homa
+ * struct homa_common_hdr - Wire format for the first bytes in every Homa
  * packet. This must (mostly) match the format of a TCP header to enable
  * Homa packets to actually be transmitted as TCP packets (and thereby
  * take advantage of TSO and other features).
  */
-struct common_header {
+struct homa_common_hdr {
 	/**
 	 * @sport: Port on source machine from which packet was sent.
 	 * Must be in the same position as in a TCP header.
@@ -108,7 +108,7 @@ struct common_header {
 
 	/**
 	 * @doff: High order 4 bits holds the number of 4-byte chunks in a
-	 * data_header (low-order bits unused). Used only for DATA packets;
+	 * homa_data_hdr (low-order bits unused). Used only for DATA packets;
 	 * must be in the same position as the data offset in a TCP header.
 	 * Used by TSO to determine where the replicated header portion ends.
 	 */
@@ -174,8 +174,8 @@ struct homa_ack {
 	__be16 server_port;
 } __packed;
 
-/* struct data_header - Contains data for part or all of a Homa message.
- * An incoming packet consists of a data_header followed by message data.
+/* struct homa_data_hdr - Contains data for part or all of a Homa message.
+ * An incoming packet consists of a homa_data_hdr followed by message data.
  * An outgoing packet can have this simple format as well, or it can be
  * structured as a GSO packet. Homa supports two different formats for GSO
  * packets, depending on whether TCP hijacking is enabled:
@@ -184,7 +184,7 @@ struct homa_ack {
  *
  *    |-----------------------|              |-----------------------|
  *    |                       |              |                       |
- *    |     data_header       |              |     data_header       |
+ *    |     homa_data_hdr     |              |     homa_data_hdr     |
  *    |                       |              |                       |
  *    |---------------------- |              |-----------------------|
  *    |                       |              |                       |
@@ -193,7 +193,7 @@ struct homa_ack {
  *    |                       |              |                       |
  *    |                       |              |                       |
  *    |-----------------------|              |-----------------------|
- *    |      seg_header       |              |                       |
+ *    |     homa_seg_hdr      |              |                       |
  *    |-----------------------|              |                       |
  *    |                       |              |     segment data      |
  *    |                       |              |                       |
@@ -201,7 +201,7 @@ struct homa_ack {
  *    |                       |              |-----------------------|
  *    |                       |              |                       |
  *    |-----------------------|              |                       |
- *    |      seg_header       |              |     segment data      |
+ *    |     homa_seg_hdr      |              |     segment data      |
  *    |-----------------------|              |                       |
  *    |                       |              |                       |
  *    |                       |              |-----------------------|
@@ -213,12 +213,12 @@ struct homa_ack {
  * With TCP hijacking, TSO will automatically adjust @common.sequence in
  * the segments, so that value can be used as the offset of the data within
  * the message. Without TCP hijacking, TSO will not adjust @common.sequence
- * in the segments, so Homa sprinkles correct offsets (in seg_headers)
- * throughout the segment data; TSO/GSO will include a different seg_header
+ * in the segments, so Homa sprinkles correct offsets (in homa_seg_hdrs)
+ * throughout the segment data; TSO/GSO will include a different homa_seg_hdr
  * in each generated packet.
  */
 
-struct seg_header {
+struct homa_seg_hdr {
 	/**
 	 * @offset: Offset within message of the first byte of data in
 	 * this segment.  If this field is -1 it means that the packet was
@@ -230,8 +230,8 @@ struct seg_header {
 	__be32 offset;
 } __packed;
 
-struct data_header {
-	struct common_header common;
+struct homa_data_hdr {
+	struct homa_common_hdr common;
 
 	/** @message_length: Total #bytes in the message. */
 	__be32 message_length;
@@ -271,36 +271,36 @@ struct data_header {
 	char pad[3];
 
 	/** @seg: First of possibly many segments. */
-	struct seg_header seg;
+	struct homa_seg_hdr seg;
 } __packed;
-_Static_assert(sizeof(struct data_header) <= HOMA_MAX_HEADER,
-	       "data_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
-_Static_assert(sizeof(struct data_header) >= HOMA_MIN_PKT_LENGTH,
-	       "data_header too small: Homa doesn't currently have code to pad data packets");
-_Static_assert(((sizeof(struct data_header) - sizeof(struct seg_header)) &
+_Static_assert(sizeof(struct homa_data_hdr) <= HOMA_MAX_HEADER,
+	       "homa_data_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_data_hdr) >= HOMA_MIN_PKT_LENGTH,
+	       "homa_data_hdr too small: Homa doesn't currently have code to pad data packets");
+_Static_assert(((sizeof(struct homa_data_hdr) - sizeof(struct homa_seg_hdr)) &
 		0x3) == 0,
-	       " data_header length not a multiple of 4 bytes (required for TCP/TSO compatibility");
+	       " homa_data_hdr length not a multiple of 4 bytes (required for TCP/TSO compatibility");
 
 /**
  * homa_data_len() - Returns the total number of bytes in a DATA packet
- * after the data_header. Note: if the packet is a GSO packet, the result
+ * after the homa_data_hdr. Note: if the packet is a GSO packet, the result
  * may include metadata as well as packet data.
  * @skb:   Incoming data packet
  */
 static inline int homa_data_len(struct sk_buff *skb)
 {
 	return skb->len - skb_transport_offset(skb) -
-			sizeof(struct data_header);
+			sizeof(struct homa_data_hdr);
 }
 
 /**
- * struct grant_header - Wire format for GRANT packets, which are sent by
+ * struct homa_grant_hdr - Wire format for GRANT packets, which are sent by
  * the receiver back to the sender to indicate that the sender may transmit
  * additional bytes in the message.
  */
-struct grant_header {
+struct homa_grant_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 
 	/**
 	 * @offset: Byte offset within the message.
@@ -324,20 +324,20 @@ struct grant_header {
 	 */
 	__u8 resend_all;
 } __packed;
-_Static_assert(sizeof(struct grant_header) <= HOMA_MAX_HEADER,
-	       "grant_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_grant_hdr) <= HOMA_MAX_HEADER,
+	       "homa_grant_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct resend_header - Wire format for RESEND packets.
+ * struct homa_resend_hdr - Wire format for RESEND packets.
  *
  * A RESEND is sent by the receiver when it believes that message data may
  * have been lost in transmission (or if it is concerned that the sender may
  * have crashed). The receiver should resend the specified portion of the
  * message, even if it already sent it previously.
  */
-struct resend_header {
+struct homa_resend_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 
 	/**
 	 * @offset: Offset within the message of the first byte of data that
@@ -362,11 +362,11 @@ struct resend_header {
 	 */
 	__u8 priority;
 } __packed;
-_Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
-	       "resend_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_resend_hdr) <= HOMA_MAX_HEADER,
+	       "homa_resend_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct unknown_header - Wire format for UNKNOWN packets.
+ * struct homa_unknown_hdr - Wire format for UNKNOWN packets.
  *
  * An UNKNOWN packet is sent by either server or client when it receives a
  * packet for an RPC that is unknown to it. When a client receives an
@@ -374,12 +374,12 @@ _Static_assert(sizeof(struct resend_header) <= HOMA_MAX_HEADER,
  * when a server receives an UNKNOWN packet it will typically discard its
  * state for the RPC.
  */
-struct unknown_header {
+struct homa_unknown_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
-	       "unknown_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_unknown_hdr) <= HOMA_MAX_HEADER,
+	       "homa_unknown_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct busy_header - Wire format for BUSY packets.
@@ -387,22 +387,22 @@ _Static_assert(sizeof(struct unknown_header) <= HOMA_MAX_HEADER,
  * These packets tell the recipient that the sender is still alive (even if
  * it isn't sending data expected by the recipient).
  */
-struct busy_header {
+struct homa_busy_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct busy_header) <= HOMA_MAX_HEADER,
-	       "busy_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_busy_hdr) <= HOMA_MAX_HEADER,
+	       "homa_busy_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct cutoffs_header - Wire format for CUTOFFS packets.
+ * struct homa_cutoffs_hdr - Wire format for CUTOFFS packets.
  *
  * These packets tell the recipient how to assign priorities to
  * unscheduled packets.
  */
-struct cutoffs_header {
+struct homa_cutoffs_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
@@ -418,45 +418,45 @@ struct cutoffs_header {
 	 */
 	__be16 cutoff_version;
 } __packed;
-_Static_assert(sizeof(struct cutoffs_header) <= HOMA_MAX_HEADER,
-	       "cutoffs_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_cutoffs_hdr) <= HOMA_MAX_HEADER,
+	       "homa_cutoffs_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct freeze_header - Wire format for FREEZE packets.
+ * struct homa_freeze_hdr - Wire format for FREEZE packets.
  *
  * These packets tell the recipient to freeze its timetrace; used
  * for debugging.
  */
-struct freeze_header {
+struct homa_freeze_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct freeze_header) <= HOMA_MAX_HEADER,
-	       "freeze_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_freeze_hdr) <= HOMA_MAX_HEADER,
+	       "homa_freeze_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct need_ack_header - Wire format for NEED_ACK packets.
+ * struct homa_need_ack_hdr - Wire format for NEED_ACK packets.
  *
  * These packets ask the recipient (a client) to return an ACK message if
  * the packet's RPC is no longer active.
  */
-struct need_ack_header {
+struct homa_need_ack_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct need_ack_header) <= HOMA_MAX_HEADER,
-	       "need_ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_need_ack_hdr) <= HOMA_MAX_HEADER,
+	       "homa_need_ack_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct ack_header - Wire format for ACK packets.
+ * struct homa_ack_hdr - Wire format for ACK packets.
  *
  * These packets are sent from a client to a server to indicate that
  * a set of RPCs is no longer active on the client, so the server can
  * free any state it may have for them.
  */
-struct ack_header {
+struct homa_ack_hdr {
 	/** @common: Fields common to all packet types. */
-	struct common_header common;
+	struct homa_common_hdr common;
 
 	/** @num_acks: Number of (leading) elements in @acks that are valid. */
 	__be16 num_acks;
@@ -465,8 +465,8 @@ struct ack_header {
 	/** @acks: Info about RPCs that are no longer active. */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
-_Static_assert(sizeof(struct ack_header) <= HOMA_MAX_HEADER,
-	       "ack_header too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_ack_hdr) <= HOMA_MAX_HEADER,
+	       "homa_ack_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * homa_local_id(): given an RPC identifier from an input packet (which

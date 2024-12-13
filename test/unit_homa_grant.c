@@ -45,7 +45,7 @@ FIXTURE(homa_grant) {
 	union sockaddr_in_union server_addr;
 	struct homa homa;
 	struct homa_sock hsk;
-	struct data_header data;
+	struct homa_data_hdr data;
 	int incoming_delta;
 };
 FIXTURE_SETUP(homa_grant)
@@ -78,7 +78,7 @@ FIXTURE_SETUP(homa_grant)
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	self->data = (struct data_header){.common = {
+	self->data = (struct homa_data_hdr){.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.type = DATA,

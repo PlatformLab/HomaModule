@@ -74,8 +74,8 @@ FIXTURE_TEARDOWN(homa_outgoing)
 
 TEST_F(homa_outgoing, set_priority__priority_mapping)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -110,8 +110,8 @@ TEST_F(homa_outgoing, homa_fill_data_interleaved)
 
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
 			homa_print_packet(skb, buffer, sizeof(buffer)));
-	EXPECT_EQ(5000 + sizeof32(struct data_header)
-			+ 3*sizeof32(struct seg_header), skb->len);
+	EXPECT_EQ(5000 + sizeof32(struct homa_data_hdr)
+			+ 3*sizeof32(struct homa_seg_hdr), skb->len);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_fill_data_interleaved__error_copying_data)
@@ -187,7 +187,7 @@ TEST_F(homa_outgoing, homa_new_data_packet__multiple_segments_homa_fill_data_int
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 
-	EXPECT_EQ(4*(sizeof(struct data_header) + crpc->hsk->ip_header_length
+	EXPECT_EQ(4*(sizeof(struct homa_data_hdr) + crpc->hsk->ip_header_length
 			+ HOMA_ETH_OVERHEAD) + 5000,
 			homa_get_skb_info(skb)->wire_bytes);
 	EXPECT_EQ(5000, homa_get_skb_info(skb)->data_bytes);
@@ -262,7 +262,7 @@ TEST_F(homa_outgoing, homa_new_data_packet__gso_information)
 	skb = homa_new_data_packet(crpc, iter, 10000, 5000, 1500);
 
 	EXPECT_EQ(4, skb_shinfo(skb)->gso_segs);
-	EXPECT_EQ(1500 + sizeof(struct seg_header),
+	EXPECT_EQ(1500 + sizeof(struct homa_seg_hdr),
 		  skb_shinfo(skb)->gso_size);
 	EXPECT_EQ(SKB_GSO_TCPV6, skb_shinfo(skb)->gso_type);
 	kfree_skb(skb);
@@ -377,7 +377,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
 			&self->server_addr);
-	struct data_header h;
+	struct homa_data_hdr h;
 
 	ASSERT_FALSE(crpc == NULL);
 	crpc->peer->acks[0] = (struct homa_ack) {
@@ -469,8 +469,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__too_short_for_pipelining)
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -491,8 +491,8 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 }
 TEST_F(homa_outgoing, homa_xmit_control__client_response)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *crpc;
-	struct grant_header h;
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
@@ -512,8 +512,8 @@ TEST_F(homa_outgoing, homa_xmit_control__client_response)
 
 TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -533,7 +533,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__cant_alloc_skb)
 TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 {
 	struct homa_rpc *srpc;
-	struct busy_header h;
+	struct homa_busy_hdr h;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -546,8 +546,8 @@ TEST_F(homa_outgoing, __homa_xmit_control__pad_packet)
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
@@ -570,8 +570,8 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 }
 TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 {
+	struct homa_grant_hdr h;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
@@ -595,7 +595,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 
 TEST_F(homa_outgoing, homa_xmit_unknown)
 {
-	struct grant_header h = {{.sport = htons(self->client_port),
+	struct homa_grant_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(99990),
 			.type = GRANT},

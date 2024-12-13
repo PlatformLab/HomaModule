@@ -835,7 +835,7 @@ void mutex_unlock(struct mutex *lock)
 
 int netif_receive_skb(struct sk_buff *skb)
 {
-	struct data_header *h = (struct data_header *)
+	struct homa_data_hdr *h = (struct homa_data_hdr *)
 			skb_transport_header(skb);
 	unit_log_printf("; ", "netif_receive_skb, id %llu, offset %d",
 			be64_to_cpu(h->common.sender_id), ntohl(h->seg.offset));
@@ -1084,7 +1084,7 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		netdev_features_t features)
 {
 	struct sk_buff *skb1, *skb2;
-	struct data_header h;
+	struct homa_data_hdr h;
 	int offset, length;
 
 	/* Split the existing packet into two packets. */
@@ -1428,7 +1428,7 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
+struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;
@@ -1438,34 +1438,34 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct common_header *h,
 	if (h) {
 		switch (h->type) {
 		case DATA:
-			header_size = sizeof(struct data_header);
+			header_size = sizeof(struct homa_data_hdr);
 			break;
 		case GRANT:
-			header_size = sizeof(struct grant_header);
+			header_size = sizeof(struct homa_grant_hdr);
 			break;
 		case RESEND:
-			header_size = sizeof(struct resend_header);
+			header_size = sizeof(struct homa_resend_hdr);
 			break;
 		case UNKNOWN:
-			header_size = sizeof(struct unknown_header);
+			header_size = sizeof(struct homa_unknown_hdr);
 			break;
 		case BUSY:
-			header_size = sizeof(struct busy_header);
+			header_size = sizeof(struct homa_busy_hdr);
 			break;
 		case CUTOFFS:
-			header_size = sizeof(struct cutoffs_header);
+			header_size = sizeof(struct homa_cutoffs_hdr);
 			break;
 		case FREEZE:
-			header_size = sizeof(struct freeze_header);
+			header_size = sizeof(struct homa_freeze_hdr);
 			break;
 		case NEED_ACK:
-			header_size = sizeof(struct need_ack_header);
+			header_size = sizeof(struct homa_need_ack_hdr);
 			break;
 		case ACK:
-			header_size = sizeof(struct ack_header);
+			header_size = sizeof(struct homa_ack_hdr);
 			break;
 		default:
-			header_size = sizeof(struct common_header);
+			header_size = sizeof(struct homa_common_hdr);
 			break;
 		}
 	} else {
@@ -1553,7 +1553,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 		homa_sock_bind(homa->port_map, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
-		+ sizeof(struct data_header);
+		+ sizeof(struct homa_data_hdr);
 	mock_net_device.gso_max_size = mock_mtu;
 	homa_pool_init(hsk, (void *) 0x1000000, 100*HOMA_BPAGE_SIZE);
 }

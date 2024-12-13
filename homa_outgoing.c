@@ -34,10 +34,10 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 /**
  * homa_fill_data_interleaved() - This function is invoked to fill in the
  * part of a data packet after the initial header, when GSO is being used
- * but TCP hijacking is not. As result, seg_headers must be interleaved
+ * but TCP hijacking is not. As result, homa_seg_hdrs must be interleaved
  * with the data to provide the correct offset for each segment.
  * @rpc:            RPC whose output message is being created.
- * @skb:            The packet being filled. The initial data_header was
+ * @skb:            The packet being filled. The initial homa_data_hdr was
  *                  created and initialized by the caller and the
  *                  homa_skb_info has been filled in with the packet geometry.
  * @iter:           Describes location(s) of (remaining) message data in user
@@ -54,11 +54,11 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 	int err;
 
 	/* Each iteration of the following loop adds info for one packet,
-	 * which includes a seg_header followed by the data for that
-	 * segment. The first seg_header was already added by the caller.
+	 * which includes a homa_seg_hdr followed by the data for that
+	 * segment. The first homa_seg_hdr was already added by the caller.
 	 */
 	while (1) {
-		struct seg_header seg;
+		struct homa_seg_hdr seg;
 
 		if (bytes_left < seg_length)
 			seg_length = bytes_left;
@@ -104,7 +104,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 				     int length, int max_seg_data)
 {
 	struct homa_skb_info *homa_info;
-	struct data_header *h;
+	struct homa_data_hdr *h;
 	struct sk_buff *skb;
 	int err, gso_size;
 	__u64 segs;
@@ -113,19 +113,19 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	do_div(segs, max_seg_data);
 
 	/* Initialize the overall skb. */
-	skb = homa_skb_new_tx(sizeof32(struct data_header));
+	skb = homa_skb_new_tx(sizeof32(struct homa_data_hdr));
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
 
 	/* Fill in the Homa header (which will be replicated in every
 	 * network packet by GSO).
 	 */
-	h = (struct data_header *)skb_put(skb, sizeof(struct data_header));
+	h = (struct homa_data_hdr *)skb_put(skb, sizeof(struct homa_data_hdr));
 	h->common.sport = htons(rpc->hsk->port);
 	h->common.dport = htons(rpc->dport);
 	h->common.sequence = htonl(offset);
 	h->common.type = DATA;
-	homa_set_doff(h, sizeof(struct data_header));
+	homa_set_doff(h, sizeof(struct homa_data_hdr));
 	h->common.flags = HOMA_TCP_FLAGS;
 	h->common.checksum = 0;
 	h->common.urgent = htons(HOMA_TCP_URGENT);
@@ -140,17 +140,17 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 
 	homa_info = homa_get_skb_info(skb);
 	homa_info->next_skb = NULL;
-	homa_info->wire_bytes = length + segs * (sizeof(struct data_header)
+	homa_info->wire_bytes = length + segs * (sizeof(struct homa_data_hdr)
 			+  rpc->hsk->ip_header_length + HOMA_ETH_OVERHEAD);
 	homa_info->data_bytes = length;
 	homa_info->seg_length = max_seg_data;
 	homa_info->offset = offset;
 
 	if (segs > 1 && rpc->hsk->sock.sk_protocol != IPPROTO_TCP) {
-		homa_set_doff(h, sizeof(struct data_header)  -
-				sizeof32(struct seg_header));
+		homa_set_doff(h, sizeof(struct homa_data_hdr)  -
+				sizeof32(struct homa_seg_hdr));
 		h->seg.offset = htonl(offset);
-		gso_size = max_seg_data + sizeof(struct seg_header);
+		gso_size = max_seg_data + sizeof(struct homa_seg_hdr);
 		err = homa_fill_data_interleaved(rpc, skb, iter);
 	} else {
 		gso_size = max_seg_data;
@@ -235,14 +235,14 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
 	mtu = dst_mtu(dst);
 	max_seg_data = mtu - rpc->hsk->ip_header_length
-			- sizeof(struct data_header);
+			- sizeof(struct homa_data_hdr);
 	gso_size = dst->dev->gso_max_size;
 	if (gso_size > rpc->hsk->homa->max_gso_size)
 		gso_size = rpc->hsk->homa->max_gso_size;
 
 	/* Round gso_size down to an even # of mtus. */
 	segs_per_gso = gso_size - rpc->hsk->ip_header_length
-			- sizeof(struct data_header);
+			- sizeof(struct homa_data_hdr);
 	do_div(segs_per_gso, max_seg_data);
 	if (segs_per_gso == 0)
 		segs_per_gso = 1;
@@ -324,7 +324,7 @@ error:
  * @length:    Length of @contents (including the common header).
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
- *             the fields of common_header except type, will be set from this.
+ *             the fields of homa_common_hdr except type, will be set from this.
  *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
@@ -332,7 +332,7 @@ error:
 int homa_xmit_control(enum homa_packet_type type, void *contents,
 		      size_t length, struct homa_rpc *rpc)
 {
-	struct common_header *h = contents;
+	struct homa_common_hdr *h = contents;
 
 	h->type = type;
 	h->sport = htons(rpc->hsk->port);
@@ -362,7 +362,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #ifndef __STRIP__ /* See strip.py */
 	struct netdev_queue *txq;
 #endif /* See strip.py */
-	struct common_header *h;
+	struct homa_common_hdr *h;
 	struct dst_entry *dst;
 	int result, priority;
 	struct sk_buff *skb;
@@ -449,9 +449,9 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
  */
 void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 {
-	struct common_header *h = (struct common_header *)skb->data;
+	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct unknown_header unknown;
+	struct homa_unknown_hdr unknown;
 	struct homa_peer *peer;
 
 	if (hsk->homa->verbose)
@@ -565,7 +565,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	/* Update info that may have changed since the message was initially
 	 * created.
 	 */
-	((struct data_header *)skb_transport_header(skb))->cutoff_version =
+	((struct homa_data_hdr *)skb_transport_header(skb))->cutoff_version =
 			rpc->peer->cutoff_version;
 
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
@@ -575,7 +575,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 	skb->ooo_okay = 1;
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	skb->csum_start = skb_transport_header(skb) - skb->head;
-	skb->csum_offset = offsetof(struct common_header, checksum);
+	skb->csum_offset = offsetof(struct homa_common_hdr, checksum);
 	if (rpc->hsk->inet.sk.sk_family == AF_INET6) {
 		tt_record4("calling ip6_xmit: wire_bytes %d, peer 0x%x, id %d, offset %d",
 			   homa_get_skb_info(skb)->wire_bytes,
@@ -628,7 +628,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 	 */
 	for (skb = rpc->msgout.packets; skb; skb = homa_info->next_skb) {
 		int seg_offset, offset, seg_length, data_left;
-		struct data_header *h;
+		struct homa_data_hdr *h;
 
 		homa_info = homa_get_skb_info(skb);
 		offset = homa_info->offset;
@@ -638,13 +638,13 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			continue;
 
 		offset = homa_info->offset;
-		seg_offset = sizeof32(struct data_header);
+		seg_offset = sizeof32(struct homa_data_hdr);
 		data_left = homa_info->data_bytes;
 		if (skb_shinfo(skb)->gso_segs <= 1) {
 			seg_length = data_left;
 		} else {
 			seg_length = homa_info->seg_length;
-			h = (struct data_header *)skb_transport_header(skb);
+			h = (struct homa_data_hdr *)skb_transport_header(skb);
 		}
 		for ( ; data_left > 0; data_left -= seg_length,
 		     offset += seg_length,
@@ -662,8 +662,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				continue;
 
 			/* This segment must be retransmitted. */
-			new_skb = homa_skb_new_tx(sizeof(struct data_header)
-					- sizeof(struct seg_header));
+			new_skb = homa_skb_new_tx(sizeof(struct homa_data_hdr)
+					- sizeof(struct homa_seg_hdr));
 			if (unlikely(!new_skb)) {
 				if (rpc->hsk->homa->verbose)
 					pr_notice("%s couldn't allocate skb\n",
@@ -672,7 +672,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 				goto resend_done;
 			}
 			h = __skb_put_data(new_skb, skb_transport_header(skb),
-					   sizeof32(struct data_header));
+					   sizeof32(struct homa_data_hdr));
 			h->common.sequence = htonl(offset);
 			h->seg.offset = htonl(offset);
 			h->retransmit = 1;
@@ -696,7 +696,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
 
 			new_homa_info = homa_get_skb_info(new_skb);
 			new_homa_info->wire_bytes = rpc->hsk->ip_header_length
-					+ sizeof(struct data_header)
+					+ sizeof(struct homa_data_hdr)
 					+ seg_length + HOMA_ETH_OVERHEAD;
 			new_homa_info->data_bytes = seg_length;
 			new_homa_info->seg_length = seg_length;

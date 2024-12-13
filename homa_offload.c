@@ -131,7 +131,7 @@ void homa_gro_unhook_tcp(void)
 struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 				     struct sk_buff *skb)
 {
-	struct common_header *h = (struct common_header *)
+	struct homa_common_hdr *h = (struct homa_common_hdr *)
 			skb_transport_header(skb);
 
 	// tt_record4("homa_tcp_gro_receive got type 0x%x, flags 0x%x, "
@@ -231,8 +231,8 @@ struct sk_buff *homa_gso_segment(struct sk_buff *skb,
 	/* This is needed to separate header info (which is replicated
 	 * in each segment) from data, which is divided among the segments.
 	 */
-	__skb_pull(skb, sizeof(struct data_header)
-			- sizeof(struct seg_header));
+	__skb_pull(skb, sizeof(struct homa_data_hdr)
+			- sizeof(struct homa_seg_hdr));
 	segs = skb_segment(skb, features);
 
 	/* Set incrementing ids in each of the segments (mimics behavior
@@ -284,8 +284,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	struct homa_offload_core *offload_core;
 	struct homa *homa = global_homa;
 	struct sk_buff *result = NULL;
+	struct homa_data_hdr *h_new;
 	__u64 *softirq_ns_metric;
-	struct data_header *h_new;
 	struct sk_buff *held_skb;
 	__u64 now = sched_clock();
 	int priority;
@@ -293,7 +293,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	__u32 hash;
 	int busy;
 
-	h_new = (struct data_header *)skb_transport_header(skb);
+	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, raw_smp_processor_id());
 	busy = (now - offload_core->last_gro) < homa->gro_busy_ns;
 	offload_core->last_active = now;
@@ -328,7 +328,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	} else if (h_new->common.type == GRANT) {
 		tt_record4("homa_gro_receive got grant from 0x%x id %llu, offset %d, priority %d",
 			   saddr, homa_local_id(h_new->common.sender_id),
-			   ntohl(((struct grant_header *)h_new)->offset),
+			   ntohl(((struct homa_grant_hdr *)h_new)->offset),
 			   priority);
 		/* The following optimization handles grants here at NAPI
 		 * level, bypassing the SoftIRQ mechanism (and avoiding the
@@ -476,7 +476,8 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 	 * cores. See balance.txt for overall design information on load
 	 * balancing.
 	 */
-	struct data_header *h = (struct data_header *)skb_transport_header(skb);
+	struct homa_data_hdr *h =
+			(struct homa_data_hdr *)skb_transport_header(skb);
 	int this_core = raw_smp_processor_id();
 	struct homa_offload_core *offload_core;
 	int candidate = this_core;
@@ -532,7 +533,8 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 	/* See balance.txt for overall design information on the Gen3
 	 * load balancer.
 	 */
-	struct data_header *h = (struct data_header *)skb_transport_header(skb);
+	struct homa_data_hdr *h =
+			(struct homa_data_hdr *)skb_transport_header(skb);
 	__u64 now, busy_time;
 	int *candidates;
 	int i, core;
@@ -577,7 +579,8 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
  */
 int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
-	struct data_header *h = (struct data_header *)skb_transport_header(skb);
+	struct homa_data_hdr *h =
+			(struct homa_data_hdr *)skb_transport_header(skb);
 	struct homa *homa = global_homa;
 
 	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",

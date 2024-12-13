@@ -130,7 +130,7 @@ FIXTURE(homa_incoming) {
 	struct homa homa;
 	struct homa_sock hsk;
 	struct homa_sock hsk2;
-	struct data_header data;
+	struct homa_data_hdr data;
 	struct homa_interest interest;
 };
 FIXTURE_SETUP(homa_incoming)
@@ -157,7 +157,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	self->data = (struct data_header){.common = {
+	self->data = (struct homa_data_hdr){.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.type = DATA,
@@ -926,7 +926,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__non_data_packet_for_existing_server_rp
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_IN_SERVICE,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 10000, 100);
-	struct resend_header resend = {.common = {
+	struct homa_resend_hdr resend = {.common = {
 		.sport = htons(self->client_port),
 		.dport = htons(self->server_port),
 		.type = RESEND,
@@ -951,7 +951,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__existing_client_rpc)
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
-	struct grant_header h = {{.sport = htons(self->server_port),
+	struct homa_grant_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
@@ -964,7 +964,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__existing_client_rpc)
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_client_rpc)
 {
-	struct grant_header h = {{.sport = htons(self->server_port),
+	struct homa_grant_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(99991),
 			.type = UNKNOWN}};
@@ -976,7 +976,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_client_rpc)
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_server_rpc)
 {
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(99990),
 			.type = GRANT}};
@@ -988,7 +988,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_server_rpc)
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 {
-	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	struct homa_cutoffs_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(99991),
 			.type = CUTOFFS},
@@ -1009,7 +1009,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__resend_for_unknown_server_rpc)
 {
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(99990),
 			.type = RESEND},
@@ -1024,7 +1024,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
-	struct grant_header h = {.common = {.sport = htons(self->server_port),
+	struct homa_grant_hdr h = {.common = {.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
@@ -1059,7 +1059,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_type)
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	unit_log_clear();
 
-	struct common_header h = {.sport = htons(self->server_port),
+	struct homa_common_hdr h = {.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id), .type = 99};
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h, 0, 0), &self->homa);
@@ -1331,7 +1331,7 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 20000);
-	struct grant_header h = {{.sport = htons(srpc->dport),
+	struct homa_grant_hdr h = {{.sport = htons(srpc->dport),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
@@ -1373,7 +1373,7 @@ TEST_F(homa_incoming, homa_grant_pkt__reset)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 20000);
-	struct grant_header h = {{.sport = htons(srpc->dport),
+	struct homa_grant_hdr h = {{.sport = htons(srpc->dport),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = GRANT},
@@ -1405,7 +1405,7 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
-	struct grant_header h = {{.sport = htons(self->server_port),
+	struct homa_grant_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = GRANT},
@@ -1421,7 +1421,7 @@ TEST_F(homa_incoming, homa_grant_pkt__grant_past_end_of_message)
 
 TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
 {
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = RESEND},
@@ -1435,7 +1435,7 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
 }
 TEST_F(homa_incoming, homa_resend_pkt__rpc_in_service_server_sends_busy)
 {
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = RESEND},
@@ -1458,7 +1458,7 @@ TEST_F(homa_incoming, homa_resend_pkt__rpc_incoming_server_sends_busy)
 	/* Entire msgin has not been received yet. But we have received
 	 * everything we have granted so far.
 	 */
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->server_port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = RESEND},
@@ -1483,7 +1483,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 	/* Important to respond to resends even if client thinks the
 	 * server must already have received everything.
 	 */
-	struct resend_header h = {{.sport = htons(self->server_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = RESEND},
@@ -1503,7 +1503,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_not_outgoing)
 }
 TEST_F(homa_incoming, homa_resend_pkt__send_busy_instead_of_data)
 {
-	struct resend_header h = {{.sport = htons(self->server_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = RESEND},
@@ -1523,7 +1523,7 @@ TEST_F(homa_incoming, homa_resend_pkt__send_busy_instead_of_data)
 }
 TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 {
-	struct resend_header h = {{.sport = htons(self->server_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = RESEND},
@@ -1546,7 +1546,7 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 }
 TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 {
-	struct resend_header h = {{.sport = htons(self->client_port),
+	struct homa_resend_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = RESEND},
@@ -1571,7 +1571,7 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 {
-	struct unknown_header h = {{.sport = htons(self->server_port),
+	struct homa_unknown_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = UNKNOWN}};
@@ -1593,7 +1593,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 }
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 {
-	struct unknown_header h = {{.sport = htons(self->server_port),
+	struct homa_unknown_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = UNKNOWN}};
@@ -1615,7 +1615,7 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 }
 TEST_F(homa_incoming, homa_unknown_pkt__free_server_rpc)
 {
-	struct unknown_header h = {{.sport = htons(self->client_port),
+	struct homa_unknown_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->hsk2.port),
 			.sender_id = cpu_to_be64(self->client_id),
 			.type = UNKNOWN}};
@@ -1636,7 +1636,7 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 1600);
-	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	struct homa_cutoffs_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = CUTOFFS},
@@ -1656,7 +1656,7 @@ TEST_F(homa_incoming, homa_cutoffs_pkt_basics)
 }
 TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 {
-	struct cutoffs_header h = {{.sport = htons(self->server_port),
+	struct homa_cutoffs_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
 			.type = CUTOFFS},
@@ -1680,7 +1680,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_response_fully_received)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 3000);
-	struct need_ack_header h = {.common = {
+	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
@@ -1701,7 +1701,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_response_not_fully_received)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 3000);
-	struct need_ack_header h = {.common = {
+	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
@@ -1721,7 +1721,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 100, 3000);
-	struct need_ack_header h = {.common = {
+	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
@@ -1740,7 +1740,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 {
 	struct homa_peer *peer = homa_peer_find(self->homa.peers,
 			self->server_ip, &self->hsk.inet);
-	struct need_ack_header h = {.common = {
+	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
@@ -1761,7 +1761,7 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists)
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 5000);
-	struct ack_header h = {.common = {
+	struct homa_ack_hdr h = {.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->hsk2.port),
 			.sender_id = cpu_to_be64(self->client_id),
@@ -1785,7 +1785,7 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id+2, 100, 5000);
-	struct ack_header h = {.common = {
+	struct homa_ack_hdr h = {.common = {
 			.sport = htons(self->client_port),
 			.dport = htons(self->hsk2.port),
 			.sender_id = cpu_to_be64(self->client_id + 10),

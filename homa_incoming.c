@@ -83,7 +83,7 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
  */
 void homa_gap_retry(struct homa_rpc *rpc)
 {
-	struct resend_header resend;
+	struct homa_resend_hdr resend;
 	struct homa_gap *gap;
 
 	list_for_each_entry(gap, &rpc->msgin.gaps, links) {
@@ -105,7 +105,7 @@ void homa_gap_retry(struct homa_rpc *rpc)
  */
 void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 {
-	struct data_header *h = (struct data_header *)skb->data;
+	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	struct homa_gap *gap, *dummy, *gap2;
 	int start = ntohl(h->seg.offset);
 	int length = homa_data_len(skb);
@@ -273,7 +273,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 
 		/* Each iteration of this loop copies out one skb. */
 		for (i = 0; i < n; i++) {
-			struct data_header *h = (struct data_header *)
+			struct homa_data_hdr *h = (struct homa_data_hdr *)
 					skbs[i]->data;
 			int pkt_length = homa_data_len(skbs[i]);
 			int offset = ntohl(h->seg.offset);
@@ -365,7 +365,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 #define MAX_ACKS 10
 #endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct data_header *h = (struct data_header *)skb->data;
+	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	__u64 id = homa_local_id(h->common.sender_id);
 	int dport = ntohs(h->common.dport);
 
@@ -403,7 +403,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 
 	/* Each iteration through the following loop processes one packet. */
 	for (; skb; skb = next) {
-		h = (struct data_header *)skb->data;
+		h = (struct homa_data_hdr *)skb->data;
 		next = skb->next;
 
 		/* Relinquish the RPC lock temporarily if it's needed
@@ -560,7 +560,7 @@ discard:
  */
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct data_header *h = (struct data_header *)skb->data;
+	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	struct homa *homa = rpc->hsk->homa;
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
@@ -619,7 +619,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 * packet.
 		 */
 		if (jiffies != rpc->peer->last_update_jiffies) {
-			struct cutoffs_header h2;
+			struct homa_cutoffs_hdr h2;
 			int i;
 
 			for (i = 0; i < HOMA_MAX_PRIORITIES; i++) {
@@ -646,7 +646,7 @@ discard:
  */
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
-	struct grant_header *h = (struct grant_header *)skb->data;
+	struct homa_grant_hdr *h = (struct homa_grant_hdr *)skb->data;
 	int new_offset = ntohl(h->offset);
 
 	tt_record4("processing grant for id %llu, offset %d, priority %d, increment %d",
@@ -680,11 +680,11 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		     struct homa_sock *hsk)
 {
-	struct resend_header *h = (struct resend_header *)skb->data;
+	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
 #ifndef __STRIP__ /* See strip.py */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 #endif /* See strip.py */
-	struct busy_header busy;
+	struct homa_busy_hdr busy;
 
 	if (!rpc) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, offset %d; responding with UNKNOWN",
@@ -783,7 +783,7 @@ done:
  */
 void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 {
-	struct cutoffs_header *h = (struct cutoffs_header *)skb->data;
+	struct homa_cutoffs_hdr *h = (struct homa_cutoffs_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_peer *peer;
 	int i;
@@ -809,11 +809,11 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		       struct homa_rpc *rpc)
 {
-	struct common_header *h = (struct common_header *)skb->data;
+	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	__u64 id = homa_local_id(h->sender_id);
 	struct homa_peer *peer;
-	struct ack_header ack;
+	struct homa_ack_hdr ack;
 
 	tt_record1("Received NEED_ACK for id %d", id);
 
@@ -871,7 +871,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__releases(rpc->bucket_lock)
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct ack_header *h = (struct ack_header *)skb->data;
+	struct homa_ack_hdr *h = (struct homa_ack_hdr *)skb->data;
 	int i, count;
 
 	if (rpc) {

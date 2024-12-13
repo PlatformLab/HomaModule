@@ -29,7 +29,7 @@ FIXTURE(homa_offload)
 	struct homa homa;
 	struct homa_sock hsk;
 	struct in6_addr ip;
-	struct data_header header;
+	struct homa_data_hdr header;
 	struct napi_struct napi;
 	struct sk_buff *skb, *skb2;
 	struct list_head empty_list;
@@ -45,7 +45,7 @@ FIXTURE_SETUP(homa_offload)
 	global_homa = &self->homa;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
-	self->header = (struct data_header){.common = {
+	self->header = (struct homa_data_hdr){.common = {
 			.sport = htons(40000), .dport = htons(99),
 			.type = DATA,
 			.flags = HOMA_TCP_FLAGS,
@@ -130,13 +130,13 @@ TEST_F(homa_offload, homa_gro_hook_tcp)
 
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 {
-	struct common_header *h;
+	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
-	h = (struct common_header *) skb_transport_header(skb);
+	h = (struct homa_common_hdr *) skb_transport_header(skb);
 	h->flags = 0;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
 	EXPECT_STREQ("tcp_gro_receive", unit_log_get());
@@ -144,7 +144,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 	unit_log_clear();
 
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
-	h = (struct common_header *)skb_transport_header(skb);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->urgent -= 1;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
 	EXPECT_STREQ("tcp_gro_receive", unit_log_get());
@@ -153,7 +153,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 }
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 {
-	struct common_header *h;
+	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 
 	mock_ipv6 = true;
@@ -161,7 +161,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
-	h = (struct common_header *)skb_transport_header(skb);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_TCP_FLAGS;
 	h->urgent = htons(HOMA_TCP_URGENT);
 	NAPI_GRO_CB(skb)->same_flow = 0;
@@ -176,7 +176,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 }
 TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 {
-	struct common_header *h;
+	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 
 	mock_ipv6 = false;
@@ -184,7 +184,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 	self->header.seg.offset = htonl(6000);
 	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
-	h = (struct common_header *)skb_transport_header(skb);
+	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_TCP_FLAGS;
 	h->urgent = htons(HOMA_TCP_URGENT);
 	NAPI_GRO_CB(skb)->same_flow = 0;
@@ -222,7 +222,7 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
 {
 	struct sk_buff *skb, *skb2;
-	struct data_header *h;
+	struct homa_data_hdr *h;
 
 	/* First call: copy offset from sequence number. */
 	self->header.common.sequence = htonl(6000);
@@ -232,7 +232,7 @@ TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
 	cur_offload_core->held_skb = NULL;
 	cur_offload_core->held_bucket = 99;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb));
-	h = (struct data_header *) skb_transport_header(skb);
+	h = (struct homa_data_hdr *) skb_transport_header(skb);
 	EXPECT_EQ(6000, htonl(h->seg.offset));
 
 	/* Second call: offset already valid. */
@@ -241,7 +241,7 @@ TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
 	skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb2)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb2));
-	h = (struct data_header *)skb_transport_header(skb2);
+	h = (struct homa_data_hdr *)skb_transport_header(skb2);
 	EXPECT_EQ(5000, htonl(h->seg.offset));
 
 	kfree_skb(skb);
@@ -257,7 +257,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	__u64 server_id = 1235;
 	struct homa_rpc *srpc;
 	int server_port = 99;
-	struct data_header h;
+	struct homa_data_hdr h;
 
 	h.common.sport = htons(40000);
 	h.common.dport = htons(server_port);
@@ -318,11 +318,11 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct in6_addr client_ip = unit_get_in_addr("196.168.0.1");
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
 	struct sk_buff *skb, *skb2, *skb3, *result;
+	struct homa_grant_hdr h;
 	int client_port = 40000;
 	__u64 client_id = 1234;
 	__u64 server_id = 1235;
 	struct homa_rpc *srpc;
-	struct grant_header h;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,
 			&client_ip, &server_ip, client_port, server_id, 100,

@@ -20,7 +20,7 @@
 void homa_check_rpc(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
-	struct resend_header resend;
+	struct homa_resend_hdr resend;
 	const char *us, *them;
 
 	/* See if we need to request an ack for this RPC. */
@@ -32,7 +32,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			/* >= comparison that handles tick wrap-around. */
 			if ((rpc->done_timer_ticks + homa->request_ack_ticks
 					- 1 - homa->timer_ticks) & 1 << 31) {
-				struct need_ack_header h;
+				struct homa_need_ack_hdr h;
 
 				homa_xmit_control(NEED_ACK, &h, sizeof(h), rpc);
 				tt_record4("Sent NEED_ACK for RPC id %d to peer 0x%x, port %d, ticks %d",

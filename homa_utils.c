@@ -270,7 +270,7 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
  */
 char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 {
-	struct common_header *common;
+	struct homa_common_hdr *common;
 	char header[HOMA_MAX_HEADER];
 	struct in6_addr saddr;
 	int used = 0;
@@ -282,7 +282,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	}
 
 	homa_skb_get(skb, &header, 0, sizeof(header));
-	common = (struct common_header *)header;
+	common = (struct homa_common_hdr *)header;
 	saddr = skb_canonical_ipv6_saddr(skb);
 	used = homa_snprintf(buffer, buf_len, used,
 			     "%s from %s:%u, dport %d, id %llu",
@@ -293,7 +293,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 	switch (common->type) {
 	case DATA: {
 		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
-		struct data_header *h = (struct data_header *)header;
+		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
 		int data_left, i, seg_length, pos, offset;
 
 		if (skb_shinfo(skb)->gso_segs == 0) {
@@ -328,7 +328,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
 			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
-				struct seg_header seg;
+				struct homa_seg_hdr seg;
 
 				homa_skb_get(skb, &seg, pos, sizeof(seg));
 				offset = ntohl(seg.offset);
@@ -345,7 +345,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	case GRANT: {
-		struct grant_header *h = (struct grant_header *)header;
+		struct homa_grant_hdr *h = (struct homa_grant_hdr *)header;
 		char *resend = (h->resend_all) ? ", resend_all" : "";
 
 		used = homa_snprintf(buffer, buf_len, used,
@@ -354,7 +354,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	case RESEND: {
-		struct resend_header *h = (struct resend_header *)header;
+		struct homa_resend_hdr *h = (struct homa_resend_hdr *)header;
 
 		used = homa_snprintf(buffer, buf_len, used,
 				     ", offset %d, length %d, resend_prio %u",
@@ -369,7 +369,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		/* Nothing to add here. */
 		break;
 	case CUTOFFS: {
-		struct cutoffs_header *h = (struct cutoffs_header *)header;
+		struct homa_cutoffs_hdr *h = (struct homa_cutoffs_hdr *)header;
 
 		used = homa_snprintf(buffer, buf_len, used,
 				     ", cutoffs %d %d %d %d %d %d %d %d, version %u",
@@ -391,7 +391,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 		/* Nothing to add here. */
 		break;
 	case ACK: {
-		struct ack_header *h = (struct ack_header *)header;
+		struct homa_ack_hdr *h = (struct homa_ack_hdr *)header;
 		int i, count;
 
 		count = ntohs(h->num_acks);
@@ -422,14 +422,14 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
  */
 char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 {
+	struct homa_common_hdr *common;
 	char header[HOMA_MAX_HEADER];
-	struct common_header *common;
 
-	common = (struct common_header *)header;
+	common = (struct homa_common_hdr *)header;
 	homa_skb_get(skb, header, 0, HOMA_MAX_HEADER);
 	switch (common->type) {
 	case DATA: {
-		struct data_header *h = (struct data_header *)header;
+		struct homa_data_hdr *h = (struct homa_data_hdr *)header;
 		struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 		int data_left, used, i, seg_length, pos, offset;
 
@@ -450,7 +450,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 				     seg_length, offset);
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
 			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
-				struct seg_header seg;
+				struct homa_seg_hdr seg;
 
 				homa_skb_get(skb, &seg, pos, sizeof(seg));
 				offset = ntohl(seg.offset);
@@ -467,7 +467,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	case GRANT: {
-		struct grant_header *h = (struct grant_header *)header;
+		struct homa_grant_hdr *h = (struct homa_grant_hdr *)header;
 		char *resend = h->resend_all ? " resend_all" : "";
 
 		snprintf(buffer, buf_len, "GRANT %d@%d%s", ntohl(h->offset),
@@ -475,7 +475,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		break;
 	}
 	case RESEND: {
-		struct resend_header *h = (struct resend_header *)header;
+		struct homa_resend_hdr *h = (struct homa_resend_hdr *)header;
 
 		snprintf(buffer, buf_len, "RESEND %d-%d@%d", ntohl(h->offset),
 			 ntohl(h->offset) + ntohl(h->length) - 1,
@@ -515,7 +515,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 void homa_freeze_peers(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
-	struct freeze_header freeze;
+	struct homa_freeze_hdr freeze;
 	struct homa_peer **peers;
 	int num_peers, i, err;
 	struct homa_sock *hsk;
@@ -703,7 +703,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		return;
 	rpc->hsk->homa->freeze_type = 0;
 	if (!tt_frozen) {
-//		struct freeze_header freeze;
+//		struct homa_freeze_hdr freeze;
 		int dummy;
 
 		pr_notice("freezing in %s with freeze_type %d\n", __func__,

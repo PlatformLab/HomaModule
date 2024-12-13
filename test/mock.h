@@ -44,34 +44,35 @@ extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;
 extern int         mock_xmit_log_homa_info;
 
-extern struct page *
+struct page *
 		   mock_alloc_pages(gfp_t gfp, unsigned order);
-extern int         mock_check_error(int *errorMask);
-extern void        mock_clear_xmit_prios(void);
-extern void        mock_data_ready(struct sock *sk);
-extern cycles_t    mock_get_cycles(void);
-extern unsigned int
-		   mock_get_mtu(const struct dst_entry *dst);
-extern void        mock_get_page(struct page *page);
-extern int         mock_page_refs(struct page *page);
-extern int         mock_page_refs(struct page *page);
-extern void        mock_put_page(struct page *page);
-extern void        mock_rcu_read_lock(void);
-extern void        mock_rcu_read_unlock(void);
-extern struct ctl_table_header *
-		   mock_register_net_sysctl(struct net *net,
-		       const char *path, struct ctl_table *table);
-extern void        mock_set_core(int num);
-extern void        mock_set_ipv6(struct homa_sock *hsk);
-extern void        mock_spin_lock(spinlock_t *lock);
-extern void        mock_spin_unlock(spinlock_t *lock);
-extern int         mock_skb_count(void);
-extern struct sk_buff *
-                   mock_skb_new(struct in6_addr *saddr, struct common_header *h,
+int         mock_check_error(int *errorMask);
+void        mock_clear_xmit_prios(void);
+void        mock_data_ready(struct sock *sk);
+cycles_t    mock_get_cycles(void);
+unsigned int
+	    mock_get_mtu(const struct dst_entry *dst);
+void        mock_get_page(struct page *page);
+int         mock_page_refs(struct page *page);
+int         mock_page_refs(struct page *page);
+void        mock_put_page(struct page *page);
+void        mock_rcu_read_lock(void);
+void        mock_rcu_read_unlock(void);
+struct ctl_table_header *
+	    mock_register_net_sysctl(struct net *net,
+				     const char *path,
+				     struct ctl_table *table);
+void        mock_set_core(int num);
+void        mock_set_ipv6(struct homa_sock *hsk);
+void        mock_spin_lock(spinlock_t *lock);
+void        mock_spin_unlock(spinlock_t *lock);
+int         mock_skb_count(void);
+struct sk_buff *
+            mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
 			int extra_bytes, int first_value);
-extern void        mock_sock_destroy(struct homa_sock *hsk,
-			struct homa_socktab *socktab);
-extern void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
-			int port);
-extern void        mock_teardown(void);
-extern void       *mock_vmalloc(size_t size);
+void        mock_sock_destroy(struct homa_sock *hsk,
+			      struct homa_socktab *socktab);
+void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
+			   int port);
+void        mock_teardown(void);
+void       *mock_vmalloc(size_t size);
