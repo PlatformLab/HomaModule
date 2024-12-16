@@ -82,8 +82,8 @@ int homa_init(struct homa *homa)
 	}
 
 	/* Wild guesses to initialize configuration values... */
-	homa->unsched_bytes = 10000;
-	homa->window_param = 10000;
+	homa->unsched_bytes = 40000;
+	homa->window_param = 100000;
 	homa->link_mbps = 25000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
@@ -124,7 +124,7 @@ int homa_init(struct homa *homa)
 		return err;
 	}
 	homa->pacer_exit = false;
-	homa->max_nic_queue_ns = 2000;
+	homa->max_nic_queue_ns = 5000;
 	homa->ns_per_mbyte = 0;
 	homa->verbose = 0;
 	homa->max_gso_size = 10000;

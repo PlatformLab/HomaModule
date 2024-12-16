@@ -35,6 +35,8 @@ FIXTURE_SETUP(homa_timer)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;
 	self->homa.timer_ticks = 100;
+	self->homa.unsched_bytes = 10000;
+	self->homa.window_param = 10000;
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	unit_log_clear();
 }

@@ -19,6 +19,8 @@ FIXTURE(homa_pool) {
 FIXTURE_SETUP(homa_pool)
 {
 	homa_init(&self->homa);
+	self->homa.unsched_bytes = 10000;
+	self->homa.window_param = 10000;
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");

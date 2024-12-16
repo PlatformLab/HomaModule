@@ -152,6 +152,8 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer_fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
+	self->homa.unsched_bytes = 10000;
+	self->homa.window_param = 10000;
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	mock_sock_init(&self->hsk2, &self->homa, self->server_port);
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;

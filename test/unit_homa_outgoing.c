@@ -58,6 +58,8 @@ FIXTURE_SETUP(homa_outgoing)
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	self->homa.ns_per_mbyte = 1000000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
+	self->homa.unsched_bytes = 10000;
+	self->homa.window_param = 10000;
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
