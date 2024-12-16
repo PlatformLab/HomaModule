@@ -38,6 +38,21 @@ Notes for Homa implementation in Linux:
   * TCQ_F_NOLOCK seems to apply to the qdisc root lock: individual qdiscs
     still get locked.
 
+* Notes on Homa qdisc:
+  * Keep separate packet queues for TCP and Homa
+  * Pace packet output to stay within network speed
+  * If both queues are nonempty, split bandwidth between the queues using
+    a static formula (have a relative weight for each of TCP and Homa?)
+  * For Homa, is it OK call ip_queue_xmit for all available output and
+    let the qdisc queue them up?
+    * Potential risk: queues might get long, so insertion could be expensive.
+      Can organize the queue by RPC, not individual packets ... there probably
+      are not large #'s of ready RPCs at once?
+  * Keep track of all of the queues for a particular device, and potentially
+    move packets between queues (e.g. all long packets get transmitted on a
+    single queue; no short packets get transmitted there).
+
+
 * Remedies to consider for the performance problems at 100 Gbps, where
   one tx channel gets very backed up:
   * Implement zero-copy on output in order to reduce memory bandwidth
