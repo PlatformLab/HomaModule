@@ -80,7 +80,10 @@ struct homa_message_out {
 	 */
 	int granted;
 
-	/** @priority: Priority level to use for future scheduled packets. */
+	/**
+	 * @sched_priority: Priority level to use for future scheduled
+	 * packets.
+	 */
 	__u8 sched_priority;
 
 	/**
