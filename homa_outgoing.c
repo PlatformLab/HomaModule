@@ -242,7 +242,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	/* Round gso_size down to an even # of mtus. */
 	segs_per_gso = gso_size - rpc->hsk->ip_header_length
 			- sizeof(struct data_header);
-	do_div(segs_per_gso, max_seg_data);
+	if (rpc->hsk->sock.sk_protocol != IPPROTO_TCP) {
+		segs_per_gso += sizeof(struct seg_header);
+		do_div(segs_per_gso, max_seg_data + sizeof(struct seg_header));
+	} else {
+		do_div(segs_per_gso, max_seg_data);
+	}
 	if (segs_per_gso == 0)
 		segs_per_gso = 1;
 	max_gso_data = segs_per_gso * max_seg_data;
