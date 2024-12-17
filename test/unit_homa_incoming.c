@@ -772,7 +772,27 @@ TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 			"skb_copy_datagram_iter: 440 bytes to 0x1000a00: 103560-103999",
 			unit_log_get());
 }
-TEST_F(homa_incoming, homa_copy_to_user__error_in_import_single_range)
+TEST_F(homa_incoming, homa_copy_to_user__skb_data_extends_past_message_end)
+{
+	struct homa_data_hdr *h;
+	struct homa_rpc *crpc;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
+			self->server_ip, self->server_port, self->client_id,
+			1000, 4000);
+	ASSERT_NE(NULL, crpc);
+	self->data.message_length = htonl(4000);
+	homa_data_pkt(mock_skb_new(self->server_ip, &self->data.common,
+			3000, 101000), crpc);
+
+	unit_log_clear();
+	mock_copy_to_user_dont_copy = -1;
+	h = (struct homa_data_hdr *)skb_peek(&crpc->msgin.packets)->data;
+	h->seg.offset = htonl(4000);
+	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_incoming, homa_copy_to_user__error_in_import_ubuf)
 {
 	struct homa_rpc *crpc;
 
@@ -1050,6 +1070,31 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 			&self->homa);
 	EXPECT_EQ(5, crpc->silent_ticks);
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+}
+TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
+{
+	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 3000);
+	struct sk_buff *skb, *skb2, *skb3;
+	struct homa_ack_hdr ack;
+
+	ASSERT_NE(NULL, srpc);
+	ack.common = self->data.common;
+	ack.common.type = ACK;
+	ack.common.sender_id += 100;
+	ack.num_acks = htons(1);
+	ack.acks[0].server_port = htons(self->server_port);
+	ack.acks[0].client_id = cpu_to_be64(self->client_id + 4);
+	skb = mock_skb_new(self->client_ip, &ack.common, 0, 0);
+	skb2 = mock_skb_new(self->client_ip, &ack.common, 0, 0);
+	skb3 = mock_skb_new(self->client_ip, &ack.common, 0, 0);
+	skb->next = skb2;
+	skb2->next = skb3;
+
+	unit_log_clear();
+	homa_dispatch_pkts(skb, &self->homa);
+	EXPECT_SUBSTR("ack 1239", unit_log_get());
 }
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_type)
 {

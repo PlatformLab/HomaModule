@@ -519,7 +519,13 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			/* It isn't safe to process more packets once we've
 			 * released the RPC lock (this should never happen).
 			 */
-			BUG_ON(next);
+			while (next) {
+				WARN_ONCE(next, "%s found extra packets after AC<\n",
+					  __func__);
+				skb = next;
+				next = skb->next;
+				kfree_skb(skb);
+			}
 			break;
 		default:
 			INC_METRIC(unknown_packet_types, 1);

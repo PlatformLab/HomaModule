@@ -206,7 +206,9 @@ def scan(file, alt_mode):
             non_comment = pline
         non_comment = non_comment.strip()
 
-        # Strip groups of lines labeled with special '#if'
+        # Strip groups of lines labeled with special '#ifndef __STRIP__'
+        # Note: don't do brace elimination here: this allows greater control
+        # to the __STRIP__ code.
         if in_labeled_skip != None:
             if line.startswith('#endif /* See strip.py */'):
                 in_labeled_skip = None

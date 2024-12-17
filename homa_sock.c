@@ -264,16 +264,19 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up_process(interest->thread);
 	homa_sock_unlock(hsk);
 
+#ifndef __STRIP__ /* See strip.py */
 	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, 1000);
-#ifndef __STRIP__ /* See strip.py */
 		i++;
 		if (i == 5) {
 			tt_record("Freezing because reap seems hung");
 			tt_freeze();
 		}
-#endif /* See strip.py */
 	}
+#else /* See strip.py */
+	while (!list_empty(&hsk->dead_rpcs))
+		homa_rpc_reap(hsk, 1000);
+#endif /* See strip.py */
 
 	if (hsk->buffer_pool) {
 		homa_pool_destroy(hsk->buffer_pool);

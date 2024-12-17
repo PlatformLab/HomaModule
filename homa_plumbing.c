@@ -1415,8 +1415,8 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	iph = (struct iphdr *)(skb->data);
 	daddr = ipv4_to_ipv6(iph->daddr);
 	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
-		struct homa_common_hdr *h = (struct homa_common_hdr *)(skb->data +
-				iph->ihl * 4);
+		struct homa_common_hdr *h = (struct homa_common_hdr *)(skb->data
+				+ iph->ihl * 4);
 
 		port = ntohs(h->dport);
 		error = -ENOTCONN;

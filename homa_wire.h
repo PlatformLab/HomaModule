@@ -286,6 +286,7 @@ _Static_assert(((sizeof(struct homa_data_hdr) - sizeof(struct homa_seg_hdr)) &
  * after the homa_data_hdr. Note: if the packet is a GSO packet, the result
  * may include metadata as well as packet data.
  * @skb:   Incoming data packet
+ * Return: see above
  */
 static inline int homa_data_len(struct sk_buff *skb)
 {
@@ -382,7 +383,7 @@ _Static_assert(sizeof(struct homa_unknown_hdr) <= HOMA_MAX_HEADER,
 	       "homa_unknown_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct busy_header - Wire format for BUSY packets.
+ * struct homa_busy_hdr - Wire format for BUSY packets.
  *
  * These packets tell the recipient that the sender is still alive (even if
  * it isn't sending data expected by the recipient).
@@ -473,6 +474,7 @@ _Static_assert(sizeof(struct homa_ack_hdr) <= HOMA_MAX_HEADER,
  * is network-encoded), return the decoded id we should use for that
  * RPC on this machine.
  * @sender_id:  RPC id from an incoming packet, such as h->common.sender_id
+ * Return: see above
  */
 static inline __u64 homa_local_id(__be64 sender_id)
 {

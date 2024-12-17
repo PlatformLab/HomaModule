@@ -161,7 +161,6 @@ void     homa_throttle_lock_slow(struct homa *homa);
  * and easier to use than sockaddr_storage).
  */
 union sockaddr_in_union {
-
 	/** @sa: Used to access as a generic sockaddr. */
 	struct sockaddr sa;
 

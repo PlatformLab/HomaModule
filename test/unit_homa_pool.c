@@ -453,6 +453,22 @@ TEST_F(homa_pool, homa_pool_get_buffer)
 	EXPECT_EQ((150000 & (HOMA_BPAGE_SIZE-1)) - 100, available);
 	EXPECT_EQ((void *) (pool->region + 2*HOMA_BPAGE_SIZE + 100), buffer);
 }
+TEST_F(homa_pool, homa_pool_get_buffer__bad_offset)
+{
+	struct homa_rpc *crpc;
+	int available;
+	void *buffer;
+
+	crpc = unit_client_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, &self->client_ip,
+			&self->server_ip, 4000, 98, 1000, 150000);
+	ASSERT_NE(NULL, crpc);
+	buffer = homa_pool_get_buffer(crpc, 149900, &available);
+	EXPECT_NE(NULL, buffer);
+	EXPECT_EQ(100, available);
+	buffer = homa_pool_get_buffer(crpc, 150000, &available);
+	EXPECT_EQ(NULL, buffer);
+	EXPECT_EQ(0, available);
+}
 
 TEST_F(homa_pool, homa_pool_release_buffers__basics)
 {

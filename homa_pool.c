@@ -371,7 +371,8 @@ queued:
  *              been allocated for the message.
  * @offset:     Offset within @rpc's incoming message.
  * @available:  Will be filled in with the number of bytes of space available
- *              at the returned address.
+ *              at the returned address (could be zero if offset is
+ * 		(erroneously) past the end of the message).
  * Return:      The application's virtual address for buffer space corresponding
  *              to @offset in the incoming message for @rpc.
  */
@@ -380,7 +381,12 @@ void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
 	int bpage_index, bpage_offset;
 
 	bpage_index = offset >> HOMA_BPAGE_SHIFT;
-	BUG_ON(bpage_index >= rpc->msgin.num_bpages);
+	if (offset >= rpc->msgin.length) {
+		WARN_ONCE(true, "%s got offset %d >= message length %d\n",
+			  __func__, offset, rpc->msgin.length);
+		*available = 0;
+		return NULL;
+	}
 	bpage_offset = offset & (HOMA_BPAGE_SIZE - 1);
 	*available = (bpage_index < (rpc->msgin.num_bpages - 1))
 			? HOMA_BPAGE_SIZE - bpage_offset
