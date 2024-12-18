@@ -240,10 +240,23 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	if (gso_size > rpc->hsk->homa->max_gso_size)
 		gso_size = rpc->hsk->homa->max_gso_size;
 
-	/* Round gso_size down to an even # of mtus. */
-	segs_per_gso = gso_size - rpc->hsk->ip_header_length
-			- sizeof(struct homa_data_hdr);
-	do_div(segs_per_gso, max_seg_data);
+	/* Round gso_size down to an even # of mtus; calculation depends
+	 * on whether we're doing TCP hijacking (need more space in TSO packet
+	 * if no hijacking).
+	 */
+	if (rpc->hsk->sock.sk_protocol == IPPROTO_TCP) {
+		/* Hijacking */
+		segs_per_gso = gso_size - rpc->hsk->ip_header_length
+				- sizeof(struct homa_data_hdr);
+		do_div(segs_per_gso, max_seg_data);
+	} else {
+		/* No hijacking */
+		segs_per_gso = gso_size - rpc->hsk->ip_header_length -
+				sizeof(struct homa_data_hdr) +
+				sizeof(struct homa_seg_hdr);
+		do_div(segs_per_gso, max_seg_data +
+				sizeof(struct homa_seg_hdr));
+	}
 	if (segs_per_gso == 0)
 		segs_per_gso = 1;
 	max_gso_data = segs_per_gso * max_seg_data;
