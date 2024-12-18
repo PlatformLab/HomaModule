@@ -1192,7 +1192,7 @@ claim_rpc:
 		interest->locked = 1;
 	}
 	atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
-	atomic_long_set_release(&interest->ready_rpc, (long)rpc);
+	homa_interest_set_rpc(interest, rpc);
 	return 0;
 }
 
@@ -1227,7 +1227,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 	 */
 	while (1) {
 		error = homa_register_interests(&interest, hsk, flags, id);
-		rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
+		rpc = homa_interest_get_rpc(&interest);
 		if (rpc)
 			goto found_rpc;
 		if (error < 0) {
@@ -1241,8 +1241,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		while (1) {
 			int reaper_result;
 
-			rpc = (struct homa_rpc *)atomic_long_read(&interest
-								  .ready_rpc);
+			rpc = homa_interest_get_rpc(&interest);
 			if (rpc) {
 				tt_record1("received RPC handoff while reaping, id %d",
 					   rpc->id);
@@ -1301,7 +1300,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		/* Now it's time to sleep. */
 		per_cpu(homa_offload_core, interest.core).last_app_active = now;
 		set_current_state(TASK_INTERRUPTIBLE);
-		rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
+		rpc = homa_interest_get_rpc(&interest);
 		if (!rpc && !hsk->shutdown) {
 			__u64 end;
 			__u64 start = sched_clock();
@@ -1345,7 +1344,7 @@ found_rpc:
 		 * this could have happened anytime up until we reset the
 		 * interests above).
 		 */
-		rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
+		rpc = homa_interest_get_rpc(&interest);
 		if (rpc) {
 			tt_record2("homa_wait_for_message found rpc id %d, pid %d",
 				   rpc->id, current->pid);
@@ -1491,7 +1490,7 @@ thread_waiting:
 	INC_METRIC(handoffs_thread_waiting, 1);
 	tt_record3("homa_rpc_handoff handing off id %d to pid %d on core %d",
 		   rpc->id, interest->thread->pid, task_cpu(interest->thread));
-	atomic_long_set_release(&interest->ready_rpc, (long)rpc);
+	homa_interest_set_rpc(interest, rpc);
 
 	/* Update the last_app_active time for the thread's core, so Homa
 	 * will try to avoid doing any work there.

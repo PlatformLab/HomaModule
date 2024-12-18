@@ -186,10 +186,13 @@ struct homa_interest {
 	/**
 	 * @ready_rpc: This is actually a (struct homa_rpc *) identifying the
 	 * RPC that was found; NULL if no RPC has been found yet. This
-	 * variable is used for synchronization to handoff the RPC, and
-	 * must be set only after @locked is set.
+	 * variable is used for lock-free synchronization to handoff a
+	 * ready RPC to a receiving thread; read and write with functions
+	 * below.
 	 */
 	atomic_long_t ready_rpc;
+_Static_assert(sizeof(atomic_long_t) >= sizeof(struct homa_rpc *),
+	       "atomic_long_t isn't large enough to store a homa_rpc *");
 
 	/**
 	 * @locked: Nonzero means that @ready_rpc is locked; only valid
@@ -251,6 +254,29 @@ enum homa_freeze_type {
 	PACKET_LOST            = 5,
 	NEED_ACK_MISSING_DATA  = 6,
 };
+
+/**
+ * homa_interest_get_rpc() - Return the ready RPC stored in an interest,
+ * if there is one.
+ * @interest:  Struct to check
+ * Return: the ready RPC, or NULL if none.
+ */
+static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *interest)
+{
+	return (struct homa_rpc *)atomic_long_read(&interest->ready_rpc);
+}
+
+/**
+ * homa_interest_set_rpc() - Hand off a ready RPC to an interest from a
+ * waiting receiver thread. Note: interest->locked must be set before
+ * calling this function.
+ * @interest:   Owned by a thread that is ready to receive the RPC.
+ */
+static inline void homa_interest_set_rpc(struct homa_interest *interest,
+						     struct homa_rpc *rpc)
+{
+	atomic_long_set_release(&interest->ready_rpc, (long)rpc);
+}
 
 /**
  * struct homa - Overall information about the Homa protocol implementation.

@@ -2137,8 +2137,7 @@ TEST_F(homa_incoming, homa_register_interests__return_response_by_id)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			0, self->client_id);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__socket_shutdown)
@@ -2162,8 +2161,7 @@ TEST_F(homa_incoming, homa_register_interests__specified_id_has_packets)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST, crpc->id);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__specified_id_has_error)
@@ -2179,8 +2177,7 @@ TEST_F(homa_incoming, homa_register_interests__specified_id_has_error)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_NONBLOCKING, crpc->id);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__specified_id_not_ready)
@@ -2194,8 +2191,7 @@ TEST_F(homa_incoming, homa_register_interests__specified_id_not_ready)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST, crpc->id);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(NULL, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(NULL, homa_interest_get_rpc(&self->interest));
 }
 TEST_F(homa_incoming, homa_register_interests__return_queued_response)
 {
@@ -2208,8 +2204,7 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_response)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
 	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
 	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
 	homa_rpc_unlock(crpc);
@@ -2225,8 +2220,7 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_request)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(srpc, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(srpc, homa_interest_get_rpc(&self->interest));
 	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
 	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
 	homa_rpc_unlock(srpc);
@@ -2246,8 +2240,7 @@ TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
 	result = homa_register_interests(&self->interest, &self->hsk,
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(srpc1, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(srpc1, homa_interest_get_rpc(&self->interest));
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
 	homa_rpc_unlock(srpc1);
 
@@ -2257,8 +2250,7 @@ TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE
 			|HOMA_RECVMSG_NONBLOCKING, 0);
 	EXPECT_EQ(0, result);
-	EXPECT_EQ(srpc2, (struct homa_rpc *)
-			atomic_long_read(&self->interest.ready_rpc));
+	EXPECT_EQ(srpc2, homa_interest_get_rpc(&self->interest));
 	EXPECT_STREQ("", unit_log_get());
 	homa_rpc_unlock(srpc2);
 }
@@ -2600,8 +2592,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__handoff_already_in_progress)
 	atomic_or(RPC_HANDING_OFF, &crpc->flags);
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
-	EXPECT_EQ(NULL, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(NULL, homa_interest_get_rpc(&interest));
 	EXPECT_STREQ("", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
 }
@@ -2630,8 +2621,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__rpc_already_enqueued)
 	atomic_or(RPC_HANDING_OFF, &crpc->flags);
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
-	EXPECT_EQ(NULL, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(NULL, homa_interest_get_rpc(&interest));
 	EXPECT_STREQ("", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
 }
@@ -2652,8 +2642,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__interest_on_rpc)
 	crpc->interest = &interest;
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
 	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_EQ(NULL, crpc->interest);
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
@@ -2674,8 +2663,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__response_interests)
 	interest.thread = &mock_task;
 	list_add_tail(&interest.response_links, &self->hsk.response_interests);
 	homa_rpc_handoff(crpc);
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
@@ -2705,8 +2693,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__request_interests)
 	interest.thread = &mock_task;
 	list_add_tail(&interest.request_links, &self->hsk.request_interests);
 	homa_rpc_handoff(srpc);
-	EXPECT_EQ(srpc, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(srpc, homa_interest_get_rpc(&interest));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &srpc->flags);
@@ -2746,8 +2733,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__detach_interest)
 
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
-	EXPECT_EQ(crpc, (struct homa_rpc *)
-			atomic_long_read(&interest.ready_rpc));
+	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
 	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_EQ(NULL, crpc->interest);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
