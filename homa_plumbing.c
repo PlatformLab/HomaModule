@@ -1413,7 +1413,7 @@ int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 	int port = 0;
 
 	iph = (struct iphdr *)(skb->data);
-	daddr = ipv4_to_ipv6(iph->daddr);
+	ipv6_addr_set_v4mapped(iph->daddr, &daddr);
 	if (type == ICMP_DEST_UNREACH && code == ICMP_PORT_UNREACH) {
 		struct homa_common_hdr *h = (struct homa_common_hdr *)(skb->data
 				+ iph->ihl * 4);

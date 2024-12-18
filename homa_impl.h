@@ -943,24 +943,7 @@ struct homa_skb_info {
  */
 static inline struct homa_skb_info *homa_get_skb_info(struct sk_buff *skb)
 {
-	return (struct homa_skb_info *)(skb_end_pointer(skb)
-			- sizeof(struct homa_skb_info));
-}
-
-/**
- * homa_next_skb() - Compute address of Homa's private link field in @skb.
- * @skb:     Socket buffer containing private link field.
- * Return: address of Homa's private link field for @skb.
- *
- * Homa needs to keep a list of buffers in a message, but it can't use the
- * links built into sk_buffs because Homa wants to retain its list even
- * after sending the packet, and the built-in links get used during sending.
- * Thus we allocate extra space at the very end of the packet's data
- * area to hold a forward pointer for a list.
- */
-static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
-{
-	return (struct sk_buff **)(skb_end_pointer(skb) - sizeof(char *));
+	return (struct homa_skb_info *)(skb_end_pointer(skb)) - 1;
 }
 
 /**
@@ -1010,23 +993,6 @@ static inline bool skb_is_ipv6(const struct sk_buff *skb)
 }
 
 /**
- * ipv4_to_ipv6() - Given an IPv4 address, return an equivalent IPv6 address
- * (an IPv4-mapped one).
- * @ip4: IPv4 address, in network byte order.
- * Return: IPv6 address that is equivalent to @ip4.
- */
-static inline struct in6_addr ipv4_to_ipv6(__be32 ip4)
-{
-	struct in6_addr ret = {};
-
-	if (ip4 == htonl(INADDR_ANY))
-		return in6addr_any;
-	ret.in6_u.u6_addr32[2] = htonl(0xffff);
-	ret.in6_u.u6_addr32[3] = ip4;
-	return ret;
-}
-
-/**
  * ipv6_to_ipv4() - Given an IPv6 address produced by ipv4_to_ipv6, return
  * the original IPv4 address (in network byte order).
  * @ip6:  IPv6 address; assumed to be a mapped IPv4 address.
@@ -1047,13 +1013,14 @@ static inline __be32 ipv6_to_ipv4(const struct in6_addr ip6)
 static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
 						  *addr)
 {
+	struct in6_addr mapped;
 	if (addr) {
-		return (addr->sa.sa_family == AF_INET6)
-			? addr->in6.sin6_addr
-			: ipv4_to_ipv6(addr->in4.sin_addr.s_addr);
-	} else {
-		return in6addr_any;
+		if (addr->sa.sa_family == AF_INET6)
+			return addr->in6.sin6_addr;
+		ipv6_addr_set_v4mapped(addr->in4.sin_addr.s_addr, &mapped);
+		return mapped;
 	}
+	return in6addr_any;
 }
 
 /**
@@ -1066,21 +1033,12 @@ static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
  */
 static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 {
-	return skb_is_ipv6(skb) ? ipv6_hdr(skb)->saddr
-				: ipv4_to_ipv6(ip_hdr(skb)->saddr);
-}
+	struct in6_addr mapped;
 
-/**
- * is_mapped_ipv4() - Return true if an IPv6 address is actually an
- * IPv4-mapped address, false otherwise.
- * @x:  The address to check.
- * Return: see above.
- */
-static inline bool is_mapped_ipv4(const struct in6_addr x)
-{
-	return ((x.in6_u.u6_addr32[0] == 0) &&
-		(x.in6_u.u6_addr32[1] == 0) &&
-		(x.in6_u.u6_addr32[2] == htonl(0xffff)));
+	if (skb_is_ipv6(skb))
+		return ipv6_hdr(skb)->saddr;
+	ipv6_addr_set_v4mapped(ip_hdr(skb)->saddr, &mapped);
+	return mapped;
 }
 
 static inline bool is_homa_pkt(struct sk_buff *skb)
@@ -1100,7 +1058,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
  */
 static inline __u32 tt_addr(const struct in6_addr x)
 {
-	return is_mapped_ipv4(x) ? ntohl(x.in6_u.u6_addr32[3])
+	return ipv6_addr_v4mapped(&x) ? ntohl(x.in6_u.u6_addr32[3])
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
 			: ntohl(x.in6_u.u6_addr32[1]));
 }
