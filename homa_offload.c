@@ -384,7 +384,8 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				protocol = ip_hdr(held_skb)->protocol;
 			if (protocol != IPPROTO_HOMA) {
 				tt_record3("homa_gro_receive held_skb 0x%0x%0x isn't Homa: protocol %d",
-					   SPLIT_64(held_skb), protocol);
+					   tt_hi(held_skb), tt_lo(held_skb),
+					   protocol);
 				continue;
 			}
 
