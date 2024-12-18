@@ -288,7 +288,8 @@ struct homa {
 	/**
 	 * @next_outgoing_id: Id to use for next outgoing RPC request.
 	 * This is always even: it's used only to generate client-side ids.
-	 * Accessed without locks.
+	 * Accessed without locks. Note: RPC ids are unique within a
+	 * single client machine.
 	 */
 	atomic64_t next_outgoing_id;
 
@@ -746,7 +747,7 @@ struct homa {
 	int max_gso_size;
 
 	/**
-	 * @gso_force_software: A non-zero value will cause Home to perform
+	 * @gso_force_software: A non-zero value will cause Homa to perform
 	 * segmentation in software using GSO; zero means ask the NIC to
 	 * perform TSO. Set externally via sysctl.
 	 */
@@ -888,12 +889,14 @@ struct homa {
 	 */
 	int next_id;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @temp: the values in this array can be read and written with sysctl.
 	 * They have no officially defined purpose, and are available for
 	 * short-term use during testing.
 	 */
 	int temp[4];
+#endif /* See strip.py */
 };
 
 /**
@@ -970,6 +973,9 @@ static inline struct sk_buff **homa_next_skb(struct sk_buff *skb)
  */
 static inline void homa_set_doff(struct homa_data_hdr *h, int size)
 {
+	/* Drop the 2 low-order bits from size and set the 4 high-order
+	 * bits of doff from what's left.
+	 */
 	h->common.doff = size << 2;
 }
 
