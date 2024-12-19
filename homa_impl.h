@@ -184,19 +184,21 @@ struct homa_interest {
 	struct task_struct *thread;
 
 	/**
-	 * @ready_rpc: This is actually a (struct homa_rpc *) identifying the
-	 * RPC that was found; NULL if no RPC has been found yet. This
-	 * variable is used for lock-free synchronization to handoff a
-	 * ready RPC to a receiving thread; read and write with functions
-	 * below.
+	 * @rpc_ready: Non-zero means an appropriate incoming message has
+	 * been assigned to this interest, and @rpc and @locked are valid
+	 * (they must be set before setting this variable).
 	 */
-	atomic_long_t ready_rpc;
-_Static_assert(sizeof(atomic_long_t) >= sizeof(struct homa_rpc *),
-	       "atomic_long_t isn't large enough to store a homa_rpc *");
+	atomic_t rpc_ready;
 
 	/**
-	 * @locked: Nonzero means that @ready_rpc is locked; only valid
-	 * if @ready_rpc is non-NULL.
+	 * @rpc: If @rpc_ready is non-zero, points to an RPC with a ready
+	 * incoming message that meets the requirements of this interest.
+	 */
+	struct homa_rpc *rpc;
+
+	/**
+	 * @locked: Nonzero means that @rpc is locked; only valid if
+	 * @rpc_ready is non-zero.
 	 */
 	int locked;
 
@@ -234,7 +236,8 @@ _Static_assert(sizeof(atomic_long_t) >= sizeof(struct homa_rpc *),
 static inline void homa_interest_init(struct homa_interest *interest)
 {
 	interest->thread = current;
-	atomic_long_set(&interest->ready_rpc, 0);
+	atomic_set(&interest->rpc_ready, 0);
+	interest->rpc = NULL;
 	interest->locked = 0;
 	interest->core = raw_smp_processor_id();
 	interest->reg_rpc = NULL;
@@ -263,19 +266,26 @@ enum homa_freeze_type {
  */
 static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *interest)
 {
-	return (struct homa_rpc *)atomic_long_read(&interest->ready_rpc);
+	if (atomic_read(&interest->rpc_ready))
+		return interest->rpc;
+	return NULL;
 }
 
 /**
  * homa_interest_set_rpc() - Hand off a ready RPC to an interest from a
  * waiting receiver thread. Note: interest->locked must be set before
  * calling this function.
- * @interest:   Owned by a thread that is ready to receive the RPC.
+ * @interest:   Belongs to a thread that is waiting for an incoming message.
+ * @rpc:        Ready rpc to assign to @interest.
+ * @locked:     1 means @rpc is locked, 0 means unlocked.
  */
 static inline void homa_interest_set_rpc(struct homa_interest *interest,
-						     struct homa_rpc *rpc)
+						     struct homa_rpc *rpc,
+						     int locked)
 {
-	atomic_long_set_release(&interest->ready_rpc, (long)rpc);
+	interest->rpc = rpc;
+	interest->locked = locked;
+	atomic_set_release(&interest->rpc_ready, 1);
 }
 
 /**

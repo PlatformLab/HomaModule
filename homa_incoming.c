@@ -1105,9 +1105,9 @@ int homa_register_interests(struct homa_interest *interest,
 			    struct homa_sock *hsk, int flags, __u64 id)
 {
 	struct homa_rpc *rpc = NULL;
+	int locked = 1;
 
 	homa_interest_init(interest);
-	interest->locked = 1;
 	if (id != 0) {
 		if (!homa_is_client(id))
 			return -EINVAL;
@@ -1139,7 +1139,7 @@ int homa_register_interests(struct homa_interest *interest,
 		homa_rpc_unlock(rpc);
 	}
 
-	interest->locked = 0;
+	locked = 0;
 	if (flags & HOMA_RECVMSG_RESPONSE) {
 		if (!list_empty(&hsk->ready_responses)) {
 			rpc = list_first_entry(&hsk->ready_responses,
@@ -1185,14 +1185,14 @@ claim_rpc:
 	 */
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	homa_sock_unlock(hsk);
-	if (!interest->locked) {
+	if (!locked) {
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc, "homa_register_interests");
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
-		interest->locked = 1;
+		locked = 1;
 	}
 	atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
-	homa_interest_set_rpc(interest, rpc);
+	homa_interest_set_rpc(interest, rpc, locked);
 	return 0;
 }
 
@@ -1273,7 +1273,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		while (1) {
 			__u64 blocked;
 
-			rpc = (struct homa_rpc *)atomic_long_read(&interest.ready_rpc);
+			rpc = homa_interest_get_rpc(&interest);
 			if (rpc) {
 				tt_record3("received RPC handoff while polling, id %d, socket %d, pid %d",
 					   rpc->id, hsk->port,
@@ -1490,7 +1490,7 @@ thread_waiting:
 	INC_METRIC(handoffs_thread_waiting, 1);
 	tt_record3("homa_rpc_handoff handing off id %d to pid %d on core %d",
 		   rpc->id, interest->thread->pid, task_cpu(interest->thread));
-	homa_interest_set_rpc(interest, rpc);
+	homa_interest_set_rpc(interest, rpc, 0);
 
 	/* Update the last_app_active time for the thread's core, so Homa
 	 * will try to avoid doing any work there.

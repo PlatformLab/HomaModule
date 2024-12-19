@@ -419,7 +419,7 @@ TEST_F(homa_rpc, homa_rpc_free__wakeup_interest)
 	struct homa_interest interest = {};
 
 	ASSERT_NE(NULL, crpc);
-	atomic_long_set(&interest.ready_rpc, 0);
+	atomic_set(&interest.rpc_ready, 0);
 	interest.reg_rpc = crpc;
 	crpc->interest = &interest;
 	unit_log_clear();
