@@ -2089,7 +2089,7 @@ void homa_client::sender()
 
 	while (1) {
 		uint64_t now;
-		uint64_t rpc_id;
+		__u64 rpc_id;
 		int server;
 		int status;
 		int slot = get_rinfo();
@@ -2190,7 +2190,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
 	uint64_t start;
-	uint64_t rpc_id;
+	__u64 rpc_id;
 	int status;
 
 	header->length = length;
@@ -2214,7 +2214,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
 		log(NORMAL, "FATAL: measure_rtt got error in recvmsg: %s "
-				"(id %lu, server %s)\n",
+				"(id %llu, server %s)\n",
 				strerror(errno), rpc_id,
 				print_address((union sockaddr_in_union *)
 					      receiver->src_addr()));

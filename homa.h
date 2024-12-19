@@ -60,14 +60,14 @@ struct homa_sendmsg_args {
 	 * id. If the message is a request, then the value is modified to
 	 * hold the id of the new RPC.
 	 */
-	uint64_t id;
+	__u64 id;
 
 	/**
 	 * @completion_cookie: (in) Used only for request messages; will be
 	 * returned by recvmsg when the RPC completes. Typically used to
 	 * locate app-specific info about the RPC.
 	 */
-	uint64_t completion_cookie;
+	__u64 completion_cookie;
 };
 
 #if !defined(__cplusplus)
@@ -86,27 +86,27 @@ struct homa_recvmsg_args {
 	 * @id: (in/out) Initially specifies the id of the desired RPC, or 0
 	 * if any RPC is OK; returns the actual id received.
 	 */
-	uint64_t id;
+	__u64 id;
 
 	/**
 	 * @completion_cookie: (out) If the incoming message is a response,
 	 * this will return the completion cookie specified when the
 	 * request was sent. For requests this will always be zero.
 	 */
-	uint64_t completion_cookie;
+	__u64 completion_cookie;
 
 	/**
 	 * @flags: (in) OR-ed combination of bits that control the operation.
 	 * See below for values.
 	 */
-	uint32_t flags;
+	__u32 flags;
 
 	/**
 	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
 	 * Passes in bpages from previous messages that can now be
 	 * recycled; returns bpages from the new message.
 	 */
-	uint32_t num_bpages;
+	__u32 num_bpages;
 
 	/**
 	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer
@@ -118,7 +118,7 @@ struct homa_recvmsg_args {
 	 * these bpages and must eventually return them to Homa, using
 	 * bpage_offsets in a future recvmsg invocation.
 	 */
-	uint32_t bpage_offsets[HOMA_MAX_BPAGES];
+	__u32 bpage_offsets[HOMA_MAX_BPAGES];
 };
 
 #if !defined(__cplusplus)
@@ -141,7 +141,7 @@ _Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
  */
 struct homa_abort_args {
 	/** @id: Id of RPC to abort, or zero to abort all RPCs on socket. */
-	uint64_t id;
+	__u64 id;
 
 	/**
 	 * @error: Zero means destroy and free RPCs; nonzero means complete
@@ -150,7 +150,7 @@ struct homa_abort_args {
 	int error;
 
 	int _pad1;
-	uint64_t _pad2[2];
+	__u64 _pad2[2];
 };
 
 #if !defined(__cplusplus)
@@ -189,19 +189,19 @@ struct homa_rcvbuf_args {
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
 #ifndef __STRIP__ /* See strip.py */
-int     homa_abort(int sockfd, uint64_t id, int error);
+int     homa_abort(int sockfd, __u64 id, int error);
 int     homa_send(int sockfd, const void *message_buf,
 		  size_t length, const struct sockaddr *dest_addr,
-		  uint32_t addrlen,  uint64_t *id, uint64_t completion_cookie);
+		  __u32 addrlen,  __u64 *id, __u64 completion_cookie);
 int     homa_sendv(int sockfd, const struct iovec *iov,
 		   int iovcnt, const struct sockaddr *dest_addr,
-		   uint32_t addrlen,  uint64_t *id, uint64_t completion_cookie);
+		   __u32 addrlen,  __u64 *id, __u64 completion_cookie);
 ssize_t homa_reply(int sockfd, const void *message_buf,
 		   size_t length, const struct sockaddr *dest_addr,
-		   uint32_t addrlen,  uint64_t id);
+		   __u32 addrlen,  __u64 id);
 ssize_t homa_replyv(int sockfd, const struct iovec *iov,
 		    int iovcnt, const struct sockaddr *dest_addr,
-		    uint32_t addrlen,  uint64_t id);
+		    __u32 addrlen,  __u64 id);
 #endif /* See strip.py */
 
 #ifdef __cplusplus

@@ -36,8 +36,8 @@
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
-		   const struct sockaddr *dest_addr, uint32_t addrlen,
-		   uint64_t id)
+		   const struct sockaddr *dest_addr, __u32 addrlen,
+		   __u64 id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -81,8 +81,8 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
-		    const struct sockaddr *dest_addr, uint32_t addrlen,
-		    uint64_t id)
+		    const struct sockaddr *dest_addr, __u32 addrlen,
+		    __u64 id)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -118,8 +118,8 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *message_buf, size_t length,
-	      const struct sockaddr *dest_addr, uint32_t addrlen,
-	      uint64_t *id, uint64_t completion_cookie)
+	      const struct sockaddr *dest_addr, __u32 addrlen,
+	      __u64 *id, __u64 completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -163,8 +163,8 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
-	       const struct sockaddr *dest_addr, uint32_t addrlen,
-	       uint64_t *id, uint64_t completion_cookie)
+	       const struct sockaddr *dest_addr, __u32 addrlen,
+	       __u64 *id, __u64 completion_cookie)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -200,7 +200,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
  * Return:      If an error occurred, -1 is returned and errno is set
  *              appropriately. Otherwise zero is returned.
  */
-int homa_abort(int sockfd, uint64_t id, int error)
+int homa_abort(int sockfd, __u64 id, int error)
 {
 	struct homa_abort_args args = {id, error};
 

@@ -125,13 +125,13 @@ void homa_server(int port)
 					2*sizeof32(int));
 			if (verbose)
 				printf("Received message from %s with %d bytes, "
-					"id %lu, seed %d, response length %d\n",
+					"id %llu, seed %d, response length %d\n",
 					print_address(&source), length,
 					recv_args.id, seed, resp_length);
 		} else
 			if (verbose)
 				printf("Received message from %s with "
-					"%d bytes, id %lu, response length %d\n",
+					"%d bytes, id %llu, response length %d\n",
 					print_address(&source), length,
 					recv_args.id, resp_length);
 

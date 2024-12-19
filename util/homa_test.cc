@@ -77,7 +77,7 @@ void close_fd(int fd)
  */
 void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 {
-	uint64_t id;
+	__u64 id;
 	int status;
 
 	sleep(1);
@@ -87,7 +87,7 @@ void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
 	} else {
-		printf("homa_send succeeded, id %lu\n", id);
+		printf("homa_send succeeded, id %llu\n", id);
 	}
 }
 
@@ -160,7 +160,7 @@ void test_close()
  */
 void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 {
-	uint64_t id;
+	__u64 id;
 	int status;
 	int completed = 0;
 	size_t total = 0;
@@ -188,7 +188,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
-			printf("Error in recvmsg for id %lu: %s\n",
+			printf("Error in recvmsg for id %llu: %s\n",
 				id, strerror(errno));
 		} else {
 			total += received;
@@ -214,7 +214,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 {
-	uint64_t id;
+	__u64 id;
 	int status;
 	ssize_t resp_length;
 
@@ -224,7 +224,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 		printf("Error in homa_send: %s\n", strerror(errno));
 		return;
 	} else {
-		printf("homa_send succeeded, id %lu\n", id);
+		printf("homa_send succeeded, id %llu\n", id);
 	}
 	recv_args.id = 0;
 	recv_args.flags = HOMA_RECVMSG_RESPONSE;
@@ -237,7 +237,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 	int seed = check_message(&recv_args, buf_region, resp_length,
 			2*sizeof32(int));
 	printf("Received message from %s with %lu bytes, "
-			"seed %d, id %lu\n",
+			"seed %d, id %llu\n",
 			print_address(&source_addr), resp_length, seed,
 			recv_args.id);
 }
@@ -408,7 +408,7 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_send(int fd, const sockaddr_in_union *dest, char *request)
 {
-	uint64_t id;
+	__u64 id;
 	int status;
 
 	status = homa_send(fd, request, length, &dest->sa,
@@ -417,7 +417,7 @@ void test_send(int fd, const sockaddr_in_union *dest, char *request)
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
 	} else {
-		printf("Homa_send succeeded, id %lu\n", id);
+		printf("Homa_send succeeded, id %llu\n", id);
 	}
 }
 
@@ -492,9 +492,9 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 #define MAX_RPCS 100
 	int *buffers[MAX_RPCS];
 	ssize_t resp_length;
-	uint64_t id, end_cycles;
+	__u64 id;
 	uint64_t start_cycles = 0;
-	uint64_t end_time;
+	uint64_t end_cycles, end_time;
 	int status, i;
 	int64_t bytes_sent = 0;
 	int64_t start_bytes = 0;
