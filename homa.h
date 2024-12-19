@@ -42,7 +42,7 @@ extern "C"
 		>> HOMA_BPAGE_SHIFT)
 
 /**
- * define HOMA_MIN_DEFAULT_PORT - The 16-bit port space is divided into
+ * define HOMA_MIN_DEFAULT_PORT - The 16 bit port space is divided into
  * two nonoverlapping regions. Ports 1-32767 are reserved exclusively
  * for well-defined server ports. The remaining ports are used for client
  * ports; these are allocated automatically by Homa. Port 0 is reserved.
@@ -175,8 +175,8 @@ struct homa_rcvbuf_args {
  */
 
 /**
- * define HOMA_FLAG_DONT_THROTTLE - disable the output throttling mechanism:
- * always send all packets immediately.
+ * define HOMA_FLAG_DONT_THROTTLE - disable the output throttling mechanism
+ * (always send all packets immediately).
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
 
