@@ -2205,8 +2205,8 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_response)
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
-	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
-	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
+	EXPECT_TRUE(list_empty(&self->interest.request_links));
+	EXPECT_TRUE(list_empty(&self->interest.response_links));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__return_queued_request)
@@ -2221,8 +2221,8 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_request)
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(srpc, homa_interest_get_rpc(&self->interest));
-	EXPECT_EQ(LIST_POISON1, self->interest.request_links.next);
-	EXPECT_EQ(LIST_POISON1, self->interest.response_links.next);
+	EXPECT_TRUE(list_empty(&self->interest.request_links));
+	EXPECT_TRUE(list_empty(&self->interest.response_links));
 	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)

@@ -1162,8 +1162,8 @@ int homa_register_interests(struct homa_interest *interest,
 			/* Make sure the interest isn't on the response list;
 			 * otherwise it might receive a second RPC.
 			 */
-			if (interest->response_links.next != LIST_POISON1)
-				list_del(&interest->response_links);
+			if (!list_empty(&interest->response_links))
+				list_del_init(&interest->response_links);
 			goto claim_rpc;
 		}
 		list_add(&interest->request_links, &hsk->request_interests);
@@ -1328,15 +1328,15 @@ found_rpc:
 		 */
 		UNIT_HOOK("found_rpc");
 		if (interest.reg_rpc ||
-		    interest.request_links.next != LIST_POISON1 ||
-		    interest.response_links.next != LIST_POISON1) {
+		    !list_empty(&interest.request_links) ||
+		    !list_empty(&interest.response_links)) {
 			homa_sock_lock(hsk, "homa_wait_for_message");
 			if (interest.reg_rpc)
 				interest.reg_rpc->interest = NULL;
-			if (interest.request_links.next != LIST_POISON1)
-				list_del(&interest.request_links);
-			if (interest.response_links.next != LIST_POISON1)
-				list_del(&interest.response_links);
+			if (!list_empty(&interest.request_links))
+				list_del_init(&interest.request_links);
+			if (!list_empty(&interest.response_links))
+				list_del_init(&interest.response_links);
 			homa_sock_unlock(hsk);
 		}
 
@@ -1507,10 +1507,10 @@ thread_waiting:
 		interest->reg_rpc->interest = NULL;
 		interest->reg_rpc = NULL;
 	}
-	if (interest->request_links.next != LIST_POISON1)
-		list_del(&interest->request_links);
-	if (interest->response_links.next != LIST_POISON1)
-		list_del(&interest->response_links);
+	if (!list_empty(&interest->request_links))
+		list_del_init(&interest->request_links);
+	if (!list_empty(&interest->response_links))
+		list_del_init(&interest->response_links);
 	wake_up_process(interest->thread);
 }
 

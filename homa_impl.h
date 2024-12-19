@@ -241,8 +241,8 @@ static inline void homa_interest_init(struct homa_interest *interest)
 	interest->locked = 0;
 	interest->core = raw_smp_processor_id();
 	interest->reg_rpc = NULL;
-	interest->request_links.next = LIST_POISON1;
-	interest->response_links.next = LIST_POISON1;
+	INIT_LIST_HEAD(&interest->request_links);
+	INIT_LIST_HEAD(&interest->response_links);
 }
 
 /**
