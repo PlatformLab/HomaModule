@@ -16,6 +16,7 @@
  * equivalent or rpc2 is higher priority.
  * @rpc1:     First RPC to consider.
  * @rpc2:     Second RPC to consider.
+ * Return: see above
  */
 int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 {

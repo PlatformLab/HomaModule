@@ -7,8 +7,7 @@
 
 #include <linux/skbuff.h>
 
-/**
- * enum homa_packet_type - Defines the possible types of Homa packets.
+/* Defines the possible types of Homa packets.
  *
  * See the xxx_header structs below for more information about each type.
  */
@@ -97,13 +96,16 @@ struct homa_common_hdr {
 	 */
 	__be32 sequence;
 
-	/* The fields below correspond to the acknowledgment field in TCP
-	 * headers; not used by Homa, except for the low-order 8 bits, which
-	 * specify the Homa packet type (one of the values in the
-	 * homa_packet_type enum).
+	/**
+	 * @ack: Corresponds to the high-order bits of the acknowledgment
+	 * field in TCP headers; not used by Homa.
 	 */
-	__be16 ack1;
-	__u8 ack2;
+	char ack[3];
+
+	/**
+	 * @type: Homa packet type (one of the values of the homa_packet_type
+	 * enum). Corresponds to the low-order byte of the ack in TCP.
+	 */
 	__u8 type;
 
 	/**
@@ -131,7 +133,7 @@ struct homa_common_hdr {
 	__be16 window;
 
 	/**
-	 * @checksum: not used by Homa, but must occupy the same bytes as
+	 * @checksum: Not used by Homa, but must occupy the same bytes as
 	 * the checksum in a TCP header (TSO may modify this?).
 	 */
 	__be16 checksum;

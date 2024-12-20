@@ -10,13 +10,12 @@ extern "C" {
 }
 
 namespace homa {
-/**
- * class homa::receiver - Helper class for receiving a series of messages
- * from a Homa socket. This class serves two purposes: first, it implements
- * the application side of the Homa buffer management protocol, returning
- * receive buffer space to Homa when the application longer needs it. Second,
- * it provides convenience methods for accessing messages that are scattered\
- * over several discontiguous regions of buffer space.
+/* Helper class for receiving a series of messages from a Homa socket. This
+ * class serves two purposes: first, it implements the application side of
+ * the Homa buffer management protocol, returning receive buffer space to
+ * Homa when the application longer needs it. Second, it provides convenience
+ * methods for accessing messages that are scattered over several discontiguous
+ * regions of buffer space.
  *
  * Typical usage:
  * - Call receive, which will invoke Homa to receive an incoming message.

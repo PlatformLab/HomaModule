@@ -19,14 +19,13 @@
  *
  * All counters are free-running: they never reset.
  */
-#define HOMA_NUM_SMALL_COUNTS 64
-#define HOMA_NUM_MEDIUM_COUNTS 128
 struct homa_metrics {
 	/**
 	 * @small_msg_bytes: entry i holds the total number of bytes
 	 * received in messages whose length is between 64*i and 64*i + 63,
 	 * inclusive.
 	 */
+#define HOMA_NUM_SMALL_COUNTS 64
 	__u64 small_msg_bytes[HOMA_NUM_SMALL_COUNTS];
 
 	/**
@@ -35,6 +34,7 @@ struct homa_metrics {
 	 * 1024*i + 1023, inclusive. The first four entries are always 0
 	 * (small_msg_counts covers this range).
 	 */
+#define HOMA_NUM_MEDIUM_COUNTS 128
 	__u64 medium_msg_bytes[HOMA_NUM_MEDIUM_COUNTS];
 
 	/**
@@ -190,7 +190,8 @@ struct homa_metrics {
 	 */
 	__u64 send_ns;
 
-	/** @send_calls: total number of invocations of homa_semdmsg
+	/**
+	 * @send_calls: total number of invocations of homa_semdmsg
 	 * for requests.
 	 */
 	__u64 send_calls;
@@ -324,32 +325,32 @@ struct homa_metrics {
 	__u64 peer_new_entries;
 
 	/**
-	 * @peer_kmalloc errors: total number of times homa_peer_find
+	 * @peer_kmalloc_errors: total number of times homa_peer_find
 	 * returned an error because it couldn't allocate memory for a new
 	 * peer.
 	 */
 	__u64 peer_kmalloc_errors;
 
 	/**
-	 * @peer_route errors: total number of times homa_peer_find
+	 * @peer_route_errors: total number of times homa_peer_find
 	 * returned an error because it couldn't create a route to the peer.
 	 */
 	__u64 peer_route_errors;
 
 	/**
-	 * @control_xmit_errors errors: total number of times ip_queue_xmit
+	 * @control_xmit_errors: total number of times ip_queue_xmit
 	 * failed when transmitting a control packet.
 	 */
 	__u64 control_xmit_errors;
 
 	/**
-	 * @data_xmit_errors errors: total number of times ip_queue_xmit
+	 * @data_xmit_errors: total number of times ip_queue_xmit
 	 * failed when transmitting a data packet.
 	 */
 	__u64 data_xmit_errors;
 
 	/**
-	 * @unknown_rpc: total number of times an incoming packet was
+	 * @unknown_rpcs: total number of times an incoming packet was
 	 * discarded because it referred to a nonexistent RPC. Doesn't
 	 * count grant packets received by servers (since these are
 	 * fairly common).
@@ -357,13 +358,13 @@ struct homa_metrics {
 	__u64 unknown_rpcs;
 
 	/**
-	 * @cant_create_server_rpc: total number of times a server discarded
+	 * @server_cant_create_rpcs: total number of times a server discarded
 	 * an incoming packet because it couldn't create a homa_rpc object.
 	 */
 	__u64 server_cant_create_rpcs;
 
 	/**
-	 * @unknown_packet_type: total number of times a packet was discarded
+	 * @unknown_packet_types: total number of times a packet was discarded
 	 * because its type wasn't one of the supported values.
 	 */
 	__u64 unknown_packet_types;
@@ -460,7 +461,7 @@ struct homa_metrics {
 	__u64 throttle_lock_misses;
 
 	/**
-	 * @peer_acklock_miss_ns: total time spent waiting for peer lock misses.
+	 * @peer_ack_lock_miss_ns: total time spent waiting for peer lock misses.
 	 */
 	__u64 peer_ack_lock_miss_ns;
 
@@ -543,7 +544,7 @@ struct homa_metrics {
 	__u64 disabled_rpc_reaps;
 
 	/**
-	 * @reaper_runs: total number of times that the reaper was invoked
+	 * @reaper_calls: total number of times that the reaper was invoked
 	 * and was not disabled.
 	 */
 	__u64 reaper_calls;
@@ -572,7 +573,7 @@ struct homa_metrics {
 	__u64 throttle_list_checks;
 
 	/**
-	 * @unacked_overflows: total number of times that homa_peer_add_ack
+	 * @ack_overflows: total number of times that homa_peer_add_ack
 	 * found insufficient space for the new id and hence had to send an
 	 * ACK message.
 	 */
@@ -585,7 +586,7 @@ struct homa_metrics {
 	__u64 ignored_need_acks;
 
 	/**
-	 * @bpage_resuses: total number of times that, when an owned page
+	 * @bpage_reuses: total number of times that, when an owned page
 	 * reached the end, it could be reused because all existing
 	 * allocations had been released.
 	 */
@@ -645,8 +646,9 @@ struct homa_metrics {
 DECLARE_PER_CPU(struct homa_metrics, homa_metrics);
 
 /**
- * per_cpu_metrics() - Return the metrics structure for the current core.
+ * homa_metrics_per_cpu() - Return the metrics structure for the current core.
  * This is unsynchronized and doesn't guarantee non-preemption.
+ * Return: see above
  */
 static inline struct homa_metrics *homa_metrics_per_cpu(void)
 {

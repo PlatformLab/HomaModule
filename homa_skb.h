@@ -10,14 +10,14 @@
 #include <linux/percpu-defs.h>
 
 /**
- * define HOMA_PAGE_ORDER: power-of-two exponent determining how
+ * define HOMA_SKB_PAGE_ORDER - exponent (power of two) determining how
  * many pages to allocate in a high-order page for skb pages (e.g.,
  * 2 means allocate in units of 4 pages).
  */
 #define HOMA_SKB_PAGE_ORDER 4
 
 /**
- * define HOMA_PAGE_SIZE: number of bytes corresponding to HOMA_PAGE_ORDER.
+ * define HOMA_SKB_PAGE_SIZE - number of bytes corresponding to HOMA_PAGE_ORDER.
  */
 #define HOMA_SKB_PAGE_SIZE (PAGE_SIZE << HOMA_SKB_PAGE_ORDER)
 
@@ -72,11 +72,10 @@ struct homa_skb_core {
 	/** @page_size: total number of bytes available in @skb_page. */
 	int page_size;
 
-	/**
-	 * define HOMA_MAX_STASHED: maximum number of stashed pages that
-	 * can be consumed by a message of a given size (assumes page_inuse
-	 * is 0). This is a rough guess, since it doesn't consider all of
-	 * the data_segments that will be needed for the packets.
+	/* Maximum number of stashed pages that can be consumed by a message
+	 * of a given size (assumes page_inuse is 0). This is a rough guess,
+	 * since it doesn't consider all of the data_segments that will be
+	 * needed for the packets.
 	 */
 #define HOMA_MAX_STASHED(size) ((((size) - 1) / HOMA_SKB_PAGE_SIZE) + 1)
 

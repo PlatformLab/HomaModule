@@ -399,6 +399,7 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
  * @file:    Information about the file being read.
  * @offset:  Distance to seek, in bytes
  * @whence:  Starting point from which to measure the distance to seek.
+ * Return: current position within file.
  */
 loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
 {

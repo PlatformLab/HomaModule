@@ -1065,6 +1065,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
  * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
  * provide a unique identifier for the address in a timetrace record.
  * @x:  Address (either IPv6 or IPv4-mapped IPv6)
+ * Return: see above
  */
 static inline __u32 tt_addr(const struct in6_addr x)
 {
