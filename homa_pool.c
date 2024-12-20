@@ -59,7 +59,7 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 	if (((uintptr_t)region) & ~PAGE_MASK)
 		return -EINVAL;
 	pool->hsk = hsk;
-	pool->region = (char *)region;
+	pool->region = (char __user *)region;
 	pool->num_bpages = region_size >> HOMA_BPAGE_SHIFT;
 	pool->descriptors = NULL;
 	pool->cores = NULL;
@@ -133,7 +133,7 @@ void homa_pool_get_rcvbuf(struct homa_sock *hsk,
 			  struct homa_rcvbuf_args *args)
 {
 	homa_sock_lock(hsk, "homa_pool_get_rcvbuf");
-	args->start = hsk->buffer_pool->region;
+	args->start = (uintptr_t)hsk->buffer_pool->region;
 	args->length = hsk->buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 	homa_sock_unlock(hsk);
 }
@@ -376,7 +376,8 @@ queued:
  * Return:      The application's virtual address for buffer space corresponding
  *              to @offset in the incoming message for @rpc.
  */
-void *homa_pool_get_buffer(struct homa_rpc *rpc, int offset, int *available)
+void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
+				  int *available)
 {
 	int bpage_index, bpage_offset;
 

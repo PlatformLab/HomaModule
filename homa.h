@@ -158,8 +158,8 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 
 /** struct homa_rcvbuf_args - setsockopt argument for SO_HOMA_RCVBUF. */
 struct homa_rcvbuf_args {
-	/** @start: First byte of buffer region. */
-	void *start;
+	/** @start: Address of first byte of buffer region in user space. */
+	__u64 start;
 
 	/** @length: Total number of bytes available at @start. */
 	size_t length;

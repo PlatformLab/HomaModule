@@ -1012,7 +1012,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 				port, strerror(errno));
 		exit(1);
 	}
-	arg.start = buf_region;
+	arg.start = (uintptr_t)buf_region;
 	arg.length = buf_size;
 	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
@@ -1963,7 +1963,7 @@ homa_client::homa_client(int id, std::string& experiment)
 				id, strerror(errno));
 		exit(1);
 	}
-	arg.start = buf_region;
+	arg.start = (uintptr_t)buf_region;
 	arg.length = buf_size;
 	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));

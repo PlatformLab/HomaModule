@@ -121,7 +121,7 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
 		  10*HOMA_BPAGE_SIZE + 1000));
 	homa_pool_get_rcvbuf(&self->hsk, &args);
-	EXPECT_EQ(args.start, (void *)0x40000);
+	EXPECT_EQ(0x40000, args.start);
 	EXPECT_EQ(10*HOMA_BPAGE_SIZE, args.length);
 }
 

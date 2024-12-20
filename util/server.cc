@@ -91,7 +91,7 @@ void homa_server(int port)
 		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
 		return;
 	}
-	arg.start = buf_region;
+	arg.start = (uintptr_t)buf_region;
 	arg.length = 1000*HOMA_BPAGE_SIZE;
 	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));

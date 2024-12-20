@@ -864,13 +864,12 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 	/* Do a trivial test to make sure we can at least write the first
 	 * page of the region.
 	 */
-	if (copy_to_user((__force void __user *)args.start, &args,
+	if (copy_to_user(u64_to_user_ptr(args.start), &args,
 			 sizeof(args)))
 		return -EFAULT;
 
 	homa_sock_lock(hsk, "homa_setsockopt SO_HOMA_RCV_BUF");
-	ret = homa_pool_init(hsk, (__force void __user *)args.start,
-			     args.length);
+	ret = homa_pool_init(hsk, u64_to_user_ptr(args.start), args.length);
 	homa_sock_unlock(hsk);
 	INC_METRIC(so_set_buf_calls, 1);
 	INC_METRIC(so_set_buf_ns, sched_clock() - start);

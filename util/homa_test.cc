@@ -439,7 +439,7 @@ void test_set_buf(int fd)
 		return;
 	}
 
-	arg.start = region;
+	arg.start = (uintptr_t)region;
 	arg.length = 64*HOMA_BPAGE_SIZE;
 	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
@@ -928,7 +928,7 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	struct homa_rcvbuf_args arg;
-	arg.start = buf_region;
+	arg.start = (uintptr_t)buf_region;
 	arg.length = 1000*HOMA_BPAGE_SIZE;
 	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
 			sizeof(arg));
