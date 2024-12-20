@@ -60,7 +60,7 @@ A request fails only if Homa cannot maintain communication with the
 Homa transport module on the server. Homa ensures at-most-once
 semantics for an RPC.
 .PP
-Home is intended for use between machines that are physically
+Homa is intended for use between machines that are physically
 close, with round-trip latencies no more than a few tens of microseconds.
 Homa is not suitable for wide-area communication.
 .PP
@@ -168,7 +168,7 @@ arguments must refer to a struct of the following type:
 .vs -2
 .EX
 struct homa_rcvbuf_args {
-    void *start;
+    __u64 start;
     size_t length;
 };
 .EE
@@ -192,6 +192,10 @@ then
 .I
 recvmsg
 calls on the socket will return ENOMEM errors.
+.PP
+Because of this mechanism, a Homa socket cannot be shared by multiple
+processes unless the processes also share the buffer space and map
+it to the same virtual address in each sharing process.
 .SH SENDING MESSAGES
 .PP
 The
