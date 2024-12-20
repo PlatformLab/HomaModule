@@ -3,7 +3,9 @@
  */
 
 #include "dist.h"
+extern "C" {
 #include "homa.h"
+}
 #include "iostream"
 
 /**

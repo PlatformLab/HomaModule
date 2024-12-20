@@ -18,7 +18,9 @@
 #include <string>
 #include <vector>
 
+extern "C" {
 #include "homa.h"
+}
 
 /* Values of command-line arguments (and their default values): */
 

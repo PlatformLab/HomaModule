@@ -13,11 +13,6 @@
 #include <sys/socket.h>
 #endif
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
 /* IANA-assigned Internet Protocol number for Homa. */
 #define IPPROTO_HOMA 146
 
@@ -203,9 +198,5 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov,
 		    int iovcnt, const struct sockaddr *dest_addr,
 		    __u32 addrlen,  __u64 id);
 #endif /* See strip.py */
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif /* _UAPI_LINUX_HOMA_H */

@@ -42,7 +42,9 @@
 #include <vector>
 
 #include "dist.h"
+extern "C" {
 #include "homa.h"
+}
 #include "homa_receiver.h"
 #include "test_utils.h"
 #include "time_trace.h"

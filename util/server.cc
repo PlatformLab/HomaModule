@@ -29,7 +29,9 @@
 
 #include <thread>
 
+extern "C" {
 #include "homa.h"
+}
 #include "test_utils.h"
 
 /* Log events to standard output. */

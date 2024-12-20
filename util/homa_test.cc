@@ -28,7 +28,9 @@
 
 #include <thread>
 
+extern "C" {
 #include "homa.h"
+}
 #include "test_utils.h"
 
 /* Determines message size in bytes for tests. */

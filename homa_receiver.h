@@ -5,7 +5,9 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+extern "C" {
 #include "homa.h"
+}
 
 namespace homa {
 /**
