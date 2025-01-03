@@ -193,7 +193,6 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 
 	/* Can we just extend the skb's last fragment? */
 	skb_core = &per_cpu(homa_skb_core, raw_smp_processor_id());
-	frag = &shinfo->frags[shinfo->nr_frags - 1];
 	if (shinfo->nr_frags > 0) {
 		frag = &shinfo->frags[shinfo->nr_frags - 1];
 		if (skb_frag_page(frag) == skb_core->skb_page &&
