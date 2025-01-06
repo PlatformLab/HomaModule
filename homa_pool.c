@@ -372,7 +372,7 @@ queued:
  * @offset:     Offset within @rpc's incoming message.
  * @available:  Will be filled in with the number of bytes of space available
  *              at the returned address (could be zero if offset is
- * 		(erroneously) past the end of the message).
+ *              (erroneously) past the end of the message).
  * Return:      The application's virtual address for buffer space corresponding
  *              to @offset in the incoming message for @rpc.
  */
