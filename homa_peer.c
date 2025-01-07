@@ -239,8 +239,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 				  __func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
 	} else {
-		struct homa_dead_dst *dead = (struct homa_dead_dst *)
-				kmalloc(sizeof(*dead), GFP_KERNEL);
+		struct homa_dead_dst *dead = kmalloc(sizeof(*dead), GFP_KERNEL);
 		if (unlikely(!dead)) {
 			/* Can't allocate memory to keep track of the
 			 * dead dst; just free it immediately (a bit
