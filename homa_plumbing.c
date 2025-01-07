@@ -1684,7 +1684,11 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 int homa_timer_main(void *transport)
 {
 	struct homa *homa = (struct homa *)transport;
-	struct hrtimer hrtimer;
+
+	/* The following variable is static because hrtimer_init will
+	 * complain about a stack-allocated hrtimer if in debug mode.
+	 */
+	static struct hrtimer hrtimer;
 	ktime_t tick_interval;
 	u64 nsec;
 
