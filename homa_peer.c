@@ -228,9 +228,18 @@ done:
 void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 		      struct homa_sock *hsk)
 {
+	struct homa_dead_dst *save_dead;
 	struct dst_entry *dst;
+	__u64 now;
 
-	spin_lock_bh(&peertab->write_lock);
+	/* Need to keep around the current entry for a while in case
+	 * someone is using it. If we can't do that, then don't update
+	 * the entry.
+	 */
+	save_dead = kmalloc(sizeof(*save_dead), GFP_ATOMIC);
+	if (unlikely(!save_dead))
+		return;
+
 	dst = homa_peer_get_dst(peer, &hsk->inet);
 	if (IS_ERR(dst)) {
 		/* Retain the existing dst if we can't create a new one. */
@@ -238,24 +247,17 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 			pr_notice("%s couldn't recreate dst: error %ld",
 				  __func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
-	} else {
-		struct homa_dead_dst *dead = kmalloc(sizeof(*dead), GFP_KERNEL);
-		if (unlikely(!dead)) {
-			/* Can't allocate memory to keep track of the
-			 * dead dst; just free it immediately (a bit
-			 * risky, admittedly).
-			 */
-			dst_release(peer->dst);
-		} else {
-			__u64 now = sched_clock();
-
-			dead->dst = peer->dst;
-			dead->gc_time = now + 125000000;
-			list_add_tail(&dead->dst_links, &peertab->dead_dsts);
-			homa_peertab_gc_dsts(peertab, now);
-		}
-		peer->dst = dst;
+		kfree(save_dead);
+		return;
 	}
+
+	spin_lock_bh(&peertab->write_lock);
+	now = sched_clock();
+	save_dead->dst = peer->dst;
+	save_dead->gc_time = now + 100000000;
+	list_add_tail(&save_dead->dst_links, &peertab->dead_dsts);
+	homa_peertab_gc_dsts(peertab, now);
+	peer->dst = dst;
 	spin_unlock_bh(&peertab->write_lock);
 }
 

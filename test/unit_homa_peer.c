@@ -113,11 +113,11 @@ TEST_F(homa_peer, homa_peertab_gc_dsts)
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
 	mock_ns = 50000000;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	mock_ns = 100000000;
+	mock_ns = 90000000;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
 	EXPECT_EQ(3, dead_count(&self->peertab));
 
-	homa_peertab_gc_dsts(&self->peertab, 150000000);
+	homa_peertab_gc_dsts(&self->peertab, 110000000);
 	EXPECT_EQ(2, dead_count(&self->peertab));
 	homa_peertab_gc_dsts(&self->peertab, ~0);
 	EXPECT_EQ(0, dead_count(&self->peertab));
@@ -228,6 +228,21 @@ TEST_F(homa_peer, homa_dst_refresh__basics)
 	EXPECT_NE(old_dst, peer->dst);
 	EXPECT_EQ(1, dead_count(self->homa.peers));
 }
+TEST_F(homa_peer, homa_dst_refresh__malloc_error)
+{
+	struct dst_entry *old_dst;
+	struct homa_peer *peer;
+
+	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
+	ASSERT_NE(NULL, peer);
+	EXPECT_EQ_IP(*ip1111, peer->addr);
+
+	old_dst = homa_get_dst(peer, &self->hsk);
+	mock_kmalloc_errors = 1;
+	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
+	EXPECT_EQ(old_dst, peer->dst);
+	EXPECT_EQ(0, dead_count(self->homa.peers));
+}
 TEST_F(homa_peer, homa_dst_refresh__routing_error)
 {
 	struct dst_entry *old_dst;
@@ -242,21 +257,6 @@ TEST_F(homa_peer, homa_dst_refresh__routing_error)
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
-	EXPECT_EQ(0, dead_count(self->homa.peers));
-}
-TEST_F(homa_peer, homa_dst_refresh__malloc_error)
-{
-	struct dst_entry *old_dst;
-	struct homa_peer *peer;
-
-	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
-	ASSERT_NE(NULL, peer);
-	EXPECT_EQ_IP(*ip1111, peer->addr);
-
-	old_dst = homa_get_dst(peer, &self->hsk);
-	mock_kmalloc_errors = 1;
-	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
-	EXPECT_NE(old_dst, peer->dst);
 	EXPECT_EQ(0, dead_count(self->homa.peers));
 }
 TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
