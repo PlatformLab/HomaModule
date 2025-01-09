@@ -545,8 +545,8 @@ pages than needed.
 .TP
 .IR skb_page_pool_min_kb
 When releasing pages from the sk_buff page pools back to Linux, Homa will
-not release pages from a pool if the total capacity of free pages in
-the pool has been less than this option (specified in Kbytes) at any point
+not release pages from a pool if the amount of unused space in
+the pool has been less than this (specified in Kbytes) at any point
 in the recent past.
 .TP
 .IR throttle_min_bytes

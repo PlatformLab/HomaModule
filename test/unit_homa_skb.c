@@ -714,6 +714,29 @@ TEST_F(homa_skb, homa_skb_release_pages__allocate_skb_pages_to_free)
 	homa_skb_release_pages(&self->homa);
 	EXPECT_EQ(5, self->homa.pages_to_free_slots);
 }
+TEST_F(homa_skb, homa_skb_release_pages__cant_reallocate_skb_pages_to_free)
+{
+	struct homa_page_pool *pool;
+
+	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
+	mock_ns = 1000000;
+	self->homa.skb_page_free_time = 500000;
+	self->homa.skb_page_frees_per_sec = 20;
+	self->homa.skb_page_pool_min_kb = 0;
+	add_to_pool(&self->homa, 20, 0);
+	pool = get_skb_core(0)->pool;
+	pool->low_mark = 15;
+
+	EXPECT_EQ(0, self->homa.pages_to_free_slots);
+	self->homa.skb_pages_to_free = kmalloc_array(4, sizeof(struct page *),
+						     GFP_ATOMIC);
+	self->homa.pages_to_free_slots = 4;
+
+	mock_kmalloc_errors = 1;
+	homa_skb_release_pages(&self->homa);
+	EXPECT_EQ(16, get_skb_core(0)->pool->avail);
+	EXPECT_EQ(4, self->homa.pages_to_free_slots);
+}
 TEST_F(homa_skb, homa_skb_release_pages__limited_by_min_kb)
 {
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);

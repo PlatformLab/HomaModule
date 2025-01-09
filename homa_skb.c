@@ -596,15 +596,23 @@ void homa_skb_release_pages(struct homa *homa)
 	homa->skb_page_free_time = now + 500000000ULL;
 	release_max = homa->skb_page_frees_per_sec / 2;
 	if (homa->pages_to_free_slots < release_max) {
-		if (homa->skb_pages_to_free)
-			kfree(homa->skb_pages_to_free);
+		struct page **old = homa->skb_pages_to_free;
+
 		homa->skb_pages_to_free = kmalloc_array(release_max,
 							sizeof(struct page *),
 							GFP_ATOMIC);
-		homa->pages_to_free_slots = release_max;
+		if (homa->skb_pages_to_free) {
+			kfree(old);
+			homa->pages_to_free_slots = release_max;
+		} else {
+			homa->skb_pages_to_free = old;
+			release_max = homa->pages_to_free_slots;
+		}
 	}
 
-	/* Find the pool with the largest low-water mark. */
+	/* Find the pool with the largest number of pages that haven't
+	 * been used recently.
+	 */
 	max_low_mark = -1;
 	spin_lock_bh(&homa->page_pool_mutex);
 	for (i = 0; i <= homa->max_numa; i++) {

@@ -470,8 +470,8 @@ struct homa {
 	__u64 skb_page_free_time;
 
 	/**
-	 * @skb_page_pool_min_mb: Don't return pages from a pool to Linux
-	 * if the amount of cached data in the pool has been less than this
+	 * @skb_page_pool_min_kb: Don't return pages from a pool to Linux
+	 * if the amount of unused space in the pool has been less than this
 	 * many KBytes at any time in the recent past. Set externally via
 	 * sysctl.
 	 */
