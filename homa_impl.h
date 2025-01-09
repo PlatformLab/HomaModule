@@ -412,12 +412,10 @@ struct homa {
 	atomic_t total_incoming __aligned(L1_CACHE_BYTES);
 
 	/**
-	 * @next_client_port: A client port number to consider for the
-	 * next Homa socket; increments monotonically. Current value may
-	 * be in the range allocated for servers; must check before using.
-	 * This port may also be in use already; must check.
+	 * @prev_default_port: The most recent port number assigned from
+	 * the range of default ports.
 	 */
-	__u16 next_client_port __aligned(L1_CACHE_BYTES);
+	__u16 prev_default_port __aligned(L1_CACHE_BYTES);
 
 	/**
 	 * @port_map: Information about all open sockets. Dynamically

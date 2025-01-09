@@ -26,6 +26,9 @@
 
 #define get_page mock_get_page
 
+#undef HOMA_MIN_DEFAULT_PORT
+#define HOMA_MIN_DEFAULT_PORT mock_min_default_port
+
 #undef kmalloc
 #define kmalloc mock_kmalloc
 
@@ -92,6 +95,7 @@ extern char        mock_xmit_prios[];
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
 extern int         mock_max_skb_frags;
+extern __u16       mock_min_default_port;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
@@ -144,7 +148,7 @@ struct sk_buff *
 			 int extra_bytes, int first_value);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
-void        mock_sock_init(struct homa_sock *hsk, struct homa *homa,
+int         mock_sock_init(struct homa_sock *hsk, struct homa *homa,
 			   int port);
 void        mock_teardown(void);
 void       *mock_vmalloc(size_t size);

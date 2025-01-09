@@ -181,6 +181,9 @@ int mock_page_nid_mask;
 /* Used to collect printk output. */
 char mock_printk_output [5000];
 
+/* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
+__u16 mock_min_default_port = 0x8000;
+
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
@@ -1603,28 +1606,33 @@ int mock_skb_count(void)
  * @homa:         Overall information about the Homa protocol.
  * @port:         Port number to use for the socket, or 0 to
  *                use default.
+ * Return: 0 for success, otherwise a negative errno.
  */
-void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
+int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 {
-	int saved_port = homa->next_client_port;
+	int saved_port = homa->prev_default_port;
 	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = &hsk->sock;
+	int err = 0;
 
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
-	if ((port != 0) && (port >= HOMA_MIN_DEFAULT_PORT))
-		homa->next_client_port = port;
-	homa_sock_init(hsk, homa);
+	if (port != 0 && port >= mock_min_default_port)
+		homa->prev_default_port = port - 1;
+	err = homa_sock_init(hsk, homa);
 	if (port != 0)
-		homa->next_client_port = saved_port;
-	if (port < HOMA_MIN_DEFAULT_PORT)
+		homa->prev_default_port = saved_port;
+	if (err != 0)
+		return err;
+	if (port != 0 && port < mock_min_default_port)
 		homa_sock_bind(homa->port_map, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);
 	mock_net_device.gso_max_size = mock_mtu;
-	homa_pool_init(hsk, (void *) 0x1000000, 100*HOMA_BPAGE_SIZE);
+	err = homa_pool_init(hsk, (void *) 0x1000000, 100*HOMA_BPAGE_SIZE);
+	return err;
 }
 
 /**
@@ -1686,6 +1694,7 @@ void mock_teardown(void)
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
+	mock_min_default_port = 0x8000;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));

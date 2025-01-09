@@ -119,13 +119,28 @@ TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 {
 	struct homa_sock hsk2, hsk3;
 
-	self->homa.next_client_port = 0xffff;
+	self->homa.prev_default_port = 0xfffe;
 	mock_sock_init(&hsk2, &self->homa, 0);
 	mock_sock_init(&hsk3, &self->homa, 0);
 	EXPECT_EQ(65535, hsk2.port);
 	EXPECT_EQ(32769, hsk3.port);
 	homa_sock_destroy(&hsk2);
 	homa_sock_destroy(&hsk3);
+}
+TEST_F(homa_sock, homa_sock_init__all_ports_in_use)
+{
+	struct homa_sock hsk2, hsk3, hsk4;
+
+	mock_min_default_port = -2;
+	EXPECT_EQ(0, -mock_sock_init(&hsk2, &self->homa, 0));
+	EXPECT_EQ(0, -mock_sock_init(&hsk3, &self->homa, 0));
+	EXPECT_EQ(EADDRNOTAVAIL, -mock_sock_init(&hsk4, &self->homa, 0));
+	EXPECT_EQ(65534, hsk2.port);
+	EXPECT_EQ(65535, hsk3.port);
+	EXPECT_EQ(1, hsk4.shutdown);
+	homa_sock_destroy(&hsk2);
+	homa_sock_destroy(&hsk3);
+	homa_sock_destroy(&hsk4);
 }
 TEST_F(homa_sock, homa_sock_init__ip_header_length)
 {

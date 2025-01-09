@@ -55,7 +55,7 @@ int homa_init(struct homa *homa)
 	homa->throttle_add = 0;
 	homa->throttle_min_bytes = 200;
 	atomic_set(&homa->total_incoming, 0);
-	homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
+	homa->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
 		pr_err("%s couldn't create port_map: kmalloc failure",

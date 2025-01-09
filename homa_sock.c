@@ -130,6 +130,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = homa->port_map;
+	int starting_port;
 	int result = 0;
 	int i;
 
@@ -142,17 +143,22 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
 			? HOMA_IPV4_HEADER_LENGTH : HOMA_IPV6_HEADER_LENGTH;
 	hsk->shutdown = false;
+	starting_port = homa->prev_default_port;
 	while (1) {
-		if (homa->next_client_port < HOMA_MIN_DEFAULT_PORT)
-			homa->next_client_port = HOMA_MIN_DEFAULT_PORT;
-		if (!homa_sock_find(socktab, homa->next_client_port))
+		homa->prev_default_port++;
+		if (homa->prev_default_port < HOMA_MIN_DEFAULT_PORT)
+			homa->prev_default_port = HOMA_MIN_DEFAULT_PORT;
+		if (!homa_sock_find(socktab, homa->prev_default_port))
 			break;
-		homa->next_client_port++;
+		if (homa->prev_default_port == starting_port) {
+			spin_unlock_bh(&socktab->write_lock);
+			hsk->shutdown = true;
+			return -EADDRNOTAVAIL;
+		}
 	}
-	hsk->port = homa->next_client_port;
+	hsk->port = homa->prev_default_port;
 	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
-	homa->next_client_port++;
 	hsk->socktab_links.sock = hsk;
 	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
 			   &socktab->buckets[homa_port_hash(hsk->port)]);
