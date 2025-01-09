@@ -48,8 +48,10 @@ struct homa_bpage {
 };
 
 #ifndef __STRIP__ /* See strip.py */
+#ifndef CONFIG_LOCKDEP
 _Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
 	       "homa_bpage overflowed a cache line");
+#endif
 #endif /* See strip.py */
 
 /**

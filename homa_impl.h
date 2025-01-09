@@ -59,6 +59,9 @@ struct page *mock_alloc_pages(gfp_t gfp, unsigned int order);
 #define compound_order mock_compound_order
 unsigned int mock_compound_order(struct page *page);
 
+#ifdef cpu_to_node
+#undef cpu_to_node
+#endif
 #define cpu_to_node mock_cpu_to_node
 int mock_cpu_to_node(int cpu);
 

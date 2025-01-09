@@ -197,6 +197,7 @@ unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base;
 unsigned long phys_base;
 unsigned long vmemmap_base;
+kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 int __preempt_count;
 struct pcpu_hot pcpu_hot = {.cpu_number = 1};
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
@@ -204,6 +205,7 @@ struct net_hotdata net_hotdata = {
 	.rps_cpu_mask = 0x1f,
 	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
 };
+int debug_locks;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
@@ -329,6 +331,11 @@ unsigned long _copy_from_user(void *to, const void __user *from,
 void __copy_overflow(int size, unsigned long count)
 {
 	abort();
+}
+
+int debug_lockdep_rcu_enabled(void)
+{
+	return 0;
 }
 
 void dst_release(struct dst_entry *dst)
@@ -696,6 +703,14 @@ struct file *filp_open(const char *, int, umode_t)
 	return NULL;
 }
 
+void __fortify_panic(const u8 reason, const size_t avail, const size_t size)
+{
+	FAIL("__fortify_panic invoked");
+
+	/* API prohibits return. */
+	while (1) ;
+}
+
 ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
 {
 	return 0;
@@ -749,6 +764,11 @@ void __kfree_skb(struct sk_buff *skb)
 	free(skb);
 }
 
+void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
+{
+	return mock_kmalloc(size, gfpflags);
+}
+
 void *mock_kmalloc(size_t size, gfp_t flags)
 {
 	void *block;
@@ -789,20 +809,40 @@ int kthread_stop(struct task_struct *k)
 }
 
 #ifdef CONFIG_DEBUG_LIST
-bool __list_add_valid(struct list_head *new,
-		struct list_head *prev,
-		struct list_head *next)
+bool __list_add_valid(struct list_head *new, struct list_head *prev,
+		      struct list_head *next)
+{
+	return true;
+}
+#endif
+
+bool __list_add_valid_or_report(struct list_head *new, struct list_head *prev,
+				struct list_head *next)
 {
 	return true;
 }
 
+#ifdef CONFIG_DEBUG_LIST
 bool __list_del_entry_valid(struct list_head *entry)
 {
 	return true;
 }
 #endif
 
+bool __list_del_entry_valid_or_report(struct list_head *entry)
+{
+	return true;
+}
+
 void __local_bh_enable_ip(unsigned long ip, unsigned int cnt) {}
+
+void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
+{}
+
+int lock_is_held_type(const struct lockdep_map *lock, int read)
+{
+	return 0;
+}
 
 void lock_sock_nested(struct sock *sk, int subclass)
 {
@@ -822,7 +862,11 @@ void __mutex_init(struct mutex *lock, const char *name,
 
 }
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+void mutex_lock_nested(struct mutex *lock, unsigned int subclass)
+#else
 void mutex_lock(struct mutex *lock)
+#endif
 {
 	mock_active_locks++;
 }
@@ -937,6 +981,10 @@ void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 	mock_active_locks++;
 }
 
+void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
+			  struct lock_class_key *key, short inner)
+{}
+
 int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
@@ -959,6 +1007,16 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 		return 0;
 	mock_active_locks++;
 	return 1;
+}
+
+int rcu_read_lock_held(void)
+{
+	return 0;
+}
+
+int rcu_read_lock_bh_held(void)
+{
+	return 0;
 }
 
 bool rcuref_get_slowpath(rcuref_t *ref)
@@ -1053,6 +1111,9 @@ struct sk_buff *skb_dequeue(struct sk_buff_head *list)
 {
 	return __skb_dequeue(list);
 }
+
+void skb_dump(const char *level, const struct sk_buff *skb, bool full_pkt)
+{}
 
 void *skb_pull(struct sk_buff *skb, unsigned int len)
 {
