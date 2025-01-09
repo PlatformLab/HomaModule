@@ -775,10 +775,10 @@ struct homa {
 	__u32 timer_ticks;
 
 	/**
-	 * @metrics_lock: Used to synchronize accesses to @metrics_active_opens
+	 * @metrics_mutex: Used to synchronize accesses to @metrics_active_opens
 	 * and updates to @metrics.
 	 */
-	spinlock_t metrics_lock;
+	struct mutex metrics_mutex;
 
 	/*
 	 * @metrics: a human-readable string containing recent values

@@ -135,7 +135,7 @@ int homa_init(struct homa *homa)
 	homa->busy_usecs = 100;
 	homa->gro_busy_usecs = 5;
 	homa->timer_ticks = 0;
-	spin_lock_init(&homa->metrics_lock);
+	mutex_init(&homa->metrics_mutex);
 	homa->metrics = NULL;
 	homa->metrics_capacity = 0;
 	homa->metrics_length = 0;

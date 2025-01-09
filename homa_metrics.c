@@ -28,7 +28,7 @@ void homa_metric_append(struct homa *homa, const char *format, ...)
 #else
 		homa->metrics_capacity =  4096;
 #endif
-		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_ATOMIC);
+		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_KERNEL);
 		if (!homa->metrics) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;
@@ -51,7 +51,7 @@ void homa_metric_append(struct homa *homa, const char *format, ...)
 
 		/* Not enough room; expand buffer capacity. */
 		homa->metrics_capacity *= 2;
-		new_buffer = kmalloc(homa->metrics_capacity, GFP_ATOMIC);
+		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
 		if (!new_buffer) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;
@@ -355,11 +355,11 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 	 * use this copy for subsequent opens, until the file has been
 	 * completely closed.
 	 */
-	spin_lock(&homa->metrics_lock);
+	mutex_lock(&homa->metrics_mutex);
 	if (homa->metrics_active_opens == 0)
 		homa_metrics_print(homa);
 	homa->metrics_active_opens++;
-	spin_unlock(&homa->metrics_lock);
+	mutex_unlock(&homa->metrics_mutex);
 	return 0;
 }
 
@@ -418,8 +418,8 @@ int homa_metrics_release(struct inode *inode, struct file *file)
 {
 	struct homa *homa = global_homa;
 
-	spin_lock(&homa->metrics_lock);
+	mutex_lock(&homa->metrics_mutex);
 	homa->metrics_active_opens--;
-	spin_unlock(&homa->metrics_lock);
+	mutex_unlock(&homa->metrics_mutex);
 	return 0;
 }
