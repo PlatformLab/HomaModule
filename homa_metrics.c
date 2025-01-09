@@ -28,7 +28,7 @@ void homa_metric_append(struct homa *homa, const char *format, ...)
 #else
 		homa->metrics_capacity =  4096;
 #endif
-		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_ATOMIC);
 		if (!homa->metrics) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;
@@ -51,7 +51,7 @@ void homa_metric_append(struct homa *homa, const char *format, ...)
 
 		/* Not enough room; expand buffer capacity. */
 		homa->metrics_capacity *= 2;
-		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		new_buffer = kmalloc(homa->metrics_capacity, GFP_ATOMIC);
 		if (!new_buffer) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;

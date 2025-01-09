@@ -67,7 +67,7 @@ static inline struct sk_buff *homa_skb_new_tx(int length)
 
 	skb = alloc_skb(HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH +
 			sizeof(struct homa_skb_info) + length,
-			GFP_KERNEL);
+			GFP_ATOMIC);
 	if (likely(skb)) {
 		skb_reserve(skb, HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH);
 		skb_reset_transport_header(skb);

@@ -134,7 +134,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kmalloc(sizeof(*srpc), GFP_KERNEL);
+	srpc = kmalloc(sizeof(*srpc), GFP_ATOMIC);
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
@@ -345,7 +345,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	struct homa_rpc *rpc;
 	int i, batch_size;
 	int rx_frees = 0;
-	int result;
+	int result = 0;
 
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);

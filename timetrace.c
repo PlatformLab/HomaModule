@@ -337,7 +337,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 		result = -EINVAL;
 		goto done;
 	}
-	pf = kmalloc(sizeof(*pf), GFP_KERNEL);
+	pf = kmalloc(sizeof(*pf), GFP_ATOMIC);
 	if (!pf) {
 		result = -ENOMEM;
 		goto done;

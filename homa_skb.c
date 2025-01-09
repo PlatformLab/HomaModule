@@ -52,7 +52,7 @@ int homa_skb_init(struct homa *homa)
 		if (!homa->page_pools[numa]) {
 			struct homa_page_pool *pool;
 
-			pool = kmalloc(sizeof(*pool), GFP_KERNEL);
+			pool = kmalloc(sizeof(*pool), GFP_ATOMIC);
 			if (!pool)
 				return -ENOMEM;
 			pool->avail = 0;
@@ -131,7 +131,7 @@ struct sk_buff *homa_skb_new_tx(int length)
 	 */
 	skb = alloc_skb(HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH +
 			sizeof(struct homa_skb_info) + length,
-			GFP_KERNEL);
+			GFP_ATOMIC);
 	if (likely(skb)) {
 		skb_reserve(skb, HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH);
 		skb_reset_transport_header(skb);
@@ -286,7 +286,7 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 	/* Step 3: can we allocate a new big page? */
 	INC_METRIC(skb_page_allocs, 1);
 	start = sched_clock();
-	skb_core->skb_page = alloc_pages((GFP_KERNEL & ~__GFP_RECLAIM) | __GFP_COMP
+	skb_core->skb_page = alloc_pages(GFP_ATOMIC | __GFP_COMP
 			| __GFP_NOWARN | __GFP_NORETRY, HOMA_SKB_PAGE_ORDER);
 	if (likely(skb_core->skb_page)) {
 		INC_METRIC(skb_page_alloc_ns, sched_clock() - start);
@@ -294,7 +294,7 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 	}
 
 	/* Step 4: can we allocate a normal page? */
-	skb_core->skb_page = alloc_page(GFP_KERNEL);
+	skb_core->skb_page = alloc_page(GFP_ATOMIC);
 	INC_METRIC(skb_page_alloc_ns, sched_clock() - start);
 	if (likely(skb_core->skb_page)) {
 		skb_core->page_size = PAGE_SIZE;
@@ -600,7 +600,7 @@ void homa_skb_release_pages(struct homa *homa)
 			kfree(homa->skb_pages_to_free);
 		homa->skb_pages_to_free = kmalloc_array(release_max,
 							sizeof(struct page *),
-							GFP_KERNEL);
+							GFP_ATOMIC);
 		homa->pages_to_free_slots = release_max;
 	}
 

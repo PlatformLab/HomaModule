@@ -335,13 +335,15 @@ TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
 }
 TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 {
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
+	struct homa_rpc *crpc1, *crpc2;
 
+	crpc1 = homa_rpc_new_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc1 == NULL);
+	homa_rpc_unlock(crpc1);
+
+	crpc2 = homa_rpc_new_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc2 == NULL);
+
         mock_set_ipv6(&self->hsk);
 	self->hsk.sock.sk_protocol = IPPROTO_TCP;
 
@@ -350,7 +352,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 			2 * UNIT_TEST_DATA_PER_PACKET;
 	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
 			unit_iov_iter((void *) 1000, 10000), 0));
-	homa_rpc_unlock(crpc1);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
 
 	/* Second try: just barely enough space for 3 packets in GSO. */
@@ -363,13 +364,10 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 }
 TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
 {
-	struct homa_rpc *crpc1 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
-	struct homa_rpc *crpc2 = homa_rpc_new_client(&self->hsk,
-			&self->server_addr);
+	struct homa_rpc *crpc1, *crpc2;
 
+	crpc1 = homa_rpc_new_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc1 == NULL);
-	ASSERT_FALSE(crpc2 == NULL);
         mock_set_ipv6(&self->hsk);
 
 	/* First try: not quite enough space for 3 packets in GSO. */
@@ -382,6 +380,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_no_hijacking)
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
 
 	/* Second try: just barely enough space for 3 packets in GSO. */
+	crpc2 = homa_rpc_new_client(&self->hsk, &self->server_addr);
+	ASSERT_FALSE(crpc2 == NULL);
 	mock_net_device.gso_max_size += 1;
 	unit_log_clear();
 	ASSERT_EQ(0, -homa_message_out_fill(crpc2,

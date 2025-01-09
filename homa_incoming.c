@@ -66,7 +66,7 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
 {
 	struct homa_gap *gap;
 
-	gap = kmalloc(sizeof(*gap), GFP_KERNEL);
+	gap = kmalloc(sizeof(*gap), GFP_ATOMIC);
 	if (!gap)
 		return NULL;
 	gap->start = start;

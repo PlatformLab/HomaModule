@@ -115,10 +115,15 @@ static struct unit_hash *skbs_in_use;
  */
 static struct unit_hash *vmallocs_in_use;
 
-/* The number of locks that have been acquired but not yet released.
- * Should be 0 at the end of each test.
+/* The number of locks (other than spin locks) that have been acquired
+ * but not yet released. Should be 0 at the end of each test.
  */
 static int mock_active_locks;
+
+/* The number of spin locksthat have been acquired but not yet released.
+ * Should be 0 at the end of each test.
+ */
+static int mock_active_spin_locks;
 
 /* The number of times rcu_read_lock has been called minus the number
  * of times rcu_read_unlock has been called.
@@ -775,6 +780,9 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
+	if (mock_active_spin_locks  > 0 && (flags & ~__GFP_ZERO) != GFP_ATOMIC)
+		FAIL("Incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
+		     flags, GFP_ATOMIC);
 	block = malloc(size);
 	if (!block) {
 		FAIL("malloc failed");
@@ -972,13 +980,13 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
-	mock_active_locks++;
+	mock_active_spin_locks++;
 }
 
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
-	mock_active_locks++;
+	mock_active_spin_locks++;
 }
 
 void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
@@ -990,14 +998,14 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
-	mock_active_locks++;
+	mock_active_spin_locks++;
 	return 1;
 }
 
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
-	mock_active_locks--;
+	mock_active_spin_locks--;
 }
 
 int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
@@ -1005,7 +1013,7 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_spin_lock_held))
 		return 0;
-	mock_active_locks++;
+	mock_active_spin_locks++;
 	return 1;
 }
 
@@ -1627,7 +1635,7 @@ void mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 void mock_spin_unlock(spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
-	mock_active_locks--;
+	mock_active_spin_locks--;
 }
 
 /**
@@ -1723,8 +1731,14 @@ void mock_teardown(void)
 	vmallocs_in_use = NULL;
 
 	if (mock_active_locks != 0)
-		FAIL(" %d locks still locked after test", mock_active_locks);
+		FAIL(" %d (non-spin) locks still locked after test",
+		     mock_active_locks);
 	mock_active_locks = 0;
+
+	if (mock_active_spin_locks != 0)
+		FAIL(" %d spin locks still locked after test",
+		     mock_active_spin_locks);
+	mock_active_spin_locks = 0;
 
 	if (mock_active_rcu_locks != 0)
 		FAIL(" %d rcu_read_locks still active after test",

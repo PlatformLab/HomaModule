@@ -178,7 +178,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i + 1000000;
 	}
-	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_KERNEL);
+	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_ATOMIC);
 	if (!hsk->buffer_pool)
 		result = -ENOMEM;
 	if (homa->hijack_tcp)

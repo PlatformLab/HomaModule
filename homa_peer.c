@@ -92,7 +92,7 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 	if (count == 0)
 		return NULL;
 
-	result = kmalloc_array(count, sizeof(peer), GFP_KERNEL);
+	result = kmalloc_array(count, sizeof(peer), GFP_ATOMIC);
 	if (!result)
 		return NULL;
 	*num_peers = count;
