@@ -321,18 +321,20 @@ void homa_rpc_free(struct homa_rpc *rpc)
  * RPCs for a given socket. For a large RPC, it can take a long time to
  * free all of its packet buffers, so we try to perform this work
  * off the critical path where it won't delay applications. Each call to
- * this function does a small chunk of work. See the file reap.txt for
- * more information.
- * @hsk:   Homa socket that may contain dead RPCs. Must not be locked by the
- *         caller; this function will lock and release.
- * @count: Number of buffers to free during this call.
+ * this function normally does a small chunk of work (unless reap_all is
+ * true). See the file reap.txt for more information.
+ * @hsk:      Homa socket that may contain dead RPCs. Must not be locked by the
+ *            caller; this function will lock and release.
+ * @reap_all: False means do a small chunk of work; there may still be
+ *            unreaped RPCs on return. True means reap all dead rpcs for
+ *            hsk.  Will busy-wait if reaping has been disabled for some RPCs.
  *
  * Return: A return value of 0 means that we ran out of work to do; calling
  *         again will do no work (there could be unreaped RPCs, but if so,
  *         reaping has been disabled for them).  A value greater than
  *         zero means there is still more reaping work to be done.
  */
-int homa_rpc_reap(struct homa_sock *hsk, int count)
+int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 {
 #ifdef __UNIT_TEST__
 #define BATCH_MAX 3
@@ -344,6 +346,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
 	int i, batch_size;
+	int skbs_to_reap;
 	int rx_frees;
 	int result = 0;
 
@@ -353,11 +356,14 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	/* Each iteration through the following loop will reap
 	 * BATCH_MAX skbs.
 	 */
-	while (count > 0) {
-		batch_size = count;
-		if (batch_size > BATCH_MAX)
-			batch_size = BATCH_MAX;
-		count -= batch_size;
+	skbs_to_reap = hsk->homa->reap_limit;
+	while (skbs_to_reap > 0 && !list_empty(&hsk->dead_rpcs)) {
+		batch_size = BATCH_MAX;
+		if (!reap_all) {
+			if (batch_size > skbs_to_reap)
+				batch_size = skbs_to_reap;
+			skbs_to_reap -= batch_size;
+		}
 		num_skbs = 0;
 		num_rpcs = 0;
 		rx_frees = 0;
@@ -369,6 +375,8 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 				   atomic_read(&hsk->protect_count),
 				   hsk->dead_skbs);
 			homa_sock_unlock(hsk);
+			if (reap_all)
+				continue;
 			return 0;
 		}
 
@@ -470,7 +478,7 @@ release:
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
 			   num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
 			   hsk->port);
-		if (!result)
+		if (!result && !reap_all)
 			break;
 	}
 	homa_pool_check_waiting(hsk->buffer_pool);

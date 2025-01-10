@@ -436,7 +436,7 @@ struct homa_rpc
 	       *homa_rpc_new_server(struct homa_sock *hsk,
 				    const struct in6_addr *source,
 				    struct homa_data_hdr *h, int *created);
-int      homa_rpc_reap(struct homa_sock *hsk, int count);
+int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);

@@ -552,7 +552,7 @@ discard:
 		__u64 start = sched_clock();
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
-		homa_rpc_reap(hsk, hsk->homa->reap_limit);
+		homa_rpc_reap(hsk, false);
 		INC_METRIC(data_pkt_reap_ns, sched_clock() - start);
 	}
 }
@@ -1247,8 +1247,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 					   rpc->id);
 				goto found_rpc;
 			}
-			reaper_result = homa_rpc_reap(hsk,
-						      hsk->homa->reap_limit);
+			reaper_result = homa_rpc_reap(hsk, false);
 			if (reaper_result == 0)
 				break;
 

@@ -213,7 +213,7 @@ void homa_timer(struct homa *homa)
 			__u64 start = sched_clock();
 
 			tt_record("homa_timer calling homa_rpc_reap");
-			if (homa_rpc_reap(hsk, hsk->homa->reap_limit) == 0)
+			if (homa_rpc_reap(hsk, false) == 0)
 				break;
 			INC_METRIC(timer_reap_ns, sched_clock() - start);
 		}
