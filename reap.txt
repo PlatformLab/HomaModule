@@ -8,7 +8,7 @@ This file discusses issues related to freeing resources for completed RPCs
   RPC completed, but this can result in severe performance hiccups. For
   example, a server RPC is freed once the last packet of the response
   has been transmitted, but this can happen in homa_softirq in response
-  to an incoming grant, and there may be other short messages waiting
+  to an incoming acknowledgment, and there may be other short messages waiting
   to be processed. Freeing a long RPC could result in significant delay
   for a subsequent short RPC.
 
@@ -34,7 +34,7 @@ This file discusses issues related to freeing resources for completed RPCs
     will reap a few buffers for every incoming data packet. This is undesirable
     because it will impact Homa's performance.
 
-* In addition, during the conversion to the new input buffering scheme for 2.0,
+* In addition, during the conversion to the new input buffering scheme,
   freeing of packets for incoming messages was moved to homa_copy_to_user,
   under the assumption that this code wouldn't be on the critical path.
   However, right now the packet freeing is taking 20-25% of the total
