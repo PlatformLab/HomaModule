@@ -344,7 +344,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
 	int i, batch_size;
-	int rx_frees = 0;
+	int rx_frees;
 	int result = 0;
 
 	INC_METRIC(reaper_calls, 1);
@@ -360,6 +360,7 @@ int homa_rpc_reap(struct homa_sock *hsk, int count)
 		count -= batch_size;
 		num_skbs = 0;
 		num_rpcs = 0;
+		rx_frees = 0;
 
 		homa_sock_lock(hsk, "homa_rpc_reap");
 		if (atomic_read(&hsk->protect_count)) {

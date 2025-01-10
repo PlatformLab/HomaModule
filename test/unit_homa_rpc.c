@@ -506,7 +506,7 @@ TEST_F(homa_rpc, homa_rpc_reap__basics)
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 	unit_log_clear();
 	EXPECT_STREQ("1236 1238", dead_rpcs(&self->hsk));
-	EXPECT_EQ(2, self->hsk.dead_skbs);
+	EXPECT_EQ(3, self->hsk.dead_skbs);
 }
 TEST_F(homa_rpc, homa_rpc_reap__protected)
 {
