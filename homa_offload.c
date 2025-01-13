@@ -89,6 +89,7 @@ void homa_gro_hook_tcp(void)
 		return;
 
 	pr_notice("Homa setting up TCP hijacking\n");
+	rcu_read_lock();
 	tcp_net_offload = rcu_dereference(inet_offloads[IPPROTO_TCP]);
 	hook_tcp_net_offload = *tcp_net_offload;
 	hook_tcp_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
@@ -100,6 +101,7 @@ void homa_gro_hook_tcp(void)
 	hook_tcp6_net_offload.callbacks.gro_receive = homa_tcp_gro_receive;
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&hook_tcp6_net_offload;
+	rcu_read_unlock();
 }
 
 /**

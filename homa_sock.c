@@ -29,11 +29,13 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
+	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
 		homa_sock_destroy(hsk);
 	}
 	homa_socktab_end_scan(&scan);
+	rcu_read_unlock();
 }
 
 /**

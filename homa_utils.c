@@ -521,17 +521,18 @@ void homa_freeze_peers(struct homa *homa)
 	struct homa_sock *hsk;
 
 	/* Find a socket to use (any will do). */
+	rcu_read_lock();
 	hsk = homa_socktab_start_scan(homa->port_map, &scan);
 	homa_socktab_end_scan(&scan);
 	if (!hsk) {
 		tt_record("homa_freeze_peers couldn't find a socket");
-		return;
+		goto done;
 	}
 
 	peers = homa_peertab_get_peers(homa->peers, &num_peers);
 	if (!peers) {
 		tt_record("homa_freeze_peers couldn't find peers to freeze");
-		return;
+		goto done;
 	}
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
@@ -547,6 +548,10 @@ void homa_freeze_peers(struct homa *homa)
 				   err, tt_addr(peers[i]->addr));
 	}
 	kfree(peers);
+
+done:
+	rcu_read_unlock();
+	return;
 }
 
 /**
