@@ -1295,7 +1295,7 @@ int homa_softirq(struct sk_buff *skb)
 		 * it will work even if the RPC and/or socket are unknown.
 		 */
 		if (unlikely(h->type == FREEZE)) {
-			if (!tt_frozen) {
+			if (!atomic_read(&tt_frozen)) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
 					   ntohs(h->dport),

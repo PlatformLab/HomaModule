@@ -34,10 +34,10 @@ TEST_F(timetrace, tt_freeze)
 	EXPECT_EQ(0, tt_freeze_count.counter);
 	tt_freeze();
 	EXPECT_EQ(1, tt_freeze_count.counter);
-	EXPECT_TRUE(tt_frozen);
+	EXPECT_TRUE(atomic_read(&tt_frozen));
 	tt_freeze();
 	EXPECT_EQ(1, tt_freeze_count.counter);
-	EXPECT_TRUE(tt_frozen);
+	EXPECT_TRUE(atomic_read(&tt_frozen));
 }
 
 TEST_F(timetrace, tt_record__basics)
@@ -285,20 +285,20 @@ TEST_F(timetrace, tt_proc_release__unfreeze)
 	tt_freeze();
 	tt_proc_open(NULL, &self->file);
 	EXPECT_EQ(2, tt_freeze_count.counter);
-	EXPECT_TRUE(tt_frozen);
+	EXPECT_TRUE(atomic_read(&tt_frozen));
 	tt_proc_open(NULL, &file2);
 	EXPECT_EQ(3, tt_freeze_count.counter);
-	EXPECT_TRUE(tt_frozen);
+	EXPECT_TRUE(atomic_read(&tt_frozen));
 
 	tt_proc_release(NULL, &self->file);
 	EXPECT_EQ(2, tt_freeze_count.counter);
-	EXPECT_TRUE(tt_frozen);
+	EXPECT_TRUE(atomic_read(&tt_frozen));
 	EXPECT_NE(NULL, tt_buffers[1]->events[3].format);
 	EXPECT_EQ(2, tt_buffers[1]->next_index);
 
 	tt_proc_release(NULL, &file2);
 	EXPECT_EQ(0, tt_freeze_count.counter);
-	EXPECT_FALSE(tt_frozen);
+	EXPECT_FALSE(atomic_read(&tt_frozen));
 	EXPECT_EQ(NULL, tt_buffers[1]->events[3].format);
 	EXPECT_EQ(0, tt_buffers[1]->next_index);
 }

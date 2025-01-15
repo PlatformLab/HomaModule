@@ -707,7 +707,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 	if (type != rpc->hsk->homa->freeze_type)
 		return;
 	rpc->hsk->homa->freeze_type = 0;
-	if (!tt_frozen) {
+	if (!atomic_read(&tt_frozen)) {
 //		struct homa_freeze_hdr freeze;
 		int dummy;
 

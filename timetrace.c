@@ -64,7 +64,7 @@ static struct proc_dir_entry *tt_dir_entry;
  * isn't safe here, because tt_freeze gets called at times when threads
  * can't sleep.
  */
-static spinlock_t tt_lock;
+static struct mutex tt_mutex;
 
 /* No new timetrace entries will be made whenever this is nonzero (counts
  * the number of active /proc reads, plus 1 more if tt_frozen is true).
@@ -75,7 +75,7 @@ atomic_t tt_freeze_count = {.counter = 1};
 /* True means that tt_freeze has been called since the last time the
  * timetrace was read.
  */
-bool tt_frozen;
+atomic_t tt_frozen;
 
 /* True means timetrace has been successfully initialized. */
 static bool init;
@@ -134,9 +134,9 @@ int tt_init(char *proc_file, int *temp)
 		tt_dir_entry = NULL;
 	}
 
-	spin_lock_init(&tt_lock);
-	tt_freeze_count.counter = 0;
-	tt_frozen = false;
+	mutex_init(&tt_mutex);
+	atomic_set(&tt_freeze_count, 0);
+	atomic_set(&tt_frozen, 0);
 	init = true;
 
 #ifdef TT_KERNEL
@@ -173,7 +173,7 @@ void tt_destroy(void)
 {
 	int i;
 
-	spin_lock(&tt_lock);
+	mutex_lock(&tt_mutex);
 	if (init) {
 		init = false;
 		if (tt_dir_entry)
@@ -203,7 +203,7 @@ void tt_destroy(void)
 	tt_linux_homa_temp = tt_linux_homa_temp_default;
 #endif
 
-	spin_unlock(&tt_lock);
+	mutex_unlock(&tt_mutex);
 }
 
 /**
@@ -213,16 +213,15 @@ void tt_destroy(void)
  */
 void tt_freeze(void)
 {
-	if (tt_frozen)
-		return;
-	tt_record("timetrace frozen");
-	pr_notice("%s invoked\n", __func__);
-	spin_lock(&tt_lock);
-	if (!tt_frozen) {
-		tt_frozen = true;
+	/* Need to synchronize here to make sure tt_freeze_count only
+	 * gets incremented once, even under concurrent calls to this
+	 * function.
+	 */
+	if (atomic_xchg(&tt_frozen, 1) == 0) {
+		tt_record("timetrace frozen");
+		pr_notice("%s invoked\n", __func__);
 		atomic_inc(&tt_freeze_count);
 	}
-	spin_unlock(&tt_lock);
 }
 
 /**
@@ -332,7 +331,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	struct tt_proc_file *pf = NULL;
 	int result = 0;
 
-	spin_lock(&tt_lock);
+	mutex_lock(&tt_mutex);
 	if (!init) {
 		result = -EINVAL;
 		goto done;
@@ -356,7 +355,7 @@ int tt_proc_open(struct inode *inode, struct file *file)
 	}
 
 done:
-	spin_unlock(&tt_lock);
+	mutex_unlock(&tt_mutex);
 	return result;
 }
 
@@ -383,7 +382,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 	 */
 	int copied_to_user = 0;
 
-	spin_lock(&tt_lock);
+	mutex_lock(&tt_mutex);
 	if (!pf || pf->file != file) {
 		pr_err("tt_metrics_read found damaged private_data: 0x%p\n",
 		       file->private_data);
@@ -477,7 +476,7 @@ flush:
 	}
 
 done:
-	spin_unlock(&tt_lock);
+	mutex_unlock(&tt_mutex);
 	return copied_to_user;
 }
 
@@ -517,13 +516,12 @@ int tt_proc_release(struct inode *inode, struct file *file)
 	kfree(pf);
 	file->private_data = NULL;
 
-	spin_lock(&tt_lock);
+	mutex_lock(&tt_mutex);
 
 	if (init) {
-		if (tt_frozen && (atomic_read(&tt_freeze_count) == 2)) {
+		if (atomic_read(&tt_freeze_count) == 2 &&
+				atomic_xchg(&tt_frozen, 0) == 1)
 			atomic_dec(&tt_freeze_count);
-			tt_frozen = false;
-		}
 
 		if (atomic_read(&tt_freeze_count) == 1) {
 			/* We are the last active open of the file; reset all of
@@ -539,7 +537,7 @@ int tt_proc_release(struct inode *inode, struct file *file)
 		atomic_dec(&tt_freeze_count);
 	}
 
-	spin_unlock(&tt_lock);
+	mutex_unlock(&tt_mutex);
 	return 0;
 }
 

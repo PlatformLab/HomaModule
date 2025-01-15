@@ -119,7 +119,7 @@ loff_t    tt_proc_lseek(struct file *file, loff_t offset, int whence);
 extern struct    tt_buffer *tt_buffers[];
 extern int       tt_buffer_size;
 extern atomic_t  tt_freeze_count;
-extern bool      tt_frozen;
+extern atomic_t  tt_frozen;
 extern int       tt_pf_storage;
 extern bool      tt_test_no_khz;
 

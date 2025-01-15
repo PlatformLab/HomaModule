@@ -187,7 +187,7 @@ void homa_timer(struct homa *homa)
 	if (total_grants == prev_grant_count &&
 	    homa->num_grantable_rpcs > 20) {
 		zero_count++;
-		if (zero_count > 3 && !tt_frozen && 0) {
+		if (zero_count > 3 && !atomic_read(&tt_frozen) && 0) {
 			pr_err("%s found no grants going out\n", __func__);
 			homa_rpc_log_active_tt(homa, 0);
 			tt_record("freezing because no grants are going out");
