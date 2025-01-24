@@ -301,8 +301,9 @@ struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
  * homa_sock_lock() - Acquire the lock for a socket. If the socket
  * isn't immediately available, record stats on the waiting time.
  * @hsk:     Socket to lock.
- * @locker:  Static string identifying where the socket was locked;
- *           used to track down deadlocks.
+ * @locker:  Static string identifying where the socket was locked.
+ *           Not normally used, but can be helpful when tracking down
+ *           deadlocks.
  */
 static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
 	__acquires(&hsk->lock)
