@@ -86,17 +86,18 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 	pool->bpages_needed = INT_MAX;
 
 	/* Allocate and initialize core-specific data. */
-	pool->cores = kmalloc_array(nr_cpu_ids, sizeof(struct homa_pool_core),
-				    GFP_ATOMIC);
+	pool->cores = alloc_percpu_gfp(struct homa_pool_core, GFP_ATOMIC);
 	if (!pool->cores) {
 		result = -ENOMEM;
 		goto error;
 	}
 	pool->num_cores = nr_cpu_ids;
 	for (i = 0; i < pool->num_cores; i++) {
-		pool->cores[i].page_hint = 0;
-		pool->cores[i].allocated = 0;
-		pool->cores[i].next_candidate = 0;
+		struct homa_pool_core *core = per_cpu_ptr(pool->cores, i);
+
+		core->page_hint = 0;
+		core->allocated = 0;
+		core->next_candidate = 0;
 	}
 	pool->check_waiting_invoked = 0;
 
@@ -104,7 +105,7 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 
 error:
 	kfree(pool->descriptors);
-	kfree(pool->cores);
+	free_percpu(pool->cores);
 	pool->region = NULL;
 	return result;
 }
@@ -119,7 +120,7 @@ void homa_pool_destroy(struct homa_pool *pool)
 	if (!pool->region)
 		return;
 	kfree(pool->descriptors);
-	kfree(pool->cores);
+	free_percpu(pool->cores);
 	pool->region = NULL;
 }
 
@@ -160,7 +161,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 	int alloced = 0;
 	int limit = 0;
 
-	core = &pool->cores[core_num];
+	core = this_cpu_ptr(pool->cores);
 	if (atomic_sub_return(num_pages, &pool->free_bpages) < 0) {
 		atomic_add(num_pages, &pool->free_bpages);
 		return -1;
@@ -283,7 +284,7 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	if (unlikely(partial == 0))
 		goto success;
 	core_id = raw_smp_processor_id();
-	core = &pool->cores[core_id];
+	core = this_cpu_ptr(pool->cores);
 	bpage = &pool->descriptors[core->page_hint];
 	if (!spin_trylock_bh(&bpage->lock)) {
 		tt_record("beginning wait for bpage lock");

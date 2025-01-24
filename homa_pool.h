@@ -6,6 +6,8 @@
 #ifndef _HOMA_POOL_H
 #define _HOMA_POOL_H
 
+#include <linux/percpu.h>
+
 #include "homa_rpc.h"
 
 /**
@@ -64,7 +66,7 @@ struct homa_pool_core {
 	 * which may be owned by this core. If so, we'll use it
 	 * for allocating partial pages.
 	 */
-	int page_hint ____cacheline_aligned_in_smp;
+	int page_hint;
 
 	/**
 	 * @allocated: if the page given by @page_hint is
@@ -80,11 +82,6 @@ struct homa_pool_core {
 	 */
 	int next_candidate;
 };
-
-#ifndef __STRIP__ /* See strip.py */
-_Static_assert(sizeof(struct homa_pool_core) == L1_CACHE_BYTES,
-	       "homa_pool_core overflowed a cache line");
-#endif /* See strip.py */
 
 /**
  * struct homa_pool - Describes a pool of buffer space for incoming
@@ -128,7 +125,7 @@ struct homa_pool {
 	int bpages_needed;
 
 	/** @cores: core-specific info; dynamically allocated. */
-	struct homa_pool_core *cores;
+	struct homa_pool_core __percpu *cores;
 
 	/** @num_cores: number of elements in @cores. */
 	int num_cores;

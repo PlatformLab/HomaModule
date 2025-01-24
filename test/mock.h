@@ -8,6 +8,9 @@
 #undef alloc_pages
 #define alloc_pages mock_alloc_pages
 
+#undef alloc_percpu_gfp
+#define alloc_percpu_gfp(type, flags) mock_kmalloc(10 * sizeof(type), flags)
+
 #define compound_order mock_compound_order
 
 #ifdef cpu_to_node
@@ -23,6 +26,9 @@
 
 #undef DEFINE_PER_CPU
 #define DEFINE_PER_CPU(type, name) type name[10]
+
+#undef free_percpu
+#define free_percpu(name) kfree(name)
 
 #define get_page mock_get_page
 
@@ -49,6 +55,9 @@
 #undef per_cpu
 #define per_cpu(name, core) (name[core])
 
+#undef per_cpu_ptr
+#define per_cpu_ptr(name, core) (&name[core])
+
 #define put_page mock_put_page
 
 #define rcu_read_lock mock_rcu_read_lock
@@ -61,6 +70,9 @@
 #define signal_pending(...) mock_signal_pending
 
 #define spin_unlock mock_spin_unlock
+
+#undef this_cpu_ptr
+#define this_cpu_ptr(name) (&name[pcpu_hot.cpu_number])
 
 #undef vmalloc
 #define vmalloc mock_vmalloc
