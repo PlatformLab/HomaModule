@@ -26,6 +26,12 @@ from switch import *
 interface = None
 vlan = None
 
+# Cached result of get_cpu_type.
+cpu_type = None
+
+# Cached result of get_link_speed (integer Mbits/sec.)
+link_mbps = None
+
 # Number of this node (e.g. 1 for "node1"). Set by get_node_num.
 node_num = None
 
@@ -87,6 +93,19 @@ def get_core_mask(core = -1):
         mask_words.pop()
     return result
 
+def get_cpu_type():
+    """
+    Return information about the processor we're running on (the "model name"
+    from /proc/cpuinfo)
+    """
+
+    global cpu_type
+    if cpu_type == None:
+        read_cpu_info()
+    if cpu_type == None:
+        raise Exception("Couldn't find 'model name' line in /proc/cpuinfo")
+    return cpu_type
+
 def get_interfaces():
     """
     Runs ifconfig and parses its output to identify the key network
@@ -108,7 +127,8 @@ def get_interfaces():
                 available += ", "
             available += current
             if (('s1f1' in current) or ('s1f0' in current)
-                    or ('s0f0' in current) or ('s0f1' in current)):
+                    or ('s0f0' in current) or ('s0f1' in current)
+                    or (current == 'eno1')):
                 interface = current
             continue
         if re.match('^[ ]+ inet 10\.0\.1\.', line):
@@ -121,6 +141,27 @@ def get_interfaces():
         raise Exception("Couldn't identify primary network interface")
     print("Primary network interface is %s, vlan is %s" % (interface, vlan))
     return [interface, vlan]
+
+def get_link_speed():
+    """
+    Return the link speed for the primary NIC, in Mbits/sec.
+    """
+
+    global link_mbps
+    if link_mbps != None:
+        return link_mbps
+    nic = get_interfaces()[0]
+    num_channels = -1
+
+    for line in subprocess.run(["ethtool", "eno1"], stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, encoding="utf-8",
+            check=True).stdout.splitlines():
+        match = re.match('.*Speed: ([0-9]+)Mb/s', line)
+        if match:
+            link_mbps = int(match.group(1))
+            print("Link speed for %s is %d Mbps" % (nic, link_mbps))
+            return link_mbps
+    raise Exception("Couldn't find link speed in ethtool output")
 
 def get_nic_irqs():
     """
@@ -141,6 +182,7 @@ def get_nic_irqs():
         if not i in irqs:
             raise Exception('Couldn\'t find IRQ for NIC channel %d' % (i))
         result.append(irqs[i])
+    f.close()
     return result
 
 def get_node_num():
@@ -162,7 +204,8 @@ def get_node_num():
 
 def get_node_type():
     """
-    Returns the node type for this machine.
+    Returns the node type for this machine (assumes we're running on a
+    Cloudlab machine).
     """
 
     global node_type
@@ -258,7 +301,7 @@ def read_cpu_info():
     Read the file /proc/cpuinfo and store information from it in various
     global arrays above.
     """
-    global cpu_info, num_phys_cores
+    global cpu_info, cpu_type, num_phys_cores
 
     if len(cpu_info) > 0:
         return
@@ -272,6 +315,9 @@ def read_cpu_info():
             name = match.group(1)
             value = match.group(2)
             # print("name '%s' value '%s'" % (name, value))
+            if name == 'model name' and cpu_type == None:
+                cpu_type = value
+                print("CPU type is %s" % (cpu_type))
             if name == 'processor':
                 cpu = int(value)
                 cpu_info.append({name: int(value)})
@@ -336,41 +382,40 @@ def config_homa(mod):
     this node type.
     mod:   the path to the Homa module '.ko' file
     """
-    type = get_node_type()
     print("Installing Homa kernel module from %s" % (mod))
     subprocess.run(["sudo", "rmmod", "homa"], check=False)
     subprocess.run(["sudo", "bash", "-c", "insmod %s" % (mod)],
             check=True)
 
     set_sysctl("num_priorities", "8")
-    if type == "xl170":
-        set_sysctl("link_mbps", "25000")
-        set_sysctl("max_nic_queue_ns", "2000")
+    link_mbps = get_link_speed()
+    set_sysctl ("link_mbps", str(link_mbps))
+    if link_mbps == 10000:
+        set_sysctl("max_nic_queue_ns", "5000")
+        set_sysctl("unsched_bytes", "30000")
+        set_sysctl("window", "50000")
+        set_sysctl("max_incoming", "400000")
+        set_sysctl("max_gso_size", "10000")
+    elif link_mbps == 25000:
+        set_sysctl("max_nic_queue_ns", "5000")
         set_sysctl("unsched_bytes", "60000")
         set_sysctl("window", "100000")
         set_sysctl("max_incoming", "480000")
         set_sysctl("max_gso_size", "10000")
-    elif type == "c6525-100g":
-        set_sysctl("link_mbps", "100000")
+    elif link_mbps == 100000:
         set_sysctl("max_nic_queue_ns", "5000")
         set_sysctl("unsched_bytes", "60000")
         set_sysctl("window", "200000")
         set_sysctl("max_incoming", "1600000")
         set_sysctl("max_gso_size", "100000")
-    elif type == "c6525-25g":
-        set_sysctl("link_mbps", "25000")
-        set_sysctl("max_nic_queue_ns", "5000")
-        set_sysctl("unsched_bytes", "60000")
-        set_sysctl("window", "100000")
-        set_sysctl("max_incoming", "480000")
-        set_sysctl("max_gso_size", "10000")
     else:
-        raise Exception("Can't configure Homa: unknown node type %s" % (type))
+        raise Exception("Can't configure Homa: no config info available "
+                "for link speed %d Mbps" % (link_mbps))
 
 def config_ecn_threshold(kb):
     """
-    Modify the configuration of this experiment's egress ports at the top-of-rack switch
-    to enable optimal Homa performance.
+    Modify the configuration of this experiment's egress ports at the
+    top-of-rack switch to enable optimal Homa performance.
     """
     s = Switch(True)
     for port in get_exp_ports():
@@ -492,24 +537,18 @@ def config_power():
     """
     Configure the machine's power management for best Homa performance.
     """
-    type = get_node_type()
-    if type == "xl170":
-        # Intel E5-2640v4 processor. For Homa, it's best to leave C-states
-        # enabled. This can cause CPUs to sleep in power-saving mode, but if
-        # C-states are disabled, then so is Turbo mode, and that will hurt
-        # peak peformance.
+    if "Intel" in get_cpu_type():
+        # For Intel processors, it's best to leave C-states enabled. This
+        # can cause CPUs to sleep in power-saving mode, but if C-states
+        # are disabled, then so is Turbo mode, and that will hurt  peak peformance.
         print("Configuring power settings for Intel CPUs")
         try:
             subprocess.run(["sudo", "cpupower", "frequency-set", "-g",
                     "performance"], check=True)
         except subprocess.CalledProcessError:
             print("*** cpupower error; ignoring for now")
-    elif (type == "c6525-100g") or (type == "c6525-25g"):
-        # AMD 7402P (EPYC Rome processor); don't know of any appropriate
-        # power setting changes
-        return
     else:
-        raise Exception("Can't configure power: unknown node type %s" % (type))
+        print("Skipping power settings (non-Intel CPU type)")
 
 def config_reset_switch_all_ports():
     """
@@ -695,5 +734,7 @@ while i < len(sys.argv):
         config_switch_all_ports()
     elif arg == "switch_ports":
         config_switch_ports()
+    elif arg == "test":
+        get_cpu_type()
     else:
         raise Exception("Unknown feature '%s'" % (arg))
