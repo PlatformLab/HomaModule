@@ -54,10 +54,14 @@ CP_HDRS := homa_impl.h \
 	   homa_stub.h \
 	   homa_wire.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out timetrace.o, $(HOMA_OBJS)))
-CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS))
+CP_EXTRAS := reap.txt \
+	     sync.txt
+CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
 net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
 $(HOMA_TARGET)/%: % util/strip.py
 	util/strip.py $< > $@
+$(HOMA_TARGET)/%.txt: %.txt
+	cp $< $@
 $(LINUX_SRC_DIR)/include/uapi/linux/homa.h: homa.h util/strip.py
 	util/strip.py $< > $@
 
