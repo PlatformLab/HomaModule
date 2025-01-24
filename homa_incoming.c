@@ -23,6 +23,9 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 {
 	int err;
 
+	if (length > HOMA_MAX_MESSAGE_LENGTH)
+		return -EINVAL;
+
 	rpc->msgin.length = length;
 	skb_queue_head_init(&rpc->msgin.packets);
 	rpc->msgin.recv_end = 0;

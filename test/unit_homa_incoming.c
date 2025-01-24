@@ -191,6 +191,17 @@ TEST_F(homa_incoming, homa_message_in_init__basics)
 	EXPECT_EQ(128, crpc->msgin.granted);
 	EXPECT_EQ(1, crpc->msgin.num_bpages);
 }
+TEST_F(homa_incoming, homa_message_in_init__message_too_long)
+{
+	struct homa_rpc *srpc;
+	int created;
+
+	self->data.message_length = htonl(HOMA_MAX_MESSAGE_LENGTH+1);
+	srpc = homa_rpc_new_server(&self->hsk, self->client_ip, &self->data,
+			&created);
+	ASSERT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(EINVAL, -PTR_ERR(srpc));
+}
 TEST_F(homa_incoming, homa_message_in_init__pool_doesnt_exist)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
