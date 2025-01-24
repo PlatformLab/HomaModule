@@ -17,14 +17,14 @@ struct homa_offload_core {
 	 * there was system activity, such NAPI or SoftIRQ, on this
 	 * core. Used for load balancing.
 	 */
-	__u64 last_active;
+	u64 last_active;
 
 	/**
 	 * @last_gro: the last time (in sched_clock() units) that
 	 * homa_gro_receive returned on this core. Used to determine
 	 * whether GRO is keeping a core busy.
 	 */
-	__u64 last_gro;
+	u64 last_gro;
 
 	/**
 	 * @softirq_backlog: the number of batches of packets that have
@@ -55,7 +55,7 @@ struct homa_offload_core {
 	 * by sending or receiving messages). Used for load balancing
 	 * (see balance.txt).
 	 */
-	__u64 last_app_active;
+	u64 last_app_active;
 
 	/**
 	 * held_skb: last packet buffer known to be available for

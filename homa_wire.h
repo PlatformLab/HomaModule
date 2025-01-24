@@ -478,7 +478,7 @@ _Static_assert(sizeof(struct homa_ack_hdr) <= HOMA_MAX_HEADER,
  * @sender_id:  RPC id from an incoming packet, such as h->common.sender_id
  * Return: see above
  */
-static inline __u64 homa_local_id(__be64 sender_id)
+static inline u64 homa_local_id(__be64 sender_id)
 {
 	/* If the client bit was set on the sender side, it needs to be
 	 * removed here, and conversely.

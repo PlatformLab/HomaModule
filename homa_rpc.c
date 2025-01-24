@@ -111,7 +111,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 				     struct homa_data_hdr *h, int *created)
 	__acquires(&srpc->bucket->lock)
 {
-	__u64 id = homa_local_id(h->common.sender_id);
+	u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;
 	struct homa_rpc *srpc = NULL;
 	int err;
@@ -213,7 +213,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		    struct homa_ack *ack)
 {
 	__u16 server_port = ntohs(ack->server_port);
-	__u64 id = homa_local_id(ack->client_id);
+	u64 id = homa_local_id(ack->client_id);
 	struct homa_sock *hsk2 = hsk;
 	struct homa_rpc *rpc;
 
@@ -495,7 +495,7 @@ release:
  *            The RPC will be locked; the caller must eventually unlock it
  *            by invoking homa_rpc_unlock.
  */
-struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
+struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
 	__acquires(&crpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
@@ -522,7 +522,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, __u64 id)
  *            unlock it by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
-				      const struct in6_addr *saddr, __u64 id)
+				      const struct in6_addr *saddr, u64 id)
 	__acquires(&srpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);

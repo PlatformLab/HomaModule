@@ -40,8 +40,8 @@ FIXTURE(homa_grant) {
 	int client_port;
 	struct in6_addr server_ip[5];
 	int server_port;
-	__u64 client_id;
-	__u64 server_id;
+	u64 client_id;
+	u64 server_id;
 	union sockaddr_in_union server_addr;
 	struct homa homa;
 	struct homa_sock hsk;
@@ -98,7 +98,7 @@ FIXTURE_TEARDOWN(homa_grant)
 }
 
 static struct homa_rpc *test_rpc(FIXTURE_DATA(homa_grant) *self,
-		__u64 id, struct in6_addr *server_ip, int size)
+		u64 id, struct in6_addr *server_ip, int size)
 {
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, server_ip, self->server_port,

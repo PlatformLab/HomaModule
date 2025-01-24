@@ -115,7 +115,7 @@ struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
  *                 dates no later than this will be freed. Specify ~0 to
  *                 free all entries.
  */
-void homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now)
+void homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now)
 {
 	while (!list_empty(&peertab->dead_dsts)) {
 		struct homa_dead_dst *dead =
@@ -153,14 +153,14 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	struct dst_entry *dst;
 
 	// Should use siphash or jhash here:
-	__u32 bucket = hash_32((__force __u32)addr->in6_u.u6_addr32[0],
+	u32 bucket = hash_32((__force u32)addr->in6_u.u6_addr32[0],
 			       HOMA_PEERTAB_BUCKET_BITS);
 
-	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[1],
+	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[1],
 			  HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[2],
+	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[2],
 			  HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32((__force __u32)addr->in6_u.u6_addr32[3],
+	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[3],
 			  HOMA_PEERTAB_BUCKET_BITS);
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 				 peertab_links) {
@@ -230,7 +230,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 {
 	struct homa_dead_dst *save_dead;
 	struct dst_entry *dst;
-	__u64 now;
+	u64 now;
 
 	/* Need to keep around the current entry for a while in case
 	 * someone is using it. If we can't do that, then don't update
@@ -366,7 +366,7 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 void homa_peer_lock_slow(struct homa_peer *peer)
 	__acquires(&peer->ack_lock)
 {
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 
 	tt_record("beginning wait for peer lock");
 	spin_lock_bh(&peer->ack_lock);

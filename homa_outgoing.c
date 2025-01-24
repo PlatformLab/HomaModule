@@ -107,7 +107,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	struct homa_data_hdr *h;
 	struct sk_buff *skb;
 	int err, gso_size;
-	__u64 segs;
+	u64 segs;
 
 	segs = length + max_seg_data - 1;
 	do_div(segs, max_seg_data);
@@ -213,7 +213,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	struct sk_buff **last_link;
 	struct dst_entry *dst;
-	__u64 segs_per_gso;
+	u64 segs_per_gso;
 	int overlap_xmit;
 
 	/* Bytes of the message that haven't yet been copied into skbs. */
@@ -733,7 +733,7 @@ resend_done:
  */
 void homa_outgoing_sysctl_changed(struct homa *homa)
 {
-	__u64 tmp;
+	u64 tmp;
 
 	tmp = 8 * 1000ULL * 1000ULL * 1000ULL;
 
@@ -761,7 +761,7 @@ void homa_outgoing_sysctl_changed(struct homa *homa)
  */
 int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 {
-	__u64 idle, new_idle, clock, ns_for_packet;
+	u64 idle, new_idle, clock, ns_for_packet;
 	int bytes;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
@@ -779,7 +779,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 #ifndef __STRIP__ /* See strip.py */
 		if (idle < clock) {
 			if (homa->pacer_wake_time) {
-				__u64 lost = (homa->pacer_wake_time > idle)
+				u64 lost = (homa->pacer_wake_time > idle)
 						? clock - homa->pacer_wake_time
 						: clock - idle;
 				INC_METRIC(pacer_lost_ns, lost);
@@ -880,7 +880,7 @@ void homa_pacer_xmit(struct homa *homa)
 	 * homa_pacer_main about interfering with softirq handlers).
 	 */
 	for (i = 0; i < 5; i++) {
-		__u64 idle_time, now;
+		u64 idle_time, now;
 
 		/* If the NIC queue is too long, wait until it gets shorter. */
 		now = sched_clock();
@@ -912,7 +912,7 @@ void homa_pacer_xmit(struct homa *homa)
 		homa->pacer_fifo_count -= homa->pacer_fifo_fraction;
 		if (homa->pacer_fifo_count <= 0) {
 			struct homa_rpc *cur;
-			__u64 oldest = ~0;
+			u64 oldest = ~0;
 
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
@@ -1006,7 +1006,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	struct homa_rpc *candidate;
 	int bytes_left;
 	int checks = 0;
-	__u64 now;
+	u64 now;
 
 	if (!list_empty(&rpc->throttled_links))
 		return;
@@ -1069,7 +1069,7 @@ void homa_remove_from_throttled(struct homa_rpc *rpc)
 void homa_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	__s64 bytes = 0;
+	s64 bytes = 0;
 	int rpcs = 0;
 
 	pr_notice("Printing throttled list\n");

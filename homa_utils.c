@@ -199,7 +199,7 @@ char *homa_print_ipv4_addr(__be32 addr)
 #define NUM_BUFS_IPV4 4
 #define BUF_SIZE_IPV4 30
 	static char buffers[NUM_BUFS_IPV4][BUF_SIZE_IPV4];
-	__u32 a2 = ntohl(addr);
+	u32 a2 = ntohl(addr);
 	static int next_buf;
 	char *buffer;
 
@@ -242,7 +242,7 @@ char *homa_print_ipv6_addr(const struct in6_addr *addr)
 	} else if ((addr->s6_addr32[0] == 0) &&
 		(addr->s6_addr32[1] == 0) &&
 		(addr->s6_addr32[2] == htonl(0x0000ffff))) {
-		__u32 a2 = ntohl(addr->s6_addr32[3]);
+		u32 a2 = ntohl(addr->s6_addr32[3]);
 
 		snprintf(buffer, BUF_SIZE, "%u.%u.%u.%u", (a2 >> 24) & 0xff,
 			 (a2 >> 16) & 0xff, (a2 >> 8) & 0xff, a2 & 0xff);
@@ -665,7 +665,7 @@ void homa_prios_changed(struct homa *homa)
  */
 void homa_spin(int ns)
 {
-	__u64 end;
+	u64 end;
 
 	end = sched_clock() + ns;
 	while (sched_clock() < end)
@@ -683,7 +683,7 @@ void homa_spin(int ns)
 void homa_throttle_lock_slow(struct homa *homa)
 	__acquires(&homa->throttle_lock)
 {
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 
 	tt_record("beginning wait for throttle lock");
 	spin_lock_bh(&homa->throttle_lock);

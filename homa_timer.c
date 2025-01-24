@@ -156,7 +156,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 void homa_timer(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
-	static __u64 prev_grant_count;
+	static u64 prev_grant_count;
 	int total_incoming_rpcs = 0;
 	int sum_incoming_rec = 0;
 	struct homa_sock *hsk;
@@ -164,7 +164,7 @@ void homa_timer(struct homa *homa)
 	struct homa_rpc *rpc;
 	int sum_incoming = 0;
 	cycles_t start, end;
-	__u64 total_grants;
+	u64 total_grants;
 	int total_rpcs = 0;
 	int rpc_count = 0;
 	int core;
@@ -210,7 +210,7 @@ void homa_timer(struct homa *homa)
 			 * isn't keeping up with RPC reaping, so we'll help
 			 * out.  See reap.txt for more info.
 			 */
-			__u64 start = sched_clock();
+			u64 start = sched_clock();
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, false) == 0)

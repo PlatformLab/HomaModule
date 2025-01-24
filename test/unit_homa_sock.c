@@ -28,7 +28,7 @@ FIXTURE(homa_sock) {
 	int client_port;
 	struct in6_addr server_ip[1];
 	int server_port;
-	__u64 client_id;
+	u64 client_id;
 };
 FIXTURE_SETUP(homa_sock)
 {

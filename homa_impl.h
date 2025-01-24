@@ -254,7 +254,7 @@ struct homa {
 	 * @grantable_lock_time: sched_clock() time when grantable_lock
 	 * was last locked.
 	 */
-	__u64 grantable_lock_time;
+	u64 grantable_lock_time;
 
 	/**
 	 * @grant_recalc_count: Incremented every time homa_grant_recalc
@@ -286,7 +286,7 @@ struct homa {
 	 * increment or decrement of num_grantable_rpcs; used for computing
 	 * statistics.
 	 */
-	__u64 last_grantable_change;
+	u64 last_grantable_change;
 
 	/**
 	 * @max_grantable_rpcs: The largest value that has been seen for
@@ -366,7 +366,7 @@ struct homa {
 	 * @pacer_wake_time: time (in sched_clock units) when the pacer last
 	 * woke up (if the pacer is running) or 0 if the pacer is sleeping.
 	 */
-	__u64 pacer_wake_time;
+	u64 pacer_wake_time;
 
 	/**
 	 * @throttle_lock: Used to synchronize access to @throttled_rpcs. To
@@ -387,7 +387,7 @@ struct homa {
 	 * @throttle_add: The time (in sched_clock() units) when the most
 	 * recent RPC was added to @throttled_rpcs.
 	 */
-	__u64 throttle_add;
+	u64 throttle_add;
 
 	/**
 	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
@@ -467,7 +467,7 @@ struct homa {
 	 * @skb_page_free_time: Time (in sched_clock() units) when the
 	 * next sk_buff page should be freed. Could be in the past.
 	 */
-	__u64 skb_page_free_time;
+	u64 skb_page_free_time;
 
 	/**
 	 * @skb_page_pool_min_kb: Don't return pages from a pool to Linux
@@ -670,7 +670,7 @@ struct homa {
 	 * of the value, to ensure that we don't underestimate NIC queue
 	 * length and queue too many packets.
 	 */
-	__u32 ns_per_mbyte;
+	u32 ns_per_mbyte;
 
 	/**
 	 * @verbose: Nonzero enables additional logging. Set externally via
@@ -772,7 +772,7 @@ struct homa {
 	 * @timer_ticks: number of times that homa_timer has been invoked
 	 * (may wraparound, which is safe).
 	 */
-	__u32 timer_ticks;
+	u32 timer_ticks;
 
 	/**
 	 * @metrics_mutex: Used to synchronize accesses to @metrics_active_opens
@@ -996,7 +996,7 @@ static inline bool is_homa_pkt(struct sk_buff *skb)
  * @x:  Address (either IPv6 or IPv4-mapped IPv6)
  * Return: see above
  */
-static inline __u32 tt_addr(const struct in6_addr x)
+static inline u32 tt_addr(const struct in6_addr x)
 {
 	return ipv6_addr_v4mapped(&x) ? ntohl(x.in6_u.u6_addr32[3])
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
@@ -1111,7 +1111,7 @@ void     homa_prios_changed(struct homa *homa);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		      int flags, int *addr_len);
 int      homa_register_interests(struct homa_interest *interest,
-				 struct homa_sock *hsk, int flags, __u64 id);
+				 struct homa_sock *hsk, int flags, u64 id);
 void     homa_remove_from_throttled(struct homa_rpc *rpc);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			  int priority);
@@ -1150,7 +1150,7 @@ int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-				       __u64 id);
+				       u64 id);
 int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,

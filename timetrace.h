@@ -30,7 +30,7 @@ struct tt_event {
 	/**
 	 * Time when this event occurred (in tt_rdtsc units).
 	 */
-	__u64 timestamp;
+	u64 timestamp;
 	/**
 	 * Format string describing the event. NULL means that this
 	 * entry has never been occupied.
@@ -41,10 +41,10 @@ struct tt_event {
 	 * Up to 4 additional arguments that may be referenced by
 	 * @format when printing out this event.
 	 */
-	__u32 arg0;
-	__u32 arg1;
-	__u32 arg2;
-	__u32 arg3;
+	u32 arg0;
+	u32 arg1;
+	u32 arg2;
+	u32 arg3;
 };
 
 /* The number of events in a tt_buffer, as a power of 2. */
@@ -97,9 +97,9 @@ struct tt_proc_file {
 void      tt_destroy(void);
 void      tt_freeze(void);
 int       tt_init(char *proc_file, int *temp);
-void      tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
-			const char *format, __u32 arg0, __u32 arg1,
-			__u32 arg2, __u32 arg3);
+void      tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
+			const char *format, u32 arg0, u32 arg1,
+			u32 arg2, u32 arg3);
 
 /* Private methods and variables: exposed so they can be accessed
  * by unit tests.
@@ -134,12 +134,12 @@ extern void      *tt_debug_ptr[100];
  * (accessed via the RDTSC instruction).
  * Return: see above
  */
-static inline __u64 tt_rdtsc(void)
+static inline u64 tt_rdtsc(void)
 {
-	__u32 lo, hi;
+	u32 lo, hi;
 
 	__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
-	return (((__u64)hi << 32) | lo);
+	return (((u64)hi << 32) | lo);
 }
 
 /*
@@ -159,8 +159,8 @@ static inline __u64 tt_rdtsc(void)
  * @arg2       Argument to use when printing a message about this event.
  * @arg3       Argument to use when printing a message about this event.
  */
-static inline void tt_record4(const char *format, __u32 arg0, __u32 arg1,
-			      __u32 arg2, __u32 arg3)
+static inline void tt_record4(const char *format, u32 arg0, u32 arg1,
+			      u32 arg2, u32 arg3)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
@@ -168,8 +168,8 @@ static inline void tt_record4(const char *format, __u32 arg0, __u32 arg1,
 #endif
 }
 
-static inline void tt_record3(const char *format, __u32 arg0, __u32 arg1,
-			      __u32 arg2)
+static inline void tt_record3(const char *format, u32 arg0, u32 arg1,
+			      u32 arg2)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
@@ -177,7 +177,7 @@ static inline void tt_record3(const char *format, __u32 arg0, __u32 arg1,
 #endif
 }
 
-static inline void tt_record2(const char *format, __u32 arg0, __u32 arg1)
+static inline void tt_record2(const char *format, u32 arg0, u32 arg1)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
@@ -185,7 +185,7 @@ static inline void tt_record2(const char *format, __u32 arg0, __u32 arg1)
 #endif
 }
 
-static inline void tt_record1(const char *format, __u32 arg0)
+static inline void tt_record1(const char *format, u32 arg0)
 {
 #if ENABLE_TIME_TRACE
 	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
@@ -201,7 +201,7 @@ static inline void tt_record(const char *format)
 #endif
 }
 
-static inline __u32 tt_hi(void *p)
+static inline u32 tt_hi(void *p)
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wshift-count-overflow"
@@ -209,7 +209,7 @@ static inline __u32 tt_hi(void *p)
 #pragma GCC diagnostic pop
 }
 
-static inline __u32 tt_lo(void *p)
+static inline u32 tt_lo(void *p)
 {
 	return ((uintptr_t)p) & 0xffffffff;
 }

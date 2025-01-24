@@ -49,7 +49,7 @@ static void set_bpages_needed(struct homa_pool *pool)
  * Return: Either zero (for success) or a negative errno for failure.
  */
 int homa_pool_init(struct homa_sock *hsk, void __user *region,
-		   __u64 region_size)
+		   u64 region_size)
 {
 	struct homa_pool *pool = hsk->buffer_pool;
 	int i, result;
@@ -151,12 +151,12 @@ void homa_pool_get_rcvbuf(struct homa_sock *hsk,
  *                set). Otherwise the pages are left unowned.
  * Return: 0 for success, -1 if there wasn't enough free space in the pool.
  */
-int homa_pool_get_pages(struct homa_pool *pool, int num_pages, __u32 *pages,
+int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 			int set_owner)
 {
 	int core_num = raw_smp_processor_id();
 	struct homa_pool_core *core;
-	__u64 now = sched_clock();
+	u64 now = sched_clock();
 	int alloced = 0;
 	int limit = 0;
 
@@ -257,7 +257,7 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 {
 	struct homa_pool *pool = rpc->hsk->buffer_pool;
 	int full_pages, partial, i, core_id;
-	__u32 pages[HOMA_MAX_BPAGES];
+	u32 pages[HOMA_MAX_BPAGES];
 	struct homa_pool_core *core;
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
@@ -407,7 +407,7 @@ void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
  * Return:        0 for success, otherwise a negative errno.
  */
 int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
-			      __u32 *buffers)
+			      u32 *buffers)
 {
 	int result = 0;
 	int i;
@@ -415,7 +415,7 @@ int homa_pool_release_buffers(struct homa_pool *pool, int num_buffers,
 	if (!pool->region)
 		return result;
 	for (i = 0; i < num_buffers; i++) {
-		__u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
+		u32 bpage_index = buffers[i] >> HOMA_BPAGE_SHIFT;
 		struct homa_bpage *bpage = &pool->descriptors[bpage_index];
 
 		if (bpage_index < pool->num_bpages) {

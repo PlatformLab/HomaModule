@@ -310,7 +310,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 {
 	struct dst_entry *dst;
 	char buffer[30];
-	__u32 addr;
+	u32 addr;
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;

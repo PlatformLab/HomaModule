@@ -14,8 +14,8 @@ FIXTURE(homa_timer) {
 	int client_port;
 	struct in6_addr server_ip[1];
 	int server_port;
-	__u64 client_id;
-	__u64 server_id;
+	u64 client_id;
+	u64 server_id;
 	union sockaddr_in_union server_addr;
 	struct homa homa;
 	struct homa_sock hsk;

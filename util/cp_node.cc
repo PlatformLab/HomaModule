@@ -3082,8 +3082,8 @@ int dump_times_cmd(std::vector<string> &words)
 	for (client *client: clients) {
 		if (!exp.empty() && (client->experiment != exp))
 			continue;
-		__u32 start = client->total_responses % NUM_CLIENT_STATS;
-		__u32 i = start;
+		uint32_t start = client->total_responses % NUM_CLIENT_STATS;
+		uint32_t i = start;
 		while (1) {
 			if (client->actual_rtts[i] != 0) {
 				fprintf(f, "%8d %12.2f\n",

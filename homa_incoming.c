@@ -232,7 +232,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 	int end_offset = 0;
 #endif /* See strip.py */
 	int error = 0;
-	__u64 start;
+	u64 start;
 	int n = 0;             /* Number of filled entries in skbs. */
 	int i;
 
@@ -366,7 +366,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 #endif /* __UNIT_TEST__ */
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
-	__u64 id = homa_local_id(h->common.sender_id);
+	u64 id = homa_local_id(h->common.sender_id);
 	int dport = ntohs(h->common.dport);
 
 	/* Used to collect acks from data packets so we can process them
@@ -549,7 +549,7 @@ discard:
 		 * nor homa_timer can keep up with reaping dead
 		 * RPCs. See reap.txt for details.
 		 */
-		__u64 start = sched_clock();
+		u64 start = sched_clock();
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
 		homa_rpc_reap(hsk, false);
@@ -817,7 +817,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 {
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	__u64 id = homa_local_id(h->sender_id);
+	u64 id = homa_local_id(h->sender_id);
 	struct homa_peer *peer;
 	struct homa_ack_hdr ack;
 
@@ -911,7 +911,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 {
 	struct homa_rpc *rpc, *oldest;
-	__u64 oldest_birth;
+	u64 oldest_birth;
 	int granted;
 
 	oldest = NULL;
@@ -1102,7 +1102,7 @@ done:
  *                interest.
  */
 int homa_register_interests(struct homa_interest *interest,
-			    struct homa_sock *hsk, int flags, __u64 id)
+			    struct homa_sock *hsk, int flags, u64 id)
 {
 	struct homa_rpc *rpc = NULL;
 	int locked = 1;
@@ -1210,10 +1210,10 @@ claim_rpc:
  *           errno value. The RPC will be locked; the caller must unlock.
  */
 struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-				       __u64 id)
+				       u64 id)
 	__acquires(&rpc->bucket_lock)
 {
-	__u64 poll_start, poll_end, now;
+	u64 poll_start, poll_end, now;
 	int error, blocked = 0, polled = 0;
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
@@ -1270,7 +1270,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		poll_start = now;
 		poll_end = now + (1000 * hsk->homa->poll_usecs);
 		while (1) {
-			__u64 blocked;
+			u64 blocked;
 
 			rpc = homa_interest_get_rpc(&interest);
 			if (rpc) {
@@ -1301,8 +1301,8 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = homa_interest_get_rpc(&interest);
 		if (!rpc && !hsk->shutdown) {
-			__u64 end;
-			__u64 start = sched_clock();
+			u64 end;
+			u64 start = sched_clock();
 
 			tt_record1("homa_wait_for_message sleeping, pid %d",
 				   current->pid);
@@ -1403,7 +1403,7 @@ done:
 struct homa_interest *homa_choose_interest(struct homa *homa,
 					   struct list_head *head, int offset)
 {
-	__u64 busy_time = sched_clock() - homa->busy_ns;
+	u64 busy_time = sched_clock() - homa->busy_ns;
 	struct homa_interest *backup = NULL;
 	struct homa_interest *interest;
 	struct list_head *pos;
@@ -1520,7 +1520,7 @@ thread_waiting:
  */
 void homa_incoming_sysctl_changed(struct homa *homa)
 {
-	__u64 tmp;
+	u64 tmp;
 
 	if (homa->grant_fifo_fraction > 500)
 		homa->grant_fifo_fraction = 500;

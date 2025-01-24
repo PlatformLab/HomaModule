@@ -21,23 +21,23 @@ extern atomic_t  *tt_linux_freeze_count;
 extern atomic_t   tt_linux_freeze_no_homa;
 extern int       *tt_linux_homa_temp;
 extern int        tt_linux_homa_temp_default[16];
-extern void       (*tt_linux_inc_metrics)(int metric, __u64 count);
-extern void       (*tt_linux_record)(struct tt_buffer *buffer, __u64 timestamp,
-				     const char *format, __u32 arg0, __u32 arg1,
-				     __u32 arg2, __u32 arg3);
-extern void       tt_linux_skip_metrics(int metric, __u64 count);
+extern void       (*tt_linux_inc_metrics)(int metric, u64 count);
+extern void       (*tt_linux_record)(struct tt_buffer *buffer, u64 timestamp,
+				     const char *format, u32 arg0, u32 arg1,
+				     u32 arg2, u32 arg3);
+extern void       tt_linux_skip_metrics(int metric, u64 count);
 extern void       (*tt_linux_printk)(void);
 extern void       (*tt_linux_dbg1)(char *msg, ...);
 extern void       (*tt_linux_dbg2)(char *msg, ...);
 extern void       (*tt_linux_dbg3)(char *msg, ...);
 extern void       tt_linux_nop(void);
-extern void       homa_trace(__u64 u0, __u64 u1, int i0, int i1);
+extern void       homa_trace(u64 u0, u64 u1, int i0, int i1);
 
-extern void       ltt_record_nop(struct tt_buffer *buffer, __u64 timestamp,
-				 const char *format, __u32 arg0, __u32 arg1,
-				 __u32 arg2, __u32 arg3);
+extern void       ltt_record_nop(struct tt_buffer *buffer, u64 timestamp,
+				 const char *format, u32 arg0, u32 arg1,
+				 u32 arg2, u32 arg3);
 #endif
-void       tt_inc_metric(int metric, __u64 count);
+void       tt_inc_metric(int metric, u64 count);
 
 /* Separate buffers for each core: this eliminates the need for
  * synchronization in tt_record, which improves performance significantly.
@@ -243,9 +243,9 @@ void tt_freeze(void)
  * @arg2:      Argument to use when printing a message about this event.
  * @arg3:      Argument to use when printing a message about this event.
  */
-void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
-		   const char *format, __u32 arg0, __u32 arg1, __u32 arg2,
-		   __u32 arg3)
+void tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
+		   const char *format, u32 arg0, u32 arg1, u32 arg2,
+		   u32 arg3)
 {
 	struct tt_event *event;
 
@@ -288,7 +288,7 @@ void tt_record_buf(struct tt_buffer *buffer, __u64 timestamp,
 void tt_find_oldest(int *pos)
 {
 	struct tt_buffer *buffer;
-	__u64 start_time = 0;
+	u64 start_time = 0;
 	int i;
 
 	for (i = 0; i < nr_cpu_ids; i++) {
@@ -401,7 +401,7 @@ ssize_t tt_proc_read(struct file *file, char __user *user_buf,
 		struct tt_event *event;
 		int entry_length, chunk_size, available, i, failed_to_copy;
 		int current_core = -1;
-		__u64 earliest_time = ~0;
+		u64 earliest_time = ~0;
 
 		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
@@ -595,7 +595,7 @@ void tt_print_file(char *path)
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
-		__u64 earliest_time = ~0;
+		u64 earliest_time = ~0;
 		struct tt_event *event;
 		int current_core = -1;
 		int i;
@@ -694,7 +694,7 @@ void tt_printk(void)
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
-		__u64 earliest_time = ~0;
+		u64 earliest_time = ~0;
 		struct tt_event *event;
 		int current_core = -1;
 		char msg[200];
@@ -754,7 +754,7 @@ void tt_get_messages(char *buffer, size_t length)
 
 	/* Each iteration of this loop prints one event. */
 	while (true) {
-		__u64 earliest_time = ~0;
+		u64 earliest_time = ~0;
 		struct tt_event *event;
 		int current_core = -1;
 		int i, result;
@@ -833,7 +833,7 @@ void tt_dbg3(char *msg, ...)
  *            to increment.
  * @count:    Amount by which to increment to the metric.
  */
-void tt_inc_metric(int metric, __u64 count)
+void tt_inc_metric(int metric, u64 count)
 {
 	/* Maps from the metric argument to an offset within homa_metrics.
 	 * This level of indirection is needed so that the kernel doesn't
@@ -846,7 +846,7 @@ void tt_inc_metric(int metric, __u64 count)
 		offsetof(struct homa_metrics, linux_softirq_ns),
 		offsetof(struct homa_metrics, linux_pkt_alloc_bytes),
 	};
-	__u64 *metric_addr = (__u64 *)(((char *)homa_metrics_per_cpu())
+	u64 *metric_addr = (u64 *)(((char *)homa_metrics_per_cpu())
 			+ offsets[metric]);
 	*metric_addr += count;
 }

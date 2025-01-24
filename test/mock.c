@@ -138,10 +138,10 @@ static int mock_active_rcu_locks;
 cycles_t mock_cycles;
 
 /* Used as the return value for calls to sched_clock. */
-__u64 mock_ns;
+u64 mock_ns;
 
 /* Add this value to mock_ns every time sched_clock is invoked. */
-__u64 mock_ns_tick;
+u64 mock_ns_tick;
 
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
@@ -270,7 +270,7 @@ size_t _copy_from_iter(void *addr, size_t bytes, struct iov_iter *iter)
 	}
 	while (bytes_left > 0) {
 		struct iovec *iov = (struct iovec *) iter_iov(iter);
-		__u64 int_base = (__u64) iov->iov_base;
+		u64 int_base = (u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 
 		if (chunk_bytes > bytes_left)
@@ -326,7 +326,7 @@ unsigned long _copy_to_user(void __user *to, const void *from, unsigned long n)
 unsigned long _copy_from_user(void *to, const void __user *from,
 		unsigned long n)
 {
-	__u64 int_from = (__u64) from;
+	u64 int_from = (u64) from;
 
 	if (mock_check_error(&mock_copy_data_errors))
 		return 1;
@@ -407,7 +407,7 @@ void __icmp_send(struct sk_buff *skb, int type, int code, __be32 info,
 	unit_log_printf("; ", "icmp_send type %d, code %d", type, code);
 }
 
-void icmp6_send(struct sk_buff *skb, u8 type, u8 code, __u32 info,
+void icmp6_send(struct sk_buff *skb, u8 type, u8 code, u32 info,
 		const struct in6_addr *force_saddr,
 		const struct inet6_skb_parm *parm)
 {
@@ -602,7 +602,7 @@ unsigned int ip6_mtu(const struct dst_entry *dst)
 }
 
 int ip6_xmit(const struct sock *sk, struct sk_buff *skb, struct flowi6 *fl6,
-	     __u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
+	     u32 mark, struct ipv6_txoptions *opt, int tclass, u32 priority)
 {
 	char buffer[200];
 	const char *prefix = " ";
@@ -1047,7 +1047,7 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
-__u64 sched_clock(void)
+u64 sched_clock(void)
 {
 	mock_ns += mock_ns_tick;
 	return mock_ns;
@@ -1098,7 +1098,7 @@ int skb_copy_datagram_iter(const struct sk_buff *from, int offset,
 	}
 	while (bytes_left > 0) {
 		struct iovec *iov = (struct iovec *) iter_iov(iter);
-		__u64 int_base = (__u64) iov->iov_base;
+		u64 int_base = (u64) iov->iov_base;
 		size_t chunk_bytes = iov->iov_len;
 
 		if (chunk_bytes > bytes_left)
@@ -1494,8 +1494,8 @@ void mock_set_ipv6(struct homa_sock *hsk)
  *                skb, initialized to zero.
  * @extra_bytes:  How much additional data to add to the buffer after
  *                the header.
- * @first_value:  Determines the data contents: the first __u32 will have
- *                this value, and each successive __u32 will increment by 4.
+ * @first_value:  Determines the data contents: the first u32 will have
+ *                this value, and each successive u32 will increment by 4.
  *
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.

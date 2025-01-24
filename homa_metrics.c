@@ -81,7 +81,7 @@ char *homa_metrics_print(struct homa *homa)
 	  sched_clock());
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = &per_cpu(homa_metrics, core);
-		__s64 delta;
+		s64 delta;
 
 		M("core                 %15d  Core id for following metrics\n",
 		  core);

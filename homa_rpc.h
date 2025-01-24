@@ -90,7 +90,7 @@ struct homa_message_out {
 	 * @init_ns: Time in sched_clock units when this structure was
 	 * initialized.  Used to find the oldest outgoing message.
 	 */
-	__u64 init_ns;
+	u64 init_ns;
 };
 
 /**
@@ -108,7 +108,7 @@ struct homa_gap {
 	 * @time: time (in sched_clock units) when the gap was first detected.
 	 * As of 7/2024 this isn't used for anything.
 	 */
-	__u64 time;
+	u64 time;
 
 	/** @links: for linking into list in homa_message_in. */
 	struct list_head links;
@@ -180,20 +180,20 @@ struct homa_message_in {
 	 * @birth: sched_clock() time when this RPC was added to the grantable
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
-	__u64 birth;
+	u64 birth;
 
 	/**
 	 * @num_bpages: The number of entries in @bpage_offsets used for this
 	 * message (0 means buffers not allocated yet).
 	 */
-	__u32 num_bpages;
+	u32 num_bpages;
 
 	/**
 	 * @bpage_offsets: Describes buffer space allocated for this message.
 	 * Each entry is an offset from the start of the buffer region.
 	 * All but the last pointer refer to areas of size HOMA_BPAGE_SIZE.
 	 */
-	__u32 bpage_offsets[HOMA_MAX_BPAGES];
+	u32 bpage_offsets[HOMA_MAX_BPAGES];
 };
 
 /**
@@ -299,14 +299,14 @@ struct homa_rpc {
 	 * from its port. The low-order bit indicates whether we are
 	 * server (1) or client (0) for this RPC.
 	 */
-	__u64 id;
+	u64 id;
 
 	/**
 	 * @completion_cookie: Only used on clients. Contains identifying
 	 * information about the RPC provided by the application; returned to
 	 * the application with the RPC's result.
 	 */
-	__u64 completion_cookie;
+	u64 completion_cookie;
 
 	/**
 	 * @error: Only used on clients. If nonzero, then the RPC has
@@ -390,7 +390,7 @@ struct homa_rpc {
 	 * @resend_timer_ticks: Value of homa->timer_ticks the last time
 	 * we sent a RESEND for this RPC.
 	 */
-	__u32 resend_timer_ticks;
+	u32 resend_timer_ticks;
 
 	/**
 	 * @done_timer_ticks: The value of homa->timer_ticks the first
@@ -398,7 +398,7 @@ struct homa_rpc {
 	 * packets have been transmitted), so we're ready for an ack.
 	 * Zero means we haven't reached that point yet.
 	 */
-	__u32 done_timer_ticks;
+	u32 done_timer_ticks;
 
 	/**
 	 * @magic: when the RPC is alive, this holds a distinct value that
@@ -418,10 +418,10 @@ struct homa_rpc {
 
 void     homa_check_rpc(struct homa_rpc *rpc);
 struct homa_rpc
-	       *homa_find_client_rpc(struct homa_sock *hsk, __u64 id);
+	       *homa_find_client_rpc(struct homa_sock *hsk, u64 id);
 struct homa_rpc
 	       *homa_find_server_rpc(struct homa_sock *hsk,
-				     const struct in6_addr *saddr, __u64 id);
+				     const struct in6_addr *saddr, u64 id);
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
 void     homa_rpc_free(struct homa_rpc *rpc);
@@ -522,7 +522,7 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
  * @id:  Id of the RPC in question.
  * Return: true if we are the client for RPC id, false otherwise
  */
-static inline bool homa_is_client(__u64 id)
+static inline bool homa_is_client(u64 id)
 {
 	return (id & 1) == 0;
 }

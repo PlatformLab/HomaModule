@@ -282,17 +282,17 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 *    gro_list by the caller, so it will be considered for merges
 	 *    in the future.
 	 */
-	__u64 saved_softirq_metric, softirq_ns;
+	u64 saved_softirq_metric, softirq_ns;
 	struct homa_offload_core *offload_core;
 	struct homa *homa = global_homa;
 	struct sk_buff *result = NULL;
 	struct homa_data_hdr *h_new;
-	__u64 *softirq_ns_metric;
+	u64 *softirq_ns_metric;
 	struct sk_buff *held_skb;
-	__u64 now = sched_clock();
+	u64 now = sched_clock();
 	int priority;
-	__u32 saddr;
-	__u32 hash;
+	u32 saddr;
+	u32 hash;
 	int busy;
 
 	if (!homa_make_header_avl(skb))
@@ -486,7 +486,7 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 	int this_core = raw_smp_processor_id();
 	struct homa_offload_core *offload_core;
 	int candidate = this_core;
-	__u64 now = sched_clock();
+	u64 now = sched_clock();
 	int i;
 
 	for (i = CORES_TO_CHECK; i > 0; i--) {
@@ -540,7 +540,7 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
-	__u64 now, busy_time;
+	u64 now, busy_time;
 	int *candidates;
 	int i, core;
 
@@ -600,8 +600,8 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		homa_gro_gen2(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_IDLE) {
 		int i, core, best;
-		__u64 best_time = ~0;
-		__u64 last_active;
+		u64 best_time = ~0;
+		u64 last_active;
 
 		/* Pick a specific core to handle SoftIRQ processing for this
 		 * group of packets. The goal here is to spread load so that no

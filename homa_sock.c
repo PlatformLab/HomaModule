@@ -387,7 +387,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 void homa_sock_lock_slow(struct homa_sock *hsk)
 	__acquires(&hsk->lock)
 {
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 
 	tt_record("beginning wait for socket lock");
 	spin_lock_bh(&hsk->lock);
@@ -405,10 +405,10 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  * @id:        ID of the particular RPC being locked (multiple RPCs may
  *             share a single bucket lock).
  */
-void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, __u64 id)
+void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 	__acquires(&bucket->lock)
 {
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 
 	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
 		   id, bucket->id);

@@ -794,7 +794,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 int homa_ioctl(struct sock *sk, int cmd, int *karg)
 {
 	int result;
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 
 	switch (cmd) {
 	case HOMAIOCABORT:
@@ -850,7 +850,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_rcvbuf_args args;
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	int ret;
 
 	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
@@ -926,10 +926,10 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
 	union sockaddr_in_union *addr;
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
-	__u64 finish;
+	u64 finish;
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
 			start;
@@ -1066,9 +1066,9 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	struct homa_rpc *rpc;
-	__u64 finish;
+	u64 finish;
 	int result;
 
 	INC_METRIC(recv_calls, 1);
@@ -1236,7 +1236,7 @@ int homa_softirq(struct sk_buff *skb)
 	struct homa *homa = global_homa;
 	struct homa_common_hdr *h;
 	int header_offset;
-	__u64 start;
+	u64 start;
 
 	start = sched_clock();
 	INC_METRIC(softirq_calls, 1);
@@ -1480,7 +1480,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait)
 {
 	struct sock *sk = sock->sk;
-	__u32 mask;
+	u32 mask;
 
 	sock_poll_wait(file, sock, wait);
 	mask = POLLOUT | POLLWRNORM;

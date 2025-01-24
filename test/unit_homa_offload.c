@@ -255,8 +255,8 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	struct in6_addr server_ip = unit_get_in_addr("1.2.3.4");
 	struct sk_buff *skb, *skb2, *skb3, *skb4, *result;
 	int client_port = 40000;
-	__u64 client_id = 1234;
-	__u64 server_id = 1235;
+	u64 client_id = 1234;
+	u64 server_id = 1235;
 	struct homa_rpc *srpc;
 	int server_port = 99;
 	struct homa_data_hdr h;
@@ -322,8 +322,8 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	struct sk_buff *skb, *skb2, *skb3, *result;
 	struct homa_grant_hdr h;
 	int client_port = 40000;
-	__u64 client_id = 1234;
-	__u64 server_id = 1235;
+	u64 client_id = 1234;
+	u64 server_id = 1235;
 	struct homa_rpc *srpc;
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING,

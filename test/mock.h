@@ -99,8 +99,8 @@ extern __u16       mock_min_default_port;
 extern int         mock_mtu;
 extern struct net_device
 		   mock_net_device;
-extern __u64       mock_ns;
-extern __u64       mock_ns_tick;
+extern u64         mock_ns;
+extern u64         mock_ns_tick;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
 extern char        mock_printk_output[];

@@ -128,7 +128,7 @@ TEST_F(homa_pool, homa_pool_get_rcvbuf)
 TEST_F(homa_pool, homa_pool_get_pages__basics)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	EXPECT_EQ(0, homa_pool_get_pages(pool, 2, pages, 0));
 	EXPECT_EQ(0, pages[0]);
@@ -141,7 +141,7 @@ TEST_F(homa_pool, homa_pool_get_pages__basics)
 TEST_F(homa_pool, homa_pool_get_pages__not_enough_space)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	atomic_set(&pool->free_bpages, 1);
 	EXPECT_EQ(-1, homa_pool_get_pages(pool, 2, pages, 0));
@@ -151,7 +151,7 @@ TEST_F(homa_pool, homa_pool_get_pages__not_enough_space)
 TEST_F(homa_pool, homa_pool_get_pages__set_limit)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	atomic_set(&pool->free_bpages, 62);
 	pool->cores[raw_smp_processor_id()].next_candidate = 49;
@@ -162,7 +162,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_limit)
 TEST_F(homa_pool, homa_pool_get_pages__set_limit_with_MIN_EXTRA)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	atomic_set(&pool->free_bpages, 92);
 	pool->cores[raw_smp_processor_id()].next_candidate = 13;
@@ -173,7 +173,7 @@ TEST_F(homa_pool, homa_pool_get_pages__set_limit_with_MIN_EXTRA)
 TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	mock_ns = 1000;
 	atomic_set(&pool->descriptors[0].refs, 2);
@@ -191,7 +191,7 @@ TEST_F(homa_pool, homa_pool_get_pages__skip_unusable_bpages)
 TEST_F(homa_pool, homa_pool_get_pages__cant_lock_pages)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	mock_ns = 1000;
 	mock_trylock_errors = 3;
@@ -202,7 +202,7 @@ TEST_F(homa_pool, homa_pool_get_pages__cant_lock_pages)
 TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	mock_ns = 1000;
 	unit_hook_register(steal_bpages_hook);
@@ -213,7 +213,7 @@ TEST_F(homa_pool, homa_pool_get_pages__state_changes_while_locking)
 TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	pool->descriptors[0].owner = 5;
 	mock_ns = 5000;
@@ -228,7 +228,7 @@ TEST_F(homa_pool, homa_pool_get_pages__steal_expired_page)
 TEST_F(homa_pool, homa_pool_get_pages__set_owner)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
-	__u32 pages[10];
+	u32 pages[10];
 
 	self->homa.bpage_lease_usecs = 1;
 	mock_ns = 5000;
@@ -505,7 +505,7 @@ TEST_F(homa_pool, homa_pool_release_buffers__basics)
 }
 TEST_F(homa_pool, homa_pool_release_buffers__bogus_offset)
 {
-	__u32 buffer = self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
+	u32 buffer = self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 
 	EXPECT_EQ(EINVAL, -homa_pool_release_buffers(self->hsk.buffer_pool,
 						       1, &buffer));

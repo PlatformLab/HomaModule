@@ -123,7 +123,7 @@ void homa_skb_cleanup(struct homa *homa)
  */
 struct sk_buff *homa_skb_new_tx(int length)
 {
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	struct sk_buff *skb;
 
 	/* Note: allocate space for an IPv6 header, which is larger than
@@ -244,7 +244,7 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 {
 	struct homa_page_pool *pool;
-	__u64 start;
+	u64 start;
 
 	if (skb_core->skb_page) {
 		if (page_ref_count(skb_core->skb_page) == 1) {
@@ -455,7 +455,7 @@ void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)
 #define MAX_PAGES_AT_ONCE 50
 #endif
 	struct page *pages_to_cache[MAX_PAGES_AT_ONCE];
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	int num_pages = 0;
 	int i, j;
 
@@ -587,7 +587,7 @@ void homa_skb_release_pages(struct homa *homa)
 {
 	int i, max_low_mark, min_pages, release, release_max;
 	struct homa_page_pool *max_pool;
-	__u64 now = sched_clock();
+	u64 now = sched_clock();
 
 	if (now < homa->skb_page_free_time)
 		return;

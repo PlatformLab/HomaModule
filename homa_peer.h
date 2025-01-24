@@ -26,7 +26,7 @@ struct homa_dead_dst {
 	 * @gc_time: Time (in units of sched_clock()) when it is safe
 	 * to free @dst.
 	 */
-	__u64 gc_time;
+	u64 gc_time;
 
 	/** @dst_links: Used to link together entries in peertab->dead_dsts. */
 	struct list_head dst_links;
@@ -161,14 +161,14 @@ struct homa_peer {
 	 * @least_recent_ticks: the @resend_timer_ticks value for
 	 * @least_recent_rpc.
 	 */
-	__u32 least_recent_ticks;
+	u32 least_recent_ticks;
 
 	/**
 	 * @current_ticks: the value of @homa->timer_ticks the last time
 	 * that @least_recent_rpc and @least_recent_ticks were computed.
 	 * Used to detect the start of a new homa_timer pass.
 	 */
-	__u32 current_ticks;
+	u32 current_ticks;
 
 	/**
 	 * @resend_rpc: the value of @least_recent_rpc computed in the
@@ -215,7 +215,7 @@ struct dst_entry
 void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
-void     homa_peertab_gc_dsts(struct homa_peertab *peertab, __u64 now);
+void     homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now);
 
 /**
  * homa_peer_lock() - Acquire the lock for a peer's @unacked_lock. If the lock

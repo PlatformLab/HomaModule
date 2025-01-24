@@ -81,7 +81,7 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 		/* Message not yet tracked; add it in priority order to
 		 * the peer's list.
 		 */
-		__u64 time = sched_clock();
+		u64 time = sched_clock();
 
 		INC_METRIC(grantable_rpcs_integral, homa->num_grantable_rpcs
 				* (time - homa->last_grantable_change));
@@ -165,7 +165,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
 	struct homa_rpc *candidate;
-	__u64 time = sched_clock();
+	u64 time = sched_clock();
 	struct homa_rpc *head;
 
 	if (list_empty(&rpc->grantable_links))
@@ -395,7 +395,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 	int i, active, try_again;
-	__u64 start;
+	u64 start;
 
 	tt_record("homa_grant_recalc starting");
 	INC_METRIC(grant_recalc_calls, 1);
@@ -567,7 +567,7 @@ void homa_grant_find_oldest(struct homa *homa)
 	int max_incoming = homa->grant_window + 2 * homa->fifo_grant_increment;
 	struct homa_rpc *rpc, *oldest;
 	struct homa_peer *peer;
-	__u64 oldest_birth;
+	u64 oldest_birth;
 
 	oldest = NULL;
 	oldest_birth = ~0;
@@ -653,7 +653,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 	__acquires(&homa->grantable_lock)
 {
 	int starting_count = atomic_read(&homa->grant_recalc_count);
-	__u64 start = sched_clock();
+	u64 start = sched_clock();
 	int result = 0;
 
 	tt_record("beginning wait for grantable lock");

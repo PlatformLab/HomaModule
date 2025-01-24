@@ -281,7 +281,7 @@ struct homa_v6_sock {
 };
 
 void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
-					 __u64 id);
+					 u64 id);
 int                homa_sock_bind(struct homa_socktab *socktab,
 				  struct homa_sock *hsk, __u16 port);
 void               homa_sock_destroy(struct homa_sock *hsk);
@@ -347,7 +347,7 @@ static inline int homa_port_hash(__u16 port)
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
 static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *hsk,
-							     __u64 id)
+							     u64 id)
 {
 	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
@@ -365,7 +365,7 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *h
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
 static inline struct homa_rpc_bucket *homa_server_rpc_bucket(struct homa_sock *hsk,
-							     __u64 id)
+							     u64 id)
 {
 	/* Each client allocates RPC ids sequentially, so they will
 	 * naturally distribute themselves across the hash space.
@@ -384,7 +384,7 @@ static inline struct homa_rpc_bucket *homa_server_rpc_bucket(struct homa_sock *h
  *             but used occasionally for diagnostics and debugging.
  */
 static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket,
-				    __u64 id, const char *locker)
+				    u64 id, const char *locker)
 {
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);
@@ -395,7 +395,7 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket,
  * @bucket:   Bucket to unlock.
  * @id:       ID of the RPC that was using the lock.
  */
-static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, __u64 id)
+static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, u64 id)
 	__releases(&bucket->lock)
 {
 	spin_unlock_bh(&bucket->lock);
