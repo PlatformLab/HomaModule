@@ -140,6 +140,21 @@ void homa_pool_get_rcvbuf(struct homa_sock *hsk,
 }
 
 /**
+ * homa_pool_bpage_available() - Check whether a bpage is available for use.
+ * @bpage:      Bpage to check
+ * @now:        Current time (sched_clock() units)
+ * Return:      True if the bpage is free or if it can be stolen, otherwise
+ *              false.
+ */
+bool homa_bpage_available(struct homa_bpage *bpage, u64 now)
+{
+	int ref_count = atomic_read(&bpage->refs);
+
+	return ref_count == 0 || (ref_count == 1 && bpage->owner >= 0 &&
+			bpage->expiration <= now);
+}
+
+/**
  * homa_pool_get_pages() - Allocate one or more full pages from the pool.
  * @pool:         Pool from which to allocate pages
  * @num_pages:    Number of pages needed
@@ -172,7 +187,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 	 */
 	while (alloced != num_pages) {
 		struct homa_bpage *bpage;
-		int cur, ref_count;
+		int cur;
 
 		/* If we don't need to use all of the bpages in the pool,
 		 * then try to use only the ones with low indexes. This
@@ -214,15 +229,11 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		 * (must check again in case someone else snuck in and
 		 * grabbed the page).
 		 */
-		ref_count = atomic_read(&bpage->refs);
-		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-				bpage->expiration > now)))
+		if (!homa_bpage_available(bpage, now))
 			continue;
 		if (!spin_trylock_bh(&bpage->lock))
 			continue;
-		ref_count = atomic_read(&bpage->refs);
-		if (ref_count >= 2 || (ref_count == 1 && (bpage->owner < 0 ||
-				bpage->expiration > now))) {
+		if (!homa_bpage_available(bpage, now)) {
 			spin_unlock_bh(&bpage->lock);
 			continue;
 		}

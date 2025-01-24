@@ -137,6 +137,7 @@ struct homa_pool {
 	int check_waiting_invoked;
 };
 
+bool     homa_bpage_available(struct homa_bpage *bpage, u64 now);
 int      homa_pool_allocate(struct homa_rpc *rpc);
 void     homa_pool_check_waiting(struct homa_pool *pool);
 void     homa_pool_destroy(struct homa_pool *pool);
