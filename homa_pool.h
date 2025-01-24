@@ -59,35 +59,26 @@ _Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
  * out of which that core is allocating small chunks).
  */
 struct homa_pool_core {
-	union {
-		/**
-		 * @cache_line: Ensures that each object is exactly one
-		 * cache line long.
-		 */
-		char cache_line[L1_CACHE_BYTES];
-		struct {
-			/**
-			 * @page_hint: Index of bpage in pool->descriptors,
-			 * which may be owned by this core. If so, we'll use it
-			 * for allocating partial pages.
-			 */
-			int page_hint;
+	/**
+	 * @page_hint: Index of bpage in pool->descriptors,
+	 * which may be owned by this core. If so, we'll use it
+	 * for allocating partial pages.
+	 */
+	int page_hint ____cacheline_aligned_in_smp;
 
-			/**
-			 * @allocated: if the page given by @page_hint is
-			 * owned by this core, this variable gives the number of
-			 * (initial) bytes that have already been allocated
-			 * from the page.
-			 */
-			int allocated;
+	/**
+	 * @allocated: if the page given by @page_hint is
+	 * owned by this core, this variable gives the number of
+	 * (initial) bytes that have already been allocated
+	 * from the page.
+	 */
+	int allocated;
 
-			/**
-			 * @next_candidate: when searching for free bpages,
-			 * check this index next.
-			 */
-			int next_candidate;
-		};
-	};
+	/**
+	 * @next_candidate: when searching for free bpages,
+	 * check this index next.
+	 */
+	int next_candidate;
 };
 
 #ifndef __STRIP__ /* See strip.py */

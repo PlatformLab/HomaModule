@@ -242,13 +242,13 @@ struct homa {
 	 * it could be a severe underestimate if there is competing traffic
 	 * from, say, TCP. Access only with atomic ops.
 	 */
-	atomic64_t link_idle_time __aligned(L1_CACHE_BYTES);
+	atomic64_t link_idle_time ____cacheline_aligned_in_smp;
 
 	/**
 	 * @grantable_lock: Used to synchronize access to grant-related
 	 * fields below, from @grantable_peers to @last_grantable_change.
 	 */
-	spinlock_t grantable_lock __aligned(L1_CACHE_BYTES);
+	spinlock_t grantable_lock ____cacheline_aligned_in_smp;
 
 	/**
 	 * @grantable_lock_time: sched_clock() time when grantable_lock
@@ -347,7 +347,7 @@ struct homa {
 	 * @pacer_mutex: Ensures that only one instance of homa_pacer_xmit
 	 * runs at a time. Only used in "try" mode: never block on this.
 	 */
-	spinlock_t pacer_mutex __aligned(L1_CACHE_BYTES);
+	spinlock_t pacer_mutex ____cacheline_aligned_in_smp;
 
 	/**
 	 * @pacer_fifo_fraction: The fraction of time (in thousandths) when
@@ -409,19 +409,19 @@ struct homa {
 	 * a peer sends more bytes than granted (see synchronization note in
 	 * homa_send_grants for why we have to allow this possibility).
 	 */
-	atomic_t total_incoming __aligned(L1_CACHE_BYTES);
+	atomic_t total_incoming ____cacheline_aligned_in_smp;
 
 	/**
 	 * @prev_default_port: The most recent port number assigned from
 	 * the range of default ports.
 	 */
-	__u16 prev_default_port __aligned(L1_CACHE_BYTES);
+	__u16 prev_default_port ____cacheline_aligned_in_smp;
 
 	/**
 	 * @port_map: Information about all open sockets. Dynamically
 	 * allocated; must be kfreed.
 	 */
-	struct homa_socktab *port_map __aligned(L1_CACHE_BYTES);
+	struct homa_socktab *port_map ____cacheline_aligned_in_smp;
 
 	/**
 	 * @peers: Info about all the other hosts we have communicated with.
@@ -433,7 +433,7 @@ struct homa {
 	 * @page_pool_mutex: Synchronizes access to any/all of the page_pools
 	 * used for outgoing sk_buff data.
 	 */
-	spinlock_t page_pool_mutex __aligned(L1_CACHE_BYTES);
+	spinlock_t page_pool_mutex ____cacheline_aligned_in_smp;
 
 	/**
 	 * @page_pools: One page pool for each NUMA node on the machine.
