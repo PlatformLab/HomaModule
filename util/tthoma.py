@@ -85,7 +85,7 @@ import time
 #                    ends when last data packet is transmitted by the NIC.
 #                    Missing if tx isn't live during the trace.
 # unsched:           # of bytes of unscheduled data in the incoming message
-# free               Time when the RPC was passed to homa_rpc_free
+# end:               Time when the RPC was passed to homa_rpc_end
 #
 # The following fields will be present if homa_rpc_log_active_tt was invoked
 # when the timetraces were frozen; they reflect the RPC's state at the end
@@ -1426,14 +1426,14 @@ class Dispatcher:
         'regexp': 'RPC id ([0-9]+) has ([0-9]+) bpages allocated'
     })
 
-    def __rpc_free(self, trace, time, core, match, interests):
+    def __rpc_end(self, trace, time, core, match, interests):
         id = int(match.group(1))
         for interest in interests:
-            interest.tt_rpc_free(trace, time, core, id)
+            interest.tt_rpc_end(trace, time, core, id)
 
     patterns.append({
-        'name': 'rpc_free',
-        'regexp': 'homa_rpc_free invoked for id ([0-9]+)'
+        'name': 'rpc_end',
+        'regexp': 'homa_rpc_end invoked for id ([0-9]+)'
     })
 
     def __grant_recalc_start(self, trace, time, core, match, interests):
@@ -5585,8 +5585,8 @@ class AnalyzeRpcs:
             return None
 
         ceiling = None
-        if 'free' in rpc:
-            ceiling = rpc['free']
+        if 'end' in rpc:
+            ceiling = rpc['end']
         if not (rpc['id'] & 1):
             if rpc['gro_data']:
                 ceiling = rpc['gro_data'][0][0]
@@ -5755,9 +5755,9 @@ class AnalyzeRpcs:
         if num_bytes > max_unsched:
             max_unsched = num_bytes
 
-    def tt_rpc_free(self, trace, t, core, id):
+    def tt_rpc_end(self, trace, t, core, id):
         global rpcs
-        rpcs[id]['free'] = t
+        rpcs[id]['end'] = t
 
     def tt_rpc_incoming(self, trace, t, core, id, peer, received, length):
         global rpcs, max_unsched

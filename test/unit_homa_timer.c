@@ -272,7 +272,7 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 			self->server_port, self->client_id, 40000, 1000);
 
 	ASSERT_NE(NULL, dead);
-	homa_rpc_free(dead);
+	homa_rpc_end(dead);
 	EXPECT_EQ(31, self->hsk.dead_skbs);
 
 	// First call to homa_timer: not enough dead skbs.

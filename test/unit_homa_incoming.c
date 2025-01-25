@@ -68,7 +68,7 @@ void handoff_hook3(char *id)
 	hook3_count++;
 
 	homa_rpc_handoff(hook_rpc);
-	homa_rpc_free(hook_rpc);
+	homa_rpc_end(hook_rpc);
 }
 
 /* The following hook function frees an RPC. */
@@ -77,7 +77,7 @@ void delete_hook(char *id)
 	if (strcmp(id, "schedule") != 0)
 		return;
 	if (delete_count == 0)
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 	delete_count--;
 }
 
@@ -87,7 +87,7 @@ void lock_delete_hook(char *id)
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	if (lock_delete_count == 0)
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 	lock_delete_count--;
 }
 
@@ -97,7 +97,7 @@ void lock_delete_hook(char *id)
 void match_free_hook(char *id)
 {
 	if (strcmp(id, "found_rpc") == 0)
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 }
 
 /* The following hook function shuts down a socket. */
@@ -696,7 +696,7 @@ TEST_F(homa_incoming, homa_copy_to_user__rpc_freed)
 			self->server_ip, self->server_port, self->client_id,
 			1000, 4000);
 	ASSERT_NE(NULL, crpc);
-	homa_rpc_free(crpc);
+	homa_rpc_end(crpc);
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
@@ -1178,7 +1178,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 	struct homa_rpc *srpc;
 	mock_ns_tick = 10;
 
-	homa_rpc_free(dead);
+	homa_rpc_end(dead);
 	EXPECT_EQ(31, self->hsk.dead_skbs);
 	srpc = unit_server_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
@@ -2021,7 +2021,7 @@ TEST_F(homa_incoming, homa_abort_rpcs__ignore_dead_rpcs)
 			self->server_port, self->client_id, 5000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	homa_rpc_free(crpc);
+	homa_rpc_end(crpc);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	unit_log_clear();
 	homa_abort_rpcs(&self->homa, self->server_ip, 0, -ENOTCONN);
@@ -2081,7 +2081,7 @@ TEST_F(homa_incoming, homa_abort_sock_rpcs__rpc_already_dead)
 			self->server_port, self->client_id, 5000, 1600);
 
 	ASSERT_NE(NULL, crpc);
-	homa_rpc_free(crpc);
+	homa_rpc_end(crpc);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	unit_log_clear();
 	homa_abort_sock_rpcs(&self->hsk, -ENOTCONN);
@@ -2343,7 +2343,7 @@ TEST_F(homa_incoming, homa_wait_for_message__rpc_arrives_while_sleeping)
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id+2, 20000, 20000);
 	self->homa.reap_limit = 5;
-	homa_rpc_free(crpc2);
+	homa_rpc_end(crpc2);
 	EXPECT_EQ(31, self->hsk.dead_skbs);
 	unit_log_clear();
 

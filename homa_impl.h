@@ -1120,7 +1120,7 @@ void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 void     homa_rpc_acked(struct homa_sock *hsk,
 			const struct in6_addr *saddr, struct homa_ack *ack);
-void     homa_rpc_free(struct homa_rpc *rpc);
+void     homa_rpc_end(struct homa_rpc *rpc);
 void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,

@@ -261,7 +261,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 		homa_rpc_lock(rpc, "homa_sock_shutdown");
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
 

@@ -773,11 +773,11 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			   rpc->state);
 	} else {
 		if (rpc->hsk->homa->verbose)
-			pr_notice("Freeing rpc id %llu from client %s:%d: unknown to client",
+			pr_notice("Ending rpc id %llu from client %s:%d: unknown to client",
 				  rpc->id,
 				  homa_print_ipv6_addr(&rpc->peer->addr),
 				  rpc->dport);
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
 	}
 done:
@@ -885,7 +885,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 
 	if (rpc) {
 		tt_record1("homa_ack_pkt freeing rpc id %d", rpc->id);
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
 
@@ -992,7 +992,7 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 		INC_METRIC(server_rpc_discards, 1);
 		tt_record3("aborting server RPC: peer 0x%x, id %d, error %d",
 			   tt_addr(rpc->peer->addr), rpc->id, error);
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		return;
 	}
 	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
@@ -1079,7 +1079,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 		if (error)
 			homa_rpc_abort(rpc, error);
 		else
-			homa_rpc_free(rpc);
+			homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
 	homa_unprotect_rpcs(hsk);

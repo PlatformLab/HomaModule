@@ -775,7 +775,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 	if (!rpc)
 		return -EINVAL;
 	if (args.error == 0)
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 	else
 		homa_rpc_abort(rpc, -args.error);
 	homa_rpc_unlock(rpc); /* Locked by homa_find_client_rpc. */
@@ -1043,7 +1043,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 error:
 	if (rpc) {
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
@@ -1156,7 +1156,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	}
 
 	/* This indicates that the application now owns the buffers, so
-	 * we won't free them in homa_rpc_free.
+	 * we won't free them in homa_rpc_end.
 	 */
 	rpc->msgin.num_bpages = 0;
 
@@ -1165,10 +1165,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	 */
 	if (homa_is_client(rpc->id)) {
 		homa_peer_add_ack(rpc);
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 	} else {
 		if (result < 0)
-			homa_rpc_free(rpc);
+			homa_rpc_end(rpc);
 		else
 			rpc->state = RPC_IN_SERVICE;
 	}

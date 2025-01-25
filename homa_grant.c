@@ -620,7 +620,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 			 * calling homa_grant_recalc. This creates a risk that the
 			 * RPC could be reaped before the lock is reacquired.
 			 * However, this function is only called from a specific
-			 * place in homa_rpc_free where the RPC hasn't yet been put
+			 * place in homa_rpc_end where the RPC hasn't yet been put
 			 * on the reap list, so there is no way it can be reaped
 			 * until we return.
 			 */

@@ -424,7 +424,7 @@ struct homa_rpc
 				     const struct in6_addr *saddr, u64 id);
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
-void     homa_rpc_free(struct homa_rpc *rpc);
+void     homa_rpc_end(struct homa_rpc *rpc);
 void     homa_rpc_log(struct homa_rpc *rpc);
 void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);

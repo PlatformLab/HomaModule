@@ -206,7 +206,7 @@ struct homa_sock {
 	struct list_head active_rpcs;
 
 	/**
-	 * @dead_rpcs: Contains RPCs for which homa_rpc_free has been
+	 * @dead_rpcs: Contains RPCs for which homa_rpc_end has been
 	 * called, but their packet buffers haven't yet been freed.
 	 */
 	struct list_head dead_rpcs;

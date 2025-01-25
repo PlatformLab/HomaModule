@@ -4,22 +4,13 @@ This file discusses issues related to freeing resources for completed RPCs
 * Most of the cost of reaping comes from freeing skbuffs; this can be
   quite expensive for RPCs with long messages.
 
-* The natural time to reap is when homa_rpc_free is invoked to mark an
-<<<<<<< HEAD
-  RPC completed, but this can result in severe performance hiccups. For
-  example, a server RPC is freed once the last packet of the response
-  has been transmitted, but this can happen in homa_softirq in response
-  to an incoming acknowledgment, and there may be other short messages waiting
-  to be processed. Freeing a long RPC could result in significant delay
-  for a subsequent short RPC.
-=======
+* The natural time to reap is when homa_rpc_end is invoked to mark an
   RPC completed, but this can result in severe performance hiccups. However,
   this can happen in homa_softirq at a time when there are short messages
   waiting  to be processed. Freeing a long RPC could result in significant
   delay for a subsequent short RPC.
->>>>>>> bd01983 (Replace __u64 with u64 in non-uapi code)
 
-* Thus Homa doesn't reap immediately in homa_rpc_free. Instead, dead RPCs
+* Thus Homa doesn't reap immediately in homa_rpc_end. Instead, dead RPCs
   are queued up and reaping occurs later, at a more convenient time where
   it is less likely to impact latency. The challenge is to figure out how to
   do this so that (a) we keep up with dead RPCs and (b) we minimize

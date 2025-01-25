@@ -47,7 +47,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	if (IS_ERR(crpc))
 		return NULL;
 	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length), 0)) {
-		homa_rpc_free(crpc);
+		homa_rpc_end(crpc);
 		return NULL;
 	}
 	homa_rpc_unlock(crpc);
@@ -92,7 +92,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	if (state == UNIT_RCVD_MSG)
 		return crpc;
 	FAIL("%s received unexpected state %d", __func__, state);
-	homa_rpc_free(crpc);
+	homa_rpc_end(crpc);
 	return NULL;
 }
 
@@ -405,7 +405,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	FAIL("%s received unexpected state %d", __func__, state);
 
 error:
-	homa_rpc_free(srpc);
+	homa_rpc_end(srpc);
 	return NULL;
 }
 

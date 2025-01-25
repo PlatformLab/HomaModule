@@ -230,7 +230,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	rpc = homa_find_server_rpc(hsk2, saddr, id);
 	if (rpc) {
 		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
-		homa_rpc_free(rpc);
+		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 	}
 
@@ -240,12 +240,14 @@ done:
 }
 
 /**
- * homa_rpc_free() - Destructor for homa_rpc; will arrange for all resources
- * associated with the RPC to be released (eventually).
+ * homa_rpc_end() - Stop all activity on an RPC and begin the process of
+ * releasing its resources; this process will continue in the background
+ * until homa_rpc_reap eventually completes it.
  * @rpc:  Structure to clean up, or NULL. Must be locked. Its socket must
- *        not be locked.
+ *        not be locked. Once this function returns the caller should not
+ *        use the RPC except to unlock it.
  */
-void homa_rpc_free(struct homa_rpc *rpc)
+void homa_rpc_end(struct homa_rpc *rpc)
 	__acquires(&rpc->hsk->lock)
 	__releases(&rpc->hsk->lock)
 {
@@ -265,8 +267,8 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	 */
 	if (!rpc || rpc->state == RPC_DEAD)
 		return;
-	UNIT_LOG("; ", "homa_rpc_free invoked");
-	tt_record1("homa_rpc_free invoked for id %d", rpc->id);
+	UNIT_LOG("; ", "homa_rpc_end invoked");
+	tt_record1("homa_rpc_end invoked for id %d", rpc->id);
 	rpc->state = RPC_DEAD;
 
 	/* The following line must occur before the socket is locked or
@@ -277,7 +279,7 @@ void homa_rpc_free(struct homa_rpc *rpc)
 	homa_grant_free_rpc(rpc);
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
-	homa_sock_lock(rpc->hsk, "homa_rpc_free");
+	homa_sock_lock(rpc->hsk, "homa_rpc_end");
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
 	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
@@ -446,7 +448,7 @@ release:
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
 			/* Lock and unlock the RPC before freeing it. This
 			 * is needed to deal with races where the code
-			 * that invoked homa_rpc_free hasn't unlocked the
+			 * that invoked homa_rpc_end hasn't unlocked the
 			 * RPC yet.
 			 */
 			homa_rpc_lock(rpc, "homa_rpc_reap");

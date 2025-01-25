@@ -17,7 +17,7 @@ static void unlock_hook(char *id)
 	if (strcmp(id, "unlock") != 0)
 		return;
 	if (hook_rpc) {
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 		hook_rpc = NULL;
 	}
 }
@@ -28,7 +28,7 @@ void lock_free_hook(char *id)
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	if (hook_rpc) {
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 		hook_rpc = NULL;
 	}
 }
@@ -785,7 +785,7 @@ TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
 	unit_hook_register(lock_free_hook);
 	hook_rpc = crpc;
 	homa_xmit_data(crpc, false);
-	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_free invoked",
+	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_end invoked",
 			unit_log_get());
 	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);
 }

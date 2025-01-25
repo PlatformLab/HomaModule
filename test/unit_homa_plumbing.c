@@ -16,7 +16,7 @@ static void unlock_hook(char *id)
 	if (strcmp(id, "unlock") != 0)
 		return;
 	if (hook_rpc) {
-		homa_rpc_free(hook_rpc);
+		homa_rpc_end(hook_rpc);
 		hook_rpc = 0;
 	}
 }
