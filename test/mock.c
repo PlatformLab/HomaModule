@@ -1152,6 +1152,13 @@ void *skb_put(struct sk_buff *skb, unsigned int len)
 	return result;
 }
 
+void skb_queue_purge_reason(struct sk_buff_head *list,
+			    enum skb_drop_reason reason)
+{
+	while (skb_queue_len(list) > 0)
+		kfree_skb(__skb_dequeue(list));
+}
+
 struct sk_buff *skb_segment(struct sk_buff *head_skb,
 		netdev_features_t features)
 {

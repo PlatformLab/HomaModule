@@ -412,16 +412,10 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			 * immediately in rare situations where there are
 			 * buffers left.
 			 */
-			if (rpc->msgin.length >= 0) {
-				while (1) {
-					struct sk_buff *skb;
-
-					skb = skb_dequeue(&rpc->msgin.packets);
-					if (!skb)
-						break;
-					kfree_skb(skb);
-					rx_frees++;
-				}
+			if (rpc->msgin.length >= 0 &&
+			    !skb_queue_empty_lockless(&rpc->msgin.packets)) {
+				rx_frees += skb_queue_len(&rpc->msgin.packets);
+				skb_queue_purge(&rpc->msgin.packets);
 			}
 
 			/* If we get here, it means all packets have been
