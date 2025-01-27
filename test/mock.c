@@ -786,6 +786,7 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 {
 	void *block;
 
+	UNIT_HOOK("kmalloc");
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	if (mock_active_spin_locks  > 0 && (flags & ~__GFP_ZERO) != GFP_ATOMIC)
@@ -1802,6 +1803,7 @@ void *mock_vmalloc(size_t size)
 {
 	void *block;
 
+	UNIT_HOOK("kmalloc");
 	if (mock_check_error(&mock_vmalloc_errors))
 		return NULL;
 	block = malloc(size);

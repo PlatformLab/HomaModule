@@ -13,6 +13,26 @@ struct in6_addr ip1111[1];
 struct in6_addr ip2222[1];
 struct in6_addr ip3333[1];
 
+static int hook_new_peer_count;
+static struct homa_peertab *hook_peertab;
+static struct homa_sock *hook_hsk;
+
+static void kmalloc_hook(char *id)
+{
+	int i;
+
+	if (strcmp(id, "kmalloc") != 0)
+		return;
+	for (i = 0; i < hook_new_peer_count; i++) {
+		char addr_string[20];
+		struct in6_addr addr;
+
+		snprintf(addr_string, sizeof(addr_string), "10.0.0.%d", i);
+		addr = unit_get_in_addr(addr_string);
+		homa_peer_find(hook_peertab, &addr, &hook_hsk->inet);
+	}
+}
+
 FIXTURE(homa_peer) {
 	struct homa homa;
 	struct homa_sock hsk;
@@ -179,6 +199,38 @@ TEST_F(homa_peer, homa_peertab_get_peers__multiple_peers)
 			|| (peers[2] == peer2));
 	EXPECT_TRUE((peers[0] == peer3) || (peers[1] == peer3)
 			|| (peers[2] == peer3));
+	kfree(peers);
+}
+TEST_F(homa_peer, homa_peertab_get_peers__a_few_new_peers_created_concurrently)
+{
+	struct homa_peer **peers;
+	int num_peers = 45;
+
+	homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
+	homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
+	unit_hook_register(kmalloc_hook);
+	hook_hsk = &self->hsk;
+	hook_peertab = &self->peertab;
+	hook_new_peer_count = 3;
+	peers = homa_peertab_get_peers(&self->peertab, &num_peers);
+	ASSERT_NE(NULL, peers);
+	EXPECT_EQ(5, num_peers);
+	kfree(peers);
+}
+TEST_F(homa_peer, homa_peertab_get_peers__many_new_peers_created_concurrently)
+{
+	struct homa_peer **peers;
+	int num_peers = 45;
+
+	homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
+	homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
+	unit_hook_register(kmalloc_hook);
+	hook_hsk = &self->hsk;
+	hook_peertab = &self->peertab;
+	hook_new_peer_count = 20;
+	peers = homa_peertab_get_peers(&self->peertab, &num_peers);
+	ASSERT_NE(NULL, peers);
+	EXPECT_EQ(12, num_peers);
 	kfree(peers);
 }
 

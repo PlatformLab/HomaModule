@@ -113,8 +113,14 @@ int unit_hash_size(struct unit_hash *hash)
  */
 void unit_hook(char *id)
 {
+	static bool hook_active = false;
+
+	if (hook_active)
+		return;
+	hook_active = true;
 	for (hook_func& func: hooks)
 		func(id);
+	hook_active = false;
 }
 
 /**

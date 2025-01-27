@@ -198,9 +198,11 @@ struct homa_peer {
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
 void     homa_peertab_destroy(struct homa_peertab *peertab);
+#ifndef __STRIP__ /* See strip.py */
 struct homa_peer **
 		homa_peertab_get_peers(struct homa_peertab *peertab,
 				       int *num_peers);
+#endif /* See strip.py */
 int      homa_peertab_init(struct homa_peertab *peertab);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer

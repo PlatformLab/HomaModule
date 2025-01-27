@@ -60,6 +60,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	homa_peertab_gc_dsts(peertab, ~0);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peertab_get_peers() - Return information about all of the peers
  * currently known
@@ -67,45 +68,63 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
  * @num_peers:  Modified to hold the number of peers returned.
  * Return:      kmalloced array holding pointers to all known peers. The
  *		caller must free this. If there is an error, or if there
- *	        are no peers, NULL is returned.
+ *	        are no peers, NULL is returned.  Note: if a large number
+ *              of new peers are created while this function executes,
+ *              then the results may not be complete.
  */
 struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
 					  int *num_peers)
 {
+	int i, slots, next_slot;
 	struct homa_peer **result;
-	struct hlist_node *next;
 	struct homa_peer *peer;
-	int i, count;
 
-	*num_peers = 0;
-	if (!peertab->buckets)
-		return NULL;
+	/* Note: RCU must be used in the iterators below to ensure safety
+	 * with concurrent insertions. Technically, rcu_read_lock and
+	 * rcu_read_unlock shouldn't be necessary because we don't have to
+	 * worry about concurrent deletions. But without them, some sanity
+	 * checkers will complain.
+	 */
+	rcu_read_lock();
 
-	/* Figure out how many peers there are. */
-	count = 0;
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
-		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-					  peertab_links)
-			count++;
-	}
-
-	if (count == 0)
-		return NULL;
-
-	result = kmalloc_array(count, sizeof(peer), GFP_ATOMIC);
-	if (!result)
-		return NULL;
-	*num_peers = count;
-	count = 0;
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
-		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-					  peertab_links) {
-			result[count] = peer;
-			count++;
+	/* Figure out how large an array to allocate. */
+	slots = 0;
+	next_slot = 0;
+	result = NULL;
+	if (peertab->buckets) {
+		for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
+			hlist_for_each_entry_rcu(peer, &peertab->buckets[i],
+						 peertab_links)
+				slots++;
 		}
 	}
+	if (slots == 0)
+		goto done;
+
+	/* Allocate extra space in case new peers got created while we
+	 * were counting.
+	 */
+	slots += 10;
+	result = kmalloc_array(slots, sizeof(peer), GFP_ATOMIC);
+	if (!result)
+		goto done;
+	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
+		hlist_for_each_entry_rcu(peer, &peertab->buckets[i],
+					 peertab_links) {
+			result[next_slot] = peer;
+			next_slot++;
+
+			/* We might not have allocated enough extra space. */
+			if (next_slot >= slots)
+				goto done;
+		}
+	}
+done:
+	rcu_read_unlock();
+	*num_peers = next_slot;
 	return result;
 }
+#endif /* See strip.py */
 
 /**
  * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
