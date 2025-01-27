@@ -52,12 +52,9 @@ int homa_skb_init(struct homa *homa)
 		if (!homa->page_pools[numa]) {
 			struct homa_page_pool *pool;
 
-			pool = kmalloc(sizeof(*pool), GFP_ATOMIC);
+			pool = kmalloc(sizeof(*pool), GFP_ATOMIC | __GFP_ZERO);
 			if (!pool)
 				return -ENOMEM;
-			pool->avail = 0;
-			pool->low_mark = 0;
-			memset(pool->pages, 0, sizeof(pool->pages));
 			homa->page_pools[numa] = pool;
 		}
 		skb_core->pool = homa->page_pools[numa];

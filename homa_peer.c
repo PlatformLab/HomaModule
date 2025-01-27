@@ -188,7 +188,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 		if (ipv6_addr_equal(&peer->addr, addr))
 			goto done;
 	}
-	peer = kmalloc(sizeof(*peer), GFP_ATOMIC);
+	peer = kmalloc(sizeof(*peer), GFP_ATOMIC | __GFP_ZERO);
 	if (!peer) {
 		peer = (struct homa_peer *)ERR_PTR(-ENOMEM);
 		INC_METRIC(peer_kmalloc_errors, 1);
@@ -210,13 +210,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
-	peer->outstanding_resends = 0;
-	peer->most_recent_resend = 0;
-	peer->least_recent_rpc = NULL;
-	peer->least_recent_ticks = 0;
 	peer->current_ticks = -1;
-	peer->resend_rpc = NULL;
-	peer->num_acks = 0;
 	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
 

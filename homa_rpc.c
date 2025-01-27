@@ -28,7 +28,7 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kmalloc(sizeof(*crpc), GFP_KERNEL);
+	crpc = kmalloc(sizeof(*crpc), GFP_KERNEL | __GFP_ZERO);
 	if (unlikely(!crpc))
 		return ERR_PTR(-ENOMEM);
 
@@ -38,8 +38,6 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
-	atomic_set(&crpc->flags, 0);
-	atomic_set(&crpc->grants_in_progress, 0);
 	crpc->peer = homa_peer_find(hsk->homa->peers, &dest_addr_as_ipv6,
 				    &hsk->inet);
 	if (IS_ERR(crpc->peer)) {
@@ -48,21 +46,14 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 		goto error;
 	}
 	crpc->dport = ntohs(dest->in6.sin6_port);
-	crpc->completion_cookie = 0;
-	crpc->error = 0;
 	crpc->msgin.length = -1;
-	crpc->msgin.num_bpages = 0;
-	memset(&crpc->msgout, 0, sizeof(crpc->msgout));
 	crpc->msgout.length = -1;
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->buf_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
-	crpc->interest = NULL;
 	INIT_LIST_HEAD(&crpc->grantable_links);
 	INIT_LIST_HEAD(&crpc->throttled_links);
-	crpc->silent_ticks = 0;
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
-	crpc->done_timer_ticks = 0;
 	crpc->magic = HOMA_RPC_MAGIC;
 	crpc->start_ns = sched_clock();
 
@@ -134,7 +125,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kmalloc(sizeof(*srpc), GFP_ATOMIC);
+	srpc = kmalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ZERO);
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
@@ -142,8 +133,6 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
-	atomic_set(&srpc->flags, 0);
-	atomic_set(&srpc->grants_in_progress, 0);
 	srpc->peer = homa_peer_find(hsk->homa->peers, source, &hsk->inet);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
@@ -151,21 +140,14 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	srpc->dport = ntohs(h->common.sport);
 	srpc->id = id;
-	srpc->completion_cookie = 0;
-	srpc->error = 0;
 	srpc->msgin.length = -1;
-	srpc->msgin.num_bpages = 0;
-	memset(&srpc->msgout, 0, sizeof(srpc->msgout));
 	srpc->msgout.length = -1;
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
-	srpc->interest = NULL;
 	INIT_LIST_HEAD(&srpc->grantable_links);
 	INIT_LIST_HEAD(&srpc->throttled_links);
-	srpc->silent_ticks = 0;
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
-	srpc->done_timer_ticks = 0;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_ns = sched_clock();
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",

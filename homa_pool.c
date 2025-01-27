@@ -69,7 +69,7 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 	}
 	pool->descriptors = kmalloc_array(pool->num_bpages,
 					  sizeof(struct homa_bpage),
-					  GFP_ATOMIC);
+					  GFP_ATOMIC | __GFP_ZERO);
 	if (!pool->descriptors) {
 		result = -ENOMEM;
 		goto error;
@@ -78,27 +78,19 @@ int homa_pool_init(struct homa_sock *hsk, void __user *region,
 		struct homa_bpage *bp = &pool->descriptors[i];
 
 		spin_lock_init(&bp->lock);
-		atomic_set(&bp->refs, 0);
 		bp->owner = -1;
-		bp->expiration = 0;
 	}
 	atomic_set(&pool->free_bpages, pool->num_bpages);
 	pool->bpages_needed = INT_MAX;
 
 	/* Allocate and initialize core-specific data. */
-	pool->cores = alloc_percpu_gfp(struct homa_pool_core, GFP_ATOMIC);
+	pool->cores = alloc_percpu_gfp(struct homa_pool_core,
+				       GFP_ATOMIC | __GFP_ZERO);
 	if (!pool->cores) {
 		result = -ENOMEM;
 		goto error;
 	}
 	pool->num_cores = nr_cpu_ids;
-	for (i = 0; i < pool->num_cores; i++) {
-		struct homa_pool_core *core = per_cpu_ptr(pool->cores, i);
-
-		core->page_hint = 0;
-		core->allocated = 0;
-		core->next_candidate = 0;
-	}
 	pool->check_waiting_invoked = 0;
 
 	return 0;
