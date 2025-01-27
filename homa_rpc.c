@@ -121,7 +121,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	 */
 	bucket = homa_server_rpc_bucket(hsk, id);
 	homa_bucket_lock(bucket, id, "homa_rpc_new_server");
-	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
+	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
 		    srpc->dport == ntohs(h->common.sport) &&
 		    ipv6_addr_equal(&srpc->peer->addr, source)) {
@@ -282,7 +282,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	homa_sock_lock(rpc->hsk, "homa_rpc_end");
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
-	list_add_tail_rcu(&rpc->dead_links, &rpc->hsk->dead_rpcs);
+	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->buf_links);
 	if (rpc->interest) {
@@ -347,6 +347,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	struct sk_buff *skbs[BATCH_MAX];
 	int num_skbs, num_rpcs;
 	struct homa_rpc *rpc;
+	struct homa_rpc *tmp;
 	int i, batch_size;
 	int skbs_to_reap;
 	int rx_frees;
@@ -383,7 +384,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 		}
 
 		/* Collect buffers and freeable RPCs. */
-		list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links) {
+		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, dead_links) {
 			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP) ||
 			    atomic_read(&rpc->grants_in_progress) != 0 ||
 			    atomic_read(&rpc->msgout.active_xmits) != 0) {
@@ -423,7 +424,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			 */
 			rpcs[num_rpcs] = rpc;
 			num_rpcs++;
-			list_del_rcu(&rpc->dead_links);
+			list_del(&rpc->dead_links);
 			if (num_rpcs >= batch_size)
 				goto release;
 		}
@@ -498,7 +499,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
 	struct homa_rpc *crpc;
 
 	homa_bucket_lock(bucket, id, __func__);
-	hlist_for_each_entry_rcu(crpc, &bucket->rpcs, hash_links) {
+	hlist_for_each_entry(crpc, &bucket->rpcs, hash_links) {
 		if (crpc->id == id)
 			return crpc;
 	}
@@ -525,7 +526,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 	struct homa_rpc *srpc;
 
 	homa_bucket_lock(bucket, id, __func__);
-	hlist_for_each_entry_rcu(srpc, &bucket->rpcs, hash_links) {
+	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id && ipv6_addr_equal(&srpc->peer->addr, saddr))
 			return srpc;
 	}
