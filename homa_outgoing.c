@@ -813,6 +813,7 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 int homa_pacer_main(void *transport)
 {
 	struct homa *homa = (struct homa *)transport;
+	bool work_left;
 
 	homa->pacer_wake_time = sched_clock();
 	while (1) {
@@ -820,7 +821,7 @@ int homa_pacer_main(void *transport)
 			homa->pacer_wake_time = 0;
 			break;
 		}
-		homa_pacer_xmit(homa);
+		work_left = homa_pacer_xmit(homa);
 
 		/* Sleep this thread if the throttled list is empty. Even
 		 * if the throttled list isn't empty, call the scheduler
@@ -829,17 +830,15 @@ int homa_pacer_main(void *transport)
 		 * incoming packets from being handled).
 		 */
 		set_current_state(TASK_INTERRUPTIBLE);
-#ifndef __STRIP__ /* See strip.py */
-		if (list_first_or_null_rcu(&homa->throttled_rpcs,
-					   struct homa_rpc, throttled_links) == NULL)
-			tt_record("pacer sleeping");
-		else
-#else /* See strip.py */
-		if (list_first_or_null_rcu(&homa->throttled_rpcs,
-					   struct homa_rpc,
-					   throttled_links) != NULL)
-#endif /* See strip.py */
+		if (work_left)
 			__set_current_state(TASK_RUNNING);
+#ifndef __STRIP__ /* See strip.py */
+		else {
+			tt_record("pacer sleeping");
+			INC_METRIC(throttled_ns, sched_clock() -
+			           homa->throttle_add);
+		}
+#endif /* See strip.py */
 		INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);
 		homa->pacer_wake_time = 0;
 		schedule();
@@ -862,17 +861,21 @@ int homa_pacer_main(void *transport)
  * likelihood that we keep the link busy. Those other invocations are not
  * guaranteed to happen, so the pacer thread provides a backstop.
  * @homa:    Overall data about the Homa protocol implementation.
+ * Return:   False if there are no throttled RPCs at the time this
+ *           function returns, true if there are throttled RPCs or
+ *           if the answer is unknown at the time of return.
  */
-void homa_pacer_xmit(struct homa *homa)
+bool homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
+	bool result = true;
 	int i;
 
 	/* Make sure only one instance of this function executes at a
 	 * time.
 	 */
 	if (!spin_trylock_bh(&homa->pacer_mutex))
-		return;
+		return true;
 
 	/* Each iteration through the following loop sends one packet. We
 	 * limit the number of passes through this loop in order to cap the
@@ -916,7 +919,7 @@ void homa_pacer_xmit(struct homa *homa)
 
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
-			list_for_each_entry_rcu(cur, &homa->throttled_rpcs,
+			list_for_each_entry(cur, &homa->throttled_rpcs,
 						throttled_links) {
 				if (cur->msgout.init_ns < oldest) {
 					rpc = cur;
@@ -924,11 +927,12 @@ void homa_pacer_xmit(struct homa *homa)
 				}
 			}
 		} else {
-			rpc = list_first_or_null_rcu(&homa->throttled_rpcs,
-						     struct homa_rpc,
-						     throttled_links);
+			rpc = list_first_entry_or_null(&homa->throttled_rpcs,
+						       struct homa_rpc,
+						       throttled_links);
 		}
 		if (!rpc) {
+			result = false;
 			homa_throttle_unlock(homa);
 			break;
 		}
@@ -957,27 +961,16 @@ void homa_pacer_xmit(struct homa *homa)
 			if (!list_empty(&rpc->throttled_links)) {
 				tt_record2("pacer removing id %d from throttled list, offset %d",
 					   rpc->id, rpc->msgout.next_xmit_offset);
-				list_del_rcu(&rpc->throttled_links);
-				if (list_empty(&homa->throttled_rpcs))
-					INC_METRIC(throttled_ns, sched_clock()
-							- homa->throttle_add);
-
-				/* Note: this reinitialization is only safe
-				 * because the pacer only looks at the first
-				 * element of the list, rather than traversing
-				 * it (and besides, we know the pacer isn't
-				 * active concurrently, since this code *is*
-				 * the pacer). It would not be safe under more
-				 * general usage patterns.
-				 */
-				INIT_LIST_HEAD_RCU(&rpc->throttled_links);
+				list_del_init(&rpc->throttled_links);
 			}
+			result = !list_empty(&homa->throttled_rpcs);
 			homa_throttle_unlock(homa);
 		}
 		homa_rpc_unlock(rpc);
 	}
 done:
 	spin_unlock_bh(&homa->pacer_mutex);
+	return result;
 }
 
 /**
@@ -1016,7 +1009,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	homa->throttle_add = now;
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_throttle_lock(homa);
-	list_for_each_entry_rcu(candidate, &homa->throttled_rpcs,
+	list_for_each_entry(candidate, &homa->throttled_rpcs,
 				throttled_links) {
 		int bytes_left_cand;
 
@@ -1028,12 +1021,12 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 		bytes_left_cand = candidate->msgout.length -
 				candidate->msgout.next_xmit_offset;
 		if (bytes_left_cand > bytes_left) {
-			list_add_tail_rcu(&rpc->throttled_links,
+			list_add_tail(&rpc->throttled_links,
 					  &candidate->throttled_links);
 			goto done;
 		}
 	}
-	list_add_tail_rcu(&rpc->throttled_links, &homa->throttled_rpcs);
+	list_add_tail(&rpc->throttled_links, &homa->throttled_rpcs);
 done:
 	homa_throttle_unlock(homa);
 	wake_up_process(homa->pacer_kthread);

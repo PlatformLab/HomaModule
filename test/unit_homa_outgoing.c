@@ -1108,7 +1108,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
 		unit_log_get());
 	unit_log_clear();
@@ -1143,7 +1143,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_SUBSTR("id 4, message_length 10000, offset 0, data_length 1400",
 			unit_log_get());
 	unit_log_clear();
@@ -1156,7 +1156,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	/* Second attempt: pacer_fifo_count reaches zero. */
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_SUBSTR("id 2, message_length 20000, offset 0, data_length 1400",
 			unit_log_get());
 	unit_log_clear();
@@ -1178,7 +1178,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	mock_trylock_errors = 1;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -1189,7 +1189,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
 	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(0, homa_pacer_xmit(&self->homa));
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -1206,7 +1206,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
 	atomic64_set(&self->homa.link_idle_time, 12000);
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -1224,12 +1224,12 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	mock_trylock_errors = ~1;
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_skipped_rpcs);
 	unit_log_clear();
 	mock_trylock_errors = 0;
-	homa_pacer_xmit(&self->homa);
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
 		unit_log_get());
 }
@@ -1242,20 +1242,32 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 4,
-			10000, 1000);
+			2000, 1000);
 
 	homa_add_to_throttled(crpc1);
 	homa_add_to_throttled(crpc2);
 	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	homa_pacer_xmit(&self->homa);
+
+	/* First call completes id 2, but id 4 is still in the queue. */
+	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
 	EXPECT_STREQ("xmit DATA 1000@0; xmit DATA 1400@0",
 			unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 4, next_offset 1400", unit_log_get());
 	EXPECT_TRUE(list_empty(&crpc1->throttled_links));
+
+	/* Second call completes id 4, queue now empty. */
+	unit_log_clear();
+	self->homa.max_nic_queue_ns = 10000;
+	EXPECT_EQ(0, homa_pacer_xmit(&self->homa));
+	EXPECT_STREQ("xmit DATA 600@1400", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	EXPECT_TRUE(list_empty(&crpc2->throttled_links));
 }
 
 /* Don't know how to unit test homa_pacer_stop... */

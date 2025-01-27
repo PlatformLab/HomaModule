@@ -378,8 +378,7 @@ struct homa {
 	/**
 	 * @throttled_rpcs: Contains all homa_rpcs that have bytes ready
 	 * for transmission, but which couldn't be sent without exceeding
-	 * the queue limits for transmission. Manipulate only with "_rcu"
-	 * functions.
+	 * the queue limits for transmission.
 	 */
 	struct list_head throttled_rpcs;
 
@@ -1099,7 +1098,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 void     homa_outgoing_sysctl_changed(struct homa *homa);
 int      homa_pacer_main(void *transport);
 void     homa_pacer_stop(struct homa *homa);
-void     homa_pacer_xmit(struct homa *homa);
+bool     homa_pacer_xmit(struct homa *homa);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 char    *homa_print_ipv4_addr(__be32 addr);
