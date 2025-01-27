@@ -225,14 +225,16 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 		goto done;
 	}
 	peer->dst = dst;
-	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
+#ifndef __STRIP__ /* See strip.py */
+        peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
-	peer->cutoff_version = 0;
-	peer->last_update_jiffies = 0;
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
+#endif /* See strip.py */
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
+#ifndef __STRIP__ /* See strip.py */
 	peer->current_ticks = -1;
+#endif /* See strip.py */
 	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
 

@@ -469,7 +469,9 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			    h->common.type == BUSY ||
 			    h->common.type == NEED_ACK)
 				rpc->silent_ticks = 0;
+#ifndef __STRIP__ /* See strip.py */
 			rpc->peer->outstanding_resends = 0;
+#endif /* See strip.py */
 		}
 
 		switch (h->common.type) {

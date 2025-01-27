@@ -93,6 +93,7 @@ struct homa_peer {
 	 */
 	struct dst_entry *dst;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unsched_cutoffs: priorities to use for unscheduled packets
 	 * sent to this host, as specified in the most recent CUTOFFS
@@ -130,6 +131,7 @@ struct homa_peer {
 	 * empty list pointing to itself.
 	 */
 	struct list_head grantable_links;
+#endif /* See strip.py */
 
 	/**
 	 * @peertab_links: Links this object into a bucket of its
@@ -137,6 +139,7 @@ struct homa_peer {
 	 */
 	struct hlist_node peertab_links;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @outstanding_resends: the number of resend requests we have
 	 * sent to this server (spaced @homa.resend_interval apart) since
@@ -176,6 +179,7 @@ struct homa_peer {
 	 * in the current pass, if it still needs one.
 	 */
 	struct homa_rpc *resend_rpc;
+#endif /* See strip.py */
 
 	/**
 	 * @num_acks: the number of (initial) entries in @acks that
