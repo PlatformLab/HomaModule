@@ -131,6 +131,11 @@ static int mock_active_spin_locks;
  */
 static int mock_active_rcu_locks;
 
+/* The number of times preempt_disable() has been invoked, minus the
+ * number of times preempt_enable has been invoked.
+ */
+static int mock_preempt_disables;
+
 /* Used as the return value for calls to get_cycles. A value of ~0 means
  * return actual clock time. Shouldn't be used much anymore (get_cycles
  * shouldn't be used).
@@ -229,7 +234,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 		return NULL;
 	skb = malloc(sizeof(struct sk_buff));
 	if (skb == NULL)
-		FAIL("skb malloc failed in %s", __func__);
+		FAIL(" skb malloc failed in %s", __func__);
 	memset(skb, 0, sizeof(*skb));
 	if (!skbs_in_use)
 		skbs_in_use = unit_hash_new();
@@ -239,7 +244,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->head = malloc(size + shinfo_size);
 	memset(skb->head, 0, size + shinfo_size);
 	if (skb->head == NULL)
-		FAIL("data malloc failed in %s", __func__);
+		FAIL(" data malloc failed in %s", __func__);
 	skb->data = skb->head;
 	skb_reset_tail_pointer(skb);
 	skb->end = skb->tail + size;
@@ -354,7 +359,7 @@ void dst_release(struct dst_entry *dst)
 	if (atomic_read(&dst->__rcuref.refcnt) > 0)
 		return;
 	if (!routes_in_use || unit_hash_get(routes_in_use, dst) == NULL) {
-		FAIL("%s on unknown route", __func__);
+		FAIL(" %s on unknown route", __func__);
 		return;
 	}
 	unit_hash_erase(routes_in_use, dst);
@@ -583,7 +588,7 @@ struct dst_entry *ip6_dst_lookup_flow(struct net *net, const struct sock *sk,
 		return ERR_PTR(-EHOSTUNREACH);
 	route = malloc(sizeof(struct rtable));
 	if (!route) {
-		FAIL("malloc failed");
+		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
 	atomic_set(&route->dst.__rcuref.refcnt, 1);
@@ -682,7 +687,7 @@ struct rtable *ip_route_output_flow(struct net *net, struct flowi4 *flp4,
 		return ERR_PTR(-EHOSTUNREACH);
 	route = malloc(sizeof(struct rtable));
 	if (!route) {
-		FAIL("malloc failed");
+		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
 	atomic_set(&route->dst.__rcuref.refcnt, 1);
@@ -713,7 +718,7 @@ struct file *filp_open(const char *, int, umode_t)
 
 void __fortify_panic(const u8 reason, const size_t avail, const size_t size)
 {
-	FAIL("__fortify_panic invoked");
+	FAIL(" __fortify_panic invoked");
 
 	/* API prohibits return. */
 	while (1) ;
@@ -735,7 +740,7 @@ void kfree(const void *block)
 	if (block == NULL)
 		return;
 	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
-		FAIL("%s on unknown block %p", __func__, block);
+		FAIL(" %s on unknown block %p", __func__, block);
 		return;
 	}
 	unit_hash_erase(kmallocs_in_use, block);
@@ -756,7 +761,7 @@ void __kfree_skb(struct sk_buff *skb)
 		return;
 	skb_dst_drop(skb);
 	if (!skbs_in_use || unit_hash_get(skbs_in_use, skb) == NULL) {
-		FAIL("kfree_skb on unknown sk_buff");
+		FAIL(" kfree_skb on unknown sk_buff");
 		return;
 	}
 	unit_hash_erase(skbs_in_use, skb);
@@ -784,11 +789,11 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
 	if (mock_active_spin_locks  > 0 && (flags & ~__GFP_ZERO) != GFP_ATOMIC)
-		FAIL("Incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
+		FAIL(" Incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
 		     flags, GFP_ATOMIC);
 	block = malloc(size);
 	if (!block) {
-		FAIL("malloc failed");
+		FAIL(" malloc failed");
 		return NULL;
 	}
 	if (flags & __GFP_ZERO)
@@ -935,7 +940,7 @@ struct proc_dir_entry *proc_create(const char *name, umode_t mode,
 	struct proc_dir_entry *entry = malloc(40);
 
 	if (!entry) {
-		FAIL("malloc failed");
+		FAIL(" malloc failed");
 		return ERR_PTR(-ENOMEM);
 	}
 	if (!proc_files_in_use)
@@ -961,7 +966,7 @@ void proc_remove(struct proc_dir_entry *de)
 		return;
 	if (!proc_files_in_use
 			|| unit_hash_get(proc_files_in_use, de) == NULL) {
-		FAIL("%s on unknown dir_entry", __func__);
+		FAIL(" %s on unknown dir_entry", __func__);
 		return;
 	}
 	unit_hash_erase(proc_files_in_use, de);
@@ -1129,7 +1134,7 @@ void skb_dump(const char *level, const struct sk_buff *skb, bool full_pkt)
 void *skb_pull(struct sk_buff *skb, unsigned int len)
 {
 	if ((skb_tail_pointer(skb) - skb->data) < len)
-		FAIL("sk_buff underflow during %s", __func__);
+		FAIL(" sk_buff underflow during %s", __func__);
 	skb->len -= len;
 	return skb->data += len;
 }
@@ -1139,7 +1144,7 @@ void *skb_push(struct sk_buff *skb, unsigned int len)
 	skb->data -= len;
 	skb->len += len;
 	if (unlikely(skb->data < skb->head))
-		FAIL("sk_buff underflow during %s", __func__);
+		FAIL(" sk_buff underflow during %s", __func__);
 	return skb->data;
 }
 
@@ -1242,7 +1247,7 @@ void unregister_net_sysctl_table(struct ctl_table_header *header)
 void vfree(const void *block)
 {
 	if (!vmallocs_in_use || unit_hash_get(vmallocs_in_use, block) == NULL) {
-		FAIL("%s on unknown block", __func__);
+		FAIL(" %s on unknown block", __func__);
 		return;
 	}
 	unit_hash_erase(vmallocs_in_use, block);
@@ -1391,7 +1396,7 @@ void mock_get_page(struct page *page)
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
 
 	if (ref_count == 0)
-		FAIL("unallocated page passed to %s", __func__);
+		FAIL(" unallocated page passed to %s", __func__);
 	else
 		unit_hash_set(pages_in_use, page, (void *) (ref_count+1));
 }
@@ -1420,12 +1425,29 @@ int mock_page_to_nid(struct page *page)
 	return result;
 }
 
+void mock_preempt_disable()
+{
+	mock_preempt_disables++;
+}
+
+void mock_preempt_enable()
+{
+	if (mock_preempt_disables == 0)
+		FAIL(" preempt_enable invoked without preempt_disable");
+	mock_preempt_disables--;
+}
+
+int mock_processor_id()
+{
+	return pcpu_hot.cpu_number;
+}
+
 void mock_put_page(struct page *page)
 {
 	int64_t ref_count = (int64_t) unit_hash_get(pages_in_use, page);
 
 	if (ref_count == 0)
-		FAIL("unallocated page passed to %s", __func__);
+		FAIL(" unallocated page passed to %s", __func__);
 	else {
 		ref_count--;
 		if (ref_count == 0) {
@@ -1761,6 +1783,11 @@ void mock_teardown(void)
 				mock_active_rcu_locks);
 	mock_active_rcu_locks = 0;
 
+	if (mock_preempt_disables != 0)
+		FAIL(" %d preempt_disables still active after test",
+				mock_preempt_disables);
+	mock_preempt_disables = 0;
+
 	memset(homa_metrics, 0, sizeof(homa_metrics));
 
 	unit_hook_clear();
@@ -1779,7 +1806,7 @@ void *mock_vmalloc(size_t size)
 		return NULL;
 	block = malloc(size);
 	if (!block) {
-		FAIL("malloc failed");
+		FAIL(" malloc failed");
 		return NULL;
 	}
 	if (!vmallocs_in_use)

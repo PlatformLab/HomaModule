@@ -24,6 +24,9 @@
 #undef DECLARE_PER_CPU
 #define DECLARE_PER_CPU(type, name) extern type name[10]
 
+#undef debug_smp_processor_id
+#define debug_smp_processor_id() (pcpu_hot.cpu_number)
+
 #undef DEFINE_PER_CPU
 #define DEFINE_PER_CPU(type, name) type name[10]
 
@@ -58,6 +61,12 @@
 #undef per_cpu_ptr
 #define per_cpu_ptr(name, core) (&name[core])
 
+#undef preempt_disable
+#define preempt_disable() mock_preempt_disable()
+
+#undef preempt_enable
+#define preempt_enable() mock_preempt_enable()
+
 #define put_page mock_put_page
 
 #define rcu_read_lock mock_rcu_read_lock
@@ -68,6 +77,9 @@
 #define register_net_sysctl mock_register_net_sysctl
 
 #define signal_pending(...) mock_signal_pending
+
+#undef smp_processor_id
+#define smp_processor_id() mock_processor_id()
 
 #define spin_unlock mock_spin_unlock
 
@@ -143,6 +155,9 @@ void       *mock_kmalloc(size_t size, gfp_t flags);
 int         mock_page_refs(struct page *page);
 int         mock_page_refs(struct page *page);
 int         mock_page_to_nid(struct page *page);
+void        mock_preempt_disable(void);
+void        mock_preempt_enable(void);
+int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);

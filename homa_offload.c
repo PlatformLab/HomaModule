@@ -299,7 +299,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		tt_record("homa_gro_receive couldn't pull enough data from packet");
 
 	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
-	offload_core = &per_cpu(homa_offload_core, raw_smp_processor_id());
+	offload_core = &per_cpu(homa_offload_core, smp_processor_id());
 	busy = (now - offload_core->last_gro) < homa->gro_busy_ns;
 	offload_core->last_active = now;
 	if (skb_is_ipv6(skb)) {
@@ -440,7 +440,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	offload_core->held_skb = skb;
 	offload_core->held_bucket = hash;
 	if (likely(homa->gro_policy & HOMA_GRO_SAME_CORE))
-		homa_set_softirq_cpu(skb, raw_smp_processor_id());
+		homa_set_softirq_cpu(skb, smp_processor_id());
 
 done:
 	homa_check_pacer(homa, 1);
@@ -483,7 +483,7 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
-	int this_core = raw_smp_processor_id();
+	int this_core = smp_processor_id();
 	struct homa_offload_core *offload_core;
 	int candidate = this_core;
 	u64 now = sched_clock();
@@ -545,7 +545,7 @@ void homa_gro_gen3(struct homa *homa, struct sk_buff *skb)
 	int i, core;
 
 	candidates = per_cpu(homa_offload_core,
-			     raw_smp_processor_id()).gen3_softirq_cores;
+			     smp_processor_id()).gen3_softirq_cores;
 	now = sched_clock();
 	busy_time = now - homa->busy_ns;
 
@@ -593,7 +593,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 	//		ntohl(h->seg.offset),
 	//		NAPI_GRO_CB(skb)->count);
 
-	per_cpu(homa_offload_core, raw_smp_processor_id()).held_skb = NULL;
+	per_cpu(homa_offload_core, smp_processor_id()).held_skb = NULL;
 	if (homa->gro_policy & HOMA_GRO_GEN3) {
 		homa_gro_gen3(homa, skb);
 	} else if (homa->gro_policy & HOMA_GRO_GEN2) {
@@ -610,7 +610,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		 * hasn't done NAPI or SoftIRQ processing for Homa in the
 		 * longest time.
 		 */
-		best = raw_smp_processor_id();
+		best = smp_processor_id();
 		core = best;
 		for (i = 0; i < CORES_TO_CHECK; i++) {
 			core++;
@@ -630,7 +630,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 		/* Use the next core (in circular order) to handle the
 		 * SoftIRQ processing.
 		 */
-		int target = raw_smp_processor_id() + 1;
+		int target = smp_processor_id() + 1;
 
 		if (unlikely(target >= nr_cpu_ids))
 			target = 0;

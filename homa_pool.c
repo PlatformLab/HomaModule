@@ -162,7 +162,7 @@ bool homa_bpage_available(struct homa_bpage *bpage, u64 now)
 int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 			int set_owner)
 {
-	int core_num = raw_smp_processor_id();
+	int core_num = smp_processor_id();
 	struct homa_pool_core *core;
 	u64 now = sched_clock();
 	int alloced = 0;
@@ -286,7 +286,7 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 	partial = rpc->msgin.length & (HOMA_BPAGE_SIZE - 1);
 	if (unlikely(partial == 0))
 		goto success;
-	core_id = raw_smp_processor_id();
+	core_id = smp_processor_id();
 	core = this_cpu_ptr(pool->cores);
 	bpage = &pool->descriptors[core->page_hint];
 	if (!spin_trylock_bh(&bpage->lock)) {

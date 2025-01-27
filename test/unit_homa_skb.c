@@ -18,7 +18,7 @@ static inline struct homa_skb_core *get_skb_core(int core)
  */
 static struct sk_buff *test_skb(struct homa *homa)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *skb = homa_skb_new_tx(100);
 	int32_t data[1000];
 	char *src;
@@ -144,7 +144,7 @@ TEST_F(homa_skb, homa_skb_cleanup)
 
 TEST_F(homa_skb, homa_skb_stash_pages)
 {
-	int id = raw_smp_processor_id();
+	int id = smp_processor_id();
 	struct homa_skb_core *skb_core;
 
 	skb_core = get_skb_core(id);
@@ -172,7 +172,7 @@ TEST_F(homa_skb, homa_skb_stash_pages)
 
 TEST_F(homa_skb, homa_skb_extend_frags__basics)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	char *p1, *p2, *p3;
 	int length = 100;
 
@@ -195,7 +195,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__basics)
 }
 TEST_F(homa_skb, homa_skb_extend_frags__merge_but_reduce_length)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	int length = 1000;
 	char *p1, *p2;
 
@@ -213,7 +213,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__merge_but_reduce_length)
 }
 TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_allocate_new_page)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *skb2 = alloc_skb_fclone(200, GFP_KERNEL);
 	char *p1, *p2, *p3;
 	int length;
@@ -245,7 +245,7 @@ TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_allocate_new_page)
 }
 TEST_F(homa_skb, homa_skb_extend_frags__cant_merge_use_same_page_reduce_length)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *skb2 = alloc_skb_fclone(200, GFP_KERNEL);
 	char *p1, *p2, *p3;
 	int length;
@@ -291,7 +291,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__free_previous_page)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__reuse_existing_page)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *skb = homa_skb_new_tx(100);
 	struct page *page;
 	int length = 100;
@@ -308,9 +308,9 @@ TEST_F(homa_skb, homa_skb_page_alloc__reuse_existing_page)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__from_stash)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 
-	add_to_pool(&self->homa, 5, raw_smp_processor_id());
+	add_to_pool(&self->homa, 5, smp_processor_id());
 	homa_skb_stash_pages(&self->homa, 3*HOMA_SKB_PAGE_SIZE - 100);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, skb_core));
 	EXPECT_NE(NULL, skb_core->skb_page);
@@ -320,9 +320,9 @@ TEST_F(homa_skb, homa_skb_page_alloc__from_stash)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__from_pool)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 
-	add_to_pool(&self->homa, 5, raw_smp_processor_id());
+	add_to_pool(&self->homa, 5, smp_processor_id());
 	EXPECT_EQ(5, skb_core->pool->avail);
 	EXPECT_EQ(0, skb_core->num_stashed_pages);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, skb_core));
@@ -331,9 +331,9 @@ TEST_F(homa_skb, homa_skb_page_alloc__from_pool)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 
-	add_to_pool(&self->homa, 1, raw_smp_processor_id());
+	add_to_pool(&self->homa, 1, smp_processor_id());
 	EXPECT_EQ(1, skb_core->pool->avail);
 	EXPECT_EQ(0, skb_core->num_stashed_pages);
 	hook_pool = skb_core->pool;
@@ -346,7 +346,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
 }
 TEST_F(homa_skb, homa_skb_page_alloc__new_large_page)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 
 	mock_ns_tick = 100;
 	EXPECT_EQ(0, skb_core->pool->avail);
@@ -382,7 +382,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__no_pages_available)
 
 TEST_F(homa_skb, homa_skb_append_to_frag__basics)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct skb_shared_info *shinfo = skb_shinfo(self->skb);
 	char *p;
 
@@ -415,7 +415,7 @@ TEST_F(homa_skb, homa_skb_append_to_frag__no_memory)
 
 TEST_F(homa_skb, homa_skb_append_from_iter__basics)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct iov_iter *iter = unit_iov_iter((void *) 1000, 5000);
 	struct skb_shared_info *shinfo = skb_shinfo(self->skb);
 
@@ -466,7 +466,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__header_only)
 }
 TEST_F(homa_skb, homa_skb_append_from_skb__error_copying_header)
 {
-	struct homa_skb_core *skb_core = get_skb_core(raw_smp_processor_id());
+	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *src_skb = test_skb(&self->homa);
 	struct sk_buff *dst_skb = homa_skb_new_tx(100);
 

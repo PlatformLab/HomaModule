@@ -9,7 +9,7 @@
 #include "mock.h"
 #include "utils.h"
 
-#define cur_offload_core (&per_cpu(homa_offload_core, raw_smp_processor_id()))
+#define cur_offload_core (&per_cpu(homa_offload_core, smp_processor_id()))
 
 static struct sk_buff *tcp_gro_receive(struct list_head *held_list,
 				       struct sk_buff *skb)
@@ -617,7 +617,7 @@ TEST_F(homa_offload, homa_gro_gen3__all_cores_busy_so_pick_first)
 TEST_F(homa_offload, homa_gro_complete__clear_held_skb)
 {
 	struct homa_offload_core *offload_core = &per_cpu(homa_offload_core,
-			raw_smp_processor_id());
+			smp_processor_id());
 
 	offload_core->held_skb = self->skb2;
 	homa_gro_complete(self->skb, 0);

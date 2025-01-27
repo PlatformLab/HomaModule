@@ -151,7 +151,7 @@ struct sk_buff *homa_skb_new_tx(int length)
 void homa_skb_stash_pages(struct homa *homa, int length)
 {
 	struct homa_skb_core *skb_core = &per_cpu(homa_skb_core,
-			raw_smp_processor_id());
+			smp_processor_id());
 	struct homa_page_pool *pool = skb_core->pool;
 	int pages_needed = HOMA_MAX_STASHED(length);
 
@@ -188,8 +188,10 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	skb_frag_t *frag;
 	char *result;
 
+	preempt_disable();
+
 	/* Can we just extend the skb's last fragment? */
-	skb_core = &per_cpu(homa_skb_core, raw_smp_processor_id());
+	skb_core = &per_cpu(homa_skb_core, smp_processor_id());
 	if (shinfo->nr_frags > 0) {
 		frag = &shinfo->frags[shinfo->nr_frags - 1];
 		if (skb_frag_page(frag) == skb_core->skb_page &&
@@ -206,15 +208,17 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 				 skb_core->page_inuse;
 			skb_core->page_inuse += actual_size;
 			skb_len_add(skb, actual_size);
-			return result;
+			goto done;
 		}
 	}
 
 	/* Need to add a new fragment to the skb. */
 	skb_core->page_inuse = ALIGN(skb_core->page_inuse, SMP_CACHE_BYTES);
 	if (skb_core->page_inuse >= skb_core->page_size) {
-		if (!homa_skb_page_alloc(homa, skb_core))
-			return NULL;
+		if (!homa_skb_page_alloc(homa, skb_core)) {
+			result = NULL;
+			goto done;
+		}
 	}
 	if ((skb_core->page_size - skb_core->page_inuse) < actual_size)
 		actual_size = skb_core->page_size - skb_core->page_inuse;
@@ -228,6 +232,9 @@ void *homa_skb_extend_frags(struct homa *homa, struct sk_buff *skb, int *length)
 	result = page_address(skb_frag_page(frag)) + skb_core->page_inuse;
 	skb_core->page_inuse += actual_size;
 	skb_len_add(skb, actual_size);
+
+done:
+	preempt_enable();
 	return result;
 }
 

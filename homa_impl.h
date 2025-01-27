@@ -58,7 +58,7 @@
 #ifndef __STRIP__ /* See strip.py */
 /* Null out things that confuse VSCode Intellisense */
 #ifdef __VSCODE__
-#define raw_smp_processor_id() 1
+#define smp_processor_id() 1
 #define BUG()
 #define BUG_ON(...)
 #define set_current_state(...)
@@ -135,7 +135,8 @@ struct homa_interest {
 
 	/**
 	 * @core: Core on which @thread was executing when it registered
-	 * its interest.  Used for load balancing (see balance.txt).
+	 * its interest.  This is a hint used for load balancing
+	 * (see balance.txt).
 	 */
 	int core;
 
@@ -170,6 +171,10 @@ static inline void homa_interest_init(struct homa_interest *interest)
 	atomic_set(&interest->rpc_ready, 0);
 	interest->rpc = NULL;
 	interest->locked = 0;
+
+	/* Safe (and necessary) to use raw_smp_processor_id: this is only
+	 * a hint.
+	 */
 	interest->core = raw_smp_processor_id();
 	interest->reg_rpc = NULL;
 	INIT_LIST_HEAD(&interest->request_links);
