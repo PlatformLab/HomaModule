@@ -573,7 +573,11 @@ TEST_F(homa_pool, homa_pool_check_waiting__rpc_initially_locked)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_trylock_errors = 0xa;
+#else /* See strip.py */
+	mock_trylock_errors = 0x3;
+#endif /* See strip.py */
 	unit_log_clear();
 	atomic_set(&pool->free_bpages, 1);
 	homa_pool_check_waiting(pool);

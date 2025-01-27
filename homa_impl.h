@@ -72,11 +72,11 @@ struct homa;
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
-#endif /* See strip.py */
 #include "homa_metrics.h"
 
 /* Declarations used in this file, so they can't be made at the end. */
 void     homa_throttle_lock_slow(struct homa *homa);
+#endif /* See strip.py */
 
 #define sizeof32(type) ((int)(sizeof(type)))
 
@@ -905,6 +905,7 @@ static inline void homa_set_doff(struct homa_data_hdr *h, int size)
 	h->common.doff = size << 2;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_throttle_lock() - Acquire the throttle lock. If the lock
  * isn't immediately available, record stats on the waiting time.
@@ -916,6 +917,17 @@ static inline void homa_throttle_lock(struct homa *homa)
 	if (!spin_trylock_bh(&homa->throttle_lock))
 		homa_throttle_lock_slow(homa);
 }
+#else /* See strip.py */
+/**
+ * homa_throttle_lock() - Acquire the throttle lock.
+ * @homa:    Overall data about the Homa protocol implementation.
+ */
+static inline void homa_throttle_lock(struct homa *homa)
+	__acquires(&homa->throttle_lock)
+{
+	spin_lock_bh(&homa->throttle_lock);
+}
+#endif /* See strip.py */
 
 /**
  * homa_throttle_unlock() - Release the throttle lock.

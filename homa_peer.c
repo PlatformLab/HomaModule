@@ -353,6 +353,7 @@ struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 			&peer->flow.u.ip6, NULL);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_set_cutoffs() - Set the cutoffs for unscheduled priorities in
  * a peer object. This is a convenience function used primarily by unit tests.
@@ -397,6 +398,7 @@ void homa_peer_lock_slow(struct homa_peer *peer)
 	INC_METRIC(peer_ack_lock_misses, 1);
 	INC_METRIC(peer_ack_lock_miss_ns, sched_clock() - start);
 }
+#endif /* See strip.py */
 
 /**
  * homa_peer_add_ack() - Add a given RPC to the list of unacked

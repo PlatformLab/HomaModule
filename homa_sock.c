@@ -376,6 +376,7 @@ struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 	return result;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_sock_lock_slow() - This function implements the slow path for
  * acquiring a socketC lock. It is invoked when a socket lock isn't immediately
@@ -422,3 +423,4 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 		INC_METRIC(server_lock_miss_ns, sched_clock() - start);
 	}
 }
+#endif /* See strip.py */

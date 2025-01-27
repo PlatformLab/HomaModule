@@ -214,11 +214,14 @@ int      homa_peer_get_acks(struct homa_peer *peer, int count,
 struct dst_entry
 	       *homa_peer_get_dst(struct homa_peer *peer,
 				  struct inet_sock *inet);
+#ifndef __STRIP__ /* See strip.py */
 void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
+#endif /* See strip.py */
 void     homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now);
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_lock() - Acquire the lock for a peer's @unacked_lock. If the lock
  * isn't immediately available, record stats on the waiting time.
@@ -230,6 +233,17 @@ static inline void homa_peer_lock(struct homa_peer *peer)
 	if (!spin_trylock_bh(&peer->ack_lock))
 		homa_peer_lock_slow(peer);
 }
+#else /* See strip.py */
+/**
+ * homa_peer_lock() - Acquire the lock for a peer's @ack_lock.
+ * @peer:    Peer to lock.
+ */
+static inline void homa_peer_lock(struct homa_peer *peer)
+	__acquires(&peer->ack_lock)
+{
+	spin_lock_bh(&peer->ack_lock);
+}
+#endif /* See strip.py */
 
 /**
  * homa_peer_unlock() - Release the lock for a peer's @unacked_lock.

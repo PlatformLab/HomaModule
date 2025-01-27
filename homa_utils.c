@@ -673,6 +673,7 @@ void homa_spin(int ns)
 		;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_throttle_lock_slow() - This function implements the slow path for
  * acquiring the throttle lock. It is invoked when the lock isn't immediately
@@ -723,3 +724,4 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		homa_freeze_peers(rpc->hsk->homa);
 	}
 }
+#endif /* See strip.py */
