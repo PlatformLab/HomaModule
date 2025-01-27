@@ -146,9 +146,6 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 				 const struct in6_addr *addr,
 				 struct inet_sock *inet)
 {
-	/* Note: this function uses RCU operators to ensure safety even
-	 * if a concurrent call is adding a new entry.
-	 */
 	struct homa_peer *peer;
 	struct dst_entry *dst;
 
@@ -162,12 +159,22 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 			  HOMA_PEERTAB_BUCKET_BITS);
 	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[3],
 			  HOMA_PEERTAB_BUCKET_BITS);
+
+	/* Use RCU operators to ensure safety even if a concurrent call is
+	 * adding a new entry. The calls to rcu_read_lock and rcu_read_unlock
+	 * shouldn't actually be needed, since we don't need to protect
+	 * against concurrent deletion.
+	 */
+	rcu_read_lock();
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 				 peertab_links) {
-		if (ipv6_addr_equal(&peer->addr, addr))
+		if (ipv6_addr_equal(&peer->addr, addr)) {
+			rcu_read_unlock();
 			return peer;
+		}
 		INC_METRIC(peer_hash_links, 1);
 	}
+	rcu_read_unlock();
 
 	/* No existing entry; create a new one.
 	 *
@@ -176,8 +183,8 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	 * created by a concurrent invocation of this function).
 	 */
 	spin_lock_bh(&peertab->write_lock);
-	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
-				 peertab_links) {
+	hlist_for_each_entry(peer, &peertab->buckets[bucket],
+			     peertab_links) {
 		if (ipv6_addr_equal(&peer->addr, addr))
 			goto done;
 	}
