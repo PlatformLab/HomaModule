@@ -49,6 +49,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	if (!peertab->buckets)
 		return;
 
+	spin_lock_bh(&peertab->write_lock);
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
 					  peertab_links) {
@@ -58,6 +59,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	}
 	vfree(peertab->buckets);
 	homa_peertab_gc_dsts(peertab, ~0);
+	spin_unlock_bh(&peertab->write_lock);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -135,6 +137,7 @@ done:
  *                 free all entries.
  */
 void homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now)
+	__must_hold(&peer_tab->write_lock)
 {
 	while (!list_empty(&peertab->dead_dsts)) {
 		struct homa_dead_dst *dead =
