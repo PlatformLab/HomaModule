@@ -71,8 +71,8 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	 * to be performed without holding locks. Also, can't hold spin
 	 * locks while doing things that could block, such as memory allocation.
 	 */
-	homa_bucket_lock(bucket, crpc->id, "homa_rpc_new_client");
-	homa_sock_lock(hsk, "homa_rpc_new_client");
+	homa_bucket_lock(bucket, crpc->id);
+	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		homa_rpc_unlock(crpc);
@@ -120,7 +120,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	 * the desired RPC.
 	 */
 	bucket = homa_server_rpc_bucket(hsk, id);
-	homa_bucket_lock(bucket, id, "homa_rpc_new_server");
+	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id &&
 		    srpc->dport == ntohs(h->common.sport) &&
@@ -176,7 +176,7 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 		goto error;
 
 	/* Initialize fields that require socket to be locked. */
-	homa_sock_lock(hsk, "homa_rpc_new_server");
+	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		err = -ESHUTDOWN;
@@ -279,7 +279,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	homa_grant_free_rpc(rpc);
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
-	homa_sock_lock(rpc->hsk, "homa_rpc_end");
+	homa_sock_lock(rpc->hsk);
 	__hlist_del(&rpc->hash_links);
 	list_del_rcu(&rpc->active_links);
 	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
@@ -371,7 +371,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 		num_rpcs = 0;
 		rx_frees = 0;
 
-		homa_sock_lock(hsk, "homa_rpc_reap");
+		homa_sock_lock(hsk);
 		if (atomic_read(&hsk->protect_count)) {
 			INC_METRIC(disabled_reaps, 1);
 			tt_record2("homa_rpc_reap returning: protect_count %d, dead_skbs %d",
@@ -446,7 +446,7 @@ release:
 			 * that invoked homa_rpc_end hasn't unlocked the
 			 * RPC yet.
 			 */
-			homa_rpc_lock(rpc, "homa_rpc_reap");
+			homa_rpc_lock(rpc);
 			homa_rpc_unlock(rpc);
 
 			if (unlikely(rpc->msgin.num_bpages))
@@ -498,7 +498,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
 	struct homa_rpc *crpc;
 
-	homa_bucket_lock(bucket, id, __func__);
+	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(crpc, &bucket->rpcs, hash_links) {
 		if (crpc->id == id)
 			return crpc;
@@ -525,7 +525,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;
 
-	homa_bucket_lock(bucket, id, __func__);
+	homa_bucket_lock(bucket, id);
 	hlist_for_each_entry(srpc, &bucket->rpcs, hash_links) {
 		if (srpc->id == id && ipv6_addr_equal(&srpc->peer->addr, saddr))
 			return srpc;

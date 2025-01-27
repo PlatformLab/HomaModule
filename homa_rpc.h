@@ -451,23 +451,19 @@ int      homa_validate_incoming(struct homa *homa, int verbose,
  *          One approach is to use homa_protect_rpcs. Don't use this function
  *          unless you are very sure what you are doing!  See sync.txt for
  *          more info on locking.
- * @locker: Static string identifying the locking code. Normally ignored,
- *          but used occasionally for diagnostics and debugging.
  */
-static inline void homa_rpc_lock(struct homa_rpc *rpc, const char *locker)
+static inline void homa_rpc_lock(struct homa_rpc *rpc)
 {
-	homa_bucket_lock(rpc->bucket, rpc->id, locker);
+	homa_bucket_lock(rpc->bucket, rpc->id);
 }
 
 /**
  * homa_rpc_try_lock() - Acquire the lock for an RPC if it is available.
  * @rpc:       RPC to lock.
- * @locker:    Static string identifying the locking code. Normally ignored,
- *             but used when debugging deadlocks.
  * Return:     Nonzero if lock was successfully acquired, zero if it is
  *             currently owned by someone else.
  */
-static inline int homa_rpc_try_lock(struct homa_rpc *rpc, const char *locker)
+static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;
@@ -498,7 +494,7 @@ static inline int homa_protect_rpcs(struct homa_sock *hsk)
 {
 	int result;
 
-	homa_sock_lock(hsk, __func__);
+	homa_sock_lock(hsk);
 	result = !hsk->shutdown;
 	if (result)
 		atomic_inc(&hsk->protect_count);

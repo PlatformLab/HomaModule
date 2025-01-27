@@ -292,12 +292,12 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 					   max_seg_data);
 		if (unlikely(IS_ERR(skb))) {
 			err = PTR_ERR(skb);
-			homa_rpc_lock(rpc, "homa_message_out_fill");
+			homa_rpc_lock(rpc);
 			goto error;
 		}
 		bytes_left -= skb_data_bytes;
 
-		homa_rpc_lock(rpc, "homa_message_out_fill2");
+		homa_rpc_lock(rpc);
 		if (rpc->state == RPC_DEAD) {
 			/* RPC was freed while we were copying. */
 			err = -EINVAL;
@@ -552,7 +552,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 				   txq->dql.num_queued, txq->dql.adj_limit);
 #endif /* See strip.py */
 		force = false;
-		homa_rpc_lock(rpc, "homa_xmit_data");
+		homa_rpc_lock(rpc);
 		if (rpc->state == RPC_DEAD)
 			break;
 	}
@@ -936,7 +936,7 @@ bool homa_pacer_xmit(struct homa *homa)
 			homa_throttle_unlock(homa);
 			break;
 		}
-		if (!homa_rpc_try_lock(rpc, "homa_pacer_xmit")) {
+		if (!homa_rpc_try_lock(rpc)) {
 			homa_throttle_unlock(homa);
 			INC_METRIC(pacer_skipped_rpcs, 1);
 			break;
@@ -1069,7 +1069,7 @@ void homa_log_throttled(struct homa *homa)
 	homa_throttle_lock(homa);
 	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
 		rpcs++;
-		if (!homa_rpc_try_lock(rpc, "homa_log_throttled")) {
+		if (!homa_rpc_try_lock(rpc)) {
 			pr_notice("Skipping throttled RPC: locked\n");
 			continue;
 		}

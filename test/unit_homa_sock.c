@@ -396,13 +396,13 @@ TEST_F(homa_sock, homa_sock_lock_slow)
 {
 	mock_ns_tick = 100;
 
-	homa_sock_lock(&self->hsk, "unit test");
+	homa_sock_lock(&self->hsk);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_misses);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_miss_ns);
 	homa_sock_unlock(&self->hsk);
 
 	mock_trylock_errors = 1;
-	homa_sock_lock(&self->hsk, "unit test");
+	homa_sock_lock(&self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->socket_lock_misses);
 	EXPECT_EQ(100, homa_metrics_per_cpu()->socket_lock_miss_ns);
 	homa_sock_unlock(&self->hsk);

@@ -153,12 +153,6 @@ struct homa_sock {
 	spinlock_t lock;
 
 	/**
-	 * @last_locker: identifies the code that most recently acquired
-	 * @lock successfully. Occasionally used for debugging.
-	 */
-	char *last_locker;
-
-	/**
 	 * @protect_count: counts the number of calls to homa_protect_rpcs
 	 * for which there have not yet been calls to homa_unprotect_rpcs.
 	 * See sync.txt for more info.
@@ -301,16 +295,12 @@ struct homa_sock  *homa_socktab_start_scan(struct homa_socktab *socktab,
  * homa_sock_lock() - Acquire the lock for a socket. If the socket
  * isn't immediately available, record stats on the waiting time.
  * @hsk:     Socket to lock.
- * @locker:  Static string identifying where the socket was locked.
- *           Not normally used, but can be helpful when tracking down
- *           deadlocks.
  */
-static inline void homa_sock_lock(struct homa_sock *hsk, const char *locker)
+static inline void homa_sock_lock(struct homa_sock *hsk)
 	__acquires(&hsk->lock)
 {
 	if (!spin_trylock_bh(&hsk->lock))
 		homa_sock_lock_slow(hsk);
-//	hsk->last_locker = locker;
 }
 
 /**
@@ -378,14 +368,11 @@ static inline struct homa_rpc_bucket *homa_server_rpc_bucket(struct homa_sock *h
 
 /**
  * homa_bucket_lock() - Acquire the lock for an RPC hash table bucket.
- * @bucket:    Bucket to lock
- * @id:        ID of the RPC that is requesting the lock. Normally ignored,
- *             but used occasionally for diagnostics and debugging.
- * @locker:    Static string identifying the locking code. Normally ignored,
- *             but used occasionally for diagnostics and debugging.
+ * @bucket:    Bucket to lock.
+ * @id:        Id of the RPC on whose behalf the bucket is being locked.
+ *             Used only for metrics.
  */
-static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket,
-				    u64 id, const char *locker)
+static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
 {
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);

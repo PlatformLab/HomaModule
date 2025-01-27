@@ -133,7 +133,7 @@ void homa_pool_destroy(struct homa_pool *pool)
 void homa_pool_get_rcvbuf(struct homa_sock *hsk,
 			  struct homa_rcvbuf_args *args)
 {
-	homa_sock_lock(hsk, "homa_pool_get_rcvbuf");
+	homa_sock_lock(hsk);
 	args->start = (uintptr_t)hsk->buffer_pool->region;
 	args->length = hsk->buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 	homa_sock_unlock(hsk);
@@ -360,7 +360,7 @@ out_of_space:
 	tt_record4("Buffer allocation failed, port %d, id %d, length %d, free_bpages %d",
 		   pool->hsk->port, rpc->id, rpc->msgin.length,
 		   atomic_read(&pool->free_bpages));
-	homa_sock_lock(pool->hsk, "homa_pool_allocate");
+	homa_sock_lock(pool->hsk);
 	list_for_each_entry(other, &pool->hsk->waiting_for_bufs, buf_links) {
 		if (other->msgin.length > rpc->msgin.length) {
 			list_add_tail(&rpc->buf_links, &other->buf_links);
@@ -462,7 +462,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 	while (atomic_read(&pool->free_bpages) >= pool->bpages_needed) {
 		struct homa_rpc *rpc;
 
-		homa_sock_lock(pool->hsk, "buffer pool");
+		homa_sock_lock(pool->hsk);
 		if (list_empty(&pool->hsk->waiting_for_bufs)) {
 			pool->bpages_needed = INT_MAX;
 			homa_sock_unlock(pool->hsk);
@@ -470,7 +470,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		}
 		rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
 				       struct homa_rpc, buf_links);
-		if (!homa_rpc_try_lock(rpc, "homa_pool_check_waiting")) {
+		if (!homa_rpc_try_lock(rpc)) {
 			/* Can't just spin on the RPC lock because we're
 			 * holding the socket lock (see sync.txt). Instead,
 			 * release the socket lock and try the entire

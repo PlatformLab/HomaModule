@@ -342,7 +342,7 @@ free_skbs:
 			   n, rpc->id);
 		n = 0;
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_lock(rpc, "homa_copy_to_user");
+		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK | RPC_COPYING_TO_USER,
 			      &rpc->flags);
 		if (error)
@@ -613,7 +613,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
 	    !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
 		atomic_or(RPC_PKTS_READY, &rpc->flags);
-		homa_sock_lock(rpc->hsk, "homa_data_pkt");
+		homa_sock_lock(rpc->hsk);
 		homa_rpc_handoff(rpc);
 		homa_sock_unlock(rpc->hsk);
 	}
@@ -961,7 +961,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	 * the RPC, just skip it (waiting could deadlock), and it
 	 * will eventually get updated elsewhere.
 	 */
-	if (homa_rpc_try_lock(oldest, "homa_choose_fifo_grant")) {
+	if (homa_rpc_try_lock(oldest)) {
 		homa_grant_update_incoming(oldest, homa);
 		homa_rpc_unlock(oldest);
 	}
@@ -998,7 +998,7 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
 		   tt_addr(rpc->peer->addr), rpc->id, error);
 	rpc->error = error;
-	homa_sock_lock(rpc->hsk, "homa_rpc_abort");
+	homa_sock_lock(rpc->hsk);
 	if (!rpc->hsk->shutdown)
 		homa_rpc_handoff(rpc);
 	homa_sock_unlock(rpc->hsk);
@@ -1036,7 +1036,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 				continue;
 			if (port && rpc->dport != port)
 				continue;
-			homa_rpc_lock(rpc, "rpc_abort_rpcs");
+			homa_rpc_lock(rpc);
 			homa_rpc_abort(rpc, error);
 			homa_rpc_unlock(rpc);
 		}
@@ -1068,7 +1068,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 	list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs, active_links) {
 		if (!homa_is_client(rpc->id))
 			continue;
-		homa_rpc_lock(rpc, "homa_abort_sock_rpcs");
+		homa_rpc_lock(rpc);
 		if (rpc->state == RPC_DEAD) {
 			homa_rpc_unlock(rpc);
 			continue;
@@ -1126,7 +1126,7 @@ int homa_register_interests(struct homa_interest *interest,
 	/* Need both the RPC lock (acquired above) and the socket lock to
 	 * avoid races.
 	 */
-	homa_sock_lock(hsk, "homa_register_interests");
+	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		if (rpc)
@@ -1190,7 +1190,7 @@ claim_rpc:
 	homa_sock_unlock(hsk);
 	if (!locked) {
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
-		homa_rpc_lock(rpc, "homa_register_interests");
+		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
 		locked = 1;
 	}
@@ -1332,7 +1332,7 @@ found_rpc:
 		if (interest.reg_rpc ||
 		    !list_empty(&interest.request_links) ||
 		    !list_empty(&interest.response_links)) {
-			homa_sock_lock(hsk, "homa_wait_for_message");
+			homa_sock_lock(hsk);
 			if (interest.reg_rpc)
 				interest.reg_rpc->interest = NULL;
 			if (!list_empty(&interest.request_links))
@@ -1352,7 +1352,7 @@ found_rpc:
 				   rpc->id, current->pid);
 			if (!interest.locked) {
 				atomic_or(APP_NEEDS_LOCK, &rpc->flags);
-				homa_rpc_lock(rpc, "homa_wait_for_message");
+				homa_rpc_lock(rpc);
 				atomic_andnot(APP_NEEDS_LOCK | RPC_HANDING_OFF,
 					      &rpc->flags);
 			} else {

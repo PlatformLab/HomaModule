@@ -139,7 +139,6 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	spin_lock_bh(&socktab->write_lock);
 	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
-	hsk->last_locker = "none";
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
@@ -235,7 +234,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	int i = 0;
 #endif /* See strip.py */
 
-	homa_sock_lock(hsk, "homa_socket_shutdown");
+	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
 		return;
@@ -260,12 +259,12 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	homa_sock_unlock(hsk);
 
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-		homa_rpc_lock(rpc, "homa_sock_shutdown");
+		homa_rpc_lock(rpc);
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
 
-	homa_sock_lock(hsk, "homa_socket_shutdown #2");
+	homa_sock_lock(hsk);
 	list_for_each_entry(interest, &hsk->request_interests, request_links)
 		wake_up_process(interest->thread);
 	list_for_each_entry(interest, &hsk->response_interests, response_links)
@@ -325,7 +324,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 		return result;
 	if (port >= HOMA_MIN_DEFAULT_PORT)
 		return -EINVAL;
-	homa_sock_lock(hsk, "homa_sock_bind");
+	homa_sock_lock(hsk);
 	spin_lock_bh(&socktab->write_lock);
 	if (hsk->shutdown) {
 		result = -ESHUTDOWN;
@@ -402,19 +401,19 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  * lock isn't immediately available. It waits for the lock, but also records
  * statistics about the waiting time.
  * @bucket:    The hash table bucket to lock.
- * @id:        ID of the particular RPC being locked (multiple RPCs may
- *             share a single bucket lock).
+ * @id:        Id of the RPC on whose behalf the bucket is being locked.
+ *             Used only for metrics.
  */
 void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 	__acquires(&bucket->lock)
 {
 	u64 start = sched_clock();
 
-	tt_record2("beginning wait for rpc lock, id %d (bucket %d)",
+	tt_record2("beginning wait for rpc lock, id %d, (bucket %d)",
 		   id, bucket->id);
 	spin_lock_bh(&bucket->lock);
-	tt_record2("ending wait for bucket lock, id %d (bucket %d)",
-		   id, bucket->id);
+	tt_record2("ending wait for bucket lock, id %d, (bucket %d)",
+		    id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_ns, sched_clock() - start);

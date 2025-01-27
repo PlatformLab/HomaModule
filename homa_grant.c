@@ -469,7 +469,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = active_rpcs[i];
 
-			homa_rpc_lock(rpc, "homa_grant_recalc");
+			homa_rpc_lock(rpc);
 			homa_grant_send(rpc, homa);
 			try_again += homa_grant_update_incoming(rpc, homa);
 			if (rpc->msgin.granted >= rpc->msgin.length) {
@@ -626,7 +626,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 			 */
 			homa_rpc_unlock(rpc);
 			homa_grant_recalc(homa, 1);
-			homa_rpc_lock(rpc, "homa_grant_free_rpc");
+			homa_rpc_lock(rpc);
 		} else {
 			homa_grantable_unlock(homa);
 		}
