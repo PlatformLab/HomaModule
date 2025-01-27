@@ -367,7 +367,7 @@ out_of_space:
 			goto queued;
 		}
 	}
-	list_add_tail_rcu(&rpc->buf_links, &pool->hsk->waiting_for_bufs);
+	list_add_tail(&rpc->buf_links, &pool->hsk->waiting_for_bufs);
 
 queued:
 	set_bpages_needed(pool);
