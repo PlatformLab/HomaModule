@@ -187,11 +187,14 @@ TEST_F(homa_sock, homa_sock_unlink__remove_from_map)
 
 	EXPECT_EQ(&hsk2, homa_sock_find(self->homa.port_map, client2));
 	EXPECT_EQ(&hsk3, homa_sock_find(self->homa.port_map, client3));
+	sock_put(&hsk2.sock);
+	sock_put(&hsk3.sock);
 
 	homa_sock_shutdown(&hsk2);
 
 	EXPECT_EQ(NULL, homa_sock_find(self->homa.port_map, client2));
 	EXPECT_EQ(&hsk3, homa_sock_find(self->homa.port_map, client3));
+	sock_put(&hsk3.sock);
 
 	homa_sock_shutdown(&hsk3);
 
@@ -208,6 +211,7 @@ TEST_F(homa_sock, homa_sock_shutdown__unlink_socket)
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk, 100));
 	client = hsk.port;
 	EXPECT_EQ(&hsk, homa_sock_find(self->homa.port_map, client));
+	sock_put(&hsk.sock);
 
 	homa_sock_shutdown(&hsk);
 	EXPECT_EQ(NULL, homa_sock_find(self->homa.port_map, client));
@@ -281,10 +285,12 @@ TEST_F(homa_sock, homa_sock_bind)
 			110));
 
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->homa.port_map, 110));
+	sock_put(&self->hsk.sock);
 	EXPECT_EQ(0, -homa_sock_bind(self->homa.port_map, &self->hsk,
 			120));
 	EXPECT_EQ(NULL, homa_sock_find(self->homa.port_map, 110));
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->homa.port_map, 120));
+	sock_put(&self->hsk.sock);
 	homa_sock_destroy(&hsk2);
 }
 TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
@@ -302,8 +308,10 @@ TEST_F(homa_sock, homa_sock_find__basics)
 	EXPECT_EQ(0, homa_sock_bind(self->homa.port_map, &hsk2, 100));
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->homa.port_map,
 			self->hsk.port));
+	sock_put(&self->hsk.sock);
 	EXPECT_EQ(&hsk2, homa_sock_find(self->homa.port_map,
 			hsk2.port));
+	sock_put(&hsk2.sock);
 	EXPECT_EQ(NULL, homa_sock_find(self->homa.port_map,
 			hsk2.port + 1));
 	homa_sock_destroy(&hsk2);
@@ -326,12 +334,16 @@ TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->homa.port_map,
 			13));
+	sock_put(&self->hsk.sock);
 	EXPECT_EQ(&hsk2, homa_sock_find(self->homa.port_map,
 			2*HOMA_SOCKTAB_BUCKETS + 13));
+	sock_put(&hsk2.sock);
 	EXPECT_EQ(&hsk3, homa_sock_find(self->homa.port_map,
 			3*HOMA_SOCKTAB_BUCKETS + 13));
+	sock_put(&hsk3.sock);
 	EXPECT_EQ(&hsk4, homa_sock_find(self->homa.port_map,
 			5*HOMA_SOCKTAB_BUCKETS + 13));
+	sock_put(&hsk4.sock);
 
 	homa_sock_destroy(&hsk2);
 	homa_sock_destroy(&hsk3);

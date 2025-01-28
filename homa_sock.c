@@ -129,6 +129,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = homa->port_map;
+	struct homa_sock *other;
 	int starting_port;
 	int result = 0;
 	int i;
@@ -146,8 +147,10 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		homa->prev_default_port++;
 		if (homa->prev_default_port < HOMA_MIN_DEFAULT_PORT)
 			homa->prev_default_port = HOMA_MIN_DEFAULT_PORT;
-		if (!homa_sock_find(socktab, homa->prev_default_port))
+		other = homa_sock_find(socktab, homa->prev_default_port);
+		if (!other)
 			break;
+		sock_put(&other->sock);
 		if (homa->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
 			hsk->shutdown = true;
@@ -322,6 +325,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 
 	owner = homa_sock_find(socktab, port);
 	if (owner) {
+		sock_put(&owner->sock);
 		if (owner != hsk)
 			result = -EADDRINUSE;
 		goto done;
@@ -342,24 +346,25 @@ done:
  * homa_sock_find() - Returns the socket associated with a given port.
  * @socktab:    Hash table in which to perform lookup.
  * @port:       The port of interest.
- * Return:      The socket that owns @port, or NULL if none.
- *
- * Note: this function uses RCU list-searching facilities, but it doesn't
- * call rcu_read_lock. The caller should do that, if the caller cares (this
- * way, the caller's use of the socket will also be protected).
+ * Return:      The socket that owns @port, or NULL if none. If non-NULL
+ *              then this method has taken a reference on the socket and
+ * 	        the caller must call sock_put to release it.
  */
 struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 {
 	struct homa_sock *hsk;
 	struct homa_sock *result = NULL;
 
+	rcu_read_lock();
 	hlist_for_each_entry_rcu(hsk, &socktab->buckets[homa_port_hash(port)],
 				 socktab_links) {
 		if (hsk->port == port) {
 			result = hsk;
+			sock_hold(&hsk->sock);
 			break;
 		}
 	}
+	rcu_read_unlock();
 	return result;
 }
 

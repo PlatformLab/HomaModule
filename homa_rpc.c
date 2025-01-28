@@ -200,7 +200,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 	struct homa_rpc *rpc;
 
 	UNIT_LOG("; ", "ack %llu", id);
-	if (hsk2->port != server_port) {
+	if (hsk->port != server_port) {
 		/* Without RCU, sockets other than hsk can be deleted
 		 * out from under us.
 		 */
@@ -215,6 +215,8 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
 	}
+	if (hsk->port != server_port)
+		sock_put(&hsk2->sock);
 
 done:
 	if (hsk->port != server_port)

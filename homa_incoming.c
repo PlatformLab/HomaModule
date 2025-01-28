@@ -560,6 +560,7 @@ discard:
 		homa_rpc_reap(hsk, false);
 		INC_METRIC(data_pkt_reap_ns, sched_clock() - start);
 	}
+	sock_put(&hsk->sock);
 }
 
 /**
