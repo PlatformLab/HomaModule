@@ -102,9 +102,6 @@ struct homa_rpc_bucket {
 	 */
 	spinlock_t lock;
 
-	/** @rpcs: list of RPCs that hash to this bucket. */
-	struct hlist_head rpcs;
-
 	/**
 	 * @id: identifier for this bucket, used in error messages etc.
 	 * It's the index of the bucket within its hash table bucket
@@ -112,6 +109,9 @@ struct homa_rpc_bucket {
 	 * client RPCs.
 	 */
 	int id;
+
+	/** @rpcs: list of RPCs that hash to this bucket. */
+	struct hlist_head rpcs;
 };
 
 /**

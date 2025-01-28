@@ -175,15 +175,15 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		struct homa_rpc_bucket *bucket = &hsk->client_rpc_buckets[i];
 
 		spin_lock_init(&bucket->lock);
-		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i;
+		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
 	for (i = 0; i < HOMA_SERVER_RPC_BUCKETS; i++) {
 		struct homa_rpc_bucket *bucket = &hsk->server_rpc_buckets[i];
 
 		spin_lock_init(&bucket->lock);
-		INIT_HLIST_HEAD(&bucket->rpcs);
 		bucket->id = i + 1000000;
+		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
 	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_ATOMIC);
 	if (!hsk->buffer_pool)
