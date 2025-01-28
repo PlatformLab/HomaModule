@@ -36,56 +36,32 @@ struct homa_socktab {
 
 	/**
 	 * @buckets: Heads of chains for hash table buckets. Chains
-	 * consist of homa_socktab_link objects.
+	 * consist of homa_sock objects.
 	 */
-	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
-
-	/**
-	 * @active_scans: List of homa_socktab_scan structs for all scans
-	 * currently underway on this homa_socktab.
-	 */
-	struct list_head active_scans;
-};
-
-/**
- * struct homa_socktab_links - Used to link homa_socks into the hash chains
- * of a homa_socktab.
- */
-struct homa_socktab_links {
-	/** hash_links: links this element into the hash chain. */
-	struct hlist_node hash_links;
-
-	/** @sock: Homa socket structure. */
-	struct homa_sock *sock;
+	struct hlist_head __rcu buckets[HOMA_SOCKTAB_BUCKETS];
 };
 
 /**
  * struct homa_socktab_scan - Records the state of an iteration over all
- * the entries in a homa_socktab, in a way that permits RCU-safe deletion
- * of entries.
+ * the entries in a homa_socktab, in a way that is safe against concurrent
+ * reclamation of sockets.
  */
 struct homa_socktab_scan {
 	/** @socktab: The table that is being scanned. */
 	struct homa_socktab *socktab;
 
 	/**
-	 * @current_bucket: the index of the bucket in socktab->buckets
-	 * currently being scanned. If >= HOMA_SOCKTAB_BUCKETS, the scan
-	 * is complete.
+	 * @hsk: Points to the current socket in the iteration, or NULL if
+	 * we're at the beginning or end of the iteration. If non-NULL then
+	 * we are holding a reference to this socket.
+	 */
+	struct homa_sock *hsk;
+
+	/**
+	 * @current_bucket: The index of the bucket in socktab->buckets
+	 * currently being scanned.
 	 */
 	int current_bucket;
-
-	/**
-	 * @next: the next socket to return from homa_socktab_next (this
-	 * socket has not yet been returned). NULL means there are no
-	 * more sockets in the current bucket.
-	 */
-	struct homa_socktab_links *next;
-
-	/**
-	 * @scan_links: Used to link this scan into @socktab->scans.
-	 */
-	struct list_head scan_links;
 };
 
 /**
@@ -184,11 +160,8 @@ struct homa_sock {
 	 */
 	int ip_header_length;
 
-	/**
-	 * @socktab_links: Links this socket into the homa_socktab
-	 * based on @port.
-	 */
-	struct homa_socktab_links socktab_links;
+	/** @socktab_links: Links this socket into a homa_socktab bucket. */
+	struct hlist_node __rcu socktab_links;
 
 	/**
 	 * @active_rpcs: List of all existing RPCs related to this socket,
@@ -199,7 +172,7 @@ struct homa_sock {
 	 * The list is sorted, with the oldest RPC first. Manipulate with
 	 * RCU so timer can access without locking.
 	 */
-	struct list_head active_rpcs;
+	struct list_head __rcu active_rpcs;
 
 	/**
 	 * @dead_rpcs: Contains RPCs for which homa_rpc_end has been

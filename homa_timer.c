@@ -199,10 +199,7 @@ void homa_timer(struct homa *homa)
 	}
 	prev_grant_count = total_grants;
 
-	/* Scan all existing RPCs in all sockets.  The rcu_read_lock
-	 * below prevents sockets from being deleted during the scan.
-	 */
-	rcu_read_lock();
+	/* Scan all existing RPCs in all sockets. */
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
@@ -223,6 +220,7 @@ void homa_timer(struct homa *homa)
 
 		if (!homa_protect_rpcs(hsk))
 			continue;
+		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			total_rpcs++;
 			homa_rpc_lock(rpc);
@@ -243,8 +241,7 @@ void homa_timer(struct homa *homa)
 			rpc_count++;
 			if (rpc_count >= 10) {
 				/* Give other kernel threads a chance to run
-				 * on this core. Must release the RCU read lock
-				 * while doing this.
+				 * on this core.
 				 */
 				rcu_read_unlock();
 				schedule();
@@ -252,10 +249,10 @@ void homa_timer(struct homa *homa)
 				rpc_count = 0;
 			}
 		}
+		rcu_read_unlock();
 		homa_unprotect_rpcs(hsk);
 	}
 	homa_socktab_end_scan(&scan);
-	rcu_read_unlock();
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 		   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 		   atomic_read(&homa->total_incoming));

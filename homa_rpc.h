@@ -354,7 +354,7 @@ struct homa_rpc {
 	 * The next field will be LIST_POISON1 if this RPC hasn't yet been
 	 * linked into @hsk->active_rpcs. Access with RCU.
 	 */
-	struct list_head active_links;
+	struct list_head __rcu active_links;
 
 	/** @dead_links: For linking this object into @hsk->dead_rpcs. */
 	struct list_head dead_links;

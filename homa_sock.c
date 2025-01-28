@@ -17,7 +17,6 @@ void homa_socktab_init(struct homa_socktab *socktab)
 	spin_lock_init(&socktab->write_lock);
 	for (i = 0; i < HOMA_SOCKTAB_BUCKETS; i++)
 		INIT_HLIST_HEAD(&socktab->buckets[i]);
-	INIT_LIST_HEAD(&socktab->active_scans);
 }
 
 /**
@@ -29,13 +28,11 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
-	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
 		homa_sock_destroy(hsk);
 	}
 	homa_socktab_end_scan(&scan);
-	rcu_read_unlock();
 }
 
 /**
@@ -43,35 +40,27 @@ void homa_socktab_destroy(struct homa_socktab *socktab)
  * in a socktab.
  * @socktab:   Socktab to scan.
  * @scan:      Will hold the current state of the scan; any existing
- *             contents are discarded.
+ *             contents are discarded. The caller must eventually pass this
+ *             to homa_socktab_end_scan.
  *
  * Return:     The first socket in the table, or NULL if the table is
- *             empty.
+ *             empty. If non-NULL, a reference is held on the socket to
+ *             prevent its deletion.
  *
  * Each call to homa_socktab_next will return the next socket in the table.
  * All sockets that are present in the table at the time this function is
  * invoked will eventually be returned, as long as they are not removed
- * from the table. It is safe to remove sockets from the table and/or
- * delete them while the scan is in progress. If a socket is removed from
- * the table during the scan, it may or may not be returned by
- * homa_socktab_next. New entries added during the scan may or may not be
- * returned. The caller must hold an RCU read lock when invoking the
- * scan-related methods here, as well as when manipulating sockets returned
- * during the scan. It is safe to release and reacquire the RCU read lock
- * during a scan, as long as no socket is held when the read lock is
- * released and homa_socktab_next isn't invoked until the RCU read lock
- * is reacquired.
+ * from the table. It is safe to remove sockets from the table while the
+ * scan is in progress. If a socket is removed from the table during the scan,
+ * it may or may not be returned by homa_socktab_next. New entries added
+ * during the scan may or may not be returned.
  */
 struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
 					  struct homa_socktab_scan *scan)
 {
 	scan->socktab = socktab;
+	scan->hsk = NULL;
 	scan->current_bucket = -1;
-	scan->next = NULL;
-
-	spin_lock_bh(&socktab->write_lock);
-	list_add_tail_rcu(&scan->scan_links, &socktab->active_scans);
-	spin_unlock_bh(&socktab->write_lock);
 
 	return homa_socktab_next(scan);
 }
@@ -81,32 +70,39 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  * @scan:      State of the scan.
  *
  * Return:     The next socket in the table, or NULL if the iteration has
- *             returned all of the sockets in the table. Sockets are not
- *             returned in any particular order. It's possible that the
- *             returned socket has been destroyed.
+ *             returned all of the sockets in the table.  If non-NULL, a
+ *             reference is held on the socket to prevent its deletion.
+ *             Sockets are not returned in any particular order. It's
+ *             possible that the returned socket has been destroyed.
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
-	struct homa_socktab_links *links;
-	struct homa_sock *hsk;
+	struct hlist_head __rcu *bucket;
+	struct hlist_node *next;
 
-	while (1) {
-		while (!scan->next) {
-			struct hlist_head *bucket;
-
-			scan->current_bucket++;
-			if (scan->current_bucket >= HOMA_SOCKTAB_BUCKETS)
-				return NULL;
-			bucket = &scan->socktab->buckets[scan->current_bucket];
-			scan->next = (struct homa_socktab_links *)
-				      rcu_dereference(hlist_first_rcu(bucket));
-		}
-		links = scan->next;
-		hsk = links->sock;
-		scan->next = (struct homa_socktab_links *)
-				rcu_dereference(hlist_next_rcu(&links->hash_links));
-		return hsk;
+	rcu_read_lock();
+	if (scan->hsk) {
+		sock_put(&scan->hsk->sock);
+		next = rcu_dereference(hlist_next_rcu(&scan->hsk->socktab_links));
+		if (next)
+			goto success;
 	}
+	while (scan->current_bucket < HOMA_SOCKTAB_BUCKETS - 1) {
+		scan->current_bucket++;
+		bucket = &scan->socktab->buckets[scan->current_bucket];
+		next = rcu_dereference(hlist_first_rcu(bucket));
+		if (next)
+			goto success;
+	}
+	scan->hsk = NULL;
+	rcu_read_unlock();
+	return NULL;
+
+success:
+	scan->hsk =  hlist_entry(next, struct homa_sock, socktab_links);
+	sock_hold(&scan->hsk->sock);
+	rcu_read_unlock();
+	return scan->hsk;
 }
 
 /**
@@ -116,9 +112,10 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
  */
 void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 {
-	spin_lock_bh(&scan->socktab->write_lock);
-	list_del(&scan->scan_links);
-	spin_unlock_bh(&scan->socktab->write_lock);
+	if (scan->hsk) {
+		sock_put(&scan->hsk->sock);
+		scan->hsk = NULL;
+	}
 }
 
 /**
@@ -160,8 +157,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->port = homa->prev_default_port;
 	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
-	hsk->socktab_links.sock = hsk;
-	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
+	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_port_hash(hsk->port)]);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
@@ -202,19 +198,12 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 void homa_sock_unlink(struct homa_sock *hsk)
 {
 	struct homa_socktab *socktab = hsk->homa->port_map;
-	struct homa_socktab_scan *scan;
 
 	/* If any scans refer to this socket, advance them to refer to
 	 * the next socket instead.
 	 */
 	spin_lock_bh(&socktab->write_lock);
-	list_for_each_entry(scan, &socktab->active_scans, scan_links) {
-		if (!scan->next || scan->next->sock != hsk)
-			continue;
-		scan->next = (struct homa_socktab_links *)
-				rcu_dereference(hlist_next_rcu(&scan->next->hash_links));
-	}
-	hlist_del_rcu(&hsk->socktab_links.hash_links);
+	hlist_del_rcu(&hsk->socktab_links);
 	spin_unlock_bh(&socktab->write_lock);
 }
 
@@ -337,11 +326,11 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 			result = -EADDRINUSE;
 		goto done;
 	}
-	hlist_del_rcu(&hsk->socktab_links.hash_links);
+	hlist_del_rcu(&hsk->socktab_links);
 	hsk->port = port;
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links.hash_links,
+	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_port_hash(port)]);
 done:
 	spin_unlock_bh(&socktab->write_lock);
@@ -361,13 +350,11 @@ done:
  */
 struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
 {
-	struct homa_socktab_links *link;
+	struct homa_sock *hsk;
 	struct homa_sock *result = NULL;
 
-	hlist_for_each_entry_rcu(link, &socktab->buckets[homa_port_hash(port)],
-				 hash_links) {
-		struct homa_sock *hsk = link->sock;
-
+	hlist_for_each_entry_rcu(hsk, &socktab->buckets[homa_port_hash(port)],
+				 socktab_links) {
 		if (hsk->port == port) {
 			result = hsk;
 			break;

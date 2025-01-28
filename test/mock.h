@@ -81,6 +81,10 @@
 #undef smp_processor_id
 #define smp_processor_id() mock_processor_id()
 
+#define sock_hold(sock) mock_sock_hold(sock)
+
+#define sock_put(sock) mock_sock_put(sock)
+
 #define spin_unlock mock_spin_unlock
 
 #undef this_cpu_ptr
@@ -130,6 +134,7 @@ extern int         mock_page_nid_mask;
 extern char        mock_printk_output[];
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
+extern int         mock_sock_holds;
 extern int         mock_spin_lock_held;
 extern struct task_struct
 		   mock_task;
@@ -175,8 +180,10 @@ struct sk_buff *
 			 int extra_bytes, int first_value);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
+void        mock_sock_hold(struct sock *sk);
 int         mock_sock_init(struct homa_sock *hsk, struct homa *homa,
 			   int port);
+void        mock_sock_put(struct sock *sk);
 void        mock_teardown(void);
 void       *mock_vmalloc(size_t size);
 

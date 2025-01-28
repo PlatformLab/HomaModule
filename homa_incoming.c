@@ -1019,10 +1019,9 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		     int port, int error)
 {
 	struct homa_socktab_scan scan;
-	struct homa_rpc *rpc, *tmp;
+	struct homa_rpc *rpc;
 	struct homa_sock *hsk;
 
-	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan); hsk;
 	     hsk = homa_socktab_next(&scan)) {
 		/* Skip the (expensive) lock acquisition if there's no
@@ -1032,8 +1031,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			continue;
 		if (!homa_protect_rpcs(hsk))
 			continue;
-		list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs,
-					 active_links) {
+		rcu_read_lock();
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 			if (!ipv6_addr_equal(&rpc->peer->addr, addr))
 				continue;
 			if (port && rpc->dport != port)
@@ -1042,10 +1041,10 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 			homa_rpc_abort(rpc, error);
 			homa_rpc_unlock(rpc);
 		}
+		rcu_read_unlock();
 		homa_unprotect_rpcs(hsk);
 	}
 	homa_socktab_end_scan(&scan);
-	rcu_read_unlock();
 }
 
 /**
@@ -1060,14 +1059,15 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
  */
 void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 {
-	struct homa_rpc *rpc, *tmp;
+	struct homa_rpc *rpc;
 
 	rcu_read_lock();
 	if (list_empty(&hsk->active_rpcs))
 		goto done;
 	if (!homa_protect_rpcs(hsk))
 		goto done;
-	list_for_each_entry_safe(rpc, tmp, &hsk->active_rpcs, active_links) {
+	rcu_read_lock();
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 		if (!homa_is_client(rpc->id))
 			continue;
 		homa_rpc_lock(rpc);
@@ -1084,6 +1084,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 			homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
+	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
 done:
 	rcu_read_unlock();
