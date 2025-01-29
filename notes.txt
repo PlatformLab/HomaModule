@@ -28,6 +28,13 @@ Notes for Homa implementation in Linux:
       traffic?
   * Also consider the amount of data that is "stuck" in the NIC?
 
+* Optimizations for skb freeing:
+  * In GRO, merge page frags out of skbs and return skbs to napi with
+    napi_reuse_skb (return GRO_MERGED_FREE?). See also napi_get_frags (used
+    by the driver?).
+  * Apparently TCP has a faster way of eventually freeing the merged skb
+    (return things to the allocating core): see tcp_eat_recv_skb?
+
 * Remedies to consider for the performance problems at 100 Gbps, where
   one tx channel gets very backed up:
   * Implement zero-copy on output in order to reduce memory bandwidth
