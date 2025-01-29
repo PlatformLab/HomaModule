@@ -250,11 +250,13 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	homa_sock_unlink(hsk);
 	homa_sock_unlock(hsk);
 
+	rcu_read_lock();
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 		homa_rpc_lock(rpc);
 		homa_rpc_end(rpc);
 		homa_rpc_unlock(rpc);
 	}
+	rcu_read_unlock();
 
 	homa_sock_lock(hsk);
 	list_for_each_entry(interest, &hsk->request_interests, request_links)

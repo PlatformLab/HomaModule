@@ -1062,11 +1062,10 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 {
 	struct homa_rpc *rpc;
 
-	rcu_read_lock();
 	if (list_empty(&hsk->active_rpcs))
-		goto done;
+		return;
 	if (!homa_protect_rpcs(hsk))
-		goto done;
+		return;
 	rcu_read_lock();
 	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
 		if (!homa_is_client(rpc->id))
@@ -1087,8 +1086,6 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 	}
 	rcu_read_unlock();
 	homa_unprotect_rpcs(hsk);
-done:
-	rcu_read_unlock();
 }
 
 /**
