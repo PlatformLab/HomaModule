@@ -60,13 +60,6 @@ struct homa_message_out {
 	int next_xmit_offset;
 
 	/**
-	 * @active_xmits: The number of threads that are currently
-	 * transmitting data packets for this RPC; can't reap the RPC
-	 * until this count becomes zero.
-	 */
-	atomic_t active_xmits;
-
-	/**
 	 * @unscheduled: Initial bytes of message that we'll send
 	 * without waiting for grants.
 	 */
@@ -251,13 +244,8 @@ struct homa_rpc {
 	/* Valid bits for @flags:
 	 * RPC_PKTS_READY -        The RPC has input packets ready to be
 	 *                         copied to user space.
-	 * RPC_COPYING_FROM_USER - Data is being copied from user space into
-	 *                         the RPC; the RPC must not be reaped.
-	 * RPC_COPYING_TO_USER -   Data is being copied from this RPC to
-	 *                         user space; the RPC must not be reaped.
-	 * RPC_HANDING_OFF -       This RPC is in the process of being
-	 *                         handed off to a waiting thread; it must
-	 *                         not be reaped.
+	 * RPC_HANDING_OFF -       The RPC has been handed off to a waiting
+	 *                         thread but not yet received by that thread.
 	 * APP_NEEDS_LOCK -        Means that code in the application thread
 	 *                         needs the RPC lock (e.g. so it can start
 	 *                         copying data to user space) so others
@@ -269,21 +257,14 @@ struct homa_rpc {
 	 *                         high network speeds).
 	 */
 #define RPC_PKTS_READY        1
-#define RPC_COPYING_FROM_USER 2
-#define RPC_COPYING_TO_USER   4
-#define RPC_HANDING_OFF       8
-#define APP_NEEDS_LOCK       16
-
-#define RPC_CANT_REAP (RPC_COPYING_FROM_USER | RPC_COPYING_TO_USER \
-		| RPC_HANDING_OFF)
+#define RPC_HANDING_OFF       2
+#define APP_NEEDS_LOCK        4
 
 	/**
-	 * @grants_in_progress: Count of active grant sends for this RPC;
-	 * it's not safe to reap the RPC unless this value is zero.
-	 * This variable is needed so that grantable_lock can be released
-	 * while sending grants, to reduce contention.
+	 * @refs: Number of unmatched calls to homa_rpc_hold; it's not safe
+	 * to free the RPC until this is zero.
 	 */
-	atomic_t grants_in_progress;
+	atomic_t refs;
 
 	/**
 	 * @peer: Information about the other machine (the server, if
@@ -511,6 +492,30 @@ static inline void homa_unprotect_rpcs(struct homa_sock *hsk)
 {
 	atomic_dec(&hsk->protect_count);
 }
+
+#ifndef __UNIT_TEST__
+/**
+ * homa_rpc_hold() - Increment the reference count on an RPC, which will
+ * prevent it from being freed until homa_rpc_put() is called. Used in
+ * situations where a pointer to the RPC needs to be retained during a
+ * period where it is unprotected by locks.
+ * @rpc:      RPC on which to take a reference.
+ */
+static inline void homa_rpc_hold(struct homa_rpc *rpc)
+{
+	atomic_inc(&rpc->refs);
+}
+
+/**
+ * homa_rpc_put() - Release a reference on an RPC (cancels the effect of
+ * a previous call to homa_rpc_put).
+ * @rpc:      RPC to release.
+ */
+static inline void homa_rpc_put(struct homa_rpc *rpc)
+{
+	atomic_dec(&rpc->refs);
+}
+#endif /* __UNIT_TEST__ */
 
 /**
  * homa_is_client(): returns true if we are the client for a particular RPC,

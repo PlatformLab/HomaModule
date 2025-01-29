@@ -38,6 +38,10 @@
 #undef HOMA_MIN_DEFAULT_PORT
 #define HOMA_MIN_DEFAULT_PORT mock_min_default_port
 
+#define homa_rpc_hold mock_rpc_hold
+
+#define homa_rpc_put mock_rpc_put
+
 #undef kmalloc
 #define kmalloc mock_kmalloc
 
@@ -170,6 +174,8 @@ struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,
 				     struct ctl_table *table);
+void        mock_rpc_hold(struct homa_rpc *rpc);
+void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_core(int num);
 void        mock_set_ipv6(struct homa_sock *hsk);
 void        mock_spin_lock(spinlock_t *lock);

@@ -131,10 +131,15 @@ static int mock_active_spin_locks;
  */
 static int mock_active_rcu_locks;
 
-/* Number of calss to sock_hold that haven't been matched with calls
+/* Number of calls to sock_hold that haven't been matched with calls
  * to sock_put.
  */
 int mock_sock_holds;
+
+/* Number of calls to homa_rpc_hold that haven't been matched with calls
+ * to homa_rpc_put.
+ */
+int mock_rpc_holds;
 
 /* The number of times preempt_disable() has been invoked, minus the
  * number of times preempt_enable has been invoked.
@@ -1495,6 +1500,20 @@ struct ctl_table_header *mock_register_net_sysctl(struct net *net,
 	return (struct ctl_table_header *)11111;
 }
 
+void mock_rpc_hold(struct homa_rpc *rpc)
+{
+	mock_rpc_holds++;
+	atomic_inc(&rpc->refs);
+}
+
+void mock_rpc_put(struct homa_rpc *rpc)
+{
+	if (atomic_read(&rpc->refs) == 0)
+		FAIL("homa_rpc_put invoked when RPC has no active holds");
+	mock_rpc_holds--;
+	atomic_dec(&rpc->refs);
+}
+
 /**
  * mock_set_core() - Set internal state that indicates the "current core".
  * @num:     Integer identifier for a core.
@@ -1806,12 +1825,18 @@ void mock_teardown(void)
 				mock_sock_holds);
 	mock_sock_holds = 0;
 
+	if (mock_rpc_holds != 0)
+		FAIL(" %d homa_rpc_holds still active after test",
+				mock_rpc_holds);
+	mock_rpc_holds = 0;
+
 	if (mock_preempt_disables != 0)
 		FAIL(" %d preempt_disables still active after test",
 				mock_preempt_disables);
 	mock_preempt_disables = 0;
 
 	memset(homa_metrics, 0, sizeof(homa_metrics));
+
 	unit_hook_clear();
 }
 

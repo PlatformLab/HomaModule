@@ -364,9 +364,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, dead_links) {
-			if ((atomic_read(&rpc->flags) & RPC_CANT_REAP) ||
-			    atomic_read(&rpc->grants_in_progress) != 0 ||
-			    atomic_read(&rpc->msgout.active_xmits) != 0) {
+			if (atomic_read(&rpc->refs) != 0) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;
 			}

@@ -268,7 +268,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		 * run out of packets); copy any available packets out to
 		 * user space.
 		 */
-		atomic_or(RPC_COPYING_TO_USER, &rpc->flags);
+		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
 
 		tt_record1("starting copy to user space for id %d",
@@ -343,8 +343,8 @@ free_skbs:
 		n = 0;
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
-		atomic_andnot(APP_NEEDS_LOCK | RPC_COPYING_TO_USER,
-			      &rpc->flags);
+		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_put(rpc);
 		if (error)
 			break;
 	}
@@ -1183,11 +1183,12 @@ claim_rpc:
 		hsk->sock.sk_data_ready(&hsk->sock);
 	}
 
-	/* This flag is needed to keep the RPC from being reaped during the
-	 * gap between when we release the socket lock and we acquire the
-	 * RPC lock.
+	/* Must take a reference on the RPC before storing in interest
+	 * (match the behavior of homa_rpc_handoff). This also prevents
+	 * the RPC from being reaped during the gap between when we release
+	 * the socket lock and we acquire the RPC lock.
 	 */
-	atomic_or(RPC_HANDING_OFF, &rpc->flags);
+	homa_rpc_hold(rpc);
 	homa_sock_unlock(hsk);
 	if (!locked) {
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
@@ -1195,7 +1196,6 @@ claim_rpc:
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
 		locked = 1;
 	}
-	atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
 	homa_interest_set_rpc(interest, rpc, locked);
 	return 0;
 }
@@ -1359,6 +1359,12 @@ found_rpc:
 			} else {
 				atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
 			}
+
+			/* Once the RPC has been locked it's safe to drop
+			 * the reference that was set before storing the RPC
+			 * in interest.
+			 * */
+			homa_rpc_put(rpc);
 			if (!rpc->error)
 				rpc->error = homa_copy_to_user(rpc);
 			if (rpc->state == RPC_DEAD) {
@@ -1483,11 +1489,10 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	return;
 
 thread_waiting:
-	/* We found a waiting thread. The following 3 lines must be here,
-	 * before clearing the interest, in order to avoid a race with
-	 * homa_wait_for_message (which won't acquire the socket lock if
-	 * the interest is clear).
+	/* We found a waiting thread.  Take a reference on it to keep
+	 * it from being freed before homa_wait_for_message picks it up.
 	 */
+	homa_rpc_hold(rpc);
 	atomic_or(RPC_HANDING_OFF, &rpc->flags);
 	interest->locked = 0;
 	INC_METRIC(handoffs_thread_waiting, 1);
@@ -1504,7 +1509,7 @@ thread_waiting:
 	/* Clear the interest. This serves two purposes. First, it saves
 	 * the waking thread from acquiring the socket lock again, which
 	 * reduces contention on that lock). Second, it ensures that
-	 * no-one else attempts to give this interest a different RPC.
+	 * no-one else attempts to give this interest to a different RPC.
 	 */
 	if (interest->reg_rpc) {
 		interest->reg_rpc->interest = NULL;

@@ -430,7 +430,7 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			int extra_levels;
 
 			active_rpcs[i] = rpc;
-			atomic_inc(&rpc->grants_in_progress);
+			homa_rpc_hold(rpc);
 			atomic_set(&rpc->msgin.rank, i);
 			atomic_set(&homa->active_remaining[i],
 				   rpc->msgin.bytes_remaining);
@@ -478,8 +478,8 @@ void homa_grant_recalc(struct homa *homa, int locked)
 				homa_grant_remove_rpc(rpc);
 				homa_grantable_unlock(homa);
 			}
+			homa_rpc_put(rpc);
 			homa_rpc_unlock(rpc);
-			atomic_dec(&rpc->grants_in_progress);
 		}
 
 		if (try_again == 0)

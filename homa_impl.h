@@ -198,7 +198,8 @@ enum homa_freeze_type {
  * homa_interest_get_rpc() - Return the ready RPC stored in an interest,
  * if there is one.
  * @interest:  Struct to check
- * Return: the ready RPC, or NULL if none.
+ * Return: the ready RPC, or NULL if none. If an RPC is returned, a
+ * reference has been taken on it; caller must call homa_rpc_put().
  */
 static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *interest)
 {
@@ -209,10 +210,10 @@ static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *inter
 
 /**
  * homa_interest_set_rpc() - Hand off a ready RPC to an interest from a
- * waiting receiver thread. Note: interest->locked must be set before
- * calling this function.
+ * waiting receiver thread.
  * @interest:   Belongs to a thread that is waiting for an incoming message.
- * @rpc:        Ready rpc to assign to @interest.
+ * @rpc:        Ready rpc to assign to @interest. Caller must have taken a
+ *              reference by calling homa_rpc_hold().
  * @locked:     1 means @rpc is locked, 0 means unlocked.
  */
 static inline void homa_interest_set_rpc(struct homa_interest *interest,

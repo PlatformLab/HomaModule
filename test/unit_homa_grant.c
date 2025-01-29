@@ -764,7 +764,6 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 	EXPECT_EQ(10000, rpc1->msgin.granted);
 	EXPECT_EQ(20000, atomic_read(&self->homa.active_remaining[0]));
 	EXPECT_EQ(1, atomic_read(&self->homa.grant_recalc_count));
-	EXPECT_EQ(0, atomic_read(&rpc1->grants_in_progress));
 
 	EXPECT_EQ(1, atomic_read(&rpc3->msgin.rank));
 	EXPECT_EQ(1, rpc3->msgin.priority);

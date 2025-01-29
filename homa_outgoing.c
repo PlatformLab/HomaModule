@@ -23,7 +23,6 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	rpc->msgout.packets = NULL;
 	rpc->msgout.next_xmit = &rpc->msgout.packets;
 	rpc->msgout.next_xmit_offset = 0;
-	atomic_set(&rpc->msgout.active_xmits, 0);
 	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
@@ -222,6 +221,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int gso_size;
 	int err;
 
+	homa_rpc_hold(rpc);
 	homa_message_out_init(rpc, iter->count);
 	if (unlikely(rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH ||
 		     rpc->msgout.length == 0)) {
@@ -265,7 +265,6 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	overlap_xmit = rpc->msgout.length > 2 * max_gso_data;
 	rpc->msgout.granted = rpc->msgout.unscheduled;
-	atomic_or(RPC_COPYING_FROM_USER, &rpc->flags);
 	homa_skb_stash_pages(rpc->hsk->homa, rpc->msgout.length);
 
 	/* Each iteration of the loop below creates one GSO packet. */
@@ -317,14 +316,14 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
-	atomic_andnot(RPC_COPYING_FROM_USER, &rpc->flags);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
+	homa_rpc_put(rpc);
 	if (!overlap_xmit && xmit)
 		homa_xmit_data(rpc, false);
 	return 0;
 
 error:
-	atomic_andnot(RPC_COPYING_FROM_USER, &rpc->flags);
+	homa_rpc_put(rpc);
 	return err;
 }
 
@@ -509,7 +508,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 	struct netdev_queue *txq;
 #endif /* See strip.py */
 
-	atomic_inc(&rpc->msgout.active_xmits);
+	homa_rpc_hold(rpc);
 	while (*rpc->msgout.next_xmit) {
 		int priority;
 		struct sk_buff *skb = *rpc->msgout.next_xmit;
@@ -556,7 +555,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		if (rpc->state == RPC_DEAD)
 			break;
 	}
-	atomic_dec(&rpc->msgout.active_xmits);
+	homa_rpc_put(rpc);
 }
 
 /**

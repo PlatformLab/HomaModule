@@ -2149,6 +2149,8 @@ TEST_F(homa_incoming, homa_register_interests__return_response_by_id)
 			0, self->client_id);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
+	EXPECT_EQ(1, atomic_read(&crpc->refs));
+	homa_rpc_put(crpc);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__socket_shutdown)
@@ -2173,6 +2175,8 @@ TEST_F(homa_incoming, homa_register_interests__specified_id_has_packets)
 			HOMA_RECVMSG_REQUEST, crpc->id);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
+	EXPECT_EQ(1, atomic_read(&crpc->refs));
+	homa_rpc_put(crpc);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__specified_id_has_error)
@@ -2189,6 +2193,8 @@ TEST_F(homa_incoming, homa_register_interests__specified_id_has_error)
 			HOMA_RECVMSG_REQUEST|HOMA_RECVMSG_NONBLOCKING, crpc->id);
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
+	EXPECT_EQ(1, atomic_read(&crpc->refs));
+	homa_rpc_put(crpc);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__specified_id_not_ready)
@@ -2218,6 +2224,8 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_response)
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&self->interest));
 	EXPECT_TRUE(list_empty(&self->interest.request_links));
 	EXPECT_TRUE(list_empty(&self->interest.response_links));
+	EXPECT_EQ(1, atomic_read(&crpc->refs));
+	homa_rpc_put(crpc);
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_register_interests__return_queued_request)
@@ -2234,6 +2242,8 @@ TEST_F(homa_incoming, homa_register_interests__return_queued_request)
 	EXPECT_EQ(srpc, homa_interest_get_rpc(&self->interest));
 	EXPECT_TRUE(list_empty(&self->interest.request_links));
 	EXPECT_TRUE(list_empty(&self->interest.response_links));
+	EXPECT_EQ(1, atomic_read(&srpc->refs));
+	homa_rpc_put(srpc);
 	homa_rpc_unlock(srpc);
 }
 TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
@@ -2253,6 +2263,8 @@ TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(srpc1, homa_interest_get_rpc(&self->interest));
 	EXPECT_STREQ("sk->sk_data_ready invoked", unit_log_get());
+	EXPECT_EQ(1, atomic_read(&srpc1->refs));
+	homa_rpc_put(srpc1);
 	homa_rpc_unlock(srpc1);
 
 	// Second time shouldn't call sk_data_ready (no more RPCs).
@@ -2263,6 +2275,8 @@ TEST_F(homa_incoming, homa_register_interests__call_sk_data_ready)
 	EXPECT_EQ(0, result);
 	EXPECT_EQ(srpc2, homa_interest_get_rpc(&self->interest));
 	EXPECT_STREQ("", unit_log_get());
+	EXPECT_EQ(1, atomic_read(&srpc2->refs));
+	homa_rpc_put(srpc2);
 	homa_rpc_unlock(srpc2);
 }
 
@@ -2388,7 +2402,7 @@ TEST_F(homa_incoming, homa_wait_for_message__handoff_rpc_then_delete_after_givin
 	ASSERT_NE(NULL, crpc);
 
 	// Prevent the RPC from being reaped during the test.
-	atomic_or(RPC_COPYING_TO_USER, &crpc->flags);
+	homa_rpc_hold(crpc);
 
 	hook_rpc = crpc;
 	hook3_count = 0;
@@ -2397,9 +2411,8 @@ TEST_F(homa_incoming, homa_wait_for_message__handoff_rpc_then_delete_after_givin
 	rpc = homa_wait_for_message(&self->hsk,
 			HOMA_RECVMSG_NONBLOCKING|HOMA_RECVMSG_RESPONSE, 0);
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
-	EXPECT_EQ(RPC_COPYING_TO_USER, atomic_read(&crpc->flags));
 	EXPECT_EQ(RPC_DEAD, crpc->state);
-	atomic_andnot(RPC_COPYING_TO_USER, &crpc->flags);
+	homa_rpc_put(crpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__explicit_rpc_deleted_while_sleeping)
 {
@@ -2445,8 +2458,7 @@ TEST_F(homa_incoming, homa_wait_for_message__copy_to_user)
 	rpc = homa_wait_for_message(&self->hsk,
 			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
-	EXPECT_EQ(0, atomic_read(&crpc->flags)
-			& (RPC_PKTS_READY|RPC_COPYING_TO_USER));
+	EXPECT_EQ(0, atomic_read(&crpc->flags) & RPC_PKTS_READY);
 }
 TEST_F(homa_incoming, homa_wait_for_message__rpc_freed_after_matching)
 {
@@ -2509,8 +2521,7 @@ TEST_F(homa_incoming, homa_wait_for_message__message_complete)
 			HOMA_RECVMSG_RESPONSE|HOMA_RECVMSG_NONBLOCKING, 0);
 	ASSERT_FALSE(IS_ERR(rpc));
 	EXPECT_EQ(crpc, rpc);
-	EXPECT_EQ(0, atomic_read(&crpc->flags)
-			& (RPC_PKTS_READY|RPC_COPYING_TO_USER));
+	EXPECT_EQ(0, atomic_read(&crpc->flags) & RPC_PKTS_READY);
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_for_message__signal)
@@ -2654,6 +2665,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__interest_on_rpc)
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
+	homa_rpc_put(crpc);
 	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_EQ(NULL, crpc->interest);
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
@@ -2675,6 +2687,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__response_interests)
 	list_add_tail(&interest.response_links, &self->hsk.response_interests);
 	homa_rpc_handoff(crpc);
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
+	homa_rpc_put(crpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
@@ -2705,6 +2718,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__request_interests)
 	list_add_tail(&interest.request_links, &self->hsk.request_interests);
 	homa_rpc_handoff(srpc);
 	EXPECT_EQ(srpc, homa_interest_get_rpc(&interest));
+	homa_rpc_put(srpc);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.request_interests));
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
 	atomic_andnot(RPC_HANDING_OFF, &srpc->flags);
@@ -2745,6 +2759,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__detach_interest)
 	homa_rpc_handoff(crpc);
 	crpc->interest = NULL;
 	EXPECT_EQ(crpc, homa_interest_get_rpc(&interest));
+	homa_rpc_put(crpc);
 	EXPECT_EQ(NULL, interest.reg_rpc);
 	EXPECT_EQ(NULL, crpc->interest);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.response_interests));
@@ -2770,6 +2785,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__update_last_app_active)
 	mock_ns = 10000;
 	per_cpu(homa_offload_core, 2).last_app_active = 444;
 	homa_rpc_handoff(crpc);
+	homa_rpc_put(crpc);
 	EXPECT_STREQ("wake_up_process pid 0", unit_log_get());
 	EXPECT_EQ(10000, per_cpu(homa_offload_core, 2).last_app_active);
 	atomic_andnot(RPC_HANDING_OFF, &crpc->flags);
