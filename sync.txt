@@ -39,9 +39,10 @@ This file describes the synchronization strategy used for Homa.
   occur while operations are underway that hold RPC locks but not the socket
   lock. This creates several potential problems:
   * A socket might be deleted and its memory reclaimed while an RPC still
-    has access to it. Home assumes that Linux will prevent socket deletion
+    has access to it. Homa assumes that Linux will prevent socket deletion
     while the kernel call is executing. In situations outside kernel call
-    handling, Homa uses rcu_read_lock to prevent socket deletion.
+    handling, Homa uses rcu_read_lock and/or socket references to prevent
+    socket deletion.
   * A socket might be shut down while there are active operations on
     RPCs. For example, a new RPC creation might be underway when a socket
     is shut down, which could add the new RPC after all of its RPCs
