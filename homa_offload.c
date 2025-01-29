@@ -295,6 +295,9 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	__u32 hash;
 	int busy;
 
+	if (!homa_make_header_avl(skb))
+		tt_record("homa_gro_receive couldn't pull enough data from packet");
+
 	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, raw_smp_processor_id());
 	busy = (now - offload_core->last_gro) < homa->gro_busy_ns;
@@ -306,11 +309,10 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		priority = ((struct iphdr *)skb_network_header(skb))->tos >> 5;
 		saddr = ntohl(ip_hdr(skb)->saddr);
 	}
+	tt_record4("homa_gro_receive transport %d, len %d, data_len %d, delta %d",
+		   skb->network_header, skb->len, skb->data_len,
+		   skb_transport_header(skb) - skb->data);
 
-//      The test below is overly conservative except for data packets.
-//	if (!pskb_may_pull(skb, 64))
-//		tt_record("homa_gro_receive can't pull enough data "
-//				"from packet for trace");
 	if (h_new->common.type == DATA) {
 		if (h_new->seg.offset == (__force __be32)-1) {
 			tt_record2("homa_gro_receive replaced offset %d with %d",

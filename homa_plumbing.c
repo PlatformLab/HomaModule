@@ -1236,7 +1236,6 @@ int homa_softirq(struct sk_buff *skb)
 	struct homa *homa = global_homa;
 	struct homa_common_hdr *h;
 	int header_offset;
-	int pull_length;
 	__u64 start;
 
 	start = sched_clock();
@@ -1262,16 +1261,13 @@ int homa_softirq(struct sk_buff *skb)
 		 * header hasn't yet been removed (this happens for GRO packets
 		 * on the frag_list, since they aren't handled explicitly by IP.
 		 */
-		header_offset = skb_transport_header(skb) - skb->data;
-		pull_length = HOMA_MAX_HEADER + header_offset;
-		if (pull_length > skb->len)
-			pull_length = skb->len;
-		if (!pskb_may_pull(skb, pull_length)) {
+		if (!homa_make_header_avl(skb)) {
 			if (homa->verbose)
 				pr_notice("Homa can't handle fragmented packet (no space for header); discarding\n");
 			UNIT_LOG("", "pskb discard");
 			goto discard;
 		}
+		header_offset = skb_transport_header(skb) - skb->data;
 		if (header_offset)
 			__skb_pull(skb, header_offset);
 
