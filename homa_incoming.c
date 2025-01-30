@@ -519,18 +519,6 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 		case ACK:
 			INC_METRIC(packets_received[ACK - DATA], 1);
 			homa_ack_pkt(skb, hsk, rpc);
-			rpc = NULL;
-
-			/* It isn't safe to process more packets once we've
-			 * released the RPC lock (this should never happen).
-			 */
-			while (next) {
-				WARN_ONCE(next, "%s found extra packets after AC<\n",
-					  __func__);
-				skb = next;
-				next = skb->next;
-				kfree_skb(skb);
-			}
 			break;
 		default:
 			INC_METRIC(unknown_packet_types, 1);
@@ -875,8 +863,7 @@ done:
  *           This function now owns the packet.
  * @hsk:     Socket on which the packet was received.
  * @rpc:     The RPC named in the packet header, or NULL if no such
- *           RPC exists. The RPC has been locked by the caller but will
- *           be unlocked here.
+ *           RPC exists. The RPC lock will be dead on return.
  */
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		  struct homa_rpc *rpc)
@@ -889,12 +876,24 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	if (rpc) {
 		tt_record1("homa_ack_pkt freeing rpc id %d", rpc->id);
 		homa_rpc_end(rpc);
-		homa_rpc_unlock(rpc);
 	}
 
 	count = ntohs(h->num_acks);
-	for (i = 0; i < count; i++)
-		homa_rpc_acked(hsk, &saddr, &h->acks[i]);
+	if (count > 0) {
+		if (rpc) {
+			/* Must temporarily release rpc's lock because
+			 * homa_rpc_acked needs to acquire RPC locks.
+			 */
+			homa_rpc_hold(rpc);
+			homa_rpc_unlock(rpc);
+		}
+		for (i = 0; i < count; i++)
+			homa_rpc_acked(hsk, &saddr, &h->acks[i]);
+		if (rpc) {
+			homa_rpc_lock(rpc);
+			homa_rpc_put(rpc);
+		}
+	}
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
 		   homa_local_id(h->common.sender_id), tt_addr(saddr), count);
 	kfree_skb(skb);

@@ -1814,7 +1814,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 			unit_log_get());
 }
 
-TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists)
+TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_no_extras)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
@@ -1834,6 +1834,41 @@ TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists)
 			&self->homa);
 	EXPECT_EQ(0, unit_list_length(&self->hsk2.active_rpcs));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->packets_received[ACK - DATA]);
+}
+TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_plus_extras)
+{
+	struct homa_rpc *srpc1 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id, 100, 5000);
+	struct homa_rpc *srpc2 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id+2, 100, 5000);
+	struct homa_rpc *srpc3 = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->client_port,
+			self->server_id+4, 100, 5000);
+	struct homa_ack_hdr h = {.common = {
+			.sport = htons(self->client_port),
+			.dport = htons(self->hsk2.port),
+			.sender_id = cpu_to_be64(self->client_id),
+			.type = ACK},
+			.num_acks = htons(2)};
+
+	ASSERT_NE(NULL, srpc1);
+	ASSERT_NE(NULL, srpc2);
+	ASSERT_NE(NULL, srpc3);
+	EXPECT_EQ(3, unit_list_length(&self->hsk2.active_rpcs));
+	unit_log_clear();
+	mock_xmit_log_verbose = 1;
+	h.acks[0] = (struct homa_ack) {.server_port = htons(self->server_port),
+			.client_id = cpu_to_be64(self->server_id+1)};
+	h.acks[1] = (struct homa_ack) {.server_port = htons(self->server_port),
+			.client_id = cpu_to_be64(self->server_id+3)};
+	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
+			&self->homa);
+	EXPECT_EQ(0, unit_list_length(&self->hsk2.active_rpcs));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc1));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
+	EXPECT_STREQ("DEAD", homa_symbol_for_state(srpc2));
 }
 TEST_F(homa_incoming, homa_ack_pkt__target_rpc_doesnt_exist)
 {
