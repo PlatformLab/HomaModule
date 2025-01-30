@@ -217,8 +217,7 @@ static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *inter
  * @locked:     1 means @rpc is locked, 0 means unlocked.
  */
 static inline void homa_interest_set_rpc(struct homa_interest *interest,
-						     struct homa_rpc *rpc,
-						     int locked)
+					 struct homa_rpc *rpc, int locked)
 {
 	interest->rpc = rpc;
 	interest->locked = locked;

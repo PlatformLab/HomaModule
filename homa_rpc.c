@@ -276,9 +276,10 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	if (rpc->msgin.length >= 0) {
 		rpc->hsk->dead_skbs += skb_queue_len(&rpc->msgin.packets);
 		while (1) {
-			struct homa_gap *gap = list_first_entry_or_null(&rpc->msgin.gaps,
-									struct homa_gap,
-									links);
+			struct homa_gap *gap;
+
+			gap = list_first_entry_or_null(&rpc->msgin.gaps,
+						       struct homa_gap, links);
 			if (!gap)
 				break;
 			list_del(&gap->links);
