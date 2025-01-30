@@ -418,6 +418,11 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			if (flags & APP_NEEDS_LOCK) {
 				homa_rpc_unlock(rpc);
 				tt_record2("softirq released lock for id %d, flags 0x%x", rpc->id, flags);
+
+				/* We're going to try to reacquire the RPC
+				 * lock almost immediately below; give the
+				 * app thread a chance to get to it first.
+				 */
 				homa_spin(200);
 				rpc = NULL;
 			}
