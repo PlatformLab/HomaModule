@@ -7,7 +7,13 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_skb.h"
+#endif /* See strip.py */
+
+#ifdef __STRIP__ /* See strip.py */
+#include "homa_stub.h"
+#endif /* See strip.py */
 
 struct completion homa_pacer_kthread_done;
 
@@ -21,40 +27,30 @@ struct completion homa_pacer_kthread_done;
  */
 int homa_init(struct homa *homa)
 {
-	int i, err;
+	int err;
+#ifndef __STRIP__ /* See strip.py */
+	int i;
 
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
 		       "homa_init assumes at least 8 priority levels");
+#endif /* See strip.py */
 
-	homa->pacer_kthread = NULL;
+	memset(homa, 0, sizeof(*homa));
 	init_completion(&homa_pacer_kthread_done);
 	atomic64_set(&homa->next_outgoing_id, 2);
 	atomic64_set(&homa->link_idle_time, sched_clock());
+#ifndef __STRIP__ /* See strip.py */
 	spin_lock_init(&homa->grantable_lock);
-	homa->grantable_lock_time = 0;
-	atomic_set(&homa->grant_recalc_count, 0);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	INIT_LIST_HEAD(&homa->grantable_rpcs);
-	homa->num_grantable_rpcs = 0;
 	homa->last_grantable_change = sched_clock();
-	homa->max_grantable_rpcs = 0;
-	homa->oldest_rpc = NULL;
-	homa->num_active_rpcs = 0;
-	for (i = 0; i < HOMA_MAX_GRANTS; i++) {
-		homa->active_rpcs[i] = NULL;
-		atomic_set(&homa->active_remaining[i], 0);
-	}
-	homa->grant_nonfifo = 0;
-	homa->grant_nonfifo_left = 0;
+#endif /* See strip.py */
 	spin_lock_init(&homa->pacer_mutex);
 	homa->pacer_fifo_fraction = 50;
 	homa->pacer_fifo_count = 1;
-	homa->pacer_wake_time = 0;
 	spin_lock_init(&homa->throttle_lock);
 	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
-	homa->throttle_add = 0;
 	homa->throttle_min_bytes = 200;
-	atomic_set(&homa->total_incoming, 0);
 	homa->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
@@ -74,17 +70,22 @@ int homa_init(struct homa *homa)
 		       __func__, -err);
 		return err;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);
 	if (err) {
 		pr_err("Couldn't initialize skb management (errno %d)\n",
 		       -err);
 		return err;
 	}
+#endif /* See strip.py */
 
 	/* Wild guesses to initialize configuration values... */
+#ifndef __STRIP__ /* See strip.py */
 	homa->unsched_bytes = 40000;
 	homa->window_param = 100000;
+#endif /* See strip.py */
 	homa->link_mbps = 25000;
+#ifndef __STRIP__ /* See strip.py */
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
@@ -107,6 +108,7 @@ int homa_init(struct homa *homa)
 	homa->max_overcommit = 8;
 	homa->max_incoming = 400000;
 	homa->max_rpcs_per_peer = 1;
+#endif /* See strip.py */
 	homa->resend_ticks = 5;
 	homa->resend_interval = 5;
 	homa->timeout_ticks = 100;
@@ -114,7 +116,6 @@ int homa_init(struct homa *homa)
 	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;
-	homa->max_dead_buffs = 0;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 					  "homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -125,27 +126,23 @@ int homa_init(struct homa *homa)
 	}
 	homa->pacer_exit = false;
 	homa->max_nic_queue_ns = 5000;
-	homa->ns_per_mbyte = 0;
+#ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
+#endif /* See strip.py */
 	homa->max_gso_size = 10000;
-	homa->gso_force_software = 0;
-	homa->hijack_tcp = 0;
+#ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->busy_usecs = 100;
 	homa->gro_busy_usecs = 5;
-	homa->timer_ticks = 0;
 	mutex_init(&homa->metrics_mutex);
 	homa->metrics = NULL;
-	homa->metrics_capacity = 0;
-	homa->metrics_length = 0;
-	homa->metrics_active_opens = 0;
-	homa->flags = 0;
-	homa->freeze_type = 0;
+#endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
-	homa->next_id = 0;
+#ifndef __STRIP__ /* See strip.py */
 	homa_outgoing_sysctl_changed(homa);
 	homa_incoming_sysctl_changed(homa);
+#endif /* See strip.py */
 	return 0;
 }
 
@@ -175,11 +172,14 @@ void homa_destroy(struct homa *homa)
 		kfree(homa->peers);
 		homa->peers = NULL;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	homa_skb_cleanup(homa);
 	kfree(homa->metrics);
 	homa->metrics = NULL;
+#endif /* See strip.py */
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_prios_changed() - This function is called whenever configuration
  * information related to priorities, such as @homa->unsched_cutoffs or
@@ -217,6 +217,7 @@ void homa_prios_changed(struct homa *homa)
 	}
 	homa->cutoff_version++;
 }
+#endif /* See strip.py */
 
 /**
  * homa_spin() - Delay (without sleeping) for a given time interval.

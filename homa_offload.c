@@ -19,6 +19,7 @@ static const struct net_offload homa_offload = {
 	},
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /* Pointers to TCP's net_offload structures. NULL means homa_gro_hook_tcp
  * hasn't been called yet.
  */
@@ -31,6 +32,7 @@ static const struct net_offload *tcp6_net_offload;
  */
 static struct net_offload hook_tcp_net_offload;
 static struct net_offload hook_tcp6_net_offload;
+#endif /* See strip.py */
 
 /**
  * homa_offload_init() - Invoked to enable GRO and GSO. Typically invoked
@@ -78,6 +80,8 @@ int homa_offload_end(void)
 	return res1 ? res1 : res2;
 }
 
+#ifndef __STRIP__ /* See strip.py */
+#endif /* See strip.py */
 /**
  * homa_gro_hook_tcp() - Arranges for TCP gro_receive calls to be
  * mediated by this file, so that Homa-over-TCP packets can be retrieved
@@ -156,6 +160,8 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	}
 	return homa_gro_receive(held_list, skb);
 }
+#ifndef __STRIP__ /* See strip.py */
+#endif /* See strip.py */
 
 /**
  * homa_set_softirq_cpu() - Arrange for SoftIRQ processing of a packet to

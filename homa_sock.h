@@ -143,9 +143,11 @@ struct homa_sock {
 	 */
 	struct homa *homa;
 
-	/** @shutdown: True means the socket is no longer usable (either
+	/**
+	 * @shutdown: True means the socket is no longer usable (either
 	 * shutdown has already been invoked, or the socket was never
-	 * properly initialized). */
+	 * properly initialized).
+	 */
 	bool shutdown;
 
 	/**

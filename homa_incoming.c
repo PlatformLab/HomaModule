@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
+#ifndef __STRIP__ /* See strip.py */
 /* This file contains functions that handle incoming Homa messages, including
  * both receiving information for those messages and sending grants.
  */
+#else /* See strip.py */
+/* This file contains functions that handle incoming Homa messages. */
+#endif /* See strip.py */
 
 #include "homa_impl.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_offload.h"
+#endif /* See strip.py */
 #include "homa_peer.h"
 #include "homa_pool.h"
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_message_in_init() - Constructor for homa_message_in.
  * @rpc:          RPC whose msgin structure should be initialized.
@@ -20,6 +27,16 @@
  *                if rpc->msgin could not be initialized.
  */
 int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
+#else /* See strip.py */
+/**
+ * homa_message_in_init() - Constructor for homa_message_in.
+ * @rpc:          RPC whose msgin structure should be initialized.
+ * @length:       Total number of bytes in message.
+ * Return:        Zero for successful initialization, or a negative errno
+ *                if rpc->msgin could not be initialized.
+ */
+int homa_message_in_init(struct homa_rpc *rpc, int length)
+#endif /* See strip.py */
 {
 	int err;
 
@@ -31,15 +48,18 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 	rpc->msgin.recv_end = 0;
 	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
+#ifndef __STRIP__ /* See strip.py */
 	rpc->msgin.granted = (unsched > length) ? length : unsched;
 	rpc->msgin.rec_incoming = 0;
 	atomic_set(&rpc->msgin.rank, -1);
 	rpc->msgin.priority = 0;
+#endif /* See strip.py */
 	rpc->msgin.resend_all = 0;
 	rpc->msgin.num_bpages = 0;
 	err = homa_pool_allocate(rpc);
 	if (err != 0)
 		return err;
+#ifndef __STRIP__ /* See strip.py */
 	if (rpc->msgin.num_bpages == 0) {
 		/* The RPC is now queued waiting for buffer space, so we're
 		 * going to discard all of its packets.
@@ -54,6 +74,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
+#endif /* See strip.py */
 	return 0;
 }
 
@@ -92,7 +113,9 @@ void homa_gap_retry(struct homa_rpc *rpc)
 	list_for_each_entry(gap, &rpc->msgin.gaps, links) {
 		resend.offset = htonl(gap->start);
 		resend.length = htonl(gap->end - gap->start);
+#ifndef __STRIP__ /* See strip.py */
 		resend.priority = rpc->hsk->homa->num_priorities - 1;
+#endif /* See strip.py */
 		tt_record3("homa_gap_retry sending RESEND for id %d, start %d, end %d",
 			   rpc->id, gap->start, gap->end);
 		homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
@@ -194,18 +217,22 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	}
 
 discard:
+#ifndef __STRIP__ /* See strip.py */
 	if (h->retransmit)
 		INC_METRIC(resent_discards, 1);
 	else
 		INC_METRIC(packet_discards, 1);
+#endif /* See strip.py */
 	tt_record4("homa_add_packet discarding packet for id %d, offset %d, length %d, retransmit %d",
 		   rpc->id, start, length, h->retransmit);
 	kfree_skb(skb);
 	return;
 
 keep:
+#ifndef __STRIP__ /* See strip.py */
 	if (h->retransmit)
 		INC_METRIC(resent_packets_used, 1);
+#endif /* See strip.py */
 	__skb_queue_tail(&rpc->msgin.packets, skb);
 	rpc->msgin.bytes_remaining -= length;
 }
@@ -230,12 +257,14 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 #define MAX_SKBS 20
 #endif /* __UNIT_TEST__ */
 	struct sk_buff *skbs[MAX_SKBS];
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	int start_offset = 0;
 	int end_offset = 0;
 #endif /* See strip.py */
 	int error = 0;
+#ifndef __STRIP__ /* See strip.py */
 	u64 start;
+#endif /* See strip.py */
 	int n = 0;             /* Number of filled entries in skbs. */
 	int i;
 
@@ -313,7 +342,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					goto free_skbs;
 				copied += chunk_size;
 			}
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 			if (end_offset == 0) {
 				start_offset = offset;
 			} else if (end_offset != offset) {
@@ -326,14 +355,16 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 		}
 
 free_skbs:
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 		if (end_offset != 0) {
 			tt_record3("copied out bytes %d-%d for id %d",
 				   start_offset, end_offset, rpc->id);
 			end_offset = 0;
 		}
 #endif /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		start = sched_clock();
+#endif /* See strip.py */
 		for (i = 0; i < n; i++)
 			kfree_skb(skbs[i]);
 		INC_METRIC(skb_free_ns, sched_clock() - start);
@@ -348,9 +379,11 @@ free_skbs:
 		if (error)
 			break;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	if (error)
 		tt_record2("homa_copy_to_user returning error %d for id %d",
 			   -error, rpc->id);
+#endif /* See strip.py */
 	return error;
 }
 
@@ -456,27 +489,33 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			}
 		}
 		if (unlikely(!rpc)) {
+#ifndef __STRIP__ /* See strip.py */
 			if (h->common.type != CUTOFFS &&
 			    h->common.type != NEED_ACK &&
+#else /* See strip.py */
+			if (h->common.type != NEED_ACK &&
+#endif /* See strip.py */
 			    h->common.type != ACK &&
 			    h->common.type != RESEND) {
 				tt_record4("Discarding packet for unknown RPC, id %u, type %d, peer 0x%x:%d",
 					   id, h->common.type, tt_addr(saddr),
 					   ntohs(h->common.sport));
+#ifndef __STRIP__ /* See strip.py */
 				if (h->common.type != GRANT ||
 				    homa_is_client(id))
 					INC_METRIC(unknown_rpcs, 1);
+#endif /* See strip.py */
 				goto discard;
 			}
 		} else {
 			if (h->common.type == DATA ||
+#ifndef __STRIP__ /* See strip.py */
 			    h->common.type == GRANT ||
+#endif /* See strip.py */
 			    h->common.type == BUSY ||
 			    h->common.type == NEED_ACK)
 				rpc->silent_ticks = 0;
-#ifndef __STRIP__ /* See strip.py */
 			rpc->peer->outstanding_resends = 0;
-#endif /* See strip.py */
 		}
 
 		switch (h->common.type) {
@@ -493,10 +532,12 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			homa_data_pkt(skb, rpc);
 			INC_METRIC(packets_received[DATA - DATA], 1);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case GRANT:
 			INC_METRIC(packets_received[GRANT - DATA], 1);
 			homa_grant_pkt(skb, rpc);
 			break;
+#endif /* See strip.py */
 		case RESEND:
 			INC_METRIC(packets_received[RESEND - DATA], 1);
 			homa_resend_pkt(skb, rpc, hsk);
@@ -513,10 +554,12 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			 * silent_ticks, which happened above.
 			 */
 			goto discard;
+#ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			INC_METRIC(packets_received[CUTOFFS - DATA], 1);
 			homa_cutoffs_pkt(skb, hsk);
 			break;
+#endif /* See strip.py */
 		case NEED_ACK:
 			INC_METRIC(packets_received[NEED_ACK - DATA], 1);
 			homa_need_ack_pkt(skb, hsk, rpc);
@@ -535,7 +578,11 @@ discard:
 		kfree_skb(skb);
 	}
 	if (rpc)
+#ifndef __STRIP__ /* See strip.py */
 		homa_grant_check_rpc(rpc); /* Unlocks rpc. */
+#else /* See strip.py */
+		homa_rpc_unlock(rpc);
+#endif /* See strip.py */
 
 	while (num_acks > 0) {
 		num_acks--;
@@ -547,7 +594,9 @@ discard:
 		 * nor homa_timer can keep up with reaping dead
 		 * RPCs. See reap.txt for details.
 		 */
+#ifndef __STRIP__ /* See strip.py */
 		u64 start = sched_clock();
+#endif /* See strip.py */
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
 		homa_rpc_reap(hsk, false);
@@ -566,7 +615,9 @@ discard:
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
+#ifndef __STRIP__ /* See strip.py */
 	struct homa *homa = rpc->hsk->homa;
+#endif /* See strip.py */
 
 	tt_record4("incoming data packet, id %d, peer 0x%x, offset %d/%d",
 		   homa_local_id(h->common.sender_id),
@@ -578,10 +629,16 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			goto discard;
 		INC_METRIC(responses_received, 1);
 		rpc->state = RPC_INCOMING;
+#ifndef __STRIP__ /* See strip.py */
 		tt_record2("Incoming message for id %d has %d unscheduled bytes",
 			   rpc->id, ntohl(h->incoming));
+#endif /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 		if (homa_message_in_init(rpc, ntohl(h->message_length),
 					 ntohl(h->incoming)) != 0)
+#else /* See strip.py */
+		if (homa_message_in_init(rpc, ntohl(h->message_length)) != 0)
+#endif /* See strip.py */
 			goto discard;
 	} else if (rpc->state != RPC_INCOMING) {
 		/* Must be server; note that homa_rpc_new_server already
@@ -597,9 +654,14 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		 * exceed available cache space, resulting in poor
 		 * performance.
 		 */
+#ifndef __STRIP__ /* See strip.py */
 		tt_record4("Dropping packet because no buffer space available: id %d, offset %d, length %d, old incoming %d",
 			   rpc->id, ntohl(h->seg.offset), homa_data_len(skb),
 			   rpc->msgin.granted);
+#else /* See strip.py */
+		tt_record3("Dropping packet because no buffer space available: id %d, offset %d, length %d",
+			   rpc->id, ntohl(h->seg.offset), homa_data_len(skb));
+#endif /* See strip.py */
 		INC_METRIC(dropped_data_no_bufs, homa_data_len(skb));
 		goto discard;
 	}
@@ -614,6 +676,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		homa_sock_unlock(rpc->hsk);
 	}
 
+#ifndef __STRIP__ /* See strip.py */
 	if (ntohs(h->cutoff_version) != homa->cutoff_version) {
 		/* The sender has out-of-date cutoffs. Note: we may need
 		 * to resend CUTOFFS packets if one gets lost, but we don't
@@ -636,6 +699,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			rpc->peer->last_update_jiffies = jiffies;
 		}
 	}
+#endif /* See strip.py */
 	return;
 
 discard:
@@ -643,6 +707,7 @@ discard:
 	UNIT_LOG("; ", "homa_data_pkt discarded packet");
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_grant_pkt() - Handler for incoming GRANT packets
  * @skb:     Incoming packet; size already verified large enough for header.
@@ -672,6 +737,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	}
 	kfree_skb(skb);
 }
+#endif /* See strip.py */
 
 /**
  * homa_resend_pkt() - Handler for incoming RESEND packets
@@ -686,20 +752,23 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		     struct homa_sock *hsk)
 {
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
-#ifndef __STRIP__ /* See strip.py */
-	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-#endif /* See strip.py */
 	struct homa_busy_hdr busy;
 
 	if (!rpc) {
 		tt_record4("resend request for unknown id %d, peer 0x%x:%d, offset %d; responding with UNKNOWN",
-			   homa_local_id(h->common.sender_id), tt_addr(saddr),
+			   homa_local_id(h->common.sender_id),
+			   tt_addr(skb_canonical_ipv6_saddr(skb)),
 			   ntohs(h->common.sport), ntohl(h->offset));
 		homa_xmit_unknown(skb, hsk);
 		goto done;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
 		   rpc->id, ntohl(h->offset), ntohl(h->length), h->priority);
+#else /* See strip.py */
+	tt_record3("resend request for id %llu, offset %d, length %d",
+		   rpc->id, ntohl(h->offset), ntohl(h->length));
+#endif /* See strip.py */
 
 	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
 		/* We are the server for this RPC and don't yet have a
@@ -710,6 +779,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 		goto done;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
 		/* We have chosen not to transmit data from this message;
 		 * send BUSY instead.
@@ -729,6 +799,16 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 				 ntohl(h->offset) + ntohl(h->length),
 				 h->priority);
 	}
+#else /* See strip.py */
+	if (ntohl(h->length) == 0)
+		/* This RESEND is from a server just trying to determine
+		 * whether the client still cares about the RPC; return
+		 * BUSY so the server doesn't time us out.
+		 */
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+	homa_resend_data(rpc, ntohl(h->offset),
+			 ntohl(h->offset) + ntohl(h->length));
+#endif /* See strip.py */
 
 done:
 	kfree_skb(skb);
@@ -752,27 +832,35 @@ void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 			tt_record4("Restarting id %d to server 0x%x:%d, lost %d bytes",
 				   rpc->id, tt_addr(rpc->peer->addr),
 				   rpc->dport, rpc->msgout.next_xmit_offset);
+#ifndef __STRIP__ /* See strip.py */
 			homa_freeze(rpc, RESTART_RPC,
 				    "Freezing because of RPC restart, id %d, peer 0x%x");
 			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset,
 					 homa_unsched_priority(rpc->hsk->homa,
 							       rpc->peer,
 							       rpc->msgout.length));
+#else /* See strip.py */
+			homa_resend_data(rpc, 0, rpc->msgout.next_xmit_offset);
+#endif /* See strip.py */
 			goto done;
 		}
 
+#ifndef __STRIP__ /* See strip.py */
 		pr_err("Received unknown for RPC id %llu, peer %s:%d in bogus state %d; discarding unknown\n",
 		       rpc->id, homa_print_ipv6_addr(&rpc->peer->addr),
 		       rpc->dport, rpc->state);
+#endif /* See strip.py */
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: bad state %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->state);
 	} else {
+#ifndef __STRIP__ /* See strip.py */
 		if (rpc->hsk->homa->verbose)
 			pr_notice("Ending rpc id %llu from client %s:%d: unknown to client",
 				  rpc->id,
 				  homa_print_ipv6_addr(&rpc->peer->addr),
 				  rpc->dport);
+#endif /* See strip.py */
 		homa_rpc_end(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
 	}
@@ -780,6 +868,7 @@ done:
 	kfree_skb(skb);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_cutoffs_pkt() - Handler for incoming CUTOFFS packets
  * @skb:     Incoming packet; size already verified large enough for header.
@@ -802,6 +891,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	}
 	kfree_skb(skb);
 }
+#endif /* See strip.py */
 
 /**
  * homa_need_ack_pkt() - Handler for incoming NEED_ACK packets
@@ -848,8 +938,10 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	ack.common.type = ACK;
 	ack.common.sport = h->dport;
 	ack.common.dport = h->sport;
+#ifndef __STRIP__ /* See strip.py */
 	ack.common.flags = HOMA_TCP_FLAGS;
 	ack.common.urgent = htons(HOMA_TCP_URGENT);
+#endif /* See strip.py */
 	ack.common.sender_id = cpu_to_be64(id);
 	ack.num_acks = htons(homa_peer_get_acks(peer,
 						HOMA_MAX_ACKS_PER_PKT,
@@ -904,6 +996,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	kfree_skb(skb);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_choose_fifo_grant() - This function is invoked occasionally to give
  * a high-priority grant to the oldest incoming message. We do this in
@@ -984,6 +1077,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	}
 	return oldest;
 }
+#endif /* See strip.py */
 
 /**
  * homa_rpc_abort() - Terminate an RPC.
@@ -1221,11 +1315,16 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 				       u64 id)
 	__acquires(&rpc->bucket_lock)
 {
+#ifndef __STRIP__ /* See strip.py */
 	u64 poll_start, poll_end, now;
-	int error, blocked = 0, polled = 0;
+#endif /* See strip.py */
 	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
 	struct homa_rpc *rpc = NULL;
+#ifndef __STRIP__ /* See strip.py */
+	int blocked = 0, polled = 0;
+#endif /* See strip.py */
+	int error;
 
 	/* Each iteration of this loop finds an RPC, but it might not be
 	 * in a state where we can return it (e.g., there might be packets
@@ -1267,6 +1366,7 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 			goto found_rpc;
 		}
 
+#ifndef __STRIP__ /* See strip.py */
 		// tt_record4("Preparing to poll, socket %d, flags 0x%x, pid %d, poll_usecs %d",
 		// 	   hsk->port, flags, current->pid,
 		// 	   hsk->homa->poll_usecs);
@@ -1303,20 +1403,27 @@ struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
 		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
 			   hsk->port, current->pid);
 		INC_METRIC(poll_ns, now - poll_start);
+#endif /* See strip.py */
 
 		/* Now it's time to sleep. */
+#ifndef __STRIP__ /* See strip.py */
 		per_cpu(homa_offload_core, interest.core).last_app_active = now;
+#endif /* See strip.py */
 		set_current_state(TASK_INTERRUPTIBLE);
 		rpc = homa_interest_get_rpc(&interest);
 		if (!rpc && !hsk->shutdown) {
+#ifndef __STRIP__ /* See strip.py */
 			u64 end;
 			u64 start = sched_clock();
+#endif /* See strip.py */
 
 			tt_record1("homa_wait_for_message sleeping, pid %d",
 				   current->pid);
 			schedule();
-			end = sched_clock();
+#ifndef __STRIP__ /* See strip.py */
 			blocked = 1;
+			end = sched_clock();
+#endif /* See strip.py */
 			INC_METRIC(blocked_ns, end - start);
 		}
 		__set_current_state(TASK_RUNNING);
@@ -1394,13 +1501,16 @@ found_rpc:
 	}
 
 done:
+#ifndef __STRIP__ /* See strip.py */
 	if (blocked)
 		INC_METRIC(slow_wakeups, 1);
 	else if (polled)
 		INC_METRIC(fast_wakeups, 1);
+#endif /* See strip.py */
 	return rpc;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_choose_interest() - Given a list of interests for an incoming
  * message, choose the best one to handle it (if any).
@@ -1414,9 +1524,24 @@ done:
  *               interest whose thread is running on a core that isn't
  *               currently busy doing Homa transport work.
  */
+#else /* See strip.py */
+/**
+ * homa_choose_interest() - Given a list of interests for an incoming
+ * message, choose the best one to handle it (if any).
+ * @homa:        Overall information about the Homa transport.
+ * @head:        Head pointers for the list of interest: either
+ *		 hsk->request_interests or hsk->response_interests.
+ * @offset:      Offset of "next" pointers in the list elements (either
+ *               offsetof(request_links) or offsetof(response_links).
+ * Return:       An interest to use for the incoming message, or NULL if none
+ *               is available. (future patch sets will fill in additional
+ *               functionality in this function).
+ */
+#endif /* See strip.py */
 struct homa_interest *homa_choose_interest(struct homa *homa,
 					   struct list_head *head, int offset)
 {
+#ifndef __STRIP__ /* See strip.py */
 	u64 busy_time = sched_clock() - homa->busy_ns;
 	struct homa_interest *backup = NULL;
 	struct homa_interest *interest;
@@ -1436,6 +1561,12 @@ struct homa_interest *homa_choose_interest(struct homa *homa,
 
 	/* All interested threads are on busy cores; return the first. */
 	return backup;
+#else /* See strip.py */
+	if (list_empty(head))
+		return NULL;
+	else
+		return (struct homa_interest *)(((char *)head->next) - offset);
+#endif /* See strip.py */
 }
 
 /**
@@ -1504,11 +1635,13 @@ thread_waiting:
 		   rpc->id, interest->thread->pid, task_cpu(interest->thread));
 	homa_interest_set_rpc(interest, rpc, 0);
 
+#ifndef __STRIP__ /* See strip.py */
 	/* Update the last_app_active time for the thread's core, so Homa
 	 * will try to avoid doing any work there.
 	 */
 	per_cpu(homa_offload_core, interest->core).last_app_active =
 			sched_clock();
+#endif /* See strip.py */
 
 	/* Clear the interest. This serves two purposes. First, it saves
 	 * the waking thread from acquiring the socket lock again, which
@@ -1526,6 +1659,7 @@ thread_waiting:
 	wake_up_process(interest->thread);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_incoming_sysctl_changed() - Invoked whenever a sysctl value is changed;
  * any input-related parameters that depend on sysctl-settable values.
@@ -1549,3 +1683,4 @@ void homa_incoming_sysctl_changed(struct homa *homa)
 	homa->busy_ns = homa->busy_usecs * 1000;
 	homa->gro_busy_ns = homa->gro_busy_usecs * 1000;
 }
+#endif /* See strip.py */

@@ -58,20 +58,18 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		return crpc;
 	crpc->msgout.next_xmit_offset = crpc->msgout.length;
 
-	struct homa_data_hdr h = {
-		.common = {
-			.sport = htons(server_port),
-			.dport = htons(hsk->port),
-			.type = DATA,
-			.sender_id = cpu_to_be64(id ^ 1)
-		},
-		.message_length = htonl(resp_length),
-		.incoming = htonl(10000),
-		.ack = {0, 0},
-		.cutoff_version = 0,
-		.retransmit = 0,
-		.seg = {.offset = 0}
+	struct homa_data_hdr h;
+	memset(&h, 0, sizeof(h));
+	h.common = (struct homa_common_hdr){
+		.sport = htons(server_port),
+		.dport = htons(hsk->port),
+		.type = DATA,
+		.sender_id = cpu_to_be64(id ^ 1)
 	};
+	h.message_length = htonl(resp_length);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
@@ -197,6 +195,7 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 	}
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_grantables() - Append to the test log information about all of
  * the messages that are currently grantable.
@@ -219,6 +218,7 @@ void unit_log_grantables(struct homa *homa)
 		}
 	}
 }
+#endif /* See strip.py */
 
 /**
  * unit_log_message_out_packets() - Append to the test log a human-readable
@@ -352,20 +352,18 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		int req_length, int resp_length)
 {
 	int bytes_received, created;
-	struct homa_data_hdr h = {
-		.common = {
-			.sport = htons(client_port),
-			.dport = htons(hsk->port),
-			.type = DATA,
-			.sender_id = cpu_to_be64(id ^ 1)
-		},
-		.message_length = htonl(req_length),
-		.incoming = htonl(10000),
-		.ack = {0, 0},
-		.cutoff_version = 0,
-		.retransmit = 0,
-		.seg = {.offset = 0}
+	struct homa_data_hdr h;
+	memset(&h, 0, sizeof(h));
+	h.common = (struct homa_common_hdr){
+		.sport = htons(client_port),
+		.dport = htons(hsk->port),
+		.type = DATA,
+		.sender_id = cpu_to_be64(id ^ 1)
 	};
+	h.message_length = htonl(req_length);
+#ifndef __STRIP__ /* See strip.py */
+	h.incoming = htonl(10000);
+#endif /* See strip.py */
 	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h,
 			&created);
 

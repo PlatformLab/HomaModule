@@ -45,7 +45,9 @@ extern int           unit_list_length(struct list_head *head);
 extern void          unit_log_active_ids(struct homa_sock *hsk);
 extern void          unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 extern void          unit_log_frag_list(struct sk_buff *skb, int verbose);
+#ifndef __STRIP__ /* See strip.py */
 extern void          unit_log_grantables(struct homa *homa);
+#endif /* See strip.py */
 extern void          unit_log_hashed_rpcs(struct homa_sock *hsk);
 extern void          unit_log_message_out_packets(
 			struct homa_message_out *message, int verbose);

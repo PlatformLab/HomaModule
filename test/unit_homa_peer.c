@@ -13,6 +13,7 @@ struct in6_addr ip1111[1];
 struct in6_addr ip2222[1];
 struct in6_addr ip3333[1];
 
+#ifndef __STRIP__ /* See strip.py */
 static int hook_new_peer_count;
 static struct homa_peertab *hook_peertab;
 static struct homa_sock *hook_hsk;
@@ -32,6 +33,7 @@ static void kmalloc_hook(char *id)
 		homa_peer_find(hook_peertab, &addr, &hook_hsk->inet);
 	}
 }
+#endif /* See strip.py */
 
 FIXTURE(homa_peer) {
 	struct homa homa;
@@ -70,12 +72,14 @@ static int dead_count(struct homa_peertab *peertab)
 	return count;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 static void peer_spinlock_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
 		return;
 	mock_ns += 1000;
 }
+#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_find__basics)
 {
@@ -84,8 +88,10 @@ TEST_F(homa_peer, homa_peer_find__basics)
 	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(INT_MAX, peer->unsched_cutoffs[HOMA_MAX_PRIORITIES-2]);
 	EXPECT_EQ(0, peer->cutoff_version);
+#endif /* See strip.py */
 
 	peer2 = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	EXPECT_EQ(peer, peer2);
@@ -93,7 +99,9 @@ TEST_F(homa_peer, homa_peer_find__basics)
 	peer2 = homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
 
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(2, homa_metrics_per_cpu()->peer_new_entries);
+#endif /* See strip.py */
 }
 
 static struct _test_data_homa_peer *test_data;
@@ -143,6 +151,7 @@ TEST_F(homa_peer, homa_peertab_gc_dsts)
 	EXPECT_EQ(0, dead_count(&self->peertab));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peertab_get_peers__not_init)
 {
 	struct homa_peertab peertab;
@@ -233,6 +242,7 @@ TEST_F(homa_peer, homa_peertab_get_peers__many_new_peers_created_concurrently)
 	EXPECT_EQ(12, num_peers);
 	kfree(peers);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_find__conflicting_creates)
 {
@@ -253,7 +263,9 @@ TEST_F(homa_peer, homa_peer_find__kmalloc_error)
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
+#endif /* See strip.py */
 }
 TEST_F(homa_peer, homa_peer_find__route_error)
 {
@@ -263,7 +275,9 @@ TEST_F(homa_peer, homa_peer_find__route_error)
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
+#endif /* See strip.py */
 }
 
 TEST_F(homa_peer, homa_dst_refresh__basics)
@@ -308,7 +322,9 @@ TEST_F(homa_peer, homa_dst_refresh__routing_error)
 	mock_route_errors = 1;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
+#endif /* See strip.py */
 	EXPECT_EQ(0, dead_count(self->homa.peers));
 }
 TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
@@ -328,6 +344,7 @@ TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
 	EXPECT_EQ(1, dead_count(self->homa.peers));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_unsched_priority)
 {
 	struct homa_peer peer;
@@ -338,6 +355,7 @@ TEST_F(homa_peer, homa_unsched_priority)
 	EXPECT_EQ(4, homa_unsched_priority(&self->homa, &peer, 200));
 	EXPECT_EQ(3, homa_unsched_priority(&self->homa, &peer, 201));
 }
+#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_get_dst_ipv4)
 {
@@ -383,6 +401,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peer_lock_slow)
 {
 	struct homa_peer *peer = homa_peer_find(&self->peertab, ip3333,
@@ -402,6 +421,7 @@ TEST_F(homa_peer, homa_peer_lock_slow)
 	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_ns);
 	homa_peer_unlock(peer);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_add_ack)
 {

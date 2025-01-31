@@ -444,6 +444,7 @@ void log_affinity()
  */
 void kfreeze()
 {
+#ifndef __STRIP__ /* See strip.py */
 	kfreeze_count++;
 	if (kfreeze_count > 1)
 		return;
@@ -457,6 +458,7 @@ void kfreeze()
 		log(NORMAL, "ERROR: HOMAIOCFREEZE ioctl failed: %s\n",
 				strerror(errno));
 	close(fd);
+#endif /* See strip.py */
 }
 
 /**

@@ -47,17 +47,17 @@ FIXTURE_SETUP(homa_offload)
 	global_homa = &self->homa;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
-	self->header = (struct homa_data_hdr){.common = {
-			.sport = htons(40000), .dport = htons(99),
-			.type = DATA,
-			.flags = HOMA_TCP_FLAGS,
-			.urgent = HOMA_TCP_URGENT,
-			.sender_id = cpu_to_be64(1000)},
-			.message_length = htonl(10000),
-			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0},
-			.retransmit = 0,
-			.seg = {.offset = htonl(2000)}};
+	memset(&self->header, 0, sizeof(self->header));
+	self->header.common = (struct homa_common_hdr){
+		.sport = htons(40000), .dport = htons(99),
+		.type = DATA,
+		.flags = HOMA_TCP_FLAGS,
+		.urgent = HOMA_TCP_URGENT,
+		.sender_id = cpu_to_be64(1000)
+	};
+	self->header.message_length = htonl(10000);
+	self->header.incoming = htonl(10000);
+	self->header.seg.offset = htonl(2000);
 	for (i = 0; i < GRO_HASH_BUCKETS; i++) {
 		INIT_LIST_HEAD(&self->napi.gro_hash[i].list);
 		self->napi.gro_hash[i].count = 0;
@@ -261,16 +261,13 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	int server_port = 99;
 	struct homa_data_hdr h;
 
+	memset(&h, 0, sizeof(h));
 	h.common.sport = htons(40000);
 	h.common.dport = htons(server_port);
 	h.common.type = DATA;
 	h.common.sender_id = cpu_to_be64(client_id);
 	h.message_length = htonl(10000);
 	h.incoming = htonl(10000);
-	h.cutoff_version = 0;
-	h.ack.client_id = 0;
-	h.ack.server_port = 0;
-	h.retransmit = 0;
 	h.seg.offset = htonl(2000);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT,

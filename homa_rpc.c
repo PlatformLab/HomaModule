@@ -5,8 +5,14 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_skb.h"
+#endif /* See strip.py */
+
+#ifdef __STRIP__ /* See strip.py */
+#include "homa_stub.h"
+#endif /* See strip.py */
 
 /**
  * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
@@ -51,7 +57,9 @@ struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->ready_links);
 	INIT_LIST_HEAD(&crpc->buf_links);
 	INIT_LIST_HEAD(&crpc->dead_links);
+#ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&crpc->grantable_links);
+#endif /* See strip.py */
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->magic = HOMA_RPC_MAGIC;
@@ -145,15 +153,23 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->ready_links);
 	INIT_LIST_HEAD(&srpc->buf_links);
 	INIT_LIST_HEAD(&srpc->dead_links);
+#ifndef __STRIP__ /* See strip.py */
 	INIT_LIST_HEAD(&srpc->grantable_links);
+#endif /* See strip.py */
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->magic = HOMA_RPC_MAGIC;
 	srpc->start_ns = sched_clock();
+#ifndef __STRIP__ /* See strip.py */
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 		   srpc->id, ntohl(h->incoming));
+#endif /* See strip.py */
+#ifndef __STRIP__ /* See strip.py */
 	err = homa_message_in_init(srpc, ntohl(h->message_length),
 				   ntohl(h->incoming));
+#else /* See strip.py */
+	err = homa_message_in_init(srpc, ntohl(h->message_length));
+#endif /* See strip.py */
 	if (err != 0)
 		goto error;
 
@@ -250,12 +266,13 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	tt_record1("homa_rpc_end invoked for id %d", rpc->id);
 	rpc->state = RPC_DEAD;
 
-	/* The following line must occur before the socket is locked or
-	 * RPC is added to dead_rpcs. This is necessary because homa_grant_free
-	 * releases the RPC lock and reacquires it (see comment in
-	 * homa_grant_free for more info).
+#ifndef __STRIP__ /* See strip.py */
+	/* The following line must occur before the socket is locked. This is
+	 * necessary because homa__rpc releases the RPC lock and
+	 * reacquires it.
 	 */
 	homa_grant_free_rpc(rpc);
+#endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
 	homa_sock_lock(rpc->hsk);
@@ -512,6 +529,7 @@ struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 	return NULL;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_rpc_log() - Log info about a particular RPC; this is functionality
  * pulled out of homa_rpc_log_active because its indentation got too deep.
@@ -582,7 +600,6 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
  */
 void homa_rpc_log_tt(struct homa_rpc *rpc)
 {
-#ifndef __STRIP__ /* See strip.py */
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;
@@ -616,7 +633,6 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 	} else {
 		tt_record2("RPC id %d is in state %d", rpc->id, rpc->state);
 	}
-#endif /* See strip.py */
 }
 
 /**
@@ -710,7 +726,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 				continue;
 			total_incoming += rpc->msgin.rec_incoming;
 			if (verbose)
-				tt_record3("homa_validate_incoming: RPC id %d, ncoming %d, rec_incoming %d",
+				tt_record3("homa_validate_incoming: RPC id %d, incoming %d, rec_incoming %d",
 					   rpc->id, incoming,
 					   rpc->msgin.rec_incoming);
 			if (rpc->msgin.granted >= rpc->msgin.length)
@@ -735,3 +751,4 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		   actual - total_incoming, total_incoming, actual);
 	return actual - total_incoming;
 }
+#endif /* See strip.py */

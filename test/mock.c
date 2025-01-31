@@ -7,7 +7,9 @@
 
 #include "homa_impl.h"
 #include "homa_pool.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_skb.h"
+#endif /* See strip.py */
 #include "ccutils.h"
 #include "mock.h"
 #include "utils.h"
@@ -380,11 +382,7 @@ void finish_wait(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
-#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
-	void get_random_bytes(void *buf, int nbytes)
-#else
-	void get_random_bytes(void *buf, size_t nbytes)
-#endif
+void get_random_bytes(void *buf, size_t nbytes)
 {
 	memset(buf, 0, nbytes);
 }
@@ -1341,6 +1339,7 @@ void mock_clear_xmit_prios(void)
 	mock_xmit_prios[0] = 0;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * mock_compound_order() - Replacement for compound_order function.
  */
@@ -1355,6 +1354,7 @@ unsigned int mock_compound_order(struct page *page)
 	mock_compound_order_mask >>= 1;
 	return result;
 }
+#endif /* See strip.py */
 
 /**
  * mock_cpu_to_node() - Replaces cpu_to_node to determine NUMA node for
@@ -1566,9 +1566,11 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
 		case DATA:
 			header_size = sizeof(struct homa_data_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case GRANT:
 			header_size = sizeof(struct homa_grant_hdr);
 			break;
+#endif /* See strip.py */
 		case RESEND:
 			header_size = sizeof(struct homa_resend_hdr);
 			break;
@@ -1578,12 +1580,14 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
 		case BUSY:
 			header_size = sizeof(struct homa_busy_hdr);
 			break;
+#ifndef __STRIP__ /* See strip.py */
 		case CUTOFFS:
 			header_size = sizeof(struct homa_cutoffs_hdr);
 			break;
 		case FREEZE:
 			header_size = sizeof(struct homa_freeze_hdr);
 			break;
+#endif /* See strip.py */
 		case NEED_ACK:
 			header_size = sizeof(struct homa_need_ack_hdr);
 			break;
@@ -1835,7 +1839,9 @@ void mock_teardown(void)
 				mock_preempt_disables);
 	mock_preempt_disables = 0;
 
+#ifndef __STRIP__ /* See strip.py */
 	memset(homa_metrics, 0, sizeof(homa_metrics));
+#endif /* See strip.py */
 
 	unit_hook_clear();
 }

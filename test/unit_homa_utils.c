@@ -24,6 +24,7 @@ FIXTURE_TEARDOWN(homa_utils)
 	unit_teardown();
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * set_cutoffs() - A convenience method to allow all of the values in
  * homa->unsched_cutoffs to be set concisely.
@@ -49,6 +50,7 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 	homa->unsched_cutoffs[6] = c6;
 	homa->unsched_cutoffs[7] = c7;
 }
+#endif /* See strip.py */
 
 TEST_F(homa_utils, homa_init__kmalloc_failure_for_port_map)
 {
@@ -71,6 +73,7 @@ TEST_F(homa_utils, homa_init__kmalloc_failure_for_peers)
 	EXPECT_EQ(NULL, homa2.peers);
 	homa_destroy(&homa2);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 {
 	struct homa homa2;
@@ -82,6 +85,7 @@ TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 		      mock_printk_output);
 	homa_destroy(&homa2);
 }
+#endif /* See strip.py */
 TEST_F(homa_utils, homa_init__cant_create_pacer_thread)
 {
 	struct homa homa2;
@@ -93,6 +97,7 @@ TEST_F(homa_utils, homa_init__cant_create_pacer_thread)
 	homa_destroy(&homa2);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_print_ipv4_addr)
 {
 	struct in6_addr test_addr1 = unit_get_in_addr("192.168.0.1");
@@ -134,7 +139,9 @@ TEST_F(homa_utils, homa_snprintf)
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
 			buffer);
 }
+#endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_prios_changed__basics)
 {
 	set_cutoffs(&self->homa, 90, 80, HOMA_MAX_MESSAGE_LENGTH*2, 60, 50,
@@ -166,3 +173,4 @@ TEST_F(homa_utils, homa_prios_changed__share_lowest_priority)
 	EXPECT_EQ(0x7fffffff, self->homa.unsched_cutoffs[0]);
 	EXPECT_EQ(0, self->homa.max_sched_prio);
 }
+#endif /* See strip.py */

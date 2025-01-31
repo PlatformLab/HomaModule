@@ -130,6 +130,7 @@ _Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
 #define HOMA_RECVMSG_NONBLOCKING   0x04
 #define HOMA_RECVMSG_VALID_FLAGS   0x07
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_abort_args - Structure that passes arguments and results
  * between user space and the HOMAIOCABORT ioctl.
@@ -152,6 +153,7 @@ struct homa_abort_args {
 _Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
 _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 #endif
+#endif /* See strip.py */
 
 /** define SO_HOMA_RCVBUF: setsockopt option for specifying buffer region. */
 #define SO_HOMA_RCVBUF 10
@@ -180,11 +182,14 @@ struct homa_rcvbuf_args {
  * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
  */
 
+#ifndef __STRIP__ /* See strip.py */
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
+#endif /* See strip.py */
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
 
 #ifndef __STRIP__ /* See strip.py */
 int     homa_abort(int sockfd, __u64 id, int error);
+#endif /* See strip.py */
 int     homa_send(int sockfd, const void *message_buf,
 		  size_t length, const struct sockaddr *dest_addr,
 		  __u32 addrlen,  __u64 *id, __u64 completion_cookie);
@@ -197,6 +202,5 @@ ssize_t homa_reply(int sockfd, const void *message_buf,
 ssize_t homa_replyv(int sockfd, const struct iovec *iov,
 		    int iovcnt, const struct sockaddr *dest_addr,
 		    __u32 addrlen,  __u64 id);
-#endif /* See strip.py */
 
 #endif /* _UAPI_LINUX_HOMA_H */

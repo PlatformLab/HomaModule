@@ -160,6 +160,7 @@ TEST_F(homa_sock, homa_sock_init__kzalloc_failure)
 	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock, &self->homa));
 	homa_sock_destroy(&sock);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 {
 	struct homa_sock hijack, no_hijack;
@@ -173,6 +174,7 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	homa_sock_destroy(&hijack);
 	homa_sock_destroy(&no_hijack);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_sock, homa_sock_unlink__remove_from_map)
 {
@@ -350,6 +352,7 @@ TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 	homa_sock_destroy(&hsk4);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_lock_slow)
 {
 	mock_ns_tick = 100;
@@ -365,3 +368,4 @@ TEST_F(homa_sock, homa_sock_lock_slow)
 	EXPECT_EQ(100, homa_metrics_per_cpu()->socket_lock_miss_ns);
 	homa_sock_unlock(&self->hsk);
 }
+#endif /* See strip.py */

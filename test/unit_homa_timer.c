@@ -35,8 +35,10 @@ FIXTURE_SETUP(homa_timer)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;
 	self->homa.timer_ticks = 100;
+#ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.window_param = 10000;
+#endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	unit_log_clear();
 }
@@ -80,6 +82,7 @@ TEST_F(homa_timer, homa_check_rpc__request_ack)
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_timer, homa_check_rpc__all_granted_bytes_received)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -94,6 +97,7 @@ TEST_F(homa_timer, homa_check_rpc__all_granted_bytes_received)
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
+#endif /* See strip.py */
 TEST_F(homa_timer, homa_check_rpc__no_buffer_space)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -144,11 +148,15 @@ TEST_F(homa_timer, homa_check_rpc__timeout)
 	unit_log_clear();
 	crpc->silent_ticks = self->homa.timeout_ticks-1;
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(0, homa_metrics_per_cpu()->rpc_timeouts);
+#endif /* See strip.py */
 	EXPECT_EQ(0, crpc->error);
 	crpc->silent_ticks = self->homa.timeout_ticks;
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
+#endif /* See strip.py */
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
 TEST_F(homa_timer, homa_check_rpc__issue_resend)
@@ -158,10 +166,12 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 			self->server_port, self->client_id, 200, 10000);
 
 	ASSERT_NE(NULL, crpc);
-	crpc->msgin.granted = 5000;
 	self->homa.resend_ticks = 3;
 	self->homa.resend_interval = 2;
+#ifndef __STRIP__ /* See strip.py */
+	crpc->msgin.granted = 5000;
 	crpc->msgout.granted = 0;
+#endif /* See strip.py */
 
 	/* First call: resend_ticks-1. */
 	crpc->silent_ticks = 2;
@@ -173,7 +183,11 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 	crpc->silent_ticks = 3;
 	unit_log_clear();
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 1400-9999", unit_log_get());
+#endif /* See strip.py */
 
 	/* Third call: not yet time for next resend. */
 	crpc->silent_ticks = 4;
@@ -185,7 +199,11 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 	crpc->silent_ticks = 5;
 	unit_log_clear();
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 1400-9999", unit_log_get());
+#endif /* See strip.py */
 }
 TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 {
@@ -194,7 +212,9 @@ TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 			self->server_port, self->client_id, 5000, 10000);
 
 	ASSERT_NE(NULL, crpc);
+#ifndef __STRIP__ /* See strip.py */
 	crpc->msgout.granted = 5000;
+#endif /* See strip.py */
 	crpc->msgout.next_xmit_offset = 5000;
 	self->homa.resend_ticks = 3;
 
@@ -208,7 +228,11 @@ TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 	crpc->silent_ticks = 3;
 	unit_log_clear();
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 0-99", unit_log_get());
+#endif /* See strip.py */
 }
 TEST_F(homa_timer, homa_check_rpc__call_homa_gap_retry)
 {
@@ -218,8 +242,10 @@ TEST_F(homa_timer, homa_check_rpc__call_homa_gap_retry)
 
 	ASSERT_NE(NULL, crpc);
 	crpc->silent_ticks = 3;
+#ifndef __STRIP__ /* See strip.py */
 	crpc->msgin.granted = 10000;
 	crpc->msgin.recv_end = 10000;
+#endif /* See strip.py */
 	crpc->msgin.bytes_remaining = 15000;
 	homa_gap_new(&crpc->msgin.gaps, 7000, 8000);
 	self->homa.resend_ticks = 3;
@@ -227,7 +253,12 @@ TEST_F(homa_timer, homa_check_rpc__call_homa_gap_retry)
 
 	unit_log_clear();
 	homa_check_rpc(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 7000-7999@7", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 7000-7999; xmit RESEND 1400-19999",
+		     unit_log_get());
+#endif /* See strip.py */
 }
 
 TEST_F(homa_timer, homa_timer__basics)
@@ -250,7 +281,11 @@ TEST_F(homa_timer, homa_timer__basics)
 	unit_log_clear();
 	homa_timer(&self->homa);
 	EXPECT_EQ(3, crpc->silent_ticks);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("xmit RESEND 1400-4999", unit_log_get());
+#endif /* See strip.py */
 
 	/* Don't send another RESEND (resend_interval not reached). */
 	unit_log_clear();
@@ -264,7 +299,9 @@ TEST_F(homa_timer, homa_timer__basics)
 	crpc->peer->outstanding_resends = self->homa.timeout_resends;
 #endif /* See strip.py */
 	homa_timer(&self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
+#endif /* See strip.py */
 	EXPECT_EQ(ETIMEDOUT, -crpc->error);
 }
 TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
@@ -275,17 +312,29 @@ TEST_F(homa_timer, homa_timer__reap_dead_rpcs)
 
 	ASSERT_NE(NULL, dead);
 	homa_rpc_end(dead);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(31, self->hsk.dead_skbs);
+#else /* See strip.py */
+	EXPECT_EQ(30, self->hsk.dead_skbs);
+#endif /* See strip.py */
 
 	// First call to homa_timer: not enough dead skbs.
 	self->homa.dead_buffs_limit = 32;
 	homa_timer(&self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(31, self->hsk.dead_skbs);
+#else /* See strip.py */
+	EXPECT_EQ(30, self->hsk.dead_skbs);
+#endif /* See strip.py */
 
 	// Second call to homa_timer: must reap.
 	self->homa.dead_buffs_limit = 15;
 	homa_timer(&self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(11, self->hsk.dead_skbs);
+#else /* See strip.py */
+	EXPECT_EQ(10, self->hsk.dead_skbs);
+#endif /* See strip.py */
 }
 TEST_F(homa_timer, homa_timer__rpc_in_service)
 {

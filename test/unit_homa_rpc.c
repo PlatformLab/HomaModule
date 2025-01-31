@@ -50,19 +50,22 @@ FIXTURE_SETUP(homa_rpc)
 	self->server_addr.in6.sin6_addr = *self->server_ip;
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
 	homa_init(&self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.window_param = 10000;
+#endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
-	self->data = (struct homa_data_hdr){.common = {
-			.sport = htons(self->client_port),
-			.dport = htons(self->server_port),
-			.type = DATA,
-			.sender_id = self->client_id},
-			.message_length = htonl(10000),
-			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0},
-			.retransmit = 0,
-			.seg = {.offset = 0}};
+	memset(&self->data, 0, sizeof(self->data));
+	self->data.common = (struct homa_common_hdr){
+		.sport = htons(self->client_port),
+		.dport = htons(self->server_port),
+		.type = DATA,
+		.sender_id = self->client_id
+	};
+	self->data.message_length = htonl(10000);
+#ifndef __STRIP__ /* See strip.py */
+	self->data.incoming = htonl(10000);
+#endif /* See strip.py */
 	self->iovec.iov_base = (void *) 2000;
 	self->iovec.iov_len = 10000;
 	iov_iter_init(&self->iter, WRITE, &self->iovec, 1, self->iovec.iov_len);
@@ -278,6 +281,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_rpc)
 	homa_rpc_end(srpc);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_rpc, homa_bucket_lock_slow)
 {
 	struct homa_rpc *crpc, *srpc;
@@ -306,6 +310,7 @@ TEST_F(homa_rpc, homa_bucket_lock_slow)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_lock_misses);
 	EXPECT_EQ(10, homa_metrics_per_cpu()->server_lock_miss_ns);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_rpc, homa_rpc_acked__basics)
 {
@@ -386,12 +391,16 @@ TEST_F(homa_rpc, homa_rpc_end__basics)
 			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 1000, 20000);
 
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
+#endif /* See strip.py */
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_end(crpc);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
+#endif /* See strip.py */
 	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc->id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, unit_list_length(&self->hsk.dead_rpcs));
@@ -445,7 +454,11 @@ TEST_F(homa_rpc, homa_rpc_end__free_gaps)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
 
+#ifndef __STRIP__ /* See strip.py */
 	homa_message_in_init(crpc, 10000, 0);
+#else /* See strip.py */
+	homa_message_in_init(crpc, 10000);
+#endif /* See strip.py */
 	unit_log_clear();
 	self->data.seg.offset = htonl(1400);
 	homa_add_packet(crpc, mock_skb_new(self->client_ip,

@@ -185,6 +185,7 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	return result;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_abort() - Terminate the execution of an RPC.
  * @sockfd:     File descriptor for the socket associated with the RPC.
@@ -206,3 +207,4 @@ int homa_abort(int sockfd, __u64 id, int error)
 
 	return ioctl(sockfd, HOMAIOCABORT, &args);
 }
+#endif /* See strip.py */

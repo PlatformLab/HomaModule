@@ -78,16 +78,15 @@ FIXTURE_SETUP(homa_grant)
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	self->data = (struct homa_data_hdr){.common = {
-			.sport = htons(self->client_port),
-			.dport = htons(self->server_port),
-			.type = DATA,
-			.sender_id = cpu_to_be64(self->client_id)},
-			.message_length = htonl(10000),
-			.incoming = htonl(10000), .cutoff_version = 0,
-			.ack = {0, 0},
-			.retransmit = 0,
-			.seg = {.offset = 0}};
+	memset(&self->data, 0, sizeof(self->data));
+	self->data.common = (struct homa_common_hdr){
+		.sport = htons(self->client_port),
+		.dport = htons(self->server_port),
+		.type = DATA,
+		.sender_id = cpu_to_be64(self->client_id)
+	};
+	self->data.message_length = htonl(10000);
+	self->data.incoming = htonl(10000);
 	unit_log_clear();
 	self->incoming_delta = 0;
 }

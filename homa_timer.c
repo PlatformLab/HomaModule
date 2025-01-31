@@ -7,7 +7,13 @@
 #include "homa_impl.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_skb.h"
+#endif /* See strip.py */
+
+#ifdef __STRIP__ /* See strip.py */
+#include "homa_stub.h"
+#endif /* See strip.py */
 
 /**
  * homa_check_rpc() -  Invoked for each RPC during each timer pass; does
@@ -21,7 +27,9 @@ void homa_check_rpc(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_resend_hdr resend;
+#ifndef __STRIP__ /* See strip.py */
 	const char *us, *them;
+#endif /* See strip.py */
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
@@ -45,6 +53,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->state == RPC_INCOMING) {
+#ifndef __STRIP__ /* See strip.py */
 		if ((rpc->msgin.length - rpc->msgin.bytes_remaining)
 				>= rpc->msgin.granted) {
 			/* We've received everything that we've granted, so we
@@ -53,6 +62,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			rpc->silent_ticks = 0;
 			return;
 		}
+#endif /* See strip.py */
 		if (rpc->msgin.num_bpages == 0) {
 			/* Waiting for buffer space, so no problem. */
 			rpc->silent_ticks = 0;
@@ -67,7 +77,11 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	}
 
 	if (rpc->state == RPC_OUTGOING) {
+#ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
+#else /* See strip.py */
+		if (rpc->msgout.next_xmit_offset < rpc->msgout.length) {
+#endif /* See strip.py */
 			/* There are granted bytes that we haven't transmitted,
 			 * so no need to be concerned; the ball is in our court.
 			 */
@@ -82,6 +96,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		INC_METRIC(rpc_timeouts, 1);
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->state);
+#ifndef __STRIP__ /* See strip.py */
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
 		homa_freeze_peers(homa);
@@ -91,6 +106,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 				  rpc->id,
 				  homa_print_ipv6_addr(&rpc->peer->addr),
 				  rpc->state);
+#endif /* See strip.py */
 		homa_rpc_abort(rpc, -ETIMEDOUT);
 		return;
 	}
@@ -112,40 +128,54 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	} else {
 		homa_gap_retry(rpc);
 		resend.offset = htonl(rpc->msgin.recv_end);
+#ifndef __STRIP__ /* See strip.py */
 		resend.length = htonl(rpc->msgin.granted - rpc->msgin.recv_end);
+#else /* See strip.py */
+		resend.length = htonl(rpc->msgin.length - rpc->msgin.recv_end);
+#endif /* See strip.py */
 		if (resend.length == 0)
 			return;
 	}
-	resend.priority = homa->num_priorities - 1;
-	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 #ifndef __STRIP__ /* See strip.py */
+	resend.priority = homa->num_priorities - 1;
+#endif /* See strip.py */
+	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 	if (homa_is_client(rpc->id)) {
+#ifndef __STRIP__ /* See strip.py */
 		us = "client";
 		them = "server";
+#endif /* See strip.py */
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   rpc->dport, rpc->msgin.recv_end);
+#ifndef __STRIP__ /* See strip.py */
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 			   rpc->msgin.length, rpc->msgin.granted,
 			   rpc->msgin.bytes_remaining,
 			   rpc->msgin.rec_incoming);
+#endif /* See strip.py */
 	} else {
+#ifndef __STRIP__ /* See strip.py */
 		us = "server";
 		them = "client";
+#endif /* See strip.py */
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->msgin.recv_end);
+#ifndef __STRIP__ /* See strip.py */
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 			   rpc->msgin.length, rpc->msgin.granted,
 			   rpc->msgin.bytes_remaining,
 			   rpc->msgin.rec_incoming);
-	}
 #endif /* See strip.py */
+	}
+#ifndef __STRIP__ /* See strip.py */
 	if (homa->verbose)
 		pr_notice("Homa %s RESEND to %s %s:%d for id %llu, offset %d, length %d\n", us, them,
 			  homa_print_ipv6_addr(&rpc->peer->addr),
 			  rpc->dport, rpc->id, rpc->msgin.recv_end,
 			  rpc->msgin.granted - rpc->msgin.recv_end);
+#endif /* See strip.py */
 }
 
 /**
@@ -156,22 +186,32 @@ void homa_check_rpc(struct homa_rpc *rpc)
 void homa_timer(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
+#ifndef __STRIP__ /* See strip.py */
 	static u64 prev_grant_count;
 	int total_incoming_rpcs = 0;
 	int sum_incoming_rec = 0;
+#endif /* See strip.py */
 	struct homa_sock *hsk;
+#ifndef __STRIP__ /* See strip.py */
 	static int zero_count;
+#endif /* See strip.py */
 	struct homa_rpc *rpc;
+#ifndef __STRIP__ /* See strip.py */
 	int sum_incoming = 0;
-	cycles_t start, end;
 	u64 total_grants;
+#endif /* See strip.py */
 	int total_rpcs = 0;
 	int rpc_count = 0;
+#ifndef __STRIP__ /* See strip.py */
+	cycles_t start;
+	cycles_t end;
 	int core;
+#endif /* See strip.py */
 
-	start = sched_clock();
 	homa->timer_ticks++;
 
+#ifndef __STRIP__ /* See strip.py */
+	start = sched_clock();
 	total_grants = 0;
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = homa_metrics_per_cpu();
@@ -198,6 +238,7 @@ void homa_timer(struct homa *homa)
 		zero_count = 0;
 	}
 	prev_grant_count = total_grants;
+#endif /* See strip.py */
 
 	/* Scan all existing RPCs in all sockets. */
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
@@ -207,12 +248,14 @@ void homa_timer(struct homa *homa)
 			 * isn't keeping up with RPC reaping, so we'll help
 			 * out.  See reap.txt for more info.
 			 */
-			u64 start = sched_clock();
+#ifndef __STRIP__ /* See strip.py */
+			u64 rpc_start = sched_clock();
+#endif /* See strip.py */
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, false) == 0)
 				break;
-			INC_METRIC(timer_reap_ns, sched_clock() - start);
+			INC_METRIC(timer_reap_ns, sched_clock() - rpc_start);
 		}
 
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
@@ -228,12 +271,14 @@ void homa_timer(struct homa *homa)
 				rpc->silent_ticks = 0;
 				homa_rpc_unlock(rpc);
 				continue;
+#ifndef __STRIP__ /* See strip.py */
 			} else if (rpc->state == RPC_INCOMING) {
 				total_incoming_rpcs += 1;
 				sum_incoming_rec += rpc->msgin.rec_incoming;
 				sum_incoming += rpc->msgin.granted
 						- (rpc->msgin.length
 						- rpc->msgin.bytes_remaining);
+#endif /* See strip.py */
 			}
 			rpc->silent_ticks++;
 			homa_check_rpc(rpc);
@@ -253,10 +298,14 @@ void homa_timer(struct homa *homa)
 		homa_unprotect_rpcs(hsk);
 	}
 	homa_socktab_end_scan(&scan);
+#ifndef __STRIP__ /* See strip.py */
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 		   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
 		   atomic_read(&homa->total_incoming));
+#endif /* See strip.py */
 	homa_skb_release_pages(homa);
+#ifndef __STRIP__ /* See strip.py */
 	end = sched_clock();
 	INC_METRIC(timer_ns, end - start);
+#endif /* See strip.py */
 }

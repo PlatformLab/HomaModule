@@ -64,6 +64,9 @@ num_phys_cores = 0
 xl170_default_cores = [0, 10, 7, 19, 8, 18, 6, 16, 4, 14,
     11, 1, 7, 17, 15, 5, 13, 3,  2,  12]
 
+# False means that the installed version of Homa doesn't support sysctls.
+sysctl_avl = True
+
 def get_core_mask(core = -1):
     """
     Returns a string representing a bit mask containing one bit for each
@@ -373,6 +376,10 @@ def set_sysctl(name, value):
     """
     Set a Homa sysctl configuration option as given by name and value.
     """
+    global sysctl_avl
+
+    if not sysctl_avl:
+        return
     subprocess.run(["sudo", "sysctl", ".net.homa.%s=%s" % (name, value)],
             check=True)
 
@@ -386,6 +393,16 @@ def config_homa(mod):
     subprocess.run(["sudo", "rmmod", "homa"], check=False)
     subprocess.run(["sudo", "bash", "-c", "insmod %s" % (mod)],
             check=True)
+
+    # See if Homa supports sysctls (if it has been stripped down for Linux
+    # upstreaming, it might not).
+
+    result = subprocess.run(["sysctl", ".net.homa.num_priorities"],
+            capture_output=True)
+    if result.returncode != 0:
+        global sysctl_avl
+        print("Homa doesn't appear to support sysctls")
+        sysctl_avl = False
 
     set_sysctl("num_priorities", "8")
     link_mbps = get_link_speed()

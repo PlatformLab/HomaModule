@@ -59,6 +59,7 @@ struct homa_message_out {
 	 */
 	int next_xmit_offset;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @unscheduled: Initial bytes of message that we'll send
 	 * without waiting for grants.
@@ -78,6 +79,7 @@ struct homa_message_out {
 	 * packets.
 	 */
 	__u8 sched_priority;
+#endif /* See strip.py */
 
 	/**
 	 * @init_ns: Time in sched_clock units when this structure was
@@ -142,6 +144,7 @@ struct homa_message_in {
 	 */
 	int bytes_remaining;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
 	 * may transmit without additional grants, includes unscheduled bytes.
@@ -165,15 +168,18 @@ struct homa_message_in {
 
 	/** @priority: Priority level to include in future GRANTS. */
 	int priority;
+#endif /* See strip.py */
 
 	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
 	__u8 resend_all;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @birth: sched_clock() time when this RPC was added to the grantable
 	 * list. Invalid if RPC isn't in the grantable list.
 	 */
 	u64 birth;
+#endif /* See strip.py */
 
 	/**
 	 * @num_bpages: The number of entries in @bpage_offsets used for this
@@ -346,12 +352,14 @@ struct homa_rpc {
 	 */
 	struct homa_interest *interest;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
 	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head grantable_links;
+#endif /* See strip.py */
 
 	/**
 	 * @throttled_links: Used to link this RPC into homa->throttled_rpcs.
@@ -406,10 +414,12 @@ struct homa_rpc
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
 void     homa_rpc_end(struct homa_rpc *rpc);
+#ifndef __STRIP__ /* See strip.py */
 void     homa_rpc_log(struct homa_rpc *rpc);
 void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 void     homa_rpc_log_tt(struct homa_rpc *rpc);
+#endif /* See strip.py */
 struct homa_rpc
 	       *homa_rpc_new_client(struct homa_sock *hsk,
 				    const union sockaddr_in_union *dest);
@@ -418,9 +428,10 @@ struct homa_rpc
 				    const struct in6_addr *source,
 				    struct homa_data_hdr *h, int *created);
 int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
-char    *homa_symbol_for_state(struct homa_rpc *rpc);
+#ifndef __STRIP__ /* See strip.py */
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
+#endif /* See strip.py */
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.

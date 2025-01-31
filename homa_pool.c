@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
+#endif /* See strip.py */
 #include "homa_pool.h"
 
 /* This file contains functions that manage user-space buffer pools. */
@@ -483,6 +485,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
 		homa_pool_allocate(rpc);
+#ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgin.num_bpages > 0) {
 			/* Allocation succeeded; "wake up" the RPC. */
 			rpc->msgin.resend_all = 1;
@@ -490,5 +493,11 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		} else {
 			homa_rpc_unlock(rpc);
 		}
+#else /* See strip.py */
+		if (rpc->msgin.num_bpages > 0)
+			/* Allocation succeeded; "wake up" the RPC. */
+			rpc->msgin.resend_all = 1;
+		homa_rpc_unlock(rpc);
+#endif /* See strip.py */
 	}
 }

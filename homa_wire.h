@@ -13,12 +13,16 @@
  */
 enum homa_packet_type {
 	DATA               = 0x10,
+#ifndef __STRIP__ /* See strip.py */
 	GRANT              = 0x11,
+#endif /* See strip.py */
 	RESEND             = 0x12,
 	UNKNOWN            = 0x13,
 	BUSY               = 0x14,
+#ifndef __STRIP__ /* See strip.py */
 	CUTOFFS            = 0x15,
 	FREEZE             = 0x16,
+#endif /* See strip.py */
 	NEED_ACK           = 0x17,
 	ACK                = 0x18,
 	BOGUS              = 0x19,      /* Used only in unit tests. */
@@ -62,12 +66,14 @@ enum homa_packet_type {
  */
 #define HOMA_MAX_HEADER 90
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * define HOMA_MAX_PRIORITIES - The maximum number of priority levels that
  * Homa can use (the actual number can be restricted to less than this at
  * runtime). Changing this value will affect packet formats.
  */
 #define HOMA_MAX_PRIORITIES 8
+#endif /* See strip.py */
 
 /**
  * struct homa_common_hdr - Wire format for the first bytes in every Homa
@@ -116,6 +122,7 @@ struct homa_common_hdr {
 	 */
 	__u8 doff;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @flags: Holds TCP flags such as URG, ACK, etc. The special value
 	 * HOMA_TCP_FLAGS is stored here to distinguish Homa-over-TCP packets
@@ -125,6 +132,9 @@ struct homa_common_hdr {
 	 */
 	__u8 flags;
 #define HOMA_TCP_FLAGS 6
+#else /* See strip.py */
+	__u8 reserved1;
+#endif /* See strip.py */
 
 	/**
 	 * @window: Corresponds to the window field in TCP headers. Not used
@@ -138,6 +148,7 @@ struct homa_common_hdr {
 	 */
 	__be16 checksum;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @urgent: occupies the same bytes as the urgent pointer in a TCP
 	 * header. When Homa packets are transmitted over TCP, this has the
@@ -146,6 +157,9 @@ struct homa_common_hdr {
 	 */
 	__be16 urgent;
 #define HOMA_TCP_URGENT 0xb97d
+#else /* See strip.py */
+	__be16 reserved2;
+#endif /* See strip.py */
 
 	/**
 	 * @sender_id: the identifier of this RPC as used on the sender (i.e.,
@@ -176,6 +190,7 @@ struct homa_ack {
 	__be16 server_port;
 } __packed;
 
+#ifndef __STRIP__ /* See strip.py */
 /* struct homa_data_hdr - Contains data for part or all of a Homa message.
  * An incoming packet consists of a homa_data_hdr followed by message data.
  * An outgoing packet can have this simple format as well, or it can be
@@ -219,8 +234,48 @@ struct homa_ack {
  * throughout the segment data; TSO/GSO will include a different homa_seg_hdr
  * in each generated packet.
  */
+#else /* See strip.py */
+/* struct homa_data_hdr - Contains data for part or all of a Homa message.
+ * An incoming packet consists of a homa_data_hdr followed by message data.
+ * An outgoing packet can have this simple format as well, or it can be
+ * structured as a GSO packet with the following format:
+ *
+ *    |-----------------------|
+ *    |                       |
+ *    |     data_header       |
+ *    |                       |
+ *    |---------------------- |
+ *    |                       |
+ *    |                       |
+ *    |     segment data      |
+ *    |                       |
+ *    |                       |
+ *    |-----------------------|
+ *    |      seg_header       |
+ *    |-----------------------|
+ *    |                       |
+ *    |                       |
+ *    |     segment data      |
+ *    |                       |
+ *    |                       |
+ *    |-----------------------|
+ *    |      seg_header       |
+ *    |-----------------------|
+ *    |                       |
+ *    |                       |
+ *    |     segment data      |
+ *    |                       |
+ *    |                       |
+ *    |-----------------------|
+ *
+ * TSO will not adjust @homa_common_hdr.sequence in the segments, so Homa
+ * sprinkles correct offsets (in homa_seg_hdrs) throughout the segment data;
+ * TSO/GSO will include a different homa_seg_hdr in each generated packet.
+ */
+#endif /* See strip.py */
 
 struct homa_seg_hdr {
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @offset: Offset within message of the first byte of data in
 	 * this segment.  If this field is -1 it means that the packet was
@@ -229,6 +284,12 @@ struct homa_seg_hdr {
 	 * and updates this value from @common.sequence if needed, so the
 	 * value will always be valid once the packet reaches homa_softirq.
 	 */
+#else /* See strip.py */
+	/**
+	 * @offset: Offset within message of the first byte of data in
+	 * this segment.
+	 */
+#endif /* See strip.py */
 	__be32 offset;
 } __packed;
 
@@ -238,6 +299,7 @@ struct homa_data_hdr {
 	/** @message_length: Total #bytes in the message. */
 	__be32 message_length;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @incoming: The receiver can expect the sender to send all of the
 	 * bytes in the message up to at least this offset (exclusive),
@@ -246,6 +308,9 @@ struct homa_data_hdr {
 	 * transmits unilaterally (e.g., to round up to a full GSO batch).
 	 */
 	__be32 incoming;
+#else /* See strip.py */
+	__be32 reserved1;
+#endif /* See strip.py */
 
 	/** @ack: If the @client_id field of this is nonzero, provides info
 	 * about an RPC that the recipient can now safely free. Note: in
@@ -256,6 +321,7 @@ struct homa_data_hdr {
 	 */
 	struct homa_ack ack;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @cutoff_version: The cutoff_version from the most recent
 	 * CUTOFFS packet that the source of this packet has received
@@ -263,6 +329,9 @@ struct homa_data_hdr {
 	 * yet received a CUTOFFS packet.
 	 */
 	__be16 cutoff_version;
+#else /* See strip.py */
+	__be16 reserved2;
+#endif /* See strip.py */
 
 	/**
 	 * @retransmit: 1 means this packet was sent in response to a RESEND
@@ -296,6 +365,7 @@ static inline int homa_data_len(struct sk_buff *skb)
 			sizeof(struct homa_data_hdr);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_grant_hdr - Wire format for GRANT packets, which are sent by
  * the receiver back to the sender to indicate that the sender may transmit
@@ -329,6 +399,7 @@ struct homa_grant_hdr {
 } __packed;
 _Static_assert(sizeof(struct homa_grant_hdr) <= HOMA_MAX_HEADER,
 	       "homa_grant_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+#endif /* See strip.py */
 
 /**
  * struct homa_resend_hdr - Wire format for RESEND packets.
@@ -357,6 +428,7 @@ struct homa_resend_hdr {
 	 */
 	__be32 length;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @priority: Packet priority to use.
 	 *
@@ -364,6 +436,7 @@ struct homa_resend_hdr {
 	 * priority.
 	 */
 	__u8 priority;
+#endif /* See strip.py */
 } __packed;
 _Static_assert(sizeof(struct homa_resend_hdr) <= HOMA_MAX_HEADER,
 	       "homa_resend_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
@@ -397,6 +470,7 @@ struct homa_busy_hdr {
 _Static_assert(sizeof(struct homa_busy_hdr) <= HOMA_MAX_HEADER,
 	       "homa_busy_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_cutoffs_hdr - Wire format for CUTOFFS packets.
  *
@@ -436,6 +510,7 @@ struct homa_freeze_hdr {
 } __packed;
 _Static_assert(sizeof(struct homa_freeze_hdr) <= HOMA_MAX_HEADER,
 	       "homa_freeze_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+#endif /* See strip.py */
 
 /**
  * struct homa_need_ack_hdr - Wire format for NEED_ACK packets.

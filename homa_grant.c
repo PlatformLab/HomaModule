@@ -674,6 +674,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
 	return result;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_grant_log_tt() - Generate timetrace records describing all of
  * the active RPCs (those we are currently granting to).
@@ -693,3 +694,4 @@ void homa_grant_log_tt(struct homa *homa)
 	}
 	homa_grantable_unlock(homa);
 }
+#endif /* See strip.py */

@@ -5,7 +5,9 @@
  */
 
 #include "homa_impl.h"
+#ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
+#endif /* See strip.py */
 #include "homa_peer.h"
 #include "homa_pool.h"
 
@@ -35,10 +37,12 @@ static bool exiting;
 /* Thread that runs timer code to detect lost packets and crashed peers. */
 static struct task_struct *timer_kthread;
 
+#ifndef __STRIP__ /* See strip.py */
 /* Set via sysctl to request that a particular action be taken. The value
  * written determines the action.
  */
 static int action;
+#endif /* See strip.py */
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -175,6 +179,7 @@ static struct inet6_protocol homav6_protocol = {
 	.flags =        INET6_PROTO_NOPOLICY | INET6_PROTO_FINAL,
 };
 
+#ifndef __STRIP__ /* See strip.py */
 /* Describes file operations implemented for /proc/net/homa_metrics. */
 static const struct proc_ops homa_metrics_pops = {
 	.proc_open         = homa_metrics_open,
@@ -493,8 +498,10 @@ static struct ctl_table homa_ctl_table[] = {
 	{}
 #endif
 };
+#endif /* See strip.py */
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
+#ifndef __STRIP__ /* See strip.py */
 static __u16 header_lengths[] = {
 	sizeof32(struct homa_data_hdr),
 	sizeof32(struct homa_grant_hdr),
@@ -506,9 +513,24 @@ static __u16 header_lengths[] = {
 	sizeof32(struct homa_need_ack_hdr),
 	sizeof32(struct homa_ack_hdr)
 };
+#else /* See strip.py */
+static __u16 header_lengths[] = {
+	sizeof32(struct homa_data_hdr),
+	0,
+	sizeof32(struct homa_resend_hdr),
+	sizeof32(struct homa_unknown_hdr),
+	sizeof32(struct homa_busy_hdr),
+	0,
+	0,
+	sizeof32(struct homa_need_ack_hdr),
+	sizeof32(struct homa_ack_hdr)
+};
+#endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
 /* Used to remove sysctl values when the module is unloaded. */
 static struct ctl_table_header *homa_ctl_header;
+#endif /* See strip.py */
 
 static DECLARE_COMPLETION(timer_thread_done);
 
@@ -523,11 +545,10 @@ int __init homa_load(void)
 
 	pr_notice("Homa module loading\n");
 #ifndef __STRIP__ /* See strip.py */
-	pr_notice("Homa structure sizes: homa_data_hdr %u, homa_seg_hdr %u, ack %u, homa_grant_hdr %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+	pr_notice("Homa structure sizes: homa_data_hdr %u, homa_seg_hdr %u, ack %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof32(struct homa_data_hdr),
 		  sizeof32(struct homa_seg_hdr),
 		  sizeof32(struct homa_ack),
-		  sizeof32(struct homa_grant_hdr),
 		  sizeof32(struct homa_peer),
 		  sizeof32(struct iphdr),
 		  sizeof32(struct flowi),
@@ -576,6 +597,7 @@ int __init homa_load(void)
 	status = homa_init(homa);
 	if (status)
 		goto homa_init_err;
+#ifndef __STRIP__ /* See strip.py */
 	metrics_dir_entry = proc_create("homa_metrics", 0444,
 					init_net.proc_net, &homa_metrics_pops);
 	if (!metrics_dir_entry) {
@@ -597,6 +619,7 @@ int __init homa_load(void)
 		pr_err("Homa couldn't init offloads\n");
 		goto offload_err;
 	}
+#endif /* See strip.py */
 
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
@@ -607,20 +630,24 @@ int __init homa_load(void)
 		goto timer_err;
 	}
 
-	homa_gro_hook_tcp();
 #ifndef __STRIP__ /* See strip.py */
+	homa_gro_hook_tcp();
+#endif /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	tt_init("timetrace", homa->temp);
 #endif /* See strip.py */
 
 	return 0;
 
 timer_err:
+#ifndef __STRIP__ /* See strip.py */
 	homa_offload_end();
 offload_err:
 	unregister_net_sysctl_table(homa_ctl_header);
 sysctl_err:
 	proc_remove(metrics_dir_entry);
 metrics_err:
+#endif /* See strip.py */
 	homa_destroy(homa);
 homa_init_err:
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
@@ -647,18 +674,21 @@ void __exit homa_unload(void)
 	pr_notice("Homa module unloading\n");
 	exiting = true;
 
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
-
+#ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
+#endif /* See strip.py */
 	if (timer_kthread)
 		wake_up_process(timer_kthread);
+	wait_for_completion(&timer_thread_done);
+#ifndef __STRIP__ /* See strip.py */
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
-	wait_for_completion(&timer_thread_done);
 	unregister_net_sysctl_table(homa_ctl_header);
 	proc_remove(metrics_dir_entry);
+#endif /* See strip.py */
 	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
@@ -713,8 +743,10 @@ void homa_close(struct sock *sk, long timeout)
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
 	tt_record1("closed socket, port %d", hsk->port);
+#ifndef __STRIP__ /* See strip.py */
 	if (hsk->homa->freeze_type == SOCKET_CLOSE)
 		tt_freeze();
+#endif /* See strip.py */
 }
 
 /**
@@ -746,6 +778,7 @@ int homa_disconnect(struct sock *sk, int flags)
 	return -EINVAL;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_ioc_abort() - The top-level function for the ioctl that implements
  * the homa_abort user-level API.
@@ -781,6 +814,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 	homa_rpc_unlock(rpc); /* Locked by homa_find_client_rpc. */
 	return ret;
 }
+#endif /* See strip.py */
 
 /**
  * homa_ioctl() - Implements the ioctl system call for Homa sockets.
@@ -793,6 +827,7 @@ int homa_ioc_abort(struct sock *sk, int *karg)
  */
 int homa_ioctl(struct sock *sk, int cmd, int *karg)
 {
+#ifndef __STRIP__ /* See strip.py */
 	int result;
 	u64 start = sched_clock();
 
@@ -814,6 +849,9 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 		break;
 	}
 	return result;
+#else /* See strip.py */
+	return -EINVAL;
+#endif /* See strip.py */
 }
 
 /**
@@ -850,7 +888,9 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_rcvbuf_args args;
+#ifndef __STRIP__ /* See strip.py */
 	u64 start = sched_clock();
+#endif /* See strip.py */
 	int ret;
 
 	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
@@ -926,13 +966,17 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
 	union sockaddr_in_union *addr;
+#ifndef __STRIP__ /* See strip.py */
 	u64 start = sched_clock();
+#endif /* See strip.py */
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
+#ifndef __STRIP__ /* See strip.py */
 	u64 finish;
 
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active =
 			start;
+#endif /* See strip.py */
 
 	addr = (union sockaddr_in_union *)msg->msg_name;
 	if (!addr) {
@@ -990,7 +1034,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			result = -EFAULT;
 			goto error;
 		}
+#ifndef __STRIP__ /* See strip.py */
 		finish = sched_clock();
+#endif /* See strip.py */
 		INC_METRIC(send_ns, finish - start);
 	} else {
 		/* This is a response message. */
@@ -1035,7 +1081,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
 		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
+#ifndef __STRIP__ /* See strip.py */
 		finish = sched_clock();
+#endif /* See strip.py */
 		INC_METRIC(reply_ns, finish - start);
 	}
 	tt_record1("homa_sendmsg finished, id %d", args.id);
@@ -1066,13 +1114,19 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
+#ifndef __STRIP__ /* See strip.py */
 	u64 start = sched_clock();
+#endif /* See strip.py */
 	struct homa_rpc *rpc;
+#ifndef __STRIP__ /* See strip.py */
 	u64 finish;
+#endif /* See strip.py */
 	int result;
 
 	INC_METRIC(recv_calls, 1);
+#ifndef __STRIP__ /* See strip.py */
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_app_active = start;
+#endif /* See strip.py */
 	if (unlikely(!msg->msg_control)) {
 		/* This test isn't strictly necessary, but it provides a
 		 * hook for testing kernel call times.
@@ -1112,6 +1166,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	}
 	result = rpc->error ? rpc->error : rpc->msgin.length;
 
+#ifndef __STRIP__ /* See strip.py */
 	/* Generate time traces on both ends for long elapsed times (used
 	 * for performance debugging).
 	 */
@@ -1130,6 +1185,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 				    "Freezing because of long elapsed time for RPC id %d, peer 0x%x");
 		}
 	}
+#endif /* See strip.py */
 
 	/* Collect result information. */
 	control.id = rpc->id;
@@ -1182,7 +1238,9 @@ done:
 		result = -EFAULT;
 	}
 
+#ifndef __STRIP__ /* See strip.py */
 	finish = sched_clock();
+#endif /* See strip.py */
 	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
 		   control.id, result,
 		   control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
@@ -1236,11 +1294,13 @@ int homa_softirq(struct sk_buff *skb)
 	struct homa *homa = global_homa;
 	struct homa_common_hdr *h;
 	int header_offset;
+#ifndef __STRIP__ /* See strip.py */
 	u64 start;
 
 	start = sched_clock();
-	INC_METRIC(softirq_calls, 1);
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
+#endif /* See strip.py */
+	INC_METRIC(softirq_calls, 1);
 
 	/* skb may actually contain many distinct packets, linked through
 	 * skb_shinfo(skb)->frag_list by the Homa GRO mechanism. Make a
@@ -1262,8 +1322,10 @@ int homa_softirq(struct sk_buff *skb)
 		 * on the frag_list, since they aren't handled explicitly by IP.
 		 */
 		if (!homa_make_header_avl(skb)) {
+#ifndef __STRIP__ /* See strip.py */
 			if (homa->verbose)
 				pr_notice("Homa can't handle fragmented packet (no space for header); discarding\n");
+#endif /* See strip.py */
 			UNIT_LOG("", "pskb discard");
 			goto discard;
 		}
@@ -1276,6 +1338,7 @@ int homa_softirq(struct sk_buff *skb)
 		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
 			     h->type < DATA || h->type >= BOGUS ||
 			     skb->len < header_lengths[h->type - DATA])) {
+#ifndef __STRIP__ /* See strip.py */
 			const struct in6_addr saddr =
 					skb_canonical_ipv6_saddr(skb);
 			if (homa->verbose)
@@ -1283,10 +1346,12 @@ int homa_softirq(struct sk_buff *skb)
 					homa_symbol_for_type(h->type),
 					homa_print_ipv6_addr(&saddr),
 					skb->len - header_offset);
+#endif /* See strip.py */
 			INC_METRIC(short_packets, 1);
 			goto discard;
 		}
 
+#ifndef __STRIP__ /* See strip.py */
 		/* Check for FREEZE here, rather than in homa_incoming.c, so
 		 * it will work even if the RPC and/or socket are unknown.
 		 */
@@ -1302,6 +1367,7 @@ int homa_softirq(struct sk_buff *skb)
 			}
 			goto discard;
 		}
+#endif /* See strip.py */
 
 		/* Process the packet now if it is a control packet or
 		 * if it contains an entire short message.
@@ -1367,7 +1433,9 @@ discard:
 		packets = other_pkts;
 	}
 
+#ifndef __STRIP__ /* See strip.py */
 	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
+#endif /* See strip.py */
 	INC_METRIC(softirq_ns, sched_clock() - start);
 	return 0;
 }
@@ -1494,6 +1562,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	return (__poll_t)mask;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_dointvec() - This function is a wrapper around proc_dointvec. It is
  * invoked to read and write sysctl values and also update other values
@@ -1546,10 +1615,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			if (action == 2) {
 				homa_rpc_log_active(homa, 0);
 			} else if (action == 3) {
-#ifndef __STRIP__ /* See strip.py */
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-#endif /* See strip.py */
 			} else if (action == 4) {
 				homa_log_throttled(homa);
 			} else if (action == 5) {
@@ -1657,6 +1724,7 @@ done:
 	kfree(values);
 	return result;
 }
+#endif /* See strip.py */
 
 /**
  * homa_hrtimer() - This function is invoked by the hrtimer mechanism to

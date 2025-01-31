@@ -1,16 +1,12 @@
 # Makefile to build Homa as a Linux module.
 
 HOMA_OBJS := homa_devel.o \
-	homa_grant.o \
 	homa_incoming.o \
-	homa_metrics.o \
-	homa_offload.o \
 	homa_outgoing.o \
 	homa_peer.o \
 	homa_pool.o \
 	homa_plumbing.o \
 	homa_rpc.o \
-	homa_skb.o \
 	homa_sock.o \
 	homa_timer.o \
 	homa_utils.o \
@@ -21,9 +17,17 @@ ifneq ($(KERNELRELEASE),)
 obj-m += homa.o
 homa-y = $(HOMA_OBJS)
 
+ifneq ($(__STRIP__),)
+MY_CFLAGS += -D__STRIP__
+else
+HOMA_OBJS += homa_grant.o \
+	homa_metrics.o \
+	homa_offload.o \
+	homa_skb.o
+endif
+
 MY_CFLAGS += -g
-ccflags-y += ${MY_CFLAGS}
-CC += ${MY_CFLAGS}
+ccflags-y += $(MY_CFLAGS)
 
 else
 
@@ -56,12 +60,15 @@ CP_HDRS := homa_impl.h \
 	   homa_wire.h
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := reap.txt \
-	     sync.txt
+	     sync.txt \
+	     Makefile
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
 net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
 $(HOMA_TARGET)/%: % util/strip.py
 	util/strip.py $< > $@
 $(HOMA_TARGET)/%.txt: %.txt
+	cp $< $@
+$(HOMA_TARGET)/Makefile: Makefile.upstream
 	cp $< $@
 $(LINUX_SRC_DIR)/include/uapi/linux/homa.h: homa.h util/strip.py
 	util/strip.py $< > $@

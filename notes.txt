@@ -411,3 +411,6 @@ Notes for Homa implementation in Linux:
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
+
+#ifndef __STRIP__ /* See strip.py */
+#endif /* See strip.py */

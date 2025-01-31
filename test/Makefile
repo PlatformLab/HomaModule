@@ -29,43 +29,50 @@ CCINCLUDES := \
 DEFS :=      -D__KERNEL__ \
 	     -D__UNIT_TEST__ \
 	     -D KBUILD_MODNAME='"homa"'
+ifneq ($(__STRIP__),)
+DEFS +=      -D__STRIP__
+endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare \
 		-Wno-strict-aliasing -Werror
 CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
-TEST_SRCS :=  unit_homa_grant.c \
-	      unit_homa_incoming.c \
-	      unit_homa_offload.c \
-	      unit_homa_metrics.c \
+TEST_SRCS :=  unit_homa_incoming.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peer.c \
 	      unit_homa_pool.c \
 	      unit_homa_plumbing.c \
 	      unit_homa_rpc.c \
-	      unit_homa_skb.c \
 	      unit_homa_sock.c \
 	      unit_homa_timer.c \
 	      unit_homa_utils.c \
 	      unit_timetrace.c
+ifeq ($(__STRIP__),)
+TEST_SRCS +=  unit_homa_grant.c \
+	      unit_homa_offload.c \
+	      unit_homa_metrics.c \
+	      unit_homa_skb.c
+endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
 HOMA_SRCS :=  homa_devel.c \
-	      homa_grant.c \
 	      homa_incoming.c \
-	      homa_metrics.c \
-	      homa_offload.c \
 	      homa_outgoing.c \
 	      homa_peer.c \
 	      homa_pool.c \
 	      homa_plumbing.c \
 	      homa_rpc.c \
-	      homa_skb.c \
 	      homa_sock.c \
 	      homa_timer.c \
 	      homa_utils.c \
 	      timetrace.c
+ifeq ($(__STRIP__),)
+HOMA_SRCS +=  homa_grant.c \
+	      homa_metrics.c \
+	      homa_offload.c \
+	      homa_skb.c
+endif
 HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
 
 OTHER_SRCS := ccutils.cc \

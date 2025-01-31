@@ -65,6 +65,9 @@ delete_rtts = False
 # The CloudLab node type for this node (e.g. xl170)
 node_type = None
 
+# Value of the "--stripped" option.
+stripped = False
+
 # Defaults for command-line options; assumes that servers and clients
 # share nodes.
 default_defaults = {
@@ -276,6 +279,10 @@ def get_parser(description, usage, defaults = {}):
             metavar='nodes',
             help='List of node numbers not to use in the experiment; can '
             ' contain ranges, such as "3,5-8,12"')
+    parser.add_argument('--stripped', dest='stripped', type=boolean,
+            default=True, metavar="T/F", help='Boolean value: true means '
+            'Homa has been stripped for upstreaming, which means some '
+            'facilities are not available (default: false)')
     parser.add_argument('--tcp-client-max', dest='tcp_client_max', type=int,
             metavar='count', default=0, help="Maximum number of TCP requests "
             "that can be outstanding from a client node at once (divided evenly "
@@ -569,6 +576,11 @@ def set_sysctl_parameter(name, value, nodes):
     nodes:    specifies ids of the nodes on which to execute the command:
               should be a range, list, or other object that supports "in"
     """
+    global stripped
+    if stripped:
+        vlog("Skipping set of Homa %s parameter to %s on nodes %s (Homa is stripped)"
+                % (name, value, str(nodes)))
+        return
     vlog("Setting Homa parameter %s to %s on nodes %s" % (name, value,
             str(nodes)))
     for id in nodes:
@@ -615,7 +627,8 @@ def start_servers(exp, ids, options):
                  port_threads
                  protocol
     """
-    global server_nodes
+    global server_nodes, stripped
+    stripped = options.stripped
     log("Starting servers for %s experiment on nodes %s" % (exp, ids))
     if len(server_nodes) > 0:
         do_cmd("stop servers", server_nodes)
@@ -654,7 +667,7 @@ def run_experiment(name, clients, options):
                   workload
     """
 
-    global active_nodes
+    global active_nodes, stripped
     exp_nodes = list(set(options.servers + list(clients)))
     start_nodes(clients, options)
     nodes = []
@@ -712,9 +725,12 @@ def run_experiment(name, clients, options):
         if options.protocol == "homa":
             # Wait a bit so that homa_prio can set priorities appropriately
             time.sleep(2)
-            vlog("Recording initial metrics")
-            for id in exp_nodes:
-                do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
+            if stripped:
+                vlog("Skipping initial read of metrics (Homa is stripped)")
+            else:
+                vlog("Recording initial metrics")
+                for id in exp_nodes:
+                    do_subprocess(["ssh", "node%d" % (id), "metrics.py"])
         if not "no_rtt_files" in options:
             do_cmd("dump_times /dev/null %s" % (name), clients)
         do_cmd("log Starting measurements for %s experiment" % (name),
@@ -737,15 +753,22 @@ def run_experiment(name, clients, options):
     if not "no_rtt_files" in options:
         do_cmd("dump_times rtts %s" % (name), clients)
     if (options.protocol == "homa") and not "unloaded" in options:
-        vlog("Recording final metrics from nodes %s" % (exp_nodes))
-        for id in exp_nodes:
-            f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
-            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
-            f.close()
-        shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, options.servers[0]),
-                "%s/reports/%s-%d.metrics" % (options.log_dir, name, options.servers[0]))
-        shutil.copyfile("%s/%s-%d.metrics" % (options.log_dir, name, clients[0]),
-                "%s/reports/%s-%d.metrics" % (options.log_dir, name, clients[0]))
+        if stripped:
+                vlog("Skipping final read of metrics (Homa is stripped)")
+        else:
+            vlog("Recording final metrics from nodes %s" % (exp_nodes))
+            for id in exp_nodes:
+                f = open("%s/%s-%d.metrics" % (options.log_dir, name, id), 'w')
+                subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
+                f.close()
+            shutil.copyfile("%s/%s-%d.metrics" %
+                    (options.log_dir, name, options.servers[0]),
+                    "%s/reports/%s-%d.metrics" %
+                    (options.log_dir, name, options.servers[0]))
+            shutil.copyfile("%s/%s-%d.metrics" %
+                    (options.log_dir, name, clients[0]),
+                    "%s/reports/%s-%d.metrics" %
+                    (options.log_dir, name, clients[0]))
     do_cmd("stop senders", clients)
     if False and "dctcp" in name:
         do_cmd("tt print cp.tt", clients)
@@ -792,7 +815,7 @@ def run_experiments(*args):
              There may be additional optional values that used if present.
     """
 
-    global active_nodes
+    global active_nodes, stripped
 
     homa_nodes = []
     homa_clients = []
@@ -880,8 +903,11 @@ def run_experiments(*args):
         # Wait a bit so that homa_prio can set priorities appropriately
         time.sleep(2)
     if homa_nodes:
-        vlog("Initializing metrics")
-        do_ssh(["metrics.py > /dev/null"], homa_nodes)
+        if stripped:
+            vlog("Skipping metrics initialization (Homa is stripped)")
+        else:
+            vlog("Initializing metrics")
+            do_ssh(["metrics.py > /dev/null"], homa_nodes)
     do_cmd("dump_times /dev/null", all_nodes)
     do_cmd("log Starting measurements", all_nodes)
     log("Starting measurements")
@@ -897,15 +923,22 @@ def run_experiments(*args):
     for exp in args:
         do_cmd("dump_times %s.rtts %s" % (exp.name, exp.name), exp.clients)
     if homa_nodes:
-        vlog("Recording final metrics from nodes %s" % (homa_nodes))
-        for id in homa_nodes:
-            f = open("%s/node%d.metrics" % (exp.log_dir, id), 'w')
-            subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
-            f.close()
-        shutil.copyfile("%s/node%d.metrics" % (exp.log_dir, homa_clients[0]),
-                "%s/reports/node%d.metrics" % (exp.log_dir, homa_clients[0]))
-        shutil.copyfile("%s/node%d.metrics" % (exp.log_dir, homa_servers[0]),
-                "%s/reports/node%d.metrics" % (exp.log_dir, homa_servers[0]))
+        if stripped:
+                vlog("Skipping final read of metrics (Homa is stripped)")
+        else:
+            vlog("Recording final metrics from nodes %s" % (homa_nodes))
+            for id in homa_nodes:
+                f = open("%s/node%d.metrics" % (exp.log_dir, id), 'w')
+                subprocess.run(["ssh", "node%d" % (id), "metrics.py"], stdout=f)
+                f.close()
+            shutil.copyfile("%s/node%d.metrics" %
+                    (exp.log_dir, homa_clients[0]),
+                    "%s/reports/node%d.metrics" %
+                    (exp.log_dir, homa_clients[0]))
+            shutil.copyfile("%s/node%d.metrics" %
+                    (exp.log_dir, homa_servers[0]),
+                    "%s/reports/node%d.metrics" %
+                    (exp.log_dir, homa_servers[0]))
     do_cmd("stop senders", all_nodes)
     do_cmd("stop clients", all_nodes)
     for exp in args:

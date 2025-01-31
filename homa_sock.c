@@ -187,8 +187,10 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_ATOMIC);
 	if (!hsk->buffer_pool)
 		result = -ENOMEM;
+#ifndef __STRIP__ /* See strip.py */
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
+#endif /* See strip.py */
 	spin_unlock_bh(&socktab->write_lock);
 	return result;
 }

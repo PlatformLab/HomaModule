@@ -7,43 +7,58 @@ This script is used to copy information from the Homa GitHub repo to
 a Linux kernel repo, removing information that doesn't belong in the
 official kernel version (such as calls to tt_record).
 
-Usage: strip.py [--alt] file file file ... destdir
+Usage: strip.py file file file ... destdir
 
 Each of the files will be read, stripped as appropriate, and copied to a
 file by the same name in destdir. If there is only a single file and no
 destdir, then the stripped file is printed on standard output.
 
-In some cases, such as calls to tt_record* and code related to unit tests,
-information is removed automatically. In other cases, it is controlled with
-#if statments in the following ways:
+The following code is removed automatically:
+  * Calls to timetracing, such as tt_record*
+  * Blocks conditionalized on '#ifdef __UNIT_TEST__'
+  * UNIT_LOG and UNIT_HOOK statements
+  * INC_METRIC statements
 
-* This entire block will be removed in the stripped version:
+Additional stripping is controlled by #ifdefs. The #ifdefs allow the
+code to be used in three ways:
+* Normal compilation in a development environment: includes unit testing
+  and timetracing support, nothing is stripped. The code is compiled as
+  is.
+* Upstreaming: source files are run through this program, which produces
+  a statically-stripped version.
+* Compile-time stripping: the code is compiled as is, but "__STRIP__=y" is
+  set on the make command line (both for compiling Homa and for unit testing).
+  This omits almost all of the information that must be omitted for
+  upstreaming, but retains a few debugging facilities like timetracing.
+
+Here are details about the #ifdefs used for stripping:
+
+* This entire block will be removed in the stripped version, but it will
+  be compiled in normal mode:
     #ifndef __STRIP__ /* See strip.py */
     ...
     #endif /* See strip.py */
 
+* This entire block will be removed in the stripped version, but it will
+  be compiled in both normal mode and with compile-time stripping.
+    #ifndef __UPSTREAM__ /* See strip.py */
+    ...
+    #endif /* See strip.py */
+
 * The #if and #endif statements will be removed, leaving just the code
-  in between:
+  in between. The code will be compiled in compile-time stripping mode
     #ifdef __STRIP__ /* See strip.py */
     ...
     #endif /* See strip.py */
 
-* Everything will be removed except the code between #else and #endif:
+* Everything will be removed except the code between #else and #endif.
+  During normal mode the #ifndef block will be compiled; under compile-time
+  stripping the #else block will be compiled.
     #ifndef __STRIP__ /* See strip.py */
     ...
     #else /* See strip.py */
     ...
     #endif /* See strip.py */
-
-* It is also possible to strip using "alt" mode, with lines like this:
-    #ifndef __STRIP__ /* See strip.py --alt */
-    #ifdef __STRIP__ /* See strip.py --alt */
-  If the --alt option was not specified then these lines are handled as
-  if "--alt" wasn't present in the comments. However, if the --alt option
-  was specified then these lines are ignored.
-
-If the --alt option is specified, it means the output is intended for
-testing outside the Linux kernel. In this case, the lines should remain.
 """
 
 from collections import defaultdict
@@ -111,12 +126,11 @@ def last_non_blank(s):
         return s2[-1]
     return None
 
-def scan(file, alt_mode):
+def scan(file):
     """
     Read a file, remove information that shouldn't appear in the Linux kernel
     version, and return an array of lines representing the stripped file.
     file:     Pathname of file to read
-    alt_mode: True means the --alt option was specified
     """
 
     global exit_code
@@ -206,9 +220,9 @@ def scan(file, alt_mode):
             non_comment = pline
         non_comment = non_comment.strip()
 
-        # Strip groups of lines labeled with special '#ifndef __STRIP__'
-        # Note: don't do brace elimination here: this allows greater control
-        # to the __STRIP__ code.
+        # Strip groups of lines labeled with '#ifndef __STRIP__' or
+        # '#ifndef __UPSTREAM__'. Note: don't do brace elimination here:
+        # this gives greater control to the __STRIP__ code.
         if in_labeled_skip != None:
             if line.startswith('#endif /* See strip.py */'):
                 in_labeled_skip = None
@@ -220,16 +234,13 @@ def scan(file, alt_mode):
             if in_labeled_skip == 1:
                 continue
         if line.startswith('#ifndef __STRIP__ /* See strip.py */') or (
-                line.startswith('#ifndef __STRIP__ /* See strip.py --alt */')
-                and not alt_mode):
+                line.startswith('#ifndef __UPSTREAM__ /* See strip.py */')):
             if slines[-1].strip() == '':
                 delete_empty_line = True
             in_labeled_skip = 1
             check_braces = False
             continue
-        if line.startswith('#ifdef __STRIP__ /* See strip.py */') or (
-                line.startswith('#ifdef __STRIP__ /* See strip.py --alt */')
-                and not alt_mode):
+        if line.startswith('#ifdef __STRIP__ /* See strip.py */') :
             if slines[-1].strip() == '':
                 slines.pop()
             in_labeled_skip = 0
@@ -243,13 +254,16 @@ def scan(file, alt_mode):
                 delete_empty_line = True
             continue
 
-        # Strip tt_record statements.
         if skip_statement:
             if pline[-1] == ';':
                 skip_statement = False
             check_braces = True
             continue
+
+        # Strip tt_record and INC_METRIC statements.
         match = re.match('(//[ \t]*)?tt_record[1-4]?[(]', pline)
+        if not match:
+            match = re.match('(//[ \t]*)?INC_METRIC[(]', pline)
         if match:
             # If this is the only statement in its block, delete the
             # outer block statement (if, while, etc.). Don't delete case
@@ -277,13 +291,18 @@ def scan(file, alt_mode):
             continue
 
         # Strip UNIT_LOG and UNIT_HOOK statements.
-        if not alt_mode and (pline.startswith('UNIT_LOG(') or
-                pline.startswith('UNIT_HOOK(')):
+        if (pline.startswith('UNIT_LOG(') or pline.startswith('UNIT_HOOK(')):
             if pline[-1] != ';':
                   skip_statement = True
             if slines[-1].strip() == '':
                 delete_empty_line = True
             check_braces = True
+            continue
+
+        # Strip #include "homa_strip.h" statements.
+        if pline.startswith('#include "homa_strip.h"'):
+            if slines[-1].strip() == '':
+                delete_empty_line = True
             continue
 
         # Strip '#ifdef __UNIT_TEST__' blocks (keep #else clauses)
@@ -296,12 +315,12 @@ def scan(file, alt_mode):
                 continue
             if in_unit == 'if':
                 continue
-        elif line.startswith('#ifdef __UNIT_TEST__') and not alt_mode:
+        elif line.startswith('#ifdef __UNIT_TEST__'):
             in_unit = 'if'
             if slines[-1].strip() == '':
                 delete_empty_line = True
             continue
-        elif line.startswith('#ifndef __UNIT_TEST__') and not alt_mode:
+        elif line.startswith('#ifndef __UNIT_TEST__'):
             in_unit = 'else'
             if slines[-1].strip() == '':
                 delete_empty_line = True
@@ -317,7 +336,7 @@ def scan(file, alt_mode):
                 continue
             if in_version == 'if':
                 continue
-        elif line.startswith('#if LINUX_VERSION_CODE') and not alt_mode:
+        elif line.startswith('#if LINUX_VERSION_CODE'):
             in_version = 'if'
             if slines[-1].strip() == '':
                 delete_empty_line = True
@@ -361,21 +380,17 @@ def scan(file, alt_mode):
 
 if __name__ == '__main__':
     f = sys.stdin
-    alt_mode = False;
-    if (len(sys.argv) >= 2) and (sys.argv[1] == '--alt'):
-        alt_mode = True;
-        del sys.argv[1]
     if len(sys.argv) < 2:
         print('Usage: strip.py [--alt] file [file ... destdir]', file=sys.stderr)
         exit(1)
     if len(sys.argv) == 2:
-        for line in scan(sys.argv[1], alt_mode):
+        for line in scan(sys.argv[1]):
             print(line, end='')
     else:
         for file in sys.argv[1:-1]:
             dst_file = '%s/%s' % (sys.argv[-1], file)
             print('Stripping %s into %s' % (file, dst_file))
-            slines = scan(file, alt_mode)
+            slines = scan(file)
             dst = open(dst_file, 'w')
             for line in slines:
                 print(line, end='', file=dst)

@@ -139,7 +139,6 @@ struct homa_peer {
 	 */
 	struct hlist_node peertab_links;
 
-#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @outstanding_resends: the number of resend requests we have
 	 * sent to this server (spaced @homa.resend_interval apart) since
@@ -179,7 +178,6 @@ struct homa_peer {
 	 * in the current pass, if it still needs one.
 	 */
 	struct homa_rpc *resend_rpc;
-#endif /* See strip.py */
 
 	/**
 	 * @num_acks: the number of (initial) entries in @acks that

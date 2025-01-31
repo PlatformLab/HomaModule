@@ -67,14 +67,17 @@ FIXTURE_SETUP(homa_plumbing)
 			ipv6_to_ipv4(self->server_addr.in6.sin6_addr);
 	}
 	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
+	memset(&self->data, 0, sizeof(self->data));
 	self->data = (struct homa_data_hdr){.common = {
-			.sport = htons(self->client_port),
-			.dport = htons(self->server_port),
-			.type = DATA,
-			.sender_id = cpu_to_be64(self->client_id)},
-			.message_length = htonl(10000),
-			.incoming = htonl(10000), .retransmit = 0,
-			.seg = {.offset = 0}};
+		.sport = htons(self->client_port),
+		.dport = htons(self->server_port),
+		.type = DATA,
+		.sender_id = cpu_to_be64(self->client_id)},
+		.message_length = htonl(10000),
+#ifndef __STRIP__ /* See strip.py */
+		.incoming = htonl(10000),
+#endif /* See strip.py */
+	};
 	self->recvmsg_args.id = 0;
 	self->recvmsg_hdr.msg_name = &self->addr;
 	self->recvmsg_hdr.msg_namelen = 0;
@@ -206,6 +209,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	EXPECT_EQ(345, self->hsk.port);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_plumbing, homa_ioc_abort__basics)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -248,6 +252,7 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 
 	EXPECT_EQ(EINVAL, -homa_ioc_abort(&self->hsk.inet.sk, (int *) &args));
 }
+#endif /* See strip.py */
 
 TEST_F(homa_plumbing, homa_socket__success)
 {
@@ -312,7 +317,9 @@ TEST_F(homa_plumbing, homa_setsockopt__success)
 			sizeof(struct homa_rcvbuf_args)));
 	EXPECT_EQ(args.start, (uintptr_t)self->hsk.buffer_pool->region);
 	EXPECT_EQ(64, self->hsk.buffer_pool->num_bpages);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->so_set_buf_calls);
+#endif /* See strip.py */
 }
 
 
@@ -835,7 +842,9 @@ TEST_F(homa_plumbing, homa_softirq__packet_too_short)
 	skb->len -= 1;
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+#endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
@@ -845,7 +854,9 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->short_packets);
+#endif /* See strip.py */
 }
 TEST_F(homa_plumbing, homa_softirq__process_short_messages_first)
 {

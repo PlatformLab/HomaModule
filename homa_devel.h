@@ -7,8 +7,34 @@
 #ifndef _HOMA_DEVEL_H
 #define _HOMA_DEVEL_H
 
-#include "homa_impl.h"
+struct homa;
 struct homa_rpc;
+
+/**
+ * enum homa_freeze_type - The @type argument to homa_freeze must be
+ * one of these values.
+ */
+enum homa_freeze_type {
+	RESTART_RPC            = 1,
+	PEER_TIMEOUT           = 2,
+	SLOW_RPC               = 3,
+	SOCKET_CLOSE           = 4,
+	PACKET_LOST            = 5,
+	NEED_ACK_MISSING_DATA  = 6,
+};
+
+/**
+ * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
+ * provide a unique identifier for the address in a timetrace record.
+ * @x:  Address (either IPv6 or IPv4-mapped IPv6)
+ * Return: see above
+ */
+static inline u32 tt_addr(const struct in6_addr x)
+{
+	return ipv6_addr_v4mapped(&x) ? ntohl(x.in6_u.u6_addr32[3])
+			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
+			: ntohl(x.in6_u.u6_addr32[1]));
+}
 
 #ifndef __STRIP__ /* See strip.py */
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,

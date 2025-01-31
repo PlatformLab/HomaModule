@@ -232,9 +232,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	INIT_LIST_HEAD(&peer->grantable_links);
 #endif /* See strip.py */
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
-#ifndef __STRIP__ /* See strip.py */
 	peer->current_ticks = -1;
-#endif /* See strip.py */
 	spin_lock_init(&peer->ack_lock);
 	INC_METRIC(peer_new_entries, 1);
 
@@ -267,11 +265,13 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 
 	dst = homa_peer_get_dst(peer, &hsk->inet);
 	if (IS_ERR(dst)) {
+#ifndef __STRIP__ /* See strip.py */
 		/* Retain the existing dst if we can't create a new one. */
 		if (hsk->homa->verbose)
 			pr_notice("%s couldn't recreate dst: error %ld",
 				  __func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
+#endif /* See strip.py */
 		kfree(save_dead);
 		return;
 	}
@@ -279,13 +279,14 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 	spin_lock_bh(&peertab->write_lock);
 	now = sched_clock();
 	save_dead->dst = peer->dst;
-	save_dead->gc_time = now + 100000000;
+	save_dead->gc_time = now + 100000000;   /* 100 ms */
 	list_add_tail(&save_dead->dst_links, &peertab->dead_dsts);
 	homa_peertab_gc_dsts(peertab, now);
 	peer->dst = dst;
 	spin_unlock_bh(&peertab->write_lock);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_unsched_priority() - Returns the priority level to use for
  * unscheduled packets of a message.
@@ -306,6 +307,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 	}
 	/* Can't ever get here */
 }
+#endif /* See strip.py */
 
 /**
  * homa_peer_get_dst() - Find an appropriate dst structure (either IPv4

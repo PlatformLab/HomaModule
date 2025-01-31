@@ -11,6 +11,17 @@
 
 #include "homa_impl.h"
 
+static inline int homa_skb_init(struct homa *homa)
+{
+	return 0;
+}
+
+static inline void homa_skb_cleanup(struct homa *homa)
+{}
+
+static inline void homa_skb_release_pages(struct homa *homa)
+{}
+
 static inline int homa_skb_append_from_iter(struct homa *homa,
 					    struct sk_buff *skb,
 					    struct iov_iter *iter, int length)
@@ -66,8 +77,7 @@ static inline struct sk_buff *homa_skb_new_tx(int length)
 	struct sk_buff *skb;
 
 	skb = alloc_skb(HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH +
-			sizeof(struct homa_skb_info) + length,
-			GFP_ATOMIC);
+			sizeof(struct homa_skb_info) + length, GFP_ATOMIC);
 	if (likely(skb)) {
 		skb_reserve(skb, HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH);
 		skb_reset_transport_header(skb);

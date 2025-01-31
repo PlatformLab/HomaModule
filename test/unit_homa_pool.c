@@ -19,8 +19,10 @@ FIXTURE(homa_pool) {
 FIXTURE_SETUP(homa_pool)
 {
 	homa_init(&self->homa);
+#ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.window_param = 10000;
+#endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
@@ -342,7 +344,9 @@ TEST_F(homa_pool, homa_pool_allocate__page_wrap_around)
 	EXPECT_EQ(2*HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[0]);
 	EXPECT_EQ(2000, pool->cores[smp_processor_id()].allocated);
 	EXPECT_EQ(smp_processor_id(), pool->descriptors[2].owner);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->bpage_reuses);
+#endif /* See strip.py */
 }
 TEST_F(homa_pool, homa_pool_allocate__owned_page_overflow)
 {
@@ -432,7 +436,9 @@ TEST_F(homa_pool, homa_pool_allocate__out_of_space)
 	rpc = list_next_entry(rpc, buf_links);
 	EXPECT_EQ(100, rpc->id);
 	EXPECT_TRUE(list_is_last(&rpc->buf_links, &self->hsk.waiting_for_bufs));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3, homa_metrics_per_cpu()->buffer_alloc_failures);
+#endif /* See strip.py */
 	EXPECT_EQ(1, pool->bpages_needed);
 }
 
@@ -611,6 +617,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__reset_bpages_needed)
 	EXPECT_EQ(0, crpc2->msgin.num_bpages);
 	EXPECT_EQ(2, pool->bpages_needed);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -631,6 +638,7 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
 	EXPECT_STREQ("xmit GRANT 10000@0 resend_all", unit_log_get());
 }
+#endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
