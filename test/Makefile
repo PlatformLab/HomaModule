@@ -51,7 +51,8 @@ TEST_SRCS :=  unit_homa_grant.c \
 	      unit_timetrace.c
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
-HOMA_SRCS :=  homa_grant.c \
+HOMA_SRCS :=  homa_devel.c \
+	      homa_grant.c \
 	      homa_incoming.c \
 	      homa_metrics.c \
 	      homa_offload.c \

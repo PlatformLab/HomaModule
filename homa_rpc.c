@@ -735,31 +735,3 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		   actual - total_incoming, total_incoming, actual);
 	return actual - total_incoming;
 }
-
-/**
- * homa_symbol_for_state() - Returns a printable string describing an
- * RPC state.
- * @rpc:  RPC whose state should be returned in printable form.
- *
- * Return: A static string holding the current state of @rpc.
- */
-char *homa_symbol_for_state(struct homa_rpc *rpc)
-{
-	static char buffer[20];
-
-	switch (rpc->state) {
-	case RPC_OUTGOING:
-		return "OUTGOING";
-	case RPC_INCOMING:
-		return "INCOMING";
-	case RPC_IN_SERVICE:
-		return "IN_SERVICE";
-	case RPC_DEAD:
-		return "DEAD";
-	}
-
-	/* See safety comment in homa_symbol_for_type. */
-	snprintf(buffer, sizeof(buffer) - 1, "unknown(%u)", rpc->state);
-	buffer[sizeof(buffer) - 1] = 0;
-	return buffer;
-}

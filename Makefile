@@ -1,6 +1,7 @@
 # Makefile to build Homa as a Linux module.
 
-HOMA_OBJS := homa_grant.o \
+HOMA_OBJS := homa_devel.o \
+	homa_grant.o \
 	homa_incoming.o \
 	homa_metrics.o \
 	homa_offload.o \
