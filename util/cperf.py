@@ -280,7 +280,7 @@ def get_parser(description, usage, defaults = {}):
             help='List of node numbers not to use in the experiment; can '
             ' contain ranges, such as "3,5-8,12"')
     parser.add_argument('--stripped', dest='stripped', type=boolean,
-            default=True, metavar="T/F", help='Boolean value: true means '
+            default=False, metavar="T/F", help='Boolean value: true means '
             'Homa has been stripped for upstreaming, which means some '
             'facilities are not available (default: false)')
     parser.add_argument('--tcp-client-max', dest='tcp_client_max', type=int,
@@ -309,7 +309,7 @@ def get_parser(description, usage, defaults = {}):
     parser.add_argument('--tt-freeze', dest='tt_freeze', type=boolean,
             default=True, metavar="T/F", help="Boolean value: if true, "
             "timetraces will be frozen on all nodes at the end of the "
-            "Homa benchmark run (default: false)")
+            "Homa benchmark run (default: true)")
     parser.add_argument('--unsched', type=int, dest='unsched',
             metavar='count', default=defaults['unsched'],
             help='If nonzero, homa_prio will always use this number of '
