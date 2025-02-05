@@ -156,7 +156,7 @@ def get_link_speed():
     nic = get_interfaces()[0]
     num_channels = -1
 
-    for line in subprocess.run(["ethtool", "eno1"], stdout=subprocess.PIPE,
+    for line in subprocess.run(["ethtool", nic], stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, encoding="utf-8",
             check=True).stdout.splitlines():
         match = re.match('.*Speed: ([0-9]+)Mb/s', line)
