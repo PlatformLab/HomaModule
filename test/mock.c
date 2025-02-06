@@ -222,7 +222,9 @@ unsigned int nr_cpu_ids = 8;
 unsigned long page_offset_base;
 unsigned long phys_base;
 unsigned long vmemmap_base;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
+#endif
 int __preempt_count;
 struct pcpu_hot pcpu_hot = {.cpu_number = 1};
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
@@ -358,10 +360,12 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 int debug_lockdep_rcu_enabled(void)
 {
 	return 0;
 }
+#endif
 
 void dst_release(struct dst_entry *dst)
 {
@@ -861,8 +865,10 @@ bool __list_del_entry_valid_or_report(struct list_head *entry)
 
 void __local_bh_enable_ip(unsigned long ip, unsigned int cnt) {}
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 {}
+#endif
 
 int lock_is_held_type(const struct lockdep_map *lock, int read)
 {
@@ -1034,6 +1040,7 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	return 1;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 int rcu_read_lock_held(void)
 {
 	return 0;
@@ -1043,6 +1050,7 @@ int rcu_read_lock_bh_held(void)
 {
 	return 0;
 }
+#endif
 
 bool rcuref_get_slowpath(rcuref_t *ref)
 {
