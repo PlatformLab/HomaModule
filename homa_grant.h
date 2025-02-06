@@ -16,8 +16,7 @@ int      homa_grant_outranks(struct homa_rpc *rpc1,
 int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 			      int max_rpcs);
 void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-void     homa_grant_recalc(struct homa *homa, int locked,
-			   struct homa_rpc *locked_rpc);
+void     homa_grant_recalc(struct homa *homa, struct homa_rpc *locked_rpc);
 void     homa_grant_remove_rpc(struct homa_rpc *rpc);
 int      homa_grant_send(struct homa_rpc *rpc, struct homa *homa);
 int      homa_grant_update_incoming(struct homa_rpc *rpc,

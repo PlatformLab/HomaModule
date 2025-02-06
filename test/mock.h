@@ -142,6 +142,7 @@ extern int         mock_sock_holds;
 extern int         mock_spin_lock_held;
 extern struct task_struct
 		   mock_task;
+extern int          mock_total_spin_locks;
 extern int         mock_trylock_errors;
 extern int         mock_vmalloc_errors;
 extern int         mock_xmit_log_verbose;

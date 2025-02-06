@@ -127,6 +127,9 @@ static int mock_active_locks;
  */
 static int mock_active_spin_locks;
 
+/* Total number of successful spinlock acquisitions during current test. */
+int mock_total_spin_locks;
+
 /* The number of times rcu_read_lock has been called minus the number
  * of times rcu_read_unlock has been called.
  * Should be 0 at the end of each test.
@@ -1004,12 +1007,14 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
 	mock_active_spin_locks++;
+	mock_total_spin_locks++;
 }
 
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
 	mock_active_spin_locks++;
+	mock_total_spin_locks++;
 }
 
 void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
@@ -1022,6 +1027,7 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
 	mock_active_spin_locks++;
+	mock_total_spin_locks++;
 	return 1;
 }
 
@@ -1826,6 +1832,7 @@ void mock_teardown(void)
 		FAIL(" %d spin locks still locked after test",
 		     mock_active_spin_locks);
 	mock_active_spin_locks = 0;
+	mock_total_spin_locks = 0;
 
 	if (mock_active_rcu_locks != 0)
 		FAIL(" %d rcu_read_locks still active after test",
