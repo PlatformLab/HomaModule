@@ -452,11 +452,16 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 				homa_rpc_unlock(rpc);
 				tt_record2("softirq released lock for id %d, flags 0x%x", rpc->id, flags);
 
-				/* We're going to try to reacquire the RPC
-				 * lock almost immediately below; give the
-				 * app thread a chance to get to it first.
+				/* This short spin is needed to ensure that the
+				 * other thread gets the lock before this thread
+				 * grabs it again below (the need for this
+				 * was confirmed experimentally in 2/2025;
+				 * without it, the handoff fails 20-25% of the
+				 * time). Furthermore, the call to homa_spin
+				 * seems to allow the other thread to acquire
+				 * the lock more quickly.
 				 */
-				homa_spin(200);
+				homa_spin(100);
 				rpc = NULL;
 			}
 		}
@@ -508,6 +513,8 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 				goto discard;
 			}
 		} else {
+			tt_record1("homa_dispatch_pkts has rpc lock for id %d",
+				   rpc->id);
 			if (h->common.type == DATA ||
 #ifndef __STRIP__ /* See strip.py */
 			    h->common.type == GRANT ||
