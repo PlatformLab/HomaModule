@@ -297,8 +297,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		goto done;
 	}
 
+	homa_grant_update_incoming(rpc, homa);
 	if (rpc->msgin.granted >= rpc->msgin.length) {
-		homa_grant_update_incoming(rpc, homa);
 		homa_rpc_unlock(rpc);
 		goto done;
 	}
@@ -311,7 +311,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * granting.
 	 */
 	if (list_empty(&rpc->grantable_links)) {
-		homa_grant_update_incoming(rpc, homa);
 		homa_grantable_lock(homa, 0);
 		homa_grant_add_rpc(rpc);
 		recalc = (homa->num_active_rpcs < homa->max_overcommit ||
@@ -329,7 +328,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	/* Not a new message; see if we can upgrade the message's priority. */
 	rank = atomic_read(&rpc->msgin.rank);
 	if (rank < 0) {
-		homa_grant_update_incoming(rpc, homa);
 		if (rpc->msgin.bytes_remaining < atomic_read(&homa->active_remaining[homa->max_overcommit - 1])) {
 			homa_rpc_unlock(rpc);
 			INC_METRIC(grant_priority_bumps, 1);
@@ -342,7 +340,6 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if (rank > 0 && rpc->msgin.bytes_remaining <
 			atomic_read(&homa->active_remaining[rank - 1])) {
-		homa_grant_update_incoming(rpc, homa);
 		homa_rpc_unlock(rpc);
 		INC_METRIC(grant_priority_bumps, 1);
 		homa_grant_recalc(homa, 0);
