@@ -584,12 +584,12 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 discard:
 		kfree_skb(skb);
 	}
-	if (rpc)
+	if (rpc) {
 #ifndef __STRIP__ /* See strip.py */
-		homa_grant_check_rpc(rpc); /* Unlocks rpc. */
-#else /* See strip.py */
-		homa_rpc_unlock(rpc);
+		homa_grant_check_rpc(rpc);
 #endif /* See strip.py */
+		homa_rpc_unlock(rpc);
+	}
 
 	while (num_acks > 0) {
 		num_acks--;

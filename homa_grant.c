@@ -269,12 +269,12 @@ int homa_grant_send(struct homa_rpc *rpc, struct homa *homa)
  * RPC has changed (such as packets arriving). It checks the state of the
  * RPC relative to outgoing grants and takes any appropriate actions that
  * are needed (such as adding the RPC to the grantable list or sending
- * grants).
- * @rpc:    RPC to check. Must be locked by the caller. Note: THIS FUNCTION
- *          WILL RELEASE THE LOCK before returning.
+ * grants for this or other RPCs).
+ * @rpc:    RPC to check. Must be locked by the caller. This function may
+ *          release and then reacquire that lock, so caller must not hold
+ *          any locks that would disallow that.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
-	__releases(rpc->bucket_lock)
 {
 	/* Overall design notes:
 	 * The grantable lock has proven to be a performance bottleneck,
@@ -292,16 +292,12 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	int rank, recalc;
 
 	if (rpc->msgin.length < 0 || rpc->state == RPC_DEAD ||
-	    rpc->msgin.num_bpages <= 0) {
-		homa_rpc_unlock(rpc);
+	    rpc->msgin.num_bpages <= 0)
 		goto done;
-	}
 
 	homa_grant_update_incoming(rpc, homa);
-	if (rpc->msgin.granted >= rpc->msgin.length) {
-		homa_rpc_unlock(rpc);
+	if (rpc->msgin.granted >= rpc->msgin.length)
 		goto done;
-	}
 
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
 		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
@@ -317,9 +313,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 				rpc->msgin.bytes_remaining <
 				atomic_read(&homa->active_remaining
 				[homa->max_overcommit - 1]));
-		homa_rpc_unlock(rpc);
 		if (recalc)
-			homa_grant_recalc(homa, 1);
+			homa_grant_recalc(homa, 1, rpc);
 		else
 			homa_grantable_unlock(homa);
 		goto done;
@@ -329,20 +324,16 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	rank = atomic_read(&rpc->msgin.rank);
 	if (rank < 0) {
 		if (rpc->msgin.bytes_remaining < atomic_read(&homa->active_remaining[homa->max_overcommit - 1])) {
-			homa_rpc_unlock(rpc);
 			INC_METRIC(grant_priority_bumps, 1);
-			homa_grant_recalc(homa, 0);
-		} else {
-			homa_rpc_unlock(rpc);
+			homa_grant_recalc(homa, 0, rpc);
 		}
 		goto done;
 	}
 	atomic_set(&homa->active_remaining[rank], rpc->msgin.bytes_remaining);
 	if (rank > 0 && rpc->msgin.bytes_remaining <
 			atomic_read(&homa->active_remaining[rank - 1])) {
-		homa_rpc_unlock(rpc);
 		INC_METRIC(grant_priority_bumps, 1);
-		homa_grant_recalc(homa, 0);
+		homa_grant_recalc(homa, 0, rpc);
 		goto done;
 	}
 
@@ -356,14 +347,12 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	if (rpc->msgin.granted >= rpc->msgin.length) {
 		homa_grantable_lock(homa, 0);
 		homa_grant_remove_rpc(rpc);
-		homa_rpc_unlock(rpc);
-		homa_grant_recalc(homa, 1);
+		homa_grant_recalc(homa, 1, rpc);
 		goto done;
 	}
 
-	homa_rpc_unlock(rpc);
 	if (recalc)
-		homa_grant_recalc(homa, 0);
+		homa_grant_recalc(homa, 0, rpc);
 done:
 	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
@@ -373,15 +362,20 @@ done:
  * and what priorities to use for each. If needed, send out grant packets to
  * ensure that all appropriate grants have been issued. This function is
  * invoked whenever something happens that could change the contents or order
- * of homa->active_rpcs. No RPC locks may be held when this function is invoked,
- * because RPC locks will be acquired here.
+ * of homa->active_rpcs.
  * @homa:        Overall information about the Homa transport.
  * @locked:      Normally this function will acquire (and release)
  *               homa->grantable_lock. If this value is nonzero, it means
  *               the caller has already acquired homa->grantable_lock. In
  *               either case the lock will be released upon return.
+ * @caller_rpc:  An RPC for which the caller holds the lock. This function
+ *               may release this lock in order acquire other RPC locks,
+ *               but if so, it will reacquire the lock before returning.
+ *               The caller must not hold any locks that prevent RPCs
+ *               from being locked (see sync.txt).  NULL means no lock held.
  */
-void homa_grant_recalc(struct homa *homa, int locked)
+void homa_grant_recalc(struct homa *homa, int locked,
+		       struct homa_rpc *caller_rpc)
 {
 	/* The tricky part of this method is that we need to release
 	 * homa->grantable_lock before actually sending grants, because
@@ -403,6 +397,11 @@ void homa_grant_recalc(struct homa *homa, int locked)
 		}
 	}
 	start = sched_clock();
+
+	if (likely(caller_rpc)) {
+		homa_rpc_hold(caller_rpc);
+		homa_rpc_unlock(caller_rpc);
+	}
 
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
@@ -486,6 +485,10 @@ void homa_grant_recalc(struct homa *homa, int locked)
 			INC_METRIC(grant_recalc_skips, 1);
 			break;
 		}
+	}
+	if (likely(caller_rpc)) {
+		homa_rpc_lock(caller_rpc);
+		homa_rpc_put(caller_rpc);
 	}
 	INC_METRIC(grant_recalc_ns, sched_clock() - start);
 }
@@ -612,21 +615,10 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 	if (!list_empty(&rpc->grantable_links)) {
 		homa_grantable_lock(homa, 0);
 		homa_grant_remove_rpc(rpc);
-		if (atomic_read(&rpc->msgin.rank) >= 0) {
-			/* Very tricky code below. We have to unlock the RPC before
-			 * calling homa_grant_recalc. This creates a risk that the
-			 * RPC could be reaped before the lock is reacquired.
-			 * However, this function is only called from a specific
-			 * place in homa_rpc_end where the RPC hasn't yet been put
-			 * on the reap list, so there is no way it can be reaped
-			 * until we return.
-			 */
-			homa_rpc_unlock(rpc);
-			homa_grant_recalc(homa, 1);
-			homa_rpc_lock(rpc);
-		} else {
+		if (atomic_read(&rpc->msgin.rank) >= 0)
+			homa_grant_recalc(homa, 1, rpc);
+		else
 			homa_grantable_unlock(homa);
-		}
 	}
 
 	if (rpc->msgin.rec_incoming != 0)
