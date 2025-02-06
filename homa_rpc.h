@@ -438,11 +438,10 @@ int      homa_validate_incoming(struct homa *homa, int verbose,
  * @rpc:    RPC to lock. Note: this function is only safe under
  *          limited conditions (in most cases homa_bucket_lock should be
  *          used). The caller must ensure that the RPC cannot be reaped
- *          before the lock is acquired. It cannot do that by acquirin
- *          the socket lock, since that violates lock ordering constraints.
- *          One approach is to use homa_protect_rpcs. Don't use this function
- *          unless you are very sure what you are doing!  See sync.txt for
- *          more info on locking.
+ *          before the lock is acquired, such as by taking a reference on
+ *          the rpc with homa_rpc_hold or calling homa_protect_rpcs.
+ *          Don't use this function unless you are very sure what you are
+ *          doing!  See sync.txt for more info on locking.
  */
 static inline void homa_rpc_lock(struct homa_rpc *rpc)
 {
