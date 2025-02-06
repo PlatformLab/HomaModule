@@ -355,8 +355,13 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 done:
-	if (recalc)
-		homa_grant_recalc(homa, rpc);
+	if (recalc) {
+		homa_rpc_hold(rpc);
+		homa_rpc_unlock(rpc);
+		homa_grant_recalc(homa);
+		homa_rpc_lock(rpc);
+		homa_rpc_put(rpc);
+	}
 	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
 
@@ -365,15 +370,11 @@ done:
  * and what priorities to use for each. If needed, send out grant packets to
  * ensure that all appropriate grants have been issued. This function is
  * invoked whenever something happens that could change the contents or order
- * of homa->active_rpcs.
+ * of homa->active_rpcs. Caller must not hold any RPC locks (this function
+ * may need to lock RPCs).
  * @homa:        Overall information about the Homa transport.
- * @caller_rpc:  An RPC for which the caller holds the lock. This function
- *               may release this lock in order acquire other RPC locks,
- *               but if so, it will reacquire the lock before returning.
- *               The caller must not hold any locks that prevent RPCs
- *               from being locked (see sync.txt).  NULL means no lock held.
  */
-void homa_grant_recalc(struct homa *homa, struct homa_rpc *caller_rpc)
+void homa_grant_recalc(struct homa *homa)
 {
 	/* The tricky part of this method is that we need to release
 	 * homa->grantable_lock before actually sending grants, because
@@ -389,11 +390,6 @@ void homa_grant_recalc(struct homa *homa, struct homa_rpc *caller_rpc)
 	tt_record("homa_grant_recalc starting");
 	INC_METRIC(grant_recalc_calls, 1);
 	start = sched_clock();
-
-	if (likely(caller_rpc)) {
-		homa_rpc_hold(caller_rpc);
-		homa_rpc_unlock(caller_rpc);
-	}
 
 	/* We may have to recalculate multiple times if grants sent in one
 	 * round cause messages to be completely granted, opening up
@@ -476,10 +472,6 @@ void homa_grant_recalc(struct homa *homa, struct homa_rpc *caller_rpc)
 		if (try_again == 0)
 			break;
 		INC_METRIC(grant_recalc_loops, 1);
-	}
-	if (likely(caller_rpc)) {
-		homa_rpc_lock(caller_rpc);
-		homa_rpc_put(caller_rpc);
 	}
 	INC_METRIC(grant_recalc_ns, sched_clock() - start);
 }
@@ -605,8 +597,13 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 
 	if (!list_empty(&rpc->grantable_links)) {
 		homa_grant_remove_rpc(rpc);
-		if (atomic_read(&rpc->msgin.rank) >= 0)
-			homa_grant_recalc(homa, rpc);
+		if (atomic_read(&rpc->msgin.rank) >= 0) {
+			homa_rpc_hold(rpc);
+			homa_rpc_unlock(rpc);
+			homa_grant_recalc(homa);
+			homa_rpc_lock(rpc);
+			homa_rpc_put(rpc);
+		}
 	}
 
 	if (rpc->msgin.rec_incoming != 0)
