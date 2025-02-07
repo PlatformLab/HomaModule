@@ -491,6 +491,12 @@ struct homa_metrics {
 	u64 grantable_rpcs_integral;
 
 	/**
+	 * @grant_check_calls: cumulative number of times homa_grant_check_rpc
+	 * has been invoked.
+	 */
+	u64 grant_check_calls;
+
+	/**
 	 * @grant_recalc_calls: cumulative number of times homa_grant_recalc
 	 * has been invoked.
 	 */

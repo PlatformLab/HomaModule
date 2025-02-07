@@ -496,6 +496,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__msgin_not_initialized)
 	homa_grant_check_rpc(rpc);
 	EXPECT_EQ(0, rpc->msgin.rec_incoming);
 	EXPECT_EQ(0, atomic_read(&self->homa.total_incoming));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_check_calls);
 }
 TEST_F(homa_grant, homa_grant_check_rpc__rpc_dead)
 {
@@ -550,6 +551,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__add_new_message_to_grantables)
 	EXPECT_EQ(10000, rpc->msgin.rec_incoming);
 	EXPECT_EQ(0, atomic_read(&rpc->msgin.rank));
 	EXPECT_EQ(10000, atomic_read(&self->homa.total_incoming));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_check_calls);
 }
 TEST_F(homa_grant, homa_grant_check_rpc__new_message_bumps_existing)
 {

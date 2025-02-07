@@ -320,6 +320,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
 		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
 		   rpc->msgin.length);
+	INC_METRIC(grant_check_calls, 1);
 
 	/* This message requires grants; if it is a new message, set up
 	 * granting.

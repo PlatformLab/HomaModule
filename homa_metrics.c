@@ -280,8 +280,10 @@ char *homa_metrics_print(struct homa *homa)
 		  m->grantable_lock_miss_ns);
 		M("grantable_rpcs_integral   %15llu  Integral of homa->num_grantable_rpcs*dt\n",
 		  m->grantable_rpcs_integral);
-		M("grant_recalc_calls        %15llu  Number of calls to homa_grant_recalc\n",
-		  m->grant_recalc_calls);
+		  M("grant_check_calls       %15llu  Number of calls to homa_grant_check_rpc\n",
+		    m->grant_check_calls);
+		    M("grant_recalc_calls        %15llu  Number of calls to homa_grant_recalc\n",
+		      m->grant_recalc_calls);
 		M("grant_recalc_ns           %15llu  Time spent in homa_grant_recalc\n",
 		  m->grant_recalc_ns);
 		M("grant_recalc_skips        %15llu  Number of times homa_grant_recalc skipped redundant work\n",
