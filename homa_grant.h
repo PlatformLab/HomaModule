@@ -18,9 +18,10 @@ int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_grant_recalc(struct homa *homa);
 void     homa_grant_remove_rpc(struct homa_rpc *rpc);
-int      homa_grant_send(struct homa_rpc *rpc, struct homa *homa);
+void     homa_grant_send(struct homa_rpc *rpc);
 int      homa_grant_update_incoming(struct homa_rpc *rpc,
 				    struct homa *homa);
+int      homa_grant_update_offset(struct homa_rpc *rpc, struct homa *homa);
 
 /**
  * homa_grantable_lock() - Acquire the grantable lock. If the lock

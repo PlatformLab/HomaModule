@@ -417,93 +417,71 @@ TEST_F(homa_grant, homa_grant_remove_rpc__reposition_peer_in_homa_list)
 	EXPECT_EQ(3, self->homa.num_grantable_rpcs);
 }
 
+TEST_F(homa_grant, homa_grant_update_offset__basics)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	EXPECT_EQ(1, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(10000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_offset__rpc_idle)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	rpc->silent_ticks = 2;
+	EXPECT_EQ(0, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(0, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_offset__end_of_message)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+        /* First call grants remaining bytes in message. */
+	rpc->msgin.bytes_remaining = 5000;
+	EXPECT_EQ(1, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(20000, rpc->msgin.granted);
+
+        /* Second call cannot grant anymore. */
+	EXPECT_EQ(0, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(20000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_offset__insufficient_room_in_incoming)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	rpc->msgin.bytes_remaining = 5000;
+	atomic_set(&self->homa.total_incoming, 48000);
+	EXPECT_EQ(1, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(17000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_offset__incoming_overcommitted)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	atomic_set(&self->homa.total_incoming, 51000);
+	EXPECT_EQ(0, homa_grant_update_offset(rpc, &self->homa));
+	EXPECT_EQ(0, rpc->msgin.granted);
+}
+
 TEST_F(homa_grant, homa_grant_send__basics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
 
-	rpc->msgin.priority = 3;
+	rpc->msgin.granted = 12300;
 	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(1, granted);
-	EXPECT_EQ(10000, rpc->msgin.granted);
-	EXPECT_STREQ("xmit GRANT 10000@3", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__incoming_negative)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
-
-	rpc->msgin.bytes_remaining = 5000;
-	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
-
-	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(0, granted);
-	EXPECT_EQ(15000, rpc->msgin.granted);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__end_of_message)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
-
-	rpc->msgin.bytes_remaining = 5000;
-	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(1, granted);
-	EXPECT_EQ(20000, rpc->msgin.granted);
-	EXPECT_STREQ("xmit GRANT 20000@0", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__not_enough_available_bytes)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
-
-	rpc->msgin.granted = 3000;
-	rpc->msgin.rec_incoming = 4000;
-	atomic_set(&self->homa.total_incoming, self->homa.max_incoming - 4000);
-
-	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(1, granted);
-	EXPECT_EQ(8000, rpc->msgin.granted);
-	EXPECT_STREQ("xmit GRANT 8000@0", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__nothing_available)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
-
-	atomic_set(&self->homa.total_incoming, self->homa.max_incoming);
-	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(0, granted);
-	EXPECT_EQ(0, rpc->msgin.granted);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_grant, homa_grant_send__skip_because_of_silent_ticks)
-{
-	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
-
-	rpc->silent_ticks = 2;
-	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(0, granted);
+	homa_grant_send(rpc);
+	EXPECT_STREQ("xmit GRANT 12300@0", unit_log_get());
 }
 TEST_F(homa_grant, homa_grant_send__resend_all)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
-	int granted;
 
+	rpc->msgin.granted = 5000;
 	rpc->msgin.resend_all = 1;
 	unit_log_clear();
-	granted = homa_grant_send(rpc, &self->homa);
-	EXPECT_EQ(1, granted);
-	EXPECT_EQ(10000, rpc->msgin.granted);
+	homa_grant_send(rpc);
+	EXPECT_STREQ("xmit GRANT 5000@0 resend_all", unit_log_get());
 	EXPECT_EQ(0, rpc->msgin.resend_all);
-	EXPECT_STREQ("xmit GRANT 10000@0 resend_all", unit_log_get());
 }
 
 TEST_F(homa_grant, homa_grant_check_rpc__msgin_not_initialized)
@@ -703,30 +681,6 @@ TEST_F(homa_grant, homa_grant_check_rpc__remove_from_grantable)
 	EXPECT_EQ(0, self->homa.num_active_rpcs);
 	EXPECT_EQ(-1, atomic_read(&rpc->msgin.rank));
 }
-TEST_F(homa_grant, homa_grant_check_rpc__recalc_because_of_headroom)
-{
-	struct homa_rpc *rpc1, *rpc2;
-
-	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
-	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
-	self->homa.max_incoming = 15000;
-	homa_grant_recalc(&self->homa);
-	EXPECT_EQ(15000, atomic_read(&self->homa.total_incoming));
-	EXPECT_EQ(10000, rpc1->msgin.granted);
-	EXPECT_EQ(5000, rpc2->msgin.granted);
-
-	rpc1->msgin.bytes_remaining = 4000;
-	rpc1->msgin.granted = 12000;
-	rpc1->msgin.rec_incoming = 10000;
-	unit_log_clear();
-	homa_grant_check_rpc(rpc1);
-	EXPECT_EQ(20000, rpc1->msgin.granted);
-	EXPECT_EQ(4000, rpc1->msgin.rec_incoming);
-	EXPECT_EQ(10000, rpc2->msgin.granted);
-	EXPECT_EQ(10000, rpc2->msgin.rec_incoming);
-	EXPECT_STREQ("xmit GRANT 20000@1; xmit GRANT 10000@0", unit_log_get());
-	EXPECT_EQ(14000, atomic_read(&self->homa.total_incoming));
-}
 
 TEST_F(homa_grant, homa_grant_recalc__basics)
 {
@@ -856,7 +810,25 @@ TEST_F(homa_grant, homa_grant_recalc__compute_window_size)
 	EXPECT_EQ(25000, rpc2->msgin.granted);
 	EXPECT_EQ(25000, rpc3->msgin.granted);
 }
-TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted)
+TEST_F(homa_grant, homa_grant_recalc__rpc_cant_be_granted)
+{
+	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
+
+	rpc1 = test_rpc(self, 100, self->server_ip, 10000);
+	rpc2 = test_rpc(self, 102, self->server_ip, 10000);
+	rpc3 = test_rpc(self, 104, self->server_ip, 10000);
+	rpc4 = test_rpc(self, 106, self->server_ip, 10000);
+	self->homa.window_param = 5000;
+	self->homa.max_overcommit = 3;
+	rpc2->silent_ticks = 3;
+
+	homa_grant_recalc(&self->homa);
+	EXPECT_EQ(5000, rpc1->msgin.granted);
+	EXPECT_EQ(0, rpc2->msgin.granted);
+	EXPECT_EQ(5000, rpc3->msgin.granted);
+	EXPECT_EQ(0, rpc4->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted_so_recalc)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3, *rpc4;
 
