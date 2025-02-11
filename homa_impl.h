@@ -243,7 +243,12 @@ struct homa {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @grantable_lock: Used to synchronize access to grant-related
-	 * fields below, from @grantable_peers to @last_grantable_change.
+	 * fields below. In order to reduce contention, this lock is held
+	 * only when making structural changes (e.g. modifying grantable_peers
+	 * or active_rpcs). It is not held when computing new grant offsets
+	 * and/or sending grant packets. Under some race conditions, it is
+	 * possible for RPCs to receive grants out of priority order, or to
+	 * receive duplicate grants.
 	 */
 	spinlock_t grantable_lock ____cacheline_aligned_in_smp;
 
@@ -269,14 +274,7 @@ struct homa {
 	 */
 	struct list_head grantable_peers;
 
-	/**
-	 * @grantable_rpcs: Contains all RPCs that have not been fully
-	 * granted. The list is sorted in priority order (fewer ungranted
-	 * bytes -> higher priority).
-	 */
-	struct list_head grantable_rpcs;
-
-	/** @num_grantable_rpcs: The number of RPCs in grantable_rpcs. */
+	/** @num_grantable_rpcs: The number of RPCs in grantable_peers. */
 	int num_grantable_rpcs;
 
 	/** @last_grantable_change: The sched_clock() time of the most recent
@@ -291,20 +289,6 @@ struct homa {
 	 * reset externally using sysctl).
 	 */
 	int max_grantable_rpcs;
-
-	/**
-	 * @oldest_rpc: The RPC with incoming data whose start_ns is
-	 * farthest in the past). NULL means either there are no incoming
-	 * RPCs or the oldest needs to be recomputed. Must hold grantable_lock
-	 * to update.
-	 */
-	struct homa_rpc *oldest_rpc;
-
-	/**
-	 * @grant_window: How many bytes of granted but not yet received data
-	 * may exist for an RPC at any given time.
-	 */
-	int grant_window;
 
 	/**
 	 * @num_active_rpcs: number of entries in @active_rpcs and
@@ -328,6 +312,20 @@ struct homa {
 	atomic_t active_remaining[HOMA_MAX_GRANTS];
 
 	/**
+	 * @oldest_rpc: The RPC with incoming data whose start_ns is
+	 * farthest in the past). NULL means either there are no incoming
+	 * RPCs or the oldest needs to be recomputed. Must hold grantable_lock
+	 * to update.
+	 */
+	struct homa_rpc *oldest_rpc;
+
+	/**
+	 * @grant_window: How many bytes of granted but not yet received data
+	 * may exist for an RPC at any given time.
+	 */
+	int grant_window;
+
+	/**
 	 * @grant_nonfifo: How many bytes should be granted using the
 	 * normal priority system between grants to the oldest message.
 	 */
@@ -339,6 +337,23 @@ struct homa {
 	 * to the old message.
 	 */
 	int grant_nonfifo_left;
+
+	/**
+	 * @total_incoming: the total number of bytes that we expect to receive
+	 * (across all messages) even if we don't send out any more grants
+	 * (includes granted but unreceived bytes, plus unreceived unscheduled
+	 * bytes that we know about). This can potentially be negative, if
+	 * a peer sends more bytes than granted (see synchronization note in
+	 * homa_send_grants for why we have to allow this possibility).
+	 */
+	atomic_t total_incoming ____cacheline_aligned_in_smp;
+
+	/**
+	 * @needy_ranks: A bitmask selecting all of the indices in @active_rpcs
+	 * whose RPCs could not be fully granted because @total_incoming
+	 * hit the @max_incoming limit.
+	 */
+	atomic_t needy_ranks;
 #endif /* See strip.py */
 
 	/**
@@ -397,18 +412,6 @@ struct homa {
 	 * via sysctl.
 	 */
 	int throttle_min_bytes;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @total_incoming: the total number of bytes that we expect to receive
-	 * (across all messages) even if we don't send out any more grants
-	 * (includes granted but unreceived bytes, plus unreceived unscheduled
-	 * bytes that we know about). This can potentially be negative, if
-	 * a peer sends more bytes than granted (see synchronization note in
-	 * homa_send_grants for why we have to allow this possibility).
-	 */
-	atomic_t total_incoming ____cacheline_aligned_in_smp;
-#endif /* See strip.py */
 
 	/**
 	 * @prev_default_port: The most recent port number assigned from

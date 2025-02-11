@@ -519,6 +519,12 @@ struct homa_metrics {
 	u64 grant_recalc_skips;
 
 	/**
+	 * @grant_check_needy_calls: cumulative number of times that
+	 * homa_grant_check_needy has been invoked.
+	 */
+	u64 grant_check_needy_calls;
+
+	/**
 	 * @grant_priority_bumps: cumulative number of times the grant priority
 	 * of an RPC has increased above its next-higher-priority neighbor.
 	 */

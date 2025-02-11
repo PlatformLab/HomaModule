@@ -157,12 +157,13 @@ struct homa_message_in {
 	 * @rec_incoming: Number of bytes in homa->total_incoming currently
 	 * contributed ("recorded") from this RPC.
 	 */
-	int rec_incoming;
+	atomic_t rec_incoming;
 
 	/**
 	 * @rank: The index of this RPC in homa->active_rpcs and
 	 * homa->active_remaining, or -1 if this RPC is not in those arrays.
-	 * Set by homa_grant, read-only to the RPC.
+	 * Lower number means higher priority. Must be atomic because it
+	 * is read without synchronization.
 	 */
 	atomic_t rank;
 

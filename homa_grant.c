@@ -32,32 +32,24 @@ int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 /**
  * homa_grant_update_incoming() - Figure out how much incoming data there is
  * for an RPC (i.e., data that has been granted but not yet received) and make
- * sure this is properly reflected in homa->total_incoming.
- * @rpc:   RPC to check; must be locked by the caller and its msgin must be
- *         properly initialized.
+ * sure this is properly reflected in rpc->msgin.incoming
+ * and homa->total_incoming.
+ * @rpc:   RPC to check; need not be locked.
  * @homa:  Overall information about the Homa transport.
- * Return: A nonzero return value means that this update caused
- *         homa->total_incoming to drop below homa->max_incoming, when it
- *         had previously been at or above that level. This means that it
- *         may be possible to send out additional grants to some RPCs (doing
- *         this is left to the caller).
  */
-int homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
+void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
 {
-	int incoming = rpc->msgin.granted - (rpc->msgin.length
-			- rpc->msgin.bytes_remaining);
+	int incoming, delta;
 
+	incoming = rpc->msgin.granted - (rpc->msgin.length -
+					 rpc->msgin.bytes_remaining);
 	if (incoming < 0)
 		incoming = 0;
-	if (incoming != rpc->msgin.rec_incoming) {
-		int delta = incoming - rpc->msgin.rec_incoming;
-		int old = atomic_fetch_add(delta, &homa->total_incoming);
-
-		rpc->msgin.rec_incoming = incoming;
-		return (old >= homa->max_incoming &&
-			(old + delta) < homa->max_incoming);
+	delta = incoming - atomic_read(&rpc->msgin.rec_incoming);
+	if (delta != 0) {
+		atomic_add(delta, &rpc->msgin.rec_incoming);
+		atomic_add(delta, &homa->total_incoming);
 	}
-	return 0;
 }
 
 /**
@@ -231,7 +223,8 @@ done:
  * @homa:  Overall information about the Homa transport.
  * Return: Nonzero means that @rpc->msgin.granted was increased (presumably
  * the caller will now send a GRANT packet). Zero means that @rpc->msgin.granted
- * can't be increased at this time.
+ * can't be increased at this time. This function will set a bit in
+ * homa->needy_ranks if available incoming was exhausted.
  */
 int homa_grant_update_offset(struct homa_rpc *rpc, struct homa *homa)
 {
@@ -248,9 +241,15 @@ int homa_grant_update_offset(struct homa_rpc *rpc, struct homa *homa)
 	new_grant_offset = received + homa->grant_window;
 	if (new_grant_offset > rpc->msgin.length)
 		new_grant_offset = rpc->msgin.length;
-	incoming_delta = (new_grant_offset - received) - rpc->msgin.rec_incoming;
+	incoming_delta = (new_grant_offset - received) -
+			 atomic_read(&rpc->msgin.rec_incoming);
 	avl_incoming = homa->max_incoming - atomic_read(&homa->total_incoming);
 	if (avl_incoming < incoming_delta) {
+		atomic_or(homa_grant_needy_bit(atomic_read(&rpc->msgin.rank)),
+			  &homa->needy_ranks);
+		tt_record3("insufficient headroom: needed %d, available %d, used %d",
+				incoming_delta, avl_incoming,
+				atomic_read(&homa->total_incoming));
 		new_grant_offset -= incoming_delta - avl_incoming;
 	}
 	if (new_grant_offset <= rpc->msgin.granted)
@@ -263,15 +262,23 @@ int homa_grant_update_offset(struct homa_rpc *rpc, struct homa *homa)
 }
 
 /**
- * homa_grant_send() -Issue a GRANT packet for the current grant offset
- * in an RPC.
- * @rpc:   The RPC on whose behalf to send the packet. Need not be locked
- *         (and better for it not to be locked, since sending the packet
- *         takes a while).
+ * homa_grant_try_send() - If an RPC needs granting and there is headroom
+ * under @homa->max_incoming, send a grant.
+ * @rpc:     RPC to check. Should not be locked, but caller must own a
+ *           reference.
+ * @homa:    Overall info about the Homa transport.
+ * Return:   1 means that homa_grant_recalc now needs to be called (@rpc
+ * became completely granted and was removed from the grantable list).
  */
-void homa_grant_send(struct homa_rpc *rpc)
+int homa_grant_try_send(struct homa_rpc *rpc, struct homa *homa)
 {
 	struct homa_grant_hdr grant;
+
+	atomic_andnot(homa_grant_needy_bit(atomic_read(&rpc->msgin.rank)),
+		      &homa->needy_ranks);
+	if (!homa_grant_update_offset(rpc, homa))
+		return 0;
+	homa_grant_update_incoming(rpc, homa);
 
 	grant.offset = htonl(rpc->msgin.granted);
 	grant.priority = rpc->msgin.priority;
@@ -279,6 +286,12 @@ void homa_grant_send(struct homa_rpc *rpc)
 	if (grant.resend_all)
 		rpc->msgin.resend_all = 0;
 	homa_xmit_control(GRANT, &grant, sizeof(grant), rpc);
+
+	if (rpc->msgin.granted >= rpc->msgin.length) {
+		homa_grant_remove_rpc(rpc);
+		return 1;
+	}
+	return 0;
 }
 
 /**
@@ -287,13 +300,12 @@ void homa_grant_send(struct homa_rpc *rpc)
  * RPC relative to outgoing grants and takes any appropriate actions that
  * are needed (such as adding the RPC to the grantable list or sending
  * grants for this or other RPCs).
- * @rpc:    RPC to check. Must be locked by the caller. This function may
- *          release and then reacquire that lock, so caller must not hold
- *          any locks that would disallow that.
+ * @rpc:    RPC to check. Must not be locked by the caller, but caller
+ *          must own a reference.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
 {
-	/* Overall design notes:
+	/* Overall design note:
 	 * The grantable lock has proven to be a performance bottleneck,
 	 * particularly as network speeds increase. homa_grant_recalc must
 	 * acquire that lock in order to recompute the set of messages
@@ -306,31 +318,33 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * be called, which create a lot of special cases in this function.
 	 */
 	struct homa *homa = rpc->hsk->homa;
-	int rank, recalc;
-	int locked = 1;
+	int rank;
 
 	if (rpc->msgin.length < 0 || rpc->state == RPC_DEAD ||
 	    rpc->msgin.num_bpages <= 0)
-		goto done;
-
-	recalc = homa_grant_update_incoming(rpc, homa);
-	if (rpc->msgin.granted >= rpc->msgin.length)
-		goto done;
+		return;
 
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
 		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
 		   rpc->msgin.length);
 	INC_METRIC(grant_check_calls, 1);
+	homa_grant_update_incoming(rpc, homa);
+	if (rpc->msgin.granted >= rpc->msgin.length) {
+		if (homa_grant_check_needy(homa))
+			goto recalc;
+		goto done;
+	}
 
 	/* This message requires grants; if it is a new message, set up
 	 * granting.
 	 */
 	if (list_empty(&rpc->grantable_links)) {
 		homa_grant_add_rpc(rpc);
-		recalc += (homa->num_active_rpcs < homa->max_overcommit ||
+		if (homa->num_active_rpcs < homa->max_overcommit ||
 				rpc->msgin.bytes_remaining <
 				atomic_read(&homa->active_remaining
-				[homa->max_overcommit - 1]));
+				[homa->max_overcommit - 1]))
+			goto recalc;
 		goto done;
 	}
 
@@ -338,9 +352,10 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	rank = atomic_read(&rpc->msgin.rank);
 	if (rank < 0) {
 		if (rpc->msgin.bytes_remaining <
-		    atomic_read(&homa->active_remaining[homa->max_overcommit - 1])) {
+		    atomic_read(&homa->active_remaining[homa->max_overcommit -
+							1])) {
 			INC_METRIC(grant_priority_bumps, 1);
-			recalc = 1;
+			goto recalc;
 		}
 		goto done;
 	}
@@ -348,38 +363,29 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	if (rank > 0 && rpc->msgin.bytes_remaining <
 			atomic_read(&homa->active_remaining[rank - 1])) {
 		INC_METRIC(grant_priority_bumps, 1);
-		recalc = 1;
-		goto done;
+		goto recalc;
 	}
 
-	/* Getting here should be the normal case: see if we can send a new
-	 * grant for this message.
-	 */
-	if (homa_grant_update_offset(rpc, homa)) {
-		recalc += homa_grant_update_incoming(rpc, homa);
-		if (rpc->msgin.granted >= rpc->msgin.length) {
-			homa_grant_remove_rpc(rpc);
-			recalc = 1;
-		}
-		homa_rpc_hold(rpc);
-		homa_rpc_unlock(rpc);
-		locked = 0;
-		homa_grant_send(rpc);
+	if (atomic_read(&homa->needy_ranks) != 0) {
+		/* There are other RPCs that also need grants; process them
+		 * in priority order (and make sure this RPC ges considered
+		 * as well).
+		 */
+		atomic_or(homa_grant_needy_bit(rank), &homa->needy_ranks);
+		if (!homa_grant_check_needy(homa))
+			goto done;
+	} else {
+		/* Ideally this should be the common case: no need to consider
+		 * any other RPCs.
+		  */
+		if (!homa_grant_try_send(rpc, homa))
+			goto done;
 	}
+
+recalc:
+	homa_grant_recalc(homa);
 
 done:
-	if (recalc) {
-		if (locked) {
-			homa_rpc_hold(rpc);
-			homa_rpc_unlock(rpc);
-			locked = 0;
-		}
-		homa_grant_recalc(homa);
-	}
-	if (!locked) {
-		homa_rpc_lock(rpc);
-		homa_rpc_put(rpc);
-	}
 	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
 
@@ -401,6 +407,7 @@ void homa_grant_recalc(struct homa *homa)
 	int i, active, try_again;
 	u64 start;
 
+	UNIT_LOG("; ", "homa_grant_recalc");
 	tt_record("homa_grant_recalc starting");
 	INC_METRIC(grant_recalc_calls, 1);
 	start = sched_clock();
@@ -417,6 +424,7 @@ void homa_grant_recalc(struct homa *homa)
 
 		try_again = 0;
 		atomic_inc(&homa->grant_recalc_count);
+		atomic_set(&homa->needy_ranks, 0);
 
 		/* Clear the existing grant calculation. */
 		for (i = 0; i < homa->num_active_rpcs; i++)
@@ -470,29 +478,14 @@ void homa_grant_recalc(struct homa *homa)
 		 * because sending grants takes a while and holding
 		 * grantable_lock would significantly increase contention for
 		 * it. We don't hold RPC locks while sending grants either,
-		 * for the same reason.
+		 * for the same reason (but we do hold a reference, to keep
+		 * the RPC from being reaped).
 		 */
 		homa_grantable_unlock(homa);
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = active_rpcs[i];
 
-			if (!homa_grant_update_offset(rpc, homa)) {
-				homa_rpc_put(rpc);
-				continue;
-			}
-			homa_rpc_lock(rpc);
-			homa_grant_update_incoming(rpc, homa);
-			if (rpc->msgin.granted >= rpc->msgin.length) {
-				try_again += 1;
-				homa_grant_remove_rpc(rpc);
-			}
-			homa_rpc_unlock(rpc);
-			homa_grant_send(rpc);
-
-			/* Careful not to release reference until after
-			 * grant has been sent; otherwise RPC could be
-			 * reaped.
-			 */
+			try_again += homa_grant_try_send(rpc, homa);
 			homa_rpc_put(rpc);
 		}
 
@@ -568,6 +561,53 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 }
 
 /**
+ * homa_grant_check_needy() - See if any of the RPCs in @homa->needy_ranks
+ * can now be granted; if so, issue grants to them.
+ * @homa:   Overall information about the Homa transport.
+ * Return:  Nonzero means that homa_grant_recalc needs to be called (the
+ *          list of grantable RPCs changed).
+ */
+int homa_grant_check_needy(struct homa *homa)
+{
+	struct homa_rpc *rpc;
+	int result = 0;
+	int rank;
+
+	INC_METRIC(grant_check_needy_calls, 1);
+	while (atomic_read(&homa->total_incoming) < homa->max_incoming) {
+		rank = ffs(atomic_read(&homa->needy_ranks));
+		if (rank == 0)
+			break;
+		rank--;
+		atomic_andnot(homa_grant_needy_bit(rank),
+			       &homa->needy_ranks);
+
+		homa_grantable_lock(homa, 0);
+		if (rank >= homa->num_active_rpcs) {
+			/* active_rpcs changed before lock was acquired;
+			 * no need for us to do anything more (someone else
+			 * has already invoked homa_grant_recalc).
+			 */
+			homa_grantable_unlock(homa);
+			return 0;
+		}
+
+		/* Must take reference on rpc to keep it alive, which can only
+		 * be done safely while holding grantable lock. But, must
+		 * release grantable lock before actually sending grant, in
+		 * order to reduce contention.
+		 */
+		rpc = homa->active_rpcs[rank];
+		homa_rpc_hold(rpc);
+		homa_grantable_unlock(homa);
+
+		result |= homa_grant_try_send(rpc, homa);
+		homa_rpc_put(rpc);
+	}
+	return result;
+}
+
+/**
  * homa_grant_find_oldest() - Recompute the value of homa->oldest_rpc.
  * @homa:    Overall data about the Homa protocol implementation. The
  *           grantable_lock must be held by the caller.
@@ -621,6 +661,7 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 	__releases(rpc->bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;
+	int incoming;
 
 	if (!list_empty(&rpc->grantable_links)) {
 		homa_grant_remove_rpc(rpc);
@@ -633,8 +674,9 @@ void homa_grant_free_rpc(struct homa_rpc *rpc)
 		}
 	}
 
-	if (rpc->msgin.rec_incoming != 0)
-		atomic_sub(rpc->msgin.rec_incoming, &homa->total_incoming);
+	incoming = atomic_read(&rpc->msgin.rec_incoming);
+	if (incoming != 0)
+		atomic_sub(incoming, &homa->total_incoming);
 }
 
 /**

@@ -152,7 +152,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 			   rpc->msgin.length, rpc->msgin.granted,
 			   rpc->msgin.bytes_remaining,
-			   rpc->msgin.rec_incoming);
+			   atomic_read(&rpc->msgin.rec_incoming));
 #endif /* See strip.py */
 	} else {
 #ifndef __STRIP__ /* See strip.py */
@@ -166,7 +166,7 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
 			   rpc->msgin.length, rpc->msgin.granted,
 			   rpc->msgin.bytes_remaining,
-			   rpc->msgin.rec_incoming);
+			   atomic_read(&rpc->msgin.rec_incoming));
 #endif /* See strip.py */
 	}
 #ifndef __STRIP__ /* See strip.py */
@@ -274,7 +274,8 @@ void homa_timer(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 			} else if (rpc->state == RPC_INCOMING) {
 				total_incoming_rpcs += 1;
-				sum_incoming_rec += rpc->msgin.rec_incoming;
+				sum_incoming_rec +=
+					atomic_read(&rpc->msgin.rec_incoming);
 				sum_incoming += rpc->msgin.granted
 						- (rpc->msgin.length
 						- rpc->msgin.bytes_remaining);

@@ -30,7 +30,8 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
 #else /* See strip.py */
 /**
  * homa_message_in_init() - Constructor for homa_message_in.
- * @rpc:          RPC whose msgin structure should be initialized.
+ * @rpc:          RPC whose msgin structure should be initialized. The
+ *                msgin struct is assumed to be zeroes.
  * @length:       Total number of bytes in message.
  * Return:        Zero for successful initialization, or a negative errno
  *                if rpc->msgin could not be initialized.
@@ -45,17 +46,12 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 
 	rpc->msgin.length = length;
 	skb_queue_head_init(&rpc->msgin.packets);
-	rpc->msgin.recv_end = 0;
 	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
 #ifndef __STRIP__ /* See strip.py */
 	rpc->msgin.granted = (unsched > length) ? length : unsched;
-	rpc->msgin.rec_incoming = 0;
 	atomic_set(&rpc->msgin.rank, -1);
-	rpc->msgin.priority = 0;
 #endif /* See strip.py */
-	rpc->msgin.resend_all = 0;
-	rpc->msgin.num_bpages = 0;
 	err = homa_pool_allocate(rpc);
 	if (err != 0)
 		return err;
@@ -586,9 +582,13 @@ discard:
 	}
 	if (rpc) {
 #ifndef __STRIP__ /* See strip.py */
-		homa_grant_check_rpc(rpc);
-#endif /* See strip.py */
+		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
+		homa_grant_check_rpc(rpc);
+		homa_rpc_put(rpc);
+#else /* See strip.py */
+		homa_rpc_unlock(rpc);
+#endif /* See strip.py */
 	}
 
 	while (num_acks > 0) {
@@ -1004,6 +1004,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 }
 
 #ifndef __STRIP__ /* See strip.py */
+#if 0
 /**
  * homa_choose_fifo_grant() - This function is invoked occasionally to give
  * a high-priority grant to the oldest incoming message. We do this in
@@ -1084,6 +1085,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
 	}
 	return oldest;
 }
+#endif
 #endif /* See strip.py */
 
 /**

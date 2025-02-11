@@ -5,8 +5,11 @@
 #ifndef _HOMA_GRANT_H
 #define _HOMA_GRANT_H
 
+#include "homa_rpc.h"
+
 int      homa_grantable_lock_slow(struct homa *homa, int recalc);
 void     homa_grant_add_rpc(struct homa_rpc *rpc);
+int      homa_grant_check_needy(struct homa *homa);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
 void     homa_grant_find_oldest(struct homa *homa);
 void     homa_grant_free_rpc(struct homa_rpc *rpc);
@@ -18,9 +21,9 @@ int      homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_grant_recalc(struct homa *homa);
 void     homa_grant_remove_rpc(struct homa_rpc *rpc);
-void     homa_grant_send(struct homa_rpc *rpc);
-int      homa_grant_update_incoming(struct homa_rpc *rpc,
+void     homa_grant_update_incoming(struct homa_rpc *rpc,
 				    struct homa *homa);
+int      homa_grant_try_send(struct homa_rpc *rpc, struct homa *homa);
 int      homa_grant_update_offset(struct homa_rpc *rpc, struct homa *homa);
 
 /**
@@ -57,6 +60,19 @@ static inline void homa_grantable_unlock(struct homa *homa)
 	INC_METRIC(grantable_lock_ns, sched_clock() -
 		   homa->grantable_lock_time);
 	spin_unlock_bh(&homa->grantable_lock);
+}
+
+/**
+ * homa_grant_needy_bit() - Return a bit mask with the bit set in the
+ * position in @homa->grant_needy_ranks for @rank.
+ * @rank:     Rank of an RPC (corresponds to position in @homa->active_rpcs).
+ * Return:    A value with a 1-bit in the position corresponding to @rank,
+ *            or 0 if rank is -1 or >= HOMA_MAX_PRIORITIES.
+ */
+static inline int homa_grant_needy_bit(int rank)
+{
+	/* Eliminate any bits that conflict with HOMA_MAX_PRIORITIES. */
+	return (1 << rank) & ((1 << HOMA_MAX_PRIORITIES) - 1);
 }
 
 #endif /* _HOMA_GRANT_H */

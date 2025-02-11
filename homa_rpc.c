@@ -713,7 +713,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		if (!homa_protect_rpcs(hsk))
 			continue;
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			int incoming;
+			int incoming, rec_incoming;
 
 			if (rpc->state != RPC_INCOMING)
 				continue;
@@ -722,13 +722,13 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 					- rpc->msgin.bytes_remaining);
 			if (incoming < 0)
 				incoming = 0;
-			if (rpc->msgin.rec_incoming == 0)
+			rec_incoming = atomic_read(&rpc->msgin.rec_incoming);
+			if (rec_incoming == 0)
 				continue;
-			total_incoming += rpc->msgin.rec_incoming;
+			total_incoming += rec_incoming;
 			if (verbose)
 				tt_record3("homa_validate_incoming: RPC id %d, incoming %d, rec_incoming %d",
-					   rpc->id, incoming,
-					   rpc->msgin.rec_incoming);
+					   rpc->id, incoming, rec_incoming);
 			if (rpc->msgin.granted >= rpc->msgin.length)
 				continue;
 			if (list_empty(&rpc->grantable_links)) {

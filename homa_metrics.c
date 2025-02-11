@@ -286,10 +286,12 @@ char *homa_metrics_print(struct homa *homa)
 		      m->grant_recalc_calls);
 		M("grant_recalc_ns           %15llu  Time spent in homa_grant_recalc\n",
 		  m->grant_recalc_ns);
-		M("grant_recalc_skips        %15llu  Number of times homa_grant_recalc skipped redundant work\n",
-		  m->grant_recalc_skips);
 		M("grant_recalc_loops        %15llu  Number of times homa_grant_recalc looped back\n",
 		  m->grant_recalc_loops);
+		M("grant_recalc_skips        %15llu  Number of times homa_grant_recalc skipped redundant work\n",
+		  m->grant_recalc_skips);
+		M("grant_check_needy_calls   %15llu  Number of calls to homa_grant_check_needy\n",
+		  m->grant_recalc_skips);
 		M("grant_priority_bumps      %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
 		M("fifo_grants               %15llu  Grants issued using FIFO priority\n",

@@ -636,7 +636,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	atomic_set(&pool->free_bpages, 2);
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
-	EXPECT_STREQ("xmit GRANT 10000@0 resend_all", unit_log_get());
+	EXPECT_STREQ("homa_grant_recalc; xmit GRANT 10000@0 resend_all",
+		     unit_log_get());
 }
 #endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_check_waiting__reallocation_fails)

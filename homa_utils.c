@@ -42,7 +42,6 @@ int homa_init(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_peers);
-	INIT_LIST_HEAD(&homa->grantable_rpcs);
 	homa->last_grantable_change = sched_clock();
 #endif /* See strip.py */
 	spin_lock_init(&homa->pacer_mutex);
