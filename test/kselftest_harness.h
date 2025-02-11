@@ -630,7 +630,7 @@ extern int strcmp(const char *s1, const char *s2);
 	if (!(__exp _t __seen)) { \
 		unsigned long long __exp_print = (long long)__exp; \
 		unsigned long long __seen_print = (long long)__seen; \
-		__TH_LOG(" Expected %s (%llu) %s %s (%llu)", \
+		__TH_LOG(" Expected %s (%lld) %s %s (%lld)", \
 			 #_expected, __exp_print, #_t, \
 			 #_seen, __seen_print); \
 		__current_test->passed = 0; \
