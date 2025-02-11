@@ -271,7 +271,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	 * necessary because homa__rpc releases the RPC lock and
 	 * reacquires it.
 	 */
-	homa_grant_free_rpc(rpc);
+	homa_grant_end_rpc(rpc);
 #endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */

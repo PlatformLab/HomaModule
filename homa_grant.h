@@ -11,8 +11,8 @@ int      homa_grantable_lock_slow(struct homa *homa, int recalc);
 void     homa_grant_add_rpc(struct homa_rpc *rpc);
 int      homa_grant_check_needy(struct homa *homa);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
+void     homa_grant_end_rpc(struct homa_rpc *rpc);
 void     homa_grant_find_oldest(struct homa *homa);
-void     homa_grant_free_rpc(struct homa_rpc *rpc);
 void     homa_grant_log_tt(struct homa *homa);
 int      homa_grant_outranks(struct homa_rpc *rpc1,
 			     struct homa_rpc *rpc2);

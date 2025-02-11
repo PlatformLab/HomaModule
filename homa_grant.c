@@ -653,11 +653,12 @@ void homa_grant_find_oldest(struct homa *homa)
 }
 
 /**
- * homa_grant_free_rpc() - This function is invoked when an RPC is freed;
- * it cleans up any state related to grants for that RPC's incoming message.
+ * homa_grant_end_rpc() - This function is invoked when homa_rpc_end is
+ * invoked; it cleans up any state related to grants for that RPC's
+ * incoming message.
  * @rpc:   The RPC to clean up. Must be locked by the caller.
  */
-void homa_grant_free_rpc(struct homa_rpc *rpc)
+void homa_grant_end_rpc(struct homa_rpc *rpc)
 	__releases(rpc->bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;

@@ -1277,7 +1277,7 @@ TEST_F(homa_grant, homa_grant_rpc_free__rpc_not_grantable)
 			100, 1000, 2000);
 	atomic_set(&self->homa.total_incoming, 10000);
 	atomic_set(&rpc->msgin.rec_incoming, 3000);
-	homa_grant_free_rpc(rpc);
+	homa_grant_end_rpc(rpc);
 	EXPECT_EQ(7000, atomic_read(&self->homa.total_incoming));
 }
 TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
@@ -1296,7 +1296,7 @@ TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
 	EXPECT_EQ(10000, atomic_read(&rpc1->msgin.rec_incoming));
 
 	unit_log_clear();
-	homa_grant_free_rpc(rpc1);
+	homa_grant_end_rpc(rpc1);
 	EXPECT_EQ(-1, atomic_read(&rpc1->msgin.rank));
 	EXPECT_EQ(0, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(1, atomic_read(&rpc3->msgin.rank));
@@ -1319,7 +1319,7 @@ TEST_F(homa_grant, homa_grant_free_rpc__not_in_active_list)
 	EXPECT_FALSE(list_empty(&rpc3->grantable_links));
 
 	atomic_set(&rpc3->msgin.rec_incoming, 5000);
-	homa_grant_free_rpc(rpc3);
+	homa_grant_end_rpc(rpc3);
 	EXPECT_TRUE(list_empty(&rpc3->grantable_links));
 	EXPECT_EQ(15000, atomic_read(&self->homa.total_incoming));
 }
