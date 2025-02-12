@@ -1038,7 +1038,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_client_rpc)
 	struct homa_grant_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(99991),
-			.type = UNKNOWN}};
+			.type = RPC_UNKNOWN}};
 
 	mock_xmit_log_verbose = 1;
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
@@ -1093,7 +1093,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__resend_for_unknown_server_rpc)
 
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->homa);
-	EXPECT_STREQ("xmit UNKNOWN", unit_log_get());
+	EXPECT_STREQ("xmit RPC_UNKNOWN", unit_log_get());
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
@@ -1567,7 +1567,7 @@ TEST_F(homa_incoming, homa_resend_pkt__unknown_rpc)
 
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
 			&self->homa);
-	EXPECT_STREQ("xmit UNKNOWN", unit_log_get());
+	EXPECT_STREQ("xmit RPC_UNKNOWN", unit_log_get());
 }
 TEST_F(homa_incoming, homa_resend_pkt__rpc_in_service_server_sends_busy)
 {
@@ -1719,10 +1719,10 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 {
-	struct homa_unknown_hdr h = {{.sport = htons(self->server_port),
+	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
-			.type = UNKNOWN}};
+			.type = RPC_UNKNOWN}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 2000, 2000);
@@ -1747,10 +1747,10 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 }
 TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 {
-	struct homa_unknown_hdr h = {{.sport = htons(self->server_port),
+	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
 			.sender_id = cpu_to_be64(self->server_id),
-			.type = UNKNOWN}};
+			.type = RPC_UNKNOWN}};
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 2000, 2000);
@@ -1776,10 +1776,10 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 }
 TEST_F(homa_incoming, homa_unknown_pkt__free_server_rpc)
 {
-	struct homa_unknown_hdr h = {{.sport = htons(self->client_port),
+	struct homa_rpc_unknown_hdr h = {{.sport = htons(self->client_port),
 			.dport = htons(self->hsk2.port),
 			.sender_id = cpu_to_be64(self->client_id),
-			.type = UNKNOWN}};
+			.type = RPC_UNKNOWN}};
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->client_port,
 			self->server_id, 100, 20000);

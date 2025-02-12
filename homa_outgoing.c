@@ -538,21 +538,21 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 }
 
 /**
- * homa_xmit_unknown() - Send an UNKNOWN packet to a peer.
+ * homa_xmit_unknown() - Send an RPC_UNKNOWN packet to a peer.
  * @skb:         Buffer containing an incoming packet; identifies the peer to
- *               which the UNKNOWN packet should be sent.
- * @hsk:         Socket that should be used to send the UNKNOWN packet.
+ *               which the RPC_UNKNOWN packet should be sent.
+ * @hsk:         Socket that should be used to send the RPC_UNKNOWN packet.
  */
 void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 {
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
-	struct homa_unknown_hdr unknown;
+	struct homa_rpc_unknown_hdr unknown;
 	struct homa_peer *peer;
 
 #ifndef __STRIP__ /* See strip.py */
 	if (hsk->homa->verbose)
-		pr_notice("sending UNKNOWN to peer %s:%d for id %llu",
+		pr_notice("sending RPC_UNKNOWN to peer %s:%d for id %llu",
 			  homa_print_ipv6_addr(&saddr),
 			  ntohs(h->sport), homa_local_id(h->sender_id));
 #endif /* See strip.py */
@@ -561,7 +561,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 		   homa_local_id(h->sender_id));
 	unknown.common.sport = h->dport;
 	unknown.common.dport = h->sport;
-	unknown.common.type = UNKNOWN;
+	unknown.common.type = RPC_UNKNOWN;
 #ifndef __STRIP__ /* See strip.py */
 	unknown.common.flags = HOMA_TCP_FLAGS;
 	unknown.common.urgent = htons(HOMA_TCP_URGENT);

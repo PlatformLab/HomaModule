@@ -1171,7 +1171,7 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 void     homa_timer(struct homa *homa);
 int      homa_timer_main(void *transport);
 void     homa_unhash(struct sock *sk);
-void     homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+void     homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_unload(void);
 #ifndef __STRIP__ /* See strip.py */
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,

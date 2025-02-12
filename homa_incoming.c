@@ -545,9 +545,9 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			INC_METRIC(packets_received[RESEND - DATA], 1);
 			homa_resend_pkt(skb, rpc, hsk);
 			break;
-		case UNKNOWN:
-			INC_METRIC(packets_received[UNKNOWN - DATA], 1);
-			homa_unknown_pkt(skb, rpc);
+		case RPC_UNKNOWN:
+			INC_METRIC(packets_received[RPC_UNKNOWN - DATA], 1);
+			homa_rpc_unknown_pkt(skb, rpc);
 			break;
 		case BUSY:
 			INC_METRIC(packets_received[BUSY - DATA], 1);
@@ -762,7 +762,7 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	struct homa_busy_hdr busy;
 
 	if (!rpc) {
-		tt_record4("resend request for unknown id %d, peer 0x%x:%d, offset %d; responding with UNKNOWN",
+		tt_record4("resend request for unknown id %d, peer 0x%x:%d, offset %d; responding with RPC_UNKNOWN",
 			   homa_local_id(h->common.sender_id),
 			   tt_addr(skb_canonical_ipv6_saddr(skb)),
 			   ntohs(h->common.sport), ntohl(h->offset));
@@ -822,12 +822,12 @@ done:
 }
 
 /**
- * homa_unknown_pkt() - Handler for incoming UNKNOWN packets.
+ * homa_rpc_unknown_pkt() - Handler for incoming RPC_UNKNOWN packets.
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
  */
-void homa_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 {
 	tt_record3("Received unknown for id %llu, peer %x:%d",
 		   rpc->id, tt_addr(rpc->peer->addr), rpc->dport);

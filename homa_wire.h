@@ -17,7 +17,7 @@ enum homa_packet_type {
 	GRANT              = 0x11,
 #endif /* See strip.py */
 	RESEND             = 0x12,
-	UNKNOWN            = 0x13,
+	RPC_UNKNOWN        = 0x13,
 	BUSY               = 0x14,
 #ifndef __STRIP__ /* See strip.py */
 	CUTOFFS            = 0x15,
@@ -423,7 +423,7 @@ struct homa_resend_hdr {
 	 * @length: Number of bytes of data to retransmit; this could specify
 	 * a range longer than the total message size. Zero is a special case
 	 * used by servers; in this case, there is no need to actually resend
-	 * anything; the purpose of this packet is to trigger an UNKNOWN
+	 * anything; the purpose of this packet is to trigger an RPC_UNKNOWN
 	 * response if the client no longer cares about this RPC.
 	 */
 	__be32 length;
@@ -442,20 +442,20 @@ _Static_assert(sizeof(struct homa_resend_hdr) <= HOMA_MAX_HEADER,
 	       "homa_resend_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
- * struct homa_unknown_hdr - Wire format for UNKNOWN packets.
+ * struct homa_rpc_unknown_hdr - Wire format for RPC_UNKNOWN packets.
  *
- * An UNKNOWN packet is sent by either server or client when it receives a
+ * An RPC_UNKNOWN packet is sent by either server or client when it receives a
  * packet for an RPC that is unknown to it. When a client receives an
- * UNKNOWN packet it will typically restart the RPC from the beginning;
- * when a server receives an UNKNOWN packet it will typically discard its
+ * RPC_UNKNOWN packet it will typically restart the RPC from the beginning;
+ * when a server receives an RPC_UNKNOWN packet it will typically discard its
  * state for the RPC.
  */
-struct homa_unknown_hdr {
+struct homa_rpc_unknown_hdr {
 	/** @common: Fields common to all packet types. */
 	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct homa_unknown_hdr) <= HOMA_MAX_HEADER,
-	       "homa_unknown_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+_Static_assert(sizeof(struct homa_rpc_unknown_hdr) <= HOMA_MAX_HEADER,
+	       "homa_rpc_unknown_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_busy_hdr - Wire format for BUSY packets.

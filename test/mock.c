@@ -1588,8 +1588,8 @@ struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
 		case RESEND:
 			header_size = sizeof(struct homa_resend_hdr);
 			break;
-		case UNKNOWN:
-			header_size = sizeof(struct homa_unknown_hdr);
+		case RPC_UNKNOWN:
+			header_size = sizeof(struct homa_rpc_unknown_hdr);
 			break;
 		case BUSY:
 			header_size = sizeof(struct homa_busy_hdr);

@@ -705,7 +705,7 @@ TEST_F(homa_outgoing, homa_xmit_unknown)
 	mock_xmit_log_verbose = 1;
 	skb = mock_skb_new(self->client_ip, &h.common, 0, 0);
 	homa_xmit_unknown(skb, &self->hsk);
-	EXPECT_STREQ("xmit UNKNOWN from 0.0.0.0:99, dport 40000, id 99991",
+	EXPECT_STREQ("xmit RPC_UNKNOWN from 0.0.0.0:99, dport 40000, id 99991",
 			unit_log_get());
 	kfree_skb(skb);
 }

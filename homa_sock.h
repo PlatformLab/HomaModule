@@ -144,6 +144,12 @@ struct homa_sock {
 	struct homa *homa;
 
 	/**
+	 * @is_server: True means that this socket can act as both client
+	 * and server; false means the socket is client-only.
+	 */
+	bool is_server;
+
+	/**
 	 * @shutdown: True means the socket is no longer usable (either
 	 * shutdown has already been invoked, or the socket was never
 	 * properly initialized).

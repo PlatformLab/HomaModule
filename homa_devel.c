@@ -212,7 +212,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 #endif /* See strip.py */
 		break;
 	}
-	case UNKNOWN:
+	case RPC_UNKNOWN:
 		/* Nothing to add here. */
 		break;
 	case BUSY:
@@ -341,8 +341,8 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 #endif /* See strip.py */
 		break;
 	}
-	case UNKNOWN:
-		snprintf(buffer, buf_len, "UNKNOWN");
+	case RPC_UNKNOWN:
+		snprintf(buffer, buf_len, "RPC_UNKNOWN");
 		break;
 	case BUSY:
 		snprintf(buffer, buf_len, "BUSY");
@@ -498,8 +498,8 @@ char *homa_symbol_for_type(uint8_t type)
 #endif /* See strip.py */
 	case RESEND:
 		return "RESEND";
-	case UNKNOWN:
-		return "UNKNOWN";
+	case RPC_UNKNOWN:
+		return "RPC_UNKNOWN";
 	case BUSY:
 		return "BUSY";
 #ifndef __STRIP__ /* See strip.py */

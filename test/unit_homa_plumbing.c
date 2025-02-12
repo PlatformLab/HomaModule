@@ -890,7 +890,7 @@ TEST_F(homa_plumbing, homa_softirq__process_control_first)
 	struct homa_common_hdr unknown = {
 		.sport = htons(self->client_port),
 		.dport = htons(self->server_port),
-		.type = UNKNOWN,
+		.type = RPC_UNKNOWN,
 		.sender_id = cpu_to_be64(self->client_id)
 	};
 	struct sk_buff *skb, *skb2;
