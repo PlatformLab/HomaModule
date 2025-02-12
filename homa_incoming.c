@@ -415,7 +415,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 
 	/* Find the appropriate socket.*/
 	hsk = homa_sock_find(homa->port_map, dport);
-	if (!hsk) {
+	if (!hsk || (!homa_is_client(id) && !hsk->is_server)) {
 		if (skb_is_ipv6(skb))
 			icmp6_send(skb, ICMPV6_DEST_UNREACH,
 				   ICMPV6_PORT_UNREACH, 0, NULL, IP6CB(skb));
@@ -430,6 +430,8 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 			kfree_skb(skb);
 			skb = next;
 		}
+		if (hsk)
+			sock_put(&hsk->sock);
 		return;
 	}
 

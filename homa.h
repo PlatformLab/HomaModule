@@ -158,6 +158,12 @@ _Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
 /** define SO_HOMA_RCVBUF: setsockopt option for specifying buffer region. */
 #define SO_HOMA_RCVBUF 10
 
+/**
+ * define SO_HOMA_SERVER: setsockopt option for specifying whether a
+ * socket will act as server.
+ * */
+#define SO_HOMA_SERVER 11
+
 /** struct homa_rcvbuf_args - setsockopt argument for SO_HOMA_RCVBUF. */
 struct homa_rcvbuf_args {
 	/** @start: Address of first byte of buffer region in user space. */

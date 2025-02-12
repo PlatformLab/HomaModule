@@ -224,6 +224,24 @@ The
 system call is used to receive messages; see Homa's
 .BR recvmsg (2)
 man page for details.
+.PP
+By default, if
+.B bind
+has not been invoked for a socket then it can be used only as the client
+for outgoing RPCs: incoming requests directed at the socket will be
+rejected. Once
+.B bind
+has been invoked, the socket can act as the server side for incoming
+RPCs. In addition,
+.B setsockopt
+may be invoked with the
+.B SO_HOMA_SERVER
+option to activate or deactivate any socket for incoming requests.
+.B SO_HOMA_SERVER
+takes an integer argument, where any nonzero value enables incoming
+requests and zero disables them.
+The current setting can be retrieved with
+.BR getsockopt .
 .SH ABORTING REQUESTS
 .PP
 It is possible to abort RPCs that are in progress. This is done with

@@ -166,6 +166,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
+	self->hsk.is_server = false;
 
 	addr.in6.sin6_family = AF_INET6;
 	addr.in6.sin6_port = htons(123);
@@ -173,6 +174,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 	result = homa_bind(&sock, &addr.sa, sizeof(addr.in6));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(123, self->hsk.port);
+	EXPECT_EQ(1, self->hsk.is_server);
 }
 TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 {
@@ -200,6 +202,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, &self->homa, 0);
+	self->hsk.is_server = false;
 
 	addr.in4.sin_family = AF_INET;
 	addr.in4.sin_port = htons(345);
@@ -207,6 +210,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 	result = homa_bind(&sock, &addr.sa, sizeof(addr.in4));
 	EXPECT_EQ(0, -result);
 	EXPECT_EQ(345, self->hsk.port);
+	EXPECT_EQ(1, self->hsk.is_server);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -269,30 +273,30 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 	EXPECT_EQ(ENOMEM, -homa_socket(&sock.sock));
 }
 
-TEST_F(homa_plumbing, homs_setsockopt__bad_level)
+TEST_F(homa_plumbing, homa_setsockopt__bad_level)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, 0, 0,
 		self->optval, sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homs_setsockopt__bad_optname)
+TEST_F(homa_plumbing, homa_setsockopt__bad_optname)
 {
 	EXPECT_EQ(ENOPROTOOPT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA, 0,
 		self->optval, sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homs_setsockopt__bad_optlen)
+TEST_F(homa_plumbing, homa_setsockopt__recvbuf_bad_optlen)
 {
 	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
 			SO_HOMA_RCVBUF, self->optval,
 			sizeof(struct homa_rcvbuf_args) - 1));
 }
-TEST_F(homa_plumbing, homs_setsockopt__copy_from_sockptr_fails)
+TEST_F(homa_plumbing, homa_setsockopt__recvbuf_copy_from_sockptr_fails)
 {
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
 			SO_HOMA_RCVBUF, self->optval,
 			sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_setsockopt__copy_to_user_fails)
+TEST_F(homa_plumbing, homa_setsockopt__recvbuf_copy_to_user_fails)
 {
 	struct homa_rcvbuf_args args = {0x100000, 5*HOMA_BPAGE_SIZE};
 
@@ -302,7 +306,7 @@ TEST_F(homa_plumbing, homa_setsockopt__copy_to_user_fails)
 			SO_HOMA_RCVBUF, self->optval,
 			sizeof(struct homa_rcvbuf_args)));
 }
-TEST_F(homa_plumbing, homa_setsockopt__success)
+TEST_F(homa_plumbing, homa_setsockopt__recvbuf_success)
 {
 	struct homa_rcvbuf_args args;
 	char buffer[5000];
@@ -321,9 +325,34 @@ TEST_F(homa_plumbing, homa_setsockopt__success)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->so_set_buf_calls);
 #endif /* See strip.py */
 }
+TEST_F(homa_plumbing, homa_setsockopt__server_bad_optlen)
+{
+	EXPECT_EQ(EINVAL, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SERVER, self->optval, sizeof(int) - 1));
+}
+TEST_F(homa_plumbing, homa_setsockopt__server_copy_from_sockptr_fails)
+{
+	mock_copy_data_errors = 1;
+	EXPECT_EQ(EFAULT, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SERVER, self->optval, sizeof(int)));
+}
+TEST_F(homa_plumbing, homa_setsockopt__server_success)
+{
+	int arg = 7;
+
+	self->optval.user = &arg;
+	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SERVER, self->optval, sizeof(int)));
+	EXPECT_EQ(1, self->hsk.is_server);
+
+	arg = 0;
+	EXPECT_EQ(0, -homa_setsockopt(&self->hsk.sock, IPPROTO_HOMA,
+			SO_HOMA_SERVER, self->optval, sizeof(int)));
+	EXPECT_EQ(0, self->hsk.is_server);
+}
 
 
-TEST_F(homa_plumbing, homa_getsockopt__success)
+TEST_F(homa_plumbing, homa_getsockopt__recvbuf_success)
 {
 	struct homa_rcvbuf_args val;
 	int size = sizeof32(val) + 10;
@@ -353,6 +382,40 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_level)
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
 		(char *)&val, &size));
 }
+TEST_F(homa_plumbing, homa_getsockopt__recvbuf_bad_length)
+{
+	struct homa_rcvbuf_args val;
+	int size = sizeof32(val) - 1;
+
+	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_RCVBUF, (char *)&val, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__server_bad_length)
+{
+	int is_server;
+	int size = sizeof32(is_server) - 1;
+
+	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_SERVER, (char *)&is_server, &size));
+}
+TEST_F(homa_plumbing, homa_getsockopt__server_success)
+{
+	int is_server;
+	int size = sizeof32(is_server);
+
+	self->hsk.is_server = 1;
+	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_SERVER, (char *)&is_server, &size));
+	EXPECT_EQ(1, is_server);
+	EXPECT_EQ(sizeof(int), size);
+
+	self->hsk.is_server = 0;
+	size = 20;
+	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
+		  SO_HOMA_SERVER, (char *)&is_server, &size));
+	EXPECT_EQ(0, is_server);
+	EXPECT_EQ(sizeof(int), size);
+}
 TEST_F(homa_plumbing, homa_getsockopt__bad_optname)
 {
 	struct homa_rcvbuf_args val;
@@ -360,14 +423,6 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_optname)
 
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF-1, (char *)&val, &size));
-}
-TEST_F(homa_plumbing, homa_getsockopt__bad_length)
-{
-	struct homa_rcvbuf_args val;
-	int size = sizeof32(val) - 1;
-
-	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
-		  SO_HOMA_RCVBUF, (char *)&val, &size));
 }
 TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_size)
 {

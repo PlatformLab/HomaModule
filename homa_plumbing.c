@@ -887,32 +887,52 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		    sockptr_t optval, unsigned int optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_rcvbuf_args args;
-#ifndef __STRIP__ /* See strip.py */
-	u64 start = sched_clock();
-#endif /* See strip.py */
 	int ret;
 
-	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
+	if (level != IPPROTO_HOMA)
 		return -ENOPROTOOPT;
-	if (optlen != sizeof(struct homa_rcvbuf_args))
-		return -EINVAL;
 
-	if (copy_from_sockptr(&args, optval, optlen))
-		return -EFAULT;
+	if (optname == SO_HOMA_RCVBUF) {
+		struct homa_rcvbuf_args args;
+#ifndef __STRIP__ /* See strip.py */
+		u64 start = sched_clock();
+#endif /* See strip.py */
 
-	/* Do a trivial test to make sure we can at least write the first
-	 * page of the region.
-	 */
-	if (copy_to_user(u64_to_user_ptr(args.start), &args,
-			 sizeof(args)))
-		return -EFAULT;
+		if (optlen != sizeof(struct homa_rcvbuf_args))
+			return -EINVAL;
 
-	homa_sock_lock(hsk);
-	ret = homa_pool_init(hsk, u64_to_user_ptr(args.start), args.length);
-	homa_sock_unlock(hsk);
-	INC_METRIC(so_set_buf_calls, 1);
-	INC_METRIC(so_set_buf_ns, sched_clock() - start);
+		if (copy_from_sockptr(&args, optval, optlen))
+			return -EFAULT;
+
+		/* Do a trivial test to make sure we can at least write the first
+		* page of the region.
+		*/
+		if (copy_to_user(u64_to_user_ptr(args.start), &args,
+				sizeof(args)))
+			return -EFAULT;
+
+		homa_sock_lock(hsk);
+		ret = homa_pool_init(hsk, u64_to_user_ptr(args.start), args.length);
+		homa_sock_unlock(hsk);
+		INC_METRIC(so_set_buf_calls, 1);
+		INC_METRIC(so_set_buf_ns, sched_clock() - start);
+	} else if (optname == SO_HOMA_SERVER) {
+		int arg;
+
+		if (optlen != sizeof(arg))
+			return -EINVAL;
+
+		if (copy_from_sockptr(&arg, optval, optlen))
+			return -EFAULT;
+
+		if (arg)
+			hsk->is_server = true;
+		else
+			hsk->is_server = false;
+		ret = 0;
+	} else {
+		ret = -ENOPROTOOPT;
+	}
 	return ret;
 }
 
@@ -931,25 +951,40 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 		    char __user *optval, int __user *optlen)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa_rcvbuf_args val;
+	struct homa_rcvbuf_args rcvbuf_args;
+	void *result;
+	int is_server;
 	int len;
 
 	if (copy_from_sockptr(&len, USER_SOCKPTR(optlen), sizeof(int)))
 		return -EFAULT;
 
-	if (level != IPPROTO_HOMA || optname != SO_HOMA_RCVBUF)
+	if (level != IPPROTO_HOMA)
 		return -ENOPROTOOPT;
-	if (len < sizeof(val))
-		return -EINVAL;
+	if (optname == SO_HOMA_RCVBUF) {
+		if (len < sizeof(rcvbuf_args))
+			return -EINVAL;
 
-	homa_pool_get_rcvbuf(hsk, &val);
-	len = sizeof(val);
+		homa_pool_get_rcvbuf(hsk, &rcvbuf_args);
+		len = sizeof(rcvbuf_args);
+		result = &rcvbuf_args;
+	} else if (optname == SO_HOMA_SERVER) {
+		if (len < sizeof(is_server))
+			return -EINVAL;
+
+		is_server = hsk->is_server;
+		len = sizeof(is_server);
+		result = &is_server;
+	} else {
+		return -ENOPROTOOPT;
+	}
 
 	if (copy_to_sockptr(USER_SOCKPTR(optlen), &len, sizeof(int)))
 		return -EFAULT;
 
-	if (copy_to_sockptr(USER_SOCKPTR(optval), &val, len))
+	if (copy_to_sockptr(USER_SOCKPTR(optval), result, len))
 		return -EFAULT;
+
 	return 0;
 }
 

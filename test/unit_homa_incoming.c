@@ -939,6 +939,23 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv6)
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_STREQ("icmp6_send type 1, code 4", unit_log_get());
 }
+TEST_F(homa_incoming, homa_dispatch_pkts__server_not_enabled)
+{
+	struct sk_buff *skb;
+
+	self->data.common.dport = htons(100);
+
+	// Make sure the test uses IPv4.
+	mock_ipv6 = false;
+	homa_sock_destroy(&self->hsk);
+	mock_sock_init(&self->hsk, &self->homa, 0);
+	self->hsk.is_server = false;
+
+	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
+	homa_dispatch_pkts(skb, &self->homa);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_STREQ("icmp_send type 3, code 3", unit_log_get());
+}
 TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_free_many_packets)
 {
 	struct sk_buff *skb, *skb2, *skb3;

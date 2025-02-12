@@ -141,6 +141,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->homa = homa;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
 			? HOMA_IPV4_HEADER_LENGTH : HOMA_IPV6_HEADER_LENGTH;
+	hsk->is_server = false;
 	hsk->shutdown = false;
 	starting_port = homa->prev_default_port;
 	while (1) {
@@ -340,6 +341,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_port_hash(port)]);
+	hsk->is_server = true;
 done:
 	spin_unlock_bh(&socktab->write_lock);
 	homa_sock_unlock(hsk);

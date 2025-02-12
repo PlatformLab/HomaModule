@@ -1705,6 +1705,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	if (port != 0 && port >= mock_min_default_port)
 		homa->prev_default_port = port - 1;
 	err = homa_sock_init(hsk, homa);
+	hsk->is_server = true;
 	if (port != 0)
 		homa->prev_default_port = saved_port;
 	if (err != 0)

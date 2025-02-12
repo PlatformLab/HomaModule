@@ -125,6 +125,9 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- February 2025: by default, incoming requests for a socket are rejected
+  unless the socket has been bound. setsockopt can be used with
+  SO_HOMA_SERVER to enable or disable incoming requests for any socket.
 - October 2024: Homa now has an official IANA IP protocol number (146).
 - August 2024: upgraded to Linux 6.10.6.
 - July 2024: introduced "TCP hijacking", where Homa packets are sent as
