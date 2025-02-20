@@ -290,7 +290,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			skb_data_bytes = bytes_left;
 		skb = homa_new_data_packet(rpc, iter, offset, skb_data_bytes,
 					   max_seg_data);
-		if (unlikely(!skb)) {
+		if (unlikely(IS_ERR(skb))) {
 			err = PTR_ERR(skb);
 			homa_rpc_lock(rpc, "homa_message_out_fill");
 			goto error;
