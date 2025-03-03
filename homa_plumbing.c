@@ -1029,6 +1029,12 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = -EFAULT;
 		goto error;
 	}
+	if ((args.flags & ~HOMA_SENDMSG_VALID_FLAGS) ||
+	    (args.reserved != 0)) {
+		result = -EINVAL;
+		goto error;
+	}
+
 	if (addr->sa.sa_family != sk->sk_family) {
 		result = -EAFNOSUPPORT;
 		goto error;
@@ -1049,6 +1055,8 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			rpc = NULL;
 			goto error;
 		}
+		if (args.flags & HOMA_SENDMSG_PRIVATE)
+			atomic_or(RPC_PRIVATE, &rpc->flags);
 		INC_METRIC(send_calls, 1);
 		tt_record4("homa_sendmsg request, target 0x%x:%d, id %u, length %d",
 			   (addr->in6.sin6_family == AF_INET)
@@ -1149,11 +1157,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
+	struct homa_rpc *rpc;
+	int nonblocking;
 #ifndef __STRIP__ /* See strip.py */
 	u64 start = sched_clock();
-#endif /* See strip.py */
-	struct homa_rpc *rpc;
-#ifndef __STRIP__ /* See strip.py */
 	u64 finish;
 #endif /* See strip.py */
 	int result;
@@ -1188,16 +1195,30 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	if (result != 0)
 		goto done;
 
-	rpc = homa_wait_for_message(hsk, (flags & MSG_DONTWAIT)
-			? (control.flags | HOMA_RECVMSG_NONBLOCKING)
-			: control.flags, control.id);
-	if (IS_ERR(rpc)) {
-		/* If we get here, it means there was an error that prevented
-		 * us from finding an RPC to return. If there's an error in
-		 * the RPC itself we won't get here.
-		 */
-		result = PTR_ERR(rpc);
-		goto done;
+	nonblocking = ((flags & MSG_DONTWAIT) ||
+		       (control.flags & HOMA_RECVMSG_NONBLOCKING));
+	if (control.id != 0) {
+		rpc = homa_find_client_rpc(hsk, control.id); /* Locks RPC. */
+		if (!rpc) {
+			result = -EINVAL;
+			goto done;
+		}
+		result = homa_wait_private(rpc, nonblocking);
+		if (result != 0) {
+			homa_rpc_unlock(rpc);
+			control.id = 0;
+			goto done;
+		}
+	} else {
+		rpc = homa_wait_shared(hsk, nonblocking);
+		if (IS_ERR(rpc)) {
+			/* If we get here, it means there was an error that
+			 * prevented us from finding an RPC to return. Errors
+			 * in the RPC itself are handled below.
+			 */
+			result = PTR_ERR(rpc);
+			goto done;
+		}
 	}
 	result = rpc->error ? rpc->error : rpc->msgin.length;
 
@@ -1591,8 +1612,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 	if (homa_sk(sk)->shutdown)
 		mask |= POLLIN;
 
-	if (!list_empty(&homa_sk(sk)->ready_requests) ||
-	    !list_empty(&homa_sk(sk)->ready_responses))
+	if (!list_empty(&homa_sk(sk)->ready_rpcs))
 		mask |= POLLIN | POLLRDNORM;
 	return (__poll_t)mask;
 }

@@ -107,115 +107,6 @@ union sockaddr_in_union {
 };
 
 /**
- * struct homa_interest - Contains various information used while waiting
- * for incoming messages (indicates what kinds of messages a particular
- * thread is interested in receiving).
- */
-struct homa_interest {
-	/**
-	 * @thread: Thread that would like to receive a message. Will get
-	 * woken up when a suitable message becomes available.
-	 */
-	struct task_struct *thread;
-
-	/**
-	 * @rpc_ready: Non-zero means an appropriate incoming message has
-	 * been assigned to this interest, and @rpc and @locked are valid
-	 * (they must be set before setting this variable).
-	 */
-	atomic_t rpc_ready;
-
-	/**
-	 * @rpc: If @rpc_ready is non-zero, points to an RPC with a ready
-	 * incoming message that meets the requirements of this interest.
-	 */
-	struct homa_rpc *rpc;
-
-	/**
-	 * @locked: Nonzero means that @rpc is locked; only valid if
-	 * @rpc_ready is non-zero.
-	 */
-	int locked;
-
-	/**
-	 * @core: Core on which @thread was executing when it registered
-	 * its interest.  This is a hint used for load balancing
-	 * (see balance.txt).
-	 */
-	int core;
-
-	/**
-	 * @reg_rpc: RPC whose @interest field points here, or
-	 * NULL if none.
-	 */
-	struct homa_rpc *reg_rpc;
-
-	/**
-	 * @request_links: For linking this object into
-	 * &homa_sock.request_interests. The interest must not be linked
-	 * on either this list or @response_links if @id is nonzero.
-	 */
-	struct list_head request_links;
-
-	/**
-	 * @response_links: For linking this object into
-	 * &homa_sock.request_interests.
-	 */
-	struct list_head response_links;
-};
-
-/**
- * homa_interest_init() - Fill in default values for all of the fields
- * of a struct homa_interest.
- * @interest:   Struct to initialize.
- */
-static inline void homa_interest_init(struct homa_interest *interest)
-{
-	interest->thread = current;
-	atomic_set(&interest->rpc_ready, 0);
-	interest->rpc = NULL;
-	interest->locked = 0;
-
-	/* Safe (and necessary) to use raw_smp_processor_id: this is only
-	 * a hint.
-	 */
-	interest->core = raw_smp_processor_id();
-	interest->reg_rpc = NULL;
-	INIT_LIST_HEAD(&interest->request_links);
-	INIT_LIST_HEAD(&interest->response_links);
-}
-
-/**
- * homa_interest_get_rpc() - Return the ready RPC stored in an interest,
- * if there is one.
- * @interest:  Struct to check
- * Return: the ready RPC, or NULL if none. If an RPC is returned, a
- * reference has been taken on it; caller must call homa_rpc_put().
- */
-static inline struct homa_rpc *homa_interest_get_rpc(struct homa_interest *interest)
-{
-	if (atomic_read(&interest->rpc_ready))
-		return interest->rpc;
-	return NULL;
-}
-
-/**
- * homa_interest_set_rpc() - Hand off a ready RPC to an interest from a
- * waiting receiver thread.
- * @interest:   Belongs to a thread that is waiting for an incoming message.
- * @rpc:        Ready rpc to assign to @interest. Caller must have taken a
- *              reference by calling homa_rpc_hold().
- * @locked:     1 means @rpc is locked, 0 means unlocked.
- */
-static inline void homa_interest_set_rpc(struct homa_interest *interest,
-					 struct homa_rpc *rpc, int locked)
-{
-	interest->rpc = rpc;
-	interest->locked = locked;
-	atomic_set_release(&interest->rpc_ready, 1);
-}
-
-/**
  * struct homa - Overall information about the Homa protocol implementation.
  *
  * There will typically only exist one of these at a time, except during
@@ -1063,30 +954,12 @@ int      homa_bind(struct socket *sk, struct sockaddr *addr,
 		   int addr_len);
 int      homa_check_nic_queue(struct homa *homa, struct sk_buff *skb,
 			      bool force);
-#ifndef __STRIP__ /* See strip.py */
-struct homa_rpc *homa_choose_fifo_grant(struct homa *homa);
-#endif /* See strip.py */
-struct homa_interest *homa_choose_interest(struct homa *homa,
-					   struct list_head *head,
-					   int offset);
 void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
-#endif /* See strip.py */
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
 int      homa_disconnect(struct sock *sk, int flags);
 void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
-#ifndef __STRIP__ /* See strip.py */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int      homa_dointvec(struct ctl_table *table, int write,
-		       void __user *buffer, size_t *lenp, loff_t *ppos);
-#else
-int      homa_dointvec(const struct ctl_table *table, int write,
-		       void *buffer, size_t *lenp, loff_t *ppos);
-#endif
-#endif /* See strip.py */
 int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
@@ -1101,19 +974,8 @@ int      homa_getsockopt(struct sock *sk, int level, int optname,
 int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
 int      homa_init(struct homa *homa);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_incoming_sysctl_changed(struct homa *homa);
-int      homa_ioc_abort(struct sock *sk, int *karg);
-#endif /* See strip.py */
 int      homa_ioctl(struct sock *sk, int cmd, int *karg);
 int      homa_load(void);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_log_throttled(struct homa *homa);
-int      homa_message_in_init(struct homa_rpc *rpc, int length,
-			      int unsched);
-#else /* See strip.py */
-int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
-#endif /* See strip.py */
 int      homa_message_out_fill(struct homa_rpc *rpc,
 			       struct iov_iter *iter, int xmit);
 void     homa_message_out_init(struct homa_rpc *rpc, int length);
@@ -1122,28 +984,14 @@ void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 				     struct iov_iter *iter, int offset,
 				     int length, int max_seg_data);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_outgoing_sysctl_changed(struct homa *homa);
-#endif /* See strip.py */
 int      homa_pacer_main(void *transport);
 void     homa_pacer_stop(struct homa *homa);
 bool     homa_pacer_xmit(struct homa *homa);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_prios_changed(struct homa *homa);
-#endif /* See strip.py */
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		      int flags, int *addr_len);
-int      homa_register_interests(struct homa_interest *interest,
-				 struct homa_sock *hsk, int flags, u64 id);
 void     homa_remove_from_throttled(struct homa_rpc *rpc);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
-			  int priority);
-#else /* See strip.py */
-void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
-#endif /* See strip.py */
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
 void     homa_rpc_abort(struct homa_rpc *crpc, int error);
@@ -1157,7 +1005,41 @@ int      homa_setsockopt(struct sock *sk, int level, int optname,
 int      homa_shutdown(struct socket *sock, int how);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
+void     homa_timer(struct homa *homa);
+int      homa_timer_main(void *transport);
+void     homa_unhash(struct sock *sk);
+void     homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
+void     homa_unload(void);
+int      homa_wait_private(struct homa_rpc *rpc, int nonblocking);
+struct homa_rpc
+        *homa_wait_shared(struct homa_sock *hsk, int nonblocking);
+int      homa_xmit_control(enum homa_packet_type type, void *contents,
+			   size_t length, struct homa_rpc *rpc);
+int      __homa_xmit_control(void *contents, size_t length,
+			     struct homa_peer *peer, struct homa_sock *hsk);
+void     homa_xmit_data(struct homa_rpc *rpc, bool force);
+void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
+
 #ifndef __STRIP__ /* See strip.py */
+struct homa_rpc
+	*homa_choose_fifo_grant(struct homa *homa);
+void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
+int      homa_dointvec(struct ctl_table *table, int write,
+		       void __user *buffer, size_t *lenp, loff_t *ppos);
+#else
+int      homa_dointvec(const struct ctl_table *table, int write,
+		       void *buffer, size_t *lenp, loff_t *ppos);
+#endif
+void     homa_incoming_sysctl_changed(struct homa *homa);
+int      homa_ioc_abort(struct sock *sk, int *karg);
+void     homa_log_throttled(struct homa *homa);
+int      homa_message_in_init(struct homa_rpc *rpc, int length,
+			      int unsched);
+void     homa_outgoing_sysctl_changed(struct homa *homa);
+void     homa_prios_changed(struct homa *homa);
+void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
+			  int priority);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 				   void __user *buffer, size_t *lenp,
@@ -1166,33 +1048,18 @@ int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
 int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
-#endif
-#endif /* See strip.py */
-void     homa_timer(struct homa *homa);
-int      homa_timer_main(void *transport);
-void     homa_unhash(struct sock *sk);
-void     homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
-void     homa_unload(void);
-#ifndef __STRIP__ /* See strip.py */
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
 int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
-#endif /* See strip.py */
-struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-				       u64 id);
-int      homa_xmit_control(enum homa_packet_type type, void *contents,
-			   size_t length, struct homa_rpc *rpc);
-int      __homa_xmit_control(void *contents, size_t length,
-			     struct homa_peer *peer, struct homa_sock *hsk);
-void     homa_xmit_data(struct homa_rpc *rpc, bool force);
-#ifndef __STRIP__ /* See strip.py */
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
+#endif
 #else /* See strip.py */
+int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
+void     homa_resend_data(struct homa_rpc *rpc, int start, int end);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 #endif /* See strip.py */
-void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 /**
  * homa_check_pacer() - This method is invoked at various places in Homa to

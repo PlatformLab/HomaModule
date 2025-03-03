@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_interest.h"
 #include "homa_sock.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -246,24 +247,20 @@ TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 }
 TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 {
-	struct homa_interest interest1, interest2, interest3;
-	struct task_struct task1, task2, task3;
+	struct homa_interest interest1, interest2;
 
-	interest1.thread = &task1;
-	task1.pid = 100;
-	interest2.thread = &task2;
-	task2.pid = 200;
-	interest3.thread = &task3;
-	task3.pid = 300;
-	EXPECT_FALSE(self->hsk.shutdown);
-	list_add_tail(&interest1.request_links, &self->hsk.request_interests);
-	list_add_tail(&interest2.request_links, &self->hsk.request_interests);
-	list_add_tail(&interest3.response_links, &self->hsk.response_interests);
+	mock_log_wakeups = 1;
+	homa_interest_init_shared(&interest1, &self->hsk);
+	homa_interest_init_shared(&interest2, &self->hsk);
+	unit_log_clear();
+
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
-	EXPECT_STREQ("wake_up_process pid -1; wake_up_process pid 100; "
-			"wake_up_process pid 200; wake_up_process pid 300",
-			unit_log_get());
+	EXPECT_EQ(1, atomic_read(&interest1.ready));
+	EXPECT_EQ(1, atomic_read(&interest2.ready));
+	EXPECT_EQ(NULL, interest1.rpc);
+	EXPECT_EQ(NULL, interest2.rpc);
+	EXPECT_STREQ("wake_up; wake_up", unit_log_get());
 }
 
 TEST_F(homa_sock, homa_sock_bind)

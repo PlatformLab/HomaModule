@@ -85,8 +85,7 @@ FIXTURE_SETUP(homa_plumbing)
 	self->recvmsg_hdr.msg_controllen = sizeof(self->recvmsg_args);
 	self->recvmsg_hdr.msg_flags = 0;
 	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
-	self->recvmsg_args.flags = HOMA_RECVMSG_REQUEST
-			| HOMA_RECVMSG_RESPONSE | HOMA_RECVMSG_NONBLOCKING;
+	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
 	self->send_vec[0].iov_base = self->buffer;
 	self->send_vec[0].iov_len = 100;
 	self->send_vec[1].iov_base = self->buffer + 1000;
@@ -474,6 +473,20 @@ TEST_F(homa_plumbing, homa_sendmsg__cant_read_args)
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 }
+TEST_F(homa_plumbing, homa_sendmsg__illegal_flag)
+{
+	self->sendmsg_args.flags = 2;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
+TEST_F(homa_plumbing, homa_sendmsg__nonzero_reserved_field)
+{
+	self->sendmsg_args.reserved = 0x1000;
+	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
+		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_plumbing, homa_sendmsg__bad_address_family)
 {
 	self->client_addr.in4.sin_family = 1;
@@ -685,13 +698,35 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
-TEST_F(homa_plumbing, homa_recvmsg__error_in_homa_wait_for_message)
+TEST_F(homa_plumbing, homa_recvmsg__private_rpc_doesnt_exist)
 {
-	self->hsk.shutdown = true;
-	EXPECT_EQ(ESHUTDOWN, -homa_recvmsg(&self->hsk.inet.sk,
-			&self->recvmsg_hdr, 0, 0,
-			&self->recvmsg_hdr.msg_namelen));
-	self->hsk.shutdown = false;
+	self->recvmsg_args.id = 99;
+
+	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+}
+TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			self->client_id, 100, 2000);
+
+	EXPECT_NE(NULL, crpc);
+	atomic_or(RPC_PRIVATE, &crpc->flags);
+
+	self->recvmsg_args.id = crpc->id;
+	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
+
+	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+	EXPECT_EQ(0, self->recvmsg_args.id);
+}
+TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_shared)
+{
+	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
+
+	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 {

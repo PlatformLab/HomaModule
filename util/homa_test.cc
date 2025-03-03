@@ -84,7 +84,7 @@ void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 
 	sleep(1);
 	status = homa_send(fd, request, length, &addr->sa,
-			   sockaddr_size(&addr->sa), &id, 0);
+			   sockaddr_size(&addr->sa), &id, 0, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
@@ -142,7 +142,7 @@ void test_close()
 	}
 	std::thread thread(close_fd, fd);
 	recv_args.id = 0;
-	recv_args.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
@@ -172,7 +172,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 
 	for (int i = 1; i <= count; i++) {
 		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0);
+				   sockaddr_size(&dest->sa), &id, 0, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
 				strerror(errno));
@@ -186,7 +186,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	total = 0;
 	for (int i = 1; i <= count; i++) {
 		recv_args.id = 0;
-		recv_args.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
@@ -221,7 +221,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 	ssize_t resp_length;
 
 	status = homa_send(fd, request, length, &dest->sa,
-			   sockaddr_size(&dest->sa), &id, 0);
+			   sockaddr_size(&dest->sa), &id, 0, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n", strerror(errno));
 		return;
@@ -229,7 +229,7 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 		printf("homa_send succeeded, id %llu\n", id);
 	}
 	recv_args.id = 0;
-	recv_args.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	resp_length = recvmsg(fd, &recv_hdr, 0);
 	if (resp_length < 0) {
@@ -322,7 +322,7 @@ void test_poll(int fd, char *request)
 	}
 
 	recv_args.id = 0;
-	recv_args.flags = HOMA_RECVMSG_REQUEST;
+	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0)
@@ -330,6 +330,49 @@ void test_poll(int fd, char *request)
 	else
 		printf("rcvmsg returned %d bytes from port %d\n",
 				result, ntohs(source_addr.in4.sin_port));
+}
+
+/**
+ * test_private() - Send several private requests and wait for responses in
+ * the reverse order.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request.
+ * @request:  Request message.
+ */
+void test_private(int fd, const sockaddr_in_union *dest, char *request)
+{
+	__u64 ids[3];
+	int status, i;
+	ssize_t resp_length;
+
+	for (i = 0; i < 3; i++) {
+		status = homa_send(fd, request, length, &dest->sa,
+				   sockaddr_size(&dest->sa), &ids[i], 0,
+				   HOMA_SENDMSG_PRIVATE);
+		if (status < 0) {
+			printf("Error in homa_send: %s\n", strerror(errno));
+			return;
+		} else {
+			printf("homa_send succeeded, id %llu\n", ids[i]);
+		}
+	}
+
+	for (i = 2; i >= 0; i--) {
+		recv_args.id = ids[i];
+		recv_args.flags = 0;
+		recv_hdr.msg_controllen = sizeof(recv_args);
+		resp_length = recvmsg(fd, &recv_hdr, 0);
+		if (resp_length < 0) {
+			printf("Error in recvmsg: %s\n", strerror(errno));
+			return;
+		}
+		int seed = check_message(&recv_args, buf_region, resp_length,
+				2*sizeof32(int));
+		printf("Received message from %s with %lu bytes, "
+				"seed %d, id %llu\n",
+				print_address(&source_addr), resp_length, seed,
+				recv_args.id);
+	}
 }
 
 /**
@@ -376,14 +419,14 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 	for (int i = -10; i < count; i++) {
 		start = rdtsc();
 		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), NULL, 0);
+				   sockaddr_size(&dest->sa), NULL, 0, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n",
 					strerror(errno));
 			return;
 		}
 		recv_args.id = 0;
-		recv_args.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (i >= 0)
@@ -414,7 +457,7 @@ void test_send(int fd, const sockaddr_in_union *dest, char *request)
 	int status;
 
 	status = homa_send(fd, request, length, &dest->sa,
-			   sockaddr_size(&dest->sa), &id, 0);
+			   sockaddr_size(&dest->sa), &id, 0, 0);
 	if (status < 0) {
 		printf("Error in homa_send: %s\n",
 			strerror(errno));
@@ -459,7 +502,7 @@ void test_shutdown(int fd)
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
 	recv_args.id = 0;
-	recv_args.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
@@ -471,7 +514,7 @@ void test_shutdown(int fd)
 
 	/* Make sure that future reads also fail. */
 	recv_args.id = 0;
-	recv_args.flags = HOMA_RECVMSG_RESPONSE;
+	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0) {
@@ -517,7 +560,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 	}
 	for (i = 0; i < count; i++) {
 		status = homa_send(fd, buffers[i], length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0);
+				   sockaddr_size(&dest->sa), &id, 0, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n", strerror(errno));
 			return;
@@ -528,11 +571,11 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 	 * response to an outstanding request, then initiates a new
 	 * request.
 	 */
-	while (1){
+	while (1) {
 		int *response;
 
 		recv_args.id = 0;
-		recv_args.flags = HOMA_RECVMSG_RESPONSE;
+		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
@@ -546,7 +589,7 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		response = (int *) (buf_region + recv_args.bpage_offsets[0]);
 		status = homa_send(fd, buffers[(response[2]/1000) %count],
 				   length, &dest->sa, sockaddr_size(&dest->sa),
-				   &id, 0);
+				   &id, 0, 0);
 		if (status < 0) {
 			printf("Error in homa_send: %s\n", strerror(errno));
 			return;
@@ -776,8 +819,7 @@ void test_tmp(int fd, int count)
 	h.msg_controllen = sizeof(control);
 
 	memset(&control, 0, sizeof(control));
-	control.flags = HOMA_RECVMSG_REQUEST | HOMA_RECVMSG_REQUEST
-			| HOMA_RECVMSG_NONBLOCKING;
+	control.flags = HOMA_RECVMSG_NONBLOCKING;
 
 	int result = recvmsg(fd, &h, 0);
 	printf("recvmsg returned %d, addr %p, namelen %d, control %p, "
@@ -959,6 +1001,8 @@ int main(int argc, char** argv)
 			test_ioctl(fd, count);
 		} else if (strcmp(argv[next_arg], "poll") == 0) {
 			test_poll(fd, buffer);
+		} else if (strcmp(argv[next_arg], "private") == 0) {
+			test_private(fd, &dest, buffer);
 		} else if (strcmp(argv[next_arg], "send") == 0) {
 			test_send(fd, &dest, buffer);
 		} else if (strcmp(argv[next_arg], "read") == 0) {

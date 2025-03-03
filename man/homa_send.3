@@ -7,13 +7,13 @@ homa_send, homa_sendv \- send a request message
 .PP
 .BI "int homa_send(int " sockfd ", const void *" message_buf ", size_t " length \
 ", const struct sockaddr *" dest_addr ",
-.BI "              size_t " addrlen ", uint64_t *" id ", uint64_t " \
-"completion_cookie" );
+.BI "              size_t " addrlen ", __u64 *" id ", __u64" \
+completion_cookie ", __u32 " flags );
 .PP
 .BI "int homa_sendv(int " sockfd ", const struct iovec *" iov ", size_t " \
 iovcnt ", const sockaddr *" dest_addr ,
-.BI "              size_t " addrlen ", uint64_t *" id ", uint64_t " \
-"completion_cookie" );
+.BI "              size_t " addrlen ", __u64 *" id ", __u64 " \
+completion_cookie ", __u32 " flags );
 .fi
 .SH DESCRIPTION
 .BR homa_send
@@ -61,8 +61,20 @@ The
 argument provides application-specific identifying information about the RPC,
 such as the address of a data structure used to manage the
 RPC; it will be returned by
-.BR homa_recv
+.BR recvmsg
 when the RPC completes.
+The
+.I flags
+argument is passed to
+.BR sendmsg
+as the
+.IR flags
+field of the
+.B
+homa_sendmsg_args
+struct  (see the man page for
+.BR sendmsg
+for details).
 .PP
 This function returns as soon as the message has been queued for
 transmission.
@@ -76,7 +88,7 @@ is stored in
 is not NULL).
 The  identifier can be used later to match the request
 with the corresponding response, using
-.BR homa_reply (3).
+.BR recvmsg (2).
 On error, \-1 is returned and
 .I errno
 is set appropriately.

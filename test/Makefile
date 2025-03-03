@@ -39,6 +39,7 @@ CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
 TEST_SRCS :=  unit_homa_incoming.c \
+	      unit_homa_interest.c \
 	      unit_homa_outgoing.c \
 	      unit_homa_peer.c \
 	      unit_homa_pool.c \
@@ -57,6 +58,7 @@ endif
 TEST_OBJS :=  $(patsubst %.c,%.o,$(TEST_SRCS))
 
 HOMA_SRCS :=  homa_devel.c \
+	      homa_interest.c \
 	      homa_incoming.c \
 	      homa_outgoing.c \
 	      homa_peer.c \

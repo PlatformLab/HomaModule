@@ -63,14 +63,27 @@ struct homa_sendmsg_args {
 	 * locate app-specific info about the RPC.
 	 */
 	__u64 completion_cookie;
+
+	/**
+	 * @flags: (in) OR-ed combination of bits that control the operation.
+	 * See below for values.
+	 */
+	__u32 flags;
+
+	__u32 reserved;
 };
 
 #if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_sendmsg_args) >= 16,
+_Static_assert(sizeof(struct homa_sendmsg_args) >= 24,
 	       "homa_sendmsg_args shrunk");
-_Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
+_Static_assert(sizeof(struct homa_sendmsg_args) <= 24,
 	       "homa_sendmsg_args grew");
 #endif
+
+/* Flag bits for homa_sendmsg_args.flags (see man page for documentation):
+ */
+#define HOMA_SENDMSG_PRIVATE      0x01
+#define HOMA_SENDMSG_VALID_FLAGS   0x01
 
 /**
  * struct homa_recvmsg_args - Provides information needed by Homa's
@@ -78,8 +91,9 @@ _Static_assert(sizeof(struct homa_sendmsg_args) <= 16,
  */
 struct homa_recvmsg_args {
 	/**
-	 * @id: (in/out) Initially specifies the id of the desired RPC, or 0
-	 * if any RPC is OK; returns the actual id received.
+	 * @id: (in/out) Initial value is 0 to wait for any shared RPC;
+	 * nonzero means wait for that specific (private) RPC. Returns
+	 * the id of the RPC received.
 	 */
 	__u64 id;
 
@@ -125,10 +139,8 @@ _Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
 
 /* Flag bits for homa_recvmsg_args.flags (see man page for documentation):
  */
-#define HOMA_RECVMSG_REQUEST       0x01
-#define HOMA_RECVMSG_RESPONSE      0x02
-#define HOMA_RECVMSG_NONBLOCKING   0x04
-#define HOMA_RECVMSG_VALID_FLAGS   0x07
+#define HOMA_RECVMSG_NONBLOCKING   0x01
+#define HOMA_RECVMSG_VALID_FLAGS   0x01
 
 #ifndef __STRIP__ /* See strip.py */
 /**
@@ -198,10 +210,12 @@ int     homa_abort(int sockfd, __u64 id, int error);
 #endif /* See strip.py */
 int     homa_send(int sockfd, const void *message_buf,
 		  size_t length, const struct sockaddr *dest_addr,
-		  __u32 addrlen,  __u64 *id, __u64 completion_cookie);
+		  __u32 addrlen,  __u64 *id, __u64 completion_cookie,
+		  int flags);
 int     homa_sendv(int sockfd, const struct iovec *iov,
 		   int iovcnt, const struct sockaddr *dest_addr,
-		   __u32 addrlen,  __u64 *id, __u64 completion_cookie);
+		   __u32 addrlen,  __u64 *id, __u64 completion_cookie,
+		   int flags);
 ssize_t homa_reply(int sockfd, const void *message_buf,
 		   size_t length, const struct sockaddr *dest_addr,
 		   __u32 addrlen,  __u64 id);

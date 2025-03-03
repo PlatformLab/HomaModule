@@ -125,6 +125,10 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
      sysctl mechanism. For details, see the man page `homa.7`.
 
 ## Significant recent improvements
+- March 2025: implemented private RPCs, resulting in API changes.
+  HOMA_RECVMSG_REQUEST and HOMA_RECVMSG_RESPONSE flags no longer exist and
+  struct homa_sendmsg_args now has a flags field with one defined
+  flag: HOMA_SENDMSG_PRIVATE.
 - February 2025: by default, incoming requests for a socket are rejected
   unless the socket has been bound. setsockopt can be used with
   SO_HOMA_SERVER to enable or disable incoming requests for any socket.

@@ -103,7 +103,7 @@ struct homa_rpc;
 struct homa_sock;
 struct homa_socktab;
 
-/* Functions for mocking that are exported to test code. */
+/* Variables and functions for mocking that are exported to test code. */
 extern int         mock_alloc_page_errors;
 extern int         mock_alloc_skb_errors;
 extern int         mock_bpage_size;
@@ -122,8 +122,11 @@ extern bool        mock_ipv6;
 extern bool        mock_ipv6_default;
 extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
+extern int         mock_prepare_to_wait_errors;
 extern int         mock_register_protosw_errors;
+extern int         mock_wait_intr_irq_errors;
 extern char        mock_xmit_prios[];
+extern int         mock_log_wakeups;
 extern int         mock_log_rcu_sched;
 extern int         mock_max_grants;
 extern int         mock_max_skb_frags;
@@ -177,6 +180,7 @@ struct ctl_table_header *
 				     struct ctl_table *table);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
+void        mock_set_clock_vals(u64 t, ...);
 void        mock_set_core(int num);
 void        mock_set_ipv6(struct homa_sock *hsk);
 void        mock_spin_lock(spinlock_t *lock);

@@ -46,6 +46,8 @@ ssize_t homa_reply(int sockfd, const void *message_buf, size_t length,
 
 	args.id = id;
 	args.completion_cookie = 0;
+	args.flags = 0;
+	args.reserved = 0;
 
 	vec.iov_base = (void *)message_buf;
 	vec.iov_len = length;
@@ -90,6 +92,8 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
 
 	args.id = id;
 	args.completion_cookie = 0;
+	args.flags = 0;
+	args.reserved = 0;
 
 	hdr.msg_name = (void *)dest_addr;
 	hdr.msg_namelen = addrlen;
@@ -113,13 +117,15 @@ ssize_t homa_replyv(int sockfd, const struct iovec *iov, int iovcnt,
  *                     here; this can be used later to find the response for
  *                     this request.
  * @completion_cookie: Value to be returned by recvmsg when RPC completes.
+ * @flags:             Flag bits to pass to the sendmsg kernel call, such
+ *                     as HOMA_SENDMSG_PRIVATE; see man page for complete info.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_send(int sockfd, const void *message_buf, size_t length,
 	      const struct sockaddr *dest_addr, __u32 addrlen,
-	      __u64 *id, __u64 completion_cookie)
+	      __u64 *id, __u64 completion_cookie, int flags)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -128,6 +134,8 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
 
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
+	args.flags = flags;
+	args.reserved = 0;
 
 	vec.iov_base = (void *)message_buf;
 	vec.iov_len = length;
@@ -158,13 +166,15 @@ int homa_send(int sockfd, const void *message_buf, size_t length,
  *                     here; this can be used later to find the response for
  *                     this request.
  * @completion_cookie: Value to be returned by recvmsg when RPC completes.
+ * @flags:             Flag bits to pass to the sendmsg kernel call, such
+ *                     as HOMA_SENDMSG_PRIVATE; see man page for complete info.
  *
  * Return:      0 means the request has been accepted for delivery. If an
  *              error occurred, -1 is returned and errno is set appropriately.
  */
 int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 	       const struct sockaddr *dest_addr, __u32 addrlen,
-	       __u64 *id, __u64 completion_cookie)
+	       __u64 *id, __u64 completion_cookie, int flags)
 {
 	struct homa_sendmsg_args args;
 	struct msghdr hdr;
@@ -172,6 +182,8 @@ int homa_sendv(int sockfd, const struct iovec *iov, int iovcnt,
 
 	args.id = 0;
 	args.completion_cookie = completion_cookie;
+	args.flags = flags;
+	args.reserved = 0;
 
 	hdr.msg_name = (void *)dest_addr;
 	hdr.msg_namelen = addrlen;

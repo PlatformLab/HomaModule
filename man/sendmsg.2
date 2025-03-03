@@ -56,8 +56,9 @@ field must refer to a structure of the following type:
 .EX
 struct homa_sendmsg_args {
     uint64_t id;                  /* RPC identifier. */
-    uint64_t completion_cookie;   /* For requests only; value to return
+    __u64 completion_cookie;      /* For requests only; value to return
                                    * along with response. */
+    __u32 flags;                  /* OR'ed combination of bits. */
 };
 .EE
 .vs +2
@@ -91,6 +92,26 @@ uniquely by
 and
 .IR msg ->\c
 .BR msg_name .
+.PP
+The
+.B id
+field of
+.B homa_sendmsg_args
+contains an OR'ed collection of bits. At present only a single
+flag bit is supported.
+.TP
+.B HOMA_SENDMSG_PRIVATE
+Ignored when sending responses
+.RB ( id " is 0)."
+For requests, this bit will mark the RPC as
+.IR private .
+The response for a
+private RPC can only be retrieved by specifying the RPC's id explicitly
+when invoking
+.BR recvmsg .
+In addition, system calls such as
+.BR select (2)
+cannot be used to determine when a private response has arrived.
 .PP
 .B sendmsg
 returns as soon as the message has been queued for transmission.

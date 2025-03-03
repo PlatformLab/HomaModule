@@ -3,6 +3,7 @@
 /* This file contains functions for managing homa_rpc structs. */
 
 #include "homa_impl.h"
+#include "homa_interest.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -182,11 +183,11 @@ struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
 	}
 	hlist_add_head(&srpc->hash_links, &bucket->rpcs);
 	list_add_tail_rcu(&srpc->active_links, &hsk->active_rpcs);
+	homa_sock_unlock(hsk);
 	if (ntohl(h->seg.offset) == 0 && srpc->msgin.num_bpages > 0) {
 		atomic_or(RPC_PKTS_READY, &srpc->flags);
 		homa_rpc_handoff(srpc);
 	}
-	homa_sock_unlock(hsk);
 	INC_METRIC(requests_received, 1);
 	*created = 1;
 	return srpc;
@@ -265,6 +266,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	UNIT_LOG("; ", "homa_rpc_end invoked");
 	tt_record1("homa_rpc_end invoked for id %d", rpc->id);
 	rpc->state = RPC_DEAD;
+	rpc->error = -EINVAL;
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
@@ -281,11 +283,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	list_add_tail(&rpc->dead_links, &rpc->hsk->dead_rpcs);
 	__list_del_entry(&rpc->ready_links);
 	__list_del_entry(&rpc->buf_links);
-	if (rpc->interest) {
-		rpc->interest->reg_rpc = NULL;
-		wake_up_process(rpc->interest->thread);
-		rpc->interest = NULL;
-	}
+	homa_interest_notify_private(rpc);
 //	tt_record3("Freeing rpc id %d, socket %d, dead_skbs %d", rpc->id,
 //			rpc->hsk->client_port,
 //			rpc->hsk->dead_skbs);

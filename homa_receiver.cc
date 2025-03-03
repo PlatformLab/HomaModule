@@ -69,12 +69,11 @@ void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
 /**
  * homa::receiver::receive() - Release resources for the current message, if
  * any, and receive a new incoming message.
- * @flags:    Various OR'ed bits such as HOMA_RECVMSG_REQUEST and
- *            HOMA_RECVMSG_NONBLOCKING. See the Homa documentation
- *            for the flags field of recvmsg for details.
- * @id:       Identifier of a particular RPC whose result is desired,
- *            or 0. See the Homa documentation for the id field of
- *            recvmsg for details.
+ * @flags:    Various OR'ed bits such as HOMA_RECVMSG_NONBLOCKING. See the
+ *            Homa documentation for the flags field of recvmsg for details.
+ * @id:       Identifier of a private RPC whose result is desired, or 0
+ *            to wait for a shared RPC. See the Homa documentation for the id
+ *            field of recvmsg for details.
  * Return:    The length of the new active message. If an error occurs, -1
  *            is returned and additional information is available in
  *            errno. Note: if id() returns a nonzero result after an

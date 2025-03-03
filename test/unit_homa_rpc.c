@@ -23,6 +23,23 @@ void unprotect_hsk_hook(char *id)
 	}
 }
 
+#if 0
+static struct homa_rpc *hook_rpc;
+static int hook_count;
+static void unlink_rpc_hook(char *id)
+{
+	if (strcmp(id, "spin_lock")!= 0)
+		return;
+	if (hook_count == 0)
+		return;
+	hook_count--;
+	if (hook_count == 0) {
+		list_del_init(&hook_rpc->ready_links);
+		homa_rpc_put(hook_rpc);
+	}
+}
+#endif
+
 FIXTURE(homa_rpc) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -247,7 +264,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__handoff_rpc)
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_requests));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(srpc);
 }
 TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_no_buffers)
@@ -261,7 +278,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_no_buffers)
 			&created);
 	ASSERT_FALSE(IS_ERR(srpc));
 	homa_rpc_unlock(srpc);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(srpc);
 }
 TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_rpc)
@@ -277,7 +294,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__dont_handoff_rpc)
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(RPC_INCOMING, srpc->state);
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
-	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_requests));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(srpc);
 }
 
@@ -420,6 +437,17 @@ TEST_F(homa_rpc, homa_rpc_end__already_dead)
 	homa_rpc_end(crpc);
 	EXPECT_STREQ("", unit_log_get());
 }
+TEST_F(homa_rpc, homa_rpc_end__remove_from_ready_rpcs)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 100);
+
+	ASSERT_NE(NULL, crpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
+	homa_rpc_end(crpc);
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
+}
 TEST_F(homa_rpc, homa_rpc_end__state_ready)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
@@ -427,26 +455,9 @@ TEST_F(homa_rpc, homa_rpc_end__state_ready)
 			self->server_port, self->client_id, 1000, 100);
 
 	ASSERT_NE(NULL, crpc);
-	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_responses));
+	EXPECT_EQ(1, unit_list_length(&self->hsk.ready_rpcs));
 	homa_rpc_end(crpc);
-	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_responses));
-}
-TEST_F(homa_rpc, homa_rpc_end__wakeup_interest)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id, 1000, 100);
-	struct homa_interest interest = {};
-
-	ASSERT_NE(NULL, crpc);
-	atomic_set(&interest.rpc_ready, 0);
-	interest.reg_rpc = crpc;
-	crpc->interest = &interest;
-	unit_log_clear();
-	homa_rpc_end(crpc);
-	EXPECT_EQ(NULL, interest.reg_rpc);
-	EXPECT_STREQ("homa_rpc_end invoked; "
-			"wake_up_process pid -1", unit_log_get());
+	EXPECT_EQ(0, unit_list_length(&self->hsk.ready_rpcs));
 }
 TEST_F(homa_rpc, homa_rpc_end__free_gaps)
 {

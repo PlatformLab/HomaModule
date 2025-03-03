@@ -199,30 +199,16 @@ struct homa_sock {
 	struct list_head waiting_for_bufs;
 
 	/**
-	 * @ready_requests: Contains server RPCs whose request message is
-	 * in a state requiring attention from  a user process. The head is
-	 * oldest, i.e. next to return.
+	 * @ready_rpcs: List of all RPCs that are ready for attention from
+	 * an application thread.
 	 */
-	struct list_head ready_requests;
+	struct list_head ready_rpcs;
 
 	/**
-	 * @ready_responses: Contains client RPCs whose response message is
-	 * in a state requiring attention from a user process. The head is
-	 * oldest, i.e. next to return.
+	 * @interests: List of threads that are currently waiting for
+	 * incoming messages via homa_wait_shared.
 	 */
-	struct list_head ready_responses;
-
-	/**
-	 * @request_interests: List of threads that want to receive incoming
-	 * request messages.
-	 */
-	struct list_head request_interests;
-
-	/**
-	 * @response_interests: List of threads that want to receive incoming
-	 * response messages.
-	 */
-	struct list_head response_interests;
+	struct list_head interests;
 
 	/**
 	 * @client_rpc_buckets: Hash table for fast lookup of client RPCs.

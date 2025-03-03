@@ -9,12 +9,14 @@
 #endif /* See strip.py */
 
 #include "homa_impl.h"
+#include "homa_interest.h"
+#include "homa_peer.h"
+#include "homa_pool.h"
+
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_grant.h"
 #include "homa_offload.h"
 #endif /* See strip.py */
-#include "homa_peer.h"
-#include "homa_pool.h"
 
 #ifndef __STRIP__ /* See strip.py */
 /**
@@ -241,7 +243,8 @@ keep:
  *           It is possible for the RPC to be freed while this function
  *           executes (it releases and reacquires the RPC lock). If that
  *           happens, -EINVAL will be returned and the state of @rpc
- *           will be RPC_DEAD.
+ *           will be RPC_DEAD. Clears the RPC_PKTS_READY bit in @rpc->flags
+ *           if all available packets have been copied out.
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
 	__releases(rpc->bucket_lock)
@@ -286,8 +289,10 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			if (n < MAX_SKBS)
 				continue;
 		}
-		if (n == 0)
+		if (n == 0) {
+			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
 			break;
+		}
 
 		/* At this point we've collected a batch of packets (or
 		 * run out of packets); copy any available packets out to
@@ -680,9 +685,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 	if (skb_queue_len(&rpc->msgin.packets) != 0 &&
 	    !(atomic_read(&rpc->flags) & RPC_PKTS_READY)) {
 		atomic_or(RPC_PKTS_READY, &rpc->flags);
-		homa_sock_lock(rpc->hsk);
 		homa_rpc_handoff(rpc);
-		homa_sock_unlock(rpc->hsk);
 	}
 
 #ifndef __STRIP__ /* See strip.py */
@@ -1110,10 +1113,7 @@ void homa_rpc_abort(struct homa_rpc *rpc, int error)
 	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
 		   tt_addr(rpc->peer->addr), rpc->id, error);
 	rpc->error = error;
-	homa_sock_lock(rpc->hsk);
-	if (!rpc->hsk->shutdown)
-		homa_rpc_handoff(rpc);
-	homa_sock_unlock(rpc->hsk);
+	homa_rpc_handoff(rpc);
 }
 
 /**
@@ -1198,476 +1198,198 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
 }
 
 /**
- * homa_register_interests() - Records information in various places so
- * that a thread will be woken up if an RPC that it cares about becomes
- * available.
- * @interest:     Used to record information about the messages this thread is
- *                waiting on. The initial contents of the structure are
- *                assumed to be undefined.
- * @hsk:          Socket on which relevant messages will arrive.  Must not be
- *                locked.
- * @flags:        Flags field from homa_recvmsg_args; see manual entry for
- *                details.
- * @id:           If non-zero, then the caller is interested in receiving
- *                the response for this RPC (@id must be a client request).
- * Return:        Either zero or a negative errno value. If a matching RPC
- *                is already available, information about it will be stored in
- *                interest.
+ * homa_wait_private() - Waits until the response has been received for
+ * a specific RPC or the RPC has failed with an error.
+ * @rpc:          RPC to wait for; an error will be returned if the RPC is
+ *                not a client RPC or not private. Must be locked by caller.
+ * @nonblocking:  Nonzero means return immediately if @rpc not ready.
+ * Return:  0 if the response has been successfully received, otherwise
+ *          a negative errno.
  */
-int homa_register_interests(struct homa_interest *interest,
-			    struct homa_sock *hsk, int flags, u64 id)
+int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
+	__must_hold(&rpc->bucket->lock)
 {
-	struct homa_rpc *rpc = NULL;
-	int locked = 1;
+	struct homa_interest interest;
+	int result = 0;
+	int iteration;
 
-	homa_interest_init(interest);
-	if (id != 0) {
-		if (!homa_is_client(id))
-			return -EINVAL;
-		rpc = homa_find_client_rpc(hsk, id); /* Locks rpc. */
-		if (!rpc)
-			return -EINVAL;
-		if (rpc->interest && rpc->interest != interest) {
-			homa_rpc_unlock(rpc);
-			return -EINVAL;
-		}
-	}
+	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
+		return -EINVAL;
 
-	/* Need both the RPC lock (acquired above) and the socket lock to
-	 * avoid races.
-	 */
-	homa_sock_lock(hsk);
-	if (hsk->shutdown) {
-		homa_sock_unlock(hsk);
-		if (rpc)
-			homa_rpc_unlock(rpc);
-		return -ESHUTDOWN;
-	}
-
-	if (id != 0) {
-		if ((atomic_read(&rpc->flags) & RPC_PKTS_READY) || rpc->error)
-			goto claim_rpc;
-		rpc->interest = interest;
-		interest->reg_rpc = rpc;
-		homa_rpc_unlock(rpc);
-	}
-
-	locked = 0;
-	if (flags & HOMA_RECVMSG_RESPONSE) {
-		if (!list_empty(&hsk->ready_responses)) {
-			rpc = list_first_entry(&hsk->ready_responses,
-					       struct homa_rpc,
-					       ready_links);
-			goto claim_rpc;
-		}
-		/* Insert this thread at the *front* of the list;
-		 * we'll get better cache locality if we reuse
-		 * the same thread over and over, rather than
-		 * round-robining between threads.  Same below.
-		 */
-		list_add(&interest->response_links,
-			 &hsk->response_interests);
-	}
-	if (flags & HOMA_RECVMSG_REQUEST) {
-		if (!list_empty(&hsk->ready_requests)) {
-			rpc = list_first_entry(&hsk->ready_requests,
-					       struct homa_rpc, ready_links);
-			/* Make sure the interest isn't on the response list;
-			 * otherwise it might receive a second RPC.
-			 */
-			if (!list_empty(&interest->response_links))
-				list_del_init(&interest->response_links);
-			goto claim_rpc;
-		}
-		list_add(&interest->request_links, &hsk->request_interests);
-	}
-	homa_sock_unlock(hsk);
-	return 0;
-
-claim_rpc:
-	list_del_init(&rpc->ready_links);
-	if (!list_empty(&hsk->ready_requests) ||
-	    !list_empty(&hsk->ready_responses)) {
-		// There are still more RPCs available, so let Linux know.
-		hsk->sock.sk_data_ready(&hsk->sock);
-	}
-
-	/* Must take a reference on the RPC before storing in interest
-	 * (match the behavior of homa_rpc_handoff). This also prevents
-	 * the RPC from being reaped during the gap between when we release
-	 * the socket lock and we acquire the RPC lock.
-	 */
 	homa_rpc_hold(rpc);
-	homa_sock_unlock(hsk);
-	if (!locked) {
+
+	/* Each iteration through this loop waits until rpc needs attention
+	 * in some way (e.g. packets have arrived), then deals with that need
+	 * (e.g. copy to user space). It may take many iterations until the
+	 * RPC is ready for the application.
+	 */
+	for (iteration = 0; ; iteration++) {
+		if (!rpc->error)
+			rpc->error = homa_copy_to_user(rpc);
+		if (rpc->error) {
+			result = rpc->error;
+			break;
+		}
+		if (rpc->msgin.length >= 0 &&
+		    rpc->msgin.bytes_remaining == 0 &&
+		    skb_queue_len(&rpc->msgin.packets) == 0) {
+			if (iteration == 0)
+				INC_METRIC(fast_wakeups, 1);
+			break;
+		}
+
+		result = homa_interest_init_private(&interest, rpc);
+		if (result != 0)
+			break;
+
+		homa_rpc_unlock(rpc);
+		result = homa_interest_wait(&interest, nonblocking );
+
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
-		locked = 1;
+		homa_interest_unlink_private(&interest);
+
+		/* If homa_interest_wait returned an error but the interest
+		 * actually got ready, then ignore the error.
+		 */
+		if (result != 0 && atomic_read(&interest.ready) == 0)
+			break;
 	}
-	homa_interest_set_rpc(interest, rpc, locked);
-	return 0;
+
+	homa_rpc_put(rpc);
+	return result;
 }
 
 /**
- * homa_wait_for_message() - Wait for receipt of an incoming message
- * that matches the parameters. Various other activities can occur while
- * waiting, such as reaping dead RPCs and copying data to user space.
- * @hsk:          Socket where messages will arrive.
- * @flags:        Flags field from homa_recvmsg_args; see manual entry for
- *                details.
- * @id:           If non-zero, then a response message matching this id may
- *                be returned (@id must refer to a client request).
+ * homa_wait_shared() - Wait for the completion of any non-private
+ * incoming message on a socket.
+ * @hsk:          Socket on which to wait. Must not be locked.
+ * @nonblocking:  Nonzero means return immediately if no RPC is ready.
  *
- * Return:   Pointer to an RPC that matches @flags and @id, or a negative
- *           errno value. The RPC will be locked; the caller must unlock.
+ * Return:    Pointer to an RPC with a complete incoming message or nonzero
+ *            error field, or a negative errno (usually -EINTR). If an RPC
+ *            is returned it will be locked and the caller must unlock.
  */
-struct homa_rpc *homa_wait_for_message(struct homa_sock *hsk, int flags,
-				       u64 id)
-	__acquires(&rpc->bucket_lock)
+struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 {
-#ifndef __STRIP__ /* See strip.py */
-	u64 poll_start, poll_end, now;
-#endif /* See strip.py */
-	struct homa_rpc *result = NULL;
 	struct homa_interest interest;
-	struct homa_rpc *rpc = NULL;
-#ifndef __STRIP__ /* See strip.py */
-	int blocked = 0, polled = 0;
-#endif /* See strip.py */
-	int error;
+	struct homa_rpc *rpc;
+	int iteration;
+	int result;
 
-	/* Each iteration of this loop finds an RPC, but it might not be
-	 * in a state where we can return it (e.g., there might be packets
-	 * ready to transfer to user space, but the incoming message isn't yet
-	 * complete). Thus it could take many iterations of this loop
-	 * before we have an RPC with a complete message.
+	/* Each iteration through this loop waits until an RPC needs attention
+	 * in some way (e.g. packets have arrived), then deals with that need
+	 * (e.g. copy to user space). It may take many iterations until an
+	 * RPC is ready for the application.
 	 */
-	while (1) {
-		error = homa_register_interests(&interest, hsk, flags, id);
-		rpc = homa_interest_get_rpc(&interest);
-		if (rpc)
-			goto found_rpc;
-		if (error < 0) {
-			result = ERR_PTR(error);
-			goto found_rpc;
-		}
-
-		/* There is no ready RPC so far. Clean up dead RPCs before
-		 * going to sleep (or returning, if in nonblocking mode).
-		 */
-		while (1) {
-			int reaper_result;
-
-			rpc = homa_interest_get_rpc(&interest);
-			if (rpc) {
-				tt_record1("received RPC handoff while reaping, id %d",
-					   rpc->id);
-				goto found_rpc;
-			}
-			reaper_result = homa_rpc_reap(hsk, false);
-			if (reaper_result == 0)
-				break;
-
-			/* Give NAPI and SoftIRQ tasks a chance to run. */
-			schedule();
-		}
-		if (flags & HOMA_RECVMSG_NONBLOCKING) {
-			result = ERR_PTR(-EAGAIN);
-			goto found_rpc;
-		}
-
-#ifndef __STRIP__ /* See strip.py */
-		// tt_record4("Preparing to poll, socket %d, flags 0x%x, pid %d, poll_usecs %d",
-		// 	   hsk->port, flags, current->pid,
-		// 	   hsk->homa->poll_usecs);
-
-		/* Busy-wait for a while before going to sleep; this avoids
-		 * context-switching overhead to wake up.
-		 */
-		now = sched_clock();
-		poll_start = now;
-		poll_end = now + (1000 * hsk->homa->poll_usecs);
-		while (1) {
-			u64 blocked;
-
-			rpc = homa_interest_get_rpc(&interest);
-			if (rpc) {
-				tt_record3("received RPC handoff while polling, id %d, socket %d, pid %d",
-					   rpc->id, hsk->port,
-					   current->pid);
-				polled = 1;
-				INC_METRIC(poll_ns, now - poll_start);
-				goto found_rpc;
-			}
-			if (now >= poll_end) {
-				INC_METRIC(poll_ns, now - poll_start);
-				break;
-			}
-			blocked = sched_clock();
-			schedule();
-			now = sched_clock();
-			blocked = now - blocked;
-			INC_METRIC(blocked_ns, blocked);
-			poll_start += blocked;
-		}
-		tt_record2("Poll ended unsuccessfully on socket %d, pid %d",
-			   hsk->port, current->pid);
-		INC_METRIC(poll_ns, now - poll_start);
-#endif /* See strip.py */
-
-		/* Now it's time to sleep. */
-#ifndef __STRIP__ /* See strip.py */
-		per_cpu(homa_offload_core, interest.core).last_app_active = now;
-#endif /* See strip.py */
-		set_current_state(TASK_INTERRUPTIBLE);
-		rpc = homa_interest_get_rpc(&interest);
-		if (!rpc && !hsk->shutdown) {
-#ifndef __STRIP__ /* See strip.py */
-			u64 end;
-			u64 start = sched_clock();
-#endif /* See strip.py */
-
-			tt_record1("homa_wait_for_message sleeping, pid %d",
-				   current->pid);
-			schedule();
-#ifndef __STRIP__ /* See strip.py */
-			blocked = 1;
-			end = sched_clock();
-#endif /* See strip.py */
-			INC_METRIC(blocked_ns, end - start);
-		}
-		__set_current_state(TASK_RUNNING);
-
-found_rpc:
-		/* If we get here, it means either an RPC is ready for our
-		 * attention or an error occurred.
-		 *
-		 * First, clean up all of the interests. Must do this before
-		 * making any other decisions, because until we do, an incoming
-		 * message could still be passed to us. Note: if we went to
-		 * sleep, then this info was already cleaned up by whoever
-		 * woke us up. Also, values in the interest may change between
-		 * when we test them below and when we acquire the socket lock,
-		 * so they have to be checked again after locking the socket.
-		 */
-		UNIT_HOOK("found_rpc");
-		if (interest.reg_rpc ||
-		    !list_empty(&interest.request_links) ||
-		    !list_empty(&interest.response_links)) {
-			homa_sock_lock(hsk);
-			if (interest.reg_rpc)
-				interest.reg_rpc->interest = NULL;
-			if (!list_empty(&interest.request_links))
-				list_del_init(&interest.request_links);
-			if (!list_empty(&interest.response_links))
-				list_del_init(&interest.response_links);
+	for (iteration = 0; ; iteration++) {
+		homa_sock_lock(hsk);
+		if (hsk->shutdown) {
+			rpc = ERR_PTR(-ESHUTDOWN);
 			homa_sock_unlock(hsk);
+			goto done;
 		}
+		if (!list_empty(&hsk->ready_rpcs)) {
+			rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc,
+					ready_links);
+			homa_rpc_hold(rpc);
+			list_del_init(&rpc->ready_links);
+			if (!list_empty(&hsk->ready_rpcs)) {
+				/* There are still more RPCs available, so
+				 * let Linux know.
+				 */
+				hsk->sock.sk_data_ready(&hsk->sock);
+			}
+			homa_sock_unlock(hsk);
+			if (iteration == 0)
+				INC_METRIC(fast_wakeups, 1);
+		} else {
+			homa_interest_init_shared(&interest, hsk);
+			homa_sock_unlock(hsk);
+			result = homa_interest_wait(&interest, nonblocking );
+			homa_interest_unlink_shared(&interest);
 
-		/* Now check to see if we received an RPC handoff (note that
-		 * this could have happened anytime up until we reset the
-		 * interests above).
-		 */
-		rpc = homa_interest_get_rpc(&interest);
-		if (rpc) {
-			tt_record2("homa_wait_for_message found rpc id %d, pid %d",
-				   rpc->id, current->pid);
-			if (!interest.locked) {
-				atomic_or(APP_NEEDS_LOCK, &rpc->flags);
-				homa_rpc_lock(rpc);
-				atomic_andnot(APP_NEEDS_LOCK | RPC_HANDING_OFF,
-					      &rpc->flags);
-			} else {
-				atomic_andnot(RPC_HANDING_OFF, &rpc->flags);
+			if (result != 0) {
+				/* If homa_interest_wait returned an error
+				 * (e.g. -EAGAIN) but in the meantime the
+				 * interest received a handoff, ignore the
+				 * error.
+				 */
+				if (atomic_read(&interest.ready) == 0) {
+					rpc = ERR_PTR(result);
+					goto done;
+				}
 			}
 
-			/* Once the RPC has been locked it's safe to drop
-			 * the reference that was set before storing the RPC
-			 * in interest.
-			 * */
-			homa_rpc_put(rpc);
-			if (!rpc->error)
-				rpc->error = homa_copy_to_user(rpc);
-			if (rpc->state == RPC_DEAD) {
-				homa_rpc_unlock(rpc);
-				continue;
+			rpc = interest.rpc;
+			if (!rpc) {
+				rpc = ERR_PTR(-ESHUTDOWN);
+				goto done;
 			}
-			if (rpc->error)
-				goto done;
-			atomic_andnot(RPC_PKTS_READY, &rpc->flags);
-			if (rpc->msgin.bytes_remaining == 0 &&
-			    !skb_queue_len(&rpc->msgin.packets))
-				goto done;
-			homa_rpc_unlock(rpc);
 		}
 
-		/* A complete message isn't available: check for errors. */
-		if (IS_ERR(result))
-			return result;
-		if (signal_pending(current))
-			return ERR_PTR(-EINTR);
-
-		/* No message and no error; try again. */
+		tt_record3("homa_wait_shared received RPC handoff, id %d, socket %d, pid %d",
+			   rpc->id, rpc->hsk->port, current->pid);
+		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_lock(rpc);
+		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
+		homa_rpc_put(rpc);
+		if (!rpc->error)
+			rpc->error = homa_copy_to_user(rpc);
+		if (rpc->error) {
+			if (rpc->state != RPC_DEAD)
+				break;
+		} else if (rpc->msgin.bytes_remaining == 0 &&
+		    skb_queue_len(&rpc->msgin.packets) == 0)
+			break;
+		homa_rpc_unlock(rpc);
 	}
 
 done:
-#ifndef __STRIP__ /* See strip.py */
-	if (blocked)
-		INC_METRIC(slow_wakeups, 1);
-	else if (polled)
-		INC_METRIC(fast_wakeups, 1);
-#endif /* See strip.py */
 	return rpc;
-}
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_choose_interest() - Given a list of interests for an incoming
- * message, choose the best one to handle it (if any).
- * @homa:        Overall information about the Homa transport.
- * @head:        Head pointers for the list of interest: either
- *		 hsk->request_interests or hsk->response_interests.
- * @offset:      Offset of "next" pointers in the list elements (either
- *               offsetof(request_links) or offsetof(response_links).
- * Return:       An interest to use for the incoming message, or NULL if none
- *               is available. If possible, this function tries to pick an
- *               interest whose thread is running on a core that isn't
- *               currently busy doing Homa transport work.
- */
-#else /* See strip.py */
-/**
- * homa_choose_interest() - Given a list of interests for an incoming
- * message, choose the best one to handle it (if any).
- * @homa:        Overall information about the Homa transport.
- * @head:        Head pointers for the list of interest: either
- *		 hsk->request_interests or hsk->response_interests.
- * @offset:      Offset of "next" pointers in the list elements (either
- *               offsetof(request_links) or offsetof(response_links).
- * Return:       An interest to use for the incoming message, or NULL if none
- *               is available. (future patch sets will fill in additional
- *               functionality in this function).
- */
-#endif /* See strip.py */
-struct homa_interest *homa_choose_interest(struct homa *homa,
-					   struct list_head *head, int offset)
-{
-#ifndef __STRIP__ /* See strip.py */
-	u64 busy_time = sched_clock() - homa->busy_ns;
-	struct homa_interest *backup = NULL;
-	struct homa_interest *interest;
-	struct list_head *pos;
-
-	list_for_each(pos, head) {
-		interest = (struct homa_interest *)(((char *)pos) - offset);
-		if (per_cpu(homa_offload_core, interest->core).last_active <
-				busy_time) {
-			if (backup)
-				INC_METRIC(handoffs_alt_thread, 1);
-			return interest;
-		}
-		if (!backup)
-			backup = interest;
-	}
-
-	/* All interested threads are on busy cores; return the first. */
-	return backup;
-#else /* See strip.py */
-	if (list_empty(head))
-		return NULL;
-	else
-		return (struct homa_interest *)(((char *)head->next) - offset);
-#endif /* See strip.py */
 }
 
 /**
  * homa_rpc_handoff() - This function is called when the input message for
- * an RPC is ready for attention from a user thread. It either notifies
- * a waiting reader or queues the RPC.
- * @rpc:                RPC to handoff; must be locked. The caller must
- *			also have locked the socket for this RPC.
+ * an RPC is ready for attention from a user thread. It notifies a waiting
+ * reader and/or queues the RPC, as appropriate.
+ * @rpc:                RPC to handoff; must be locked.
  */
 void homa_rpc_handoff(struct homa_rpc *rpc)
 {
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_interest *interest;
 
-	if ((atomic_read(&rpc->flags) & RPC_HANDING_OFF) ||
-	    !list_empty(&rpc->ready_links))
+	tt_record1("homa_rpc_handoff called for id %d", rpc->id);
+
+	if (atomic_read(&rpc->flags) & RPC_PRIVATE) {
+		homa_interest_notify_private(rpc);
 		return;
-
-	/* First, see if someone is interested in this RPC specifically.
-	 */
-	if (rpc->interest) {
-		interest = rpc->interest;
-		goto thread_waiting;
 	}
 
-	/* Second, check the interest list for this type of RPC. */
-	if (homa_is_client(rpc->id)) {
-		interest = homa_choose_interest(hsk->homa,
-						&hsk->response_interests,
-						offsetof(struct homa_interest,
-							 response_links));
-		if (interest)
-			goto thread_waiting;
-		list_add_tail(&rpc->ready_links, &hsk->ready_responses);
-		INC_METRIC(responses_queued, 1);
-	} else {
-		interest = homa_choose_interest(hsk->homa,
-						&hsk->request_interests,
-						offsetof(struct homa_interest,
-							 request_links));
-		if (interest)
-			goto thread_waiting;
-		list_add_tail(&rpc->ready_links, &hsk->ready_requests);
-		INC_METRIC(requests_queued, 1);
-	}
-
-	/* If we get here, no-one is waiting for the RPC, so it has been
-	 * queued.
+	/* Shared RPC; if there is a waiting thread, hand off the RPC;
+	 * otherwise enqueue it.
 	 */
-
-	/* Notify the poll mechanism. */
-	hsk->sock.sk_data_ready(&hsk->sock);
-	tt_record2("homa_rpc_handoff finished queuing id %d for port %d",
-		   rpc->id, hsk->port);
-	return;
-
-thread_waiting:
-	/* We found a waiting thread.  Take a reference on it to keep
-	 * it from being freed before homa_wait_for_message picks it up.
-	 */
-	homa_rpc_hold(rpc);
-	atomic_or(RPC_HANDING_OFF, &rpc->flags);
-	interest->locked = 0;
-	INC_METRIC(handoffs_thread_waiting, 1);
-	tt_record3("homa_rpc_handoff handing off id %d to pid %d on core %d",
-		   rpc->id, interest->thread->pid, task_cpu(interest->thread));
-	homa_interest_set_rpc(interest, rpc, 0);
-
+	homa_sock_lock(hsk);
+	if (!list_empty(&hsk->interests)) {
 #ifndef __STRIP__ /* See strip.py */
-	/* Update the last_app_active time for the thread's core, so Homa
-	 * will try to avoid doing any work there.
-	 */
-	per_cpu(homa_offload_core, interest->core).last_app_active =
-			sched_clock();
+		interest = homa_choose_interest(hsk);
+#else /* See strip.py */
+		interest = list_first_entry(&hsk->interests,
+					    struct homa_interest, links);
 #endif /* See strip.py */
-
-	/* Clear the interest. This serves two purposes. First, it saves
-	 * the waking thread from acquiring the socket lock again, which
-	 * reduces contention on that lock). Second, it ensures that
-	 * no-one else attempts to give this interest to a different RPC.
-	 */
-	if (interest->reg_rpc) {
-		interest->reg_rpc->interest = NULL;
-		interest->reg_rpc = NULL;
+		list_del_init(&interest->links);
+		interest->rpc = rpc;
+		homa_rpc_hold(rpc);
+		atomic_set_release(&interest->ready, 1);
+		wake_up(&interest->wait_queue);
+		INC_METRIC(handoffs_thread_waiting, 1);
+	} else if (list_empty(&rpc->ready_links)) {
+		list_add_tail(&rpc->ready_links, &hsk->ready_rpcs);
+		hsk->sock.sk_data_ready(&hsk->sock);
 	}
-	if (!list_empty(&interest->request_links))
-		list_del_init(&interest->request_links);
-	if (!list_empty(&interest->response_links))
-		list_del_init(&interest->response_links);
-	wake_up_process(interest->thread);
+	homa_sock_unlock(hsk);
 }
 
 #ifndef __STRIP__ /* See strip.py */

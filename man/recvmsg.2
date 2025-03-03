@@ -15,12 +15,12 @@ on Homa sockets. The
 .I sockfd
 argument must refer to a Homa socket. The
 .I msg
-argument describes which incoming messages are of interest, and is
+argument describes which incoming messages are of interest and is
 used to return information about the message that is received. The
 .I flags
-argument is not used for its
+argument is not used except for its
 .B MSG_DONTWAIT
-bit, which can be used to request nonblocking behavior
+bit, which can be used to request nonblocking behavior.
 .PP
 The
 .B msg
@@ -58,7 +58,8 @@ field must refer to a structure of the following type:
 .EX
 struct homa_recvmsg_args {
     uint64_t id;                             /* If nonzero, specifies id of
-                                              * desired RPC. */
+                                              * desired RPC, which must be
+                                              * private. */
     uint64_t completion_cookie;              /* Value from sendmsg for request. */
     int flags;                               /* OR-ed combination of bits. */
     uint32_t num_bpages;                     /* Number of valid entries in
@@ -78,25 +79,22 @@ structs are used both for passing parameter
 information into Homa and for receiving result information:
 .nr step 1 1
 .IP \[bu] 2
-The input values for
-.B flags
-and
+The initial value of
 .B id
-indicate which messages are of interest to the caller.
-.B Flags
-is a bitmask. If it contains the
-.B HOMA_RECVMSG_REQUEST
-bit, then the caller is interested in any request message.
-If it contains the
-.B HOMA_RECVMSG_RESPONSE
-bit, then the caller is interested in any response message.
-If the
-.B HOMA_RECVMSG_RESPONSE
-bit is zero but
+indicates what message(s) the caller is interested in, in one of two ways.
+If the value is nonzero, it gives the RPC identifier for a specific
+RPC; it must be an RPC for which the caller is client, and it must
+have been specified as
+.I private
+when
+.B sendmsg
+was invoked to initate the RPC. In this case,
+.B recvmsg
+will wait for the response message for that RPC.
+If the initial value of
 .B id
-is nonzero, then the caller is interested in receiving a response
-for the RPC given by
-.B id.
+is zero, then the system call will wait for any message that is not a private
+response (the message could be either a request or response).
 .IP \[bu]
 On a successful return Homa will use the structs to return information
 about the message received. The
@@ -237,7 +235,8 @@ First, it must eventually return the message's bpages to Homa as described
 above. Second, if
 the message is a request, the application must eventually send a response
 (Homa retains state for each request until its response has been sent; if
-no responses are sent, kernel state will accumulate without bound).
+no responses are sent, kernel state will accumulate and the socket may
+eventually block).
 .SH ERRORS
 .PP
 When

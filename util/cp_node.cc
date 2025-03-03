@@ -1071,7 +1071,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 
 	while (1) {
 		while (1) {
-			length = receiver.receive(HOMA_RECVMSG_REQUEST, 0);
+			length = receiver.receive(0, 0);
 			if (length >= 0)
 				break;
 			if ((errno == EBADF) || (errno == ESHUTDOWN)) {
@@ -2052,7 +2052,7 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 	rpc_id = 0;
 	ssize_t length;
 	do {
-		length = receiver->receive(HOMA_RECVMSG_RESPONSE, rpc_id);
+		length = receiver->receive(0, rpc_id);
 	} while ((length < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (length < 0) {
 		if (exit_receivers)
@@ -2138,12 +2138,12 @@ void homa_client::sender()
 			status = homa_sendv(fd, vec, 2,
 				            &server_addrs[server].sa,
 					    sockaddr_size(&server_addrs[server].sa),
-					    &rpc_id, 0);
+					    &rpc_id, 0, 0);
 		} else
 			status = homa_send(fd, sender_buffer, header->length,
 					   &server_addrs[server].sa,
 					   sockaddr_size(&server_addrs[server].sa),
-					   &rpc_id, 0);
+					   &rpc_id, 0, 0);
 		if (status < 0) {
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
@@ -2206,7 +2206,8 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	header->cid.client_port = id;
 	start = rdtsc();
 	status = homa_send(fd, buffer, header->length, &server_addrs[server].sa,
-			   sockaddr_size(&server_addrs[server].sa), &rpc_id, 0);
+			   sockaddr_size(&server_addrs[server].sa), &rpc_id, 0,
+			   0);
 	if (status < 0) {
 		log(NORMAL, "FATAL: error in homa_send: %s (request "
 				"length %d)\n", strerror(errno),

@@ -3,6 +3,7 @@
 /* This file manages homa_sock and homa_socktab objects. */
 
 #include "homa_impl.h"
+#include "homa_interest.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 
@@ -167,10 +168,8 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
 	INIT_LIST_HEAD(&hsk->waiting_for_bufs);
-	INIT_LIST_HEAD(&hsk->ready_requests);
-	INIT_LIST_HEAD(&hsk->ready_responses);
-	INIT_LIST_HEAD(&hsk->request_interests);
-	INIT_LIST_HEAD(&hsk->response_interests);
+	INIT_LIST_HEAD(&hsk->ready_rpcs);
+	INIT_LIST_HEAD(&hsk->interests);
 	for (i = 0; i < HOMA_CLIENT_RPC_BUCKETS; i++) {
 		struct homa_rpc_bucket *bucket = &hsk->client_rpc_buckets[i];
 
@@ -220,8 +219,6 @@ void homa_sock_unlink(struct homa_sock *hsk)
  * @hsk:       Socket to shut down.
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
-	__acquires(&hsk->lock)
-	__releases(&hsk->lock)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
@@ -229,6 +226,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	int i = 0;
 #endif /* See strip.py */
 
+	tt_record1("Starting shutdown for socket %d", hsk->port);
 	homa_sock_lock(hsk);
 	if (hsk->shutdown) {
 		homa_sock_unlock(hsk);
@@ -262,10 +260,13 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	rcu_read_unlock();
 
 	homa_sock_lock(hsk);
-	list_for_each_entry(interest, &hsk->request_interests, request_links)
-		wake_up_process(interest->thread);
-	list_for_each_entry(interest, &hsk->response_interests, response_links)
-		wake_up_process(interest->thread);
+	while (!list_empty(&hsk->interests)) {
+		interest = list_first_entry(&hsk->interests,
+					    struct homa_interest, links);
+		__list_del_entry(&interest->links);
+		atomic_set_release(&interest->ready, 1);
+		wake_up(&interest->wait_queue);
+	}
 	homa_sock_unlock(hsk);
 
 #ifndef __STRIP__ /* See strip.py */
@@ -287,6 +288,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		kfree(hsk->buffer_pool);
 		hsk->buffer_pool = NULL;
 	}
+	tt_record1("Finished shutdown for socket %d", hsk->port);
 }
 
 /**

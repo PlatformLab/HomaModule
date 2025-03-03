@@ -2,6 +2,7 @@
 
 HOMA_OBJS := homa_devel.o \
 	homa_incoming.o \
+	homa_interest.o \
 	homa_outgoing.o \
 	homa_peer.o \
 	homa_pool.o \
@@ -52,6 +53,7 @@ check:
 LINUX_SRC_DIR ?= ../net-next
 HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
 CP_HDRS := homa_impl.h \
+	   homa_interest.h \
 	   homa_peer.h \
 	   homa_pool.h \
 	   homa_rpc.h \

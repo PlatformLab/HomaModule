@@ -390,7 +390,6 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	}
 	if (state == UNIT_RCVD_MSG)
 		return srpc;
-	list_del_init(&srpc->ready_links);
 	srpc->state = RPC_IN_SERVICE;
 	if (state == UNIT_IN_SERVICE)
 		return srpc;

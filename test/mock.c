@@ -46,11 +46,13 @@ int mock_ip6_xmit_errors;
 int mock_ip_queue_xmit_errors;
 int mock_kmalloc_errors;
 int mock_kthread_create_errors;
+int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
 int mock_trylock_errors;
 int mock_vmalloc_errors;
+int mock_wait_intr_irq_errors;
 
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
@@ -67,6 +69,11 @@ int mock_xmit_log_verbose;
  * the contents of the homa_info from packets.
  */
 int mock_xmit_log_homa_info;
+
+/* If a test sets this variable to nonzero, calls to wake_up and
+ * wake_up_all will be logged.
+ */
+int mock_log_wakeups;
 
 /* If a test sets this variable to nonzero, call_rcu_sched will log
  * whenever it is invoked.
@@ -163,6 +170,14 @@ u64 mock_ns;
 /* Add this value to mock_ns every time sched_clock is invoked. */
 u64 mock_ns_tick;
 
+/* If values are present here, use then as the return values from
+ * sched_clock, without considering mock_ns or mock_ns_ticks.
+ */
+#define MAX_CLOCK_VALS 10
+u64 mock_clock_vals[MAX_CLOCK_VALS];
+int mock_next_clock_val = 0;
+int mock_num_clock_vals = 0;
+
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
  */
@@ -229,13 +244,14 @@ unsigned long vmemmap_base;
 kmem_buckets kmalloc_caches[NR_KMALLOC_TYPES];
 #endif
 int __preempt_count;
-struct pcpu_hot pcpu_hot = {.cpu_number = 1};
+struct pcpu_hot pcpu_hot = {.cpu_number = 1, .current_task = &mock_task};
 char sock_flow_table[RPS_SOCK_FLOW_TABLE_SIZE(1024)];
 struct net_hotdata net_hotdata = {
 	.rps_cpu_mask = 0x1f,
 	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
 };
 int debug_locks;
+struct static_call_key __SCK__might_resched;
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
@@ -275,6 +291,12 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->truesize = size;
 	skb->dev = &mock_net_device;
 	return skb;
+}
+
+int autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
+			     int sync, void *key)
+{
+	return 0;
 }
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
@@ -369,6 +391,14 @@ int debug_lockdep_rcu_enabled(void)
 	return 0;
 }
 #endif
+
+int do_wait_intr_irq(wait_queue_head_t *, wait_queue_entry_t *)
+{
+	UNIT_HOOK("do_wait_intr_irq");
+	if (mock_check_error(&mock_wait_intr_irq_errors))
+		return -ERESTARTSYS;
+	return 0;
+}
 
 void dst_release(struct dst_entry *dst)
 {
@@ -570,6 +600,13 @@ void inet_unregister_protosw(struct inet_protosw *p)
 
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 		struct lock_class_key *key)
+{}
+
+void init_wait_entry(struct wait_queue_entry *wq_entry, int flags)
+{}
+
+void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name,
+			   struct lock_class_key *)
 {}
 
 void iov_iter_init(struct iov_iter *i, unsigned int direction,
@@ -797,6 +834,11 @@ void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 	return mock_kmalloc(size, gfpflags);
 }
 
+void __might_sleep(const char *file, int line)
+{
+	UNIT_HOOK("might_sleep");
+}
+
 void *mock_kmalloc(size_t size, gfp_t flags)
 {
 	void *block;
@@ -923,6 +965,9 @@ int netif_receive_skb(struct sk_buff *skb)
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
+	UNIT_HOOK("prepare_to_wait");
+	if (mock_check_error(&mock_prepare_to_wait_errors))
+		return -ERESTARTSYS;
 	return 0;
 }
 
@@ -1017,6 +1062,13 @@ void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 	mock_total_spin_locks++;
 }
 
+void __lockfunc _raw_spin_lock_irq(raw_spinlock_t *lock)
+{
+	UNIT_HOOK("spin_lock");
+	mock_active_spin_locks++;
+	mock_total_spin_locks++;
+}
+
 void __raw_spin_lock_init(raw_spinlock_t *lock, const char *name,
 			  struct lock_class_key *key, short inner)
 {}
@@ -1034,6 +1086,11 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
+	mock_active_spin_locks--;
+}
+
+void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)
+{
 	mock_active_spin_locks--;
 }
 
@@ -1082,6 +1139,10 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 
 u64 sched_clock(void)
 {
+	if (mock_next_clock_val < mock_num_clock_vals) {
+		mock_next_clock_val++;
+		return mock_clock_vals[mock_next_clock_val - 1];
+	}
 	mock_ns += mock_ns_tick;
 	return mock_ns;
 }
@@ -1089,6 +1150,11 @@ u64 sched_clock(void)
 void schedule(void)
 {
 	UNIT_HOOK("schedule");
+}
+
+int __SCT__might_resched(void)
+{
+	return 0;
 }
 
 void security_sk_classify_flow(const struct sock *sk,
@@ -1298,7 +1364,21 @@ long wait_woken(struct wait_queue_entry *wq_entry, unsigned int mode,
 int __wake_up(struct wait_queue_head *wq_head, unsigned int mode,
 		int nr_exclusive, void *key)
 {
+	if (!mock_log_wakeups)
+		return 0;
+	if (nr_exclusive == 1)
+		unit_log_printf("; ", "wake_up");
+	else
+		unit_log_printf("; ", "wake_up_all");
 	return 0;
+}
+
+void __wake_up_locked(struct wait_queue_head *wq_head, unsigned int mode,
+		      int nr)
+{
+	if (!mock_log_wakeups)
+		return;
+	unit_log_printf("; ", "wake_up_locked");
 }
 
 int wake_up_process(struct task_struct *tsk)
@@ -1534,6 +1614,31 @@ void mock_rpc_put(struct homa_rpc *rpc)
 }
 
 /**
+ * mock_set_clock_vals() - Specify one or more clock values to be returned
+ * by the next calls to sched_clock(). The list of arguments must be
+ * terminated by a zero value (which will not be used as a clock value).
+ * @t:    The first clock reading to return.
+ */
+void mock_set_clock_vals(u64 t, ...)
+{
+	va_list args;
+
+	mock_clock_vals[0] = t;
+	mock_num_clock_vals = 1;
+	va_start(args, t);
+	while (mock_num_clock_vals < MAX_CLOCK_VALS) {
+		u64 time = va_arg(args, u64);
+
+		if (time == 0)
+			break;
+		mock_clock_vals[mock_num_clock_vals] = time;
+		mock_num_clock_vals++;
+	}
+	va_end(args);
+	mock_next_clock_val = 0;
+}
+
+/**
  * mock_set_core() - Set internal state that indicates the "current core".
  * @num:     Integer identifier for a core.
  */
@@ -1747,6 +1852,7 @@ void mock_teardown(void)
 	int count;
 
 	pcpu_hot.cpu_number = 1;
+	pcpu_hot.current_task = &mock_task;
 	cpu_khz = 1000000;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
@@ -1757,6 +1863,8 @@ void mock_teardown(void)
 	mock_cycles = 0;
 	mock_ns = 0;
 	mock_ns_tick = 0;
+	mock_next_clock_val = 0;
+	mock_num_clock_vals = 0;
 	mock_ipv6 = mock_ipv6_default;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
@@ -1764,7 +1872,9 @@ void mock_teardown(void)
 	mock_ip_queue_xmit_errors = 0;
 	mock_kmalloc_errors = 0;
 	mock_kthread_create_errors = 0;
+	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
+	mock_wait_intr_irq_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
 	mock_bpage_shift = 16;
@@ -1778,6 +1888,7 @@ void mock_teardown(void)
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
 	mock_xmit_log_homa_info = 0;
+	mock_log_wakeups = 0;
 	mock_mtu = 0;
 	mock_max_skb_frags = MAX_SKB_FRAGS;
 	mock_numa_mask = 5;

@@ -251,8 +251,6 @@ struct homa_rpc {
 	/* Valid bits for @flags:
 	 * RPC_PKTS_READY -        The RPC has input packets ready to be
 	 *                         copied to user space.
-	 * RPC_HANDING_OFF -       The RPC has been handed off to a waiting
-	 *                         thread but not yet received by that thread.
 	 * APP_NEEDS_LOCK -        Means that code in the application thread
 	 *                         needs the RPC lock (e.g. so it can start
 	 *                         copying data to user space) so others
@@ -262,10 +260,13 @@ struct homa_rpc {
 	 *                         preventing data copies to user space from
 	 *                         starting (and they limit throughput at
 	 *                         high network speeds).
+	 * RPC_PRIVATE -           This RPC will be waited on in "private" mode,
+	 *                         where the app explicitly requests the
+	 *                         response from this particular RPC.
 	 */
 #define RPC_PKTS_READY        1
-#define RPC_HANDING_OFF       2
 #define APP_NEEDS_LOCK        4
+#define RPC_PRIVATE           8
 
 	/**
 	 * @refs: Number of unmatched calls to homa_rpc_hold; it's not safe
@@ -325,8 +326,7 @@ struct homa_rpc {
 	struct hlist_node hash_links;
 
 	/**
-	 * @ready_links: Used to link this object into
-	 * @hsk->ready_requests or @hsk->ready_responses.
+	 * @ready_links: Used to link this object into @hsk->ready_rpcs.
 	 */
 	struct list_head ready_links;
 
@@ -348,10 +348,10 @@ struct homa_rpc {
 	struct list_head dead_links;
 
 	/**
-	 * @interest: Describes a thread that wants to be notified when
-	 * msgin is complete, or NULL if none.
+	 * @private_interest: If there is a thread waiting for this RPC in
+	 * homa_wait_private, then this points to that thread's interest.
 	 */
-	struct homa_interest *interest;
+	struct homa_interest *private_interest;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -537,6 +537,16 @@ static inline void homa_rpc_put(struct homa_rpc *rpc)
 static inline bool homa_is_client(u64 id)
 {
 	return (id & 1) == 0;
+}
+
+/**
+ * homa_rpc_needs_attention() - Returns true if @rpc has failed or if
+ * its incoming message is ready for attention by an application thread
+ * (e.g., packets are ready to copy to user space).
+ */
+static inline bool homa_rpc_needs_attention(struct homa_rpc *rpc)
+{
+	return (rpc->error != 0 || atomic_read(&rpc->flags) & RPC_PKTS_READY);
 }
 
 #endif /* _HOMA_RPC_H */
