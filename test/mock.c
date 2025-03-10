@@ -1046,6 +1046,11 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	return 1;
 }
 
+int rcu_read_lock_any_held(void)
+{
+	return 1;
+}
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 int rcu_read_lock_held(void)
 {
