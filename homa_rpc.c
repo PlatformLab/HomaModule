@@ -382,7 +382,21 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 
 		/* Collect buffers and freeable RPCs. */
 		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, dead_links) {
-			if (atomic_read(&rpc->refs) != 0) {
+			int refs;
+
+			/* Make sure that all outstanding uses of the RPC have
+			 * completed. We can only be sure if the reference
+			 * count is zero when we're holding the lock. Note:
+			 * it isn't safe to block while locking the RPC here,
+			 * since we hold the socket lock.
+			 */
+			if (homa_rpc_try_lock(rpc)) {
+				refs = atomic_read(&rpc->refs);
+				homa_rpc_unlock(rpc);
+			} else {
+				refs = 1;
+			}
+			if (refs != 0) {
 				INC_METRIC(disabled_rpc_reaps, 1);
 				continue;
 			}
@@ -436,13 +450,6 @@ release:
 		for (i = 0; i < num_rpcs; i++) {
 			rpc = rpcs[i];
 			UNIT_LOG("; ", "reaped %llu", rpc->id);
-			/* Lock and unlock the RPC before freeing it. This
-			 * is needed to deal with races where the code
-			 * that invoked homa_rpc_end hasn't unlocked the
-			 * RPC yet.
-			 */
-			homa_rpc_lock(rpc);
-			homa_rpc_unlock(rpc);
 
 			if (unlikely(rpc->msgin.num_bpages))
 				homa_pool_release_buffers(rpc->hsk->buffer_pool,

@@ -586,6 +586,30 @@ TEST_F(homa_rpc, homa_rpc_reap__protected_and_reap_all)
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 	EXPECT_EQ(0, self->hsk.dead_skbs);
 }
+TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_locked)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 1000, 2000);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+2, 1000, 2000);
+
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	homa_rpc_end(crpc1);
+	homa_rpc_end(crpc2);
+	unit_log_clear();
+	self->homa.reap_limit = 3;
+	mock_trylock_errors = 2;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, false));
+	EXPECT_STREQ("reaped 1236", unit_log_get());
+	EXPECT_EQ(1, homa_metrics_per_cpu()->disabled_rpc_reaps);
+	unit_log_clear();
+	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->disabled_rpc_reaps);
+	EXPECT_STREQ("reaped 1234", unit_log_get());
+}
 TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_refs)
 {
 	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
@@ -604,12 +628,15 @@ TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_refs)
 	self->homa.reap_limit = 3;
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1236", unit_log_get());
+	EXPECT_EQ(1, homa_metrics_per_cpu()->disabled_rpc_reaps);
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
+	EXPECT_EQ(2, homa_metrics_per_cpu()->disabled_rpc_reaps);
 	EXPECT_STREQ("", unit_log_get());
 	homa_rpc_put(crpc1);
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
+	EXPECT_EQ(2, homa_metrics_per_cpu()->disabled_rpc_reaps);
 }
 TEST_F(homa_rpc, homa_rpc_reap__hit_limit_in_msgout_packets)
 {
