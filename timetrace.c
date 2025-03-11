@@ -684,7 +684,7 @@ void tt_printk(void)
 	static atomic_t active;
 
 	if (atomic_xchg(&active, 1)) {
-		pr_notice("concurrent call to %s aborting\n", __func__);
+		pr_err("concurrent call to %s aborting\n", __func__);
 		return;
 	}
 	if (!init)
@@ -692,7 +692,7 @@ void tt_printk(void)
 	atomic_inc(&tt_freeze_count);
 	tt_find_oldest(pos);
 
-	pr_notice("cpu_khz: %u\n", cpu_khz);
+	pr_err("cpu_khz: %u\n", cpu_khz);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
@@ -723,10 +723,11 @@ void tt_printk(void)
 
 		snprintf(msg, sizeof(msg), event->format, event->arg0,
 			 event->arg1, event->arg2, event->arg3);
-		pr_notice("%lu [C%02d] %s\n",
+		pr_err("%lu [C%02d] %s\n",
 			  (unsigned long)event->timestamp,
 			  current_core, msg);
 	}
+	pr_err("Finished dumping timetrace to syslog\n");
 
 	atomic_dec(&tt_freeze_count);
 	atomic_set(&active, 0);
@@ -808,6 +809,10 @@ done:
  */
 void tt_dbg1(char *msg, ...)
 {
+	pr_err("tt_dbg1 is dumping timetrace\n");
+	tt_freeze();
+	tt_printk();
+	pr_err("Finished dumping timetrace\n");
 }
 
 /**
