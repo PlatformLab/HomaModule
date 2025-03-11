@@ -141,21 +141,21 @@ uint64_t last_stats_time = 0;
 
 /**
  * @last_client_rpcs: entries correspond to @experiments; total number of
- * client RPCS completed by that experiment as of the last time we printed
+ * client RPCs completed by that experiment as of the last time we printed
  * statistics.
  */
 std::vector<uint64_t> last_client_rpcs;
 
 /**
  * @last_client_bytes_out: entries correspond to @experiments; total amount
- * of data sent in request messages by client RPCS in that experiment as
+ * of data sent in request messages by client RPCs in that experiment as
  * of the last time we printed statistics.
  */
 std::vector<uint64_t> last_client_bytes_out;
 
 /**
  * @last_client_bytes_in: entries correspond to @experiments; total
- * amount of data received in response messages for client RPCS in that
+ * amount of data received in response messages for client RPCs in that
  * experiment as of the last time we printed statistics.
  */
 std::vector<uint64_t> last_client_bytes_in;
@@ -2819,7 +2819,7 @@ void client_stats(uint64_t now)
 			}
 		}
 		if (outstanding_rpcs != 0)
-			log(NORMAL, "Outstanding client RPCS for %s "
+			log(NORMAL, "Outstanding client RPCs for %s "
 					"experiment: %lu\n",
 					exp.c_str(), outstanding_rpcs);
 		last_client_rpcs[i] = client_rpcs;
