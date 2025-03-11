@@ -7,6 +7,8 @@
 #ifndef _HOMA_DEVEL_H
 #define _HOMA_DEVEL_H
 
+#include "timetrace.h"
+
 struct homa;
 struct homa_rpc;
 
@@ -34,6 +36,41 @@ static inline u32 tt_addr(const struct in6_addr x)
 	return ipv6_addr_v4mapped(&x) ? ntohl(x.in6_u.u6_addr32[3])
 			: (x.in6_u.u6_addr32[3] ? ntohl(x.in6_u.u6_addr32[3])
 			: ntohl(x.in6_u.u6_addr32[1]));
+}
+
+/**
+ * addr_valid() - Determine whether a given address is a valid address
+ * within kernel memory.
+ * @addr:    Address to check
+ */
+static inline int addr_valid(void *addr)
+{
+#ifdef __UNIT_TEST__
+	return 1;
+#else
+#define HIGH_BITS 0xffff800000000000
+	u64 int_addr = (u64) addr;
+
+	return (int_addr & HIGH_BITS) == HIGH_BITS;
+#endif /* __UNIT_TEST__ */
+}
+
+static inline void check_addr_valid(void *addr, char *info)
+{
+#ifndef __UNIT_TEST__
+#define HIGH_BITS 0xffff800000000000
+	u64 int_addr = (u64) addr;
+
+	if ((int_addr & HIGH_BITS) != HIGH_BITS) {
+		pr_err("Bogus address 0x%px (%s))\n", addr, info);
+		tt_record("Freezing timetrace because of bogus address");
+		tt_record(info);
+		tt_freeze();
+		tt_printk();
+		pr_err("Finished dumping timetrace\n");
+		BUG_ON(1);
+	}
+#endif /* __UNIT_TEST__ */
 }
 
 #ifndef __STRIP__ /* See strip.py */
