@@ -58,3 +58,6 @@ for line in f:
             (this_time - first_time)/(1000.0 *cpu_ghz),
             (this_time - prev_time)/(1000.0 * cpu_ghz), this_event))
     prev_time = this_time
+
+if cpu_ghz == None:
+    print("Couldn't find initial line with clock speed", file=sys.stderr)
