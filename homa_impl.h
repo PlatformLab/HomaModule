@@ -68,9 +68,10 @@
 #endif /* See strip.py */
 
 /* Forward declarations. */
-struct homa_peer;
-struct homa_sock;
 struct homa;
+struct homa_peer;
+struct homa_rpc;
+struct homa_sock;
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"

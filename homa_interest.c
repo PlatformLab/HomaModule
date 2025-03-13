@@ -71,14 +71,16 @@ int homa_interest_init_private(struct homa_interest *interest,
  */
 int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 {
-	u64 start, block_start, blocked_time, now;
 	struct homa_sock *hsk = interest->hsk;
 	int result = 0;
 	int iteration;
 	int wait_err;
 
+#ifndef __STRIP__ /* See strip.py */
+	u64 start, block_start, blocked_time, now;
 	start = sched_clock();
 	blocked_time = 0;
+#endif /* See strip.py */
         interest->blocked = 0;
 
 	/* This loop iterates in order to poll and/or reap dead RPCS. */
@@ -99,22 +101,27 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 			goto done;
 		}
 
+#ifndef __STRIP__ /* See strip.py */
 		now = sched_clock();
 		per_cpu(homa_offload_core,
 			raw_smp_processor_id()).last_app_active = now;
 		if (now - start >= 1000 * hsk->homa->poll_usecs)
 			break;
+#else /* See strip.py */
+		break;
+#endif /* See strip.py */
 	}
 
 	interest->blocked = 1;
-	block_start = now;
+	IF_NO_STRIP(block_start = now);
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
 			atomic_read_acquire(&interest->ready) != 0);
-	blocked_time = sched_clock() - block_start;
+	IF_NO_STRIP(blocked_time = sched_clock() - block_start);
 	if (wait_err == -ERESTARTSYS)
 		result = -EINTR;
 
 done:
+#ifndef __STRIP__ /* See strip.py */
 	if (interest->blocked) {
 		INC_METRIC(slow_wakeups, 1);
 		INC_METRIC(blocked_ns, blocked_time);
@@ -122,6 +129,7 @@ done:
 		INC_METRIC(fast_wakeups, 1);
 	}
 	INC_METRIC(poll_ns, sched_clock() - start - blocked_time);
+#endif /* See strip.py */
 	return result;
 }
 

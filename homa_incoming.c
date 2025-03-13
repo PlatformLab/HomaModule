@@ -1233,11 +1233,13 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		if (rpc->msgin.length >= 0 &&
 		    rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0) {
+#ifndef __STRIP__ /* See strip.py */
 			if (iteration == 0) {
 				tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
 						rpc->id, current->pid);
 				INC_METRIC(fast_wakeups, 1);
 			}
+#endif /* See strip.py */
 			break;
 		}
 
@@ -1309,8 +1311,10 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				hsk->sock.sk_data_ready(&hsk->sock);
 			}
 			homa_sock_unlock(hsk);
+#ifndef __STRIP__ /* See strip.py */
 			if (iteration == 0)
 				INC_METRIC(fast_wakeups, 1);
+#endif /* See strip.py */
 		} else {
 			homa_interest_init_shared(&interest, hsk);
 			homa_sock_unlock(hsk);
@@ -1391,6 +1395,14 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		atomic_set_release(&interest->ready, 1);
 		wake_up(&interest->wait_queue);
 		INC_METRIC(handoffs_thread_waiting, 1);
+
+#ifndef __STRIP__ /* See strip.py */
+		/* Update the last_app_active time for the thread's core, so Homa
+		 * Homa will try to avoid assigning any work there.
+		 */
+		per_cpu(homa_offload_core, interest->core).last_app_active =
+				sched_clock();
+#endif /* See strip.py */
 	} else if (list_empty(&rpc->ready_links)) {
 		list_add_tail(&rpc->ready_links, &hsk->ready_rpcs);
 		hsk->sock.sk_data_ready(&hsk->sock);

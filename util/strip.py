@@ -18,6 +18,7 @@ The following code is removed automatically:
   * Blocks conditionalized on '#ifdef __UNIT_TEST__'
   * UNIT_LOG and UNIT_HOOK statements
   * INC_METRIC statements
+  * IF_NO_STRIP statements
 
 Additional stripping is controlled by #ifdefs. The #ifdefs allow the
 code to be used in three ways:
@@ -260,10 +261,12 @@ def scan(file):
             check_braces = True
             continue
 
-        # Strip tt_record and INC_METRIC statements.
+        # Strip tt_record, INC_METRIC, and IF_NO_STRIP statements.
         match = re.match('(//[ \t]*)?tt_record[1-4]?[(]', pline)
         if not match:
             match = re.match('(//[ \t]*)?INC_METRIC[(]', pline)
+        if not match:
+            match = re.match('(//[ \t]*)?IF_NO_STRIP[(]', pline)
         if match:
             # If this is the only statement in its block, delete the
             # outer block statement (if, while, etc.). Don't delete case
