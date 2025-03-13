@@ -300,8 +300,8 @@ char *homa_metrics_print(struct homa *homa)
 		  m->fifo_grants_no_incoming);
 		M("disabled_reaps            %15llu  Reaper invocations that were disabled\n",
 		  m->disabled_reaps);
-		M("disabled_rpc_reaps        %15llu  Disabled RPCs skipped by reaper\n",
-		  m->disabled_rpc_reaps);
+		M("deferred_rpc_reaps        %15llu  RPCs skipped by reaper because still in use\n",
+		  m->deferred_rpc_reaps);
 		M("reaper_calls              %15llu  Reaper invocations that were not disabled\n",
 		  m->reaper_calls);
 		M("reaper_dead_skbs          %15llu  Sum of hsk->dead_skbs across all reaper calls\n",

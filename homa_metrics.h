@@ -550,10 +550,10 @@ struct homa_metrics {
 	u64 disabled_reaps;
 
 	/**
-	 * @disabled_rpc_reaps: total number of times that the reaper skipped
-	 * an RPC because reaping was disabled for that particular RPC
+	 * @deferred_rpc_reaps: total number of times that the reaper skipped
+	 * an RPC because it was still in use elsewhere.
 	 */
-	u64 disabled_rpc_reaps;
+	u64 deferred_rpc_reaps;
 
 	/**
 	 * @reaper_calls: total number of times that the reaper was invoked

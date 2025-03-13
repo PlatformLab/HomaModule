@@ -395,7 +395,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 				refs = 1;
 			}
 			if (refs != 0) {
-				INC_METRIC(disabled_rpc_reaps, 1);
+				INC_METRIC(deferred_rpc_reaps, 1);
 				continue;
 			}
 			rpc->magic = 0;
