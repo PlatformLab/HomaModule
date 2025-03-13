@@ -1233,8 +1233,11 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		if (rpc->msgin.length >= 0 &&
 		    rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0) {
-			if (iteration == 0)
+			if (iteration == 0) {
+				tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
+						rpc->id, current->pid);
 				INC_METRIC(fast_wakeups, 1);
+			}
 			break;
 		}
 
@@ -1249,6 +1252,8 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
 		homa_interest_unlink_private(&interest);
+		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
+				rpc->id, current->pid, interest.blocked);
 
 		/* If homa_interest_wait returned an error but the interest
 		 * actually got ready, then ignore the error.
@@ -1293,6 +1298,8 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 		if (!list_empty(&hsk->ready_rpcs)) {
 			rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc,
 					ready_links);
+			tt_record2("homa_wait_shared found rpc id %d, pid %d via ready_rpcs, blocked 0",
+					rpc->id, current->pid);
 			homa_rpc_hold(rpc);
 			list_del_init(&rpc->ready_links);
 			if (!list_empty(&hsk->ready_rpcs)) {
@@ -1327,10 +1334,10 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				rpc = ERR_PTR(-ESHUTDOWN);
 				goto done;
 			}
+			tt_record3("homa_wait_shared found rpc id %d, pid %d via handoff, blocked %d",
+				   rpc->id, current->pid, interest.blocked);
 		}
 
-		tt_record3("homa_wait_shared received RPC handoff, id %d, socket %d, pid %d",
-			   rpc->id, rpc->hsk->port, current->pid);
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
@@ -1361,8 +1368,6 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_interest *interest;
 
-	tt_record1("homa_rpc_handoff called for id %d", rpc->id);
-
 	if (atomic_read(&rpc->flags) & RPC_PRIVATE) {
 		homa_interest_notify_private(rpc);
 		return;
@@ -1382,12 +1387,15 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		list_del_init(&interest->links);
 		interest->rpc = rpc;
 		homa_rpc_hold(rpc);
+		tt_record1("homa_rpc_handoff handing off id %d", rpc->id);
 		atomic_set_release(&interest->ready, 1);
 		wake_up(&interest->wait_queue);
 		INC_METRIC(handoffs_thread_waiting, 1);
 	} else if (list_empty(&rpc->ready_links)) {
 		list_add_tail(&rpc->ready_links, &hsk->ready_rpcs);
 		hsk->sock.sk_data_ready(&hsk->sock);
+		tt_record2("homa_rpc_handoff queued id %d for port %d",
+			   rpc->id, hsk->port);
 	}
 	homa_sock_unlock(hsk);
 }

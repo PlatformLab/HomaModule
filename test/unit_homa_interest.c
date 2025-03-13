@@ -141,6 +141,8 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 	homa_interest_init_shared(&interest, &self->hsk);
 	atomic_set(&interest.ready, 1);
 	EXPECT_EQ(0, homa_interest_wait(&interest, 0));
+	EXPECT_EQ(0, interest.blocked);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups);
 
 	homa_interest_unlink_shared(&interest);
 }
@@ -187,6 +189,7 @@ TEST_F(homa_interest, homa_interest_wait__nonblocking)
 	self->homa.poll_usecs = 100;
 
 	EXPECT_EQ(EAGAIN, -homa_interest_wait(&interest, 1));
+	EXPECT_EQ(0, interest.blocked);
 	homa_interest_unlink_shared(&interest);
 }
 TEST_F(homa_interest, homa_interest_wait__poll_then_block)
@@ -206,6 +209,7 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	EXPECT_EQ(0, homa_metrics_per_cpu()->blocked_ns);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->fast_wakeups);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups);
+	EXPECT_EQ(1, interest.blocked);
 	homa_interest_unlink_shared(&interest);
 }
 TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
@@ -217,6 +221,7 @@ TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
 	self->homa.poll_usecs = 0;
 
 	EXPECT_EQ(EINTR, -homa_interest_wait(&interest, 0));
+	EXPECT_EQ(1, interest.blocked);
 	homa_interest_unlink_shared(&interest);
 }
 TEST_F(homa_interest, homa_interest_wait__time_metrics)

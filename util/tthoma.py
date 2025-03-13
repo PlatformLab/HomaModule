@@ -27,7 +27,7 @@ import time
 # file; it is created by AnalyzeRpcs. Keys are RPC ids, values are dictionaries
 # of info about that RPC, with the following elements (some elements may be
 # missing if the RPC straddled the beginning or end of the timetrace):
-# found:             Time when homa_wait_for_message found the RPC
+# found:             Last time when homa_wait_for_message found the RPC
 # gro_core:          Core that handled GRO processing for this RPC
 # gro_data:          List of <time, offset, priority> tuples for all incoming
 #                    data packets processed by GRO
@@ -37,7 +37,7 @@ import time
 #                    grant packets processed by GRO. Deprecated: use
 #                    gro_grant_pkts instead
 # gro_grant_pkts:    List of all incoming grant packets processed by GRO
-# handoff:           Time when RPC was handed off to waiting thread
+# handoff:           Last time when RPC was handed off to waiting thread
 # id:                RPC's identifier
 # in_length:         Size of the incoming message, in bytes, or None if unknown
 # ip_xmits:          Dictionary mapping from offset to ip_*xmit time for
@@ -47,7 +47,7 @@ import time
 #                    (name of trace file without extension)
 # out_length:        Size of the outgoing message, in bytes
 # peer:              Address of the peer host
-# queued:            Time when RPC was added to ready queue (no
+# queued:            Last time when RPC was added to ready queue (no
 #                    waiting threads). At most one of 'handoff' and 'queued'
 #                    will be present.
 # resend_rx:         List of <time, offset, length> tuples for all incoming
@@ -1308,17 +1308,19 @@ class Dispatcher:
 
     patterns.append({
         'name': 'rpc_queued',
-        'regexp': 'homa_rpc_handoff finished queuing id ([0-9]+)'
+        'regexp': 'homa_rpc_handoff queued id ([0-9]+)'
     })
 
     def __wait_found_rpc(self, trace, time, core, match, interests):
         id = int(match.group(1))
+        type = match.group(2)
+        blocked = int(match.group(3))
         for interest in interests:
-            interest.tt_wait_found_rpc(trace, time, core, id)
+            interest.tt_wait_found_rpc(trace, time, core, id, type, blocked)
 
     patterns.append({
         'name': 'wait_found_rpc',
-        'regexp': 'homa_wait_for_message found rpc id ([0-9]+)'
+        'regexp': 'homa_wait_[^ ]+ found rpc id ([0-9]+).* via ([a-z_]+), blocked ([0-9]+)'
     })
 
     def __poll_success(self, trace, time, core, match, interests):
@@ -2383,16 +2385,15 @@ class AnalyzeDelay:
     def tt_rpc_queued(self, trace, time, core, id):
         self.rpc_queued[id] = time
 
-    def tt_wait_found_rpc(self, trace, time, core, id):
+    def tt_wait_found_rpc(self, trace, time, core, id, type, blocked):
         if id in self.rpc_handoffs:
             delay = time - self.rpc_handoffs[id]
-            if id in self.poll_success:
-                self.app_poll_wakeups.append([delay, time, trace['node']])
-                del self.poll_success[id]
-            else:
+            if blocked:
                 self.app_sleep_wakeups.append([delay, time, trace['node']])
+            else:
+                self.app_poll_wakeups.append([delay, time, trace['node']])
             del self.rpc_handoffs[id]
-        elif id in self.rpc_queued:
+        elif id in self.rpc_queued and blocked == 0:
             self.app_queue_wakeups.append([time - self.rpc_queued[id], time,
                     trace['node']])
             del self.rpc_queued[id]
@@ -3650,7 +3651,7 @@ class AnalyzeHandoffs:
                     node_req_handoffs[rpc['node']].append(delay)
                 else:
                     node_resp_handoffs[rpc['node']].append(delay)
-            elif 'queued' in rpc:
+            elif 'queued' in rpc:q
                 delay = rpc['found'] - rpc['queued']
                 if id & 1:
                     node_req_queued[rpc['node']].append(delay)
@@ -5733,7 +5734,7 @@ class AnalyzeRpcs:
         global rpcs
         rpcs[id]['recvmsg_done'] = t
 
-    def tt_wait_found_rpc(self, trace, t, core, id):
+    def tt_wait_found_rpc(self, trace, t, core, id, type, blocked):
         rpcs[id]['found'] = t
 
     def tt_copy_out_start(self, trace, t, core, id):

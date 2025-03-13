@@ -16,12 +16,6 @@
  */
 struct homa_interest {
 	/**
-	 * @ready: Nonzero means the interest is ready for attention: either
-	 * there is an RPC that needs attention or @hsk has been shutdown.
-	 */
-	atomic_t ready;
-
-	/**
 	 * @rpc: If ready is set, then this holds an RPC that needs
 	 * attention, or NULL if this is a shared interest and hsk has
 	 * been shutdown. If ready is not set, this will be NULL if the
@@ -31,10 +25,22 @@ struct homa_interest {
 	struct homa_rpc *rpc;
 
 	/**
+	 * @ready: Nonzero means the interest is ready for attention: either
+	 * there is an RPC that needs attention or @hsk has been shutdown.
+	 */
+	atomic_t ready;
+
+	/**
 	 * @core: Core on which homa_wait_*was invoked.  This is a hint
 	 * used for load balancing (see balance.txt).
 	 */
 	int core;
+
+	/**
+	 * @blocked: Zero means a handoff was received without the thread
+	 * needing to block; nonzero means the thread blocked.
+	 */
+	int blocked;
 
 	/**
 	 * @wait_queue: Used to block the thread while waiting (will never

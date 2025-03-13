@@ -21,9 +21,10 @@ void homa_interest_init_shared(struct homa_interest *interest,
 			       struct homa_sock *hsk)
 	__must_hold(&hsk->lock)
 {
-	atomic_set(&interest->ready, 0);
 	interest->rpc = NULL;
+	atomic_set(&interest->ready, 0);
 	interest->core = raw_smp_processor_id();
+	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = hsk;
 	list_add(&interest->links, &hsk->interests);
@@ -45,9 +46,10 @@ int homa_interest_init_private(struct homa_interest *interest,
 	if (rpc->private_interest)
 		return -EINVAL;
 
-	atomic_set(&interest->ready, 0);
 	interest->rpc = rpc;
+	atomic_set(&interest->ready, 0);
 	interest->core = raw_smp_processor_id();
+	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = rpc->hsk;
 	rpc->private_interest = interest;
@@ -71,13 +73,13 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 {
 	u64 start, block_start, blocked_time, now;
 	struct homa_sock *hsk = interest->hsk;
-	int fast_wakeup = 1;
 	int result = 0;
 	int iteration;
 	int wait_err;
 
 	start = sched_clock();
 	blocked_time = 0;
+        interest->blocked = 0;
 
 	/* This loop iterates in order to poll and/or reap dead RPCS. */
 	for (iteration = 0; ; iteration++) {
@@ -104,7 +106,7 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 			break;
 	}
 
-	fast_wakeup = 0;
+	interest->blocked = 1;
 	block_start = now;
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
 			atomic_read_acquire(&interest->ready) != 0);
@@ -113,11 +115,12 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 		result = -EINTR;
 
 done:
-	if (fast_wakeup)
-		INC_METRIC(fast_wakeups, 1);
-	else
+	if (interest->blocked) {
 		INC_METRIC(slow_wakeups, 1);
-	INC_METRIC(blocked_ns, blocked_time);
+		INC_METRIC(blocked_ns, blocked_time);
+	} else {
+		INC_METRIC(fast_wakeups, 1);
+	}
 	INC_METRIC(poll_ns, sched_clock() - start - blocked_time);
 	return result;
 }
