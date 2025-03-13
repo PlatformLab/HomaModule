@@ -674,6 +674,15 @@ TEST_F(homa_plumbing, homa_recvmsg__bogus_flags)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
+TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
+{
+	struct homa_pool *saved_pool = self->hsk.buffer_pool;
+
+	self->hsk.buffer_pool = NULL;
+	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+	self->hsk.buffer_pool = saved_pool;
+}
 TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 {
 	EXPECT_EQ(0, -homa_pool_get_pages(self->hsk.buffer_pool, 2,

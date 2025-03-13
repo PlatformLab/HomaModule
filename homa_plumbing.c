@@ -1189,6 +1189,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		result = -EINVAL;
 		goto done;
 	}
+	if (!hsk->buffer_pool) {
+		result = -EINVAL;
+		goto done;
+	}
 	result = homa_pool_release_buffers(hsk->buffer_pool, control.num_bpages,
 					   control.bpage_offsets);
 	control.num_bpages = 0;
