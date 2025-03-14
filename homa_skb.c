@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
-/* This file contains functions for allocating and freeing sk_buffs. In
- * particular, this file implements efficient management of the memory used
- * by sk_buffs.
+/* This file contains functions for allocating and freeing sk_buffs for
+ * outbound packets. In particular, this file implements efficient management
+ * of the memory used by sk_buffs.
  */
 
 #include "homa_impl.h"
