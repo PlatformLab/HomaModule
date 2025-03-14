@@ -135,7 +135,7 @@ max_unsched = 0
 # elapsed_time: Total time interval covered by the trace
 traces = {}
 
-# Peer address -> node names. Computed by AnalyzeRpcs.
+# Peer address -> node name. Computed by AnalyzeRpcs.
 peer_nodes = {}
 
 # This variable holds information about every data packet in the traces.
@@ -409,6 +409,18 @@ def get_first_interval_end(node=None):
     if interval_end < start:
         interval_end += options.interval
     return interval_end
+
+def get_first_end():
+    """
+    Return the earliest time at which any of the traces ends (i.e. the last
+    time that is present in all of the trace files).
+    """
+    earliest = 1e20
+    for trace in traces.values():
+        last = trace['last_time']
+        if last < earliest:
+            earliest = last
+    return earliest
 
 def get_first_time():
     """
@@ -3651,7 +3663,7 @@ class AnalyzeHandoffs:
                     node_req_handoffs[rpc['node']].append(delay)
                 else:
                     node_resp_handoffs[rpc['node']].append(delay)
-            elif 'queued' in rpc:q
+            elif 'queued' in rpc:
                 delay = rpc['found'] - rpc['queued']
                 if id & 1:
                     node_req_queued[rpc['node']].append(delay)
@@ -4880,7 +4892,9 @@ class AnalyzeNet:
         print('--------------')
         print('Network delay (including sending NIC, network, receiving NIC, and GRO')
         print('backup) for packets with GRO processing on a particular core.')
-        print('Pkts:      Total data packets processed by Core on Node')
+        print('Node:      Receiving node for packets')
+        print('Core:      Core identifier on Node')
+        print('Pkts:      Total incoming data packets processed by Core on Node')
         print('AvgDelay:  Average end-to-end delay from ip_*xmit invocation to '
                 'GRO (usec)')
         print('MaxDelay:  Maximum end-to-end delay, and the time when the max packet was')
@@ -5504,6 +5518,10 @@ class AnalyzePackets:
                     else:
                         pkt['tso_length'] = tso_length
 
+            if not 'rx_node' in pkt:
+                if 'peer' in tx_rpc:
+                    pkt['rx_node'] = peer_nodes[tx_rpc['peer']]
+
             # Make sure that all of the smaller packets deriving from each
             # TSO packet are represented and properly populated (if one of
             # these packets is lost it won't be represented yet).
@@ -5541,6 +5559,91 @@ class AnalyzePackets:
                         pkt['segments'].append(pkt2)
         for pid, pkt in new_pkts:
             packets[pid] = pkt
+
+#------------------------------------------------
+# Analyzer: pairs
+#------------------------------------------------
+class AnalyzePairs:
+    """
+    For each pair of nodes, outputs statistics about packet delays and
+    backlog as of the end of the traces.
+    """
+    def __init__(self, dispatcher):
+        dispatcher.interest('AnalyzePackets')
+
+    def output(self):
+        global traces, options, packets
+        print('\n-------------------')
+        print('Analyzer: pairs')
+        print('-------------------')
+
+        # node -> dictionary mapping from node to the statistics about
+        # the node pair.
+        pairs = {}
+        backlog_time = get_first_end()
+
+        for src in get_sorted_nodes():
+            dsts = {}
+            for dst in get_sorted_nodes():
+                if dst == src:
+                    continue
+                dsts[dst] = {'delays': [], 'backlog': 0, 'xmit': 0}
+            pairs[src] = dsts
+
+        for pkt in packets.values():
+            if not 'nic' in pkt:
+                continue
+            if not 'tx_node' in pkt:
+                continue
+            if not 'rx_node' in pkt:
+                continue
+            src = pkt['tx_node']
+            dst = pkt['rx_node']
+            if pkt['nic'] >= traces[dst]['last_time']:
+                continue
+            if pkt['nic'] < traces[dst]['first_time']:
+                continue
+            info = pairs[pkt['tx_node']][pkt['rx_node']]
+            info['xmit'] += 1
+            if 'gro' in pkt:
+                info['delays'].append(pkt['gro'] - pkt['nic'])
+            if not ('gro' in pkt) or (pkt['gro'] > backlog_time):
+                info['backlog'] += 1
+
+        print('Statistics about data packets sent between each distinct pair')
+        print('of nodes:')
+        print('Source:   Node that transmitted packets')
+        print('Dest:     Node to which packets were sent')
+        print('Xmits:    Total number of packets sent from Source to Dest')
+        print('Backlog:  Number of packets that had been sent but not recevied')
+        print('          as of the end of the traces (time %.1f)' %
+                (backlog_time))
+        print('DelayP50: 10th percentile delay (usec NIC to GRO) for received pakcets')
+        print('DelayP50: 50th percentile delay (usec NIC to GRO) for received pakcets')
+        print('DelayP90: 90th percentile delay (usec NIC to GRO) for received pakcets')
+        print('DelayP99: 99th percentile delay (usec NIC to GRO) for received pakcets')
+        print()
+        print('Source   Dest  Xmits  Backlog DelayP10 DelayP50 DelayP90 DelayP99')
+        first = True
+        for src in get_sorted_nodes():
+            if not first:
+                print('')
+            for dst in get_sorted_nodes():
+                if dst == src:
+                    continue
+                info = pairs[src][dst]
+                delays = sorted(info['delays'])
+                if delays:
+                    print('%6s %6s %6d   %6d  %7.1f  %7.1f  %7.1f  %7.1f' % (
+                            src, dst, info['xmit'], info['backlog'],
+                            delays[10*len(delays)//100],
+                            delays[len(delays)//2],
+                            delays[90*len(delays)//100],
+                            delays[99*len(delays)//100]))
+                else:
+                    print('%6s %6s %6d %6d %6d' % (src, dst, info['xmit'],
+                            info['backlog'], len(delays)))
+            first = False
 
 #------------------------------------------------
 # Analyzer: rpcs
@@ -6098,7 +6201,7 @@ class AnalyzeRx:
     """
     Generates one data file for each node showing various statistics
     related to incoming message reception as a function of time, including
-    data rate, live messages, info about outstnanding grants, and where
+    data rate, live messages, info about outstanding grants, and where
     incoming data packets are curently located (qdisc, net, gro). Requires
     the --data and --gbps options.
     """
@@ -6830,40 +6933,45 @@ class AnalyzeTemp:
             dispatcher.interest('AnalyzePackets')
 
     def output(self):
-        global traces, options, packets
+        global traces, options, packets, rpcs
         print('\n-------------------')
         print('Analyzer: temp')
         print('-------------------')
 
+        print('Peer nodes: %s\n' % (peer_nodes))
+        delays = []
         pkts = []
         node3pkts = 0
         long = 50
         node = options.node
         for pkt in packets.values():
+            if pkt['id'] == 500018274:
+                print(pkt)
             if not 'nic' in pkt:
                 continue
-            if not 'free_tx_skb' in pkt:
+            if not ('tx_node' in pkt) or (pkt['tx_node'] != 'node4'):
                 continue
-            if not 'gro' in pkt:
+            if not ('rx_node' in pkt) or (pkt['rx_node'] != 'node1'):
                 continue
-            max_gro = get_max_gro(pkt)
-            if (node != None) and ('tx_node' in pkt) and (node != pkt['tx_node']):
-                continue
-            node3pkts += 1
-            delta = pkt['free_tx_skb'] - max_gro
-            if delta < long:
-                continue
-            pkts.append([delta, pkt])
-        if pkts:
-            print('%d/%d packets (%.1f%%) had free delays > %d usec'% (
-                    len(pkts), node3pkts, 100*len(pkts)/node3pkts, long))
-        else:
-            print('No packets had long free delays')
-        for delay, pkt in sorted(pkts, reverse=True, key=lambda t : t[0]):
-            print('RPC id %10d (%s), offset %6d, nic %9.3f, max_gro %9.3f, free %9.3f, '
-                    'free delay %7.3f' % (pkt['id'], pkt['tx_node'], pkt['offset'],
-                    pkt['nic'], get_max_gro(pkt), pkt['free_tx_skb'],
-                    pkt['free_tx_skb'] - pkt['gro']))
+            pkts.append(pkt)
+        if not pkts:
+            print('No data packets made it from node1 to node4 in the traces')
+            return
+        pkts.sort(key=lambda d : d['nic'])
+        print('RpcId     Offset       NIC       GRO   Delay')
+        for pkt in pkts:
+            if 'gro' in pkt:
+                delay = pkt['gro'] - pkt['nic']
+                delays.append(delay)
+                print('%9d %6d %9.3f %9.3f %7.1f' % (pkt['id'], pkt['offset'],
+                        pkt['nic'], pkt['gro'], pkt['gro'] - pkt['nic']))
+            else:
+                print('%9d %6d %9.3f N/A' % (pkt['id'], pkt['offset'],
+                        pkt['nic']))
+        delays.sort()
+        print('\nDelays: average %.1f us, P50 %.1f us, P90 %.1f us, P99 %.1f us' %
+                (sum(delays)/len(delays), delays[50*len(delays)//100],
+                delays[90*len(delays)//100], delays[99*len(delays)//100]))
 
     def output_long_qdisc(self):
         global traces, options, packets
