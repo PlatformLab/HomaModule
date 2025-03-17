@@ -47,6 +47,15 @@ void mock_resend_data(struct homa_rpc *rpc, int start, int end,
 		mock_resend_data(rpc, start, end, priority);
 #endif /* See strip.py */
 
+/* Compute the expected "truesize" value for a Homa packet, given
+ * the number of bytes of message data in the packet.
+ */
+static int true_size(int msg_bytes)
+{
+	return msg_bytes + SKB_TRUESIZE(SKB_DATA_ALIGN(HOMA_SKB_EXTRA +
+		HOMA_IPV6_HEADER_LENGTH + sizeof(struct homa_data_hdr)));
+}
+
 FIXTURE(homa_outgoing) {
 	struct in6_addr client_ip[1];
 	int client_port;
@@ -366,6 +375,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 			unit_iov_iter((void *) 1000, HOMA_MAX_MESSAGE_LENGTH+1),
 			0));
 	homa_rpc_unlock(crpc);
+	EXPECT_EQ(0, crpc->msgout.skb_memory);
+	EXPECT_EQ(0, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
 {
@@ -523,6 +534,24 @@ TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 			unit_log_get());
 	EXPECT_EQ(4200, homa_get_skb_info(crpc->msgout.packets)->data_bytes);
 }
+TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_new_data_packet)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+
+	ASSERT_FALSE(crpc == NULL);
+        mock_set_ipv6(&self->hsk);
+	mock_copy_data_errors = 2;
+
+	EXPECT_EQ(EFAULT, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 3000), 0));
+	homa_rpc_unlock(crpc);
+	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
+	EXPECT_EQ(1, crpc->msgout.num_skbs);
+	EXPECT_EQ(true_size(1400), crpc->msgout.skb_memory);
+	EXPECT_EQ(true_size(1400),
+		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
+}
 TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
 {
 	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
@@ -535,6 +564,8 @@ TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
 			unit_iov_iter((void *) 1000, 3000), 0));
 	EXPECT_EQ(0, crpc->msgout.num_skbs);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
+	EXPECT_EQ(0, crpc->msgout.skb_memory);
+	EXPECT_EQ(0, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_message_out_fill__add_to_throttled)
@@ -569,6 +600,24 @@ TEST_F(homa_outgoing, homa_message_out_fill__too_short_for_pipelining)
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_message_out_fill__packet_memory_accounting)
+{
+	struct homa_rpc *crpc = homa_rpc_new_client(&self->hsk,
+			&self->server_addr);
+
+        mock_set_ipv6(&self->hsk);
+
+	ASSERT_FALSE(crpc == NULL);
+	ASSERT_EQ(0, -homa_message_out_fill(crpc,
+			unit_iov_iter((void *) 1000, 3000), 0));
+	homa_rpc_unlock(crpc);
+	unit_log_clear();
+	EXPECT_EQ(3, crpc->msgout.num_skbs);
+	EXPECT_EQ(2 * true_size(1400) + true_size(200),
+		  crpc->msgout.skb_memory);
+	EXPECT_EQ(2 * true_size(1400) + true_size(200),
+		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 
 TEST_F(homa_outgoing, homa_xmit_control__server_request)

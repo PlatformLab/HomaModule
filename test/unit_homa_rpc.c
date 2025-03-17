@@ -664,6 +664,34 @@ TEST_F(homa_rpc, homa_rpc_reap__hit_limit_in_msgout_packets)
 	EXPECT_STREQ("1234", dead_rpcs(&self->hsk));
 	EXPECT_EQ(4, self->hsk.dead_skbs);
 }
+TEST_F(homa_rpc, homa_rpc_reap__skb_memory_accounting)
+{
+	struct homa_rpc *crpc1 = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 5000, 2000);
+	struct homa_rpc *crpc2 = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id+2, 5000, 100);
+
+	ASSERT_NE(NULL, crpc1);
+	ASSERT_NE(NULL, crpc2);
+	crpc1->msgout.skb_memory = 2000;
+	crpc2->msgout.skb_memory = 3000;
+	homa_rpc_end(crpc1);
+	homa_rpc_end(crpc2);
+	unit_log_clear();
+	EXPECT_STREQ("1234 1236", dead_rpcs(&self->hsk));
+	refcount_set(&self->hsk.sock.sk_wmem_alloc, 5000);
+	EXPECT_EQ(9, self->hsk.dead_skbs);
+	unit_log_clear();
+	self->homa.reap_limit = 7;
+	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, false));
+	EXPECT_STREQ("reaped 1234", unit_log_get());
+	unit_log_clear();
+	EXPECT_STREQ("1236", dead_rpcs(&self->hsk));
+	EXPECT_EQ(1, self->hsk.dead_skbs);
+	EXPECT_EQ(3000, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+}
 TEST_F(homa_rpc, homa_rpc_reap__release_buffers)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

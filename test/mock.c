@@ -288,7 +288,7 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	skb->users.refs.counter = 1;
 	skb->_skb_refdst = 0;
 	ip_hdr(skb)->saddr = 0;
-	skb->truesize = size;
+	skb->truesize = SKB_TRUESIZE(size);
 	skb->dev = &mock_net_device;
 	return skb;
 }

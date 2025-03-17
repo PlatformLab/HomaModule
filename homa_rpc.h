@@ -31,6 +31,12 @@ struct homa_message_out {
 	int num_skbs;
 
 	/**
+	 * @skb_memory: Total number of bytes of memory occupied by
+	 * the sk_buffs for this message.
+	 */
+	int skb_memory;
+
+	/**
 	 * @copied_from_user: Number of bytes of the message that have
 	 * been copied from user space into skbs in @packets.
 	 */

@@ -7,6 +7,11 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
+#ifdef __UNIT_TEST__
+#define KSELFTEST_NOT_MAIN 1
+#include "test/kselftest_harness.h"
+#endif
+
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.
  * @socktab:  The object to initialize; previous contents are discarded.
@@ -219,6 +224,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
+	u64 tx_memory;
 #ifndef __STRIP__ /* See strip.py */
 	int i = 0;
 #endif /* See strip.py */
@@ -279,6 +285,16 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	while (!list_empty(&hsk->dead_rpcs))
 		homa_rpc_reap(hsk, 1000);
 #endif /* See strip.py */
+
+	tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
+	if (tx_memory != 0) {
+		pr_err("homa_sock_shutdown found sk_wmem_alloc %llu bytes, port %d\n",
+			tx_memory, hsk->port);
+#ifdef __UNIT_TEST__
+	FAIL(" sk_wmem_alloc %llu after shutdown for port %d", tx_memory,
+	     hsk->port);
+#endif
+	}
 
 	if (hsk->buffer_pool) {
 		homa_pool_destroy(hsk->buffer_pool);

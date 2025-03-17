@@ -38,23 +38,6 @@ static inline u32 tt_addr(const struct in6_addr x)
 			: ntohl(x.in6_u.u6_addr32[1]));
 }
 
-/**
- * addr_valid() - Determine whether a given address is a valid address
- * within kernel memory.
- * @addr:    Address to check
- */
-static inline int addr_valid(void *addr)
-{
-#ifdef __UNIT_TEST__
-	return 1;
-#else
-#define HIGH_BITS 0xffff800000000000
-	u64 int_addr = (u64) addr;
-
-	return (int_addr & HIGH_BITS) == HIGH_BITS;
-#endif /* __UNIT_TEST__ */
-}
-
 static inline void check_addr_valid(void *addr, char *info)
 {
 #ifndef __UNIT_TEST__

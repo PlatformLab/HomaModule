@@ -261,6 +261,7 @@ TEST_F(homa_plumbing, homa_socket__success)
 {
 	struct homa_sock sock;
 
+	memset(&sock, 0, sizeof(sock));
 	EXPECT_EQ(0, homa_socket(&sock.sock));
 	homa_sock_destroy(&sock);
 }

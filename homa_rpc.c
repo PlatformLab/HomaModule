@@ -432,6 +432,8 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 			rpcs[num_rpcs] = rpc;
 			num_rpcs++;
 			list_del(&rpc->dead_links);
+			WARN_ON(refcount_sub_and_test(rpc->msgout.skb_memory,
+						      &hsk->sock.sk_wmem_alloc));
 			if (num_rpcs >= batch_size)
 				goto release;
 		}

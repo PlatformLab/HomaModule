@@ -23,17 +23,13 @@
  */
 void homa_message_out_init(struct homa_rpc *rpc, int length)
 {
+	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
-	rpc->msgout.num_skbs = 0;
-	rpc->msgout.copied_from_user = 0;
-	rpc->msgout.packets = NULL;
 	rpc->msgout.next_xmit = &rpc->msgout.packets;
-	rpc->msgout.next_xmit_offset = 0;
 #ifndef __STRIP__ /* See strip.py */
 	rpc->msgout.unscheduled = rpc->hsk->homa->unsched_bytes;
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
-	rpc->msgout.sched_priority = 0;
 #endif /* See strip.py */
 	rpc->msgout.init_ns = sched_clock();
 }
@@ -269,14 +265,14 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	int err;
 
 	homa_rpc_hold(rpc);
-	homa_message_out_init(rpc, iter->count);
-	if (unlikely(rpc->msgout.length > HOMA_MAX_MESSAGE_LENGTH ||
-		     rpc->msgout.length == 0)) {
+	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH ||
+	             iter->count == 0)) {
 		tt_record2("homa_message_out_fill found bad length %d for id %d",
-			   rpc->msgout.length, rpc->id);
+			   iter->count, rpc->id);
 		err = -EINVAL;
 		goto error;
 	}
+	homa_message_out_init(rpc, iter->count);
 
 	/* Compute the geometry of packets. */
 	dst = homa_get_dst(rpc->peer, rpc->hsk);
@@ -372,6 +368,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		last_link = &(homa_get_skb_info(skb)->next_skb);
 		*last_link = NULL;
 		rpc->msgout.num_skbs++;
+		rpc->msgout.skb_memory += skb->truesize;
 		rpc->msgout.copied_from_user = rpc->msgout.length - bytes_left;
 		if (overlap_xmit && list_empty(&rpc->throttled_links) &&
 #ifndef __STRIP__ /* See strip.py */
@@ -386,12 +383,14 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	tt_record2("finished copy from user space for id %d, length %d",
 		   rpc->id, rpc->msgout.length);
 	INC_METRIC(sent_msg_bytes, rpc->msgout.length);
+	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
 	homa_rpc_put(rpc);
 	if (!overlap_xmit && xmit)
 		homa_xmit_data(rpc, false);
 	return 0;
 
 error:
+	refcount_add(rpc->msgout.skb_memory, &rpc->hsk->sock.sk_wmem_alloc);
 	homa_rpc_put(rpc);
 	return err;
 }
