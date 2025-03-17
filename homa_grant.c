@@ -438,9 +438,9 @@ void homa_grant_recalc(struct homa *homa)
 
 			active_rpcs[i] = rpc;
 			homa_rpc_hold(rpc);
-			atomic_set(&rpc->msgin.rank, i);
 			atomic_set(&homa->active_remaining[i],
 				   rpc->msgin.bytes_remaining);
+			atomic_set(&rpc->msgin.rank, i);
 
 			/* Compute the priority to use for this RPC's grants:
 			 * if there aren't enough RPCs to consume all of the
