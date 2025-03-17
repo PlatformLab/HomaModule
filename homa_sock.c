@@ -204,9 +204,6 @@ void homa_sock_unlink(struct homa_sock *hsk)
 {
 	struct homa_socktab *socktab = hsk->homa->port_map;
 
-	/* If any scans refer to this socket, advance them to refer to
-	 * the next socket instead.
-	 */
 	spin_lock_bh(&socktab->write_lock);
 	hlist_del_rcu(&hsk->socktab_links);
 	spin_unlock_bh(&socktab->write_lock);

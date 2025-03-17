@@ -270,7 +270,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 
 #ifndef __STRIP__ /* See strip.py */
 	/* The following line must occur before the socket is locked. This is
-	 * necessary because homa__rpc releases the RPC lock and
+	 * necessary because homa_grant_end_rpc releases the RPC lock and
 	 * reacquires it.
 	 */
 	homa_grant_end_rpc(rpc);
