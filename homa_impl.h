@@ -190,7 +190,8 @@ struct homa {
 
 	/**
 	 * @active_rpcs: pointers to all of the RPCs that we will grant to
-	 * right now. Slot 0 is highest priority.
+	 * right now. Slot 0 is highest priority. A value may be NULL if the
+	 * RPC has ended.
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 
@@ -241,11 +242,10 @@ struct homa {
 	atomic_t total_incoming ____cacheline_aligned_in_smp;
 
 	/**
-	 * @needy_ranks: A bitmask selecting all of the indices in @active_rpcs
-	 * whose RPCs could not be fully granted because @total_incoming
-	 * hit the @max_incoming limit.
+	 * @incoming_hit_limit: Nonzero means that one or more RPCs could
+	 * not be fully granted because @total_incoming exceeded @max_incoming.
 	 */
-	atomic_t needy_ranks;
+	atomic_t incoming_hit_limit;
 #endif /* See strip.py */
 
 	/**
