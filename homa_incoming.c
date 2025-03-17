@@ -52,7 +52,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 	rpc->msgin.bytes_remaining = length;
 #ifndef __STRIP__ /* See strip.py */
 	rpc->msgin.granted = (unsched > length) ? length : unsched;
-	atomic_set(&rpc->msgin.rank, -1);
+	atomic_set(&rpc->msgin.rank, 0);
 #endif /* See strip.py */
 	err = homa_pool_allocate(rpc);
 	if (err != 0)

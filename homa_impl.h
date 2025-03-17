@@ -189,17 +189,18 @@ struct homa {
 	int num_active_rpcs;
 
 	/**
-	 * @active_rpcs: pointers to all of the RPCs that we will grant to
-	 * right now. Slot 0 is highest priority. A value may be NULL if the
-	 * RPC has ended.
+	 * @active_rpcs: Hints about RPCs that we are currently granting to
+	 * (lower index in the array means higher priority). Entries may be
+	 * NULL or may refer to RPCs that no longer exist, so can't dereference
+	 * these pointers.
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
 
 	/**
-	 * @bytes_remaining: entry i in this array contains a copy of
+	 * @active_remaining: entry i in this array contains a copy of
 	 * active_rpcs[i]->msgin.bytes_remaining. These values can be
 	 * updated by the corresponding RPCs without holding the grantable
-	 * lock. Perfect consistency isn't required; this is used only to
+	 * lock. Perfect consistency isn't required; this are hints used to
 	 * detect when the priority ordering of messages changes.
 	 */
 	atomic_t active_remaining[HOMA_MAX_GRANTS];

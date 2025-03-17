@@ -616,7 +616,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__new_message_bumps_existing)
 
 	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
 	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
-	self->homa.max_overcommit = 2;
+	self->homa.max_overcommit = 3;
 	homa_grant_recalc(&self->homa);
 	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
 	EXPECT_EQ(1, atomic_read(&rpc2->msgin.rank));
@@ -628,7 +628,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__new_message_bumps_existing)
 	EXPECT_EQ(10000, rpc3->msgin.granted);
 	EXPECT_EQ(10000, atomic_read(&rpc3->msgin.rec_incoming));
 	EXPECT_EQ(1, atomic_read(&rpc3->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc2->msgin.rank));
+	EXPECT_EQ(2, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
 }
 TEST_F(homa_grant, homa_grant_check_rpc__new_message_cant_be_granted)
@@ -649,7 +649,6 @@ TEST_F(homa_grant, homa_grant_check_rpc__new_message_cant_be_granted)
 	homa_grant_check_rpc(rpc3);
 	EXPECT_EQ(0, rpc3->msgin.granted);
 	EXPECT_EQ(0, atomic_read(&rpc3->msgin.rec_incoming));
-	EXPECT_EQ(-1, atomic_read(&rpc3->msgin.rank));
 	EXPECT_EQ(1, atomic_read(&rpc2->msgin.rank));
 	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
 }
@@ -663,17 +662,17 @@ TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_negative_rank)
 	self->homa.max_overcommit = 2;
 	homa_grant_recalc(&self->homa);
 	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
+	EXPECT_EQ(rpc1, self->homa.active_rpcs[0]);
 	EXPECT_EQ(1, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc3->msgin.rank));
+	EXPECT_EQ(rpc2, self->homa.active_rpcs[1]);
 	EXPECT_EQ(0, rpc3->msgin.granted);
 
 	rpc3->msgin.bytes_remaining = 15000;
 	homa_grant_check_rpc(rpc3);
 	EXPECT_EQ(35000, rpc3->msgin.granted);
 	EXPECT_EQ(10000, atomic_read(&rpc3->msgin.rec_incoming));
-	EXPECT_EQ(0, atomic_read(&rpc3->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(1, atomic_read(&rpc1->msgin.rank));
+	EXPECT_EQ(rpc1, self->homa.active_rpcs[1]);
+	EXPECT_EQ(rpc3, self->homa.active_rpcs[0]);
 }
 TEST_F(homa_grant, homa_grant_check_rpc__upgrade_priority_from_positive_rank)
 {
@@ -777,7 +776,6 @@ TEST_F(homa_grant, homa_grant_check_rpc__grant_to_self_and_recalc)
 	self->homa.max_overcommit = 3;
 	homa_grant_recalc(&self->homa);
 	EXPECT_EQ(2, atomic_read(&rpc3->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc4->msgin.rank));
 
 	atomic_set(&self->homa.total_incoming, self->homa.max_incoming - 10000);
 	atomic_set(&self->homa.incoming_hit_limit, 0);
@@ -822,7 +820,7 @@ TEST_F(homa_grant, homa_grant_recalc__basics)
 	EXPECT_EQ(30000, atomic_read(&self->homa.active_remaining[2]));
 
 	EXPECT_EQ(2, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc4->msgin.rank));
+	EXPECT_EQ(0, rpc4->msgin.granted);
 	EXPECT_NE(0, homa_metrics_per_cpu()->grant_recalc_ns);
 }
 TEST_F(homa_grant, homa_grant_recalc__skip_recalc)
@@ -840,24 +838,27 @@ TEST_F(homa_grant, homa_grant_recalc__skip_recalc)
 	EXPECT_EQ(2, atomic_read(&self->homa.grant_recalc_count));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_recalc_skips);
 }
-TEST_F(homa_grant, homa_grant_recalc__clear_existing_active_rpcs)
+TEST_F(homa_grant, homa_grant_recalc__clear_unused_entries_in_active_rpcs)
 {
-	struct homa_rpc *rpc1;
+	struct homa_rpc *rpc1, *rpc2, *rpc3;
 
-	rpc1 = test_rpc(self, 100, self->server_ip, 40000);
-	test_rpc(self, 102, self->server_ip, 30000);
-	test_rpc(self, 104, self->server_ip, 25000);
-	test_rpc(self, 106, self->server_ip, 35000);
-	self->homa.active_rpcs[0] = rpc1;
-	atomic_set(&rpc1->msgin.rank, 10);
-	self->homa.num_active_rpcs = 1;
+	rpc1 = test_rpc(self, 100, self->server_ip, 20000);
+	rpc2 = test_rpc(self, 102, self->server_ip, 30000);
+	rpc3 = test_rpc(self, 104, self->server_ip, 25000);
 	self->homa.max_incoming = 100000;
-	self->homa.max_rpcs_per_peer = 10;
-	self->homa.max_overcommit = 2;
+	self->homa.max_overcommit = 3;
 
 	homa_grant_recalc(&self->homa);
-	EXPECT_EQ(-1, atomic_read(&rpc1->msgin.rank));
-	EXPECT_EQ(2, self->homa.num_active_rpcs);
+	EXPECT_EQ(rpc1, self->homa.active_rpcs[0]);
+	EXPECT_EQ(rpc3, self->homa.active_rpcs[1]);
+	EXPECT_EQ(rpc2, self->homa.active_rpcs[2]);
+
+	homa_rpc_end(rpc1);
+	homa_rpc_end(rpc2);
+	homa_grant_recalc(&self->homa);
+	EXPECT_EQ(rpc3, self->homa.active_rpcs[0]);
+	EXPECT_EQ(NULL, self->homa.active_rpcs[1]);
+	EXPECT_EQ(NULL, self->homa.active_rpcs[2]);
 }
 TEST_F(homa_grant, homa_grant_recalc__use_only_lowest_priorities)
 {
@@ -1117,7 +1118,7 @@ TEST_F(homa_grant, homa_grant_find_oldest__no_good_candidates)
 	EXPECT_EQ(NULL, self->homa.oldest_rpc);
 }
 
-TEST_F(homa_grant, homa_grant_rpc_free__rpc_not_grantable)
+TEST_F(homa_grant, homa_grant_end_rpc__rpc_not_grantable)
 {
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
@@ -1127,7 +1128,7 @@ TEST_F(homa_grant, homa_grant_rpc_free__rpc_not_grantable)
 	homa_grant_end_rpc(rpc);
 	EXPECT_EQ(7000, atomic_read(&self->homa.total_incoming));
 }
-TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
+TEST_F(homa_grant, homa_grant_end_rpc__in_active_list)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
 
@@ -1136,20 +1137,18 @@ TEST_F(homa_grant, homa_grant_free_rpc__in_active_list)
 	rpc3 = test_rpc(self, 104, self->server_ip, 40000);
 	self->homa.max_overcommit = 2;
 	homa_grant_recalc(&self->homa);
-	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
-	EXPECT_EQ(1, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc3->msgin.rank));
+	EXPECT_EQ(rpc1, self->homa.active_rpcs[0]);
+	EXPECT_EQ(rpc2, self->homa.active_rpcs[1]);
 	EXPECT_EQ(20000, atomic_read(&self->homa.total_incoming));
 	EXPECT_EQ(10000, atomic_read(&rpc1->msgin.rec_incoming));
 
 	unit_log_clear();
 	homa_grant_end_rpc(rpc1);
-	EXPECT_EQ(-1, atomic_read(&rpc1->msgin.rank));
-	EXPECT_EQ(0, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(1, atomic_read(&rpc3->msgin.rank));
+	EXPECT_EQ(rpc2, self->homa.active_rpcs[0]);
+	EXPECT_EQ(rpc3, self->homa.active_rpcs[1]);
 	EXPECT_EQ(20000, atomic_read(&self->homa.total_incoming));
 }
-TEST_F(homa_grant, homa_grant_free_rpc__not_in_active_list)
+TEST_F(homa_grant, homa_grant_end_rpc__not_in_active_list)
 {
 	struct homa_rpc *rpc1, *rpc2, *rpc3;
 
@@ -1160,7 +1159,6 @@ TEST_F(homa_grant, homa_grant_free_rpc__not_in_active_list)
 	homa_grant_recalc(&self->homa);
 	EXPECT_EQ(0, atomic_read(&rpc1->msgin.rank));
 	EXPECT_EQ(1, atomic_read(&rpc2->msgin.rank));
-	EXPECT_EQ(-1, atomic_read(&rpc3->msgin.rank));
 	EXPECT_EQ(20000, atomic_read(&self->homa.total_incoming));
 	EXPECT_EQ(0, atomic_read(&rpc3->msgin.rec_incoming));
 	EXPECT_FALSE(list_empty(&rpc3->grantable_links));

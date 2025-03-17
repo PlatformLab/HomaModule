@@ -160,10 +160,9 @@ struct homa_message_in {
 	atomic_t rec_incoming;
 
 	/**
-	 * @rank: The index of this RPC in homa->active_rpcs and
-	 * homa->active_remaining, or -1 if this RPC is not in those arrays.
-	 * Lower number means higher priority. Must be atomic because it
-	 * is read without synchronization.
+	 * @rank: A hint: if homa->active_rpcs[@rank] refers to this RPC then
+	 * the RPC is active and this value indicates the RPC's priority (lower
+	 * is better). Read without synchronization, so must be atomic.
 	 */
 	atomic_t rank;
 

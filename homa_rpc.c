@@ -608,6 +608,8 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 	if (rpc->state == RPC_INCOMING) {
 		int received = rpc->msgin.length
 				- rpc->msgin.bytes_remaining;
+		int rank;
+
 		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes received",
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   received, rpc->msgin.length);
@@ -615,10 +617,12 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 			tt_record4("RPC id %d has incoming %d, granted %d, prio %d", rpc->id,
 				   rpc->msgin.granted - received,
 				   rpc->msgin.granted, rpc->msgin.priority);
+		rank = atomic_read(&rpc->msgin.rank);
+		if (rpc->hsk->homa->active_rpcs[rank] != rpc)
+			rank = -1;
 		tt_record4("RPC id %d: length %d, remaining %d, rank %d",
 			   rpc->id, rpc->msgin.length,
-			   rpc->msgin.bytes_remaining,
-			   atomic_read(&rpc->msgin.rank));
+			   rpc->msgin.bytes_remaining, rank);
 		if (rpc->msgin.num_bpages == 0)
 			tt_record1("RPC id %d is blocked waiting for buffers",
 				   rpc->id);

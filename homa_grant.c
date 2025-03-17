@@ -349,7 +349,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	/* Not a new message; see if we can upgrade the message's priority. */
 	rank = atomic_read(&rpc->msgin.rank);
-	if (rank < 0) {
+	if (homa->active_rpcs[rank] != rpc) {
+		/* RPC not currently active. */
 		if (rpc->msgin.bytes_remaining <
 		    atomic_read(&homa->active_remaining[homa->max_overcommit -
 							1])) {
@@ -371,8 +372,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 	/* Ideally this should be the common case: no need to consider
-		* any other RPCs.
-		*/
+	 * any other RPCs.
+	 */
 	if (!homa_grant_try_send(rpc, homa))
 		goto done;
 
@@ -420,15 +421,16 @@ void homa_grant_recalc(struct homa *homa)
 		atomic_inc(&homa->grant_recalc_count);
 		atomic_set(&homa->incoming_hit_limit, 0);
 
-		/* Clear the existing grant calculation. */
-		for (i = 0; i < homa->num_active_rpcs; i++)
-			atomic_set(&homa->active_rpcs[i]->msgin.rank, -1);
-
 		/* Recompute which RPCs we'll grant to and initialize info
 		 * about them.
 		 */
 		active = homa_grant_pick_rpcs(homa, homa->active_rpcs,
 					      homa->max_overcommit);
+		for (i = active; i < homa->max_overcommit; i++)
+			/* Effectively invalidates @msgin.rank in RPCs that
+			 * are no longer active.
+			 */
+			homa->active_rpcs[i] = NULL;
 		homa->num_active_rpcs = active;
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = homa->active_rpcs[i];
@@ -613,7 +615,7 @@ void homa_grant_end_rpc(struct homa_rpc *rpc)
 
 	if (!list_empty(&rpc->grantable_links)) {
 		homa_grant_remove_rpc(rpc);
-		if (atomic_read(&rpc->msgin.rank) >= 0) {
+		if (homa->active_rpcs[atomic_read(&rpc->msgin.rank)] == rpc) {
 			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			homa_grant_recalc(homa);
@@ -673,16 +675,7 @@ int homa_grantable_lock_slow(struct homa *homa, int recalc)
  */
 void homa_grant_log_tt(struct homa *homa)
 {
-	int i;
-
-	homa_grantable_lock(homa, 0);
-	tt_record1("homa_grant_log_tt found %d active RPCs:",
+	tt_record1("homa_grant_log_tt found %d active RPCs",
 		   homa->num_active_rpcs);
-	for (i = 0; i < homa->num_active_rpcs; i++) {
-		tt_record2("active_rpcs[%d]: id %d", i,
-			   homa->active_rpcs[i]->id);
-		homa_rpc_log_tt(homa->active_rpcs[i]);
-	}
-	homa_grantable_unlock(homa);
 }
 #endif /* See strip.py */
