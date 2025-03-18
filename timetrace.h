@@ -107,7 +107,7 @@ void      tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
 void      tt_dbg1(char *msg, ...);
 void      tt_dbg2(char *msg, ...);
 void      tt_dbg3(char *msg, ...);
-void      tt_find_oldest(int *pos);
+u64       tt_find_oldest(int *pos);
 void      tt_get_messages(char *buffer, size_t length);
 void      tt_print_file(char *path);
 void      tt_printk(void);
