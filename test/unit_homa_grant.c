@@ -35,6 +35,17 @@ static void grantable_spinlock_hook(char *id)
 	mock_ns = 1000;
 }
 
+static struct homa_rpc *hook_rpc;
+static void remove_rpc_hook(char *id)
+{
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_rpc != NULL) {
+		homa_grant_remove_rpc(hook_rpc);
+		hook_rpc = NULL;
+	}
+}
+
 FIXTURE(homa_grant) {
 	struct in6_addr client_ip[5];
 	int client_port;
@@ -304,6 +315,17 @@ TEST_F(homa_grant, homa_grant_remove_rpc__skip_if_not_linked)
 	unit_log_grantables(&self->homa);
 	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 
+	homa_grant_remove_rpc(rpc);
+	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
+}
+TEST_F(homa_grant, homa_grant_remove_rpc__race_in_checking_not_linked)
+{
+	struct homa_rpc *rpc = test_rpc(self, 200, self->server_ip, 20000);
+
+	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
+
+	unit_hook_register(remove_rpc_hook);
+	hook_rpc = rpc;
 	homa_grant_remove_rpc(rpc);
 	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
 }

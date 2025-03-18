@@ -168,6 +168,14 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 
 	homa_grantable_lock(homa, 0);
 
+	/* Must check list again: might have been removed by someone
+	 * else before we got the lock.
+	 */
+	if (list_empty(&rpc->grantable_links)) {
+		homa_grantable_unlock(homa);
+		return;
+	}
+
 	if (homa->oldest_rpc == rpc)
 		homa->oldest_rpc = NULL;
 
