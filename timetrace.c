@@ -286,9 +286,8 @@ void tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
  * complete, since there may have been events that were discarded).
  * @pos:   Array with NPOS elements; will be filled in with the oldest
  *         index in the trace for each core.
- * Return: Time of oldest log entry that should be printed.
  */
-u64 tt_find_oldest(int *pos)
+void tt_find_oldest(int *pos)
 {
 	struct tt_buffer *buffer;
 	u64 start_time = 0;
@@ -319,7 +318,6 @@ u64 tt_find_oldest(int *pos)
 			pos[i] = (pos[i] + 1) & (tt_buffer_size - 1);
 		}
 	}
-	return start_time;
 }
 
 /**
@@ -671,27 +669,19 @@ done:
 /**
  * tt_printk() - Print the contents of the timetrace to the system log.
  * Useful in situations where the system is too unstable to extract a
- * timetrace by reading /proc/timetrace. Note: the timetrace is printed
- * most recent entry first (in the hopes that if buffer overflows
- * disrupt the output, at least the most recent entries will be complete).
+ * timetrace by reading /proc/timetrace.
  */
 void tt_printk(void)
 {
-	/* Index of the oldest entry to return from each tt_buffer. This
-	 * array is too large to allocate on the stack, and we don't want to
-	 * allocate space dynamically (this function could be called at a
-	 * point where the world is going to hell). So, allocate the array
-	 * statically and only allow one concurrent call to this function.
-	 */
-	static int oldest[NR_CPUS];
-	static atomic_t active;
-
-	/* Index of the next entry to consider from each tt_buffer, or -1 if
-	 * the last entry has been processed.
+	/* Index of the next entry to return from each tt_buffer.
+	 * This array is too large to allocate on the stack, and we don't
+	 * want to allocate space dynamically (this function could be
+	 * called at a point where the world is going to hell). So,
+	 * allocate the array statically, and only allow one concurrent
+	 * call to this function.
 	 */
 	static int pos[NR_CPUS];
-	u64 start_time;
-	int i;
+	static atomic_t active;
 
 	if (atomic_xchg(&active, 1)) {
 		pr_err("concurrent call to %s aborting\n", __func__);
@@ -700,34 +690,27 @@ void tt_printk(void)
 	if (!init)
 		return;
 	atomic_inc(&tt_freeze_count);
-	start_time = tt_find_oldest(oldest);
-	for (i = 0; i < nr_cpu_ids; i++) {
-		if (oldest[i] == tt_buffers[i]->next_index)
-			pos[i] = -1;
-		else
-			pos[i] = (tt_buffers[i]->next_index - 1) &
-			         (tt_buffer_size - 1);
-	}
+	tt_find_oldest(pos);
 
-	pr_err("cpu_khz: %u, start: %llu\n", cpu_khz, start_time);
+	pr_err("cpu_khz: %u\n", cpu_khz);
 
 	/* Each iteration of this loop printk's one event. */
 	while (true) {
-		u64 latest_time = 0;
+		u64 earliest_time = ~0;
 		struct tt_event *event;
 		int current_core = -1;
 		char msg[200];
+		int i;
 
-		/* Check all the traces to find the latest available event. */
+		/* Check all the traces to find the earliest available event. */
 		for (i = 0; i < nr_cpu_ids; i++) {
 			struct tt_buffer *buffer = tt_buffers[i];
 
-			if (pos[i] == -1)
-				continue;
 			event = &buffer->events[pos[i]];
-			if (event->timestamp >= latest_time) {
+			if (pos[i] != buffer->next_index &&
+			    event->timestamp < earliest_time) {
 				current_core = i;
-				latest_time = event->timestamp;
+				earliest_time = event->timestamp;
 			}
 		}
 		if (current_core < 0) {
@@ -735,15 +718,12 @@ void tt_printk(void)
 			break;
 		}
 		event = &(tt_buffers[current_core]->events[pos[current_core]]);
-		if (pos[current_core] == oldest[current_core])
-			pos[current_core] = -1;
-		else
-			pos[current_core] = (pos[current_core] - 1)
-					& (tt_buffer_size - 1);
+		pos[current_core] = (pos[current_core] + 1)
+				& (tt_buffer_size - 1);
 
 		snprintf(msg, sizeof(msg), event->format, event->arg0,
 			 event->arg1, event->arg2, event->arg3);
-		pr_notice("%lu [C%02d] %s\n",
+		pr_err("%lu [C%02d] %s\n",
 			  (unsigned long)event->timestamp,
 			  current_core, msg);
 	}

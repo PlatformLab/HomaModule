@@ -36,8 +36,6 @@ f = sys.stdin
 if len(sys.argv) > 1:
     f = open(sys.argv[1])
 
-lines = []
-
 for line in f:
     # Ignore everything up until the initial line containing the clock speed.
     if cpu_ghz == None:
@@ -46,9 +44,6 @@ for line in f:
             cpu_ghz = float(match.group(1))*1e-06
         continue
 
-    lines.append(line)
-
-for line in reversed(lines):
     match = re.match('.* ([0-9.]+) (\[C..\] .+)', line)
     if not match:
         continue
