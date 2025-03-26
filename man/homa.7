@@ -616,6 +616,11 @@ of these messages will be
 This approach was inspired by the paper "Dynamic Queue Length Thresholds
 for Shared-Memory Packet Switches"; the idea is to maintain unused
 granting capacity equal to the window for each of the current messages.
+.TP
+.IR wmem_max
+Maximum amount of memory that may be used for outgoing packet buffers
+by a single socket at a given time.  Output message transmissions will
+block when this limit is reached.
 .SH /PROC FILES
 .PP
 In addition to files for the configuration parameters described above,

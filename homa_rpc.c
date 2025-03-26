@@ -474,6 +474,7 @@ release:
 			rpc->state = 0;
 			kfree(rpc);
 		}
+		homa_sock_wakeup_wmem(hsk);
 		tt_record4("reaped %d skbs, %d rpcs; %d skbs remain for port %d",
 			   num_skbs + rx_frees, num_rpcs, hsk->dead_skbs,
 			   hsk->port);

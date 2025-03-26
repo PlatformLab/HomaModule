@@ -140,6 +140,10 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	int result = 0;
 	int i;
 
+	/* Initialize fields outside the Homa part. */
+	hsk->sock.sk_sndbuf = homa->wmem_max;
+
+	/* Initialize Homa-specific fields. */
 	spin_lock_bh(&socktab->write_lock);
 	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
@@ -287,7 +291,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 #endif /* See strip.py */
 
 	tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
-	if (tx_memory != 0) {
+	if (tx_memory != 1) {
 		pr_err("homa_sock_shutdown found sk_wmem_alloc %llu bytes, port %d\n",
 			tx_memory, hsk->port);
 #ifdef __UNIT_TEST__
@@ -437,3 +441,34 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 	}
 }
 #endif /* See strip.py */
+
+/**
+ * homa_sock_wait_wmem() - Block the thread until @hsk's usage of tx
+ * packet memory drops below the socket's limit.
+ * @hsk:          Socket of interest.
+ * @nonblocking:  If there's not enough memory, return -EWOLDBLOCK instead
+ *                of blocking.
+ * Return: 0 for success, otherwise a negative errno.
+ */
+int homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking)
+{
+	long timeo = hsk->sock.sk_sndtimeo;
+	int result;
+
+	if (nonblocking)
+		timeo = 0;
+	set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
+	tt_record2("homa_sock_wait_wmem waiting on port %d, wmem %d",
+		   hsk->port, refcount_read(&hsk->sock.sk_wmem_alloc));
+	result = wait_event_interruptible_timeout(*sk_sleep(&hsk->sock),
+		               homa_sock_wmem_avl(hsk) || hsk->shutdown,
+			       timeo);
+	tt_record4("homa_sock_wait_wmem woke up on port %d with result %d, wmem %d, signal pending %d",
+		   hsk->port, result, refcount_read(&hsk->sock.sk_wmem_alloc),
+		   signal_pending(current));
+	if (signal_pending(current))
+		return -EINTR;
+	if (result == 0)
+		return -EWOULDBLOCK;
+	return 0;
+}

@@ -376,7 +376,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__message_too_long)
 			0));
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
-	EXPECT_EQ(0, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__zero_length_message)
 {
@@ -549,7 +549,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__error_in_homa_new_data_packet)
 	EXPECT_EQ(1, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, crpc->msgout.num_skbs);
 	EXPECT_EQ(true_size(1400), crpc->msgout.skb_memory);
-	EXPECT_EQ(true_size(1400),
+	EXPECT_EQ(true_size(1400) + 1,
 		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
@@ -565,7 +565,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__rpc_freed_during_copy)
 	EXPECT_EQ(0, crpc->msgout.num_skbs);
 	EXPECT_EQ(RPC_DEAD, crpc->state);
 	EXPECT_EQ(0, crpc->msgout.skb_memory);
-	EXPECT_EQ(0, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	EXPECT_EQ(1, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_outgoing, homa_message_out_fill__add_to_throttled)
@@ -616,7 +616,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__packet_memory_accounting)
 	EXPECT_EQ(3, crpc->msgout.num_skbs);
 	EXPECT_EQ(2 * true_size(1400) + true_size(200),
 		  crpc->msgout.skb_memory);
-	EXPECT_EQ(2 * true_size(1400) + true_size(200),
+	EXPECT_EQ(2 * true_size(1400) + true_size(200) + 1,
 		  refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 

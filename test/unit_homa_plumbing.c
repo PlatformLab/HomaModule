@@ -259,18 +259,20 @@ TEST_F(homa_plumbing, homa_ioc_abort__nonexistent_rpc)
 
 TEST_F(homa_plumbing, homa_socket__success)
 {
-	struct homa_sock sock;
+	struct homa_sock hsk;
 
-	memset(&sock, 0, sizeof(sock));
-	EXPECT_EQ(0, homa_socket(&sock.sock));
-	homa_sock_destroy(&sock);
+	memset(&hsk, 0, sizeof(hsk));
+	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
+	EXPECT_EQ(0, homa_socket(&hsk.sock));
+	homa_sock_destroy(&hsk);
 }
 TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 {
-	struct homa_sock sock;
+	struct homa_sock hsk;
 
+	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_socket(&sock.sock));
+	EXPECT_EQ(ENOMEM, -homa_socket(&hsk.sock));
 }
 
 TEST_F(homa_plumbing, homa_setsockopt__bad_level)
@@ -476,7 +478,7 @@ TEST_F(homa_plumbing, homa_sendmsg__cant_read_args)
 }
 TEST_F(homa_plumbing, homa_sendmsg__illegal_flag)
 {
-	self->sendmsg_args.flags = 2;
+	self->sendmsg_args.flags = 4;
 	EXPECT_EQ(EINVAL, -homa_sendmsg(&self->hsk.inet.sk,
 		&self->sendmsg_hdr, self->sendmsg_hdr.msg_iter.count));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
@@ -1190,6 +1192,14 @@ TEST_F(homa_plumbing, homa_err_handler_v6__protocol_not_supported)
 	kfree_skb(failed);
 }
 
+TEST_F(homa_plumbing, homa_poll__no_tx_buffer_space)
+{
+	struct socket sock = {.sk = &self->hsk.sock};
+
+	self->hsk.sock.sk_sndbuf = 0;
+	EXPECT_EQ(0, homa_poll(NULL, &sock, NULL));
+	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+}
 TEST_F(homa_plumbing, homa_poll__not_readable)
 {
 	struct socket sock = {.sk = &self->hsk.sock};

@@ -219,6 +219,9 @@ char mock_printk_output [5000];
 /* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
 __u16 mock_min_default_port = 0x8000;
 
+/* Used as sk_socket for all sockets created by mock_sock_init. */
+struct socket mock_socket;
+
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
@@ -758,6 +761,17 @@ int ip4_datagram_connect(struct sock *sk, struct sockaddr *uaddr,
 	return 0;
 }
 
+void device_set_wakeup_capable(struct device *dev, bool capable)
+{}
+
+void device_wakeup_disable(struct device *dev)
+{}
+
+int device_wakeup_enable(struct device *dev)
+{
+	return 0;
+}
+
 int filp_close(struct file *, fl_owner_t id)
 {
 	return 0;
@@ -926,7 +940,7 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	sk->sk_lock.owned = 1;
 }
 
-ssize_t __modver_version_show(struct module_attribute *a,
+ssize_t __modver_version_show(const struct module_attribute *a,
 		struct module_kobject *b, char *c)
 {
 	return 0;
@@ -1150,6 +1164,14 @@ u64 sched_clock(void)
 void schedule(void)
 {
 	UNIT_HOOK("schedule");
+}
+
+signed long schedule_timeout(signed long timeout)
+{
+	UNIT_HOOK("schedule_timeout");
+
+	/* Result is time remaining in timeout. */
+	return timeout - 1;
 }
 
 int __SCT__might_resched(void)
@@ -1812,6 +1834,12 @@ int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
+	sk->sk_socket = &mock_socket;
+	memset(&mock_socket, 0, sizeof(mock_socket));
+	refcount_set(&sk->sk_wmem_alloc, 1);
+	init_waitqueue_head(&mock_socket.wq.wait);
+	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
+	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	if (port != 0 && port >= mock_min_default_port)
 		homa->prev_default_port = port - 1;
 	err = homa_sock_init(hsk, homa);

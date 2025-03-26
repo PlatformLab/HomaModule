@@ -131,6 +131,7 @@ int homa_init(struct homa *homa)
 	homa->max_gso_size = 10000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
+	homa->wmem_max = 100000000;
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->busy_usecs = 100;
 	homa->gro_busy_usecs = 5;

@@ -681,7 +681,7 @@ TEST_F(homa_rpc, homa_rpc_reap__skb_memory_accounting)
 	homa_rpc_end(crpc2);
 	unit_log_clear();
 	EXPECT_STREQ("1234 1236", dead_rpcs(&self->hsk));
-	refcount_set(&self->hsk.sock.sk_wmem_alloc, 5000);
+	refcount_set(&self->hsk.sock.sk_wmem_alloc, 5001);
 	EXPECT_EQ(9, self->hsk.dead_skbs);
 	unit_log_clear();
 	self->homa.reap_limit = 7;
@@ -690,7 +690,7 @@ TEST_F(homa_rpc, homa_rpc_reap__skb_memory_accounting)
 	unit_log_clear();
 	EXPECT_STREQ("1236", dead_rpcs(&self->hsk));
 	EXPECT_EQ(1, self->hsk.dead_skbs);
-	EXPECT_EQ(3000, refcount_read(&self->hsk.sock.sk_wmem_alloc));
+	EXPECT_EQ(3001, refcount_read(&self->hsk.sock.sk_wmem_alloc));
 }
 TEST_F(homa_rpc, homa_rpc_reap__release_buffers)
 {
@@ -726,6 +726,18 @@ TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
 	self->homa.reap_limit = 5;
 	homa_rpc_reap(&self->hsk, false);
 	// Test framework will complain if memory not freed.
+}
+TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_end(crpc);
+	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(0, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
 }
 TEST_F(homa_rpc, homa_rpc_reap__nothing_to_reap)
 {

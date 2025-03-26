@@ -494,6 +494,13 @@ static struct ctl_table homa_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
+	{
+		.procname	= "wmem_max",
+		.data		= &homa_data.wmem_max,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
 	{}
 #endif
@@ -831,22 +838,18 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 	int result;
 	u64 start = sched_clock();
 
-	switch (cmd) {
-	case HOMAIOCABORT:
+	if (cmd == HOMAIOCABORT) {
 		result = homa_ioc_abort(sk, karg);
 		INC_METRIC(abort_calls, 1);
 		INC_METRIC(abort_ns, sched_clock() - start);
-		break;
-	case HOMAIOCFREEZE:
+	} else if (cmd == HOMAIOCFREEZE) {
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, pid %d",
 			   current->pid);
 		tt_freeze();
 		result = 0;
-		break;
-	default:
+	} else {
 		pr_notice("Unknown Homa ioctl: %d\n", cmd);
 		result = -EINVAL;
-		break;
 	}
 	return result;
 #else /* See strip.py */
@@ -1033,6 +1036,15 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	    (args.reserved != 0)) {
 		result = -EINVAL;
 		goto error;
+	}
+
+	if (!homa_sock_wmem_avl(hsk)) {
+		result = homa_sock_wait_wmem(hsk,
+					     msg->msg_flags & MSG_DONTWAIT ||
+					     args.flags &
+					     HOMA_SENDMSG_NONBLOCKING);
+		if (result != 0)
+			goto error;
 	}
 
 	if (addr->sa.sa_family != sk->sk_family) {
@@ -1290,11 +1302,19 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	}
 	homa_rpc_unlock(rpc); /* Locked by homa_wait_for_message. */
 
+	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
+		/* There are tasks waiting for tx memory, so reap
+		 * immediately.
+		 */
+		homa_rpc_reap(hsk, true);
+	}
+
 done:
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
 				  &control, sizeof(control)))) {
 		/* Note: in this case the message's buffers will be leaked. */
-		pr_notice("%s couldn't copy back args\n", __func__);
+		pr_notice("%s couldn't copy back args to 0x%px\n",
+			  __func__, msg->msg_control);
 		result = -EFAULT;
 	}
 
@@ -1607,17 +1627,25 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait)
 {
-	struct sock *sk = sock->sk;
+	struct homa_sock *hsk = homa_sk(sock->sk);
 	u32 mask;
 
+	mask = 0;
 	sock_poll_wait(file, sock, wait);
-	mask = POLLOUT | POLLWRNORM;
+	tt_record2("homa_poll found sk_wmem_alloc %d, sk_sndbuf %d",
+		   refcount_read(&hsk->sock.sk_wmem_alloc),
+		   hsk->sock.sk_sndbuf);
+	if (homa_sock_wmem_avl(hsk))
+		mask |= POLLOUT | POLLWRNORM;
+	else
+		set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
 
-	if (homa_sk(sk)->shutdown)
+	if (hsk->shutdown)
 		mask |= POLLIN;
 
-	if (!list_empty(&homa_sk(sk)->ready_rpcs))
+	if (!list_empty(&hsk->ready_rpcs))
 		mask |= POLLIN | POLLRDNORM;
+	tt_record1("homa_poll returning mask 0x%x", mask);
 	return (__poll_t)mask;
 }
 

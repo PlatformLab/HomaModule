@@ -863,6 +863,94 @@ void test_udpclose()
 	}
 }
 
+/* Receive one message every second. */
+void recv_slow(int fd)
+{
+	int status;
+
+	while (1) {
+		sleep(1);
+		recv_args.id = 0;
+		recv_args.flags = 0;
+		recv_hdr.msg_controllen = sizeof(recv_args);
+		status = recvmsg(fd, &recv_hdr, 0);
+		if (status < 0) {
+			printf("Receiver exiting: %s\n", strerror(errno));
+			return;
+		}
+		printf("Received response with %d bytes\n", status);
+	}
+}
+
+/**
+ * test_wmem() - Use two threads, a sender and a receiver, and make the
+ * receiver go so slowly that the sender uses up all available tx packet
+ * memory and blocks.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request
+ * @request:  Request message.
+ */
+void test_wmem(int fd, const sockaddr_in_union *dest, char *request)
+{
+	__u64 id;
+	int status;
+
+	std::thread thread(recv_slow, fd);
+
+	for ( ; count > 0; count--) {
+		status = homa_send(fd, request, length, &dest->sa,
+				   sockaddr_size(&dest->sa), &id, 0, 0);
+		if (status < 0) {
+			printf("Error in homa_send: %s\n", strerror(errno));
+			break;
+		}
+		printf("Sent request with %d bytes\n", length);
+	}
+	shutdown(fd, 0);
+	thread.join();
+}
+
+/**
+ * test_wmem() - Use two threads, a sender and a receiver, and make the
+ * receiver go so slowly that the sender uses up all available tx packet
+ * memory and blocks. On the sender, use poll to wait for tx packet memory.
+ * @fd:       Homa socket.
+ * @dest:     Where to send the request
+ * @request:  Request message.
+ */
+void test_wmem_poll(int fd, const sockaddr_in_union *dest, char *request)
+{
+	__u64 id;
+	int status;
+	struct pollfd poll_info = {
+		.fd =     fd,
+		.events = POLLOUT,
+		.revents = 0
+	};
+
+	std::thread thread(recv_slow, fd);
+
+	for ( ; count > 0; count--) {
+		status = poll(&poll_info, 1, -1);
+		if (status > 0) {
+			printf("Poll succeeded with mask 0x%x\n", poll_info.revents);
+		} else {
+			printf("Poll failed: %s\n", strerror(errno));
+			break;
+		}
+		status = homa_send(fd, request, length, &dest->sa,
+				   sockaddr_size(&dest->sa), &id, 0,
+				   HOMA_SENDMSG_NONBLOCKING);
+		if (status < 0) {
+			printf("Error in homa_send: %s\n", strerror(errno));
+			break;
+		}
+		printf("Sent request with %d bytes\n", length);
+	}
+	shutdown(fd, 0);
+	thread.join();
+}
+
 int main(int argc, char** argv)
 {
 	int fd, status, port, next_arg;
@@ -1023,6 +1111,10 @@ int main(int argc, char** argv)
 			test_tmp(fd, count);
 		} else if (strcmp(argv[next_arg], "udpclose") == 0) {
 			test_udpclose();
+		} else if (strcmp(argv[next_arg], "wmem") == 0) {
+			test_wmem(fd, &dest, buffer);
+		} else if (strcmp(argv[next_arg], "wmem_poll") == 0) {
+			test_wmem_poll(fd, &dest, buffer);
 		} else {
 			printf("Unknown operation '%s'\n", argv[next_arg]);
 			exit(1);

@@ -595,6 +595,12 @@ struct homa {
 	 */
 	int gso_force_software;
 
+	/**
+	 * @wmem_max: Limit on the value of sk_sndbuf for any socket. Set
+	 * externally via sysctl.
+	 */
+	int wmem_max;
+
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @hijack_tcp: Non-zero means encapsulate outgoing Homa packets

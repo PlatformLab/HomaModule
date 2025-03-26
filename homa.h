@@ -82,8 +82,9 @@ _Static_assert(sizeof(struct homa_sendmsg_args) <= 24,
 
 /* Flag bits for homa_sendmsg_args.flags (see man page for documentation):
  */
-#define HOMA_SENDMSG_PRIVATE      0x01
-#define HOMA_SENDMSG_VALID_FLAGS   0x01
+#define HOMA_SENDMSG_PRIVATE       0x01
+#define HOMA_SENDMSG_NONBLOCKING   0x02
+#define HOMA_SENDMSG_VALID_FLAGS   0x03
 
 /**
  * struct homa_recvmsg_args - Provides information needed by Homa's

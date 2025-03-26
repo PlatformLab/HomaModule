@@ -12,6 +12,21 @@
 #define n(x) htons(x)
 #define N(x) htonl(x)
 
+struct homa_sock *hook_hsk;
+static int hook_count;
+static void schedule_hook(char *id)
+{
+	if (strcmp(id, "schedule_timeout") != 0)
+		return;
+	if (hook_count <= 0)
+		return;
+	hook_count--;
+	if (hook_count != 0)
+		return;
+	hook_hsk->sock.sk_sndbuf = refcount_read(&hook_hsk->sock.sk_wmem_alloc)
+				   + 100;
+}
+
 FIXTURE(homa_sock) {
 	struct homa homa;
 	struct homa_sock hsk;
@@ -30,6 +45,7 @@ FIXTURE_SETUP(homa_sock)
 	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	self->server_port = 99;
 	self->client_id = 1234;
+	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_sock)
 {
@@ -366,3 +382,62 @@ TEST_F(homa_sock, homa_sock_lock_slow)
 	homa_sock_unlock(&self->hsk);
 }
 #endif /* See strip.py */
+
+TEST_F(homa_sock, homa_sock_wait_wmem__no_memory_shortage)
+{
+	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 1));
+	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__nonblocking)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 1));
+	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_then_wakes)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	self->hsk.sock.sk_sndtimeo = 6;
+	hook_hsk = &self->hsk;
+	hook_count = 5;
+	unit_hook_register(schedule_hook);
+
+	EXPECT_EQ(0, -homa_sock_wait_wmem(&self->hsk, 0));
+	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__thread_blocks_but_times_out)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	self->hsk.sock.sk_sndtimeo = 4;
+	hook_hsk = &self->hsk;
+	hook_count = 5;
+	unit_hook_register(schedule_hook);
+
+	EXPECT_EQ(EWOULDBLOCK, -homa_sock_wait_wmem(&self->hsk, 0));
+}
+TEST_F(homa_sock, homa_sock_wait_wmem__interrupted_by_signal)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	mock_prepare_to_wait_errors = 1;
+	mock_signal_pending = 1;
+
+	EXPECT_EQ(EINTR, -homa_sock_wait_wmem(&self->hsk, 0));
+}
+
+TEST_F(homa_sock, homa_sock_wakeup_wmem)
+{
+	self->hsk.sock.sk_sndbuf = 0;
+	set_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags);
+
+	/* First call: no memory available. */
+	homa_sock_wakeup_wmem(&self->hsk);
+	EXPECT_EQ(1, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+
+	/* Second call: memory now available. */
+	self->hsk.sock.sk_sndbuf = 1000000;
+	mock_log_wakeups = 1;
+	unit_log_clear();
+	homa_sock_wakeup_wmem(&self->hsk);
+	EXPECT_EQ(0, test_bit(SOCK_NOSPACE, &self->hsk.sock.sk_socket->flags));
+	EXPECT_STREQ("wake_up", unit_log_get());
+}
