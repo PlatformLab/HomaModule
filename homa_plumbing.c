@@ -16,33 +16,18 @@ static long sysctl_homa_mem[3] __read_mostly;
 static int sysctl_homa_rmem_min __read_mostly;
 static int sysctl_homa_wmem_min __read_mostly;
 
-/* Global data for Homa. Never reference homa_data directly. Always use
- * the global_homa variable instead; this allows overriding during unit tests.
- */
-static struct homa homa_data;
+/* Identifier for retrieving Homa-specific data for a struct net. */
+unsigned int homa_net_id;
 
-/* This variable contains the address of the statically-allocated struct homa
- * used throughout Homa. This variable should almost never be used directly:
- * it should be passed as a parameter to functions that need it. This
- * variable is used only by functions called from Linux (so they can't pass
- * in a pointer).
+/* This structure defines functions that allow Homa to be used as a
+ * pernet subsystem.
  */
-struct homa *global_homa = &homa_data;
-
-/* True means that the Homa module is in the process of unloading itself,
- * so everyone should clean up.
- */
-static bool exiting;
-
-/* Thread that runs timer code to detect lost packets and crashed peers. */
-static struct task_struct *timer_kthread;
-
-#ifndef __STRIP__ /* See strip.py */
-/* Set via sysctl to request that a particular action be taken. The value
- * written determines the action.
- */
-static int action;
-#endif /* See strip.py */
+static struct pernet_operations homa_net_ops = {
+	.init = homa_net_init,
+	.exit = homa_net_exit,
+	.id = &homa_net_id,
+	.size = sizeof(struct homa)
+};
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -180,74 +165,67 @@ static struct inet6_protocol homav6_protocol = {
 };
 
 #ifndef __STRIP__ /* See strip.py */
-/* Describes file operations implemented for /proc/net/homa_metrics. */
-static const struct proc_ops homa_metrics_pops = {
-	.proc_open         = homa_metrics_open,
-	.proc_read         = homa_metrics_read,
-	.proc_lseek        = homa_metrics_lseek,
-	.proc_release      = homa_metrics_release,
-};
-
-/* Used to remove /proc/net/homa_metrics when the module is unloaded. */
-static struct proc_dir_entry *metrics_dir_entry;
-
-/* Used to configure sysctl access to Homa configuration parameters.*/
+/* Used to configure sysctl access to Homa configuration parameters. The
+ * @data fields are actually offsets within a struct homa; these are converted
+ * to pointers into a net-specific struct homa later.
+ */
+#define OFFSET(field) (void *) offsetof(struct homa, field)
 static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "action",
-		.data		= &action,
+		.data		= OFFSET(sysctl_action),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "bpage_lease_usecs",
-		.data		= &homa_data.bpage_lease_usecs,
+		.data		= OFFSET(bpage_lease_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "busy_usecs",
-		.data		= &homa_data.busy_usecs,
+		.data		= OFFSET(busy_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "cutoff_version",
-		.data		= &homa_data.cutoff_version,
+		.data		= OFFSET(cutoff_version),
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "dead_buffs_limit",
-		.data		= &homa_data.dead_buffs_limit,
+		.data		= OFFSET(dead_buffs_limit),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "fifo_grant_increment",
-		.data		= &homa_data.fifo_grant_increment,
+		.data		= OFFSET(fifo_grant_increment),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "flags",
-		.data		= &homa_data.flags,
+		.data		= OFFSET(flags),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "freeze_type",
-		.data		= &homa_data.freeze_type,
+		.data		= OFFSET(freeze_type),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "gen3_softirq_cores",
@@ -258,245 +236,245 @@ static struct ctl_table homa_ctl_table[] = {
 	},
 	{
 		.procname	= "grant_fifo_fraction",
-		.data		= &homa_data.grant_fifo_fraction,
+		.data		= OFFSET(grant_fifo_fraction),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "gro_busy_usecs",
-		.data		= &homa_data.gro_busy_usecs,
+		.data		= OFFSET(gro_busy_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "gro_policy",
-		.data		= &homa_data.gro_policy,
+		.data		= OFFSET(gro_policy),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "gso_force_software",
-		.data		= &homa_data.gso_force_software,
+		.data		= OFFSET(gso_force_software),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "hijack_tcp",
-		.data		= &homa_data.hijack_tcp,
+		.data		= OFFSET(hijack_tcp),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "link_mbps",
-		.data		= &homa_data.link_mbps,
+		.data		= OFFSET(link_mbps),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_dead_buffs",
-		.data		= &homa_data.max_dead_buffs,
+		.data		= OFFSET(max_dead_buffs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_grantable_rpcs",
-		.data		= &homa_data.max_grantable_rpcs,
+		.data		= OFFSET(max_grantable_rpcs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_gro_skbs",
-		.data		= &homa_data.max_gro_skbs,
+		.data		= OFFSET(max_gro_skbs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_gso_size",
-		.data		= &homa_data.max_gso_size,
+		.data		= OFFSET(max_gso_size),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_nic_queue_ns",
-		.data		= &homa_data.max_nic_queue_ns,
+		.data		= OFFSET(max_nic_queue_ns),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_incoming",
-		.data		= &homa_data.max_incoming,
+		.data		= OFFSET(max_incoming),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_overcommit",
-		.data		= &homa_data.max_overcommit,
+		.data		= OFFSET(max_overcommit),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_rpcs_per_peer",
-		.data		= &homa_data.max_rpcs_per_peer,
+		.data		= OFFSET(max_rpcs_per_peer),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "max_sched_prio",
-		.data		= &homa_data.max_sched_prio,
+		.data		= OFFSET(max_sched_prio),
 		.maxlen		= sizeof(int),
 		.mode		= 0444,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "next_id",
-		.data		= &homa_data.next_id,
+		.data		= OFFSET(next_id),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "num_priorities",
-		.data		= &homa_data.num_priorities,
+		.data		= OFFSET(num_priorities),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "pacer_fifo_fraction",
-		.data		= &homa_data.pacer_fifo_fraction,
+		.data		= OFFSET(pacer_fifo_fraction),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "poll_usecs",
-		.data		= &homa_data.poll_usecs,
+		.data		= OFFSET(poll_usecs),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "priority_map",
-		.data		= &homa_data.priority_map,
+		.data		= OFFSET(priority_map),
 		.maxlen		= HOMA_MAX_PRIORITIES * sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "reap_limit",
-		.data		= &homa_data.reap_limit,
+		.data		= OFFSET(reap_limit),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "request_ack_ticks",
-		.data		= &homa_data.request_ack_ticks,
+		.data		= OFFSET(request_ack_ticks),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "resend_interval",
-		.data		= &homa_data.resend_interval,
+		.data		= OFFSET(resend_interval),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "resend_ticks",
-		.data		= &homa_data.resend_ticks,
+		.data		= OFFSET(resend_ticks),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "skb_page_frees_per_sec",
-		.data		= &homa_data.skb_page_frees_per_sec,
+		.data		= OFFSET(skb_page_frees_per_sec),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "skb_page_pool_min_kb",
-		.data		= &homa_data.skb_page_pool_min_kb,
+		.data		= OFFSET(skb_page_pool_min_kb),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "temp",
-		.data		= homa_data.temp,
-		.maxlen		= sizeof(homa_data.temp),
+		.data		= OFFSET(temp[0]),
+		.maxlen		= sizeof(((struct homa *) 0)->temp),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "throttle_min_bytes",
-		.data		= &homa_data.throttle_min_bytes,
+		.data		= OFFSET(throttle_min_bytes),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "timeout_resends",
-		.data		= &homa_data.timeout_resends,
+		.data		= OFFSET(timeout_resends),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "timeout_ticks",
-		.data		= &homa_data.timeout_ticks,
+		.data		= OFFSET(timeout_ticks),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec
+		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "unsched_bytes",
-		.data		= &homa_data.unsched_bytes,
+		.data		= OFFSET(unsched_bytes),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "unsched_cutoffs",
-		.data		= &homa_data.unsched_cutoffs,
+		.data		= OFFSET(unsched_cutoffs),
 		.maxlen		= HOMA_MAX_PRIORITIES * sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "verbose",
-		.data		= &homa_data.verbose,
+		.data		= OFFSET(verbose),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "window",
-		.data		= &homa_data.window_param,
+		.data		= OFFSET(window_param),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "wmem_max",
-		.data		= &homa_data.wmem_max,
+		.data		= OFFSET(wmem_max),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -534,11 +512,6 @@ static __u16 header_lengths[] = {
 };
 #endif /* See strip.py */
 
-#ifndef __STRIP__ /* See strip.py */
-/* Used to remove sysctl values when the module is unloaded. */
-static struct ctl_table_header *homa_ctl_header;
-#endif /* See strip.py */
-
 static DECLARE_COMPLETION(timer_thread_done);
 
 /**
@@ -547,7 +520,6 @@ static DECLARE_COMPLETION(timer_thread_done);
  */
 int __init homa_load(void)
 {
-	struct homa *homa = global_homa;
 	int status;
 
 	pr_notice("Homa module loading\n");
@@ -601,25 +573,10 @@ int __init homa_load(void)
 		goto add_protocol_v6_err;
 	}
 
-	status = homa_init(homa);
-	if (status)
-		goto homa_init_err;
 #ifndef __STRIP__ /* See strip.py */
-	metrics_dir_entry = proc_create("homa_metrics", 0444,
-					init_net.proc_net, &homa_metrics_pops);
-	if (!metrics_dir_entry) {
-		pr_err("couldn't create /proc/net/homa_metrics\n");
-		status = -ENOMEM;
+	status = homa_metrics_init();
+	if (status != 0)
 		goto metrics_err;
-	}
-
-	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
-					      homa_ctl_table);
-	if (!homa_ctl_header) {
-		pr_err("couldn't register Homa sysctl parameters\n");
-		status = -ENOMEM;
-		goto sysctl_err;
-	}
 
 	status = homa_offload_init();
 	if (status != 0) {
@@ -628,35 +585,29 @@ int __init homa_load(void)
 	}
 #endif /* See strip.py */
 
-	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
-	if (IS_ERR(timer_kthread)) {
-		status = PTR_ERR(timer_kthread);
-		pr_err("couldn't create homa pacer thread: error %d\n",
-		       status);
-		timer_kthread = NULL;
-		goto timer_err;
+	status = register_pernet_subsys(&homa_net_ops);
+	if (status != 0) {
+		pr_err("Homa got error from register_pernet_subsys: %d\n",
+			status);
+		goto net_err;
 	}
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_hook_tcp();
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
-	tt_init("timetrace", homa->temp);
+	tt_init("timetrace");
 #endif /* See strip.py */
 
 	return 0;
 
-timer_err:
 #ifndef __STRIP__ /* See strip.py */
+net_err:
 	homa_offload_end();
 offload_err:
-	unregister_net_sysctl_table(homa_ctl_header);
-sysctl_err:
-	proc_remove(metrics_dir_entry);
+	homa_metrics_end();
 metrics_err:
 #endif /* See strip.py */
-	homa_destroy(homa);
-homa_init_err:
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 add_protocol_v6_err:
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
@@ -676,27 +627,19 @@ proto_register_err:
  */
 void __exit homa_unload(void)
 {
-	struct homa *homa = global_homa;
-
 	pr_notice("Homa module unloading\n");
-	exiting = true;
+
+	unregister_pernet_subsys(&homa_net_ops);
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
-#endif /* See strip.py */
-	if (timer_kthread)
-		wake_up_process(timer_kthread);
-	wait_for_completion(&timer_thread_done);
-#ifndef __STRIP__ /* See strip.py */
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
-	unregister_net_sysctl_table(homa_ctl_header);
-	proc_remove(metrics_dir_entry);
+	homa_metrics_end();
 #endif /* See strip.py */
-	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
@@ -707,6 +650,78 @@ void __exit homa_unload(void)
 
 module_init(homa_load);
 module_exit(homa_unload);
+
+/**
+ * homa_net_init() - Initialize a new struct homa as a per-net subsystem.
+ * @net:    The net that Homa will be associated with.
+ * Return:  0 on success, otherwise a negative errno.
+ */
+int homa_net_init(struct net *net)
+{
+	struct homa *homa = homa_from_net(net);
+	int status;
+
+	pr_notice("Homa attaching to net namespace\n");
+
+	status = homa_init(homa);
+	if (status)
+		goto homa_init_err;
+#ifndef __STRIP__ /* See strip.py */
+
+	homa->sysctl_header = register_net_sysctl(net, "net/homa",
+					      homa_ctl_table);
+	if (!homa->sysctl_header) {
+		pr_err("couldn't register Homa sysctl parameters\n");
+		status = -ENOMEM;
+		goto sysctl_err;
+	}
+#endif /* See strip.py */
+
+	homa->timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
+	if (IS_ERR(homa->timer_kthread)) {
+		status = PTR_ERR(homa->timer_kthread);
+		pr_err("couldn't create homa timer thread: error %d\n",
+		       status);
+		homa->timer_kthread = NULL;
+		goto timer_err;
+	}
+
+#ifndef __UPSTREAM__ /* See strip.py */
+	tt_set_temp(homa->temp);
+#endif /* See strip.py */
+	return 0;
+
+timer_err:
+#ifndef __STRIP__ /* See strip.py */
+	unregister_net_sysctl_table(homa->sysctl_header);
+sysctl_err:
+#endif /* See strip.py */
+	homa_destroy(homa);
+homa_init_err:
+	return status;
+}
+
+/**
+ * homa_net_exit() - Remove Homa from a net.
+ * @net:    The net from which Homa should be removed.
+ */
+void homa_net_exit(struct net *net)
+{
+	struct homa *homa = homa_from_net(net);
+
+	pr_notice("Homa detaching from net namespace\n");
+
+	homa->destroyed = true;
+	if (homa->timer_kthread)
+		wake_up_process(homa->timer_kthread);
+	wait_for_completion(&timer_thread_done);
+
+#ifndef __STRIP__ /* See strip.py */
+	if (homa->sysctl_header)
+		unregister_net_sysctl_table(homa->sysctl_header);
+#endif /* See strip.py */
+	homa_destroy(homa);
+}
 
 /**
  * homa_bind() - Implements the bind system call for Homa sockets: associates
@@ -867,7 +882,7 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_sock(sk);
 	int result;
 
 	result = homa_sock_init(hsk, homa);
@@ -1371,7 +1386,7 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_skb(skb);
 	struct homa_common_hdr *h;
 	int header_offset;
 #ifndef __STRIP__ /* See strip.py */
@@ -1547,7 +1562,7 @@ int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 int homa_err_handler_v4(struct sk_buff *skb, u32 info)
 {
 	const struct icmphdr *icmp = icmp_hdr(skb);
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_skb(skb);
 	struct in6_addr daddr;
 	int type = icmp->type;
 	int code = icmp->code;
@@ -1593,7 +1608,7 @@ int homa_err_handler_v6(struct sk_buff *skb, struct inet6_skb_parm *opt,
 			u8 type,  u8 code,  int offset,  __be32 info)
 {
 	const struct ipv6hdr *iph = (const struct ipv6hdr *)skb->data;
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_skb(skb);
 	int error = 0;
 	int port = 0;
 
@@ -1670,13 +1685,21 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
 #endif
 {
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_net(current->nsproxy->net_ns);
+	struct ctl_table table_copy;
 	int result;
 
-	result = proc_dointvec(table, write, buffer, lenp, ppos);
+	/* Generate a new ctl_table that refers to a field in the
+	 * net-specific struct homa.
+	 */
+	table_copy = *table;
+	table_copy.data = ((char *) homa) + (uintptr_t) table_copy.data;
+
+	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write) {
-		/* Don't worry which particular value changed; update
-		 * all info that is dependent on any sysctl value.
+		/* Update any information that is dependent on sysctl values
+		 * (don't worry about which value changed, just refresh all
+		 * dependent information).
 		 */
 		homa_incoming_sysctl_changed(homa);
 		homa_outgoing_sysctl_changed(homa);
@@ -1685,8 +1708,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * particular value was written (don't want to increment
 		 * cutoff_version otherwise).
 		 */
-		if (table->data == &homa_data.unsched_cutoffs ||
-		    table->data == &homa_data.num_priorities) {
+		if (table_copy.data == &homa->unsched_cutoffs ||
+		    table_copy.data == &homa->num_priorities) {
 			homa_prios_changed(homa);
 		}
 
@@ -1695,39 +1718,39 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			homa->next_id = 0;
 		}
 
-		/* Handle the special value log_topic by invoking a function
+		/* Handle the special value "action" by invoking a function
 		 * to print information to the log.
 		 */
-		if (table->data == &action) {
-			if (action == 2) {
+		if (table_copy.data == &homa->sysctl_action) {
+			if (homa->sysctl_action == 2) {
 				homa_rpc_log_active(homa, 0);
-			} else if (action == 3) {
+			} else if (homa->sysctl_action == 3) {
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
-			} else if (action == 4) {
+			} else if (homa->sysctl_action == 4) {
 				homa_log_throttled(homa);
-			} else if (action == 5) {
+			} else if (homa->sysctl_action == 5) {
 				tt_printk();
-			} else if (action == 6) {
+			} else if (homa->sysctl_action == 6) {
 				tt_record("Calling homa_rpc_log_active because of action 6");
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record("Freezing because of action 6");
 				tt_freeze();
-			} else if (action == 7) {
+			} else if (homa->sysctl_action == 7) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record("Freezing cluster because of action 7");
 				homa_freeze_peers(homa);
 				tt_record("Finished freezing cluster");
 				tt_freeze();
-			} else if (action == 8) {
+			} else if (homa->sysctl_action == 8) {
 				pr_notice("homa_total_incoming is %d\n",
 					  atomic_read(&homa->total_incoming));
-			} else if (action == 9) {
+			} else if (homa->sysctl_action == 9) {
 				tt_print_file("/users/ouster/node.tt");
 			} else {
-				homa_rpc_log_active(homa, action);
+				homa_rpc_log_active(homa, homa->sysctl_action);
 			}
-			action = 0;
+			homa->sysctl_action = 0;
 		}
 	}
 	return result;
@@ -1822,7 +1845,10 @@ done:
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {
-	wake_up_process(timer_kthread);
+	struct homa *homa;
+
+	homa = container_of(timer, struct homa, hrtimer);
+	wake_up_process(homa->timer_kthread);
 	return HRTIMER_NORESTART;
 }
 
@@ -1835,31 +1861,26 @@ enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 int homa_timer_main(void *transport)
 {
 	struct homa *homa = (struct homa *)transport;
-
-	/* The following variable is static because hrtimer_init will
-	 * complain about a stack-allocated hrtimer if in debug mode.
-	 */
-	static struct hrtimer hrtimer;
 	ktime_t tick_interval;
 	u64 nsec;
 
-	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	hrtimer.function = &homa_hrtimer;
+	hrtimer_init(&homa->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	homa->hrtimer.function = &homa_hrtimer;
 	nsec = 1000000;                   /* 1 ms */
 	tick_interval = ns_to_ktime(nsec);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		if (!exiting) {
-			hrtimer_start(&hrtimer, tick_interval,
+		if (!homa->destroyed) {
+			hrtimer_start(&homa->hrtimer, tick_interval,
 				      HRTIMER_MODE_REL);
 			schedule();
 		}
 		__set_current_state(TASK_RUNNING);
-		if (exiting)
+		if (homa->destroyed)
 			break;
 		homa_timer(homa);
 	}
-	hrtimer_cancel(&hrtimer);
+	hrtimer_cancel(&homa->hrtimer);
 	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }

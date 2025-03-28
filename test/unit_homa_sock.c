@@ -39,6 +39,7 @@ FIXTURE(homa_sock) {
 FIXTURE_SETUP(homa_sock)
 {
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
@@ -66,6 +67,7 @@ TEST_F(homa_sock, homa_socktab_start_scan)
 
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_DEFAULT_PORT+100);
 	EXPECT_EQ(&self->hsk, homa_socktab_start_scan(self->homa.port_map,
 			&scan));
@@ -82,6 +84,7 @@ TEST_F(homa_sock, homa_socktab_next)
 
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&hsk1, &self->homa, first_port);
 	mock_sock_init(&hsk2, &self->homa, first_port+HOMA_SOCKTAB_BUCKETS);
 	mock_sock_init(&hsk3, &self->homa, first_port+2*HOMA_SOCKTAB_BUCKETS);
@@ -114,6 +117,7 @@ TEST_F(homa_sock, homa_socktab_end_scan)
 
 	homa_destroy(&self->homa);
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, HOMA_MIN_DEFAULT_PORT+100);
 	homa_socktab_start_scan(self->homa.port_map, &scan1);
 	homa_socktab_start_scan(self->homa.port_map, &scan2);

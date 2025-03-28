@@ -97,14 +97,11 @@ bool tt_test_no_khz;
  * @proc_file: Name of a file in /proc; this file can be read to extract
  *             the current timetrace. NULL means don't create a /proc file
  *             (such as when running unit tests).
- * @temp:      Pointer to homa's "temp" configuration parameters, which
- *             we should make available to the kernel. NULL means no
- *             such variables available.
  *
  * Return :    0 means success, anything else means an error occurred (a
  *             log message will be printed to describe the error).
  */
-int tt_init(char *proc_file, int *temp)
+int tt_init(char *proc_file)
 {
 	int i;
 
@@ -153,8 +150,6 @@ int tt_init(char *proc_file, int *temp)
 	tt_linux_dbg2 = tt_dbg2;
 	tt_linux_dbg3 = tt_dbg3;
 	memset(tt_debug_int64, 0, sizeof(tt_debug_int64));
-	if (temp)
-		tt_linux_homa_temp = temp;
 #endif
 
 	return 0;
@@ -165,6 +160,19 @@ error:
 		tt_buffers[i] = NULL;
 	}
 	return -1;
+}
+
+/**
+ * tt_set_temp() - Make the "temp" variables from a struct homa available
+ * to the rest of the Linux kernel.
+ * @temp:      Pointer to homa's "temp" configuration parameters, which
+ *             we should make available to the kernel.
+ */
+void tt_set_temp(int *temp)
+{
+#ifdef TT_KERNEL
+	tt_linux_homa_temp = temp;
+#endif
 }
 
 /**

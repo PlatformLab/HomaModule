@@ -41,10 +41,10 @@ FIXTURE_SETUP(homa_offload)
 	int i;
 
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
 	self->homa.window_param = 10000;
-	global_homa = &self->homa;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	memset(&self->header, 0, sizeof(self->header));
@@ -101,7 +101,6 @@ FIXTURE_TEARDOWN(homa_offload)
 	list_for_each_entry_safe(skb, tmp, &self->napi.gro_hash[2].list, list)
 		kfree_skb(skb);
 	homa_destroy(&self->homa);
-	global_homa = NULL;
 	unit_teardown();
 }
 

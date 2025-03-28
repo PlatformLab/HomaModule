@@ -290,7 +290,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 */
 	u64 saved_softirq_metric, softirq_ns;
 	struct homa_offload_core *offload_core;
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_skb(skb);
 	struct sk_buff *result = NULL;
 	struct homa_data_hdr *h_new;
 	u64 *softirq_ns_metric;
@@ -592,7 +592,7 @@ int homa_gro_complete(struct sk_buff *skb, int hoffset)
 {
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
-	struct homa *homa = global_homa;
+	struct homa *homa = homa_from_skb(skb);
 
 	// tt_record4("homa_gro_complete type %d, id %d, offset %d, count %d",
 	//		h->common.type, homa_local_id(h->common.sender_id),

@@ -8,75 +8,116 @@
 
 DEFINE_PER_CPU(struct homa_metrics, homa_metrics);
 
+/* Describes file operations implemented for /proc/net/homa_metrics. */
+static const struct proc_ops homa_metrics_ops = {
+	.proc_open         = homa_metrics_open,
+	.proc_read         = homa_metrics_read,
+	.proc_lseek        = homa_metrics_lseek,
+	.proc_release      = homa_metrics_release,
+};
+
+/* Global information used to export metrics information through a file in
+ * /proc.
+ */
+struct homa_metrics_output homa_mout;
+
 /**
- * homa_metric_append() - Formats a new metric and appends it to homa->metrics.
- * @homa:        The new data will appended to the @metrics field of
- *               this structure.
+ * homa_metrics_init() - Initialize global information related to metrics.
+ * Return:  0 for success, otherwise a negative errno.
+ */
+int homa_metrics_init()
+{
+	mutex_init(&homa_mout.mutex);
+	homa_mout.output = NULL;
+	homa_mout.dir_entry = proc_create("homa_metrics", 0444,
+					  init_net.proc_net,
+					  &homa_metrics_ops);
+	if (!homa_mout.dir_entry) {
+		pr_err("couldn't create /proc/net/homa_metrics\n");
+		return -ENOMEM;
+	}
+	return 0;
+}
+
+/**
+ * homa_metrics_end() - Called to clean up metrics information when the
+ * Homa module unloads.
+ */
+void homa_metrics_end()
+{
+	if (homa_mout.dir_entry)
+		proc_remove(homa_mout.dir_entry);
+	homa_mout.dir_entry = NULL;
+	kfree(homa_mout.output);
+	homa_mout.output = NULL;
+}
+
+/**
+ * homa_metric_append() - Formats a new metric and appends it to
+ * homa_mout.output.
  * @format:      Standard printf-style format string describing the
  *               new metric. Arguments after this provide the usual
  *               values expected for printf-like functions.
  */
-void homa_metric_append(struct homa *homa, const char *format, ...)
+void homa_metric_append(const char *format, ...)
 {
 	char *new_buffer;
 	size_t new_chars;
 	va_list ap;
 
-	if (!homa->metrics) {
+	if (!homa_mout.output) {
 #ifdef __UNIT_TEST__
-		homa->metrics_capacity =  30;
+		homa_mout.capacity =  30;
 #else
-		homa->metrics_capacity =  4096;
+		homa_mout.capacity =  4096;
 #endif
-		homa->metrics =  kmalloc(homa->metrics_capacity, GFP_KERNEL);
-		if (!homa->metrics) {
+		homa_mout.output =  kmalloc(homa_mout.capacity, GFP_KERNEL);
+		if (!homa_mout.output) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;
 		}
-		homa->metrics_length = 0;
+		homa_mout.length = 0;
 	}
 
 	/* May have to execute this loop multiple times if we run out
-	 * of space in homa->metrics; each iteration expands the storage,
+	 * of space in homa_mout.output; each iteration expands the storage,
 	 * until eventually it is large enough.
 	 */
 	while (true) {
 		va_start(ap, format);
-		new_chars = vsnprintf(homa->metrics + homa->metrics_length,
-				      homa->metrics_capacity -
-				      homa->metrics_length, format, ap);
+		new_chars = vsnprintf(homa_mout.output + homa_mout.length,
+				      homa_mout.capacity -
+				      homa_mout.length, format, ap);
 		va_end(ap);
-		if ((homa->metrics_length + new_chars) < homa->metrics_capacity)
+		if ((homa_mout.length + new_chars) < homa_mout.capacity)
 			break;
 
 		/* Not enough room; expand buffer capacity. */
-		homa->metrics_capacity *= 2;
-		new_buffer = kmalloc(homa->metrics_capacity, GFP_KERNEL);
+		homa_mout.capacity *= 2;
+		new_buffer = kmalloc(homa_mout.capacity, GFP_KERNEL);
 		if (!new_buffer) {
 			pr_warn("%s couldn't allocate memory\n", __func__);
 			return;
 		}
-		memcpy(new_buffer, homa->metrics, homa->metrics_length);
-		kfree(homa->metrics);
-		homa->metrics = new_buffer;
+		memcpy(new_buffer, homa_mout.output, homa_mout.length);
+		kfree(homa_mout.output);
+		homa_mout.output = new_buffer;
 	}
-	homa->metrics_length += new_chars;
+	homa_mout.length += new_chars;
 }
 
 /**
  * homa_metrics_print() - Sample all of the Homa performance metrics and
  * generate a human-readable string describing all of them.
- * @homa:    Overall data about the Homa protocol implementation;
- *           the formatted string will be stored in homa->metrics.
  *
  * Return:   The formatted string.
  */
-char *homa_metrics_print(struct homa *homa)
+char *homa_metrics_print(void)
 {
 	int core, i, lower = 0;
 
-	homa->metrics_length = 0;
-#define M(...) homa_metric_append(homa, __VA_ARGS__)
+	homa_mout.length = 0;
+#define M(...) homa_metric_append(__VA_ARGS__)
 	M("time_ns              %20llu  sched_clock() time when metrics were gathered\n",
 	  sched_clock());
 	for (core = 0; core < nr_cpu_ids; core++) {
@@ -337,7 +378,7 @@ char *homa_metrics_print(struct homa *homa)
 			  i, m->temp[i]);
 	}
 
-	return homa->metrics;
+	return homa_mout.output;
 }
 
 /**
@@ -350,8 +391,6 @@ char *homa_metrics_print(struct homa *homa)
  */
 int homa_metrics_open(struct inode *inode, struct file *file)
 {
-	struct homa *homa = global_homa;
-
 	/* Collect all of the metrics when the file is opened, and save
 	 * these for use by subsequent reads (don't want the metrics to
 	 * change between reads). If there are concurrent opens on the
@@ -359,17 +398,17 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 	 * use this copy for subsequent opens, until the file has been
 	 * completely closed.
 	 */
-	mutex_lock(&homa->metrics_mutex);
-	if (homa->metrics_active_opens == 0)
-		homa_metrics_print(homa);
-	homa->metrics_active_opens++;
-	mutex_unlock(&homa->metrics_mutex);
+	mutex_lock(&homa_mout.mutex);
+	if (homa_mout.active_opens == 0)
+		homa_metrics_print();
+	homa_mout.active_opens++;
+	mutex_unlock(&homa_mout.mutex);
 	return 0;
 }
 
 /**
  * homa_metrics_read() - This function is invoked to handle read kernel calls on
- * /proc/net/homa_metrics.
+ * /proc/net/homa_homa_mout.
  * @file:    Information about the file being read.
  * @buffer:  Address in user space of the buffer in which data from the file
  *           should be returned.
@@ -382,15 +421,14 @@ int homa_metrics_open(struct inode *inode, struct file *file)
 ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 			  size_t length, loff_t *offset)
 {
-	struct homa *homa = global_homa;
 	size_t copied;
 
-	if (*offset >= homa->metrics_length)
+	if (*offset >= homa_mout.length)
 		return 0;
-	copied = homa->metrics_length - *offset;
+	copied = homa_mout.length - *offset;
 	if (copied > length)
 		copied = length;
-	if (copy_to_user(buffer, homa->metrics + *offset, copied))
+	if (copy_to_user(buffer, homa_mout.output + *offset, copied))
 		return -EFAULT;
 	*offset += copied;
 	return copied;
@@ -398,7 +436,7 @@ ssize_t homa_metrics_read(struct file *file, char __user *buffer,
 
 /**
  * homa_metrics_lseek() - This function is invoked to handle seeks on
- * /proc/net/homa_metrics. Right now seeks are ignored: the file must be
+ * /proc/net/homa_homa_mout. Right now seeks are ignored: the file must be
  * read sequentially.
  * @file:    Information about the file being read.
  * @offset:  Distance to seek, in bytes
@@ -420,10 +458,8 @@ loff_t homa_metrics_lseek(struct file *file, loff_t offset, int whence)
  */
 int homa_metrics_release(struct inode *inode, struct file *file)
 {
-	struct homa *homa = global_homa;
-
-	mutex_lock(&homa->metrics_mutex);
-	homa->metrics_active_opens--;
-	mutex_unlock(&homa->metrics_mutex);
+	mutex_lock(&homa_mout.mutex);
+	homa_mout.active_opens--;
+	mutex_unlock(&homa_mout.mutex);
 	return 0;
 }

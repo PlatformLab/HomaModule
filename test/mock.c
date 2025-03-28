@@ -220,14 +220,22 @@ char mock_printk_output [5000];
 __u16 mock_min_default_port = 0x8000;
 
 /* Used as sk_socket for all sockets created by mock_sock_init. */
-struct socket mock_socket;
+static struct socket mock_socket;
+
+/* Will be used as the struct homa for functions such as homa_from_net
+ * and homa_from_sock.
+ */
+static struct homa *mock_homa;
+struct net mock_net;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
 		.gso_max_size = 0,
-		._tx = &mock_net_queue};
+		._tx = &mock_net_queue,
+		.nd_net = {.net = &mock_net}
+	};
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
 struct net_offload tcp_offload;
@@ -255,6 +263,10 @@ struct net_hotdata net_hotdata = {
 };
 int debug_locks;
 struct static_call_key __SCK__might_resched;
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+struct lockdep_map rcu_lock_map;
+#endif /* CONFIG_DEBUG_LOCK_ALLOC */
 
 extern void add_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
@@ -924,6 +936,13 @@ bool __list_del_entry_valid_or_report(struct list_head *entry)
 
 void __local_bh_enable_ip(unsigned long ip, unsigned int cnt) {}
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
+		  int trylock, int read, int check,
+		  struct lockdep_map *nest_lock, unsigned long ip)
+{}
+#endif
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 {}
@@ -933,6 +952,11 @@ int lock_is_held_type(const struct lockdep_map *lock, int read)
 {
 	return 0;
 }
+
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+void lock_release(struct lockdep_map *lock, unsigned long ip)
+{}
+#endif
 
 void lock_sock_nested(struct sock *sk, int subclass)
 {
@@ -1117,6 +1141,11 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	return 1;
 }
 
+bool rcu_is_watching(void)
+{
+	return true;
+}
+
 int rcu_read_lock_any_held(void)
 {
 	return 1;
@@ -1134,12 +1163,23 @@ int rcu_read_lock_bh_held(void)
 }
 #endif
 
+void __rcu_read_lock(void)
+{}
+
+void __rcu_read_unlock(void)
+{}
+
 bool rcuref_get_slowpath(rcuref_t *ref)
 {
 	return true;
 }
 
 void refcount_warn_saturate(refcount_t *r, enum refcount_saturation_type t) {}
+
+int register_pernet_subsys(struct pernet_operations *)
+{
+	return 0;
+}
 
 void release_sock(struct sock *sk)
 {
@@ -1360,6 +1400,9 @@ void tasklet_kill(struct tasklet_struct *t)
 void unregister_net_sysctl_table(struct ctl_table_header *header)
 {}
 
+void unregister_pernet_subsys(struct pernet_operations *)
+{}
+
 void vfree(const void *block)
 {
 	if (!vmallocs_in_use || unit_hash_get(vmallocs_in_use, block) == NULL) {
@@ -1533,6 +1576,13 @@ void mock_get_page(struct page *page)
 		unit_hash_set(pages_in_use, page, (void *) (ref_count+1));
 }
 
+void *mock_net_generic(const struct net *net, unsigned int id)
+{
+	if (id == homa_net_id)
+		return mock_homa;
+	return NULL;
+}
+
 /**
  * mock_page_refs() - Returns current reference count for page (0 if no
  * such page exists).
@@ -1633,6 +1683,16 @@ void mock_rpc_put(struct homa_rpc *rpc)
 		FAIL("homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
 	atomic_dec(&rpc->refs);
+}
+
+/**
+ * mock_set_homa() - Arrange for a particular struct homa to be used in
+ * tests (e.g., it will be discovered by homa_from_net etc.).
+ */
+void mock_set_homa(struct homa *homa)
+{
+	mock_homa = homa;
+	homa_net_id = 167;
 }
 
 /**
@@ -1835,6 +1895,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
+	sk->sk_net.net = &mock_net;
 	memset(&mock_socket, 0, sizeof(mock_socket));
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);
@@ -1924,6 +1985,8 @@ void mock_teardown(void)
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
 	mock_min_default_port = 0x8000;
+	mock_homa = NULL;
+	homa_net_id = 0;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));

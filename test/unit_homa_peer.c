@@ -46,6 +46,7 @@ FIXTURE(homa_peer) {
 FIXTURE_SETUP(homa_peer)
 {
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_peertab_init(&self->peertab);
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");

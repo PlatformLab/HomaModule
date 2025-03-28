@@ -96,10 +96,11 @@ struct tt_proc_file {
 
 void      tt_destroy(void);
 void      tt_freeze(void);
-int       tt_init(char *proc_file, int *temp);
+int       tt_init(char *proc_file);
 void      tt_record_buf(struct tt_buffer *buffer, u64 timestamp,
 			const char *format, u32 arg0, u32 arg1,
 			u32 arg2, u32 arg3);
+void      tt_set_temp(int *temp);
 
 /* Private methods and variables: exposed so they can be accessed
  * by unit tests.

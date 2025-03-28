@@ -135,8 +135,6 @@ int homa_init(struct homa *homa)
 	homa->gro_policy = HOMA_GRO_NORMAL;
 	homa->busy_usecs = 100;
 	homa->gro_busy_usecs = 5;
-	mutex_init(&homa->metrics_mutex);
-	homa->metrics = NULL;
 #endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
 #ifndef __STRIP__ /* See strip.py */
@@ -174,8 +172,6 @@ void homa_destroy(struct homa *homa)
 	}
 #ifndef __STRIP__ /* See strip.py */
 	homa_skb_cleanup(homa);
-	kfree(homa->metrics);
-	homa->metrics = NULL;
 #endif /* See strip.py */
 }
 

@@ -53,6 +53,7 @@ FIXTURE(homa_interest) {
 FIXTURE_SETUP(homa_interest)
 {
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;

@@ -50,6 +50,8 @@
 
 #define kthread_complete_and_exit(...)
 
+#define net_generic(net, id) mock_net_generic(net, id)
+
 #ifdef page_address
 #undef page_address
 #endif
@@ -132,6 +134,7 @@ extern int         mock_max_grants;
 extern int         mock_max_skb_frags;
 extern __u16       mock_min_default_port;
 extern int         mock_mtu;
+extern struct net  mock_net;
 extern struct net_device
 		   mock_net_device;
 extern u64         mock_ns;
@@ -165,6 +168,7 @@ unsigned int
 	    mock_get_mtu(const struct dst_entry *dst);
 void        mock_get_page(struct page *page);
 void       *mock_kmalloc(size_t size, gfp_t flags);
+void       *mock_net_generic(const struct net *net, unsigned int id);
 int         mock_page_refs(struct page *page);
 int         mock_page_refs(struct page *page);
 int         mock_page_to_nid(struct page *page);
@@ -182,6 +186,7 @@ void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_clock_vals(u64 t, ...);
 void        mock_set_core(int num);
+void        mock_set_homa(struct homa *homa);
 void        mock_set_ipv6(struct homa_sock *hsk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);

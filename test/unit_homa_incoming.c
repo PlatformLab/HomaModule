@@ -87,6 +87,7 @@ FIXTURE_SETUP(homa_incoming)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
 	self->homa.poll_usecs = 0;
@@ -819,7 +820,7 @@ TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
-	tt_init(NULL, NULL);
+	tt_init(NULL);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
 	tt_get_messages(traces, sizeof(traces));
 	EXPECT_STREQ("starting copy to user space for id 1234; "

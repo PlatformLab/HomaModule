@@ -76,6 +76,7 @@ FIXTURE_SETUP(homa_grant)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	self->homa.num_priorities = 1;
 	self->homa.poll_usecs = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;

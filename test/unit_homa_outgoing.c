@@ -77,6 +77,7 @@ FIXTURE_SETUP(homa_outgoing)
 	self->client_id = 1234;
 	self->server_id = 1235;
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_ns = 10000;
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	self->homa.ns_per_mbyte = 1000000;

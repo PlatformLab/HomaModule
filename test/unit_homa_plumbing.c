@@ -55,8 +55,8 @@ FIXTURE_SETUP(homa_plumbing)
 	self->client_addr.in6.sin6_port = htons(self->client_port);
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	global_homa = &self->homa;
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
@@ -107,7 +107,6 @@ FIXTURE_TEARDOWN(homa_plumbing)
 {
 	homa_destroy(&self->homa);
 	unit_teardown();
-	global_homa = NULL;
 }
 
 TEST_F(homa_plumbing, homa_load__error_in_inet6_register_protosw)
@@ -262,6 +261,7 @@ TEST_F(homa_plumbing, homa_socket__success)
 	struct homa_sock hsk;
 
 	memset(&hsk, 0, sizeof(hsk));
+	hsk.sock.sk_net.net = &mock_net;
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
 	homa_sock_destroy(&hsk);
@@ -270,6 +270,8 @@ TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 {
 	struct homa_sock hsk;
 
+	memset(&hsk, 0, sizeof(hsk));
+	hsk.sock.sk_net.net = &mock_net;
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_socket(&hsk.sock));

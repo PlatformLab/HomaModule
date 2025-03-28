@@ -16,6 +16,7 @@ FIXTURE(homa_utils) {
 FIXTURE_SETUP(homa_utils)
 {
 	homa_init(&self->homa);
+	mock_set_homa(&self->homa);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_utils)
