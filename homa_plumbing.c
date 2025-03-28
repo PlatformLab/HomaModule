@@ -11,11 +11,6 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
-/* Not yet sure what these variables are for */
-static long sysctl_homa_mem[3] __read_mostly;
-static int sysctl_homa_rmem_min __read_mostly;
-static int sysctl_homa_wmem_min __read_mostly;
-
 /* Identifier for retrieving Homa-specific data for a struct net. */
 unsigned int homa_net_id;
 
@@ -100,9 +95,6 @@ static struct proto homa_prot = {
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.get_port	   = homa_get_port,
-	.sysctl_mem	   = sysctl_homa_mem,
-	.sysctl_wmem	   = &sysctl_homa_wmem_min,
-	.sysctl_rmem	   = &sysctl_homa_rmem_min,
 	.obj_size	   = sizeof(struct homa_sock),
 	.no_autobind       = 1,
 };
@@ -124,10 +116,6 @@ static struct proto homav6_prot = {
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.get_port	   = homa_get_port,
-	.sysctl_mem	   = sysctl_homa_mem,
-	.sysctl_wmem	   = &sysctl_homa_wmem_min,
-	.sysctl_rmem	   = &sysctl_homa_rmem_min,
-
 	.obj_size	   = sizeof(struct homa_v6_sock),
 	.ipv6_pinfo_offset = offsetof(struct homa_v6_sock, inet6),
 
