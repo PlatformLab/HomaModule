@@ -1,6 +1,7 @@
 # Makefile to run unit tests for Homa
 
-KDIR ?= /lib/modules/$(shell uname -r)/build
+LINUX_VERSION ?= $(shell uname -r)
+KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 CC ?= gcc
 CXX ?= g++
 PERL ?= perl

@@ -38,7 +38,8 @@ ifneq ($(KERNEL_SRC),)
 KDIR ?= $(KERNEL_SRC)
 endif
 
-KDIR ?= /lib/modules/$(shell uname -r)/build
+LINUX_VERSION ?= $(shell uname -r)
+KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 
 all:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) modules
