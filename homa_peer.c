@@ -62,7 +62,7 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	spin_unlock_bh(&peertab->write_lock);
 }
 
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 /**
  * homa_peertab_get_peers() - Return information about all of the peers
  * currently known

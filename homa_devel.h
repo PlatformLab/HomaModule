@@ -9,6 +9,16 @@
 
 #include "timetrace.h"
 
+#ifdef __STRIP__
+#define INC_METRIC(...)
+
+#undef LINUX_VERSION_CODE
+#define LINUX_VERSION_CODE 100
+
+#undef KERNEL_VERSION
+#define KERNEL_VERSION(...) 100
+#endif /* __STRIP__ */
+
 struct homa;
 struct homa_rpc;
 
@@ -62,11 +72,9 @@ static inline void check_addr_valid(void *addr, char *info)
 #define IF_NO_STRIP(code)
 #endif /* See strip.py */
 
-#ifndef __STRIP__ /* See strip.py */
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		     char *format);
 void     homa_freeze_peers(struct homa *homa);
-#endif /* See strip.py */
 char    *homa_print_ipv4_addr(__be32 addr);
 char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);

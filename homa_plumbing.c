@@ -1434,7 +1434,7 @@ int homa_softirq(struct sk_buff *skb)
 			goto discard;
 		}
 
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 		/* Check for FREEZE here, rather than in homa_incoming.c, so
 		 * it will work even if the RPC and/or socket are unknown.
 		 */

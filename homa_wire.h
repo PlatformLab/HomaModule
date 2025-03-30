@@ -21,6 +21,8 @@ enum homa_packet_type {
 	BUSY               = 0x14,
 #ifndef __STRIP__ /* See strip.py */
 	CUTOFFS            = 0x15,
+#endif /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 	FREEZE             = 0x16,
 #endif /* See strip.py */
 	NEED_ACK           = 0x17,
@@ -497,7 +499,9 @@ struct homa_cutoffs_hdr {
 } __packed;
 _Static_assert(sizeof(struct homa_cutoffs_hdr) <= HOMA_MAX_HEADER,
 	       "homa_cutoffs_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
+	       #endif /* See strip.py */
 
+#ifndef __UPSTREAM__ /* See strip.py */
 /**
  * struct homa_freeze_hdr - Wire format for FREEZE packets.
  *

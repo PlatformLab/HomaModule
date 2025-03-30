@@ -369,7 +369,6 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 	return buffer;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_freeze_peers() - Send FREEZE packets to all known peers.
  * @homa:   Provides info about peers.
@@ -399,8 +398,8 @@ void homa_freeze_peers(struct homa *homa)
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;
-	freeze.common.flags = HOMA_TCP_FLAGS;
-	freeze.common.urgent = htons(HOMA_TCP_URGENT);
+	IF_NO_STRIP(freeze.common.flags = HOMA_TCP_FLAGS);
+	IF_NO_STRIP(freeze.common.urgent = htons(HOMA_TCP_URGENT));
 	freeze.common.sender_id = 0;
 	for (i = 0; i < num_peers; i++) {
 		tt_record1("Sending freeze to 0x%x", tt_addr(peers[i]->addr));
@@ -415,7 +414,6 @@ done:
 	rcu_read_unlock();
 	return;
 }
-#endif /* See strip.py */
 
 /**
  * homa_snprintf() - This function makes it easy to use a series of calls

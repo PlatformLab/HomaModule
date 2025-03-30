@@ -200,7 +200,7 @@ struct homa_peer {
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
 void     homa_peertab_destroy(struct homa_peertab *peertab);
-#ifndef __STRIP__ /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
 struct homa_peer **
 		homa_peertab_get_peers(struct homa_peertab *peertab,
 				       int *num_peers);

@@ -48,7 +48,6 @@
 #include "homa.h"
 #include <linux/version.h>
 #include "homa_devel.h"
-#include "homa_strip.h"
 #else /* See strip.py */
 #include <linux/homa.h>
 #endif /* See strip.py */
