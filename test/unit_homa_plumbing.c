@@ -56,6 +56,8 @@ FIXTURE_SETUP(homa_plumbing)
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
 	homa_init(&self->homa);
+	if (self->homa.wmem_max == 0)
+		printf("homa_plumbing fixture found wmem_max 0\n");
 	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
@@ -102,6 +104,8 @@ FIXTURE_SETUP(homa_plumbing)
 	self->optval.user = (void *) 0x100000;
 	self->optval.is_kernel = 0;
 	unit_log_clear();
+	if (self->homa.wmem_max == 0)
+		printf("homa_plumbing fixture set wmem_max 0\n");
 }
 FIXTURE_TEARDOWN(homa_plumbing)
 {

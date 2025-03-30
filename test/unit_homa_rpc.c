@@ -613,13 +613,17 @@ TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_locked)
 	homa_rpc_end(crpc2);
 	unit_log_clear();
 	self->homa.reap_limit = 3;
+#ifndef __STRIP__ /* See strip.py */
 	mock_trylock_errors = 2;
+#else /* See strip.py */
+	mock_trylock_errors = 1;
+#endif /* See strip.py */
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1236", unit_log_get());
-	EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps));
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
 }
 TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_refs)
@@ -640,15 +644,15 @@ TEST_F(homa_rpc, homa_rpc_reap__skip_rpc_because_of_refs)
 	self->homa.reap_limit = 3;
 	EXPECT_EQ(1, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1236", unit_log_get());
-	EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->deferred_rpc_reaps));
 	unit_log_clear();
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
-	EXPECT_EQ(2, homa_metrics_per_cpu()->deferred_rpc_reaps);
+	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->deferred_rpc_reaps));
 	EXPECT_STREQ("", unit_log_get());
 	homa_rpc_put(crpc1);
 	EXPECT_EQ(0, homa_rpc_reap(&self->hsk, false));
 	EXPECT_STREQ("reaped 1234", unit_log_get());
-	EXPECT_EQ(2, homa_metrics_per_cpu()->deferred_rpc_reaps);
+	IF_NO_STRIP(EXPECT_EQ(2, homa_metrics_per_cpu()->deferred_rpc_reaps));
 }
 TEST_F(homa_rpc, homa_rpc_reap__hit_limit_in_msgout_packets)
 {

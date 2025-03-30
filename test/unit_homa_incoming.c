@@ -2225,7 +2225,7 @@ TEST_F(homa_incoming, homa_wait_private__basics)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	EXPECT_EQ(0, homa_wait_private(crpc, 0));
 	ASSERT_EQ(RPC_PRIVATE, atomic_read(&crpc->flags));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
 }
 TEST_F(homa_incoming, homa_wait_private__rpc_has_error)
 {
@@ -2271,14 +2271,14 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 
 	ASSERT_NE(NULL, crpc);
 	atomic_or(RPC_PRIVATE, &crpc->flags);
-	self->homa.poll_usecs = 0;
+	IF_NO_STRIP(self->homa.poll_usecs = 0);
 	unit_hook_register(handoff_hook);
 	hook_rpc = crpc;
 	hook_count = 1;
 	mock_prepare_to_wait_errors = 1;
 
 	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups));
 	EXPECT_EQ(0, mock_prepare_to_wait_errors);
 }
 
@@ -2307,7 +2307,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_already_ready)
 	ASSERT_FALSE(IS_ERR(rpc));
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(0, crpc->msgin.packets.qlen);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__multiple_rpcs_already_ready)
@@ -2355,7 +2355,7 @@ TEST_F(homa_incoming, homa_wait_shared__signal_race_with_handoff)
 	rpc = homa_wait_shared(&self->hsk, 0);
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(ENOENT, -rpc->error);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups));
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__socket_shutdown_while_blocked)
@@ -2462,7 +2462,7 @@ TEST_F(homa_incoming, homa_rpc_handoff__handoff_to_shared_interest)
 	EXPECT_EQ(crpc, interest2.rpc);
 	homa_rpc_put(crpc);
 	homa_interest_unlink_shared(&interest1);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_thread_waiting);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_thread_waiting));
 }
 TEST_F(homa_incoming, homa_rpc_handoff__queue_rpc_on_socket)
 {

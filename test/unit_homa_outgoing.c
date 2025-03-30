@@ -52,8 +52,9 @@ void mock_resend_data(struct homa_rpc *rpc, int start, int end,
  */
 static int true_size(int msg_bytes)
 {
-	return msg_bytes + SKB_TRUESIZE(SKB_DATA_ALIGN(HOMA_SKB_EXTRA +
-		HOMA_IPV6_HEADER_LENGTH + sizeof(struct homa_data_hdr)));
+	return SKB_TRUESIZE(msg_bytes + HOMA_SKB_EXTRA +
+		HOMA_IPV6_HEADER_LENGTH + sizeof(struct homa_skb_info) +
+		sizeof(struct homa_data_hdr));
 }
 
 FIXTURE(homa_outgoing) {

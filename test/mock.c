@@ -287,7 +287,6 @@ struct sk_buff *__alloc_skb(unsigned int size, gfp_t priority, int flags,
 	if (!skbs_in_use)
 		skbs_in_use = unit_hash_new();
 	unit_hash_set(skbs_in_use, skb, "used");
-	size = SKB_DATA_ALIGN(size);
 	shinfo_size = SKB_DATA_ALIGN(sizeof(struct skb_shared_info));
 	skb->head = malloc(size + shinfo_size);
 	memset(skb->head, 0, size + shinfo_size);

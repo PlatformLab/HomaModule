@@ -17,6 +17,7 @@
 static int hook_count;
 static struct homa_interest *hook_interest;
 
+#ifndef __STRIP__ /* See strip.py */
 static void log_hook(char *id)
 {
 	if (strcmp(id, "unlock") == 0 ||
@@ -24,6 +25,7 @@ static void log_hook(char *id)
 		unit_log_printf("; ", "%s", id);
 	}
 }
+#endif /* See strip.py */
 
 static void notify_hook(char *id)
 {
@@ -143,10 +145,11 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 	atomic_set(&interest.ready, 1);
 	EXPECT_EQ(0, homa_interest_wait(&interest, 0));
 	EXPECT_EQ(0, interest.blocked);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
 
 	homa_interest_unlink_shared(&interest);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_schedule)
 {
 	struct homa_interest interest;
@@ -161,9 +164,10 @@ TEST_F(homa_interest, homa_interest_wait__call_schedule)
 	unit_log_clear();
 
 	EXPECT_EQ(0, homa_interest_wait(&interest, 0));
-	ASSERT_STREQ("schedule; schedule", unit_log_get());
+	EXPECT_STREQ("schedule; schedule", unit_log_get());
 	homa_interest_unlink_shared(&interest);
 }
+#endif /* See strip.py */
 TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 {
 	struct homa_interest interest;
@@ -176,7 +180,7 @@ TEST_F(homa_interest, homa_interest_wait__call_homa_rpc_reap)
 	homa_rpc_end(crpc);
 	EXPECT_EQ(15, self->hsk.dead_skbs);
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_usecs = 0;
+	IF_NO_STRIP(self->homa.poll_usecs = 0);
 
 	EXPECT_EQ(EAGAIN, -homa_interest_wait(&interest, 1));
 	EXPECT_EQ(0, self->hsk.dead_skbs);
@@ -187,7 +191,7 @@ TEST_F(homa_interest, homa_interest_wait__nonblocking)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_usecs = 100;
+	IF_NO_STRIP(self->homa.poll_usecs = 100);
 
 	EXPECT_EQ(EAGAIN, -homa_interest_wait(&interest, 1));
 	EXPECT_EQ(0, interest.blocked);
@@ -198,7 +202,7 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_usecs = 3;
+	IF_NO_STRIP(self->homa.poll_usecs = 3);
 	mock_set_clock_vals(1000, 2000, 3999, 4000, 0);
 	mock_ns = 4000;
 	unit_hook_register(notify_hook);
@@ -206,11 +210,13 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 	hook_count = 4;
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest, 0));
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3000, homa_metrics_per_cpu()->poll_ns);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->blocked_ns);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->fast_wakeups);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups);
 	EXPECT_EQ(1, interest.blocked);
+#endif /* See strip.py */
 	homa_interest_unlink_shared(&interest);
 }
 TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
@@ -219,7 +225,7 @@ TEST_F(homa_interest, homa_interest_wait__interrupted_by_signal)
 
 	homa_interest_init_shared(&interest, &self->hsk);
 	mock_prepare_to_wait_errors = 1;
-	self->homa.poll_usecs = 0;
+	IF_NO_STRIP(self->homa.poll_usecs = 0);
 
 	EXPECT_EQ(EINTR, -homa_interest_wait(&interest, 0));
 	EXPECT_EQ(1, interest.blocked);
@@ -230,7 +236,7 @@ TEST_F(homa_interest, homa_interest_wait__time_metrics)
 	struct homa_interest interest;
 
 	homa_interest_init_shared(&interest, &self->hsk);
-	self->homa.poll_usecs = 0;
+	IF_NO_STRIP(self->homa.poll_usecs = 0);
 	mock_set_clock_vals(1000, 1500, 3000, 3200, 0);
 	mock_ns = 4000;
 	unit_hook_register(notify_hook);
@@ -238,8 +244,8 @@ TEST_F(homa_interest, homa_interest_wait__time_metrics)
 	hook_count = 4;
 
 	EXPECT_EQ(0, -homa_interest_wait(&interest, 0));
-	EXPECT_EQ(700, homa_metrics_per_cpu()->poll_ns);
-	EXPECT_EQ(1500, homa_metrics_per_cpu()->blocked_ns);
+	IF_NO_STRIP(EXPECT_EQ(700, homa_metrics_per_cpu()->poll_ns));
+	IF_NO_STRIP(EXPECT_EQ(1500, homa_metrics_per_cpu()->blocked_ns));
 	homa_interest_unlink_shared(&interest);
 }
 
@@ -291,7 +297,7 @@ TEST_F(homa_interest, homa_choose_interest__find_idle_core)
 	struct homa_interest *result = homa_choose_interest(&self->hsk);
 	EXPECT_EQ(&interest2, result);
 	EXPECT_EQ(2, result->core);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_alt_thread);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->handoffs_alt_thread));
 	INIT_LIST_HEAD(&self->hsk.interests);
 }
 TEST_F(homa_interest, homa_choose_interest__all_cores_busy)
@@ -313,7 +319,7 @@ TEST_F(homa_interest, homa_choose_interest__all_cores_busy)
 
 	struct homa_interest *result = homa_choose_interest(&self->hsk);
 	EXPECT_EQ(3, result->core);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->handoffs_alt_thread);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->handoffs_alt_thread));
 	INIT_LIST_HEAD(&self->hsk.interests);
 }
 #endif /* See strip.py */

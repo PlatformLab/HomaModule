@@ -589,8 +589,8 @@ int __init homa_load(void)
 
 	return 0;
 
-#ifndef __STRIP__ /* See strip.py */
 net_err:
+#ifndef __STRIP__ /* See strip.py */
 	homa_offload_end();
 offload_err:
 	homa_metrics_end();

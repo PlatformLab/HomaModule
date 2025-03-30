@@ -136,7 +136,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	skb = homa_skb_new_tx(sizeof32(struct homa_data_hdr));
 #else /* See strip.py */
 	skb = homa_skb_new_tx(sizeof32(struct homa_data_hdr) + length +
-			      segs * sizeof32(struct homa_seg_hdr));
+			      (segs - 1) * sizeof32(struct homa_seg_hdr));
 #endif /* See strip.py */
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
