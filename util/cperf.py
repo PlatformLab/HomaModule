@@ -68,6 +68,9 @@ node_type = None
 # Value of the "--stripped" option.
 stripped = False
 
+# Speed of host uplinks.
+link_mbps = 0
+
 # Defaults for command-line options; assumes that servers and clients
 # share nodes.
 default_defaults = {
@@ -333,7 +336,7 @@ def init(options):
     """
     Initialize various global state, such as the log file.
     """
-    global old_slowdown, log_dir, log_file, verbose, delete_rtts
+    global old_slowdown, log_dir, log_file, verbose, delete_rtts, link_mbps
     log_dir = options.log_dir
     old_slowdown = options.old_slowdown
     if not options.plot_only:
@@ -377,7 +380,7 @@ def init(options):
             s += ", "
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
-    vlog("Homa configuration:")
+    vlog("Homa configuration (node%d):" % (options.nodes[0]))
     for param in ['dead_buffs_limit', 'grant_fifo_fraction',
             'gro_policy', 'link_mbps', 'max_dead_buffs',
             'max_grantable_rpcs', 'max_gro_skbs', 'max_gso_size',
@@ -385,8 +388,11 @@ def init(options):
             'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
             'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
             'throttle_min_bytes', 'timeout_resends', 'unsched_bytes', 'window']:
-        result = do_subprocess(['sysctl', '-n', '.net.homa.' + param])
+        result = do_subprocess(['ssh', 'node%d' % (options.nodes[0]),
+                'sysctl', '-n', '.net.homa.' + param])
         vlog("  %-20s %s" % (param, result))
+        if param == 'link_mbps':
+            link_mbps = float(result)
 
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))
@@ -1293,6 +1299,7 @@ def get_digest(experiment):
     experiment:  Name of the desired experiment
     """
     global old_slowdown, digests, log_dir, min_rtt, unloaded_p50, delete_rtts
+    global link_mbps
 
     if experiment in digests:
         return digests[experiment]
@@ -1310,8 +1317,6 @@ def get_digest(experiment):
     digest["slow_999"] = []
 
     avg_slowdowns = []
-
-    link_mbps = float(get_sysctl_parameter(".net.homa.link_mbps"))
 
     # Read in the RTT files for this experiment.
     files = sorted(glob.glob(log_dir + ("/%s-*.rtts" % (experiment))))
