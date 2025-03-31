@@ -61,7 +61,7 @@ CP_HDRS := homa_impl.h \
 	   homa_sock.h \
 	   homa_stub.h \
 	   homa_wire.h
-CP_SRCS := $(patsubst %.o,%.c,$(filter-out timetrace.o, $(HOMA_OBJS)))
+CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := reap.txt \
 	     sync.txt \
 	     Makefile
