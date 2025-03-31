@@ -1315,9 +1315,11 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 done:
 	if (unlikely(copy_to_user((__force void __user *)msg->msg_control,
 				  &control, sizeof(control)))) {
+#ifndef __UPSTREAM__ /* See strip.py */
 		/* Note: in this case the message's buffers will be leaked. */
 		pr_notice("%s couldn't copy back args to 0x%px\n",
 			  __func__, msg->msg_control);
+#endif /* See strip.py */
 		result = -EFAULT;
 	}
 

@@ -337,6 +337,7 @@ def init(options):
     Initialize various global state, such as the log file.
     """
     global old_slowdown, log_dir, log_file, verbose, delete_rtts, link_mbps
+    global stripped
     log_dir = options.log_dir
     old_slowdown = options.old_slowdown
     if not options.plot_only:
@@ -381,18 +382,21 @@ def init(options):
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
     vlog("Homa configuration (node%d):" % (options.nodes[0]))
-    for param in ['dead_buffs_limit', 'grant_fifo_fraction',
-            'gro_policy', 'link_mbps', 'max_dead_buffs',
-            'max_grantable_rpcs', 'max_gro_skbs', 'max_gso_size',
-            'max_nic_queue_ns', 'max_incoming', 'max_overcommit',
-            'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
-            'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
-            'throttle_min_bytes', 'timeout_resends', 'unsched_bytes', 'window']:
-        result = do_subprocess(['ssh', 'node%d' % (options.nodes[0]),
-                'sysctl', '-n', '.net.homa.' + param])
-        vlog("  %-20s %s" % (param, result))
-        if param == 'link_mbps':
-            link_mbps = float(result)
+    if not options.stripped:
+        for param in ['dead_buffs_limit', 'grant_fifo_fraction',
+                'gro_policy', 'link_mbps', 'max_dead_buffs',
+                'max_grantable_rpcs', 'max_gro_skbs', 'max_gso_size',
+                'max_nic_queue_ns', 'max_incoming', 'max_overcommit',
+                'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
+                'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
+                'throttle_min_bytes', 'timeout_resends', 'unsched_bytes', 'window']:
+            result = do_subprocess(['ssh', 'node%d' % (options.nodes[0]),
+                    'sysctl', '-n', '.net.homa.' + param])
+            vlog("  %-20s %s" % (param, result))
+            if param == 'link_mbps':
+                link_mbps = float(result)
+    else:
+        link_mbps = 25000
 
     if options.mtu != 0:
         log("Setting MTU to %d" % (options.mtu))

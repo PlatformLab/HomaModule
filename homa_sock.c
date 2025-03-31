@@ -10,7 +10,7 @@
 #ifdef __UNIT_TEST__
 #define KSELFTEST_NOT_MAIN 1
 #include "test/kselftest_harness.h"
-#endif
+#endif /* __UNIT_TEST__ */
 
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.
@@ -297,7 +297,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 #ifdef __UNIT_TEST__
 	FAIL(" sk_wmem_alloc %llu after shutdown for port %d", tx_memory,
 	     hsk->port);
-#endif
+#endif /* __UNIT_TEST__ */
 	}
 
 	if (hsk->buffer_pool) {

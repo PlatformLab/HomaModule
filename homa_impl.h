@@ -718,13 +718,6 @@ struct homa {
 	struct ctl_table_header *sysctl_header;
 #endif /* See strip.py */
 
-#ifndef __UPSTREAM__ /* See strip.py */
-	/**
-	 * @sysctl_action: This value is set by sysctl to invoke one of
-	 * several actions for testing. It is normally zero.
-	 */
-	int sysctl_action;
-
 	/**
 	 * @timer_kthread: Thread that runs timer code to detect lost
 	 * packets and crashed peers.
@@ -739,6 +732,13 @@ struct homa {
 	 * so everyone should clean up.
 	 */
 	bool destroyed;
+
+#ifndef __UPSTREAM__ /* See strip.py */
+	/**
+	 * @sysctl_action: This value is set by sysctl to invoke one of
+	 * several actions for testing. It is normally zero.
+	 */
+	int sysctl_action;
 
 	/**
 	 * @temp: the values in this array can be read and written with sysctl.

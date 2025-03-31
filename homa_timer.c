@@ -27,9 +27,6 @@ void homa_check_rpc(struct homa_rpc *rpc)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_resend_hdr resend;
-#ifndef __STRIP__ /* See strip.py */
-	const char *us, *them;
-#endif /* See strip.py */
 
 	/* See if we need to request an ack for this RPC. */
 	if (!homa_is_client(rpc->id) && rpc->state == RPC_OUTGOING &&
@@ -140,41 +137,24 @@ void homa_check_rpc(struct homa_rpc *rpc)
 	resend.priority = homa->num_priorities - 1;
 #endif /* See strip.py */
 	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+#ifndef __UPSTREAM__ /* See strip.py */
 	if (homa_is_client(rpc->id)) {
-#ifndef __STRIP__ /* See strip.py */
-		us = "client";
-		them = "server";
-#endif /* See strip.py */
 		tt_record4("Sent RESEND for client RPC id %llu, server 0x%x:%d, offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   rpc->dport, rpc->msgin.recv_end);
-#ifndef __STRIP__ /* See strip.py */
-		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
-			   rpc->msgin.length, rpc->msgin.granted,
-			   rpc->msgin.bytes_remaining,
-			   atomic_read(&rpc->msgin.rec_incoming));
-#endif /* See strip.py */
+		/* Should be if (homa->verbose) */
+		pr_notice("Homa client RESEND to %s:%d for id %llu, offset %d\n",
+			homa_print_ipv6_addr(&rpc->peer->addr),
+			rpc->dport, rpc->id, rpc->msgin.recv_end);
 	} else {
-#ifndef __STRIP__ /* See strip.py */
-		us = "server";
-		them = "client";
-#endif /* See strip.py */
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->msgin.recv_end);
-#ifndef __STRIP__ /* See strip.py */
-		tt_record4("length %d, granted %d, rem %d, rec_incoming %d",
-			   rpc->msgin.length, rpc->msgin.granted,
-			   rpc->msgin.bytes_remaining,
-			   atomic_read(&rpc->msgin.rec_incoming));
-#endif /* See strip.py */
+		/* Should be if (homa->verbose) */
+		pr_notice("Homa server RESEND to %s:%d for id %llu, offset %d\n",
+			homa_print_ipv6_addr(&rpc->peer->addr),
+			rpc->dport, rpc->id, rpc->msgin.recv_end);
 	}
-#ifndef __STRIP__ /* See strip.py */
-	if (homa->verbose)
-		pr_notice("Homa %s RESEND to %s %s:%d for id %llu, offset %d, length %d\n", us, them,
-			  homa_print_ipv6_addr(&rpc->peer->addr),
-			  rpc->dport, rpc->id, rpc->msgin.recv_end,
-			  rpc->msgin.granted - rpc->msgin.recv_end);
 #endif /* See strip.py */
 }
 
