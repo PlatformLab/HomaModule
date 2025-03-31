@@ -266,7 +266,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 
 	homa_rpc_hold(rpc);
 	if (unlikely(iter->count > HOMA_MAX_MESSAGE_LENGTH ||
-	             iter->count == 0)) {
+		     iter->count == 0)) {
 		tt_record2("homa_message_out_fill found bad length %d for id %d",
 			   iter->count, rpc->id);
 		err = -EINVAL;
@@ -350,7 +350,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 			skb_data_bytes = bytes_left;
 		skb = homa_new_data_packet(rpc, iter, offset, skb_data_bytes,
 					   max_seg_data);
-		if (unlikely(IS_ERR(skb))) {
+		if (IS_ERR(skb)) {
 			err = PTR_ERR(skb);
 			homa_rpc_lock(rpc);
 			goto error;
@@ -979,7 +979,7 @@ int homa_pacer_main(void *transport)
 		else {
 			tt_record("pacer sleeping");
 			INC_METRIC(throttled_ns, sched_clock() -
-			           homa->throttle_add);
+				   homa->throttle_add);
 		}
 #endif /* See strip.py */
 		INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);

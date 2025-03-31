@@ -157,7 +157,7 @@ static struct inet6_protocol homav6_protocol = {
  * @data fields are actually offsets within a struct homa; these are converted
  * to pointers into a net-specific struct homa later.
  */
-#define OFFSET(field) (void *) offsetof(struct homa, field)
+#define OFFSET(field) ((void *) offsetof(struct homa, field))
 static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "action",
@@ -911,8 +911,8 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 			return -EFAULT;
 
 		/* Do a trivial test to make sure we can at least write the first
-		* page of the region.
-		*/
+		 * page of the region.
+		 */
 		if (copy_to_user(u64_to_user_ptr(args.start), &args,
 				sizeof(args)))
 			return -EFAULT;
@@ -1666,7 +1666,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  * Return: 0 for success, nonzero for error.
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int homa_dointvec(struct ctl_table *table, int write,
+int homa_dointvec(const struct ctl_table *table, int write,
 		  void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_dointvec(const struct ctl_table *table, int write,
@@ -1757,7 +1757,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
  * Return: 0 for success, nonzero for error.
  */
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 			      void __user *buffer, size_t *lenp, loff_t *ppos)
 #else
 int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,

@@ -78,10 +78,11 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 
 #ifndef __STRIP__ /* See strip.py */
 	u64 start, block_start, blocked_time, now;
+
 	start = sched_clock();
 	blocked_time = 0;
 #endif /* See strip.py */
-        interest->blocked = 0;
+	interest->blocked = 0;
 
 	/* This loop iterates in order to poll and/or reap dead RPCS. */
 	for (iteration = 0; ; iteration++) {

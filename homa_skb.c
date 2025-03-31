@@ -99,11 +99,9 @@ void homa_skb_cleanup(struct homa *homa)
 		homa->page_pools[i] = NULL;
 	}
 
-	if (homa->skb_pages_to_free) {
-		kfree(homa->skb_pages_to_free);
-		homa->skb_pages_to_free = NULL;
-		homa->pages_to_free_slots = 0;
-	}
+	kfree(homa->skb_pages_to_free);
+	homa->skb_pages_to_free = NULL;
+	homa->pages_to_free_slots = 0;
 }
 
 /**

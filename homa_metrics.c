@@ -25,7 +25,7 @@ struct homa_metrics_output homa_mout;
  * homa_metrics_init() - Initialize global information related to metrics.
  * Return:  0 for success, otherwise a negative errno.
  */
-int homa_metrics_init()
+int homa_metrics_init(void)
 {
 	mutex_init(&homa_mout.mutex);
 	homa_mout.output = NULL;
@@ -43,7 +43,7 @@ int homa_metrics_init()
  * homa_metrics_end() - Called to clean up metrics information when the
  * Homa module unloads.
  */
-void homa_metrics_end()
+void homa_metrics_end(void)
 {
 	if (homa_mout.dir_entry)
 		proc_remove(homa_mout.dir_entry);

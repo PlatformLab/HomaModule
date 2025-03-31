@@ -1248,7 +1248,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 			break;
 
 		homa_rpc_unlock(rpc);
-		result = homa_interest_wait(&interest, nonblocking );
+		result = homa_interest_wait(&interest, nonblocking);
 
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
@@ -1318,7 +1318,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 		} else {
 			homa_interest_init_shared(&interest, hsk);
 			homa_sock_unlock(hsk);
-			result = homa_interest_wait(&interest, nonblocking );
+			result = homa_interest_wait(&interest, nonblocking);
 			homa_interest_unlink_shared(&interest);
 
 			if (result != 0) {
@@ -1397,7 +1397,7 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		INC_METRIC(handoffs_thread_waiting, 1);
 
 #ifndef __STRIP__ /* See strip.py */
-		/* Update the last_app_active time for the thread's core, so Homa
+		/* Update the last_app_active time for the thread's core, so
 		 * Homa will try to avoid assigning any work there.
 		 */
 		per_cpu(homa_offload_core, interest->core).last_app_active =

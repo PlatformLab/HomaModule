@@ -710,8 +710,8 @@ static inline struct homa_metrics *homa_metrics_per_cpu(void)
  * different core and races with an INC_METRIC there, the worst that
  * happens is that one of the INC_METRICs is lost, which isn't a big deal.
  */
-#define INC_METRIC(metric, count) per_cpu(homa_metrics, \
-		raw_smp_processor_id()).metric += (count)
+#define INC_METRIC(metric, count) (per_cpu(homa_metrics, \
+		raw_smp_processor_id()).metric += (count))
 
 extern struct homa_metrics_output homa_mout;
 

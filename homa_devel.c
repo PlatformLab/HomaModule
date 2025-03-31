@@ -412,7 +412,6 @@ void homa_freeze_peers(struct homa *homa)
 
 done:
 	rcu_read_unlock();
-	return;
 }
 
 /**

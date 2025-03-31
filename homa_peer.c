@@ -226,7 +226,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	}
 	peer->dst = dst;
 #ifndef __STRIP__ /* See strip.py */
-        peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
 	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);

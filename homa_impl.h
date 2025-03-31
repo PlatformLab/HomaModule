@@ -876,6 +876,7 @@ static inline struct in6_addr canonical_ipv6_addr(const union sockaddr_in_union
 						  *addr)
 {
 	struct in6_addr mapped;
+
 	if (addr) {
 		if (addr->sa.sa_family == AF_INET6)
 			return addr->in6.sin6_addr;
@@ -1018,7 +1019,7 @@ void     homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_unload(void);
 int      homa_wait_private(struct homa_rpc *rpc, int nonblocking);
 struct homa_rpc
-        *homa_wait_shared(struct homa_sock *hsk, int nonblocking);
+	*homa_wait_shared(struct homa_sock *hsk, int nonblocking);
 int      homa_xmit_control(enum homa_packet_type type, void *contents,
 			   size_t length, struct homa_rpc *rpc);
 int      __homa_xmit_control(void *contents, size_t length,
@@ -1031,7 +1032,7 @@ struct homa_rpc
 	*homa_choose_fifo_grant(struct homa *homa);
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int      homa_dointvec(struct ctl_table *table, int write,
+int      homa_dointvec(const struct ctl_table *table, int write,
 		       void __user *buffer, size_t *lenp, loff_t *ppos);
 #else
 int      homa_dointvec(const struct ctl_table *table, int write,
@@ -1047,7 +1048,7 @@ void     homa_prios_changed(struct homa *homa);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			  int priority);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int      homa_sysctl_softirq_cores(struct ctl_table *table, int write,
+int      homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 				   void __user *buffer, size_t *lenp,
 				   loff_t *ppos);
 #else

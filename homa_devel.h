@@ -69,7 +69,7 @@ static inline void check_addr_valid(void *addr, char *info)
 #ifndef __STRIP__ /* See strip.py */
 #define IF_NO_STRIP(code) code
 #else /* See strip.py */
-#define IF_NO_STRIP(code)
+#define IF_NO_STRIP(...)
 #endif /* See strip.py */
 
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
@@ -81,7 +81,7 @@ char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
 				  int buf_len);
 int      homa_snprintf(char *buffer, int size, int used,
-                       const char *format, ...) __printf(4, 5);
+		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
 

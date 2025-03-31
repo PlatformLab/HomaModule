@@ -146,7 +146,6 @@ position_peer:
 	}
 done:
 	homa_grantable_unlock(homa);
-	return;
 }
 
 /**
@@ -219,7 +218,6 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 
 done:
 	homa_grantable_unlock(homa);
-	return;
 }
 
 /**
