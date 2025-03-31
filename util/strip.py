@@ -127,6 +127,19 @@ def last_non_blank(s):
         return s2[-1]
     return None
 
+def blank_next_ok(line):
+    """
+    Given a line, return True if it is OK for this line to be followed by
+    a blank line. False means that if the next line to be output is blank,
+    it should be dropped.
+    """
+    s = line.strip()
+    if s == '':
+        return False
+    if s.endswith('{') or s.endswith('*/'):
+        return False
+    return True
+
 def scan(file):
     """
     Read a file, remove information that shouldn't appear in the Linux kernel
@@ -227,7 +240,6 @@ def scan(file):
         if in_labeled_skip != None:
             if line.startswith('#endif /* See strip.py */'):
                 in_labeled_skip = None
-                check_braces = False
                 continue
             elif line.startswith('#else /* See strip.py */'):
                 in_labeled_skip = 0
@@ -236,22 +248,22 @@ def scan(file):
                 continue
         if line.startswith('#ifndef __STRIP__ /* See strip.py */') or (
                 line.startswith('#ifndef __UPSTREAM__ /* See strip.py */')):
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             in_labeled_skip = 1
-            check_braces = False
+            check_braces = True
             continue
         if line.startswith('#ifdef __STRIP__ /* See strip.py */') :
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 slines.pop()
             in_labeled_skip = 0
-            check_braces = False
+            check_braces = True
             continue
 
         # Strip tt_freeze() statements.
         if pline == 'tt_freeze();':
             check_braces = True
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             continue
 
@@ -288,7 +300,7 @@ def scan(file):
 
             if pline[-1] != ';':
                   skip_statement = True
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             check_braces = True
             continue
@@ -297,14 +309,14 @@ def scan(file):
         if (pline.startswith('UNIT_LOG(') or pline.startswith('UNIT_HOOK(')):
             if pline[-1] != ';':
                   skip_statement = True
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             check_braces = True
             continue
 
         # Strip #include "homa_strip.h" statements.
         if pline.startswith('#include "homa_strip.h"'):
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             continue
 
@@ -320,12 +332,12 @@ def scan(file):
                 continue
         elif line.startswith('#ifdef __UNIT_TEST__'):
             in_unit = 'if'
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             continue
         elif line.startswith('#ifndef __UNIT_TEST__'):
             in_unit = 'else'
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             continue
 
@@ -341,7 +353,7 @@ def scan(file):
                 continue
         elif line.startswith('#if LINUX_VERSION_CODE'):
             in_version = 'if'
-            if slines[-1].strip() == '':
+            if not blank_next_ok(slines[-1]):
                 delete_empty_line = True
             continue
 
@@ -353,9 +365,9 @@ def scan(file):
         delete_empty_line = False
 
         # Remove braces for blocks that now have only a single statement
-        if pline[0] == '}':
+        if pline == '}' or pline.startswith('} else'):
             if check_braces:
-                check_braces = False;
+                check_braces = False
                 if open_index != None:
                     if statements_in_block == 0:
                         print('%s:%d: stripping creates empty block' %
@@ -371,6 +383,7 @@ def scan(file):
         if pline[-1] == '{' and line[0] != '{':
             statements_in_block = 0
             open_index = len(slines)
+            check_braces = False
 
         # Count statements
         if non_comment and non_comment[-1] == ';':
