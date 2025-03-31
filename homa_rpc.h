@@ -548,6 +548,8 @@ static inline bool homa_is_client(u64 id)
  * homa_rpc_needs_attention() - Returns true if @rpc has failed or if
  * its incoming message is ready for attention by an application thread
  * (e.g., packets are ready to copy to user space).
+ * @rpc: RPC to check.
+ * Return: See above
  */
 static inline bool homa_rpc_needs_attention(struct homa_rpc *rpc)
 {

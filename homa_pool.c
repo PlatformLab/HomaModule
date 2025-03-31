@@ -134,7 +134,7 @@ void homa_pool_get_rcvbuf(struct homa_sock *hsk,
 }
 
 /**
- * homa_pool_bpage_available() - Check whether a bpage is available for use.
+ * homa_bpage_available() - Check whether a bpage is available for use.
  * @bpage:      Bpage to check
  * @now:        Current time (sched_clock() units)
  * Return:      True if the bpage is free or if it can be stolen, otherwise

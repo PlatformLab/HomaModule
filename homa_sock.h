@@ -392,10 +392,11 @@ static inline struct homa_sock *homa_sk(const struct sock *sk)
 }
 
 /**
- * homa_sock_wmem_avl()) - Returns true if the socket is within its limit
+ * homa_sock_wmem_avl() - Returns true if the socket is within its limit
  * for output memory usage. False means that no new messages should be sent
  * until memory is freed.
  * @hsk:   Socket of interest.
+ * Return: See above.
  */
 static inline bool homa_sock_wmem_avl(struct homa_sock *hsk)
 {
