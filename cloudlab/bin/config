@@ -134,7 +134,7 @@ def get_interfaces():
                     or (current == 'eno1')):
                 interface = current
             continue
-        if re.match('^[ ]+ inet 10\.0\.1\.', line):
+        if re.match(r'^[ ]+ inet 10\.0\.1\.', line):
             vlan = current
     if not vlan or not interface:
         print("Found the following interfaces: %s" % (available))
@@ -198,7 +198,7 @@ def get_node_num():
         return node_num
     hostname = subprocess.run(["hostname"], stdout=subprocess.PIPE,
             encoding="utf-8", check=True).stdout
-    match = re.match('node([0-9]+)\.', hostname)
+    match = re.match(r'node([0-9]+)\.', hostname)
     if not match:
         raise Exception("Couldn't figure out node number for this node")
     node_num = int(match.group(1))
@@ -313,7 +313,7 @@ def read_cpu_info():
     sockets = {}
     f = open("/proc/cpuinfo", "r")
     for line in f:
-        match = re.match('([^\t]*)[\t ]+: (.*)', line)
+        match = re.match(r'([^\t]*)[\t ]+: (.*)', line)
         if match:
             name = match.group(1)
             value = match.group(2)
