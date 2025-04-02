@@ -794,7 +794,7 @@ void tcp_connection::set_epoll_events(int epoll_fd, uint32_t events)
 			: EPOLL_CTL_MOD, fd, &ev) < 0) {
 		log(NORMAL, "FATAL: couldn't add/modify epoll event: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	epoll_events = events;
 }
@@ -862,7 +862,7 @@ bool tcp_connection::xmit()
 						"to %s: %s (port %d)\n",
 						print_address(&peer),
 						strerror(errno), port);
-				exit(1);
+				_exit(1);
 			}
 		}
 		if (bytes_sent < header->length) {
@@ -987,7 +987,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 		log(NORMAL, "FATAL: homa_server couldn't open Homa "
 				"socket: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	memset(&addr, 0, sizeof(addr));
@@ -1002,7 +1002,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 		log(NORMAL, "FATAL: homa_server couldn't bind socket "
 				"to Homa port %d: %s\n", port,
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	log(NORMAL, "Successfully bound to Homa port %d\n", port);
 
@@ -1012,7 +1012,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 	if (buf_region == MAP_FAILED) {
 		printf("Couldn't mmap buffer region for server on port %d: %s\n",
 				port, strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	arg.start = (uintptr_t)buf_region;
 	arg.length = buf_size;
@@ -1021,7 +1021,7 @@ homa_server::homa_server(int port, int id, int inet_family, int num_threads,
 	if (status < 0) {
 		printf("FATAL: error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	for (int i = 0; i < num_threads; i++) {
@@ -1117,7 +1117,7 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 			log(NORMAL, "FATAL: homa_reply failed for server "
 					"port %d: %s\n",
 					port, strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		metrics->requests++;
 		metrics->bytes_in += length;
@@ -1219,7 +1219,7 @@ tcp_server::tcp_server(int port, int id, int num_threads,
 	if (listen_fd == -1) {
 		log(NORMAL, "FATAL: couldn't open server socket: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	int option_value = 1;
 	if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &option_value,
@@ -1227,13 +1227,13 @@ tcp_server::tcp_server(int port, int id, int num_threads,
 		log(NORMAL, "FATAL: couldn't set SO_REUSEADDR on listen "
 				"socket: %s",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	if (fcntl(listen_fd, F_SETFL, O_NONBLOCK) != 0) {
 		log(NORMAL, "FATAL: couldn't set O_NONBLOCK on listen "
 				"socket: %s",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	sockaddr_in_union addr;
 	if (inet_family == AF_INET) {
@@ -1248,12 +1248,12 @@ tcp_server::tcp_server(int port, int id, int num_threads,
 	if (bind(listen_fd, &addr.sa, sizeof(addr)) == -1) {
 		log(NORMAL, "FATAL: couldn't bind to port %d: %s\n", port,
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	if (listen(listen_fd, 1000) == -1) {
 		log(NORMAL, "FATAL: couldn't listen on socket: %s",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	epoll_fd = epoll_create(10);
@@ -1261,7 +1261,7 @@ tcp_server::tcp_server(int port, int id, int num_threads,
 		log(NORMAL, "FATAL: couldn't create epoll instance for "
 				"TCP server: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
@@ -1269,7 +1269,7 @@ tcp_server::tcp_server(int port, int id, int num_threads,
 	if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, listen_fd, &ev) < 0) {
 		log(NORMAL, "FATAL: couldn't add listen socket to epoll: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	metrics = new server_metrics(experiment);
@@ -1296,7 +1296,7 @@ tcp_server::~tcp_server()
 	if (pipe2(fds, 0) < 0) {
 		log(NORMAL, "FATAL: couldn't create pipe to shutdown TCP "
 				"server: %s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
@@ -1305,7 +1305,7 @@ tcp_server::~tcp_server()
 	if (write(fds[1], "xxxx", 4) < 0) {
 		log(NORMAL, "FATAL: couldn't write to TCP shutdown pipe: %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	for (size_t i = 0; i < threads.size(); i++)
@@ -1367,7 +1367,7 @@ void tcp_server::server(int thread_id)
 				continue;
 			log(NORMAL, "FATAL: epoll_wait failed: %s\n",
 					strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		tt("epoll_wait returned %d events in server pid %d",
 				num_events, pid);
@@ -1411,7 +1411,7 @@ void tcp_server::accept(int epoll_fd)
 			return;
 		log(NORMAL, "FATAL: couldn't accept incoming TCP connection: "
 				"%s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	/* Make sure the connection appears to be coming from someone
@@ -1447,7 +1447,7 @@ void tcp_server::accept(int epoll_fd)
 	if (fd >= MAX_FDS) {
 		log(NORMAL, "FATAL: TCP socket fd %d is greater than MAX_FDS\n",
 				fd);
-		exit(1);
+		_exit(1);
 	}
 	spin_lock lock_guard(&fd_locks[fd]);
 	tcp_connection *connection = new tcp_connection(fd, fd, port,
@@ -1722,7 +1722,7 @@ client::client(int id, std::string& experiment)
 			log(NORMAL, "FATAL: couldn't look up address "
 					"for %s: %s\n",
 					host, gai_strerror(status));
-			exit(1);
+			_exit(1);
 		}
 		dest = reinterpret_cast<sockaddr_in_union *>
 				(matching_addresses->ai_addr);
@@ -1814,7 +1814,7 @@ int client::get_rinfo()
 					"total_responses %ld, last_rinfo %d)\n",
 					rinfos.size(), total_requests,
 				        total_responses.load(), last_rinfo);
-			exit(1);
+			_exit(1);
 		}
 	}
 }
@@ -1955,7 +1955,7 @@ homa_client::homa_client(int id, std::string& experiment)
 	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
 		log(NORMAL, "Couldn't open Homa socket: %s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	buf_region = (char *) mmap(NULL, buf_size, PROT_READ|PROT_WRITE,
@@ -1963,7 +1963,7 @@ homa_client::homa_client(int id, std::string& experiment)
 	if (buf_region == MAP_FAILED) {
 		printf("Couldn't mmap buffer region for homa_client id %d: %s\n",
 				id, strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	arg.start = (uintptr_t)buf_region;
 	arg.length = buf_size;
@@ -1972,7 +1972,7 @@ homa_client::homa_client(int id, std::string& experiment)
 	if (status < 0) {
 		printf("FATAL: error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	if (unloaded) {
@@ -2062,13 +2062,13 @@ bool homa_client::wait_response(homa::receiver *receiver, uint64_t rpc_id)
 				strerror(errno), rpc_id,
 				print_address((union sockaddr_in_union *)
 					      receiver->src_addr()));
-		exit(1);
+		_exit(1);
 	}
 	header = receiver->get<message_header>(0);
 	if (header == nullptr) {
 		log(NORMAL, "FATAL: Homa response message contained %lu bytes; "
 			"need at least %lu", length, sizeof(*header));
-		exit(1);
+		_exit(1);
 	}
 	uint64_t end_time = rdtsc();
 	tt("Received response, cid 0x%08x, id %x, %d bytes",
@@ -2148,7 +2148,7 @@ void homa_client::sender()
 			log(NORMAL, "FATAL: error in homa_send: %s (request "
 					"length %d)\n", strerror(errno),
 					header->length);
-			exit(1);
+			_exit(1);
 		}
 		requests[server]++;
 		total_requests++;
@@ -2212,7 +2212,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 		log(NORMAL, "FATAL: error in homa_send: %s (request "
 				"length %d)\n", strerror(errno),
 				header->length);
-		exit(1);
+		_exit(1);
 	}
 	do {
 		status = receiver->receive(0, rpc_id);
@@ -2223,7 +2223,7 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 				strerror(errno), rpc_id,
 				print_address((union sockaddr_in_union *)
 					      receiver->src_addr()));
-		exit(1);
+		_exit(1);
 	}
 	return rdtsc() - start;
 }
@@ -2371,7 +2371,7 @@ tcp_client::tcp_client(int id, std::string& experiment)
 	if (epoll_fd < 0) {
 		log(NORMAL, "FATAL: tcp_client couldn't create epoll "
 				"instance: %s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	for (uint32_t i = 0; i < server_addrs.size(); i++) {
@@ -2380,7 +2380,7 @@ tcp_client::tcp_client(int id, std::string& experiment)
 			log(NORMAL, "FATAL: couldn't open TCP client "
 					"socket: %s\n",
 					strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		if (connect(fd, reinterpret_cast<struct sockaddr *>(
 				&server_addrs[i]),
@@ -2389,7 +2389,7 @@ tcp_client::tcp_client(int id, std::string& experiment)
 					"to %s: %s\n",
 					print_address(&server_addrs[i]),
 					strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		int flag = 1;
 		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
@@ -2398,7 +2398,7 @@ tcp_client::tcp_client(int id, std::string& experiment)
 					"to server %s: %s",
 					print_address(&server_addrs[i]),
 					strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		sockaddr_in_union addr;
 		socklen_t length = sizeof(addr);
@@ -2406,7 +2406,7 @@ tcp_client::tcp_client(int id, std::string& experiment)
 				&length)) {
 			log(NORMAL, "FATAL: getsockname failed for TCP client: "
 					"%s\n", strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		connections.emplace_back(new tcp_connection(fd, i,
 				ntohs(addr.in4.sin_port), server_addrs[i]));
@@ -2442,7 +2442,7 @@ tcp_client::~tcp_client()
 	if (pipe2(fds, 0) < 0) {
 		log(NORMAL, "FATAL: couldn't create pipe to shutdown TCP "
 				"server: %s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	struct epoll_event ev;
 	ev.events = EPOLLIN;
@@ -2451,7 +2451,7 @@ tcp_client::~tcp_client()
 	if (write(fds[1], "xxxx", 4) < 0) {
 		log(NORMAL, "FATAL: couldn't write to TCP shutdown "
 				"pipe: %s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 
 	if (sending_thread)
@@ -2595,7 +2595,7 @@ void tcp_client::receiver(int receiver_id)
 			log(NORMAL, "FATAL: epoll_wait failed in tcp_client: "
 					"%s\n",
 					strerror(errno));
-			exit(1);
+			_exit(1);
 		}
 		tt("epoll_wait returned %d events in client pid %d",
 				num_events, pid);
@@ -2629,7 +2629,7 @@ void tcp_client::read(tcp_connection *connection, int pid)
 	if (error) {
 		log(NORMAL, "FATAL: %s (client)\n",
 				connection->error_message);
-		exit(1);
+		_exit(1);
 	}
 }
 
@@ -3508,13 +3508,13 @@ int main(int argc, char** argv)
 	if (getrlimit(RLIMIT_NOFILE, &limits) != 0) {
 		log(NORMAL, "FATAL: couldn't read file descriptor limits: "
 				"%s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	limits.rlim_cur = limits.rlim_max;
 	if (setrlimit(RLIMIT_NOFILE, &limits) != 0) {
 		log(NORMAL, "FATAL: couldn't increase file descriptor limit: "
 				"%s\n", strerror(errno));
-		exit(1);
+		_exit(1);
 	}
 	struct sigaction action;
 	action.sa_sigaction = error_handler;
@@ -3533,7 +3533,7 @@ int main(int argc, char** argv)
 		for (int i = 1; i < argc; i++)
 			words.emplace_back(argv[i]);
 		if (!exec_words(words))
-			exit(1);
+			_exit(1);
 
 		/* Instead of going interactive, just print stats.
 		 * every second.
