@@ -69,7 +69,7 @@ node_type = None
 stripped = False
 
 # Speed of host uplinks.
-link_mbps = 0
+link_mbps = None
 
 # Defaults for command-line options; assumes that servers and clients
 # share nodes.
@@ -382,20 +382,21 @@ def init(options):
         s += ("--%s: %s" % (name, str(opts[name])))
     vlog("Options: %s" % (s))
     vlog("Homa configuration (node%d):" % (options.nodes[0]))
-    if not options.stripped:
-        for param in ['dead_buffs_limit', 'grant_fifo_fraction',
-                'gro_policy', 'link_mbps', 'max_dead_buffs',
-                'max_grantable_rpcs', 'max_gro_skbs', 'max_gso_size',
-                'max_nic_queue_ns', 'max_incoming', 'max_overcommit',
-                'max_rpcs_per_peer', 'num_priorities', 'pacer_fifo_fraction',
-                'poll_usecs', 'reap_limit', 'resend_interval', 'resend_ticks',
-                'throttle_min_bytes', 'timeout_resends', 'unsched_bytes', 'window']:
-            result = do_subprocess(['ssh', 'node%d' % (options.nodes[0]),
-                    'sysctl', '-n', '.net.homa.' + param])
-            vlog("  %-20s %s" % (param, result))
-            if param == 'link_mbps':
-                link_mbps = float(result)
-    else:
+    result = subprocess.run(['ssh', 'node%d' % (options.nodes[0]),
+            'sysctl', '-a'], capture_output=True, encoding="utf-8")
+    if (result.returncode != 0):
+        log("sysctl -a on node%d exited with status %d:" %
+                (options.nodes[0], result.returncode))
+        log(result.stderr.rstrip())
+    for line in result.stdout.splitlines():
+        match = re.match('.*net.homa.([^ ]+) = (.*)', line)
+        if match:
+            name = match.group(1)
+            value = match.group(2)
+            vlog("  %-20s %s" % (name, value))
+            if name == 'link_mbps':
+                link_mbps = float(value)
+    if link_mbps == None:
         link_mbps = 25000
 
     if options.mtu != 0:
