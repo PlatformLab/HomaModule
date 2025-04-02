@@ -544,17 +544,16 @@ struct homa {
 	int max_dead_buffs;
 
 	/**
-	 * @pacer_kthread: Kernel thread that transmits packets from
-	 * throttled_rpcs in a way that limits queue buildup in the
-	 * NIC.
-	 */
-	struct task_struct *pacer_kthread;
-
-	/**
 	 * @pacer_exit: true means that the pacer thread should exit as
 	 * soon as possible.
 	 */
 	bool pacer_exit;
+
+	/**
+	 * @pacer_wait_queue: Used to block the pacer thread when there
+	 * are no throttled RPCs.
+	 */
+	struct wait_queue_head pacer_wait_queue;
 
 	/**
 	 * @max_nic_queue_ns: Limits the NIC queue length: we won't queue
@@ -562,6 +561,13 @@ struct homa {
 	 * nanoseconds in the future (or more). Set externally via sysctl.
 	 */
 	int max_nic_queue_ns;
+
+	/**
+	 * @pacer_kthread: Kernel thread that transmits packets from
+	 * throttled_rpcs in a way that limits queue buildup in the
+	 * NIC.
+	 */
+	struct task_struct *pacer_kthread;
 
 	/**
 	 * @ns_per_mbyte: the number of ns that it takes to transmit
@@ -993,7 +999,7 @@ int      homa_net_init(struct net *net);
 void     homa_net_exit(struct net *net);
 int      homa_pacer_main(void *transport);
 void     homa_pacer_stop(struct homa *homa);
-bool     homa_pacer_xmit(struct homa *homa);
+void     homa_pacer_xmit(struct homa *homa);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,

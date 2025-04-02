@@ -115,6 +115,9 @@ int homa_init(struct homa *homa)
 	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;
+	homa->pacer_exit = false;
+	init_waitqueue_head(&homa->pacer_wait_queue);
+	homa->max_nic_queue_ns = 5000;
 	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
 					  "homa_pacer");
 	if (IS_ERR(homa->pacer_kthread)) {
@@ -123,8 +126,6 @@ int homa_init(struct homa *homa)
 		pr_err("couldn't create homa pacer thread: error %d\n", err);
 		return err;
 	}
-	homa->pacer_exit = false;
-	homa->max_nic_queue_ns = 5000;
 	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;

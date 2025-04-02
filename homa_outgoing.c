@@ -956,95 +956,61 @@ int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
 int homa_pacer_main(void *transport)
 {
 	struct homa *homa = (struct homa *)transport;
-	bool work_left;
 
-	homa->pacer_wake_time = sched_clock();
 	while (1) {
-		if (homa->pacer_exit) {
-			homa->pacer_wake_time = 0;
+		if (homa->pacer_exit)
 			break;
+		homa_pacer_xmit(homa);
+		if (!list_empty(&homa->throttled_rpcs)) {
+			/* NIC queue is full; before calling pacer again,
+			 * give other threads a chance to run (otherwise
+			 * low-level packet processing such as softirq could
+			 * get locked out).
+			 */
+			schedule();
+			continue;
 		}
-		work_left = homa_pacer_xmit(homa);
 
-		/* Sleep this thread if the throttled list is empty. Even
-		 * if the throttled list isn't empty, call the scheduler
-		 * to give other processes a chance to run (if we don't,
-		 * softirq handlers can get locked out, which prevents
-		 * incoming packets from being handled).
-		 */
-		set_current_state(TASK_INTERRUPTIBLE);
-		if (work_left)
-			__set_current_state(TASK_RUNNING);
-#ifndef __STRIP__ /* See strip.py */
-		else {
-			tt_record("pacer sleeping");
-			INC_METRIC(throttled_ns, sched_clock() -
-				   homa->throttle_add);
-		}
-#endif /* See strip.py */
-		INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);
-		homa->pacer_wake_time = 0;
-		schedule();
-		homa->pacer_wake_time = sched_clock();
-		__set_current_state(TASK_RUNNING);
+		tt_record("pacer sleeping");
+		wait_event(homa->pacer_wait_queue, homa->pacer_exit ||
+			   !list_empty(&homa->throttled_rpcs));
+		tt_record("pacer woke up");
 	}
 	kthread_complete_and_exit(&homa_pacer_kthread_done, 0);
 	return 0;
 }
 
 /**
- * homa_pacer_xmit() - Transmit packets from  the throttled list. Note:
- * this function may be invoked from either process context or softirq (BH)
- * level. This function is invoked from multiple places, not just in the
- * pacer thread. The reason for this is that (as of 10/2019) Linux's scheduling
- * of the pacer thread is unpredictable: the thread may block for long periods
- * of time (e.g., because it is assigned to the same CPU as a busy interrupt
- * handler). This can result in poor utilization of the network link. So,
- * this method gets invoked from other places as well, to increase the
- * likelihood that we keep the link busy. Those other invocations are not
- * guaranteed to happen, so the pacer thread provides a backstop.
+ * homa_pacer_xmit() - Transmit packets from  the throttled list until
+ * either (a) the throttled list is empty or (b) the NIC queue has
+ * reached maximum allowable length. Note: this function may be invoked
+ * from either process context or softirq (BH) level. This function is
+ * invoked from multiple places, not just in the pacer thread. The reason
+ * for this is that (as of 10/2019) Linux's scheduling of the pacer thread
+ * is unpredictable: the thread may block for long periods of time (e.g.,
+ * because it is assigned to the same CPU as a busy interrupt handler).
+ * This can result in poor utilization of the network link. So, this method
+ * gets invoked from other places as well, to increase the likelihood that we
+ * keep the link busy. Those other invocations are not guaranteed to happen,
+ * so the pacer thread provides a backstop.
  * @homa:    Overall data about the Homa protocol implementation.
- * Return:   False if there are no throttled RPCs at the time this
- *           function returns, true if there are throttled RPCs or
- *           if the answer is unknown at the time of return.
  */
-bool homa_pacer_xmit(struct homa *homa)
+void homa_pacer_xmit(struct homa *homa)
 {
 	struct homa_rpc *rpc;
-	bool result = true;
-	int i;
+	s64 queue_ns;
 
-	/* Make sure only one instance of this function executes at a
-	 * time.
-	 */
+	/* Make sure only one instance of this function executes at a time. */
 	if (!spin_trylock_bh(&homa->pacer_mutex))
-		return true;
+		return;
 
-	/* Each iteration through the following loop sends one packet. We
-	 * limit the number of passes through this loop in order to cap the
-	 * time spent in one call to this function (see note in
-	 * homa_pacer_main about interfering with softirq handlers).
-	 */
-	for (i = 0; i < 5; i++) {
-		u64 idle_time, now;
-
-		/* If the NIC queue is too long, wait until it gets shorter. */
-		now = sched_clock();
-		idle_time = atomic64_read(&homa->link_idle_time);
-		while ((now + homa->max_nic_queue_ns) < idle_time) {
-			/* If we've xmitted at least one packet then
-			 * return (this helps with testing and also
-			 * allows homa_pacer_main to yield the core).
-			 */
-			if (i != 0)
-				goto done;
-			now = sched_clock();
-		}
-		/* Note: when we get here, it's possible that the NIC queue is
-		 * still too long because other threads have queued packets,
-		 * but we transmit anyway so we don't starve (see perf.text
-		 * for more info).
-		 */
+	homa->pacer_wake_time = sched_clock();
+	while (1) {
+		queue_ns = atomic64_read(&homa->link_idle_time) - sched_clock();
+		if (queue_ns >= homa->max_nic_queue_ns)
+		    	break;
+		if (list_empty(&homa->throttled_rpcs))
+			break;
 
 		/* Lock the first throttled RPC. This may not be possible
 		 * because we have to hold throttle_lock while locking
@@ -1071,11 +1037,10 @@ bool homa_pacer_xmit(struct homa *homa)
 			}
 		} else {
 			rpc = list_first_entry_or_null(&homa->throttled_rpcs,
-						       struct homa_rpc,
-						       throttled_links);
+							struct homa_rpc,
+							throttled_links);
 		}
 		if (!rpc) {
-			result = false;
 			homa_throttle_unlock(homa);
 			break;
 		}
@@ -1097,12 +1062,12 @@ bool homa_pacer_xmit(struct homa *homa)
 		 */
 #ifndef __STRIP__ /* See strip.py */
 		if (!*rpc->msgout.next_xmit || rpc->msgout.next_xmit_offset >=
-				rpc->msgout.granted) {
+		                               rpc->msgout.granted) {
 #else /* See strip.py */
 		if (!*rpc->msgout.next_xmit) {
 #endif /* See strip.py */
-			/* Nothing more to transmit from this message (right
-			 * now), so remove it from the throttled list.
+			/* No more data can be transmitted from this message
+			 * (right now), so remove it from the throttled list.
 			 */
 			homa_throttle_lock(homa);
 			if (!list_empty(&rpc->throttled_links)) {
@@ -1110,14 +1075,13 @@ bool homa_pacer_xmit(struct homa *homa)
 					   rpc->id, rpc->msgout.next_xmit_offset);
 				list_del_init(&rpc->throttled_links);
 			}
-			result = !list_empty(&homa->throttled_rpcs);
 			homa_throttle_unlock(homa);
 		}
 		homa_rpc_unlock(rpc);
 	}
-done:
+	INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);
+	homa->pacer_wake_time = 0;
 	spin_unlock_bh(&homa->pacer_mutex);
-	return result;
 }
 
 /**
@@ -1128,7 +1092,7 @@ done:
 void homa_pacer_stop(struct homa *homa)
 {
 	homa->pacer_exit = true;
-	wake_up_process(homa->pacer_kthread);
+	wake_up(&homa->pacer_wait_queue);
 	kthread_stop(homa->pacer_kthread);
 	homa->pacer_kthread = NULL;
 }
@@ -1178,7 +1142,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 	list_add_tail(&rpc->throttled_links, &homa->throttled_rpcs);
 done:
 	homa_throttle_unlock(homa);
-	wake_up_process(homa->pacer_kthread);
+	wake_up(&homa->pacer_wait_queue);
 	INC_METRIC(throttle_list_adds, 1);
 	INC_METRIC(throttle_list_checks, checks);
 //	tt_record("woke up pacer thread");

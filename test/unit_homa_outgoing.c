@@ -47,6 +47,17 @@ void mock_resend_data(struct homa_rpc *rpc, int start, int end,
 		mock_resend_data(rpc, start, end, priority);
 #endif /* See strip.py */
 
+static int hook_count;
+static void remove_throttled_hook(char *id) {
+	if (strcmp(id, "spin_lock") != 0)
+		return;
+	if (hook_count <= 0)
+		return;
+	hook_count--;
+	if (hook_count == 0)
+		homa_remove_from_throttled(hook_rpc);
+}
+
 /* Compute the expected "truesize" value for a Homa packet, given
  * the number of bytes of message data in the packet.
  */
@@ -86,6 +97,7 @@ FIXTURE_SETUP(homa_outgoing)
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.window_param = 10000;
+	self->homa.pacer_fifo_fraction = 0;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
 	self->server_addr.in6.sin6_family = AF_INET;
@@ -851,8 +863,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	/* Now force transmission. */
 	unit_log_clear();
 	homa_xmit_data(crpc2, true);
-	EXPECT_STREQ("xmit DATA 1400@0; wake_up_process pid -1",
-			unit_log_get());
+	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800; "
@@ -871,8 +882,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 
 	homa_xmit_data(crpc, false);
 	EXPECT_STREQ("xmit DATA 1400@0; "
-			"xmit DATA 1400@1400; "
-			"wake_up_process pid -1", unit_log_get());
+			"xmit DATA 1400@1400", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
@@ -1242,7 +1252,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	self->homa.max_nic_queue_ns = 2000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
 		unit_log_get());
 	unit_log_clear();
@@ -1250,6 +1260,54 @@ TEST_F(homa_outgoing, homa_pacer_xmit__basics)
 	EXPECT_STREQ("request id 1234, next_offset 2800; "
 		"request id 1236, next_offset 0; "
 		"request id 1238, next_offset 0", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__pacer_already_active)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id,
+			10000, 1000);
+
+	homa_add_to_throttled(crpc);
+	self->homa.max_nic_queue_ns = 2000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	mock_trylock_errors = 1;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request id 1234, next_offset 0", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id,
+			10000, 1000);
+
+	homa_add_to_throttled(crpc);
+	self->homa.max_nic_queue_ns = 2001;
+	mock_ns = 10000;
+	atomic64_set(&self->homa.link_idle_time, 12000);
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa);
+
+	/* Just room for one packet before NIC queue fills. */
+	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
+	unit_log_clear();
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("request id 1234, next_offset 1400", unit_log_get());
+}
+TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
+{
+	self->homa.max_nic_queue_ns = 2000;
+	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	unit_log_clear();
+	homa_pacer_xmit(&self->homa);
+	unit_log_throttled(&self->homa);
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 {
@@ -1277,7 +1335,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_SUBSTR("id 4, message_length 10000, offset 0, data_length 1400",
 			unit_log_get());
 	unit_log_clear();
@@ -1290,7 +1348,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 	/* Second attempt: pacer_fifo_count reaches zero. */
 	atomic64_set(&self->homa.link_idle_time, 10000);
 	unit_log_clear();
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_SUBSTR("id 2, message_length 20000, offset 0, data_length 1400",
 			unit_log_get());
 	unit_log_clear();
@@ -1300,7 +1358,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__xmit_fifo)
 			"request id 6, next_offset 0", unit_log_get());
 	EXPECT_EQ(900, self->homa.pacer_fifo_count);
 }
-TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
+TEST_F(homa_outgoing, homa_pacer_xmit__rpc_removed_from_queue_before_locked)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
@@ -1308,43 +1366,18 @@ TEST_F(homa_outgoing, homa_pacer_xmit__pacer_busy)
 			10000, 1000);
 
 	homa_add_to_throttled(crpc);
-	self->homa.max_nic_queue_ns = 2000;
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	mock_trylock_errors = 1;
-	unit_log_clear();
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
-	EXPECT_STREQ("", unit_log_get());
-	unit_log_clear();
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 1234, next_offset 0", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_pacer_xmit__queue_empty)
-{
-	self->homa.max_nic_queue_ns = 2000;
+	self->homa.max_nic_queue_ns = 10000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
-	EXPECT_EQ(0, homa_pacer_xmit(&self->homa));
-	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_pacer_xmit__nic_queue_fills)
-{
-	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
-			UNIT_OUTGOING, self->client_ip, self->server_ip,
-			self->server_port, self->client_id,
-			10000, 1000);
+	unit_hook_register(remove_throttled_hook);
+	hook_rpc = crpc;
+	hook_count = 2;
+	homa_pacer_xmit(&self->homa);
 
-	homa_add_to_throttled(crpc);
-	self->homa.max_nic_queue_ns = 2001;
-	mock_ns = 10000;
-	atomic64_set(&self->homa.link_idle_time, 12000);
-	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
-	unit_log_clear();
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
-	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
+	EXPECT_STREQ("removing id 1234 from throttled list", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
-	EXPECT_STREQ("request id 1234, next_offset 1400", unit_log_get());
+	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 {
@@ -1358,14 +1391,14 @@ TEST_F(homa_outgoing, homa_pacer_xmit__rpc_locked)
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	unit_log_clear();
 	mock_trylock_errors = ~1;
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("", unit_log_get());
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->pacer_skipped_rpcs);
 #endif /* See strip.py */
 	unit_log_clear();
 	mock_trylock_errors = 0;
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
 		unit_log_get());
 }
@@ -1387,7 +1420,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	unit_log_clear();
 
 	/* First call completes id 2, but id 4 is still in the queue. */
-	EXPECT_EQ(1, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("xmit DATA 1000@0; xmit DATA 1400@0",
 			unit_log_get());
 	unit_log_clear();
@@ -1398,7 +1431,7 @@ TEST_F(homa_outgoing, homa_pacer_xmit__remove_from_queue)
 	/* Second call completes id 4, queue now empty. */
 	unit_log_clear();
 	self->homa.max_nic_queue_ns = 10000;
-	EXPECT_EQ(0, homa_pacer_xmit(&self->homa));
+	homa_pacer_xmit(&self->homa);
 	EXPECT_STREQ("xmit DATA 600@1400", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -1427,7 +1460,10 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 			self->server_port, 10, 10000, 1000);
 
 	/* Basics: add one RPC. */
+	mock_log_wakeups = 1;
+	unit_log_clear();
 	homa_add_to_throttled(crpc1);
+	EXPECT_STREQ("wake_up", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 2, next_offset 0", unit_log_get());
@@ -1446,7 +1482,9 @@ TEST_F(homa_outgoing, homa_add_to_throttled__basics)
 		"request id 6, next_offset 0", unit_log_get());
 
 	/* Don't reinsert if already present. */
+	unit_log_clear();
 	homa_add_to_throttled(crpc1);
+	EXPECT_STREQ("", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 4, next_offset 0; "
