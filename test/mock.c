@@ -399,7 +399,7 @@ void __copy_overflow(int size, unsigned long count)
 	abort();
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
 int debug_lockdep_rcu_enabled(void)
 {
 	return 0;
@@ -859,10 +859,12 @@ void *__kmalloc_cache_noprof(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 	return mock_kmalloc(size, gfpflags);
 }
 
+#ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 void __might_sleep(const char *file, int line)
 {
 	UNIT_HOOK("might_sleep");
 }
+#endif
 
 void *mock_kmalloc(size_t size, gfp_t flags)
 {
@@ -940,9 +942,7 @@ void lock_acquire(struct lockdep_map *lock, unsigned int subclass,
 		  int trylock, int read, int check,
 		  struct lockdep_map *nest_lock, unsigned long ip)
 {}
-#endif
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 void lockdep_rcu_suspicious(const char *file, const int line, const char *s)
 {}
 #endif
@@ -963,7 +963,7 @@ void lock_sock_nested(struct sock *sk, int subclass)
 	sk->sk_lock.owned = 1;
 }
 
-ssize_t __modver_version_show(const struct module_attribute *a,
+ssize_t __modver_version_show(struct module_attribute *a,
 		struct module_kobject *b, char *c)
 {
 	return 0;
@@ -1145,12 +1145,12 @@ bool rcu_is_watching(void)
 	return true;
 }
 
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
 int rcu_read_lock_any_held(void)
 {
 	return 1;
 }
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
 int rcu_read_lock_held(void)
 {
 	return 0;
