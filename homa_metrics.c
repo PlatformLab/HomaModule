@@ -179,16 +179,14 @@ char *homa_metrics_print(void)
 		  m->skb_page_alloc_ns);
 		M("requests_received         %15llu  Incoming request messages\n",
 		  m->requests_received);
-		M("requests_queued           %15llu  Requests for which no thread was waiting\n",
-		  m->requests_queued);
 		M("responses_received        %15llu  Incoming response messages\n",
 		  m->responses_received);
-		M("responses_queued          %15llu  Responses for which no thread was waiting\n",
-		  m->responses_queued);
-		M("fast_wakeups              %15llu  Messages received while polling\n",
-		  m->fast_wakeups);
-		M("slow_wakeups              %15llu  Messages received after thread went to sleep\n",
-		  m->slow_wakeups);
+		M("wait_none                 %15llu  Messages received without blocking or polling\n",
+		  m->wait_none);
+		M("wait_fast                 %15llu  Messages received while polling\n",
+		  m->wait_fast);
+		M("wait_block                %15llu  Messages received after thread went to sleep\n",
+		  m->wait_block);
 		M("handoffs_thread_waiting   %15llu  RPC handoffs to waiting threads (vs. queue)\n",
 		  m->handoffs_thread_waiting);
 		M("handoffs_alt_thread       %15llu  RPC handoffs not to first on list (avoid busy core)\n",

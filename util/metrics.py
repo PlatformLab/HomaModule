@@ -370,8 +370,9 @@ if elapsed_secs != 0:
     if total_messages > 0.0:
         print("\nReceiving Messages:")
         print("-------------------")
-        poll_percent = 100.0*float(deltas["fast_wakeups"])/total_messages
-        sleep_percent = 100.0*float(deltas["slow_wakeups"])/total_messages
+        avail_percent = 100.0*float(deltas["wait_none"])/total_messages
+        poll_percent = 100.0*float(deltas["wait_fast"])/total_messages
+        sleep_percent = 100.0*float(deltas["wait_block"])/total_messages
         if deltas["gen3_alt_handoffs"]:
             gen3_alt_percent = (100.0*deltas["gen3_alt_handoffs"]
                     /deltas["gen3_handoffs"])
@@ -392,8 +393,7 @@ if elapsed_secs != 0:
                         /deltas["packets_rcvd_GRANT"])
         else:
             grant_bypass_percent = 0.0
-        print("Available immediately:        %5.1f%%" % (100.0 - poll_percent
-                - sleep_percent))
+        print("Available immediately:        %5.1f%%" % (avail_percent))
         print("Arrived while polling:        %5.1f%%" % (poll_percent))
         print("Blocked at least once:        %5.1f%%" % (sleep_percent))
         print("Alternate GRO handoffs:       %5.1f%%" % (gen3_alt_percent))
@@ -440,14 +440,6 @@ if elapsed_secs != 0:
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")
-    for symbol in ["requests_queued", "responses_queued"]:
-        delta = deltas[symbol]
-        if delta != 0:
-            received = deltas[symbol[:-7] + "_received"]
-            if (received != 0):
-                percent = "(%.1f%%)" % (100.0*float(delta)/float(received))
-                percent = percent.ljust(12)
-                print("%-28s %15d %s %s" % (symbol, delta, percent, docs[symbol]))
     for symbol in ["resent_packets", "resent_packets_used",
             "packet_discards", "resent_discards", "unknown_rpcs",
             "peer_kmalloc_errors", "peer_route_errors", "control_xmit_errors",

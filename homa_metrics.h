@@ -104,33 +104,28 @@ struct homa_metrics {
 	u64 requests_received;
 
 	/**
-	 * @requests_queued: total number of requests that were added to
-	 * @homa->ready_requests (no thread was waiting).
-	 */
-	u64 requests_queued;
-
-	/**
 	 * @responses_received: total number of response messages received.
 	 */
 	u64 responses_received;
 
 	/**
-	 * @responses_queued: total number of responses that were added to
-	 * @homa->ready_responses (no thread was waiting).
+	 * @wait_none: total number of times that an incoming message was
+	 * already waiting when recvmsg was invoked.
 	 */
-	u64 responses_queued;
+	u64 wait_none;
 
 	/**
-	 * @fast_wakeups: total number of times that a message arrived for
-	 * a receiving thread that was polling in homa_wait_for_message.
+	 * @wait_fast: total number of times that a message arrived for
+	 * a receiving thread while it was polling (i.e. the message
+	 * wasn't immediatly available, but the thread never blocked).
 	 */
-	u64 fast_wakeups;
+	u64 wait_fast;
 
 	/**
-	 * @slow_wakeups: total number of times that a receiving thread
-	 * had to be put to sleep (no message arrived while it was polling).
+	 * @wait_block: total number of times that a thread blocked at
+	 * least once while waiting for an incoming message.
 	 */
-	u64 slow_wakeups;
+	u64 wait_block;
 
 	/**
 	 * @handoffs_thread_waiting: total number of times that an RPC

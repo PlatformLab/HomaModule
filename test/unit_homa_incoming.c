@@ -2214,7 +2214,7 @@ TEST_F(homa_incoming, homa_wait_private__rpc_not_private)
 	ASSERT_NE(NULL, crpc);
 	EXPECT_EQ(EINVAL, -homa_wait_private(crpc, 0));
 }
-TEST_F(homa_incoming, homa_wait_private__basics)
+TEST_F(homa_incoming, homa_wait_private__available_immediately)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
@@ -2225,7 +2225,7 @@ TEST_F(homa_incoming, homa_wait_private__basics)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	EXPECT_EQ(0, homa_wait_private(crpc, 0));
 	ASSERT_EQ(RPC_PRIVATE, atomic_read(&crpc->flags));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_none));
 }
 TEST_F(homa_incoming, homa_wait_private__rpc_has_error)
 {
@@ -2262,6 +2262,7 @@ TEST_F(homa_incoming, homa_wait_private__nonblocking)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 
 	EXPECT_EQ(EAGAIN, -homa_wait_private(crpc, 1));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_fast));
 }
 TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 {
@@ -2278,7 +2279,7 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 	mock_prepare_to_wait_errors = 1;
 
 	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
 	EXPECT_EQ(0, mock_prepare_to_wait_errors);
 }
 
@@ -2307,7 +2308,7 @@ TEST_F(homa_incoming, homa_wait_shared__rpc_already_ready)
 	ASSERT_FALSE(IS_ERR(rpc));
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(0, crpc->msgin.packets.qlen);
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_none));
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__multiple_rpcs_already_ready)
@@ -2337,6 +2338,7 @@ TEST_F(homa_incoming, homa_wait_shared__nonblocking)
 	rpc = homa_wait_shared(&self->hsk, 1);
 	EXPECT_TRUE(IS_ERR(rpc));
 	EXPECT_EQ(EAGAIN, -PTR_ERR(rpc));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_fast));
 }
 TEST_F(homa_incoming, homa_wait_shared__signal_race_with_handoff)
 {
@@ -2355,7 +2357,7 @@ TEST_F(homa_incoming, homa_wait_shared__signal_race_with_handoff)
 	rpc = homa_wait_shared(&self->hsk, 0);
 	EXPECT_EQ(crpc, rpc);
 	EXPECT_EQ(ENOENT, -rpc->error);
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups));
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
 	homa_rpc_unlock(rpc);
 }
 TEST_F(homa_incoming, homa_wait_shared__socket_shutdown_while_blocked)
@@ -2371,6 +2373,7 @@ TEST_F(homa_incoming, homa_wait_shared__socket_shutdown_while_blocked)
 	EXPECT_EQ(ESHUTDOWN, -PTR_ERR(rpc));
 	EXPECT_EQ(1, self->hsk.shutdown);
 	self->hsk.shutdown = 0;
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
 }
 TEST_F(homa_incoming, homa_wait_shared__copy_to_user_fails)
 {

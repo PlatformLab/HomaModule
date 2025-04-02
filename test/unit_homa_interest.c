@@ -145,7 +145,6 @@ TEST_F(homa_interest, homa_interest_wait__already_ready)
 	atomic_set(&interest.ready, 1);
 	EXPECT_EQ(0, homa_interest_wait(&interest, 0));
 	EXPECT_EQ(0, interest.blocked);
-	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->fast_wakeups));
 
 	homa_interest_unlink_shared(&interest);
 }
@@ -213,8 +212,6 @@ TEST_F(homa_interest, homa_interest_wait__poll_then_block)
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(3000, homa_metrics_per_cpu()->poll_ns);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->blocked_ns);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->fast_wakeups);
-	EXPECT_EQ(1, homa_metrics_per_cpu()->slow_wakeups);
 	EXPECT_EQ(1, interest.blocked);
 #endif /* See strip.py */
 	homa_interest_unlink_shared(&interest);

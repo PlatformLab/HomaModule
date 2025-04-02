@@ -1214,8 +1214,11 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	__must_hold(&rpc->bucket->lock)
 {
 	struct homa_interest interest;
+#ifndef __STRIP__ /* See strip.py */
+	int avail_immediately = 1;
+	int blocked = 0;
+#endif /* See strip.py */
 	int result = 0;
-	IF_NO_STRIP(int iteration);
 
 	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
 		return -EINVAL;
@@ -1227,11 +1230,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	 * (e.g. copy to user space). It may take many iterations until the
 	 * RPC is ready for the application.
 	 */
-#ifndef __STRIP__ /* See strip.py */
-	for (iteration = 0; ; iteration++) {
-#else /* See strip.py */
 	while (1) {
-#endif /* See strip.py */
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
@@ -1241,13 +1240,8 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		if (rpc->msgin.length >= 0 &&
 		    rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0) {
-#ifndef __STRIP__ /* See strip.py */
-			if (iteration == 0) {
-				tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
-						rpc->id, current->pid);
-				INC_METRIC(fast_wakeups, 1);
-			}
-#endif /* See strip.py */
+			tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
+					rpc->id, current->pid);
 			break;
 		}
 
@@ -1257,6 +1251,10 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 
 		homa_rpc_unlock(rpc);
 		result = homa_interest_wait(&interest, nonblocking);
+#ifndef __STRIP__ /* See strip.py */
+		avail_immediately = 0;
+		blocked |= interest.blocked;
+#endif /* See strip.py */
 
 		atomic_or(APP_NEEDS_LOCK, &rpc->flags);
 		homa_rpc_lock(rpc);
@@ -1272,6 +1270,14 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 			break;
 	}
 
+#ifndef __STRIP__ /* See strip.py */
+	if (avail_immediately)
+		INC_METRIC(wait_none, 1);
+	else if (blocked)
+		INC_METRIC(wait_block, 1);
+	else
+		INC_METRIC(wait_fast, 1);
+#endif /* See strip.py */
 	homa_rpc_put(rpc);
 	return result;
 }
@@ -1290,7 +1296,10 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 {
 	struct homa_interest interest;
 	struct homa_rpc *rpc;
-	IF_NO_STRIP(int iteration);
+#ifndef __STRIP__ /* See strip.py */
+	int avail_immediately = 1;
+	int blocked = 0;
+#endif /* See strip.py */
 	int result;
 
 	/* Each iteration through this loop waits until an RPC needs attention
@@ -1298,11 +1307,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	 * (e.g. copy to user space). It may take many iterations until an
 	 * RPC is ready for the application.
 	 */
-#ifndef __STRIP__ /* See strip.py */
-	for (iteration = 0; ; iteration++) {
-#else /* See strip.py */
 	while (1) {
-#endif /* See strip.py */
 		homa_sock_lock(hsk);
 		if (hsk->shutdown) {
 			rpc = ERR_PTR(-ESHUTDOWN);
@@ -1324,14 +1329,14 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 				hsk->sock.sk_data_ready(&hsk->sock);
 			}
 			homa_sock_unlock(hsk);
-#ifndef __STRIP__ /* See strip.py */
-			if (iteration == 0)
-				INC_METRIC(fast_wakeups, 1);
-#endif /* See strip.py */
 		} else {
 			homa_interest_init_shared(&interest, hsk);
 			homa_sock_unlock(hsk);
 			result = homa_interest_wait(&interest, nonblocking);
+#ifndef __STRIP__ /* See strip.py */
+			avail_immediately = 0;
+			blocked |= interest.blocked;
+#endif /* See strip.py */
 			homa_interest_unlink_shared(&interest);
 
 			if (result != 0) {
@@ -1371,6 +1376,14 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	}
 
 done:
+#ifndef __STRIP__ /* See strip.py */
+	if (avail_immediately)
+		INC_METRIC(wait_none, 1);
+	else if (blocked)
+		INC_METRIC(wait_block, 1);
+	else
+		INC_METRIC(wait_fast, 1);
+#endif /* See strip.py */
 	return rpc;
 }
 

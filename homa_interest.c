@@ -123,12 +123,8 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 
 done:
 #ifndef __STRIP__ /* See strip.py */
-	if (interest->blocked) {
-		INC_METRIC(slow_wakeups, 1);
+	if (interest->blocked)
 		INC_METRIC(blocked_ns, blocked_time);
-	} else {
-		INC_METRIC(fast_wakeups, 1);
-	}
 	INC_METRIC(poll_ns, sched_clock() - start - blocked_time);
 #endif /* See strip.py */
 	return result;
