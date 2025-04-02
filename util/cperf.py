@@ -1062,7 +1062,7 @@ def scan_logs():
     experiments = defaultdict(lambda : defaultdict(dict))
 
     for file in sorted(glob.glob(log_dir + "/node*.log")):
-        node = re.match('.*/(node[0-9]+)\.log', file).group(1)
+        node = re.match(r'.*/(node[0-9]+)\.log', file).group(1)
         scan_log(file, node, experiments)
 
     for name, exp in experiments.items():
@@ -1188,7 +1188,7 @@ def scan_metrics(experiment):
             if match:
                 metrics['cores'][file] = float(match.group(1))
                 continue
-            match = re.match('([^ ]+) +([0-9]+) +\( *([0-9.]+ *[MKG]?)/s', line)
+            match = re.match(r'([^ ]+) +([0-9]+) +\( *([0-9.]+ *[MKG]?)/s', line)
             if not match:
                 continue
             name = match.group(1)
