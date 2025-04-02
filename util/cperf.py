@@ -654,6 +654,9 @@ def start_servers(exp, ids, options):
                % (options.tcp_server_ports, options.tcp_port_threads,
                 options.protocol, exp, options.ipv6), ids)
     server_nodes = ids
+    if (options.debug):
+        print("Pausing for debug setup; type <Enter> to continue: ", end="")
+        input()
 
 def run_experiment(name, clients, options):
     """
