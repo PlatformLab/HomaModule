@@ -1215,7 +1215,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 {
 	struct homa_interest interest;
 	int result = 0;
-	int iteration;
+	IF_NO_STRIP(int iteration);
 
 	if (!(atomic_read(&rpc->flags) & RPC_PRIVATE))
 		return -EINVAL;
@@ -1227,7 +1227,11 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 	 * (e.g. copy to user space). It may take many iterations until the
 	 * RPC is ready for the application.
 	 */
+#ifndef __STRIP__ /* See strip.py */
 	for (iteration = 0; ; iteration++) {
+#else /* See strip.py */
+	while (1) {
+#endif /* See strip.py */
 		if (!rpc->error)
 			rpc->error = homa_copy_to_user(rpc);
 		if (rpc->error) {
@@ -1286,7 +1290,7 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 {
 	struct homa_interest interest;
 	struct homa_rpc *rpc;
-	int iteration;
+	IF_NO_STRIP(int iteration);
 	int result;
 
 	/* Each iteration through this loop waits until an RPC needs attention
@@ -1294,7 +1298,11 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 	 * (e.g. copy to user space). It may take many iterations until an
 	 * RPC is ready for the application.
 	 */
+#ifndef __STRIP__ /* See strip.py */
 	for (iteration = 0; ; iteration++) {
+#else /* See strip.py */
+	while (1) {
+#endif /* See strip.py */
 		homa_sock_lock(hsk);
 		if (hsk->shutdown) {
 			rpc = ERR_PTR(-ESHUTDOWN);
