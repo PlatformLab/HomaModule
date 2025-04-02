@@ -301,10 +301,16 @@ int homa_pool_allocate(struct homa_rpc *rpc)
 		goto new_page;
 	}
 	if ((core->allocated + partial) > HOMA_BPAGE_SIZE) {
+#ifndef __STRIP__ /* See strip.py */
 		if (atomic_read(&bpage->refs) == 1) {
 			/* Bpage is totally free, so we can reuse it. */
 			core->allocated = 0;
 			INC_METRIC(bpage_reuses, 1);
+#else /* See strip.py */
+		if (atomic_read(&bpage->refs) == 1) {
+			/* Bpage is totally free, so we can reuse it. */
+			core->allocated = 0;
+#endif /* See strip.py */
 		} else {
 			bpage->owner = -1;
 

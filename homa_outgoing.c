@@ -1029,7 +1029,7 @@ void homa_pacer_xmit(struct homa *homa)
 			homa->pacer_fifo_count += 1000;
 			rpc = NULL;
 			list_for_each_entry(cur, &homa->throttled_rpcs,
-						throttled_links) {
+					    throttled_links) {
 				if (cur->msgout.init_ns < oldest) {
 					rpc = cur;
 					oldest = cur->msgout.init_ns;
@@ -1135,7 +1135,7 @@ void homa_add_to_throttled(struct homa_rpc *rpc)
 				candidate->msgout.next_xmit_offset;
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail(&rpc->throttled_links,
-					  &candidate->throttled_links);
+				      &candidate->throttled_links);
 			goto done;
 		}
 	}

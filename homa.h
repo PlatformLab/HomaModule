@@ -70,6 +70,7 @@ struct homa_sendmsg_args {
 	 */
 	__u32 flags;
 
+	/** @reserved: Not currently used. */
 	__u32 reserved;
 };
 
@@ -196,8 +197,7 @@ struct homa_rcvbuf_args {
  */
 #define HOMA_FLAG_DONT_THROTTLE   2
 
-/**
- * I/O control calls on Homa sockets. These are mapped into the
+/* I/O control calls on Homa sockets. These are mapped into the
  * SIOCPROTOPRIVATE range of 0x89e0 through 0x89ef.
  */
 

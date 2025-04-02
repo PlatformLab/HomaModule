@@ -135,6 +135,7 @@ struct homa_common_hdr {
 	__u8 flags;
 #define HOMA_TCP_FLAGS 6
 #else /* See strip.py */
+	/** @reserved1: Not used (corresponds to TCP flags). */
 	__u8 reserved1;
 #endif /* See strip.py */
 
@@ -160,6 +161,7 @@ struct homa_common_hdr {
 	__be16 urgent;
 #define HOMA_TCP_URGENT 0xb97d
 #else /* See strip.py */
+	/** @reserved2: Not used (corresponds to TCP urgent field). */
 	__be16 reserved2;
 #endif /* See strip.py */
 

@@ -576,7 +576,7 @@ int __init homa_load(void)
 	status = register_pernet_subsys(&homa_net_ops);
 	if (status != 0) {
 		pr_err("Homa got error from register_pernet_subsys: %d\n",
-			status);
+		       status);
 		goto net_err;
 	}
 
@@ -910,15 +910,16 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		if (copy_from_sockptr(&args, optval, optlen))
 			return -EFAULT;
 
-		/* Do a trivial test to make sure we can at least write the first
-		 * page of the region.
+		/* Do a trivial test to make sure we can at least write the
+		 * first page of the region.
 		 */
 		if (copy_to_user(u64_to_user_ptr(args.start), &args,
 				sizeof(args)))
 			return -EFAULT;
 
 		homa_sock_lock(hsk);
-		ret = homa_pool_init(hsk, u64_to_user_ptr(args.start), args.length);
+		ret = homa_pool_init(hsk, u64_to_user_ptr(args.start),
+				     args.length);
 		homa_sock_unlock(hsk);
 		INC_METRIC(so_set_buf_calls, 1);
 		INC_METRIC(so_set_buf_ns, sched_clock() - start);
@@ -1035,7 +1036,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = -EFAULT;
 		goto error;
 	}
-	if ((args.flags & ~HOMA_SENDMSG_VALID_FLAGS) ||
+	if (args.flags & ~HOMA_SENDMSG_VALID_FLAGS ||
 	    (args.reserved != 0)) {
 		result = -EINVAL;
 		goto error;

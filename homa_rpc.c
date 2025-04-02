@@ -379,7 +379,8 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 		}
 
 		/* Collect buffers and freeable RPCs. */
-		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs, dead_links) {
+		list_for_each_entry_safe(rpc, tmp, &hsk->dead_rpcs,
+					 dead_links) {
 			int refs;
 
 			/* Make sure that all outstanding uses of the RPC have

@@ -321,8 +321,8 @@ static inline int homa_port_hash(__u16 port)
  *
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *hsk,
-							     u64 id)
+static inline struct homa_rpc_bucket
+		*homa_client_rpc_bucket(struct homa_sock *hsk, u64 id)
 {
 	/* We can use a really simple hash function here because RPC ids
 	 * are allocated sequentially.
@@ -339,8 +339,8 @@ static inline struct homa_rpc_bucket *homa_client_rpc_bucket(struct homa_sock *h
  *
  * Return:    The bucket in which this RPC will appear, if the RPC exists.
  */
-static inline struct homa_rpc_bucket *homa_server_rpc_bucket(struct homa_sock *hsk,
-							     u64 id)
+static inline struct homa_rpc_bucket
+		*homa_server_rpc_bucket(struct homa_sock *hsk, u64 id)
 {
 	/* Each client allocates RPC ids sequentially, so they will
 	 * naturally distribute themselves across the hash space.

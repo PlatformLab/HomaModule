@@ -1109,7 +1109,7 @@ static inline void homa_check_pacer(struct homa *homa, int softirq)
  */
 static inline struct homa *homa_from_net(struct net *net)
 {
-	return (struct homa *) net_generic(net, homa_net_id);
+	return (struct homa *)net_generic(net, homa_net_id);
 }
 
 /**
@@ -1120,7 +1120,7 @@ static inline struct homa *homa_from_net(struct net *net)
  */
 static inline struct homa *homa_from_sock(struct sock *sock)
 {
-	return (struct homa *) net_generic(sock_net(sock), homa_net_id);
+	return (struct homa *)net_generic(sock_net(sock), homa_net_id);
 }
 
 /**
@@ -1131,7 +1131,7 @@ static inline struct homa *homa_from_sock(struct sock *sock)
  */
 static inline struct homa *homa_from_skb(struct sk_buff *skb)
 {
-	return (struct homa *) net_generic(dev_net(skb->dev), homa_net_id);
+	return (struct homa *)net_generic(dev_net(skb->dev), homa_net_id);
 }
 
 extern struct completion homa_pacer_kthread_done;

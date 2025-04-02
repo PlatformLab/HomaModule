@@ -856,7 +856,6 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 			goto done;
 		}
-
 #ifndef __STRIP__ /* See strip.py */
 		pr_err("Received unknown for RPC id %llu, peer %s:%d in bogus state %d; discarding unknown\n",
 		       rpc->id, homa_print_ipv6_addr(&rpc->peer->addr),
@@ -865,16 +864,19 @@ void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 		tt_record4("Discarding unknown for RPC id %d, peer 0x%x:%d: bad state %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->state);
-	} else {
 #ifndef __STRIP__ /* See strip.py */
+	} else {
 		if (rpc->hsk->homa->verbose)
 			pr_notice("Ending rpc id %llu from client %s:%d: unknown to client",
 				  rpc->id,
 				  homa_print_ipv6_addr(&rpc->peer->addr),
 				  rpc->dport);
-#endif /* See strip.py */
 		homa_rpc_end(rpc);
 		INC_METRIC(server_rpcs_unknown, 1);
+#else /* See strip.py */
+	} else {
+		homa_rpc_end(rpc);
+#endif /* See strip.py */
 	}
 done:
 	kfree_skb(skb);
@@ -929,12 +931,14 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	 * the entire response), or if we can't find peer info.
 	 */
 	if (rpc && (rpc->state != RPC_INCOMING ||
-		    rpc->msgin.bytes_remaining)) {
 #ifndef __STRIP__ /* See strip.py */
+		    rpc->msgin.bytes_remaining)) {
 		tt_record3("NEED_ACK arrived for id %d before message received, state %d, remaining %d",
 			   rpc->id, rpc->state, rpc->msgin.bytes_remaining);
 		homa_freeze(rpc, NEED_ACK_MISSING_DATA,
 			    "Freezing because NEED_ACK received before message complete, id %d, peer 0x%x");
+#else /* See strip.py */
+		    rpc->msgin.bytes_remaining)) {
 #endif /* See strip.py */
 		goto done;
 	} else {
@@ -1298,10 +1302,11 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 			goto done;
 		}
 		if (!list_empty(&hsk->ready_rpcs)) {
-			rpc = list_first_entry(&hsk->ready_rpcs, struct homa_rpc,
-					ready_links);
+			rpc = list_first_entry(&hsk->ready_rpcs,
+					       struct homa_rpc,
+					       ready_links);
 			tt_record2("homa_wait_shared found rpc id %d, pid %d via ready_rpcs, blocked 0",
-					rpc->id, current->pid);
+				   rpc->id, current->pid);
 			homa_rpc_hold(rpc);
 			list_del_init(&rpc->ready_links);
 			if (!list_empty(&hsk->ready_rpcs)) {
