@@ -80,7 +80,7 @@ FIXTURE(homa_skb) {
 };
 FIXTURE_SETUP(homa_skb)
 {
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 	self->skb = alloc_skb_fclone(200, GFP_KERNEL);
 	if (!self->skb)

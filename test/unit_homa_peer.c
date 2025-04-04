@@ -45,7 +45,7 @@ FIXTURE(homa_peer) {
 };
 FIXTURE_SETUP(homa_peer)
 {
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	homa_peertab_init(&self->peertab);

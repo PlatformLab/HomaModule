@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -15,17 +16,16 @@
 #include "homa_stub.h"
 #endif /* See strip.py */
 
-struct completion homa_pacer_kthread_done;
-
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
+ * @net:    Network namespace that @homa is associated with.
  *
  * Return:  0 on success, or a negative errno if there was an error. Even
  *          if an error occurs, it is safe (and necessary) to call
  *          homa_destroy at some point.
  */
-int homa_init(struct homa *homa)
+int homa_init(struct homa *homa, struct net *net)
 {
 	int err;
 #ifndef __STRIP__ /* See strip.py */
@@ -36,20 +36,18 @@ int homa_init(struct homa *homa)
 #endif /* See strip.py */
 
 	memset(homa, 0, sizeof(*homa));
-	init_completion(&homa_pacer_kthread_done);
 	atomic64_set(&homa->next_outgoing_id, 2);
-	atomic64_set(&homa->link_idle_time, sched_clock());
 #ifndef __STRIP__ /* See strip.py */
 	spin_lock_init(&homa->grantable_lock);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	homa->last_grantable_change = sched_clock();
 #endif /* See strip.py */
-	spin_lock_init(&homa->pacer_mutex);
-	homa->pacer_fifo_fraction = 50;
-	homa->pacer_fifo_count = 1;
-	spin_lock_init(&homa->throttle_lock);
-	INIT_LIST_HEAD_RCU(&homa->throttled_rpcs);
-	homa->throttle_min_bytes = 200;
+	homa->pacer = homa_pacer_new(homa, net);
+	if (IS_ERR(homa->pacer)) {
+		err = PTR_ERR(homa->pacer);
+		homa->pacer = NULL;
+		return err;
+	}
 	homa->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
@@ -82,9 +80,6 @@ int homa_init(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 	homa->unsched_bytes = 40000;
 	homa->window_param = 100000;
-#endif /* See strip.py */
-	homa->link_mbps = 25000;
-#ifndef __STRIP__ /* See strip.py */
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
@@ -115,22 +110,11 @@ int homa_init(struct homa *homa)
 	homa->request_ack_ticks = 2;
 	homa->reap_limit = 10;
 	homa->dead_buffs_limit = 5000;
-	homa->pacer_exit = false;
-	init_waitqueue_head(&homa->pacer_wait_queue);
-	homa->max_nic_queue_ns = 5000;
-	homa->pacer_kthread = kthread_run(homa_pacer_main, homa,
-					  "homa_pacer");
-	if (IS_ERR(homa->pacer_kthread)) {
-		err = PTR_ERR(homa->pacer_kthread);
-		homa->pacer_kthread = NULL;
-		pr_err("couldn't create homa pacer thread: error %d\n", err);
-		return err;
-	}
-	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->verbose = 0;
 #endif /* See strip.py */
 	homa->max_gso_size = 10000;
+	homa->wmem_max = 100000000;
 #ifndef __STRIP__ /* See strip.py */
 	homa->max_gro_skbs = 20;
 	homa->gro_policy = HOMA_GRO_NORMAL;
@@ -139,7 +123,6 @@ int homa_init(struct homa *homa)
 #endif /* See strip.py */
 	homa->bpage_lease_usecs = 10000;
 #ifndef __STRIP__ /* See strip.py */
-	homa_outgoing_sysctl_changed(homa);
 	homa_incoming_sysctl_changed(homa);
 #endif /* See strip.py */
 	return 0;
@@ -155,16 +138,16 @@ void homa_destroy(struct homa *homa)
 #include "utils.h"
 	unit_homa_destroy(homa);
 #endif /* __UNIT_TEST__ */
-	if (homa->pacer_kthread) {
-		homa_pacer_stop(homa);
-		wait_for_completion(&homa_pacer_kthread_done);
-	}
 
 	/* The order of the following statements matters! */
 	if (homa->port_map) {
 		homa_socktab_destroy(homa->port_map);
 		kfree(homa->port_map);
 		homa->port_map = NULL;
+	}
+	if (homa->pacer) {
+		homa_pacer_destroy(homa->pacer);
+		homa->pacer = NULL;
 	}
 	if (homa->peers) {
 		homa_peertab_destroy(homa->peers);
@@ -229,24 +212,3 @@ void homa_spin(int ns)
 		/* Empty loop body.*/
 		;
 }
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_throttle_lock_slow() - This function implements the slow path for
- * acquiring the throttle lock. It is invoked when the lock isn't immediately
- * available. It waits for the lock, but also records statistics about
- * the waiting time.
- * @homa:    Overall data about the Homa protocol implementation.
- */
-void homa_throttle_lock_slow(struct homa *homa)
-	__acquires(&homa->throttle_lock)
-{
-	u64 start = sched_clock();
-
-	tt_record("beginning wait for throttle lock");
-	spin_lock_bh(&homa->throttle_lock);
-	tt_record("ending wait for throttle lock");
-	INC_METRIC(throttle_lock_misses, 1);
-	INC_METRIC(throttle_lock_miss_ns, sched_clock() - start);
-}
-#endif /* See strip.py */

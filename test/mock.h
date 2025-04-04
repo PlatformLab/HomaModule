@@ -126,6 +126,7 @@ extern int         mock_kmalloc_errors;
 extern int         mock_kthread_create_errors;
 extern int         mock_prepare_to_wait_errors;
 extern int         mock_register_protosw_errors;
+extern int         mock_register_sysctl_errors;
 extern int         mock_wait_intr_irq_errors;
 extern char        mock_xmit_prios[];
 extern int         mock_log_wakeups;

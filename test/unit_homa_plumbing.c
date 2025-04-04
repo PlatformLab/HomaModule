@@ -55,7 +55,7 @@ FIXTURE_SETUP(homa_plumbing)
 	self->client_addr.in6.sin6_port = htons(self->client_port);
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	if (self->homa.wmem_max == 0)
 		printf("homa_plumbing fixture found wmem_max 0\n");
 	mock_set_homa(&self->homa);

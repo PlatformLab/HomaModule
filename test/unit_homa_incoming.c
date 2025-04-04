@@ -2,6 +2,7 @@
 
 #include "homa_impl.h"
 #include "homa_interest.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -86,14 +87,14 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
 	self->homa.poll_usecs = 0;
 #endif /* See strip.py */
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	self->homa.pacer_fifo_fraction = 0;
+	self->homa.pacer->fifo_fraction = 0;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.grant_fifo_fraction = 0;
 	self->homa.unsched_bytes = 10000;

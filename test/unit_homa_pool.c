@@ -18,7 +18,7 @@ FIXTURE(homa_pool) {
 };
 FIXTURE_SETUP(homa_pool)
 {
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;

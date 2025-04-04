@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -377,7 +378,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		    xmit) {
 #endif /* See strip.py */
 			tt_record1("waking up pacer for id %d", rpc->id);
-			homa_add_to_throttled(rpc);
+			homa_pacer_manage_rpc(rpc);
 		}
 	}
 	tt_record2("finished copy from user space for id %d, length %d",
@@ -612,11 +613,11 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 #endif /* See strip.py */
 
 		if ((rpc->msgout.length - rpc->msgout.next_xmit_offset)
-				>= homa->throttle_min_bytes) {
-			if (!homa_check_nic_queue(homa, skb, force)) {
+				>= homa->pacer->throttle_min_bytes) {
+			if (!homa_pacer_check_nic_q(homa->pacer, skb, force)) {
 				tt_record1("homa_xmit_data adding id %u to throttle queue",
 					   rpc->id);
-				homa_add_to_throttled(rpc);
+				homa_pacer_manage_rpc(rpc);
 				break;
 			}
 		}
@@ -853,7 +854,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
-			homa_check_nic_queue(rpc->hsk->homa, new_skb, true);
+			homa_pacer_check_nic_q(rpc->hsk->homa->pacer,
+						   new_skb, true);
 #ifndef __STRIP__ /* See strip.py */
 			__homa_xmit_data(new_skb, rpc, priority);
 #else /* See strip.py */
@@ -866,338 +868,3 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 resend_done:
 	return;
 }
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_outgoing_sysctl_changed() - Invoked whenever a sysctl value is changed;
- * any output-related parameters that depend on sysctl-settable values.
- * @homa:    Overall data about the Homa protocol implementation.
- */
-void homa_outgoing_sysctl_changed(struct homa *homa)
-{
-	u64 tmp;
-
-	tmp = 8 * 1000ULL * 1000ULL * 1000ULL;
-
-	/* Underestimate link bandwidth (overestimate time) by 1%. */
-	tmp = tmp * 101 / 100;
-	do_div(tmp, homa->link_mbps);
-	homa->ns_per_mbyte = tmp;
-}
-#endif /* See strip.py */
-
-/**
- * homa_check_nic_queue() - This function is invoked before passing a packet
- * to the NIC for transmission. It serves two purposes. First, it maintains
- * an estimate of the NIC queue length. Second, it indicates to the caller
- * whether the NIC queue is so full that no new packets should be queued
- * (Homa's SRPT depends on keeping the NIC queue short).
- * @homa:     Overall data about the Homa protocol implementation.
- * @skb:      Packet that is about to be transmitted.
- * @force:    True means this packet is going to be transmitted
- *            regardless of the queue length.
- * Return:    Nonzero is returned if either the NIC queue length is
- *            acceptably short or @force was specified. 0 means that the
- *            NIC queue is at capacity or beyond, so the caller should delay
- *            the transmission of @skb. If nonzero is returned, then the
- *            queue estimate is updated to reflect the transmission of @skb.
- */
-int homa_check_nic_queue(struct homa *homa, struct sk_buff *skb, bool force)
-{
-	u64 idle, new_idle, clock, ns_for_packet;
-	int bytes;
-
-	bytes = homa_get_skb_info(skb)->wire_bytes;
-	ns_for_packet = homa->ns_per_mbyte;
-	ns_for_packet *= bytes;
-	do_div(ns_for_packet, 1000000);
-	while (1) {
-		clock = sched_clock();
-		idle = atomic64_read(&homa->link_idle_time);
-		if ((clock + homa->max_nic_queue_ns) < idle && !force &&
-		    !(homa->flags & HOMA_FLAG_DONT_THROTTLE))
-			return 0;
-#ifndef __STRIP__ /* See strip.py */
-		if (!list_empty(&homa->throttled_rpcs))
-			INC_METRIC(pacer_bytes, bytes);
-		if (idle < clock) {
-			if (homa->pacer_wake_time) {
-				u64 lost = (homa->pacer_wake_time > idle)
-						? clock - homa->pacer_wake_time
-						: clock - idle;
-				INC_METRIC(pacer_lost_ns, lost);
-				tt_record1("pacer lost %d cycles", lost);
-			}
-			new_idle = clock + ns_for_packet;
-		} else {
-			new_idle = idle + ns_for_packet;
-		}
-#else /* See strip.py */
-		if (idle < clock)
-			new_idle = clock + ns_for_packet;
-		else
-			new_idle = idle + ns_for_packet;
-#endif /* See strip.py */
-
-		/* This method must be thread-safe. */
-		if (atomic64_cmpxchg_relaxed(&homa->link_idle_time, idle,
-					     new_idle) == idle)
-			break;
-	}
-	return 1;
-}
-
-/**
- * homa_pacer_main() - Top-level function for the pacer thread.
- * @transport:  Pointer to struct homa.
- *
- * Return:         Always 0.
- */
-int homa_pacer_main(void *transport)
-{
-	struct homa *homa = (struct homa *)transport;
-
-	while (1) {
-		if (homa->pacer_exit)
-			break;
-		homa_pacer_xmit(homa);
-		if (!list_empty(&homa->throttled_rpcs)) {
-			/* NIC queue is full; before calling pacer again,
-			 * give other threads a chance to run (otherwise
-			 * low-level packet processing such as softirq could
-			 * get locked out).
-			 */
-			schedule();
-			continue;
-		}
-
-		tt_record("pacer sleeping");
-		wait_event(homa->pacer_wait_queue, homa->pacer_exit ||
-			   !list_empty(&homa->throttled_rpcs));
-		tt_record("pacer woke up");
-	}
-	kthread_complete_and_exit(&homa_pacer_kthread_done, 0);
-	return 0;
-}
-
-/**
- * homa_pacer_xmit() - Transmit packets from  the throttled list until
- * either (a) the throttled list is empty or (b) the NIC queue has
- * reached maximum allowable length. Note: this function may be invoked
- * from either process context or softirq (BH) level. This function is
- * invoked from multiple places, not just in the pacer thread. The reason
- * for this is that (as of 10/2019) Linux's scheduling of the pacer thread
- * is unpredictable: the thread may block for long periods of time (e.g.,
- * because it is assigned to the same CPU as a busy interrupt handler).
- * This can result in poor utilization of the network link. So, this method
- * gets invoked from other places as well, to increase the likelihood that we
- * keep the link busy. Those other invocations are not guaranteed to happen,
- * so the pacer thread provides a backstop.
- * @homa:    Overall data about the Homa protocol implementation.
- */
-void homa_pacer_xmit(struct homa *homa)
-{
-	struct homa_rpc *rpc;
-	s64 queue_ns;
-
-	/* Make sure only one instance of this function executes at a time. */
-	if (!spin_trylock_bh(&homa->pacer_mutex))
-		return;
-
-	homa->pacer_wake_time = sched_clock();
-	while (1) {
-		queue_ns = atomic64_read(&homa->link_idle_time) - sched_clock();
-		if (queue_ns >= homa->max_nic_queue_ns)
-		    	break;
-		if (list_empty(&homa->throttled_rpcs))
-			break;
-
-		/* Lock the first throttled RPC. This may not be possible
-		 * because we have to hold throttle_lock while locking
-		 * the RPC; that means we can't wait for the RPC lock because
-		 * of lock ordering constraints (see sync.txt). Thus, if
-		 * the RPC lock isn't available, do nothing. Holding the
-		 * throttle lock while locking the RPC is important because
-		 * it keeps the RPC from being deleted before it can be locked.
-		 */
-		homa_throttle_lock(homa);
-		homa->pacer_fifo_count -= homa->pacer_fifo_fraction;
-		if (homa->pacer_fifo_count <= 0) {
-			struct homa_rpc *cur;
-			u64 oldest = ~0;
-
-			homa->pacer_fifo_count += 1000;
-			rpc = NULL;
-			list_for_each_entry(cur, &homa->throttled_rpcs,
-					    throttled_links) {
-				if (cur->msgout.init_ns < oldest) {
-					rpc = cur;
-					oldest = cur->msgout.init_ns;
-				}
-			}
-		} else {
-			rpc = list_first_entry_or_null(&homa->throttled_rpcs,
-							struct homa_rpc,
-							throttled_links);
-		}
-		if (!rpc) {
-			homa_throttle_unlock(homa);
-			break;
-		}
-		if (!homa_rpc_try_lock(rpc)) {
-			homa_throttle_unlock(homa);
-			INC_METRIC(pacer_skipped_rpcs, 1);
-			break;
-		}
-		homa_throttle_unlock(homa);
-
-		tt_record4("pacer calling homa_xmit_data for rpc id %llu, port %d, offset %d, bytes_left %d",
-			   rpc->id, rpc->hsk->port,
-			   rpc->msgout.next_xmit_offset,
-			   rpc->msgout.length - rpc->msgout.next_xmit_offset);
-		homa_xmit_data(rpc, true);
-
-		/* Note: rpc->state could be RPC_DEAD here, but the code
-		 * below should work anyway.
-		 */
-#ifndef __STRIP__ /* See strip.py */
-		if (!*rpc->msgout.next_xmit || rpc->msgout.next_xmit_offset >=
-		                               rpc->msgout.granted) {
-#else /* See strip.py */
-		if (!*rpc->msgout.next_xmit) {
-#endif /* See strip.py */
-			/* No more data can be transmitted from this message
-			 * (right now), so remove it from the throttled list.
-			 */
-			homa_throttle_lock(homa);
-			if (!list_empty(&rpc->throttled_links)) {
-				tt_record2("pacer removing id %d from throttled list, offset %d",
-					   rpc->id, rpc->msgout.next_xmit_offset);
-				list_del_init(&rpc->throttled_links);
-			}
-			homa_throttle_unlock(homa);
-		}
-		homa_rpc_unlock(rpc);
-	}
-	INC_METRIC(pacer_ns, sched_clock() - homa->pacer_wake_time);
-	homa->pacer_wake_time = 0;
-	spin_unlock_bh(&homa->pacer_mutex);
-}
-
-/**
- * homa_pacer_stop() - Will cause the pacer thread to exit (waking it up
- * if necessary); doesn't return until after the pacer thread has exited.
- * @homa:    Overall data about the Homa protocol implementation.
- */
-void homa_pacer_stop(struct homa *homa)
-{
-	homa->pacer_exit = true;
-	wake_up(&homa->pacer_wait_queue);
-	kthread_stop(homa->pacer_kthread);
-	homa->pacer_kthread = NULL;
-}
-
-/**
- * homa_add_to_throttled() - Make sure that an RPC is on the throttled list
- * and wake up the pacer thread if necessary.
- * @rpc:     RPC with outbound packets that have been granted but can't be
- *           sent because of NIC queue restrictions. Must be locked by caller.
- */
-void homa_add_to_throttled(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
-{
-	struct homa *homa = rpc->hsk->homa;
-	struct homa_rpc *candidate;
-	int bytes_left;
-	int checks = 0;
-	u64 now;
-
-	if (!list_empty(&rpc->throttled_links))
-		return;
-	now = sched_clock();
-#ifndef __STRIP__ /* See strip.py */
-	if (!list_empty(&homa->throttled_rpcs))
-		INC_METRIC(throttled_ns, now - homa->throttle_add);
-#endif /* See strip.py */
-	homa->throttle_add = now;
-	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
-	homa_throttle_lock(homa);
-	list_for_each_entry(candidate, &homa->throttled_rpcs,
-				throttled_links) {
-		int bytes_left_cand;
-
-		checks++;
-
-		/* Watch out: the pacer might have just transmitted the last
-		 * packet from candidate.
-		 */
-		bytes_left_cand = candidate->msgout.length -
-				candidate->msgout.next_xmit_offset;
-		if (bytes_left_cand > bytes_left) {
-			list_add_tail(&rpc->throttled_links,
-				      &candidate->throttled_links);
-			goto done;
-		}
-	}
-	list_add_tail(&rpc->throttled_links, &homa->throttled_rpcs);
-done:
-	homa_throttle_unlock(homa);
-	wake_up(&homa->pacer_wait_queue);
-	INC_METRIC(throttle_list_adds, 1);
-	INC_METRIC(throttle_list_checks, checks);
-//	tt_record("woke up pacer thread");
-}
-
-/**
- * homa_remove_from_throttled() - Make sure that an RPC is not on the
- * throttled list.
- * @rpc:     RPC of interest.
- */
-void homa_remove_from_throttled(struct homa_rpc *rpc)
-{
-	if (unlikely(!list_empty(&rpc->throttled_links))) {
-		UNIT_LOG("; ", "removing id %llu from throttled list", rpc->id);
-		homa_throttle_lock(rpc->hsk->homa);
-		list_del(&rpc->throttled_links);
-#ifndef __STRIP__ /* See strip.py */
-		if (list_empty(&rpc->hsk->homa->throttled_rpcs))
-			INC_METRIC(throttled_ns, sched_clock()
-					- rpc->hsk->homa->throttle_add);
-#endif /* See strip.py */
-		homa_throttle_unlock(rpc->hsk->homa);
-		INIT_LIST_HEAD(&rpc->throttled_links);
-	}
-}
-
-#ifndef __STRIP__ /* See strip.py */
-/**
- * homa_log_throttled() - Print information to the system log about the
- * RPCs on the throttled list.
- * @homa:   Overall information about the Homa transport.
- */
-void homa_log_throttled(struct homa *homa)
-{
-	struct homa_rpc *rpc;
-	s64 bytes = 0;
-	int rpcs = 0;
-
-	pr_notice("Printing throttled list\n");
-	homa_throttle_lock(homa);
-	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
-		rpcs++;
-		if (!homa_rpc_try_lock(rpc)) {
-			pr_notice("Skipping throttled RPC: locked\n");
-			continue;
-		}
-		if (*rpc->msgout.next_xmit)
-			bytes += rpc->msgout.length
-					- rpc->msgout.next_xmit_offset;
-		if (rpcs <= 20)
-			homa_rpc_log(rpc);
-		homa_rpc_unlock(rpc);
-	}
-	homa_throttle_unlock(homa);
-	pr_notice("Finished printing throttle list: %d rpcs, %lld bytes\n",
-		  rpcs, bytes);
-}
-#endif /* See strip.py */

@@ -4,6 +4,7 @@
 
 #include "homa_impl.h"
 #include "homa_interest.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -310,7 +311,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
 		rpc->hsk->homa->max_dead_buffs = rpc->hsk->dead_skbs;
 
 	homa_sock_unlock(rpc->hsk);
-	homa_remove_from_throttled(rpc);
+	homa_pacer_unmanage_rpc(rpc);
 }
 
 /**

@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #include "ccutils.h"
@@ -299,7 +300,7 @@ void unit_log_throttled(struct homa *homa)
 {
 	struct homa_rpc *rpc;
 
-	list_for_each_entry_rcu(rpc, &homa->throttled_rpcs, throttled_links) {
+	list_for_each_entry_rcu(rpc, &homa->pacer->throttled_rpcs, throttled_links) {
 		unit_log_printf("; ", "%s id %llu, next_offset %d",
 				homa_is_client(rpc->id) ? "request"
 				: "response", rpc->id,

@@ -2,6 +2,7 @@
 
 #include "homa_impl.h"
 #include "homa_grant.h"
+#include "homa_pacer.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -75,12 +76,12 @@ FIXTURE_SETUP(homa_grant)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 	self->homa.num_priorities = 1;
 	self->homa.poll_usecs = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
-	self->homa.pacer_fifo_fraction = 0;
+	self->homa.pacer->fifo_fraction = 0;
 	self->homa.grant_fifo_fraction = 0;
 	self->homa.window_param = 10000;
 	self->homa.grant_window = 10000;

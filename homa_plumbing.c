@@ -8,6 +8,7 @@
 #ifndef __STRIP__ /* See strip.py */
 #include "homa_offload.h"
 #endif /* See strip.py */
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 
@@ -258,13 +259,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "link_mbps",
-		.data		= OFFSET(link_mbps),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "max_dead_buffs",
 		.data		= OFFSET(max_dead_buffs),
 		.maxlen		= sizeof(int),
@@ -288,13 +282,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "max_gso_size",
 		.data		= OFFSET(max_gso_size),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "max_nic_queue_ns",
-		.data		= OFFSET(max_nic_queue_ns),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -337,13 +324,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "num_priorities",
 		.data		= OFFSET(num_priorities),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "pacer_fifo_fraction",
-		.data		= OFFSET(pacer_fifo_fraction),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -408,13 +388,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.procname	= "temp",
 		.data		= OFFSET(temp[0]),
 		.maxlen		= sizeof(((struct homa *) 0)->temp),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "throttle_min_bytes",
-		.data		= OFFSET(throttle_min_bytes),
-		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
@@ -651,7 +624,7 @@ int homa_net_init(struct net *net)
 
 	pr_notice("Homa attaching to net namespace\n");
 
-	status = homa_init(homa);
+	status = homa_init(homa, net);
 	if (status)
 		goto homa_init_err;
 #ifndef __STRIP__ /* See strip.py */
@@ -1693,7 +1666,6 @@ int homa_dointvec(const struct ctl_table *table, int write,
 		 * dependent information).
 		 */
 		homa_incoming_sysctl_changed(homa);
-		homa_outgoing_sysctl_changed(homa);
 
 		/* For this value, only call the method when this
 		 * particular value was written (don't want to increment
@@ -1719,7 +1691,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				tt_record("Freezing because of sysctl");
 				tt_freeze();
 			} else if (homa->sysctl_action == 4) {
-				homa_log_throttled(homa);
+				homa_pacer_log_throttled(homa->pacer);
 			} else if (homa->sysctl_action == 5) {
 				tt_printk();
 			} else if (homa->sysctl_action == 6) {

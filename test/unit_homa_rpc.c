@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -66,7 +67,7 @@ FIXTURE_SETUP(homa_rpc)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = *self->server_ip;
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	homa_init(&self->homa);
+	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
@@ -509,11 +510,11 @@ TEST_F(homa_rpc, homa_rpc_end__remove_from_throttled_list)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 10000, 1000);
 
-	homa_add_to_throttled(crpc);
-	EXPECT_EQ(1, unit_list_length(&self->homa.throttled_rpcs));
+	homa_pacer_manage_rpc(crpc);
+	EXPECT_EQ(1, unit_list_length(&self->homa.pacer->throttled_rpcs));
 	unit_log_clear();
 	homa_rpc_end(crpc);
-	EXPECT_EQ(0, unit_list_length(&self->homa.throttled_rpcs));
+	EXPECT_EQ(0, unit_list_length(&self->homa.pacer->throttled_rpcs));
 }
 
 TEST_F(homa_rpc, homa_rpc_reap__basics)

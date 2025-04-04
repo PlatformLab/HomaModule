@@ -48,6 +48,7 @@ int mock_kmalloc_errors;
 int mock_kthread_create_errors;
 int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
+int mock_register_sysctl_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
 int mock_trylock_errors;
@@ -57,7 +58,7 @@ int mock_wait_intr_irq_errors;
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
 
-/* Used as current task during tests. */
+/* Used as current task during tests. Also returned by kthread_run. */
 struct task_struct mock_task;
 
 /* If a test sets this variable to nonzero, ip_queue_xmit will log
@@ -901,11 +902,12 @@ struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 {
 	if (mock_check_error(&mock_kthread_create_errors))
 		return ERR_PTR(-EACCES);
-	return NULL;
+	return &mock_task;
 }
 
 int kthread_stop(struct task_struct *k)
 {
+	unit_log_printf("; ", "kthread_stop");
 	return 0;
 }
 
@@ -1667,6 +1669,8 @@ void mock_rcu_read_unlock(void)
 struct ctl_table_header *mock_register_net_sysctl(struct net *net,
 		const char *path, struct ctl_table *table)
 {
+	if (mock_check_error(&mock_register_sysctl_errors))
+		return NULL;
 	return (struct ctl_table_header *)11111;
 }
 
@@ -1962,6 +1966,7 @@ void mock_teardown(void)
 	mock_kthread_create_errors = 0;
 	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
+	mock_register_sysctl_errors = 0;
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;

@@ -368,8 +368,9 @@ struct homa_rpc {
 #endif /* See strip.py */
 
 	/**
-	 * @throttled_links: Used to link this RPC into homa->throttled_rpcs.
-	 * If this RPC isn't in homa->throttled_rpcs, this is an empty
+	 * @throttled_links: Used to link this RPC into
+	 * homa->pacer.throttled_rpcs. If this RPC isn't in
+	 * homa->pacer.throttled_rpcs, this is an empty
 	 * list pointing to itself.
 	 */
 	struct list_head throttled_links;
