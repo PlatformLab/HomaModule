@@ -546,3 +546,56 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 	}
 }
 #endif /* See strip.py */
+
+/**
+ * homa_check_addr() - Verify that an address falls within the allowable
+ * range for kernel data. If not, crash the kernel.
+ * @p:  Address to check.
+ */
+void homa_check_addr(void *p)
+{
+	uintptr_t addr = (uintptr_t)p;
+
+	if ((addr & 0xffff800000000000) != 0xffff800000000000) {
+		pr_err("homa_check_addr received bogus address 0x%lx\n", addr);
+		tt_dbg1("foo");
+		BUG_ON(1);
+	}
+}
+
+/**
+ * homa_check_list() - Scan a list to make sure its pointer structure is
+ * not corrupted and that its length is bounded. Crashes the kernel if
+ * a problem is found.
+ * @list:        Head of list to scan.
+ * @max_length:  If the list has more than this many elements, it is
+ *               assumed to have an internal loop.
+ */
+void homa_check_list(struct list_head *list, int max_length)
+{
+	struct list_head *p, *prev;
+	int num_elems;
+
+	homa_check_addr(list->next);
+	homa_check_addr(list->prev);
+	prev = list;
+	for (p = list->next, num_elems = 0; ; p = p->next, num_elems++) {
+		if (p->prev != prev) {
+			pr_err("homa_check_list found bogus list structure: p->prev 0x%px, prev 0x%px\n",
+			       p->prev, prev);
+			tt_dbg1("foo");
+			BUG_ON(1);
+		}
+		if (p == list)
+			break;
+		if (num_elems > max_length) {
+			pr_err("homa_check_list found list with > %d elements\n",
+			       max_length);
+			tt_dbg1("foo");
+			BUG_ON(1);
+		}
+		homa_check_addr(p->next);
+		homa_check_addr(p->prev);
+		prev = p;
+	}
+}

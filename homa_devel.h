@@ -72,6 +72,8 @@ static inline void check_addr_valid(void *addr, char *info)
 #define IF_NO_STRIP(...)
 #endif /* See strip.py */
 
+void     homa_check_addr(void *p);
+void     homa_check_list(struct list_head *list, int max_length);
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		     char *format);
 void     homa_freeze_peers(struct homa *homa);
