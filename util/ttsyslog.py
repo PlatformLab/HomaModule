@@ -37,6 +37,10 @@ if len(sys.argv) > 1:
     f = open(sys.argv[1])
 
 for line in f:
+    line = line.rstrip()
+    if line.endswith('^M'):
+        line = line[:-2]
+
     # Ignore everything up until the initial line containing the clock speed.
     if cpu_ghz == None:
         match = re.match('.*cpu_khz: ([0-9.]+)', line)
