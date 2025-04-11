@@ -588,14 +588,8 @@ discard:
 		kfree_skb(skb);
 	}
 	if (rpc) {
-#ifndef __STRIP__ /* See strip.py */
-		homa_rpc_hold(rpc);
+		IF_NO_STRIP(homa_grant_check_rpc(rpc));
 		homa_rpc_unlock(rpc);
-		homa_grant_check_rpc(rpc);
-		homa_rpc_put(rpc);
-#else /* See strip.py */
-		homa_rpc_unlock(rpc);
-#endif /* See strip.py */
 	}
 
 	while (num_acks > 0) {

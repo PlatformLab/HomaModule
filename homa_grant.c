@@ -60,6 +60,7 @@ void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa *homa)
  * @rpc:    The RPC to add/reposition. Must be locked by caller.
  */
 void homa_grant_add_rpc(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
@@ -155,6 +156,7 @@ done:
  *           a grantable list. Must be locked by caller.
  */
 void homa_grant_remove_rpc(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_peer *peer = rpc->peer;
@@ -303,10 +305,10 @@ int homa_grant_try_send(struct homa_rpc *rpc, struct homa *homa)
  * RPC relative to outgoing grants and takes any appropriate actions that
  * are needed (such as adding the RPC to the grantable list or sending
  * grants for this or other RPCs).
- * @rpc:    RPC to check. Must not be locked by the caller, but caller
- *          must own a reference.
+ * @rpc:    RPC to check. Must be locked by the caller.
  */
 void homa_grant_check_rpc(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	/* Overall design note:
 	 * The grantable lock has proven to be a performance bottleneck,
@@ -353,7 +355,11 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		goto done;
 	}
 
-	/* Not a new message; see if we can upgrade the message's priority. */
+	/* Not a new message; see if we can upgrade the message's priority.
+	 * This accesses data that might be changing concurrently (e.g.
+	 * active_rpcs), but it should be safe: the worst that can happen
+	 * is extra calls to homa_grant_recalc.
+	 */
 	rank = atomic_read(&rpc->msgin.rank);
 	if (homa->active_rpcs[rank] != rpc) {
 		/* RPC not currently active. */
@@ -384,7 +390,11 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		goto done;
 
 recalc:
+	homa_rpc_hold(rpc);
+	homa_rpc_unlock(rpc);
 	homa_grant_recalc(homa);
+	homa_rpc_lock(rpc);
+	homa_rpc_put(rpc);
 
 done:
 	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);

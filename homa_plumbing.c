@@ -483,7 +483,7 @@ int __init homa_load(void)
 {
 	int status;
 
-	pr_notice("Homa module loading\n");
+	pr_err("Homa module loading\n");
 #ifndef __STRIP__ /* See strip.py */
 	pr_notice("Homa structure sizes: homa_data_hdr %u, homa_seg_hdr %u, ack %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
 		  sizeof32(struct homa_data_hdr),
