@@ -3,6 +3,7 @@
 /* This file manages homa_sock and homa_socktab objects. */
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_interest.h"
 #include "homa_peer.h"
 #include "homa_pool.h"

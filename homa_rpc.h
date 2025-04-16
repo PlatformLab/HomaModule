@@ -163,7 +163,7 @@ struct homa_message_in {
 	 * @rec_incoming: Number of bytes in homa->total_incoming currently
 	 * contributed ("recorded") from this RPC.
 	 */
-	atomic_t rec_incoming;
+	int rec_incoming;
 
 	/**
 	 * @rank: A hint: if homa->active_rpcs[@rank] refers to this RPC then

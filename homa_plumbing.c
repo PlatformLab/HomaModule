@@ -1300,10 +1300,9 @@ done:
 #ifndef __STRIP__ /* See strip.py */
 	finish = sched_clock();
 #endif /* See strip.py */
-	tt_record3("homa_recvmsg returning id %d, length %d, bpage0 %d",
-		   control.id, result,
-		   control.bpage_offsets[0] >> HOMA_BPAGE_SHIFT);
 	INC_METRIC(recv_ns, finish - start);
+	tt_record2("homa_recvmsg returning status %d, id %d", result,
+		   control.id);
 	return result;
 }
 

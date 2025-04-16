@@ -94,10 +94,12 @@ void homa_check_rpc(struct homa_rpc *rpc)
 		tt_record3("RPC id %d, peer 0x%x, aborted because of timeout, state %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->state);
 #ifndef __STRIP__ /* See strip.py */
+#if 0
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
 		homa_freeze_peers(homa);
 		tt_freeze();
+#endif
 		if (homa->verbose)
 			pr_notice("RPC id %llu, peer %s, aborted because of timeout, state %d\n",
 				  rpc->id,
@@ -254,8 +256,7 @@ void homa_timer(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 			} else if (rpc->state == RPC_INCOMING) {
 				total_incoming_rpcs += 1;
-				sum_incoming_rec +=
-					atomic_read(&rpc->msgin.rec_incoming);
+				sum_incoming_rec += rpc->msgin.rec_incoming;
 				sum_incoming += rpc->msgin.granted
 						- (rpc->msgin.length
 						- rpc->msgin.bytes_remaining);

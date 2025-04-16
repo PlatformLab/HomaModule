@@ -1296,6 +1296,8 @@ struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 #endif /* See strip.py */
 	int result;
 
+	INIT_LIST_HEAD(&interest.links);
+	init_waitqueue_head(&interest.wait_queue);
 	/* Each iteration through this loop waits until an RPC needs attention
 	 * in some way (e.g. packets have arrived), then deals with that need
 	 * (e.g. copy to user space). It may take many iterations until an
