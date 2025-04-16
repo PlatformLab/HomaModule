@@ -354,7 +354,7 @@ if elapsed_secs != 0:
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
-    for lock in ["client", "server", "socket", "grantable", "throttle", "peer_ack"]:
+    for lock in ["client", "server", "socket", "grant", "throttle", "peer_ack"]:
         misses = float(deltas[lock + "_lock_misses"])
         ns = float(deltas[lock + "_lock_miss_ns"])
         if misses == 0:
@@ -454,8 +454,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["pacer_lost_ns", "timer_reap_ns",
-            "data_pkt_reap_ns", "grantable_lock_ns"]:
+    for symbol in ["pacer_lost_ns", "timer_reap_ns", "data_pkt_reap_ns",
+            "grant_lock_ns"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue

@@ -122,7 +122,7 @@ struct homa {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @grantable_lock: Used to synchronize access to grant-related
+	 * @grant_lock: Used to synchronize access to grant-related
 	 * fields below. In order to reduce contention, this lock is held
 	 * only when making structural changes (e.g. modifying grantable_peers
 	 * or active_rpcs). It is not held when computing new grant offsets
@@ -130,13 +130,13 @@ struct homa {
 	 * possible for RPCs to receive grants out of priority order, or to
 	 * receive duplicate grants.
 	 */
-	spinlock_t grantable_lock ____cacheline_aligned_in_smp;
+	spinlock_t grant_lock ____cacheline_aligned_in_smp;
 
 	/**
-	 * @grantable_lock_time: sched_clock() time when grantable_lock
+	 * @grant_lock_time: sched_clock() time when grant_lock
 	 * was last locked.
 	 */
-	u64 grantable_lock_time;
+	u64 grant_lock_time;
 
 	/**
 	 * @grant_recalc_count: Incremented every time homa_grant_recalc
@@ -187,7 +187,7 @@ struct homa {
 	/**
 	 * @active_remaining: entry i in this array contains a copy of
 	 * active_rpcs[i]->msgin.bytes_remaining. These values can be
-	 * updated by the corresponding RPCs without holding the grantable
+	 * updated by the corresponding RPCs without holding the grant
 	 * lock. Perfect consistency isn't required; this are hints used to
 	 * detect when the priority ordering of messages changes.
 	 */
@@ -196,7 +196,7 @@ struct homa {
 	/**
 	 * @oldest_rpc: The RPC with incoming data whose start_ns is
 	 * farthest in the past). NULL means either there are no incoming
-	 * RPCs or the oldest needs to be recomputed. Must hold grantable_lock
+	 * RPCs or the oldest needs to be recomputed. Must hold grant_lock
 	 * to update.
 	 */
 	struct homa_rpc *oldest_rpc;

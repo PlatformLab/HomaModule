@@ -121,7 +121,7 @@ struct homa_peer {
 	 * responses) involving this peer whose msgins require (or required
 	 * them in the past) and have not been fully received. The list is
 	 * sorted in priority order (head has fewest bytes_remaining).
-	 * Locked with homa->grantable_lock.
+	 * Locked with homa->grant_lock.
 	 */
 	struct list_head grantable_rpcs;
 

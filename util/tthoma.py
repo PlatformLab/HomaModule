@@ -2900,11 +2900,11 @@ class AnalyzeFilter:
                     tx_id, pkt['offset']))
 
 #------------------------------------------------
-# Analyzer: grantablelock
+# Analyzer: grantlock
 #------------------------------------------------
-class AnalyzeGrantablelock:
+class AnalyzeGrantlock:
     """
-    Analyzes contention for the grantable lock, which controls centrally
+    Analyzes contention for the grant lock, which controls centrally
     managed data about grantable RPCs.
     """
 
@@ -2920,7 +2920,7 @@ class AnalyzeGrantablelock:
         #
         self.nodes = {}
 
-        # One record for each interval where a core blocked for the grantable
+        # One record for each interval where a core blocked for the grant
         # lock: <time, duration, node, core> where time is when the lock was
         # finally acquired, duration is how long the core had to wait, and
         # node and core indicate where the block occurred.
@@ -2958,7 +2958,7 @@ class AnalyzeGrantablelock:
         self.last_unblock = None
 
     def tt_lock_wait(self, trace, time, core, event, lock_name):
-        if lock_name != 'grantable':
+        if lock_name != 'grant':
             return
         if event == 'beginning':
             # Core blocked on lock
@@ -2991,17 +2991,17 @@ class AnalyzeGrantablelock:
         global traces
 
         print('\n-----------------------')
-        print('Analyzer: grantablelock')
+        print('Analyzer: grantlock')
         print('-----------------------\n')
 
-        print('Per-node statistics on usage of the grantable lock:')
+        print('Per-node statistics on usage of the grant lock:')
         print('Node:     Name of node')
         print('Blocked:  Fraction of core(s) wasted while blocked on the lock '
                 '(1.0 means')
         print('          that on average, one core was blocked on the lock)')
         print('MaxCore:  The core that spent the largest fraction of its time '
                 'blocked on')
-        print('          the grantable lock')
+        print('          the grant lock')
         print('MaxBlk:   Fraction of time that MaxCore was blocked on the lock')
         print('HoldFrac: Fraction of time this node held the lock (note: '
                 'hold times ')
@@ -3043,7 +3043,7 @@ class AnalyzeGrantablelock:
             print('%-10s %5.2f     C%02d %6.3f %s' % (name, total_block/elapsed,
                     max_block_core, max_block/elapsed, hold_info))
 
-        print('\nLongest times a core had to wait for the grantable lock:')
+        print('\nLongest times a core had to wait for the grant lock:')
         print('  EndTime BlockTime       Node Core')
         self.block_intervals.sort(key=lambda t : t[1], reverse=True)
         for i in range(len(self.block_intervals)):
@@ -3052,7 +3052,7 @@ class AnalyzeGrantablelock:
             time, duration, node, core = self.block_intervals[i]
             print('%9.3f   %7.1f %10s %4d' % (time, duration, node, core))
 
-        print('\nLongest periods that one core held the grantable lock:')
+        print('\nLongest periods that one core held the grant lock:')
         print('StartTime  HoldTime       Node Core')
         self.hold_times.sort(key=lambda t : t[1], reverse=True)
         for i in range(len(self.hold_times)):

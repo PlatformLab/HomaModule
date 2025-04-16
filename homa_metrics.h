@@ -242,11 +242,8 @@ struct homa_metrics {
 	 */
 	u64 so_set_buf_calls;
 
-	/**
-	 * @grantable_lock_ns: total time spent with homa->grantable_lock
-	 * locked.
-	 */
-	u64 grantable_lock_ns;
+	/**  @grant_lock_ns: total time spent with the grant lock locked. */
+	u64 grant_lock_ns;
 
 	/** @timer_ns: total time spent in homa_timer. */
 	u64 timer_ns;
@@ -467,16 +464,16 @@ struct homa_metrics {
 	u64 peer_ack_lock_misses;
 
 	/**
-	 * @grantable_lock_miss_ns: total time spent waiting for grantable
-	 * lock misses.
+	 * @grant_lock_miss_ns: total time spent waiting for grant lock
+	 * misses.
 	 */
-	u64 grantable_lock_miss_ns;
+	u64 grant_lock_miss_ns;
 
 	/**
-	 * @grantable_lock_misses: total number of times that Homa had to wait
-	 * to acquire the grantable lock.
+	 * @grant_lock_misses: total number of times that Homa had to wait
+	 * to acquire the grant lock.
 	 */
-	u64 grantable_lock_misses;
+	u64 grant_lock_misses;
 
 	/**
 	 * @grantable_rpcs_integral: cumulative sum of time_delta*grantable,

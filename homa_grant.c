@@ -12,7 +12,7 @@
 
 /* Design Notes:
  * This file is pretty complicated because of locking issues. Recalculating
- * the priorities for granting requires @homa->grantable_lock, which is
+ * the priorities for granting requires @homa->grant_lock, which is
  * global.  Priorities can potentially change every time a data packet
  * arrives, but acquiring the global lock for each data packet would result
  * in unacceptable contention (this was tried in earlier versions). The
@@ -26,7 +26,7 @@
  * with an incorrect offset, which has only minor performance consequences).
  *
  * Another overall requirement for the file is not to hold locks (either
- * RPC locks or @homa->grantable_lock) when actually sending grants. This
+ * RPC locks or @homa->grant_lock) when actually sending grants. This
  * is because packet transmission takes a long time, so holding a lock
  * could result in unacceptable contention.
  */
@@ -88,7 +88,7 @@ void homa_grant_add_rpc(struct homa_rpc *rpc)
 	struct homa_peer *peer_cand;
 	struct homa_rpc *candidate;
 
-	homa_grantable_lock(homa, 0);
+	homa_grant_lock(homa, 0);
 
 	/* Make sure this message is in the right place in the grantable_rpcs
 	 * list for its peer.
@@ -167,7 +167,7 @@ position_peer:
 		list_add(&prev_peer->grantable_links, &peer->grantable_links);
 	}
 done:
-	homa_grantable_unlock(homa);
+	homa_grant_unlock(homa);
 }
 
 /**
@@ -188,13 +188,13 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	if (list_empty(&rpc->grantable_links))
 		return;
 
-	homa_grantable_lock(homa, 0);
+	homa_grant_lock(homa, 0);
 
 	/* Must check list again: might have been removed by someone
 	 * else before we got the lock.
 	 */
 	if (list_empty(&rpc->grantable_links)) {
-		homa_grantable_unlock(homa);
+		homa_grant_unlock(homa);
 		return;
 	}
 
@@ -240,7 +240,7 @@ void homa_grant_remove_rpc(struct homa_rpc *rpc)
 	}
 
 done:
-	homa_grantable_unlock(homa);
+	homa_grant_unlock(homa);
 }
 
 /**
@@ -423,7 +423,7 @@ done:
 void homa_grant_recalc(struct homa *homa)
 {
 	/* A copy of homa->active_rpcs; needed so we can send grants
-	 * without holding grantable_lock. See Design Notes at the top
+	 * without holding grant_lock. See Design Notes at the top
 	 * of this file.
 	 */
 	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
@@ -440,14 +440,14 @@ void homa_grant_recalc(struct homa *homa)
 	 * opportunities to grant to additional messages.
 	 */
 	while (1) {
-		/* The first part of this computation holds the grantable
+		/* The first part of this computation holds the grant
 		 * lock but not individual RPC locks (we know that any RPC
 		 * in @homa->active_rpcs cannot be reaped until it is removed
-		 * from the list, and that requires the grantable lock). It
+		 * from the list, and that requires the grant lock). It
 		 * takes references on all active RPCs before releasing the
-		 * grantable lock.
+		 * grant lock.
 		 */
-		if (!homa_grantable_lock(homa, 1)) {
+		if (!homa_grant_lock(homa, 1)) {
 			INC_METRIC(grant_recalc_skips, 1);
 			break;
 		}
@@ -506,13 +506,13 @@ void homa_grant_recalc(struct homa *homa)
 					(homa->num_active_rpcs + 1);
 
 		/* The second part of the computation is done without
-		 * holding the grantable lock, but it will acquire RPC locks.
-		 * The grantable lock is released because (a) we want to
+		 * holding the grant lock, but it will acquire RPC locks.
+		 * The grant lock is released because (a) we want to
 		 * reduce contention for it and (b) we can't acquire RPC locks
 		 * while holding it. References on the active RPCs keep them
 		 * from being reaped.
 		 */
-		homa_grantable_unlock(homa);
+		homa_grant_unlock(homa);
 		for (i = 0; i < active; i++) {
 			struct homa_rpc *rpc = active_rpcs[i];
 			int new_offset;
@@ -610,7 +610,7 @@ int homa_grant_pick_rpcs(struct homa *homa, struct homa_rpc **rpcs,
 /**
  * homa_grant_find_oldest() - Recompute the value of homa->oldest_rpc.
  * @homa:    Overall data about the Homa protocol implementation. The
- *           grantable_lock must be held by the caller.
+ *           grant_lock must be held by the caller.
  */
 void homa_grant_find_oldest(struct homa *homa)
 {
@@ -679,40 +679,40 @@ void homa_grant_end_rpc(struct homa_rpc *rpc)
 }
 
 /**
- * homa_grantable_lock_slow() - This function implements the slow path for
- * acquiring the grantable lock. It is invoked when the lock isn't immediately
+ * homa_grant_lock_slow() - This function implements the slow path for
+ * acquiring the grant lock. It is invoked when the lock isn't immediately
  * available. It waits for the lock, but also records statistics about
  * the waiting time.
  * @homa:    Overall data about the Homa protocol implementation.
  * @recalc:  Nonzero means the caller is homa_grant_recalc; if another thread
  *           is already recalculating, can return without waiting for the lock.
- * Return:   Nonzero means this thread now owns the grantable lock. Zero
+ * Return:   Nonzero means this thread now owns the grant lock. Zero
  *           means the lock was not acquired and there is no need for this
  *           thread to do the work of homa_grant_recalc because some other
  *           thread started a fresh calculation after this method was invoked.
  */
-int homa_grantable_lock_slow(struct homa *homa, int recalc)
-	__acquires(&homa->grantable_lock)
+int homa_grant_lock_slow(struct homa *homa, int recalc)
+	__acquires(&homa->grant_lock)
 {
 	int starting_count = atomic_read(&homa->grant_recalc_count);
 	u64 start = sched_clock();
 	int result = 0;
 
-	tt_record("beginning wait for grantable lock");
+	tt_record("beginning wait for grant lock");
 	while (1) {
-		if (spin_trylock_bh(&homa->grantable_lock)) {
-			tt_record("ending wait for grantable lock");
+		if (spin_trylock_bh(&homa->grant_lock)) {
+			tt_record("ending wait for grant lock");
 			result = 1;
 			break;
 		}
 		if (recalc && atomic_read(&homa->grant_recalc_count)
 				!= starting_count) {
-			tt_record("skipping wait for grantable lock: recalc elsewhere");
+			tt_record("skipping wait for grant lock: recalc elsewhere");
 			break;
 		}
 	}
-	INC_METRIC(grantable_lock_misses, 1);
-	INC_METRIC(grantable_lock_miss_ns, sched_clock() - start);
+	INC_METRIC(grant_lock_misses, 1);
+	INC_METRIC(grant_lock_miss_ns, sched_clock() - start);
 	return result;
 }
 

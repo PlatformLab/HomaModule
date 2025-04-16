@@ -155,7 +155,7 @@ struct homa_message_in {
 	 * @granted: Total # of bytes (starting from offset 0) that the sender
 	 * may transmit without additional grants, includes unscheduled bytes.
 	 * Never larger than @length. Note: once initialized, this
-	 * may not be modified without holding @homa->grantable_lock.
+	 * may not be modified without holding @homa->grant_lock.
 	 */
 	int granted;
 

@@ -1016,7 +1016,7 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
  * being retained until fifo grants are reimplemented using the new grant
  * mechanism.
  * @homa:    Overall data about the Homa protocol implementation. The
- *           grantable_lock must be held by the caller.
+ *           grant lock must be held by the caller.
  * Return: An RPC to which to send a FIFO grant, or NULL if there is
  *         no appropriate RPC. This method doesn't actually send a grant,
  *         but it updates @msgin.granted to reflect the desired grant.

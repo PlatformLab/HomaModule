@@ -27,7 +27,7 @@ char *rpc_ids(struct homa_rpc **rpcs, int count)
 }
 
 static struct homa *hook_homa;
-static void grantable_spinlock_hook(char *id)
+static void grant_spinlock_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
 		return;
@@ -816,7 +816,7 @@ TEST_F(homa_grant, homa_grant_recalc__cant_acquire_grantable_lock)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
 
-	unit_hook_register(grantable_spinlock_hook);
+	unit_hook_register(grant_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xff;
 
@@ -962,7 +962,7 @@ TEST_F(homa_grant, homa_grant_recalc__rpc_fully_granted_but_cant_get_lock)
 	rpc4 = test_rpc(self, 106, self->server_ip, 10000);
 	self->homa.max_incoming = 32000;
 	self->homa.max_overcommit = 2;
-	unit_hook_register(grantable_spinlock_hook);
+	unit_hook_register(grant_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xe0;
 	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_recalc_skips);
@@ -1160,35 +1160,35 @@ TEST_F(homa_grant, homa_grant_end_rpc__not_in_active_list)
 	EXPECT_EQ(15000, atomic_read(&self->homa.total_incoming));
 }
 
-TEST_F(homa_grant, homa_grantable_lock_slow__basics)
+TEST_F(homa_grant, homa_grant_lock_slow__basics)
 {
 	mock_ns = 500;
-	unit_hook_register(grantable_spinlock_hook);
+	unit_hook_register(grant_spinlock_hook);
 
-	EXPECT_EQ(1, homa_grantable_lock_slow(&self->homa, 0));
-	homa_grantable_unlock(&self->homa);
+	EXPECT_EQ(1, homa_grant_lock_slow(&self->homa, 0));
+	homa_grant_unlock(&self->homa);
 
-	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
-	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_ns);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_lock_misses);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grant_lock_miss_ns);
 }
-TEST_F(homa_grant, homa_grantable_lock_slow__recalc_count)
+TEST_F(homa_grant, homa_grant_lock_slow__recalc_count)
 {
 	mock_ns = 500;
-	unit_hook_register(grantable_spinlock_hook);
+	unit_hook_register(grant_spinlock_hook);
 	hook_homa = &self->homa;
 	mock_trylock_errors = 0xff;
 
-	EXPECT_EQ(0, homa_grantable_lock_slow(&self->homa, 1));
+	EXPECT_EQ(0, homa_grant_lock_slow(&self->homa, 1));
 	hook_homa = NULL;
 
-	EXPECT_EQ(1, homa_metrics_per_cpu()->grantable_lock_misses);
-	EXPECT_EQ(500, homa_metrics_per_cpu()->grantable_lock_miss_ns);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_lock_misses);
+	EXPECT_EQ(500, homa_metrics_per_cpu()->grant_lock_miss_ns);
 
 	/* Make sure the check only occurs if the recalc argument is set. */
 	mock_trylock_errors = 0xff;
-	EXPECT_EQ(1, homa_grantable_lock_slow(&self->homa, 0));
-	EXPECT_EQ(2, homa_metrics_per_cpu()->grantable_lock_misses);
-	homa_grantable_unlock(&self->homa);
+	EXPECT_EQ(1, homa_grant_lock_slow(&self->homa, 0));
+	EXPECT_EQ(2, homa_metrics_per_cpu()->grant_lock_misses);
+	homa_grant_unlock(&self->homa);
 }
 
 /* Functions in homa_grant.h:

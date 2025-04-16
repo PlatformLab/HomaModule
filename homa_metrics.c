@@ -234,8 +234,8 @@ char *homa_metrics_print(void)
 		  m->so_set_buf_ns);
 		M("so_set_buf_calls          %15llu  Total invocations of setsockopt SO_HOMA_RCVBUF\n",
 		  m->so_set_buf_calls);
-		M("grantable_lock_ns         %15llu  Time spent with homa->grantable_lock locked\n",
-		  m->grantable_lock_ns);
+		M("grant_lock_ns             %15llu  Time spent with grant lock locked\n",
+		  m->grant_lock_ns);
 		M("timer_ns                  %15llu  Time spent in homa_timer\n",
 		  m->timer_ns);
 		M("timer_reap_ns             %15llu  Time in homa_timer spent reaping RPCs\n",
@@ -313,16 +313,16 @@ char *homa_metrics_print(void)
 		  m->peer_ack_lock_misses);
 		M("peer_ack_lock_miss_ns     %15llu  Time lost waiting for peer ack locks\n",
 		  m->peer_ack_lock_miss_ns);
-		M("grantable_lock_misses     %15llu  Grantable lock misses\n",
-		  m->grantable_lock_misses);
-		M("grantable_lock_miss_ns    %15llu  Time lost waiting for grantable lock\n",
-		  m->grantable_lock_miss_ns);
+		M("grant_lock_misses     %15llu  Grant lock misses\n",
+		  m->grant_lock_misses);
+		M("grant_lock_miss_ns    %15llu  Time lost waiting for grant lock\n",
+		  m->grant_lock_miss_ns);
 		M("grantable_rpcs_integral   %15llu  Integral of homa->num_grantable_rpcs*dt\n",
 		  m->grantable_rpcs_integral);
-		  M("grant_check_calls       %15llu  Number of calls to homa_grant_check_rpc\n",
-		    m->grant_check_calls);
-		    M("grant_recalc_calls        %15llu  Number of calls to homa_grant_recalc\n",
-		      m->grant_recalc_calls);
+		M("grant_check_calls       %15llu  Number of calls to homa_grant_check_rpc\n",
+		  m->grant_check_calls);
+		M("grant_recalc_calls        %15llu  Number of calls to homa_grant_recalc\n",
+		  m->grant_recalc_calls);
 		M("grant_recalc_ns           %15llu  Time spent in homa_grant_recalc\n",
 		  m->grant_recalc_ns);
 		M("grant_recalc_loops        %15llu  Number of times homa_grant_recalc looped back\n",

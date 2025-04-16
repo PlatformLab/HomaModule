@@ -38,7 +38,7 @@ int homa_init(struct homa *homa, struct net *net)
 	memset(homa, 0, sizeof(*homa));
 	atomic64_set(&homa->next_outgoing_id, 2);
 #ifndef __STRIP__ /* See strip.py */
-	spin_lock_init(&homa->grantable_lock);
+	spin_lock_init(&homa->grant_lock);
 	INIT_LIST_HEAD(&homa->grantable_peers);
 	homa->last_grantable_change = sched_clock();
 #endif /* See strip.py */

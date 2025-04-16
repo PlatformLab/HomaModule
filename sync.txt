@@ -30,7 +30,7 @@ This file describes the synchronization strategy used for Homa.
   locks are held, they must always be acquired in a consistent order, in
   order to prevent deadlock. For each lock, here are the other locks that
   may be acquired while holding the given lock.
-  * RPC: socket, grantable, throttle, peer->ack_lock
+  * RPC: socket, grant, throttle, peer->ack_lock
   * Socket: port_map.write_lock
   Any lock not listed above must be a "leaf" lock: no other lock will be
   acquired while holding the lock.
