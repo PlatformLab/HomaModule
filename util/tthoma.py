@@ -1221,14 +1221,14 @@ class Dispatcher:
     })
 
     def __recvmsg_done(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        length = int(match.group(2))
+        status = int(match.group(1))
+        id = int(match.group(2))
         for interest in interests:
-            interest.tt_recvmsg_done(trace, time, core, id, length)
+            interest.tt_recvmsg_done(trace, time, core, id, status)
 
     patterns.append({
         'name': 'recvmsg_done',
-        'regexp': 'homa_recvmsg returning id ([0-9]+), length ([0-9]+)'
+        'regexp': 'homa_recvmsg returning status ([0-9]+), id ([0-9]+)'
     })
 
     def __copy_in_start(self, trace, time, core, match, interests):
@@ -5833,7 +5833,7 @@ class AnalyzeRpcs:
         rpcs[id]['sendmsg'] = t
         rpcs[id]['out_length'] = length
 
-    def tt_recvmsg_done(self, trace, t, core, id, length):
+    def tt_recvmsg_done(self, trace, t, core, id, status):
         global rpcs
         rpcs[id]['recvmsg_done'] = t
 

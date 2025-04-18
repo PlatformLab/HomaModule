@@ -94,6 +94,11 @@ int mock_bpage_size = 0x10000;
 /* HOMA_BPAGE_SHIFT will evaluate to this. */
 int mock_bpage_shift = 16;
 
+/* Keeps track of all the spinlocks that have been locked but not unlocked.
+ * Reset for each test.
+ */
+static struct unit_hash *spinlocks_held;
+
 /* Keeps track of all the blocks of memory that have been allocated by
  * kmalloc but not yet freed by kfree. Reset for each test.
  */
@@ -129,11 +134,6 @@ static struct unit_hash *vmallocs_in_use;
  * but not yet released. Should be 0 at the end of each test.
  */
 static int mock_active_locks;
-
-/* The number of spin locksthat have been acquired but not yet released.
- * Should be 0 at the end of each test.
- */
-static int mock_active_spin_locks;
 
 /* Total number of successful spinlock acquisitions during current test. */
 int mock_total_spin_locks;
@@ -874,7 +874,8 @@ void *mock_kmalloc(size_t size, gfp_t flags)
 	UNIT_HOOK("kmalloc");
 	if (mock_check_error(&mock_kmalloc_errors))
 		return NULL;
-	if (mock_active_spin_locks  > 0 && (flags & ~__GFP_ZERO) != GFP_ATOMIC)
+	if (unit_hash_size(spinlocks_held)  > 0 &&
+	    (flags & ~__GFP_ZERO) != GFP_ATOMIC)
 		FAIL(" Incorrect flags 0x%x passed to mock_kmalloc; expected GFP_ATOMIC (0x%x)",
 		     flags, GFP_ATOMIC);
 	block = malloc(size);
@@ -1090,21 +1091,21 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
-	mock_active_spin_locks++;
+	mock_record_locked(lock);
 	mock_total_spin_locks++;
 }
 
 void __lockfunc _raw_spin_lock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
-	mock_active_spin_locks++;
+	mock_record_locked(lock);
 	mock_total_spin_locks++;
 }
 
 void __lockfunc _raw_spin_lock_irq(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("spin_lock");
-	mock_active_spin_locks++;
+	mock_record_locked(lock);
 	mock_total_spin_locks++;
 }
 
@@ -1117,7 +1118,7 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_trylock_errors))
 		return 0;
-	mock_active_spin_locks++;
+	mock_record_locked(lock);
 	mock_total_spin_locks++;
 	return 1;
 }
@@ -1125,12 +1126,12 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
-	mock_active_spin_locks--;
+	mock_record_unlocked(lock);
 }
 
 void __lockfunc _raw_spin_unlock_irq(raw_spinlock_t *lock)
 {
-	mock_active_spin_locks--;
+	mock_record_unlocked(lock);
 }
 
 int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
@@ -1138,7 +1139,7 @@ int __lockfunc _raw_spin_trylock(raw_spinlock_t *lock)
 	UNIT_HOOK("spin_lock");
 	if (mock_check_error(&mock_spin_lock_held))
 		return 0;
-	mock_active_spin_locks++;
+	mock_record_locked(lock);
 	return 1;
 }
 
@@ -1399,7 +1400,9 @@ void tasklet_kill(struct tasklet_struct *t)
 {}
 
 void unregister_net_sysctl_table(struct ctl_table_header *header)
-{}
+{
+	UNIT_LOG("; ", "unregister_net_sysctl_table");
+}
 
 void unregister_pernet_subsys(struct pernet_operations *)
 {}
@@ -1660,6 +1663,25 @@ void mock_rcu_read_unlock(void)
 	if (mock_active_rcu_locks == 0)
 		FAIL(" rcu_read_unlock called without rcu_read_lock");
 	mock_active_rcu_locks--;
+}
+
+void mock_record_locked(void *lock)
+{
+	if (!spinlocks_held)
+		spinlocks_held = unit_hash_new();
+	if (unit_hash_get(spinlocks_held, lock) != NULL)
+		FAIL(" locking lock 0x%p when already locked", lock);
+	else
+		unit_hash_set(spinlocks_held, lock, "locked");
+}
+
+void mock_record_unlocked(void *lock)
+{
+	if (!spinlocks_held || unit_hash_get(spinlocks_held, lock) == NULL) {
+		FAIL(" unlocking lock 0x%p that isn't locked", lock);
+		return;
+	}
+	unit_hash_erase(spinlocks_held, lock);
 }
 
 /**
@@ -1931,7 +1953,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 void mock_spin_unlock(spinlock_t *lock)
 {
 	UNIT_HOOK("unlock");
-	mock_active_spin_locks--;
+	mock_record_unlocked(lock);
 }
 
 /**
@@ -2006,6 +2028,12 @@ void mock_teardown(void)
 	unit_hash_free(skbs_in_use);
 	skbs_in_use = NULL;
 
+	count = unit_hash_size(spinlocks_held);
+	if (count > 0)
+		FAIL(" %u spinlocks still held after test", count);
+	unit_hash_free(spinlocks_held);
+	spinlocks_held = NULL;
+
 	count = unit_hash_size(kmallocs_in_use);
 	if (count > 0)
 		FAIL(" %u kmalloced block(s) still allocated after test", count);
@@ -2040,11 +2068,6 @@ void mock_teardown(void)
 		FAIL(" %d (non-spin) locks still locked after test",
 		     mock_active_locks);
 	mock_active_locks = 0;
-
-	if (mock_active_spin_locks != 0)
-		FAIL(" %d spin locks still locked after test",
-		     mock_active_spin_locks);
-	mock_active_spin_locks = 0;
 	mock_total_spin_locks = 0;
 
 	if (mock_active_rcu_locks != 0)

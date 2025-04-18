@@ -433,10 +433,6 @@ if elapsed_secs != 0:
         print("Skb page alloc time:  %5.2f  usec/skb" % (
                 float(deltas["skb_page_alloc_ns"]) / 1000 /
                 deltas["skb_page_allocs"]))
-    if deltas["grant_recalc_calls"] != 0:
-        print("homa_grant_recalc:    %5.2f  usec/call" % (
-                float(deltas["grant_recalc_ns"]) / 1000 /
-                deltas["grant_recalc_calls"]))
 
     print("\nCanaries (possible problem indicators):")
     print("---------------------------------------")

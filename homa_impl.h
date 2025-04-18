@@ -83,15 +83,6 @@ void     homa_throttle_lock_slow(struct homa *homa);
 
 #define sizeof32(type) ((int)(sizeof(type)))
 
-#ifndef __STRIP__ /* See strip.py */
-/**
- * define HOMA_MAX_GRANTS - Used to size various data structures for grant
- * management; the max_overcommit sysctl parameter must never be greater than
- * this.
- */
-#define HOMA_MAX_GRANTS 10
-#endif /* See strip.py */
-
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).
@@ -122,119 +113,10 @@ struct homa {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @grant_lock: Used to synchronize access to grant-related
-	 * fields below. In order to reduce contention, this lock is held
-	 * only when making structural changes (e.g. modifying grantable_peers
-	 * or active_rpcs). It is not held when computing new grant offsets
-	 * and/or sending grant packets. Under some race conditions, it is
-	 * possible for RPCs to receive grants out of priority order, or to
-	 * receive duplicate grants.
+	 * @grant: Contains information used by homa_grant.c to manage
+	 * grants for incoming messages.
 	 */
-	spinlock_t grant_lock ____cacheline_aligned_in_smp;
-
-	/**
-	 * @grant_lock_time: sched_clock() time when grant_lock
-	 * was last locked.
-	 */
-	u64 grant_lock_time;
-
-	/**
-	 * @grant_recalc_count: Incremented every time homa_grant_recalc
-	 * starts a new recalculation; used to avoid unnecessary
-	 * recalculations in other threads. If a thread sees this value
-	 * change, it knows that someone else is recalculating grants.
-	 */
-	atomic_t grant_recalc_count;
-
-	/**
-	 * @grantable_peers: Contains all peers with entries in their
-	 * grantable_rpcs lists. The list is sorted in priority order of
-	 * the highest priority RPC for each peer (fewer ungranted bytes ->
-	 * higher priority).
-	 */
-	struct list_head grantable_peers;
-
-	/** @num_grantable_rpcs: The number of RPCs in grantable_peers. */
-	int num_grantable_rpcs;
-
-	/** @last_grantable_change: The sched_clock() time of the most recent
-	 * increment or decrement of num_grantable_rpcs; used for computing
-	 * statistics.
-	 */
-	u64 last_grantable_change;
-
-	/**
-	 * @max_grantable_rpcs: The largest value that has been seen for
-	 * num_grantable_rpcs since this value was reset to 0 (it can be
-	 * reset externally using sysctl).
-	 */
-	int max_grantable_rpcs;
-
-	/**
-	 * @num_active_rpcs: number of entries in @active_rpcs and
-	 * @active_remaining that are currently used.
-	 */
-	int num_active_rpcs;
-
-	/**
-	 * @active_rpcs: Hints about RPCs that we are currently granting to
-	 * (lower index in the array means higher priority). Entries may be
-	 * NULL or may refer to RPCs that no longer exist, so can't dereference
-	 * these pointers.
-	 */
-	struct homa_rpc *active_rpcs[HOMA_MAX_GRANTS];
-
-	/**
-	 * @active_remaining: entry i in this array contains a copy of
-	 * active_rpcs[i]->msgin.bytes_remaining. These values can be
-	 * updated by the corresponding RPCs without holding the grant
-	 * lock. Perfect consistency isn't required; this are hints used to
-	 * detect when the priority ordering of messages changes.
-	 */
-	atomic_t active_remaining[HOMA_MAX_GRANTS];
-
-	/**
-	 * @oldest_rpc: The RPC with incoming data whose start_ns is
-	 * farthest in the past). NULL means either there are no incoming
-	 * RPCs or the oldest needs to be recomputed. Must hold grant_lock
-	 * to update.
-	 */
-	struct homa_rpc *oldest_rpc;
-
-	/**
-	 * @grant_window: How many bytes of granted but not yet received data
-	 * may exist for an RPC at any given time.
-	 */
-	int grant_window;
-
-	/**
-	 * @grant_nonfifo: How many bytes should be granted using the
-	 * normal priority system between grants to the oldest message.
-	 */
-	int grant_nonfifo;
-
-	/**
-	 * @grant_nonfifo_left: Counts down bytes using the normal
-	 * priority mechanism. When this reaches zero, it's time to grant
-	 * to the old message.
-	 */
-	int grant_nonfifo_left;
-
-	/**
-	 * @total_incoming: the total number of bytes that we expect to receive
-	 * (across all messages) even if we don't send out any more grants
-	 * (includes granted but unreceived bytes, plus unreceived unscheduled
-	 * bytes that we know about). This can potentially be negative, if
-	 * a peer sends more bytes than granted (see synchronization note in
-	 * homa_send_grants for why we have to allow this possibility).
-	 */
-	atomic_t total_incoming ____cacheline_aligned_in_smp;
-
-	/**
-	 * @incoming_hit_limit: Nonzero means that one or more RPCs could
-	 * not be fully granted because @total_incoming exceeded @max_incoming.
-	 */
-	atomic_t incoming_hit_limit;
+	struct homa_grant *grant;
 #endif /* See strip.py */
 
 	/**
@@ -325,15 +207,6 @@ struct homa {
 	int unsched_bytes;
 
 	/**
-	 * @window_param: Set externally via sysctl to select a policy for
-	 * computing homa-grant_window. If 0 then homa->grant_window is
-	 * computed dynamically based on the number of RPCs we're currently
-	 * granting to. If nonzero then homa->grant_window will always be the
-	 * same as @window_param.
-	 */
-	int window_param;
-
-	/**
 	 * @poll_usecs: Amount of time (in microseconds) that a thread
 	 * will spend busy-waiting for an incoming messages before
 	 * going to sleep. Set externally via sysctl.
@@ -382,41 +255,6 @@ struct homa {
 	 * next version change.  Can be set externally via sysctl.
 	 */
 	int cutoff_version;
-
-	/**
-	 * @fifo_grant_increment: how many additional bytes to grant in
-	 * a "pity" grant sent to the oldest outstanding message. Set
-	 * externally via sysctl.
-	 */
-	int fifo_grant_increment;
-
-	/**
-	 * @grant_fifo_fraction: The fraction (in thousandths) of granted
-	 * bytes that should go to the *oldest* incoming message, rather
-	 * than the highest priority ones. Set externally via sysctl.
-	 */
-	int grant_fifo_fraction;
-
-	/**
-	 * @max_overcommit: The maximum number of messages to which Homa will
-	 * send grants at any given point in time.  Set externally via sysctl.
-	 */
-	int max_overcommit;
-
-	/**
-	 * @max_incoming: Homa will try to ensure that the total number of
-	 * bytes senders have permission to send to this host (either
-	 * unscheduled bytes or granted bytes) does not exceeds this value.
-	 * Set externally via sysctl.
-	 */
-	int max_incoming;
-
-	/**
-	 * @max_rpcs_per_peer: If there are multiple incoming messages from
-	 * the same peer, Homa will only issue grants to this many of them
-	 * at a time.  Set externally via sysctl.
-	 */
-	int max_rpcs_per_peer;
 #endif /* See strip.py */
 
 	/**

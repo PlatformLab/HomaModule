@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
@@ -85,7 +86,7 @@ FIXTURE_SETUP(homa_outgoing)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
+	self->homa.grant->window = 10000;
 	self->homa.pacer->fifo_fraction = 0;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, self->client_port);
@@ -402,6 +403,7 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 
 	crpc2 = homa_rpc_new_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc2 == NULL);
+	homa_rpc_unlock(crpc2);
 
         mock_set_ipv6(&self->hsk);
 	self->hsk.sock.sk_protocol = IPPROTO_TCP;
@@ -409,13 +411,16 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_geometry_hijacking)
 	/* First try: not quite enough space for 3 packets in GSO. */
 	mock_net_device.gso_max_size = mock_mtu - 1 +
 			2 * UNIT_TEST_DATA_PER_PACKET;
+	homa_rpc_lock(crpc1);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc1,
 			unit_iov_iter((void *) 1000, 10000), 0));
+	homa_rpc_unlock(crpc1);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 2800", unit_log_get());
 
 	/* Second try: just barely enough space for 3 packets in GSO. */
 	mock_net_device.gso_max_size += 1;
 	unit_log_clear();
+	homa_rpc_lock(crpc2);
 	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
 			unit_iov_iter((void *) 1000, 10000), 0));
 	homa_rpc_unlock(crpc2);
@@ -456,7 +461,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_force_software)
 	struct homa_rpc *crpc2;
 
 	ASSERT_FALSE(crpc1 == NULL);
-	homa_rpc_unlock(crpc1);
 	mock_net_device.gso_max_size = 10000;
 	mock_xmit_log_verbose = 1;
 	self->homa.gso_force_software = 0;
@@ -464,17 +468,18 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_force_software)
 			unit_iov_iter((void *) 1000, 5000), 0));
 	unit_log_clear();
 	homa_xmit_data(crpc1, false);
+	homa_rpc_unlock(crpc1);
 	EXPECT_SUBSTR("xmit DATA", unit_log_get());
 	EXPECT_NOSUBSTR("TSO disabled", unit_log_get());
 
 	crpc2 = homa_rpc_new_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(crpc2 == NULL);
-	homa_rpc_unlock(crpc2);
 	self->homa.gso_force_software = 1;
 	ASSERT_EQ(0, -homa_message_out_fill(crpc2,
 			unit_iov_iter((void *) 1000, 5000), 0));
 	unit_log_clear();
 	homa_xmit_data(crpc2, false);
+	homa_rpc_unlock(crpc2);
 	EXPECT_SUBSTR("TSO disabled", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
@@ -778,7 +783,9 @@ TEST_F(homa_outgoing, homa_xmit_data__basics)
 #endif /* See strip.py */
 	unit_log_clear();
 	mock_clear_xmit_prios();
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit DATA 1400@0; "
 			"xmit DATA 1400@1400; "
@@ -807,7 +814,9 @@ TEST_F(homa_outgoing, homa_xmit_data__stop_because_no_more_granted)
 
 	unit_log_clear();
 	crpc->msgout.granted = 1000;
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -825,7 +834,9 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 	self->homa.pacer->max_nic_queue_ns = 500;
 	self->homa.pacer->throttle_min_bytes = 250;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 200@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -844,14 +855,18 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
 	self->homa.pacer->max_nic_queue_ns = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
+	homa_rpc_lock(crpc1);
 	homa_xmit_data(crpc1, false);
+	homa_rpc_unlock(crpc1);
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
 	EXPECT_STREQ("request id 1234, next_offset 2800", unit_log_get());
 
 	/* Now force transmission. */
 	unit_log_clear();
+	homa_rpc_lock(crpc2);
 	homa_xmit_data(crpc2, true);
+	homa_rpc_unlock(crpc2);
 	EXPECT_STREQ("xmit DATA 1400@0", unit_log_get());
 	unit_log_clear();
 	unit_log_throttled(&self->homa);
@@ -869,7 +884,9 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 	self->homa.pacer->max_nic_queue_ns = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0; "
 			"xmit DATA 1400@1400", unit_log_get());
 	unit_log_clear();
@@ -888,9 +905,11 @@ TEST_F(homa_outgoing, homa_xmit_data__rpc_freed)
 #endif /* See strip.py */
 
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	unit_hook_register(lock_free_hook);
 	hook_rpc = crpc;
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("xmit DATA 1400@0; homa_rpc_end invoked",
 			unit_log_get());
 	EXPECT_EQ(1400, crpc->msgout.next_xmit_offset);

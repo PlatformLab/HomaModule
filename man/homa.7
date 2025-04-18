@@ -358,6 +358,17 @@ of the bandwidth is for FIFO and 90% for SRPT). As of October 2020, a small
 value can provide significant benefits for the largest messages under very high
 loads, but for most loads its effect is negligible.
 .TP
+.IR grant_recalc_usecs
+How frequently (in microseconds) to scan the RPCs currently receiving grants
+to see if the priority order is still correct. The order can become incorrect
+if enough data is arrives for a low-priority RPC so that it now has fewer bytes
+left to grant than other RPCs that currently have higher priority.
+Validating the order requires the global grant lock, so checking every time data
+arrives would risk severe lock contention. Instead, the order is only checked
+every
+.I grant_recalc_usecs
+microseconds.
+.TP
 .I gro_busy_usecs
 An integer value used to determine whether or not to perform some
 optimizations specified by

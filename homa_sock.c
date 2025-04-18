@@ -8,6 +8,10 @@
 #include "homa_peer.h"
 #include "homa_pool.h"
 
+#ifndef __STRIP__ /* See strip.py */
+#include "homa_grant.h"
+#endif /* See strip.py */
+
 #ifdef __UNIT_TEST__
 #define KSELFTEST_NOT_MAIN 1
 #include "test/kselftest_harness.h"

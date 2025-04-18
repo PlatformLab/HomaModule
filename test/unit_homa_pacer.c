@@ -124,7 +124,8 @@ TEST_F(homa_pacer, homa_pacer_destroy__basics)
 	EXPECT_FALSE(IS_ERR(pacer));
 	unit_log_clear();
 	homa_pacer_destroy(pacer);
-	EXPECT_STREQ("kthread_stop", unit_log_get());
+	EXPECT_STREQ("unregister_net_sysctl_table; kthread_stop",
+		     unit_log_get());
 }
 TEST_F(homa_pacer, homa_pacer_destroy__no_thread)
 {
@@ -135,7 +136,7 @@ TEST_F(homa_pacer, homa_pacer_destroy__no_thread)
 	pacer->kthread = NULL;
 	unit_log_clear();
 	homa_pacer_destroy(pacer);
-	EXPECT_STREQ("", unit_log_get());
+	EXPECT_STREQ("unregister_net_sysctl_table", unit_log_get());
 }
 
 TEST_F(homa_pacer, homa_pacer_check_nic_q__success)

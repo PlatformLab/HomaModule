@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
@@ -38,9 +39,12 @@ int homa_init(struct homa *homa, struct net *net)
 	memset(homa, 0, sizeof(*homa));
 	atomic64_set(&homa->next_outgoing_id, 2);
 #ifndef __STRIP__ /* See strip.py */
-	spin_lock_init(&homa->grant_lock);
-	INIT_LIST_HEAD(&homa->grantable_peers);
-	homa->last_grantable_change = sched_clock();
+	homa->grant = homa_grant_new(net);
+	if (IS_ERR(homa->grant)) {
+		err = PTR_ERR(homa->grant);
+		homa->grant = NULL;
+		return err;
+	}
 #endif /* See strip.py */
 	homa->pacer = homa_pacer_new(homa, net);
 	if (IS_ERR(homa->pacer)) {
@@ -79,7 +83,6 @@ int homa_init(struct homa *homa, struct net *net)
 	/* Wild guesses to initialize configuration values... */
 #ifndef __STRIP__ /* See strip.py */
 	homa->unsched_bytes = 40000;
-	homa->window_param = 100000;
 	homa->poll_usecs = 50;
 	homa->num_priorities = HOMA_MAX_PRIORITIES;
 	for (i = 0; i < HOMA_MAX_PRIORITIES; i++)
@@ -97,11 +100,6 @@ int homa_init(struct homa *homa, struct net *net)
 #else
 	homa->cutoff_version = 1;
 #endif
-	homa->fifo_grant_increment = 10000;
-	homa->grant_fifo_fraction = 50;
-	homa->max_overcommit = 8;
-	homa->max_incoming = 400000;
-	homa->max_rpcs_per_peer = 1;
 #endif /* See strip.py */
 	homa->resend_ticks = 5;
 	homa->resend_interval = 5;
@@ -144,6 +142,10 @@ void homa_destroy(struct homa *homa)
 		homa_socktab_destroy(homa->port_map);
 		kfree(homa->port_map);
 		homa->port_map = NULL;
+	}
+	if (homa->grant) {
+		homa_grant_destroy(homa->grant);
+		homa->grant = NULL;
 	}
 	if (homa->pacer) {
 		homa_pacer_destroy(homa->pacer);

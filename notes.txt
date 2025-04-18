@@ -1,14 +1,11 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Grant changes:
-  * Make sure active_rpcs[0] is NULL if no active RPCs.
-  * Potential race: active_rpcs vs. active_remaining
-  * Duplicated hit_limit code in check_rpc
-  * Why call update_incoming again in try_send?
-  * Hold RPC lock when reading rec_incoming (no longer atomic)
-  * Eliminate homa_grant_try_send
-  * No increment in new "sending grant" tt_record.
+* Notes for the next design of grants:
+  * Update tthoma.py: e.g., no grant_recalc records
+  * grant_check_slow_path too high
+  * Too much time in NAPI?
+  * Too many BUSY packets (more than DATA)
 
 * Failure modes:
   * homa_grant_add_rpc: list has a loop, or encounter a null list link
@@ -427,62 +424,3 @@ Notes for Homa implementation in Linux:
   ip_input.c:        ip_rcv_finish
   ip_input.c:        dst_input
   homa_plumbing.c:   homa_softirq
-
-#ifndef __STRIP__ /* See strip.py */
-#endif /* See strip.py */
-Call Trace:^M
-[281667.695467]  <TASK>^M
-[281667.695601]  ? show_regs+0x64/0x70^M
-[281667.696414]  ? __die+0x24/0x70^M
-[281667.696992]  ? page_fault_oops+0x21c/0x730                fault.c:716
-[281667.697224]  ? __pfx_page_fault_oops+0x10/0x10^M
-[281667.697857]  ? bpf_ksym_find+0xcb/0xe0                    kernel/bpf/core.c:740?
-[281667.698072]  ? __pfx_is_prefetch.isra.0+0x10/0x10^M
-[281667.698801]  ? search_bpf_extables+0xb5/0xd0              kernel/bpf/core.c:794
-[281667.699448]  ? search_exception_tables+0x60/0x70^M        kernel/extable.c:62
-[281667.700086]  ? fixup_exception+0x3b/0x400                 mm/extable.c:320
-[281667.700309]  ? sched_clock+0x10/0x30^M
-[281667.700526]  ? kernelmode_fixup_or_oops.isra.0+0x6b/0x80  fault.c:733?
-[281667.700829]  ? __bad_area_nosemaphore+0x1e6/0x340         fault.c:790
-[281667.701445]  ? spurious_kernel_fault_check+0x46/0xb0^M
-[281667.701724]  ? bad_area_nosemaphore+0x16/0x20^M           fault.c:839
-[281667.702368]  ? do_kern_addr_fault+0x95/0xb0               fault.c:1203
-[281667.703008]  ? exc_page_fault+0xdd/0xe0^M
-[281667.703231]  ? asm_exc_page_fault+0x27/0x30^M
-[281667.703874]  ? __mod_memcg_lruvec_state+0x188/0x300^M
-[281667.704197]  ? __mod_memcg_lruvec_state+0x19e/0x300^M
-[281667.704469]  folio_batch_move_lru+0xc9/0x240               swap.c:168
-[281667.705820]  lru_add_drain_cpu+0xf3/0x190                  swap.c:616
-[281667.706021]  lru_add_drain+0x24/0x60                       swap.c:698
-[281667.706214]  zap_page_range_single+0xa8/0x340              memory.c:1938
-[281667.706846]  ? __pfx_zap_page_range_single+0x10/0x10^M
-[281667.807198]  ? userfaultfd_remove+0x8e/0x210               fs/userfaultd.c:777?
-[281667.807853]  ? __pfx_userfaultfd_remove+0x10/0x10^M
-[281667.808526]  ? __pfx_find_vma_prev+0x10/0x10               mmap.c:98x?
-[281668.309000]  do_madvise.part.0+0x1db8/0x1f90^M
-[281668.309630]  ? ____sys_recvmsg+0x15f/0x380                 socket.c:2803
-[281668.309905]  ? __pfx_do_madvise.part.0+0x10/0x10^M
-[281668.310514]  ? update_min_vruntime+0x11b/0x130^M
-[281668.311116]  ? __update_load_avg_cfs_rq+0x78/0x5f0^M
-[281668.311722]  ? __pfx___resched_curr+0x10/0x10^M
-[281668.312349]  ? ___sys_recvmsg+0xe0/0x150                   socket.c:2845
-[281668.312557]  ? __pfx____sys_recvmsg+0x10/0x10^M
-[281668.313169]  ? __kasan_check_read+0x11/0x20^M
-[281668.313791]  ? psi_group_change+0x2e9/0x4a0^M
-[281668.314416]  ? __set_next_task_fair.part.0+0x28/0x310^M
-[281668.314711]  ? __kasan_check_write+0x14/0x20^M
-[281668.315326]  ? recalc_sigpending+0xa7/0xf0^M
-[281668.315529]  ? preempt_count_sub+0x18/0xc0^M
-[281668.315774]  ? _raw_spin_unlock_irq+0x1f/0x40^M
-[281668.316381]  ? sigprocmask+0x129/0x1c0^M
-[281668.316584]  ? __pfx_sigprocmask+0x10/0x10^M
-[281668.316812]  ? __kasan_check_write+0x14/0x20^M
-[281668.317411]  ? __x64_sys_rt_sigprocmask+0x105/0x190^M
-[281668.317680]  ? __pfx___x64_sys_rt_sigprocmask+0x10/0x10^M
-[281668.317978]  __x64_sys_madvise+0x9a/0xb0^M
-[281668.318189]  ? __x64_sys_madvise+0x9a/0xb0^M
-[281668.318393]  x64_sys_call+0x1f34/0x20b0^M
-[281668.318603]  do_syscall_64+0x4b/0x110^M
-
-xmit DATA 1400@0; xmit DATA 1400@1400; xmit DATA 1400@2800; time 1600; time 2200; xmit DATA 800@4200; removing id 1234 from throttled list; time 3200; xmit DATA 1400@0; time 4400; xmit DATA 1400@1400; time 5600; time 6200; xmit DATA 1400@2800; time 7400; xmit DATA 1400@4200; time 8600; time 9200; xmit DATA 1400@5600; time 10400; time 11000; xmit DATA 1400@7000; time 12200; xmit DATA 1400@8400; time 13400; time 14000; xmit DATA 200@9800; removing id 1236 from throttled list
-xmit DATA 1400@0; xmit DATA 1400@1400; xmit DATA 1400@2800; xmit DATA 800@4200; removing id 1234 from throttled list; time 1400; time 2000; xmit DATA 1400@0; time 3200; time 3800; xmit DATA 1400@1400; time 5000; xmit DATA 1400@2800; time 6200; time 6800; xmit DATA 1400@4200; time 8000; xmit DATA 1400@5600; time 9200; time 9800; xmit DATA 1400@7000; time 11000; time 11600; xmit DATA 1400@8400; xmit DATA 200@9800; removing id 1236 from throttled list

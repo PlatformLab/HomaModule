@@ -44,7 +44,6 @@ FIXTURE_SETUP(homa_offload)
 	mock_set_homa(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
 	mock_sock_init(&self->hsk, &self->homa, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	memset(&self->header, 0, sizeof(self->header));
@@ -326,7 +325,9 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 			&client_ip, &server_ip, client_port, server_id, 100,
 			20000);
 	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
 	homa_xmit_data(srpc, false);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 
 	h.common.sport = htons(srpc->dport);

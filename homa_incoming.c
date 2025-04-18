@@ -50,20 +50,13 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 	skb_queue_head_init(&rpc->msgin.packets);
 	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
-#ifndef __STRIP__ /* See strip.py */
-	rpc->msgin.granted = (unsched > length) ? length : unsched;
-	atomic_set(&rpc->msgin.rank, 0);
-#endif /* See strip.py */
 	err = homa_pool_allocate(rpc);
-	if (err != 0)
+	if (err != 0) {
+		rpc->msgin.length = -1;
 		return err;
-#ifndef __STRIP__ /* See strip.py */
-	if (rpc->msgin.num_bpages == 0) {
-		/* The RPC is now queued waiting for buffer space, so we're
-		 * going to discard all of its packets.
-		 */
-		rpc->msgin.granted = 0;
 	}
+#ifndef __STRIP__ /* See strip.py */
+	homa_grant_init_rpc(rpc, unsched);
 	if (length < HOMA_NUM_SMALL_COUNTS * 64) {
 		INC_METRIC(small_msg_bytes[(length - 1) >> 6], length);
 	} else if (length < HOMA_NUM_MEDIUM_COUNTS * 1024) {
@@ -1442,19 +1435,6 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
  */
 void homa_incoming_sysctl_changed(struct homa *homa)
 {
-	u64 tmp;
-
-	if (homa->grant_fifo_fraction > 500)
-		homa->grant_fifo_fraction = 500;
-	tmp = homa->grant_fifo_fraction;
-	if (tmp != 0)
-		tmp = (1000 * homa->fifo_grant_increment) / tmp -
-				homa->fifo_grant_increment;
-	homa->grant_nonfifo = tmp;
-
-	if (homa->max_overcommit > HOMA_MAX_GRANTS)
-		homa->max_overcommit = HOMA_MAX_GRANTS;
-
 	homa->busy_ns = homa->busy_usecs * 1000;
 	homa->gro_busy_ns = homa->gro_busy_usecs * 1000;
 }

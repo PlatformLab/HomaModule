@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #define KSELFTEST_NOT_MAIN 1
@@ -38,7 +39,7 @@ FIXTURE_SETUP(homa_timer)
 	self->homa.timer_ticks = 100;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
+	self->homa.grant->window = 10000;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	unit_log_clear();
@@ -59,6 +60,7 @@ TEST_F(homa_timer, homa_check_rpc__request_ack)
 	self->homa.request_ack_ticks = 2;
 
 	/* First call: do nothing (response not fully transmitted). */
+	homa_rpc_lock(srpc);
 	homa_check_rpc(srpc);
 	EXPECT_EQ(0, srpc->done_timer_ticks);
 
@@ -80,6 +82,7 @@ TEST_F(homa_timer, homa_check_rpc__request_ack)
 	unit_log_clear();
 	self->homa.timer_ticks++;
 	homa_check_rpc(srpc);
+	homa_rpc_unlock(srpc);
 	EXPECT_EQ(100, srpc->done_timer_ticks);
 	EXPECT_STREQ("xmit NEED_ACK", unit_log_get());
 }
@@ -94,7 +97,9 @@ TEST_F(homa_timer, homa_check_rpc__all_granted_bytes_received)
 	unit_log_clear();
 	crpc->msgin.granted = 1400;
 	crpc->silent_ticks = 10;
-	 homa_check_rpc(crpc);
+	homa_rpc_lock(crpc);
+	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -109,7 +114,9 @@ TEST_F(homa_timer, homa_check_rpc__no_buffer_space)
 	unit_log_clear();
 	crpc->msgin.num_bpages = 0;
 	crpc->silent_ticks = 10;
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -122,7 +129,9 @@ TEST_F(homa_timer, homa_check_rpc__server_has_received_request)
 	ASSERT_NE(NULL, srpc);
 	unit_log_clear();
 	srpc->silent_ticks = 10;
+	homa_rpc_lock(srpc);
 	homa_check_rpc(srpc);
+	homa_rpc_unlock(srpc);
 	EXPECT_EQ(0, srpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -135,7 +144,9 @@ TEST_F(homa_timer, homa_check_rpc__granted_bytes_not_sent)
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	crpc->silent_ticks = 10;
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 	EXPECT_EQ(0, crpc->silent_ticks);
 	EXPECT_STREQ("", unit_log_get());
 }
@@ -148,6 +159,7 @@ TEST_F(homa_timer, homa_check_rpc__timeout)
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	crpc->silent_ticks = self->homa.timeout_ticks-1;
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(0, homa_metrics_per_cpu()->rpc_timeouts);
@@ -155,6 +167,7 @@ TEST_F(homa_timer, homa_check_rpc__timeout)
 	EXPECT_EQ(0, crpc->error);
 	crpc->silent_ticks = self->homa.timeout_ticks;
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->rpc_timeouts);
 #endif /* See strip.py */
@@ -183,6 +196,7 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 	/* Second call: resend_ticks. */
 	crpc->silent_ticks = 3;
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
@@ -200,6 +214,7 @@ TEST_F(homa_timer, homa_check_rpc__issue_resend)
 	crpc->silent_ticks = 5;
 	unit_log_clear();
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 1400-4999@7", unit_log_get());
 #else /* See strip.py */
@@ -222,6 +237,7 @@ TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 	/* First call: resend_ticks-1. */
 	crpc->silent_ticks = 2;
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
 	EXPECT_STREQ("", unit_log_get());
 
@@ -229,6 +245,7 @@ TEST_F(homa_timer, homa_check_rpc__request_first_bytes_of_message)
 	crpc->silent_ticks = 3;
 	unit_log_clear();
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 0-99@7", unit_log_get());
 #else /* See strip.py */
@@ -253,7 +270,9 @@ TEST_F(homa_timer, homa_check_rpc__call_homa_gap_retry)
 	self->homa.resend_interval = 2;
 
 	unit_log_clear();
+	homa_rpc_lock(crpc);
 	homa_check_rpc(crpc);
+	homa_rpc_unlock(crpc);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("xmit RESEND 7000-7999@7", unit_log_get());
 #else /* See strip.py */

@@ -8,6 +8,7 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_grant.h"
 #include "homa_skb.h"
 #endif /* See strip.py */
 
@@ -24,6 +25,7 @@
  * @rpc:     RPC to check; must be locked by the caller.
  */
 void homa_check_rpc(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 	struct homa_resend_hdr resend;
@@ -202,12 +204,12 @@ void homa_timer(struct homa *homa)
 	}
 
 	tt_record4("homa_timer found total_incoming %d, num_grantable_rpcs %d, num_active_rpcs %d, new grants %d",
-		   atomic_read(&homa->total_incoming),
-		   homa->num_grantable_rpcs,
-		   homa->num_active_rpcs,
+		   atomic_read(&homa->grant->total_incoming),
+		   homa->grant->num_grantable_rpcs,
+		   homa->grant->num_active_rpcs,
 		   total_grants - prev_grant_count);
 	if (total_grants == prev_grant_count &&
-	    homa->num_grantable_rpcs > 20) {
+	    homa->grant->num_grantable_rpcs > 20) {
 		zero_count++;
 		if (zero_count > 3 && !atomic_read(&tt_frozen) && 0) {
 			pr_err("%s found no grants going out\n", __func__);
@@ -283,7 +285,7 @@ void homa_timer(struct homa *homa)
 #ifndef __STRIP__ /* See strip.py */
 	tt_record4("homa_timer found %d incoming RPCs, incoming sum %d, rec_sum %d, homa->total_incoming %d",
 		   total_incoming_rpcs, sum_incoming, sum_incoming_rec,
-		   atomic_read(&homa->total_incoming));
+		   atomic_read(&homa->grant->total_incoming));
 #endif /* See strip.py */
 	homa_skb_release_pages(homa);
 #ifndef __STRIP__ /* See strip.py */

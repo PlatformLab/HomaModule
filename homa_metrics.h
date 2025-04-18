@@ -489,32 +489,10 @@ struct homa_metrics {
 	u64 grant_check_calls;
 
 	/**
-	 * @grant_recalc_calls: cumulative number of times homa_grant_recalc
-	 * has been invoked.
+	 * @grant_check_slow_path: cumulative number of times
+	 * homa_grant_check_rpc acquired the grant lock.
 	 */
-	u64 grant_recalc_calls;
-
-	/** @grant_recalc_ns: total time spent in homa_grant_recalc. */
-	u64 grant_recalc_ns;
-
-	/**
-	 * @grant_recalc_loops: cumulative number of times homa_grant_recalc
-	 * has looped back to recalculate again.
-	 */
-	u64 grant_recalc_loops;
-
-	/**
-	 * @grant_recalc_skips: cumulative number of times that
-	 * homa_grant_recalc skipped its work because in other thread
-	 * already did it.
-	 */
-	u64 grant_recalc_skips;
-
-	/**
-	 * @grant_check_needy_calls: cumulative number of times that
-	 * homa_grant_check_needy has been invoked.
-	 */
-	u64 grant_check_needy_calls;
+	u64 grant_check_slow_path;
 
 	/**
 	 * @grant_priority_bumps: cumulative number of times the grant priority

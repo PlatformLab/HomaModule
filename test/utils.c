@@ -5,6 +5,7 @@
  */
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
@@ -199,23 +200,33 @@ void unit_log_frag_list(struct sk_buff *skb, int verbose)
 #ifndef __STRIP__ /* See strip.py */
 /**
  * unit_log_grantables() - Append to the test log information about all of
- * the messages that are currently grantable.
+ * the messages under grant->grantable_peers.
  * @homa:     Homa's overall state.
  */
 void unit_log_grantables(struct homa *homa)
 {
 	struct homa_peer *peer;
 	struct homa_rpc *rpc;
+	int i;
 
-	list_for_each_entry(peer, &homa->grantable_peers, grantable_links) {
+	for (i = 0; i < homa->grant->num_active_rpcs; i++) {
+		rpc = homa->grant->active_rpcs[i];
+		unit_log_printf("; ", "active[%d]: id %llu ungranted %d",
+				i, rpc->id,
+				rpc->msgin.length - rpc->msgin.granted);
+		if (rpc->msgin.rank != i) {
+			unit_log_printf(" ", "bad rank %d", rpc->msgin.rank);
+		}
+	}
+	list_for_each_entry(peer, &homa->grant->grantable_peers,
+			    grantable_links) {
+		unit_log_printf("; ", "peer %s:",
+				homa_print_ipv6_addr(&peer->addr));
 		list_for_each_entry(rpc, &peer->grantable_rpcs,
 				grantable_links) {
-			unit_log_printf("; ", "%s from %s, id %llu, remaining %d",
-					homa_is_client(rpc->id) ? "response"
-					: "request",
-					homa_print_ipv6_addr(&peer->addr),
+			unit_log_printf(" ", "id %llu ungranted %d",
 					rpc->id,
-					rpc->msgin.bytes_remaining);
+					rpc->msgin.length - rpc->msgin.granted);
 		}
 	}
 }
@@ -354,6 +365,8 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 {
 	int bytes_received, created;
 	struct homa_data_hdr h;
+	int status;
+
 	memset(&h, 0, sizeof(h));
 	h.common = (struct homa_common_hdr){
 		.sport = htons(client_port),
@@ -394,8 +407,11 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	srpc->state = RPC_IN_SERVICE;
 	if (state == UNIT_IN_SERVICE)
 		return srpc;
-	if (homa_message_out_fill(srpc,
-			unit_iov_iter((void *) 2000, resp_length), 0) != 0)
+	homa_rpc_lock(srpc);
+	status = homa_message_out_fill(srpc, unit_iov_iter((void *) 2000,
+				       resp_length), 0);
+	homa_rpc_unlock(srpc);
+	if (status != 0)
 		goto error;
 	srpc->state = RPC_OUTGOING;
 	if (state == UNIT_OUTGOING)

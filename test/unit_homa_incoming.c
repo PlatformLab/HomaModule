@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_interest.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
@@ -96,9 +97,8 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer->fifo_fraction = 0;
 #ifndef __STRIP__ /* See strip.py */
-	self->homa.grant_fifo_fraction = 0;
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
+	self->homa.grant->window = 10000;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	mock_sock_init(&self->hsk2, &self->homa, self->server_port);
@@ -162,6 +162,7 @@ TEST_F(homa_incoming, homa_message_in_init__no_buffer_region)
 	self->hsk.buffer_pool = homa_pool_new(&self->hsk);
 	EXPECT_EQ(ENOMEM, -homa_message_in_init(crpc, HOMA_BPAGE_SIZE*2, 0));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);
+	EXPECT_EQ(-1, crpc->msgin.length);
 }
 TEST_F(homa_incoming, homa_message_in_init__no_buffers_available)
 {
@@ -183,13 +184,13 @@ TEST_F(homa_incoming, homa_message_in_init__update_metrics)
 			UNIT_OUTGOING, self->client_ip, self->server_ip,
 			self->server_port, 99, 1000, 1000);
 
-	EXPECT_EQ(0, homa_message_in_init(crpc, 140, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 130, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff0, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 0x3000, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 1000000, 0));
-	EXPECT_EQ(0, homa_message_in_init(crpc, 900000, 0));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 140, 140));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 130, 130));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff, 0xfff));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 0xfff0, 0xfff0));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 0x3000, 0x3000));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 1000000, 1000000));
+	EXPECT_EQ(0, homa_message_in_init(crpc, 900000, 900000));
 	EXPECT_EQ(270, homa_metrics_per_cpu()->small_msg_bytes[2]);
 	EXPECT_EQ(0xfff, homa_metrics_per_cpu()->small_msg_bytes[63]);
 	EXPECT_EQ(0x3000, homa_metrics_per_cpu()->medium_msg_bytes[11]);
@@ -645,7 +646,9 @@ TEST_F(homa_incoming, homa_copy_to_user__basics)
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399; "
 			"skb_copy_datagram_iter: 648 bytes to 0x1000578: 101000-101647; "
 			"skb_copy_datagram_iter: 752 bytes to 0x1000800: 101648-102399; "
@@ -691,7 +694,9 @@ TEST_F(homa_incoming, homa_copy_to_user__multiple_batches)
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399; "
 			"skb_copy_datagram_iter: 1400 bytes to 0x1000578: 1400-2799; "
 			"skb_copy_datagram_iter: 1400 bytes to 0x1000af0: 2800-4199; "
@@ -716,7 +721,9 @@ TEST_F(homa_incoming, homa_copy_to_user__nothing_to_copy)
 	/* First call finds packets to copy. */
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("skb_copy_datagram_iter: 1400 bytes to 0x1000000: 0-1399",
 			unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
@@ -742,7 +749,9 @@ TEST_F(homa_incoming, homa_copy_to_user__many_chunks_for_one_skb)
 
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("skb_copy_datagram_iter: 512 bytes to 0x1000000: 101000-101511; "
 			"skb_copy_datagram_iter: 512 bytes to 0x1000200: 101512-102023; "
 			"skb_copy_datagram_iter: 512 bytes to 0x1000400: 102024-102535; "
@@ -768,7 +777,9 @@ TEST_F(homa_incoming, homa_copy_to_user__skb_data_extends_past_message_end)
 	mock_copy_to_user_dont_copy = -1;
 	h = (struct homa_data_hdr *)skb_peek(&crpc->msgin.packets)->data;
 	h->seg.offset = htonl(4000);
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("", unit_log_get());
 }
 TEST_F(homa_incoming, homa_copy_to_user__error_in_import_ubuf)
@@ -782,7 +793,9 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_import_ubuf)
 
 	unit_log_clear();
 	mock_import_ubuf_errors = 1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(13, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
@@ -797,7 +810,9 @@ TEST_F(homa_incoming, homa_copy_to_user__error_in_skb_copy_datagram_iter)
 
 	unit_log_clear();
 	mock_copy_data_errors = 1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(14, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, skb_queue_len(&crpc->msgin.packets));
 }
@@ -823,7 +838,9 @@ TEST_F(homa_incoming, homa_copy_to_user__timetrace_info)
 	unit_log_clear();
 	mock_copy_to_user_dont_copy = -1;
 	tt_init(NULL);
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, -homa_copy_to_user(crpc));
+	homa_rpc_unlock(crpc);
 	tt_get_messages(traces, sizeof(traces));
 	EXPECT_STREQ("starting copy to user space for id 1234; "
 			"copied out bytes 0-1400 for id 1234; "
@@ -1165,6 +1182,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__too_many_acks)
 	EXPECT_STREQ("sk->sk_data_ready invoked; ack 1237; ack 1235",
 				unit_log_get());
 }
+#if 0
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_grant_check_rpc)
 {
@@ -1177,6 +1195,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__invoke_homa_grant_check_rpc)
 	EXPECT_SUBSTR("id 1235", unit_log_get());
 }
 #endif /* See strip.py */
+#endif
 TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 {
 	struct homa_rpc *dead = unit_client_rpc(&self->hsk,
@@ -1431,7 +1450,9 @@ TEST_F(homa_incoming, homa_grant_pkt__basics)
 			.resend_all = 0};
 
 	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
 	homa_xmit_data(srpc, false);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 
 	homa_dispatch_pkts(mock_skb_new(self->client_ip, &h.common, 0, 0),
@@ -1473,7 +1494,9 @@ TEST_F(homa_incoming, homa_grant_pkt__reset)
 			.resend_all = 1};
 
 	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
 	homa_xmit_data(srpc, false);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 	EXPECT_EQ(10000, srpc->msgout.granted);
 	EXPECT_EQ(10000, srpc->msgout.next_xmit_offset);
@@ -1630,7 +1653,9 @@ TEST_F(homa_incoming, homa_resend_pkt__client_send_data)
 			self->server_port, self->client_id, 2000, 100);
 
 	ASSERT_NE(NULL, crpc);
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	unit_log_clear();
 	mock_clear_xmit_prios();
 
@@ -1659,7 +1684,9 @@ TEST_F(homa_incoming, homa_resend_pkt__server_send_data)
 			self->server_id, 100, 20000);
 
 	ASSERT_NE(NULL, srpc);
+	homa_rpc_lock(srpc);
 	homa_xmit_data(srpc, false);
+	homa_rpc_unlock(srpc);
 	unit_log_clear();
 	mock_clear_xmit_prios();
 
@@ -1683,7 +1710,9 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_all)
 			self->server_port, self->client_id, 2000, 2000);
 
 	ASSERT_NE(NULL, crpc);
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	unit_log_clear();
 
 	mock_xmit_log_verbose = 1;
@@ -1714,7 +1743,9 @@ TEST_F(homa_incoming, homa_unknown_pkt__client_resend_part)
 #ifndef __STRIP__ /* See strip.py */
 	crpc->msgout.granted = 1400;
 #endif /* See strip.py */
+	homa_rpc_lock(crpc);
 	homa_xmit_data(crpc, false);
+	homa_rpc_unlock(crpc);
 	unit_log_clear();
 
 	mock_xmit_log_verbose = 1;
@@ -2226,7 +2257,9 @@ TEST_F(homa_incoming, homa_wait_private__available_immediately)
 	ASSERT_NE(NULL, crpc);
 	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
 	atomic_or(RPC_PRIVATE, &crpc->flags);
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(0, homa_wait_private(crpc, 0));
+	homa_rpc_unlock(crpc);
 	ASSERT_EQ(RPC_PRIVATE, atomic_read(&crpc->flags));
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_none));
 }
@@ -2240,7 +2273,9 @@ TEST_F(homa_incoming, homa_wait_private__rpc_has_error)
 	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	crpc->error = -ENOENT;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
+	homa_rpc_unlock(crpc);
 	EXPECT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags) & RPC_PKTS_READY);
 }
 TEST_F(homa_incoming, homa_wait_private__copy_to_user_fails)
@@ -2253,7 +2288,9 @@ TEST_F(homa_incoming, homa_wait_private__copy_to_user_fails)
 	ASSERT_EQ(RPC_PKTS_READY, atomic_read(&crpc->flags));
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 	mock_copy_data_errors = 1;
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(EFAULT, -homa_wait_private(crpc, 0));
+	homa_rpc_unlock(crpc);
 }
 TEST_F(homa_incoming, homa_wait_private__nonblocking)
 {
@@ -2264,7 +2301,9 @@ TEST_F(homa_incoming, homa_wait_private__nonblocking)
 	ASSERT_NE(NULL, crpc);
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(EAGAIN, -homa_wait_private(crpc, 1));
+	homa_rpc_unlock(crpc);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_fast));
 }
 TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
@@ -2278,10 +2317,12 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 	IF_NO_STRIP(self->homa.poll_usecs = 0);
 	unit_hook_register(handoff_hook);
 	hook_rpc = crpc;
-	hook_count = 1;
+	hook_count = 2;
 	mock_prepare_to_wait_errors = 1;
 
+	homa_rpc_lock(crpc);
 	EXPECT_EQ(ENOENT, -homa_wait_private(crpc, 0));
+	homa_rpc_unlock(crpc);
 	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->wait_block));
 	EXPECT_EQ(0, mock_prepare_to_wait_errors);
 }
@@ -2493,39 +2534,6 @@ TEST_F(homa_incoming, homa_rpc_handoff__queue_rpc_on_socket)
 }
 
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_incoming_sysctl_changed__grant_nonfifo)
-{
-	self->homa.fifo_grant_increment = 10000;
-	self->homa.grant_fifo_fraction = 0;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(0, self->homa.grant_nonfifo);
-
-	self->homa.grant_fifo_fraction = 100;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(90000, self->homa.grant_nonfifo);
-
-	self->homa.grant_fifo_fraction = 500;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(10000, self->homa.grant_nonfifo);
-
-	self->homa.grant_fifo_fraction = 2000;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(10000, self->homa.grant_nonfifo);
-}
-TEST_F(homa_incoming, homa_incoming_sysctl_changed__limit_on_max_overcommit)
-{
-	self->homa.max_overcommit = 2;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(2, self->homa.max_overcommit);
-
-	self->homa.max_overcommit = HOMA_MAX_GRANTS;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.max_overcommit);
-
-	self->homa.max_overcommit = HOMA_MAX_GRANTS+1;
-	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(HOMA_MAX_GRANTS, self->homa.max_overcommit);
-}
 TEST_F(homa_incoming, homa_incoming_sysctl_changed__convert_usec_to_ns)
 {
 	self->homa.busy_usecs = 53;

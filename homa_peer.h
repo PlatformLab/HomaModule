@@ -117,18 +117,26 @@ struct homa_peer {
 	unsigned long last_update_jiffies;
 
 	/**
-	 * @grantable_rpcs: Contains all homa_rpcs (both requests and
-	 * responses) involving this peer whose msgins require (or required
-	 * them in the past) and have not been fully received. The list is
-	 * sorted in priority order (head has fewest bytes_remaining).
-	 * Locked with homa->grant_lock.
+	 * @active_rpcs: Number of RPCs involving this peer whose incoming
+	 * messages are currently in homa->grant->active_rpcs. Managed by
+	 * homa_grant.c under the grant lock.
+	 */
+	int active_rpcs;
+
+	/**
+	 * @grantable_rpcs: Contains homa_rpcs (both requests and responses)
+	 * involving this peer that are not in homa->active_rpcs but
+	 * whose msgins eventually need more grants. The list is sorted in
+	 * priority order (head has fewest ungranted bytes). Managed by
+	 * homa_grant.c under the grant lock.
 	 */
 	struct list_head grantable_rpcs;
 
 	/**
 	 * @grantable_links: Used to link this peer into homa->grantable_peers.
 	 * If this RPC is not linked into homa->grantable_peers, this is an
-	 * empty list pointing to itself.
+	 * empty list pointing to itself. Managed by homa_grant.c under the
+	 * grant lock.abort
 	 */
 	struct list_head grantable_links;
 #endif /* See strip.py */

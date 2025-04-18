@@ -313,24 +313,16 @@ char *homa_metrics_print(void)
 		  m->peer_ack_lock_misses);
 		M("peer_ack_lock_miss_ns     %15llu  Time lost waiting for peer ack locks\n",
 		  m->peer_ack_lock_miss_ns);
-		M("grant_lock_misses     %15llu  Grant lock misses\n",
+		M("grant_lock_misses         %15llu  Grant lock misses\n",
 		  m->grant_lock_misses);
-		M("grant_lock_miss_ns    %15llu  Time lost waiting for grant lock\n",
+		M("grant_lock_miss_ns        %15llu  Time lost waiting for grant lock\n",
 		  m->grant_lock_miss_ns);
 		M("grantable_rpcs_integral   %15llu  Integral of homa->num_grantable_rpcs*dt\n",
 		  m->grantable_rpcs_integral);
-		M("grant_check_calls       %15llu  Number of calls to homa_grant_check_rpc\n",
+		M("grant_check_calls         %15llu  Number of calls to homa_grant_check_rpc\n",
 		  m->grant_check_calls);
-		M("grant_recalc_calls        %15llu  Number of calls to homa_grant_recalc\n",
-		  m->grant_recalc_calls);
-		M("grant_recalc_ns           %15llu  Time spent in homa_grant_recalc\n",
-		  m->grant_recalc_ns);
-		M("grant_recalc_loops        %15llu  Number of times homa_grant_recalc looped back\n",
-		  m->grant_recalc_loops);
-		M("grant_recalc_skips        %15llu  Number of times homa_grant_recalc skipped redundant work\n",
-		  m->grant_recalc_skips);
-		M("grant_check_needy_calls   %15llu  Number of calls to homa_grant_check_needy\n",
-		  m->grant_recalc_skips);
+		M("grant_check_slow_path     %15llu  Number of times homa_grant_check_rpc acquired grant lock\n",
+		  m->grant_check_calls);
 		M("grant_priority_bumps      %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
 		M("fifo_grants               %15llu  Grants issued using FIFO priority\n",

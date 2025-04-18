@@ -275,6 +275,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
  * returned.
  */
 int homa_pool_allocate(struct homa_rpc *rpc)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa_pool *pool = rpc->hsk->buffer_pool;
 	int full_pages, partial, i, core_id;
@@ -510,11 +511,10 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		if (rpc->msgin.num_bpages > 0) {
 			/* Allocation succeeded; "wake up" the RPC. */
 			rpc->msgin.resend_all = 1;
+			homa_grant_init_rpc(rpc, 0);
 			homa_grant_check_rpc(rpc);
 		}
-		homa_rpc_unlock(rpc);
-#else /* See strip.py */
-		homa_rpc_unlock(rpc);
 #endif /* See strip.py */
+		homa_rpc_unlock(rpc);
 	}
 }

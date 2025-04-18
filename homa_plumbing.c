@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_grant.h"
 #include "homa_offload.h"
 #endif /* See strip.py */
 #include "homa_pacer.h"
@@ -196,13 +197,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "fifo_grant_increment",
-		.data		= OFFSET(fifo_grant_increment),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "flags",
 		.data		= OFFSET(flags),
 		.maxlen		= sizeof(int),
@@ -222,13 +216,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.maxlen		= 0,
 		.mode		= 0644,
 		.proc_handler	= homa_sysctl_softirq_cores
-	},
-	{
-		.procname	= "grant_fifo_fraction",
-		.data		= OFFSET(grant_fifo_fraction),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
 	},
 	{
 		.procname	= "gro_busy_usecs",
@@ -266,13 +253,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.proc_handler	= homa_dointvec
 	},
 	{
-		.procname	= "max_grantable_rpcs",
-		.data		= OFFSET(max_grantable_rpcs),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
 		.procname	= "max_gro_skbs",
 		.data		= OFFSET(max_gro_skbs),
 		.maxlen		= sizeof(int),
@@ -282,27 +262,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "max_gso_size",
 		.data		= OFFSET(max_gso_size),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "max_incoming",
-		.data		= OFFSET(max_incoming),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "max_overcommit",
-		.data		= OFFSET(max_overcommit),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "max_rpcs_per_peer",
-		.data		= OFFSET(max_rpcs_per_peer),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -422,13 +381,6 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "verbose",
 		.data		= OFFSET(verbose),
-		.maxlen		= sizeof(int),
-		.mode		= 0644,
-		.proc_handler	= homa_dointvec
-	},
-	{
-		.procname	= "window",
-		.data		= OFFSET(window_param),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
@@ -1709,7 +1661,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 				tt_freeze();
 			} else if (homa->sysctl_action == 8) {
 				pr_notice("homa_total_incoming is %d\n",
-					  atomic_read(&homa->total_incoming));
+					  atomic_read(&homa->grant->total_incoming));
 			} else if (homa->sysctl_action == 9) {
 				tt_print_file("/users/ouster/node.tt");
 			} else {

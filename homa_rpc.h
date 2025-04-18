@@ -150,43 +150,6 @@ struct homa_message_in {
 	 */
 	int bytes_remaining;
 
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @granted: Total # of bytes (starting from offset 0) that the sender
-	 * may transmit without additional grants, includes unscheduled bytes.
-	 * Never larger than @length. Note: once initialized, this
-	 * may not be modified without holding @homa->grant_lock.
-	 */
-	int granted;
-
-	/**
-	 * @rec_incoming: Number of bytes in homa->total_incoming currently
-	 * contributed ("recorded") from this RPC.
-	 */
-	int rec_incoming;
-
-	/**
-	 * @rank: A hint: if homa->active_rpcs[@rank] refers to this RPC then
-	 * the RPC is active and this value indicates the RPC's priority (lower
-	 * is better). Read without synchronization, so must be atomic.
-	 */
-	atomic_t rank;
-
-	/** @priority: Priority level to include in future GRANTS. */
-	int priority;
-#endif /* See strip.py */
-
-	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
-	__u8 resend_all;
-
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @birth: sched_clock() time when this RPC was added to the grantable
-	 * list. Invalid if RPC isn't in the grantable list.
-	 */
-	u64 birth;
-#endif /* See strip.py */
-
 	/**
 	 * @num_bpages: The number of entries in @bpage_offsets used for this
 	 * message (0 means buffers not allocated yet).
@@ -199,6 +162,44 @@ struct homa_message_in {
 	 * All but the last pointer refer to areas of size HOMA_BPAGE_SIZE.
 	 */
 	u32 bpage_offsets[HOMA_MAX_BPAGES];
+
+#ifndef __STRIP__ /* See strip.py */
+	/**
+	 * @rank: Position of this RPC in homa->grant->active_rpcs, or -1
+	 * if not in homa->grant->active_rpcs. Managed by homa_grant.c.
+	 */
+	int rank;
+
+	/**
+	 * @granted: Total # of bytes (starting from offset 0) that the sender
+	 * will transmit without additional grants, including unscheduled bytes.
+	 * Never larger than @length. Managed by homa_grant.c.
+	 */
+	int granted;
+
+	/**
+	 * @prev_grant: Offset in the last GRANT packet sent for this RPC
+	 * (initially set to unscheduled bytes).
+	 */
+	int prev_grant;
+
+	/**
+	 * @rec_incoming: Number of bytes in homa->total_incoming currently
+	 * contributed ("recorded") from this RPC. Managed by homa_grant.c.
+	 */
+	int rec_incoming;
+
+
+	/**
+	 * @birth: sched_clock() time when homa_grant_manage_rpc was invoked
+	 * for this RPC. Managed by homa_grant.c. Only set if the RPC needs
+	 * grants.
+	 */
+	u64 birth;
+
+	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
+	__u8 resend_all;
+#endif /* See strip.py */
 };
 
 /**

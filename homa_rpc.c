@@ -274,7 +274,8 @@ void homa_rpc_end(struct homa_rpc *rpc)
 	 * necessary because homa_grant_end_rpc releases the RPC lock and
 	 * reacquires it.
 	 */
-	homa_grant_end_rpc(rpc);
+	if (rpc->msgin.length >= 0)
+		homa_grant_end_rpc(rpc);
 #endif /* See strip.py */
 
 	/* Unlink from all lists, so no-one will ever find this RPC again. */
@@ -627,12 +628,9 @@ void homa_rpc_log_tt(struct homa_rpc *rpc)
 			   rpc->id, tt_addr(rpc->peer->addr),
 			   received, rpc->msgin.length);
 #ifndef __STRIP__
-		tt_record4("RPC id %d has incoming %d, granted %d, prio %d", rpc->id,
-			   rpc->msgin.granted - received,
-			   rpc->msgin.granted, rpc->msgin.priority);
-		rank = atomic_read(&rpc->msgin.rank);
-		if (rpc->hsk->homa->active_rpcs[rank] != rpc)
-			rank = -1;
+		tt_record3("RPC id %d has incoming %d, granted %d", rpc->id,
+			   rpc->msgin.granted - received, rpc->msgin.granted);
+		rank = rpc->msgin.rank;
 #else /* __STRIP__ */
 		rank = -1;
 #endif /* __STRIP__ */
@@ -676,10 +674,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 	struct homa_rpc *rpc;
 	int count = 0;
 
-#ifndef __STRIP__
-	homa_grant_log_tt(homa);
-#endif /* __STRIP__ */
-	tt_record("Logging active Homa RPCs:");
+	tt_record("Logging Homa RPCs:");
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
@@ -735,7 +730,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 	int actual;
 
 	tt_record1("homa_validate_incoming starting, total_incoming %d",
-		   atomic_read(&homa->total_incoming));
+		   atomic_read(&homa->grant->total_incoming));
 	*link_errors = 0;
 	rcu_read_lock();
 	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
@@ -779,7 +774,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 	}
 	homa_socktab_end_scan(&scan);
 	rcu_read_unlock();
-	actual = atomic_read(&homa->total_incoming);
+	actual = atomic_read(&homa->grant->total_incoming);
 	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",
 		   actual - total_incoming, total_incoming, actual);
 	return actual - total_incoming;

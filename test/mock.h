@@ -179,6 +179,8 @@ int         mock_processor_id(void);
 void        mock_put_page(struct page *page);
 void        mock_rcu_read_lock(void);
 void        mock_rcu_read_unlock(void);
+void        mock_record_locked(void *lock);
+void        mock_record_unlocked(void *lock);
 struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,

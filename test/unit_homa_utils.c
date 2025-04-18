@@ -68,7 +68,7 @@ TEST_F(homa_utils, homa_init__kmalloc_failure_for_peers)
 	struct homa homa2;
 
 	memset(&homa2, 0, sizeof(homa2));
-	mock_kmalloc_errors = 4;
+	mock_kmalloc_errors = 8;
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2, &mock_net));
 	EXPECT_NE(NULL, homa2.port_map);
 	EXPECT_EQ(NULL, homa2.peers);
@@ -80,7 +80,7 @@ TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 	struct homa homa2;
 
 	memset(&homa2, 0, sizeof(homa2));
-	mock_kmalloc_errors = 8;
+	mock_kmalloc_errors = 0x10;
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2, &mock_net));
 	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
 		      mock_printk_output);

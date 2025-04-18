@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_pool.h"
@@ -71,7 +72,7 @@ FIXTURE_SETUP(homa_rpc)
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
+	self->homa.grant->window = 10000;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	memset(&self->data, 0, sizeof(self->data));
@@ -412,14 +413,14 @@ TEST_F(homa_rpc, homa_rpc_end__basics)
 			self->server_port, self->client_id, 1000, 20000);
 
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(1, self->homa.num_grantable_rpcs);
+	EXPECT_EQ(1, self->homa.grant->num_grantable_rpcs);
 #endif /* See strip.py */
 	ASSERT_NE(NULL, crpc);
 	unit_log_clear();
 	mock_log_rcu_sched = 1;
 	homa_rpc_end(crpc);
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(0, self->homa.num_grantable_rpcs);
+	EXPECT_EQ(0, self->homa.grant->num_grantable_rpcs);
 #endif /* See strip.py */
 	EXPECT_EQ(NULL, homa_find_client_rpc(&self->hsk, crpc->id));
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));

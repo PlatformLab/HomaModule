@@ -588,8 +588,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
-	__releases(rpc->bucket_lock)
-	__acquires(rpc->bucket_lock)
+	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 #ifndef __STRIP__ /* See strip.py */
@@ -634,6 +633,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 		rpc->msgout.next_xmit_offset +=
 				homa_get_skb_info(skb)->data_bytes;
 
+		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
 		skb_get(skb);
 #ifndef __STRIP__ /* See strip.py */
@@ -648,6 +648,7 @@ void homa_xmit_data(struct homa_rpc *rpc, bool force)
 #endif /* See strip.py */
 		force = false;
 		homa_rpc_lock(rpc);
+		homa_rpc_put(rpc);
 		if (rpc->state == RPC_DEAD)
 			break;
 	}

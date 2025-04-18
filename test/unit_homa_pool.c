@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_grant.h"
 #include "homa_pool.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
@@ -22,7 +23,7 @@ FIXTURE_SETUP(homa_pool)
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
-	self->homa.window_param = 10000;
+	self->homa.grant->window = 10000;
 #endif /* See strip.py */
 	mock_sock_init(&self->hsk, &self->homa, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
@@ -669,7 +670,8 @@ TEST_F(homa_pool, homa_pool_check_waiting__wake_up_waiting_rpc)
 	atomic_set(&pool->free_bpages, 2);
 	homa_pool_check_waiting(pool);
 	EXPECT_EQ(2, crpc->msgin.num_bpages);
-	EXPECT_STREQ("homa_grant_recalc; xmit GRANT 10000@0 resend_all",
+	EXPECT_EQ(0, crpc->msgin.rank);
+	EXPECT_STREQ("xmit GRANT 10000@0 resend_all",
 		     unit_log_get());
 }
 #endif /* See strip.py */
