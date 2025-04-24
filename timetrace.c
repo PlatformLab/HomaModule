@@ -694,6 +694,7 @@ void tt_printk(void)
 	 */
 	static int pos[NR_CPUS];
 	static atomic_t active;
+	int i;
 
 	if (atomic_xchg(&active, 1)) {
 		pr_err("concurrent call to %s aborting\n", __func__);
@@ -703,6 +704,16 @@ void tt_printk(void)
 		return;
 	atomic_inc(&tt_freeze_count);
 	tt_find_oldest(pos);
+
+	/* Limit the number of entries logged per core (logging too many
+	 * seems to cause entries to be lost).
+	 */
+	for (i = 0; i < nr_cpu_ids; i++) {
+		struct tt_buffer *buffer = tt_buffers[i];
+
+		if (((buffer->next_index - pos[i]) & (TT_BUF_SIZE - 1)) > 200)
+			pos[i] = (buffer->next_index - 200) & (TT_BUF_SIZE - 1);
+	}
 
 	pr_err("cpu_khz: %u\n", cpu_khz);
 
