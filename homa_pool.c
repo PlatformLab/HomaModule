@@ -42,25 +42,41 @@ static void set_bpages_needed(struct homa_pool *pool)
 }
 
 /**
- * homa_pool_init() - Initialize a homa_pool; any previous contents are
- * destroyed.
- * @hsk:          Socket containing the pool to initialize.
+ * homa_pool_new() - Allocate and initialize a new homa_pool (it will have
+ * no region associated with it until homa_pool_set_region is invoked).
+ * @hsk:          Socket the pool will be associated with.
+ * Return: A pointer to the new pool or a negative errno.
+ */
+struct homa_pool *homa_pool_new(struct homa_sock *hsk)
+{
+	struct homa_pool *pool;
+
+	pool = kzalloc(sizeof(*pool), GFP_ATOMIC);
+	if (!pool)
+		return ERR_PTR(-ENOMEM);
+	pool->hsk = hsk;
+	return pool;
+}
+
+/**
+ * homa_pool_set_region() - Associate a region of memory with a pool.
+ * @pool:         Pool the region will be associated with. Must not currently
+ *                have a region associated with it.
  * @region:       First byte of the memory region for the pool, allocated
  *                by the application; must be page-aligned.
  * @region_size:  Total number of bytes available at @buf_region.
  * Return: Either zero (for success) or a negative errno for failure.
  */
-int homa_pool_init(struct homa_sock *hsk, void __user *region,
+int homa_pool_set_region(struct homa_pool *pool, void __user *region,
 		   u64 region_size)
 {
-	struct homa_pool *pool = hsk->buffer_pool;
 	int i, result;
 
-	homa_pool_destroy(hsk->buffer_pool);
+	if (pool->region)
+		return -EINVAL;
 
 	if (((uintptr_t)region) & ~PAGE_MASK)
 		return -EINVAL;
-	pool->hsk = hsk;
 	pool->region = (char __user *)region;
 	pool->num_bpages = region_size >> HOMA_BPAGE_SHIFT;
 	pool->descriptors = NULL;
@@ -106,31 +122,30 @@ error:
 
 /**
  * homa_pool_destroy() - Destructor for homa_pool. After this method
- * returns, the object should not be used unless it has been reinitialized.
+ * returns, the object should not be used (it will be freed here).
  * @pool: Pool to destroy.
  */
 void homa_pool_destroy(struct homa_pool *pool)
 {
-	if (!pool->region)
-		return;
-	kfree(pool->descriptors);
-	free_percpu(pool->cores);
-	pool->region = NULL;
+	if (pool->region) {
+		kfree(pool->descriptors);
+		free_percpu(pool->cores);
+		pool->region = NULL;
+	}
+	kfree(pool);
 }
 
 /**
  * homa_pool_get_rcvbuf() - Return information needed to handle getsockopt
  * for HOMA_SO_RCVBUF.
- * @hsk:          Socket on which getsockopt request was made.
+ * @pool:         Pool for which information is needed.
  * @args:         Store info here.
  */
-void homa_pool_get_rcvbuf(struct homa_sock *hsk,
+void homa_pool_get_rcvbuf(struct homa_pool *pool,
 			  struct homa_rcvbuf_args *args)
 {
-	homa_sock_lock(hsk);
-	args->start = (uintptr_t)hsk->buffer_pool->region;
-	args->length = hsk->buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
-	homa_sock_unlock(hsk);
+	args->start = (uintptr_t)pool->region;
+	args->length = pool->num_bpages << HOMA_BPAGE_SHIFT;
 }
 
 /**

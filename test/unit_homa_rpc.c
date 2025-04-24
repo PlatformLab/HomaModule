@@ -249,6 +249,7 @@ TEST_F(homa_rpc, homa_rpc_new_server__no_buffer_pool)
 
 	self->data.message_length = N(1400);
 	homa_pool_destroy(self->hsk.buffer_pool);
+	self->hsk.buffer_pool = homa_pool_new(&self->hsk);
 	srpc = homa_rpc_new_server(&self->hsk, self->client_ip, &self->data,
 			&created);
 	ASSERT_TRUE(IS_ERR(srpc));

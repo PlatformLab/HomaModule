@@ -194,9 +194,11 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-	hsk->buffer_pool = kzalloc(sizeof(*hsk->buffer_pool), GFP_ATOMIC);
-	if (!hsk->buffer_pool)
-		result = -ENOMEM;
+	hsk->buffer_pool = homa_pool_new(hsk);
+	if (IS_ERR(hsk->buffer_pool)) {
+		result = PTR_ERR(hsk->buffer_pool);
+		hsk->buffer_pool = NULL;
+	}
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
@@ -303,7 +305,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 
 	if (hsk->buffer_pool) {
 		homa_pool_destroy(hsk->buffer_pool);
-		kfree(hsk->buffer_pool);
 		hsk->buffer_pool = NULL;
 	}
 	tt_record1("Finished shutdown for socket %d", hsk->port);

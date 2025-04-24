@@ -68,7 +68,7 @@ static void change_owner_hook(char *id)
 			.page_hint].owner = -1;
 }
 
-TEST_F(homa_pool, homa_pool_set_bpages_needed)
+TEST_F(homa_pool, set_bpages_needed)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
 
@@ -82,50 +82,80 @@ TEST_F(homa_pool, homa_pool_set_bpages_needed)
 	EXPECT_EQ(2, pool->bpages_needed);
 }
 
-TEST_F(homa_pool, homa_pool_init__basics)
+TEST_F(homa_pool, homa_pool_init)
 {
-	struct homa_pool *pool = self->hsk.buffer_pool;
+	struct homa_pool *pool;
 
-	EXPECT_EQ(100, pool->num_bpages);
-	EXPECT_EQ(-1, pool->descriptors[98].owner);
+	/* Success */
+	pool = homa_pool_new(&self->hsk);
+	EXPECT_FALSE(IS_ERR(pool));
+	EXPECT_EQ(pool->hsk, &self->hsk);
+	homa_pool_destroy(pool);
+
+	/* Can't allocate memory. */
+	mock_kmalloc_errors = 1;
+	pool = homa_pool_new(&self->hsk);
+	EXPECT_TRUE(IS_ERR(pool));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(pool));
 }
-TEST_F(homa_pool, homa_pool_init__region_not_page_aligned)
+
+TEST_F(homa_pool, homa_pool_set_region__basics)
 {
-	homa_pool_destroy(self->hsk.buffer_pool);
-	EXPECT_EQ(EINVAL, -homa_pool_init(&self->hsk,
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
+
+	EXPECT_EQ(0, -homa_pool_set_region(pool, (void *) 0x100000,
+			78*HOMA_BPAGE_SIZE));
+	EXPECT_EQ(78, pool->num_bpages);
+	EXPECT_EQ(-1, pool->descriptors[69].owner);
+	homa_pool_destroy(pool);
+}
+TEST_F(homa_pool, homa_pool_set_region__region_not_page_aligned)
+{
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
+
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(pool,
 			((char *) 0x1000000) + 10,
 			100*HOMA_BPAGE_SIZE));
+	homa_pool_destroy(pool);
 }
-TEST_F(homa_pool, homa_pool_init__region_too_small)
+TEST_F(homa_pool, homa_pool_set_region__region_too_small)
 {
-	homa_pool_destroy(self->hsk.buffer_pool);
-	EXPECT_EQ(EINVAL, -homa_pool_init(&self->hsk, (void *) 0x1000000,
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
+
+	EXPECT_EQ(EINVAL, -homa_pool_set_region(pool, (void *) 0x1000000,
 			HOMA_BPAGE_SIZE));
+	homa_pool_destroy(pool);
 }
-TEST_F(homa_pool, homa_pool_init__cant_allocate_descriptors)
+TEST_F(homa_pool, homa_pool_set_region__cant_allocate_descriptors)
 {
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
+
 	mock_kmalloc_errors = 1;
-	homa_pool_destroy(self->hsk.buffer_pool);
-	EXPECT_EQ(ENOMEM, -homa_pool_init(&self->hsk, (void *) 0x100000,
+	EXPECT_EQ(ENOMEM, -homa_pool_set_region(pool, (void *) 0x100000,
 			100*HOMA_BPAGE_SIZE));
+	homa_pool_destroy(pool);
 }
-TEST_F(homa_pool, homa_pool_init__cant_allocate_core_info)
+TEST_F(homa_pool, homa_pool_set_region__cant_allocate_core_info)
 {
-	homa_pool_destroy(self->hsk.buffer_pool);
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
+
 	mock_kmalloc_errors = 2;
-	EXPECT_EQ(ENOMEM, -homa_pool_init(&self->hsk, (void *) 0x100000,
+	EXPECT_EQ(ENOMEM, -homa_pool_set_region(pool, (void *) 0x100000,
 			100*HOMA_BPAGE_SIZE));
+	homa_pool_destroy(pool);
 }
 
 TEST_F(homa_pool, homa_pool_get_rcvbuf)
 {
+	struct homa_pool *pool = homa_pool_new(&self->hsk);
 	struct homa_rcvbuf_args args;
 
-	EXPECT_EQ(0, -homa_pool_init(&self->hsk, (void *)0x40000,
+	EXPECT_EQ(0, -homa_pool_set_region(pool, (void *)0x40000,
 		  10*HOMA_BPAGE_SIZE + 1000));
-	homa_pool_get_rcvbuf(&self->hsk, &args);
+	homa_pool_get_rcvbuf(pool, &args);
 	EXPECT_EQ(0x40000, args.start);
 	EXPECT_EQ(10*HOMA_BPAGE_SIZE, args.length);
+	homa_pool_destroy(pool);
 }
 
 TEST_F(homa_pool, homa_pool_get_pages__basics)
@@ -258,15 +288,17 @@ TEST_F(homa_pool, homa_pool_allocate__basics)
 	EXPECT_EQ(150000 - 2*HOMA_BPAGE_SIZE,
 			pool->cores[smp_processor_id()].allocated);
 }
-TEST_F(homa_pool, homa_pool_no_buffer_pool)
+TEST_F(homa_pool, homa_pool_allocate__no_buffer_pool)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
 			UNIT_RCVD_ONE_PKT, &self->client_ip, &self->server_ip,
 			4000, 98, 1000,	150000);
-	struct homa_pool *pool = self->hsk.buffer_pool;
 
 	ASSERT_NE(NULL, crpc);
-	homa_pool_destroy(pool);
+
+	homa_pool_destroy(self->hsk.buffer_pool);
+	self->hsk.buffer_pool = homa_pool_new(&self->hsk);
+
 	EXPECT_EQ(ENOMEM, -homa_pool_allocate(crpc));
 }
 TEST_F(homa_pool, homa_pool_allocate__cant_allocate_full_bpages)
