@@ -654,9 +654,8 @@ def start_servers(exp, ids, options):
                % (options.tcp_server_ports, options.tcp_port_threads,
                 options.protocol, exp, options.ipv6), ids)
     server_nodes = ids
-    if (options.debug):
-        print("Pausing for debug setup; type <Enter> to continue: ", end="")
-        input()
+    if options.debug:
+        input("Pausing for debug setup, type <Enter> to continue: ")
 
 def run_experiment(name, clients, options):
     """
@@ -980,13 +979,19 @@ def scan_log(file, node, experiments):
     experiment = ""
     node_data = None
     active = False
+    timeouts = 0
 
     for line in open(file):
         if "FATAL:" in line:
             log("%s: %s" % (file, line[:-1]))
             exited = True
         if "ERROR:" in line:
+            if "Homa RPC timed out" in line:
+                timeouts += 1
+                if timeouts > 1:
+                    continue
             log("%s: %s" % (file, line[:-1]))
+            continue
         if "cp_node exiting" in line:
             exited = True
 
@@ -1053,6 +1058,8 @@ def scan_log(file, node, experiments):
                 continue
     if not exited:
         log("%s appears to have crashed (didn't exit)" % (node))
+    if timeouts > 1:
+        log("%s: %d additional Homa RPC timeouts" % (file, timeouts-1))
 
 def scan_logs():
     """
