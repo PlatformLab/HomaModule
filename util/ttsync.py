@@ -10,7 +10,7 @@ all of the traces except the first so that the clocks are synchronized
 across the traces
 """
 
-from __future__ import division, print_function
+from collections import defaultdict
 from glob import glob
 from optparse import OptionParser
 import math
@@ -50,12 +50,31 @@ send_pkts = {}
 # receiver, as passed to parse_tt.
 recv_pkts = {}
 
-
 # (rpc_id:offset) -> 1 for each retransmitted packet. rpc_id is the
 # id on the sender; used to ignore retransmits when syncing clocks
 # (the retransmit can accidentally be paired with the receipt of the
 # original packet).
 retransmits = {}
+
+# node_num -> rpc_id -> <times>. For each node number, contains
+# a dictionary mapping from RPC identifiers to a list of unadjusted times
+# when busy or resend packets were transmitted for rpc_id. Rpc_id the id on
+# the sender.
+send_ctl = defaultdict(lambda: defaultdict(list))
+
+# rpc_id -> times. Times is a list of unadjusted times when resend or
+# busy packets were received for rpc_id (rpc_id is the id on the receiver).
+recv_ctl = defaultdict(list)
+
+# List of <time, sender, receiver> with one entry for each FREEZE packet
+# sent. Time is the unadjusted time on the sender when the packet was sent.
+# sender is the sender node index, and receiver is the receiver *address*.
+send_freeze = []
+
+# node_num -> <time, sender> for each FREEZE packet received. Time
+# is the unadjusted time on the receiver when the last freeze packet
+# was received by node_num. Ssender is the sender *address*.
+recv_freeze = {}
 
 # This is an NxN array, where N is the number of nodes. min_delays[A][B]
 # gives the smallest delay seen from node A to node B, as measured with
@@ -65,7 +84,7 @@ min_delays = []
 # This is an NxN array, where N is the number of nodes. Each entry corresponds
 # to an entry in min_delays, and gives the time when the message producing
 # the minimum delay was received.
-recv_times = []
+min_recv_times = []
 
 # For each node, the offset to add to its clock value in order to synchronize
 # its clock with node 0.
@@ -78,6 +97,15 @@ max_send_offsets = {}
 # rpc_id -> maximum offset that has been received so far for that RPC; used to
 # skip receipts of retransmissions, which can mess up delay calculations.
 max_recv_offsets = {}
+
+# rpc_id -> IP address of the node that sent or received packets with that ID.
+id_addr = {}
+
+# rpc_id -> node index for the node that sent or received packets with that ID.
+id_node_num = {}
+
+# IP address of node -> node's index in sync tables.
+addr_node_num = {}
 
 def parse_tt(tt, node_num):
     """
@@ -104,6 +132,65 @@ def parse_tt(tt, node_num):
                 id = int(match.group(4))
                 pktid = '%d:%d' % (id, offset)
                 retransmits[pktid] = 1
+                continue
+
+            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+                    'sending BUSY from resend, id ([0-9]+),', line)
+            if match:
+                time = float(match.group(1))
+                id = match.group(3)
+                send_ctl[node_num][id].append(time)
+                continue
+
+            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+                    'mlx sent homa packet to ([^ ]+) id ([0-9]+), '
+                    'type (0x[0-9a-f]+)', line)
+            if match:
+                time = float(match.group(1))
+                addr = match.group(3)
+                id = match.group(4)
+                type = match.group(5)
+                id_addr[peer_id(id)] = addr
+                id_node_num[id] = node_num
+                if type != '0x12' and type != '0x14':
+                    continue
+                send_ctl[node_num][id].append(time)
+                continue
+
+            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+                    'homa_gro_receive got packet from ([^ ]+) id ([0-9]+), '
+                    'type (0x[0-9a-f]+)', line)
+            if match:
+                time = float(match.group(1))
+                addr = match.group(3)
+                id = match.group(4)
+                type = match.group(5)
+                id_addr[peer_id(id)] = addr
+                id_node_num[id] = node_num
+                if type == '0x16':
+                    recv_freeze[node_num] = [time, addr]
+                    continue
+                if type != '0x12' and type != '0x14':
+                    continue
+                recv_ctl[id].append(time)
+                continue
+
+            match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+                    'Sending freeze to (0x[0-9a-f]+)', line)
+            if match:
+                time = float(match.group(1))
+                addr = match.group(3)
+                send_freeze.append([time, node_num, addr])
+                continue
+
+            # match = re.match(' *([-0-9.]+) us .* us\) \[C([0-9]+)\] '
+            #         'Freezing because of request on port [0-9]+ '
+            #         'from (0x[0-9a-f]+):', line)
+            # if match:
+            #     time = float(match.group(1))
+            #     addr = match.group(3)
+            #     recv_freeze[node_num] = [time, addr]
+            #     continue
             continue
 
         time = float(match.group(1))
@@ -130,6 +217,7 @@ def parse_tt(tt, node_num):
             last_offset = offset + int(match2.group(1)) - 1
             if (id in max_send_offsets) and (max_send_offsets[id] < last_offset):
                 max_send_offsets[id] = last_offset
+            continue
 
         if "homa_gro_receive got packet" in line:
             if (id in max_recv_offsets) and (max_recv_offsets[id] >= offset):
@@ -138,17 +226,30 @@ def parse_tt(tt, node_num):
             recv_pkts[pktid] = [time, node_num]
             max_recv_offsets[id] = offset
             recvd += 1
+            continue
 
         if "sending grant for" in line:
             pktid = '%d:%dg' % (id, offset)
             if not pktid in send_pkts:
                 send_pkts[pktid] = [time, node_num]
                 sent += 1
+            continue
 
         if "homa_gro_receive got grant from" in line:
             pktid = '%d:%dg' % (id^1, offset)
             recv_pkts[pktid] = [time, node_num]
             recvd += 1
+            continue
+
+        match = re.match(r' *([-0-9.]+) us .* us\) \[C([0-9]+)\] Sent RESEND '
+                    r'for client RPC id ([0-9]+), server ([^:]+):', line)
+        if False and match:
+            id = match.group(3)
+            addr = match.group(4)
+            id_addr[peer_id(id)] = addr
+            id_node_num[id] = node_num
+            send_ctl[node_num][id].append(time)
+            continue
 
     print("%s has %d packet sends, %d receives" % (tt, sent, recvd))
 
@@ -161,10 +262,10 @@ def find_min_delays(num_nodes):
                 send_pkts and recv_pkts must be < num_nodes.
     """
 
-    global min_delays, recv_times, send_pkts, recv_pkts
+    global min_delays, min_recv_times, send_pkts, recv_pkts
 
     min_delays = [[1e20 for i in range(num_nodes)] for j in range(num_nodes)]
-    recv_times = [[0 for i in range(num_nodes)] for j in range(num_nodes)]
+    min_recv_times = [[0 for i in range(num_nodes)] for j in range(num_nodes)]
 
     # Iterate over all the client-side events and match them to server-side
     # events if possible.
@@ -176,7 +277,81 @@ def find_min_delays(num_nodes):
         delay = recv_time - send_time
         if delay < min_delays[send_node][recv_node]:
             min_delays[send_node][recv_node] = delay
-            recv_times[send_node][recv_node] = recv_time
+            min_recv_times[send_node][recv_node] = recv_time
+
+def find_min_delays_alt(num_nodes):
+    """
+    This function provides an alternate way to compute minimum delays,
+    using resend and busy packets instead of data and grant packets. It's
+    useful in situations where the cluster has stalled so there aren't any
+    data/grant packets.
+    """
+    global send_ctl, recv_ctl, send_freeze, recv_freeze
+    global min_delays, min_recv_times, addr_node_num
+
+    # Resend and busy packet are problematic because they are not unique:
+    # there can be several identical packets between the same pair of nodes.
+    # Here's how this function matches up sends and receives:
+    # * Start from freeze packets, which are unique; use them to compute
+    #   an upper bound on delays in one direction.
+    # * Then scan packets flowing in the other direction: match sends and
+    #   receives to pick the pair that produces the smallest positive RTT
+    #   (when combined with freeze info in the other direction).
+    # * Then use this minimum in the other direction to match sends and
+    #   recieves in the same direction as the freeze, to get a tighter bound
+    #   that the freeze could produce by itself.
+
+    for send_time, fsend_node, recv_addr in send_freeze:
+        # Compute freeze delay.
+        if not recv_addr in addr_node_num:
+            continue
+        frecv_node = addr_node_num[recv_addr]
+        recv_time = recv_freeze[frecv_node][0]
+        freeze_delay = recv_time - send_time
+        if freeze_delay < min_delays[fsend_node][frecv_node]:
+            # print("New min delay %.1f us from %d to %d (freeze) send %.1f recv %.1f" %
+            #         (freeze_delay, fsend_node, frecv_node, send_time, recv_time))
+            min_delays[fsend_node][frecv_node] = freeze_delay
+            min_recv_times[fsend_node][frecv_node] = recv_time
+
+        # Scan control packets in reverse direction from freeze.
+        min_delay = min_delays[frecv_node][fsend_node]
+        for id, send_times in send_ctl[frecv_node].items():
+            id2 = peer_id(id)
+            if not id2 in id_node_num or id_node_num[id2] != fsend_node:
+                continue
+            for send in send_times:
+                for recv in recv_ctl[id2]:
+                    delay = recv - send
+                    if freeze_delay + delay > 0 and delay < min_delay:
+                        # print("New min delay %.1f us (rtt %.1f) from %d "
+                        #         "to %d (reverse ctl) id %s send %.1f recv %.1f" % (delay,
+                        #         delay + freeze_delay, frecv_node, fsend_node,
+                        #         id, send, recv))
+                        min_delay = delay
+                        min_delays[frecv_node][fsend_node] = delay
+                        min_recv_times[frecv_node][fsend_node] = recv
+
+        # Scan control packets in same direction as freeze.
+        reverse_delay = min_delay
+        if reverse_delay == 1e20:
+            continue
+        min_delay = min_delays[fsend_node][frecv_node]
+        for id, send_times in send_ctl[fsend_node].items():
+            id2 = peer_id(id)
+            if not id2 in id_node_num or id_node_num[id2] != frecv_node:
+                continue
+            for send in send_times:
+                for recv in recv_ctl[id2]:
+                    delay = recv - send
+                    if reverse_delay + delay > 0 and delay < min_delay:
+                        # print("New min delay %.1f us (rtt %.1f) from %d "
+                        #         "to %d (forward ctl) id %s send %.1f recv %.1f" % (delay,
+                        #         delay + reverse_delay, fsend_node, frecv_node,
+                        #         id, send, recv))
+                        min_delay = delay
+                        min_delays[fsend_node][frecv_node] = delay
+                        min_recv_times[fsend_node][frecv_node] = recv
 
 def get_node_num(tt_file):
     """
@@ -188,13 +363,24 @@ def get_node_num(tt_file):
         return int(match.group(1))
     return tt_file
 
+def peer_id(id):
+    """
+    Given a (string) RPC identifier, return the identifier used for that RPC
+    on the peer node.
+    """
+
+    return str(int(id)^1)
+
 tt_files.sort(key = lambda name : get_node_num(name))
 node_names = [Path(tt_file).stem for tt_file in tt_files]
 num_nodes = len(tt_files)
 for i in range(num_nodes):
     parse_tt(tt_files[i],i)
+for id, addr in id_addr.items():
+    if id in id_node_num:
+        addr_node_num[addr] = id_node_num[id]
 find_min_delays(num_nodes)
-
+find_min_delays_alt(num_nodes)
 
 # List of offset info for all nodes; index = node id; elements are
 # dictionaries with the following entries:
@@ -236,8 +422,8 @@ while synced < num_nodes:
             if rtt < 0:
                 print('Negative RTT %.1f between %s (recv %.3f) and '
                         '%s (recv %.3f),' % (rtt, node_names[ref],
-                        recv_times[node][ref], node_names[node],
-                        recv_times[ref][node]))
+                        min_recv_times[node][ref], node_names[node],
+                        min_recv_times[ref][node]))
             if (rtt < best_rtt) and (rtt > 0):
                 best_node = node
                 best_ref = ref
@@ -297,7 +483,7 @@ for src in range(num_nodes):
                     %(node_names[src], src_offset, node_names[dst], dst_offset))
             print('   mimimum delay %.1f becomes %.1f, received at %9.3f' %
                     (min_delays[src][dst], new_min,
-                    recv_times[src][dst] + dst_offset))
+                    min_recv_times[src][dst] + dst_offset))
 
 # Rewrite traces with synchronized times
 if not options.no_rewrite:
