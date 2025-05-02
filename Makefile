@@ -66,6 +66,7 @@ CP_HDRS := homa_impl.h \
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := reap.txt \
 	     sync.txt \
+	     Kconfig \
 	     Makefile
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
 net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
