@@ -1561,7 +1561,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait)
 {
 	struct homa_sock *hsk = homa_sk(sock->sk);
-	u32 mask;
+	__poll_t mask;
 
 	mask = 0;
 	sock_poll_wait(file, sock, wait);
@@ -1569,17 +1569,17 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 		   refcount_read(&hsk->sock.sk_wmem_alloc),
 		   hsk->sock.sk_sndbuf);
 	if (homa_sock_wmem_avl(hsk))
-		mask |= POLLOUT | POLLWRNORM;
+		mask |= EPOLLOUT | EPOLLWRNORM;
 	else
 		set_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags);
 
 	if (hsk->shutdown)
-		mask |= POLLIN;
+		mask |= EPOLLIN;
 
 	if (!list_empty(&hsk->ready_rpcs))
-		mask |= POLLIN | POLLRDNORM;
-	tt_record1("homa_poll returning mask 0x%x", mask);
-	return (__poll_t)mask;
+		mask |= EPOLLIN | EPOLLRDNORM;
+	tt_record1("homa_poll returning mask 0x%x", (__force int)mask);
+	return mask;
 }
 
 #ifndef __STRIP__ /* See strip.py */

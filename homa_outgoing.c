@@ -19,10 +19,12 @@
 
 /**
  * homa_message_out_init() - Initialize rpc->msgout.
- * @rpc:       RPC whose output message should be initialized.
+ * @rpc:       RPC whose output message should be initialized. Must be
+ *             locked by caller.
  * @length:    Number of bytes that will eventually be in rpc->msgout.
  */
 void homa_message_out_init(struct homa_rpc *rpc, int length)
+	__must_hold(rpc_bucket_lock)
 {
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
@@ -41,7 +43,8 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  * part of a data packet after the initial header, when GSO is being used
  * but TCP hijacking is not. As result, homa_seg_hdrs must be interleaved
  * with the data to provide the correct offset for each segment.
- * @rpc:            RPC whose output message is being created.
+ * @rpc:            RPC whose output message is being created. Must be
+ *                  locked by caller.
  * @skb:            The packet being filled. The initial homa_data_hdr was
  *                  created and initialized by the caller and the
  *                  homa_skb_info has been filled in with the packet geometry.
@@ -55,7 +58,8 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
  * part of a data packet after the initial header, when GSO is being used.
  * homa_seg_hdrs must be interleaved with the data to provide the correct
  * offset for each segment.
- * @rpc:            RPC whose output message is being created.
+ * @rpc:            RPC whose output message is being created. Must be
+ *                  locked by caller.
  * @skb:            The packet being filled. The initial homa_data_hdr was
  *                  created and initialized by the caller and the
  *                  homa_skb_info has been filled in with the packet geometry.
@@ -66,6 +70,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 #endif /* See strip.py */
 int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 			       struct iov_iter *iter)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 	int seg_length = homa_info->seg_length;
@@ -106,7 +111,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  * data packet. The resulting packet will be a GSO packet that will eventually
  * be segmented by the NIC.
  * @rpc:          RPC that packet will belong to (msgout must have been
- *                initialized).
+ *                initialized). Must be locked by caller.
  * @iter:         Describes location(s) of (remaining) message data in user
  *                space.
  * @offset:       Offset in the message of the first byte of data in this
@@ -122,6 +127,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 				     struct iov_iter *iter, int offset,
 				     int length, int max_seg_data)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_skb_info *homa_info;
 	struct homa_data_hdr *h;
@@ -240,8 +246,7 @@ error:
  *           rpc->state will be RPC_DEAD.
  */
 int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
-	__releases(rpc->bucket_lock)
-	__acquires(rpc->bucket_lock)
+	__must_hold(rpc_bucket_lock)
 {
 	/* Geometry information for packets:
 	 * mtu:              largest size for an on-the-wire packet (including
@@ -406,6 +411,7 @@ error:
  * @rpc:       The packet will go to the socket that handles the other end
  *             of this RPC. Addressing info for the packet, including all of
  *             the fields of homa_common_hdr except type, will be set from this.
+ *             Caller must hold either the lock or a reference.
  *
  * Return:     Either zero (for success), or a negative errno value if there
  *             was a problem.
@@ -588,7 +594,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 #ifndef __STRIP__ /* See strip.py */
@@ -739,7 +745,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
  * homa_resend_data() - This function is invoked as part of handling RESEND
  * requests. It retransmits the packet(s) containing a given range of bytes
  * from a message.
- * @rpc:      RPC for which data should be resent.
+ * @rpc:      RPC for which data should be resent. Must be locked by caller.
  * @start:    Offset within @rpc->msgout of the first byte to retransmit.
  * @end:      Offset within @rpc->msgout of the byte just after the last one
  *            to retransmit.
@@ -759,6 +765,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
  */
 void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 #endif /* See strip.py */
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_skb_info *homa_info;
 	struct sk_buff *skb;

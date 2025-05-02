@@ -20,7 +20,8 @@ struct homa_interest {
 	 * attention, or NULL if this is a shared interest and hsk has
 	 * been shutdown. If ready is not set, this will be NULL if the
 	 * interest is shared; if it's private, it holds the RPC the
-	 * interest is associated with.
+	 * interest is associated with. If non-NULL, a reference has been
+	 * taken on the RPC.
 	 */
 	struct homa_rpc *rpc;
 

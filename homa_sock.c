@@ -88,7 +88,7 @@ struct homa_sock *homa_socktab_start_scan(struct homa_socktab *socktab,
  */
 struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 {
-	struct hlist_head __rcu *bucket;
+	struct hlist_head *bucket;
 	struct hlist_node *next;
 
 	rcu_read_lock();
@@ -215,6 +215,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
  * homa_sock_unlink() - Unlinks a socket from its socktab and does
  * related cleanups. Once this method returns, the socket will not be
  * discoverable through the socktab.
+ * @hsk:  Socket to unlink.
  */
 void homa_sock_unlink(struct homa_sock *hsk)
 {
@@ -429,7 +430,7 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  *             Used only for metrics.
  */
 void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
-	__acquires(&bucket->lock)
+	__acquires(rpc_bucket_lock)
 {
 	u64 start = sched_clock();
 

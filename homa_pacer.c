@@ -325,7 +325,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
  *           sent because of NIC queue restrictions. Must be locked by caller.
  */
 void homa_pacer_manage_rpc(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_pacer *pacer = rpc->hsk->homa->pacer;
 	struct homa_rpc *candidate;
@@ -375,7 +375,7 @@ done:
  * @rpc:     RPC of interest.
  */
 void homa_pacer_unmanage_rpc(struct homa_rpc *rpc)
-	__must_hold(&rpc->bucket->lock)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_pacer *pacer = rpc->hsk->homa->pacer;
 

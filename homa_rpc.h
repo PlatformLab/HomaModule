@@ -348,7 +348,7 @@ struct homa_rpc {
 	 * The next field will be LIST_POISON1 if this RPC hasn't yet been
 	 * linked into @hsk->active_rpcs. Access with RCU.
 	 */
-	struct list_head __rcu active_links;
+	struct list_head active_links;
 
 	/** @dead_links: For linking this object into @hsk->dead_rpcs. */
 	struct list_head dead_links;
@@ -452,6 +452,7 @@ int      homa_validate_incoming(struct homa *homa, int verbose,
  *          doing!  See sync.txt for more info on locking.
  */
 static inline void homa_rpc_lock(struct homa_rpc *rpc)
+	__acquires(rpc_bucket_lock)
 {
 	homa_bucket_lock(rpc->bucket, rpc->id);
 }
@@ -463,6 +464,7 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc)
  *             currently owned by someone else.
  */
 static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
+	__cond_acquires(rpc_bucket_lock)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;
@@ -474,6 +476,7 @@ static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
  * @rpc:   RPC to unlock.
  */
 static inline void homa_rpc_unlock(struct homa_rpc *rpc)
+	__releases(rpc_bucket_lock)
 {
 	homa_bucket_unlock(rpc->bucket, rpc->id);
 }

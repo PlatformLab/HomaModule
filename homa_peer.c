@@ -386,7 +386,7 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 
 /**
  * homa_peer_lock_slow() - This function implements the slow path for
- * acquiring a peer's @unacked_lock. It is invoked when the lock isn't
+ * acquiring a peer's @ack_lock. It is invoked when the lock isn't
  * immediately available. It waits for the lock, but also records statistics
  * about the waiting time.
  * @peer:    Peer to  lock.

@@ -40,6 +40,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length, int unsched)
  */
 int homa_message_in_init(struct homa_rpc *rpc, int length)
 #endif /* See strip.py */
+	__must_hold(rpc_bucket_lock)
 {
 	int err;
 
@@ -97,6 +98,7 @@ struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
  * @rpc:     RPC to check; must be locked by caller.
  */
 void homa_gap_retry(struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_resend_hdr resend;
 	struct homa_gap *gap;
@@ -121,6 +123,7 @@ void homa_gap_retry(struct homa_rpc *rpc)
  *         (the packet will either be freed or added to rpc->msgin.packets).
  */
 void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 	struct homa_gap *gap, *dummy, *gap2;
@@ -240,8 +243,7 @@ keep:
  *           if all available packets have been copied out.
  */
 int homa_copy_to_user(struct homa_rpc *rpc)
-	__releases(rpc->bucket_lock)
-	__acquires(rpc->bucket_lock)
+	__must_hold(rpc_bucket_lock)
 {
 #ifdef __UNIT_TEST__
 #define MAX_SKBS 3
@@ -306,7 +308,7 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 			int buf_bytes, chunk_size;
 			struct iov_iter iter;
 			int copied = 0;
-			char *dst;
+			char __user *dst;
 
 			/* Each iteration of this loop copies to one
 			 * user buffer.
@@ -324,8 +326,8 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 					}
 					chunk_size = buf_bytes;
 				}
-				error = import_ubuf(READ, (void __user *)dst,
-						    chunk_size, &iter);
+				error = import_ubuf(READ, dst, chunk_size,
+						    &iter);
 				if (error)
 					goto free_skbs;
 				error = skb_copy_datagram_iter(skbs[i],
@@ -614,6 +616,7 @@ discard:
  *           Must be locked by the caller.
  */
 void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_data_hdr *h = (struct homa_data_hdr *)skb->data;
 #ifndef __STRIP__ /* See strip.py */
@@ -712,8 +715,10 @@ discard:
  * @skb:     Incoming packet; size already verified large enough for header.
  *           This function now owns the packet.
  * @rpc:     Information about the RPC corresponding to this packet.
+ *           Must be locked by caller.
  */
 void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_grant_hdr *h = (struct homa_grant_hdr *)skb->data;
 	int new_offset = ntohl(h->offset);
@@ -749,6 +754,7 @@ void homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
  */
 void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 		     struct homa_sock *hsk)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
 	struct homa_busy_hdr busy;
@@ -817,9 +823,11 @@ done:
  * homa_rpc_unknown_pkt() - Handler for incoming RPC_UNKNOWN packets.
  * @skb:     Incoming packet; size known to be large enough for the header.
  *           This function now owns the packet.
- * @rpc:     Information about the RPC corresponding to this packet.
+ * @rpc:     Information about the RPC corresponding to this packet. Must
+ *           be locked by caller.
  */
 void homa_rpc_unknown_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	tt_record3("Received unknown for id %llu, peer %x:%d",
 		   rpc->id, tt_addr(rpc->peer->addr), rpc->dport);
@@ -904,6 +912,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
  */
 void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		       struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
@@ -967,7 +976,7 @@ done:
  */
 void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		  struct homa_rpc *rpc)
-	__releases(rpc->bucket_lock)
+	__must_hold(rpc_bucket_lock)
 {
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	struct homa_ack_hdr *h = (struct homa_ack_hdr *)skb->data;
@@ -986,12 +995,13 @@ void homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			 */
 			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
-		}
-		for (i = 0; i < count; i++)
-			homa_rpc_acked(hsk, &saddr, &h->acks[i]);
-		if (rpc) {
+			for (i = 0; i < count; i++)
+				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
 			homa_rpc_lock(rpc);
 			homa_rpc_put(rpc);
+		} else {
+			for (i = 0; i < count; i++)
+				homa_rpc_acked(hsk, &saddr, &h->acks[i]);
 		}
 	}
 	tt_record3("ACK received for id %d, peer 0x%x, with %d other acks",
@@ -1093,6 +1103,7 @@ struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
  *           we just free the RPC.
  */
 void homa_rpc_abort(struct homa_rpc *rpc, int error)
+	__must_hold(rpc_bucket_lock)
 {
 	if (!homa_is_client(rpc->id)) {
 		INC_METRIC(server_rpc_discards, 1);
@@ -1383,6 +1394,7 @@ done:
  * @rpc:                RPC to handoff; must be locked.
  */
 void homa_rpc_handoff(struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_sock *hsk = rpc->hsk;
 	struct homa_interest *interest;

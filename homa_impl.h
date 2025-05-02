@@ -83,6 +83,12 @@ void     homa_throttle_lock_slow(struct homa *homa);
 
 #define sizeof32(type) ((int)(sizeof(type)))
 
+#ifdef __CHECKER__
+#define __context__(x, y, z) __attribute__((context(x, y, z)))
+#else
+#define __context__(x, y, z)
+#endif /* __CHECKER__ */
+
 /**
  * union sockaddr_in_union - Holds either an IPv4 or IPv6 address (smaller
  * and easier to use than sockaddr_storage).

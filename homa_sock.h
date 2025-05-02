@@ -38,7 +38,7 @@ struct homa_socktab {
 	 * @buckets: Heads of chains for hash table buckets. Chains
 	 * consist of homa_sock objects.
 	 */
-	struct hlist_head __rcu buckets[HOMA_SOCKTAB_BUCKETS];
+	struct hlist_head buckets[HOMA_SOCKTAB_BUCKETS];
 };
 
 /**
@@ -76,7 +76,7 @@ struct homa_rpc_bucket {
 	 * this bucket. This dual purpose permits clean and safe
 	 * deletion and garbage collection of RPCs.
 	 */
-	spinlock_t lock;
+	spinlock_t lock __context__(rpc_bucket_lock, 1, 1);
 
 	/**
 	 * @id: identifier for this bucket, used in error messages etc.
@@ -169,7 +169,7 @@ struct homa_sock {
 	int ip_header_length;
 
 	/** @socktab_links: Links this socket into a homa_socktab bucket. */
-	struct hlist_node __rcu socktab_links;
+	struct hlist_node socktab_links;
 
 	/**
 	 * @active_rpcs: List of all existing RPCs related to this socket,
@@ -180,7 +180,7 @@ struct homa_sock {
 	 * The list is sorted, with the oldest RPC first. Manipulate with
 	 * RCU so timer can access without locking.
 	 */
-	struct list_head __rcu active_rpcs;
+	struct list_head active_rpcs;
 
 	/**
 	 * @dead_rpcs: Contains RPCs for which homa_rpc_end has been
@@ -358,6 +358,7 @@ static inline struct homa_rpc_bucket
  *             Used only for metrics.
  */
 static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
+	__acquires(rpc_bucket_lock)
 {
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);
@@ -370,6 +371,7 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
  *             Used only for metrics.
  */
 static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
+	__acquires(rpc_bucket_lock)
 {
 	spin_lock_bh(&bucket->lock);
 }
@@ -381,7 +383,7 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
  * @id:       ID of the RPC that was using the lock.
  */
 static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, u64 id)
-	__releases(&bucket->lock)
+	__releases(rpc_bucket_lock)
 {
 	spin_unlock_bh(&bucket->lock);
 }

@@ -139,10 +139,11 @@ void homa_grant_destroy(struct homa_grant *grant)
  * homa_grant_init_rpc() - Initialize grant-related information for an
  * RPC's incoming message (may add the RPC to grant priority queues).
  * @rpc:          RPC being initialized. Grant-related fields in msgin
- *                are assumed to be zero.
+ *                are assumed to be zero.  Must be locked by caller.
  * @unsched:      Number of unscheduled bytes in the incoming message for @rpc.
  */
 void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
+	__must_hold(rpc_bucket_lock)
 {
 	rpc->msgin.rank = -1;
 	if (rpc->msgin.num_bpages == 0)
@@ -165,6 +166,7 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
  *         may release and then reacquire the lock.
  */
 void homa_grant_end_rpc(struct homa_rpc *rpc)
+	__must_hold(rpc_bucket_lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_grant_candidates cand;
@@ -878,7 +880,7 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
  * @homa:    Overall data about the Homa protocol implementation.
  */
 void homa_grant_lock_slow(struct homa_grant *grant)
-	__acquires(&homa->grant_lock)
+	__acquires(&grant->lock)
 {
 	u64 start = sched_clock();
 
