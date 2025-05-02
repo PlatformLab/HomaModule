@@ -33,7 +33,7 @@ int homa_init(struct homa *homa, struct net *net)
 	int i;
 
 	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
-		       "homa_init assumes at least 8 priority levels");
+		       "Homa requires at least 8 priority levels");
 #endif /* See strip.py */
 
 	memset(homa, 0, sizeof(*homa));

@@ -392,9 +392,6 @@ static struct ctl_table homa_ctl_table[] = {
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-	{}
-#endif
 };
 #endif /* See strip.py */
 
@@ -1595,13 +1592,8 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
  *
  * Return: 0 for success, nonzero for error.
  */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int homa_dointvec(const struct ctl_table *table, int write,
-		  void __user *buffer, size_t *lenp, loff_t *ppos)
-#else
 int homa_dointvec(const struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
-#endif
 {
 	struct homa *homa = homa_from_net(current->nsproxy->net_ns);
 	struct ctl_table table_copy;
@@ -1685,13 +1677,8 @@ int homa_dointvec(const struct ctl_table *table, int write,
  *
  * Return: 0 for success, nonzero for error.
  */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
-			      void __user *buffer, size_t *lenp, loff_t *ppos)
-#else
 int homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
 			      void *buffer, size_t *lenp, loff_t *ppos)
-#endif
 {
 	struct homa_offload_core *offload_core;
 	struct ctl_table table_copy;

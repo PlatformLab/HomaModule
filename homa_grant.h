@@ -80,7 +80,8 @@ struct homa_grant {
 	/**
 	 * @num_grantable_rpcs: Total number of RPCs with incoming
 	 * messages that still need grants. Includes entries in both
-	 * @active_rpcs and @grantable_peers. */
+	 * @active_rpcs and @grantable_peers.
+	 */
 	int num_grantable_rpcs;
 
 	/**
@@ -203,7 +204,7 @@ struct homa_grant_candidates {
 	 * @removes: Total number of RPCs that have been removed from this
 	 * structure over its lifetime. Low-order bits give index of next
 	 * RPC to be checked for possible grant.
-	 * */
+	 */
 	u32 removes;
 
 	/* Maximum number of RPCs that can be stored in @rpcs. If space
@@ -213,6 +214,8 @@ struct homa_grant_candidates {
 	 */
 #define HOMA_MAX_CAND_RPCS 8
 #define HOMA_CAND_MASK (HOMA_MAX_CAND_RPCS - 1)
+
+	/** @rpcs: RPCs that should be considered for sending grants. */
 	struct homa_rpc *rpcs[HOMA_MAX_CAND_RPCS];
 
 };
@@ -290,7 +293,7 @@ static inline void homa_grant_lock(struct homa_grant *grant)
 
 /**
  * homa_grant_unlock() - Release the grant lock.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @grant:   Grant management info.
  */
 static inline void homa_grant_unlock(struct homa_grant *grant)
 	__releases(&grant->grant_lock)

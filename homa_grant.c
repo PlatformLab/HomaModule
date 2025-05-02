@@ -232,7 +232,7 @@ int homa_grant_outranks(struct homa_rpc *rpc1, struct homa_rpc *rpc2)
 	grant_diff = (rpc1->msgin.length - rpc1->msgin.granted) -
 		     (rpc2->msgin.length - rpc2->msgin.granted);
 	return grant_diff < 0 || ((grant_diff == 0) &&
-			          (rpc1->msgin.birth < rpc2->msgin.birth));
+				  (rpc1->msgin.birth < rpc2->msgin.birth));
 }
 
 /**
@@ -298,7 +298,7 @@ struct homa_rpc *homa_grant_insert_active(struct homa_rpc *rpc)
 			/* All the other RPCs with the same peer are higher
 			 * priority than @rpc and we can't have any more RPCs
 			 * with the same peer, so bump @rpc.
-			*/
+			 */
 			return rpc;
 
 		/* Bump the lowest priority RPC from the same peer to make room
@@ -672,7 +672,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	/* This function handles 4 different things:
 	 * 1. It generates new grant packets for @rpc if appropriate. This
-         *    is the common case.
+	 *    is the common case.
 	 * 2. If total_incoming had been exhausted, but headroom is now
 	 *    available, it sends grants to the highest priority RPC that
 	 *    needs them, which may not be @rpc.
@@ -690,7 +690,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * occasionally scans all the RPCs in active_rpcs to fix any priority
 	 * inversions that may have developed. The interval for these scans
 	 * is chosen so as not to create too much contention for the grant lock.
-	*/
+	 */
 	now = sched_clock();
 	limit = atomic_xchg(&grant->incoming_hit_limit, false);
 	recalc = now >= READ_ONCE(grant->next_recalc);
@@ -830,7 +830,7 @@ void homa_grant_find_oldest(struct homa *homa)
  *          be incremented
  */
 void homa_grant_cand_add(struct homa_grant_candidates *cand,
-	                 struct homa_rpc *rpc)
+			 struct homa_rpc *rpc)
 {
 	if (cand->inserts < cand->removes + HOMA_MAX_CAND_RPCS) {
 		homa_rpc_hold(rpc);
@@ -877,7 +877,7 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
  * acquiring the grant lock. It is invoked when the lock isn't immediately
  * available. It waits for the lock, but also records statistics about
  * the waiting time.
- * @homa:    Overall data about the Homa protocol implementation.
+ * @grant:    Grant management information.
  */
 void homa_grant_lock_slow(struct homa_grant *grant)
 	__acquires(&grant->lock)

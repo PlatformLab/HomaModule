@@ -159,7 +159,10 @@ struct homa_abort_args {
 	 */
 	int error;
 
+	/** @_pad1: Reserved. */
 	int _pad1;
+
+	/** @_pad2: Reserved. */
 	__u64 _pad2[2];
 };
 

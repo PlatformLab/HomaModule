@@ -148,16 +148,16 @@ void homa_check_rpc(struct homa_rpc *rpc)
 			   rpc->dport, rpc->msgin.recv_end);
 		/* Should be if (homa->verbose) */
 		// pr_notice("Homa client RESEND to %s:%d for id %llu, offset %d\n",
-		// 	homa_print_ipv6_addr(&rpc->peer->addr),
-		// 	rpc->dport, rpc->id, rpc->msgin.recv_end);
+		//	homa_print_ipv6_addr(&rpc->peer->addr),
+		//	rpc->dport, rpc->id, rpc->msgin.recv_end);
 	} else {
 		tt_record4("Sent RESEND for server RPC id %llu, client 0x%x:%d offset %d",
 			   rpc->id, tt_addr(rpc->peer->addr), rpc->dport,
 			   rpc->msgin.recv_end);
 		/* Should be if (homa->verbose) */
 		// pr_notice("Homa server RESEND to %s:%d for id %llu, offset %d\n",
-		// 	homa_print_ipv6_addr(&rpc->peer->addr),
-		// 	rpc->dport, rpc->id, rpc->msgin.recv_end);
+		//	homa_print_ipv6_addr(&rpc->peer->addr),
+		//	rpc->dport, rpc->id, rpc->msgin.recv_end);
 	}
 #endif /* See strip.py */
 }

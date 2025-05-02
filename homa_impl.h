@@ -86,7 +86,7 @@ void     homa_throttle_lock_slow(struct homa *homa);
 #ifdef __CHECKER__
 #define __context__(x, y, z) __attribute__((context(x, y, z)))
 #else
-#define __context__(x, y, z)
+#define __context__(...)
 #endif /* __CHECKER__ */
 
 /**
@@ -180,7 +180,7 @@ struct homa {
 	struct page **skb_pages_to_free;
 
 	/**
-	 * @pages_to_free_slot: Maximum number of pages that can be
+	 * @pages_to_free_slots: Maximum number of pages that can be
 	 * stored in skb_pages_to_free;
 	 */
 	int pages_to_free_slots;
@@ -398,7 +398,7 @@ struct homa {
 	#define HOMA_GRO_NORMAL      (HOMA_GRO_SAME_CORE | HOMA_GRO_GEN2 | \
 				      HOMA_GRO_SHORT_BYPASS | HOMA_GRO_FAST_GRANTS)
 
-	/*
+	/**
 	 * @busy_usecs: if there has been activity on a core within the
 	 * last @busy_usecs, it is considered to be busy and Homa will
 	 * try to avoid scheduling other activities on the core. See
@@ -409,7 +409,7 @@ struct homa {
 	/** @busy_ns: Same as busy_usecs except in sched_clock() units. */
 	int busy_ns;
 
-	/*
+	/**
 	 * @gro_busy_usecs: if the gap between the completion of
 	 * homa_gro_receive and the next call to homa_gro_receive on the same
 	 * core is less than this, then GRO on that core is considered to be
@@ -736,13 +736,8 @@ void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 struct homa_rpc
 	*homa_choose_fifo_grant(struct homa *homa);
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int      homa_dointvec(const struct ctl_table *table, int write,
-		       void __user *buffer, size_t *lenp, loff_t *ppos);
-#else
 int      homa_dointvec(const struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);
-#endif
 void     homa_incoming_sysctl_changed(struct homa *homa);
 int      homa_ioc_abort(struct sock *sk, int *karg);
 int      homa_message_in_init(struct homa_rpc *rpc, int length,
@@ -750,11 +745,6 @@ int      homa_message_in_init(struct homa_rpc *rpc, int length,
 void     homa_prios_changed(struct homa *homa);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end,
 			  int priority);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
-int      homa_sysctl_softirq_cores(const struct ctl_table *table, int write,
-				   void __user *buffer, size_t *lenp,
-				   loff_t *ppos);
-#else
 int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   int write, void *buffer, size_t *lenp,
 				   loff_t *ppos);
@@ -764,7 +754,6 @@ int      homa_validate_incoming(struct homa *homa, int verbose,
 				int *link_errors);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
-#endif
 #else /* See strip.py */
 int      homa_message_in_init(struct homa_rpc *rpc, int unsched);
 void     homa_resend_data(struct homa_rpc *rpc, int start, int end);

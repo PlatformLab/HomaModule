@@ -72,10 +72,8 @@ void homa_metric_append(const char *format, ...)
 		homa_mout.capacity =  4096;
 #endif
 		homa_mout.output =  kmalloc(homa_mout.capacity, GFP_KERNEL);
-		if (!homa_mout.output) {
-			pr_warn("%s couldn't allocate memory\n", __func__);
+		if (!homa_mout.output)
 			return;
-		}
 		homa_mout.length = 0;
 	}
 

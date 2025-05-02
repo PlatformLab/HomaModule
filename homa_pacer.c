@@ -247,7 +247,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 	while (1) {
 		queue_ns = atomic64_read(&pacer->link_idle_time) - sched_clock();
 		if (queue_ns >= pacer->max_nic_queue_ns)
-		    	break;
+			break;
 		if (list_empty(&pacer->throttled_rpcs))
 			break;
 
@@ -301,7 +301,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		 */
 #ifndef __STRIP__ /* See strip.py */
 		if (!*rpc->msgout.next_xmit || rpc->msgout.next_xmit_offset >=
-		                               rpc->msgout.granted) {
+					       rpc->msgout.granted) {
 #else /* See strip.py */
 		if (!*rpc->msgout.next_xmit) {
 #endif /* See strip.py */

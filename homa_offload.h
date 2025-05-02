@@ -58,7 +58,7 @@ struct homa_offload_core {
 	u64 last_app_active;
 
 	/**
-	 * held_skb: last packet buffer known to be available for
+	 * @held_skb: last packet buffer known to be available for
 	 * merging other packets into on this core (note: may not still
 	 * be available), or NULL if none.
 	 */
