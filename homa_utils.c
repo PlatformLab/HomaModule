@@ -5,11 +5,11 @@
  */
 
 #include "homa_impl.h"
-#include "homa_grant.h"
 #include "homa_pacer.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
+#include "homa_grant.h"
 #include "homa_skb.h"
 #endif /* See strip.py */
 
