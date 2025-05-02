@@ -527,7 +527,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
  */
 struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
 				      const struct in6_addr *saddr, u64 id)
-	__acquires(rpc_bucket_lock)
+	__cond_acquires(rpc_bucket_lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;
