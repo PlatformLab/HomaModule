@@ -63,6 +63,7 @@ TEST_F(homa_utils, homa_init__kmalloc_failure_for_port_map)
 	EXPECT_EQ(NULL, homa2.port_map);
 	homa_destroy(&homa2);
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__kmalloc_failure_for_peers)
 {
 	struct homa homa2;
@@ -74,7 +75,6 @@ TEST_F(homa_utils, homa_init__kmalloc_failure_for_peers)
 	EXPECT_EQ(NULL, homa2.peers);
 	homa_destroy(&homa2);
 }
-#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 {
 	struct homa homa2;

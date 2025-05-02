@@ -143,10 +143,12 @@ void homa_destroy(struct homa *homa)
 		kfree(homa->port_map);
 		homa->port_map = NULL;
 	}
+#ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
 		homa_grant_destroy(homa->grant);
 		homa->grant = NULL;
 	}
+#endif /* See strip.py */
 	if (homa->pacer) {
 		homa_pacer_destroy(homa->pacer);
 		homa->pacer = NULL;
