@@ -367,13 +367,18 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	 */
 	hash = skb_get_hash_raw(skb) & (GRO_HASH_BUCKETS - 1);
 	if (offload_core->held_skb) {
-		/* Reverse-engineer the location of the napi_struct, so we
+		/* Reverse-engineer the location of the gro_node, so we
 		 * can verify that held_skb is still valid.
 		 */
 		struct gro_list *gro_list = container_of(held_list,
 				struct gro_list, list);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
 		struct napi_struct *napi = container_of(gro_list,
 				struct napi_struct, gro_hash[hash]);
+#else
+		struct gro_node *gro_node = container_of(gro_list,
+				struct gro_node, hash[hash]);
+#endif
 
 		/* Must verify that offload_core->held_skb points to a packet on
 		 * the list, and that the packet is a Homa packet.
@@ -383,7 +388,11 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		 * some other protocol).
 		 */
 		list_for_each_entry(held_skb,
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
 				    &napi->gro_hash[offload_core->held_bucket].list,
+#else
+				    &gro_node->hash[offload_core->held_bucket].list,
+#endif
 				    list) {
 			int protocol;
 
@@ -418,7 +427,7 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				 * returning skb as result is no longer
 				 * sufficient (as of 5.4.80) to push it up
 				 * the stack; the packet just gets queued on
-				 * napi->rx_list. This code basically steals
+				 * gro_node->rx_list. This code basically steals
 				 * the packet from dev_gro_receive and
 				 * pushes it upward.
 				 */
@@ -426,10 +435,17 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 				homa_gro_complete(held_skb, 0);
 				netif_receive_skb(held_skb);
 				homa_send_ipis();
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
 				napi->gro_hash[offload_core->held_bucket].count--;
 				if (napi->gro_hash[offload_core->held_bucket].count == 0)
 					__clear_bit(offload_core->held_bucket,
 						    &napi->gro_bitmask);
+#else
+				gro_node->hash[offload_core->held_bucket].count--;
+				if (gro_node->hash[offload_core->held_bucket].count == 0)
+					__clear_bit(offload_core->held_bucket,
+						    &gro_node->bitmask);
+#endif
 				result = ERR_PTR(-EINPROGRESS);
 			}
 			goto done;

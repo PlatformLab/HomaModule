@@ -1768,8 +1768,13 @@ int homa_timer_main(void *transport)
 	ktime_t tick_interval;
 	u64 nsec;
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
 	hrtimer_init(&homa->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	homa->hrtimer.function = &homa_hrtimer;
+#else
+	hrtimer_setup(&homa->hrtimer, homa_hrtimer, CLOCK_MONOTONIC,
+		      HRTIMER_MODE_REL);
+#endif
 	nsec = 1000000;                   /* 1 ms */
 	tick_interval = ns_to_ktime(nsec);
 	while (1) {
