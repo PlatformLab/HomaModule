@@ -25,14 +25,14 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
 
-- The head is known to work under Linux 6.10.6. In the past, Homa has
+- The head is known to work under Linux 6.13.9. In the past, Homa has
   run under several earlier versions of Linux. There is a separate branch
   for each of these
   older versions, with names such as linux_4.15.18. Older branches are
   out of date feature-wise: recent commits have not been back-ported to them.
   Other versions of Linux have not been tested and
-  may require code changes (these upgrades rarely take more than a couple
-  of hours). If you get Homa working on some other version, please submit a
+  may require code changes (these upgrades rarely long). If you get Homa
+  working on some other version, please submit a
   pull request with the required code changes.
 
 - Related work that you may find useful:
