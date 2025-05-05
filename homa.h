@@ -33,8 +33,8 @@
  * define HOMA_MAX_BPAGES - The largest number of bpages that will be required
  * to store an incoming message.
  */
-#define HOMA_MAX_BPAGES ((HOMA_MAX_MESSAGE_LENGTH + HOMA_BPAGE_SIZE - 1) \
-		>> HOMA_BPAGE_SHIFT)
+#define HOMA_MAX_BPAGES ((HOMA_MAX_MESSAGE_LENGTH + HOMA_BPAGE_SIZE - 1) >> \
+		HOMA_BPAGE_SHIFT)
 
 /**
  * define HOMA_MIN_DEFAULT_PORT - The 16 bit port space is divided into
