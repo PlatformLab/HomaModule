@@ -27,9 +27,9 @@ enum homa_packet_type {
 #endif /* See strip.py */
 	NEED_ACK           = 0x17,
 	ACK                = 0x18,
-	BOGUS              = 0x19,      /* Used only in unit tests. */
+	MAX_OP             = 0x18,
 	/* If you add a new type here, you must also do the following:
-	 * 1. Change BOGUS so it is the highest opcode
+	 * 1. Change MAX_OP so it is the highest valid opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
 	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
 	 * 3. Add the header length to header_lengths in homa_plumbing.c.

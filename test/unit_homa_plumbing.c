@@ -948,7 +948,7 @@ TEST_F(homa_plumbing, homa_softirq__bogus_packet_type)
 {
 	struct sk_buff *skb;
 
-	self->data.common.type = BOGUS;
+	self->data.common.type = MAX_OP + 1;
 	skb = mock_skb_new(self->client_ip, &self->data.common, 1400, 1400);
 	homa_softirq(skb);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));

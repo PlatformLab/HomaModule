@@ -1342,7 +1342,7 @@ int homa_softirq(struct sk_buff *skb)
 		/* Reject packets that are too short or have bogus types. */
 		h = (struct homa_common_hdr *)skb->data;
 		if (unlikely(skb->len < sizeof(struct homa_common_hdr) ||
-			     h->type < DATA || h->type >= BOGUS ||
+			     h->type < DATA || h->type > MAX_OP ||
 			     skb->len < header_lengths[h->type - DATA])) {
 #ifndef __STRIP__ /* See strip.py */
 			const struct in6_addr saddr =

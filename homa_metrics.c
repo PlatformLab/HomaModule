@@ -143,13 +143,13 @@ char *homa_metrics_print(void)
 		  m->large_msg_bytes, lower);
 		M("sent_msg_bytes            %15llu  otal bytes in all outgoing messages\n",
 		  m->sent_msg_bytes);
-		for (i = DATA; i < BOGUS;  i++) {
+		for (i = DATA; i <= MAX_OP;  i++) {
 			char *symbol = homa_symbol_for_type(i);
 
 			M("packets_sent_%-7s      %15llu  %s packets sent\n",
 			  symbol, m->packets_sent[i - DATA], symbol);
 		}
-		for (i = DATA; i < BOGUS;  i++) {
+		for (i = DATA; i <= MAX_OP;  i++) {
 			char *symbol = homa_symbol_for_type(i);
 
 			M("packets_rcvd_%-7s      %15llu  %s packets received\n",
