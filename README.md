@@ -124,7 +124,11 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
    - Homa exports a collection of configuration parameters through the
      sysctl mechanism. For details, see the man page `homa.7`.
 
-## Significant recent improvements
+## Significant changesKs
+- May 2025: `homa_api.c` has been removed, so the functions `homa_abort`,
+  `homa_reply`, `homa_replyv`, `homa_send`, and `homa_sendv` no longer
+  exist.
+- April 2025: upgraded to Linux 6.13.9.
 - March 2025: implemented private RPCs, resulting in API changes.
   HOMA_RECVMSG_REQUEST and HOMA_RECVMSG_RESPONSE flags no longer exist and
   struct homa_sendmsg_args now has a flags field with one defined
@@ -132,6 +136,14 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
 - February 2025: by default, incoming requests for a socket are rejected
   unless the socket has been bound. setsockopt can be used with
   SO_HOMA_SERVER to enable or disable incoming requests for any socket.
+- October 2024: the process of upstreaming Homa into the Linux kernel has
+  begun. The reviewing process is likely to result in API changes.
+  Upstreaming will occur in stages, so the first version to appear in Linux
+  will not be either functionally complete or performant. The sources in
+  this repository contain '#ifndef __STRIP__' directives, which
+  separate functionality being upstreamed from functionality that is not
+  currently upstreamed (some things, such as development aids,
+  may never be upstreamed).
 - October 2024: Homa now has an official IANA IP protocol number (146).
 - August 2024: upgraded to Linux 6.10.6.
 - July 2024: introduced "TCP hijacking", where Homa packets are sent as

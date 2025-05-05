@@ -79,17 +79,21 @@ void close_fd(int fd)
  */
 void send_fd(int fd, const sockaddr_in_union *addr, char *request)
 {
-	__u64 id;
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	struct iovec iov;
 	int status;
 
 	sleep(1);
-	status = homa_send(fd, request, length, &addr->sa,
-			   sockaddr_size(&addr->sa), &id, 0, 0);
+	iov.iov_base = request;
+	iov.iov_len = length;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &addr->sa,
+			  sockaddr_size(&addr->sa));
+	status = sendmsg(fd, &msghdr, 0);
 	if (status < 0) {
-		printf("Error in homa_send: %s\n",
-			strerror(errno));
+		printf("Error in sendmsg %s\n", strerror(errno));
 	} else {
-		printf("homa_send succeeded, id %llu\n", id);
+		printf("sendmsg succeeded, id %llu\n", homa_args.id);
 	}
 }
 
@@ -162,19 +166,25 @@ void test_close()
  */
 void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 id;
-	int status;
+	struct homa_sendmsg_args homa_args;
+	uint64_t start = rdtsc();
+	struct msghdr msghdr;
 	int completed = 0;
 	size_t total = 0;
-#define PRINT_INTERVAL 1000
 	ssize_t received;
-	uint64_t start = rdtsc();
+	struct iovec iov;
+	int status;
 
+#define PRINT_INTERVAL 1000
+
+	iov.iov_base = request;
+	iov.iov_len = 1;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+			  sockaddr_size(&dest->sa));
 	for (int i = 1; i <= count; i++) {
-		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0, 0);
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n",
+			printf("Error in sendmsg: %s\n",
 				strerror(errno));
 			sleep(1);
 		}
@@ -191,7 +201,7 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
 			printf("Error in recvmsg for id %llu: %s\n",
-				id, strerror(errno));
+			       recv_args.id, strerror(errno));
 		} else {
 			total += received;
 			completed++;
@@ -216,17 +226,22 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 id;
-	int status;
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
 	ssize_t resp_length;
+	struct iovec iov;
+	int status;
 
-	status = homa_send(fd, request, length, &dest->sa,
-			   sockaddr_size(&dest->sa), &id, 0, 0);
+	iov.iov_base = request;
+	iov.iov_len = length;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+			  sockaddr_size(&dest->sa));
+	status = sendmsg(fd, &msghdr, 0);
 	if (status < 0) {
-		printf("Error in homa_send: %s\n", strerror(errno));
+		printf("Error in sendmsg: %s\n", strerror(errno));
 		return;
 	} else {
-		printf("homa_send succeeded, id %llu\n", id);
+		printf("sendmsg succeeded, id %llu\n", homa_args.id);
 	}
 	recv_args.id = 0;
 	recv_args.flags = 0;
@@ -341,19 +356,27 @@ void test_poll(int fd, char *request)
  */
 void test_private(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 ids[3];
-	int status, i;
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
 	ssize_t resp_length;
+	struct iovec iov;
+	int status, i;
+	__u64 ids[3];
 
+	iov.iov_base = request;
+	iov.iov_len = length;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+			  sockaddr_size(&dest->sa));
+	homa_args.flags = HOMA_SENDMSG_PRIVATE;
 	for (i = 0; i < 3; i++) {
-		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), &ids[i], 0,
-				   HOMA_SENDMSG_PRIVATE);
+		homa_args.id = 0;
+		status = sendmsg(fd, &msghdr, 0);
+		ids[i] = homa_args.id;
 		if (status < 0) {
-			printf("Error in homa_send: %s\n", strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			return;
 		} else {
-			printf("homa_send succeeded, id %llu\n", ids[i]);
+			printf("sendmsg succeeded, id %llu\n", ids[i]);
 		}
 	}
 
@@ -411,18 +434,23 @@ void test_read(int fd, int count)
  */
 void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 {
-	int status;
-	ssize_t resp_length;
-	uint64_t start;
 	uint64_t *times = new uint64_t[count];
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	ssize_t resp_length;
+	struct iovec iov;
+	uint64_t start;
+	int status;
 
+	iov.iov_base = request;
+	iov.iov_len = length;
 	for (int i = -10; i < count; i++) {
 		start = rdtsc();
-		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), NULL, 0, 0);
+		init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+				sockaddr_size(&dest->sa));
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n",
-					strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			return;
 		}
 		recv_args.id = 0;
@@ -453,26 +481,29 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_send(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 id;
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	struct iovec iov;
 	int status;
 
-	status = homa_send(fd, request, length, &dest->sa,
-			   sockaddr_size(&dest->sa), &id, 0, 0);
+	iov.iov_base = request;
+	iov.iov_len = length;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+			  sockaddr_size(&dest->sa));
+	status = sendmsg(fd, &msghdr, 0);
 	if (status < 0) {
-		printf("Error in homa_send: %s\n",
-			strerror(errno));
+		printf("Error in sendmsg: %s\n", strerror(errno));
 	} else {
-		printf("Homa_send succeeded, id %llu\n", id);
+		printf("sendmsg succeeded, id %llu\n", homa_args.id);
 	}
 }
 
 /**
  * test_set_buf() - Invoke homa_set_buf on a Homa socket.
- * @fd:       Homa socket.
  */
-void test_set_buf(int fd)
+void test_set_buf(void)
 {
-	int status;
+	int status, fd;
 	char *region = (char *) mmap(NULL, 64*HOMA_BPAGE_SIZE,
 			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
 	struct homa_rcvbuf_args arg;
@@ -482,6 +513,11 @@ void test_set_buf(int fd)
 		return;
 	}
 
+	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
+	if (fd < 0) {
+		printf("Couldn't open Homa socket: %s\n", strerror(errno));
+	}
+
 	arg.start = (uintptr_t)region;
 	arg.length = 64*HOMA_BPAGE_SIZE;
 	status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
@@ -489,6 +525,7 @@ void test_set_buf(int fd)
 	if (status < 0)
 		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
+	close(fd);
 }
 
 /**
@@ -535,14 +572,16 @@ void test_shutdown(int fd)
 void test_stream(int fd, const sockaddr_in_union *dest)
 {
 #define MAX_RPCS 100
-	int *buffers[MAX_RPCS];
-	ssize_t resp_length;
-	__u64 id;
-	uint64_t start_cycles = 0;
+	struct homa_sendmsg_args homa_args;
 	uint64_t end_cycles, end_time;
-	int status, i;
-	int64_t bytes_sent = 0;
+	uint64_t start_cycles = 0;
 	int64_t start_bytes = 0;
+	int *buffers[MAX_RPCS];
+	int64_t bytes_sent = 0;
+	struct msghdr msghdr;
+	ssize_t resp_length;
+	struct iovec iov;
+	int status, i;
 	double rate;
 
 	end_time = rdtsc() + (uint64_t) (5*get_cycles_per_sec());
@@ -558,11 +597,14 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		buffers[i][1] = 12;
 		seed_buffer(buffers[i]+2, length - 2*sizeof32(int), 1000*i);
 	}
+	iov.iov_len = length;
 	for (i = 0; i < count; i++) {
-		status = homa_send(fd, buffers[i], length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0, 0);
+		iov.iov_base = buffers[i];
+		init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+				sockaddr_size(&dest->sa));
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n", strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			return;
 		}
 	}
@@ -579,19 +621,19 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
-			printf("Error in recvmsg: %s\n",
-					strerror(errno));
+			printf("Error in recvmsg: %s\n", strerror(errno));
 			return;
 		}
 		if (resp_length != 12)
 			printf("Expected 12 bytes in response, received %ld\n",
 					resp_length);
 		response = (int *) (buf_region + recv_args.bpage_offsets[0]);
-		status = homa_send(fd, buffers[(response[2]/1000) %count],
-				   length, &dest->sa, sockaddr_size(&dest->sa),
-				   &id, 0, 0);
+		iov.iov_base = buffers[(response[2]/1000) % count];
+		init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+				sockaddr_size(&dest->sa));
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n", strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			return;
 		}
 		bytes_sent += length;
@@ -885,23 +927,28 @@ void recv_slow(int fd)
 /**
  * test_wmem() - Use two threads, a sender and a receiver, and make the
  * receiver go so slowly that the sender uses up all available tx packet
- * memory and blocks.
+ * memory and blocks. Note: specify a large --length parameter.
  * @fd:       Homa socket.
  * @dest:     Where to send the request
  * @request:  Request message.
  */
 void test_wmem(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 id;
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	struct iovec iov;
 	int status;
 
 	std::thread thread(recv_slow, fd);
 
+	iov.iov_base = request;
+	iov.iov_len = length;
 	for ( ; count > 0; count--) {
-		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0, 0);
+		init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+				sockaddr_size(&dest->sa));
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n", strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			break;
 		}
 		printf("Sent request with %d bytes\n", length);
@@ -920,16 +967,20 @@ void test_wmem(int fd, const sockaddr_in_union *dest, char *request)
  */
 void test_wmem_poll(int fd, const sockaddr_in_union *dest, char *request)
 {
-	__u64 id;
-	int status;
+	struct homa_sendmsg_args homa_args;
 	struct pollfd poll_info = {
 		.fd =     fd,
 		.events = POLLOUT,
 		.revents = 0
 	};
+	struct msghdr msghdr;
+	struct iovec iov;
+	int status;
 
 	std::thread thread(recv_slow, fd);
 
+	iov.iov_base = request;
+	iov.iov_len = length;
 	for ( ; count > 0; count--) {
 		status = poll(&poll_info, 1, -1);
 		if (status > 0) {
@@ -938,11 +989,11 @@ void test_wmem_poll(int fd, const sockaddr_in_union *dest, char *request)
 			printf("Poll failed: %s\n", strerror(errno));
 			break;
 		}
-		status = homa_send(fd, request, length, &dest->sa,
-				   sockaddr_size(&dest->sa), &id, 0,
-				   HOMA_SENDMSG_NONBLOCKING);
+		init_sendmsg_hdrs(&msghdr, &homa_args, &iov, 1, &dest->sa,
+				sockaddr_size(&dest->sa));
+		status = sendmsg(fd, &msghdr, MSG_DONTWAIT);
 		if (status < 0) {
-			printf("Error in homa_send: %s\n", strerror(errno));
+			printf("Error in sendmsg: %s\n", strerror(errno));
 			break;
 		}
 		printf("Sent request with %d bytes\n", length);
@@ -1100,7 +1151,7 @@ int main(int argc, char** argv)
 		} else if (strcmp(argv[next_arg], "shutdown") == 0) {
 			test_shutdown(fd);
 		} else if (strcmp(argv[next_arg], "set_buf") == 0) {
-			test_set_buf(fd);
+			test_set_buf();
 		} else if (strcmp(argv[next_arg], "stream") == 0) {
 			test_stream(fd, &dest);
 		} else if (strcmp(argv[next_arg], "tcp") == 0) {

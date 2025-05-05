@@ -1065,11 +1065,13 @@ homa_server::~homa_server()
  */
 void homa_server::server(int thread_id, server_metrics *metrics)
 {
-	message_header *header;
-	int length, num_vecs, result;
-	char thread_name[50];
 	homa::receiver receiver(fd, buf_region);
 	struct iovec vecs[HOMA_MAX_BPAGES];
+	struct homa_sendmsg_args homa_args;
+	int length, num_vecs, result;
+	message_header *header;
+	struct msghdr msghdr;
+	char thread_name[50];
 	int offset;
 
 	snprintf(thread_name, sizeof(thread_name), "S%d.%d", id, thread_id);
@@ -1121,9 +1123,11 @@ void homa_server::server(int thread_id, server_metrics *metrics)
 			offset += chunk_size;
 			num_vecs++;
 		}
-		result = homa_replyv(fd, vecs, num_vecs, receiver.src_addr(),
-				     sockaddr_size(receiver.src_addr()),
-				     receiver.id());
+		init_sendmsg_hdrs(&msghdr, &homa_args, vecs, num_vecs,
+				  receiver.src_addr(),
+				  sockaddr_size(receiver.src_addr()));
+		homa_args.id = receiver.id();
+		result = sendmsg(fd, &msghdr, 0);
 		if (result < 0) {
 			log(NORMAL, "FATAL: homa_reply failed for server "
 					"port %d: %s\n",
@@ -2131,13 +2135,16 @@ void homa_client::sender()
 	uint64_t next_start = rdtsc();
 	char thread_name[50];
 	homa::receiver receiver(fd, buf_region);
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	struct iovec vec[2];
+	int num_vecs;
 
 	snprintf(thread_name, sizeof(thread_name), "C%d", id);
 	time_trace::thread_buffer thread_buffer(thread_name);
 
 	while (1) {
 		uint64_t now;
-		__u64 rpc_id;
 		int server;
 		int status;
 		int slot = get_rinfo();
@@ -2173,28 +2180,29 @@ void homa_client::sender()
 		header->msg_id = slot;
 		tt("sending request, cid 0x%08x, id %u, length %d",
 				header->cid, header->msg_id, header->length);
+
 		if (client_iovec && (header->length > 20)) {
-			struct iovec vec[2];
 			vec[0].iov_base = sender_buffer;
 			vec[0].iov_len = 20;
 			vec[1].iov_base = sender_buffer + 20;
 			vec[1].iov_len = header->length - 20;
-			status = homa_sendv(fd, vec, 2,
-				            &server_addrs[server].sa,
-					    sockaddr_size(&server_addrs[server].sa),
-					    &rpc_id, 0, 0);
-		} else
-			status = homa_send(fd, sender_buffer, header->length,
-					   &server_addrs[server].sa,
-					   sockaddr_size(&server_addrs[server].sa),
-					   &rpc_id, 0, 0);
+			num_vecs = 2;
+		} else {
+			vec[0].iov_base = sender_buffer;
+			vec[0].iov_len = header->length;
+			num_vecs = 1;
+		}
+		init_sendmsg_hdrs(&msghdr, &homa_args, vec, num_vecs,
+				  &server_addrs[server].sa,
+				  sockaddr_size(&server_addrs[server].sa));
+		status = sendmsg(fd, &msghdr, 0);
 		if (status < 0) {
-			log(NORMAL, "FATAL: error in homa_send: %s (request "
+			log(NORMAL, "FATAL: error in Homa sendmsg: %s (request "
 					"length %d)\n", strerror(errno),
 					header->length);
 			fatal();
 		}
-		rinfos[slot].id = rpc_id;
+		rinfos[slot].id = homa_args.id;
 		requests[server]++;
 		total_requests++;
 		lag = now - next_start;
@@ -2202,7 +2210,7 @@ void homa_client::sender()
 		if (receivers_running == 0) {
 			/* There isn't a separate receiver thread; wait for
 			 * the response here. */
-			wait_response(&receiver, rpc_id);
+			wait_response(&receiver, homa_args.id);
 		}
 	}
 }
@@ -2238,8 +2246,10 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 		homa::receiver *receiver)
 {
 	message_header *header = reinterpret_cast<message_header *>(buffer);
+	struct homa_sendmsg_args homa_args;
+	struct msghdr msghdr;
+	struct iovec vec;
 	uint64_t start;
-	__u64 rpc_id;
 	int status;
 
 	header->length = length;
@@ -2250,22 +2260,26 @@ uint64_t homa_client::measure_rtt(int server, int length, char *buffer,
 	header->cid = server_conns[server];
 	header->cid.client_port = id;
 	start = rdtsc();
-	status = homa_send(fd, buffer, header->length, &server_addrs[server].sa,
-			   sockaddr_size(&server_addrs[server].sa), &rpc_id, 0,
-			   0);
+
+	vec.iov_base = buffer;
+	vec.iov_len = header->length;
+	init_sendmsg_hdrs(&msghdr, &homa_args, &vec, 1,
+			  &server_addrs[server].sa,
+			  sockaddr_size(&server_addrs[server].sa));
+	status = sendmsg(fd, &msghdr, 0);
 	if (status < 0) {
-		log(NORMAL, "FATAL: error in homa_send: %s (request "
+		log(NORMAL, "FATAL: error in Homa sendmsg: %s (request "
 				"length %d)\n", strerror(errno),
 				header->length);
 		fatal();
 	}
 	do {
-		status = receiver->receive(0, rpc_id);
+		status = receiver->receive(0, homa_args.id);
 	} while ((status < 0) && ((errno == EAGAIN) || (errno == EINTR)));
 	if (status < 0) {
 		log(NORMAL, "FATAL: measure_rtt got error in recvmsg: %s "
 				"(id %llu, server %s)\n",
-				strerror(errno), rpc_id,
+				strerror(errno), homa_args.id,
 				print_address((union sockaddr_in_union *)
 					      receiver->src_addr()));
 		fatal();

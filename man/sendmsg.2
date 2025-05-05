@@ -115,6 +115,25 @@ cannot be used to determine when a private response has arrived.
 .PP
 .B sendmsg
 returns as soon as the message has been queued for transmission.
+.B sendmsg
+will block if there are so many outstanding messages on the socket that
+its limit on write buffer memory has been exceeded. However, if the
+.BR MSG_DONTWAIT
+bit is set in the
+.BR flags
+argument to
+.BR sendmsg
+or the
+.B O_NONBLOCK
+flag is set for the socket using
+.BR fcntl
+then
+.B sendmsg
+will will fail with an
+.I errno
+value of
+.BR EAGAIN
+instead of blocking.
 .SH RETURN VALUE
 The return value is 0 for success and -1 if an error occurred.
 .SH ERRORS
@@ -159,7 +178,4 @@ The socked has been disabled using
 .BR shutdown (2).
 .SH SEE ALSO
 .BR recvmsg (2),
-.BR homa_abort (3),
-.BR homa_reply (3),
-.BR homa_send (3),
 .BR homa (7)

@@ -8,7 +8,7 @@ BINS := buffer_client buffer_server cp_node dist_test dist_to_proto \
 
 OBJS := $(patsubst %,%.o,$(BINS))
 
-LIB_SRCS := dist.cc homa_api.c test_utils.cc time_trace.cc
+LIB_SRCS := dist.cc test_utils.cc time_trace.cc
 LIB_OBJS := $(patsubst %.c,%.o,$(patsubst %.cc,%.o,$(LIB_SRCS)))
 LIB_OBJS += homa_receiver.o
 
@@ -37,9 +37,6 @@ homa_receiver.o: ../homa_receiver.cc ../homa_receiver.h
 	g++ -c $(CFLAGS) -std=c++17 $< -o $@
 
 %.o: %.c test_utils.h ../homa.h
-	cc -c $(CFLAGS) $< -o $@
-
-homa_api.o: ../homa_api.c ../homa.h
 	cc -c $(CFLAGS) $< -o $@
 
 clean:

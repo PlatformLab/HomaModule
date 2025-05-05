@@ -242,12 +242,62 @@ takes an integer argument, where any nonzero value enables incoming
 requests and zero disables them.
 The current setting can be retrieved with
 .BR getsockopt .
-.SH ABORTING REQUESTS
+.SH ABORTING RPCS
 .PP
-It is possible to abort RPCs that are in progress. This is done with
-the
-.B homa_abort
-function call, which is described in a separate manual page.
+It is possible for a client to abort RPCs that are in progress by invoking
+.B ioctl
+with the
+.B HOMAIOCABORT
+operation. One additional argument must be specified for
+.BR ioctl ,
+consisting of a pointer to the following structure:
+.in +4n
+.ps -1
+.vs -2
+.EX
+struct homa_abort_args {
+    __u64 id;                   /* Id of RPC to abort or 0.
+    __u32 error;                /* Errno to use for completion or 0.
+    __u32 _pad1;                /* Must be zero.
+    __u64 _pad2[2];             /* Must be zero.
+};
+.EE
+.vs +2
+.ps +1
+.in
+.PP
+The
+.B id
+field contains the identifier for an RPC; if this RPC is active on the socket
+then it is aborted. If no such RPC exists then the
+.B ioctl
+returns without doing anything. If
+.B id
+is zero then all outgoing RPCs for the socket are aborted.
+.PP
+If
+.B error
+is 0 then the matching RPCs will be deleted and all state associated
+with them will be freed (the RPCs will not be returned by
+.BR recvmsg ).
+If
+.B error
+is nonzero then the RPC(s) will immediately be placed in the completed
+state so that they can be returned by
+.BR recvmsg ;
+.B recvmsg
+will return an error for each aborted RPC, with an
+.B errno
+value of
+.B error.
+Regardless of whether the RPC(s) are completed or freed, the
+servers for the RPCs
+are not notified of the abort. If a
+request has already been transmitted to the server at the time
+an abort is requested, it may still be executed on the server. Any response
+from the server will be discarded.
+.PP
+Only outgoing (client-side) RPCs may be aborted.
 .SH SHUTDOWN
 .PP
 The
@@ -655,7 +705,4 @@ the core number for the following lines. A few counters appear before the first
 "core" line: these are core-independent counters such as elapsed time.
 .SH SEE ALSO
 .BR recvmsg (2),
-.BR sendmsg (2),
-.BR homa_abort (3),
-.BR homa_reply (3),
-.BR homa_send (3)
+.BR sendmsg (2)

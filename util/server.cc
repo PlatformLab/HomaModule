@@ -57,16 +57,18 @@ int inet_family = AF_INET;
  */
 void homa_server(int port)
 {
-	int fd;
-	sockaddr_in_union addr;
-	sockaddr_in_union source;
-	int length;
-	struct homa_recvmsg_args recv_args;
-	struct msghdr hdr;
-	struct homa_rcvbuf_args arg;
-	char *buf_region;
+	struct homa_sendmsg_args reply_args;
 	struct iovec vecs[HOMA_MAX_BPAGES];
+	struct homa_recvmsg_args recv_args;
+	struct homa_rcvbuf_args arg;
+	struct msghdr reply_msghdr;
+	sockaddr_in_union source;
+	sockaddr_in_union addr;
+	struct msghdr hdr;
+	char *buf_region;
 	int num_vecs;
+	int length;
+	int fd;
 
 	fd = socket(inet_family, SOCK_DGRAM, IPPROTO_HOMA);
 	if (fd < 0) {
@@ -78,7 +80,7 @@ void homa_server(int port)
 	addr.in4.sin_port = htons(port);
 	if (bind(fd, &addr.sa, sizeof(addr)) != 0) {
 		printf("Couldn't bind socket to Homa port %d: %s\n", port,
-				strerror(errno));
+		       strerror(errno));
 		return;
 	}
 	if (verbose)
@@ -86,7 +88,8 @@ void homa_server(int port)
 
 	// Set up buffer region.
 	buf_region = (char *) mmap(NULL, 1000*HOMA_BPAGE_SIZE,
-			PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
+				   PROT_READ|PROT_WRITE,
+				   MAP_PRIVATE|MAP_ANONYMOUS, 0, 0);
 	if (buf_region == MAP_FAILED) {
 		printf("Couldn't mmap buffer region: %s\n", strerror(errno));
 		return;
@@ -94,7 +97,7 @@ void homa_server(int port)
 	arg.start = (uintptr_t)buf_region;
 	arg.length = 1000*HOMA_BPAGE_SIZE;
 	int status = setsockopt(fd, IPPROTO_HOMA, SO_HOMA_RCVBUF, &arg,
-			sizeof(arg));
+				sizeof(arg));
 	if (status < 0) {
 		printf("Error in setsockopt(SO_HOMA_RCVBUF): %s\n",
 				strerror(errno));
@@ -120,21 +123,22 @@ void homa_server(int port)
 			printf("recvmsg failed: %s\n", strerror(errno));
 			continue;
 		}
-		int resp_length = ((int *) (buf_region + recv_args.bpage_offsets[0]))[1];
+		int resp_length = ((int *) (buf_region +
+					    recv_args.bpage_offsets[0]))[1];
 		if (validate) {
 			seed = check_message(&recv_args, buf_region, length,
-					2*sizeof32(int));
+					     2*sizeof32(int));
 			if (verbose)
 				printf("Received message from %s with %d bytes, "
-					"id %llu, seed %d, response length %d\n",
-					print_address(&source), length,
-					recv_args.id, seed, resp_length);
+				       "id %llu, seed %d, response length %d\n",
+				       print_address(&source), length,
+				       recv_args.id, seed, resp_length);
 		} else
 			if (verbose)
 				printf("Received message from %s with "
-					"%d bytes, id %llu, response length %d\n",
-					print_address(&source), length,
-					recv_args.id, resp_length);
+				       "%d bytes, id %llu, response length %d\n",
+				       print_address(&source), length,
+				       recv_args.id, resp_length);
 
 		/* Second word of the message indicates how large a
 		 * response to send.
@@ -143,15 +147,18 @@ void homa_server(int port)
 		while (resp_length > 0) {
 			vecs[num_vecs].iov_len = (resp_length > HOMA_BPAGE_SIZE)
 					? HOMA_BPAGE_SIZE : resp_length;
-			vecs[num_vecs].iov_base = buf_region
-					+ recv_args.bpage_offsets[num_vecs];
+			vecs[num_vecs].iov_base = buf_region +
+					recv_args.bpage_offsets[num_vecs];
 			resp_length -= vecs[num_vecs].iov_len;
 			num_vecs++;
 		}
-		result = homa_replyv(fd, vecs, num_vecs, &source.sa,
-				     sockaddr_size(&source.sa), recv_args.id);
+		init_sendmsg_hdrs(&reply_msghdr, &reply_args, vecs, num_vecs,
+				  &source.sa, sockaddr_size(&source.sa));
+		reply_args.id = recv_args.id;
+		result = sendmsg(fd, &reply_msghdr, 0);
 		if (result < 0) {
-			printf("homa_reply failed: %s\n", strerror(errno));
+			printf("sendmsg for reply failed: %s\n",
+			       strerror(errno));
 		}
 	}
 }

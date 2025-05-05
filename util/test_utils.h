@@ -67,6 +67,37 @@ inline static uint64_t rdtsc(void)
 	return (((uint64_t)hi << 32) | lo);
 }
 
+/**
+ * init_sendmsg_hdrs(): Convenience function to initialize the two headers
+ * needed to invoke sendmsg for Homa. This initializes for the common case;
+ * callers may need to set some fields explicitly for less common cases.
+ * @hdr:         msghdr argument to sendmsg: will be initialized here.
+ * @args:        Homa's sendmsg arguments; will be initialized here.
+ * @iov:         Describes outgoing message.
+ * @iovcnt:      Number of entries in @iov.
+ * @dest_addr:   Target for the message.
+ * @addrlen:     Size of @dest_addr (bytes).
+ */
+inline static void init_sendmsg_hdrs(struct msghdr *hdr,
+				     struct homa_sendmsg_args *args,
+		       		     struct iovec *iov, int iovcnt,
+				     const struct sockaddr *dest_addr,
+				     __u32 addrlen)
+{
+	args->id = 0;
+	args->completion_cookie = 0;
+	args->flags = 0;
+	args->reserved = 0;
+
+	hdr->msg_name = (struct sockaddr *)dest_addr;
+	hdr->msg_namelen = addrlen;
+	hdr->msg_iov = iov;
+	hdr->msg_iovlen = iovcnt;
+	hdr->msg_control = args;
+	hdr->msg_controllen = 0;
+	hdr->msg_flags = 0;
+}
+
 #ifdef __cplusplus
 }
 #endif

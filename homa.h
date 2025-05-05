@@ -157,10 +157,10 @@ struct homa_abort_args {
 	 * @error: Zero means destroy and free RPCs; nonzero means complete
 	 * them with this error (recvmsg will return the RPCs).
 	 */
-	int error;
+	__u32 error;
 
 	/** @_pad1: Reserved. */
-	int _pad1;
+	__u32 _pad1;
 
 	/** @_pad2: Reserved. */
 	__u64 _pad2[2];
@@ -208,23 +208,5 @@ struct homa_rcvbuf_args {
 #define HOMAIOCABORT  _IOWR(0x89, 0xe3, struct homa_abort_args)
 #endif /* See strip.py */
 #define HOMAIOCFREEZE _IO(0x89, 0xef)
-
-#ifndef __STRIP__ /* See strip.py */
-int     homa_abort(int sockfd, __u64 id, int error);
-#endif /* See strip.py */
-int     homa_send(int sockfd, const void *message_buf,
-		  size_t length, const struct sockaddr *dest_addr,
-		  __u32 addrlen,  __u64 *id, __u64 completion_cookie,
-		  int flags);
-int     homa_sendv(int sockfd, const struct iovec *iov,
-		   int iovcnt, const struct sockaddr *dest_addr,
-		   __u32 addrlen,  __u64 *id, __u64 completion_cookie,
-		   int flags);
-ssize_t homa_reply(int sockfd, const void *message_buf,
-		   size_t length, const struct sockaddr *dest_addr,
-		   __u32 addrlen,  __u64 id);
-ssize_t homa_replyv(int sockfd, const struct iovec *iov,
-		    int iovcnt, const struct sockaddr *dest_addr,
-		    __u32 addrlen,  __u64 id);
 
 #endif /* _UAPI_LINUX_HOMA_H */

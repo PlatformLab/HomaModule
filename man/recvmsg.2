@@ -176,21 +176,15 @@ will be set to zero by the call.
 .PP
 .B recvmsg
 normally waits until a suitable message has arrived, but nonblocking
-behavior may be requested in any of three ways. First, the
-.BR HOMA_RECVMSG_NONBLOCKING
-bit may be set in the
-.B flags
-field of the
-.BR homa_recvmsg_args
-struct. Second, the
+behavior may be requested either by setting the
 .BR MSG_DONTWAIT
-bit can be set in the
+bit in the
 .BR flags
 argument to
-.BR recvmsg .
-Third, the
+.BR recvmsg
+or by setting the
 .B O_NONBLOCK
-flag may be set for the socket using
+flag for the socket using
 .BR fcntl .
 If
 .B recvmsg
@@ -290,8 +284,5 @@ was sent.
 The socked has been disabled using
 .BR shutdown (2).
 .SH SEE ALSO
-.BR recvmsg (2),
-.BR homa_abort (3),
-.BR homa_reply (3),
-.BR homa_send (3),
+.BR sendmsg (2),
 .BR homa (7)
