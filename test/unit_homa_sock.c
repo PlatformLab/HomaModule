@@ -168,8 +168,8 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 	mock_sock_init(&hsk_v4, &self->homa, 0);
 	mock_ipv6 = true;
 	mock_sock_init(&hsk_v6, &self->homa, 0);
-	EXPECT_EQ(HOMA_IPV4_HEADER_LENGTH, hsk_v4.ip_header_length);
-	EXPECT_EQ(HOMA_IPV6_HEADER_LENGTH, hsk_v6.ip_header_length);
+	EXPECT_EQ(sizeof(struct iphdr), hsk_v4.ip_header_length);
+	EXPECT_EQ(sizeof(struct ipv6hdr), hsk_v6.ip_header_length);
 	homa_sock_destroy(&hsk_v4);
 	homa_sock_destroy(&hsk_v6);
 }

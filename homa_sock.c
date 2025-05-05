@@ -154,7 +154,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
-			? HOMA_IPV4_HEADER_LENGTH : HOMA_IPV6_HEADER_LENGTH;
+			? sizeof(struct iphdr) :sizeof(struct ipv6hdr);
 	hsk->is_server = false;
 	hsk->shutdown = false;
 	starting_port = homa->prev_default_port;

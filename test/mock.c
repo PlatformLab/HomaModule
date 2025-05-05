@@ -1768,8 +1768,8 @@ void mock_set_core(int num)
 void mock_set_ipv6(struct homa_sock *hsk)
 {
 	mock_ipv6 = true;
-	mock_mtu -= hsk->ip_header_length - HOMA_IPV6_HEADER_LENGTH;
-	hsk->ip_header_length = HOMA_IPV6_HEADER_LENGTH;
+	mock_mtu -= hsk->ip_header_length - sizeof(struct ipv6hdr);
+	hsk->ip_header_length = sizeof(struct ipv6hdr);
 	hsk->sock.sk_family = AF_INET6;
 }
 

@@ -124,11 +124,10 @@ struct sk_buff *homa_skb_new_tx(int length)
 	/* Note: allocate space for an IPv6 header, which is larger than
 	 * an IPv4 header.
 	 */
-	skb = alloc_skb(HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH +
-			sizeof(struct homa_skb_info) + length,
+	skb = alloc_skb(HOMA_SKB_EXTRA + sizeof(struct homa_skb_info) + length,
 			GFP_ATOMIC);
 	if (likely(skb)) {
-		skb_reserve(skb, HOMA_SKB_EXTRA + HOMA_IPV6_HEADER_LENGTH);
+		skb_reserve(skb, HOMA_SKB_EXTRA);
 		skb_reset_transport_header(skb);
 	}
 	INC_METRIC(skb_allocs, 1);

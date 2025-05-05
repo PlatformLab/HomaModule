@@ -6,6 +6,14 @@
 #define _HOMA_WIRE_H
 
 #include <linux/skbuff.h>
+#ifdef __UNIT_TEST__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+#endif /* __UNIT_TEST__ */
+#include <net/tcp.h>
+#ifdef __UNIT_TEST__
+#pragma GCC diagnostic pop
+#endif /* __UNIT_TEST__ */
 
 /* Defines the possible types of Homa packets.
  *
@@ -36,19 +44,13 @@ enum homa_packet_type {
 	 */
 };
 
-/** define HOMA_IPV6_HEADER_LENGTH - Size of IP header (V6). */
-#define HOMA_IPV6_HEADER_LENGTH 40
-
-/** define HOMA_IPV4_HEADER_LENGTH - Size of IP header (V4). */
-#define HOMA_IPV4_HEADER_LENGTH 20
-
 /**
  * define HOMA_SKB_EXTRA - How many bytes of additional space to allow at the
- * beginning of each sk_buff, before the IP header. This includes room for a
- * VLAN header and also includes some extra space, "just to be safe" (not
- * really sure if this is needed).
+ * beginning of each sk_buff, before the Homa header. This includes room for
+ * either an IPV4 or IPV6 header, Ethernet header, VLAN header, etc. This is
+ * a bit of an overestimate, since it also includes space for a TCP header.
  */
-#define HOMA_SKB_EXTRA 40
+#define HOMA_SKB_EXTRA MAX_TCP_HEADER
 
 /**
  * define HOMA_ETH_OVERHEAD - Number of bytes per Ethernet packet for Ethernet
