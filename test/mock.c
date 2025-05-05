@@ -55,6 +55,11 @@ int mock_trylock_errors;
 int mock_vmalloc_errors;
 int mock_wait_intr_irq_errors;
 
+/* The value that prepare_to_wait_event should return when
+ * mock_prepare_to_wait_errors is nonzero.
+ */
+int mock_prepare_to_wait_status = -ERESTARTSYS;
+
 /* The return value from calls to signal_pending(). */
 int mock_signal_pending;
 
@@ -1007,7 +1012,7 @@ long prepare_to_wait_event(struct wait_queue_head *wq_head,
 {
 	UNIT_HOOK("prepare_to_wait");
 	if (mock_check_error(&mock_prepare_to_wait_errors))
-		return -ERESTARTSYS;
+		return mock_prepare_to_wait_status;
 	return 0;
 }
 
@@ -2001,6 +2006,7 @@ void mock_teardown(void)
 	mock_trylock_errors = 0;
 	mock_vmalloc_errors = 0;
 	memset(&mock_task, 0, sizeof(mock_task));
+	mock_prepare_to_wait_status = -ERESTARTSYS;
 	mock_signal_pending = 0;
 	mock_xmit_log_verbose = 0;
 	mock_xmit_log_homa_info = 0;

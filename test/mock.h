@@ -142,6 +142,7 @@ extern u64         mock_ns;
 extern u64         mock_ns_tick;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
+extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
 extern int         mock_route_errors;
 extern int         mock_signal_pending;

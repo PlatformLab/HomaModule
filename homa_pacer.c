@@ -193,6 +193,7 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 int homa_pacer_main(void *arg)
 {
 	struct homa_pacer *pacer = arg;
+	int status;
 
 	while (1) {
 		if (pacer->exit)
@@ -212,9 +213,11 @@ int homa_pacer_main(void *arg)
 		}
 
 		tt_record("pacer sleeping");
-		wait_event(pacer->wait_queue, pacer->exit ||
-			   !list_empty(&pacer->throttled_rpcs));
-		tt_record("pacer woke up");
+		status = wait_event_interruptible(pacer->wait_queue,
+			pacer->exit || !list_empty(&pacer->throttled_rpcs));
+		tt_record1("pacer woke up with status %d", status);
+		if (status != 0 && status != -ERESTARTSYS)
+			break;
 	}
 	kthread_complete_and_exit(&pacer->kthread_done, 0);
 	return 0;

@@ -304,6 +304,13 @@ TEST_F(homa_pacer, homa_pacer_main__rpc_arrives_while_sleeping)
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400; xmit DATA 1400@2800",
 		     unit_log_get());
 }
+TEST_F(homa_pacer, homa_pacer_main__exit_on_signal)
+{
+	mock_prepare_to_wait_errors = 1;
+	mock_prepare_to_wait_status = -EINVAL;
+	unit_log_clear();
+	homa_pacer_main(self->homa.pacer);
+}
 
 TEST_F(homa_pacer, homa_pacer_xmit__basics)
 {
