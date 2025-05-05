@@ -662,8 +662,12 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	int i;
 
 	if (rpc->msgin.length < 0 || rpc->msgin.num_bpages <= 0 ||
-	    rpc->msgin.rank < 0)
+	    rpc->state == RPC_DEAD)
 		return;
+	if (rpc->msgin.rank < 0) {
+		homa_grant_update_incoming(rpc, grant);
+		return;
+	}
 
 	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
 		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,

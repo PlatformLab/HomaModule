@@ -937,7 +937,7 @@ TEST_F(homa_grant, homa_grant_check_rpc__msgin_not_initialized)
 	EXPECT_EQ(0, atomic_read(&self->homa.grant->total_incoming));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_check_calls);
 }
-TEST_F(homa_grant, homa_grant_check_rpc__rpc_not_active)
+TEST_F(homa_grant, homa_grant_check_rpc__update_incoming_if_rpc_not_active)
 {
 	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
 			self->client_ip, self->server_ip, self->server_port,
@@ -946,10 +946,13 @@ TEST_F(homa_grant, homa_grant_check_rpc__rpc_not_active)
 	homa_message_in_init(rpc, 2000, 0);
 	EXPECT_EQ(0, rpc->msgin.rank);
 	rpc->msgin.rank = -1;
+	rpc->msgin.rec_incoming = 100;
+	atomic_set(&self->homa.grant->total_incoming, 1000);
 	unit_log_clear();
 	homa_grant_check_rpc(rpc);
 	EXPECT_STREQ("", unit_log_get());
 	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_check_calls);
+	EXPECT_EQ(900, atomic_read(&self->homa.grant->total_incoming));
 }
 TEST_F(homa_grant, homa_grant_check_rpc__fast_path)
 {
