@@ -84,8 +84,7 @@ _Static_assert(sizeof(struct homa_sendmsg_args) <= 24,
 /* Flag bits for homa_sendmsg_args.flags (see man page for documentation):
  */
 #define HOMA_SENDMSG_PRIVATE       0x01
-#define HOMA_SENDMSG_NONBLOCKING   0x02
-#define HOMA_SENDMSG_VALID_FLAGS   0x03
+#define HOMA_SENDMSG_VALID_FLAGS   0x01
 
 /**
  * struct homa_recvmsg_args - Provides information needed by Homa's
@@ -105,12 +104,6 @@ struct homa_recvmsg_args {
 	 * request was sent. For requests this will always be zero.
 	 */
 	__u64 completion_cookie;
-
-	/**
-	 * @flags: (in) OR-ed combination of bits that control the operation.
-	 * See below for values.
-	 */
-	__u32 flags;
 
 	/**
 	 * @num_bpages: (in/out) Number of valid entries in @bpage_offsets.
@@ -138,11 +131,6 @@ _Static_assert(sizeof(struct homa_recvmsg_args) >= 88,
 _Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
 	       "homa_recvmsg_args grew");
 #endif
-
-/* Flag bits for homa_recvmsg_args.flags (see man page for documentation):
- */
-#define HOMA_RECVMSG_NONBLOCKING   0x01
-#define HOMA_RECVMSG_VALID_FLAGS   0x01
 
 #ifndef __STRIP__ /* See strip.py */
 /**

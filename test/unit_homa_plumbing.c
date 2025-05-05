@@ -85,9 +85,8 @@ FIXTURE_SETUP(homa_plumbing)
 	self->recvmsg_hdr.msg_namelen = 0;
 	self->recvmsg_hdr.msg_control = &self->recvmsg_args;
 	self->recvmsg_hdr.msg_controllen = sizeof(self->recvmsg_args);
-	self->recvmsg_hdr.msg_flags = 0;
+	self->recvmsg_hdr.msg_flags = MSG_DONTWAIT;
 	memset(&self->recvmsg_args, 0, sizeof(self->recvmsg_args));
-	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
 	self->send_vec[0].iov_base = self->buffer;
 	self->send_vec[0].iov_len = 100;
 	self->send_vec[1].iov_base = self->buffer + 1000;
@@ -677,12 +676,6 @@ TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
-TEST_F(homa_plumbing, homa_recvmsg__bogus_flags)
-{
-	self->recvmsg_args.flags = 1 << 10;
-	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
-}
 TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
 {
 	struct homa_pool *saved_pool = self->hsk.buffer_pool;
@@ -703,7 +696,7 @@ TEST_F(homa_plumbing, homa_recvmsg__release_buffers)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[0].refs));
 	EXPECT_EQ(0, atomic_read(&self->hsk.buffer_pool->descriptors[1].refs));
 }
@@ -714,7 +707,7 @@ TEST_F(homa_plumbing, homa_recvmsg__error_in_release_buffers)
 			self->hsk.buffer_pool->num_bpages << HOMA_BPAGE_SHIFT;
 
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__private_rpc_doesnt_exist)
 {
@@ -733,18 +726,15 @@ TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_private)
 	atomic_or(RPC_PRIVATE, &crpc->flags);
 
 	self->recvmsg_args.id = crpc->id;
-	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.id);
 }
 TEST_F(homa_plumbing, homa_recvmsg__error_from_homa_wait_shared)
 {
-	self->recvmsg_args.flags = HOMA_RECVMSG_NONBLOCKING;
-
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 }
 TEST_F(homa_plumbing, homa_recvmsg__MSG_DONT_WAIT)
 {
@@ -910,7 +900,7 @@ TEST_F(homa_plumbing, homa_recvmsg__copy_back_args_even_after_error)
 	self->recvmsg_args.bpage_offsets[1] = HOMA_BPAGE_SIZE;
 
 	EXPECT_EQ(EAGAIN, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
-			0, 0, &self->recvmsg_hdr.msg_namelen));
+			0, MSG_DONTWAIT, &self->recvmsg_hdr.msg_namelen));
 	EXPECT_EQ(0, self->recvmsg_args.num_bpages);
 }
 

@@ -69,8 +69,7 @@ void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
 /**
  * homa::receiver::receive() - Release resources for the current message, if
  * any, and receive a new incoming message.
- * @flags:    Various OR'ed bits such as HOMA_RECVMSG_NONBLOCKING. See the
- *            Homa documentation for the flags field of recvmsg for details.
+ * @flags:    Flag bits for the recvmsg invocation (e.g., MSG_DONTWAIT).
  * @id:       Identifier of a private RPC whose result is desired, or 0
  *            to wait for a shared RPC. See the Homa documentation for the id
  *            field of recvmsg for details.
@@ -82,11 +81,10 @@ void homa::receiver::copy_out(void *dest, size_t offset, size_t count) const
  */
 size_t homa::receiver::receive(int flags, uint64_t id)
 {
-	control.flags = flags;
 	control.id = id;
 	hdr.msg_namelen = sizeof(source);
 	hdr.msg_controllen = sizeof(control);
-	msg_length = recvmsg(fd, &hdr, 0);
+	msg_length = recvmsg(fd, &hdr, flags);
 	if (msg_length < 0) {
 		control.num_bpages = 0;
 		id = 0;
@@ -105,9 +103,8 @@ void homa::receiver::release()
 		return;
 
 	/* This recvmsg request will do nothing except return buffer space. */
-	control.flags = HOMA_RECVMSG_NONBLOCKING;
 	control.id = 0;
-	recvmsg(fd, &hdr, 0);
+	recvmsg(fd, &hdr, MSG_DONTWAIT);
 	control.num_bpages = 0;
 	msg_length = -1;
 }

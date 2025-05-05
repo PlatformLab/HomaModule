@@ -969,9 +969,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 	if (!homa_sock_wmem_avl(hsk)) {
 		result = homa_sock_wait_wmem(hsk,
-					     msg->msg_flags & MSG_DONTWAIT ||
-					     args.flags &
-					     HOMA_SENDMSG_NONBLOCKING);
+					     msg->msg_flags & MSG_DONTWAIT);
 		if (result != 0)
 			goto error;
 	}
@@ -1122,11 +1120,10 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 				    sizeof(control))))
 		return -EFAULT;
 	control.completion_cookie = 0;
-	tt_record3("homa_recvmsg starting, port %d, pid %d, flags %d",
-		   hsk->port, current->pid, control.flags);
+	tt_record2("homa_recvmsg starting, port %d, pid %d",
+		   hsk->port, current->pid);
 
-	if (control.num_bpages > HOMA_MAX_BPAGES ||
-	    (control.flags & ~HOMA_RECVMSG_VALID_FLAGS)) {
+	if (control.num_bpages > HOMA_MAX_BPAGES) {
 		result = -EINVAL;
 		goto done;
 	}
@@ -1140,8 +1137,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	if (result != 0)
 		goto done;
 
-	nonblocking = ((flags & MSG_DONTWAIT) ||
-		       (control.flags & HOMA_RECVMSG_NONBLOCKING));
+	nonblocking = flags & MSG_DONTWAIT;
 	if (control.id != 0) {
 		rpc = homa_find_client_rpc(hsk, control.id); /* Locks RPC. */
 		if (!rpc) {

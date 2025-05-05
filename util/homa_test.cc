@@ -146,7 +146,6 @@ void test_close()
 	}
 	std::thread thread(close_fd, fd);
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
@@ -196,7 +195,6 @@ void test_fill_memory(int fd, const sockaddr_in_union *dest, char *request)
 	total = 0;
 	for (int i = 1; i <= count; i++) {
 		recv_args.id = 0;
-		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		received = recvmsg(fd, &recv_hdr, 0);
 		if (received < 0) {
@@ -244,7 +242,6 @@ void test_invoke(int fd, const sockaddr_in_union *dest, char *request)
 		printf("sendmsg succeeded, id %llu\n", homa_args.id);
 	}
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	resp_length = recvmsg(fd, &recv_hdr, 0);
 	if (resp_length < 0) {
@@ -337,7 +334,6 @@ void test_poll(int fd, char *request)
 	}
 
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0)
@@ -382,7 +378,6 @@ void test_private(int fd, const sockaddr_in_union *dest, char *request)
 
 	for (i = 2; i >= 0; i--) {
 		recv_args.id = ids[i];
-		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
@@ -454,7 +449,6 @@ void test_rtt(int fd, const sockaddr_in_union *dest, char *request)
 			return;
 		}
 		recv_args.id = 0;
-		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (i >= 0)
@@ -539,7 +533,6 @@ void test_shutdown(int fd)
 	std::thread thread(shutdown_fd, fd);
 	thread.detach();
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result > 0) {
@@ -551,7 +544,6 @@ void test_shutdown(int fd)
 
 	/* Make sure that future reads also fail. */
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_hdr.msg_controllen = sizeof(recv_args);
 	result = recvmsg(fd, &recv_hdr, 0);
 	if (result < 0) {
@@ -617,7 +609,6 @@ void test_stream(int fd, const sockaddr_in_union *dest)
 		int *response;
 
 		recv_args.id = 0;
-		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		resp_length = recvmsg(fd, &recv_hdr, 0);
 		if (resp_length < 0) {
@@ -861,7 +852,6 @@ void test_tmp(int fd, int count)
 	h.msg_controllen = sizeof(control);
 
 	memset(&control, 0, sizeof(control));
-	control.flags = HOMA_RECVMSG_NONBLOCKING;
 
 	int result = recvmsg(fd, &h, 0);
 	printf("recvmsg returned %d, addr %p, namelen %d, control %p, "
@@ -913,7 +903,6 @@ void recv_slow(int fd)
 	while (1) {
 		sleep(1);
 		recv_args.id = 0;
-		recv_args.flags = 0;
 		recv_hdr.msg_controllen = sizeof(recv_args);
 		status = recvmsg(fd, &recv_hdr, 0);
 		if (status < 0) {
@@ -1119,7 +1108,6 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	recv_args.id = 0;
-	recv_args.flags = 0;
 	recv_args.num_bpages = 0;
 	recv_hdr.msg_name = &source_addr;
 	recv_hdr.msg_namelen = sizeof32(source_addr);
