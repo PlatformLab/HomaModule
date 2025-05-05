@@ -43,7 +43,7 @@ for ((i = $first ; i <= $last; i++)); do
     echo '*** Installing Homa on' $node '***'
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv ~/.bashrc ~/.bash_profile ~/.gdbinit $node:
     rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv --exclude __pycache__ ~/bin/ $node:bin/
-    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $homa_ko $root/util/cp_node $root/util/homa_prio $root/util/*.py $node:bin/
+    rsync --ipv4 -e "ssh -4 -o StrictHostKeyChecking=no" -rtv $homa_ko $root/util/cp_node $root/util/homa_prio $root/util/server $root/util/homa_test $root/util/*.py $node:bin/
     ssh -4 $node 'sudo sysctl .kernel.printk="5 4 1 7"'
     ssh -4 $node 'echo $PATH'
     ssh -4 $node 'config default'
