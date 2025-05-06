@@ -43,12 +43,12 @@ static void set_bpages_needed(struct homa_pool *pool)
 }
 
 /**
- * homa_pool_new() - Allocate and initialize a new homa_pool (it will have
+ * homa_pool_alloc() - Allocate and initialize a new homa_pool (it will have
  * no region associated with it until homa_pool_set_region is invoked).
  * @hsk:          Socket the pool will be associated with.
  * Return: A pointer to the new pool or a negative errno.
  */
-struct homa_pool *homa_pool_new(struct homa_sock *hsk)
+struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 {
 	struct homa_pool *pool;
 
@@ -122,11 +122,11 @@ error:
 }
 
 /**
- * homa_pool_destroy() - Destructor for homa_pool. After this method
+ * homa_pool_free() - Destructor for homa_pool. After this method
  * returns, the object should not be used (it will be freed here).
  * @pool: Pool to destroy.
  */
-void homa_pool_destroy(struct homa_pool *pool)
+void homa_pool_free(struct homa_pool *pool)
 {
 	if (pool->region) {
 		kfree(pool->descriptors);
@@ -266,7 +266,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 }
 
 /**
- * homa_pool_allocate() - Allocate buffer space for an RPC.
+ * homa_pool_alloc_msg() - Allocate buffer space for an incoming message.
  * @rpc:  RPC that needs space allocated for its incoming message (space must
  *        not already have been allocated). The fields @msgin->num_buffers
  *        and @msgin->buffers are filled in. Must be locked by caller.
@@ -275,7 +275,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
  * occurred, such as no buffer pool present, then a negative errno is
  * returned.
  */
-int homa_pool_allocate(struct homa_rpc *rpc)
+int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	__must_hold(&rpc->bucket->lock)
 {
 	struct homa_pool *pool = rpc->hsk->buffer_pool;
@@ -507,7 +507,7 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 			   rpc->id, rpc->msgin.length,
 			   atomic_read(&pool->free_bpages),
 			   pool->bpages_needed);
-		homa_pool_allocate(rpc);
+		homa_pool_alloc_msg(rpc);
 #ifndef __STRIP__ /* See strip.py */
 		if (rpc->msgin.num_bpages > 0) {
 			/* Allocation succeeded; "wake up" the RPC. */

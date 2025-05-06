@@ -736,14 +736,14 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 		return 0;
 	}
 
-	rpc = homa_find_client_rpc(hsk, args.id);
+	rpc = homa_rpc_find_client(hsk, args.id);
 	if (!rpc)
 		return -EINVAL;
 	if (args.error == 0)
 		homa_rpc_end(rpc);
 	else
 		homa_rpc_abort(rpc, -args.error);
-	homa_rpc_unlock(rpc); /* Locked by homa_find_client_rpc. */
+	homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_client. */
 	return ret;
 }
 #endif /* See strip.py */
@@ -988,7 +988,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 
 	if (!args.id) {
 		/* This is a request message. */
-		rpc = homa_rpc_new_client(hsk, addr);
+		rpc = homa_rpc_alloc_client(hsk, addr);
 		if (IS_ERR(rpc)) {
 			result = PTR_ERR(rpc);
 			rpc = NULL;
@@ -1007,12 +1007,12 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (result)
 			goto error;
 		args.id = rpc->id;
-		homa_rpc_unlock(rpc); /* Locked by homa_rpc_new_client. */
+		homa_rpc_unlock(rpc); /* Locked by homa_rpc_alloc_client. */
 		rpc = NULL;
 
 		if (unlikely(copy_to_user((void __user *)msg->msg_control,
 					  &args, sizeof(args)))) {
-			rpc = homa_find_client_rpc(hsk, args.id);
+			rpc = homa_rpc_find_client(hsk, args.id);
 			result = -EFAULT;
 			goto error;
 		}
@@ -1034,7 +1034,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		}
 		canonical_dest = canonical_ipv6_addr(addr);
 
-		rpc = homa_find_server_rpc(hsk, &canonical_dest, args.id);
+		rpc = homa_rpc_find_server(hsk, &canonical_dest, args.id);
 		if (!rpc) {
 			/* Return without an error if the RPC doesn't exist;
 			 * this could be totally valid (e.g. client is
@@ -1051,7 +1051,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		if (rpc->state != RPC_IN_SERVICE) {
 			tt_record2("homa_sendmsg error: RPC id %d in bad state %d",
 				   rpc->id, rpc->state);
-			/* Locked by homa_find_server_rpc. */
+			/* Locked by homa_rpc_find_server. */
 			homa_rpc_unlock(rpc);
 			rpc = NULL;
 			result = -EINVAL;
@@ -1062,7 +1062,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		result = homa_message_out_fill(rpc, &msg->msg_iter, 1);
 		if (result && rpc->state != RPC_DEAD)
 			goto error;
-		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
+		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
 		finish = sched_clock();
 #endif /* See strip.py */
@@ -1074,7 +1074,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 error:
 	if (rpc) {
 		homa_rpc_end(rpc);
-		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
+		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 	}
 	tt_record2("homa_sendmsg returning error %d for id %d",
 		   result, args.id);
@@ -1139,7 +1139,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 
 	nonblocking = flags & MSG_DONTWAIT;
 	if (control.id != 0) {
-		rpc = homa_find_client_rpc(hsk, control.id); /* Locks RPC. */
+		rpc = homa_rpc_find_client(hsk, control.id); /* Locks RPC. */
 		if (!rpc) {
 			result = -EINVAL;
 			goto done;

@@ -197,7 +197,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-	hsk->buffer_pool = homa_pool_new(hsk);
+	hsk->buffer_pool = homa_pool_alloc(hsk);
 	if (IS_ERR(hsk->buffer_pool)) {
 		result = PTR_ERR(hsk->buffer_pool);
 		hsk->buffer_pool = NULL;
@@ -308,7 +308,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	}
 
 	if (hsk->buffer_pool) {
-		homa_pool_destroy(hsk->buffer_pool);
+		homa_pool_free(hsk->buffer_pool);
 		hsk->buffer_pool = NULL;
 	}
 	tt_record1("Finished shutdown for socket %d", hsk->port);

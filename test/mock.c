@@ -1338,11 +1338,11 @@ struct sk_buff *skb_segment(struct sk_buff *head_skb,
 	memcpy(&h, skb_transport_header(head_skb), sizeof(h));
 	offset = ntohl(h.seg.offset);
 	length = homa_data_len(head_skb);
-	skb1 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
+	skb1 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
 			offset);
 	offset += length/2;
 	h.seg.offset = htonl(offset);
-	skb2 = mock_skb_new(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
+	skb2 = mock_skb_alloc(&ipv6_hdr(head_skb)->saddr, &h.common, length/2,
 			offset);
 	skb2->next = NULL;
 	skb1->next = skb2;
@@ -1774,7 +1774,7 @@ void mock_set_ipv6(struct homa_sock *hsk)
 }
 
 /**
- * mock_skb_new() - Allocate and return a packet buffer. The buffer is
+ * mock_skb_alloc() - Allocate and return a packet buffer. The buffer is
  * initialized as if it just arrived from the network.
  * @saddr:        IPv6 address to use as the sender of the packet, in
  *                network byte order.
@@ -1790,7 +1790,7 @@ void mock_set_ipv6(struct homa_sock *hsk)
  * Return:        A packet buffer containing the information described above.
  *                The caller owns this buffer and is responsible for freeing it.
  */
-struct sk_buff *mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
+struct sk_buff *mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h,
 		int extra_bytes, int first_value)
 {
 	int header_size, ip_size, data_size, shinfo_size;

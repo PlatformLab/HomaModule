@@ -39,7 +39,7 @@ enum homa_packet_type {
 	/* If you add a new type here, you must also do the following:
 	 * 1. Change MAX_OP so it is the highest valid opcode
 	 * 2. Add support for the new opcode in homa_print_packet,
-	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_new.
+	 *    homa_print_packet_short, homa_symbol_for_type, and mock_skb_alloc.
 	 * 3. Add the header length to header_lengths in homa_plumbing.c.
 	 */
 };

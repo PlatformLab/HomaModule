@@ -145,16 +145,16 @@ struct homa_pacer {
 	atomic64_t link_idle_time ____cacheline_aligned_in_smp;
 };
 
+struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net);
 int      homa_pacer_check_nic_q(struct homa_pacer *pacer,
 				struct sk_buff *skb, bool force);
 int      homa_pacer_dointvec(const struct ctl_table *table, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos);
-void     homa_pacer_destroy(struct homa_pacer *pacer);
+void     homa_pacer_free(struct homa_pacer *pacer);
 void     homa_pacer_unmanage_rpc(struct homa_rpc *rpc);
 void     homa_pacer_log_throttled(struct homa_pacer *pacer);
 int      homa_pacer_main(void *transport);
 void     homa_pacer_manage_rpc(struct homa_rpc *rpc);
-struct homa_pacer *homa_pacer_new(struct homa *homa, struct net *net);
 void     homa_pacer_throttle_lock_slow(struct homa_pacer *pacer);
 void     homa_pacer_update_sysctl_deps(struct homa_pacer *pacer);
 void     homa_pacer_xmit(struct homa_pacer *pacer);

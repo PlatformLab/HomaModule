@@ -63,14 +63,14 @@ FIXTURE_SETUP(homa_offload)
 	}
 	self->napi.gro_bitmask = 0;
 
-	self->skb = mock_skb_new(&self->ip, &self->header.common, 1400, 2000);
+	self->skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 2000);
 	NAPI_GRO_CB(self->skb)->same_flow = 0;
 	NAPI_GRO_CB(self->skb)->last = self->skb;
 	NAPI_GRO_CB(self->skb)->count = 1;
 	self->header.seg.offset = htonl(4000);
 	self->header.common.dport = htons(88);
 	self->header.common.sender_id = cpu_to_be64(1002);
-	self->skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	self->skb2 = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(self->skb2)->same_flow = 0;
 	NAPI_GRO_CB(self->skb2)->last = self->skb2;
 	NAPI_GRO_CB(self->skb2)->count = 1;
@@ -135,7 +135,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	h = (struct homa_common_hdr *) skb_transport_header(skb);
 	h->flags = 0;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
@@ -143,7 +143,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 	kfree_skb(skb);
 	unit_log_clear();
 
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->urgent -= 1;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
@@ -159,7 +159,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv6)
 	mock_ipv6 = true;
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_TCP_FLAGS;
@@ -182,7 +182,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_homa_ipv4)
 	mock_ipv6 = false;
 	homa_gro_hook_tcp();
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	ip_hdr(skb)->protocol = IPPROTO_TCP;
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->flags = HOMA_TCP_FLAGS;
@@ -205,7 +205,7 @@ TEST_F(homa_offload, homa_gso_segment_set_ip_ids)
 	int version;
 
 	mock_ipv6 = false;
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 2000);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 2000);
 	version = ip_hdr(skb)->version;
 	EXPECT_EQ(4, version);
 	segs = homa_gso_segment(skb, 0);
@@ -227,7 +227,7 @@ TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
 	/* First call: copy offset from sequence number. */
 	self->header.common.sequence = htonl(6000);
 	self->header.seg.offset = -1;
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = NULL;
 	cur_offload_core->held_bucket = 99;
@@ -238,7 +238,7 @@ TEST_F(homa_offload, homa_gro_receive__update_offset_from_sequence)
 	/* Second call: offset already valid. */
 	self->header.common.sequence = htonl(6000);
 	self->header.seg.offset = ntohl(5000);
-	skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb2 = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb2)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->empty_list, skb2));
 	h = (struct homa_data_hdr *)skb_transport_header(skb2);
@@ -275,7 +275,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	unit_log_clear();
 
 	/* First attempt: HOMA_GRO_SHORT_BYPASS not enabled. */
-	skb = mock_skb_new(&self->ip, &h.common, 1400, 2000);
+	skb = mock_skb_alloc(&self->ip, &h.common, 1400, 2000);
 	result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
@@ -285,7 +285,7 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	 */
 	self->homa.gro_policy |= HOMA_GRO_SHORT_BYPASS;
 	cur_offload_core->last_gro = 400;
-	skb2 = mock_skb_new(&self->ip, &h.common, 1400, 2000);
+	skb2 = mock_skb_alloc(&self->ip, &h.common, 1400, 2000);
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_data_bypasses);
@@ -294,14 +294,14 @@ TEST_F(homa_offload, homa_gro_receive__HOMA_GRO_SHORT_BYPASS)
 	h.message_length = htonl(1400);
 	h.incoming = htonl(1400);
 	cur_offload_core->last_gro = 400;
-	skb3 = mock_skb_new(&self->ip, &h.common, 1400, 4000);
+	skb3 = mock_skb_alloc(&self->ip, &h.common, 1400, 4000);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_data_bypasses);
 
 	/* Third attempt: no bypass because core busy. */
 	cur_offload_core->last_gro = 600;
-	skb4 = mock_skb_new(&self->ip, &h.common, 1400, 4000);
+	skb4 = mock_skb_alloc(&self->ip, &h.common, 1400, 4000);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_data_bypasses);
@@ -340,7 +340,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 
 	/* First attempt: HOMA_GRO_FAST_GRANTS not enabled. */
 	self->homa.gro_policy = 0;
-	skb = mock_skb_new(&client_ip, &h.common, 0, 0);
+	skb = mock_skb_alloc(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(0, homa_metrics_per_cpu()->gro_grant_bypasses);
@@ -349,7 +349,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 	/* Second attempt: HOMA_FAST_GRANTS is enabled. */
 	self->homa.gro_policy = HOMA_GRO_FAST_GRANTS;
 	cur_offload_core->last_gro = 400;
-	skb2 = mock_skb_new(&client_ip, &h.common, 0, 0);
+	skb2 = mock_skb_alloc(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb2);
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
@@ -357,7 +357,7 @@ TEST_F(homa_offload, homa_gro_receive__fast_grant_optimization)
 
 	/* Third attempt: core is too busy for fast grants. */
 	cur_offload_core->last_gro = 600;
-	skb3 = mock_skb_new(&client_ip, &h.common, 0, 0);
+	skb3 = mock_skb_alloc(&client_ip, &h.common, 0, 0);
 	result = homa_gro_receive(&self->empty_list, skb3);
 	EXPECT_EQ(0, -PTR_ERR(result));
 	EXPECT_EQ(1, homa_metrics_per_cpu()->gro_grant_bypasses);
@@ -370,7 +370,7 @@ TEST_F(homa_offload, homa_gro_receive__no_held_skb)
 	int same_flow;
 
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 2;
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = NULL;
@@ -388,7 +388,7 @@ TEST_F(homa_offload, homa_gro_receive__empty_merge_list)
 	int same_flow;
 
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 2;
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = self->skb;
@@ -406,7 +406,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb_not_in_merge_list)
 	int same_flow;
 
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 3;
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = skb;
@@ -424,7 +424,7 @@ TEST_F(homa_offload, homa_gro_receive__held_skb__in_merge_list_but_wrong_proto)
 	int same_flow;
 
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	skb->hash = 3;
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	cur_offload_core->held_skb = self->skb;
@@ -450,7 +450,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 
 	self->header.seg.offset = htonl(6000);
 	self->header.common.sender_id = cpu_to_be64(1002);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
@@ -459,7 +459,7 @@ TEST_F(homa_offload, homa_gro_receive__merge)
 
 	self->header.seg.offset = htonl(7000);
 	self->header.common.sender_id = cpu_to_be64(1004);
-	skb2 = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb2 = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	NAPI_GRO_CB(skb2)->same_flow = 0;
 	EXPECT_EQ(NULL, homa_gro_receive(&self->napi.gro_hash[3].list, skb2));
 	same_flow = NAPI_GRO_CB(skb)->same_flow;
@@ -480,14 +480,14 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	cur_offload_core->held_skb = self->skb2;
 	cur_offload_core->held_bucket = 2;
 	self->header.seg.offset = htonl(6000);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	homa_gro_receive(&self->napi.gro_hash[3].list, skb);
 	EXPECT_EQ(2, NAPI_GRO_CB(self->skb2)->count);
 	EXPECT_EQ(2, self->napi.gro_hash[2].count);
 
 	// Second packet hits the limit.
 	self->header.common.sport = htons(40001);
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	unit_log_clear();
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(homa_gro_receive(
 			&self->napi.gro_hash[3].list, skb)));
@@ -503,7 +503,7 @@ TEST_F(homa_offload, homa_gro_receive__max_gro_skbs)
 	// to become empty.
 	self->homa.max_gro_skbs = 2;
 	cur_offload_core->held_skb = self->skb;
-	skb = mock_skb_new(&self->ip, &self->header.common, 1400, 0);
+	skb = mock_skb_alloc(&self->ip, &self->header.common, 1400, 0);
 	unit_log_clear();
 	EXPECT_EQ(EINPROGRESS, -PTR_ERR(homa_gro_receive(
 			&self->napi.gro_hash[3].list, skb)));

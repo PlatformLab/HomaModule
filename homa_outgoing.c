@@ -107,9 +107,9 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 }
 
 /**
- * homa_new_data_packet() - Allocate a new sk_buff and fill it with a Homa
- * data packet. The resulting packet will be a GSO packet that will eventually
- * be segmented by the NIC.
+ * homa_tx_data_pkt_alloc() - Allocate a new sk_buff and fill it with an
+ * outgoing Homa data packet. The resulting packet will be a GSO packet
+ * that will eventually be segmented by the NIC.
  * @rpc:          RPC that packet will belong to (msgout must have been
  *                initialized). Must be locked by caller.
  * @iter:         Describes location(s) of (remaining) message data in user
@@ -124,7 +124,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  *                a single segment of the GSO packet.
  * Return: A pointer to the new packet, or a negative errno.
  */
-struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
+struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 				     struct iov_iter *iter, int offset,
 				     int length, int max_seg_data)
 	__must_hold(rpc_bucket_lock)
@@ -140,9 +140,9 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 
 	/* Initialize the overall skb. */
 #ifndef __STRIP__ /* See strip.py */
-	skb = homa_skb_new_tx(sizeof(struct homa_data_hdr));
+	skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr));
 #else /* See strip.py */
-	skb = homa_skb_new_tx(sizeof(struct homa_data_hdr) + length +
+	skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr) + length +
 			      (segs - 1) * sizeof(struct homa_seg_hdr));
 #endif /* See strip.py */
 	if (!skb)
@@ -354,7 +354,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 #endif /* See strip.py */
 		if (skb_data_bytes > bytes_left)
 			skb_data_bytes = bytes_left;
-		skb = homa_new_data_packet(rpc, iter, offset, skb_data_bytes,
+		skb = homa_tx_data_pkt_alloc(rpc, iter, offset, skb_data_bytes,
 					   max_seg_data);
 		if (IS_ERR(skb)) {
 			err = PTR_ERR(skb);
@@ -461,7 +461,7 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	int result;
 
 	dst = homa_get_dst(peer, hsk);
-	skb = homa_skb_new_tx(HOMA_MAX_HEADER);
+	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
 	dst_hold(dst);
@@ -813,10 +813,10 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 
 			/* This segment must be retransmitted. */
 #ifndef __STRIP__ /* See strip.py */
-			new_skb = homa_skb_new_tx(sizeof(struct homa_data_hdr)
+			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr)
 					- sizeof(struct homa_seg_hdr));
 #else /* See strip.py */
-			new_skb = homa_skb_new_tx(sizeof(struct homa_data_hdr)
+			new_skb = homa_skb_alloc_tx(sizeof(struct homa_data_hdr)
 					+ seg_length);
 #endif /* See strip.py */
 			if (unlikely(!new_skb)) {

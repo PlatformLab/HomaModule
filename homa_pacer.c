@@ -47,13 +47,13 @@ static struct ctl_table pacer_ctl_table[] = {
 #endif /* See strip.py */
 
 /**
- * homa_pacer_new() - Allocate and initialize a new pacer object, which
+ * homa_pacer_alloc() - Allocate and initialize a new pacer object, which
  * will hold pacer-related information for @homa.
  * @homa:   Homa transport that the pacer will be associated with.
  * @net:    Network namespace that @homa is associated with.
  * Return:  A pointer to the new struct pacer, or a negative errno.
  */
-struct homa_pacer *homa_pacer_new(struct homa *homa, struct net *net)
+struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net)
 {
 	struct homa_pacer *pacer;
 	int err;
@@ -94,17 +94,17 @@ struct homa_pacer *homa_pacer_new(struct homa *homa, struct net *net)
 	return pacer;
 
 error:
-	homa_pacer_destroy(pacer);
+	homa_pacer_free(pacer);
 	return ERR_PTR(err);
 }
 
 /**
- * homa_pacer_destroy() - Cleanup and destroy the pacer object for a Homa
+ * homa_pacer_free() - Cleanup and free the pacer object for a Homa
  * transport.
  * @pacer:    Object to destroy; caller must not reference the object
  *            again once this function returns.
  */
-void homa_pacer_destroy(struct homa_pacer *pacer)
+void homa_pacer_free(struct homa_pacer *pacer)
 {
 	pacer->exit = true;
 #ifndef __STRIP__ /* See strip.py */

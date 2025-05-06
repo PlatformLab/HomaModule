@@ -72,7 +72,7 @@ static inline void homa_skb_get(struct sk_buff *skb, void *dest, int offset,
 	memcpy(dest, skb_transport_header(skb) + offset, length);
 }
 
-static inline struct sk_buff *homa_skb_new_tx(int length)
+static inline struct sk_buff *homa_skb_alloc_tx(int length)
 {
 	struct sk_buff *skb;
 

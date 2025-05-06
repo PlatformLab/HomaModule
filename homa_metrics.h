@@ -74,11 +74,11 @@ struct homa_metrics {
 	u64 priority_packets[HOMA_MAX_PRIORITIES];
 
 	/**
-	 * @skb_allocs: total number of calls to homa_skb_new_tx.
+	 * @skb_allocs: total number of calls to homa_skb_alloc_tx.
 	 */
 	u64 skb_allocs;
 
-	/** @skb_alloc_ns: total time spent in homa_skb_new_tx. */
+	/** @skb_alloc_ns: total time spent in homa_skb_alloc_tx. */
 	u64 skb_alloc_ns;
 
 	/**
@@ -576,7 +576,7 @@ struct homa_metrics {
 
 	/**
 	 * @buffer_alloc_failures: total number of times that
-	 * homa_pool_allocate was unable to allocate buffer space for
+	 * homa_pool_alloc_msg was unable to allocate buffer space for
 	 * an incoming message.
 	 */
 	u64 buffer_alloc_failures;

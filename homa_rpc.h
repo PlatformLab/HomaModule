@@ -412,12 +412,18 @@ struct homa_rpc {
 	u64 start_ns;
 };
 
-void     homa_check_rpc(struct homa_rpc *rpc);
 struct homa_rpc
-	       *homa_find_client_rpc(struct homa_sock *hsk, u64 id);
+	*homa_rpc_alloc_client(struct homa_sock *hsk,
+			       const union sockaddr_in_union *dest);
 struct homa_rpc
-	       *homa_find_server_rpc(struct homa_sock *hsk,
-				     const struct in6_addr *saddr, u64 id);
+	*homa_rpc_alloc_server(struct homa_sock *hsk,
+			       const struct in6_addr *source,
+			       struct homa_data_hdr *h, int *created);
+struct homa_rpc
+	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
+struct homa_rpc
+	*homa_rpc_find_server(struct homa_sock *hsk,
+			      const struct in6_addr *saddr, u64 id);
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
 void     homa_rpc_end(struct homa_rpc *rpc);
@@ -427,13 +433,6 @@ void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 void     homa_rpc_log_tt(struct homa_rpc *rpc);
 #endif /* See strip.py */
-struct homa_rpc
-	       *homa_rpc_new_client(struct homa_sock *hsk,
-				    const union sockaddr_in_union *dest);
-struct homa_rpc
-	       *homa_rpc_new_server(struct homa_sock *hsk,
-				    const struct in6_addr *source,
-				    struct homa_data_hdr *h, int *created);
 int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
 #ifndef __UPSTREAM__ /* See strip.py */
 int      homa_validate_incoming(struct homa *homa, int verbose,

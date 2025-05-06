@@ -77,12 +77,12 @@ static struct ctl_table grant_ctl_table[] = {
 #endif /* See strip.py */
 
 /**
- * homa_grant_new() - Allocate and initialize a new grant object, which
+ * homa_grant_alloc() - Allocate and initialize a new grant object, which
  * will hold grant management information for @homa.
  * @net:    Network namespace that @homa is associated with.
  * Return:  A pointer to the new struct grant, or a negative errno.
  */
-struct homa_grant *homa_grant_new(struct net *net)
+struct homa_grant *homa_grant_alloc(struct net *net)
 {
 	struct homa_grant *grant;
 	int err;
@@ -114,17 +114,17 @@ struct homa_grant *homa_grant_new(struct net *net)
 	return grant;
 
 error:
-	homa_grant_destroy(grant);
+	homa_grant_free(grant);
 	return ERR_PTR(err);
 }
 
 /**
- * homa_grant_destroy() - Cleanup and destroy the grant object for a Homa
+ * homa_grant_free() - Cleanup and free the grant object for a Homa
  * transport.
- * @grant:    Object to destroy; caller must not reference the object
+ * @grant:    Object to free; caller must not reference the object
  *            again once this function returns.
  */
-void homa_grant_destroy(struct homa_grant *grant)
+void homa_grant_free(struct homa_grant *grant)
 {
 #ifndef __STRIP__ /* See strip.py */
 	if (grant->sysctl_header) {

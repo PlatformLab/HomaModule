@@ -81,17 +81,17 @@ TEST_F(homa_pacer, homa_pacer_new__success)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_FALSE(IS_ERR(pacer));
 	EXPECT_EQ(&self->homa, pacer->homa);
-	homa_pacer_destroy(pacer);
+	homa_pacer_free(pacer);
 }
 TEST_F(homa_pacer, homa_pacer_new__cant_allocate_memory)
 {
 	struct homa_pacer *pacer;
 
 	mock_kmalloc_errors = 1;
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(pacer));
 }
@@ -100,7 +100,7 @@ TEST_F(homa_pacer, homa_pacer_new__cant_create_pacer_thread)
 	struct homa_pacer *pacer;
 
 	mock_kthread_create_errors = 1;
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(EACCES, -PTR_ERR(pacer));
 }
@@ -110,20 +110,20 @@ TEST_F(homa_pacer, homa_pacer_new__cant_register_sysctls)
 	struct homa_pacer *pacer;
 
 	mock_register_sysctl_errors = 1;
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(pacer));
 }
 #endif /* See strip.py */
 
-TEST_F(homa_pacer, homa_pacer_destroy__basics)
+TEST_F(homa_pacer, homa_pacer_free__basics)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_FALSE(IS_ERR(pacer));
 	unit_log_clear();
-	homa_pacer_destroy(pacer);
+	homa_pacer_free(pacer);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("unregister_net_sysctl_table; kthread_stop",
 		     unit_log_get());
@@ -132,15 +132,15 @@ TEST_F(homa_pacer, homa_pacer_destroy__basics)
 		     unit_log_get());
 #endif /* See strip.py */
 }
-TEST_F(homa_pacer, homa_pacer_destroy__no_thread)
+TEST_F(homa_pacer, homa_pacer_free__no_thread)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_new(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa, &mock_net);
 	EXPECT_FALSE(IS_ERR(pacer));
 	pacer->kthread = NULL;
 	unit_log_clear();
-	homa_pacer_destroy(pacer);
+	homa_pacer_free(pacer);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("unregister_net_sysctl_table", unit_log_get());
 #endif /* See strip.py */

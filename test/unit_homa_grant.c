@@ -133,48 +133,48 @@ static struct homa_rpc *test_rpc_init(FIXTURE_DATA(homa_grant) *self,
 	return rpc;
 }
 
-TEST_F(homa_grant, homa_grant_new__success)
+TEST_F(homa_grant, homa_grant_alloc__success)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_new(&mock_net);
+	grant = homa_grant_alloc(&mock_net);
 	EXPECT_EQ(50, grant->fifo_fraction);
-	homa_grant_destroy(grant);
+	homa_grant_free(grant);
 }
-TEST_F(homa_grant, homa_grant_new__cant_allocate_memory)
+TEST_F(homa_grant, homa_grant_alloc__cant_allocate_memory)
 {
 	struct homa_grant *grant;
 
 	mock_kmalloc_errors = 1;
-	grant = homa_grant_new(&mock_net);
+	grant = homa_grant_alloc(&mock_net);
 	EXPECT_TRUE(IS_ERR(grant));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(grant));
 }
-TEST_F(homa_grant, homa_grant_new__cant_register_sysctls)
+TEST_F(homa_grant, homa_grant_alloc__cant_register_sysctls)
 {
 	struct homa_grant *grant;
 
 	mock_register_sysctl_errors = 1;
-	grant = homa_grant_new(&mock_net);
+	grant = homa_grant_alloc(&mock_net);
 	EXPECT_TRUE(IS_ERR(grant));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(grant));
 }
 
-TEST_F(homa_grant, homa_grant_destroy__basics)
+TEST_F(homa_grant, homa_grant_free__basics)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_new(&mock_net);
-	homa_grant_destroy(grant);
+	grant = homa_grant_alloc(&mock_net);
+	homa_grant_free(grant);
 	EXPECT_STREQ("unregister_net_sysctl_table", unit_log_get());
 }
-TEST_F(homa_grant, homa_grant_destroy__sysctls_not_registered)
+TEST_F(homa_grant, homa_grant_free__sysctls_not_registered)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_new(&mock_net);
+	grant = homa_grant_alloc(&mock_net);
 	grant->sysctl_header = NULL;
-	homa_grant_destroy(grant);
+	homa_grant_free(grant);
 	EXPECT_STREQ("", unit_log_get());
 }
 

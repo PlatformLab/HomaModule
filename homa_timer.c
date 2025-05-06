@@ -17,14 +17,14 @@
 #endif /* See strip.py */
 
 /**
- * homa_check_rpc() -  Invoked for each RPC during each timer pass; does
+ * homa_timer_check_rpc() -  Invoked for each RPC during each timer pass; does
  * most of the work of checking for time-related actions such as sending
  * resends, aborting RPCs for which there is no response, and sending
  * requests for acks. It is separate from homa_timer because homa_timer
  * got too long and deeply indented.
  * @rpc:     RPC to check; must be locked by the caller.
  */
-void homa_check_rpc(struct homa_rpc *rpc)
+void homa_timer_check_rpc(struct homa_rpc *rpc)
 	__must_hold(&rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
@@ -265,7 +265,7 @@ void homa_timer(struct homa *homa)
 #endif /* See strip.py */
 			}
 			rpc->silent_ticks++;
-			homa_check_rpc(rpc);
+			homa_timer_check_rpc(rpc);
 			homa_rpc_unlock(rpc);
 			rpc_count++;
 			if (rpc_count >= 10) {

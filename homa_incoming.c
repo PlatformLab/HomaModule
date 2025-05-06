@@ -51,7 +51,7 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 	skb_queue_head_init(&rpc->msgin.packets);
 	INIT_LIST_HEAD(&rpc->msgin.gaps);
 	rpc->msgin.bytes_remaining = length;
-	err = homa_pool_allocate(rpc);
+	err = homa_pool_alloc_msg(rpc);
 	if (err != 0) {
 		rpc->msgin.length = -1;
 		return err;
@@ -71,14 +71,14 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 }
 
 /**
- * homa_gap_new() - Create a new gap and add it to a list.
+ * homa_gap_alloc() - Allocate a new gap and add it to a gap list.
  * @next:   Add the new gap just before this list element.
  * @start:  Offset of first byte covered by the gap.
  * @end:    Offset of byte just after the last one covered by the gap.
  * Return:  Pointer to the new gap, or NULL if memory couldn't be allocated
  *          for the gap object.
  */
-struct homa_gap *homa_gap_new(struct list_head *next, int start, int end)
+struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end)
 {
 	struct homa_gap *gap;
 
@@ -145,7 +145,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 
 	if (start > rpc->msgin.recv_end) {
 		/* Packet creates a new gap. */
-		if (!homa_gap_new(&rpc->msgin.gaps,
+		if (!homa_gap_alloc(&rpc->msgin.gaps,
 				  rpc->msgin.recv_end, start)) {
 			pr_err("Homa couldn't allocate gap: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
@@ -198,7 +198,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		}
 
 		/* Packet is in the middle of the gap; must split the gap. */
-		gap2 = homa_gap_new(&gap->links, gap->start, start);
+		gap2 = homa_gap_alloc(&gap->links, gap->start, start);
 		if (!gap2) {
 			pr_err("Homa couldn't allocate gap for split: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
@@ -474,7 +474,7 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 					/* Create a new RPC if one doesn't
 					 * already exist.
 					 */
-					rpc = homa_rpc_new_server(hsk, &saddr,
+					rpc = homa_rpc_alloc_server(hsk, &saddr,
 								  h, &created);
 					if (IS_ERR(rpc)) {
 						pr_warn("homa_pkt_dispatch couldn't create server rpc: error %lu",
@@ -484,11 +484,11 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 						goto discard;
 					}
 				} else {
-					rpc = homa_find_server_rpc(hsk, &saddr,
+					rpc = homa_rpc_find_server(hsk, &saddr,
 								   id);
 				}
 			} else {
-				rpc = homa_find_client_rpc(hsk, id);
+				rpc = homa_rpc_find_client(hsk, id);
 			}
 		}
 		if (unlikely(!rpc)) {
@@ -645,7 +645,7 @@ void homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 			goto discard;
 	} else if (rpc->state != RPC_INCOMING) {
-		/* Must be server; note that homa_rpc_new_server already
+		/* Must be server; note that homa_rpc_alloc_server already
 		 * initialized msgin and allocated buffers.
 		 */
 		if (unlikely(rpc->msgin.length >= 0))

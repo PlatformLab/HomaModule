@@ -138,16 +138,16 @@ struct homa_pool {
 };
 
 bool     homa_bpage_available(struct homa_bpage *bpage, u64 now);
-int      homa_pool_allocate(struct homa_rpc *rpc);
+struct   homa_pool *homa_pool_alloc(struct homa_sock *hsk);
+int      homa_pool_alloc_msg(struct homa_rpc *rpc);
 void     homa_pool_check_waiting(struct homa_pool *pool);
-void     homa_pool_destroy(struct homa_pool *pool);
+void     homa_pool_free(struct homa_pool *pool);
 void __user *homa_pool_get_buffer(struct homa_rpc *rpc, int offset,
 				  int *available);
 int      homa_pool_get_pages(struct homa_pool *pool, int num_pages,
 			     u32 *pages, int leave_locked);
 void     homa_pool_get_rcvbuf(struct homa_pool *pool,
 			      struct homa_rcvbuf_args *args);
-struct   homa_pool *homa_pool_new(struct homa_sock *hsk);
 int      homa_pool_release_buffers(struct homa_pool *pool,
 				   int num_buffers, u32 *buffers);
 int      homa_pool_set_region(struct homa_pool *pool, void __user *region,

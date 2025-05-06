@@ -220,17 +220,19 @@ struct homa_grant_candidates {
 
 };
 
+struct homa_grant
+	*homa_grant_alloc(struct net *net);
 void     homa_grant_cand_add(struct homa_grant_candidates *cand,
 			     struct homa_rpc *rpc);
 void     homa_grant_cand_check(struct homa_grant_candidates *cand,
 			       struct homa_grant *grant);
 void     homa_grant_check_rpc(struct homa_rpc *rpc);
-void     homa_grant_destroy(struct homa_grant *grant);
 int      homa_grant_dointvec(const struct ctl_table *table, int write,
 			     void *buffer, size_t *lenp, loff_t *ppos);
 void     homa_grant_end_rpc(struct homa_rpc *rpc);
 void     homa_grant_find_oldest(struct homa *homa);
 void     homa_grant_fix_order(struct homa_grant *grant);
+void     homa_grant_free(struct homa_grant *grant);
 void     homa_grant_init_rpc(struct homa_rpc *rpc, int unsched);
 struct homa_rpc
 	*homa_grant_insert_active(struct homa_rpc *rpc);
@@ -238,8 +240,6 @@ void     homa_grant_insert_grantable(struct homa_rpc *rpc);
 void     homa_grant_manage_rpc(struct homa_rpc *rpc);
 void     homa_grant_lock_slow(struct homa_grant *grant);
 void     homa_grant_log_tt(struct homa *homa);
-struct homa_grant
-	*homa_grant_new(struct net *net);
 int      homa_grant_outranks(struct homa_rpc *rpc1,
 			     struct homa_rpc *rpc2);
 void     homa_grant_pkt(struct sk_buff *skb, struct homa_rpc *rpc);

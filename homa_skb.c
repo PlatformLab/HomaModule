@@ -105,7 +105,7 @@ void homa_skb_cleanup(struct homa *homa)
 }
 
 /**
- * homa_skb_new_tx() - Allocate a new sk_buff for outgoing data.
+ * homa_skb_alloc_tx() - Allocate a new sk_buff for outgoing data.
  * @length:       Number of bytes of data that the caller would like to
  *                have available in the linear part of the sk_buff for
  *                the Homa header and additional data beyond that. This
@@ -116,7 +116,7 @@ void homa_skb_cleanup(struct homa *homa)
  *                skb_put will be for the transport (Homa) header. The
  *                homa_skb_info is not initialized.
  */
-struct sk_buff *homa_skb_new_tx(int length)
+struct sk_buff *homa_skb_alloc_tx(int length)
 {
 	u64 start = sched_clock();
 	struct sk_buff *skb;
@@ -434,7 +434,7 @@ int homa_skb_append_from_skb(struct homa *homa, struct sk_buff *dst_skb,
  * homa_skb_free_tx() - Release the storage for an sk_buff.
  * @homa:      Overall data about the Homa protocol implementation.
  * @skb:       sk_buff to free; should have been allocated by
- *             homa_skb_new_tx.
+ *             homa_skb_alloc_tx.
  */
 void homa_skb_free_tx(struct homa *homa, struct sk_buff *skb)
 {
@@ -445,7 +445,7 @@ void homa_skb_free_tx(struct homa *homa, struct sk_buff *skb)
  * homa_skb_free_many_tx() - Release the storage for multiple sk_buffs.
  * @homa:      Overall data about the Homa protocol implementation.
  * @skbs:      Pointer to first entry in array of sk_buffs to free.  All of
- *             these should have been allocated by homa_skb_new_tx.
+ *             these should have been allocated by homa_skb_alloc_tx.
  * @count:     Total number of sk_buffs to free.
  */
 void homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs, int count)

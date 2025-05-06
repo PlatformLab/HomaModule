@@ -95,6 +95,7 @@ struct homa_skb_core {
 };
 DECLARE_PER_CPU(struct homa_skb_core, homa_skb_core);
 
+struct sk_buff *homa_skb_alloc_tx(int length);
 int      homa_skb_append_from_iter(struct homa *homa,
 				   struct sk_buff *skb, struct iov_iter *iter,
 				   int length);
@@ -115,7 +116,6 @@ void     homa_skb_free_many_tx(struct homa *homa, struct sk_buff **skbs,
 void     homa_skb_get(struct sk_buff *skb, void *dest, int offset,
 		      int length);
 int      homa_skb_init(struct homa *homa);
-struct sk_buff *homa_skb_new_tx(int length);
 bool     homa_skb_page_alloc(struct homa *homa,
 			     struct homa_skb_core *core);
 void     homa_skb_release_pages(struct homa *homa);

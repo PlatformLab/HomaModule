@@ -19,7 +19,7 @@ static inline struct homa_skb_core *get_skb_core(int core)
 static struct sk_buff *test_skb(struct homa *homa)
 {
 	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
-	struct sk_buff *skb = homa_skb_new_tx(100);
+	struct sk_buff *skb = homa_skb_alloc_tx(100);
 	int32_t data[1000];
 	char *src;
 	int i;
@@ -293,7 +293,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__free_previous_page)
 TEST_F(homa_skb, homa_skb_page_alloc__reuse_existing_page)
 {
 	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
-	struct sk_buff *skb = homa_skb_new_tx(100);
+	struct sk_buff *skb = homa_skb_alloc_tx(100);
 	struct page *page;
 	int length = 100;
 
@@ -452,7 +452,7 @@ TEST_F(homa_skb, homa_skb_append_from_iter__no_memory)
 TEST_F(homa_skb, homa_skb_append_from_skb__header_only)
 {
 	struct sk_buff *src_skb = test_skb(&self->homa);
-	struct sk_buff *dst_skb = homa_skb_new_tx(100);
+	struct sk_buff *dst_skb = homa_skb_alloc_tx(100);
 	int32_t data[500];
 
 	EXPECT_EQ(0, homa_skb_append_from_skb(&self->homa, dst_skb, src_skb,
@@ -469,7 +469,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__error_copying_header)
 {
 	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 	struct sk_buff *src_skb = test_skb(&self->homa);
-	struct sk_buff *dst_skb = homa_skb_new_tx(100);
+	struct sk_buff *dst_skb = homa_skb_alloc_tx(100);
 
 	mock_alloc_page_errors = -1;
 	skb_core->page_inuse = skb_core->page_size;
@@ -482,7 +482,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__error_copying_header)
 TEST_F(homa_skb, homa_skb_append_from_skb__header_and_first_frag)
 {
 	struct sk_buff *src_skb = test_skb(&self->homa);
-	struct sk_buff *dst_skb = homa_skb_new_tx(100);
+	struct sk_buff *dst_skb = homa_skb_alloc_tx(100);
 	struct skb_shared_info *dst_shinfo;
 	int32_t data[500];
 
@@ -502,7 +502,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__header_and_first_frag)
 TEST_F(homa_skb, homa_skb_append_from_skb__multiple_frags)
 {
 	struct sk_buff *src_skb = test_skb(&self->homa);
-	struct sk_buff *dst_skb = homa_skb_new_tx(100);
+	struct sk_buff *dst_skb = homa_skb_alloc_tx(100);
 	struct skb_shared_info *dst_shinfo;
 	int32_t data[500];
 
@@ -522,7 +522,7 @@ TEST_F(homa_skb, homa_skb_append_from_skb__multiple_frags)
 TEST_F(homa_skb, homa_skb_append_from_skb__dst_runs_out_of_frags)
 {
 	struct sk_buff *src_skb = test_skb(&self->homa);
-	struct sk_buff *dst_skb = homa_skb_new_tx(100);
+	struct sk_buff *dst_skb = homa_skb_alloc_tx(100);
 	struct skb_shared_info *dst_shinfo;
 	int i, err;
 
@@ -547,14 +547,14 @@ TEST_F(homa_skb, homa_skb_free_many_tx__basics)
 	struct sk_buff *skbs[2];
 	int i, length;
 
-	skbs[0] = homa_skb_new_tx(100);
+	skbs[0] = homa_skb_alloc_tx(100);
 	for (i = 0; i < 3; i++) {
 		length = 2*HOMA_SKB_PAGE_SIZE;
 		homa_skb_extend_frags(&self->homa, skbs[0], &length);
 	}
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, length);
 
-	skbs[1] = homa_skb_new_tx(100);
+	skbs[1] = homa_skb_alloc_tx(100);
 	length = 2 * HOMA_SKB_PAGE_SIZE;
 	homa_skb_extend_frags(&self->homa, skbs[1], &length);
 
@@ -567,7 +567,7 @@ TEST_F(homa_skb, homa_skb_free_many_tx__skb_ref_count_not_one)
 	struct page *page;
 	int length;
 
-	skb = homa_skb_new_tx(100);
+	skb = homa_skb_alloc_tx(100);
 	length = HOMA_SKB_PAGE_SIZE;
 	homa_skb_extend_frags(&self->homa, skb, &length);
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, length);
@@ -586,7 +586,7 @@ TEST_F(homa_skb, homa_skb_free_many_tx__check_page_order)
 	struct sk_buff *skb;
 	int i, length;
 
-	skb = homa_skb_new_tx(100);
+	skb = homa_skb_alloc_tx(100);
 	for (i = 0; i < 4; i++) {
 		length = 2 * HOMA_SKB_PAGE_SIZE;
 		homa_skb_extend_frags(&self->homa, skb, &length);

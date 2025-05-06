@@ -17,9 +17,9 @@
 #endif /* See strip.py */
 
 /**
- * homa_rpc_new_client() - Allocate and construct a client RPC (one that is used
- * to issue an outgoing request). Doesn't send any packets. Invoked with no
- * locks held.
+ * homa_rpc_alloc_client() - Allocate and initialize a client RPC (one that
+ * is used to issue an outgoing request). Doesn't send any packets. Invoked
+ * with no locks held.
  * @hsk:      Socket to which the RPC belongs.
  * @dest:     Address of host (ip and port) to which the RPC will be sent.
  *
@@ -27,7 +27,7 @@
  *            errno if an error occurred. The RPC will be locked; the
  *            caller must eventually unlock it.
  */
-struct homa_rpc *homa_rpc_new_client(struct homa_sock *hsk,
+struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 				     const union sockaddr_in_union *dest)
 	__acquires(rpc_bucket_lock)
 {
@@ -94,7 +94,7 @@ error:
 }
 
 /**
- * homa_rpc_new_server() - Allocate and construct a server RPC (one that is
+ * homa_rpc_alloc_server() - Allocate and initialize a server RPC (one that is
  * used to manage an incoming request). If appropriate, the RPC will also
  * be handed off (we do it here, while we have the socket locked, to avoid
  * acquiring the socket lock a second time later for the handoff).
@@ -109,7 +109,7 @@ error:
  *          if an error occurred. If there is already an RPC corresponding
  *          to h, then it is returned instead of creating a new RPC.
  */
-struct homa_rpc *homa_rpc_new_server(struct homa_sock *hsk,
+struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				     const struct in6_addr *source,
 				     struct homa_data_hdr *h, int *created)
 	__acquires(rpc_bucket_lock)
@@ -228,11 +228,11 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		if (!hsk2)
 			return;
 	}
-	rpc = homa_find_server_rpc(hsk2, saddr, id);
+	rpc = homa_rpc_find_server(hsk2, saddr, id);
 	if (rpc) {
 		tt_record1("homa_rpc_acked freeing id %d", rpc->id);
 		homa_rpc_end(rpc);
-		homa_rpc_unlock(rpc); /* Locked by homa_find_server_rpc. */
+		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 	}
 	if (hsk->port != server_port)
 		sock_put(&hsk2->sock);
@@ -490,7 +490,7 @@ release:
 }
 
 /**
- * homa_find_client_rpc() - Locate client-side information about the RPC that
+ * homa_rpc_find_client() - Locate client-side information about the RPC that
  * a packet belongs to, if there is any. Thread-safe without socket lock.
  * @hsk:      Socket via which packet was received.
  * @id:       Unique identifier for the RPC.
@@ -499,7 +499,7 @@ release:
  *            The RPC will be locked; the caller must eventually unlock it
  *            by invoking homa_rpc_unlock.
  */
-struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
+struct homa_rpc *homa_rpc_find_client(struct homa_sock *hsk, u64 id)
 	__cond_acquires(rpc_bucket_lock)
 {
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
@@ -515,7 +515,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
 }
 
 /**
- * homa_find_server_rpc() - Locate server-side information about the RPC that
+ * homa_rpc_find_server() - Locate server-side information about the RPC that
  * a packet belongs to, if there is any. Thread-safe without socket lock.
  * @hsk:      Socket via which packet was received.
  * @saddr:    Address from which the packet was sent.
@@ -525,7 +525,7 @@ struct homa_rpc *homa_find_client_rpc(struct homa_sock *hsk, u64 id)
  *            if none. The RPC will be locked; the caller must eventually
  *            unlock it by invoking homa_rpc_unlock.
  */
-struct homa_rpc *homa_find_server_rpc(struct homa_sock *hsk,
+struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 				      const struct in6_addr *saddr, u64 id)
 	__cond_acquires(rpc_bucket_lock)
 {

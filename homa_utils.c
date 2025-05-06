@@ -39,14 +39,14 @@ int homa_init(struct homa *homa, struct net *net)
 	memset(homa, 0, sizeof(*homa));
 	atomic64_set(&homa->next_outgoing_id, 2);
 #ifndef __STRIP__ /* See strip.py */
-	homa->grant = homa_grant_new(net);
+	homa->grant = homa_grant_alloc(net);
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
 		return err;
 	}
 #endif /* See strip.py */
-	homa->pacer = homa_pacer_new(homa, net);
+	homa->pacer = homa_pacer_alloc(homa, net);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
 		homa->pacer = NULL;
@@ -145,12 +145,12 @@ void homa_destroy(struct homa *homa)
 	}
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
-		homa_grant_destroy(homa->grant);
+		homa_grant_free(homa->grant);
 		homa->grant = NULL;
 	}
 #endif /* See strip.py */
 	if (homa->pacer) {
-		homa_pacer_destroy(homa->pacer);
+		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
 	}
 	if (homa->peers) {

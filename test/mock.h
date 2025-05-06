@@ -194,10 +194,10 @@ void        mock_set_homa(struct homa *homa);
 void        mock_set_ipv6(struct homa_sock *hsk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
-int         mock_skb_count(void);
 struct sk_buff *
-            mock_skb_new(struct in6_addr *saddr, struct homa_common_hdr *h,
+            mock_skb_alloc(struct in6_addr *saddr, struct homa_common_hdr *h,
 			 int extra_bytes, int first_value);
+int         mock_skb_count(void);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
 void        mock_sock_hold(struct sock *sk);

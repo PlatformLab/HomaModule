@@ -45,7 +45,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 	server_addr.in6.sin6_port =  htons(server_port);
 	if (id != 0)
 		atomic64_set(&hsk->homa->next_outgoing_id, id);
-	crpc = homa_rpc_new_client(hsk, &server_addr);
+	crpc = homa_rpc_alloc_client(hsk, &server_addr);
 	if (IS_ERR(crpc))
 		return NULL;
 	if (homa_message_out_fill(crpc, unit_iov_iter(NULL, req_length), 0)) {
@@ -75,7 +75,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
-	homa_dispatch_pkts(mock_skb_new(server_ip, &h.common, this_size, 0),
+	homa_dispatch_pkts(mock_skb_alloc(server_ip, &h.common, this_size, 0),
 			hsk->homa);
 	if (state == UNIT_RCVD_ONE_PKT)
 		return crpc;
@@ -86,7 +86,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
-		homa_dispatch_pkts(mock_skb_new(server_ip, &h.common,
+		homa_dispatch_pkts(mock_skb_alloc(server_ip, &h.common,
 				this_size, 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)
@@ -378,14 +378,14 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 #ifndef __STRIP__ /* See strip.py */
 	h.incoming = htonl(10000);
 #endif /* See strip.py */
-	struct homa_rpc *srpc = homa_rpc_new_server(hsk, client_ip, &h,
+	struct homa_rpc *srpc = homa_rpc_alloc_server(hsk, client_ip, &h,
 			&created);
 
 	if (IS_ERR(srpc))
 		return NULL;
 	EXPECT_EQ(srpc->completion_cookie, 0);
 	homa_rpc_unlock(srpc);
-	homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
+	homa_dispatch_pkts(mock_skb_alloc(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : req_length, 0),
 			hsk->homa);
@@ -399,7 +399,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 		if (this_size >  UNIT_TEST_DATA_PER_PACKET)
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
-		homa_dispatch_pkts(mock_skb_new(client_ip, &h.common,
+		homa_dispatch_pkts(mock_skb_alloc(client_ip, &h.common,
 				this_size, 0), hsk->homa);
 	}
 	if (state == UNIT_RCVD_MSG)

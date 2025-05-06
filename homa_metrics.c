@@ -347,7 +347,7 @@ char *homa_metrics_print(void)
 		  m->ignored_need_acks);
 		M("bpage_reuses              %15llu  Buffer page could be reused because ref count was zero\n",
 		  m->bpage_reuses);
-		M("buffer_alloc_failures     %15llu  homa_pool_allocate didn't find enough buffer space for an RPC\n",
+		M("buffer_alloc_failures     %15llu  homa_pool_alloc_msg didn't find enough buffer space for an RPC\n",
 		  m->buffer_alloc_failures);
 		M("linux_pkt_alloc_bytes     %15llu  Bytes allocated in new packets by NIC driver due to cache overflows\n",
 		  m->linux_pkt_alloc_bytes);
