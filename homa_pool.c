@@ -84,9 +84,8 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	 * without GFP_ATOMIC.
 	 */
 	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
-	if (num_bpages < MIN_POOL_SIZE) {
+	if (num_bpages < MIN_POOL_SIZE)
 		return -EINVAL;
-	}
 	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
 				    __GFP_ZERO);
 	if (!descriptors)
@@ -219,8 +218,8 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (limit == 0) {
 			int extra;
 
-			limit = pool->num_bpages
-					- atomic_read(&pool->free_bpages);
+			limit = pool->num_bpages -
+				atomic_read(&pool->free_bpages);
 			extra = limit >> 2;
 			limit += (extra < MIN_EXTRA) ? MIN_EXTRA : extra;
 			if (limit > pool->num_bpages)
