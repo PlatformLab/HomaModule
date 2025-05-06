@@ -614,19 +614,6 @@ static inline struct in6_addr skb_canonical_ipv6_saddr(struct sk_buff *skb)
 	return mapped;
 }
 
-static inline bool is_homa_pkt(struct sk_buff *skb)
-{
-	struct iphdr *iph = ip_hdr(skb);
-
-#ifndef __STRIP__ /* See strip.py */
-	return ((iph->protocol == IPPROTO_HOMA) ||
-		((iph->protocol == IPPROTO_TCP) &&
-		 (tcp_hdr(skb)->urg_ptr == htons(HOMA_TCP_URGENT))));
-#else /* See strip.py */
-	return (iph->protocol == IPPROTO_HOMA);
-#endif /* See strip.py */
-}
-
 /**
  * homa_make_header_avl() - Invokes pskb_may_pull to make sure that all the
  * Homa header information for a packet is in the linear part of the skb
