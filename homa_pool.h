@@ -15,39 +15,30 @@
  * a buffer pool.
  */
 struct homa_bpage {
-	union {
-		/**
-		 * @cache_line: Ensures that each homa_bpage object
-		 * is exactly one cache line long.
-		 */
-		char cache_line[L1_CACHE_BYTES];
-		struct {
-			/** @lock: to synchronize shared access. */
-			spinlock_t lock;
+	/** @lock: to synchronize shared access. */
+	spinlock_t lock;
 
-			/**
-			 * @refs: Counts number of distinct uses of this
-			 * bpage (1 tick for each message that is using
-			 * this page, plus an additional tick if the @owner
-			 * field is set).
-			 */
-			atomic_t refs;
+	/**
+	 * @refs: Counts number of distinct uses of this
+	 * bpage (1 tick for each message that is using
+	 * this page, plus an additional tick if the @owner
+	 * field is set).
+	 */
+	atomic_t refs;
 
-			/**
-			 * @owner: kernel core that currently owns this page
-			 * (< 0 if none).
-			 */
-			int owner;
+	/**
+	 * @owner: kernel core that currently owns this page
+	 * (< 0 if none).
+	 */
+	int owner;
 
-			/**
-			 * @expiration: time (in sched_clock() units) after
-			 * which it's OK to steal this page from its current
-			 * owner (if @refs is 1).
-			 */
-			u64 expiration;
-		};
-	};
-};
+	/**
+	 * @expiration: time (in sched_clock() units) after
+	 * which it's OK to steal this page from its current
+	 * owner (if @refs is 1).
+	 */
+	u64 expiration;
+} ____cacheline_aligned_in_smp;
 
 #ifndef __STRIP__ /* See strip.py */
 #ifndef CONFIG_LOCKDEP
