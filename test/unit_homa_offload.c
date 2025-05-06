@@ -11,16 +11,16 @@
 
 #define cur_offload_core (&per_cpu(homa_offload_core, smp_processor_id()))
 
-static struct sk_buff *tcp_gro_receive(struct list_head *held_list,
+static struct sk_buff *test_tcp_gro_receive(struct list_head *held_list,
 				       struct sk_buff *skb)
 {
-	UNIT_LOG("; ", "tcp_gro_receive");
+	UNIT_LOG("; ", "test_tcp_gro_receive");
 	return NULL;
 }
-static struct sk_buff *tcp6_gro_receive(struct list_head *held_list,
+static struct sk_buff *unit_tcp6_gro_receive(struct list_head *held_list,
 				       struct sk_buff *skb)
 {
-	UNIT_LOG("; ", "tcp6_gro_receive");
+	UNIT_LOG("; ", "unit_tcp6_gro_receive");
 	return NULL;
 }
 
@@ -79,9 +79,9 @@ FIXTURE_SETUP(homa_offload)
 	list_add_tail(&self->skb->list, &self->napi.gro_hash[2].list);
 	list_add_tail(&self->skb2->list, &self->napi.gro_hash[2].list);
 	INIT_LIST_HEAD(&self->empty_list);
-	self->tcp_offloads.callbacks.gro_receive = tcp_gro_receive;
+	self->tcp_offloads.callbacks.gro_receive = test_tcp_gro_receive;
 	inet_offloads[IPPROTO_TCP] = &self->tcp_offloads;
-	self->tcp6_offloads.callbacks.gro_receive = tcp6_gro_receive;
+	self->tcp6_offloads.callbacks.gro_receive = unit_tcp6_gro_receive;
 	inet6_offloads[IPPROTO_TCP] = &self->tcp6_offloads;
 	homa_offload_init();
 
@@ -115,16 +115,16 @@ TEST_F(homa_offload, homa_gro_hook_tcp)
 	homa_gro_hook_tcp();
 
 	homa_gro_unhook_tcp();
-	EXPECT_EQ(&tcp_gro_receive,
+	EXPECT_EQ(&test_tcp_gro_receive,
 		  inet_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-	EXPECT_EQ(&tcp6_gro_receive,
+	EXPECT_EQ(&unit_tcp6_gro_receive,
 		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
 
 	/* Second unhook call should do nothing. */
 	homa_gro_unhook_tcp();
-	EXPECT_EQ(&tcp_gro_receive,
+	EXPECT_EQ(&test_tcp_gro_receive,
 		  inet_offloads[IPPROTO_TCP]->callbacks.gro_receive);
-	EXPECT_EQ(&tcp6_gro_receive,
+	EXPECT_EQ(&unit_tcp6_gro_receive,
 		  inet6_offloads[IPPROTO_TCP]->callbacks.gro_receive);
 }
 
@@ -139,7 +139,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 	h = (struct homa_common_hdr *) skb_transport_header(skb);
 	h->flags = 0;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
-	EXPECT_STREQ("tcp_gro_receive", unit_log_get());
+	EXPECT_STREQ("test_tcp_gro_receive", unit_log_get());
 	kfree_skb(skb);
 	unit_log_clear();
 
@@ -147,7 +147,7 @@ TEST_F(homa_offload, homa_tcp_gro_receive__pass_to_tcp)
 	h = (struct homa_common_hdr *)skb_transport_header(skb);
 	h->urgent -= 1;
 	EXPECT_EQ(NULL, homa_tcp_gro_receive(&self->empty_list, skb));
-	EXPECT_STREQ("tcp_gro_receive", unit_log_get());
+	EXPECT_STREQ("test_tcp_gro_receive", unit_log_get());
 	kfree_skb(skb);
 	homa_gro_unhook_tcp();
 }
