@@ -249,6 +249,10 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (!homa_bpage_available(bpage, now))
 			continue;
 		if (!spin_trylock_bh(&bpage->lock))
+			/* Rather than wait for a locked page to become free,
+			 * just go on to the next page. If the page is locked,
+			 * it probably won't turn out to be available anyway.
+			 */
 			continue;
 		if (!homa_bpage_available(bpage, now)) {
 			spin_unlock_bh(&bpage->lock);
