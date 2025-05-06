@@ -166,7 +166,7 @@ char *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len)
 					     ", TSO disabled");
 		if (skb_shinfo(skb)->gso_segs <= 1)
 			break;
-		pos = skb_transport_offset(skb) + sizeof32(*h) + seg_length;
+		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, used, ", extra segs");
 		for (i = skb_shinfo(skb)->gso_segs - 1; i > 0; i--) {
 			if (homa_info->seg_length < skb_shinfo(skb)->gso_size) {
@@ -296,7 +296,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 		if (offset == -1)
 			offset = ntohl(h->common.sequence);
 
-		pos = skb_transport_offset(skb) + sizeof32(*h) + seg_length;
+		pos = skb_transport_offset(skb) + sizeof(*h) + seg_length;
 		used = homa_snprintf(buffer, buf_len, 0, "DATA%s %d@%d",
 				     h->retransmit ? " retrans" : "",
 				     seg_length, offset);

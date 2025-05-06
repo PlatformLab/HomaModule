@@ -398,27 +398,27 @@ static struct ctl_table homa_ctl_table[] = {
 /* Sizes of the headers for each Homa packet type, in bytes. */
 #ifndef __STRIP__ /* See strip.py */
 static __u16 header_lengths[] = {
-	sizeof32(struct homa_data_hdr),
-	sizeof32(struct homa_grant_hdr),
-	sizeof32(struct homa_resend_hdr),
-	sizeof32(struct homa_rpc_unknown_hdr),
-	sizeof32(struct homa_busy_hdr),
-	sizeof32(struct homa_cutoffs_hdr),
-	sizeof32(struct homa_freeze_hdr),
-	sizeof32(struct homa_need_ack_hdr),
-	sizeof32(struct homa_ack_hdr)
+	sizeof(struct homa_data_hdr),
+	sizeof(struct homa_grant_hdr),
+	sizeof(struct homa_resend_hdr),
+	sizeof(struct homa_rpc_unknown_hdr),
+	sizeof(struct homa_busy_hdr),
+	sizeof(struct homa_cutoffs_hdr),
+	sizeof(struct homa_freeze_hdr),
+	sizeof(struct homa_need_ack_hdr),
+	sizeof(struct homa_ack_hdr)
 };
 #else /* See strip.py */
 static __u16 header_lengths[] = {
-	sizeof32(struct homa_data_hdr),
+	sizeof(struct homa_data_hdr),
 	0,
-	sizeof32(struct homa_resend_hdr),
-	sizeof32(struct homa_rpc_unknown_hdr),
-	sizeof32(struct homa_busy_hdr),
+	sizeof(struct homa_resend_hdr),
+	sizeof(struct homa_rpc_unknown_hdr),
+	sizeof(struct homa_busy_hdr),
 	0,
 	0,
-	sizeof32(struct homa_need_ack_hdr),
-	sizeof32(struct homa_ack_hdr)
+	sizeof(struct homa_need_ack_hdr),
+	sizeof(struct homa_ack_hdr)
 };
 #endif /* See strip.py */
 
@@ -434,20 +434,20 @@ int __init homa_load(void)
 
 	pr_err("Homa module loading\n");
 #ifndef __STRIP__ /* See strip.py */
-	pr_notice("Homa structure sizes: homa_data_hdr %u, homa_seg_hdr %u, ack %u, peer %u, ip_hdr %u flowi %u ipv6_hdr %u, flowi6 %u tcp_sock %u homa_rpc %u sk_buff %u rcvmsg_control %u union sockaddr_in_union %u HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
-		  sizeof32(struct homa_data_hdr),
-		  sizeof32(struct homa_seg_hdr),
-		  sizeof32(struct homa_ack),
-		  sizeof32(struct homa_peer),
-		  sizeof32(struct iphdr),
-		  sizeof32(struct flowi),
-		  sizeof32(struct ipv6hdr),
-		  sizeof32(struct flowi6),
-		  sizeof32(struct tcp_sock),
-		  sizeof32(struct homa_rpc),
-		  sizeof32(struct sk_buff),
-		  sizeof32(struct homa_recvmsg_args),
-		  sizeof32(union sockaddr_in_union),
+	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
+		  sizeof(struct homa_data_hdr),
+		  sizeof(struct homa_seg_hdr),
+		  sizeof(struct homa_ack),
+		  sizeof(struct homa_peer),
+		  sizeof(struct iphdr),
+		  sizeof(struct flowi),
+		  sizeof(struct ipv6hdr),
+		  sizeof(struct flowi6),
+		  sizeof(struct tcp_sock),
+		  sizeof(struct homa_rpc),
+		  sizeof(struct sk_buff),
+		  sizeof(struct homa_recvmsg_args),
+		  sizeof(union sockaddr_in_union),
 		  HOMA_MAX_BPAGES,
 		  NR_CPUS,
 		  nr_cpu_ids,

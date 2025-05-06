@@ -113,18 +113,18 @@ TEST_F(homa_utils, homa_snprintf)
 	char buffer[50];
 	int used = 0;
 
-	used = homa_snprintf(buffer, sizeof32(buffer), used,
+	used = homa_snprintf(buffer, sizeof(buffer), used,
 			"Test message with values: %d and %d", 100, 1000);
 	EXPECT_EQ(38, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000", buffer);
 
-	used = homa_snprintf(buffer, sizeof32(buffer), used,
+	used = homa_snprintf(buffer, sizeof(buffer), used,
 			"; plus: %d", 123456);
 	EXPECT_EQ(49, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",
 			buffer);
 
-	used = homa_snprintf(buffer, sizeof32(buffer), used,
+	used = homa_snprintf(buffer, sizeof(buffer), used,
 			"more text, none of which fits");
 	EXPECT_EQ(49, used);
 	EXPECT_STREQ("Test message with values: 100 and 1000; plus: 123",

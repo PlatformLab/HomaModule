@@ -140,10 +140,10 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 
 	/* Initialize the overall skb. */
 #ifndef __STRIP__ /* See strip.py */
-	skb = homa_skb_new_tx(sizeof32(struct homa_data_hdr));
+	skb = homa_skb_new_tx(sizeof(struct homa_data_hdr));
 #else /* See strip.py */
-	skb = homa_skb_new_tx(sizeof32(struct homa_data_hdr) + length +
-			      (segs - 1) * sizeof32(struct homa_seg_hdr));
+	skb = homa_skb_new_tx(sizeof(struct homa_data_hdr) + length +
+			      (segs - 1) * sizeof(struct homa_seg_hdr));
 #endif /* See strip.py */
 	if (!skb)
 		return ERR_PTR(-ENOMEM);
@@ -195,7 +195,7 @@ struct sk_buff *homa_new_data_packet(struct homa_rpc *rpc,
 	if (segs > 1) {
 #endif /* See strip.py */
 		homa_set_doff(h, sizeof(struct homa_data_hdr)  -
-				sizeof32(struct homa_seg_hdr));
+				sizeof(struct homa_seg_hdr));
 #ifndef __STRIP__ /* See strip.py */
 		h->seg.offset = htonl(offset);
 #endif /* See strip.py */
@@ -788,7 +788,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			continue;
 
 		offset = homa_info->offset;
-		seg_offset = sizeof32(struct homa_data_hdr);
+		seg_offset = sizeof(struct homa_data_hdr);
 		data_left = homa_info->data_bytes;
 		if (skb_shinfo(skb)->gso_segs <= 1) {
 			seg_length = data_left;
@@ -829,7 +829,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 				goto resend_done;
 			}
 			h = __skb_put_data(new_skb, skb_transport_header(skb),
-					   sizeof32(struct homa_data_hdr));
+					   sizeof(struct homa_data_hdr));
 			h->common.sequence = htonl(offset);
 			h->seg.offset = htonl(offset);
 			h->retransmit = 1;

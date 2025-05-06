@@ -363,7 +363,7 @@ TEST_F(homa_plumbing, homa_setsockopt__server_success)
 TEST_F(homa_plumbing, homa_getsockopt__recvbuf_success)
 {
 	struct homa_rcvbuf_args val;
-	int size = sizeof32(val) + 10;
+	int size = sizeof(val) + 10;
 
 	homa_pool_destroy(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_new(&self->hsk);
@@ -374,12 +374,12 @@ TEST_F(homa_plumbing, homa_getsockopt__recvbuf_success)
 		  SO_HOMA_RCVBUF, (char *)&val, &size));
 	EXPECT_EQ(0x40000, val.start);
 	EXPECT_EQ(10*HOMA_BPAGE_SIZE, val.length);
-	EXPECT_EQ(sizeof32(val), size);
+	EXPECT_EQ(sizeof(val), size);
 }
 TEST_F(homa_plumbing, homa_getsockopt__cant_read_size)
 {
 	struct homa_rcvbuf_args val;
-	int size = sizeof32(val);
+	int size = sizeof(val);
 
 	mock_copy_data_errors = 1;
 	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
@@ -388,7 +388,7 @@ TEST_F(homa_plumbing, homa_getsockopt__cant_read_size)
 TEST_F(homa_plumbing, homa_getsockopt__bad_level)
 {
 	struct homa_rcvbuf_args val;
-	int size = sizeof32(val);
+	int size = sizeof(val);
 
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, 0, SO_HOMA_RCVBUF,
 		(char *)&val, &size));
@@ -396,7 +396,7 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_level)
 TEST_F(homa_plumbing, homa_getsockopt__recvbuf_bad_length)
 {
 	struct homa_rcvbuf_args val;
-	int size = sizeof32(val) - 1;
+	int size = sizeof(val) - 1;
 
 	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF, (char *)&val, &size));
@@ -404,7 +404,7 @@ TEST_F(homa_plumbing, homa_getsockopt__recvbuf_bad_length)
 TEST_F(homa_plumbing, homa_getsockopt__server_bad_length)
 {
 	int is_server;
-	int size = sizeof32(is_server) - 1;
+	int size = sizeof(is_server) - 1;
 
 	EXPECT_EQ(EINVAL, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_SERVER, (char *)&is_server, &size));
@@ -412,7 +412,7 @@ TEST_F(homa_plumbing, homa_getsockopt__server_bad_length)
 TEST_F(homa_plumbing, homa_getsockopt__server_success)
 {
 	int is_server;
-	int size = sizeof32(is_server);
+	int size = sizeof(is_server);
 
 	self->hsk.is_server = 1;
 	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
@@ -430,7 +430,7 @@ TEST_F(homa_plumbing, homa_getsockopt__server_success)
 TEST_F(homa_plumbing, homa_getsockopt__bad_optname)
 {
 	struct homa_rcvbuf_args val;
-	int size = sizeof32(val);
+	int size = sizeof(val);
 
 	EXPECT_EQ(ENOPROTOOPT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF-1, (char *)&val, &size));
@@ -438,26 +438,26 @@ TEST_F(homa_plumbing, homa_getsockopt__bad_optname)
 TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_size)
 {
 	struct homa_rcvbuf_args val = {.start = 0, .length = 0};
-	int size = sizeof32(val) + 10;
+	int size = sizeof(val) + 10;
 
 	mock_copy_to_user_errors = 1;
 
 	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF, (char *)&val, &size));
 	EXPECT_EQ(0, val.start);
-	EXPECT_EQ(sizeof32(val) + 10, size);
+	EXPECT_EQ(sizeof(val) + 10, size);
 }
 TEST_F(homa_plumbing, homa_getsockopt__cant_copy_out_value)
 {
 	struct homa_rcvbuf_args val = {.start = 0, .length = 0};
-	int size = sizeof32(val) + 10;
+	int size = sizeof(val) + 10;
 
 	mock_copy_to_user_errors = 2;
 
 	EXPECT_EQ(EFAULT, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF, (char *)&val, &size));
 	EXPECT_EQ(0, val.start);
-	EXPECT_EQ(sizeof32(val), size);
+	EXPECT_EQ(sizeof(val), size);
 }
 
 TEST_F(homa_plumbing, homa_sendmsg__msg_name_null)
@@ -773,7 +773,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 	EXPECT_EQ(AF_INET, self->addr.in4.sin_family);
 	EXPECT_STREQ("1.2.3.4", homa_print_ipv4_addr(
 			self->addr.in4.sin_addr.s_addr));
-	EXPECT_EQ(sizeof32(struct sockaddr_in),
+	EXPECT_EQ(sizeof(struct sockaddr_in),
 			self->recvmsg_hdr.msg_namelen);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(1, self->recvmsg_args.num_bpages);
@@ -804,7 +804,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 	EXPECT_EQ(AF_INET6, self->addr.in6.sin6_family);
 	EXPECT_STREQ("[1::3:5:7]", homa_print_ipv6_addr(
 			&self->addr.in6.sin6_addr));
-	EXPECT_EQ(sizeof32(struct sockaddr_in6),
+	EXPECT_EQ(sizeof(struct sockaddr_in6),
 			self->recvmsg_hdr.msg_namelen);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
 	EXPECT_EQ(0, crpc->msgin.num_bpages);

@@ -147,8 +147,8 @@ TEST_F(homa_outgoing, homa_fill_data_interleaved)
 	EXPECT_STREQ("DATA from 0.0.0.0:40000, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, extra segs 1500@11500 1500@13000 500@14500",
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 #endif /* See strip.py */
-	EXPECT_EQ(5000 + sizeof32(struct homa_data_hdr)
-			+ 3*sizeof32(struct homa_seg_hdr), skb->len);
+	EXPECT_EQ(5000 + sizeof(struct homa_data_hdr)
+			+ 3*sizeof(struct homa_seg_hdr), skb->len);
 	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_fill_data_interleaved__error_copying_data)
