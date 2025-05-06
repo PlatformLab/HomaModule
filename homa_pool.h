@@ -127,9 +127,6 @@ struct homa_pool {
 	/** @cores: core-specific info; dynamically allocated. */
 	struct homa_pool_core __percpu *cores;
 
-	/** @num_cores: number of elements in @cores. */
-	int num_cores;
-
 	/**
 	 * @check_waiting_invoked: incremented during unit tests when
 	 * homa_pool_check_waiting is invoked.

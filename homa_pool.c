@@ -111,7 +111,6 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	atomic_set(&pool->free_bpages, pool->num_bpages);
 	pool->bpages_needed = INT_MAX;
 	pool->cores = cores;
-	pool->num_cores = nr_cpu_ids;
 	pool->check_waiting_invoked = 0;
 
 	for (i = 0; i < pool->num_bpages; i++) {
