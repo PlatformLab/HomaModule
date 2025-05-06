@@ -28,27 +28,23 @@ This file describes the synchronization strategy used for Homa.
 
 * There are several other locks in Homa besides RPC locks. When multiple
   locks are held, they must always be acquired in a consistent order, in
-  order to prevent deadlock. For each lock, here are the other locks that
-  may be acquired while holding the given lock.
-  * RPC: socket, grant, throttle, peer->ack_lock
-  * Socket: port_map.write_lock
-  Any lock not listed above must be a "leaf" lock: no other lock will be
-  acquired while holding the lock.
+  order to prevent deadlock. Overall rules:
+  * RPC locks are "top level"
+  * Other locks may be acquired while holding an RPC lock
+  * It is not safe to wait on an RPC lock while holding any other locks.
+  * It is safe to acquire port_map.write_lock while holding a socket lock
+  * Other than these rules, all locks should be considered "leaf" locks:
+    don't accquire other locks while holding them.
 
 * Homa's approach means that socket shutdown and deletion can potentially
-  occur while operations are underway that hold RPC locks but not the socket
-  lock. This creates several potential problems:
-  * A socket might be deleted and its memory reclaimed while an RPC still
-    has access to it. Homa assumes that Linux will prevent socket deletion
-    while the kernel call is executing. In situations outside kernel call
-    handling, Homa uses rcu_read_lock and/or socket references to prevent
-    socket deletion.
-  * A socket might be shut down while there are active operations on
-    RPCs. For example, a new RPC creation might be underway when a socket
-    is shut down, which could add the new RPC after all of its RPCs
-    have supposedly been deleted. Handling this requires careful ordering
-    of operations during shutdown, plus the rest of Homa must be careful
-    never to add new RPCs to a socket that has been shut down.
+  begin while operations are underway that hold RPC locks but not the socket
+  lock. For example, a new RPC creation might be underway when a socket
+  is shut down, which could attempt to add the new RPC after homa_sock_shutdown
+  thinks it has deleted all RPCs. Handling this requires careful checking
+  of hsk->shutdown. For example, during new RPC creation the socket lock
+  must be acquired to add the new RPC to those for the socket; after acquiring
+  the lock, it must check hsk->shutdown and abort the RPC creation if the
+  socket has been shutdown.
 
 * There are a few places where Homa needs to process RPCs on lists
   associated with a socket, such as the timer. Such code must first lock
