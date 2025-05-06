@@ -385,7 +385,8 @@ success:
 	return 0;
 
 	/* We get here if there wasn't enough buffer space for this
-	 * message; add the RPC to hsk->waiting_for_bufs.
+	 * message; add the RPC to hsk->waiting_for_bufs. The list is sorted
+	 * by RPC length in order to implement SRPT.
 	 */
 out_of_space:
 	INC_METRIC(buffer_alloc_failures, 1);
@@ -504,9 +505,9 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 				       struct homa_rpc, buf_links);
 		if (!homa_rpc_try_lock(rpc)) {
 			/* Can't just spin on the RPC lock because we're
-			 * holding the socket lock (see sync.txt). Instead,
-			 * release the socket lock and try the entire
-			 * operation again.
+			 * holding the socket lock and the lock order is
+			 * rpc->socket (see sync.txt). Instead, release the
+			 * socket lock and try the entire operation again.
 			 */
 			homa_sock_unlock(pool->hsk);
 			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
