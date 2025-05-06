@@ -319,11 +319,15 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 	core_id = smp_processor_id();
 	core = this_cpu_ptr(pool->cores);
 	bpage = &pool->descriptors[core->page_hint];
+#ifndef __STRIP__ /* See strip.py */
 	if (!spin_trylock_bh(&bpage->lock)) {
 		tt_record("beginning wait for bpage lock");
 		spin_lock_bh(&bpage->lock);
 		tt_record("ending wait for bpage lock");
 	}
+#else /* See strip.py */
+	spin_lock_bh(&bpage->lock);
+#endif /* See strip.py */
 	if (bpage->owner != core_id) {
 		spin_unlock_bh(&bpage->lock);
 		goto new_page;
