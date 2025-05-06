@@ -139,7 +139,7 @@ struct homa_sock {
 
 	/**
 	 * @homa: Overall state about the Homa implementation. NULL
-	 * means this socket has been deleted.
+	 * means this socket was never initialized or has been deleted.
 	 */
 	struct homa *homa;
 

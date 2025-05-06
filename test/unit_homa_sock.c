@@ -133,6 +133,14 @@ TEST_F(homa_sock, homa_socktab_end_scan)
 	EXPECT_EQ(0, mock_sock_holds);
 }
 
+TEST_F(homa_sock, homa_sock_init__cant_allocate_buffer_pool)
+{
+	struct homa_sock sock;
+
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock, &self->homa));
+	homa_sock_destroy(&sock);
+}
 TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 {
 	struct homa_sock hsk2, hsk3;
@@ -172,14 +180,6 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 	EXPECT_EQ(sizeof(struct ipv6hdr), hsk_v6.ip_header_length);
 	homa_sock_destroy(&hsk_v4);
 	homa_sock_destroy(&hsk_v6);
-}
-TEST_F(homa_sock, homa_sock_init__kzalloc_failure)
-{
-	struct homa_sock sock;
-
-	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock, &self->homa));
-	homa_sock_destroy(&sock);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)

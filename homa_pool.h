@@ -150,7 +150,7 @@ void     homa_pool_get_rcvbuf(struct homa_pool *pool,
 			      struct homa_rcvbuf_args *args);
 int      homa_pool_release_buffers(struct homa_pool *pool,
 				   int num_buffers, u32 *buffers);
-int      homa_pool_set_region(struct homa_pool *pool, void __user *region,
+int      homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			      u64 region_size);
 
 #endif /* _HOMA_POOL_H */

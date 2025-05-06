@@ -839,11 +839,8 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 				 sizeof(args)))
 			return -EFAULT;
 
-		homa_sock_lock(hsk);
-		ret = homa_pool_set_region(hsk->buffer_pool,
-					   u64_to_user_ptr(args.start),
+		ret = homa_pool_set_region(hsk, u64_to_user_ptr(args.start),
 					   args.length);
-		homa_sock_unlock(hsk);
 		INC_METRIC(so_set_buf_calls, 1);
 		INC_METRIC(so_set_buf_ns, sched_clock() - start);
 	} else if (optname == SO_HOMA_SERVER) {

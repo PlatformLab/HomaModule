@@ -367,8 +367,7 @@ TEST_F(homa_plumbing, homa_getsockopt__recvbuf_success)
 
 	homa_pool_free(self->hsk.buffer_pool);
 	self->hsk.buffer_pool = homa_pool_alloc(&self->hsk);
-	EXPECT_EQ(0, -homa_pool_set_region(self->hsk.buffer_pool,
-					   (void *)0x40000,
+	EXPECT_EQ(0, -homa_pool_set_region(&self->hsk, (void *)0x40000,
 					   10*HOMA_BPAGE_SIZE + 1000));
 	EXPECT_EQ(0, -homa_getsockopt(&self->hsk.sock, IPPROTO_HOMA,
 		  SO_HOMA_RCVBUF, (char *)&val, &size));

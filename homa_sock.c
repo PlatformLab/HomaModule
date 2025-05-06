@@ -139,6 +139,7 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 {
 	struct homa_socktab *socktab = homa->port_map;
+	struct homa_pool *buffer_pool;
 	struct homa_sock *other;
 	int starting_port;
 	int result = 0;
@@ -146,6 +147,13 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
+
+	/* Do things requiring memory allocation before locking the socket,
+	 * so that GFP_ATOMIC is not needed.
+	 */
+	buffer_pool = homa_pool_alloc(hsk);
+	if (IS_ERR(buffer_pool))
+		return PTR_ERR(buffer_pool);
 
 	/* Initialize Homa-specific fields. */
 	spin_lock_bh(&socktab->write_lock);
@@ -169,7 +177,8 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		if (homa->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
 			hsk->shutdown = true;
-			return -EADDRNOTAVAIL;
+			result = -EADDRNOTAVAIL;
+			goto error;
 		}
 	}
 	hsk->port = homa->prev_default_port;
@@ -197,16 +206,16 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-	hsk->buffer_pool = homa_pool_alloc(hsk);
-	if (IS_ERR(hsk->buffer_pool)) {
-		result = PTR_ERR(hsk->buffer_pool);
-		hsk->buffer_pool = NULL;
-	}
+	hsk->buffer_pool = buffer_pool;
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->hijack_tcp)
 		hsk->sock.sk_protocol = IPPROTO_TCP;
 #endif /* See strip.py */
 	spin_unlock_bh(&socktab->write_lock);
+	return result;
+
+error:
+	homa_pool_free(buffer_pool);
 	return result;
 }
 
@@ -242,7 +251,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 
 	tt_record1("Starting shutdown for socket %d", hsk->port);
 	homa_sock_lock(hsk);
-	if (hsk->shutdown) {
+	if (hsk->shutdown || !hsk->homa) {
 		homa_sock_unlock(hsk);
 		return;
 	}

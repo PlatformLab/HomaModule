@@ -52,7 +52,7 @@ struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 {
 	struct homa_pool *pool;
 
-	pool = kzalloc(sizeof(*pool), GFP_ATOMIC);
+	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
 	if (!pool)
 		return ERR_PTR(-ENOMEM);
 	pool->hsk = hsk;
@@ -61,63 +61,72 @@ struct homa_pool *homa_pool_alloc(struct homa_sock *hsk)
 
 /**
  * homa_pool_set_region() - Associate a region of memory with a pool.
- * @pool:         Pool the region will be associated with. Must not currently
+ * @hsk:          Socket whose pool the region will be associated with.
+ *                Must not be locked, and the pool must not currently
  *                have a region associated with it.
  * @region:       First byte of the memory region for the pool, allocated
  *                by the application; must be page-aligned.
  * @region_size:  Total number of bytes available at @buf_region.
  * Return: Either zero (for success) or a negative errno for failure.
  */
-int homa_pool_set_region(struct homa_pool *pool, void __user *region,
+int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 			 u64 region_size)
 {
-	int i, result;
-
-	if (pool->region)
-		return -EINVAL;
+	struct homa_pool_core __percpu *cores;
+	struct homa_bpage *descriptors;
+	int i, result, num_bpages;
+	struct homa_pool *pool;
 
 	if (((uintptr_t)region) & ~PAGE_MASK)
 		return -EINVAL;
-	pool->region = (char __user *)region;
-	pool->num_bpages = region_size >> HOMA_BPAGE_SHIFT;
-	pool->descriptors = NULL;
-	pool->cores = NULL;
-	if (pool->num_bpages < MIN_POOL_SIZE) {
-		result = -EINVAL;
-		goto error;
+
+	/* Allocate memory before locking the socket, so we can allocate
+	 * without GFP_ATOMIC.
+	 */
+	num_bpages = region_size >> HOMA_BPAGE_SHIFT;
+	if (num_bpages < MIN_POOL_SIZE) {
+		return -EINVAL;
 	}
-	pool->descriptors = kmalloc_array(pool->num_bpages,
-					  sizeof(struct homa_bpage),
-					  GFP_ATOMIC | __GFP_ZERO);
-	if (!pool->descriptors) {
+	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
+				    __GFP_ZERO);
+	if (!descriptors)
+		return -ENOMEM;
+	cores = alloc_percpu_gfp(struct homa_pool_core, __GFP_ZERO);
+	if (!cores) {
 		result = -ENOMEM;
 		goto error;
 	}
+
+	homa_sock_lock(hsk);
+	pool = hsk->buffer_pool;
+	if (pool->region) {
+		result = -EINVAL;
+		homa_sock_unlock(hsk);
+		goto error;
+	}
+
+	pool->region = (char __user *)region;
+	pool->num_bpages = num_bpages;
+	pool->descriptors = descriptors;
+	atomic_set(&pool->free_bpages, pool->num_bpages);
+	pool->bpages_needed = INT_MAX;
+	pool->cores = cores;
+	pool->num_cores = nr_cpu_ids;
+	pool->check_waiting_invoked = 0;
+
 	for (i = 0; i < pool->num_bpages; i++) {
 		struct homa_bpage *bp = &pool->descriptors[i];
 
 		spin_lock_init(&bp->lock);
 		bp->owner = -1;
 	}
-	atomic_set(&pool->free_bpages, pool->num_bpages);
-	pool->bpages_needed = INT_MAX;
 
-	/* Allocate and initialize core-specific data. */
-	pool->cores = alloc_percpu_gfp(struct homa_pool_core,
-				       GFP_ATOMIC | __GFP_ZERO);
-	if (!pool->cores) {
-		result = -ENOMEM;
-		goto error;
-	}
-	pool->num_cores = nr_cpu_ids;
-	pool->check_waiting_invoked = 0;
-
+	homa_sock_unlock(hsk);
 	return 0;
 
 error:
-	kfree(pool->descriptors);
-	free_percpu(pool->cores);
-	pool->region = NULL;
+	kfree(descriptors);
+	free_percpu(cores);
 	return result;
 }
 
