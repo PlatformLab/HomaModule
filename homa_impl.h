@@ -631,6 +631,7 @@ static inline bool homa_make_header_avl(struct sk_buff *skb)
 	return pskb_may_pull(skb, pull_length);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 #ifdef __UNIT_TEST__
 void unit_log_printf(const char *separator, const char *format, ...)
 		__printf(2, 3);
@@ -641,6 +642,7 @@ void unit_hook(char *id);
 #define UNIT_LOG(...)
 #define UNIT_HOOK(...)
 #endif /* __UNIT_TEST__ */
+#endif /* See strip.py */
 
 extern unsigned int homa_net_id;
 
