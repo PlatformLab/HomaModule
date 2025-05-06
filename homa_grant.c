@@ -15,7 +15,7 @@
  * @data fields are actually offsets within a struct homa_grant; these are
  * converted to pointers into a net-specific struct grant later.
  */
-#define OFFSET(field) ((void *) offsetof(struct homa_grant, field))
+#define OFFSET(field) ((void *)offsetof(struct homa_grant, field))
 static struct ctl_table grant_ctl_table[] = {
 	{
 		.procname	= "fifo_grant_increment",
@@ -154,7 +154,8 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
 		rpc->msgin.prev_grant = rpc->msgin.granted;
 		return;
 	}
-	rpc->msgin.granted = rpc->msgin.prev_grant = unsched;
+	rpc->msgin.granted = unsched;
+	rpc->msgin.prev_grant = unsched;
 	homa_grant_manage_rpc(rpc);
 }
 
@@ -611,8 +612,8 @@ bool homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
 	if (avl_incoming < incoming_delta) {
 		atomic_set(&grant->incoming_hit_limit, 1);
 		tt_record3("insufficient headroom for grant: needed %d, available %d, used %d",
-				incoming_delta, avl_incoming,
-				atomic_read(&grant->total_incoming));
+			   incoming_delta, avl_incoming,
+			   atomic_read(&grant->total_incoming));
 		new_grant_offset -= incoming_delta - avl_incoming;
 	}
 	if (new_grant_offset <= rpc->msgin.granted)
@@ -944,7 +945,7 @@ int homa_grant_dointvec(const struct ctl_table *table, int write,
 	 * net-specific struct homa.
 	 */
 	table_copy = *table;
-	table_copy.data = ((char *) grant) + (uintptr_t) table_copy.data;
+	table_copy.data = ((char *)grant) + (uintptr_t)table_copy.data;
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write)

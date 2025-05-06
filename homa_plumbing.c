@@ -159,7 +159,7 @@ static struct inet6_protocol homav6_protocol = {
  * @data fields are actually offsets within a struct homa; these are converted
  * to pointers into a net-specific struct homa later.
  */
-#define OFFSET(field) ((void *) offsetof(struct homa, field))
+#define OFFSET(field) ((void *)offsetof(struct homa, field))
 static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "action",
@@ -346,7 +346,7 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "temp",
 		.data		= OFFSET(temp[0]),
-		.maxlen		= sizeof(((struct homa *) 0)->temp),
+		.maxlen		= sizeof(((struct homa *)0)->temp),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
 	},
@@ -579,7 +579,7 @@ int homa_net_init(struct net *net)
 #ifndef __STRIP__ /* See strip.py */
 
 	homa->sysctl_header = register_net_sysctl(net, "net/homa",
-					      homa_ctl_table);
+						  homa_ctl_table);
 	if (!homa->sysctl_header) {
 		pr_err("couldn't register Homa sysctl parameters\n");
 		status = -ENOMEM;
@@ -836,7 +836,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		 * first page of the region.
 		 */
 		if (copy_to_user(u64_to_user_ptr(args.start), &args,
-				sizeof(args)))
+				 sizeof(args)))
 			return -EFAULT;
 
 		homa_sock_lock(hsk);
@@ -962,7 +962,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 		goto error;
 	}
 	if (args.flags & ~HOMA_SENDMSG_VALID_FLAGS ||
-	    (args.reserved != 0)) {
+	    args.reserved != 0) {
 		result = -EINVAL;
 		goto error;
 	}
@@ -1599,7 +1599,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 	 * net-specific struct homa.
 	 */
 	table_copy = *table;
-	table_copy.data = ((char *) homa) + (uintptr_t) table_copy.data;
+	table_copy.data = ((char *)homa) + (uintptr_t)table_copy.data;
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write) {

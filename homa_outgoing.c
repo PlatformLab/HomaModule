@@ -862,8 +862,8 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			new_homa_info->offset = offset;
 			tt_record3("retransmitting offset %d, length %d, id %d",
 				   offset, seg_length, rpc->id);
-			homa_pacer_check_nic_q(rpc->hsk->homa->pacer,
-						   new_skb, true);
+			homa_pacer_check_nic_q(rpc->hsk->homa->pacer, new_skb,
+					       true);
 #ifndef __STRIP__ /* See strip.py */
 			__homa_xmit_data(new_skb, rpc, priority);
 #else /* See strip.py */

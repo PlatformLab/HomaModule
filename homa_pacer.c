@@ -13,7 +13,7 @@
  * @data fields are actually offsets within a struct homa_pacer; these are
  * converted to pointers into a net-specific struct homa later.
  */
-#define OFFSET(field) ((void *) offsetof(struct homa_pacer, field))
+#define OFFSET(field) ((void *)offsetof(struct homa_pacer, field))
 static struct ctl_table pacer_ctl_table[] = {
 	{
 		.procname	= "link_mbps",
@@ -271,7 +271,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 			pacer->fifo_count += 1000;
 			rpc = NULL;
 			list_for_each_entry(cur, &pacer->throttled_rpcs,
-						throttled_links) {
+					    throttled_links) {
 				if (cur->msgout.init_ns < oldest) {
 					rpc = cur;
 					oldest = cur->msgout.init_ns;
@@ -312,7 +312,7 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 			 * (right now), so remove it from the throttled list.
 			 */
 			tt_record2("pacer removing id %d from throttled list, offset %d",
-					rpc->id, rpc->msgout.next_xmit_offset);
+				   rpc->id, rpc->msgout.next_xmit_offset);
 			homa_pacer_unmanage_rpc(rpc);
 		}
 		homa_rpc_unlock(rpc);
@@ -347,7 +347,7 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
 	homa_pacer_throttle_lock(pacer);
 	list_for_each_entry(candidate, &pacer->throttled_rpcs,
-				throttled_links) {
+			    throttled_links) {
 		int bytes_left_cand;
 
 		checks++;
@@ -359,7 +359,7 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 				candidate->msgout.next_xmit_offset;
 		if (bytes_left_cand > bytes_left) {
 			list_add_tail(&rpc->throttled_links,
-					  &candidate->throttled_links);
+				      &candidate->throttled_links);
 			goto done;
 		}
 	}
@@ -426,7 +426,7 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
  * Return: 0 for success, nonzero for error.
  */
 int homa_pacer_dointvec(const struct ctl_table *table, int write,
-		  void *buffer, size_t *lenp, loff_t *ppos)
+			void *buffer, size_t *lenp, loff_t *ppos)
 {
 	struct homa_pacer *pacer = homa_from_net(current->nsproxy->net_ns)->pacer;
 	struct ctl_table table_copy;
@@ -436,7 +436,7 @@ int homa_pacer_dointvec(const struct ctl_table *table, int write,
 	 * net-specific struct homa.
 	 */
 	table_copy = *table;
-	table_copy.data = ((char *) pacer) + (uintptr_t) table_copy.data;
+	table_copy.data = ((char *)pacer) + (uintptr_t)table_copy.data;
 
 	result = proc_dointvec(&table_copy, write, buffer, lenp, ppos);
 	if (write)

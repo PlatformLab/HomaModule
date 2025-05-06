@@ -154,7 +154,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
 	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
-			? sizeof(struct iphdr) :sizeof(struct ipv6hdr);
+			? sizeof(struct iphdr) : sizeof(struct ipv6hdr);
 	hsk->is_server = false;
 	hsk->shutdown = false;
 	starting_port = homa->prev_default_port;
@@ -300,7 +300,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
 	if (tx_memory != 1) {
 		pr_err("%s found sk_wmem_alloc %llu bytes, port %d\n",
-			__func__, tx_memory, hsk->port);
+		       __func__, tx_memory, hsk->port);
 #ifdef __UNIT_TEST__
 	FAIL(" sk_wmem_alloc %llu after shutdown for port %d", tx_memory,
 	     hsk->port);

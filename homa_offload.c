@@ -161,8 +161,6 @@ struct sk_buff *homa_tcp_gro_receive(struct list_head *held_list,
 	}
 	return homa_gro_receive(held_list, skb);
 }
-#ifndef __STRIP__ /* See strip.py */
-#endif /* See strip.py */
 
 /**
  * homa_set_softirq_cpu() - Arrange for SoftIRQ processing of a packet to

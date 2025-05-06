@@ -92,7 +92,7 @@ static inline void homa_interest_unlink_private(struct homa_interest *interest)
 }
 
 void     homa_interest_init_shared(struct homa_interest *interest,
-	struct homa_sock *hsk);
+				   struct homa_sock *hsk);
 int      homa_interest_init_private(struct homa_interest *interest,
 				    struct homa_rpc *rpc);
 void     homa_interest_notify_private(struct homa_rpc *rpc);

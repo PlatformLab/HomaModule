@@ -36,9 +36,10 @@
 static void set_bpages_needed(struct homa_pool *pool)
 {
 	struct homa_rpc *rpc = list_first_entry(&pool->hsk->waiting_for_bufs,
-			struct homa_rpc, buf_links);
-	pool->bpages_needed = (rpc->msgin.length + HOMA_BPAGE_SIZE - 1)
-			>> HOMA_BPAGE_SHIFT;
+						struct homa_rpc, buf_links);
+
+	pool->bpages_needed = (rpc->msgin.length + HOMA_BPAGE_SIZE - 1) >>
+			      HOMA_BPAGE_SHIFT;
 }
 
 /**
@@ -68,7 +69,7 @@ struct homa_pool *homa_pool_new(struct homa_sock *hsk)
  * Return: Either zero (for success) or a negative errno for failure.
  */
 int homa_pool_set_region(struct homa_pool *pool, void __user *region,
-		   u64 region_size)
+			 u64 region_size)
 {
 	int i, result;
 

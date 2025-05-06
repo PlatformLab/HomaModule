@@ -1239,7 +1239,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		    rpc->msgin.bytes_remaining == 0 &&
 		    skb_queue_len(&rpc->msgin.packets) == 0) {
 			tt_record2("homa_wait_private found rpc id %d, pid %d via null, blocked 0",
-					rpc->id, current->pid);
+				   rpc->id, current->pid);
 			break;
 		}
 
@@ -1259,7 +1259,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
 		atomic_andnot(APP_NEEDS_LOCK, &rpc->flags);
 		homa_interest_unlink_private(&interest);
 		tt_record3("homa_wait_private found rpc id %d, pid %d via handoff, blocked %d",
-				rpc->id, current->pid, interest.blocked);
+			   rpc->id, current->pid, interest.blocked);
 
 		/* If homa_interest_wait returned an error but the interest
 		 * actually got ready, then ignore the error.

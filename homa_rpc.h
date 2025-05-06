@@ -189,7 +189,6 @@ struct homa_message_in {
 	 */
 	int rec_incoming;
 
-
 	/**
 	 * @birth: sched_clock() time when homa_grant_manage_rpc was invoked
 	 * for this RPC. Managed by homa_grant.c. Only set if the RPC needs
