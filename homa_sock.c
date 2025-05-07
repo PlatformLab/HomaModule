@@ -243,7 +243,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
-	u64 tx_memory;
 #ifndef __STRIP__ /* See strip.py */
 	int i = 0;
 #endif /* See strip.py */
@@ -305,15 +304,16 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_rpc_reap(hsk, 1000);
 #endif /* See strip.py */
 
-	tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
-	if (tx_memory != 1) {
-		pr_err("%s found sk_wmem_alloc %llu bytes, port %d\n",
-		       __func__, tx_memory, hsk->port);
+	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
 #ifdef __UNIT_TEST__
-	FAIL(" sk_wmem_alloc %llu after shutdown for port %d", tx_memory,
-	     hsk->port);
-#endif /* __UNIT_TEST__ */
+	{
+		u64 tx_memory = refcount_read(&hsk->sock.sk_wmem_alloc);
+
+		if (tx_memory != 1)
+			FAIL(" sk_wmem_alloc %llu after shutdown for port %d",
+			     tx_memory, hsk->port);
 	}
+#endif /* __UNIT_TEST__ */
 
 	if (hsk->buffer_pool) {
 		homa_pool_free(hsk->buffer_pool);
