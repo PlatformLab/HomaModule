@@ -231,6 +231,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	INIT_LIST_HEAD(&peer->grantable_rpcs);
 	INIT_LIST_HEAD(&peer->grantable_links);
 #endif /* See strip.py */
+	smp_wmb();
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	peer->current_ticks = -1;
 	spin_lock_init(&peer->ack_lock);
