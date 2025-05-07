@@ -720,8 +720,6 @@ void     homa_xmit_data(struct homa_rpc *rpc, bool force);
 void     homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk);
 
 #ifndef __STRIP__ /* See strip.py */
-struct homa_rpc
-	*homa_choose_fifo_grant(struct homa *homa);
 void     homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk);
 int      homa_dointvec(const struct ctl_table *table, int write,
 		       void *buffer, size_t *lenp, loff_t *ppos);

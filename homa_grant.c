@@ -825,6 +825,91 @@ void homa_grant_find_oldest(struct homa *homa)
 	homa->grant->oldest_rpc = oldest;
 }
 
+#ifndef __STRIP__ /* See strip.py */
+#if 0
+/**
+ * homa_choose_fifo_grant() - This function is invoked occasionally to give
+ * a high-priority grant to the oldest incoming message. We do this in
+ * order to reduce the starvation that SRPT can cause for long messages.
+ * Note: this method is obsolete and should never be invoked; it's code is
+ * being retained until fifo grants are reimplemented using the new grant
+ * mechanism.
+ * @homa:    Overall data about the Homa protocol implementation. The
+ *           grant lock must be held by the caller.
+ * Return: An RPC to which to send a FIFO grant, or NULL if there is
+ *         no appropriate RPC. This method doesn't actually send a grant,
+ *         but it updates @msgin.granted to reflect the desired grant.
+ *         Also updates homa->total_incoming.
+ */
+struct homa_rpc *homa_choose_fifo_grant(struct homa *homa)
+{
+	struct homa_rpc *rpc, *oldest;
+	u64 oldest_birth;
+	int granted;
+
+	oldest = NULL;
+	oldest_birth = ~0;
+
+	/* Find the oldest message that doesn't currently have an
+	 * outstanding "pity grant".
+	 */
+	list_for_each_entry(rpc, &homa->grantable_rpcs, grantable_links) {
+		int received, on_the_way;
+
+		if (rpc->msgin.birth >= oldest_birth)
+			continue;
+
+		received = (rpc->msgin.length
+				- rpc->msgin.bytes_remaining);
+		on_the_way = rpc->msgin.granted - received;
+		if (on_the_way > homa->unsched_bytes) {
+			/* The last "pity" grant hasn't been used
+			 * up yet.
+			 */
+			continue;
+		}
+		oldest = rpc;
+		oldest_birth = rpc->msgin.birth;
+	}
+	if (!oldest)
+		return NULL;
+	INC_METRIC(fifo_grants, 1);
+	if ((oldest->msgin.length - oldest->msgin.bytes_remaining)
+			== oldest->msgin.granted)
+		INC_METRIC(fifo_grants_no_incoming, 1);
+
+	oldest->silent_ticks = 0;
+	granted = homa->fifo_grant_increment;
+	oldest->msgin.granted += granted;
+	if (oldest->msgin.granted >= oldest->msgin.length) {
+		granted -= oldest->msgin.granted - oldest->msgin.length;
+		oldest->msgin.granted = oldest->msgin.length;
+		// homa_remove_grantable_locked(homa, oldest);
+	}
+
+	/* Try to update homa->total_incoming; if we can't lock
+	 * the RPC, just skip it (waiting could deadlock), and it
+	 * will eventually get updated elsewhere.
+	 */
+	if (homa_rpc_try_lock(oldest)) {
+		homa_grant_update_incoming(oldest, homa);
+		homa_rpc_unlock(oldest);
+	}
+
+	if (oldest->msgin.granted < (oldest->msgin.length
+				- oldest->msgin.bytes_remaining)) {
+		/* We've already received all of the bytes in the new
+		 * grant; most likely this means that the sender sent extra
+		 * data after the last fifo grant (e.g. by rounding up to a
+		 * TSO packet). Don't send this grant.
+		 */
+		return NULL;
+	}
+	return oldest;
+}
+#endif
+#endif /* See strip.py */
+
 /**
  * homa_grant_cand_add() - Add an RPC into the struct, if there is
  * space. After this function is called, homa_grant_cand_check must
