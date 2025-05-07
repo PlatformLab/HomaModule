@@ -157,7 +157,6 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 
 	/* Initialize Homa-specific fields. */
 	spin_lock_bh(&socktab->write_lock);
-	atomic_set(&hsk->protect_count, 0);
 	spin_lock_init(&hsk->lock);
 	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
