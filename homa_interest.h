@@ -33,11 +33,13 @@ struct homa_interest {
 	 */
 	atomic_t ready;
 
+#ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @core: Core on which homa_wait_*was invoked.  This is a hint
 	 * used for load balancing (see balance.txt).
 	 */
 	int core;
+#endif /* See strip.py */
 
 	/**
 	 * @blocked: Zero means a handoff was received without the thread

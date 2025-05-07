@@ -23,7 +23,7 @@ void homa_interest_init_shared(struct homa_interest *interest,
 {
 	interest->rpc = NULL;
 	atomic_set(&interest->ready, 0);
-	interest->core = raw_smp_processor_id();
+	IF_NO_STRIP(interest->core = raw_smp_processor_id());
 	interest->blocked = 0;
 	init_waitqueue_head(&interest->wait_queue);
 	interest->hsk = hsk;
