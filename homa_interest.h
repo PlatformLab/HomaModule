@@ -9,10 +9,12 @@
 #include "homa_sock.h"
 
 /**
- * struct homa_interest - Used by homa_wait_private and homa_wait_shared to
- * wait for incoming message data to arrive for an RPC. An interest can
- * be either private (if referenced by an rpc->private_interest) or shared
- * (if present on hsk->interests).
+ * struct homa_interest - Holds info that allows applications to wait for
+ * incoming RPC messages. An interest can be either private, in which case
+ * the application is waiting for a single specific RPC response and the
+ * interest is referenced by an rpc->private_interest, or shared, in which
+ * case the application is waiting for any incoming message that isn't
+ * private and the interest is present on hsk->interests.
  */
 struct homa_interest {
 	/**
