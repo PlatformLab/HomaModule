@@ -93,7 +93,6 @@ static struct proto homa_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.backlog_rcv       = homa_backlog_rcv,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.get_port	   = homa_get_port,
@@ -114,7 +113,6 @@ static struct proto homav6_prot = {
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
 	.recvmsg	   = homa_recvmsg,
-	.backlog_rcv       = homa_backlog_rcv,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
 	.get_port	   = homa_get_port,
@@ -1440,22 +1438,6 @@ discard:
 	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
 #endif /* See strip.py */
 	INC_METRIC(softirq_ns, sched_clock() - start);
-	return 0;
-}
-
-/**
- * homa_backlog_rcv() - Invoked to handle packets saved on a socket's
- * backlog because it was locked when the packets first arrived.
- * @sk:     Homa socket that owns the packet's destination port.
- * @skb:    The incoming packet. This function takes ownership of the packet
- *          (we'll delete it).
- *
- * Return:  Always returns 0.
- */
-int homa_backlog_rcv(struct sock *sk, struct sk_buff *skb)
-{
-	pr_warn_once("unimplemented backlog_rcv invoked on Homa socket\n");
-	kfree_skb(skb);
 	return 0;
 }
 

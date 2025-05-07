@@ -652,7 +652,6 @@ void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
-int      homa_backlog_rcv(struct sock *sk, struct sk_buff *skb);
 int      homa_bind(struct socket *sk, struct sockaddr *addr,
 		   int addr_len);
 void     homa_close(struct sock *sock, long timeout);
