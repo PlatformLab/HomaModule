@@ -67,7 +67,8 @@ CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS
 CP_EXTRAS := reap.txt \
 	     sync.txt \
 	     Kconfig \
-	     Makefile
+	     Makefile \
+	     strip_decl.py
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
 net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
 $(HOMA_TARGET)/%: % util/strip.py
@@ -75,6 +76,8 @@ $(HOMA_TARGET)/%: % util/strip.py
 $(HOMA_TARGET)/%.txt: %.txt
 	cp $< $@
 $(HOMA_TARGET)/Makefile: Makefile.upstream
+	cp $< $@
+$(HOMA_TARGET)/strip_decl.py: util/strip_decl.py
 	cp $< $@
 $(LINUX_SRC_DIR)/include/uapi/linux/homa.h: homa.h util/strip.py
 	util/strip.py $< > $@
