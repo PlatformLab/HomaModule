@@ -85,7 +85,6 @@ static struct proto homa_prot = {
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
 	.connect	   = ip4_datagram_connect,
-	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
 	.destroy	   = NULL,
@@ -95,7 +94,6 @@ static struct proto homa_prot = {
 	.recvmsg	   = homa_recvmsg,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
-	.get_port	   = homa_get_port,
 	.obj_size	   = sizeof(struct homa_sock),
 	.no_autobind       = 1,
 };
@@ -105,7 +103,6 @@ static struct proto homav6_prot = {
 	.owner		   = THIS_MODULE,
 	.close		   = homa_close,
 	.connect	   = ip6_datagram_connect,
-	.disconnect	   = homa_disconnect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
 	.destroy	   = NULL,
@@ -115,7 +112,6 @@ static struct proto homav6_prot = {
 	.recvmsg	   = homa_recvmsg,
 	.hash		   = homa_hash,
 	.unhash		   = homa_unhash,
-	.get_port	   = homa_get_port,
 	.obj_size	   = sizeof(struct homa_v6_sock),
 	.ipv6_pinfo_offset = offsetof(struct homa_v6_sock, inet6),
 
@@ -694,20 +690,6 @@ int homa_shutdown(struct socket *sock, int how)
 	return 0;
 }
 
-/**
- * homa_disconnect() - Invoked when disconnect system call is invoked on a
- * Homa socket.
- * @sk:    Socket to disconnect
- * @flags: ??
- *
- * Return: 0 on success, otherwise a negative errno.
- */
-int homa_disconnect(struct sock *sk, int flags)
-{
-	pr_warn("unimplemented disconnect invoked on Homa socket\n");
-	return -EINVAL;
-}
-
 #ifndef __STRIP__ /* See strip.py */
 /**
  * homa_ioc_abort() - The top-level function for the ioctl that implements
@@ -1265,21 +1247,6 @@ int homa_hash(struct sock *sk)
  */
 void homa_unhash(struct sock *sk)
 {
-}
-
-/**
- * homa_get_port() - It appears that this function is called to assign a
- * default port for a socket.
- * @sk:    Socket for the operation
- * @snum:  Unclear what this is.
- * Return: Zero for success, or a negative errno for an error.
- */
-int homa_get_port(struct sock *sk, unsigned short snum)
-{
-	/* Homa always assigns ports immediately when a socket is created,
-	 * so there is nothing to do here.
-	 */
-	return 0;
 }
 
 /**

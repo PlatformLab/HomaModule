@@ -655,7 +655,6 @@ void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
-int      homa_disconnect(struct sock *sk, int flags);
 void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
 int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
@@ -665,7 +664,6 @@ int      homa_fill_data_interleaved(struct homa_rpc *rpc,
 				    struct sk_buff *skb, struct iov_iter *iter);
 struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end);
 void     homa_gap_retry(struct homa_rpc *rpc);
-int      homa_get_port(struct sock *sk, unsigned short snum);
 int      homa_getsockopt(struct sock *sk, int level, int optname,
 			 char __user *optval, int __user *optlen);
 int      homa_hash(struct sock *sk);
