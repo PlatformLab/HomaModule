@@ -147,6 +147,7 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
+	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 
 	/* Do things requiring memory allocation before locking the socket,
 	 * so that GFP_ATOMIC is not needed.
@@ -330,7 +331,6 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 void homa_sock_destroy(struct homa_sock *hsk)
 {
 	homa_sock_shutdown(hsk);
-	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
 }
 
 /**
