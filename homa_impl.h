@@ -646,9 +646,6 @@ void unit_hook(char *id);
 
 extern unsigned int homa_net_id;
 
-void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
-			 int port, int error);
-void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
 void     homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb);
@@ -689,10 +686,6 @@ int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		      int flags, int *addr_len);
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
-void     homa_rpc_abort(struct homa_rpc *crpc, int error);
-void     homa_rpc_acked(struct homa_sock *hsk,
-			const struct in6_addr *saddr, struct homa_ack *ack);
-void     homa_rpc_end(struct homa_rpc *rpc);
 void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,

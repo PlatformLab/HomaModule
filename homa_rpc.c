@@ -317,6 +317,71 @@ void homa_rpc_end(struct homa_rpc *rpc)
 }
 
 /**
+ * homa_rpc_abort() - Terminate an RPC.
+ * @rpc:     RPC to be terminated.  Must be locked by caller.
+ * @error:   A negative errno value indicating the error that caused the abort.
+ *           If this is a client RPC, the error will be returned to the
+ *           application; if it's a server RPC, the error is ignored and
+ *           we just free the RPC.
+ */
+void homa_rpc_abort(struct homa_rpc *rpc, int error)
+	__must_hold(rpc_bucket_lock)
+{
+	if (!homa_is_client(rpc->id)) {
+		INC_METRIC(server_rpc_discards, 1);
+		tt_record3("aborting server RPC: peer 0x%x, id %d, error %d",
+			   tt_addr(rpc->peer->addr), rpc->id, error);
+		homa_rpc_end(rpc);
+		return;
+	}
+	tt_record3("aborting client RPC: peer 0x%x, id %d, error %d",
+		   tt_addr(rpc->peer->addr), rpc->id, error);
+	rpc->error = error;
+	homa_rpc_handoff(rpc);
+}
+
+/**
+ * homa_abort_rpcs() - Abort all RPCs to/from a particular peer.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @addr:    Address (network order) of the destination whose RPCs are
+ *           to be aborted.
+ * @port:    If nonzero, then RPCs will only be aborted if they were
+ *	     targeted at this server port.
+ * @error:   Negative errno value indicating the reason for the abort.
+ */
+void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
+		     int port, int error)
+{
+	struct homa_socktab_scan scan;
+	struct homa_rpc *rpc;
+	struct homa_sock *hsk;
+
+	for (hsk = homa_socktab_start_scan(homa->port_map, &scan); hsk;
+	     hsk = homa_socktab_next(&scan)) {
+		/* Skip the (expensive) lock acquisition if there's no
+		 * work to do.
+		 */
+		if (list_empty(&hsk->active_rpcs))
+			continue;
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		rcu_read_lock();
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			if (!ipv6_addr_equal(&rpc->peer->addr, addr))
+				continue;
+			if (port && rpc->dport != port)
+				continue;
+			homa_rpc_lock(rpc);
+			homa_rpc_abort(rpc, error);
+			homa_rpc_unlock(rpc);
+		}
+		rcu_read_unlock();
+		homa_unprotect_rpcs(hsk);
+	}
+	homa_socktab_end_scan(&scan);
+}
+
+/**
  * homa_rpc_reap() - Invoked to release resources associated with dead
  * RPCs for a given socket. For a large RPC, it can take a long time to
  * free all of its packet buffers, so we try to perform this work
@@ -487,6 +552,46 @@ release:
 	}
 	homa_pool_check_waiting(hsk->buffer_pool);
 	return result;
+}
+
+/**
+ * homa_abort_sock_rpcs() - Abort all outgoing (client-side) RPCs on a given
+ * socket.
+ * @hsk:         Socket whose RPCs should be aborted.
+ * @error:       Zero means that the aborted RPCs should be freed immediately.
+ *               A nonzero value means that the RPCs should be marked
+ *               complete, so that they can be returned to the application;
+ *               this value (a negative errno) will be returned from
+ *               recvmsg.
+ */
+void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
+{
+	struct homa_rpc *rpc;
+
+	if (list_empty(&hsk->active_rpcs))
+		return;
+	if (!homa_protect_rpcs(hsk))
+		return;
+	rcu_read_lock();
+	list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+		if (!homa_is_client(rpc->id))
+			continue;
+		homa_rpc_lock(rpc);
+		if (rpc->state == RPC_DEAD) {
+			homa_rpc_unlock(rpc);
+			continue;
+		}
+		tt_record4("homa_abort_sock_rpcs aborting id %u on port %d, peer 0x%x, error %d",
+			   rpc->id, hsk->port,
+			   tt_addr(rpc->peer->addr), error);
+		if (error)
+			homa_rpc_abort(rpc, error);
+		else
+			homa_rpc_end(rpc);
+		homa_rpc_unlock(rpc);
+	}
+	rcu_read_unlock();
+	homa_unprotect_rpcs(hsk);
 }
 
 /**

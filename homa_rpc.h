@@ -412,6 +412,10 @@ struct homa_rpc {
 	u64 start_ns;
 };
 
+void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
+	int port, int error);
+void     homa_abort_sock_rpcs(struct homa_sock *hsk, int error);
+void     homa_rpc_abort(struct homa_rpc *crpc, int error);
 struct homa_rpc
 	*homa_rpc_alloc_client(struct homa_sock *hsk,
 			       const union sockaddr_in_union *dest);
@@ -419,6 +423,7 @@ struct homa_rpc
 	*homa_rpc_alloc_server(struct homa_sock *hsk,
 			       const struct in6_addr *source,
 			       struct homa_data_hdr *h, int *created);
+void     homa_rpc_end(struct homa_rpc *rpc);
 struct homa_rpc
 	*homa_rpc_find_client(struct homa_sock *hsk, u64 id);
 struct homa_rpc
