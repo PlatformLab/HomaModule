@@ -2,6 +2,17 @@ This file contains various notes and lessons learned concerning performance
 of the Homa Linux kernel module.  The notes are in reverse chronological
 order.
 
+59. (May 2025) Measured overhead to read various clocks on 2.4 GHz
+Xeon E5-2640 (note: measured when CPU is active, hence running in fastest
+mode):
+
+Function                  Units        Overhead
+-----------------------------------------------
+rdtsc                     cycles         8 ns
+sched_clock               ns             9 ns
+ktime_get_mono_fast_ns    ns            24 ns
+ktime_get_raw_fast_ns     ns            24 ns
+
 58. (September 2024): Interference between Homa and TCP when both run
     concurrently on the same nodes (no special kernel code to mitigate
     interference)
