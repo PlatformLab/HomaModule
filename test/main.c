@@ -2,6 +2,7 @@
 
 /* Main program for running Homa unit tests. */
 
+#define __NO_KSELFTEST__ 1
 #include "homa_impl.h"
 #include "kselftest_harness.h"
 #include "mock.h"

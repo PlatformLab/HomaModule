@@ -14,9 +14,6 @@
 #include "mock.h"
 #include "utils.h"
 
-#define KSELFTEST_NOT_MAIN 1m
-#include "kselftest_harness.h"
-
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
  * below replace those header files.

@@ -11,11 +11,6 @@
 #include "homa_grant.h"
 #endif /* See strip.py */
 
-#ifdef __UNIT_TEST__
-#define KSELFTEST_NOT_MAIN 1
-#include "test/kselftest_harness.h"
-#endif /* __UNIT_TEST__ */
-
 /**
  * homa_socktab_init() - Constructor for homa_socktabs.
  * @socktab:  The object to initialize; previous contents are discarded.

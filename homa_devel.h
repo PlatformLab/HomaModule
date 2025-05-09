@@ -7,6 +7,13 @@
 #ifndef _HOMA_DEVEL_H
 #define _HOMA_DEVEL_H
 
+#ifdef __UNIT_TEST__
+#ifndef __NO_KSELFTEST__
+#define KSELFTEST_NOT_MAIN 1
+#include "kselftest_harness.h"
+#endif /* __NO_KSELFTEST__ */
+#endif /* __UNIT_TEST__ */
+
 #include "timetrace.h"
 
 #ifdef __STRIP__
