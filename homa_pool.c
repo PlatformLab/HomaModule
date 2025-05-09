@@ -159,7 +159,7 @@ void homa_pool_get_rcvbuf(struct homa_pool *pool,
 /**
  * homa_bpage_available() - Check whether a bpage is available for use.
  * @bpage:      Bpage to check
- * @now:        Current time (sched_clock() units)
+ * @now:        Current time (homa_clock() units)
  * Return:      True if the bpage is free or if it can be stolen, otherwise
  *              false.
  */
@@ -189,7 +189,7 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 {
 	int core_num = smp_processor_id();
 	struct homa_pool_core *core;
-	u64 now = sched_clock();
+	u64 now = homa_clock();
 	int alloced = 0;
 	int limit = 0;
 
@@ -263,8 +263,8 @@ int homa_pool_get_pages(struct homa_pool *pool, int num_pages, u32 *pages,
 		if (set_owner) {
 			atomic_set(&bpage->refs, 2);
 			bpage->owner = core_num;
-			bpage->expiration = now + 1000 *
-					pool->hsk->homa->bpage_lease_usecs;
+			bpage->expiration = now +
+					    pool->hsk->homa->bpage_lease_cycles;
 		} else {
 			atomic_set(&bpage->refs, 1);
 			bpage->owner = -1;
@@ -355,8 +355,8 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 			goto new_page;
 		}
 	}
-	bpage->expiration = sched_clock() +
-			1000 * pool->hsk->homa->bpage_lease_usecs;
+	bpage->expiration = homa_clock() +
+			    pool->hsk->homa->bpage_lease_cycles;
 	atomic_inc(&bpage->refs);
 	spin_unlock_bh(&bpage->lock);
 	goto allocate_partial;

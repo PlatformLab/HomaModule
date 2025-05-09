@@ -34,7 +34,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 	if (rpc->msgout.unscheduled > length)
 		rpc->msgout.unscheduled = length;
 #endif /* See strip.py */
-	rpc->msgout.init_ns = sched_clock();
+	rpc->msgout.init_time = homa_clock();
 }
 
 #ifndef __STRIP__ /* See strip.py */

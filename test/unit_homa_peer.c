@@ -78,7 +78,7 @@ static void peer_spinlock_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
 		return;
-	mock_ns += 1000;
+	mock_clock += 1000;
 }
 #endif /* See strip.py */
 
@@ -138,15 +138,15 @@ TEST_F(homa_peer, homa_peertab_gc_dsts)
 	struct homa_peer *peer;
 
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
-	mock_ns = 0;
+	mock_clock = 0;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	mock_ns = 50000000;
+	mock_clock = 50000000;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	mock_ns = 90000000;
+	mock_clock = 90000000;
 	homa_dst_refresh(&self->peertab, peer, &self->hsk);
 	EXPECT_EQ(3, dead_count(&self->peertab));
 
-	homa_peertab_gc_dsts(&self->peertab, 110000000);
+	homa_peertab_gc_dsts(&self->peertab, 130000000);
 	EXPECT_EQ(2, dead_count(&self->peertab));
 	homa_peertab_gc_dsts(&self->peertab, ~0);
 	EXPECT_EQ(0, dead_count(&self->peertab));
@@ -336,11 +336,11 @@ TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 
-	mock_ns = 0;
+	mock_clock = 0;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(2, dead_count(self->homa.peers));
-	mock_ns = 500000000;
+	mock_clock = 500000000;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(1, dead_count(self->homa.peers));
 }
@@ -409,17 +409,17 @@ TEST_F(homa_peer, homa_peer_lock_slow)
 			&self->hsk.inet);
 
 	ASSERT_NE(NULL, peer);
-	mock_ns = 10000;
+	mock_clock = 10000;
 	homa_peer_lock(peer);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_misses);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_miss_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 
 	mock_trylock_errors = 1;
 	unit_hook_register(peer_spinlock_hook);
 	homa_peer_lock(peer);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_ack_lock_misses);
-	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_ns);
+	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
 }
 #endif /* See strip.py */

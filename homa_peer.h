@@ -22,10 +22,7 @@ struct homa_dead_dst {
 	/** @dst: Entry that is no longer used by a struct homa_peer. */
 	struct dst_entry *dst;
 
-	/**
-	 * @gc_time: Time (in units of sched_clock()) when it is safe
-	 * to free @dst.
-	 */
+	/**  @gc_time: homa_clock() time when it is safe to free @dst. */
 	u64 gc_time;
 
 	/** @dst_links: Used to link together entries in peertab->dead_dsts. */

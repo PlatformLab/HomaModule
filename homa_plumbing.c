@@ -741,12 +741,12 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 {
 #ifndef __STRIP__ /* See strip.py */
 	int result;
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 
 	if (cmd == HOMAIOCABORT) {
 		result = homa_ioc_abort(sk, karg);
 		INC_METRIC(abort_calls, 1);
-		INC_METRIC(abort_ns, sched_clock() - start);
+		INC_METRIC(abort_cycles, homa_clock() - start);
 	} else if (cmd == HOMAIOCFREEZE) {
 		tt_record1("Freezing timetrace because of HOMAIOCFREEZE ioctl, pid %d",
 			   current->pid);
@@ -803,7 +803,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 	if (optname == SO_HOMA_RCVBUF) {
 		struct homa_rcvbuf_args args;
 #ifndef __STRIP__ /* See strip.py */
-		u64 start = sched_clock();
+		u64 start = homa_clock();
 #endif /* See strip.py */
 
 		if (optlen != sizeof(struct homa_rcvbuf_args))
@@ -822,7 +822,7 @@ int homa_setsockopt(struct sock *sk, int level, int optname,
 		ret = homa_pool_set_region(hsk, u64_to_user_ptr(args.start),
 					   args.length);
 		INC_METRIC(so_set_buf_calls, 1);
-		INC_METRIC(so_set_buf_ns, sched_clock() - start);
+		INC_METRIC(so_set_buf_cycles, homa_clock() - start);
 	} else if (optname == SO_HOMA_SERVER) {
 		int arg;
 
@@ -911,7 +911,7 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 	struct homa_sendmsg_args args;
 	union sockaddr_in_union *addr;
 #ifndef __STRIP__ /* See strip.py */
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 #endif /* See strip.py */
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
@@ -994,9 +994,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			goto error;
 		}
 #ifndef __STRIP__ /* See strip.py */
-		finish = sched_clock();
+		finish = homa_clock();
 #endif /* See strip.py */
-		INC_METRIC(send_ns, finish - start);
+		INC_METRIC(send_cycles, finish - start);
 	} else {
 		/* This is a response message. */
 		struct in6_addr canonical_dest;
@@ -1041,9 +1041,9 @@ int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 			goto error;
 		homa_rpc_unlock(rpc); /* Locked by homa_rpc_find_server. */
 #ifndef __STRIP__ /* See strip.py */
-		finish = sched_clock();
+		finish = homa_clock();
 #endif /* See strip.py */
-		INC_METRIC(reply_ns, finish - start);
+		INC_METRIC(reply_cycles, finish - start);
 	}
 	tt_record1("homa_sendmsg finished, id %d", args.id);
 	return 0;
@@ -1076,7 +1076,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	struct homa_rpc *rpc;
 	int nonblocking;
 #ifndef __STRIP__ /* See strip.py */
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 	u64 finish;
 #endif /* See strip.py */
 	int result;
@@ -1145,7 +1145,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	 * for performance debugging).
 	 */
 	if (rpc->hsk->homa->freeze_type == SLOW_RPC) {
-		u64 elapsed = (sched_clock() - rpc->start_ns) >> 10;
+		u64 elapsed = (homa_clock() - rpc->start_time) >> 10;
 
 		if (elapsed <= hsk->homa->temp[1] &&
 		    elapsed >= hsk->homa->temp[0] &&
@@ -1223,9 +1223,9 @@ done:
 	}
 
 #ifndef __STRIP__ /* See strip.py */
-	finish = sched_clock();
+	finish = homa_clock();
 #endif /* See strip.py */
-	INC_METRIC(recv_ns, finish - start);
+	INC_METRIC(recv_cycles, finish - start);
 	tt_record2("homa_recvmsg returning status %d, id %d", result,
 		   control.id);
 	return result;
@@ -1265,7 +1265,7 @@ int homa_softirq(struct sk_buff *skb)
 #ifndef __STRIP__ /* See strip.py */
 	u64 start;
 
-	start = sched_clock();
+	start = homa_clock();
 	per_cpu(homa_offload_core, raw_smp_processor_id()).last_active = start;
 #endif /* See strip.py */
 	INC_METRIC(softirq_calls, 1);
@@ -1404,7 +1404,7 @@ discard:
 #ifndef __STRIP__ /* See strip.py */
 	atomic_dec(&per_cpu(homa_offload_core, raw_smp_processor_id()).softirq_backlog);
 #endif /* See strip.py */
-	INC_METRIC(softirq_ns, sched_clock() - start);
+	INC_METRIC(softirq_cycles, homa_clock() - start);
 	return 0;
 }
 

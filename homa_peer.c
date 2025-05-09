@@ -132,7 +132,7 @@ done:
  * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
  * safe to do so.
  * @peertab:       The table in which to free entries.
- * @now:           Current time, in sched_clock() units; entries with expiration
+ * @now:           Current time, in homa_clock() units; entries with expiration
  *                 dates no later than this will be freed. Specify ~0 to
  *                 free all entries.
  */
@@ -278,9 +278,9 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 	}
 
 	spin_lock_bh(&peertab->write_lock);
-	now = sched_clock();
+	now = homa_clock();
 	save_dead->dst = peer->dst;
-	save_dead->gc_time = now + 100000000;   /* 100 ms */
+	save_dead->gc_time = now + (homa_clock_khz() << 7);   /* ~128 ms */
 	list_add_tail(&save_dead->dst_links, &peertab->dead_dsts);
 	homa_peertab_gc_dsts(peertab, now);
 	peer->dst = dst;
@@ -395,13 +395,13 @@ void homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1, int c2,
 void homa_peer_lock_slow(struct homa_peer *peer)
 	__acquires(&peer->ack_lock)
 {
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 
 	tt_record("beginning wait for peer lock");
 	spin_lock_bh(&peer->ack_lock);
 	tt_record("ending wait for peer lock");
 	INC_METRIC(peer_ack_lock_misses, 1);
-	INC_METRIC(peer_ack_lock_miss_ns, sched_clock() - start);
+	INC_METRIC(peer_ack_lock_miss_cycles, homa_clock() - start);
 }
 #endif /* See strip.py */
 

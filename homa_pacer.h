@@ -36,8 +36,8 @@ struct homa_pacer {
 	int fifo_count;
 
 	/**
-	 * @wake_time: time (in sched_clock units) when the pacer last
-	 * woke up (if the pacer is running) or 0 if the pacer is sleeping.
+	 * @wake_time: homa_clock() time when the pacer woke up (if the pacer
+	 * is running) or 0 if the pacer is sleeping.
 	 */
 	u64 wake_time;
 
@@ -56,8 +56,8 @@ struct homa_pacer {
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
-	 * @throttle_add: The time (in sched_clock() units) when the most
-	 * recent RPC was added to @throttled_rpcs.
+	 * @throttle_add: The most recent homa_clock() time when an RPC was
+	 * added to @throttled_rpcs.
 	 */
 	u64 throttle_add;
 #endif /* See strip.py */
@@ -78,18 +78,24 @@ struct homa_pacer {
 	int max_nic_queue_ns;
 
 	/**
+	 * @max_nic_queue_cycles: Same as max_nic_queue_ns except in
+	 * homa_clock() units.
+	 */
+	int max_nic_queue_cycles;
+
+	/**
 	 * @link_mbps: The raw bandwidth of the network uplink, in
 	 * units of 1e06 bits per second.  Set externally via sysctl.
 	 */
 	int link_mbps;
 
 	/**
-	 * @ns_per_mbyte: the number of ns that it takes to transmit
-	 * 10**6 bytes on our uplink. This is actually a slight overestimate
-	 * of the value, to ensure that we don't underestimate NIC queue
-	 * length and queue too many packets.
+	 * @cycles_per_mbyte: the number of homa_clock() cycles that it takes to
+	 * transmit 10**6 bytes on our uplink. This is actually a slight
+	 * overestimate of the value, to ensure that we don't underestimate
+	 * NIC queue length and queue too many packets.
 	 */
-	u32 ns_per_mbyte;
+	u32 cycles_per_mbyte;
 
 	/**
 	 * @throttle_min_bytes: If a packet has fewer bytes than this, then it
@@ -135,12 +141,11 @@ struct homa_pacer {
 	struct completion kthread_done;
 
 	/**
-	 * @link_idle_time: The time, measured by sched_clock, at which we
-	 * estimate that all of the packets we have passed to the NIC for
-	 * transmission will have been transmitted. May be in the past.
-	 * This estimate assumes that only Homa is transmitting data, so
-	 * it could be a severe underestimate if there is competing traffic
-	 * from, say, TCP. Access only with atomic ops.
+	 * @link_idle_time: The homa_clock() time at which we estimate
+	 * that all of the packets we have passed to the NIC for transmission
+	 * will have been transmitted. May be in the past. This estimate
+	 * assumes that only Homa is transmitting data, so it could be a
+	 * severe underestimate if there is competing traffic from, say, TCP.
 	 */
 	atomic64_t link_idle_time ____cacheline_aligned_in_smp;
 };
@@ -175,7 +180,7 @@ static inline void homa_pacer_check(struct homa_pacer *pacer)
 	 * to queue new packets; if the NIC queue becomes more than half
 	 * empty, then we will help out here.
 	 */
-	if ((sched_clock() + (pacer->max_nic_queue_ns >> 1)) <
+	if ((homa_clock() + (pacer->max_nic_queue_cycles >> 1)) <
 			atomic64_read(&pacer->link_idle_time))
 		return;
 	tt_record("homa_check_pacer calling homa_pacer_xmit");

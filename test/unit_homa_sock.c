@@ -372,17 +372,17 @@ TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_lock_slow)
 {
-	mock_ns_tick = 100;
+	mock_clock_tick = 100;
 
 	homa_sock_lock(&self->hsk);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_misses);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_miss_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
 
 	mock_trylock_errors = 1;
 	homa_sock_lock(&self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->socket_lock_misses);
-	EXPECT_EQ(100, homa_metrics_per_cpu()->socket_lock_miss_ns);
+	EXPECT_EQ(100, homa_metrics_per_cpu()->socket_lock_miss_cycles);
 	homa_sock_unlock(&self->hsk);
 }
 #endif /* See strip.py */

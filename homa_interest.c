@@ -79,7 +79,7 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 #ifndef __STRIP__ /* See strip.py */
 	u64 start, block_start, blocked_time, now;
 
-	start = sched_clock();
+	start = homa_clock();
 	blocked_time = 0;
 #endif /* See strip.py */
 	interest->blocked = 0;
@@ -103,10 +103,10 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 		}
 
 #ifndef __STRIP__ /* See strip.py */
-		now = sched_clock();
+		now = homa_clock();
 		per_cpu(homa_offload_core,
 			raw_smp_processor_id()).last_app_active = now;
-		if (now - start >= 1000 * hsk->homa->poll_usecs)
+		if (now - start >= hsk->homa->poll_cycles)
 			break;
 #else /* See strip.py */
 		break;
@@ -117,15 +117,15 @@ int homa_interest_wait(struct homa_interest *interest, int nonblocking)
 	IF_NO_STRIP(block_start = now);
 	wait_err = wait_event_interruptible_exclusive(interest->wait_queue,
 			atomic_read_acquire(&interest->ready) != 0);
-	IF_NO_STRIP(blocked_time = sched_clock() - block_start);
+	IF_NO_STRIP(blocked_time = homa_clock() - block_start);
 	if (wait_err == -ERESTARTSYS)
 		result = -EINTR;
 
 done:
 #ifndef __STRIP__ /* See strip.py */
 	if (interest->blocked)
-		INC_METRIC(blocked_ns, blocked_time);
-	INC_METRIC(poll_ns, sched_clock() - start - blocked_time);
+		INC_METRIC(blocked_cycles, blocked_time);
+	INC_METRIC(poll_cycles, homa_clock() - start - blocked_time);
 #endif /* See strip.py */
 	return result;
 }
@@ -158,7 +158,7 @@ void homa_interest_notify_private(struct homa_rpc *rpc)
 struct homa_interest *homa_choose_interest(struct homa_sock *hsk)
 	__must_hold(&hsk->lock)
 {
-	u64 busy_time = sched_clock() - hsk->homa->busy_ns;
+	u64 busy_time = homa_clock() - hsk->homa->busy_cycles;
 	struct homa_interest *interest, *first;
 
 	first = list_first_entry(&hsk->interests, struct homa_interest,

@@ -79,7 +79,7 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net)
 		goto error;
 	}
 	init_completion(&pacer->kthread_done);
-	atomic64_set(&pacer->link_idle_time, sched_clock());
+	atomic64_set(&pacer->link_idle_time, homa_clock());
 
 #ifndef __STRIP__ /* See strip.py */
 	pacer->sysctl_header = register_net_sysctl(net, "net/homa",
@@ -141,17 +141,17 @@ void homa_pacer_free(struct homa_pacer *pacer)
 int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 			   bool force)
 {
-	u64 idle, new_idle, clock, ns_for_packet;
+	u64 idle, new_idle, clock, cycles_for_packet;
 	int bytes;
 
 	bytes = homa_get_skb_info(skb)->wire_bytes;
-	ns_for_packet = pacer->ns_per_mbyte;
-	ns_for_packet *= bytes;
-	do_div(ns_for_packet, 1000000);
+	cycles_for_packet = pacer->cycles_per_mbyte;
+	cycles_for_packet *= bytes;
+	do_div(cycles_for_packet, 1000000);
 	while (1) {
-		clock = sched_clock();
+		clock = homa_clock();
 		idle = atomic64_read(&pacer->link_idle_time);
-		if ((clock + pacer->max_nic_queue_ns) < idle && !force &&
+		if ((clock + pacer->max_nic_queue_cycles) < idle && !force &&
 		    !(pacer->homa->flags & HOMA_FLAG_DONT_THROTTLE))
 			return 0;
 #ifndef __STRIP__ /* See strip.py */
@@ -162,18 +162,18 @@ int homa_pacer_check_nic_q(struct homa_pacer *pacer, struct sk_buff *skb,
 				u64 lost = (pacer->wake_time > idle)
 						? clock - pacer->wake_time
 						: clock - idle;
-				INC_METRIC(pacer_lost_ns, lost);
+				INC_METRIC(pacer_lost_cycles, lost);
 				tt_record1("pacer lost %d cycles", lost);
 			}
-			new_idle = clock + ns_for_packet;
+			new_idle = clock + cycles_for_packet;
 		} else {
-			new_idle = idle + ns_for_packet;
+			new_idle = idle + cycles_for_packet;
 		}
 #else /* See strip.py */
 		if (idle < clock)
-			new_idle = clock + ns_for_packet;
+			new_idle = clock + cycles_for_packet;
 		else
-			new_idle = idle + ns_for_packet;
+			new_idle = idle + cycles_for_packet;
 #endif /* See strip.py */
 
 		/* This method must be thread-safe. */
@@ -198,9 +198,9 @@ int homa_pacer_main(void *arg)
 	while (1) {
 		if (pacer->exit)
 			break;
-		pacer->wake_time = sched_clock();
+		pacer->wake_time = homa_clock();
 		homa_pacer_xmit(pacer);
-		INC_METRIC(pacer_ns, sched_clock() - pacer->wake_time);
+		INC_METRIC(pacer_cycles, homa_clock() - pacer->wake_time);
 		pacer->wake_time = 0;
 		if (!list_empty(&pacer->throttled_rpcs)) {
 			/* NIC queue is full; before calling pacer again,
@@ -241,15 +241,15 @@ int homa_pacer_main(void *arg)
 void homa_pacer_xmit(struct homa_pacer *pacer)
 {
 	struct homa_rpc *rpc;
-	s64 queue_ns;
+	s64 queue_cycles;
 
 	/* Make sure only one instance of this function executes at a time. */
 	if (!spin_trylock_bh(&pacer->mutex))
 		return;
 
 	while (1) {
-		queue_ns = atomic64_read(&pacer->link_idle_time) - sched_clock();
-		if (queue_ns >= pacer->max_nic_queue_ns)
+		queue_cycles = atomic64_read(&pacer->link_idle_time) - homa_clock();
+		if (queue_cycles >= pacer->max_nic_queue_cycles)
 			break;
 		if (list_empty(&pacer->throttled_rpcs))
 			break;
@@ -272,9 +272,9 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 			rpc = NULL;
 			list_for_each_entry(cur, &pacer->throttled_rpcs,
 					    throttled_links) {
-				if (cur->msgout.init_ns < oldest) {
+				if (cur->msgout.init_time < oldest) {
 					rpc = cur;
-					oldest = cur->msgout.init_ns;
+					oldest = cur->msgout.init_time;
 				}
 			}
 		} else {
@@ -338,10 +338,10 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 
 	if (!list_empty(&rpc->throttled_links))
 		return;
-	IF_NO_STRIP(now = sched_clock());
+	IF_NO_STRIP(now = homa_clock());
 #ifndef __STRIP__ /* See strip.py */
 	if (!list_empty(&pacer->throttled_rpcs))
-		INC_METRIC(throttled_ns, now - pacer->throttle_add);
+		INC_METRIC(throttled_cycles, now - pacer->throttle_add);
 	pacer->throttle_add = now;
 #endif /* See strip.py */
 	bytes_left = rpc->msgout.length - rpc->msgout.next_xmit_offset;
@@ -388,7 +388,7 @@ void homa_pacer_unmanage_rpc(struct homa_rpc *rpc)
 		list_del_init(&rpc->throttled_links);
 #ifndef __STRIP__ /* See strip.py */
 		if (list_empty(&pacer->throttled_rpcs))
-			INC_METRIC(throttled_ns, sched_clock()
+			INC_METRIC(throttled_cycles, homa_clock()
 					- pacer->throttle_add);
 #endif /* See strip.py */
 		homa_pacer_throttle_unlock(pacer);
@@ -405,12 +405,13 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 {
 	u64 tmp;
 
-	tmp = 8 * 1000ULL * 1000ULL * 1000ULL;
+	pacer->max_nic_queue_cycles =
+			homa_ns_to_cycles(pacer->max_nic_queue_ns);
 
 	/* Underestimate link bandwidth (overestimate time) by 1%. */
-	tmp = tmp * 101 / 100;
-	do_div(tmp, pacer->link_mbps);
-	pacer->ns_per_mbyte = tmp;
+	tmp = 101 * 8000 * (__u64)homa_clock_khz();
+	do_div(tmp, pacer->link_mbps * 100);
+	pacer->cycles_per_mbyte = tmp;
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -485,12 +486,12 @@ void homa_pacer_log_throttled(struct homa_pacer *pacer)
 void homa_pacer_throttle_lock_slow(struct homa_pacer *pacer)
 	__acquires(&pacer->throttle_lock)
 {
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 
 	tt_record("beginning wait for throttle lock");
 	spin_lock_bh(&pacer->throttle_lock);
 	tt_record("ending wait for throttle lock");
 	INC_METRIC(throttle_lock_misses, 1);
-	INC_METRIC(throttle_lock_miss_ns, sched_clock() - start);
+	INC_METRIC(throttle_lock_miss_cycles, homa_clock() - start);
 }
 #endif /* See strip.py */

@@ -31,7 +31,6 @@
 #include <linux/kthread.h>
 #include <linux/completion.h>
 #include <linux/proc_fs.h>
-#include <linux/sched/clock.h>
 #include <linux/sched/signal.h>
 #include <linux/skbuff.h>
 #include <linux/socket.h>
@@ -184,8 +183,8 @@ struct homa {
 	int pages_to_free_slots;
 
 	/**
-	 * @skb_page_free_time: Time (in sched_clock() units) when the
-	 * next sk_buff page should be freed. Could be in the past.
+	 * @skb_page_free_time: homa_clock() time when the next sk_buff
+	 * page should be freed. Could be in the past.
 	 */
 	u64 skb_page_free_time;
 
@@ -216,6 +215,9 @@ struct homa {
 	 * going to sleep. Set externally via sysctl.
 	 */
 	int poll_usecs;
+
+	/** @poll_cycles: Same as poll_usecs except in homa_clock() units. */
+	u64 poll_cycles;
 
 	/**
 	 * @num_priorities: The total number of priority levels available for
@@ -404,8 +406,8 @@ struct homa {
 	 */
 	int busy_usecs;
 
-	/** @busy_ns: Same as busy_usecs except in sched_clock() units. */
-	int busy_ns;
+	/** @busy_cycles: Same as busy_usecs except in homa_clock() units. */
+	int busy_cycles;
 
 	/**
 	 * @gro_busy_usecs: if the gap between the completion of
@@ -417,8 +419,10 @@ struct homa {
 	 */
 	int gro_busy_usecs;
 
-	/** @gro_busy_ns: Same as busy_usecs except in sched_clock() units. */
-	int gro_busy_ns;
+	/**
+	 * @gro_busy_cycles: Same as busy_usecs except in homa_clock() units.
+	 */
+	int gro_busy_cycles;
 #endif /* See strip.py */
 
 	/**
@@ -446,6 +450,12 @@ struct homa {
 	 * before its ownership can be revoked to reclaim the page.
 	 */
 	int bpage_lease_usecs;
+
+	/**
+	 * @bpage_lease_cycles: same as bpage_lease_usecs except in
+	 * homa_clock() units.
+	 * */
+	int bpage_lease_cycles;
 
 	/**
 	 * @next_id: Set via sysctl; causes next_outgoing_id to be set to
@@ -739,7 +749,7 @@ void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
  * homa_from_net() - Return the struct homa associated with a particular
  * struct net.
  * @net:     Get the struct homa for this net namespace.
- * Return:   see above
+ * Return:   see above.
  */
 static inline struct homa *homa_from_net(struct net *net)
 {
@@ -750,7 +760,7 @@ static inline struct homa *homa_from_net(struct net *net)
  * homa_from_sock() - Return the struct homa associated with a particular
  * struct sock.
  * @sock:    Get the struct homa for this socket.
- * Return:   see above
+ * Return:   see above.
  */
 static inline struct homa *homa_from_sock(struct sock *sock)
 {
@@ -761,11 +771,103 @@ static inline struct homa *homa_from_sock(struct sock *sock)
  * homa_from_skb() - Return the struct homa associated with a particular
  * sk_buff.
  * @skb:     Get the struct homa for this packet buffer.
- * Return:   see above
+ * Return:   see above.
  */
 static inline struct homa *homa_from_skb(struct sk_buff *skb)
 {
 	return (struct homa *)net_generic(dev_net(skb->dev), homa_net_id);
+}
+
+/**
+ * homa_clock() - Return a fine-grain clock value that is monotonic and
+ * consistent across cores.
+ * Return: see above.
+ */
+static inline u64 homa_clock(void)
+{
+	/* As of May 2025 there does not appear to be a portable API that
+	 * meets Homa's needs:
+	 * - The Intel X86 TSC works well but is not portable.
+	 * - sched_clock() does not guarantee monotonicity or consistency.
+	 * - ktime_get_mono_fast_ns and ktime_get_raw_fast_ns are very slow
+	 *   (27 ns to read, vs 8 ns for TSC)
+	 * Thus we use a hybrid approach that uses TSC (via get_cycles) where
+	 * available (which should be just about everywhere Homa runs).
+	 */
+#ifdef __UNIT_TEST__
+	u64 mock_get_clock(void);
+	return mock_get_clock();
+#else /* __UNIT_TEST__ */
+#ifdef CONFIG_X86_TSC
+	return get_cycles();
+#else
+	return ktime_get_mono_fast_ns();
+#endif /* CONFIG_X86_TSC */
+#endif /* __UNIT_TEST__ */
+}
+
+/**
+ * homa_clock_khz() - Return the frequency of the values returned by
+ * homa_clock, in units of KHz.
+ * Return: see above.
+ */
+static inline u64 homa_clock_khz(void)
+{
+#ifdef __UNIT_TEST__
+	return 1000000;
+#else /* __UNIT_TEST__ */
+#ifdef CONFIG_X86_TSC
+	return cpu_khz;
+#else
+	return 1000000;
+#endif /* CONFIG_X86_TSC */
+#endif /* __UNIT_TEST__ */
+}
+
+/**
+ * homa_ns_to_cycles() - Convert from units of nanoseconds to units of
+ * homa_clock().
+ * @ns:      A time measurement in nanoseconds
+ * Return:   The time in homa_clock() units corresponding to @ns.
+ */
+static inline u64 homa_ns_to_cycles(u64 ns)
+{
+#ifdef __UNIT_TEST__
+	return ns;
+#else /* __UNIT_TEST__ */
+#ifdef CONFIG_X86_TSC
+	u64 tmp;
+
+	tmp = ns * cpu_khz;
+	do_div(tmp, 1000000);
+	return tmp;
+#else
+	return ns;
+#endif /* CONFIG_X86_TSC */
+#endif /* __UNIT_TEST__ */
+}
+
+/**
+ * homa_usec_to_cycles() - Convert from units of microseconds to units of
+ * homa_clock().
+ * @usecs:   A time measurement in microseconds
+ * Return:   The time in homa_clock() units corresponding to @usecs.
+ */
+static inline u64 homa_usecs_to_cycles(u64 usecs)
+{
+#ifdef __UNIT_TEST__
+	return usecs * 1000;
+#else /* __UNIT_TEST__ */
+#ifdef CONFIG_X86_TSC
+	u64 tmp;
+
+	tmp = usecs * cpu_khz;
+	do_div(tmp, 1000);
+	return tmp;
+#else
+	return usecs * 1000;
+#endif /* CONFIG_X86_TSC */
+#endif /* __UNIT_TEST__ */
 }
 
 #endif /* _HOMA_IMPL_H */

@@ -349,20 +349,20 @@ TEST_F(homa_skb, homa_skb_page_alloc__new_large_page)
 {
 	struct homa_skb_core *skb_core = get_skb_core(smp_processor_id());
 
-	mock_ns_tick = 100;
+	mock_clock_tick = 100;
 	EXPECT_EQ(0, skb_core->pool->avail);
 	EXPECT_EQ(0, skb_core->num_stashed_pages);
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, skb_core));
 	EXPECT_NE(NULL, skb_core->skb_page);
 	EXPECT_EQ(HOMA_SKB_PAGE_SIZE, skb_core->page_size);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->skb_page_allocs);
-	EXPECT_EQ(100, homa_metrics_per_cpu()->skb_page_alloc_ns);
+	EXPECT_EQ(100, homa_metrics_per_cpu()->skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 {
 	struct homa_skb_core *skb_core = get_skb_core(2);
 
-	mock_ns_tick = 50;
+	mock_clock_tick = 50;
 	mock_alloc_page_errors = 1;
 	EXPECT_TRUE(homa_skb_page_alloc(&self->homa, skb_core));
 	EXPECT_NE(NULL, skb_core->skb_page);
@@ -370,7 +370,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__high_order_page_not_available)
 	EXPECT_EQ(PAGE_SIZE, skb_core->page_size);
 	EXPECT_EQ(0, skb_core->page_inuse);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->skb_page_allocs);
-	EXPECT_EQ(50, homa_metrics_per_cpu()->skb_page_alloc_ns);
+	EXPECT_EQ(50, homa_metrics_per_cpu()->skb_page_alloc_cycles);
 }
 TEST_F(homa_skb, homa_skb_page_alloc__no_pages_available)
 {
@@ -672,7 +672,7 @@ TEST_F(homa_skb, homa_skb_get)
 TEST_F(homa_skb, homa_skb_release_pages__basics)
 {
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
-	mock_ns = 1000000;
+	mock_clock = 1000000;
 	self->homa.skb_page_free_time = 500000;
 	self->homa.skb_page_frees_per_sec = 10;
 	self->homa.skb_page_pool_min_kb = 0;
@@ -689,7 +689,7 @@ TEST_F(homa_skb, homa_skb_release_pages__basics)
 TEST_F(homa_skb, homa_skb_release_pages__not_time_to_free)
 {
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
-	mock_ns = 1000000;
+	mock_clock = 1000000;
 	self->homa.skb_page_free_time = 1000001;
 	self->homa.skb_page_frees_per_sec = 10;
 	self->homa.skb_page_pool_min_kb = 0;
@@ -701,7 +701,7 @@ TEST_F(homa_skb, homa_skb_release_pages__not_time_to_free)
 TEST_F(homa_skb, homa_skb_release_pages__allocate_skb_pages_to_free)
 {
 	EXPECT_EQ(0, self->homa.pages_to_free_slots);
-	mock_ns= 1000000;
+	mock_clock= 1000000;
 	self->homa.skb_page_frees_per_sec = 10;
 	self->homa.skb_page_free_time = 500000;
 
@@ -720,7 +720,7 @@ TEST_F(homa_skb, homa_skb_release_pages__cant_reallocate_skb_pages_to_free)
 	struct homa_page_pool *pool;
 
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
-	mock_ns = 1000000;
+	mock_clock = 1000000;
 	self->homa.skb_page_free_time = 500000;
 	self->homa.skb_page_frees_per_sec = 20;
 	self->homa.skb_page_pool_min_kb = 0;
@@ -741,7 +741,7 @@ TEST_F(homa_skb, homa_skb_release_pages__cant_reallocate_skb_pages_to_free)
 TEST_F(homa_skb, homa_skb_release_pages__limited_by_min_kb)
 {
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
-	mock_ns = 1000000;
+	mock_clock = 1000000;
 	self->homa.skb_page_free_time = 500000;
 	self->homa.skb_page_frees_per_sec = 20;
 	self->homa.skb_page_pool_min_kb = (5 * HOMA_SKB_PAGE_SIZE) / 1000;
@@ -754,7 +754,7 @@ TEST_F(homa_skb, homa_skb_release_pages__limited_by_min_kb)
 TEST_F(homa_skb, homa_skb_release_pages__empty_pool)
 {
 	EXPECT_EQ(0UL, self->homa.skb_page_free_time);
-	mock_ns= 2000000;
+	mock_clock= 2000000;
 	self->homa.skb_page_free_time = 500000;
 	self->homa.skb_page_frees_per_sec = 1000;
 	self->homa.skb_page_pool_min_kb = 0;

@@ -80,8 +80,8 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_id = 1235;
 	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
-	mock_ns = 10000;
-	self->homa.pacer->ns_per_mbyte = 1000000;
+	mock_clock = 10000;
+	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
@@ -830,7 +830,7 @@ TEST_F(homa_outgoing, homa_xmit_data__below_throttle_min)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_ns = 500;
+	self->homa.pacer->max_nic_queue_cycles = 500;
 	self->homa.pacer->throttle_min_bytes = 250;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_rpc_lock(crpc);
@@ -852,7 +852,7 @@ TEST_F(homa_outgoing, homa_xmit_data__force)
 
 	/* First, get an RPC on the throttled list. */
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_ns = 3000;
+	self->homa.pacer->max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 	homa_rpc_lock(crpc1);
 	homa_xmit_data(crpc1, false);
@@ -880,7 +880,7 @@ TEST_F(homa_outgoing, homa_xmit_data__throttle)
 
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 11000);
-	self->homa.pacer->max_nic_queue_ns = 3000;
+	self->homa.pacer->max_nic_queue_cycles = 3000;
 	self->homa.flags &= ~HOMA_FLAG_DONT_THROTTLE;
 
 	homa_rpc_lock(crpc);

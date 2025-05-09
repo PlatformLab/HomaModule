@@ -88,10 +88,10 @@ struct homa_message_out {
 #endif /* See strip.py */
 
 	/**
-	 * @init_ns: Time in sched_clock units when this structure was
-	 * initialized.  Used to find the oldest outgoing message.
+	 * @init_time: homa_clock() time when this structure was initialized.
+	 * Used to find the oldest outgoing message.
 	 */
-	u64 init_ns;
+	u64 init_time;
 };
 
 /**
@@ -106,7 +106,7 @@ struct homa_gap {
 	int end;
 
 	/**
-	 * @time: time (in sched_clock units) when the gap was first detected.
+	 * @time: homa_clock() time when the gap was first detected.
 	 * As of 7/2024 this isn't used for anything.
 	 */
 	u64 time;
@@ -190,7 +190,7 @@ struct homa_message_in {
 	int rec_incoming;
 
 	/**
-	 * @birth: sched_clock() time when homa_grant_manage_rpc was invoked
+	 * @birth: homa_clock() time when homa_grant_manage_rpc was invoked
 	 * for this RPC. Managed by homa_grant.c. Only set if the RPC needs
 	 * grants.
 	 */
@@ -406,10 +406,10 @@ struct homa_rpc {
 	int magic;
 
 	/**
-	 * @start_ns: time (from sched_clock()) when this RPC was created.
-	 * Used (sometimes) for testing.
+	 * @start_time: homa_clock() time when this RPC was created. Used
+	 * occasionally for testing.
 	 */
-	u64 start_ns;
+	u64 start_time;
 };
 
 void     homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,

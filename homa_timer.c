@@ -195,7 +195,7 @@ void homa_timer(struct homa *homa)
 	homa->timer_ticks++;
 
 #ifndef __STRIP__ /* See strip.py */
-	start = sched_clock();
+	start = homa_clock();
 	total_grants = 0;
 	for (core = 0; core < nr_cpu_ids; core++) {
 		struct homa_metrics *m = homa_metrics_per_cpu();
@@ -233,13 +233,13 @@ void homa_timer(struct homa *homa)
 			 * out.  See reap.txt for more info.
 			 */
 #ifndef __STRIP__ /* See strip.py */
-			u64 rpc_start = sched_clock();
+			u64 rpc_start = homa_clock();
 #endif /* See strip.py */
 
 			tt_record("homa_timer calling homa_rpc_reap");
 			if (homa_rpc_reap(hsk, false) == 0)
 				break;
-			INC_METRIC(timer_reap_ns, sched_clock() - rpc_start);
+			INC_METRIC(timer_reap_cycles, homa_clock() - rpc_start);
 		}
 
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
@@ -289,7 +289,7 @@ void homa_timer(struct homa *homa)
 #endif /* See strip.py */
 	homa_skb_release_pages(homa);
 #ifndef __STRIP__ /* See strip.py */
-	end = sched_clock();
-	INC_METRIC(timer_ns, end - start);
+	end = homa_clock();
+	INC_METRIC(timer_cycles, end - start);
 #endif /* See strip.py */
 }

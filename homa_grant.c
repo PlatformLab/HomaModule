@@ -110,7 +110,7 @@ struct homa_grant *homa_grant_alloc(struct net *net)
 	}
 #endif /* See strip.py */
 	homa_grant_update_sysctl_deps(grant);
-	grant->next_recalc = sched_clock() + grant->recalc_ns;
+	grant->next_recalc = homa_clock() + grant->recalc_cycles;
 	return grant;
 
 error:
@@ -414,7 +414,7 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_rpc *bumped;
-	u64 time = sched_clock();
+	u64 time = homa_clock();
 
 	BUG_ON(rpc->msgin.rank >= 0 || !list_empty(&rpc->grantable_links));
 
@@ -540,7 +540,7 @@ void homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 	__must_hold(&rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
-	u64 time = sched_clock();
+	u64 time = homa_clock();
 
 	homa_grant_lock(grant);
 
@@ -696,7 +696,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * inversions that may have developed. The interval for these scans
 	 * is chosen so as not to create too much contention for the grant lock.
 	 */
-	now = sched_clock();
+	now = homa_clock();
 	limit = atomic_xchg(&grant->incoming_hit_limit, false);
 	recalc = now >= READ_ONCE(grant->next_recalc);
 	if (!recalc && !limit) {
@@ -728,7 +728,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	homa_grant_lock(grant);
 	if (recalc) {
 		/* Case 4. */
-		grant->next_recalc = now + grant->recalc_ns;
+		grant->next_recalc = now + grant->recalc_cycles;
 		homa_grant_fix_order(grant);
 	}
 
@@ -972,13 +972,13 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
 void homa_grant_lock_slow(struct homa_grant *grant)
 	__acquires(&grant->lock)
 {
-	u64 start = sched_clock();
+	u64 start = homa_clock();
 
 	tt_record("beginning wait for grant lock");
 	spin_lock_bh(&grant->lock);
 	tt_record("ending wait for grant lock");
 	INC_METRIC(grant_lock_misses, 1);
-	INC_METRIC(grant_lock_miss_ns, sched_clock() - start);
+	INC_METRIC(grant_lock_miss_cycles, homa_clock() - start);
 }
 
 /**
@@ -1001,7 +1001,7 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 				grant->fifo_grant_increment;
 	grant->grant_nonfifo = tmp;
 
-	grant->recalc_ns = grant->recalc_usecs * 1000;
+	grant->recalc_cycles = homa_usecs_to_cycles(grant->recalc_usecs);
 
 	grant->window = homa_grant_window(grant);
 }

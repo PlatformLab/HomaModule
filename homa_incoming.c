@@ -87,7 +87,7 @@ struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end)
 		return NULL;
 	gap->start = start;
 	gap->end = end;
-	gap->time = sched_clock();
+	gap->time = homa_clock();
 	list_add_tail(&gap->links, next);
 	return gap;
 }
@@ -359,11 +359,11 @@ free_skbs:
 		}
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
-		start = sched_clock();
+		start = homa_clock();
 #endif /* See strip.py */
 		for (i = 0; i < n; i++)
 			kfree_skb(skbs[i]);
-		INC_METRIC(skb_free_ns, sched_clock() - start);
+		INC_METRIC(skb_free_cycles, homa_clock() - start);
 		INC_METRIC(skb_frees, n);
 		tt_record2("finished freeing %d skbs for id %d",
 			   n, rpc->id);
@@ -598,12 +598,12 @@ discard:
 		 * RPCs. See reap.txt for details.
 		 */
 #ifndef __STRIP__ /* See strip.py */
-		u64 start = sched_clock();
+		u64 start = homa_clock();
 #endif /* See strip.py */
 
 		tt_record("homa_data_pkt calling homa_rpc_reap");
 		homa_rpc_reap(hsk, false);
-		INC_METRIC(data_pkt_reap_ns, sched_clock() - start);
+		INC_METRIC(data_pkt_reap_cycles, homa_clock() - start);
 	}
 	sock_put(&hsk->sock);
 }
@@ -1238,7 +1238,7 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 		 * Homa will try to avoid assigning any work there.
 		 */
 		per_cpu(homa_offload_core, interest->core).last_app_active =
-				sched_clock();
+				homa_clock();
 #endif /* See strip.py */
 	} else if (list_empty(&rpc->ready_links)) {
 		list_add_tail(&rpc->ready_links, &hsk->ready_rpcs);
@@ -1257,7 +1257,10 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
  */
 void homa_incoming_sysctl_changed(struct homa *homa)
 {
-	homa->busy_ns = homa->busy_usecs * 1000;
-	homa->gro_busy_ns = homa->gro_busy_usecs * 1000;
+	homa->poll_cycles = homa_usecs_to_cycles(homa->poll_usecs);
+	homa->busy_cycles = homa_usecs_to_cycles(homa->busy_usecs);
+	homa->gro_busy_cycles = homa_usecs_to_cycles(homa->gro_busy_usecs);
+	homa->bpage_lease_cycles =
+			homa_usecs_to_cycles(homa->bpage_lease_usecs);
 }
 #endif /* See strip.py */

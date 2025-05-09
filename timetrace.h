@@ -8,7 +8,7 @@
 #ifdef __UNIT_TEST__
 #undef get_cycles
 #define get_cycles mock_get_cycles
-cycles_t mock_get_cycles(void);
+u64 mock_get_cycles(void);
 #endif /* __UNIT_TEST__ */
 
 // Change 1 -> 0 in the following line to disable time tracing globally.
@@ -131,16 +131,18 @@ extern s64       tt_debug_int64[100];
 extern void      *tt_debug_ptr[100];
 
 /**
- * tt_rdtsc(): return the current value of the fine-grain CPU cycle counter
- * (accessed via the RDTSC instruction).
- * Return: see above
+ * tt_get_cycles(): return the current value of the fine-grain CPU cycle
+ * counter.
+ * Return: see above.
  */
-static inline u64 tt_rdtsc(void)
+static inline u64 tt_get_cycles(void)
 {
-	u32 lo, hi;
-
-	__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
-	return (((u64)hi << 32) | lo);
+#ifdef __UNIT_TEST__
+	extern u64 mock_tt_cycles;
+	return mock_tt_cycles;
+#else /* __UNIT_TEST__ */
+	return get_cycles();
+#endif /* __UNIT_TEST__ */
 }
 
 /*
@@ -164,8 +166,8 @@ static inline void tt_record4(const char *format, u32 arg0, u32 arg1,
 			      u32 arg2, u32 arg3)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-		      arg0, arg1, arg2, arg3);
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], tt_get_cycles(),
+		      format, arg0, arg1, arg2, arg3);
 #endif
 }
 
@@ -173,32 +175,32 @@ static inline void tt_record3(const char *format, u32 arg0, u32 arg1,
 			      u32 arg2)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-		      arg0, arg1, arg2, 0);
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], tt_get_cycles(),
+		      format, arg0, arg1, arg2, 0);
 #endif
 }
 
 static inline void tt_record2(const char *format, u32 arg0, u32 arg1)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-		      arg0, arg1, 0, 0);
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], tt_get_cycles(),
+		      format, arg0, arg1, 0, 0);
 #endif
 }
 
 static inline void tt_record1(const char *format, u32 arg0)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-		      arg0, 0, 0, 0);
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], tt_get_cycles(),
+		      format, arg0, 0, 0, 0);
 #endif
 }
 
 static inline void tt_record(const char *format)
 {
 #if ENABLE_TIME_TRACE
-	tt_record_buf(tt_buffers[raw_smp_processor_id()], get_cycles(), format,
-		      0, 0, 0, 0);
+	tt_record_buf(tt_buffers[raw_smp_processor_id()], tt_get_cycles(),
+		      format, 0, 0, 0, 0);
 #endif
 }
 

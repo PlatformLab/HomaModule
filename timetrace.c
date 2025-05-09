@@ -92,6 +92,10 @@ int tt_pf_storage = TT_PF_BUF_SIZE;
 /* Set during tests to disable "cpu_khz" line in trace output. */
 bool tt_test_no_khz;
 
+#ifdef __UNIT_TEST__
+unsigned int cpu_khz = 1000000;
+#endif
+
 #define MAX_IDS 10
 #define MAX_CORES 50
 static atomic_t id_counts[MAX_CORES][MAX_IDS];
@@ -913,8 +917,8 @@ void tt_inc_metric(int metric, u64 count)
 	 * for the legal values of metric.
 	 */
 	static int offsets[] = {
-		offsetof(struct homa_metrics, napi_ns),
-		offsetof(struct homa_metrics, linux_softirq_ns),
+		offsetof(struct homa_metrics, napi_cycles),
+		offsetof(struct homa_metrics, linux_softirq_cycles),
 		offsetof(struct homa_metrics, linux_pkt_alloc_bytes),
 	};
 	u64 *metric_addr = (u64 *)(((char *)homa_metrics_per_cpu())

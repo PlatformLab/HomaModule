@@ -16,7 +16,7 @@ FIXTURE_SETUP(timetrace)
 	tt_buffer_size = 64;
 	tt_test_no_khz = true;
 	tt_init("tt");
-	mock_cycles = 1000;
+	mock_tt_cycles = 1000;
 }
 FIXTURE_TEARDOWN(timetrace)
 {
@@ -46,13 +46,13 @@ TEST_F(timetrace, tt_record__basics)
 
 	memset(buffer, 0, sizeof(buffer));
 	tt_record("Message with no args");
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record1("Message with 1 arg: %d", 99);
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record2("Message with 2 args: %d %d %d %d", 100, 200);
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record3("Message with 3 args: %d %d %d %d", 10, 20, 30);
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record4("Message with 4 args: %d %d %d %d", 1, 2, 3, 4);
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);
@@ -72,13 +72,13 @@ TEST_F(timetrace, tt_record_buf__wraparound)
 	memset(buffer, 0, sizeof(buffer));
 	tt_buffer_size = 4;
 	tt_record("Message 1");
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record("Message 2");
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record("Message 3");
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record("Message 4");
-	mock_cycles++;
+	mock_tt_cycles++;
 	tt_record("Message 5");
 	tt_proc_open(NULL, &self->file);
 	tt_proc_read(&self->file, buffer, sizeof(buffer), 0);

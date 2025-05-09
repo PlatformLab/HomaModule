@@ -308,7 +308,7 @@ TEST_F(homa_rpc, homa_bucket_lock_slow)
 	struct homa_rpc *crpc, *srpc;
 	int created;
 
-	mock_ns_tick = 10;
+	mock_clock_tick = 10;
 	crpc = homa_rpc_alloc_client(&self->hsk, &self->server_addr);
 	ASSERT_FALSE(IS_ERR(crpc));
 	homa_rpc_end(crpc);
@@ -319,17 +319,17 @@ TEST_F(homa_rpc, homa_bucket_lock_slow)
 	homa_rpc_unlock(srpc);
 
 	EXPECT_EQ(0, homa_metrics_per_cpu()->client_lock_misses);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->client_lock_miss_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->client_lock_miss_cycles);
 	homa_bucket_lock_slow(crpc->bucket, crpc->id);
 	homa_rpc_unlock(crpc);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->client_lock_misses);
-	EXPECT_NE(0, homa_metrics_per_cpu()->client_lock_miss_ns);
+	EXPECT_NE(0, homa_metrics_per_cpu()->client_lock_miss_cycles);
 	EXPECT_EQ(0, homa_metrics_per_cpu()->server_lock_misses);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->server_lock_miss_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->server_lock_miss_cycles);
 	homa_bucket_lock_slow(srpc->bucket, srpc->id);
 	homa_rpc_unlock(srpc);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->server_lock_misses);
-	EXPECT_EQ(10, homa_metrics_per_cpu()->server_lock_miss_ns);
+	EXPECT_EQ(10, homa_metrics_per_cpu()->server_lock_miss_cycles);
 }
 #endif /* See strip.py */
 
@@ -725,7 +725,7 @@ TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
 
 	ASSERT_NE(NULL, crpc);
 	homa_gap_alloc(&crpc->msgin.gaps, 1000, 2000);
-	mock_ns = 1000;
+	mock_clock = 1000;
 	homa_gap_alloc(&crpc->msgin.gaps, 5000, 6000);
 
 	EXPECT_STREQ("start 1000, end 2000; start 5000, end 6000, time 1000",

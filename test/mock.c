@@ -164,25 +164,22 @@ int mock_rpc_holds;
  */
 static int mock_preempt_disables;
 
-/* Used as the return value for calls to get_cycles. A value of ~0 means
- * return actual clock time. Shouldn't be used much anymore (get_cycles
- * shouldn't be used).
- */
-cycles_t mock_cycles;
+/* Used as the return value for calls to homa_clock. */
+u64 mock_clock;
 
-/* Used as the return value for calls to sched_clock. */
-u64 mock_ns;
+/* Add this value to mock_clock every time homa_clock is invoked. */
+u64 mock_clock_tick;
 
-/* Add this value to mock_ns every time sched_clock is invoked. */
-u64 mock_ns_tick;
-
-/* If values are present here, use then as the return values from
- * sched_clock, without considering mock_ns or mock_ns_ticks.
+/* If values are present here, use them as the return values from
+ * homa_clock, without considering mock_clock or mock_clock_tick.
  */
 #define MAX_CLOCK_VALS 10
 u64 mock_clock_vals[MAX_CLOCK_VALS];
 int mock_next_clock_val = 0;
 int mock_num_clock_vals = 0;
+
+/* Used as the return value for tt_get_cycles. */
+u64 mock_tt_cycles;
 
 /* Indicates whether we should be simulation IPv6 or IPv4 in the
  * current test. Can be overridden by a test.
@@ -248,7 +245,6 @@ struct net_offload tcp_offload;
 struct net_offload tcp_v6_offload;
 
 static struct hrtimer_clock_base clock_base;
-unsigned int cpu_khz = 1000000;
 struct task_struct *current_task = &mock_task;
 unsigned long ex_handler_refcount;
 struct net init_net;
@@ -1198,16 +1194,6 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
-u64 sched_clock(void)
-{
-	if (mock_next_clock_val < mock_num_clock_vals) {
-		mock_next_clock_val++;
-		return mock_clock_vals[mock_next_clock_val - 1];
-	}
-	mock_ns += mock_ns_tick;
-	return mock_ns;
-}
-
 void schedule(void)
 {
 	UNIT_HOOK("schedule");
@@ -1551,18 +1537,17 @@ void mock_data_ready(struct sock *sk)
 }
 
 /**
- * mock_get_cycles() - Replacement for get_cycles; allows time to be
- * hard-while using mock_cycles variable.
+ * mock_get_clock() - Replacement for homa_clock; allows time to be
+ * controlled by unit tests.
  */
-cycles_t mock_get_cycles(void)
+u64 mock_get_clock(void)
 {
-	if (mock_cycles == ~0) {
-		uint32_t lo, hi;
-
-		__asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
-		return (((uint64_t)hi << 32) | lo);
+	if (mock_next_clock_val < mock_num_clock_vals) {
+		mock_next_clock_val++;
+		return mock_clock_vals[mock_next_clock_val - 1];
 	}
-	return mock_cycles;
+	mock_clock += mock_clock_tick;
+	return mock_clock;
 }
 
 /**
@@ -1727,7 +1712,7 @@ void mock_set_homa(struct homa *homa)
 
 /**
  * mock_set_clock_vals() - Specify one or more clock values to be returned
- * by the next calls to sched_clock(). The list of arguments must be
+ * by the next calls to homa_clock(). The list of arguments must be
  * terminated by a zero value (which will not be used as a clock value).
  * @t:    The first clock reading to return.
  */
@@ -1973,18 +1958,18 @@ void mock_teardown(void)
 
 	pcpu_hot.cpu_number = 1;
 	pcpu_hot.current_task = &mock_task;
-	cpu_khz = 1000000;
 	mock_alloc_page_errors = 0;
 	mock_alloc_skb_errors = 0;
 	mock_copy_data_errors = 0;
 	mock_copy_to_iter_errors = 0;
 	mock_copy_to_user_errors = 0;
 	mock_cpu_idle = 0;
-	mock_cycles = 0;
-	mock_ns = 0;
-	mock_ns_tick = 0;
+	mock_clock = 0;
+	mock_clock = 0;
+	mock_clock_tick = 0;
 	mock_next_clock_val = 0;
 	mock_num_clock_vals = 0;
+	mock_tt_cycles = 0;
 	mock_ipv6 = mock_ipv6_default;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;

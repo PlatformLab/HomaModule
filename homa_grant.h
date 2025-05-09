@@ -51,7 +51,7 @@ struct homa_grant {
 	spinlock_t lock ____cacheline_aligned_in_smp;
 
 	/**
-	 * @lock_time: sched_clock() time when lock was last locked. Used
+	 * @lock_time: homa_clock() time when lock was last locked. Used
 	 * for computing statistics.
 	 */
 	u64 lock_time;
@@ -85,7 +85,7 @@ struct homa_grant {
 	int num_grantable_rpcs;
 
 	/**
-	 * @last_grantable_change: The sched_clock() time of the most recent
+	 * @last_grantable_change: The homa_clock() time of the most recent
 	 * increment or decrement of num_grantable_rpcs; used for computing
 	 * statistics.
 	 */
@@ -134,12 +134,14 @@ struct homa_grant {
 	 */
 	int recalc_usecs;
 
-	/** @recalc_ns: Same as @recalc_usec except in units of nanoseconds. */
-	int recalc_ns;
+	/**
+	 * @recalc_cycles: Same as @recalc_usec except in homa_clock() units.
+	 */
+	int recalc_cycles;
 
 	/**
-	 * @next_recalc: Time (in sched_clock() nanoseconds) at which
-	 * priorities should be recalculated.
+	 * @next_recalc: Time in homa_clock() units at which priorities
+	 * should be recalculated.
 	 */
 	u64 next_recalc;
 
@@ -171,7 +173,7 @@ struct homa_grant {
 	int grant_nonfifo_left;
 
 	/**
-	 * @oldest_rpc: The RPC with incoming data whose start_ns is
+	 * @oldest_rpc: The RPC with incoming data whose start_cycles is
 	 * farthest in the past). NULL means either there are no incoming
 	 * RPCs or the oldest needs to be recomputed. Must hold grant_lock
 	 * to update.
@@ -288,7 +290,7 @@ static inline void homa_grant_lock(struct homa_grant *grant)
 {
 	if (!spin_trylock_bh(&grant->lock))
 		homa_grant_lock_slow(grant);
-	grant->lock_time = sched_clock();
+	grant->lock_time = homa_clock();
 }
 
 /**
@@ -298,7 +300,7 @@ static inline void homa_grant_lock(struct homa_grant *grant)
 static inline void homa_grant_unlock(struct homa_grant *grant)
 	__releases(&grant->grant_lock)
 {
-	INC_METRIC(grant_lock_ns, sched_clock() - grant->lock_time);
+	INC_METRIC(grant_lock_cycles, homa_clock() - grant->lock_time);
 	spin_unlock_bh(&grant->lock);
 }
 

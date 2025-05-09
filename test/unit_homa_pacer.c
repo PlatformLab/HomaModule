@@ -21,17 +21,17 @@ static void unmanage_hook(char *id) {
 		homa_pacer_unmanage_rpc(hook_rpc);
 }
 
-static u64 hook_exit_ns;
+static u64 hook_exit_cycles;
 static struct homa_pacer *hook_pacer;
 static void exit_hook(char *id) {
-	mock_ns += mock_ns_tick;
-	if (mock_ns >= hook_exit_ns)
+	mock_clock += mock_clock_tick;
+	if (mock_clock >= hook_exit_cycles)
 		hook_pacer->exit = true;
 }
 
 static void exit_idle_hook(char *id) {
 	if (strcmp(id, "schedule") == 0)
-		unit_log_printf("; ", "time %llu", mock_ns);
+		unit_log_printf("; ", "time %llu", mock_clock);
 	if (list_empty(&hook_pacer->throttled_rpcs))
 		hook_pacer->exit = true;
 }
@@ -64,7 +64,7 @@ FIXTURE_SETUP(homa_pacer)
 	self->server_id = 1235;
 	homa_init(&self->homa, &mock_net);
 	mock_set_homa(&self->homa);
-	self->homa.pacer->ns_per_mbyte = 1000000;
+	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.pacer->throttle_min_bytes = 0;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.pacer->fifo_fraction = 0;
@@ -157,8 +157,8 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__success)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
-	mock_ns = 8000;
-	self->homa.pacer->max_nic_queue_ns = 1000;
+	mock_clock = 8000;
+	self->homa.pacer->max_nic_queue_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, false));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -174,8 +174,8 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_full)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
-	mock_ns = 7999;
-	self->homa.pacer->max_nic_queue_ns = 1000;
+	mock_clock = 7999;
+	self->homa.pacer->max_nic_queue_cycles = 1000;
 	EXPECT_EQ(0, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, false));
 	EXPECT_EQ(9000, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -191,8 +191,8 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_full_but_force)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
-	mock_ns = 7999;
-	self->homa.pacer->max_nic_queue_ns = 1000;
+	mock_clock = 7999;
+	self->homa.pacer->max_nic_queue_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, true));
 	EXPECT_EQ(9500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -210,14 +210,14 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__pacer_metrics)
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
 	self->homa.pacer->wake_time = 9800;
-	mock_ns = 10000;
-	self->homa.pacer->max_nic_queue_ns = 1000;
+	mock_clock = 10000;
+	self->homa.pacer->max_nic_queue_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, true));
 	EXPECT_EQ(10500, atomic64_read(&self->homa.pacer->link_idle_time));
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(500, homa_metrics_per_cpu()->pacer_bytes);
-	EXPECT_EQ(200, homa_metrics_per_cpu()->pacer_lost_ns);
+	EXPECT_EQ(200, homa_metrics_per_cpu()->pacer_lost_cycles);
 #endif /* See strip.py */
 }
 TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_empty)
@@ -231,8 +231,8 @@ TEST_F(homa_pacer, homa_pacer_check_nic_q__queue_empty)
 	homa_get_skb_info(crpc->msgout.packets)->wire_bytes = 500;
 	unit_log_clear();
 	atomic64_set(&self->homa.pacer->link_idle_time, 9000);
-	mock_ns = 10000;
-	self->homa.pacer->max_nic_queue_ns = 1000;
+	mock_clock = 10000;
+	self->homa.pacer->max_nic_queue_cycles = 1000;
 	EXPECT_EQ(1, homa_pacer_check_nic_q(self->homa.pacer,
 					    crpc->msgout.packets, true));
 	EXPECT_EQ(10500, atomic64_read(&self->homa.pacer->link_idle_time));
@@ -242,10 +242,10 @@ TEST_F(homa_pacer, homa_pacer_main__exit)
 {
 	unit_hook_register(exit_hook);
 	hook_pacer = self->homa.pacer;
-	hook_exit_ns = 5000;
-	mock_ns_tick = 200;
+	hook_exit_cycles = 5000;
+	mock_clock_tick = 200;
 	homa_pacer_main(self->homa.pacer);
-	EXPECT_TRUE(mock_ns >= 5000);
+	EXPECT_TRUE(mock_clock >= 5000);
 }
 TEST_F(homa_pacer, homa_pacer_main__xmit_data)
 {
@@ -260,8 +260,8 @@ TEST_F(homa_pacer, homa_pacer_main__xmit_data)
 
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
-	self->homa.pacer->max_nic_queue_ns = 3000;
-	mock_ns_tick = 200;
+	self->homa.pacer->max_nic_queue_cycles = 3000;
+	mock_clock_tick = 200;
 	unit_hook_register(exit_idle_hook);
 	hook_pacer = self->homa.pacer;
 	unit_log_clear();
@@ -293,11 +293,11 @@ TEST_F(homa_pacer, homa_pacer_main__rpc_arrives_while_sleeping)
 
 	unit_hook_register(exit_hook);
 	hook_pacer = self->homa.pacer;
-	hook_exit_ns = 5000;
-	mock_ns_tick = 200;
+	hook_exit_cycles = 5000;
+	mock_clock_tick = 200;
 	unit_hook_register(manage_hook);
 	hook_rpc = crpc;
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 
 	unit_log_clear();
 	homa_pacer_main(self->homa.pacer);
@@ -329,7 +329,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__basics)
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
 	homa_pacer_manage_rpc(crpc3);
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
 	EXPECT_STREQ("xmit DATA 1400@0; xmit DATA 1400@1400",
@@ -349,7 +349,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__pacer_already_active)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 	mock_trylock_errors = 1;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
@@ -367,8 +367,8 @@ TEST_F(homa_pacer, homa_pacer_xmit__nic_queue_fills)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.pacer->max_nic_queue_ns = 2001;
-	mock_ns = 10000;
+	self->homa.pacer->max_nic_queue_cycles = 2001;
+	mock_clock = 10000;
 	atomic64_set(&self->homa.pacer->link_idle_time, 12000);
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
@@ -381,7 +381,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__nic_queue_fills)
 }
 TEST_F(homa_pacer, homa_pacer_xmit__queue_empty)
 {
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 	unit_log_clear();
 	homa_pacer_xmit(self->homa.pacer);
 	unit_log_throttled(&self->homa);
@@ -391,15 +391,15 @@ TEST_F(homa_pacer, homa_pacer_xmit__xmit_fifo)
 {
 	struct homa_rpc *crpc1, *crpc2, *crpc3;
 
-	mock_ns = 10000;
+	mock_clock = 10000;
 	crpc1 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 				self->server_ip, self->server_port, 2,
 				20000, 1000);
-	mock_ns = 11000;
+	mock_clock = 11000;
 	crpc2 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 				self->server_ip, self->server_port, 4,
 				10000, 1000);
-	mock_ns = 12000;
+	mock_clock = 12000;
 	crpc3 = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 				self->server_ip, self->server_port, 6,
 				30000, 1000);
@@ -408,10 +408,10 @@ TEST_F(homa_pacer, homa_pacer_xmit__xmit_fifo)
 	homa_pacer_manage_rpc(crpc3);
 
 	/* First attempt: pacer->fifo_count doesn't reach zero. */
-	self->homa.pacer->max_nic_queue_ns = 1300;
+	self->homa.pacer->max_nic_queue_cycles = 1300;
 	self->homa.pacer->fifo_count = 200;
 	self->homa.pacer->fifo_fraction = 150;
-	mock_ns= 13000;
+	mock_clock= 13000;
 	atomic64_set(&self->homa.pacer->link_idle_time, 10000);
 	unit_log_clear();
 	mock_xmit_log_verbose = 1;
@@ -447,7 +447,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__rpc_removed_from_queue_before_locked)
 			       self->client_id, 10000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.pacer->max_nic_queue_ns = 10000;
+	self->homa.pacer->max_nic_queue_cycles = 10000;
 	unit_log_clear();
 	unit_hook_register(unmanage_hook);
 	hook_rpc = crpc;
@@ -468,7 +468,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__rpc_locked)
 			       self->client_id, 5000, 1000);
 
 	homa_pacer_manage_rpc(crpc);
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 	unit_log_clear();
 	mock_trylock_errors = ~1;
 	homa_pacer_xmit(self->homa.pacer);
@@ -495,7 +495,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__remove_from_queue)
 
 	homa_pacer_manage_rpc(crpc1);
 	homa_pacer_manage_rpc(crpc2);
-	self->homa.pacer->max_nic_queue_ns = 2000;
+	self->homa.pacer->max_nic_queue_cycles = 2000;
 	unit_log_clear();
 
 	/* First call completes id 2, but id 4 is still in the queue. */
@@ -509,7 +509,7 @@ TEST_F(homa_pacer, homa_pacer_xmit__remove_from_queue)
 
 	/* Second call completes id 4, queue now empty. */
 	unit_log_clear();
-	self->homa.pacer->max_nic_queue_ns = 10000;
+	self->homa.pacer->max_nic_queue_cycles = 10000;
 	homa_pacer_xmit(self->homa.pacer);
 	EXPECT_STREQ("xmit DATA 600@1400; removing id 4 from throttled list",
 		     unit_log_get());
@@ -637,39 +637,41 @@ TEST_F(homa_pacer, homa_pacer_unmanage_rpc__metrics)
 				self->server_ip, self->server_port,
 				self->client_id+2, 5000, 1000);
 
-	mock_ns = 1000;
+	mock_clock = 1000;
 	homa_pacer_manage_rpc(crpc1);
 	EXPECT_EQ(1000, self->homa.pacer->throttle_add);
-	EXPECT_EQ(0, homa_metrics_per_cpu()->throttled_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->throttled_cycles);
 
-	mock_ns = 3000;
+	mock_clock = 3000;
 	homa_pacer_manage_rpc(crpc2);
 	EXPECT_EQ(3000, self->homa.pacer->throttle_add);
-	EXPECT_EQ(2000, homa_metrics_per_cpu()->throttled_ns);
+	EXPECT_EQ(2000, homa_metrics_per_cpu()->throttled_cycles);
 
-	mock_ns = 7000;
+	mock_clock = 7000;
 	homa_pacer_unmanage_rpc(crpc1);
 	EXPECT_EQ(3000, self->homa.pacer->throttle_add);
-	EXPECT_EQ(2000, homa_metrics_per_cpu()->throttled_ns);
+	EXPECT_EQ(2000, homa_metrics_per_cpu()->throttled_cycles);
 
-	mock_ns = 8000;
+	mock_clock = 8000;
 	homa_pacer_unmanage_rpc(crpc2);
 	EXPECT_EQ(3000, self->homa.pacer->throttle_add);
-	EXPECT_EQ(7000, homa_metrics_per_cpu()->throttled_ns);
+	EXPECT_EQ(7000, homa_metrics_per_cpu()->throttled_cycles);
 }
 #endif /* See strip.py */
 
 TEST_F(homa_pacer, homa_pacer_update_sysctl_deps)
 {
+	self->homa.pacer->max_nic_queue_ns = 6000;
 	self->homa.pacer->link_mbps = 10000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
-	EXPECT_EQ(808000, self->homa.pacer->ns_per_mbyte);
+	EXPECT_EQ(6000, self->homa.pacer->max_nic_queue_cycles);
+	EXPECT_EQ(808000, self->homa.pacer->cycles_per_mbyte);
 
 	self->homa.pacer->link_mbps = 1000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
-	EXPECT_EQ(8080000, self->homa.pacer->ns_per_mbyte);
+	EXPECT_EQ(8080000, self->homa.pacer->cycles_per_mbyte);
 
 	self->homa.pacer->link_mbps = 40000;
 	homa_pacer_update_sysctl_deps(self->homa.pacer);
-	EXPECT_EQ(202000, self->homa.pacer->ns_per_mbyte);
+	EXPECT_EQ(202000, self->homa.pacer->cycles_per_mbyte);
 }

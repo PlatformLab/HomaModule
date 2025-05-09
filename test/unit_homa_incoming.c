@@ -92,7 +92,7 @@ FIXTURE_SETUP(homa_incoming)
 	mock_set_homa(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
-	self->homa.poll_usecs = 0;
+	self->homa.poll_cycles = 0;
 #endif /* See strip.py */
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.pacer->fifo_fraction = 0;
@@ -235,7 +235,7 @@ TEST_F(homa_incoming, homa_add_packet__basics)
 
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
-	mock_ns = 5000;
+	mock_clock = 5000;
 	self->data.seg.offset = htonl(1400);
 	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
 			&self->data.common, 1400, 1400));
@@ -524,7 +524,7 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
-	mock_ns = 1000;
+	mock_clock = 1000;
 	self->data.seg.offset = htonl(0);
 	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
 			&self->data.common, 1400, 0));
@@ -536,7 +536,7 @@ TEST_F(homa_incoming, homa_add_packet__packet_in_middle_of_gap)
 			unit_print_gaps(crpc));
 
 	self->data.seg.offset = htonl(2000);
-	mock_ns = 2000;
+	mock_clock = 2000;
 	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
 			&self->data.common, 1400, 2000));
 	EXPECT_EQ(3, skb_queue_len(&crpc->msgin.packets));
@@ -551,7 +551,7 @@ TEST_F(homa_incoming, homa_add_packet__kmalloc_failure_while_splitting_gap)
 
 	homa_message_in_init(crpc, 10000, 0);
 	unit_log_clear();
-	mock_ns = 1000;
+	mock_clock = 1000;
 	self->data.seg.offset = htonl(0);
 	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
 			&self->data.common, 1400, 0));
@@ -563,7 +563,7 @@ TEST_F(homa_incoming, homa_add_packet__kmalloc_failure_while_splitting_gap)
 			unit_print_gaps(crpc));
 
 	self->data.seg.offset = htonl(2000);
-	mock_ns = 2000;
+	mock_clock = 2000;
 	mock_kmalloc_errors = 1;
 	homa_add_packet(crpc, mock_skb_alloc(self->client_ip,
 			&self->data.common, 1400, 2000));
@@ -1202,7 +1202,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 			UNIT_RCVD_MSG, self->client_ip, self->server_ip,
 			self->server_port, self->client_id, 20000, 20000);
 	struct homa_rpc *srpc;
-	mock_ns_tick = 10;
+	mock_clock_tick = 10;
 
 	homa_rpc_end(dead);
 #ifndef __STRIP__ /* See strip.py */
@@ -1226,7 +1226,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 	EXPECT_EQ(30, self->hsk.dead_skbs);
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_EQ(0, homa_metrics_per_cpu()->data_pkt_reap_ns);
+	EXPECT_EQ(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
 #endif /* See strip.py */
 
 	/* Second packet: must reap. */
@@ -1240,7 +1240,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__forced_reap)
 	EXPECT_EQ(20, self->hsk.dead_skbs);
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
-	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_ns);
+	EXPECT_NE(0, homa_metrics_per_cpu()->data_pkt_reap_cycles);
 #endif /* See strip.py */
 }
 
@@ -2314,7 +2314,7 @@ TEST_F(homa_incoming, homa_wait_private__signal_notify_race)
 
 	ASSERT_NE(NULL, crpc);
 	atomic_or(RPC_PRIVATE, &crpc->flags);
-	IF_NO_STRIP(self->homa.poll_usecs = 0);
+	IF_NO_STRIP(self->homa.poll_cycles = 0);
 	unit_hook_register(handoff_hook);
 	hook_rpc = crpc;
 	hook_count = 2;
@@ -2534,12 +2534,16 @@ TEST_F(homa_incoming, homa_rpc_handoff__queue_rpc_on_socket)
 }
 
 #ifndef __STRIP__ /* See strip.py */
-TEST_F(homa_incoming, homa_incoming_sysctl_changed__convert_usec_to_ns)
+TEST_F(homa_incoming, homa_incoming_sysctl_changed__convert_usec_to_cycles)
 {
+	self->homa.poll_usecs = 27;
 	self->homa.busy_usecs = 53;
 	self->homa.gro_busy_usecs = 140;
+	self->homa.bpage_lease_usecs = 700;
 	homa_incoming_sysctl_changed(&self->homa);
-	EXPECT_EQ(53000, self->homa.busy_ns);
-	EXPECT_EQ(140000, self->homa.gro_busy_ns);
+	EXPECT_EQ(27000, self->homa.poll_cycles);
+	EXPECT_EQ(53000, self->homa.busy_cycles);
+	EXPECT_EQ(140000, self->homa.gro_busy_cycles);
+	EXPECT_EQ(700000, self->homa.bpage_lease_cycles);
 }
 #endif /* See strip.py */

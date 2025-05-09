@@ -211,8 +211,8 @@ void homa_spin(int ns)
 {
 	u64 end;
 
-	end = sched_clock() + ns;
-	while (sched_clock() < end)
+	end = homa_clock() + homa_ns_to_cycles(ns);
+	while (homa_clock() < end)
 		/* Empty loop body.*/
 		;
 }

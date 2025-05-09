@@ -65,7 +65,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&crpc->throttled_links);
 	crpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	crpc->magic = HOMA_RPC_MAGIC;
-	crpc->start_ns = sched_clock();
+	crpc->start_time = homa_clock();
 
 	/* Initialize fields that require locking. This allows the most
 	 * expensive work, such as copying in the message from user space,
@@ -163,7 +163,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	INIT_LIST_HEAD(&srpc->throttled_links);
 	srpc->resend_timer_ticks = hsk->homa->timer_ticks;
 	srpc->magic = HOMA_RPC_MAGIC;
-	srpc->start_ns = sched_clock();
+	srpc->start_time = homa_clock();
 #ifndef __STRIP__ /* See strip.py */
 	tt_record2("Incoming message for id %d has %d unscheduled bytes",
 		   srpc->id, ntohl(h->incoming));

@@ -115,7 +115,7 @@ num_cores = len(cur)
 # Sum all of the individual core counts for both the new and old data and
 # compute the difference in "deltas"
 for symbol in symbols:
-    if (symbol == "time_ns") or (symbol == "core"):
+    if (symbol == "time_cycles") or (symbol == "cpu_khz") or (symbol == "core"):
         # This symbol shouldn't be summed.
         continue
     total_cur = 0
@@ -134,21 +134,22 @@ gro_packets = 0
 elapsed_secs = 0
 reaper_calls = 0
 pad = ""
+cpu_khz = float(cur[0]["cpu_khz"])
 
 if len(prev) > 0:
-    time_delta = cur[0]["time_ns"] - prev[0]["time_ns"]
-    elapsed_secs = float(time_delta)*1e-09
+    time_delta = cur[0]["time_cycles"] - prev[0]["time_cycles"]
+    elapsed_secs = float(time_delta)/(cpu_khz * 1000.0)
     pad = pad.ljust(13)
     secs = "(%.1f s)" % (elapsed_secs)
     secs = secs.ljust(12)
-    print("%-28s %15d %s %s" % ("time_ns", time_delta, secs,
-            docs["time_ns"]))
+    print("%-28s %15d %s %s" % ("time_cycles", time_delta, secs,
+            docs["time_cycles"]))
 else:
-    print("%-15s %28d %s%s" % ("time_ns", cur[0]["time_ns"],
-            "", docs["time_ns"]))
+    print("%-15s %28d %s%s" % ("time_cycles", cur[0]["time_cycles"],
+            "", docs["time_cycles"]))
 
 for symbol in symbols:
-    if (symbol == "time_ns"):
+    if (symbol == "time_cycles") or (symbol == "cpu_khz"):
         # This symbol is handled specially above
         continue
     delta = deltas[symbol]
@@ -160,7 +161,7 @@ for symbol in symbols:
             rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         if ("msg_bytes" in symbol) and (symbol != "sent_msg_bytes"):
             total_received_bytes += delta
-        if symbol.endswith("_ns") and (time_delta != 0):
+        if symbol.endswith("_cycles") and (time_delta != 0):
             percent = "(%.1f%%)" % (100.0*delta/time_delta)
             percent = percent.ljust(12)
             print("%-28s %15d %s %s" % (symbol, delta, percent, doc))
@@ -181,10 +182,10 @@ for symbol in symbols:
         if (symbol == "reaper_dead_skbs") and ("reaper_calls" in deltas):
             print("%-28s          %6.1f %sAvg. hsk->dead_skbs in reaper" % (
                   "avg_dead_skbs", delta/deltas["reaper_calls"], pad))
-        if symbol.endswith("_miss_ns") and (time_delta != 0):
+        if symbol.endswith("_miss_cycles") and (time_delta != 0):
             prefix = symbol[:-12]
             if ((prefix + "_misses") in deltas) and (deltas[prefix + "_misses"] != 0):
-                ns = (delta/deltas[prefix + "_misses"])
+                ns = (delta/deltas[prefix + "_misses"])/(cpu_khz * 1e-06)
                 print("%-28s          %6.1f %sAvg. wait time per %s miss (ns)" % (
                     prefix + "_miss_delay", ns, pad, prefix))
     if (symbol == "large_msg_bytes") and (total_received_bytes != 0) \
@@ -223,9 +224,9 @@ if elapsed_secs != 0:
         for where in ["napi", "softirq", "send", "recv", "reply",
                 "timer", "pacer"]:
             if where == "softirq":
-                symbol = "linux_softirq_ns"
+                symbol = "linux_softirq_cycles"
             else:
-                symbol = where + "_ns"
+                symbol = where + "_cycles"
             line = "%-10s  " % (where)
             for core in range(first_core, end_core):
                 frac = float(cur[core][symbol] - prev[core][symbol]) / float(
@@ -262,7 +263,7 @@ if elapsed_secs != 0:
     total_cores_used = 0.0
     total_syscalls = 0
 
-    time = float(deltas["send_ns"])
+    time = float(deltas["send_cycles"])
     cores = time/time_delta
     total_cores_used += cores
     calls = float(deltas["send_calls"])
@@ -270,10 +271,10 @@ if elapsed_secs != 0:
     if calls == 0:
         us_per = 0
     else:
-        us_per = (time/calls)/1000
+        us_per = (time/calls)/(cpu_khz/1e03)
     print("send syscall                %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    time = float(deltas["recv_ns"]) - float(deltas["poll_ns"])
+    time = float(deltas["recv_cycles"]) - float(deltas["poll_cycles"])
     cores = time/time_delta
     total_cores_used += cores
     calls = float(deltas["recv_calls"])
@@ -281,10 +282,10 @@ if elapsed_secs != 0:
     if calls == 0:
         us_per = 0
     else:
-        us_per = (time/calls)/1000
+        us_per = (time/calls)/(cpu_khz/1e03)
     print("recv syscall (-poll)        %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    time = float(deltas["reply_ns"])
+    time = float(deltas["reply_cycles"])
     cores = time/time_delta
     total_cores_used += cores
     calls = float(deltas["reply_calls"])
@@ -292,13 +293,13 @@ if elapsed_secs != 0:
     if calls == 0:
         us_per = 0
     else:
-        us_per = (time/calls)/1000
+        us_per = (time/calls)/(cpu_khz/1e03)
     print("reply syscall               %6.2f   %7.2f us/syscall" % (cores, us_per))
 
-    for print_name, symbol in [["NAPI", "napi_ns"],
-            ["  Bypass homa_softirq", "bypass_softirq_ns"],
-            ["Linux SoftIRQ", "linux_softirq_ns"],
-            ["  Normal homa_softirq", "softirq_ns"]]:
+    for print_name, symbol in [["NAPI", "napi_cycles"],
+            ["  Bypass homa_softirq", "bypass_softirq_cycles"],
+            ["Linux SoftIRQ", "linux_softirq_cycles"],
+            ["  Normal homa_softirq", "softirq_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
         if packets_received > 0:
@@ -306,17 +307,17 @@ if elapsed_secs != 0:
                     cores, (cpu_time/packets_received) / 1000))
         else:
             print("%s      %6.2f" % (print_name.ljust(22), cores))
-    cpu_time = float(deltas["napi_ns"])
+    cpu_time = float(deltas["napi_cycles"])
     if cpu_time == 0:
-        cpu_time = float(deltas["bypass_softirq_ns"])
+        cpu_time = float(deltas["bypass_softirq_cycles"])
     total_cores_used += cpu_time/time_delta
-    cpu_time = float(deltas["linux_softirq_ns"])
+    cpu_time = float(deltas["linux_softirq_cycles"])
     if cpu_time == 0:
-        cpu_time = float(deltas["softirq_ns"])
+        cpu_time = float(deltas["softirq_cycles"])
     total_cores_used += cpu_time/time_delta
 
-    for print_name, symbol in [["Pacer", "pacer_ns"],
-            ["Timer handler", "timer_ns"]]:
+    for print_name, symbol in [["Pacer", "pacer_cycles"],
+            ["Timer handler", "timer_cycles"]]:
         cpu_time = float(deltas[symbol])
         cores = cpu_time/time_delta
         total_cores_used += cores
@@ -325,7 +326,7 @@ if elapsed_secs != 0:
     print("----------------------------------")
     print("Total Core Utilization      %6.2f" % (total_cores_used))
 
-    time = float(deltas["poll_ns"])
+    time = float(deltas["poll_cycles"])
     cores = time/time_delta
     calls = float(deltas["recv_calls"])
     if calls == 0:
@@ -339,31 +340,31 @@ if elapsed_secs != 0:
     if calls == 0:
         us_per = 0
     else:
-        us_per = (deltas["skb_alloc_ns"]/calls)/1000
+        us_per = (deltas["skb_alloc_cycles"]/calls)/1000
     print("Skb allocation              %6.2f   %7.2f us/skb" % (
-            deltas["skb_alloc_ns"]/time_delta, us_per))
+            deltas["skb_alloc_cycles"]/time_delta, us_per))
 
     calls = deltas["skb_frees"]
     if calls == 0:
         us_per = 0
     else:
-        us_per = (deltas["skb_free_ns"]/calls)/1000
+        us_per = (deltas["skb_free_cycles"]/calls)/1000
     print("Skb freeing                 %6.2f   %7.2f us/skb" % (
-            deltas["skb_free_ns"]/time_delta, us_per))
+            deltas["skb_free_cycles"]/time_delta, us_per))
 
     print("\nLock Misses:")
     print("------------")
     print("            Misses/sec.  ns/Miss   %CPU")
     for lock in ["client", "server", "socket", "grant", "throttle", "peer_ack"]:
         misses = float(deltas[lock + "_lock_misses"])
-        ns = float(deltas[lock + "_lock_miss_ns"])
+        cycles = float(deltas[lock + "_lock_miss_cycles"])
         if misses == 0:
-            ns_per_miss = 0.0
+            cycles_per_miss = 0.0
         else:
-            ns_per_miss = ns/misses
+            cycles_per_miss = cycles/misses
         print("%-10s    %s    %6.1f   %5.1f" % (lock,
                 scale_number(misses/elapsed_secs),
-                ns_per_miss, 100.0*ns/time_delta))
+                cycles_per_miss/(cpu_khz/1e06), 100.0*cycles/time_delta))
 
     total_messages = float(deltas["requests_received"]
             + deltas["responses_received"])
@@ -417,21 +418,21 @@ if elapsed_secs != 0:
         print("                      %5.2f  Gbps/core (goodput)" % (
                 8e-9*(total_received_bytes + float(deltas["sent_msg_bytes"]))
                 /(total_cores_used * elapsed_secs)))
-    if deltas["pacer_ns"] != 0:
-        pacer_secs = float(deltas["pacer_ns"])/1000
+    if deltas["pacer_cycles"] != 0:
+        pacer_secs = float(deltas["pacer_cycles"])/(cpu_khz * 1000.0)
         print("Pacer throughput:    %6.2f  Gbps (pacer output when pacer running)" % (
                 deltas["pacer_bytes"]*8e-09/pacer_secs))
-    if deltas["throttled_ns"] != 0:
-        throttled_secs = float(deltas["throttled_ns"])/1000
+    if deltas["throttled_cycles"] != 0:
+        throttled_secs = float(deltas["throttled_cycles"])/(cpu_khz * 1000.0)
         print("Throttled throughput: %5.2f  Gbps (pacer output when throttled)" % (
                 deltas["pacer_bytes"]*8e-09/throttled_secs))
     if deltas["skb_allocs"] != 0:
         print("Skb alloc time:        %4.2f  usec/skb" % (
-                float(deltas["skb_alloc_ns"]) / 1000 /
+                float(deltas["skb_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_allocs"]))
     if deltas["skb_page_allocs"] != 0:
         print("Skb page alloc time:  %5.2f  usec/skb" % (
-                float(deltas["skb_page_alloc_ns"]) / 1000 /
+                float(deltas["skb_page_alloc_cycles"]) / (cpu_khz / 1000.0) /
                 deltas["skb_page_allocs"]))
 
     print("\nCanaries (possible problem indicators):")
@@ -450,8 +451,8 @@ if elapsed_secs != 0:
         rate_info = ("(%s/s) " % (scale_number(rate))).ljust(13)
         print("%-28s %15d %s%s" % (symbol, deltas[symbol],
                 rate_info, docs[symbol]))
-    for symbol in ["pacer_lost_ns", "timer_reap_ns", "data_pkt_reap_ns",
-            "grant_lock_ns"]:
+    for symbol in ["pacer_lost_cycles", "timer_reap_cycles",
+            "data_pkt_reap_cycles", "grant_lock_cycles"]:
         delta = deltas[symbol]
         if delta == 0 or time_delta == 0:
             continue
@@ -466,7 +467,7 @@ if elapsed_secs != 0:
 
     if deltas["responses_received"] > 0:
         print("%-28s %15.1f              ACK packets sent per 1000 client RPCs"
-                % ("acks_per_rpc", 1000.0 * deltas["packets_sent_ACK"]
+                % ("acks_per_krpc", 1000.0 * deltas["packets_sent_ACK"]
                 / deltas["responses_received"]))
 
     if avg_grantable_rpcs > 1.0:
