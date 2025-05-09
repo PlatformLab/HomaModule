@@ -71,6 +71,7 @@ struct homa;
 struct homa_peer;
 struct homa_rpc;
 struct homa_sock;
+struct homa_shared;
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
@@ -102,10 +103,17 @@ union sockaddr_in_union {
 };
 
 /**
- * struct homa - Stores overall information about an implementation of
- * the Homa transport. One of these objects exists for each network namespace.
+ * struct homa - Stores overall information about the implementation of
+ * Homa for a particular network namespace (there is a logcially separate
+ * implementation of Homa for each namespace).
  */
 struct homa {
+	/**  @shared: information shared across all struct homas. */
+	struct homa_shared *shared;
+
+	/** shared_links: used to link this struct into shared->homas. */
+	struct list_head shared_links;
+
 	/**
 	 * @next_outgoing_id: Id to use for next outgoing RPC request.
 	 * This is always even: it's used only to generate client-side ids.
@@ -504,6 +512,24 @@ struct homa {
 };
 
 /**
+ * struct homa_shared - Contains "global" information that is shared
+ * across all instances of struct homa.
+ */
+struct homa_shared {
+	/**
+	 * @lock: used when exclusive access is needed, such as when
+	 * updating @homas.
+	 */
+	spinlock_t lock;
+
+	/**
+	 * @homas: contains all of the existing struct homas, linked
+	 * through their shared_links fields. Managed with RCU.
+	 */
+	struct list_head homas;
+};
+
+/**
  * struct homa_skb_info - Additional information needed by Homa for each
  * outbound DATA packet. Space is allocated for this at the very end of the
  * linear part of the skb.
@@ -655,6 +681,7 @@ void unit_hook(char *id);
 #endif /* See strip.py */
 
 extern unsigned int homa_net_id;
+extern struct homa_shared *homa_shared;
 
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
@@ -698,6 +725,8 @@ void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
 			 sockptr_t optval, unsigned int optlen);
+struct homa_shared *homa_shared_alloc(void);
+void     homa_shared_free(struct homa_shared *shared);
 int      homa_shutdown(struct socket *sock, int how);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);

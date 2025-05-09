@@ -17,6 +17,38 @@
 #include "homa_stub.h"
 #endif /* See strip.py */
 
+/* Pointer to the singleton homa_shared object, of NULL if there are
+ * currently no struct homa objects in existence.
+ */
+struct homa_shared *homa_shared;
+
+/**
+ * homa_shared_alloc() - Allocate and initialize a new homa_shared
+ * object.
+ * Return: the new homa_shared object, or NULL if memory allocation failed.
+ */
+struct homa_shared *homa_shared_alloc(void)
+{
+	struct homa_shared *shared;
+
+	shared = kmalloc(sizeof(*homa_shared), GFP_KERNEL);
+	if (!shared)
+		return NULL;
+	spin_lock_init(&shared->lock);
+	INIT_LIST_HEAD(&shared->homas);
+	return shared;
+}
+
+/**
+ * homa_shared_free() - Clean up and free a homa_shared object.
+ */
+void homa_shared_free(struct homa_shared *shared)
+{
+	kfree(shared);
+	if (shared == homa_shared)
+		homa_shared = NULL;
+}
+
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
@@ -37,6 +69,17 @@ int homa_init(struct homa *homa, struct net *net)
 #endif /* See strip.py */
 
 	memset(homa, 0, sizeof(*homa));
+
+	if (!homa_shared) {
+		homa_shared = homa_shared_alloc();
+		if (!homa_shared)
+			return -ENOMEM;
+	}
+	homa->shared = homa_shared;
+	spin_lock_bh(&homa_shared->lock);
+	list_add_tail(&homa->shared_links, &homa_shared->homas);
+	spin_unlock_bh(&homa_shared->lock);
+
 	atomic64_set(&homa->next_outgoing_id, 2);
 #ifndef __STRIP__ /* See strip.py */
 	homa->grant = homa_grant_alloc(net);
@@ -136,6 +179,20 @@ void homa_destroy(struct homa *homa)
 #include "utils.h"
 	unit_homa_destroy(homa);
 #endif /* __UNIT_TEST__ */
+
+	if (homa->shared) {
+		struct homa_shared *shared = homa->shared;
+
+		spin_lock_bh(&shared->lock);
+		__list_del_entry(&homa->shared_links);
+		if (list_empty(&homa->shared->homas)) {
+			spin_unlock_bh(&shared->lock);
+			homa_shared_free(homa->shared);
+		} else {
+			spin_unlock_bh(&shared->lock);
+		}
+		homa->shared = NULL;
+	}
 
 	/* The order of the following statements matters! */
 	if (homa->port_map) {

@@ -53,6 +53,32 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 }
 #endif /* See strip.py */
 
+TEST_F(homa_utils, homa_shared_init__kmalloc_failure)
+{
+	mock_kmalloc_errors = 1;
+	EXPECT_EQ(NULL, homa_shared_alloc());
+}
+TEST_F(homa_utils, homa_shared_init__success)
+{
+	struct homa_shared *shared;
+
+	shared = homa_shared_alloc();
+	EXPECT_NE(NULL, shared);
+	EXPECT_EQ(1, list_empty(&shared->homas));
+	homa_shared_free(shared);
+}
+
+TEST_F(homa_utils, homa_shared_free__clear_global_variable)
+{
+	struct homa_shared *saved;
+
+	saved = homa_shared;
+	homa_shared = homa_shared_alloc();
+	homa_shared_free(homa_shared);
+	EXPECT_EQ(NULL, homa_shared);
+	homa_shared = saved;
+}
+
 TEST_F(homa_utils, homa_init__kmalloc_failure_for_port_map)
 {
 	struct homa homa2;
