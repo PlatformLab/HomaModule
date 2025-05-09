@@ -306,6 +306,8 @@ def find_min_delays_alt(num_nodes):
         if not recv_addr in addr_node_num:
             continue
         frecv_node = addr_node_num[recv_addr]
+        if not frecv_node in recv_freeze:
+            continue
         recv_time = recv_freeze[frecv_node][0]
         freeze_delay = recv_time - send_time
         if freeze_delay < min_delays[fsend_node][frecv_node]:
