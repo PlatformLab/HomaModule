@@ -282,6 +282,7 @@ struct homa_rpc {
 	/**
 	 * @peer: Information about the other machine (the server, if
 	 * this is a client RPC, or the client, if this is a server RPC).
+	 * If non-NULL then we own a reference on the object.
 	 */
 	struct homa_peer *peer;
 

@@ -53,6 +53,17 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
 		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
 					  peertab_links) {
+			if (atomic_read(&peer->refs) != 0)
+#ifdef __UNIT_TEST__
+				FAIL(" %s found peer %s with reference count %d",
+					__func__,
+					homa_print_ipv6_addr(&peer->addr),
+					atomic_read(&peer->refs));
+
+#else /* __UNIT_TEST__ */
+				pr_err("%s found peer with reference count %d",
+				       __func__, atomic_read(&peer->refs));
+#endif
 			dst_release(peer->dst);
 			kfree(peer);
 		}
@@ -160,9 +171,9 @@ void homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now)
  * @inet:       Socket that will be used for sending packets.
  *
  * Return:      The peer associated with @addr, or a negative errno if an
- *              error occurred. The caller can retain this pointer
- *              indefinitely: peer entries are never deleted except in
- *              homa_peertab_destroy.
+ *              error occurred. On a successful return the reference count
+ *              will be incremented for the returned peer. The caller must
+ *              eventually call homa_peer_put to release the reference.
  */
 struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 				 const struct in6_addr *addr,
@@ -191,6 +202,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
 				 peertab_links) {
 		if (ipv6_addr_equal(&peer->addr, addr)) {
+			homa_peer_hold(peer);
 			rcu_read_unlock();
 			return peer;
 		}
@@ -207,8 +219,10 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	spin_lock_bh(&peertab->write_lock);
 	hlist_for_each_entry(peer, &peertab->buckets[bucket],
 			     peertab_links) {
-		if (ipv6_addr_equal(&peer->addr, addr))
+		if (ipv6_addr_equal(&peer->addr, addr)) {
+			homa_peer_hold(peer);
 			goto done;
+		}
 	}
 	peer = kmalloc(sizeof(*peer), GFP_ATOMIC | __GFP_ZERO);
 	if (!peer) {
@@ -216,6 +230,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 		INC_METRIC(peer_kmalloc_errors, 1);
 		goto done;
 	}
+	atomic_set(&peer->refs, 1);
 	peer->addr = *addr;
 	dst = homa_peer_get_dst(peer, inet);
 	if (IS_ERR(dst)) {

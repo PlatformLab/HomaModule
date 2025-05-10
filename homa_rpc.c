@@ -51,6 +51,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	if (IS_ERR(crpc->peer)) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
+		crpc->peer = NULL;
 		goto error;
 	}
 	crpc->dport = ntohs(dest->in6.sin6_port);
@@ -89,6 +90,8 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	return crpc;
 
 error:
+	if (crpc->peer)
+		homa_peer_put(crpc->peer);
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -148,6 +151,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->peer = homa_peer_find(hsk->homa->peers, source, &hsk->inet);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
+		srpc->peer = NULL;
 		goto error;
 	}
 	srpc->dport = ntohs(h->common.sport);
@@ -197,6 +201,8 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 
 error:
 	homa_bucket_unlock(bucket, id);
+	if (srpc && srpc->peer)
+		homa_peer_put(srpc->peer);
 	kfree(srpc);
 	return ERR_PTR(err);
 }
@@ -251,17 +257,17 @@ void homa_rpc_end(struct homa_rpc *rpc)
 {
 	/* The goal for this function is to make the RPC inaccessible,
 	 * so that no other code will ever access it again. However, don't
-	 * actually release resources; leave that to homa_rpc_reap, which
-	 * runs later. There are two reasons for this. First, releasing
-	 * resources may be expensive, so we don't want to keep the caller
-	 * waiting; homa_rpc_reap will run in situations where there is time
-	 * to spare. Second, there may be other code that currently has
-	 * pointers to this RPC but temporarily released the lock (e.g. to
-	 * copy data to/from user space). It isn't safe to clean up until
-	 * that code has finished its work and released any pointers to the
-	 * RPC (homa_rpc_reap will ensure that this has happened). So, this
-	 * function should only make changes needed to make the RPC
-	 * inaccessible.
+	 * actually release resources or tear down the internal structure
+	 * of the RPC; leave that to homa_rpc_reap, which runs later. There
+	 * are two reasons for this. First, releasing resources may be
+	 * expensive, so we don't want to keep the caller waiting; homa_rpc_reap
+	 * will run in situations where there is time to spare. Second, there
+	 * may be other code that currently has pointers to this RPC but
+	 * temporarily released the lock (e.g. to copy data to/from user space).
+	 * It isn't safe to clean up until that code has finished its work and
+	 * released any pointers to the RPC (homa_rpc_reap will ensure that
+	 * this has happened). So, this function should only make changes
+	 * needed to make the RPC inaccessible.
 	 */
 	if (!rpc || rpc->state == RPC_DEAD)
 		return;
@@ -537,6 +543,10 @@ release:
 					list_del(&gap->links);
 					kfree(gap);
 				}
+			}
+			if (rpc->peer) {
+				homa_peer_put(rpc->peer);
+				rpc->peer = NULL;
 			}
 			tt_record2("homa_rpc_reap finished reaping id %d, socket %d",
 				   rpc->id, rpc->hsk->port);

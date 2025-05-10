@@ -76,6 +76,12 @@ struct homa_peertab {
  */
 struct homa_peer {
 	/**
+	 * @refs: Number of unmatched calls to homa_peer_hold; it's not safe
+	 * to free this object until the reference count is zero.
+	 */
+	atomic_t refs;
+
+	/**
 	 * @addr: IPv6 address for the machine (IPv4 addresses are stored
 	 * as IPv4-mapped IPv6 addresses).
 	 */
@@ -275,6 +281,27 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(hsk->homa->peers, peer, hsk);
 	return peer->dst;
+}
+
+/**
+ * homa_peer_hold() - Increment the reference count on an RPC, which will
+ * prevent it from being freed until homa_peer_put() is called.
+ * @peer:      Object on which to take a reference.
+ */
+static inline void homa_peer_hold(struct homa_peer *peer)
+{
+	atomic_inc(&peer->refs);
+}
+
+/**
+ * homa_peer_put() - Release a reference on a peer (cancels the effect of
+ * a previous call to homa_peer_put). If the reference count becomes zero
+ * then the peer may be deleted at any time.
+ * @peer:      Object to release.
+ */
+static inline void homa_peer_put(struct homa_peer *peer)
+{
+	atomic_dec(&peer->refs);
 }
 
 #endif /* _HOMA_PEER_H */

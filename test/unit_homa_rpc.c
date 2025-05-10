@@ -735,6 +735,22 @@ TEST_F(homa_rpc, homa_rpc_reap__free_gaps)
 	homa_rpc_reap(&self->hsk, false);
 	// Test framework will complain if memory not freed.
 }
+TEST_F(homa_rpc, homa_rpc_reap__release_peer_ref)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_RCVD_ONE_PKT, self->client_ip, self->server_ip,
+			4000, 98, 1000,	150000);
+	struct homa_peer *peer;
+
+	ASSERT_NE(NULL, crpc);
+	peer = crpc->peer;
+	EXPECT_EQ(1, atomic_read(&peer->refs));
+
+	homa_rpc_end(crpc);
+	homa_rpc_reap(&self->hsk, false);
+	EXPECT_EQ(0, atomic_read(&peer->refs));
+	EXPECT_EQ(NULL, crpc->peer);
+}
 TEST_F(homa_rpc, homa_rpc_reap__call_homa_sock_wakeup_wmem)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,

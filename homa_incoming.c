@@ -897,6 +897,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 		for (i = 1; i < HOMA_MAX_PRIORITIES; i++)
 			peer->unsched_cutoffs[i] = ntohl(h->unsched_cutoffs[i]);
 		peer->cutoff_version = h->cutoff_version;
+		homa_peer_put(peer);
 	}
 	kfree_skb(skb);
 }
@@ -961,6 +962,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	__homa_xmit_control(&ack, sizeof(ack), peer, hsk);
 	tt_record3("Responded to NEED_ACK for id %d, peer %0x%x with %d other acks",
 		   id, tt_addr(saddr), ntohs(ack.num_acks));
+	homa_peer_put(peer);
 
 done:
 	kfree_skb(skb);

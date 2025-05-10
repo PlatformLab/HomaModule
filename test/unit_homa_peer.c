@@ -30,7 +30,8 @@ static void kmalloc_hook(char *id)
 
 		snprintf(addr_string, sizeof(addr_string), "10.0.0.%d", i);
 		addr = unit_get_in_addr(addr_string);
-		homa_peer_find(hook_peertab, &addr, &hook_hsk->inet);
+		homa_peer_put(homa_peer_find(hook_peertab, &addr,
+			      &hook_hsk->inet));
 	}
 }
 #endif /* See strip.py */
@@ -96,13 +97,18 @@ TEST_F(homa_peer, homa_peer_find__basics)
 
 	peer2 = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
 	EXPECT_EQ(peer, peer2);
+	EXPECT_EQ(2, atomic_read(&peer->refs));
 
 	peer2 = homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
 	EXPECT_NE(peer, peer2);
+	EXPECT_EQ(1, atomic_read(&peer2->refs));
 
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(2, homa_metrics_per_cpu()->peer_new_entries);
 #endif /* See strip.py */
+	homa_peer_put(peer);
+	homa_peer_put(peer);
+	homa_peer_put(peer2);
 }
 
 static struct _test_data_homa_peer *test_data;
@@ -120,6 +126,7 @@ static void peer_lock_hook(char *id)
 	 */
 	conflicting_peer = homa_peer_find(&test_data->peertab, ip3333,
 		&test_data->hsk.inet);
+	homa_peer_put(conflicting_peer);
 }
 
 TEST_F(homa_peer, homa_peertab_init__vmalloc_failed)
@@ -150,6 +157,7 @@ TEST_F(homa_peer, homa_peertab_gc_dsts)
 	EXPECT_EQ(2, dead_count(&self->peertab));
 	homa_peertab_gc_dsts(&self->peertab, ~0);
 	EXPECT_EQ(0, dead_count(&self->peertab));
+	homa_peer_put(peer);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -190,6 +198,7 @@ TEST_F(homa_peer, homa_peertab_get_peers__one_peer)
 	EXPECT_EQ(1, num_peers);
 	EXPECT_EQ(peer, peers[0]);
 	kfree(peers);
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_peertab_get_peers__multiple_peers)
 {
@@ -210,14 +219,17 @@ TEST_F(homa_peer, homa_peertab_get_peers__multiple_peers)
 	EXPECT_TRUE((peers[0] == peer3) || (peers[1] == peer3)
 			|| (peers[2] == peer3));
 	kfree(peers);
+	homa_peer_put(peer1);
+	homa_peer_put(peer2);
+	homa_peer_put(peer3);
 }
 TEST_F(homa_peer, homa_peertab_get_peers__a_few_new_peers_created_concurrently)
 {
 	struct homa_peer **peers;
 	int num_peers = 45;
 
-	homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
-	homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
+	homa_peer_put(homa_peer_find(&self->peertab, ip1111, &self->hsk.inet));
+	homa_peer_put(homa_peer_find(&self->peertab, ip2222, &self->hsk.inet));
 	unit_hook_register(kmalloc_hook);
 	hook_hsk = &self->hsk;
 	hook_peertab = &self->peertab;
@@ -232,8 +244,8 @@ TEST_F(homa_peer, homa_peertab_get_peers__many_new_peers_created_concurrently)
 	struct homa_peer **peers;
 	int num_peers = 45;
 
-	homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
-	homa_peer_find(&self->peertab, ip2222, &self->hsk.inet);
+	homa_peer_put(homa_peer_find(&self->peertab, ip1111, &self->hsk.inet));
+	homa_peer_put(homa_peer_find(&self->peertab, ip2222, &self->hsk.inet));
 	unit_hook_register(kmalloc_hook);
 	hook_hsk = &self->hsk;
 	hook_peertab = &self->peertab;
@@ -255,6 +267,7 @@ TEST_F(homa_peer, homa_peer_find__conflicting_creates)
 	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
 	EXPECT_NE(NULL, conflicting_peer);
 	EXPECT_EQ(conflicting_peer, peer);
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_peer_find__kmalloc_error)
 {
@@ -294,6 +307,7 @@ TEST_F(homa_peer, homa_dst_refresh__basics)
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_NE(old_dst, peer->dst);
 	EXPECT_EQ(1, dead_count(self->homa.peers));
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_dst_refresh__malloc_error)
 {
@@ -309,6 +323,7 @@ TEST_F(homa_peer, homa_dst_refresh__malloc_error)
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
 	EXPECT_EQ(0, dead_count(self->homa.peers));
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_dst_refresh__routing_error)
 {
@@ -327,6 +342,7 @@ TEST_F(homa_peer, homa_dst_refresh__routing_error)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
 #endif /* See strip.py */
 	EXPECT_EQ(0, dead_count(self->homa.peers));
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
 {
@@ -343,6 +359,7 @@ TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
 	mock_clock = 500000000;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(1, dead_count(self->homa.peers));
+	homa_peer_put(peer);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -376,6 +393,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv4)
 	dst_release(dst);
 	EXPECT_STREQ("196.168.0.1",
 				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
+	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 {
@@ -400,6 +418,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 			(addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
 	EXPECT_STREQ("[1::1:1:1]",
 			homa_print_ipv6_addr(&peer->flow.u.ip6.daddr));
+	homa_peer_put(peer);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -421,6 +440,7 @@ TEST_F(homa_peer, homa_peer_lock_slow)
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_ack_lock_misses);
 	EXPECT_EQ(1000, homa_metrics_per_cpu()->peer_ack_lock_miss_cycles);
 	homa_peer_unlock(peer);
+	homa_peer_put(peer);
 }
 #endif /* See strip.py */
 
@@ -506,4 +526,5 @@ TEST_F(homa_peer, homa_peer_get_acks)
 	EXPECT_EQ(1, homa_peer_get_acks(peer, 2, acks));
 	EXPECT_STREQ("server_port 5000, client_id 100",
 			unit_ack_string(&acks[0]));
+	homa_peer_put(peer);
 }

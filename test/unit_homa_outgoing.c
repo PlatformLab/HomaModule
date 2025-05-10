@@ -98,6 +98,7 @@ FIXTURE_SETUP(homa_outgoing)
 }
 FIXTURE_TEARDOWN(homa_outgoing)
 {
+	homa_peer_put(self->peer);
 	homa_destroy(&self->homa);
 	unit_teardown();
 }
@@ -208,6 +209,31 @@ TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__cant_allocate_skb)
 	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
 	EXPECT_TRUE(IS_ERR(skb));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(skb));
+}
+TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__include_acks)
+{
+	struct iov_iter *iter = unit_iov_iter((void *)1000, 5000);
+	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
+			&self->server_addr);
+	struct homa_data_hdr h;
+	struct sk_buff *skb;
+
+	ASSERT_NE(NULL, crpc);
+	homa_rpc_unlock(crpc);
+
+	crpc->peer->acks[0] = (struct homa_ack) {
+		.server_port = htons(200),
+		.client_id = cpu_to_be64(1000)};
+	crpc->peer->num_acks = 1;
+
+	homa_message_out_init(crpc, 500);
+	skb = homa_tx_data_pkt_alloc(crpc, iter, 0, 500, 2000);
+	ASSERT_NE(NULL, skb);
+
+	homa_skb_get(skb, &h, 0, sizeof(h));
+	EXPECT_STREQ("server_port 200, client_id 1000",
+			unit_ack_string(&h.ack));
+	kfree_skb(skb);
 }
 TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__multiple_segments_homa_fill_data_interleaved)
 {
@@ -494,24 +520,6 @@ TEST_F(homa_outgoing, homa_message_out_fill__gso_limit_less_than_mtu)
 			unit_iov_iter((void *) 1000, 5000), 0));
 	homa_rpc_unlock(crpc);
 	EXPECT_SUBSTR("max_seg_data 1400, max_gso_data 1400;", unit_log_get());
-}
-TEST_F(homa_outgoing, homa_message_out_fill__include_acks)
-{
-	struct homa_rpc *crpc = homa_rpc_alloc_client(&self->hsk,
-			&self->server_addr);
-	struct homa_data_hdr h;
-
-	ASSERT_FALSE(crpc == NULL);
-	crpc->peer->acks[0] = (struct homa_ack) {
-		.server_port = htons(200),
-		.client_id = cpu_to_be64(1000)};
-	crpc->peer->num_acks = 1;
-	ASSERT_EQ(0, -homa_message_out_fill(crpc,
-			unit_iov_iter((void *) 1000, 500), 0));
-	homa_rpc_unlock(crpc);
-	homa_skb_get(crpc->msgout.packets, &h, 0, sizeof(h));
-	EXPECT_STREQ("server_port 200, client_id 1000",
-			unit_ack_string(&h.ack));
 }
 TEST_F(homa_outgoing, homa_message_out_fill__multiple_segs_per_skbuff)
 {

@@ -576,6 +576,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
 	if (!IS_ERR(peer))
 		__homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
+	homa_peer_put(peer);
 }
 
 /**

@@ -1048,6 +1048,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 	EXPECT_EQ(400, peer->cutoff_version);
 	EXPECT_EQ(9, peer->unsched_cutoffs[1]);
 	EXPECT_EQ(3, peer->unsched_cutoffs[7]);
+	homa_peer_put(peer);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__resend_for_unknown_server_rpc)
@@ -1821,6 +1822,7 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 			&self->hsk.inet);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(0, peer->cutoff_version);
+	homa_peer_put(peer);
 }
 #endif /* See strip.py */
 
@@ -1909,6 +1911,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 			&self->homa);
 	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 1234, acks [sp 99, id 1236]",
 			unit_log_get());
+	homa_peer_put(peer);
 }
 
 TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_no_extras)
