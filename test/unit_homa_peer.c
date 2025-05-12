@@ -64,16 +64,6 @@ FIXTURE_TEARDOWN(homa_peer)
 	unit_teardown();
 }
 
-static int dead_count(struct homa_peertab *peertab)
-{
-	struct list_head *pos;
-	int count = 0;
-
-	list_for_each(pos, &peertab->dead_dsts)
-		count++;
-	return count;
-}
-
 #ifndef __STRIP__ /* See strip.py */
 static void peer_spinlock_hook(char *id)
 {
@@ -138,26 +128,6 @@ TEST_F(homa_peer, homa_peertab_init__vmalloc_failed)
 
 	/* Make sure destroy is safe after failed init. */
 	homa_peertab_destroy(&table);
-}
-
-TEST_F(homa_peer, homa_peertab_gc_dsts)
-{
-	struct homa_peer *peer;
-
-	peer = homa_peer_find(&self->peertab, ip3333, &self->hsk.inet);
-	mock_clock = 0;
-	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	mock_clock = 50000000;
-	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	mock_clock = 90000000;
-	homa_dst_refresh(&self->peertab, peer, &self->hsk);
-	EXPECT_EQ(3, dead_count(&self->peertab));
-
-	homa_peertab_gc_dsts(&self->peertab, 130000000);
-	EXPECT_EQ(2, dead_count(&self->peertab));
-	homa_peertab_gc_dsts(&self->peertab, ~0);
-	EXPECT_EQ(0, dead_count(&self->peertab));
-	homa_peer_put(peer);
 }
 
 #ifndef __STRIP__ /* See strip.py */
@@ -303,26 +273,9 @@ TEST_F(homa_peer, homa_dst_refresh__basics)
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 
-	old_dst = homa_get_dst(peer, &self->hsk);
+	old_dst = peer->dst;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_NE(old_dst, peer->dst);
-	EXPECT_EQ(1, dead_count(self->homa.peers));
-	homa_peer_put(peer);
-}
-TEST_F(homa_peer, homa_dst_refresh__malloc_error)
-{
-	struct dst_entry *old_dst;
-	struct homa_peer *peer;
-
-	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
-	ASSERT_NE(NULL, peer);
-	EXPECT_EQ_IP(*ip1111, peer->addr);
-
-	old_dst = homa_get_dst(peer, &self->hsk);
-	mock_kmalloc_errors = 1;
-	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
-	EXPECT_EQ(old_dst, peer->dst);
-	EXPECT_EQ(0, dead_count(self->homa.peers));
 	homa_peer_put(peer);
 }
 TEST_F(homa_peer, homa_dst_refresh__routing_error)
@@ -334,31 +287,13 @@ TEST_F(homa_peer, homa_dst_refresh__routing_error)
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 
-	old_dst = homa_get_dst(peer, &self->hsk);
+	old_dst = peer->dst;
 	mock_route_errors = 1;
 	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
 #endif /* See strip.py */
-	EXPECT_EQ(0, dead_count(self->homa.peers));
-	homa_peer_put(peer);
-}
-TEST_F(homa_peer, homa_dst_refresh__free_old_dsts)
-{
-	struct homa_peer *peer;
-
-	peer = homa_peer_find(&self->peertab, ip1111, &self->hsk.inet);
-	ASSERT_NE(NULL, peer);
-	EXPECT_EQ_IP(*ip1111, peer->addr);
-
-	mock_clock = 0;
-	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
-	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
-	EXPECT_EQ(2, dead_count(self->homa.peers));
-	mock_clock = 500000000;
-	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
-	EXPECT_EQ(1, dead_count(self->homa.peers));
 	homa_peer_put(peer);
 }
 

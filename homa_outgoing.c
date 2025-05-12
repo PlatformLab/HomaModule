@@ -288,6 +288,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 	gso_size = dst->dev->gso_max_size;
 	if (gso_size > rpc->hsk->homa->max_gso_size)
 		gso_size = rpc->hsk->homa->max_gso_size;
+	dst_release(dst);
 
 #ifndef __STRIP__ /* See strip.py */
 	/* Round gso_size down to an even # of mtus; calculation depends
@@ -452,7 +453,6 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 	struct netdev_queue *txq;
 #endif /* See strip.py */
 	struct homa_common_hdr *h;
-	struct dst_entry *dst;
 	struct sk_buff *skb;
 	int extra_bytes;
 #ifndef __STRIP__ /* See strip.py */
@@ -460,12 +460,10 @@ int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 #endif /* See strip.py */
 	int result;
 
-	dst = homa_get_dst(peer, hsk);
 	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
 	if (unlikely(!skb))
 		return -ENOBUFS;
-	dst_hold(dst);
-	skb_dst_set(skb, dst);
+	skb_dst_set(skb, homa_get_dst(peer, hsk));
 
 	h = skb_put(skb, length);
 	memcpy(h, contents, length);
@@ -683,7 +681,6 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc, int priority)
 void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 #endif /* See strip.py */
 {
-	struct dst_entry *dst;
 #ifndef __STRIP__ /* See strip.py */
 	int err;
 
@@ -694,9 +691,7 @@ void __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc)
 			rpc->peer->cutoff_version;
 #endif /* See strip.py */
 
-	dst = homa_get_dst(rpc->peer, rpc->hsk);
-	dst_hold(dst);
-	skb_dst_set(skb, dst);
+	skb_dst_set(skb, homa_get_dst(rpc->peer, rpc->hsk));
 
 	skb->ooo_okay = 1;
 	skb->ip_summed = CHECKSUM_PARTIAL;

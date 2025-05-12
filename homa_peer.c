@@ -23,7 +23,6 @@ int homa_peertab_init(struct homa_peertab *peertab)
 	int i;
 
 	spin_lock_init(&peertab->write_lock);
-	INIT_LIST_HEAD(&peertab->dead_dsts);
 	peertab->buckets = vmalloc(HOMA_PEERTAB_BUCKETS *
 				   sizeof(*peertab->buckets));
 	if (!peertab->buckets)
@@ -69,7 +68,6 @@ void homa_peertab_destroy(struct homa_peertab *peertab)
 		}
 	}
 	vfree(peertab->buckets);
-	homa_peertab_gc_dsts(peertab, ~0);
 	spin_unlock_bh(&peertab->write_lock);
 }
 
@@ -138,29 +136,6 @@ done:
 	return result;
 }
 #endif /* See strip.py */
-
-/**
- * homa_peertab_gc_dsts() - Invoked to free unused dst_entries, if it is
- * safe to do so.
- * @peertab:       The table in which to free entries.
- * @now:           Current time, in homa_clock() units; entries with expiration
- *                 dates no later than this will be freed. Specify ~0 to
- *                 free all entries.
- */
-void homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now)
-	__must_hold(&peer_tab->write_lock)
-{
-	while (!list_empty(&peertab->dead_dsts)) {
-		struct homa_dead_dst *dead =
-			list_first_entry(&peertab->dead_dsts,
-					 struct homa_dead_dst, dst_links);
-		if (dead->gc_time > now)
-			break;
-		dst_release(dead->dst);
-		list_del(&dead->dst_links);
-		kfree(dead);
-	}
-}
 
 /**
  * homa_peer_find() - Returns the peer associated with a given host; creates
@@ -267,17 +242,7 @@ done:
 void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 		      struct homa_sock *hsk)
 {
-	struct homa_dead_dst *save_dead;
 	struct dst_entry *dst;
-	u64 now;
-
-	/* Need to keep around the current entry for a while in case
-	 * someone is using it. If we can't do that, then don't update
-	 * the entry.
-	 */
-	save_dead = kmalloc(sizeof(*save_dead), GFP_ATOMIC);
-	if (unlikely(!save_dead))
-		return;
 
 	dst = homa_peer_get_dst(peer, &hsk->inet);
 	if (IS_ERR(dst)) {
@@ -288,18 +253,10 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 				  __func__, PTR_ERR(dst));
 		INC_METRIC(peer_route_errors, 1);
 #endif /* See strip.py */
-		kfree(save_dead);
 		return;
 	}
-
-	spin_lock_bh(&peertab->write_lock);
-	now = homa_clock();
-	save_dead->dst = peer->dst;
-	save_dead->gc_time = now + (homa_clock_khz() << 7);   /* ~128 ms */
-	list_add_tail(&save_dead->dst_links, &peertab->dead_dsts);
-	homa_peertab_gc_dsts(peertab, now);
+	dst_release(peer->dst);
 	peer->dst = dst;
-	spin_unlock_bh(&peertab->write_lock);
 }
 
 #ifndef __STRIP__ /* See strip.py */

@@ -57,12 +57,6 @@ struct homa_peertab {
 	spinlock_t write_lock;
 
 	/**
-	 * @dead_dsts: List of dst_entries that are waiting to be deleted.
-	 * Hold @write_lock when manipulating.
-	 */
-	struct list_head dead_dsts;
-
-	/**
 	 * @buckets: Pointer to heads of chains of homa_peers for each bucket.
 	 * Malloc-ed, and must eventually be freed. NULL means this structure
 	 * has not been initialized.
@@ -232,7 +226,6 @@ void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
 #endif /* See strip.py */
-void     homa_peertab_gc_dsts(struct homa_peertab *peertab, u64 now);
 
 #ifndef __STRIP__ /* See strip.py */
 /**
@@ -273,13 +266,15 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
  * updating it if the cached information is stale.
  * @peer:   Peer whose destination information is desired.
  * @hsk:    Homa socket; needed by lower-level code to recreate the dst.
- * Return:   Up-to-date destination for peer.
+ * Return:  Up-to-date destination for peer; a reference has been taken
+ *          on this dst_entry, which the caller must eventually release.
  */
 static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 					     struct homa_sock *hsk)
 {
 	if (unlikely(peer->dst->obsolete > 0))
 		homa_dst_refresh(hsk->homa->peers, peer, hsk);
+	dst_hold(peer->dst);
 	return peer->dst;
 }
 
