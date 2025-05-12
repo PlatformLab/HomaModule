@@ -261,7 +261,11 @@ struct net_hotdata net_hotdata = {
 	.rps_sock_flow_table = (struct rps_sock_flow_table *) sock_flow_table
 };
 int debug_locks;
+struct static_call_key __SCK__cond_resched;
 struct static_call_key __SCK__might_resched;
+struct static_call_key __SCK__preempt_schedule;
+struct paravirt_patch_template pv_ops;
+struct workqueue_struct *system_wq;
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 struct lockdep_map rcu_lock_map;
@@ -310,6 +314,19 @@ int autoremove_wake_function(struct wait_queue_entry *wq_entry, unsigned mode,
 			     int sync, void *key)
 {
 	return 0;
+}
+
+void BUG_func(void)
+{}
+
+void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
+{
+	free_func(head);
+}
+
+bool cancel_work_sync(struct work_struct *work)
+{
+	return false;
 }
 
 void __check_object_size(const void *ptr, unsigned long n, bool to_user) {}
@@ -435,6 +452,11 @@ void finish_wait(struct wait_queue_head *wq_head,
 void get_random_bytes(void *buf, size_t nbytes)
 {
 	memset(buf, 0, nbytes);
+}
+
+u32 get_random_u32(void)
+{
+	return 0;
 }
 
 int hrtimer_cancel(struct hrtimer *timer)
@@ -894,6 +916,16 @@ void *__kmalloc_noprof(size_t size, gfp_t flags)
 	return mock_kmalloc(size, flags);
 }
 
+void kvfree(const void *addr)
+{
+	kfree(addr);
+}
+
+void *__kvmalloc_node_noprof(DECL_BUCKET_PARAMS(size, b), gfp_t flags, int node)
+{
+	return mock_kmalloc(size, flags);
+}
+
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 					   void *data, int node,
 					   const char namefmt[],
@@ -1000,6 +1032,12 @@ int netif_receive_skb(struct sk_buff *skb)
 	return 0;
 }
 
+void preempt_count_add(int val)
+{}
+
+void preempt_count_sub(int val)
+{}
+
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
 {
@@ -1087,6 +1125,12 @@ void *__pskb_pull_tail(struct sk_buff *skb, int delta)
 	return NULL;
 }
 
+bool queue_work_on(int cpu, struct workqueue_struct *wq,
+		   struct work_struct *work)
+{
+	return true;
+}
+
 void _raw_spin_lock(raw_spinlock_t *lock)
 {
 	mock_record_locked(lock);
@@ -1119,6 +1163,12 @@ int __lockfunc _raw_spin_trylock_bh(raw_spinlock_t *lock)
 	mock_record_locked(lock);
 	mock_total_spin_locks++;
 	return 1;
+}
+
+void __lockfunc _raw_spin_unlock(raw_spinlock_t *lock)
+{
+	UNIT_HOOK("unlock");
+	mock_record_unlocked(lock);
 }
 
 void __lockfunc _raw_spin_unlock_bh(raw_spinlock_t *lock)
@@ -1204,10 +1254,18 @@ signed long schedule_timeout(signed long timeout)
 	return timeout - 1;
 }
 
+int __SCT__cond_resched(void)
+{
+	return 0;
+}
+
 int __SCT__might_resched(void)
 {
 	return 0;
 }
+
+void __SCT__preempt_schedule(void)
+{}
 
 void security_sk_classify_flow(const struct sock *sk,
 		struct flowi_common *flic)

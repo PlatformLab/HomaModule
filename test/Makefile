@@ -2,6 +2,7 @@
 
 LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
+LINUX_SRC_DIR ?= /ouster/linux-stable
 CC ?= gcc
 CXX ?= g++
 PERL ?= perl
@@ -36,7 +37,7 @@ endif
 
 WARNS :=     -Wall -Wundef -Wno-trigraphs -Wno-sign-compare \
 		-Wno-strict-aliasing -Wunused-but-set-variable -Werror
-CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -g $(CINCLUDES) $(DEFS)
+CFLAGS :=    $(WARNS) -Wstrict-prototypes -MD -no-pie -g $(CINCLUDES) $(DEFS)
 CCFLAGS :=   -std=c++11 $(WARNS) -MD -g $(CCINCLUDES) $(DEFS) -fsanitize=address
 
 TEST_SRCS :=  unit_homa_incoming.c \
@@ -78,7 +79,7 @@ HOMA_SRCS +=  homa_grant.c \
 	      homa_offload.c \
 	      homa_skb.c
 endif
-HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS))
+HOMA_OBJS :=  $(patsubst %.c,%.o,$(HOMA_SRCS)) rhashtable.o
 
 OTHER_SRCS := ccutils.cc \
 	      main.c \
@@ -106,6 +107,30 @@ CLEANS = unit $(OBJS) *.d .deps
 	$(CXX) -c $(CCFLAGS) $< -o $@
 %.e: %.cc
 	$(CXX) -E $(CCFLAGS) $< -o $@
+
+dummyFile:
+	$(CXX) -c $(CCFLAGS) \
+	-I $(LINUX_SRC_DIR)/include \
+	-I $(LINUX_SRC_DIR)/arch/x86/include \
+	-I $(LINUX_SRC_DIR)/arch/x86/include/generated \
+	-include  $(LINUX_SRC_DIR)/include/linux/kconfig.h \
+	-O2 $< -o $@
+
+# Note: Without -O2 there will be strange compiler errors such as
+# 'asm operand 2 probably does not match constraints'.
+rhashtable.o: rhashtable.c
+	gcc \
+	-I .. -I . \
+	-I $(LINUX_SRC_DIR)/arch/x86/include \
+	-I $(LINUX_SRC_DIR)/arch/x86/include/generated \
+	-I $(LINUX_SRC_DIR)/include \
+	-I $(LINUX_SRC_DIR)/include/uapi \
+	-include  $(LINUX_SRC_DIR)/include/linux/kconfig.h \
+	-D__KERNEL__ -D__UNIT_TEST__ -O2 -g -std=gnu11 \
+	-fno-strict-aliasing \
+	-DKBUILD_MODFILE='"lib/rhashtable"' -DKBUILD_BASENAME='"rhashtable"' \
+	-DKBUILD_MODNAME='"rhashtable"' -D__KBUILD_MODNAME=kmod_rhashtable \
+	-c $< -o $@
 
 unit: $(OBJS)
 	$(CXX) $(CFLAGS) $^ -o $@ -lasan
