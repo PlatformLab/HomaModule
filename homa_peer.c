@@ -8,6 +8,15 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 
+const struct rhashtable_params ht_params = {
+	.key_len     = sizeof(struct homa_peer_key),
+	.key_offset  = offsetof(struct homa_peer, ht_key),
+	.head_offset = offsetof(struct homa_peer, ht_linkage),
+	.nelem_hint = 10000,
+	.hashfn = homa_peer_hash,
+	.obj_cmpfn = homa_peer_compare
+};
+
 /**
  * homa_peertab_init() - Constructor for homa_peertabs.
  * @peertab:  The object to initialize; previous contents are discarded.
@@ -20,16 +29,39 @@ int homa_peertab_init(struct homa_peertab *peertab)
 	 * safe to call homa_peertab_destroy, even if this function returns
 	 * an error.
 	 */
-	int i;
+	int status;
 
-	spin_lock_init(&peertab->write_lock);
-	peertab->buckets = vmalloc(HOMA_PEERTAB_BUCKETS *
-				   sizeof(*peertab->buckets));
-	if (!peertab->buckets)
-		return -ENOMEM;
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++)
-		INIT_HLIST_HEAD(&peertab->buckets[i]);
-	return 0;
+	status = rhashtable_init(&peertab->ht, &ht_params);
+	peertab->live = (status == 0);
+	return status;
+}
+
+/**
+ * homa_peertab_free_fn() - This function is invoked for each entry in
+ * the peer hash table by the rhashtable code when the table is being
+ * deleted. It frees its argument.
+ * @object:     struct homa_peer to free.
+ * @dummy:      Not used.
+ */
+void homa_peertab_free_fn(void *object, void *dummy)
+{
+	struct homa_peer *peer = object;
+
+#ifdef __UNIT_TEST__
+	if (atomic_read(&peer->refs) != 0) {
+		if (!mock_peertab_free_fn_no_complain)
+			FAIL(" %s found peer %s with reference count %d",
+				__func__,
+				homa_print_ipv6_addr(&peer->addr),
+				atomic_read(&peer->refs));
+	}
+#else /* __UNIT_TEST__ */
+	if (atomic_read(&peer->refs) != 0)
+		pr_err("%s found peer with reference count %d",
+		       __func__, atomic_read(&peer->refs));
+#endif
+	else
+		homa_peer_free(peer);
 }
 
 /**
@@ -41,106 +73,74 @@ int homa_peertab_init(struct homa_peertab *peertab)
  */
 void homa_peertab_destroy(struct homa_peertab *peertab)
 {
-	struct hlist_node *next;
-	struct homa_peer *peer;
-	int i;
-
-	if (!peertab->buckets)
-		return;
-
-	spin_lock_bh(&peertab->write_lock);
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
-		hlist_for_each_entry_safe(peer, next, &peertab->buckets[i],
-					  peertab_links) {
-			if (atomic_read(&peer->refs) != 0)
-#ifdef __UNIT_TEST__
-				FAIL(" %s found peer %s with reference count %d",
-					__func__,
-					homa_print_ipv6_addr(&peer->addr),
-					atomic_read(&peer->refs));
-
-#else /* __UNIT_TEST__ */
-				pr_err("%s found peer with reference count %d",
-				       __func__, atomic_read(&peer->refs));
-#endif
-			dst_release(peer->dst);
-			kfree(peer);
-		}
+	if (peertab->live) {
+		rhashtable_free_and_destroy(&peertab->ht, homa_peertab_free_fn,
+					    NULL);
+		peertab->live = false;
 	}
-	vfree(peertab->buckets);
-	spin_unlock_bh(&peertab->write_lock);
 }
 
-#ifndef __UPSTREAM__ /* See strip.py */
 /**
- * homa_peertab_get_peers() - Return information about all of the peers
- * currently known
- * @peertab:    The table to search for peers.
- * @num_peers:  Modified to hold the number of peers returned.
- * Return:      kmalloced array holding pointers to all known peers. The
- *		caller must free this. If there is an error, or if there
- *	        are no peers, NULL is returned.  Note: if a large number
- *              of new peers are created while this function executes,
- *              then the results may not be complete.
+ * homa_peer_alloc() - Allocate and initialize a new homa_peer object.
+ * @homa:       Homa context in which the peer will be used.
+ * @addr:       Address of the desired host: IPv4 addresses are represented
+ *              as IPv4-mapped IPv6 addresses.
+ * @inet:       Socket that will be used for sending packets.
+ * Return:      The peer associated with @addr, or a negative errno if an
+ *              error occurred. On a successful return the reference count
+ *              will be incremented for the returned peer.
  */
-struct homa_peer **homa_peertab_get_peers(struct homa_peertab *peertab,
-					  int *num_peers)
+struct homa_peer *homa_peer_alloc(struct homa *homa,
+				  const struct in6_addr *addr,
+				  struct inet_sock *inet)
 {
-	int i, slots, next_slot;
-	struct homa_peer **result;
 	struct homa_peer *peer;
+	struct dst_entry *dst;
 
-	/* Note: RCU must be used in the iterators below to ensure safety
-	 * with concurrent insertions. Technically, rcu_read_lock and
-	 * rcu_read_unlock shouldn't be necessary because we don't have to
-	 * worry about concurrent deletions. But without them, some sanity
-	 * checkers will complain.
-	 */
-	rcu_read_lock();
-
-	/* Figure out how large an array to allocate. */
-	slots = 0;
-	next_slot = 0;
-	result = NULL;
-	if (peertab->buckets) {
-		for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
-			hlist_for_each_entry_rcu(peer, &peertab->buckets[i],
-						 peertab_links)
-				slots++;
-		}
+	peer = kmalloc(sizeof(*peer), GFP_ATOMIC | __GFP_ZERO);
+	if (!peer) {
+		INC_METRIC(peer_kmalloc_errors, 1);
+		return (struct homa_peer *)ERR_PTR(-ENOMEM);
 	}
-	if (slots == 0)
-		goto done;
-
-	/* Allocate extra space in case new peers got created while we
-	 * were counting.
-	 */
-	slots += 10;
-	result = kmalloc_array(slots, sizeof(peer), GFP_ATOMIC);
-	if (!result)
-		goto done;
-	for (i = 0; i < HOMA_PEERTAB_BUCKETS; i++) {
-		hlist_for_each_entry_rcu(peer, &peertab->buckets[i],
-					 peertab_links) {
-			result[next_slot] = peer;
-			next_slot++;
-
-			/* We might not have allocated enough extra space. */
-			if (next_slot >= slots)
-				goto done;
-		}
+	peer->ht_key.addr = *addr;
+	peer->ht_key.homa = homa;
+	atomic_set(&peer->refs, 1);
+	peer->addr = *addr;
+	dst = homa_peer_get_dst(peer, inet);
+	if (IS_ERR(dst)) {
+		INC_METRIC(peer_route_errors, 1);
+		kfree(peer);
+		return (struct homa_peer *)dst;
 	}
-done:
-	rcu_read_unlock();
-	*num_peers = next_slot;
-	return result;
-}
+	peer->dst = dst;
+#ifndef __STRIP__ /* See strip.py */
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
+	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
+	INIT_LIST_HEAD(&peer->grantable_rpcs);
+	INIT_LIST_HEAD(&peer->grantable_links);
 #endif /* See strip.py */
+	peer->current_ticks = -1;
+	spin_lock_init(&peer->ack_lock);
+	INC_METRIC(peer_new_entries, 1);
+	return peer;
+}
+
+/**
+ * homa_peer_free() - Release any resources in a peer and free the homa_peer
+ * struct.
+ * @peer:       Structure to free. Must not currently be linked into
+ *              peertab->ht.
+ */
+void homa_peer_free(struct homa_peer *peer)
+{
+	dst_release(peer->dst);
+	kfree(peer);
+}
 
 /**
  * homa_peer_find() - Returns the peer associated with a given host; creates
  * a new homa_peer if one doesn't already exist.
- * @peertab:    Peer table in which to perform lookup.
+ * @homa:       Homa context in which the peer will be used.
  * @addr:       Address of the desired host: IPv4 addresses are represented
  *              as IPv4-mapped IPv6 addresses.
  * @inet:       Socket that will be used for sending packets.
@@ -150,85 +150,52 @@ done:
  *              will be incremented for the returned peer. The caller must
  *              eventually call homa_peer_put to release the reference.
  */
-struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
+struct homa_peer *homa_peer_find(struct homa *homa,
 				 const struct in6_addr *addr,
 				 struct inet_sock *inet)
 {
-	struct homa_peer *peer;
-	struct dst_entry *dst;
+	struct homa_peer *peer, *other;
+	struct homa_peer_key key;
+	u64 start = homa_clock();
 
-	// Should use siphash or jhash here:
-	u32 bucket = hash_32((__force u32)addr->in6_u.u6_addr32[0],
-			       HOMA_PEERTAB_BUCKET_BITS);
-
-	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[1],
-			  HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[2],
-			  HOMA_PEERTAB_BUCKET_BITS);
-	bucket ^= hash_32((__force u32)addr->in6_u.u6_addr32[3],
-			  HOMA_PEERTAB_BUCKET_BITS);
-
-	/* Use RCU operators to ensure safety even if a concurrent call is
-	 * adding a new entry. The calls to rcu_read_lock and rcu_read_unlock
-	 * shouldn't actually be needed, since we don't need to protect
-	 * against concurrent deletion.
-	 */
+	key.addr = *addr;
+	key.homa = homa;
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(peer, &peertab->buckets[bucket],
-				 peertab_links) {
-		if (ipv6_addr_equal(&peer->addr, addr)) {
-			homa_peer_hold(peer);
-			rcu_read_unlock();
-			return peer;
-		}
-		INC_METRIC(peer_hash_links, 1);
+	peer = rhashtable_lookup(&homa->peers->ht, &key, ht_params);
+	if (peer) {
+		homa_peer_hold(peer);
+		rcu_read_unlock();
+		tt_record1("homa_peer_find took %d cycles to find existing peer",
+			   homa_clock() - start);
+		return peer;
+	}
+
+	/* No existing entry, so we have to create a new one. */
+	peer = homa_peer_alloc(homa, addr, inet);
+	if (IS_ERR(peer)) {
+		rcu_read_unlock();
+		return peer;
+	}
+#ifdef __UNIT_TEST__
+	other = mock_rht_lookup_get_insert_fast(&homa->peers->ht,
+						&peer->ht_linkage, ht_params);
+#else /* __UNIT_TEST__ */
+	other = rhashtable_lookup_get_insert_fast(&homa->peers->ht,
+						  &peer->ht_linkage, ht_params);
+#endif /* __UNIT_TEST__ */
+	if (IS_ERR(other)) {
+		homa_peer_free(peer);
+		rcu_read_unlock();
+		return other;
+	}
+	if (other) {
+		/* Someone else already created the desired peer. */
+		homa_peer_hold(other);
+		rcu_read_unlock();
+		homa_peer_free(peer);
+		return other;
 	}
 	rcu_read_unlock();
-
-	/* No existing entry; create a new one.
-	 *
-	 * Note: after we acquire the lock, we have to check again to
-	 * make sure the entry still doesn't exist (it might have been
-	 * created by a concurrent invocation of this function).
-	 */
-	spin_lock_bh(&peertab->write_lock);
-	hlist_for_each_entry(peer, &peertab->buckets[bucket],
-			     peertab_links) {
-		if (ipv6_addr_equal(&peer->addr, addr)) {
-			homa_peer_hold(peer);
-			goto done;
-		}
-	}
-	peer = kmalloc(sizeof(*peer), GFP_ATOMIC | __GFP_ZERO);
-	if (!peer) {
-		peer = (struct homa_peer *)ERR_PTR(-ENOMEM);
-		INC_METRIC(peer_kmalloc_errors, 1);
-		goto done;
-	}
-	atomic_set(&peer->refs, 1);
-	peer->addr = *addr;
-	dst = homa_peer_get_dst(peer, inet);
-	if (IS_ERR(dst)) {
-		kfree(peer);
-		peer = (struct homa_peer *)PTR_ERR(dst);
-		INC_METRIC(peer_route_errors, 1);
-		goto done;
-	}
-	peer->dst = dst;
-#ifndef __STRIP__ /* See strip.py */
-	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 1] = 0;
-	peer->unsched_cutoffs[HOMA_MAX_PRIORITIES - 2] = INT_MAX;
-	INIT_LIST_HEAD(&peer->grantable_rpcs);
-	INIT_LIST_HEAD(&peer->grantable_links);
-#endif /* See strip.py */
-	smp_wmb();
-	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
-	peer->current_ticks = -1;
-	spin_lock_init(&peer->ack_lock);
-	INC_METRIC(peer_new_entries, 1);
-
-done:
-	spin_unlock_bh(&peertab->write_lock);
 	return peer;
 }
 
@@ -288,7 +255,7 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
  * @peer:   The peer for which a dst is needed. Note: this peer's flow
  *          struct will be overwritten.
  * @inet:   Socket that will be used for sending packets.
- * Return:  The dst structure (or an ERR_PTR).
+ * Return:  The dst structure (or an ERR_PTR); a reference has been taken.
  */
 struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
 				    struct inet_sock *inet)

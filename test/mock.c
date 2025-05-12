@@ -14,6 +14,8 @@
 #include "mock.h"
 #include "utils.h"
 
+#include <linux/rhashtable.h>
+
 /* It isn't safe to include some header files, such as stdlib, because
  * they conflict with kernel header files. The explicit declarations
  * below replace those header files.
@@ -46,6 +48,7 @@ int mock_kthread_create_errors;
 int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
 int mock_register_sysctl_errors;
+int mock_rht_insert_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
 int mock_trylock_errors;
@@ -227,6 +230,11 @@ static struct socket mock_socket;
  */
 static struct homa *mock_homa;
 struct net mock_net;
+
+/* Nonzero means don't generate an error message in homa_peertabe_free_fn
+ * if the reference count isn't zero.
+ */
+int mock_peertab_free_fn_no_complain;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
@@ -1033,10 +1041,20 @@ int netif_receive_skb(struct sk_buff *skb)
 }
 
 void preempt_count_add(int val)
-{}
+{
+	int i;
+
+	for (i = 0; i < val; i++)
+		preempt_disable();
+}
 
 void preempt_count_sub(int val)
-{}
+{
+	int i;
+
+	for (i = 0; i < val; i++)
+		preempt_enable();
+}
 
 long prepare_to_wait_event(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry, int state)
@@ -1240,6 +1258,15 @@ void release_sock(struct sock *sk)
 void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
+
+void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
+				      struct rhash_head *obj,
+				      const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return ERR_PTR(-EINVAL);
+	return rhashtable_lookup_get_insert_fast(ht, obj, params);
+}
 
 void schedule(void)
 {
@@ -2035,6 +2062,7 @@ void mock_teardown(void)
 	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
 	mock_register_sysctl_errors = 0;
+	mock_rht_insert_errors = 0;
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
 	mock_bpage_size = 0x10000;
@@ -2060,6 +2088,7 @@ void mock_teardown(void)
 	mock_min_default_port = 0x8000;
 	mock_homa = NULL;
 	homa_net_id = 0;
+	mock_peertab_free_fn_no_complain = 0;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));

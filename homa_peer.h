@@ -10,6 +10,8 @@
 #include "homa_wire.h"
 #include "homa_sock.h"
 
+#include <linux/rhashtable.h>
+
 struct homa_rpc;
 
 /**
@@ -50,18 +52,28 @@ struct homa_dead_dst {
  * permit efficient lookups.
  */
 struct homa_peertab {
-	/**
-	 * @write_lock: Synchronizes addition of new entries; not needed
-	 * for lookups (RCU is used instead).
-	 */
-	spinlock_t write_lock;
+	/** @ht: Hash table that stores all struct peers. */
+	struct rhashtable ht;
 
 	/**
-	 * @buckets: Pointer to heads of chains of homa_peers for each bucket.
-	 * Malloc-ed, and must eventually be freed. NULL means this structure
-	 * has not been initialized.
+	 * @live: True means ht has been successfully initialized and
+	 * not yet destructed.
 	 */
-	struct hlist_head *buckets;
+	bool live;
+};
+
+/**
+ * struct homa_peer_key - Used to look up homa_peer structs in an rhashtable.
+ */
+struct homa_peer_key {
+	/**
+	 * @addr: Address of the desired host. IPv4 addresses are represented
+	 * with IPv4-mapped IPv6 addresses.
+	 */
+	struct in6_addr addr;
+
+	/** @homa: The context in which the peer will be used. */
+	struct homa *homa;
 };
 
 /**
@@ -69,17 +81,25 @@ struct homa_peertab {
  * have communicated with (either as client or server).
  */
 struct homa_peer {
+	/** @key: The hash table key for this peer in peertab->ht. */
+	struct homa_peer_key ht_key;
+
+	/**
+	 * @ht: Used by rashtable implement to link this peer into peertab->ht.
+	 */
+	struct rhash_head ht_linkage;
+
 	/**
 	 * @refs: Number of unmatched calls to homa_peer_hold; it's not safe
 	 * to free this object until the reference count is zero.
 	 */
-	atomic_t refs;
+	atomic_t refs ____cacheline_aligned_in_smp;
 
 	/**
 	 * @addr: IPv6 address for the machine (IPv4 addresses are stored
 	 * as IPv4-mapped IPv6 addresses).
 	 */
-	struct in6_addr addr;
+	struct in6_addr addr ____cacheline_aligned_in_smp;
 
 	/** @flow: Addressing info needed to send packets. */
 	struct flowi flow;
@@ -125,7 +145,8 @@ struct homa_peer {
 	 * involving this peer that are not in homa->active_rpcs but
 	 * whose msgins eventually need more grants. The list is sorted in
 	 * priority order (head has fewest ungranted bytes). Managed by
-	 * homa_grant.c under the grant lock.
+	 * homa_grant.c under the grant lock. If this list is nonempty
+	 * then refs will be nonzero.
 	 */
 	struct list_head grantable_rpcs;
 
@@ -133,16 +154,10 @@ struct homa_peer {
 	 * @grantable_links: Used to link this peer into homa->grantable_peers.
 	 * If this RPC is not linked into homa->grantable_peers, this is an
 	 * empty list pointing to itself. Managed by homa_grant.c under the
-	 * grant lock.abort
+	 * grant lock. If this list is nonempty then refs will be nonzero.
 	 */
 	struct list_head grantable_links;
 #endif /* See strip.py */
-
-	/**
-	 * @peertab_links: Links this object into a bucket of its
-	 * homa_peertab.
-	 */
-	struct hlist_node peertab_links;
 
 	/**
 	 * @outstanding_resends: the number of resend requests we have
@@ -205,22 +220,20 @@ struct homa_peer {
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
 void     homa_peertab_destroy(struct homa_peertab *peertab);
-#ifndef __UPSTREAM__ /* See strip.py */
-struct homa_peer **
-		homa_peertab_get_peers(struct homa_peertab *peertab,
-				       int *num_peers);
-#endif /* See strip.py */
+void     homa_peertab_free_fn(void *object, void *dummy);
 int      homa_peertab_init(struct homa_peertab *peertab);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
-	       *homa_peer_find(struct homa_peertab *peertab,
-			       const struct in6_addr *addr,
-			       struct inet_sock *inet);
+	*homa_peer_alloc(struct homa *homa, const struct in6_addr *addr,
+			 struct inet_sock *inet);
+struct homa_peer
+	*homa_peer_find(struct homa *homa, const struct in6_addr *addr,
+			struct inet_sock *inet);
+void     homa_peer_free(struct homa_peer *peer);
 int      homa_peer_get_acks(struct homa_peer *peer, int count,
 			    struct homa_ack *dst);
 struct dst_entry
-	       *homa_peer_get_dst(struct homa_peer *peer,
-				  struct inet_sock *inet);
+	*homa_peer_get_dst(struct homa_peer *peer, struct inet_sock *inet);
 #ifndef __STRIP__ /* See strip.py */
 void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
@@ -297,6 +310,50 @@ static inline void homa_peer_hold(struct homa_peer *peer)
 static inline void homa_peer_put(struct homa_peer *peer)
 {
 	atomic_dec(&peer->refs);
+}
+
+static inline u32 homa_peer_hash(const void *data, u32 dummy, u32 seed)
+{
+	/* This is MurmurHash3, used instead of the jhash default because it
+	 * is faster (25 ns vs. 40 ns as of May 2025).
+	 */
+	BUILD_BUG_ON(sizeof(struct homa_peer_key) & 0x3);
+	const u32 len = sizeof(struct homa_peer_key) >> 2;
+	const u32 c1 = 0xcc9e2d51;
+	const u32 c2 = 0x1b873593;
+	const u32 *key = data;
+	u32 h = seed;
+
+
+	for (size_t i = 0; i < len; i++) {
+		u32 k = key[i];
+		k *= c1;
+		k = (k << 15) | (k >> (32 - 15));
+		k *= c2;
+
+		h ^= k;
+		h = (h << 13) | (h >> (32 - 13));
+		h = h * 5 + 0xe6546b64;
+	}
+
+	h ^= len * 4;  // Total number of input bytes
+
+	h ^= h >> 16;
+	h *= 0x85ebca6b;
+	h ^= h >> 13;
+	h *= 0xc2b2ae35;
+	h ^= h >> 16;
+	return h;
+}
+
+static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
+				    const void *obj)
+{
+	const struct homa_peer *peer = obj;
+	const struct homa_peer_key *key = arg->key;
+
+	return !ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
+	       peer->ht_key.homa == key->homa;
 }
 
 #endif /* _HOMA_PEER_H */

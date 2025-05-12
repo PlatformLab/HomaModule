@@ -92,8 +92,9 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	self->peer = homa_peer_find(self->homa.peers,
-			&self->server_addr.in6.sin6_addr, &self->hsk.inet);
+	self->peer = homa_peer_find(&self->homa,
+				    &self->server_addr.in6.sin6_addr,
+				    &self->hsk.inet);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)

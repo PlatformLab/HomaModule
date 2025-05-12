@@ -50,6 +50,9 @@
 
 #define kthread_complete_and_exit(...)
 
+#undef local_irq_save
+#define local_irq_save(flags) (flags) = 0
+
 #define net_generic(net, id) mock_net_generic(net, id)
 
 #ifdef page_address
@@ -141,8 +144,10 @@ extern struct net_device
 		   mock_net_device;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
+extern int         mock_peertab_free_fn_no_complain;
 extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
+extern int         mock_rht_insert_errors;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
 extern int         mock_sock_holds;
@@ -186,6 +191,9 @@ struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,
 				     struct ctl_table *table);
+void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
+					    struct rhash_head *obj,
+					    const struct rhashtable_params params);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_clock_vals(u64 t, ...);

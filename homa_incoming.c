@@ -891,7 +891,7 @@ void homa_cutoffs_pkt(struct sk_buff *skb, struct homa_sock *hsk)
 	struct homa_peer *peer;
 	int i;
 
-	peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
+	peer = homa_peer_find(hsk->homa, &saddr, &hsk->inet);
 	if (!IS_ERR(peer)) {
 		peer->unsched_cutoffs[0] = INT_MAX;
 		for (i = 1; i < HOMA_MAX_PRIORITIES; i++)
@@ -939,7 +939,7 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 #endif /* See strip.py */
 		goto done;
 	} else {
-		peer = homa_peer_find(hsk->homa->peers, &saddr, &hsk->inet);
+		peer = homa_peer_find(hsk->homa, &saddr, &hsk->inet);
 		if (IS_ERR(peer))
 			goto done;
 	}

@@ -119,13 +119,7 @@ dummyFile:
 # Note: Without -O2 there will be strange compiler errors such as
 # 'asm operand 2 probably does not match constraints'.
 rhashtable.o: rhashtable.c
-	gcc \
-	-I .. -I . \
-	-I $(LINUX_SRC_DIR)/arch/x86/include \
-	-I $(LINUX_SRC_DIR)/arch/x86/include/generated \
-	-I $(LINUX_SRC_DIR)/include \
-	-I $(LINUX_SRC_DIR)/include/uapi \
-	-include  $(LINUX_SRC_DIR)/include/linux/kconfig.h \
+	gcc $(CINCLUDES) \
 	-D__KERNEL__ -D__UNIT_TEST__ -O2 -g -std=gnu11 \
 	-fno-strict-aliasing \
 	-DKBUILD_MODFILE='"lib/rhashtable"' -DKBUILD_BASENAME='"rhashtable"' \

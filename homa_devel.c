@@ -377,9 +377,10 @@ void homa_freeze_peers(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
 	struct homa_freeze_hdr freeze;
-	struct homa_peer **peers;
-	int num_peers, i, err;
+	struct rhashtable_iter iter;
+	struct homa_peer *peer;
 	struct homa_sock *hsk;
+	int err;
 
 	/* Find a socket to use (any will do). */
 	rcu_read_lock();
@@ -390,25 +391,35 @@ void homa_freeze_peers(struct homa *homa)
 		goto done;
 	}
 
-	peers = homa_peertab_get_peers(homa->peers, &num_peers);
-	if (!peers) {
-		tt_record("homa_freeze_peers couldn't find peers to freeze");
-		goto done;
-	}
 	freeze.common.type = FREEZE;
 	freeze.common.sport = htons(hsk->port);
 	freeze.common.dport = 0;
 	IF_NO_STRIP(freeze.common.flags = HOMA_TCP_FLAGS);
 	IF_NO_STRIP(freeze.common.urgent = htons(HOMA_TCP_URGENT));
 	freeze.common.sender_id = 0;
-	for (i = 0; i < num_peers; i++) {
-		tt_record1("Sending freeze to 0x%x", tt_addr(peers[i]->addr));
-		err = __homa_xmit_control(&freeze, sizeof(freeze), peers[i], hsk);
+
+	rhashtable_walk_enter(&homa->peers->ht, &iter);
+	rhashtable_walk_start(&iter);
+	while (true) {
+		peer = rhashtable_walk_next(&iter);
+		if (!peer)
+			break;
+		if (IS_ERR(peer))
+			/* Resize event occurred and walk will restart;
+			 * that could result in duplicate freezes, but
+			 * that's OK.
+			 */
+			continue;
+		if (peer->ht_key.homa != homa)
+			continue;
+		tt_record1("Sending freeze to 0x%x", tt_addr(peer->addr));
+		err = __homa_xmit_control(&freeze, sizeof(freeze), peer, hsk);
 		if (err != 0)
 			tt_record2("homa_freeze_peers got error %d in xmit to 0x%x\n",
-				   err, tt_addr(peers[i]->addr));
+					err, tt_addr(peer->addr));
 	}
-	kfree(peers);
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
 
 done:
 	rcu_read_unlock();
