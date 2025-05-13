@@ -53,8 +53,16 @@ eventCount = {}
 
 # Core number -> time of most recent event on that core. -1 means no
 # events seen for that core yet.
-
 corePrev = defaultdict(lambda : None)
+
+# Core number -> most recent time the "starting event" occurred on
+# that core.
+startTimes = defaultdict(lambda : None)
+
+# Core number -> dictionary mapping from event string to the number
+# of times that event has occurred on the given core since the starting
+# event.
+eventCounts = defaultdict(lambda: defaultdict(lambda: 0))
 
 def scan(f, startingEvent):
     """
@@ -65,29 +73,26 @@ def scan(f, startingEvent):
     other events, relative to the most recent occurrence of the starting event.
     """
 
-    foundStart = False
-    startTime = 0.0
     lastTime = None
     for line in f:
-        match = re.match('(^|.* )([0-9.]+) us \(\+ *([0-9.]+) us\) '
-                '(\[C([0-9]+)\].+)', line)
+        match = re.match(r'(^|.* )([0-9.]+) us \(\+ *([0-9.]+) us\) '
+                r'\[C([0-9]+)\] (.+)', line)
         if not match:
             continue
-        thisEventTime = float(match.group(2))*1000.0
-        core = int(match.group(5))
-        if options.useCores:
-            prevTime = corePrev[core]
-        else:
-            prevTime = lastTime
+        thisEventTime = float(match.group(2))
+        core = int(match.group(4))
+        thisEvent = match.group(5)
+        if not options.useCores:
+            core = 0
+        prevTime = corePrev[core]
         if prevTime == None:
             thisEventInterval = 0
         else:
             thisEventInterval = thisEventTime - prevTime
-        thisEvent = match.group(4)
         rawEvent = thisEvent
         if options.noNumbers:
-            thisEvent = re.sub('0x[0-9a-f]+', '?', thisEvent)
-            thisEvent = re.sub('[0-9]+', '?', thisEvent)
+            thisEvent = re.sub(r'\b0x[0-9a-f]+\b', '?', thisEvent)
+            thisEvent = re.sub(r'\b[0-9.]+\b', '?', thisEvent)
         if (lastTime != None) and (thisEventTime < lastTime):
             print('Time went backwards at the following line:\n%s' % (line))
         lastTime = thisEventTime
@@ -101,11 +106,11 @@ def scan(f, startingEvent):
             if startingEvent in rawEvent:
                 # Reset variables to indicate that we are starting a new
                 # sequence of events from the starting event.
-                startTime = thisEventTime
-                foundStart = True
-                eventCount = {}
+                startTimes[core] = thisEventTime
+                eventCounts[core] = defaultdict(lambda: 0)
 
-            if not foundStart:
+            startTime = startTimes[core]
+            if startTime == None:
                 continue
 
             # If we get here, it means that we have found an event that
@@ -113,13 +118,13 @@ def scan(f, startingEvent):
             # the starting event. First, see how many times this event has
             # occurred since the last occurrence of the starting event.
             relativeTime = thisEventTime - startTime
-            # print('%.1f %.1f %s' % (relativeTime, thisEventInterval, thisEvent))
-            if thisEvent in eventCount:
-                count = eventCount[thisEvent] + 1
-            else:
-                count = 1
-            eventCount[thisEvent] = count
-            # print("Count for '%s': %d" % (thisEvent, count))
+            # print('%9.3f: %.1f %.1f %s' % (thisEventTime, relativeTime,
+            #         thisEventInterval, thisEvent))
+            count = eventCounts[core][thisEvent] + 1
+            eventCounts[core][thisEvent] = count
+
+            # print("%9.3f: count for '%s': %d" % (thisEventTime, thisEvent,
+            #         count))
             if not thisEvent in relativeEvents:
                 relativeEvents[thisEvent] = []
             occurrences = relativeEvents[thisEvent]
@@ -141,9 +146,10 @@ parser.add_option('-a', '--alt', action='store_true', default=False,
         'max, etc. for cumulative time, not delta)')
 parser.add_option('-c', '--cores', action='store_true', default=False,
         dest='useCores',
-        help='compute elapsed time for each event relative to the previous '
-        'event on the same core (default: compute relative to the previous '
-        'event on any core)')
+        help='treat events on each core independently: compute elapsed time '
+        'for each event relative to the previous event on the same core, and '
+        'if -f is specified, compute relative times separately on each core '
+        '(default: consider all events on all cores as a single stream)')
 parser.add_option('-f', '--from', type='string', dest='startEvent',
         help='measure times for other events relative to FROM; FROM contains a '
         'substring of an event')
@@ -227,14 +233,14 @@ if options.startEvent:
             medianInterval = intervals[len(intervals)//2]
             if options.altFormat:
                 message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
-                    nameLength, eventName, medianTime, times[0], times[-1],
-                    sum(times)/len(times), intervals[len(intervals)//2],
-                    len(times))
+                    nameLength, eventName, medianTime*1e03, times[0]*1e03,
+                    times[-1]*1e03, sum(times)*1e03/len(times),
+                    intervals[len(intervals)//2]*1e03, len(times))
             else:
                 message = '%-*s  %6.0f %6.0f %6.0f %6.0f %6.0f %7d' % (
-                    nameLength, eventName, medianTime, medianInterval,
-                    intervals[0], intervals[-1], sum(intervals)/len(intervals),
-                    len(intervals))
+                    nameLength, eventName, medianTime*1e03, medianInterval*1e03,
+                    intervals[0]*1e03, intervals[-1]*1e03,
+                    sum(intervals)/len(intervals)*1e03, len(intervals))
             outputInfo.append([medianTime, message])
 
     outputInfo.sort(key=lambda item: item[0])
