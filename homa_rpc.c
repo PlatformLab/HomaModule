@@ -122,6 +122,9 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	struct homa_rpc *srpc = NULL;
 	int err;
 
+	if (!hsk->buffer_pool)
+		return ERR_PTR(-ENOMEM);
+
 	/* Lock the bucket, and make sure no-one else has already created
 	 * the desired RPC.
 	 */

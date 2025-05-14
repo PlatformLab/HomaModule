@@ -167,6 +167,19 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__normal)
 	EXPECT_EQ(1, created);
 	homa_rpc_end(srpc);
 }
+TEST_F(homa_rpc, homa_rpc_alloc_server__no_buffer_pool)
+{
+	struct homa_rpc *srpc;
+	int created;
+
+	homa_pool_free(self->hsk.buffer_pool);
+	self->hsk.buffer_pool = NULL;
+	srpc = homa_rpc_alloc_server(&self->hsk, self->client_ip, &self->data,
+			&created);
+	EXPECT_TRUE(IS_ERR(srpc));
+	EXPECT_EQ(ENOMEM, -PTR_ERR(srpc));
+	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+}
 TEST_F(homa_rpc, homa_rpc_alloc_server__already_exists)
 {
 	struct homa_rpc *srpc1, *srpc2, *srpc3;
@@ -243,7 +256,7 @@ TEST_F(homa_rpc, homa_rpc_alloc_server__allocate_buffers)
 	EXPECT_EQ(3, srpc->msgin.num_bpages);
 	homa_rpc_end(srpc);
 }
-TEST_F(homa_rpc, homa_rpc_alloc_server__no_buffer_pool)
+TEST_F(homa_rpc, homa_rpc_alloc_server__cant_allocate_buffers)
 {
 	struct homa_rpc *srpc;
 	int created;
