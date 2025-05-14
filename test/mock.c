@@ -11,7 +11,6 @@
 #include "homa_skb.h"
 #endif /* See strip.py */
 #include "ccutils.h"
-#include "mock.h"
 #include "utils.h"
 
 #include <linux/rhashtable.h>
@@ -48,6 +47,7 @@ int mock_kthread_create_errors;
 int mock_prepare_to_wait_errors;
 int mock_register_protosw_errors;
 int mock_register_sysctl_errors;
+int mock_rht_init_errors;
 int mock_rht_insert_errors;
 int mock_route_errors;
 int mock_spin_lock_held;
@@ -231,10 +231,10 @@ static struct socket mock_socket;
 static struct homa *mock_homa;
 struct net mock_net;
 
-/* Nonzero means don't generate an error message in homa_peertabe_free_fn
- * if the reference count isn't zero.
+/* Nonzero means don't generate a unit test failure when freeing peers
+ * if the reference count isn't zero (log a message instead).
  */
-int mock_peertab_free_fn_no_complain;
+int mock_peer_free_no_fail;
 
 struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
 struct netdev_queue mock_net_queue = {.state = 0};
@@ -1259,6 +1259,14 @@ void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
 
+int mock_rht_init(struct rhashtable *ht,
+		    const struct rhashtable_params *params)
+{
+	if (mock_check_error(&mock_rht_init_errors))
+		return -EINVAL;
+	return rhashtable_init(ht, params);
+}
+
 void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 				      struct rhash_head *obj,
 				      const struct rhashtable_params params)
@@ -2062,6 +2070,7 @@ void mock_teardown(void)
 	mock_prepare_to_wait_errors = 0;
 	mock_register_protosw_errors = 0;
 	mock_register_sysctl_errors = 0;
+	mock_rht_init_errors = 0;
 	mock_rht_insert_errors = 0;
 	mock_wait_intr_irq_errors = 0;
 	mock_copy_to_user_dont_copy = 0;
@@ -2088,7 +2097,7 @@ void mock_teardown(void)
 	mock_min_default_port = 0x8000;
 	mock_homa = NULL;
 	homa_net_id = 0;
-	mock_peertab_free_fn_no_complain = 0;
+	mock_peer_free_no_fail = 0;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;
 	memset(inet_offloads, 0, sizeof(inet_offloads));

@@ -144,9 +144,10 @@ extern struct net_device
 		   mock_net_device;
 extern int         mock_numa_mask;
 extern int         mock_page_nid_mask;
-extern int         mock_peertab_free_fn_no_complain;
+extern int         mock_peer_free_no_fail;
 extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
+extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
@@ -191,6 +192,8 @@ struct ctl_table_header *
 	    mock_register_net_sysctl(struct net *net,
 				     const char *path,
 				     struct ctl_table *table);
+int         mock_rht_init(struct rhashtable *ht,
+			  const struct rhashtable_params *params);
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 					    struct rhash_head *obj,
 					    const struct rhashtable_params params);

@@ -63,10 +63,10 @@ static void add_to_pool(struct homa *homa, int num_pages, int core)
 
 static struct homa_page_pool *hook_pool;
 
-/* Used to remove a page from hook_pool when a lock is acquired. */
-static void spinlock_hook(char *id)
+/* Used to remove a page from hook_pool in a race. */
+static void page_alloc_race_hook(char *id)
 {
-	if (strcmp(id, "spin_lock") != 0)
+	if (strcmp(id, "skb_page_alloc_race") != 0)
 		return;
 	if ((hook_pool == NULL) || (hook_pool->avail == 0))
 		return;
@@ -338,7 +338,7 @@ TEST_F(homa_skb, homa_skb_page_alloc__pool_page_taken_while_locking)
 	EXPECT_EQ(1, skb_core->pool->avail);
 	EXPECT_EQ(0, skb_core->num_stashed_pages);
 	hook_pool = skb_core->pool;
-	unit_hook_register(spinlock_hook);
+	unit_hook_register(page_alloc_race_hook);
 	mock_alloc_page_errors = 3;
 
 	EXPECT_FALSE(homa_skb_page_alloc(&self->homa, skb_core));

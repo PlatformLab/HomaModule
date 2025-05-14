@@ -139,19 +139,13 @@ struct homa {
 	 * @prev_default_port: The most recent port number assigned from
 	 * the range of default ports.
 	 */
-	__u16 prev_default_port ____cacheline_aligned_in_smp;
+	__u16 prev_default_port;
 
 	/**
 	 * @port_map: Information about all open sockets. Dynamically
 	 * allocated; must be kfreed.
 	 */
-	struct homa_socktab *port_map ____cacheline_aligned_in_smp;
-
-	/**
-	 * @peers: Info about all the other hosts we have communicated with.
-	 * Dynamically allocated; must be kfreed.
-	 */
-	struct homa_peertab *peers;
+	struct homa_socktab *port_map;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -527,6 +521,13 @@ struct homa_shared {
 	 * through their shared_links fields. Managed with RCU.
 	 */
 	struct list_head homas;
+
+	/**
+	 * @peers: Info about all the other hosts we have communicated with;
+	 * includes peers from all struct homas. Dynamically allocated; must
+	 * be kfreed.
+	 */
+	struct homa_peertab *peers;
 };
 
 /**

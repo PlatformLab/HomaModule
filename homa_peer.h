@@ -15,51 +15,12 @@
 struct homa_rpc;
 
 /**
- * struct homa_dead_dst - Used to retain dst_entries that are no longer
- * needed, until it is safe to delete them (I'm not confident that the RCU
- * mechanism will be safe for these: the reference count could get incremented
- * after it's on the RCU list?).
- */
-struct homa_dead_dst {
-	/** @dst: Entry that is no longer used by a struct homa_peer. */
-	struct dst_entry *dst;
-
-	/**  @gc_time: homa_clock() time when it is safe to free @dst. */
-	u64 gc_time;
-
-	/** @dst_links: Used to link together entries in peertab->dead_dsts. */
-	struct list_head dst_links;
-};
-
-/**
- * define HOMA_PEERTAB_BUCKET_BITS - Number of bits in the bucket index for a
- * homa_peertab.  Should be large enough to hold an entry for every server
- * in a datacenter without long hash chains.
- */
-#define HOMA_PEERTAB_BUCKET_BITS 16
-
-/** define HOME_PEERTAB_BUCKETS - Number of buckets in a homa_peertab. */
-#define HOMA_PEERTAB_BUCKETS BIT(HOMA_PEERTAB_BUCKET_BITS)
-
-/**
- * struct homa_peertab - A hash table that maps from IPv6 addresses
- * to homa_peer objects. IPv4 entries are encapsulated as IPv6 addresses.
- * Entries are gradually added to this table, but they are never removed
- * except when the entire table is deleted. We can't safely delete because
- * results returned by homa_peer_find may be retained indefinitely.
- *
- * This table is managed exclusively by homa_peertab.c, using RCU to
- * permit efficient lookups.
+ * struct homa_peertab - Stores homa_peer objects, indexed by IPv6
+ * address.
  */
 struct homa_peertab {
 	/** @ht: Hash table that stores all struct peers. */
 	struct rhashtable ht;
-
-	/**
-	 * @live: True means ht has been successfully initialized and
-	 * not yet destructed.
-	 */
-	bool live;
 };
 
 /**
@@ -219,9 +180,11 @@ struct homa_peer {
 
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
-void     homa_peertab_destroy(struct homa_peertab *peertab);
+struct homa_peertab
+	*homa_peertab_alloc(void);
+void     homa_peertab_free(struct homa_peertab *peertab);
+void     homa_peertab_free_homa(struct homa *homa);
 void     homa_peertab_free_fn(void *object, void *dummy);
-int      homa_peertab_init(struct homa_peertab *peertab);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
 	*homa_peer_alloc(struct homa *homa, const struct in6_addr *addr,
@@ -286,7 +249,7 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 					     struct homa_sock *hsk)
 {
 	if (unlikely(peer->dst->obsolete > 0))
-		homa_dst_refresh(hsk->homa->peers, peer, hsk);
+		homa_dst_refresh(hsk->homa->shared->peers, peer, hsk);
 	dst_hold(peer->dst);
 	return peer->dst;
 }

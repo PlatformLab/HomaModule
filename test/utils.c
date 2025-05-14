@@ -474,3 +474,29 @@ void unit_homa_destroy(struct homa *homa)
 {
 	/* Currently nothing to check. */
 }
+
+/**
+ * unit_log_peers() - Return a count of the number of peers in the
+ * homa_peertab for @homa (could also include peers from other homas).
+ * @homa:       Used to locate homa_peertab to count.
+ */
+int unit_count_peers(struct homa *homa)
+{
+	struct rhashtable_iter iter;
+	struct homa_peer *peer;
+	int count = 0;
+
+	rhashtable_walk_enter(&homa->shared->peers->ht, &iter);
+	rhashtable_walk_start(&iter);
+	while (1) {
+		peer = rhashtable_walk_next(&iter);
+		if (!peer)
+			break;
+		if (IS_ERR(peer))
+			continue;
+		count++;
+	}
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
+	return count;
+}

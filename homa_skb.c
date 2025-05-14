@@ -270,6 +270,7 @@ bool homa_skb_page_alloc(struct homa *homa, struct homa_skb_core *skb_core)
 	/* Step 2: can we retrieve a page from the pool for this NUMA node? */
 	pool = skb_core->pool;
 	if (pool->avail) {
+		UNIT_HOOK("skb_page_alloc_race");
 		spin_lock_bh(&homa->page_pool_mutex);
 
 		/* Must recheck: could have changed before locked. */

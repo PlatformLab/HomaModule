@@ -25,17 +25,24 @@ struct homa_shared *homa_shared;
 /**
  * homa_shared_alloc() - Allocate and initialize a new homa_shared
  * object.
- * Return: the new homa_shared object, or NULL if memory allocation failed.
+ * Return: the new homa_shared object, or ERR_PTR on failure.
  */
 struct homa_shared *homa_shared_alloc(void)
 {
 	struct homa_shared *shared;
+	int err;
 
 	shared = kmalloc(sizeof(*homa_shared), GFP_KERNEL);
 	if (!shared)
-		return NULL;
+		return ERR_PTR(-ENOMEM);
 	spin_lock_init(&shared->lock);
 	INIT_LIST_HEAD(&shared->homas);
+	shared->peers = homa_peertab_alloc();
+	if (IS_ERR(shared->peers)) {
+		err = PTR_ERR(shared->peers);
+		kfree(shared);
+		return ERR_PTR(err);
+	}
 	return shared;
 }
 
@@ -44,6 +51,7 @@ struct homa_shared *homa_shared_alloc(void)
  */
 void homa_shared_free(struct homa_shared *shared)
 {
+	homa_peertab_free(shared->peers);
 	kfree(shared);
 	if (shared == homa_shared)
 		homa_shared = NULL;
@@ -72,8 +80,12 @@ int homa_init(struct homa *homa, struct net *net)
 
 	if (!homa_shared) {
 		homa_shared = homa_shared_alloc();
-		if (!homa_shared)
-			return -ENOMEM;
+		if (IS_ERR(homa_shared)) {
+			int status = PTR_ERR(homa_shared);
+
+			homa_shared = NULL;
+			return status;
+		}
 	}
 	homa->shared = homa_shared;
 	spin_lock_bh(&homa_shared->lock);
@@ -103,17 +115,6 @@ int homa_init(struct homa *homa, struct net *net)
 		return -ENOMEM;
 	}
 	homa_socktab_init(homa->port_map);
-	homa->peers = kmalloc(sizeof(*homa->peers), GFP_KERNEL);
-	if (!homa->peers) {
-		pr_err("%s couldn't create peers: kmalloc failure", __func__);
-		return -ENOMEM;
-	}
-	err = homa_peertab_init(homa->peers);
-	if (err) {
-		pr_err("%s couldn't initialize peer table (errno %d)\n",
-		       __func__, -err);
-		return err;
-	}
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);
 	if (err) {
@@ -171,30 +172,23 @@ int homa_init(struct homa *homa, struct net *net)
 
 /**
  * homa_destroy() -  Destructor for homa objects.
- * @homa:      Object to destroy.
+ * @homa:      Object to destroy. It is safe if this object has already
+ *             been previously destroyed.
  */
 void homa_destroy(struct homa *homa)
 {
+	struct homa_shared *shared;
+
+	if (!homa_shared)
+		/* Already destroyed. */
+		return;
+
 #ifdef __UNIT_TEST__
 #include "utils.h"
 	unit_homa_destroy(homa);
 #endif /* __UNIT_TEST__ */
 
-	if (homa->shared) {
-		struct homa_shared *shared = homa->shared;
-
-		spin_lock_bh(&shared->lock);
-		__list_del_entry(&homa->shared_links);
-		if (list_empty(&homa->shared->homas)) {
-			spin_unlock_bh(&shared->lock);
-			homa_shared_free(homa->shared);
-		} else {
-			spin_unlock_bh(&shared->lock);
-		}
-		homa->shared = NULL;
-	}
-
-	/* The order of the following statements matters! */
+	/* The order of the following cleanups matters! */
 	if (homa->port_map) {
 		homa_socktab_destroy(homa->port_map);
 		kfree(homa->port_map);
@@ -210,14 +204,21 @@ void homa_destroy(struct homa *homa)
 		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
 	}
-	if (homa->peers) {
-		homa_peertab_destroy(homa->peers);
-		kfree(homa->peers);
-		homa->peers = NULL;
-	}
 #ifndef __STRIP__ /* See strip.py */
 	homa_skb_cleanup(homa);
 #endif /* See strip.py */
+	homa_peertab_free_homa(homa);
+
+	shared = homa->shared;
+	spin_lock_bh(&shared->lock);
+	__list_del_entry(&homa->shared_links);
+	if (list_empty(&homa->shared->homas)) {
+		spin_unlock_bh(&shared->lock);
+		homa_shared_free(homa->shared);
+	} else {
+		spin_unlock_bh(&shared->lock);
+	}
+	homa->shared = NULL;
 }
 
 #ifndef __STRIP__ /* See strip.py */

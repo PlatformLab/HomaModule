@@ -8,6 +8,14 @@
 #include "homa_peer.h"
 #include "homa_rpc.h"
 
+#ifdef __UNIT_TEST__
+#undef rhashtable_init
+#define rhashtable_init mock_rht_init
+
+#undef rhashtable_lookup_get_insert_fast
+#define rhashtable_lookup_get_insert_fast mock_rht_lookup_get_insert_fast
+#endif /* __UNIT_TEST__ */
+
 const struct rhashtable_params ht_params = {
 	.key_len     = sizeof(struct homa_peer_key),
 	.key_offset  = offsetof(struct homa_peer, ht_key),
@@ -18,22 +26,57 @@ const struct rhashtable_params ht_params = {
 };
 
 /**
- * homa_peertab_init() - Constructor for homa_peertabs.
- * @peertab:  The object to initialize; previous contents are discarded.
+ * homa_peertab_alloc() - Allocate and initialize a homa_peertab.
  *
- * Return:    0 in the normal case, or a negative errno if there was a problem.
+ * Return:    A pointer to the new homa_peertab, or ERR_PTR(-errno) if there
+ *            was a problem.
  */
-int homa_peertab_init(struct homa_peertab *peertab)
+struct homa_peertab *homa_peertab_alloc(void)
 {
-	/* Note: when we return, the object must be initialized so it's
-	 * safe to call homa_peertab_destroy, even if this function returns
-	 * an error.
-	 */
-	int status;
+	struct homa_peertab *peertab;
+	int err;
 
-	status = rhashtable_init(&peertab->ht, &ht_params);
-	peertab->live = (status == 0);
-	return status;
+	peertab = kmalloc(sizeof(*peertab), GFP_KERNEL);
+	if (!peertab) {
+		pr_err("%s couldn't create peers: kmalloc failure", __func__);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	err = rhashtable_init(&peertab->ht, &ht_params);
+	if (err) {
+		kfree(peertab);
+		return ERR_PTR(err);
+	}
+	return peertab;
+}
+
+/**
+ * homa_peertab_free_homa() - Garbage collect all of the peer information
+ * associated with a particular struct homa.
+ * @homa:    Object whose peers should be freed.
+ */
+void homa_peertab_free_homa(struct homa *homa)
+{
+	struct homa_peertab *peertab = homa->shared->peers;
+	struct rhashtable_iter iter;
+	struct homa_peer *peer;
+
+	rhashtable_walk_enter(&peertab->ht, &iter);
+	rhashtable_walk_start(&iter);
+	while (1) {
+		peer = rhashtable_walk_next(&iter);
+		if (!peer)
+			break;
+		if (IS_ERR(peer))
+			continue;
+		if (peer->ht_key.homa != homa)
+			continue;
+		rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
+				       ht_params);
+		homa_peer_free(peer);
+	}
+	rhashtable_walk_stop(&iter);
+	rhashtable_walk_exit(&iter);
 }
 
 /**
@@ -47,37 +90,21 @@ void homa_peertab_free_fn(void *object, void *dummy)
 {
 	struct homa_peer *peer = object;
 
-#ifdef __UNIT_TEST__
-	if (atomic_read(&peer->refs) != 0) {
-		if (!mock_peertab_free_fn_no_complain)
-			FAIL(" %s found peer %s with reference count %d",
-				__func__,
-				homa_print_ipv6_addr(&peer->addr),
-				atomic_read(&peer->refs));
-	}
-#else /* __UNIT_TEST__ */
-	if (atomic_read(&peer->refs) != 0)
-		pr_err("%s found peer with reference count %d",
-		       __func__, atomic_read(&peer->refs));
-#endif
-	else
-		homa_peer_free(peer);
+	homa_peer_free(peer);
 }
 
 /**
- * homa_peertab_destroy() - Destructor for homa_peertabs. After this
+ * homa_peertab_free() - Destructor for homa_peertabs. After this
  * function returns, it is unsafe to use any results from previous calls
  * to homa_peer_find, since all existing homa_peer objects will have been
  * destroyed.
  * @peertab:  The table to destroy.
  */
-void homa_peertab_destroy(struct homa_peertab *peertab)
+void homa_peertab_free(struct homa_peertab *peertab)
 {
-	if (peertab->live) {
-		rhashtable_free_and_destroy(&peertab->ht, homa_peertab_free_fn,
-					    NULL);
-		peertab->live = false;
-	}
+	rhashtable_free_and_destroy(&peertab->ht, homa_peertab_free_fn,
+				    NULL);
+	kfree(peertab);
 }
 
 /**
@@ -134,7 +161,24 @@ struct homa_peer *homa_peer_alloc(struct homa *homa,
 void homa_peer_free(struct homa_peer *peer)
 {
 	dst_release(peer->dst);
-	kfree(peer);
+
+	if (atomic_read(&peer->refs) == 0)
+		kfree(peer);
+	else {
+#ifdef __UNIT_TEST__
+		if (!mock_peer_free_no_fail)
+			FAIL(" %s found peer %s with reference count %d",
+				__func__, homa_print_ipv6_addr(&peer->addr),
+				atomic_read(&peer->refs));
+		else
+			UNIT_LOG("; ", "peer %s has reference count %d",
+				 homa_print_ipv6_addr(&peer->addr),
+				 atomic_read(&peer->refs));
+#else /* __UNIT_TEST__ */
+		WARN(1, "%s found peer with reference count %d",
+		     __func__, atomic_read(&peer->refs));
+#endif /* __UNIT_TEST__ */
+	}
 }
 
 /**
@@ -154,19 +198,17 @@ struct homa_peer *homa_peer_find(struct homa *homa,
 				 const struct in6_addr *addr,
 				 struct inet_sock *inet)
 {
+	struct homa_peertab *peertab = homa->shared->peers;
 	struct homa_peer *peer, *other;
 	struct homa_peer_key key;
-	u64 start = homa_clock();
 
 	key.addr = *addr;
 	key.homa = homa;
 	rcu_read_lock();
-	peer = rhashtable_lookup(&homa->peers->ht, &key, ht_params);
+	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
 	if (peer) {
 		homa_peer_hold(peer);
 		rcu_read_unlock();
-		tt_record1("homa_peer_find took %d cycles to find existing peer",
-			   homa_clock() - start);
 		return peer;
 	}
 
@@ -176,24 +218,21 @@ struct homa_peer *homa_peer_find(struct homa *homa,
 		rcu_read_unlock();
 		return peer;
 	}
-#ifdef __UNIT_TEST__
-	other = mock_rht_lookup_get_insert_fast(&homa->peers->ht,
-						&peer->ht_linkage, ht_params);
-#else /* __UNIT_TEST__ */
-	other = rhashtable_lookup_get_insert_fast(&homa->peers->ht,
+	other = rhashtable_lookup_get_insert_fast(&peertab->ht,
 						  &peer->ht_linkage, ht_params);
-#endif /* __UNIT_TEST__ */
 	if (IS_ERR(other)) {
+		/* Couldn't insert; return the error info. */
+		homa_peer_put(peer);
 		homa_peer_free(peer);
-		rcu_read_unlock();
-		return other;
-	}
-	if (other) {
-		/* Someone else already created the desired peer. */
+		peer = other;
+	} else if (other) {
+		/* Someone else already created the desired peer; use that
+		 * one instead of ours.
+		 */
+		homa_peer_put(peer);
+		homa_peer_free(peer);
 		homa_peer_hold(other);
-		rcu_read_unlock();
-		homa_peer_free(peer);
-		return other;
+		peer = other;
 	}
 	rcu_read_unlock();
 	return peer;
