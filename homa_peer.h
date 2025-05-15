@@ -19,6 +19,12 @@ struct homa_rpc;
  * address.
  */
 struct homa_peertab {
+	/**
+	 * @lock: Used to synchronize updates to @ht as well as other
+	 * operations on this object.
+	 */
+	spinlock_t lock;
+
 	/** @ht: Hash table that stores all struct peers. */
 	struct rhashtable ht;
 };

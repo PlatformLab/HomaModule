@@ -102,6 +102,7 @@ void homa_peertab_free_fn(void *object, void *dummy)
  */
 void homa_peertab_free(struct homa_peertab *peertab)
 {
+	spin_lock_init(&peertab->lock);
 	rhashtable_free_and_destroy(&peertab->ht, homa_peertab_free_fn,
 				    NULL);
 	kfree(peertab);
@@ -218,8 +219,10 @@ struct homa_peer *homa_peer_find(struct homa *homa,
 		rcu_read_unlock();
 		return peer;
 	}
+	spin_lock_bh(&peertab->lock);
 	other = rhashtable_lookup_get_insert_fast(&peertab->ht,
 						  &peer->ht_linkage, ht_params);
+	spin_unlock_bh(&peertab->lock);
 	if (IS_ERR(other)) {
 		/* Couldn't insert; return the error info. */
 		homa_peer_put(peer);
