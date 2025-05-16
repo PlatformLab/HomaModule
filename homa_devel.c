@@ -370,21 +370,25 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
 }
 
 /**
- * homa_freeze_peers() - Send FREEZE packets to all known peers.
- * @homa:   Provides info about peers.
+ * homa_freeze_peers() - Send FREEZE packets to all known peers in the
+ * root network namespace.
  */
-void homa_freeze_peers(struct homa *homa)
+void homa_freeze_peers()
 {
 	struct homa_socktab_scan scan;
 	struct homa_freeze_hdr freeze;
 	struct rhashtable_iter iter;
 	struct homa_peer *peer;
 	struct homa_sock *hsk;
+	struct homa_net *hnet;
 	int err;
 
-	/* Find a socket to use (any will do). */
+	/* Find a socket to use (any socket for the namespace will do). */
+	hnet = homa_net_from_net(&init_net);
 	rcu_read_lock();
-	hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	hsk = homa_socktab_start_scan(hnet->homa->port_map, &scan);
+	while (hsk && hsk->hnet != hnet)
+		hsk = homa_socktab_next(&scan);
 	homa_socktab_end_scan(&scan);
 	if (!hsk) {
 		tt_record("homa_freeze_peers couldn't find a socket");
@@ -398,7 +402,7 @@ void homa_freeze_peers(struct homa *homa)
 	IF_NO_STRIP(freeze.common.urgent = htons(HOMA_TCP_URGENT));
 	freeze.common.sender_id = 0;
 
-	rhashtable_walk_enter(&homa->shared->peers->ht, &iter);
+	rhashtable_walk_enter(&hnet->homa->peers->ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (true) {
 		peer = rhashtable_walk_next(&iter);
@@ -410,7 +414,7 @@ void homa_freeze_peers(struct homa *homa)
 			 * that's OK.
 			 */
 			continue;
-		if (peer->ht_key.homa != homa)
+		if (peer->ht_key.hnet != hnet)
 			continue;
 		tt_record1("Sending freeze to 0x%x", tt_addr(peer->addr));
 		err = __homa_xmit_control(&freeze, sizeof(freeze), peer, hsk);
@@ -553,7 +557,7 @@ void homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type, char *format)
 		tt_record2(format, rpc->id, tt_addr(rpc->peer->addr));
 		tt_freeze();
 //		homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
-		homa_freeze_peers(rpc->hsk->homa);
+		homa_freeze_peers();
 	}
 }
 #endif /* See strip.py */

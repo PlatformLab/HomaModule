@@ -122,26 +122,28 @@ struct homa_sock {
 	};
 
 	/**
-	 * @lock: Must be held when modifying fields such as interests
-	 * and lists of RPCs. This lock is used in place of sk->sk_lock
-	 * because it's used differently (it's always used as a simple
-	 * spin lock).  See sync.txt for more on Homa's synchronization
-	 * strategy.
-	 */
-	spinlock_t lock;
-
-	/**
-	 * @protect_count: counts the number of calls to homa_protect_rpcs
-	 * for which there have not yet been calls to homa_unprotect_rpcs.
-	 * See sync.txt for more info.
-	 */
-	atomic_t protect_count;
-
-	/**
 	 * @homa: Overall state about the Homa implementation. NULL
 	 * means this socket was never initialized or has been deleted.
 	 */
 	struct homa *homa;
+
+	/**
+	 * @homa_net: Overall state specific to the network namespace for
+	 * this socket.
+	 */
+	struct homa_net *hnet;
+
+	/**
+	 * @buffer_pool: used to allocate buffer space for incoming messages.
+	 * Storage is dynamically allocated.
+	 */
+	struct homa_pool *buffer_pool;
+
+	/**
+	 * @port: Port number: identifies this socket uniquely among all
+	 * those on this node.
+	 */
+	__u16 port;
 
 	/**
 	 * @is_server: True means that this socket can act as both client
@@ -157,12 +159,6 @@ struct homa_sock {
 	bool shutdown;
 
 	/**
-	 * @port: Port number: identifies this socket uniquely among all
-	 * those on this node.
-	 */
-	__u16 port;
-
-	/**
 	 * @ip_header_length: Length of IP headers for this socket (depends
 	 * on IPv4 vs. IPv6).
 	 */
@@ -170,6 +166,26 @@ struct homa_sock {
 
 	/** @socktab_links: Links this socket into a homa_socktab bucket. */
 	struct hlist_node socktab_links;
+
+	/* Information above is (almost) never modified; start a new
+	 * cache line below for info that is modified frequently.
+	 */
+
+	/**
+	 * @lock: Must be held when modifying fields such as interests
+	 * and lists of RPCs. This lock is used in place of sk->sk_lock
+	 * because it's used differently (it's always used as a simple
+	 * spin lock).  See sync.txt for more on Homa's synchronization
+	 * strategy.
+	 */
+	spinlock_t lock ____cacheline_aligned_in_smp;
+
+	/**
+	 * @protect_count: counts the number of calls to homa_protect_rpcs
+	 * for which there have not yet been calls to homa_unprotect_rpcs.
+	 * See sync.txt for more info.
+	 */
+	atomic_t protect_count;
 
 	/**
 	 * @active_rpcs: List of all existing RPCs related to this socket,
@@ -223,12 +239,6 @@ struct homa_sock {
 	 * the socket lock.
 	 */
 	struct homa_rpc_bucket server_rpc_buckets[HOMA_SERVER_RPC_BUCKETS];
-
-	/**
-	 * @buffer_pool: used to allocate buffer space for incoming messages.
-	 * Storage is dynamically allocated.
-	 */
-	struct homa_pool *buffer_pool;
 };
 
 /**
@@ -251,11 +261,10 @@ int                homa_sock_bind(struct homa_socktab *socktab,
 				  struct homa_sock *hsk, __u16 port);
 void               homa_sock_destroy(struct homa_sock *hsk);
 struct homa_sock  *homa_sock_find(struct homa_socktab *socktab, __u16 port);
-int                homa_sock_init(struct homa_sock *hsk, struct homa *homa);
+int                homa_sock_init(struct homa_sock *hsk);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);
-int                homa_socket(struct sock *sk);
 void               homa_socktab_destroy(struct homa_socktab *socktab);
 void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
 void               homa_socktab_init(struct homa_socktab *socktab);

@@ -26,7 +26,7 @@
 #define KERNEL_VERSION(...) 100
 #endif /* __STRIP__ */
 
-struct homa;
+struct homa_net;
 struct homa_rpc;
 
 /**
@@ -83,7 +83,7 @@ void     homa_check_addr(void *p);
 void     homa_check_list(struct list_head *list, int max_length);
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		     char *format);
-void     homa_freeze_peers(struct homa *homa);
+void     homa_freeze_peers(void);
 char    *homa_print_ipv4_addr(__be32 addr);
 char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);

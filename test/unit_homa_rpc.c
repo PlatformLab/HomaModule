@@ -50,6 +50,7 @@ FIXTURE(homa_rpc) {
 	u64 client_id;
 	u64 server_id;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	union sockaddr_in_union server_addr;
 	struct homa_data_hdr data;
@@ -68,13 +69,13 @@ FIXTURE_SETUP(homa_rpc)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = *self->server_ip;
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	memset(&self->data, 0, sizeof(self->data));
 	self->data.common = (struct homa_common_hdr){
 		.sport = htons(self->client_port),
@@ -352,7 +353,7 @@ TEST_F(homa_rpc, homa_rpc_acked__basics)
 	struct homa_sock hsk;
 	struct homa_ack ack = {};
 
-	mock_sock_init(&hsk, &self->homa, self->server_port);
+	mock_sock_init(&hsk, self->hnet, self->server_port);
 	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
@@ -370,7 +371,7 @@ TEST_F(homa_rpc, homa_rpc_acked__lookup_socket)
 	struct homa_rpc *srpc;
 	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, &self->homa, self->server_port);
+	mock_sock_init(&hsk, self->hnet, self->server_port);
 	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
@@ -388,7 +389,7 @@ TEST_F(homa_rpc, homa_rpc_acked__no_such_socket)
 	struct homa_rpc *srpc;
 	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, &self->homa, self->server_port);
+	mock_sock_init(&hsk, self->hnet, self->server_port);
 	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);
@@ -406,7 +407,7 @@ TEST_F(homa_rpc, homa_rpc_acked__no_such_rpc)
 	struct homa_rpc *srpc;
 	struct homa_sock hsk;
 
-	mock_sock_init(&hsk, &self->homa, self->server_port);
+	mock_sock_init(&hsk, self->hnet, self->server_port);
 	srpc = unit_server_rpc(&hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			100, 3000);

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BSD-2-Clause
 
 #include "homa_impl.h"
+#include "homa_peer.h"
+#include "homa_sock.h"
 #define KSELFTEST_NOT_MAIN 1
 #include "kselftest_harness.h"
 #include "ccutils.h"
@@ -12,11 +14,14 @@
 
 FIXTURE(homa_utils) {
 	struct homa homa;
+	struct homa_net *hnet;
+	struct homa_sock hsk;
 };
 FIXTURE_SETUP(homa_utils)
 {
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_utils)
@@ -53,62 +58,53 @@ static void set_cutoffs(struct homa *homa, int c0, int c1, int c2,
 }
 #endif /* See strip.py */
 
-TEST_F(homa_utils, homa_shared_alloc__kmalloc_failure)
+#ifndef __STRIP__ /* See strip.py */
+TEST_F(homa_utils, homa_init__grant_alloc_failure)
 {
-	struct homa_shared *shared;
+	struct homa homa2;
 
 	mock_kmalloc_errors = 1;
-	shared = homa_shared_alloc();
-	EXPECT_TRUE(IS_ERR(shared));
-	EXPECT_EQ(ENOMEM, -PTR_ERR(shared));
+	unit_log_clear();
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_SUBSTR("homa_grant_alloc couldn't allocate grant structure",
+		      mock_printk_output);
+	EXPECT_EQ(NULL, homa2.grant);
+	homa_destroy(&homa2);
 }
-TEST_F(homa_utils, homa_shared_alloc__peertab_alloc_failure)
+#endif /* See strip.py */
+TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 {
-	struct homa_shared *shared;
+	struct homa homa2;
 
 	mock_kmalloc_errors = 2;
-	shared = homa_shared_alloc();
-	EXPECT_TRUE(IS_ERR(shared));
-	EXPECT_EQ(ENOMEM, -PTR_ERR(shared));
+	unit_log_clear();
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_SUBSTR("homa_pacer_alloc couldn't allocate homa_pacer struct",
+		      mock_printk_output);
+	EXPECT_EQ(NULL, homa2.pacer);
+	homa_destroy(&homa2);
 }
-TEST_F(homa_utils, homa_shared_alloc__success)
-{
-	struct homa_shared *shared;
-
-	shared = homa_shared_alloc();
-	EXPECT_NE(NULL, shared);
-	EXPECT_EQ(1, list_empty(&shared->homas));
-	homa_shared_free(shared);
-}
-
-TEST_F(homa_utils, homa_shared_free__clear_global_variable)
-{
-	struct homa_shared *saved;
-
-	saved = homa_shared;
-	homa_shared = homa_shared_alloc();
-	homa_shared_free(homa_shared);
-	EXPECT_EQ(NULL, homa_shared);
-	homa_shared = saved;
-}
-
-TEST_F(homa_utils, homa_init__error_from_homa_shared_alloc)
-{
-	struct homa_shared *saved_shared = homa_shared;
-	struct homa homa2;
-
-	homa_shared = NULL;
-	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2, &mock_net));
-	EXPECT_EQ(0, atomic64_read(&homa2.next_outgoing_id));
-	homa_shared = saved_shared;
-}
-TEST_F(homa_utils, homa_init__kmalloc_failure_for_port_map)
+TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 {
 	struct homa homa2;
 
-	mock_kmalloc_errors = 1;
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2, &mock_net));
+	mock_kmalloc_errors = 4;
+	unit_log_clear();
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_SUBSTR("homa_peertab_alloc couldn't create peers: kmalloc failure",
+		      mock_printk_output);
+	EXPECT_EQ(NULL, homa2.peers);
+	homa_destroy(&homa2);
+}
+TEST_F(homa_utils, homa_init__cant_allocate_port_map)
+{
+	struct homa homa2;
+
+	mock_kmalloc_errors = 0x10;
+	unit_log_clear();
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
+	EXPECT_SUBSTR("homa_init couldn't create port_map: kmalloc failure",
+		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.port_map);
 	homa_destroy(&homa2);
 }
@@ -117,31 +113,20 @@ TEST_F(homa_utils, homa_init__homa_skb_init_failure)
 {
 	struct homa homa2;
 
-	mock_kmalloc_errors = 0x8;
-	EXPECT_EQ(ENOMEM, -homa_init(&homa2, &mock_net));
+	mock_kmalloc_errors = 0x20;
+	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("Couldn't initialize skb management (errno 12)",
 		      mock_printk_output);
 	homa_destroy(&homa2);
 }
 #endif /* See strip.py */
 
-TEST_F(homa_utils, homa_destroy__basics)
+TEST_F(homa_utils, homa_destroy)
 {
 	struct homa homa2;
 
-	homa_init(&homa2, &mock_net);
+	homa_init(&homa2);
 	homa_destroy(&homa2);
-}
-TEST_F(homa_utils, homa_destroy__unlink_and_free_shared)
-{
-	struct homa homa2;
-
-	homa_init(&homa2, &mock_net);
-	EXPECT_NE(NULL, homa_shared);
-	homa_destroy(&homa2);
-	EXPECT_NE(NULL, homa_shared);
-	homa_destroy(&self->homa);
-	EXPECT_EQ(NULL, homa_shared);
 }
 
 #ifndef __STRIP__ /* See strip.py */

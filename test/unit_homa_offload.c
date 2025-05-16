@@ -27,6 +27,7 @@ static struct sk_buff *unit_tcp6_gro_receive(struct list_head *held_list,
 FIXTURE(homa_offload)
 {
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct in6_addr ip;
 	struct homa_data_hdr header;
@@ -40,11 +41,11 @@ FIXTURE_SETUP(homa_offload)
 {
 	int i;
 
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.unsched_bytes = 10000;
-	mock_sock_init(&self->hsk, &self->homa, 99);
+	mock_sock_init(&self->hsk, self->hnet, 99);
 	self->ip = unit_get_in_addr("196.168.0.1");
 	memset(&self->header, 0, sizeof(self->header));
 	self->header.common = (struct homa_common_hdr){

@@ -13,19 +13,20 @@ static struct homa_pool *cur_pool;
 
 FIXTURE(homa_pool) {
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct in6_addr client_ip;
 	struct in6_addr server_ip;
 };
 FIXTURE_SETUP(homa_pool)
 {
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->server_ip = unit_get_in_addr("1.2.3.4");
 	cur_pool = self->hsk.buffer_pool;

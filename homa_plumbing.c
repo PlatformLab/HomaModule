@@ -20,11 +20,26 @@ unsigned int homa_net_id;
  * pernet subsystem.
  */
 static struct pernet_operations homa_net_ops = {
-	.init = homa_net_init,
+	.init = homa_net_start,
 	.exit = homa_net_exit,
 	.id = &homa_net_id,
-	.size = sizeof(struct homa)
+	.size = sizeof(struct homa_net)
 };
+
+/* Global data for Homa. Never reference homa_data directly. Always use
+ * the global_homa variable instead (or, even better, a homa pointer
+ * stored in a struct or passed via a parameter); this allows overriding
+ * during unit tests.
+ */
+static struct homa homa_data;
+
+/* This variable contains the address of the statically-allocated struct homa
+ * used throughout Homa. This variable should almost never be used directly:
+ * it should be passed as a parameter to functions that need it. This
+ * variable is used only by a few functions called from Linux where there
+ * is no struct homa* available.
+ */
+struct homa *global_homa = &homa_data;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -416,7 +431,20 @@ static __u16 header_lengths[] = {
 };
 #endif /* See strip.py */
 
+#ifndef __STRIP__ /* See strip.py */
+/* Used to remove sysctl values when the module is unloaded. */
+static struct ctl_table_header *homa_ctl_header;
+#endif /* See strip.py */
+
+/* Thread that runs timer code to detect lost packets and crashed peers. */
+static struct task_struct *timer_kthread;
 static DECLARE_COMPLETION(timer_thread_done);
+
+/* Used to wakeup timer_kthread at regular intervals. */
+static struct hrtimer hrtimer;
+
+/* Nonzero is an indication to the timer thread that it should exit. */
+static int timer_thread_exit;
 
 /**
  * homa_load() - invoked when this module is loaded into the Linux kernel
@@ -424,6 +452,7 @@ static DECLARE_COMPLETION(timer_thread_done);
  */
 int __init homa_load(void)
 {
+	struct homa *homa = global_homa;
 	int status;
 
 	pr_err("Homa module loading\n");
@@ -476,11 +505,22 @@ int __init homa_load(void)
 		       status);
 		goto add_protocol_v6_err;
 	}
+	status = homa_init(homa);
+	if (status)
+		goto homa_init_err;
 
 #ifndef __STRIP__ /* See strip.py */
 	status = homa_metrics_init();
 	if (status != 0)
 		goto metrics_err;
+
+	homa_ctl_header = register_net_sysctl(&init_net, "net/homa",
+					      homa_ctl_table);
+	if (!homa_ctl_header) {
+		pr_err("couldn't register Homa sysctl parameters\n");
+		status = -ENOMEM;
+		goto sysctl_err;
+	}
 
 	status = homa_offload_init();
 	if (status != 0) {
@@ -495,23 +535,38 @@ int __init homa_load(void)
 		       status);
 		goto net_err;
 	}
+	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
+	if (IS_ERR(timer_kthread)) {
+		status = PTR_ERR(timer_kthread);
+		pr_err("couldn't create Homa pacer thread: error %d\n",
+		       status);
+		timer_kthread = NULL;
+		goto timer_err;
+	}
 
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_hook_tcp();
 #endif /* See strip.py */
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_init("timetrace");
+	tt_set_temp(homa->temp);
 #endif /* See strip.py */
 
 	return 0;
 
+timer_err:
+	unregister_pernet_subsys(&homa_net_ops);
 net_err:
 #ifndef __STRIP__ /* See strip.py */
 	homa_offload_end();
 offload_err:
+	unregister_net_sysctl_table(homa_ctl_header);
+sysctl_err:
 	homa_metrics_end();
 metrics_err:
 #endif /* See strip.py */
+	homa_destroy(homa);
+homa_init_err:
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
 add_protocol_v6_err:
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
@@ -531,19 +586,27 @@ proto_register_err:
  */
 void __exit homa_unload(void)
 {
-	pr_notice("Homa module unloading\n");
+	struct homa *homa = global_homa;
 
-	unregister_pernet_subsys(&homa_net_ops);
+	pr_notice("Homa module unloading\n");
 
 #ifndef __UPSTREAM__ /* See strip.py */
 	tt_destroy();
 #endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
+	if (timer_kthread) {
+		timer_thread_exit = 1;
+		wake_up_process(timer_kthread);
+		wait_for_completion(&timer_thread_done);
+	}
+	unregister_pernet_subsys(&homa_net_ops);
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
+	unregister_net_sysctl_table(homa_ctl_header);
 	homa_metrics_end();
 #endif /* See strip.py */
+	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);
 	inet6_del_protocol(&homav6_protocol, IPPROTO_HOMA);
@@ -556,75 +619,25 @@ module_init(homa_load);
 module_exit(homa_unload);
 
 /**
- * homa_net_init() - Initialize a new struct homa as a per-net subsystem.
+ * homa_net_start() - Initialize Homa for a new network namespace.
  * @net:    The net that Homa will be associated with.
  * Return:  0 on success, otherwise a negative errno.
  */
-int homa_net_init(struct net *net)
+int homa_net_start(struct net *net)
 {
-	struct homa *homa = homa_from_net(net);
-	int status;
-
 	pr_notice("Homa attaching to net namespace\n");
-
-	status = homa_init(homa, net);
-	if (status)
-		goto homa_init_err;
-#ifndef __STRIP__ /* See strip.py */
-
-	homa->sysctl_header = register_net_sysctl(net, "net/homa",
-						  homa_ctl_table);
-	if (!homa->sysctl_header) {
-		pr_err("couldn't register Homa sysctl parameters\n");
-		status = -ENOMEM;
-		goto sysctl_err;
-	}
-#endif /* See strip.py */
-
-	homa->timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
-	if (IS_ERR(homa->timer_kthread)) {
-		status = PTR_ERR(homa->timer_kthread);
-		pr_err("couldn't create homa timer thread: error %d\n",
-		       status);
-		homa->timer_kthread = NULL;
-		goto timer_err;
-	}
-
-#ifndef __UPSTREAM__ /* See strip.py */
-	tt_set_temp(homa->temp);
-#endif /* See strip.py */
-	return 0;
-
-timer_err:
-#ifndef __STRIP__ /* See strip.py */
-	unregister_net_sysctl_table(homa->sysctl_header);
-sysctl_err:
-#endif /* See strip.py */
-	homa_destroy(homa);
-homa_init_err:
-	return status;
+	return homa_net_init(homa_net_from_net(net), net, global_homa);
 }
 
 /**
- * homa_net_exit() - Remove Homa from a net.
+ * homa_net_exit() - Perform Homa cleanup needed when a network namespace
+ * is destroyed.
  * @net:    The net from which Homa should be removed.
  */
 void homa_net_exit(struct net *net)
 {
-	struct homa *homa = homa_from_net(net);
-
 	pr_notice("Homa detaching from net namespace\n");
-
-	homa->destroyed = true;
-	if (homa->timer_kthread)
-		wake_up_process(homa->timer_kthread);
-	wait_for_completion(&timer_thread_done);
-
-#ifndef __STRIP__ /* See strip.py */
-	if (homa->sysctl_header)
-		unregister_net_sysctl_table(homa->sysctl_header);
-#endif /* See strip.py */
-	homa_destroy(homa);
+	homa_net_destroy(homa_net_from_net(net));
 }
 
 /**
@@ -772,10 +785,9 @@ int homa_ioctl(struct sock *sk, int cmd, int *karg)
 int homa_socket(struct sock *sk)
 {
 	struct homa_sock *hsk = homa_sk(sk);
-	struct homa *homa = homa_from_sock(sk);
 	int result;
 
-	result = homa_sock_init(hsk, homa);
+	result = homa_sock_init(hsk);
 	if (result != 0)
 		homa_sock_destroy(hsk);
 	return result;
@@ -1537,7 +1549,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 int homa_dointvec(const struct ctl_table *table, int write,
 		  void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa *homa = homa_from_net(current->nsproxy->net_ns);
+	struct homa *homa = homa_net_from_net(current->nsproxy->net_ns)->homa;
 	struct ctl_table table_copy;
 	int result;
 
@@ -1590,7 +1602,7 @@ int homa_dointvec(const struct ctl_table *table, int write,
 			} else if (homa->sysctl_action == 7) {
 				homa_rpc_log_active_tt(homa, 0);
 				tt_record("Freezing cluster because of action 7");
-				homa_freeze_peers(homa);
+				homa_freeze_peers();
 				tt_record("Finished freezing cluster");
 				tt_freeze();
 			} else if (homa->sysctl_action == 8) {
@@ -1691,10 +1703,7 @@ done:
  */
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer)
 {
-	struct homa *homa;
-
-	homa = container_of(timer, struct homa, hrtimer);
-	wake_up_process(homa->timer_kthread);
+	wake_up_process(timer_kthread);
 	return HRTIMER_NORESTART;
 }
 
@@ -1711,27 +1720,27 @@ int homa_timer_main(void *transport)
 	u64 nsec;
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 15, 0)
-	hrtimer_init(&homa->hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	homa->hrtimer.function = &homa_hrtimer;
+	hrtimer_init(&hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer.function = &homa_hrtimer;
 #else
-	hrtimer_setup(&homa->hrtimer, homa_hrtimer, CLOCK_MONOTONIC,
+	hrtimer_setup(&hrtimer, homa_hrtimer, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL);
 #endif
 	nsec = 1000000;                   /* 1 ms */
 	tick_interval = ns_to_ktime(nsec);
 	while (1) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
-		if (!homa->destroyed) {
-			hrtimer_start(&homa->hrtimer, tick_interval,
+		if (!timer_thread_exit) {
+			hrtimer_start(&hrtimer, tick_interval,
 				      HRTIMER_MODE_REL);
 			schedule();
 		}
 		__set_current_state(TASK_RUNNING);
-		if (homa->destroyed)
+		if (timer_thread_exit)
 			break;
 		homa_timer(homa);
 	}
-	hrtimer_cancel(&homa->hrtimer);
+	hrtimer_cancel(&hrtimer);
 	kthread_complete_and_exit(&timer_thread_done, 0);
 	return 0;
 }

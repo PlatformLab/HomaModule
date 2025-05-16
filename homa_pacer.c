@@ -50,17 +50,18 @@ static struct ctl_table pacer_ctl_table[] = {
  * homa_pacer_alloc() - Allocate and initialize a new pacer object, which
  * will hold pacer-related information for @homa.
  * @homa:   Homa transport that the pacer will be associated with.
- * @net:    Network namespace that @homa is associated with.
  * Return:  A pointer to the new struct pacer, or a negative errno.
  */
-struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net)
+struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 {
 	struct homa_pacer *pacer;
 	int err;
 
 	pacer = kmalloc(sizeof(*pacer), GFP_KERNEL | __GFP_ZERO);
-	if (!pacer)
+	if (!pacer) {
+		pr_err("%s couldn't allocate homa_pacer struct\n", __func__);
 		return ERR_PTR(-ENOMEM);
+	}
 	pacer->homa = homa;
 	spin_lock_init(&pacer->mutex);
 	pacer->fifo_count = 1000;
@@ -82,7 +83,7 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net)
 	atomic64_set(&pacer->link_idle_time, homa_clock());
 
 #ifndef __STRIP__ /* See strip.py */
-	pacer->sysctl_header = register_net_sysctl(net, "net/homa",
+	pacer->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   pacer_ctl_table);
 	if (!pacer->sysctl_header) {
 		err = -ENOMEM;
@@ -429,9 +430,11 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 int homa_pacer_dointvec(const struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa_pacer *pacer = homa_from_net(current->nsproxy->net_ns)->pacer;
+	struct homa_pacer *pacer;
 	struct ctl_table table_copy;
 	int result;
+
+	pacer = homa_net_from_net(current->nsproxy->net_ns)->homa->pacer;
 
 	/* Generate a new ctl_table that refers to a field in the
 	 * net-specific struct homa.

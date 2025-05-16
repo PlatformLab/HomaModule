@@ -66,6 +66,7 @@ FIXTURE(homa_outgoing) {
 	u64 client_id;
 	u64 server_id;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	union sockaddr_in_union server_addr;
 	struct homa_peer *peer;
@@ -78,8 +79,8 @@ FIXTURE_SETUP(homa_outgoing)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 	mock_clock = 10000;
 	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
@@ -88,13 +89,12 @@ FIXTURE_SETUP(homa_outgoing)
 	self->homa.grant->window = 10000;
 	self->homa.pacer->fifo_fraction = 0;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port = htons(self->server_port);
-	self->peer = homa_peer_find(&self->homa,
-				    &self->server_addr.in6.sin6_addr,
-				    &self->hsk.inet);
+	self->peer = homa_peer_find(&self->hsk,
+				    &self->server_addr.in6.sin6_addr);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_outgoing)
@@ -293,7 +293,7 @@ TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__multiple_segments_tcp_hijacking)
 	char buffer[1000];
 
 	self->homa.hijack_tcp = 1;
-	mock_sock_init(&hsk, &self->homa, self->client_port+1);
+	mock_sock_init(&hsk, self->hnet, self->client_port+1);
 	crpc = homa_rpc_alloc_client(&hsk, &self->server_addr);
 	homa_rpc_unlock(crpc);
 	homa_message_out_init(crpc, 10000);
@@ -716,7 +716,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -740,7 +740,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 		self->server_ip, self->client_port, 1111, 10000, 10000);
@@ -968,7 +968,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,
@@ -986,7 +986,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
 			self->server_ip, self->server_port, self->client_id,

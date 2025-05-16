@@ -486,7 +486,7 @@ int unit_count_peers(struct homa *homa)
 	struct homa_peer *peer;
 	int count = 0;
 
-	rhashtable_walk_enter(&homa->shared->peers->ht, &iter);
+	rhashtable_walk_enter(&homa->peers->ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (1) {
 		peer = rhashtable_walk_next(&iter);

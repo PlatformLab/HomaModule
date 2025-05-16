@@ -225,11 +225,10 @@ __u16 mock_min_default_port = 0x8000;
 /* Used as sk_socket for all sockets created by mock_sock_init. */
 static struct socket mock_socket;
 
-/* Will be used as the struct homa for functions such as homa_from_net
- * and homa_from_sock.
- */
-static struct homa *mock_homa;
-struct net mock_net;
+#define MOCK_MAX_NETS 10
+static struct net mock_nets[MOCK_MAX_NETS];
+static struct homa_net mock_hnets[MOCK_MAX_NETS];
+static int mock_num_hnets;
 
 /* Nonzero means don't generate a unit test failure when freeing peers
  * if the reference count isn't zero (log a message instead).
@@ -242,7 +241,7 @@ struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
 		.gso_max_size = 0,
 		._tx = &mock_net_queue,
-		.nd_net = {.net = &mock_net}
+		.nd_net = {.net = &mock_nets[0]}
 	};
 const struct net_offload *inet_offloads[MAX_INET_PROTOS];
 const struct net_offload *inet6_offloads[MAX_INET_PROTOS];
@@ -1079,6 +1078,12 @@ int _printk(const char *format, ...)
 			available -= 2;
 		}
 		va_start(ap, format);
+
+		/* Skip initial characters of format that are used to
+		 * indicate priority.
+		 */
+		if (format[0] == 1)
+			format += 2;
 		vsnprintf(mock_printk_output + len, available, format, ap);
 		va_end(ap);
 
@@ -1546,6 +1551,26 @@ int woken_wake_function(struct wait_queue_entry *wq_entry, unsigned int mode,
 }
 
 /**
+ * mock_alloc_hnet: Allocate a new struct homa_net.
+ * @homa:   struct homa that the homa_net will be associated with.
+ * Return:  The new homa_net.
+ */
+struct homa_net *mock_alloc_hnet(struct homa *homa)
+{
+	struct homa_net *hnet;
+
+	if (mock_num_hnets >= MOCK_MAX_NETS) {
+		FAIL("Max number of network namespaces (%d) exceeded",
+		     MOCK_MAX_NETS);
+		return &mock_hnets[0];
+	}
+	hnet = &mock_hnets[mock_num_hnets];
+	homa_net_init(hnet, &mock_nets[mock_num_hnets], homa);
+	mock_num_hnets++;
+	return hnet;
+}
+
+/**
  * mock_alloc_pages() - Called instead of alloc_pages when Homa is compiled
  * for unit testing.
  */
@@ -1662,8 +1687,16 @@ void mock_get_page(struct page *page)
 
 void *mock_net_generic(const struct net *net, unsigned int id)
 {
-	if (id == homa_net_id)
-		return mock_homa;
+	struct homa_net *hnet;
+	int i;
+
+	if (id != homa_net_id)
+		return NULL;
+	for (i = 0; i < MOCK_MAX_NETS; i++) {
+		hnet = &mock_hnets[i];
+		if (hnet->net == net)
+			return hnet;
+	}
 	return NULL;
 }
 
@@ -1788,16 +1821,6 @@ void mock_rpc_put(struct homa_rpc *rpc)
 		FAIL("homa_rpc_put invoked when RPC has no active holds");
 	mock_rpc_holds--;
 	atomic_dec(&rpc->refs);
-}
-
-/**
- * mock_set_homa() - Arrange for a particular struct homa to be used in
- * tests (e.g., it will be discovered by homa_from_net etc.).
- */
-void mock_set_homa(struct homa *homa)
-{
-	mock_homa = homa;
-	homa_net_id = 167;
 }
 
 /**
@@ -1983,24 +2006,27 @@ void mock_sock_put(struct sock *sk)
 /**
  * mock_sock_init() - Constructor for sockets; initializes the Homa-specific
  * part, and mocks out the non-Homa-specific parts.
- * @hsk:          Storage area to be initialized.\
- * @homa:         Overall information about the Homa protocol.
+ * @hsk:          Storage area to be initialized.
+ * @hnet:         Network namesspace for the socket.
  * @port:         Port number to use for the socket, or 0 to
  *                use default.
  * Return: 0 for success, otherwise a negative errno.
  */
-int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
+int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 {
-	int saved_port = homa->prev_default_port;
 	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = &hsk->sock;
+	struct homa *homa;
+	int saved_port;
 	int err = 0;
 
+	homa = hnet->homa;
+	saved_port = homa->prev_default_port;
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
 	sk->sk_socket = &mock_socket;
-	sk->sk_net.net = &mock_net;
+	sk->sk_net.net = hnet->net;
 	memset(&mock_socket, 0, sizeof(mock_socket));
 	refcount_set(&sk->sk_wmem_alloc, 1);
 	init_waitqueue_head(&mock_socket.wq.wait);
@@ -2008,7 +2034,7 @@ int mock_sock_init(struct homa_sock *hsk, struct homa *homa, int port)
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	if (port != 0 && port >= mock_min_default_port)
 		homa->prev_default_port = port - 1;
-	err = homa_sock_init(hsk, homa);
+	err = homa_sock_init(hsk);
 	hsk->is_server = true;
 	if (port != 0)
 		homa->prev_default_port = saved_port;
@@ -2095,8 +2121,8 @@ void mock_teardown(void)
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
 	mock_min_default_port = 0x8000;
-	mock_homa = NULL;
 	homa_net_id = 0;
+	mock_num_hnets = 0;
 	mock_peer_free_no_fail = 0;
 	mock_net_device.gso_max_size = 0;
 	mock_net_device.gso_max_segs = 1000;

@@ -15,6 +15,7 @@ struct in6_addr ip3333[1];
 
 FIXTURE(homa_peer) {
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct in6_addr client_ip[1];
 	struct in6_addr server_ip[1];
@@ -22,9 +23,9 @@ FIXTURE(homa_peer) {
 };
 FIXTURE_SETUP(homa_peer)
 {
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip[0] = unit_get_in_addr("196.168.0.1");
 	self->server_ip[0] = unit_get_in_addr("1.2.3.4");
 	ip1111[0] = unit_get_in_addr("1::1:1:1");
@@ -61,8 +62,7 @@ static void peer_race_hook(char *id)
 	/* Create a peer with the same address as the one being created
 	 * by the current test.
 	 */
-	conflicting_peer = homa_peer_find(&test_data->homa, ip3333,
-					  &test_data->hsk.inet);
+	conflicting_peer = homa_peer_find(&test_data->hsk, ip3333);
 	homa_peer_put(conflicting_peer);
 }
 
@@ -94,25 +94,27 @@ TEST_F(homa_peer, homa_peertab_alloc__rhashtable_init_fails)
 	EXPECT_EQ(EINVAL, -PTR_ERR(peertab));
 }
 
-TEST_F(homa_peer, homa_peertab_free_homa)
+TEST_F(homa_peer, homa_peertab_free_net)
 {
-	/* Create peers from two different "homa"s, make sure only
+	/* Create peers from two different netns's, make sure only
 	 * those from one get freed. */
 	struct homa_peer *peer;
-	struct homa homa2;
+	struct homa_sock hsk2;
+	struct homa_net *hnet2;
 
-	homa_init(&homa2, &mock_net);
-	peer = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	hnet2 = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&hsk2, hnet2, 44);
+
+	peer = homa_peer_find(&self->hsk, ip1111);
 	homa_peer_put(peer);
-	peer = homa_peer_find(&self->homa, ip2222, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip2222);
 	homa_peer_put(peer);
-	peer = homa_peer_find(&homa2, ip3333, &self->hsk.inet);
+	peer = homa_peer_find(&hsk2, ip3333);
 	homa_peer_put(peer);
 	EXPECT_EQ(3, unit_count_peers(&self->homa));
 
-	homa_peertab_free_homa(&self->homa);
+	homa_peertab_free_net(self->hnet);
 	EXPECT_EQ(1, unit_count_peers(&self->homa));
-	homa_destroy(&homa2);
 }
 
 TEST_F(homa_peer, homa_peertab_free_fn)
@@ -120,7 +122,7 @@ TEST_F(homa_peer, homa_peertab_free_fn)
 	struct homa_peer *peer;
 	struct dst_entry *dst;
 
-	peer = homa_peer_alloc(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip3333);
 	dst = peer->dst;
 	dst_hold(dst);
 	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
@@ -134,24 +136,24 @@ TEST_F(homa_peer, homa_peertab_free_fn)
 TEST_F(homa_peer, homa_peertab_free) {
 	struct homa_peer *peer;
 
-	peer = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip1111);
 	homa_peer_put(peer);
-	peer = homa_peer_find(&self->homa, ip2222, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip2222);
 	mock_peer_free_no_fail = 1;
 
 	unit_log_clear();
-	homa_peertab_free(self->homa.shared->peers);
+	homa_peertab_free(self->homa.peers);
 	EXPECT_STREQ("peer [2::2:2:2] has reference count 1", unit_log_get());
 
 	kfree(peer);
-	self->homa.shared->peers = homa_peertab_alloc();
+	self->homa.peers = homa_peertab_alloc();
 }
 
 TEST_F(homa_peer, homa_peer_alloc__success)
 {
 	struct homa_peer *peer;
 
-	peer = homa_peer_alloc(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 #ifndef __STRIP__ /* See strip.py */
@@ -168,7 +170,7 @@ TEST_F(homa_peer, homa_peer_alloc__kmalloc_error)
 	struct homa_peer *peer;
 
 	mock_kmalloc_errors = 1;
-	peer = homa_peer_alloc(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip3333);
 	EXPECT_EQ(ENOMEM, -PTR_ERR(peer));
 
 #ifndef __STRIP__ /* See strip.py */
@@ -180,7 +182,7 @@ TEST_F(homa_peer, homa_peer_alloc__route_error)
 	struct homa_peer *peer;
 
 	mock_route_errors = 1;
-	peer = homa_peer_alloc(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip3333);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 
 #ifndef __STRIP__ /* See strip.py */
@@ -193,7 +195,7 @@ TEST_F(homa_peer, homa_peer_free__normal)
 	struct homa_peer *peer;
 	struct dst_entry *dst;
 
-	peer = homa_peer_alloc(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
 	dst = peer->dst;
 	dst_hold(dst);
@@ -208,7 +210,7 @@ TEST_F(homa_peer, homa_peer_free__nonzero_ref_count)
 {
 	struct homa_peer *peer;
 
-	peer = homa_peer_alloc(&self->homa, ip2222, &self->hsk.inet);
+	peer = homa_peer_alloc(&self->hsk, ip2222);
 	ASSERT_FALSE(IS_ERR(peer));
 	mock_peer_free_no_fail = 1;
 
@@ -223,7 +225,7 @@ TEST_F(homa_peer, homa_peer_find__basics)
 	struct homa_peer *peer, *peer2;
 
 	/* First call: create new peer. */
-	peer = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip1111);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 #ifndef __STRIP__ /* See strip.py */
@@ -232,12 +234,12 @@ TEST_F(homa_peer, homa_peer_find__basics)
 #endif /* See strip.py */
 
 	/* Second call: lookup existing peer. */
-	peer2 = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	peer2 = homa_peer_find(&self->hsk, ip1111);
 	EXPECT_EQ(peer, peer2);
 	EXPECT_EQ(2, atomic_read(&peer->refs));
 
 	/* Third call: lookup new peer. */
-	peer2 = homa_peer_find(&self->homa, ip2222, &self->hsk.inet);
+	peer2 = homa_peer_find(&self->hsk, ip2222);
 	EXPECT_NE(peer, peer2);
 	ASSERT_FALSE(IS_ERR(peer2));
 	EXPECT_EQ(1, atomic_read(&peer2->refs));
@@ -254,7 +256,7 @@ TEST_F(homa_peer, homa_peer_find__error_in_homa_peer_alloc)
 	struct homa_peer *peer;
 
 	mock_route_errors = 1;
-	peer = homa_peer_find(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip3333);
 	EXPECT_EQ(EHOSTUNREACH, -PTR_ERR(peer));
 
 #ifndef __STRIP__ /* See strip.py */
@@ -266,7 +268,7 @@ TEST_F(homa_peer, homa_peer_find__insert_error)
 	struct homa_peer *peer;
 
 	mock_rht_insert_errors = 1;
-	peer = homa_peer_find(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip3333);
 	EXPECT_TRUE(IS_ERR(peer));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peer));
 }
@@ -277,7 +279,7 @@ TEST_F(homa_peer, homa_peer_find__conflicting_create)
 	test_data = self;
 	peer_race_hook_invocations = 0;
 	unit_hook_register(peer_race_hook);
-	peer = homa_peer_find(&self->homa, ip3333, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip3333);
 	EXPECT_FALSE(IS_ERR(conflicting_peer));
 	EXPECT_EQ(conflicting_peer, peer);
 	EXPECT_EQ(1, atomic_read(&peer->refs));
@@ -289,12 +291,12 @@ TEST_F(homa_peer, homa_dst_refresh__basics)
 	struct dst_entry *old_dst;
 	struct homa_peer *peer;
 
-	peer = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip1111);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	old_dst = peer->dst;
-	homa_dst_refresh(self->homa.shared->peers, peer, &self->hsk);
+	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_NE(old_dst, peer->dst);
 	homa_peer_put(peer);
 }
@@ -303,13 +305,13 @@ TEST_F(homa_peer, homa_dst_refresh__routing_error)
 	struct dst_entry *old_dst;
 	struct homa_peer *peer;
 
-	peer = homa_peer_find(&self->homa, ip1111, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, ip1111);
 	ASSERT_NE(NULL, peer);
 	EXPECT_EQ_IP(*ip1111, peer->addr);
 
 	old_dst = peer->dst;
 	mock_route_errors = 1;
-	homa_dst_refresh(self->homa.shared->peers, peer, &self->hsk);
+	homa_dst_refresh(self->homa.peers, peer, &self->hsk);
 	EXPECT_EQ(old_dst, peer->dst);
 #ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_route_errors);
@@ -337,14 +339,13 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv4)
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 
-	struct homa_peer *peer = homa_peer_find(&self->homa,
-						&self->client_ip[0],
-						&self->hsk.inet);
+	struct homa_peer *peer = homa_peer_find(&self->hsk,
+						&self->client_ip[0]);
 	ASSERT_NE(NULL, peer);
 
-	dst = homa_peer_get_dst(peer, &self->hsk.inet);
+	dst = homa_peer_get_dst(peer, &self->hsk);
 	ASSERT_NE(NULL, dst);
 	dst_release(dst);
 	EXPECT_STREQ("196.168.0.1",
@@ -360,13 +361,12 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 
-	struct homa_peer *peer = homa_peer_find(&self->homa, &ip1111[0],
-						&self->hsk.inet);
+	struct homa_peer *peer = homa_peer_find(&self->hsk, &ip1111[0]);
 	ASSERT_NE(NULL, peer);
 
-	dst = homa_peer_get_dst(peer, &self->hsk.inet);
+	dst = homa_peer_get_dst(peer, &self->hsk);
 	ASSERT_NE(NULL, dst);
 	dst_release(dst);
 	addr = ntohl(peer->flow.u.ip4.daddr);
@@ -380,8 +380,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv6)
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peer_lock_slow)
 {
-	struct homa_peer *peer = homa_peer_find(&self->homa, ip3333,
-						&self->hsk.inet);
+	struct homa_peer *peer = homa_peer_find(&self->hsk, ip3333);
 
 	ASSERT_NE(NULL, peer);
 	mock_clock = 10000;
@@ -450,8 +449,7 @@ TEST_F(homa_peer, homa_peer_add_ack)
 
 TEST_F(homa_peer, homa_peer_get_acks)
 {
-	struct homa_peer *peer = homa_peer_find(&self->homa, ip3333,
-						&self->hsk.inet);
+	struct homa_peer *peer = homa_peer_find(&self->hsk, ip3333);
 	struct homa_ack acks[2];
 
 	ASSERT_NE(NULL, peer);

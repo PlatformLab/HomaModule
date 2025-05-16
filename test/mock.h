@@ -139,7 +139,6 @@ extern int         mock_max_grants;
 extern int         mock_max_skb_frags;
 extern __u16       mock_min_default_port;
 extern int         mock_mtu;
-extern struct net  mock_net;
 extern struct net_device
 		   mock_net_device;
 extern int         mock_numa_mask;
@@ -166,6 +165,8 @@ extern struct task_struct *current_task;
 
 struct page *
 	    mock_alloc_pages(gfp_t gfp, unsigned order);
+struct homa_net
+	   *mock_alloc_hnet(struct homa *homa);
 int         mock_check_error(int *errorMask);
 void        mock_clear_xmit_prios(void);
 unsigned int mock_compound_order(struct page *page);
@@ -201,7 +202,6 @@ void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_clock_vals(u64 t, ...);
 void        mock_set_core(int num);
-void        mock_set_homa(struct homa *homa);
 void        mock_set_ipv6(struct homa_sock *hsk);
 void        mock_spin_lock(spinlock_t *lock);
 void        mock_spin_unlock(spinlock_t *lock);
@@ -212,7 +212,7 @@ int         mock_skb_count(void);
 void        mock_sock_destroy(struct homa_sock *hsk,
 			      struct homa_socktab *socktab);
 void        mock_sock_hold(struct sock *sk);
-int         mock_sock_init(struct homa_sock *hsk, struct homa *homa,
+int         mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet,
 			   int port);
 void        mock_sock_put(struct sock *sk);
 void        mock_teardown(void);

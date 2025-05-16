@@ -79,17 +79,18 @@ static struct ctl_table grant_ctl_table[] = {
 /**
  * homa_grant_alloc() - Allocate and initialize a new grant object, which
  * will hold grant management information for @homa.
- * @net:    Network namespace that @homa is associated with.
  * Return:  A pointer to the new struct grant, or a negative errno.
  */
-struct homa_grant *homa_grant_alloc(struct net *net)
+struct homa_grant *homa_grant_alloc(void)
 {
 	struct homa_grant *grant;
 	int err;
 
 	grant = kmalloc(sizeof(*grant), GFP_KERNEL | __GFP_ZERO);
-	if (!grant)
+	if (!grant) {
+		pr_err("%s couldn't allocate grant structure\n", __func__);
 		return ERR_PTR(-ENOMEM);
+	}
 	grant->max_incoming = 400000;
 	spin_lock_init(&grant->lock);
 	INIT_LIST_HEAD(&grant->grantable_peers);
@@ -101,7 +102,7 @@ struct homa_grant *homa_grant_alloc(struct net *net)
 	grant->fifo_fraction = 50;
 
 #ifndef __STRIP__ /* See strip.py */
-	grant->sysctl_header = register_net_sysctl(net, "net/homa",
+	grant->sysctl_header = register_net_sysctl(&init_net, "net/homa",
 						   grant_ctl_table);
 	if (!grant->sysctl_header) {
 		err = -ENOMEM;
@@ -1021,10 +1022,11 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 int homa_grant_dointvec(const struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa_grant *grant =
-			homa_from_net(current->nsproxy->net_ns)->grant;
+	struct homa_grant *grant;
 	struct ctl_table table_copy;
 	int result;
+
+	grant = homa_net_from_net(current->nsproxy->net_ns)->homa->grant;
 
 	/* Generate a new ctl_table that refers to a field in the
 	 * net-specific struct homa.

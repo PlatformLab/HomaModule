@@ -46,8 +46,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
-	crpc->peer = homa_peer_find(hsk->homa, &dest_addr_as_ipv6,
-				    &hsk->inet);
+	crpc->peer = homa_peer_find(hsk, &dest_addr_as_ipv6);
 	if (IS_ERR(crpc->peer)) {
 		tt_record("error in homa_peer_find");
 		err = PTR_ERR(crpc->peer);
@@ -151,7 +150,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
-	srpc->peer = homa_peer_find(hsk->homa, source, &hsk->inet);
+	srpc->peer = homa_peer_find(hsk, source);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
 		srpc->peer = NULL;

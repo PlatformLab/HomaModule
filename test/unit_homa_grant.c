@@ -46,6 +46,7 @@ FIXTURE(homa_grant) {
 	u64 server_id;
 	union sockaddr_in_union server_addr;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct homa_data_hdr data;
 	int incoming_delta;
@@ -67,8 +68,8 @@ FIXTURE_SETUP(homa_grant)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
@@ -77,7 +78,7 @@ FIXTURE_SETUP(homa_grant)
 	self->homa.grant->window = 10000;
 	self->homa.grant->max_incoming = 50000;
 	self->homa.grant->max_rpcs_per_peer = 10;
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
@@ -137,7 +138,7 @@ TEST_F(homa_grant, homa_grant_alloc__success)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_alloc(&mock_net);
+	grant = homa_grant_alloc();
 	EXPECT_EQ(50, grant->fifo_fraction);
 	homa_grant_free(grant);
 }
@@ -146,7 +147,7 @@ TEST_F(homa_grant, homa_grant_alloc__cant_allocate_memory)
 	struct homa_grant *grant;
 
 	mock_kmalloc_errors = 1;
-	grant = homa_grant_alloc(&mock_net);
+	grant = homa_grant_alloc();
 	EXPECT_TRUE(IS_ERR(grant));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(grant));
 }
@@ -155,7 +156,7 @@ TEST_F(homa_grant, homa_grant_alloc__cant_register_sysctls)
 	struct homa_grant *grant;
 
 	mock_register_sysctl_errors = 1;
-	grant = homa_grant_alloc(&mock_net);
+	grant = homa_grant_alloc();
 	EXPECT_TRUE(IS_ERR(grant));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(grant));
 }
@@ -164,7 +165,7 @@ TEST_F(homa_grant, homa_grant_free__basics)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_alloc(&mock_net);
+	grant = homa_grant_alloc();
 	homa_grant_free(grant);
 	EXPECT_STREQ("unregister_net_sysctl_table", unit_log_get());
 }
@@ -172,7 +173,7 @@ TEST_F(homa_grant, homa_grant_free__sysctls_not_registered)
 {
 	struct homa_grant *grant;
 
-	grant = homa_grant_alloc(&mock_net);
+	grant = homa_grant_alloc();
 	grant->sysctl_header = NULL;
 	homa_grant_free(grant);
 	EXPECT_STREQ("", unit_log_get());

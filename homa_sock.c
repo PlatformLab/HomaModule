@@ -126,23 +126,34 @@ void homa_socktab_end_scan(struct homa_socktab_scan *scan)
 /**
  * homa_sock_init() - Constructor for homa_sock objects. This function
  * initializes only the parts of the socket that are owned by Homa.
- * @hsk:    Object to initialize.
- * @homa:   Homa implementation that will manage the socket.
+ * @hsk:    Object to initialize. The Homa-specific parts must have been
+ *          initialized to zeroes by the caller.
  *
  * Return: 0 for success, otherwise a negative errno.
  */
-int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
+int homa_sock_init(struct homa_sock *hsk)
 {
-	struct homa_socktab *socktab = homa->port_map;
 	struct homa_pool *buffer_pool;
+	struct homa_socktab *socktab;
 	struct homa_sock *other;
+	struct homa_net *hnet;
+	struct homa *homa;
 	int starting_port;
 	int result = 0;
 	int i;
 
+	hnet = (struct homa_net *)net_generic(sock_net(&hsk->sock),
+					      homa_net_id);
+	homa = hnet->homa;
+	socktab = homa->port_map;
+
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
 	sock_set_flag(&hsk->inet.sk, SOCK_RCU_FREE);
+#ifndef __STRIP__ /* See strip.py */
+	if (homa->hijack_tcp)
+		hsk->sock.sk_protocol = IPPROTO_TCP;
+#endif /* See strip.py */
 
 	/* Do things requiring memory allocation before locking the socket,
 	 * so that GFP_ATOMIC is not needed.
@@ -152,14 +163,15 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		return PTR_ERR(buffer_pool);
 
 	/* Initialize Homa-specific fields. */
-	spin_lock_bh(&socktab->write_lock);
-	spin_lock_init(&hsk->lock);
-	atomic_set(&hsk->protect_count, 0);
 	hsk->homa = homa;
-	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET)
-			? sizeof(struct iphdr) : sizeof(struct ipv6hdr);
-	hsk->is_server = false;
-	hsk->shutdown = false;
+	hsk->hnet = hnet;
+	hsk->buffer_pool = buffer_pool;
+
+	/* Pick a default port. Must keep the socktab locked from now
+	 * until the new socket is added to the socktab, to ensure that
+	 * no other socket chooses the same port.
+	 */
+	spin_lock_bh(&socktab->write_lock);
 	starting_port = homa->prev_default_port;
 	while (1) {
 		homa->prev_default_port++;
@@ -179,8 +191,13 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 	hsk->port = homa->prev_default_port;
 	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
-	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_port_hash(hsk->port)]);
+
+	hsk->is_server = false;
+	hsk->shutdown = false;
+	hsk->ip_header_length = (hsk->inet.sk.sk_family == AF_INET) ?
+				sizeof(struct iphdr) : sizeof(struct ipv6hdr);
+	spin_lock_init(&hsk->lock);
+	atomic_set(&hsk->protect_count, 0);
 	INIT_LIST_HEAD(&hsk->active_rpcs);
 	INIT_LIST_HEAD(&hsk->dead_rpcs);
 	hsk->dead_skbs = 0;
@@ -201,11 +218,10 @@ int homa_sock_init(struct homa_sock *hsk, struct homa *homa)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-	hsk->buffer_pool = buffer_pool;
-#ifndef __STRIP__ /* See strip.py */
-	if (homa->hijack_tcp)
-		hsk->sock.sk_protocol = IPPROTO_TCP;
-#endif /* See strip.py */
+
+	/* Link the socket into the port map. */
+	hlist_add_head_rcu(&hsk->socktab_links,
+			   &socktab->buckets[homa_port_hash(hsk->port)]);
 	spin_unlock_bh(&socktab->write_lock);
 	return result;
 

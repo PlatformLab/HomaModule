@@ -99,7 +99,7 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 #if 0
 		homa_rpc_log_active_tt(homa, 0);
 		tt_record1("Freezing because of RPC abort (id %d)", rpc->id);
-		homa_freeze_peers(homa);
+		homa_freeze_peers();
 		tt_freeze();
 #endif
 		if (homa->verbose)
@@ -215,7 +215,7 @@ void homa_timer(struct homa *homa)
 			pr_err("%s found no grants going out\n", __func__);
 			homa_rpc_log_active_tt(homa, 0);
 			tt_record("freezing because no grants are going out");
-			homa_freeze_peers(homa);
+			homa_freeze_peers();
 			tt_freeze();
 		}
 	} else {

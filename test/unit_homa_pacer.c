@@ -52,6 +52,7 @@ FIXTURE(homa_pacer) {
 	u64 client_id;
 	u64 server_id;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 };
 FIXTURE_SETUP(homa_pacer)
@@ -62,14 +63,14 @@ FIXTURE_SETUP(homa_pacer)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 	self->homa.pacer->cycles_per_mbyte = 1000000;
 	self->homa.pacer->throttle_min_bytes = 0;
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.pacer->fifo_fraction = 0;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, self->client_port);
+	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 }
 FIXTURE_TEARDOWN(homa_pacer)
 {
@@ -81,7 +82,7 @@ TEST_F(homa_pacer, homa_pacer_new__success)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_FALSE(IS_ERR(pacer));
 	EXPECT_EQ(&self->homa, pacer->homa);
 	homa_pacer_free(pacer);
@@ -91,7 +92,7 @@ TEST_F(homa_pacer, homa_pacer_new__cant_allocate_memory)
 	struct homa_pacer *pacer;
 
 	mock_kmalloc_errors = 1;
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(pacer));
 }
@@ -100,7 +101,7 @@ TEST_F(homa_pacer, homa_pacer_new__cant_create_pacer_thread)
 	struct homa_pacer *pacer;
 
 	mock_kthread_create_errors = 1;
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(EACCES, -PTR_ERR(pacer));
 }
@@ -110,7 +111,7 @@ TEST_F(homa_pacer, homa_pacer_new__cant_register_sysctls)
 	struct homa_pacer *pacer;
 
 	mock_register_sysctl_errors = 1;
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_TRUE(IS_ERR(pacer));
 	EXPECT_EQ(ENOMEM, -PTR_ERR(pacer));
 }
@@ -120,7 +121,7 @@ TEST_F(homa_pacer, homa_pacer_free__basics)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_FALSE(IS_ERR(pacer));
 	unit_log_clear();
 	homa_pacer_free(pacer);
@@ -136,7 +137,7 @@ TEST_F(homa_pacer, homa_pacer_free__no_thread)
 {
 	struct homa_pacer *pacer;
 
-	pacer = homa_pacer_alloc(&self->homa, &mock_net);
+	pacer = homa_pacer_alloc(&self->homa);
 	EXPECT_FALSE(IS_ERR(pacer));
 	pacer->kthread = NULL;
 	unit_log_clear();

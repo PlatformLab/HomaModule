@@ -71,6 +71,7 @@ FIXTURE(homa_incoming) {
 	u64 server_id;
 	union sockaddr_in_union server_addr;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct homa_sock hsk2;
 	struct homa_data_hdr data;
@@ -88,8 +89,8 @@ FIXTURE_SETUP(homa_incoming)
 	self->server_port = 99;
 	self->client_id = 1234;
 	self->server_id = 1235;
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 #ifndef __STRIP__ /* See strip.py */
 	self->homa.num_priorities = 1;
 	self->homa.poll_cycles = 0;
@@ -100,8 +101,8 @@ FIXTURE_SETUP(homa_incoming)
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, 0);
-	mock_sock_init(&self->hsk2, &self->homa, self->server_port);
+	mock_sock_init(&self->hsk, self->hnet, 0);
+	mock_sock_init(&self->hsk2, self->hnet, self->server_port);
 	self->server_addr.in6.sin6_family = self->hsk.inet.sk.sk_family;
 	self->server_addr.in6.sin6_addr = self->server_ip[0];
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
@@ -866,7 +867,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv4)
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
 	unit_log_clear();
@@ -883,7 +884,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv6)
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
 	unit_log_clear();
@@ -900,7 +901,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__server_not_enabled)
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->hsk.is_server = false;
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
@@ -918,7 +919,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_free_many_packets)
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
 	homa_sock_destroy(&self->hsk);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
 	skb2 = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
@@ -1042,7 +1043,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0),
 			&self->homa);
-	peer = homa_peer_find(&self->homa, self->server_ip, &self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, self->server_ip);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(400, peer->cutoff_version);
 	EXPECT_EQ(9, peer->unsched_cutoffs[1]);
@@ -1817,8 +1818,7 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	mock_kmalloc_errors = 1;
 	homa_cutoffs_pkt(skb, &self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-	peer = homa_peer_find(&self->homa, self->server_ip,
-			&self->hsk.inet);
+	peer = homa_peer_find(&self->hsk, self->server_ip);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(0, peer->cutoff_version);
 	homa_peer_put(peer);
@@ -1894,8 +1894,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
 }
 TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 {
-	struct homa_peer *peer = homa_peer_find(&self->homa, self->server_ip,
-					        &self->hsk.inet);
+	struct homa_peer *peer = homa_peer_find(&self->hsk, self->server_ip);
 	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),

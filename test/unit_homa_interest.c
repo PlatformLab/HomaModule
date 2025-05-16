@@ -43,6 +43,7 @@ static void notify_hook(char *id)
 
 FIXTURE(homa_interest) {
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 	struct in6_addr client_ip;
 	int client_port;
@@ -54,9 +55,9 @@ FIXTURE(homa_interest) {
 };
 FIXTURE_SETUP(homa_interest)
 {
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->client_ip = unit_get_in_addr("196.168.0.1");
 	self->client_port = 40000;
 	self->server_ip = unit_get_in_addr("1.2.3.4");

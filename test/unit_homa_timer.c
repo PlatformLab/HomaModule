@@ -19,6 +19,7 @@ FIXTURE(homa_timer) {
 	u64 server_id;
 	union sockaddr_in_union server_addr;
 	struct homa homa;
+	struct homa_net *hnet;
 	struct homa_sock hsk;
 };
 FIXTURE_SETUP(homa_timer)
@@ -32,8 +33,8 @@ FIXTURE_SETUP(homa_timer)
 	self->server_addr.in6.sin6_family = AF_INET;
 	self->server_addr.in6.sin6_addr = *self->server_ip;
 	self->server_addr.in6.sin6_port =  htons(self->server_port);
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
+	self->hnet = mock_alloc_hnet(&self->homa);
 	self->homa.flags |= HOMA_FLAG_DONT_THROTTLE;
 	self->homa.resend_ticks = 2;
 	self->homa.timer_ticks = 100;
@@ -41,7 +42,7 @@ FIXTURE_SETUP(homa_timer)
 	self->homa.unsched_bytes = 10000;
 	self->homa.grant->window = 10000;
 #endif /* See strip.py */
-	mock_sock_init(&self->hsk, &self->homa, 0);
+	mock_sock_init(&self->hsk, self->hnet, 0);
 	unit_log_clear();
 }
 FIXTURE_TEARDOWN(homa_timer)

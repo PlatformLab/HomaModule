@@ -55,9 +55,9 @@ struct homa_peertab *homa_peertab_alloc(void)
  * associated with a particular struct homa.
  * @homa:    Object whose peers should be freed.
  */
-void homa_peertab_free_homa(struct homa *homa)
+void homa_peertab_free_net(struct homa_net *hnet)
 {
-	struct homa_peertab *peertab = homa->shared->peers;
+	struct homa_peertab *peertab = hnet->homa->peers;
 	struct rhashtable_iter iter;
 	struct homa_peer *peer;
 
@@ -69,7 +69,7 @@ void homa_peertab_free_homa(struct homa *homa)
 			break;
 		if (IS_ERR(peer))
 			continue;
-		if (peer->ht_key.homa != homa)
+		if (peer->ht_key.hnet != hnet)
 			continue;
 		rhashtable_remove_fast(&peertab->ht, &peer->ht_linkage,
 				       ht_params);
@@ -110,17 +110,15 @@ void homa_peertab_free(struct homa_peertab *peertab)
 
 /**
  * homa_peer_alloc() - Allocate and initialize a new homa_peer object.
- * @homa:       Homa context in which the peer will be used.
+ * @hsk:        Socket for which the peer will be used.
  * @addr:       Address of the desired host: IPv4 addresses are represented
  *              as IPv4-mapped IPv6 addresses.
- * @inet:       Socket that will be used for sending packets.
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. On a successful return the reference count
  *              will be incremented for the returned peer.
  */
-struct homa_peer *homa_peer_alloc(struct homa *homa,
-				  const struct in6_addr *addr,
-				  struct inet_sock *inet)
+struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
+				  const struct in6_addr *addr)
 {
 	struct homa_peer *peer;
 	struct dst_entry *dst;
@@ -131,10 +129,10 @@ struct homa_peer *homa_peer_alloc(struct homa *homa,
 		return (struct homa_peer *)ERR_PTR(-ENOMEM);
 	}
 	peer->ht_key.addr = *addr;
-	peer->ht_key.homa = homa;
+	peer->ht_key.hnet = hsk->hnet;
 	atomic_set(&peer->refs, 1);
 	peer->addr = *addr;
-	dst = homa_peer_get_dst(peer, inet);
+	dst = homa_peer_get_dst(peer, hsk);
 	if (IS_ERR(dst)) {
 		INC_METRIC(peer_route_errors, 1);
 		kfree(peer);
@@ -185,26 +183,24 @@ void homa_peer_free(struct homa_peer *peer)
 /**
  * homa_peer_find() - Returns the peer associated with a given host; creates
  * a new homa_peer if one doesn't already exist.
- * @homa:       Homa context in which the peer will be used.
+ * @hsk:        Socket where the peer will be used.
  * @addr:       Address of the desired host: IPv4 addresses are represented
  *              as IPv4-mapped IPv6 addresses.
- * @inet:       Socket that will be used for sending packets.
  *
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. On a successful return the reference count
  *              will be incremented for the returned peer. The caller must
  *              eventually call homa_peer_put to release the reference.
  */
-struct homa_peer *homa_peer_find(struct homa *homa,
-				 const struct in6_addr *addr,
-				 struct inet_sock *inet)
+struct homa_peer *homa_peer_find(struct homa_sock *hsk,
+				 const struct in6_addr *addr)
 {
-	struct homa_peertab *peertab = homa->shared->peers;
+	struct homa_peertab *peertab = hsk->homa->peers;
 	struct homa_peer *peer, *other;
 	struct homa_peer_key key;
 
 	key.addr = *addr;
-	key.homa = homa;
+	key.hnet = hsk->hnet;
 	rcu_read_lock();
 	peer = rhashtable_lookup(&peertab->ht, &key, ht_params);
 	if (peer) {
@@ -214,7 +210,7 @@ struct homa_peer *homa_peer_find(struct homa *homa,
 	}
 
 	/* No existing entry, so we have to create a new one. */
-	peer = homa_peer_alloc(homa, addr, inet);
+	peer = homa_peer_alloc(hsk, addr);
 	if (IS_ERR(peer)) {
 		rcu_read_unlock();
 		return peer;
@@ -253,7 +249,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 {
 	struct dst_entry *dst;
 
-	dst = homa_peer_get_dst(peer, &hsk->inet);
+	dst = homa_peer_get_dst(peer, hsk);
 	if (IS_ERR(dst)) {
 #ifndef __STRIP__ /* See strip.py */
 		/* Retain the existing dst if we can't create a new one. */
@@ -296,46 +292,48 @@ int homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
  * or IPv6) for a peer.
  * @peer:   The peer for which a dst is needed. Note: this peer's flow
  *          struct will be overwritten.
- * @inet:   Socket that will be used for sending packets.
+ * @hsk:    Socket that will be used for sending packets.
  * Return:  The dst structure (or an ERR_PTR); a reference has been taken.
  */
 struct dst_entry *homa_peer_get_dst(struct homa_peer *peer,
-				    struct inet_sock *inet)
+				    struct homa_sock *hsk)
 {
 	memset(&peer->flow, 0, sizeof(peer->flow));
-	if (inet->sk.sk_family == AF_INET) {
+	if (hsk->sock.sk_family == AF_INET) {
 		struct rtable *rt;
 
-		flowi4_init_output(&peer->flow.u.ip4, inet->sk.sk_bound_dev_if,
-				   inet->sk.sk_mark, inet->tos,
-				   RT_SCOPE_UNIVERSE, inet->sk.sk_protocol, 0,
+		flowi4_init_output(&peer->flow.u.ip4, hsk->sock.sk_bound_dev_if,
+				   hsk->sock.sk_mark, hsk->inet.tos,
+				   RT_SCOPE_UNIVERSE, hsk->sock.sk_protocol, 0,
 				   peer->addr.in6_u.u6_addr32[3],
-				   inet->inet_saddr, 0, 0, inet->sk.sk_uid);
-		security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
-		rt = ip_route_output_flow(sock_net(&inet->sk),
-					  &peer->flow.u.ip4, &inet->sk);
+				   hsk->inet.inet_saddr, 0, 0,
+				   hsk->sock.sk_uid);
+		security_sk_classify_flow(&hsk->sock,
+					  &peer->flow.u.__fl_common);
+		rt = ip_route_output_flow(sock_net(&hsk->sock),
+					  &peer->flow.u.ip4, &hsk->sock);
 		if (IS_ERR(rt))
 			return (struct dst_entry *)(PTR_ERR(rt));
 		return &rt->dst;
 	}
-	peer->flow.u.ip6.flowi6_oif = inet->sk.sk_bound_dev_if;
+	peer->flow.u.ip6.flowi6_oif = hsk->sock.sk_bound_dev_if;
 	peer->flow.u.ip6.flowi6_iif = LOOPBACK_IFINDEX;
-	peer->flow.u.ip6.flowi6_mark = inet->sk.sk_mark;
+	peer->flow.u.ip6.flowi6_mark = hsk->sock.sk_mark;
 	peer->flow.u.ip6.flowi6_scope = RT_SCOPE_UNIVERSE;
-	peer->flow.u.ip6.flowi6_proto = inet->sk.sk_protocol;
+	peer->flow.u.ip6.flowi6_proto = hsk->sock.sk_protocol;
 	peer->flow.u.ip6.flowi6_flags = 0;
 	peer->flow.u.ip6.flowi6_secid = 0;
 	peer->flow.u.ip6.flowi6_tun_key.tun_id = 0;
-	peer->flow.u.ip6.flowi6_uid = inet->sk.sk_uid;
+	peer->flow.u.ip6.flowi6_uid = hsk->sock.sk_uid;
 	peer->flow.u.ip6.daddr = peer->addr;
-	peer->flow.u.ip6.saddr = inet->pinet6->saddr;
+	peer->flow.u.ip6.saddr = hsk->inet.pinet6->saddr;
 	peer->flow.u.ip6.fl6_dport = 0;
 	peer->flow.u.ip6.fl6_sport = 0;
 	peer->flow.u.ip6.mp_hash = 0;
-	peer->flow.u.ip6.__fl_common.flowic_tos = inet->tos;
-	peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(inet->tos, 0);
-	security_sk_classify_flow(&inet->sk, &peer->flow.u.__fl_common);
-	return ip6_dst_lookup_flow(sock_net(&inet->sk), &inet->sk,
+	peer->flow.u.ip6.__fl_common.flowic_tos = hsk->inet.tos;
+	peer->flow.u.ip6.flowlabel = ip6_make_flowinfo(hsk->inet.tos, 0);
+	security_sk_classify_flow(&hsk->sock, &peer->flow.u.__fl_common);
+	return ip6_dst_lookup_flow(sock_net(&hsk->sock), &hsk->sock,
 			&peer->flow.u.ip6, NULL);
 }
 

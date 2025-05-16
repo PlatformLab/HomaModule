@@ -39,8 +39,8 @@ struct homa_peer_key {
 	 */
 	struct in6_addr addr;
 
-	/** @homa: The context in which the peer will be used. */
-	struct homa *homa;
+	/** @homa: The network namespace in which this peer is valid. */
+	struct homa_net *hnet;
 };
 
 /**
@@ -189,20 +189,18 @@ void     homa_dst_refresh(struct homa_peertab *peertab,
 struct homa_peertab
 	*homa_peertab_alloc(void);
 void     homa_peertab_free(struct homa_peertab *peertab);
-void     homa_peertab_free_homa(struct homa *homa);
+void     homa_peertab_free_net(struct homa_net *hnet);
 void     homa_peertab_free_fn(void *object, void *dummy);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
-	*homa_peer_alloc(struct homa *homa, const struct in6_addr *addr,
-			 struct inet_sock *inet);
+	*homa_peer_alloc(struct homa_sock *hsk, const struct in6_addr *addr);
 struct homa_peer
-	*homa_peer_find(struct homa *homa, const struct in6_addr *addr,
-			struct inet_sock *inet);
+	*homa_peer_find(struct homa_sock *hsk, const struct in6_addr *addr);
 void     homa_peer_free(struct homa_peer *peer);
 int      homa_peer_get_acks(struct homa_peer *peer, int count,
 			    struct homa_ack *dst);
 struct dst_entry
-	*homa_peer_get_dst(struct homa_peer *peer, struct inet_sock *inet);
+	*homa_peer_get_dst(struct homa_peer *peer, struct homa_sock *hsk);
 #ifndef __STRIP__ /* See strip.py */
 void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
@@ -255,7 +253,7 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 					     struct homa_sock *hsk)
 {
 	if (unlikely(peer->dst->obsolete > 0))
-		homa_dst_refresh(hsk->homa->shared->peers, peer, hsk);
+		homa_dst_refresh(hsk->homa->peers, peer, hsk);
 	dst_hold(peer->dst);
 	return peer->dst;
 }
@@ -322,7 +320,7 @@ static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 	const struct homa_peer_key *key = arg->key;
 
 	return !ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
-	       peer->ht_key.homa == key->homa;
+	       peer->ht_key.hnet == key->hnet;
 }
 
 #endif /* _HOMA_PEER_H */

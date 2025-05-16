@@ -17,56 +17,15 @@
 #include "homa_stub.h"
 #endif /* See strip.py */
 
-/* Pointer to the singleton homa_shared object, of NULL if there are
- * currently no struct homa objects in existence.
- */
-struct homa_shared *homa_shared;
-
-/**
- * homa_shared_alloc() - Allocate and initialize a new homa_shared
- * object.
- * Return: the new homa_shared object, or ERR_PTR on failure.
- */
-struct homa_shared *homa_shared_alloc(void)
-{
-	struct homa_shared *shared;
-	int err;
-
-	shared = kmalloc(sizeof(*homa_shared), GFP_KERNEL);
-	if (!shared)
-		return ERR_PTR(-ENOMEM);
-	spin_lock_init(&shared->lock);
-	INIT_LIST_HEAD(&shared->homas);
-	shared->peers = homa_peertab_alloc();
-	if (IS_ERR(shared->peers)) {
-		err = PTR_ERR(shared->peers);
-		kfree(shared);
-		return ERR_PTR(err);
-	}
-	return shared;
-}
-
-/**
- * homa_shared_free() - Clean up and free a homa_shared object.
- */
-void homa_shared_free(struct homa_shared *shared)
-{
-	homa_peertab_free(shared->peers);
-	kfree(shared);
-	if (shared == homa_shared)
-		homa_shared = NULL;
-}
-
 /**
  * homa_init() - Constructor for homa objects.
  * @homa:   Object to initialize.
- * @net:    Network namespace that @homa is associated with.
  *
  * Return:  0 on success, or a negative errno if there was an error. Even
  *          if an error occurs, it is safe (and necessary) to call
  *          homa_destroy at some point.
  */
-int homa_init(struct homa *homa, struct net *net)
+int homa_init(struct homa *homa)
 {
 	int err;
 #ifndef __STRIP__ /* See strip.py */
@@ -78,36 +37,27 @@ int homa_init(struct homa *homa, struct net *net)
 
 	memset(homa, 0, sizeof(*homa));
 
-	if (!homa_shared) {
-		homa_shared = homa_shared_alloc();
-		if (IS_ERR(homa_shared)) {
-			int status = PTR_ERR(homa_shared);
-
-			homa_shared = NULL;
-			return status;
-		}
-	}
-	homa->shared = homa_shared;
-	spin_lock_bh(&homa_shared->lock);
-	list_add_tail(&homa->shared_links, &homa_shared->homas);
-	spin_unlock_bh(&homa_shared->lock);
-
 	atomic64_set(&homa->next_outgoing_id, 2);
 #ifndef __STRIP__ /* See strip.py */
-	homa->grant = homa_grant_alloc(net);
+	homa->grant = homa_grant_alloc();
 	if (IS_ERR(homa->grant)) {
 		err = PTR_ERR(homa->grant);
 		homa->grant = NULL;
 		return err;
 	}
 #endif /* See strip.py */
-	homa->pacer = homa_pacer_alloc(homa, net);
+	homa->pacer = homa_pacer_alloc(homa);
 	if (IS_ERR(homa->pacer)) {
 		err = PTR_ERR(homa->pacer);
 		homa->pacer = NULL;
 		return err;
 	}
-	homa->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
+	homa->peers = homa_peertab_alloc();
+	if (IS_ERR(homa->peers)) {
+		err = PTR_ERR(homa->peers);
+		homa->peers = NULL;
+		return err;
+	}
 	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
 	if (!homa->port_map) {
 		pr_err("%s couldn't create port_map: kmalloc failure",
@@ -177,12 +127,6 @@ int homa_init(struct homa *homa, struct net *net)
  */
 void homa_destroy(struct homa *homa)
 {
-	struct homa_shared *shared;
-
-	if (!homa_shared)
-		/* Already destroyed. */
-		return;
-
 #ifdef __UNIT_TEST__
 #include "utils.h"
 	unit_homa_destroy(homa);
@@ -204,21 +148,39 @@ void homa_destroy(struct homa *homa)
 		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
 	}
+	if (homa->peers) {
+		homa_peertab_free(homa->peers);
+		homa->peers = NULL;
+	}
 #ifndef __STRIP__ /* See strip.py */
+
 	homa_skb_cleanup(homa);
 #endif /* See strip.py */
-	homa_peertab_free_homa(homa);
+}
 
-	shared = homa->shared;
-	spin_lock_bh(&shared->lock);
-	__list_del_entry(&homa->shared_links);
-	if (list_empty(&homa->shared->homas)) {
-		spin_unlock_bh(&shared->lock);
-		homa_shared_free(homa->shared);
-	} else {
-		spin_unlock_bh(&shared->lock);
-	}
-	homa->shared = NULL;
+/**
+ * homa_net_init() - Initialize a new struct homa_net as a per-net subsystem.
+ * @hnet:    Struct to initialzie.
+ * @net:     The network namespace the struct will be associated with.
+ * @homa:    The main Homa data structure to use for the net.
+ * Return:  0 on success, otherwise a negative errno.
+ */
+int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
+{
+	memset(hnet, 0, sizeof(*hnet));
+	hnet->net = net;
+	hnet->homa = homa;
+	return 0;
+}
+
+/**
+ * homa_net_destroy() - Release any resources associated with a homa_net.
+ * @hnet:    Object to destroy; must not be used again after this function
+ *           returns.
+ */
+void homa_net_destroy(struct homa_net *hnet)
+{
+	homa_peertab_free_net(hnet);
 }
 
 #ifndef __STRIP__ /* See strip.py */

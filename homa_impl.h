@@ -103,17 +103,10 @@ union sockaddr_in_union {
 };
 
 /**
- * struct homa - Stores overall information about the implementation of
- * Homa for a particular network namespace (there is a logcially separate
- * implementation of Homa for each namespace).
+ * struct homa - Stores overall information about the Homa transport, which
+ * is shared across all Homa sockets and all network namespaces.
  */
 struct homa {
-	/**  @shared: information shared across all struct homas. */
-	struct homa_shared *shared;
-
-	/** shared_links: used to link this struct into shared->homas. */
-	struct list_head shared_links;
-
 	/**
 	 * @next_outgoing_id: Id to use for next outgoing RPC request.
 	 * This is always even: it's used only to generate client-side ids.
@@ -134,6 +127,12 @@ struct homa {
 	 * @pacer:  Information related to the pacer; managed by homa_pacer.c.
 	 */
 	struct homa_pacer *pacer;
+
+	/**
+	 * @peers: Info about all the other hosts we have communicated with;
+	 * includes peers from all network namespaces.
+	 */
+	struct homa_peertab *peers;
 
 	/**
 	 * @prev_default_port: The most recent port number assigned from
@@ -466,23 +465,6 @@ struct homa {
 	 */
 	int next_id;
 
-#ifndef __STRIP__ /* See strip.py */
-	/**
-	 * @sysctl_header: Used to remove sysctl values when this structure
-	 * is destroyed.
-	 */
-	struct ctl_table_header *sysctl_header;
-#endif /* See strip.py */
-
-	/**
-	 * @timer_kthread: Thread that runs timer code to detect lost
-	 * packets and crashed peers.
-	 */
-	struct task_struct *timer_kthread;
-
-	/** @hrtimer: Used to wakeup @timer_kthread at regular intervals. */
-	struct hrtimer hrtimer;
-
 	/**
 	 * @destroyed: True means that this structure is being destroyed
 	 * so everyone should clean up.
@@ -506,28 +488,15 @@ struct homa {
 };
 
 /**
- * struct homa_shared - Contains "global" information that is shared
- * across all instances of struct homa.
+ * struct homa_net - Contains Homa information that is specific to a
+ * particular network namespace.
  */
-struct homa_shared {
-	/**
-	 * @lock: used when exclusive access is needed, such as when
-	 * updating @homas.
-	 */
-	spinlock_t lock;
+struct homa_net {
+	/** @net: Network namespace corresponding to this structure. */
+	struct net *net;
 
-	/**
-	 * @homas: contains all of the existing struct homas, linked
-	 * through their shared_links fields. Managed with RCU.
-	 */
-	struct list_head homas;
-
-	/**
-	 * @peers: Info about all the other hosts we have communicated with;
-	 * includes peers from all struct homas. Dynamically allocated; must
-	 * be kfreed.
-	 */
-	struct homa_peertab *peers;
+	/** @homa: Global Homa information. */
+	struct homa *homa;
 };
 
 /**
@@ -724,7 +693,7 @@ int      homa_getsockopt(struct sock *sk, int level, int optname,
 			 char __user *optval, int __user *optlen);
 int      homa_hash(struct sock *sk);
 enum hrtimer_restart homa_hrtimer(struct hrtimer *timer);
-int      homa_init(struct homa *homa, struct net *net);
+int      homa_init(struct homa *homa);
 int      homa_ioctl(struct sock *sk, int cmd, int *karg);
 int      homa_load(void);
 int      homa_message_out_fill(struct homa_rpc *rpc,
@@ -732,8 +701,11 @@ int      homa_message_out_fill(struct homa_rpc *rpc,
 void     homa_message_out_init(struct homa_rpc *rpc, int length);
 void     homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 			   struct homa_rpc *rpc);
-int      homa_net_init(struct net *net);
+void     homa_net_destroy(struct homa_net *hnet);
 void     homa_net_exit(struct net *net);
+int      homa_net_init(struct homa_net *hnet, struct net *net,
+		       struct homa *homa);
+int      homa_net_start(struct net *net);
 __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
@@ -744,9 +716,8 @@ void     homa_rpc_handoff(struct homa_rpc *rpc);
 int      homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t len);
 int      homa_setsockopt(struct sock *sk, int level, int optname,
 			 sockptr_t optval, unsigned int optlen);
-struct homa_shared *homa_shared_alloc(void);
-void     homa_shared_free(struct homa_shared *shared);
 int      homa_shutdown(struct socket *sock, int how);
+int      homa_socket(struct sock *sk);
 int      homa_softirq(struct sk_buff *skb);
 void     homa_spin(int ns);
 void     homa_timer(struct homa *homa);
@@ -794,25 +765,14 @@ void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc);
 #endif /* See strip.py */
 
 /**
- * homa_from_net() - Return the struct homa associated with a particular
+ * homa_net_from_net() - Return the struct homa_net associated with a particular
  * struct net.
- * @net:     Get the struct homa for this net namespace.
+ * @net:     Get the Homa data for this net namespace.
  * Return:   see above.
  */
-static inline struct homa *homa_from_net(struct net *net)
+static inline struct homa_net *homa_net_from_net(struct net *net)
 {
-	return (struct homa *)net_generic(net, homa_net_id);
-}
-
-/**
- * homa_from_sock() - Return the struct homa associated with a particular
- * struct sock.
- * @sock:    Get the struct homa for this socket.
- * Return:   see above.
- */
-static inline struct homa *homa_from_sock(struct sock *sock)
-{
-	return (struct homa *)net_generic(sock_net(sock), homa_net_id);
+	return (struct homa_net *)net_generic(net, homa_net_id);
 }
 
 /**
@@ -823,7 +783,10 @@ static inline struct homa *homa_from_sock(struct sock *sock)
  */
 static inline struct homa *homa_from_skb(struct sk_buff *skb)
 {
-	return (struct homa *)net_generic(dev_net(skb->dev), homa_net_id);
+	struct homa_net *hnet;
+
+	hnet = net_generic(dev_net(skb->dev), homa_net_id);
+	return hnet->homa;
 }
 
 /**

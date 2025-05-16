@@ -223,7 +223,7 @@ struct homa_grant_candidates {
 };
 
 struct homa_grant
-	*homa_grant_alloc(struct net *net);
+	*homa_grant_alloc(void);
 void     homa_grant_cand_add(struct homa_grant_candidates *cand,
 			     struct homa_rpc *rpc);
 void     homa_grant_cand_check(struct homa_grant_candidates *cand,

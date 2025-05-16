@@ -150,7 +150,7 @@ struct homa_pacer {
 	atomic64_t link_idle_time ____cacheline_aligned_in_smp;
 };
 
-struct homa_pacer *homa_pacer_alloc(struct homa *homa, struct net *net);
+struct homa_pacer *homa_pacer_alloc(struct homa *homa);
 int      homa_pacer_check_nic_q(struct homa_pacer *pacer,
 				struct sk_buff *skb, bool force);
 int      homa_pacer_dointvec(const struct ctl_table *table, int write,

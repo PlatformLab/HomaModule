@@ -12,8 +12,7 @@ FIXTURE(homa_metrics) {
 };
 FIXTURE_SETUP(homa_metrics)
 {
-	homa_init(&self->homa, &mock_net);
-	mock_set_homa(&self->homa);
+	homa_init(&self->homa);
 }
 FIXTURE_TEARDOWN(homa_metrics)
 {
