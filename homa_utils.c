@@ -58,13 +58,13 @@ int homa_init(struct homa *homa)
 		homa->peers = NULL;
 		return err;
 	}
-	homa->port_map = kmalloc(sizeof(*homa->port_map), GFP_KERNEL);
-	if (!homa->port_map) {
-		pr_err("%s couldn't create port_map: kmalloc failure",
+	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
+	if (!homa->socktab) {
+		pr_err("%s couldn't create socktab: kmalloc failure",
 		       __func__);
 		return -ENOMEM;
 	}
-	homa_socktab_init(homa->port_map);
+	homa_socktab_init(homa->socktab);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);
 	if (err) {
@@ -133,10 +133,10 @@ void homa_destroy(struct homa *homa)
 #endif /* __UNIT_TEST__ */
 
 	/* The order of the following cleanups matters! */
-	if (homa->port_map) {
-		homa_socktab_destroy(homa->port_map);
-		kfree(homa->port_map);
-		homa->port_map = NULL;
+	if (homa->socktab) {
+		homa_socktab_destroy(homa->socktab, NULL);
+		kfree(homa->socktab);
+		homa->socktab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
 	if (homa->grant) {
@@ -170,6 +170,7 @@ int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
 	memset(hnet, 0, sizeof(*hnet));
 	hnet->net = net;
 	hnet->homa = homa;
+	hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT - 1;
 	return 0;
 }
 
@@ -180,6 +181,7 @@ int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
  */
 void homa_net_destroy(struct homa_net *hnet)
 {
+	homa_socktab_destroy(hnet->homa->socktab, hnet);
 	homa_peertab_free_net(hnet);
 }
 

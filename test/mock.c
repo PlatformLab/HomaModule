@@ -2016,12 +2016,10 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 {
 	static struct ipv6_pinfo hsk_pinfo;
 	struct sock *sk = &hsk->sock;
-	struct homa *homa;
 	int saved_port;
 	int err = 0;
 
-	homa = hnet->homa;
-	saved_port = homa->prev_default_port;
+	saved_port = hnet->prev_default_port;
 	memset(hsk, 0, sizeof(*hsk));
 	sk->sk_data_ready = mock_data_ready;
 	sk->sk_family = mock_ipv6 ? AF_INET6 : AF_INET;
@@ -2033,15 +2031,15 @@ int mock_sock_init(struct homa_sock *hsk, struct homa_net *hnet, int port)
 	rcu_assign_pointer(sk->sk_wq, &mock_socket.wq);
 	sk->sk_sndtimeo = MAX_SCHEDULE_TIMEOUT;
 	if (port != 0 && port >= mock_min_default_port)
-		homa->prev_default_port = port - 1;
+		hnet->prev_default_port = port - 1;
 	err = homa_sock_init(hsk);
 	hsk->is_server = true;
 	if (port != 0)
-		homa->prev_default_port = saved_port;
+		hnet->prev_default_port = saved_port;
 	if (err != 0)
 		return err;
 	if (port != 0 && port < mock_min_default_port)
-		homa_sock_bind(homa->port_map, hsk, port);
+		homa_sock_bind(hnet, hsk, port);
 	hsk->inet.pinet6 = &hsk_pinfo;
 	mock_mtu = UNIT_TEST_DATA_PER_PACKET + hsk->ip_header_length
 		+ sizeof(struct homa_data_hdr);

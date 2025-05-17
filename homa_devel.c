@@ -386,7 +386,7 @@ void homa_freeze_peers()
 	/* Find a socket to use (any socket for the namespace will do). */
 	hnet = homa_net_from_net(&init_net);
 	rcu_read_lock();
-	hsk = homa_socktab_start_scan(hnet->homa->port_map, &scan);
+	hsk = homa_socktab_start_scan(hnet->homa->socktab, &scan);
 	while (hsk && hsk->hnet != hnet)
 		hsk = homa_socktab_next(&scan);
 	homa_socktab_end_scan(&scan);

@@ -232,7 +232,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		/* Without RCU, sockets other than hsk can be deleted
 		 * out from under us.
 		 */
-		hsk2 = homa_sock_find(hsk->homa->port_map, server_port);
+		hsk2 = homa_sock_find(hsk->hnet, server_port);
 		if (!hsk2)
 			return;
 	}
@@ -364,7 +364,7 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 	struct homa_rpc *rpc;
 	struct homa_sock *hsk;
 
-	for (hsk = homa_socktab_start_scan(homa->port_map, &scan); hsk;
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan); hsk;
 	     hsk = homa_socktab_next(&scan)) {
 		/* Skip the (expensive) lock acquisition if there's no
 		 * work to do.
@@ -711,7 +711,7 @@ void homa_rpc_log_active(struct homa *homa, uint64_t id)
 
 	pr_notice("Logging active Homa RPCs:\n");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 	     hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -794,7 +794,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 
 	tt_record("Logging Homa RPCs:");
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;
@@ -851,7 +851,7 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 		   atomic_read(&homa->grant->total_incoming));
 	*link_errors = 0;
 	rcu_read_lock();
-	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
 			continue;

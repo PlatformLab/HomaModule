@@ -641,7 +641,7 @@ TEST_F(homa_outgoing, homa_xmit_control__server_request)
 	struct homa_busy_hdr h;
 	struct homa_rpc *srpc;
 
-	homa_sock_bind(self->homa.port_map, &self->hsk, self->server_port);
+	homa_sock_bind(self->hnet, &self->hsk, self->server_port);
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
 			self->server_ip, self->client_port, self->server_id,
 			10000, 10000);

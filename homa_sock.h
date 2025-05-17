@@ -15,9 +15,11 @@ void     homa_sock_lock_slow(struct homa_sock *hsk);
 
 /**
  * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
- * Must be a power of 2.
+ * Must be a power of 2. Note: can't use BIT here because the result needs
+ * to be signed.
  */
-#define HOMA_SOCKTAB_BUCKETS 1024
+#define HOMA_SOCKTAB_BUCKET_BITS 10
+#define HOMA_SOCKTAB_BUCKETS (1 << HOMA_SOCKTAB_BUCKET_BITS)
 
 /**
  * struct homa_socktab - A hash table that maps from port numbers (either
@@ -257,15 +259,16 @@ struct homa_v6_sock {
 void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 					 u64 id);
 #endif /* See strip.py */
-int                homa_sock_bind(struct homa_socktab *socktab,
-				  struct homa_sock *hsk, __u16 port);
+int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
+				  __u16 port);
 void               homa_sock_destroy(struct homa_sock *hsk);
-struct homa_sock  *homa_sock_find(struct homa_socktab *socktab, __u16 port);
+struct homa_sock  *homa_sock_find(struct homa_net *hnet, __u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
 int                homa_sock_wait_wmem(struct homa_sock *hsk, int nonblocking);
-void               homa_socktab_destroy(struct homa_socktab *socktab);
+void               homa_socktab_destroy(struct homa_socktab *socktab,
+					struct homa_net *hnet);
 void               homa_socktab_end_scan(struct homa_socktab_scan *scan);
 void               homa_socktab_init(struct homa_socktab *socktab);
 struct homa_sock  *homa_socktab_next(struct homa_socktab_scan *scan);
@@ -307,19 +310,21 @@ static inline void homa_sock_unlock(struct homa_sock *hsk)
 }
 
 /**
- * homa_port_hash() - Hash function for port numbers.
- * @port:   Port number being looked up.
+ * homa_socktab_bucket() - Compute the bucket number in a homa_socktab
+ * that will contain a particular socket.
+ * @hnet:   Network namespace of the desired socket.
+ * @port:   Port number of the socket.
  *
- * Return:  The index of the bucket in which this port will be found (if
- *          it exists.
+ * Return:  The index of the bucket in which a socket matching @hnet and
+ *          @port will be found (if it exists).
  */
-static inline int homa_port_hash(__u16 port)
+static inline int homa_socktab_bucket(struct homa_net *hnet, __u16 port)
 {
-	/* We can use a really simple hash function here because client
-	 * port numbers are allocated sequentially and server port numbers
-	 * are unpredictable.
-	 */
+#ifdef __UNIT_TEST__
 	return port & (HOMA_SOCKTAB_BUCKETS - 1);
+#else /* __UNIT_TEST__ */
+	return hash_32((uintptr_t)hnet ^ port, HOMA_SOCKTAB_BUCKET_BITS);
+#endif /* __UNIT_TEST__ */
 }
 
 /**

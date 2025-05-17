@@ -25,16 +25,20 @@ void homa_socktab_init(struct homa_socktab *socktab)
 }
 
 /**
- * homa_socktab_destroy() - Destructor for homa_socktabs.
+ * homa_socktab_destroy() - Destructor for homa_socktabs: deletes all
+ * existing sockets.
  * @socktab:  The object to destroy.
+ * @hnet:     If non-NULL, only sockets for this namespace are deleted.
  */
-void homa_socktab_destroy(struct homa_socktab *socktab)
+void homa_socktab_destroy(struct homa_socktab *socktab, struct homa_net *hnet)
 {
 	struct homa_socktab_scan scan;
 	struct homa_sock *hsk;
 
 	for (hsk = homa_socktab_start_scan(socktab, &scan); hsk;
 			hsk = homa_socktab_next(&scan)) {
+		if (hnet && hnet != hsk->hnet)
+			continue;
 		homa_sock_destroy(hsk);
 	}
 	homa_socktab_end_scan(&scan);
@@ -145,7 +149,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	hnet = (struct homa_net *)net_generic(sock_net(&hsk->sock),
 					      homa_net_id);
 	homa = hnet->homa;
-	socktab = homa->port_map;
+	socktab = homa->socktab;
 
 	/* Initialize fields outside the Homa part. */
 	hsk->sock.sk_sndbuf = homa->wmem_max;
@@ -172,23 +176,23 @@ int homa_sock_init(struct homa_sock *hsk)
 	 * no other socket chooses the same port.
 	 */
 	spin_lock_bh(&socktab->write_lock);
-	starting_port = homa->prev_default_port;
+	starting_port = hnet->prev_default_port;
 	while (1) {
-		homa->prev_default_port++;
-		if (homa->prev_default_port < HOMA_MIN_DEFAULT_PORT)
-			homa->prev_default_port = HOMA_MIN_DEFAULT_PORT;
-		other = homa_sock_find(socktab, homa->prev_default_port);
+		hnet->prev_default_port++;
+		if (hnet->prev_default_port < HOMA_MIN_DEFAULT_PORT)
+			hnet->prev_default_port = HOMA_MIN_DEFAULT_PORT;
+		other = homa_sock_find(hnet, hnet->prev_default_port);
 		if (!other)
 			break;
 		sock_put(&other->sock);
-		if (homa->prev_default_port == starting_port) {
+		if (hnet->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
 			hsk->shutdown = true;
 			result = -EADDRNOTAVAIL;
 			goto error;
 		}
 	}
-	hsk->port = homa->prev_default_port;
+	hsk->port = hnet->prev_default_port;
 	hsk->inet.inet_num = hsk->port;
 	hsk->inet.inet_sport = htons(hsk->port);
 
@@ -218,10 +222,9 @@ int homa_sock_init(struct homa_sock *hsk)
 		bucket->id = i + 1000000;
 		INIT_HLIST_HEAD(&bucket->rpcs);
 	}
-
-	/* Link the socket into the port map. */
 	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_port_hash(hsk->port)]);
+			   &socktab->buckets[homa_socktab_bucket(hnet,
+							         hsk->port)]);
 	spin_unlock_bh(&socktab->write_lock);
 	return result;
 
@@ -238,7 +241,7 @@ error:
  */
 void homa_sock_unlink(struct homa_sock *hsk)
 {
-	struct homa_socktab *socktab = hsk->homa->port_map;
+	struct homa_socktab *socktab = hsk->homa->socktab;
 
 	spin_lock_bh(&socktab->write_lock);
 	hlist_del_rcu(&hsk->socktab_links);
@@ -347,7 +350,7 @@ void homa_sock_destroy(struct homa_sock *hsk)
 /**
  * homa_sock_bind() - Associates a server port with a socket; if there
  * was a previous server port assignment for @hsk, it is abandoned.
- * @socktab:   Hash table in which the binding will be recorded.
+ * @hnet:      Network namespace with which port is associated.
  * @hsk:       Homa socket.
  * @port:      Desired server port for @hsk. If 0, then this call
  *             becomes a no-op: the socket will continue to use
@@ -355,9 +358,10 @@ void homa_sock_destroy(struct homa_sock *hsk)
  *
  * Return:  0 for success, otherwise a negative errno.
  */
-int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
+int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 		   __u16 port)
 {
+	struct homa_socktab *socktab = hnet->homa->socktab;
 	struct homa_sock *owner;
 	int result = 0;
 
@@ -372,7 +376,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 		goto done;
 	}
 
-	owner = homa_sock_find(socktab, port);
+	owner = homa_sock_find(hnet, port);
 	if (owner) {
 		sock_put(&owner->sock);
 		if (owner != hsk)
@@ -384,7 +388,7 @@ int homa_sock_bind(struct homa_socktab *socktab, struct homa_sock *hsk,
 	hsk->inet.inet_num = port;
 	hsk->inet.inet_sport = htons(hsk->port);
 	hlist_add_head_rcu(&hsk->socktab_links,
-			   &socktab->buckets[homa_port_hash(port)]);
+			   &socktab->buckets[homa_socktab_bucket(hnet, port)]);
 	hsk->is_server = true;
 done:
 	spin_unlock_bh(&socktab->write_lock);
@@ -394,21 +398,22 @@ done:
 
 /**
  * homa_sock_find() - Returns the socket associated with a given port.
- * @socktab:    Hash table in which to perform lookup.
+ * @hnet:       Network namespace where the socket will be used.
  * @port:       The port of interest.
  * Return:      The socket that owns @port, or NULL if none. If non-NULL
  *              then this method has taken a reference on the socket and
  *              the caller must call sock_put to release it.
  */
-struct homa_sock *homa_sock_find(struct homa_socktab *socktab,  __u16 port)
+struct homa_sock *homa_sock_find(struct homa_net *hnet,  __u16 port)
 {
-	struct homa_sock *hsk;
+	int bucket = homa_socktab_bucket(hnet, port);
 	struct homa_sock *result = NULL;
+	struct homa_sock *hsk;
 
 	rcu_read_lock();
-	hlist_for_each_entry_rcu(hsk, &socktab->buckets[homa_port_hash(port)],
+	hlist_for_each_entry_rcu(hsk, &hnet->homa->socktab->buckets[bucket],
 				 socktab_links) {
-		if (hsk->port == port) {
+		if (hsk->port == port && hsk->hnet == hnet) {
 			result = hsk;
 			sock_hold(&hsk->sock);
 			break;

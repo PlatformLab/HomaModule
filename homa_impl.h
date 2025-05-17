@@ -135,16 +135,10 @@ struct homa {
 	struct homa_peertab *peers;
 
 	/**
-	 * @prev_default_port: The most recent port number assigned from
-	 * the range of default ports.
-	 */
-	__u16 prev_default_port;
-
-	/**
-	 * @port_map: Information about all open sockets. Dynamically
+	 * @socktab: Information about all open sockets. Dynamically
 	 * allocated; must be kfreed.
 	 */
-	struct homa_socktab *port_map;
+	struct homa_socktab *socktab;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -497,6 +491,12 @@ struct homa_net {
 
 	/** @homa: Global Homa information. */
 	struct homa *homa;
+
+	/**
+	 * @prev_default_port: The most recent port number assigned from
+	 * the range of default ports.
+	 */
+	__u16 prev_default_port;
 };
 
 /**
@@ -680,7 +680,7 @@ void     homa_close(struct sock *sock, long timeout);
 int      homa_copy_to_user(struct homa_rpc *rpc);
 void     homa_data_pkt(struct sk_buff *skb, struct homa_rpc *rpc);
 void     homa_destroy(struct homa *homa);
-void     homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa);
+void     homa_dispatch_pkts(struct sk_buff *skb);
 int      homa_err_handler_v4(struct sk_buff *skb, u32 info);
 int      homa_err_handler_v6(struct sk_buff *skb,
 			     struct inet6_skb_parm *opt, u8 type,  u8 code,
@@ -787,6 +787,20 @@ static inline struct homa *homa_from_skb(struct sk_buff *skb)
 
 	hnet = net_generic(dev_net(skb->dev), homa_net_id);
 	return hnet->homa;
+}
+
+/**
+ * homa_net_from_skb() - Return the struct homa_net associated with a particular
+ * sk_buff.
+ * @skb:     Get the struct homa for this packet buffer.
+ * Return:   see above.
+ */
+static inline struct homa_net *homa_net_from_skb(struct sk_buff *skb)
+{
+	struct homa_net *hnet;
+
+	hnet = net_generic(dev_net(skb->dev), homa_net_id);
+	return hnet;
 }
 
 /**

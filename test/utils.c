@@ -75,8 +75,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 
 	this_size = (resp_length > UNIT_TEST_DATA_PER_PACKET)
 			? UNIT_TEST_DATA_PER_PACKET : resp_length;
-	homa_dispatch_pkts(mock_skb_alloc(server_ip, &h.common, this_size, 0),
-			hsk->homa);
+	homa_dispatch_pkts(mock_skb_alloc(server_ip, &h.common, this_size, 0));
 	if (state == UNIT_RCVD_ONE_PKT)
 		return crpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -87,7 +86,7 @@ struct homa_rpc *unit_client_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_alloc(server_ip, &h.common,
-				this_size, 0), hsk->homa);
+				this_size, 0));
 	}
 	if (state == UNIT_RCVD_MSG)
 		return crpc;
@@ -387,8 +386,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 	homa_rpc_unlock(srpc);
 	homa_dispatch_pkts(mock_skb_alloc(client_ip, &h.common,
 			(req_length > UNIT_TEST_DATA_PER_PACKET)
-			? UNIT_TEST_DATA_PER_PACKET : req_length, 0),
-			hsk->homa);
+			? UNIT_TEST_DATA_PER_PACKET : req_length, 0));
 	if (state == UNIT_RCVD_ONE_PKT)
 		return srpc;
 	for (bytes_received = UNIT_TEST_DATA_PER_PACKET;
@@ -400,7 +398,7 @@ struct homa_rpc *unit_server_rpc(struct homa_sock *hsk,
 			this_size = UNIT_TEST_DATA_PER_PACKET;
 		h.seg.offset = htonl(bytes_received);
 		homa_dispatch_pkts(mock_skb_alloc(client_ip, &h.common,
-				this_size, 0), hsk->homa);
+				this_size, 0));
 	}
 	if (state == UNIT_RCVD_MSG)
 		return srpc;

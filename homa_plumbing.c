@@ -667,7 +667,7 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 			return -EINVAL;
 		port = ntohs(addr_in->in6.sin6_port);
 	}
-	return homa_sock_bind(hsk->homa->port_map, hsk, port);
+	return homa_sock_bind(hsk->hnet, hsk, port);
 }
 
 /**
@@ -1358,7 +1358,7 @@ int homa_softirq(struct sk_buff *skb)
 				 h->type);
 			*prev_link = skb->next;
 			skb->next = NULL;
-			homa_dispatch_pkts(skb, homa);
+			homa_dispatch_pkts(skb);
 		} else {
 			prev_link = &skb->next;
 		}
@@ -1409,7 +1409,7 @@ discard:
 			UNIT_LOG("", " %d", ntohl(h3->seg.offset));
 		}
 #endif /* __UNIT_TEST__ */
-		homa_dispatch_pkts(packets, homa);
+		homa_dispatch_pkts(packets);
 		packets = other_pkts;
 	}
 

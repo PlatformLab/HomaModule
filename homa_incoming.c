@@ -387,9 +387,8 @@ free_skbs:
  * homa_dispatch_pkts() - Top-level function that processes a batch of packets,
  * all related to the same RPC.
  * @skb:       First packet in the batch, linked through skb->next.
- * @homa:      Overall information about the Homa transport.
  */
-void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
+void homa_dispatch_pkts(struct sk_buff *skb)
 {
 #ifdef __UNIT_TEST__
 #define MAX_ACKS 2
@@ -410,11 +409,13 @@ void homa_dispatch_pkts(struct sk_buff *skb, struct homa *homa)
 	struct homa_ack acks[MAX_ACKS];
 	struct homa_rpc *rpc = NULL;
 	struct homa_sock *hsk;
+	struct homa_net *hnet;
 	struct sk_buff *next;
 	int num_acks = 0;
 
 	/* Find the appropriate socket.*/
-	hsk = homa_sock_find(homa->port_map, dport);
+	hnet = homa_net_from_skb(skb);
+	hsk = homa_sock_find(hnet, dport);
 	if (!hsk || (!homa_is_client(id) && !hsk->is_server)) {
 		if (skb_is_ipv6(skb))
 			icmp6_send(skb, ICMPV6_DEST_UNREACH,

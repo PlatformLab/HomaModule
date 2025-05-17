@@ -225,7 +225,7 @@ void homa_timer(struct homa *homa)
 #endif /* See strip.py */
 
 	/* Scan all existing RPCs in all sockets. */
-	for (hsk = homa_socktab_start_scan(homa->port_map, &scan);
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
 			/* If we get here, it means that homa_wait_for_message

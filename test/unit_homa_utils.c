@@ -103,9 +103,9 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 	mock_kmalloc_errors = 0x10;
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_init couldn't create port_map: kmalloc failure",
+	EXPECT_SUBSTR("homa_init couldn't create socktab: kmalloc failure",
 		      mock_printk_output);
-	EXPECT_EQ(NULL, homa2.port_map);
+	EXPECT_EQ(NULL, homa2.socktab);
 	homa_destroy(&homa2);
 }
 #ifndef __STRIP__ /* See strip.py */
@@ -127,6 +127,47 @@ TEST_F(homa_utils, homa_destroy)
 
 	homa_init(&homa2);
 	homa_destroy(&homa2);
+}
+
+TEST_F(homa_utils, homa_net_destroy__delete_sockets)
+{
+	struct homa_sock hsk1, hsk2, hsk3;
+	struct homa_net *hnet;
+
+	hnet = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&hsk1, hnet, 100);
+	mock_sock_init(&hsk2, hnet, 101);
+	mock_sock_init(&hsk3, self->hnet, 100);
+
+	homa_net_destroy(hnet);
+	EXPECT_EQ(1, hsk1.shutdown);
+	EXPECT_EQ(1, hsk2.shutdown);
+	EXPECT_EQ(0, hsk3.shutdown);
+
+	homa_sock_destroy(&hsk3);
+}
+TEST_F(homa_utils, homa_net_destroy__delete_peers)
+{
+	struct homa_peer *peer;
+	struct homa_net *hnet;
+	struct homa_sock hsk2;
+	struct in6_addr addr;
+
+	hnet = mock_alloc_hnet(&self->homa);
+	mock_sock_init(&hsk2, hnet, 44);
+
+	addr = unit_get_in_addr("1.2.3.4");
+	peer = homa_peer_find(&hsk2, &addr);
+	homa_peer_put(peer);
+	peer = homa_peer_find(&self->hsk, &addr);
+	homa_peer_put(peer);
+	addr = unit_get_in_addr("1.2.3.5");
+	peer = homa_peer_find(&hsk2, &addr);
+	homa_peer_put(peer);
+	EXPECT_EQ(3, unit_count_peers(&self->homa));
+
+	homa_net_destroy(hnet);
+	EXPECT_EQ(1, unit_count_peers(&self->homa));
 }
 
 #ifndef __STRIP__ /* See strip.py */
