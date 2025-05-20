@@ -261,8 +261,8 @@ char *homa_metrics_print(void)
 		  m->throttled_cycles);
 		M("resent_packets            %15llu  DATA packets sent in response to RESENDs\n",
 		  m->resent_packets);
-		M("peer_new_entries          %15llu  New entries created in peer table\n",
-		  m->peer_new_entries);
+		M("peer_allocs               %15llu  New entries created in peer table\n",
+		  m->peer_allocs);
 		M("peer_kmalloc_errors       %15llu  kmalloc failures creating peer table entries\n",
 		  m->peer_kmalloc_errors);
 		M("peer_route_errors         %15llu  Routing failures creating peer table entries\n",

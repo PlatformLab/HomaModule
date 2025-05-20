@@ -219,6 +219,10 @@ int mock_page_nid_mask;
 /* Used to collect printk output. */
 char mock_printk_output [5000];
 
+/* Used as the return values from rhashtable_walk_next calls. */
+void **mock_rht_walk_results;
+int mock_rht_num_walk_results;
+
 /* Used instead of HOMA_MIN_DEFAULT_PORT by homa_skb.c. */
 __u16 mock_min_default_port = 0x8000;
 
@@ -328,7 +332,7 @@ void BUG_func(void)
 
 void call_rcu(struct rcu_head *head, void free_func(struct rcu_head *head))
 {
-	free_func(head);
+	unit_log_printf("; ", "call_rcu invoked");
 }
 
 bool cancel_work_sync(struct work_struct *work)
@@ -844,6 +848,7 @@ void kfree(const void *block)
 {
 	if (block == NULL)
 		return;
+	UNIT_HOOK("kfree");
 	if (!kmallocs_in_use || unit_hash_get(kmallocs_in_use, block) == NULL) {
 		FAIL(" %s on unknown block %p", __func__, block);
 		return;
@@ -1263,23 +1268,6 @@ void release_sock(struct sock *sk)
 void remove_wait_queue(struct wait_queue_head *wq_head,
 		struct wait_queue_entry *wq_entry)
 {}
-
-int mock_rht_init(struct rhashtable *ht,
-		    const struct rhashtable_params *params)
-{
-	if (mock_check_error(&mock_rht_init_errors))
-		return -EINVAL;
-	return rhashtable_init(ht, params);
-}
-
-void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
-				      struct rhash_head *obj,
-				      const struct rhashtable_params params)
-{
-	if (mock_check_error(&mock_rht_insert_errors))
-		return ERR_PTR(-EINVAL);
-	return rhashtable_lookup_get_insert_fast(ht, obj, params);
-}
 
 void schedule(void)
 {
@@ -1809,6 +1797,37 @@ struct ctl_table_header *mock_register_net_sysctl(struct net *net,
 	return (struct ctl_table_header *)11111;
 }
 
+int mock_rht_init(struct rhashtable *ht,
+		    const struct rhashtable_params *params)
+{
+	if (mock_check_error(&mock_rht_init_errors))
+		return -EINVAL;
+	return rhashtable_init(ht, params);
+}
+
+void *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
+				      struct rhash_head *obj,
+				      const struct rhashtable_params params)
+{
+	if (mock_check_error(&mock_rht_insert_errors))
+		return ERR_PTR(-EINVAL);
+	return rhashtable_lookup_get_insert_fast(ht, obj, params);
+}
+
+void *mock_rht_walk_next(struct rhashtable_iter *iter)
+{
+	void *result;
+
+	if (!mock_rht_walk_results)
+		return rhashtable_walk_next(iter);
+	if (mock_rht_num_walk_results == 0)
+		return NULL;
+	result = *mock_rht_walk_results;
+	mock_rht_walk_results++;
+	mock_rht_num_walk_results--;
+	return result;
+}
+
 void mock_rpc_hold(struct homa_rpc *rpc)
 {
 	mock_rpc_holds++;
@@ -2118,6 +2137,8 @@ void mock_teardown(void)
 	mock_compound_order_mask = 0;
 	mock_page_nid_mask = 0;
 	mock_printk_output[0] = 0;
+	mock_rht_walk_results = NULL;
+	mock_rht_num_walk_results = 0;
 	mock_min_default_port = 0x8000;
 	homa_net_id = 0;
 	mock_num_hnets = 0;
@@ -2129,6 +2150,7 @@ void mock_teardown(void)
 	memset(inet6_offloads, 0, sizeof(inet6_offloads));
 	inet6_offloads[IPPROTO_TCP] = (struct net_offload __rcu *)
 			&tcp_v6_offload;
+	jiffies = 1100;
 
 	count = unit_hash_size(skbs_in_use);
 	if (count > 0)

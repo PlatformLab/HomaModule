@@ -231,7 +231,7 @@ struct homa_peer *homa_peer_find(struct homa_peertab *peertab,
 	hlist_add_head_rcu(&peer->peertab_links, &peertab->buckets[bucket]);
 	peer->current_ticks = -1;
 	spin_lock_init(&peer->ack_lock);
-	INC_METRIC(peer_new_entries, 1);
+	INC_METRIC(peer_allocs, 1);
 
 done:
 	spin_unlock_bh(&peertab->write_lock);

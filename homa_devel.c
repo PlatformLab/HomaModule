@@ -402,7 +402,7 @@ void homa_freeze_peers()
 	IF_NO_STRIP(freeze.common.urgent = htons(HOMA_TCP_URGENT));
 	freeze.common.sender_id = 0;
 
-	rhashtable_walk_enter(&hnet->homa->peers->ht, &iter);
+	rhashtable_walk_enter(&hnet->homa->peertab->ht, &iter);
 	rhashtable_walk_start(&iter);
 	while (true) {
 		peer = rhashtable_walk_next(&iter);

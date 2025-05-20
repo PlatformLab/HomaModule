@@ -148,6 +148,8 @@ extern int         mock_prepare_to_wait_status;
 extern char        mock_printk_output[];
 extern int         mock_rht_init_errors;
 extern int         mock_rht_insert_errors;
+extern void      **mock_rht_walk_results;
+extern int         mock_rht_num_walk_results;
 extern int         mock_route_errors;
 extern int         mock_signal_pending;
 extern int         mock_sock_holds;
@@ -198,6 +200,7 @@ int         mock_rht_init(struct rhashtable *ht,
 void       *mock_rht_lookup_get_insert_fast(struct rhashtable *ht,
 					    struct rhash_head *obj,
 					    const struct rhashtable_params params);
+void       *mock_rht_walk_next(struct rhashtable_iter *iter);
 void        mock_rpc_hold(struct homa_rpc *rpc);
 void        mock_rpc_put(struct homa_rpc *rpc);
 void        mock_set_clock_vals(u64 t, ...);

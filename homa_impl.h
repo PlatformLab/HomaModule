@@ -132,7 +132,7 @@ struct homa {
 	 * @peers: Info about all the other hosts we have communicated with;
 	 * includes peers from all network namespaces.
 	 */
-	struct homa_peertab *peers;
+	struct homa_peertab *peertab;
 
 	/**
 	 * @socktab: Information about all open sockets. Dynamically
@@ -497,6 +497,11 @@ struct homa_net {
 	 * the range of default ports.
 	 */
 	__u16 prev_default_port;
+
+	/* @num_peers: The total number of struct homa_peers that exist
+	 * for this namespace. Managed by homa_peer.c under the peertab lock.
+	 */
+	int num_peers;
 };
 
 /**

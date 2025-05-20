@@ -44,6 +44,7 @@ struct iov_iter
 	    *unit_iov_iter(void *buffer, size_t length);
 int          unit_list_length(struct list_head *head);
 void         unit_log_active_ids(struct homa_sock *hsk);
+void         unit_log_dead_peers(struct homa *homa);
 void         unit_log_filled_skbs(struct sk_buff *skb, int verbose);
 void         unit_log_frag_list(struct sk_buff *skb, int verbose);
 #ifndef __STRIP__ /* See strip.py */

@@ -91,9 +91,9 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	mock_kmalloc_errors = 4;
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_peertab_alloc couldn't create peers: kmalloc failure",
+	EXPECT_SUBSTR("homa_peertab_alloc couldn't create peertab: kmalloc failure",
 		      mock_printk_output);
-	EXPECT_EQ(NULL, homa2.peers);
+	EXPECT_EQ(NULL, homa2.peertab);
 	homa_destroy(&homa2);
 }
 TEST_F(homa_utils, homa_init__cant_allocate_port_map)

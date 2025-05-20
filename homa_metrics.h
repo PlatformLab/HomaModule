@@ -305,11 +305,11 @@ struct homa_metrics {
 	u64 resent_packets;
 
 	/**
-	 * @peer_new_entries: total # of new entries created in Homa's
+	 * @peer_allocs: total # of new entries created in Homa's
 	 * peer table (this value doesn't increment if the desired peer is
 	 * found in the entry in its hash chain).
 	 */
-	u64 peer_new_entries;
+	u64 peer_allocs;
 
 	/**
 	 * @peer_kmalloc_errors: total number of times homa_peer_find

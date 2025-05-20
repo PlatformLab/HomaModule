@@ -52,10 +52,10 @@ int homa_init(struct homa *homa)
 		homa->pacer = NULL;
 		return err;
 	}
-	homa->peers = homa_peertab_alloc();
-	if (IS_ERR(homa->peers)) {
-		err = PTR_ERR(homa->peers);
-		homa->peers = NULL;
+	homa->peertab = homa_peertab_alloc();
+	if (IS_ERR(homa->peertab)) {
+		err = PTR_ERR(homa->peertab);
+		homa->peertab = NULL;
 		return err;
 	}
 	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
@@ -148,9 +148,9 @@ void homa_destroy(struct homa *homa)
 		homa_pacer_free(homa->pacer);
 		homa->pacer = NULL;
 	}
-	if (homa->peers) {
-		homa_peertab_free(homa->peers);
-		homa->peers = NULL;
+	if (homa->peertab) {
+		homa_peertab_free(homa->peertab);
+		homa->peertab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
 

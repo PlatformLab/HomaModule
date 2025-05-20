@@ -288,6 +288,7 @@ void homa_timer(struct homa *homa)
 		   atomic_read(&homa->grant->total_incoming));
 #endif /* See strip.py */
 	homa_skb_release_pages(homa);
+	homa_peer_gc(homa->peertab);
 #ifndef __STRIP__ /* See strip.py */
 	end = homa_clock();
 	INC_METRIC(timer_cycles, end - start);

@@ -539,6 +539,41 @@ however, under very extreme loads a small value does provide benefit for
 the largest messages, when used with
 .I grant_fifo_fraction.
 .TP
+.IR peer_gc_threshold
+.PD 0
+.TP
+.IR peer_idle_secs_min
+.TP
+.IR peer_idle_secs_max
+.TP
+.IR peer_net_max
+.IP
+These options control garbage collection of peer objets. Homa maintains
+long-lived state for each peer machine that it has communicated with; peer
+objects are kept separately for each network namespace.
+These options are used to limit memory utilization from peer objects. If the
+total number of peer objects across all namespaces is less than
+.IR peer_gc_threshold
+then no peer garbage collection occurs. If the number of peer objects is
+at least
+.IR peer_gc_threshold
+then Homa will free peers that have not been referenced in the last
+.IR peer_idle_secs_max
+in order to reduce the total number of peer objects below
+.IR peer_gc_threshold .
+In addition, if a given network namespace has more than
+.IR peer_net_max
+peers allocated, then peers in that namespace are candidates for
+freeing if they have not been referenced in the last
+.IR peer_idle_secs_min
+seconds. When choosing among candidates to free, Homa uses a semi-random
+approach that
+(a) prefers to evict peers from namespaces above the
+.IR peer_net_max
+threshold over those from underloaded namespaces
+and (b) prefers to evict peers whose most recent usage is farthest in the past.
+.PD
+.TP
 .IR poll_usecs
 When a thread waits for an incoming message, Homa first busy-waits for a
 short amount of time before putting the thread to sleep. If a message arrives
