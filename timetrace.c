@@ -141,11 +141,6 @@ int tt_init(char *proc_file)
 		tt_dir_entry = NULL;
 	}
 
-	mutex_init(&tt_mutex);
-	atomic_set(&tt_freeze_count, 0);
-	atomic_set(&tt_frozen, 0);
-	init = true;
-
 #ifdef TT_KERNEL
 	for (i = 0; i < nr_cpu_ids; i++)
 		tt_linux_buffers[i] = tt_buffers[i];
@@ -159,6 +154,11 @@ int tt_init(char *proc_file)
 	tt_linux_dbg3 = tt_dbg3;
 	memset(tt_debug_int64, 0, sizeof(tt_debug_int64));
 #endif
+
+	mutex_init(&tt_mutex);
+	atomic_set(&tt_frozen, 0);
+	atomic_set(&tt_freeze_count, 0);
+	init = true;
 
 	return 0;
 
@@ -191,6 +191,7 @@ void tt_destroy(void)
 {
 	int i;
 
+	tt_freeze_count.counter = 1;
 	mutex_lock(&tt_mutex);
 	if (init) {
 		init = false;
@@ -201,7 +202,6 @@ void tt_destroy(void)
 		kfree(tt_buffers[i]);
 		tt_buffers[i] = NULL;
 	}
-	tt_freeze_count.counter = 1;
 
 #ifdef TT_KERNEL
 	tt_linux_record = ltt_record_nop;

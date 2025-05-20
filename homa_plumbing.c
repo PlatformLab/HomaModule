@@ -590,9 +590,6 @@ void __exit homa_unload(void)
 
 	pr_notice("Homa module unloading\n");
 
-#ifndef __UPSTREAM__ /* See strip.py */
-	tt_destroy();
-#endif /* See strip.py */
 #ifndef __STRIP__ /* See strip.py */
 	homa_gro_unhook_tcp();
 	if (timer_kthread) {
@@ -613,6 +610,9 @@ void __exit homa_unload(void)
 	inet6_unregister_protosw(&homav6_protosw);
 	proto_unregister(&homa_prot);
 	proto_unregister(&homav6_prot);
+#ifndef __UPSTREAM__ /* See strip.py */
+	tt_destroy();
+#endif /* See strip.py */
 }
 
 module_init(homa_load);
