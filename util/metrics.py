@@ -443,7 +443,7 @@ if elapsed_secs != 0:
             "data_xmit_errors",
             "server_cant_create_rpcs", "server_cant_create_rpcs",
             "short_packets", "rpc_timeouts", "server_rpc_discards",
-            "server_rpcs_unknown", "forced_reaps", "buffer_alloc_failures",
+            "server_rpcs_unknown", "buffer_alloc_failures",
             "dropped_data_no_bufs", "linux_pkt_alloc_bytes"]:
         if deltas[symbol] == 0:
             continue

@@ -335,8 +335,6 @@ char *homa_metrics_print(void)
 		  m->reaper_calls);
 		M("reaper_dead_skbs          %15llu  Sum of hsk->dead_skbs across all reaper calls\n",
 		  m->reaper_dead_skbs);
-		M("forced_reaps              %15llu  Reaps forced by accumulation of dead RPCs\n",
-		  m->forced_reaps);
 		M("throttle_list_adds        %15llu  Calls to homa_add_to_throttled\n",
 		  m->throttle_list_adds);
 		M("throttle_list_checks      %15llu  List elements checked in homa_add_to_throttled\n",
