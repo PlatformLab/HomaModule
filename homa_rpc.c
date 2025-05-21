@@ -391,24 +391,70 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 
 /**
  * homa_rpc_reap() - Invoked to release resources associated with dead
- * RPCs for a given socket. For a large RPC, it can take a long time to
- * free all of its packet buffers, so we try to perform this work
- * off the critical path where it won't delay applications. Each call to
- * this function normally does a small chunk of work (unless reap_all is
- * true). See the file reap.txt for more information.
+ * RPCs for a given socket.
  * @hsk:      Homa socket that may contain dead RPCs. Must not be locked by the
  *            caller; this function will lock and release.
  * @reap_all: False means do a small chunk of work; there may still be
- *            unreaped RPCs on return. True means reap all dead rpcs for
+ *            unreaped RPCs on return. True means reap all dead RPCs for
  *            hsk.  Will busy-wait if reaping has been disabled for some RPCs.
  *
  * Return: A return value of 0 means that we ran out of work to do; calling
  *         again will do no work (there could be unreaped RPCs, but if so,
- *         reaping has been disabled for them).  A value greater than
- *         zero means there is still more reaping work to be done.
+ *         they cannot currently be reaped).  A value greater than zero means
+ *         there is still more reaping work to be done.
  */
 int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 {
+	/* RPC Reaping Strategy:
+	 *
+	 * (Note: there are references to this comment elsewhere in the
+	 * Homa code)
+	 *
+	 * Most of the cost of reaping comes from freeing sk_buffs; this can be
+	 * quite expensive for RPCs with long messages.
+	 *
+	 * The natural time to reap is when homa_rpc_end is invoked to
+	 * terminate an RPC, but this doesn't work for two reasons. First,
+	 * there may be outstanding references to the RPC; it cannot be reaped
+	 * until all of those references have been released. Second, reaping
+	 * is potentially expensive and RPC termination could occur in
+	 * homa_softirq when there are short messages waiting to be processed.
+	 * Taking time to reap a long RPC could result in significant delays
+	 * for subsequent short RPCs.
+	 *
+	 * Thus Homa doesn't reap immediately in homa_rpc_end. Instead, dead
+	 * RPCs are queued up and reaping occurs in this function, which is
+	 * invoked later when it is less likely to impact latency. The
+	 * challenge is to do this so that (a) we don't allow large numbers of
+	 * dead RPCs to accumulate and (b) we minimize the impact of reaping
+	 * on latency.
+	 *
+	 * The primary place where homa_rpc_reap is invoked is when threads
+	 * are waiting for incoming messages. The thread has nothing else to
+	 * do (it may even be polling for input), so reaping can be performed
+	 * with no latency impact on the application.  However, if a machine
+	 * is overloaded then it may never wait, so this mechanism isn't always
+	 * sufficient.
+	 *
+	 * Homa now reaps in two other places, if reaping while waiting for
+	 * messages isn't adequate:
+         * 1. If too may dead skbs accumulate, then homa_timer will call
+	 *    homa_rpc_reap.
+	 * 2. If this timer thread cannot keep up with all the reaping to be
+	 *    done then as a last resort homa_dispatch_pkts will reap in small
+	 *    increments (a few sk_buffs or RPCs) for every incoming batch
+	 *    of packets . This is undesirable because it will impact Homa's
+	 *    performance.
+	 *
+	 * During the introduction of homa_pools for managing input
+  	 * buffers, freeing of packets for incoming messages was moved to
+  	 * homa_copy_to_user under the assumption that this code wouldn't be
+	 * on the critical path. However, there is evidence that with
+	 * fast networks (e.g. 100 Gbps) copying to user space is the
+	 * bottleneck for incoming messages, and packet freeing takes about
+  	 * 20-25% of the total time in homa_copy_to_user. So, it may eventually
+         * be desirable to remove packet freeing out of homa_copy_to_user.
+	*/
 #ifdef __UNIT_TEST__
 #define BATCH_MAX 3
 #else /* __UNIT_TEST__ */

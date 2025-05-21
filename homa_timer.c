@@ -230,7 +230,8 @@ void homa_timer(struct homa *homa)
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
 			/* If we get here, it means that Homa isn't keeping
 			 * up with RPC reaping, so we'll help out.  See
-			 * reap.txt for more info.
+			 * "RPC Reaping Strategy" in homa_rpc_reap code for
+			 * details.
 			 */
 #ifndef __STRIP__ /* See strip.py */
 			u64 rpc_start = homa_clock();

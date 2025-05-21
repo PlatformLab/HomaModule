@@ -595,7 +595,8 @@ discard:
 
 	if (hsk->dead_skbs >= 2 * hsk->homa->dead_buffs_limit) {
 		/* We get here if other approaches are not keeping up with
-		 * reaping dead RPCs. See reap.txt for details.
+		 * reaping dead RPCs. See "RPC Reaping Strategy" in
+		 * homa_rpc_reap code for details.
 		 */
 #ifndef __STRIP__ /* See strip.py */
 		u64 start = homa_clock();
