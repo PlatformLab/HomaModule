@@ -1214,7 +1214,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		else
 			rpc->state = RPC_IN_SERVICE;
 	}
-	homa_rpc_unlock(rpc); /* Locked by homa_wait_for_message. */
+	homa_rpc_unlock(rpc); /* Locked by homa_wait_shared/private. */
 
 	if (test_bit(SOCK_NOSPACE, &hsk->sock.sk_socket->flags)) {
 		/* There are tasks waiting for tx memory, so reap

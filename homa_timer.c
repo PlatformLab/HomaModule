@@ -228,9 +228,9 @@ void homa_timer(struct homa *homa)
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
 			hsk; hsk = homa_socktab_next(&scan)) {
 		while (hsk->dead_skbs >= homa->dead_buffs_limit) {
-			/* If we get here, it means that homa_wait_for_message
-			 * isn't keeping up with RPC reaping, so we'll help
-			 * out.  See reap.txt for more info.
+			/* If we get here, it means that Homa isn't keeping
+			 * up with RPC reaping, so we'll help out.  See
+			 * reap.txt for more info.
 			 */
 #ifndef __STRIP__ /* See strip.py */
 			u64 rpc_start = homa_clock();

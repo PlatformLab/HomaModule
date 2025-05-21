@@ -533,7 +533,7 @@ struct homa_metrics {
 	u64 reaper_dead_skbs;
 
 	/**
-	 * @forced_reaps: total number of times that homa_wait_for_message
+	 * @forced_reaps: total number of times that homa_wait_shared/privatea
 	 * invoked the reaper because dead_skbs was too high.
 	 */
 	u64 forced_reaps;
