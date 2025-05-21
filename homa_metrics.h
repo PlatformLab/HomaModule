@@ -312,14 +312,14 @@ struct homa_metrics {
 	u64 peer_allocs;
 
 	/**
-	 * @peer_kmalloc_errors: total number of times homa_peer_find
+	 * @peer_kmalloc_errors: total number of times homa_peer_get
 	 * returned an error because it couldn't allocate memory for a new
 	 * peer.
 	 */
 	u64 peer_kmalloc_errors;
 
 	/**
-	 * @peer_route_errors: total number of times homa_peer_find
+	 * @peer_route_errors: total number of times homa_peer_get
 	 * returned an error because it couldn't create a route to the peer.
 	 */
 	u64 peer_route_errors;

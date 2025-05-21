@@ -281,21 +281,21 @@ struct homa_peer {
 
 void     homa_dst_refresh(struct homa_peertab *peertab,
 			  struct homa_peer *peer, struct homa_sock *hsk);
-struct homa_peertab
-	*homa_peertab_alloc(void);
-void     homa_peertab_free(struct homa_peertab *peertab);
-void     homa_peertab_free_net(struct homa_net *hnet);
-void     homa_peertab_free_fn(void *object, void *dummy);
 void     homa_peer_add_ack(struct homa_rpc *rpc);
 struct homa_peer
 	*homa_peer_alloc(struct homa_sock *hsk, const struct in6_addr *addr);
+struct homa_peertab
+	*homa_peer_alloc_peertab(void);
 int      homa_peer_dointvec(const struct ctl_table *table, int write,
 			    void *buffer, size_t *lenp, loff_t *ppos);
-struct homa_peer
-	*homa_peer_find(struct homa_sock *hsk, const struct in6_addr *addr);
 void     homa_peer_free(struct homa_peer *peer);
 void     homa_peer_free_dead(struct homa_peertab *peertab);
+void     homa_peer_free_fn(void *object, void *dummy);
+void     homa_peer_free_net(struct homa_net *hnet);
+void     homa_peer_free_peertab(struct homa_peertab *peertab);
 void     homa_peer_gc(struct homa_peertab *peertab);
+struct homa_peer
+	*homa_peer_get(struct homa_sock *hsk, const struct in6_addr *addr);
 int      homa_peer_get_acks(struct homa_peer *peer, int count,
 			    struct homa_ack *dst);
 struct dst_entry
@@ -367,7 +367,7 @@ static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 
 /**
  * homa_peer_hold() - Increment the reference count on an RPC, which will
- * prevent it from being freed until homa_peer_put() is called.
+ * prevent it from being freed until homa_peer_release() is called.
  * @peer:      Object on which to take a reference.
  */
 static inline void homa_peer_hold(struct homa_peer *peer)
@@ -376,12 +376,12 @@ static inline void homa_peer_hold(struct homa_peer *peer)
 }
 
 /**
- * homa_peer_put() - Release a reference on a peer (cancels the effect of
+ * homa_peer_release() - Release a reference on a peer (cancels the effect of
  * a previous call to homa_peer_hold). If the reference count becomes zero
  * then the peer may be deleted at any time.
  * @peer:      Object to release.
  */
-static inline void homa_peer_put(struct homa_peer *peer)
+static inline void homa_peer_release(struct homa_peer *peer)
 {
 	atomic_dec(&peer->refs);
 }

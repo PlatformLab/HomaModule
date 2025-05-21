@@ -133,9 +133,9 @@ TEST_F(homa_plumbing, homa_net_exit__free_peers)
 	struct in6_addr addr2 = unit_get_in_addr("1.2.3.5");
 	struct in6_addr addr3 = unit_get_in_addr("1.2.3.6");
 
-	homa_peer_put(homa_peer_find(&self->hsk, &addr1));
-	homa_peer_put(homa_peer_find(&self->hsk, &addr2));
-	homa_peer_put(homa_peer_find(&self->hsk, &addr3));
+	homa_peer_release(homa_peer_get(&self->hsk, &addr1));
+	homa_peer_release(homa_peer_get(&self->hsk, &addr2));
+	homa_peer_release(homa_peer_get(&self->hsk, &addr3));
 
 	EXPECT_EQ(3, unit_count_peers(&self->homa));
 	homa_net_exit(self->hsk.hnet->net);

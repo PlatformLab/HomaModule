@@ -1040,12 +1040,12 @@ TEST_F(homa_incoming, homa_dispatch_pkts__cutoffs_for_unknown_client_rpc)
 	struct homa_peer *peer;
 
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
-	peer = homa_peer_find(&self->hsk, self->server_ip);
+	peer = homa_peer_get(&self->hsk, self->server_ip);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(400, peer->cutoff_version);
 	EXPECT_EQ(9, peer->unsched_cutoffs[1]);
 	EXPECT_EQ(3, peer->unsched_cutoffs[7]);
-	homa_peer_put(peer);
+	homa_peer_release(peer);
 }
 #endif /* See strip.py */
 TEST_F(homa_incoming, homa_dispatch_pkts__resend_for_unknown_server_rpc)
@@ -1796,10 +1796,10 @@ TEST_F(homa_incoming, homa_cutoffs__cant_find_peer)
 	mock_kmalloc_errors = 1;
 	homa_cutoffs_pkt(skb, &self->hsk);
 	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_kmalloc_errors);
-	peer = homa_peer_find(&self->hsk, self->server_ip);
+	peer = homa_peer_get(&self->hsk, self->server_ip);
 	ASSERT_FALSE(IS_ERR(peer));
 	EXPECT_EQ(0, peer->cutoff_version);
-	homa_peer_put(peer);
+	homa_peer_release(peer);
 }
 #endif /* See strip.py */
 
@@ -1869,7 +1869,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_not_incoming)
 }
 TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 {
-	struct homa_peer *peer = homa_peer_find(&self->hsk, self->server_ip);
+	struct homa_peer *peer = homa_peer_get(&self->hsk, self->server_ip);
 	struct homa_need_ack_hdr h = {.common = {
 			.sport = htons(self->server_port),
 			.dport = htons(self->hsk.port),
@@ -1883,7 +1883,7 @@ TEST_F(homa_incoming, homa_need_ack_pkt__rpc_doesnt_exist)
 	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
 	EXPECT_STREQ("xmit ACK from 0.0.0.0:32768, dport 99, id 1234, acks [sp 99, id 1236]",
 			unit_log_get());
-	homa_peer_put(peer);
+	homa_peer_release(peer);
 }
 
 TEST_F(homa_incoming, homa_ack_pkt__target_rpc_exists_no_extras)

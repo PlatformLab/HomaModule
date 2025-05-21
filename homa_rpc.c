@@ -46,9 +46,9 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	bucket = homa_client_rpc_bucket(hsk, crpc->id);
 	crpc->bucket = bucket;
 	crpc->state = RPC_OUTGOING;
-	crpc->peer = homa_peer_find(hsk, &dest_addr_as_ipv6);
+	crpc->peer = homa_peer_get(hsk, &dest_addr_as_ipv6);
 	if (IS_ERR(crpc->peer)) {
-		tt_record("error in homa_peer_find");
+		tt_record("error in homa_peer_get");
 		err = PTR_ERR(crpc->peer);
 		crpc->peer = NULL;
 		goto error;
@@ -90,7 +90,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 
 error:
 	if (crpc->peer)
-		homa_peer_put(crpc->peer);
+		homa_peer_release(crpc->peer);
 	kfree(crpc);
 	return ERR_PTR(err);
 }
@@ -150,7 +150,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	srpc->hsk = hsk;
 	srpc->bucket = bucket;
 	srpc->state = RPC_INCOMING;
-	srpc->peer = homa_peer_find(hsk, source);
+	srpc->peer = homa_peer_get(hsk, source);
 	if (IS_ERR(srpc->peer)) {
 		err = PTR_ERR(srpc->peer);
 		srpc->peer = NULL;
@@ -204,7 +204,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 error:
 	homa_bucket_unlock(bucket, id);
 	if (srpc && srpc->peer)
-		homa_peer_put(srpc->peer);
+		homa_peer_release(srpc->peer);
 	kfree(srpc);
 	return ERR_PTR(err);
 }
@@ -547,7 +547,7 @@ release:
 				}
 			}
 			if (rpc->peer) {
-				homa_peer_put(rpc->peer);
+				homa_peer_release(rpc->peer);
 				rpc->peer = NULL;
 			}
 			tt_record2("homa_rpc_reap finished reaping id %d, socket %d",

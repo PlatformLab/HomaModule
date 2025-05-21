@@ -67,12 +67,12 @@ static struct ctl_table peer_ctl_table[] = {
 #endif /* See strip.py */
 
 /**
- * homa_peertab_alloc() - Allocate and initialize a homa_peertab.
+ * homa_peer_alloc_peertab() - Allocate and initialize a homa_peertab.
  *
  * Return:    A pointer to the new homa_peertab, or ERR_PTR(-errno) if there
  *            was a problem.
  */
-struct homa_peertab *homa_peertab_alloc(void)
+struct homa_peertab *homa_peer_alloc_peertab(void)
 {
 	struct homa_peertab *peertab;
 	int err;
@@ -109,17 +109,17 @@ struct homa_peertab *homa_peertab_alloc(void)
 	return peertab;
 
 error:
-	homa_peertab_free(peertab);
+	homa_peer_free_peertab(peertab);
 	return ERR_PTR(err);
 }
 
 /**
- * homa_peertab_free_net() - Garbage collect all of the peer information
+ * homa_peer_free_net() - Garbage collect all of the peer information
  * associated with a particular network namespace.
  * @hnet:    Network namespace whose peers should be freed. There must not
  *           be any active sockets or RPCs for this namespace.
  */
-void homa_peertab_free_net(struct homa_net *hnet)
+void homa_peer_free_net(struct homa_net *hnet)
 {
 	struct homa_peertab *peertab = hnet->homa->peertab;
 	struct rhashtable_iter iter;
@@ -157,13 +157,13 @@ void homa_peertab_free_net(struct homa_net *hnet)
 }
 
 /**
- * homa_peertab_free_fn() - This function is invoked for each entry in
+ * homa_peer_free_fn() - This function is invoked for each entry in
  * the peer hash table by the rhashtable code when the table is being
  * deleted. It frees its argument.
  * @object:     struct homa_peer to free.
  * @dummy:      Not used.
  */
-void homa_peertab_free_fn(void *object, void *dummy)
+void homa_peer_free_fn(void *object, void *dummy)
 {
 	struct homa_peer *peer = object;
 
@@ -171,13 +171,13 @@ void homa_peertab_free_fn(void *object, void *dummy)
 }
 
 /**
- * homa_peertab_free() - Destructor for homa_peertabs. After this
+ * homa_peer_free_peertab() - Destructor for homa_peertabs. After this
  * function returns, it is unsafe to use any results from previous calls
- * to homa_peer_find, since all existing homa_peer objects will have been
+ * to homa_peer_get, since all existing homa_peer objects will have been
  * destroyed.
  * @peertab:  The table to destroy.
  */
-void homa_peertab_free(struct homa_peertab *peertab)
+void homa_peer_free_peertab(struct homa_peertab *peertab)
 {
 	spin_lock_bh(&peertab->lock);
 	peertab->gc_stop_count++;
@@ -185,7 +185,7 @@ void homa_peertab_free(struct homa_peertab *peertab)
 
 	if (peertab->ht_valid) {
 		rhashtable_walk_exit(&peertab->ht_iter);
-		rhashtable_free_and_destroy(&peertab->ht, homa_peertab_free_fn,
+		rhashtable_free_and_destroy(&peertab->ht, homa_peer_free_fn,
 					    NULL);
 	}
 	while (!list_empty(&peertab->dead_peers))
@@ -491,7 +491,7 @@ void homa_peer_free(struct homa_peer *peer)
 }
 
 /**
- * homa_peer_find() - Returns the peer associated with a given host; creates
+ * homa_peer_get() - Returns the peer associated with a given host; creates
  * a new homa_peer if one doesn't already exist.
  * @hsk:        Socket where the peer will be used.
  * @addr:       Address of the desired host: IPv4 addresses are represented
@@ -500,9 +500,9 @@ void homa_peer_free(struct homa_peer *peer)
  * Return:      The peer associated with @addr, or a negative errno if an
  *              error occurred. On a successful return the reference count
  *              will be incremented for the returned peer. The caller must
- *              eventually call homa_peer_put to release the reference.
+ *              eventually call homa_peer_release to release the reference.
  */
-struct homa_peer *homa_peer_find(struct homa_sock *hsk,
+struct homa_peer *homa_peer_get(struct homa_sock *hsk,
 				 const struct in6_addr *addr)
 {
 	struct homa_peertab *peertab = hsk->homa->peertab;
@@ -531,14 +531,14 @@ struct homa_peer *homa_peer_find(struct homa_sock *hsk,
 						  &peer->ht_linkage, ht_params);
 	if (IS_ERR(other)) {
 		/* Couldn't insert; return the error info. */
-		homa_peer_put(peer);
+		homa_peer_release(peer);
 		homa_peer_free(peer);
 		peer = other;
 	} else if (other) {
 		/* Someone else already created the desired peer; use that
 		 * one instead of ours.
 		 */
-		homa_peer_put(peer);
+		homa_peer_release(peer);
 		homa_peer_free(peer);
 		peer = other;
 		homa_peer_hold(peer);

@@ -91,7 +91,7 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 	mock_kmalloc_errors = 4;
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_peertab_alloc couldn't create peertab: kmalloc failure",
+	EXPECT_SUBSTR("homa_peer_alloc_peertab couldn't create peertab: kmalloc failure",
 		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.peertab);
 	homa_destroy(&homa2);
@@ -157,13 +157,13 @@ TEST_F(homa_utils, homa_net_destroy__delete_peers)
 	mock_sock_init(&hsk2, hnet, 44);
 
 	addr = unit_get_in_addr("1.2.3.4");
-	peer = homa_peer_find(&hsk2, &addr);
-	homa_peer_put(peer);
-	peer = homa_peer_find(&self->hsk, &addr);
-	homa_peer_put(peer);
+	peer = homa_peer_get(&hsk2, &addr);
+	homa_peer_release(peer);
+	peer = homa_peer_get(&self->hsk, &addr);
+	homa_peer_release(peer);
 	addr = unit_get_in_addr("1.2.3.5");
-	peer = homa_peer_find(&hsk2, &addr);
-	homa_peer_put(peer);
+	peer = homa_peer_get(&hsk2, &addr);
+	homa_peer_release(peer);
 	EXPECT_EQ(3, unit_count_peers(&self->homa));
 
 	homa_net_destroy(hnet);

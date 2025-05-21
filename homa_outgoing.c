@@ -571,10 +571,10 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
 	unknown.common.urgent = htons(HOMA_TCP_URGENT);
 #endif /* See strip.py */
 	unknown.common.sender_id = cpu_to_be64(homa_local_id(h->sender_id));
-	peer = homa_peer_find(hsk, &saddr);
+	peer = homa_peer_get(hsk, &saddr);
 	if (!IS_ERR(peer))
 		__homa_xmit_control(&unknown, sizeof(unknown), peer, hsk);
-	homa_peer_put(peer);
+	homa_peer_release(peer);
 }
 
 /**

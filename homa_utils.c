@@ -52,7 +52,7 @@ int homa_init(struct homa *homa)
 		homa->pacer = NULL;
 		return err;
 	}
-	homa->peertab = homa_peertab_alloc();
+	homa->peertab = homa_peer_alloc_peertab();
 	if (IS_ERR(homa->peertab)) {
 		err = PTR_ERR(homa->peertab);
 		homa->peertab = NULL;
@@ -149,7 +149,7 @@ void homa_destroy(struct homa *homa)
 		homa->pacer = NULL;
 	}
 	if (homa->peertab) {
-		homa_peertab_free(homa->peertab);
+		homa_peer_free_peertab(homa->peertab);
 		homa->peertab = NULL;
 	}
 #ifndef __STRIP__ /* See strip.py */
@@ -182,7 +182,7 @@ int homa_net_init(struct homa_net *hnet, struct net *net, struct homa *homa)
 void homa_net_destroy(struct homa_net *hnet)
 {
 	homa_socktab_destroy(hnet->homa->socktab, hnet);
-	homa_peertab_free_net(hnet);
+	homa_peer_free_net(hnet);
 }
 
 #ifndef __STRIP__ /* See strip.py */
