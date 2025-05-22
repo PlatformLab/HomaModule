@@ -28,12 +28,7 @@
 int homa_init(struct homa *homa)
 {
 	int err;
-#ifndef __STRIP__ /* See strip.py */
-	int i;
-
-	_Static_assert(HOMA_MAX_PRIORITIES >= 8,
-		       "Homa requires at least 8 priority levels");
-#endif /* See strip.py */
+	IF_NO_STRIP(int i);
 
 	memset(homa, 0, sizeof(*homa));
 

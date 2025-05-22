@@ -350,13 +350,6 @@ struct homa_data_hdr {
 	/** @seg: First of possibly many segments. */
 	struct homa_seg_hdr seg;
 } __packed;
-_Static_assert(sizeof(struct homa_data_hdr) <= HOMA_MAX_HEADER,
-	       "homa_data_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
-_Static_assert(sizeof(struct homa_data_hdr) >= HOMA_MIN_PKT_LENGTH,
-	       "homa_data_hdr too small: Homa doesn't currently have code to pad data packets");
-_Static_assert(((sizeof(struct homa_data_hdr) - sizeof(struct homa_seg_hdr)) &
-		0x3) == 0,
-	       " homa_data_hdr length not a multiple of 4 bytes (required for TCP/TSO compatibility");
 
 /**
  * homa_data_len() - Returns the total number of bytes in a DATA packet
@@ -403,8 +396,6 @@ struct homa_grant_hdr {
 	 */
 	__u8 resend_all;
 } __packed;
-_Static_assert(sizeof(struct homa_grant_hdr) <= HOMA_MAX_HEADER,
-	       "homa_grant_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 #endif /* See strip.py */
 
 /**
@@ -444,8 +435,6 @@ struct homa_resend_hdr {
 	__u8 priority;
 #endif /* See strip.py */
 } __packed;
-_Static_assert(sizeof(struct homa_resend_hdr) <= HOMA_MAX_HEADER,
-	       "homa_resend_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_rpc_unknown_hdr - Wire format for RPC_UNKNOWN packets.
@@ -460,8 +449,6 @@ struct homa_rpc_unknown_hdr {
 	/** @common: Fields common to all packet types. */
 	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct homa_rpc_unknown_hdr) <= HOMA_MAX_HEADER,
-	       "homa_rpc_unknown_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_busy_hdr - Wire format for BUSY packets.
@@ -473,8 +460,6 @@ struct homa_busy_hdr {
 	/** @common: Fields common to all packet types. */
 	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct homa_busy_hdr) <= HOMA_MAX_HEADER,
-	       "homa_busy_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 #ifndef __STRIP__ /* See strip.py */
 /**
@@ -501,9 +486,7 @@ struct homa_cutoffs_hdr {
 	 */
 	__be16 cutoff_version;
 } __packed;
-_Static_assert(sizeof(struct homa_cutoffs_hdr) <= HOMA_MAX_HEADER,
-	       "homa_cutoffs_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
-	       #endif /* See strip.py */
+#endif /* See strip.py */
 
 #ifndef __UPSTREAM__ /* See strip.py */
 /**
@@ -516,8 +499,6 @@ struct homa_freeze_hdr {
 	/** @common: Fields common to all packet types. */
 	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct homa_freeze_hdr) <= HOMA_MAX_HEADER,
-	       "homa_freeze_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 #endif /* See strip.py */
 
 /**
@@ -530,8 +511,6 @@ struct homa_need_ack_hdr {
 	/** @common: Fields common to all packet types. */
 	struct homa_common_hdr common;
 } __packed;
-_Static_assert(sizeof(struct homa_need_ack_hdr) <= HOMA_MAX_HEADER,
-	       "homa_need_ack_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * struct homa_ack_hdr - Wire format for ACK packets.
@@ -551,8 +530,6 @@ struct homa_ack_hdr {
 	/** @acks: Info about RPCs that are no longer active. */
 	struct homa_ack acks[HOMA_MAX_ACKS_PER_PKT];
 } __packed;
-_Static_assert(sizeof(struct homa_ack_hdr) <= HOMA_MAX_HEADER,
-	       "homa_ack_hdr too large for HOMA_MAX_HEADER; must adjust HOMA_MAX_HEADER");
 
 /**
  * homa_local_id(): given an RPC identifier from an input packet (which

@@ -74,13 +74,6 @@ struct homa_sendmsg_args {
 	__u32 reserved;
 };
 
-#if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_sendmsg_args) >= 24,
-	       "homa_sendmsg_args shrunk");
-_Static_assert(sizeof(struct homa_sendmsg_args) <= 24,
-	       "homa_sendmsg_args grew");
-#endif
-
 /* Flag bits for homa_sendmsg_args.flags (see man page for documentation):
  */
 #define HOMA_SENDMSG_PRIVATE       0x01
@@ -125,13 +118,6 @@ struct homa_recvmsg_args {
 	__u32 bpage_offsets[HOMA_MAX_BPAGES];
 };
 
-#if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_recvmsg_args) >= 88,
-	       "homa_recvmsg_args shrunk");
-_Static_assert(sizeof(struct homa_recvmsg_args) <= 88,
-	       "homa_recvmsg_args grew");
-#endif
-
 #ifndef __STRIP__ /* See strip.py */
 /**
  * struct homa_abort_args - Structure that passes arguments and results
@@ -153,11 +139,6 @@ struct homa_abort_args {
 	/** @_pad2: Reserved. */
 	__u64 _pad2[2];
 };
-
-#if !defined(__cplusplus)
-_Static_assert(sizeof(struct homa_abort_args) >= 32, "homa_abort_args shrunk");
-_Static_assert(sizeof(struct homa_abort_args) <= 32, "homa_abort_args grew");
-#endif
 #endif /* See strip.py */
 
 /** define SO_HOMA_RCVBUF: setsockopt option for specifying buffer region. */

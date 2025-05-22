@@ -455,6 +455,45 @@ int __init homa_load(void)
 	struct homa *homa = global_homa;
 	int status;
 
+	/* Compile-time validations that no packet header is longer
+	 * than HOMA_MAX_HEADER.
+	 */
+	BUILD_BUG_ON(sizeof(struct homa_data_hdr) > HOMA_MAX_HEADER);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_grant_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_resend_hdr) > HOMA_MAX_HEADER);
+	BUILD_BUG_ON(sizeof(struct homa_rpc_unknown_hdr) > HOMA_MAX_HEADER);
+	BUILD_BUG_ON(sizeof(struct homa_busy_hdr) > HOMA_MAX_HEADER);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_cutoffs_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
+#ifndef __UPSTREAM__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_freeze_hdr) > HOMA_MAX_HEADER);
+#endif /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_need_ack_hdr) > HOMA_MAX_HEADER);
+	BUILD_BUG_ON(sizeof(struct homa_ack_hdr) > HOMA_MAX_HEADER);
+
+	/* Extra constraints on data packets:
+	 * - Ensure minimum header length so Homa doesn't have to worry about
+	 *   padding data packets.
+	 * - Make sure data packet headers are a multiple of 4 bytes (needed
+	 *   for TCP/TSO compatibility).
+	 */
+	BUILD_BUG_ON(sizeof(struct homa_data_hdr) < HOMA_MIN_PKT_LENGTH);
+	BUILD_BUG_ON((sizeof(struct homa_data_hdr) -
+		      sizeof(struct homa_seg_hdr)) & 0x3);
+
+	/* Homa requires at least 8 priority levels. */
+	BUILD_BUG_ON(HOMA_MAX_PRIORITIES < 8);
+
+	/* Detect size changes in uAPI structs. */
+	BUILD_BUG_ON(sizeof(struct homa_sendmsg_args) != 24);
+	BUILD_BUG_ON(sizeof(struct homa_recvmsg_args) != 88);
+#ifndef __STRIP__ /* See strip.py */
+	BUILD_BUG_ON(sizeof(struct homa_abort_args) != 32);
+#endif /* See strip.py */
+
 	pr_err("Homa module loading\n");
 #ifndef __STRIP__ /* See strip.py */
 	pr_notice("Homa structure sizes: homa_data_hdr %lu, homa_seg_hdr %lu, ack %lu, peer %lu, ip_hdr %lu flowi %lu ipv6_hdr %lu, flowi6 %lu tcp_sock %lu homa_rpc %lu sk_buff %lu rcvmsg_control %lu union sockaddr_in_union %lu HOMA_MAX_BPAGES %u NR_CPUS %u nr_cpu_ids %u, MAX_NUMNODES %d\n",
