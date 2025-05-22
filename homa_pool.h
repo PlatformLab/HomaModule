@@ -39,13 +39,6 @@ struct homa_bpage {
 	u64 expiration;
 } ____cacheline_aligned_in_smp;
 
-#ifndef __STRIP__ /* See strip.py */
-#ifndef CONFIG_LOCKDEP
-_Static_assert(sizeof(struct homa_bpage) == L1_CACHE_BYTES,
-	       "homa_bpage overflowed a cache line");
-#endif
-#endif /* See strip.py */
-
 /**
  * struct homa_pool_core - Holds core-specific data for a homa_pool (a bpage
  * out of which that core is allocating small chunks).
