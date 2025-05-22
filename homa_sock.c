@@ -281,7 +281,8 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	 *    there will be no concurrent activities on individual RPCs.
 	 * 5. Don't delete the buffer pool until after all of the RPCs
 	 *    have been reaped.
-	 * See sync.txt for additional information about locking.
+	 * See "Homa Locking Strategy" in homa_impl.h for additional information
+	 * about locking.
 	 */
 	hsk->shutdown = true;
 	homa_sock_unlink(hsk);

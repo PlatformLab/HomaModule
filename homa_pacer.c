@@ -258,10 +258,11 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		/* Lock the first throttled RPC. This may not be possible
 		 * because we have to hold throttle_lock while locking
 		 * the RPC; that means we can't wait for the RPC lock because
-		 * of lock ordering constraints (see sync.txt). Thus, if
-		 * the RPC lock isn't available, do nothing. Holding the
-		 * throttle lock while locking the RPC is important because
-		 * it keeps the RPC from being deleted before it can be locked.
+		 * of lock ordering constraints (see "Homa Locking Strategy" in
+		 * homa_impl.h). Thus, if the RPC lock isn't available, do
+		 * nothing. Holding the throttle lock while locking the RPC
+		 * is important because it keeps the RPC from being deleted
+		 * before it can be locked.
 		 */
 		homa_pacer_throttle_lock(pacer);
 		pacer->fifo_count -= pacer->fifo_fraction;

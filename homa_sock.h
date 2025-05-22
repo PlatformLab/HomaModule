@@ -74,9 +74,26 @@ struct homa_rpc_bucket {
 	/**
 	 * @lock: serves as a lock both for this bucket (e.g., when
 	 * adding and removing RPCs) and also for all of the RPCs in
-	 * the bucket. Must be held whenever manipulating an RPC in
-	 * this bucket. This dual purpose permits clean and safe
-	 * deletion and garbage collection of RPCs.
+	 * the bucket. Must be held whenever looking up an RPC in
+	 * this bucket or manipulating an RPC in the bucket. This approach
+	 * has the following properties:
+	 * 1. An RPC can be looked up and locked (a common operation) with
+	 *    a single lock acquisition.
+	 * 2. Looking up and locking are atomic: there is no window of
+	 *    vulnerability where someone else could delete an RPC after
+	 *    it has been looked up and before it has been locked.
+	 * 3. The lookup mechanism does not use RCU.  This is important because
+	 *    RPCs are created rapidly and typically live only a few tens of
+	 *    microseconds.  As of May 2027 RCU introduces a lag of about
+	 *    25 ms before objects can be deleted; for RPCs this would result
+	 *    in hundreds or thousands of RPCs accumulating before RCU allows
+	 *    them to be deleted.
+	 * This approach has the disadvantage that RPCs within a bucket share
+	 * locks and thus may not be able to work concurently, but there are
+	 * enough buckets in the table to make such colllisions rare.
+	 *
+	 * See "Homa Locking Strategy" in homa_impl.h for more info about
+	 * locking.
 	 */
 	spinlock_t lock __context__(rpc_bucket_lock, 1, 1);
 
@@ -177,15 +194,14 @@ struct homa_sock {
 	 * @lock: Must be held when modifying fields such as interests
 	 * and lists of RPCs. This lock is used in place of sk->sk_lock
 	 * because it's used differently (it's always used as a simple
-	 * spin lock).  See sync.txt for more on Homa's synchronization
-	 * strategy.
+	 * spin lock).  See "Homa Locking Strategy" in homa_impl.h
+	 * for more on Homa's synchronization strategy.
 	 */
 	spinlock_t lock ____cacheline_aligned_in_smp;
 
 	/**
 	 * @protect_count: counts the number of calls to homa_protect_rpcs
 	 * for which there have not yet been calls to homa_unprotect_rpcs.
-	 * See sync.txt for more info.
 	 */
 	atomic_t protect_count;
 

@@ -900,4 +900,105 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
 #endif /* __UNIT_TEST__ */
 }
 
+/* Homa Locking Strategy:
+ *
+ * (Note: this documentation is referenced in several other places in the
+ * Homa code)
+ *
+ * In the Linux TCP/IP stack the primary locking mechanism is a sleep-lock
+ * per socket. However, per-socket locks aren't adequate for Homa, because
+ * sockets are "larger" in Homa. In TCP, a socket corresponds to a single
+ * connection between two peers; an application can have hundreds or
+ * thousands of sockets open at once, so per-socket locks leave lots of
+ * opportunities for concurrency. With Homa, a single socket can be used for
+ * communicating with any number of peers, so there will typically be just
+ * one socket per thread. As a result, a single Homa socket must support many
+ * concurrent RPCs efficiently, and a per-socket lock would create a bottleneck
+ * (Homa tried this approach initially).
+ *
+ * Thus, the primary locks used in Homa spinlocks at RPC granularity. This
+ * allows operations on different RPCs for the same socket to proceed
+ * concurrently. Homa also has socket locks (which are spinlocks different
+ * from the official socket sleep-locks) but these are used much less
+ * frequently than RPC locks.
+ *
+ * Lock Ordering:
+ *
+ * There are several other locks in Homa besides RPC locks, all of which
+ * are spinlocks. When multiple locks are held, they must be acquired in a
+ * consistent order in order to prevent deadlock. Here are the rules for Homa:
+ * 1. Except for RPC and socket locks, all locks should be considered
+ *    "leaf" locks: don't accquire other locks while holding them.
+ * 2. The lock order is:
+ *    * RPC lock
+ *    * Socket lock
+ *    * Other lock
+ * 3. It is not safe to wait on an RPC lock while holding any other lock.
+ * 4. It is safe to wait on a socket lock while holding an RPC lock, but
+ *    not while holding any other lock.
+ *
+ * It may seem surprising that RPC locks are acquired *before* socket locks,
+ * but this is essential for high performance. Homa has been designed so that
+ * many common operations (such as processing input packets) can be performed
+ * while holding only an RPC lock; this allows operations on different RPCs
+ * to proceed in parallel. Only a few operations, such as handing off an
+ * incoming message to a waiting thread, require the socket lock. If socket
+ * locks had to be acquired first, any operation that might eventually need
+ * the socket lock would have to acquire it before the RPC lock, which would
+ * severely restrict concurrency.
+ *
+ * Socket Shutdown:
+ *
+ * It is possible for socket shutdown to begin while operations are underway
+ * that hold RPC locks but not the socket lock. For example, a new RPC
+ * creation might be underway when a socket is shut down. The RPC creation
+ * will eventually acquire the socket lock and add the new RPC to those
+ * for the socket; it would be very bad if this were to happen after
+ * homa_sock_shutdown things is has deleted all RPCs for the socket.
+ * In general, any operation that acquires a socket lock must check
+ * hsk->shutdown after acquiring the lock and abort if hsk->shutdown is set.
+ *
+ * Spinlock Implications:
+ *
+ * Homa uses spinlocks exclusively; this is needed because locks typically
+ * need to be acquired at atomic level, such as in SoftIRQ code.
+ *
+ * Operations that can block, such as memory allocation and copying data
+ * to/from user space, are not permitted while holding spinlocks (spinlocks
+ * disable interrupts, so the holder must not block. This results in awkward
+ * code in several places to move restricted operations outside locked
+ * regions. Such code typically looks like this:
+ *   - Acquire a reference on an object such as an RPC, in order to prevent
+ *     the object from being deleted.
+ *   - Release the object's lock.
+ *   - Perform the restricted operation.
+ *   - Re-acquire the lock.
+ *   - Release the reference.
+ * It is possible that the object may have been modified by some other party
+ * while it was unlocked, so additional checks may be needed after reacquiring
+ * the lock. As one example, an RPC may have been terminated, in which case
+ * any operation in progress on that RPC should be aborted after reacquiring
+ * the lock.
+ *
+ * Lists of RPCs:
+ *
+ * There are a few places where Homa needs to process all of the RPCs
+ * associated with a socket, such as the timer. Such code must first lock
+ * the socket (to protect access to the link pointers) then lock
+ * individual RPCs on the list. However, this violates the rules for locking
+ * order. It isn't safe to unlock the socket before locking the individual RPCs,
+ * because RPCs could be deleted and their memory recycled between the unlock
+ * of the socket lock and the lock of the RPC; this could result in corruption.
+ * Homa uses two different approaches to handle this situation:
+ * 1. Use ``homa_protect_rpcs`` to prevent RPC reaping for a socket. RPCs can
+ *    still be terminated, but their memory won't go away until
+ *    homa_unprotect_rpcs is invoked. This allows the socket lock to be
+ *    released before acquiring RPC locks; after acquiring each RPC lock,
+ *    the RPC must be checked to see if it has been terminated; if so, skip it.
+ * 2. Use ``spin_trylock_bh`` to acquire the RPC lock while still holding the
+ *    socket lock. If this fails, then release the socket lock and retry
+ *    both the socket lock and the RPC lock. Of course, the state of both
+ *    socket and RPC could change before the locks are finally acquired.
+ */
+
 #endif /* _HOMA_IMPL_H */

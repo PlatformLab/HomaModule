@@ -447,13 +447,7 @@ int      homa_validate_incoming(struct homa *homa, int verbose,
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.
- * @rpc:    RPC to lock. Note: this function is only safe under
- *          limited conditions (in most cases homa_bucket_lock should be
- *          used). The caller must ensure that the RPC cannot be reaped
- *          before the lock is acquired, such as by taking a reference on
- *          the rpc with homa_rpc_hold or calling homa_protect_rpcs.
- *          Don't use this function unless you are very sure what you are
- *          doing!  See sync.txt for more info on locking.
+ * @rpc:    RPC to lock.
  */
 static inline void homa_rpc_lock(struct homa_rpc *rpc)
 	__acquires(rpc_bucket_lock)
@@ -489,7 +483,9 @@ static inline void homa_rpc_unlock(struct homa_rpc *rpc)
  * homa_protect_rpcs() - Ensures that no RPCs will be reaped for a given
  * socket until homa_sock_unprotect is called. Typically used by functions
  * that want to scan the active RPCs for a socket without holding the socket
- * lock.  Multiple calls to this function may be in effect at once.
+ * lock.  Multiple calls to this function may be in effect at once. See
+ * "Homa Locking Strategy" in homa_impl.h for more info on why this function
+ * is needed.
  * @hsk:    Socket whose RPCs should be protected. Must not be locked
  *          by the caller; will be locked here.
  *

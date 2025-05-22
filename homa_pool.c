@@ -506,8 +506,9 @@ void homa_pool_check_waiting(struct homa_pool *pool)
 		if (!homa_rpc_try_lock(rpc)) {
 			/* Can't just spin on the RPC lock because we're
 			 * holding the socket lock and the lock order is
-			 * rpc->socket (see sync.txt). Instead, release the
-			 * socket lock and try the entire operation again.
+			 * rpc-then-socket (see "Homa Locking Strategy" in
+			 * homa_impl.h). Instead, release the socket lock
+			 * and try the entire operation again.
 			 */
 			homa_sock_unlock(pool->hsk);
 			UNIT_LOG("; ", "rpc lock unavailable in %s", __func__);
