@@ -564,6 +564,7 @@ void homa_dst_refresh(struct homa_peertab *peertab, struct homa_peer *peer,
 {
 	struct dst_entry *dst;
 
+	INC_METRIC(peer_dst_refreshes, 1);
 	dst = homa_peer_get_dst(peer, hsk);
 	if (IS_ERR(dst)) {
 #ifndef __STRIP__ /* See strip.py */

@@ -359,7 +359,8 @@ static inline void homa_peer_unlock(struct homa_peer *peer)
 static inline struct dst_entry *homa_get_dst(struct homa_peer *peer,
 					     struct homa_sock *hsk)
 {
-	if (unlikely(peer->dst->obsolete > 0))
+	if (unlikely(peer->dst->obsolete &&
+		     !peer->dst->ops->check(peer->dst, 0)))
 		homa_dst_refresh(hsk->homa->peertab, peer, hsk);
 	dst_hold(peer->dst);
 	return peer->dst;

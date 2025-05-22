@@ -267,6 +267,8 @@ char *homa_metrics_print(void)
 		  m->peer_kmalloc_errors);
 		M("peer_route_errors         %15llu  Routing failures creating peer table entries\n",
 		  m->peer_route_errors);
+		M("peer_dst_refreshes        %15llu  Obsolete dsts had to be regenerated\n",
+		  m->peer_dst_refreshes);
 		M("control_xmit_errors       %15llu  Errors sending control packets\n",
 		  m->control_xmit_errors);
 		M("data_xmit_errors          %15llu  Errors sending data packets\n",

@@ -38,6 +38,7 @@ int mock_copy_data_errors;
 int mock_copy_to_iter_errors;
 int mock_copy_to_user_errors;
 int mock_cpu_idle;
+int mock_dst_check_errors;
 int mock_import_ubuf_errors;
 int mock_import_iovec_errors;
 int mock_ip6_xmit_errors;
@@ -239,7 +240,9 @@ static int mock_num_hnets;
  */
 int mock_peer_free_no_fail;
 
-struct dst_ops mock_dst_ops = {.mtu = mock_get_mtu};
+struct dst_ops mock_dst_ops = {
+	.mtu = mock_get_mtu,
+	.check = mock_dst_check};
 struct netdev_queue mock_net_queue = {.state = 0};
 struct net_device mock_net_device = {
 		.gso_max_segs = 1000,
@@ -1639,6 +1642,13 @@ void mock_data_ready(struct sock *sk)
 	unit_log_printf("; ", "sk->sk_data_ready invoked");
 }
 
+struct dst_entry *mock_dst_check(struct dst_entry *dst, __u32 cookie)
+{
+	if (mock_check_error(&mock_dst_check_errors))
+		return NULL;
+	return dst;
+}
+
 /**
  * mock_get_clock() - Replacement for homa_clock; allows time to be
  * controlled by unit tests.
@@ -2104,6 +2114,7 @@ void mock_teardown(void)
 	mock_num_clock_vals = 0;
 	mock_tt_cycles = 0;
 	mock_ipv6 = mock_ipv6_default;
+	mock_dst_check_errors = 0;
 	mock_import_ubuf_errors = 0;
 	mock_import_iovec_errors = 0;
 	mock_ip6_xmit_errors = 0;

@@ -120,6 +120,7 @@ extern int         mock_copy_data_errors;
 extern int         mock_copy_to_user_dont_copy;
 extern int         mock_copy_to_user_errors;
 extern int         mock_cpu_idle;
+extern int         mock_dst_check_errors;
 extern int         mock_import_iovec_errors;
 extern int         mock_import_ubuf_errors;
 extern int         mock_ip6_xmit_errors;
@@ -174,6 +175,8 @@ void        mock_clear_xmit_prios(void);
 unsigned int mock_compound_order(struct page *page);
 int         mock_cpu_to_node(int core);
 void        mock_data_ready(struct sock *sk);
+struct dst_entry
+	   *mock_dst_check(struct dst_entry *, __u32 cookie);
 cycles_t    mock_get_cycles(void);
 unsigned int
 	    mock_get_mtu(const struct dst_entry *dst);

@@ -787,7 +787,7 @@ TEST_F(homa_peer, homa_unsched_priority)
 }
 #endif /* See strip.py */
 
-TEST_F(homa_peer, homa_peer_get_dst_ipv4)
+TEST_F(homa_peer, homa_peer_get_dst__ipv4)
 {
 	struct dst_entry *dst;
 
@@ -807,7 +807,7 @@ TEST_F(homa_peer, homa_peer_get_dst_ipv4)
 				homa_print_ipv4_addr(peer->flow.u.ip4.daddr));
 	homa_peer_release(peer);
 }
-TEST_F(homa_peer, homa_peer_get_dst_ipv6)
+TEST_F(homa_peer, homa_peer_get_dst__ipv6)
 {
 	struct dst_entry *dst;
 	char buffer[30];
@@ -947,4 +947,31 @@ TEST_F(homa_peer, homa_peer_update_sysctl_deps)
 	homa_peer_update_sysctl_deps(peertab);
 	EXPECT_EQ(10*HZ, peertab->idle_jiffies_min);
 	EXPECT_EQ(100*HZ, peertab->idle_jiffies_max);
+}
+
+/* Functions in homa_peer.h: */
+
+TEST_F(homa_peer, homa_get_dst__normal)
+{
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *dst;
+
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes);
+	dst_release(dst);
+	homa_peer_release(peer);
+}
+TEST_F(homa_peer, homa_get_dst__must_refresh)
+{
+	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);
+	struct dst_entry *dst;
+
+	peer->dst->obsolete = 1;
+	mock_dst_check_errors = 1;
+	dst = homa_get_dst(peer, &self->hsk);
+	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
+	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes);
+	dst_release(dst);
+	homa_peer_release(peer);
 }
