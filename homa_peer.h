@@ -300,18 +300,18 @@ int      homa_peer_get_acks(struct homa_peer *peer, int count,
 			    struct homa_ack *dst);
 struct dst_entry
 	*homa_peer_get_dst(struct homa_peer *peer, struct homa_sock *hsk);
-#ifndef __STRIP__ /* See strip.py */
-void     homa_peer_lock_slow(struct homa_peer *peer);
 int      homa_peer_pick_victims(struct homa_peertab *peertab,
 				struct homa_peer *victims[], int max_victims);
 int      homa_peer_prefer_evict(struct homa_peertab *peertab,
 				struct homa_peer *peer1,
 				struct homa_peer *peer2);
 void     homa_peer_rcu_callback(struct rcu_head *head);
+void     homa_peer_wait_dead(struct homa_peertab *peertab);
+void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
+#ifndef __STRIP__ /* See strip.py */
+void     homa_peer_lock_slow(struct homa_peer *peer);
 void     homa_peer_set_cutoffs(struct homa_peer *peer, int c0, int c1,
 			       int c2, int c3, int c4, int c5, int c6, int c7);
-void     homa_peer_update_sysctl_deps(struct homa_peertab *peertab);
-void     homa_peer_wait_dead(struct homa_peertab *peertab);
 #endif /* See strip.py */
 
 #ifndef __STRIP__ /* See strip.py */

@@ -119,6 +119,7 @@ TEST_F(homa_peer, homa_peer_alloc_peertab__rhashtable_init_fails)
 	EXPECT_TRUE(IS_ERR(peertab));
 	EXPECT_EQ(EINVAL, -PTR_ERR(peertab));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_peer, homa_peer_alloc_peertab__cant_register_sysctl)
 {
 	struct homa_peertab *peertab;
@@ -130,6 +131,7 @@ TEST_F(homa_peer, homa_peer_alloc_peertab__cant_register_sysctl)
 	EXPECT_SUBSTR("couldn't register sysctl parameters for Homa peertab",
 		      mock_printk_output);
 }
+#endif /* See strip.py */
 
 TEST_F(homa_peer, homa_peer_free_net__basics)
 {
@@ -200,8 +202,12 @@ TEST_F(homa_peer, homa_peer_free_peertab__basics) {
 
 	unit_log_clear();
 	homa_peer_free_peertab(self->homa.peertab);
+#ifndef __STRIP__ /* See strip.py */
 	EXPECT_STREQ("peer [2::2:2:2] has reference count 1; "
 		     "unregister_net_sysctl_table", unit_log_get());
+#else /* See strip.py */
+	EXPECT_STREQ("peer [2::2:2:2] has reference count 1", unit_log_get());
+#endif /* See strip.py */
 
 	kfree(peer);
 	self->homa.peertab = homa_peer_alloc_peertab();
@@ -958,7 +964,7 @@ TEST_F(homa_peer, homa_get_dst__normal)
 
 	dst = homa_get_dst(peer, &self->hsk);
 	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
-	EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes);
+	IF_NO_STRIP(EXPECT_EQ(0, homa_metrics_per_cpu()->peer_dst_refreshes));
 	dst_release(dst);
 	homa_peer_release(peer);
 }
@@ -971,7 +977,7 @@ TEST_F(homa_peer, homa_get_dst__must_refresh)
 	mock_dst_check_errors = 1;
 	dst = homa_get_dst(peer, &self->hsk);
 	EXPECT_EQ(2, atomic_read(&dst->__rcuref.refcnt));
-	EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes);
+	IF_NO_STRIP(EXPECT_EQ(1, homa_metrics_per_cpu()->peer_dst_refreshes));
 	dst_release(dst);
 	homa_peer_release(peer);
 }

@@ -76,7 +76,11 @@ TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 {
 	struct homa homa2;
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 2;
+#else /* See strip.py */
+	mock_kmalloc_errors = 1;
+#endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("homa_pacer_alloc couldn't allocate homa_pacer struct",
@@ -88,7 +92,11 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 {
 	struct homa homa2;
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 4;
+#else /* See strip.py */
+	mock_kmalloc_errors = 2;
+#endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("homa_peer_alloc_peertab couldn't create peertab: kmalloc failure",
@@ -100,7 +108,11 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 {
 	struct homa homa2;
 
+#ifndef __STRIP__ /* See strip.py */
 	mock_kmalloc_errors = 0x10;
+#else /* See strip.py */
+	mock_kmalloc_errors = 8;
+#endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
 	EXPECT_SUBSTR("homa_init couldn't create socktab: kmalloc failure",

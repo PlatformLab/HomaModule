@@ -109,7 +109,7 @@ static const char *dead_rpcs(struct homa_sock *hsk)
 	struct homa_rpc *rpc;
 
 	list_for_each_entry_rcu(rpc, &hsk->dead_rpcs, dead_links)
-		UNIT_LOG(" ", "%llu", rpc->id);
+		unit_log_printf(" ", "%llu", rpc->id);
 	return unit_log_get();
 }
 

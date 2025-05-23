@@ -484,8 +484,10 @@ int __init homa_load(void)
 	BUILD_BUG_ON((sizeof(struct homa_data_hdr) -
 		      sizeof(struct homa_seg_hdr)) & 0x3);
 
+#ifndef __STRIP__ /* See strip.py */
 	/* Homa requires at least 8 priority levels. */
 	BUILD_BUG_ON(HOMA_MAX_PRIORITIES < 8);
+#endif /* See strip.py */
 
 	/* Detect size changes in uAPI structs. */
 	BUILD_BUG_ON(sizeof(struct homa_sendmsg_args) != 24);
@@ -636,12 +638,12 @@ void __exit homa_unload(void)
 		wake_up_process(timer_kthread);
 		wait_for_completion(&timer_thread_done);
 	}
-	unregister_pernet_subsys(&homa_net_ops);
 	if (homa_offload_end() != 0)
 		pr_err("Homa couldn't stop offloads\n");
 	unregister_net_sysctl_table(homa_ctl_header);
 	homa_metrics_end();
 #endif /* See strip.py */
+	unregister_pernet_subsys(&homa_net_ops);
 	homa_destroy(homa);
 	inet_del_protocol(&homa_protocol, IPPROTO_HOMA);
 	inet_unregister_protosw(&homa_protosw);

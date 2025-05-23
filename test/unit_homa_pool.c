@@ -60,6 +60,7 @@ static void steal_bpages_hook(char *id)
 		atomic_set(&cur_pool->descriptors[3].refs, 1);
 	}
 }
+#ifndef __STRIP__ /* See strip.py */
 static void change_owner_hook(char *id)
 {
 	if (strcmp(id, "spin_lock") != 0)
@@ -69,6 +70,7 @@ static void change_owner_hook(char *id)
 	cur_pool->descriptors[cur_pool->cores[smp_processor_id()]
 			.page_hint].owner = -1;
 }
+#endif /* See strip.py */
 
 TEST_F(homa_pool, set_bpages_needed)
 {
@@ -339,6 +341,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__no_partial_page)
 	EXPECT_EQ(HOMA_BPAGE_SIZE, crpc->msgin.bpage_offsets[1]);
 	EXPECT_EQ(0, atomic_read(&pool->free_bpages));
 }
+#ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_locked_and_page_stolen)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;
@@ -367,6 +370,7 @@ TEST_F(homa_pool, homa_pool_alloc_msg__owned_page_locked_and_page_stolen)
 	EXPECT_EQ(1, pool->descriptors[3].owner);
 	EXPECT_EQ(38, atomic_read(&pool->free_bpages));
 }
+#endif /* See strip.py */
 TEST_F(homa_pool, homa_pool_alloc_msg__page_wrap_around)
 {
 	struct homa_pool *pool = self->hsk.buffer_pool;

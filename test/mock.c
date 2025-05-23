@@ -496,6 +496,15 @@ void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 	clock_base.get_time = &hrtimer_get_time;
 }
 
+void hrtimer_setup(struct hrtimer *timer,
+		   enum hrtimer_restart (*function)(struct hrtimer *),
+		   clockid_t clock_id, enum hrtimer_mode mode)
+{
+	timer->base = &clock_base;
+	clock_base.get_time = &hrtimer_get_time;
+	timer->function = function;
+}
+
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		u64 range_ns, const enum hrtimer_mode mode)
 {}

@@ -108,9 +108,11 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	homa_peer_update_sysctl_deps(peertab);
 	return peertab;
 
+#ifndef __STRIP__ /* See strip.py */
 error:
 	homa_peer_free_peertab(peertab);
 	return ERR_PTR(err);
+#endif /* See strip.py */
 }
 
 /**
@@ -758,7 +760,6 @@ int homa_peer_get_acks(struct homa_peer *peer, int count, struct homa_ack *dst)
 	return count;
 }
 
-#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_update_sysctl_deps() - Update any peertab fields that depend
  * on values set by sysctl. This function is invoked anytime a peer sysctl
@@ -771,6 +772,7 @@ void homa_peer_update_sysctl_deps(struct homa_peertab *peertab)
 	peertab->idle_jiffies_max = peertab->idle_secs_max * HZ;
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_peer_dointvec() - This function is a wrapper around proc_dointvec. It
  * is invoked to read and write peer-related sysctl values.
