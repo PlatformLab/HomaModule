@@ -71,7 +71,6 @@ struct homa;
 struct homa_peer;
 struct homa_rpc;
 struct homa_sock;
-struct homa_shared;
 
 #ifndef __STRIP__ /* See strip.py */
 #include "timetrace.h"
@@ -673,7 +672,6 @@ void unit_hook(char *id);
 #endif /* __UNIT_TEST__ */
 
 extern unsigned int homa_net_id;
-extern struct homa_shared *homa_shared;
 
 void     homa_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 		      struct homa_rpc *rpc);
