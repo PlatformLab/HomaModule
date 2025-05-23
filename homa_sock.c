@@ -96,8 +96,9 @@ struct homa_sock *homa_socktab_next(struct homa_socktab_scan *scan)
 		if (next)
 			goto success;
 	}
-	while (scan->current_bucket < HOMA_SOCKTAB_BUCKETS - 1) {
-		scan->current_bucket++;
+	for (scan->current_bucket++;
+	     scan->current_bucket < HOMA_SOCKTAB_BUCKETS;
+	     scan->current_bucket++) {
 		bucket = &scan->socktab->buckets[scan->current_bucket];
 		next = rcu_dereference(hlist_first_rcu(bucket));
 		if (next)

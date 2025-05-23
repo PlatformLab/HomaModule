@@ -15,11 +15,10 @@ void     homa_sock_lock_slow(struct homa_sock *hsk);
 
 /**
  * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
- * Must be a power of 2. Note: can't use BIT here because the result needs
- * to be signed.
+ * Must be a power of 2.
  */
 #define HOMA_SOCKTAB_BUCKET_BITS 10
-#define HOMA_SOCKTAB_BUCKETS (1 << HOMA_SOCKTAB_BUCKET_BITS)
+#define HOMA_SOCKTAB_BUCKETS BIT(HOMA_SOCKTAB_BUCKET_BITS)
 
 /**
  * struct homa_socktab - A hash table that maps from port numbers (either
@@ -61,7 +60,7 @@ struct homa_socktab_scan {
 
 	/**
 	 * @current_bucket: The index of the bucket in socktab->buckets
-	 * currently being scanned.
+	 * currently being scanned (-1 if @hsk == NULL).
 	 */
 	int current_bucket;
 };
