@@ -28,7 +28,7 @@
  *            caller must eventually unlock it.
  */
 struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
-				     const union sockaddr_in_union *dest)
+				       const union sockaddr_in_union *dest)
 	__acquires(rpc_bucket_lock)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
@@ -112,8 +112,8 @@ error:
  *          to h, then it is returned instead of creating a new RPC.
  */
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
-				     const struct in6_addr *source,
-				     struct homa_data_hdr *h, int *created)
+				       const struct in6_addr *source,
+				       struct homa_data_hdr *h, int *created)
 	__acquires(rpc_bucket_lock)
 {
 	u64 id = homa_local_id(h->common.sender_id);
@@ -438,7 +438,7 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 *
 	 * Homa now reaps in two other places, if reaping while waiting for
 	 * messages isn't adequate:
-         * 1. If too may dead skbs accumulate, then homa_timer will call
+	 * 1. If too may dead skbs accumulate, then homa_timer will call
 	 *    homa_rpc_reap.
 	 * 2. If this timer thread cannot keep up with all the reaping to be
 	 *    done then as a last resort homa_dispatch_pkts will reap in small
@@ -447,14 +447,14 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	 *    performance.
 	 *
 	 * During the introduction of homa_pools for managing input
-  	 * buffers, freeing of packets for incoming messages was moved to
-  	 * homa_copy_to_user under the assumption that this code wouldn't be
+	 * buffers, freeing of packets for incoming messages was moved to
+	 * homa_copy_to_user under the assumption that this code wouldn't be
 	 * on the critical path. However, there is evidence that with
 	 * fast networks (e.g. 100 Gbps) copying to user space is the
 	 * bottleneck for incoming messages, and packet freeing takes about
-  	 * 20-25% of the total time in homa_copy_to_user. So, it may eventually
-         * be desirable to remove packet freeing out of homa_copy_to_user.
-	*/
+	 * 20-25% of the total time in homa_copy_to_user. So, it may eventually
+	 * be desirable to remove packet freeing out of homa_copy_to_user.
+	 */
 #ifdef __UNIT_TEST__
 #define BATCH_MAX 3
 #else /* __UNIT_TEST__ */

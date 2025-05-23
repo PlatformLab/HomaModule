@@ -225,7 +225,7 @@ int homa_sock_init(struct homa_sock *hsk)
 	}
 	hlist_add_head_rcu(&hsk->socktab_links,
 			   &socktab->buckets[homa_socktab_bucket(hnet,
-							         hsk->port)]);
+								 hsk->port)]);
 	spin_unlock_bh(&socktab->write_lock);
 	return result;
 
@@ -463,7 +463,7 @@ void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
 		   id, bucket->id);
 	spin_lock_bh(&bucket->lock);
 	tt_record2("ending wait for bucket lock, id %d, (bucket %d)",
-		    id, bucket->id);
+		   id, bucket->id);
 	if (homa_is_client(id)) {
 		INC_METRIC(client_lock_misses, 1);
 		INC_METRIC(client_lock_miss_cycles, homa_clock() - start);

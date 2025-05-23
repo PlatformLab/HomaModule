@@ -505,7 +505,7 @@ void homa_peer_free(struct homa_peer *peer)
  *              eventually call homa_peer_release to release the reference.
  */
 struct homa_peer *homa_peer_get(struct homa_sock *hsk,
-				 const struct in6_addr *addr)
+				const struct in6_addr *addr)
 {
 	struct homa_peertab *peertab = hsk->homa->peertab;
 	struct homa_peer *peer, *other;

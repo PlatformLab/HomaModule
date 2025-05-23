@@ -125,8 +125,8 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
  * Return: A pointer to the new packet, or a negative errno.
  */
 struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
-				     struct iov_iter *iter, int offset,
-				     int length, int max_seg_data)
+				       struct iov_iter *iter, int offset,
+				       int length, int max_seg_data)
 	__must_hold(rpc_bucket_lock)
 {
 	struct homa_skb_info *homa_info;
@@ -356,7 +356,7 @@ int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
 		if (skb_data_bytes > bytes_left)
 			skb_data_bytes = bytes_left;
 		skb = homa_tx_data_pkt_alloc(rpc, iter, offset, skb_data_bytes,
-					   max_seg_data);
+					     max_seg_data);
 		if (IS_ERR(skb)) {
 			err = PTR_ERR(skb);
 			homa_rpc_lock(rpc);

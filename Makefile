@@ -14,11 +14,6 @@ HOMA_OBJS := homa_devel.o \
 	homa_utils.o \
 	timetrace.o
 
-ifneq ($(KERNELRELEASE),)
-
-obj-m += homa.o
-homa-y = $(HOMA_OBJS)
-
 ifneq ($(__STRIP__),)
 MY_CFLAGS += -D__STRIP__
 else
@@ -28,10 +23,8 @@ HOMA_OBJS += homa_grant.o \
 	homa_skb.o
 endif
 
-MY_CFLAGS += -g
-ccflags-y += $(MY_CFLAGS)
-
-else
+CHECK_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))
+CHECK_SRCS += $(filter-out homa_receiver.h homa_devel.h, $(wildcard *.h))
 
 ifneq ($(KERNEL_SRC),)
 # alternatively to variable KDIR accept variable KERNEL_SRC as used in
@@ -42,17 +35,31 @@ endif
 LINUX_VERSION ?= $(shell uname -r)
 KDIR ?= /lib/modules/$(LINUX_VERSION)/build
 
+LINUX_SRC_DIR ?= ../net-next
+
+ifneq ($(KERNELRELEASE),)
+
+obj-m += homa.o
+homa-y = $(HOMA_OBJS)
+
+MY_CFLAGS += -g
+ccflags-y += $(MY_CFLAGS)
+
+else
+
 all:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) modules
 
 install:
 	$(MAKE) -C $(KDIR) M=$(shell pwd) modules_install
 
-check:
-	../homaLinux/scripts/kernel-doc -none *.c
+kdoc:
+	$(LINUX_SRC_DIR)/scripts/kernel-doc -none $(CHECK_SRCS)
+
+checkpatch:
+	$(LINUX_SRC_DIR)/scripts/checkpatch.pl --file --strict $(CHECK_SRCS)
 
 # Copy stripped source files to a Linux source tree
-LINUX_SRC_DIR ?= ../net-next
 HOMA_TARGET ?= $(LINUX_SRC_DIR)/net/homa
 CP_HDRS := homa_impl.h \
 	   homa_interest.h \
@@ -63,10 +70,9 @@ CP_HDRS := homa_impl.h \
 	   homa_sock.h \
 	   homa_stub.h \
 	   homa_wire.h
-CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o timetrace.o, $(HOMA_OBJS)))
-CP_EXTRAS := reap.txt \
-	     sync.txt \
-	     Kconfig \
+CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
+		homa_metrics.o homa_offload.o homa_skb.o timetrace.o, $(HOMA_OBJS)))
+CP_EXTRAS := Kconfig \
 	     Makefile \
 	     strip_decl.py
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))

@@ -129,7 +129,7 @@ struct homa {
 	struct homa_pacer *pacer;
 
 	/**
-	 * @peers: Info about all the other hosts we have communicated with;
+	 * @peertab: Info about all the other hosts we have communicated with;
 	 * includes peers from all network namespaces.
 	 */
 	struct homa_peertab *peertab;
@@ -449,7 +449,7 @@ struct homa {
 	/**
 	 * @bpage_lease_cycles: same as bpage_lease_usecs except in
 	 * homa_clock() units.
-	 * */
+	 */
 	int bpage_lease_cycles;
 
 	/**
@@ -498,7 +498,8 @@ struct homa_net {
 	 */
 	__u16 prev_default_port;
 
-	/* @num_peers: The total number of struct homa_peers that exist
+	/**
+	 * @num_peers: The total number of struct homa_peers that exist
 	 * for this namespace. Managed by homa_peer.c under the peertab lock.
 	 */
 	int num_peers;
@@ -876,7 +877,7 @@ static inline u64 homa_ns_to_cycles(u64 ns)
 }
 
 /**
- * homa_usec_to_cycles() - Convert from units of microseconds to units of
+ * homa_usecs_to_cycles() - Convert from units of microseconds to units of
  * homa_clock().
  * @usecs:   A time measurement in microseconds
  * Return:   The time in homa_clock() units corresponding to @usecs.
@@ -926,7 +927,7 @@ static inline u64 homa_usecs_to_cycles(u64 usecs)
  * are spinlocks. When multiple locks are held, they must be acquired in a
  * consistent order in order to prevent deadlock. Here are the rules for Homa:
  * 1. Except for RPC and socket locks, all locks should be considered
- *    "leaf" locks: don't accquire other locks while holding them.
+ *    "leaf" locks: don't acquire other locks while holding them.
  * 2. The lock order is:
  *    * RPC lock
  *    * Socket lock

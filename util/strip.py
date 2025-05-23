@@ -366,6 +366,8 @@ def scan(file):
 
         # Remove braces for blocks that now have only a single statement
         if pline == '}' or pline.startswith('} else'):
+            if slines[-1].strip() == '':
+                slines.pop()
             if check_braces:
                 check_braces = False
                 if open_index != None:

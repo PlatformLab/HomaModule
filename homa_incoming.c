@@ -146,7 +146,7 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 	if (start > rpc->msgin.recv_end) {
 		/* Packet creates a new gap. */
 		if (!homa_gap_alloc(&rpc->msgin.gaps,
-				  rpc->msgin.recv_end, start)) {
+				    rpc->msgin.recv_end, start)) {
 			pr_err("Homa couldn't allocate gap: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				   rpc->id, start);
@@ -476,7 +476,8 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 					 * already exist.
 					 */
 					rpc = homa_rpc_alloc_server(hsk, &saddr,
-								  h, &created);
+								    h,
+								    &created);
 					if (IS_ERR(rpc)) {
 						pr_warn("homa_pkt_dispatch couldn't create server rpc: error %lu",
 							-PTR_ERR(rpc));

@@ -1312,7 +1312,7 @@ int homa_softirq(struct sk_buff *skb)
 {
 	struct sk_buff *packets, *other_pkts, *next;
 	struct sk_buff **prev_link, **other_link;
-	struct homa *homa = homa_from_skb(skb);
+	IF_NO_STRIP(struct homa *homa = homa_from_skb(skb));
 	struct homa_common_hdr *h;
 	int header_offset;
 #ifndef __STRIP__ /* See strip.py */
@@ -1378,7 +1378,7 @@ int homa_softirq(struct sk_buff *skb)
 		 */
 		if (unlikely(h->type == FREEZE)) {
 			if (!atomic_read(&tt_frozen)) {
-				homa_rpc_log_active_tt(homa, 0);
+				homa_rpc_log_active_tt(homa_from_skb(skb), 0);
 				tt_record4("Freezing because of request on port %d from 0x%x:%d, id %d",
 					   ntohs(h->dport),
 					   tt_addr(skb_canonical_ipv6_saddr(skb)),

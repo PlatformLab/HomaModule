@@ -373,7 +373,7 @@ char *homa_print_packet_short(struct sk_buff *skb, char *buffer, int buf_len)
  * homa_freeze_peers() - Send FREEZE packets to all known peers in the
  * root network namespace.
  */
-void homa_freeze_peers()
+void homa_freeze_peers(void)
 {
 	struct homa_socktab_scan scan;
 	struct homa_freeze_hdr freeze;
@@ -420,7 +420,7 @@ void homa_freeze_peers()
 		err = __homa_xmit_control(&freeze, sizeof(freeze), peer, hsk);
 		if (err != 0)
 			tt_record2("homa_freeze_peers got error %d in xmit to 0x%x\n",
-					err, tt_addr(peer->addr));
+				   err, tt_addr(peer->addr));
 	}
 	rhashtable_walk_stop(&iter);
 	rhashtable_walk_exit(&iter);

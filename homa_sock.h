@@ -13,10 +13,7 @@ struct homa_pool;
 void     homa_sock_lock_slow(struct homa_sock *hsk);
 #endif /* See strip.py */
 
-/**
- * define HOMA_SOCKTAB_BUCKETS - Number of hash buckets in a homa_socktab.
- * Must be a power of 2.
- */
+/* Number of hash buckets in a homa_socktab. Must be a power of 2. */
 #define HOMA_SOCKTAB_BUCKET_BITS 10
 #define HOMA_SOCKTAB_BUCKETS BIT(HOMA_SOCKTAB_BUCKET_BITS)
 
@@ -146,7 +143,7 @@ struct homa_sock {
 	struct homa *homa;
 
 	/**
-	 * @homa_net: Overall state specific to the network namespace for
+	 * @hnet: Overall state specific to the network namespace for
 	 * this socket.
 	 */
 	struct homa_net *hnet;

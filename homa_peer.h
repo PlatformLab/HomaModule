@@ -442,7 +442,7 @@ static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 	const struct homa_peer_key *key = arg->key;
 
 	return !(ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
-	         peer->ht_key.hnet == key->hnet);
+		 peer->ht_key.hnet == key->hnet);
 }
 
 #endif /* _HOMA_PEER_H */
