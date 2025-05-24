@@ -29,20 +29,31 @@ import sys
 # "all" includes all symbols.
 symbols = [
     ['none'],
+    ['peer',
+        'int      homa_xmit_control('
+    ],
+    ['pacer',
+        'void     homa_xmit_data('
+    ],
+    ['rpc',
+        'int      homa_message_in_init(',
+        'void     homa_rpc_handoff(',
+    ],
     ['outgoing',
         'int      homa_fill_data_interleaved(',
         'int      homa_message_out_fill(',
         'void     homa_message_out_init(',
+        'void     homa_resend_data(',
         'struct sk_buff *homa_tx_data_pkt_alloc(',
-        'int      homa_xmit_control(',
         'int      __homa_xmit_control(',
-        'void     homa_xmit_data(',
         'void     __homa_xmit_data(',
         'void     homa_xmit_unknown('
     ],
     ['utils',
         'void     homa_destroy(',
         'int      homa_init(',
+        'void     homa_net_destroy(',
+        'int      homa_net_init(',
         'void     homa_spin('
     ],
     ['incoming',
@@ -53,11 +64,8 @@ symbols = [
         'void     homa_dispatch_pkts(',
         'struct homa_gap *homa_gap_alloc(',
         'void     homa_gap_retry(',
-        'int      homa_message_in_init(',
         'void     homa_need_ack_pkt(',
-        'void     homa_resend_data(',
         'void     homa_resend_pkt(',
-        'void     homa_rpc_handoff(',
         'void     homa_rpc_unknown_pkt(',
         'int      homa_wait_private(',
         'struct homa_rpc *homa_wait_shared('
@@ -77,13 +85,14 @@ symbols = [
         'enum hrtimer_restart homa_hrtimer(',
         'int      homa_ioctl(',
         'int      homa_load(',
-        'int      homa_net_init(',
         'void     homa_net_exit(',
+        'int      homa_net_start(',
         '__poll_t homa_poll(',
         'int      homa_recvmsg(',
         'int      homa_sendmsg(',
         'int      homa_setsockopt(',
         'int      homa_shutdown(',
+        'int      homa_socket(',
         'int      homa_softirq(',
         'void     homa_unhash(',
         'void     homa_unload('
@@ -91,6 +100,14 @@ symbols = [
     ['all']
 ]
 
+# A list of all of the line prefixes that have not yet been encountered
+# in the source file. Used to print error messages at the end for any
+# that don't appear anywhere in the file.
+unseen = []
+
+for patch in symbols:
+    for prefix in patch[1:]:
+        unseen.append(prefix)
 
 if len(sys.argv) != 4:
     print('Usage: strip_decl.py src dst patch')
@@ -99,6 +116,14 @@ if len(sys.argv) != 4:
 src = open(sys.argv[1])
 dst = open(sys.argv[2], 'w')
 patch_name = sys.argv[3]
+found_patch = False
+for patch in symbols:
+    if patch[0] == patch_name:
+        found_patch = True
+        break
+if not found_patch:
+    print('Unknown patch name "%s"' % (patch_name), file=sys.stderr)
+    exit(1)
 skipping_to_semi = False
 prev_line_empty = False
 for line in src:
@@ -106,6 +131,11 @@ for line in src:
         if line.endswith(';\n'):
             skipping_to_semi = False
         continue
+
+    for prefix in unseen:
+        if line.startswith(prefix):
+            unseen.remove(prefix)
+            break;
 
     found_patch = False
     omit = False
@@ -130,6 +160,12 @@ for line in src:
                 print('', file=dst,)
             print(line, file=dst, end='')
             prev_line_empty = False
+
+if unseen:
+    print('The following prefixes did not appear in %s:' % (sys.argv[1]),
+            file=sys.stderr)
+    for prefix in unseen:
+        print(prefix, file=sys.stderr)
 
 dst.close()
 src.close()
