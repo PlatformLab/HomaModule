@@ -293,6 +293,7 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 	EXPECT_EQ(1, atomic_read(&interest2.ready));
 	EXPECT_EQ(NULL, interest1.rpc);
 	EXPECT_EQ(NULL, interest2.rpc);
+	EXPECT_TRUE(list_empty(&interest1.links));
 	EXPECT_STREQ("wake_up; wake_up", unit_log_get());
 }
 

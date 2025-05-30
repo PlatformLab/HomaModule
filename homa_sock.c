@@ -301,7 +301,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 	while (!list_empty(&hsk->interests)) {
 		interest = list_first_entry(&hsk->interests,
 					    struct homa_interest, links);
-		__list_del_entry(&interest->links);
+		list_del_init(&interest->links);
 		atomic_set_release(&interest->ready, 1);
 		wake_up(&interest->wait_queue);
 	}
