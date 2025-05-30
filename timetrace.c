@@ -96,10 +96,6 @@ bool tt_test_no_khz;
 unsigned int cpu_khz = 1000000;
 #endif
 
-#define MAX_IDS 10
-#define MAX_CORES 50
-static atomic_t id_counts[MAX_CORES][MAX_IDS];
-
 /**
  * tt_init(): Enable time tracing, create /proc file for reading traces.
  * @proc_file: Name of a file in /proc; this file can be read to extract
@@ -836,25 +832,9 @@ done:
  */
 void tt_dbg1(char *msg, ...)
 {
-	int id, core;
-	int problems = 0;
-
 	if (atomic_read(&tt_frozen))
 		return;
 	tt_freeze();
-
-	for (core = 0; core < MAX_CORES; core++) {
-		for (id = 0; id < MAX_IDS; id++) {
-			int value = atomic_read(&id_counts[core][id]);
-			if (value != 0) {
-				pr_err("Core %d has count %d for id %d\n",
-				       core, value, id);
-				problems++;
-			}
-		}
-	}
-	pr_err("tt_dbg1 found %d nonzero counters (running on core %d)\n",
-	       problems, raw_smp_processor_id());
 	pr_err("Dumping timetrace\n");
 	tt_printk();
 	pr_err("Finished dumping timetrace\n");
@@ -867,17 +847,6 @@ void tt_dbg1(char *msg, ...)
  */
 void tt_dbg2(char *msg, ...)
 {
-	va_list ap;
-	int core;
-	int id;
-
-	va_start(ap, msg);
-	id = va_arg(ap, int);
-	core = va_arg(ap, int);
-	atomic_add(1, &id_counts[core][id]);
-	tt_record4("tt_dbg2 incremented counter %d for core %d to %d in pid %d",
-		   id, core, atomic_read(&id_counts[core][id]), current->pid);
-	va_end(ap);
 }
 
 /**
@@ -887,17 +856,6 @@ void tt_dbg2(char *msg, ...)
  */
 void tt_dbg3(char *msg, ...)
 {
-	va_list ap;
-	int core;
-	int id;
-
-	va_start(ap, msg);
-	id = va_arg(ap, int);
-	core = va_arg(ap, int);
-	atomic_sub(1, &id_counts[core][id]);
-	tt_record4("tt_dbg3 decremented counter %d for core %d to %d in pid %d",
-		   id, core, atomic_read(&id_counts[core][id]), current->pid);
-	va_end(ap);
 }
 
 /**
