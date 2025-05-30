@@ -19,8 +19,6 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
   - The incast optimization from Section 3.6 of the SIGCOMM paper has not
     been implemented yet. If you would like to test Homa under large incasts,
     let me know and I will implement this feature.
-  - Socket buffer memory management needs more work. Large numbers of large
-    messages (hundreds of MB?) may cause buffer exhaustion and deadlock.
 
  - Please contact me if you have any problems using this repo; I'm happy to
    provide advice and support.
