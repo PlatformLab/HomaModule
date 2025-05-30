@@ -94,6 +94,8 @@ import time
 # granted:           # of bytes granted for the incoming message
 # sent:              # of bytes that have been sent for the outgoing message
 #                    as of the end of the trace
+# rank:              RPC's rank in list of grantable RPCs (0 -> highest
+#                    priority) or -1 if not in grantable list
 class RpcDict(dict):
     def __missing__(self, id):
         new_rpc = {'node': Dispatcher.cur_trace['node'],
@@ -1429,17 +1431,6 @@ class Dispatcher:
                 'length ([0-9]+), prio ([0-9]+)'
     })
 
-    def __bpages_alloced(self, trace, time, core, match, interests):
-        id = int(match.group(1))
-        bpages = int(match.group(2))
-        for interest in interests:
-            interest.tt_bpages_alloced(trace, time, core, id, bpages)
-
-    patterns.append({
-        'name': 'bpages_alloced',
-        'regexp': 'RPC id ([0-9]+) has ([0-9]+) bpages allocated'
-    })
-
     def __rpc_end(self, trace, time, core, match, interests):
         id = int(match.group(1))
         for interest in interests:
@@ -1496,15 +1487,38 @@ class Dispatcher:
         id = int(match.group(1))
         incoming = int(match.group(2))
         granted = int(match.group(3))
-        prio = int(match.group(4))
         for interest in interests:
-            interest.tt_rpc_incoming2(trace, time, core, id, incoming,
-                    granted, prio)
+            interest.tt_rpc_incoming2(trace, time, core, id, incoming, granted)
 
     patterns.append({
         'name': 'rpc_incoming2',
-        'regexp': 'RPC id ([0-9]+) has incoming ([0-9]+), granted ([0-9]+), '
-                'prio ([0-9]+)'
+        'regexp': 'RPC id ([0-9]+) has incoming ([-0-9]+), granted ([0-9]+)'
+    })
+
+    def __rpc_incoming3(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        length = int(match.group(2))
+        remaining = int(match.group(3))
+        rank = int(match.group(4))
+        for interest in interests:
+            interest.tt_rpc_incoming3(trace, time, core, id, length,
+                    remaining, rank)
+
+    patterns.append({
+        'name': 'rpc_incoming3',
+        'regexp': 'RPC id ([0-9]+): length ([0-9]+), remaining ([0-9]+), '
+                'rank ([-0-9]+)'
+    })
+
+    def __bpages_alloced(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        bpages = int(match.group(2))
+        for interest in interests:
+            interest.tt_bpages_alloced(trace, time, core, id, bpages)
+
+    patterns.append({
+        'name': 'bpages_alloced',
+        'regexp': 'RPC id ([0-9]+) has ([0-9]+) bpages allocated'
     })
 
     def __rpc_outgoing(self, trace, time, core, match, interests):
@@ -1754,7 +1768,9 @@ class AnalyzeActivity:
                     max_rpcs_core = core
             # print('core_peers for %s: %s' % (node, core_peers))
             extra = ' %7.2f (C%02d) %4.3f (C%02d) %4.3f (C%02d)' % (
-                    max_gbps, max_core, max_rpcs/total_rpcs, max_rpcs_core,
+                    max_gbps, max_core,
+                    max_rpcs/total_rpcs if total_rpcs != 0 else 0,
+                    max_rpcs_core,
                     max_pending/total_pending if total_pending != 0 else 0,
                     max_pending_core)
             print_list(node, events, total_bytes, extra)
@@ -5864,18 +5880,22 @@ class AnalyzeRpcs:
         rpcs[id]['end'] = t
 
     def tt_rpc_incoming(self, trace, t, core, id, peer, received, length):
-        global rpcs, max_unsched
+        global rpcs
         rpc = rpcs[id]
         rpc['peer'] = peer
         rpc['in_length'] = length
         rpc['remaining'] = length - received
 
-    def tt_rpc_incoming2(self, trace, t, core, id, incoming, granted, prio):
-        global rpcs, max_unsched
+    def tt_rpc_incoming2(self, trace, t, core, id, incoming, granted):
+        global rpcs
         rpcs[id]['granted'] = granted
 
+    def tt_rpc_incoming3(self, trace, t, core, id, length, remaining, rank):
+        global rpcs
+        rpcs[id]['rank'] = rank
+
     def tt_rpc_outgoing(self, trace, t, core, id, peer, sent, length):
-        global rpcs, max_unsched
+        global rpcs
         rpc = rpcs[id]
         rpc['peer'] = peer
         rpc['out_length'] = length
@@ -6544,6 +6564,12 @@ class AnalyzeRxsnapshot:
         # Deduce missing fields in RPCs where possible
         for id, live_rpc in live_rpcs.items():
             next_stage = 0
+            if id^1 in rpcs:
+                rx_rpc = rpcs[id^1]
+            else:
+                rx_rpc = {}
+            if 'remaining' in rx_rpc and live_rpc['pre_softirq'] == 0:
+                live_rpc['pre_softirq'] = rx_rpc['in_length'] - rx_rpc['remaining']
             for type in ['copied', 'softirq', 'gro', 'xmit']:
                 pre_field = 'pre_' + type
                 post_field = 'post_' + type
@@ -6563,10 +6589,10 @@ class AnalyzeRxsnapshot:
 
             next_stage = 0
             unsched = 0
-            if id^1 in rpcs:
-                rx_rpc = rpcs[id^1]
-                if 'unsched' in rx_rpc:
-                    unsched = rx_rpc['unsched']
+            if 'unsched' in rx_rpc:
+                unsched = rx_rpc['unsched']
+            if 'granted' in rx_rpc and live_rpc['pre_grant_xmit'] == 0:
+                live_rpc['pre_grant_xmit'] = rx_rpc['granted']
             for type in ['softirq', 'gro', 'xmit']:
                 pre_field = 'pre_grant_' + type
                 post_field = 'post_grant_' + type
@@ -6682,17 +6708,26 @@ class AnalyzeRxsnapshot:
         print('Copied:    Offset just after last data byte that has been '
                 'copied to user space')
         print('Incoming:  Gxmit - SoftIrq')
+        print('Rank:      Rank among RPCs receiving grants. Smaller means '
+                'higher priority,')
+        print('           blank means not grantable')
         print('Lost:      Packets that appear to have been dropped in the network')
         print('        Id  Peer       Length   GXmit    GGro   GSoft ', end='')
-        print('   Xmit     Gro SoftIrq  Copied Incoming Lost')
-        print('-------------------------------------------', end='')
-        print('---------------------------------------------')
+        print('   Xmit     Gro SoftIrq  Copied Incoming Rank Lost')
+        print('------------------------------------------------------', end='')
+        print('--------------------------------------------------')
 
         for id in sorted_ids:
             rx_rpc = rpcs[id^1]
             live_rpc = live_rpcs[id]
-            incoming = (live_rpc['pre_grant_xmit'] - live_rpc['pre_softirq']
-                    if live_rpc['pre_grant_xmit'] > 0 else 0)
+            incoming = live_rpc['pre_grant_xmit'] - live_rpc['pre_softirq']
+            if incoming <= 0:
+                incoming = ''
+            rank = ''
+            if 'rank' in rx_rpc:
+                rank = rx_rpc['rank']
+                if rank < 0:
+                    rank = ''
             print('%10d %-10s %7s %7s %7s %7s ' % (id^1,
                     rpcs[id]['node'] if id in rpcs else "",
                     rx_rpc['in_length'] if rx_rpc['in_length'] != None else "",
@@ -6702,9 +6737,9 @@ class AnalyzeRxsnapshot:
                     if live_rpc['pre_grant_gro'] > 0 else "",
                     str(live_rpc['pre_grant_softirq'])
                     if live_rpc['pre_grant_softirq'] > 0 else ""), end='')
-            print('%7d %7d %7d %7d  %7d %4d' % (live_rpc['pre_xmit'],
+            print('%7d %7d %7d %7d  %7s %4s %4d' % (live_rpc['pre_xmit'],
                     live_rpc['pre_gro'], live_rpc['pre_softirq'],
-                    live_rpc['pre_copied'], incoming, live_rpc['lost']))
+                    live_rpc['pre_copied'], incoming, rank, live_rpc['lost']))
 
         print('\nFields in the tables below:')
         print('Id:        Packet\'s RPC identifier on the receiver side')
