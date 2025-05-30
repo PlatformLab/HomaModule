@@ -83,6 +83,7 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 		return ERR_PTR(-ENOMEM);
 	}
 
+	spin_lock_init(&peertab->lock);
 	err = rhashtable_init(&peertab->ht, &ht_params);
 	if (err) {
 		kfree(peertab);
