@@ -719,14 +719,13 @@ int homa_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
 void homa_close(struct sock *sk, long timeout)
 {
 	struct homa_sock *hsk = homa_sk(sk);
+#ifndef __UPSTREAM__ /* See strip.py */
+	int port = hsk->port;
+#endif/* See strip.py */
 
 	homa_sock_destroy(hsk);
 	sk_common_release(sk);
-	tt_record1("closed socket, port %d", hsk->port);
-#ifndef __STRIP__ /* See strip.py */
-	if (hsk->homa->freeze_type == SOCKET_CLOSE)
-		tt_freeze();
-#endif /* See strip.py */
+	tt_record1("closed socket, port %d", port);
 }
 
 /**
