@@ -1076,9 +1076,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 			.offset = htonl(12600), .priority = 3, .resend_all = 0};
 
 	ASSERT_NE(NULL, crpc);
-#ifndef __STRIP__ /* See strip.py */
 	EXPECT_EQ(10000, crpc->msgout.granted);
-#endif /* See strip.py */
 	unit_log_clear();
 	crpc->silent_ticks = 5;
 	crpc->peer->outstanding_resends = 2;
@@ -1095,6 +1093,31 @@ TEST_F(homa_incoming, homa_dispatch_pkts__reset_counters)
 	EXPECT_EQ(0, crpc->peer->outstanding_resends);
 }
 #endif /* See strip.py */
+TEST_F(homa_incoming, homa_dispatch_pkts__dont_reset_silent_ticks_on_NEED_ACK)
+{
+	/* Note: if NEED_ACKs cause silent_ticks to get reset, can get in
+	 * a strange state where the server sent a response and is waiting
+	 * for an ACK, so it sends NEED_ACKs. But all the response packets
+	 * got lost, so the client can't ack, and the NEED_ACKs reset
+	 * silent ticks so the client doesn't issue RESENDs.
+	 */
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+	struct homa_need_ack_hdr h = {.common = {
+			.sport = htons(self->server_port),
+			.dport = htons(self->hsk.port),
+			.sender_id = cpu_to_be64(self->server_id),
+			.type = NEED_ACK}};
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+	crpc->silent_ticks = 2;
+	crpc->peer->outstanding_resends = 3;
+	homa_dispatch_pkts(mock_skb_alloc(self->server_ip, &h.common, 0, 0));
+	EXPECT_EQ(2, crpc->silent_ticks);
+	EXPECT_EQ(0, crpc->peer->outstanding_resends);
+}
 TEST_F(homa_incoming, homa_dispatch_pkts__multiple_ack_packets)
 {
 	struct homa_rpc *srpc = unit_server_rpc(&self->hsk2, UNIT_OUTGOING,
