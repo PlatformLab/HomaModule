@@ -829,14 +829,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 			h->common.sequence = htonl(offset);
 			h->seg.offset = htonl(offset);
 			h->retransmit = 1;
-#ifndef __STRIP__ /* See strip.py */
-			if ((offset + seg_length) <= rpc->msgout.granted)
-				h->incoming = htonl(rpc->msgout.granted);
-			else if ((offset + seg_length) > rpc->msgout.length)
-				h->incoming = htonl(rpc->msgout.length);
-			else
-				h->incoming = htonl(offset + seg_length);
-#endif /* See strip.py */
+			IF_NO_STRIP(h->incoming = htonl(end));
 			err = homa_skb_append_from_skb(rpc->hsk->homa, new_skb,
 						       skb, seg_offset,
 						       seg_length);

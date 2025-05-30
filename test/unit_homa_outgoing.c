@@ -1098,15 +1098,7 @@ TEST_F(homa_outgoing, homa_resend_data__set_incoming)
 	mock_xmit_log_verbose = 1;
 	EXPECT_EQ(10000, crpc->msgout.granted);
 	homa_resend_data(crpc, 8400, 8800, 2);
-	EXPECT_SUBSTR("incoming 10000", unit_log_get());
-
-	unit_log_clear();
-	homa_resend_data(crpc, 12900, 13000, 2);
-	EXPECT_SUBSTR("incoming 14200", unit_log_get());
-
-	unit_log_clear();
-	homa_resend_data(crpc, 15700, 16500, 2);
-	EXPECT_SUBSTR("incoming 16000", unit_log_get());
+	EXPECT_SUBSTR("incoming 8800", unit_log_get());
 }
 TEST_F(homa_outgoing, homa_resend_data__error_copying_data)
 {
