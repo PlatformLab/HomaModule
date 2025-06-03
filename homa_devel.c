@@ -16,6 +16,17 @@
 #endif /* See strip.py */
 #include "homa_wire.h"
 
+/* homa_drop_packet will accept this many more packets before it drops some. */
+static int accept_count;
+
+/* If accept_count <= 0, homa_drop_packet will drop this many packets
+ * before it starts accepting again.
+ */
+static int drop_count;
+
+/* Used for random-number generation. */
+static u32 seed;
+
 /**
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
@@ -863,4 +874,39 @@ int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
 	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",
 		   actual - total_incoming, total_incoming, actual);
 	return actual - total_incoming;
+}
+
+/**
+ * homa_drop_packet() - Invoked for each incoming packet to determine
+ * (stochastically) whether that packet should be dropped. Used during
+ * development to exercise retry code.
+ * to
+ * @homa:     Overall information about the Homa transport
+ * Return:    Nonzero means drop the packet, zero means process normally.
+ */
+int homa_drop_packet(struct homa *homa)
+{
+	/* This code is full of races, but they don't matter (better fast
+	 * than precise).
+	 */
+	if (homa->accept_bits == 0)
+		return 0;
+	while (1) {
+		if (accept_count > 0) {
+			accept_count--;
+			return 0;
+		}
+		if (drop_count > 0) {
+			drop_count--;
+			return 1;
+		}
+		if (seed == 0)
+			seed = homa_clock();
+		seed = seed * 1664525 + 1013904223;
+		accept_count = (seed >> 4) & ((1 << homa->accept_bits) - 1);
+		seed = seed * 1664525 + 1013904223;
+		drop_count = 1 + ((seed >> 4) & ((1 << homa->drop_bits) - 1));
+		tt_record2("homa_drop_packet set accept_count %d, drop_count 0x%x",
+			   accept_count, drop_count);
+	}
 }

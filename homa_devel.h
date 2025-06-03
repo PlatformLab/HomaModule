@@ -81,6 +81,7 @@ static inline void check_addr_valid(void *addr, char *info)
 
 void     homa_check_addr(void *p);
 void     homa_check_list(struct list_head *list, int max_length);
+int      homa_drop_packet(struct homa *homa);
 void     homa_freeze(struct homa_rpc *rpc, enum homa_freeze_type type,
 		     char *format);
 void     homa_freeze_peers(void);

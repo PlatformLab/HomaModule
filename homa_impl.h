@@ -437,6 +437,22 @@ struct homa {
 	 * should be frozen. Set externally via sysctl.
 	 */
 	enum homa_freeze_type freeze_type;
+
+	/**
+	 * @accept_bits: determines how many consecutive packets will be
+	 * accepted before the next bunch of packets is dropped (intervals
+	 * between dropped packets are chosen uniformly from the
+	 * range[0..1<<accept_bits)). Zero means don't drop any packets.
+	 * Set externally via sysctl.
+	 */
+	int accept_bits;
+
+	/**
+	 * @drop_bits: determines how many consecutive packets are dropped
+	 * when drops occur (counts are chosen uniformly from the
+	 * range [1..1<<drop_bits]) Set externally via sysctl.
+	 */
+	int drop_bits;
 #endif /* See strip.py */
 
 	/**

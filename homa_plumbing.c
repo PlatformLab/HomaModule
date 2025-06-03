@@ -171,6 +171,13 @@ static struct inet6_protocol homav6_protocol = {
 #define OFFSET(field) ((void *)offsetof(struct homa, field))
 static struct ctl_table homa_ctl_table[] = {
 	{
+		.procname	= "accept_bits",
+		.data		= OFFSET(accept_bits),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
 		.procname	= "action",
 		.data		= OFFSET(sysctl_action),
 		.maxlen		= sizeof(int),
@@ -201,6 +208,13 @@ static struct ctl_table homa_ctl_table[] = {
 	{
 		.procname	= "dead_buffs_limit",
 		.data		= OFFSET(dead_buffs_limit),
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= homa_dointvec
+	},
+	{
+		.procname	= "drop_bits",
+		.data		= OFFSET(drop_bits),
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= homa_dointvec
