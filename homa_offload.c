@@ -303,6 +303,11 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 	if (!homa_make_header_avl(skb))
 		tt_record("homa_gro_receive couldn't pull enough data from packet");
 
+	// if (homa_drop_packet(homa)) {
+	// 	kfree_skb(skb);
+	// 	return ERR_PTR(-EINPROGRESS);
+	// }
+
 	h_new = (struct homa_data_hdr *)skb_transport_header(skb);
 	offload_core = &per_cpu(homa_offload_core, smp_processor_id());
 	busy = (now - offload_core->last_gro) < homa->gro_busy_cycles;

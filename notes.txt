@@ -1,13 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Refactor resend mechanism:
-  * New method that handles resends:
-    * Request all gaps
-    * Reaquest entire message if nothing received yet
-  * On resender, if entire message resent, reset msgout state (e.g., granted)
-  * Issue resends when handling NEED_ACKs.
-
 * Notes for the next design of grants:
   * Update tthoma.py: e.g., no grant_recalc records
   * grant_check_slow_path too high

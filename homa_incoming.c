@@ -93,26 +93,56 @@ struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end)
 }
 
 /**
- * homa_gap_retry() - Send RESEND requests for all of the unreceived
- * gaps in a message.
- * @rpc:     RPC to check; must be locked by caller.
+ * homa_request_retrans() - The function is invoked when it appears that
+ * data packets for a message have been lost. It issues RESEND requests
+ * as appropriate and may modify the state of the RPC.
+ * @rpc:     RPC for which incoming data is delinquent; must be locked by
+ *           caller.
  */
-void homa_gap_retry(struct homa_rpc *rpc)
+void homa_request_retrans(struct homa_rpc *rpc)
 	__must_hold(rpc_bucket_lock)
 {
 	struct homa_resend_hdr resend;
 	struct homa_gap *gap;
+	int offset, length;
 
-	list_for_each_entry(gap, &rpc->msgin.gaps, links) {
-		resend.offset = htonl(gap->start);
-		resend.length = htonl(gap->end - gap->start);
 #ifndef __STRIP__ /* See strip.py */
-		resend.priority = rpc->hsk->homa->num_priorities - 1;
+	resend.priority = rpc->hsk->homa->num_priorities - 1;
 #endif /* See strip.py */
-		tt_record3("homa_gap_retry sending RESEND for id %d, start %d, end %d",
-			   rpc->id, gap->start, gap->end);
-		homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+
+	if (rpc->msgin.length >= 0) {
+		/* Issue RESENDS for any gaps in incoming data. */
+		list_for_each_entry(gap, &rpc->msgin.gaps, links) {
+			resend.offset = htonl(gap->start);
+			resend.length = htonl(gap->end - gap->start);
+			tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
+				   rpc->id, tt_addr(rpc->peer->addr),
+				   gap->start, gap->end - gap->start);
+			homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
+		}
+
+		/* Issue a RESEND for any granted data after the last gap. */
+		offset = rpc->msgin.recv_end;
+#ifndef __STRIP__ /* See strip.py */
+		length = rpc->msgin.granted - rpc->msgin.recv_end;
+#else /* See strip.py */
+		length = rpc->msgin.length - rpc->msgin.recv_end;
+#endif /* See strip.py */
+		if (length <= 0)
+			return;
+	} else {
+		/* No data has been received for the RPC. Ask the sender to
+		 * resend everything it has sent so far.
+		 */
+		offset = 0;
+		length = -1;
 	}
+
+	resend.offset = htonl(offset);
+	resend.length = htonl(length);
+	tt_record4("Sending RESEND for id %d, peer 0x%x, offset %d, length %d",
+		   rpc->id, tt_addr(rpc->peer->addr), offset, offset + length);
+	homa_xmit_control(RESEND, &resend, sizeof(resend), rpc);
 }
 
 /**
@@ -758,6 +788,9 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	__must_hold(rpc_bucket_lock)
 {
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
+	int offset = htonl(h->offset);
+	int length = htonl(h->length);
+	int end = offset + length;
 	struct homa_busy_hdr busy;
 
 	if (!rpc) {
@@ -770,51 +803,65 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	}
 #ifndef __STRIP__ /* See strip.py */
 	tt_record4("resend request for id %llu, offset %d, length %d, prio %d",
-		   rpc->id, ntohl(h->offset), ntohl(h->length), h->priority);
+		   rpc->id, offset, length, h->priority);
 #else /* See strip.py */
 	tt_record3("resend request for id %llu, offset %d, length %d",
-		   rpc->id, ntohl(h->offset), ntohl(h->length));
+		   rpc->id, offset, length);
 #endif /* See strip.py */
 
 	if (!homa_is_client(rpc->id) && rpc->state != RPC_OUTGOING) {
 		/* We are the server for this RPC and don't yet have a
-		 * response packet, so just send BUSY.
+		 * response message, so send BUSY to keep the client
+		 * waiting.
 		 */
 		tt_record2("sending BUSY from resend, id %d, state %d",
 			   rpc->id, rpc->state);
 		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
 		goto done;
 	}
+
+	/* First, retransmit bytes that were already sent once. */
+	if (length == -1)
+		end = rpc->msgout.next_xmit_offset;
+
 #ifndef __STRIP__ /* See strip.py */
-	if (rpc->msgout.next_xmit_offset < rpc->msgout.granted) {
-		/* We have chosen not to transmit data from this message;
-		 * send BUSY instead.
+	if (end > rpc->msgout.next_xmit_offset)
+		homa_resend_data(rpc, offset, rpc->msgout.next_xmit_offset,
+				 h->priority);
+	else
+		homa_resend_data(rpc, offset, end, h->priority);
+
+	if (end > rpc->msgout.granted) {
+		/* It appears that a grant packet was lost; assume that
+		 * any data requested in the RESEND must have been
+		 * granted previously.
+		 */
+		rpc->msgout.granted = end;
+		if (rpc->msgout.granted > rpc->msgout.length)
+			rpc->msgout.granted = rpc->msgout.length;
+		homa_xmit_data(rpc, false);
+	}
+#else /* See strip.py */
+	if (end > rpc->msgout.next_xmit_offset)
+		homa_resend_data(rpc, offset, rpc->msgout.next_xmit_offset);
+	else
+		homa_resend_data(rpc, offset, end);
+#endif /* See strip.py */
+
+	if (offset >= rpc->msgout.next_xmit_offset)  {
+		/* We have chosen not to transmit any of the requested data;
+		 * send BUSY so the receiver knows we are alive.
 		 */
 		tt_record3("sending BUSY from resend, id %d, offset %d, granted %d",
 			   rpc->id, rpc->msgout.next_xmit_offset,
+#ifndef __STRIP__ /* See strip.py */
 			   rpc->msgout.granted);
-		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-	} else {
-		if (ntohl(h->length) == 0)
-			/* This RESEND is from a server just trying to determine
-			 * whether the client still cares about the RPC; return
-			 * BUSY so the server doesn't time us out.
-			 */
-			homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-		homa_resend_data(rpc, ntohl(h->offset),
-				 ntohl(h->offset) + ntohl(h->length),
-				 h->priority);
-	}
 #else /* See strip.py */
-	if (ntohl(h->length) == 0)
-		/* This RESEND is from a server just trying to determine
-		 * whether the client still cares about the RPC; return
-		 * BUSY so the server doesn't time us out.
-		 */
-		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
-	homa_resend_data(rpc, ntohl(h->offset),
-			 ntohl(h->offset) + ntohl(h->length));
+			   rpc->msgout.length);
 #endif /* See strip.py */
+		homa_xmit_control(BUSY, &busy, sizeof(busy), rpc);
+		goto done;
+	}
 
 done:
 	kfree_skb(skb);
@@ -924,20 +971,15 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 
 	tt_record1("Received NEED_ACK for id %d", id);
 
-	/* Return if it's not safe for the peer to purge its state
+	/* Don't ack if it's not safe for the peer to purge its state
 	 * for this RPC (the RPC still exists and we haven't received
 	 * the entire response), or if we can't find peer info.
 	 */
 	if (rpc && (rpc->state != RPC_INCOMING ||
-#ifndef __STRIP__ /* See strip.py */
 		    rpc->msgin.bytes_remaining)) {
 		tt_record3("NEED_ACK arrived for id %d before message received, state %d, remaining %d",
 			   rpc->id, rpc->state, rpc->msgin.bytes_remaining);
-		homa_freeze(rpc, NEED_ACK_MISSING_DATA,
-			    "Freezing because NEED_ACK received before message complete, id %d, peer 0x%x");
-#else /* See strip.py */
-		    rpc->msgin.bytes_remaining)) {
-#endif /* See strip.py */
+		homa_request_retrans(rpc);
 		goto done;
 	} else {
 		peer = homa_peer_get(hsk, &saddr);

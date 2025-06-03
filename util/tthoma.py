@@ -1349,13 +1349,16 @@ class Dispatcher:
 
     def __resend_tx(self, trace, time, core, match, interests):
         id = int(match.group(1))
-        offset = int(match.group(2))
+        peer = match.group(2)
+        offset = int(match.group(3))
+        length = int(match.group(4))
         for interest in interests:
-            interest.tt_resend_tx(trace, time, core, id, offset)
+            interest.tt_resend_tx(trace, time, core, id, peer, offset, length)
 
     patterns.append({
         'name': 'resend_tx',
-        'regexp': 'Sent RESEND for client RPC id ([0-9]+), .* offset ([0-9]+)'
+        'regexp': 'Sending RESEND for id ([0-9]+), peer ([^,]+), '
+                'offset ([0-9]+), length ([0-9]+)'
     })
 
     def __resend_rx(self, trace, time, core, match, interests):
@@ -5809,7 +5812,7 @@ class AnalyzeRpcs:
         global rpcs
         rpcs[id]['resend_rx'].append([t, offset, length])
 
-    def tt_resend_tx(self, trace, t, core, id, offset):
+    def tt_resend_tx(self, trace, t, core, id, peer, offset, length):
         global rpcs
         rpcs[id]['resend_tx'].append([t, offset])
 

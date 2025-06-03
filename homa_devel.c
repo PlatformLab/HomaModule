@@ -16,6 +16,7 @@
 #endif /* See strip.py */
 #include "homa_wire.h"
 
+#ifndef __STRIP__ /* See strip.py */
 /* homa_drop_packet will accept this many more packets before it drops some. */
 static int accept_count;
 
@@ -26,6 +27,7 @@ static int drop_count;
 
 /* Used for random-number generation. */
 static u32 seed;
+#endif /* See strip.py */
 
 /**
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
@@ -806,6 +808,7 @@ void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
 	tt_record1("Finished logging (%d active Homa RPCs)", count);
 }
 
+#ifndef __STRIP__ /* See strip.py */
 /**
  * homa_validate_incoming() - Scan all of the active RPCs to compute what
  * homa_total_incoming should be, and see if it actually matches.
@@ -910,3 +913,4 @@ int homa_drop_packet(struct homa *homa)
 			   accept_count, drop_count);
 	}
 }
+#endif /* See strip.py */

@@ -706,7 +706,6 @@ int      homa_err_handler_v6(struct sk_buff *skb,
 int      homa_fill_data_interleaved(struct homa_rpc *rpc,
 				    struct sk_buff *skb, struct iov_iter *iter);
 struct homa_gap *homa_gap_alloc(struct list_head *next, int start, int end);
-void     homa_gap_retry(struct homa_rpc *rpc);
 int      homa_getsockopt(struct sock *sk, int level, int optname,
 			 char __user *optval, int __user *optlen);
 int      homa_hash(struct sock *sk);
@@ -728,6 +727,7 @@ __poll_t homa_poll(struct file *file, struct socket *sock,
 		   struct poll_table_struct *wait);
 int      homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		      int flags, int *addr_len);
+void     homa_request_retrans(struct homa_rpc *rpc);
 void     homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 			 struct homa_sock *hsk);
 void     homa_rpc_handoff(struct homa_rpc *rpc);

@@ -417,11 +417,9 @@ struct homa_resend_hdr {
 	__be32 offset;
 
 	/**
-	 * @length: Number of bytes of data to retransmit; this could specify
-	 * a range longer than the total message size. Zero is a special case
-	 * used by servers; in this case, there is no need to actually resend
-	 * anything; the purpose of this packet is to trigger an RPC_UNKNOWN
-	 * response if the client no longer cares about this RPC.
+	 * @length: Number of bytes of data to retransmit. -1 means no data
+	 * has been received for the message, so everything sent previously
+	 * should be retransmitted.
 	 */
 	__be32 length;
 
