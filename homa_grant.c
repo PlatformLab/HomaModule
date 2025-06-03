@@ -663,31 +663,20 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	u64 now;
 	int i;
 
-	if (rpc->msgin.length < 0 || rpc->msgin.num_bpages <= 0 ||
-	    rpc->state == RPC_DEAD)
-		return;
-	if (rpc->msgin.rank < 0) {
-		homa_grant_update_incoming(rpc, grant);
-		return;
-	}
-
-	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
-		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
-		   rpc->msgin.length);
-	INC_METRIC(grant_check_calls, 1);
-
-	/* This function handles 4 different things:
-	 * 1. It generates new grant packets for @rpc if appropriate. This
+	/* This function has 5 different tasks:
+	 * 1. It updates variables tracking incoming data.
+	 * 2. It generates new grant packets for @rpc if appropriate. This
 	 *    is the common case.
-	 * 2. If total_incoming had been exhausted, but headroom is now
+	 * 3. If total_incoming had been exhausted, but headroom is now
 	 *    available, it sends grants to the highest priority RPC that
 	 *    needs them, which may not be @rpc.
-	 * 3. It occasionally sends grants to the oldest RPC as determined
-	 *    by the fifo_grant_fraction parameter.
-	 * 4. It occasionally scans active_rpcs to restore proper priority
+	 * 4. It occasionally sends grants to the oldest RPC as determined
+	 *    by the fifo_grant_fraction parameter. This is not currently
+	 *    implemented.
+	 * 5. It occasionally scans active_rpcs to restore proper priority
 	 *    order. More on this below.
 	 *
-	 * Cases 2-4 require the global grant lock, but that lock is in
+	 * Tasks 3-5 require the global grant lock, but that lock is in
 	 * danger of overload, particularly as network speeds increase. So,
 	 * this function handles case 1 without acquiring the grant lock.
 	 * Issuing a grant to @rpc may change its priority relative to other
@@ -697,11 +686,31 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * inversions that may have developed. The interval for these scans
 	 * is chosen so as not to create too much contention for the grant lock.
 	 */
-	now = homa_clock();
+
+	if (rpc->msgin.length < 0 || rpc->msgin.num_bpages <= 0 ||
+	    rpc->state == RPC_DEAD)
+		return;
+
+	tt_record4("homa_grant_check_rpc starting for id %d, granted %d, recv_end %d, length %d",
+		   rpc->id, rpc->msgin.granted, rpc->msgin.recv_end,
+		   rpc->msgin.length);
+	INC_METRIC(grant_check_calls, 1);
+
+	/* If there are RPCs stalled because total_incoming is too high,
+	 * can't take the shortcut below: need to take the slow path in case
+	 * there are stalled RPCs that can now be granted.
+	 */
 	limit = atomic_xchg(&grant->incoming_hit_limit, false);
+	if (rpc->msgin.rank < 0 && !limit) {
+		/* Very fast path (Task 1 only). */
+		homa_grant_update_incoming(rpc, grant);
+		return;
+	}
+
+	now = homa_clock();
 	recalc = now >= READ_ONCE(grant->next_recalc);
 	if (!recalc && !limit) {
-		/* Fast path (Case 1). */
+		/* Fast path (Tasks 1 and 2). */
 		send_grant = homa_grant_update_granted(rpc, grant);
 		homa_grant_update_incoming(rpc, grant);
 		if (!send_grant)
@@ -728,12 +737,12 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	homa_grant_update_incoming(rpc, grant);
 	homa_grant_lock(grant);
 	if (recalc) {
-		/* Case 4. */
+		/* Task 5. */
 		grant->next_recalc = now + grant->recalc_cycles;
 		homa_grant_fix_order(grant);
 	}
 
-	/* Cases 3 and 4: search all active RPCs to find any that do
+	/* Tasks 3 and 5: search all active RPCs to find any that do
 	 * not have a full window of grants. Then release the grant lock
 	 * and send grants.
 	 */

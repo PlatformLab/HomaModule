@@ -952,8 +952,25 @@ TEST_F(homa_grant, homa_grant_check_rpc__update_incoming_if_rpc_not_active)
 	unit_log_clear();
 	homa_grant_check_rpc(rpc);
 	EXPECT_STREQ("", unit_log_get());
-	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_check_calls);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_check_calls);
 	EXPECT_EQ(900, atomic_read(&self->homa.grant->total_incoming));
+	EXPECT_EQ(0, homa_metrics_per_cpu()->grant_check_slow_path);
+}
+TEST_F(homa_grant, homa_grant_check_rpc__skip_shortcut_if_incoming_hit_limit)
+{
+	struct homa_rpc *rpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING,
+			self->client_ip, self->server_ip, self->server_port,
+			100, 1000, 2000);
+
+	homa_message_in_init(rpc, 2000, 0);
+	EXPECT_EQ(0, rpc->msgin.rank);
+	rpc->msgin.rank = -1;
+	atomic_set(&self->homa.grant->incoming_hit_limit, 1);
+	homa_rpc_lock(rpc);
+	homa_grant_check_rpc(rpc);
+	homa_rpc_unlock(rpc);
+	EXPECT_EQ(1, homa_metrics_per_cpu()->grant_check_slow_path);
+	EXPECT_EQ(0, atomic_read(&self->homa.grant->incoming_hit_limit));
 }
 TEST_F(homa_grant, homa_grant_check_rpc__fast_path)
 {
