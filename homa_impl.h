@@ -756,8 +756,6 @@ int      homa_sysctl_softirq_cores(const struct ctl_table *table,
 				   loff_t *ppos);
 int      homa_unsched_priority(struct homa *homa, struct homa_peer *peer,
 			       int length);
-int      homa_validate_incoming(struct homa *homa, int verbose,
-				int *link_errors);
 void     __homa_xmit_data(struct sk_buff *skb, struct homa_rpc *rpc,
 			  int priority);
 #else /* See strip.py */

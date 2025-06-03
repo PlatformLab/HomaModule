@@ -433,17 +433,7 @@ struct homa_rpc
 void     homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 			struct homa_ack *ack);
 void     homa_rpc_end(struct homa_rpc *rpc);
-#ifndef __UPSTREAM__ /* See strip.py */
-void     homa_rpc_log(struct homa_rpc *rpc);
-void     homa_rpc_log_active(struct homa *homa, uint64_t id);
-void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
-void     homa_rpc_log_tt(struct homa_rpc *rpc);
-#endif /* See strip.py */
 int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
-#ifndef __UPSTREAM__ /* See strip.py */
-int      homa_validate_incoming(struct homa *homa, int verbose,
-				int *link_errors);
-#endif /* See strip.py */
 
 /**
  * homa_rpc_lock() - Acquire the lock for an RPC.

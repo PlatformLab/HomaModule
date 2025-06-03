@@ -26,6 +26,7 @@
 #define KERNEL_VERSION(...) 100
 #endif /* __STRIP__ */
 
+struct homa;
 struct homa_net;
 struct homa_rpc;
 
@@ -88,9 +89,15 @@ char    *homa_print_ipv6_addr(const struct in6_addr *addr);
 char    *homa_print_packet(struct sk_buff *skb, char *buffer, int buf_len);
 char    *homa_print_packet_short(struct sk_buff *skb, char *buffer,
 				 int buf_len);
+void     homa_rpc_log(struct homa_rpc *rpc);
+void     homa_rpc_log_active(struct homa *homa, uint64_t id);
+void     homa_rpc_log_tt(struct homa_rpc *rpc);
+void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
 int      homa_snprintf(char *buffer, int size, int used,
 		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);
 char    *homa_symbol_for_state(struct homa_rpc *rpc);
+int      homa_validate_incoming(struct homa *homa, int verbose,
+				int *link_errors);
 
 #endif /* _HOMA_DEVEL_H */

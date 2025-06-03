@@ -6,6 +6,7 @@
 
 #include "homa_impl.h"
 #include "homa_devel.h"
+#include "homa_grant.h"
 #include "homa_peer.h"
 #include "homa_rpc.h"
 #ifndef __STRIP__ /* See strip.py */
@@ -613,4 +614,253 @@ void homa_check_list(struct list_head *list, int max_length)
 		homa_check_addr(p->prev);
 		prev = p;
 	}
+}
+
+/**
+ * homa_rpc_log() - Log info about a particular RPC; this is functionality
+ * pulled out of homa_rpc_log_active because its indentation got too deep.
+ * @rpc:  RPC for which key info should be written to the system log.
+ */
+void homa_rpc_log(struct homa_rpc *rpc)
+{
+	char *type = homa_is_client(rpc->id) ? "Client" : "Server";
+	char *peer = homa_print_ipv6_addr(&rpc->peer->addr);
+
+	if (rpc->state == RPC_INCOMING)
+		pr_notice("%s RPC INCOMING, id %llu, peer %s:%d, %d/%d bytes received, incoming %d\n",
+			  type, rpc->id, peer, rpc->dport,
+			  rpc->msgin.length - rpc->msgin.bytes_remaining,
+#ifndef __STRIP__
+			  rpc->msgin.length, rpc->msgin.granted);
+#else
+			  rpc->msgin.length, 0);
+#endif /* __STRIP__ */
+	else if (rpc->state == RPC_OUTGOING) {
+		pr_notice("%s RPC OUTGOING, id %llu, peer %s:%d, out length %d, left %d, granted %d, in left %d, resend_ticks %u, silent_ticks %d\n",
+			  type, rpc->id, peer, rpc->dport, rpc->msgout.length,
+			  rpc->msgout.length - rpc->msgout.next_xmit_offset,
+#ifndef __STRIP__
+			  rpc->msgout.granted, rpc->msgin.bytes_remaining,
+#else
+			  0, rpc->msgin.bytes_remaining,
+#endif /* __STRIP__ */
+			  rpc->resend_timer_ticks, rpc->silent_ticks);
+	} else {
+		pr_notice("%s RPC %s, id %llu, peer %s:%d, incoming length %d, outgoing length %d\n",
+			  type, homa_symbol_for_state(rpc), rpc->id, peer,
+			  rpc->dport, rpc->msgin.length, rpc->msgout.length);
+	}
+}
+
+/**
+ * homa_rpc_log_active() - Print information to the system log about all
+ * active RPCs. Intended primarily for debugging.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @id:      An RPC id: if nonzero, then only RPCs with this id will be
+ *           logged.
+ */
+void homa_rpc_log_active(struct homa *homa, uint64_t id)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int count = 0;
+
+	pr_notice("Logging active Homa RPCs:\n");
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+	     hsk; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			count++;
+			if (id != 0 && id != rpc->id)
+				continue;
+			homa_rpc_log(rpc);
+					}
+		homa_unprotect_rpcs(hsk);
+	}
+	homa_socktab_end_scan(&scan);
+	rcu_read_unlock();
+	pr_notice("Finished logging active Homa RPCs: %d active RPCs\n", count);
+}
+
+/**
+ * homa_rpc_log_tt() - Log info about a particular RPC using timetraces.
+ * @rpc:  RPC for which key info should be written to the system log.
+ */
+void homa_rpc_log_tt(struct homa_rpc *rpc)
+{
+	if (rpc->state == RPC_INCOMING) {
+		int received = rpc->msgin.length
+				- rpc->msgin.bytes_remaining;
+		int rank;
+
+		tt_record4("Incoming RPC id %d, peer 0x%x, %d/%d bytes received",
+			   rpc->id, tt_addr(rpc->peer->addr),
+			   received, rpc->msgin.length);
+#ifndef __STRIP__
+		tt_record3("RPC id %d has incoming %d, granted %d", rpc->id,
+			   rpc->msgin.granted - received, rpc->msgin.granted);
+		rank = rpc->msgin.rank;
+#else /* __STRIP__ */
+		rank = -1;
+#endif /* __STRIP__ */
+		tt_record4("RPC id %d: length %d, remaining %d, rank %d",
+			   rpc->id, rpc->msgin.length,
+			   rpc->msgin.bytes_remaining, rank);
+		if (rpc->msgin.num_bpages == 0) {
+			tt_record1("RPC id %d is blocked waiting for buffers",
+				   rpc->id);
+		} else {
+			struct sk_buff *skb = skb_peek(&rpc->msgin.packets);
+
+			if (!skb) {
+				tt_record2("RPC id %d has %d bpages allocated, no uncopied bytes",
+					rpc->id, rpc->msgin.num_bpages);
+			} else {
+				struct homa_data_hdr *h;
+
+				h = (struct homa_data_hdr *) skb->data;
+				tt_record3("RPC id %d has %d bpages allocated, first uncopied offset %d",
+					rpc->id, rpc->msgin.num_bpages,
+					ntohl(h->seg.offset));
+			}
+		}
+	} else if (rpc->state == RPC_OUTGOING) {
+		tt_record4("Outgoing RPC id %d, peer 0x%x, %d/%d bytes sent",
+			   rpc->id, tt_addr(rpc->peer->addr),
+			   rpc->msgout.next_xmit_offset,
+			   rpc->msgout.length);
+#ifndef __STRIP__
+		if (rpc->msgout.granted > rpc->msgout.next_xmit_offset)
+			tt_record3("RPC id %d has %d unsent grants (granted %d)",
+				   rpc->id, rpc->msgout.granted -
+				   rpc->msgout.next_xmit_offset,
+				   rpc->msgout.granted);
+#endif /* __STRIP__ */
+	} else {
+		tt_record2("RPC id %d is in state %d", rpc->id, rpc->state);
+	}
+}
+
+/**
+ * homa_rpc_log_active_tt() - Log information about all active RPCs using
+ * timetraces.
+ * @homa:    Overall data about the Homa protocol implementation.
+ * @freeze_count:  If nonzero, FREEZE requests will be sent for this many
+ *                 incoming RPCs with outstanding grants
+ */
+void homa_rpc_log_active_tt(struct homa *homa, int freeze_count)
+{
+	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int count = 0;
+
+	tt_record("Logging Homa RPCs:");
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+			hsk; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			struct homa_freeze_hdr freeze;
+
+			count++;
+			homa_rpc_log_tt(rpc);
+			if (freeze_count == 0)
+				continue;
+			if (rpc->state != RPC_INCOMING)
+				continue;
+#ifndef __STRIP__
+			if (rpc->msgin.granted <= (rpc->msgin.length
+					- rpc->msgin.bytes_remaining))
+				continue;
+#endif /* __STRIP__ */
+			freeze_count--;
+			pr_notice("Emitting FREEZE in %s\n", __func__);
+			homa_xmit_control(FREEZE, &freeze, sizeof(freeze), rpc);
+		}
+		homa_unprotect_rpcs(hsk);
+	}
+	homa_socktab_end_scan(&scan);
+	rcu_read_unlock();
+	tt_record1("Finished logging (%d active Homa RPCs)", count);
+}
+
+/**
+ * homa_validate_incoming() - Scan all of the active RPCs to compute what
+ * homa_total_incoming should be, and see if it actually matches.
+ * @homa:         Overall data about the Homa protocol implementation.
+ * @verbose:      Print incoming info for each individual RPC.
+ * @link_errors:  Set to 1 if one or more grantable RPCs don't seem to
+ *                be linked into the grantable lists.
+ * Return:   The difference between the actual value of homa->total_incoming
+ *           and the expected value computed from the individual RPCs (positive
+ *           means homa->total_incoming is higher than expected).
+ */
+int homa_validate_incoming(struct homa *homa, int verbose, int *link_errors)
+{
+	struct homa_socktab_scan scan;
+	int total_incoming = 0;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int actual;
+
+	tt_record1("homa_validate_incoming starting, total_incoming %d",
+		   atomic_read(&homa->grant->total_incoming));
+	*link_errors = 0;
+	rcu_read_lock();
+	for (hsk = homa_socktab_start_scan(homa->socktab, &scan);
+			hsk; hsk = homa_socktab_next(&scan)) {
+		if (list_empty(&hsk->active_rpcs) || hsk->shutdown)
+			continue;
+
+		if (!homa_protect_rpcs(hsk))
+			continue;
+		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
+			int incoming;
+
+			if (rpc->state != RPC_INCOMING)
+				continue;
+			incoming = rpc->msgin.granted -
+					(rpc->msgin.length
+					- rpc->msgin.bytes_remaining);
+			if (incoming < 0)
+				incoming = 0;
+			if (rpc->msgin.rec_incoming == 0)
+				continue;
+			total_incoming += rpc->msgin.rec_incoming;
+			if (verbose)
+				tt_record3("homa_validate_incoming: RPC id %d, incoming %d, rec_incoming %d",
+					   rpc->id, incoming,
+					   rpc->msgin.rec_incoming);
+			if (rpc->msgin.granted >= rpc->msgin.length)
+				continue;
+			if (list_empty(&rpc->grantable_links)) {
+				tt_record1("homa_validate_incoming: RPC id %d not linked in grantable list",
+					   rpc->id);
+				*link_errors = 1;
+			}
+			if (list_empty(&rpc->grantable_links)) {
+				tt_record1("homa_validate_incoming: RPC id %d peer not linked in grantable list",
+					   rpc->id);
+				*link_errors = 1;
+			}
+		}
+		homa_unprotect_rpcs(hsk);
+	}
+	homa_socktab_end_scan(&scan);
+	rcu_read_unlock();
+	actual = atomic_read(&homa->grant->total_incoming);
+	tt_record3("homa_validate_incoming diff %d (expected %d, got %d)",
+		   actual - total_incoming, total_incoming, actual);
+	return actual - total_incoming;
 }
