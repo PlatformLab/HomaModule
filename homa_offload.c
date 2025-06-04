@@ -319,9 +319,6 @@ struct sk_buff *homa_gro_receive(struct list_head *held_list,
 		priority = ((struct iphdr *)skb_network_header(skb))->tos >> 5;
 		saddr = ntohl(ip_hdr(skb)->saddr);
 	}
-	tt_record4("homa_gro_receive transport %d, len %d, data_len %d, delta %d",
-		   skb->network_header, skb->len, skb->data_len,
-		   skb_transport_header(skb) - skb->data);
 
 	if (h_new->common.type == DATA) {
 		if (h_new->seg.offset == (__force __be32)-1) {
