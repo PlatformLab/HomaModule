@@ -47,4 +47,5 @@ for ((i = $first ; i <= $last; i++)); do
     ssh -4 $node 'sudo sysctl .kernel.printk="5 4 1 7"'
     ssh -4 $node 'echo $PATH'
     ssh -4 $node 'config default'
+    ssh -4 $node 'if ! grep -q mitigations=off /proc/cmdline; then echo WARNING: Meltdown/Spectre mitigations have not been disabled!; fi'
 done
