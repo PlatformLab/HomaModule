@@ -322,7 +322,7 @@ char *homa_metrics_print(void)
 		M("grant_check_calls         %15llu  Number of calls to homa_grant_check_rpc\n",
 		  m->grant_check_calls);
 		M("grant_check_slow_path     %15llu  Number of times homa_grant_check_rpc acquired grant lock\n",
-		  m->grant_check_calls);
+		  m->grant_check_slow_path);
 		M("grant_priority_bumps      %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
 		M("fifo_grants               %15llu  Grants issued using FIFO priority\n",
