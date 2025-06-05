@@ -1,12 +1,6 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Notes for the next design of grants:
-  * Update tthoma.py: e.g., no grant_recalc records
-  * grant_check_slow_path too high
-  * Too much time in NAPI?
-  * Too many BUSY packets (more than DATA)
-
 * Failure modes:
   * homa_grant_add_rpc: list has a loop, or encounter a null list link
   * stack corruption under homa_recvmsg after socket shutdown.

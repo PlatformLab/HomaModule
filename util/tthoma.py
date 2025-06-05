@@ -1444,15 +1444,6 @@ class Dispatcher:
         'regexp': 'homa_rpc_end invoked for id ([0-9]+)'
     })
 
-    def __grant_recalc_start(self, trace, time, core, match, interests):
-        for interest in interests:
-            interest.tt_grant_recalc_start(trace, time, core)
-
-    patterns.append({
-        'name': 'grant_recalc_start',
-        'regexp': 'homa_grant_recalc starting'
-    })
-
     def __grant_check_start(self, trace, time, core, match, interests):
         id = int(match.group(1))
         for interest in interests:
@@ -1471,6 +1462,26 @@ class Dispatcher:
     patterns.append({
         'name': 'grant_check_done',
         'regexp': 'homa_grant_check_rpc finished with id ([0-9]+)'
+    })
+
+    def __grant_check_lock(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_grant_check_lock(trace, time, core, id)
+
+    patterns.append({
+        'name': 'grant_check_lock',
+        'regexp': 'homa_grant_check_rpc acquiring grant lock \(id ([0-9]+)\)'
+    })
+
+    def __grant_check_unlock(self, trace, time, core, match, interests):
+        id = int(match.group(1))
+        for interest in interests:
+            interest.tt_grant_check_unlock(trace, time, core, id)
+
+    patterns.append({
+        'name': 'grant_check_unlock',
+        'regexp': 'homa_grant_check_rpc released grant lock \(id ([0-9]+)\)'
     })
 
     def __rpc_incoming(self, trace, time, core, match, interests):
@@ -3092,25 +3103,25 @@ class AnalyzeGrants:
     "grants_rx_<node>" and "grants_tx_<node>". These files contain information
     about all incoming/outgoing RPCs with outstanding/available grants in each
     time interval. In addition, statistics are generated about the time spent
-    in homa_grant_check_rpc and homa_grant_recalc.
+    in homa_grant_check_rpc.
     """
     def __init__(self, dispatcher):
         dispatcher.interest('AnalyzeRpcs')
         dispatcher.interest('AnalyzeIntervals')
 
-        # Node name -> total time spent in homa_grant_check_rpc on that node,
-        # including time in homa_grant_recalc and time spent sending grants.
+        # Node name -> total time spent in homa_grant_check_rpc on that node.
         self.node_check_time = defaultdict(lambda : 0)
 
-        # Node name -> total time spent in homa_grant_recalc on that node,
-        # not including sending grants.
-        self.node_recalc_time = defaultdict(lambda : 0)
+        # Node name -> total time spent acquiring and holding the grant lock
+        # while executing homa_grant_check_rpc on that node.
+        self.node_lock_time = defaultdict(lambda : 0)
 
         # Node name -> total time spent sending grants during homa_grant_check_rpc.
         self.node_grant_send_time = defaultdict(lambda : 0)
 
-        # Node name -> number of calls to homa_grant_recalc
-        self.node_recalcs = defaultdict(lambda : 0)
+        # Node name -> number of times the grant lock was acquired by
+        # homa_grant_check_rpc on that node.
+        self.node_locks = defaultdict(lambda : 0)
 
         # Node name -> number of calls to homa_grant_check_rpc
         self.node_checks = defaultdict(lambda : 0)
@@ -3122,8 +3133,9 @@ class AnalyzeGrants:
         # Core -> start time of active call to homa_grant_check_rpc (if any)
         self.core_check_start = {}
 
-        # Core -> start time of active call to recalc start (if any)
-        self.core_recalc_start = {}
+        # Core -> time when homa_grant_check_rpc started acquiring the
+        # grant lock (if any)
+        self.core_lock_start = {}
 
         # Core -> time of first grant sent by current call to
         # homa_grant_check_rpc (only valid if homa_grant_check_rpc in progress)
@@ -3133,13 +3145,16 @@ class AnalyzeGrants:
         self.node_checks[trace['node']] += 1
         self.core_check_start[core] = t
 
-    def tt_grant_recalc_start(self, trace, t, core):
+    def tt_grant_check_lock(self, trace, t, core, id):
         node = trace['node']
-        self.node_recalcs[node] += 1
-        self.core_recalc_start[core] = t
-        if core in self.core_first_grant_send:
-            self.node_grant_send_time[node] += t - self.core_first_grant_send[core]
-            del self.core_first_grant_send[core]
+        self.core_lock_start[core] = t
+
+    def tt_grant_check_unlock(self, trace, t, core, id):
+        node = trace['node']
+        if core in self.core_lock_start:
+            self.node_locks[node] += 1
+            self.node_lock_time[node] += t - self.core_lock_start[core]
+            del self.core_lock_start[core]
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         if not core in self.core_check_start:
@@ -3154,62 +3169,46 @@ class AnalyzeGrants:
             grant = self.core_first_grant_send[core]
             self.node_grant_send_time[node] += (t - grant)
             del self.core_first_grant_send[core]
-        else:
-            grant = -1e20
-        if core in self.core_recalc_start:
-            recalc_start = self.core_recalc_start[core]
-            end = t
-            if grant > recalc_start:
-                end = grant
-            self.node_recalc_time[node] += end - self.core_recalc_start[core]
-            del self.core_recalc_start[core]
         if core in self.core_check_start:
             self.node_check_time[node] += t - self.core_check_start[core]
             del self.core_check_start[core]
 
     def print_grant_check_stats(self):
-        print('\nStatistics about the functions homa_grant_check_rpc and '
-                'homa_grant_recalc:')
+        print('\nStatistics about the function homa_grant_check_rpc:')
         print('Node:    Name of node')
         print('Checks:  Rate of calling homa_grant_check_rpc (k/sec)')
-        print('CUsec:   Average execution time in homa_grant_check_rpc, '
-                'not including')
-        print('         time in homa_grant_recalc or sending grants')
-        print('CCores:  Average active cores in homa_grant_check_rpc, '
-                'not including')
-        print('         time in homa_grant_recalc or sending grants')
-        print('RFrac:   Fraction of calls to homa_grant_check_rpc that '
-                '   invoked homa_grant_recalc')
-        print('RUsec:   Average execution time in homa_grant_recalc, '
-                'not including time')
-        print('         sending grants')
-        print('RCores:  Average active cores in homa_grant_recalc, '
-                'not including time')
-        print('         sending grants')
-        print('GPer     Average grants sent per call to homa_grant_check_rpc')
-        print('GUsec    Average time to send a grant')
-        print('GCores   Average cores actively sending grants from within '
+        print('CUsec:   Average execution time in homa_grant_check_rpc')
+        print('CCores:  Average active cores in homa_grant_check_rpc')
+        print('LFrac:   Fraction of calls to homa_grant_check_rpc that '
+                'acquired the grant lock')
+        print('LUsec:   Average time spent acquiring/holding the grant '
+                'lock in homa_grant_check_rpc')
+        print('LCores:  Average cores acquiring/hold the grant lock in '
+                'homa_grant_check_rpc')
+        print('GPer:    Average grants sent per call to homa_grant_check_rpc')
+        print('GUsec:   Average time to send a grant')
+        print('GCores:  Average cores actively sending grants from within '
                 'homa_grant_check_rpc')
 
         print('')
-        print('Node      Checks CUsec CCores RFrac RUsec RCores  '
+        print('Node      Checks CUsec CCores LFrac LUsec LCores  '
                 'GPer GUSec GCores')
         print('--------------------------------------------------'
                 '-----------------')
         for node in get_sorted_nodes():
             checks = self.node_checks[node]
-            recalcs = self.node_recalcs[node]
+            locks = self.node_locks[node]
             grants = self.node_grants_sent[node]
-            recalc_time = self.node_recalc_time[node]
+            lock_time = self.node_lock_time[node]
             grant_time = self.node_grant_send_time[node]
-            check_time = self.node_check_time[node] - recalc_time - grant_time
+            check_time = self.node_check_time[node]
             elapsed = traces[node]['elapsed_time']
             print('%-10s %5.1f %5.2f  %5.2f ' % (node, 1000*checks/elapsed,
                     check_time/checks if checks else 0, check_time/elapsed),
                     end='')
-            print('%5.2f %5.2f  %5.2f ' % (recalcs/checks if checks else 0,
-                    recalc_time/recalcs if recalcs else 0,
-                    recalc_time/elapsed), end='')
+            print('%5.2f %5.2f  %5.2f ' % (locks/checks if checks else 0,
+                    lock_time/checks if checks else 0,
+                    lock_time/elapsed), end='')
             print('%5.2f %5.2f  %5.2f' % (grants/checks if checks else 0,
                     grant_time/grants if grants else 0, grant_time/elapsed))
 
@@ -3399,7 +3398,7 @@ class AnalyzeGrants:
             if remaining == 1e20:
                 result += '%12d     ?? %6d' % (id, outstanding)
             else:
-                result += '%12d %6d %6d' % (id, remaining, outstanding)
+                result += '%12d %7d %6d' % (id, remaining, outstanding)
         return result
 
     def tx_info(self, node, local_rpcs):
@@ -3430,7 +3429,7 @@ class AnalyzeGrants:
             if remaining == 1e20:
                 result += '%12d    ?? %6d' % (id, available)
             else:
-                result += '%12d %6d %6d' % (id, remaining, available)
+                result += '%12d %7d %6d' % (id, remaining, available)
         return result
 
     def analyze(self):
@@ -3610,8 +3609,8 @@ class AnalyzeGrants:
                         'but data has\n')
                 f.write('#          not yet arrived\n')
                 f.write('\n')
-                f.write('   Time          Id1   Rem1 Grant1         '
-                        'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
+                f.write('   Time          Id1    Rem1 Grant1         '
+                        'Id2    Rem2 Grant2         Id3    Rem3 Grant3\n')
                 for interval in intervals[name]:
                     if not 'rx_grant_info' in interval:
                         continue
@@ -3634,8 +3633,8 @@ class AnalyzeGrants:
                         'but data has\n')
                 f.write('#          not yet been transmitted\n')
                 f.write('\n')
-                f.write('   Time          Id1   Rem1 Grant1         '
-                        'Id2   Rem2 Grant2         Id3   Rem3 Grant3\n')
+                f.write('   Time          Id1    Rem1 Grant1         '
+                        'Id2    Rem2 Grant2         Id3    Rem3 Grant3\n')
                 for interval in intervals[name]:
                     if not 'tx_grant_info' in interval:
                         continue

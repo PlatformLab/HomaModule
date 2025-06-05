@@ -509,6 +509,7 @@ void homa_grant_remove_active(struct homa_rpc *rpc,
 	rpc->msgin.rank = -1;
 	rpc->peer->active_rpcs--;
 	grant->num_active_rpcs--;
+	grant->active_rpcs[grant->num_active_rpcs] = NULL;
 
 	/* Pull the highest-priority entry (if there is one) from
 	 * grantable_peers into active_rpcs.
@@ -704,7 +705,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	if (rpc->msgin.rank < 0 && !limit) {
 		/* Very fast path (Task 1 only). */
 		homa_grant_update_incoming(rpc, grant);
-		return;
+		goto done;
 	}
 
 	now = homa_clock();
@@ -714,7 +715,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		send_grant = homa_grant_update_granted(rpc, grant);
 		homa_grant_update_incoming(rpc, grant);
 		if (!send_grant)
-			return;
+			goto done;
 
 		homa_grant_cand_init(&cand);
 		if (rpc->msgin.granted >= rpc->msgin.length)
@@ -730,11 +731,13 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			homa_grant_cand_check(&cand, grant);
 		homa_rpc_lock(rpc);
 		homa_rpc_put(rpc);
-		return;
+		goto done;
 	}
 
 	INC_METRIC(grant_check_slow_path, 1);
 	homa_grant_update_incoming(rpc, grant);
+	tt_record1("homa_grant_check_rpc acquiring grant lock (id %d)",
+		   rpc->id);
 	homa_grant_lock(grant);
 	if (recalc) {
 		/* Task 5. */
@@ -755,6 +758,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 			homa_grant_cand_add(&cand, rpc2);
 	}
 	homa_grant_unlock(grant);
+	tt_record1("homa_grant_check_rpc released grant lock (id %d)",
+		   rpc->id);
 	if (!homa_grant_cand_empty(&cand)) {
 		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
@@ -762,6 +767,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		homa_rpc_lock(rpc);
 		homa_rpc_put(rpc);
 	}
+	done:
+	tt_record1("homa_grant_check_rpc finished with id %d", rpc->id);
 }
 
 /**
