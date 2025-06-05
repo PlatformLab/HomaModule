@@ -304,7 +304,7 @@ if elapsed_secs != 0:
         cores = cpu_time/time_delta
         if packets_received > 0:
             print("%s      %6.2f   %7.2f us/packet" % (print_name.ljust(22),
-                    cores, (cpu_time/packets_received) / 1000))
+                    cores, (cpu_time/(cpu_khz*1000)/packets_received) * 1e6))
         else:
             print("%s      %6.2f" % (print_name.ljust(22), cores))
     cpu_time = float(deltas["napi_cycles"])
