@@ -835,7 +835,7 @@ void tt_dbg1(char *msg, ...)
 	if (atomic_read(&tt_frozen))
 		return;
 	tt_freeze();
-	pr_err("Dumping timetrace\n");
+	pr_err("Dumping timetrace on core %d\n", raw_smp_processor_id());
 	tt_printk();
 	pr_err("Finished dumping timetrace\n");
 }
