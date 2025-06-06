@@ -36,18 +36,22 @@ f = sys.stdin
 if len(sys.argv) > 1:
     f = open(sys.argv[1])
 
+lines = []
+
 for line in f:
     line = line.rstrip()
     if line.endswith('^M'):
         line = line[:-2]
 
-    # Ignore everything up until the initial line containing the clock speed.
     if cpu_ghz == None:
         match = re.match('.*cpu_khz: ([0-9.]+)', line)
         if match:
             cpu_ghz = float(match.group(1))*1e-06
         continue
 
+    lines.append(line)
+
+for line in reversed(lines):
     match = re.match('.* ([0-9.]+) (\[C..\] .+)', line)
     if not match:
         continue
