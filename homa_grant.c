@@ -173,7 +173,7 @@ void homa_grant_end_rpc(struct homa_rpc *rpc)
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_grant_candidates cand;
 
-	if (rpc->msgin.rank >= 0 || !list_empty(&rpc->grantable_links)) {
+	if (rpc->msgin.granted < rpc->msgin.length) {
 		homa_grant_cand_init(&cand);
 		homa_grant_unmanage_rpc(rpc, &cand);
 		if (!homa_grant_cand_empty(&cand)) {
@@ -421,8 +421,8 @@ void homa_grant_manage_rpc(struct homa_rpc *rpc)
 
 	homa_grant_lock(grant);
 
-	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs
-		* (time - grant->last_grantable_change));
+	INC_METRIC(grantable_rpcs_integral, grant->num_grantable_rpcs *
+		   (time - grant->last_grantable_change));
 	grant->last_grantable_change = time;
 	grant->num_grantable_rpcs++;
 	tt_record2("Incremented num_grantable_rpcs to %d, id %d",
@@ -586,24 +586,30 @@ void homa_grant_update_incoming(struct homa_rpc *rpc, struct homa_grant *grant)
 }
 
 /**
- * homa_grant_update_granted() - Compute a new grant offset for an RPC based
- * on the state of that world as well as overall grant state.
- * @rpc:   RPC whose msgin.granted should be updated. Need not be locked.
+ * homa_grant_update_granted() - Compute a new grant offset for an RPC.
+ * @rpc:   RPC whose msgin.granted should be updated. Must be locked by
+ *         caller.
  * @grant: Information for managing grants. This function may set
  *         incoming_hit_limit.
- * Return: True means the offset was increased and a grant should be sent
- *         for the RPC. False means no grant should be sent.
+ * Return: >= 0 means the offset was increased and a grant should be
+ *         sent for the RPC; the return value gives the priority to
+ *         use in the grant. -1 means the grant offset was not changed
+ *         and no grant should be sent.
  */
-bool homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
+int homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
+	__must_hold(&rpc->bucket->lock)
 {
-	int received, new_grant_offset, incoming_delta, avl_incoming;
+	int received, new_grant_offset, incoming_delta, avl_incoming, rank;
 
 	/* Don't increase the grant if the node has been slow to send
 	 * data already granted: no point in wasting grants on this
 	 * node.
 	 */
 	if (rpc->silent_ticks > 1)
-		return false;
+		return -1;
+	rank = READ_ONCE(rpc->msgin.rank);
+	if (rank < 0 || rpc->msgin.granted >= rpc->msgin.length)
+		return -1;
 
 	received = rpc->msgin.length - rpc->msgin.bytes_remaining;
 	new_grant_offset = received + grant->window;
@@ -619,25 +625,34 @@ bool homa_grant_update_granted(struct homa_rpc *rpc, struct homa_grant *grant)
 		new_grant_offset -= incoming_delta - avl_incoming;
 	}
 	if (new_grant_offset <= rpc->msgin.granted)
-		return false;
+		return -1;
 	rpc->msgin.granted = new_grant_offset;
-	return true;
+
+	/* The reason we compute the priority here rather than, say, in
+	 * homa_grant_send is that rpc->msgin.rank could change to -1
+	 * before homa_grant_send is invoked (it could change at any time,
+	 * since we don't have homa->grant->lock; that's why READ_ONCE
+	 * is used above). It's OK to still send a grant in that case, but
+	 * we need to have a meaningful priority level for it.
+	 */
+	return homa_grant_priority(rpc->hsk->homa, rank);
 }
 
 /**
  * homa_grant_send() - Issue a GRANT packet for the current grant offset
  * of an incoming RPC.
- * @rpc:     RPC for which to issue GRANT. Should not be locked (to
- *           minimize lock contention, since sending a packet is slow),
- *           but caller must hold a reference to keep it from being reaped.
- *           The msgin.resend_all field will be cleared.
+ * @rpc:      RPC for which to issue GRANT. Should not be locked (to
+ *            minimize lock contention, since sending a packet is slow),
+ *            but caller must hold a reference to keep it from being reaped.
+ *            The msgin.resend_all field will be cleared.
+ * @priority: Priority level to use for the grant.
  */
-void homa_grant_send(struct homa_rpc *rpc)
+void homa_grant_send(struct homa_rpc *rpc, int priority)
 {
 	struct homa_grant_hdr grant;
 
 	grant.offset = htonl(rpc->msgin.granted);
-	grant.priority = homa_grant_priority(rpc->hsk->homa, rpc->msgin.rank);
+	grant.priority = priority;
 	grant.resend_all = rpc->msgin.resend_all;
 	if (grant.resend_all)
 		rpc->msgin.resend_all = 0;
@@ -660,7 +675,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_grant_candidates cand;
-	bool send_grant, limit, recalc;
+	bool limit, recalc;
 	u64 now;
 	int i;
 
@@ -702,19 +717,16 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	 * there are stalled RPCs that can now be granted.
 	 */
 	limit = atomic_xchg(&grant->incoming_hit_limit, false);
-	if (rpc->msgin.rank < 0 && !limit) {
-		/* Very fast path (Task 1 only). */
-		homa_grant_update_incoming(rpc, grant);
-		goto done;
-	}
 
 	now = homa_clock();
 	recalc = now >= READ_ONCE(grant->next_recalc);
 	if (!recalc && !limit) {
+		int priority;
+
 		/* Fast path (Tasks 1 and 2). */
-		send_grant = homa_grant_update_granted(rpc, grant);
+		priority = homa_grant_update_granted(rpc, grant);
 		homa_grant_update_incoming(rpc, grant);
-		if (!send_grant)
+		if (priority < 0)
 			goto done;
 
 		homa_grant_cand_init(&cand);
@@ -726,7 +738,7 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 		 */
 		homa_rpc_hold(rpc);
 		homa_rpc_unlock(rpc);
-		homa_grant_send(rpc);
+		homa_grant_send(rpc, priority);
 		if (!homa_grant_cand_empty(&cand))
 			homa_grant_cand_check(&cand, grant);
 		homa_rpc_lock(rpc);
@@ -959,22 +971,28 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
 			   struct homa_grant *grant)
 {
 	struct homa_rpc *rpc;
+	bool locked;
+	int priority;
 
 	while (cand->removes < cand->inserts) {
 		rpc = cand->rpcs[cand->removes & HOMA_CAND_MASK];
 		cand->removes++;
 		homa_rpc_lock(rpc);
+		locked = true;
 
-		if (rpc->state != RPC_DEAD &&
-		    homa_grant_update_granted(rpc, grant)) {
-			homa_grant_update_incoming(rpc, grant);
-			if (rpc->msgin.granted >= rpc->msgin.length)
-				homa_grant_unmanage_rpc(rpc, cand);
-			homa_rpc_unlock(rpc);
-			homa_grant_send(rpc);
-		} else {
-			homa_rpc_unlock(rpc);
+		if (rpc->state != RPC_DEAD) {
+			priority = homa_grant_update_granted(rpc, grant);
+			if (priority >= 0) {
+				homa_grant_update_incoming(rpc, grant);
+				if (rpc->msgin.granted >= rpc->msgin.length)
+					homa_grant_unmanage_rpc(rpc, cand);
+				homa_rpc_unlock(rpc);
+				locked = false;
+				homa_grant_send(rpc, priority);
+			}
 		}
+		if (locked)
+			homa_rpc_unlock(rpc);
 		homa_rpc_put(rpc);
 	}
 }

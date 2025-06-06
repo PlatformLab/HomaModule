@@ -249,10 +249,10 @@ int      homa_grant_priority(struct homa *homa, int rank);
 void     homa_grant_remove_active(struct homa_rpc *rpc,
 				  struct homa_grant_candidates *cand);
 void     homa_grant_remove_grantable(struct homa_rpc *rpc);
-void     homa_grant_send(struct homa_rpc *rpc);
+void     homa_grant_send(struct homa_rpc *rpc, int priority);
 void     homa_grant_unmanage_rpc(struct homa_rpc *rpc,
 				 struct homa_grant_candidates *cand);
-bool     homa_grant_update_granted(struct homa_rpc *rpc,
+int      homa_grant_update_granted(struct homa_rpc *rpc,
 				   struct homa_grant *grant);
 void     homa_grant_update_incoming(struct homa_rpc *rpc,
 				    struct homa_grant *grant);

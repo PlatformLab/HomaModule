@@ -166,7 +166,8 @@ struct homa_message_in {
 #ifndef __STRIP__ /* See strip.py */
 	/**
 	 * @rank: Position of this RPC in homa->grant->active_rpcs, or -1
-	 * if not in homa->grant->active_rpcs. Managed by homa_grant.c.
+	 * if not in homa->grant->active_rpcs. Managed by homa_grant.c;
+	 * unsafe to access unless holding homa->grant->lock.
 	 */
 	int rank;
 
@@ -197,7 +198,7 @@ struct homa_message_in {
 	u64 birth;
 
 	/** @resend_all: if nonzero, set resend_all in the next grant packet. */
-	__u8 resend_all;
+	u8 resend_all;
 #endif /* See strip.py */
 };
 
@@ -363,7 +364,8 @@ struct homa_rpc {
 	/**
 	 * @grantable_links: Used to link this RPC into peer->grantable_rpcs.
 	 * If this RPC isn't in peer->grantable_rpcs, this is an empty
-	 * list pointing to itself.
+	 * list pointing to itself. Must hold homa->grant->lock when
+	 * accessing.
 	 */
 	struct list_head grantable_links;
 #endif /* See strip.py */

@@ -228,19 +228,27 @@ TEST_F(homa_grant, homa_grant_end_rpc__basics)
 	unit_hook_register(grant_spinlock_hook);
 	hook_spinlock_count = 0;
 
-	/* First call: RPC is managed. */
 	homa_grant_end_rpc(rpc);
 	EXPECT_EQ(-1, rpc->msgin.rank);
 	EXPECT_EQ(1, hook_spinlock_count);
 	EXPECT_EQ(-100, atomic_read(&self->homa.grant->total_incoming));
 	EXPECT_EQ(0, rpc->msgin.rec_incoming);
-
-	/* Second call: RPC not managed, nothing to do. */
-	hook_spinlock_count = 0;
-	homa_grant_end_rpc(rpc);
-	EXPECT_EQ(0, hook_spinlock_count);
 }
-TEST_F(homa_grant, homa_grant_end_rpc__call_cand_check)
+TEST_F(homa_grant, homa_grant_end_rpc__skip_cleanup_if_fully_granted)
+{
+	struct homa_rpc *rpc;
+
+	rpc = test_rpc_init(self, 100, self->server_ip, 20000);
+	rpc->msgin.rec_incoming = 100;
+	rpc->msgin.granted = rpc->msgin.length;
+	EXPECT_EQ(0, rpc->msgin.rank);
+
+	homa_grant_end_rpc(rpc);
+	EXPECT_EQ(0, rpc->msgin.rank);
+	EXPECT_EQ(-100, atomic_read(&self->homa.grant->total_incoming));
+	EXPECT_EQ(0, rpc->msgin.rec_incoming);
+}
+TEST_F(homa_grant, homa_grant_end_rpc__activate_other_rpc)
 {
 	struct homa_rpc *rpc1, *rpc2;
 
@@ -852,7 +860,10 @@ TEST_F(homa_grant, homa_grant_update_granted__basics)
 {
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
 
-	EXPECT_TRUE(homa_grant_update_granted(rpc, self->homa.grant));
+	rpc->msgin.rank = 1;
+	self->homa.grant->num_active_rpcs = 4;
+	EXPECT_EQ(2, homa_grant_update_granted(rpc, self->homa.grant));
+	self->homa.grant->num_active_rpcs = 0;
 	EXPECT_EQ(10000, rpc->msgin.granted);
 	EXPECT_EQ(0, atomic_read(&self->homa.grant->incoming_hit_limit));
 }
@@ -861,8 +872,24 @@ TEST_F(homa_grant, homa_grant_update_granted__rpc_idle)
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
 
 	rpc->silent_ticks = 2;
-	EXPECT_FALSE(homa_grant_update_granted(rpc, self->homa.grant));
+	EXPECT_EQ(-1, homa_grant_update_granted(rpc, self->homa.grant));
 	EXPECT_EQ(1000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_granted__not_active)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	rpc->msgin.rank = -1;
+	EXPECT_EQ(-1, homa_grant_update_granted(rpc, self->homa.grant));
+	EXPECT_EQ(1000, rpc->msgin.granted);
+}
+TEST_F(homa_grant, homa_grant_update_granted__already_fully_granted)
+{
+	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
+
+	rpc->msgin.rank = 2;
+	rpc->msgin.granted = rpc->msgin.length;
+	EXPECT_EQ(-1, homa_grant_update_granted(rpc, self->homa.grant));
 }
 TEST_F(homa_grant, homa_grant_update_granted__end_of_message)
 {
@@ -870,11 +897,12 @@ TEST_F(homa_grant, homa_grant_update_granted__end_of_message)
 
         /* First call grants remaining bytes in message. */
 	rpc->msgin.bytes_remaining = 5000;
-	EXPECT_TRUE(homa_grant_update_granted(rpc, self->homa.grant));
+	rpc->msgin.rank = 2;
+	EXPECT_EQ(0, homa_grant_update_granted(rpc, self->homa.grant));
 	EXPECT_EQ(20000, rpc->msgin.granted);
 
         /* Second call cannot grant anything additional. */
-	EXPECT_FALSE(homa_grant_update_granted(rpc, self->homa.grant));
+	EXPECT_EQ(-1, homa_grant_update_granted(rpc, self->homa.grant));
 }
 TEST_F(homa_grant, homa_grant_update_granted__insufficient_room_in_incoming)
 {
@@ -883,7 +911,7 @@ TEST_F(homa_grant, homa_grant_update_granted__insufficient_room_in_incoming)
 	rpc->msgin.bytes_remaining = 5000;
 	rpc->msgin.rank = 5;
 	atomic_set(&self->homa.grant->total_incoming, 48000);
-	EXPECT_TRUE(homa_grant_update_granted(rpc, self->homa.grant));
+	EXPECT_EQ(0, homa_grant_update_granted(rpc, self->homa.grant));
 	EXPECT_EQ(17000, rpc->msgin.granted);
 }
 TEST_F(homa_grant, homa_grant_update_granted__incoming_overcommitted)
@@ -891,7 +919,8 @@ TEST_F(homa_grant, homa_grant_update_granted__incoming_overcommitted)
 	struct homa_rpc *rpc = test_rpc(self, 100, self->server_ip, 20000);
 
 	atomic_set(&self->homa.grant->total_incoming, 51000);
-	EXPECT_FALSE(homa_grant_update_granted(rpc, self->homa.grant));
+	rpc->msgin.rank = 2;
+	EXPECT_EQ(-1, homa_grant_update_granted(rpc, self->homa.grant));
 	EXPECT_EQ(1000, rpc->msgin.granted);
 	EXPECT_EQ(1, atomic_read(&self->homa.grant->incoming_hit_limit));
 }
@@ -902,10 +931,9 @@ TEST_F(homa_grant, homa_grant_send__basics)
 
 	mock_xmit_log_verbose = 1;
 	rpc->msgin.granted = 2600;
-	rpc->msgin.rank = 2;
 	unit_log_clear();
-	homa_grant_send(rpc);
-	EXPECT_SUBSTR("id 100, offset 2600, grant_prio 0", unit_log_get());
+	homa_grant_send(rpc, 3);
+	EXPECT_SUBSTR("id 100, offset 2600, grant_prio 3", unit_log_get());
 }
 TEST_F(homa_grant, homa_grant_send__resend_all)
 {
@@ -916,8 +944,8 @@ TEST_F(homa_grant, homa_grant_send__resend_all)
 	rpc->msgin.rank = 0;
 	rpc->msgin.resend_all = 1;
 	unit_log_clear();
-	homa_grant_send(rpc);
-	EXPECT_SUBSTR("id 100, offset 9999, grant_prio 0, resend_all",
+	homa_grant_send(rpc, 1);
+	EXPECT_SUBSTR("id 100, offset 9999, grant_prio 1, resend_all",
 		      unit_log_get());
 	EXPECT_EQ(0, rpc->msgin.resend_all);
 }
@@ -1296,7 +1324,7 @@ TEST_F(homa_grant, homa_grant_cand_check__rpc_becomes_fully_granted)
 
 	unit_log_clear();
 	homa_grant_cand_check(&cand, self->homa.grant);
-	EXPECT_STREQ("xmit GRANT 20000@1; xmit GRANT 10000@0", unit_log_get());
+	EXPECT_STREQ("xmit GRANT 20000@0; xmit GRANT 10000@0", unit_log_get());
 	EXPECT_EQ(-1, rpc1->msgin.rank);
 	EXPECT_EQ(0, rpc2->msgin.rank);
 	EXPECT_EQ(2, cand.removes);
