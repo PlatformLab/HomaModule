@@ -1263,6 +1263,10 @@ void homa_rpc_handoff(struct homa_rpc *rpc)
 	 * otherwise enqueue it.
 	 */
 	homa_sock_lock(hsk);
+	if (hsk->shutdown) {
+		homa_sock_unlock(hsk);
+		return;
+	}
 	if (!list_empty(&hsk->interests)) {
 #ifndef __STRIP__ /* See strip.py */
 		interest = homa_choose_interest(hsk);

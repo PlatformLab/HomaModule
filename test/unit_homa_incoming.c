@@ -2577,6 +2577,20 @@ TEST_F(homa_incoming, homa_rpc_handoff__private_rpc)
 	EXPECT_TRUE(list_empty(&self->hsk.ready_rpcs));
 	homa_interest_unlink_private(&interest);
 }
+TEST_F(homa_incoming, homa_rpc_handoff__socket_shutdown)
+{
+	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
+			UNIT_OUTGOING, self->client_ip, self->server_ip,
+			self->server_port, self->client_id, 20000, 1600);
+
+	ASSERT_NE(NULL, crpc);
+	unit_log_clear();
+
+	self->hsk.shutdown = 1;
+	homa_rpc_handoff(crpc);
+	self->hsk.shutdown = 0;
+	EXPECT_TRUE(list_empty(&self->hsk.ready_rpcs));
+}
 TEST_F(homa_incoming, homa_rpc_handoff__handoff_to_shared_interest)
 {
 	struct homa_rpc *crpc = unit_client_rpc(&self->hsk,
