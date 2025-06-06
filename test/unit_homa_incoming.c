@@ -34,7 +34,7 @@ static void wait_hook4(char *id)
 	if (hook_count != 0)
 		return;
 	if (hook_shutdown_hsk)
-		homa_sock_shutdown(hook_shutdown_hsk);
+		unit_sock_destroy(hook_shutdown_hsk);
 	else
 		homa_rpc_handoff(hook_rpc);
 }
@@ -912,7 +912,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv4)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
@@ -929,7 +929,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_ipv6)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);
@@ -946,7 +946,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__server_not_enabled)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->hsk.is_server = false;
 
@@ -964,7 +964,7 @@ TEST_F(homa_incoming, homa_dispatch_pkts__unknown_socket_free_many_packets)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	skb = mock_skb_alloc(self->client_ip, &self->data.common, 1400, 1400);

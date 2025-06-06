@@ -156,7 +156,7 @@ TEST_F(homa_utils, homa_net_destroy__delete_sockets)
 	EXPECT_EQ(1, hsk2.shutdown);
 	EXPECT_EQ(0, hsk3.shutdown);
 
-	homa_sock_destroy(&hsk3);
+	unit_sock_destroy(&hsk3);
 }
 TEST_F(homa_utils, homa_net_destroy__delete_peers)
 {

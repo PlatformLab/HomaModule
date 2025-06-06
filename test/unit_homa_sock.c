@@ -118,10 +118,10 @@ TEST_F(homa_sock, homa_socktab_next)
 	hsk = homa_socktab_next(&scan);
 	EXPECT_EQ(NULL, hsk);
 	EXPECT_EQ(0, mock_sock_holds);
-	homa_sock_destroy(&hsk1);
-	homa_sock_destroy(&hsk2);
-	homa_sock_destroy(&hsk3);
-	homa_sock_destroy(&hsk4);
+	unit_sock_destroy(&hsk1);
+	unit_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk3);
+	unit_sock_destroy(&hsk4);
 	homa_socktab_end_scan(&scan);
 }
 
@@ -152,7 +152,7 @@ TEST_F(homa_sock, homa_sock_init__cant_allocate_buffer_pool)
 
 	mock_kmalloc_errors = 1;
 	EXPECT_EQ(ENOMEM, -homa_sock_init(&sock));
-	homa_sock_destroy(&sock);
+	unit_sock_destroy(&sock);
 }
 TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 {
@@ -163,8 +163,8 @@ TEST_F(homa_sock, homa_sock_init__skip_port_in_use)
 	mock_sock_init(&hsk3, self->hnet, 0);
 	EXPECT_EQ(65535, hsk2.port);
 	EXPECT_EQ(32769, hsk3.port);
-	homa_sock_destroy(&hsk2);
-	homa_sock_destroy(&hsk3);
+	unit_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk3);
 }
 TEST_F(homa_sock, homa_sock_init__all_ports_in_use)
 {
@@ -177,9 +177,9 @@ TEST_F(homa_sock, homa_sock_init__all_ports_in_use)
 	EXPECT_EQ(65534, hsk2.port);
 	EXPECT_EQ(65535, hsk3.port);
 	EXPECT_EQ(1, hsk4.shutdown);
-	homa_sock_destroy(&hsk2);
-	homa_sock_destroy(&hsk3);
-	homa_sock_destroy(&hsk4);
+	unit_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk3);
+	unit_sock_destroy(&hsk4);
 }
 TEST_F(homa_sock, homa_sock_init__ip_header_length)
 {
@@ -191,8 +191,8 @@ TEST_F(homa_sock, homa_sock_init__ip_header_length)
 	mock_sock_init(&hsk_v6, self->hnet, 0);
 	EXPECT_EQ(sizeof(struct iphdr), hsk_v4.ip_header_length);
 	EXPECT_EQ(sizeof(struct ipv6hdr), hsk_v6.ip_header_length);
-	homa_sock_destroy(&hsk_v4);
-	homa_sock_destroy(&hsk_v6);
+	unit_sock_destroy(&hsk_v4);
+	unit_sock_destroy(&hsk_v6);
 }
 #ifndef __STRIP__ /* See strip.py */
 TEST_F(homa_sock, homa_sock_init__hijack_tcp)
@@ -205,8 +205,8 @@ TEST_F(homa_sock, homa_sock_init__hijack_tcp)
 	mock_sock_init(&hijack, self->hnet, 0);
 	EXPECT_EQ(0, no_hijack.sock.sk_protocol);
 	EXPECT_EQ(IPPROTO_TCP, hijack.sock.sk_protocol);
-	homa_sock_destroy(&hijack);
-	homa_sock_destroy(&no_hijack);
+	unit_sock_destroy(&hijack);
+	unit_sock_destroy(&no_hijack);
 }
 #endif /* See strip.py */
 
@@ -226,13 +226,13 @@ TEST_F(homa_sock, homa_sock_unlink__remove_from_map)
 	sock_put(&hsk2.sock);
 	sock_put(&hsk3.sock);
 
-	homa_sock_shutdown(&hsk2);
+	unit_sock_destroy(&hsk2);
 
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client2));
 	EXPECT_EQ(&hsk3, homa_sock_find(self->hnet, client3));
 	sock_put(&hsk3.sock);
 
-	homa_sock_shutdown(&hsk3);
+	unit_sock_destroy(&hsk3);
 
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client2));
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client3));
@@ -251,6 +251,7 @@ TEST_F(homa_sock, homa_sock_shutdown__unlink_socket)
 
 	homa_sock_shutdown(&hsk);
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, client));
+	homa_sock_destroy(&hsk.sock);
 }
 TEST_F(homa_sock, homa_sock_shutdown__already_shutdown)
 {
@@ -277,6 +278,7 @@ TEST_F(homa_sock, homa_sock_shutdown__delete_rpcs)
 	homa_sock_shutdown(&self->hsk);
 	EXPECT_TRUE(self->hsk.shutdown);
 	EXPECT_EQ(0, unit_list_length(&self->hsk.active_rpcs));
+	homa_sock_destroy(&self->hsk.sock);
 }
 TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 {
@@ -295,6 +297,7 @@ TEST_F(homa_sock, homa_sock_shutdown__wakeup_interests)
 	EXPECT_EQ(NULL, interest2.rpc);
 	EXPECT_TRUE(list_empty(&interest1.links));
 	EXPECT_STREQ("wake_up; wake_up", unit_log_get());
+	homa_sock_destroy(&self->hsk.sock);
 }
 
 TEST_F(homa_sock, homa_sock_bind)
@@ -320,11 +323,11 @@ TEST_F(homa_sock, homa_sock_bind)
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, 110));
 	EXPECT_EQ(&self->hsk, homa_sock_find(self->hnet, 120));
 	sock_put(&self->hsk.sock);
-	homa_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk2);
 }
 TEST_F(homa_sock, homa_sock_bind__socket_shutdown)
 {
-	homa_sock_shutdown(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	EXPECT_EQ(ESHUTDOWN, -homa_sock_bind(self->hnet, &self->hsk, 100));
 }
 
@@ -339,7 +342,7 @@ TEST_F(homa_sock, homa_sock_find__basics)
 	EXPECT_EQ(&hsk2, homa_sock_find(self->hnet, hsk2.port));
 	sock_put(&hsk2.sock);
 	EXPECT_EQ(NULL, homa_sock_find(self->hnet, hsk2.port + 1));
-	homa_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk2);
 }
 TEST_F(homa_sock, homa_sock_find__same_port_in_different_hnets)
 {
@@ -358,8 +361,8 @@ TEST_F(homa_sock, homa_sock_find__same_port_in_different_hnets)
 
 	sock_put(&hsk1.sock);
 	sock_put(&hsk2.sock);
-	homa_sock_destroy(&hsk1);
-	homa_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk1);
+	unit_sock_destroy(&hsk2);
 }
 
 TEST_F(homa_sock, homa_sock_find__long_hash_chain)
@@ -388,9 +391,9 @@ TEST_F(homa_sock, homa_sock_find__long_hash_chain)
 			5*HOMA_SOCKTAB_BUCKETS + 13));
 	sock_put(&hsk4.sock);
 
-	homa_sock_destroy(&hsk2);
-	homa_sock_destroy(&hsk3);
-	homa_sock_destroy(&hsk4);
+	unit_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk3);
+	unit_sock_destroy(&hsk4);
 }
 
 #ifndef __STRIP__ /* See strip.py */

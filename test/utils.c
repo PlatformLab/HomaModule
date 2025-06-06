@@ -489,6 +489,17 @@ void unit_homa_destroy(struct homa *homa)
 }
 
 /**
+ * unit_sock_destroy() - Invoked by unit tests to cleanup and destroy
+ * a socket.
+ * @hsk:    Socket to destroy.
+ */
+void unit_sock_destroy(struct homa_sock *hsk)
+{
+	homa_sock_shutdown(hsk);
+	homa_sock_destroy(&hsk->sock);
+}
+
+/**
  * unit_log_peers() - Return a count of the number of peers in the
  * homa_peertab for @homa (could also include peers from other homas).
  * @homa:       Used to locate homa_peertab to count.

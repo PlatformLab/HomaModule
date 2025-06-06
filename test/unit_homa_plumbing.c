@@ -150,7 +150,7 @@ TEST_F(homa_plumbing, homa_bind__version_mismatch)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	addr.sa_family = AF_INET6;
 	sock.sk = &self->hsk.inet.sk;
@@ -165,7 +165,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_address_too_short)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	addr.in6.sin6_family = AF_INET6;
@@ -181,7 +181,7 @@ TEST_F(homa_plumbing, homa_bind__ipv6_ok)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->hsk.is_server = false;
 
@@ -201,7 +201,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_address_too_short)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	addr.in4.sin_family = AF_INET;
@@ -217,7 +217,7 @@ TEST_F(homa_plumbing, homa_bind__ipv4_ok)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	self->hsk.is_server = false;
 
@@ -283,7 +283,7 @@ TEST_F(homa_plumbing, homa_socket__success)
 	hsk.sock.sk_net.net = self->hnet->net;
 	refcount_set(&hsk.sock.sk_wmem_alloc, 1);
 	EXPECT_EQ(0, homa_socket(&hsk.sock));
-	homa_sock_destroy(&hsk);
+	unit_sock_destroy(&hsk);
 }
 TEST_F(homa_plumbing, homa_socket__homa_sock_init_failure)
 {
@@ -770,7 +770,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv4)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	EXPECT_EQ(0, -homa_pool_get_pages(self->hsk.buffer_pool, 2, pages, 0));
@@ -801,7 +801,7 @@ TEST_F(homa_plumbing, homa_recvmsg__normal_completion_ipv6)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 	server_ip6 = unit_get_in_addr("1::3:5:7");
 
@@ -1223,7 +1223,7 @@ TEST_F(homa_plumbing, homa_poll__socket_shutdown)
 {
 	struct socket sock = {.sk = &self->hsk.sock};
 
-	homa_sock_shutdown(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	EXPECT_EQ(POLLIN | POLLOUT | POLLWRNORM, homa_poll(NULL, &sock, NULL));
 }
 TEST_F(homa_plumbing, homa_poll__socket_readable)

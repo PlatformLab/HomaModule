@@ -102,7 +102,7 @@ static struct proto homa_prot = {
 	.connect	   = ip4_datagram_connect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
-	.destroy	   = NULL,
+	.destroy	   = homa_sock_destroy,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
@@ -120,7 +120,7 @@ static struct proto homav6_prot = {
 	.connect	   = ip6_datagram_connect,
 	.ioctl		   = homa_ioctl,
 	.init		   = homa_socket,
-	.destroy	   = NULL,
+	.destroy	   = homa_sock_destroy,
 	.setsockopt	   = homa_setsockopt,
 	.getsockopt	   = homa_getsockopt,
 	.sendmsg	   = homa_sendmsg,
@@ -737,7 +737,7 @@ void homa_close(struct sock *sk, long timeout)
 	int port = hsk->port;
 #endif/* See strip.py */
 
-	homa_sock_destroy(hsk);
+	homa_sock_shutdown(hsk);
 	sk_common_release(sk);
 	tt_record1("closed socket, port %d", port);
 }
@@ -842,8 +842,10 @@ int homa_socket(struct sock *sk)
 	int result;
 
 	result = homa_sock_init(hsk);
-	if (result != 0)
-		homa_sock_destroy(hsk);
+	if (result != 0) {
+		homa_sock_shutdown(hsk);
+		homa_sock_destroy(&hsk->sock);
+	}
 	return result;
 }
 

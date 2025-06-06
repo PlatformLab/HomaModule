@@ -333,7 +333,7 @@ TEST_F(homa_peer, homa_peer_prefer_evict)
 	EXPECT_EQ(0, homa_peer_prefer_evict(peertab, peer1, peer4));
 	EXPECT_EQ(1, homa_peer_prefer_evict(peertab, peer1, peer2));
 
-	homa_sock_destroy(&hsk2);
+	unit_sock_destroy(&hsk2);
 	homa_peer_free_net(hnet2);
 }
 
@@ -799,7 +799,7 @@ TEST_F(homa_peer, homa_peer_get_dst__ipv4)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	struct homa_peer *peer = homa_peer_get(&self->hsk,
@@ -821,7 +821,7 @@ TEST_F(homa_peer, homa_peer_get_dst__ipv6)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, 0);
 
 	struct homa_peer *peer = homa_peer_get(&self->hsk, &ip1111[0]);

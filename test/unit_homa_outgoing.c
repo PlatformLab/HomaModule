@@ -305,7 +305,7 @@ TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__multiple_segments_tcp_hijacking)
 	EXPECT_STREQ("DATA from 0.0.0.0:40001, dport 99, id 2, message_length 10000, offset 10000, data_length 1500, incoming 10000, extra segs 1500@11500 1500@13000 500@14500",
 			homa_print_packet(skb, buffer, sizeof(buffer)));
 	kfree_skb(skb);
-	homa_sock_destroy(&hsk);
+	unit_sock_destroy(&hsk);
 }
 TEST_F(homa_outgoing, homa_tx_data_pkt_alloc__error_copying_data_hijacking_path)
 {
@@ -715,7 +715,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv4_error)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -739,7 +739,7 @@ TEST_F(homa_outgoing, __homa_xmit_control__ipv6_error)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	srpc = unit_server_rpc(&self->hsk, UNIT_RCVD_ONE_PKT, self->client_ip,
@@ -967,7 +967,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv4_transmit_error)
 
 	// Make sure the test uses IPv4.
 	mock_ipv6 = false;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,
@@ -985,7 +985,7 @@ TEST_F(homa_outgoing, __homa_xmit_data__ipv6_transmit_error)
 
 	// Make sure the test uses IPv6.
 	mock_ipv6 = true;
-	homa_sock_destroy(&self->hsk);
+	unit_sock_destroy(&self->hsk);
 	mock_sock_init(&self->hsk, self->hnet, self->client_port);
 
 	crpc = unit_client_rpc(&self->hsk, UNIT_OUTGOING, self->client_ip,

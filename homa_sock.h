@@ -273,7 +273,7 @@ void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 #endif /* See strip.py */
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
 				  __u16 port);
-void               homa_sock_destroy(struct homa_sock *hsk);
+void               homa_sock_destroy(struct sock *sk);
 struct homa_sock  *homa_sock_find(struct homa_net *hnet, __u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
 void               homa_sock_shutdown(struct homa_sock *hsk);

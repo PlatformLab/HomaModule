@@ -53,6 +53,9 @@ void         unit_log_grantables(struct homa *homa);
 void         unit_log_hashed_rpcs(struct homa_sock *hsk);
 void         unit_log_message_out_packets(struct homa_message_out *message,
 				      int verbose);
+void         unit_log_skb_list(struct sk_buff_head *packets,
+			       int verbose);
+void         unit_log_throttled(struct homa *homa);
 const char  *unit_print_gaps(struct homa_rpc *rpc);
 struct homa_rpc
 	    *unit_server_rpc(struct homa_sock *hsk,
@@ -61,9 +64,7 @@ struct homa_rpc
 			     struct in6_addr *client_ip,
 			     int client_port, int id, int req_length,
 			     int resp_length);
-void         unit_log_skb_list(struct sk_buff_head *packets,
-			       int verbose);
-void         unit_log_throttled(struct homa *homa);
+void         unit_sock_destroy(struct homa_sock *hsk);
 void         unit_teardown(void);
 
 /* Kludge to avoid including arpa/inet.h, which causes definition

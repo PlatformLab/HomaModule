@@ -39,7 +39,13 @@ void homa_socktab_destroy(struct homa_socktab *socktab, struct homa_net *hnet)
 			hsk = homa_socktab_next(&scan)) {
 		if (hnet && hnet != hsk->hnet)
 			continue;
-		homa_sock_destroy(hsk);
+
+		/* In actual use there should be no sockets left when this
+		 * function is invoked, so the code below will never be
+		 * invoked. However, it is useful during unit tests.
+		 */
+		homa_sock_shutdown(hsk);
+		homa_sock_destroy(&hsk->sock);
 	}
 	homa_socktab_end_scan(&scan);
 }
@@ -189,6 +195,7 @@ int homa_sock_init(struct homa_sock *hsk)
 		if (hnet->prev_default_port == starting_port) {
 			spin_unlock_bh(&socktab->write_lock);
 			hsk->shutdown = true;
+			hsk->homa = NULL;
 			result = -EADDRNOTAVAIL;
 			goto error;
 		}
@@ -252,16 +259,15 @@ void homa_sock_unlink(struct homa_sock *hsk)
 /**
  * homa_sock_shutdown() - Disable a socket so that it can no longer
  * be used for either sending or receiving messages. Any system calls
- * currently waiting to send or receive messages will be aborted.
+ * currently waiting to send or receive messages will be aborted. This
+ * function will terminate any existing use of the socket, but it does
+ * not free up socket resources: that happens in homa_sock_destroy.
  * @hsk:       Socket to shut down.
  */
 void homa_sock_shutdown(struct homa_sock *hsk)
 {
 	struct homa_interest *interest;
 	struct homa_rpc *rpc;
-#ifndef __STRIP__ /* See strip.py */
-	int i = 0;
-#endif /* See strip.py */
 
 	tt_record1("Starting shutdown for socket %d", hsk->port);
 	homa_sock_lock(hsk);
@@ -306,20 +312,34 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		wake_up(&interest->wait_queue);
 	}
 	homa_sock_unlock(hsk);
+	tt_record1("Finished shutdown for socket %d", hsk->port);
+}
 
-#ifndef __STRIP__ /* See strip.py */
+/**
+ * homa_sock_destroy() - Release all of the internal resources associated
+ * with a socket; is invoked at time when that is safe (i.e., all references
+ * on the socket have been dropped).
+ * @hsk:       Socket to destroy.
+ */
+void homa_sock_destroy(struct sock *sk)
+{
+	struct homa_sock *hsk = homa_sk(sk);
+	IF_NO_STRIP(int i = 0);
+
+	if (!hsk->homa)
+		return;
+
+	tt_record1("Starting to destroy socket %d", hsk->port);
 	while (!list_empty(&hsk->dead_rpcs)) {
 		homa_rpc_reap(hsk, true);
+#ifndef __STRIP__ /* See strip.py */
 		i++;
 		if (i == 5) {
 			tt_record("Freezing because reap seems hung");
 			tt_freeze();
 		}
-	}
-#else /* See strip.py */
-	while (!list_empty(&hsk->dead_rpcs))
-		homa_rpc_reap(hsk, 1000);
 #endif /* See strip.py */
+	}
 
 	WARN_ON_ONCE(refcount_read(&hsk->sock.sk_wmem_alloc) != 1);
 #ifdef __UNIT_TEST__
@@ -336,17 +356,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
 		homa_pool_free(hsk->buffer_pool);
 		hsk->buffer_pool = NULL;
 	}
-	tt_record1("Finished shutdown for socket %d", hsk->port);
-}
-
-/**
- * homa_sock_destroy() - Destructor for homa_sock objects. This function
- * only cleans up the parts of the object that are owned by Homa.
- * @hsk:       Socket to destroy.
- */
-void homa_sock_destroy(struct homa_sock *hsk)
-{
-	homa_sock_shutdown(hsk);
+	tt_record1("Finished destroying socket %d", hsk->port);
 }
 
 /**
