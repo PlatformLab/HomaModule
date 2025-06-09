@@ -122,11 +122,17 @@ This repo contains an implementation of the Homa transport protocol as a Linux k
    - Homa exports a collection of configuration parameters through the
      sysctl mechanism. For details, see the man page `homa.7`.
 
-## Significant changesKs
+## Significant changes
 - May 2025: `homa_api.c` has been removed, so the functions `homa_abort`,
   `homa_reply`, `homa_replyv`, `homa_send`, and `homa_sendv` no longer
   exist.
+- May 2025: added support for network namespaces.
+- May 2025: reworked support for peers to cap peer memory usage.
 - April 2025: upgraded to Linux 6.13.9.
+- April 2025: major refactoring of grant management (more efficient,
+  remove complexity that was causing an unending stream of bugs).
+- March 2025: added memory cap on memory for outgoing messages: send
+  requests can block if memory limit is reached.
 - March 2025: implemented private RPCs, resulting in API changes.
   HOMA_RECVMSG_REQUEST and HOMA_RECVMSG_RESPONSE flags no longer exist and
   struct homa_sendmsg_args now has a flags field with one defined
