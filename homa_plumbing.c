@@ -420,7 +420,7 @@ static struct ctl_table homa_ctl_table[] = {
 
 /* Sizes of the headers for each Homa packet type, in bytes. */
 #ifndef __STRIP__ /* See strip.py */
-static __u16 header_lengths[] = {
+static u16 header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	sizeof(struct homa_grant_hdr),
 	sizeof(struct homa_resend_hdr),
@@ -432,7 +432,7 @@ static __u16 header_lengths[] = {
 	sizeof(struct homa_ack_hdr)
 };
 #else /* See strip.py */
-static __u16 header_lengths[] = {
+static u16 header_lengths[] = {
 	sizeof(struct homa_data_hdr),
 	0,
 	sizeof(struct homa_resend_hdr),

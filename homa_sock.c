@@ -371,7 +371,7 @@ void homa_sock_destroy(struct sock *sk)
  * Return:  0 for success, otherwise a negative errno.
  */
 int homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
-		   __u16 port)
+		   u16 port)
 {
 	struct homa_socktab *socktab = hnet->homa->socktab;
 	struct homa_sock *owner;
@@ -416,7 +416,7 @@ done:
  *              then this method has taken a reference on the socket and
  *              the caller must call sock_put to release it.
  */
-struct homa_sock *homa_sock_find(struct homa_net *hnet,  __u16 port)
+struct homa_sock *homa_sock_find(struct homa_net *hnet, u16 port)
 {
 	int bucket = homa_socktab_bucket(hnet, port);
 	struct homa_sock *result = NULL;

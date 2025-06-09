@@ -158,7 +158,7 @@ struct homa_sock {
 	 * @port: Port number: identifies this socket uniquely among all
 	 * those on this node.
 	 */
-	__u16 port;
+	u16 port;
 
 	/**
 	 * @is_server: True means that this socket can act as both client
@@ -272,9 +272,9 @@ void               homa_bucket_lock_slow(struct homa_rpc_bucket *bucket,
 					 u64 id);
 #endif /* See strip.py */
 int                homa_sock_bind(struct homa_net *hnet, struct homa_sock *hsk,
-				  __u16 port);
+				  u16 port);
 void               homa_sock_destroy(struct sock *sk);
-struct homa_sock  *homa_sock_find(struct homa_net *hnet, __u16 port);
+struct homa_sock  *homa_sock_find(struct homa_net *hnet, u16 port);
 int                homa_sock_init(struct homa_sock *hsk);
 void               homa_sock_shutdown(struct homa_sock *hsk);
 void               homa_sock_unlink(struct homa_sock *hsk);
@@ -330,7 +330,7 @@ static inline void homa_sock_unlock(struct homa_sock *hsk)
  * Return:  The index of the bucket in which a socket matching @hnet and
  *          @port will be found (if it exists).
  */
-static inline int homa_socktab_bucket(struct homa_net *hnet, __u16 port)
+static inline int homa_socktab_bucket(struct homa_net *hnet, u16 port)
 {
 #ifdef __UNIT_TEST__
 	return port & (HOMA_SOCKTAB_BUCKETS - 1);

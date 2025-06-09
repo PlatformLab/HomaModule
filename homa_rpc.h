@@ -84,7 +84,7 @@ struct homa_message_out {
 	 * @sched_priority: Priority level to use for future scheduled
 	 * packets.
 	 */
-	__u8 sched_priority;
+	u8 sched_priority;
 #endif /* See strip.py */
 
 	/**
@@ -288,7 +288,7 @@ struct homa_rpc {
 	struct homa_peer *peer;
 
 	/** @dport: Port number on @peer that will handle packets. */
-	__u16 dport;
+	u16 dport;
 
 	/**
 	 * @id: Unique identifier for the RPC among all those issued

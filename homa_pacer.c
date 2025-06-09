@@ -411,7 +411,7 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 			homa_ns_to_cycles(pacer->max_nic_queue_ns);
 
 	/* Underestimate link bandwidth (overestimate time) by 1%. */
-	tmp = 101 * 8000 * (__u64)homa_clock_khz();
+	tmp = 101 * 8000 * (u64)homa_clock_khz();
 	do_div(tmp, pacer->link_mbps * 100);
 	pacer->cycles_per_mbyte = tmp;
 }

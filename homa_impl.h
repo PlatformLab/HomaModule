@@ -511,7 +511,7 @@ struct homa_net {
 	 * @prev_default_port: The most recent port number assigned from
 	 * the range of default ports.
 	 */
-	__u16 prev_default_port;
+	u16 prev_default_port;
 
 	/**
 	 * @num_peers: The total number of struct homa_peers that exist

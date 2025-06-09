@@ -222,7 +222,7 @@ error:
 void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
 		    struct homa_ack *ack)
 {
-	__u16 server_port = ntohs(ack->server_port);
+	u16 server_port = ntohs(ack->server_port);
 	u64 id = homa_local_id(ack->client_id);
 	struct homa_sock *hsk2 = hsk;
 	struct homa_rpc *rpc;

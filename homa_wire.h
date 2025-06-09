@@ -116,7 +116,7 @@ struct homa_common_hdr {
 	 * @type: Homa packet type (one of the values of the homa_packet_type
 	 * enum). Corresponds to the low-order byte of the ack in TCP.
 	 */
-	__u8 type;
+	u8 type;
 
 	/**
 	 * @doff: High order 4 bits holds the number of 4-byte chunks in a
@@ -124,7 +124,7 @@ struct homa_common_hdr {
 	 * must be in the same position as the data offset in a TCP header.
 	 * Used by TSO to determine where the replicated header portion ends.
 	 */
-	__u8 doff;
+	u8 doff;
 
 #ifndef __STRIP__ /* See strip.py */
 	/**
@@ -134,11 +134,11 @@ struct homa_common_hdr {
 	 * which TCP would never use together; must not include URG or FIN
 	 * (TSO will turn off FIN for all but the last segment).
 	 */
-	__u8 flags;
+	u8 flags;
 #define HOMA_TCP_FLAGS 6
 #else /* See strip.py */
 	/** @reserved1: Not used (corresponds to TCP flags). */
-	__u8 reserved1;
+	u8 reserved1;
 #endif /* See strip.py */
 
 	/**
@@ -343,7 +343,7 @@ struct homa_data_hdr {
 	 * @retransmit: 1 means this packet was sent in response to a RESEND
 	 * (it has already been sent previously).
 	 */
-	__u8 retransmit;
+	u8 retransmit;
 
 	char pad[3];
 
@@ -387,14 +387,14 @@ struct homa_grant_hdr {
 	 * MESSAGE_FRAG packets for this message, until a GRANT is received
 	 * with higher offset. Larger numbers indicate higher priorities.
 	 */
-	__u8 priority;
+	u8 priority;
 
 	/**
 	 * @resend_all: Nonzero means that the sender should resend all previously
 	 * transmitted data, starting at the beginning of the message (assume
 	 * that no packets have been successfully received).
 	 */
-	__u8 resend_all;
+	u8 resend_all;
 } __packed;
 #endif /* See strip.py */
 
@@ -430,7 +430,7 @@ struct homa_resend_hdr {
 	 * The sender should transmit all the requested data using this
 	 * priority.
 	 */
-	__u8 priority;
+	u8 priority;
 #endif /* See strip.py */
 } __packed;
 
