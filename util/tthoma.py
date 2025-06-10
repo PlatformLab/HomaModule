@@ -1464,14 +1464,27 @@ class Dispatcher:
         'regexp': 'homa_grant_check_rpc finished with id ([0-9]+)'
     })
 
-    def __grant_check_lock(self, trace, time, core, match, interests):
+    def __grant_check_lock_recalc(self, trace, time, core, match, interests):
         id = int(match.group(1))
         for interest in interests:
-            interest.tt_grant_check_lock(trace, time, core, id)
+            interest.tt_grant_check_lock_recalc(trace, time, core, id)
 
     patterns.append({
-        'name': 'grant_check_lock',
-        'regexp': 'homa_grant_check_rpc acquiring grant lock \(id ([0-9]+)\)'
+        'name': 'grant_check_lock_recalc',
+        'regexp': 'homa_grant_check_rpc acquiring grant lock to fix order \(id ([0-9]+)\)'
+    })
+
+    def __grant_check_lock_needy(self, trace, time, core, match, interests):
+        rank = int(match.group(1))
+        id = int(match.group(2))
+        active = int(match.group(3))
+        for interest in interests:
+            interest.tt_grant_check_lock_needy(trace, time, core, id, rank, active)
+
+    patterns.append({
+        'name': 'grant_check_lock_needy',
+        'regexp': 'homa_grant_check_rpc acquiring grant lock, needy_rank '
+                '([0-9]+), id ([0-9]+), num_active ([0-9]+)'
     })
 
     def __grant_check_unlock(self, trace, time, core, match, interests):
@@ -3113,8 +3126,14 @@ class AnalyzeGrants:
         self.node_check_time = defaultdict(lambda : 0)
 
         # Node name -> total time spent acquiring and holding the grant lock
-        # while executing homa_grant_check_rpc on that node.
-        self.node_lock_time = defaultdict(lambda : 0)
+        # while validating/updating grant priorities in homa_grant_check_rpc
+        # on that node.
+        self.node_lock_recalc_time = defaultdict(lambda : 0)
+
+        # Node name -> total time spent acquiring and holding the grant lock
+        # while checking RPCs other than the calling one in homa_grant_check_rpc
+        # on that node.
+        self.node_lock_needy_time = defaultdict(lambda : 0)
 
         # Node name -> total time spent sending grants during homa_grant_check_rpc.
         self.node_grant_send_time = defaultdict(lambda : 0)
@@ -3134,8 +3153,13 @@ class AnalyzeGrants:
         self.core_check_start = {}
 
         # Core -> time when homa_grant_check_rpc started acquiring the
-        # grant lock (if any)
-        self.core_lock_start = {}
+        # grant lock to valid priority order (if any)
+        self.core_lock_recalc_start = {}
+
+        # Core -> time when homa_grant_check_rpc started acquiring the
+        # grant lock because RPCs other than the invoking one needed to
+        # be checked for possible grants (if any)
+        self.core_lock_needy_start = {}
 
         # Core -> time of first grant sent by current call to
         # homa_grant_check_rpc (only valid if homa_grant_check_rpc in progress)
@@ -3145,16 +3169,26 @@ class AnalyzeGrants:
         self.node_checks[trace['node']] += 1
         self.core_check_start[core] = t
 
-    def tt_grant_check_lock(self, trace, t, core, id):
+    def tt_grant_check_lock_recalc(self, trace, t, core, id):
         node = trace['node']
-        self.core_lock_start[core] = t
+        self.core_lock_recalc_start[core] = t
+
+    def tt_grant_check_lock_needy(self, trace, t, core, id, rank, active):
+        node = trace['node']
+        self.core_lock_needy_start[core] = t
 
     def tt_grant_check_unlock(self, trace, t, core, id):
         node = trace['node']
-        if core in self.core_lock_start:
+        if core in self.core_lock_recalc_start:
             self.node_locks[node] += 1
-            self.node_lock_time[node] += t - self.core_lock_start[core]
-            del self.core_lock_start[core]
+            self.node_lock_recalc_time[node] += (t -
+                    self.core_lock_recalc_start[core])
+            del self.core_lock_recalc_start[core]
+        elif core in self.core_lock_needy_start:
+            self.node_locks[node] += 1
+            self.node_lock_needy_time[node] += (t -
+                    self.core_lock_needy_start[core])
+            del self.core_lock_needy_start[core]
 
     def tt_send_grant(self, trace, t, core, id, offset, priority, increment):
         if not core in self.core_check_start:
@@ -3179,36 +3213,45 @@ class AnalyzeGrants:
         print('Checks:  Rate of calling homa_grant_check_rpc (k/sec)')
         print('CUsec:   Average execution time in homa_grant_check_rpc')
         print('CCores:  Average active cores in homa_grant_check_rpc')
-        print('LFrac:   Fraction of calls to homa_grant_check_rpc that '
-                'acquired the grant lock')
-        print('LUsec:   Average time spent acquiring/holding the grant '
-                'lock in homa_grant_check_rpc')
-        print('LCores:  Average cores acquiring/hold the grant lock in '
-                'homa_grant_check_rpc')
+        print('LPer:    Average # of acquisitions of the grant lock per call to ')
+        print('         homa_grant_check_rpc')
+        print('RUsec:   Average time spent acquiring/holding the grant '
+                'lock for priority ')
+        print('         recalculations')
+        print('RCores:  Average cores acquiring/hold the grant lock for '
+                'priority recalculation')
+        print('NUsec:   Average time spent acquiring/holding the grant '
+                'lock while considering ')
+        print('         needy RPCs other than the calling one')
+        print('NCores:  Average cores acquiring/hold the grant lock while '
+                'considering needy')
+        print('         RPCs other than the calling one')
         print('GPer:    Average grants sent per call to homa_grant_check_rpc')
         print('GUsec:   Average time to send a grant')
         print('GCores:  Average cores actively sending grants from within '
                 'homa_grant_check_rpc')
 
         print('')
-        print('Node      Checks CUsec CCores LFrac LUsec LCores  '
-                'GPer GUSec GCores')
-        print('--------------------------------------------------'
-                '-----------------')
+        print('Node      Checks CUsec CCores  LPer  RUsec RCores   '
+                'NUsec NCores   GPer GUSec GCores')
+        print('----------------------------------------------------'
+                '--------------------------------')
         for node in get_sorted_nodes():
             checks = self.node_checks[node]
             locks = self.node_locks[node]
             grants = self.node_grants_sent[node]
-            lock_time = self.node_lock_time[node]
+            recalc_time = self.node_lock_recalc_time[node]
+            needy_time = self.node_lock_needy_time[node]
             grant_time = self.node_grant_send_time[node]
             check_time = self.node_check_time[node]
             elapsed = traces[node]['elapsed_time']
             print('%-10s %5.1f %5.2f  %5.2f ' % (node, 1000*checks/elapsed,
                     check_time/checks if checks else 0, check_time/elapsed),
                     end='')
-            print('%5.2f %5.2f  %5.2f ' % (locks/checks if checks else 0,
-                    lock_time/checks if checks else 0,
-                    lock_time/elapsed), end='')
+            print('%5.2f %6.3f  %5.2f  %6.3f  %5.2f  ' % (locks/checks if checks else 0,
+                    recalc_time/checks if checks else 0, recalc_time/elapsed,
+                    needy_time/checks if checks else 0, needy_time/elapsed),
+                    end='')
             print('%5.2f %5.2f  %5.2f' % (grants/checks if checks else 0,
                     grant_time/grants if grants else 0, grant_time/elapsed))
 

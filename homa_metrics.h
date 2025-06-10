@@ -490,10 +490,23 @@ struct homa_metrics {
 	u64 grant_check_calls;
 
 	/**
-	 * @grant_check_slow_path: cumulative number of times
-	 * homa_grant_check_rpc acquired the grant lock.
+	 * @grant_check_locked: cumulative number of times an invocation of
+	 * homa_grant_check_rpc acquired the grant lock at least once.
 	 */
-	u64 grant_check_slow_path;
+	u64 grant_check_locked;
+
+	/**
+	 * @grant_check_recalcs: cumulative number of times that
+	 * homa_grant_check_rpc verified and/or adjusted the priority of
+	 * active RPCs.
+	 */
+	u64 grant_check_recalcs;
+
+	/**
+	 * @grant_check_others: cumulative number of times homa_grant_check_rpc
+	 * checked other RPCs besides the invoking one for potential grants.
+	 */
+	u64 grant_check_others;
 
 	/**
 	 * @grant_priority_bumps: cumulative number of times the grant priority

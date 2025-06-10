@@ -321,8 +321,12 @@ char *homa_metrics_print(void)
 		  m->grantable_rpcs_integral);
 		M("grant_check_calls         %15llu  Number of calls to homa_grant_check_rpc\n",
 		  m->grant_check_calls);
-		M("grant_check_slow_path     %15llu  Number of times homa_grant_check_rpc acquired grant lock\n",
-		  m->grant_check_slow_path);
+		M("grant_check_locked        %15llu  Number of calls to homa_grant_check_rpc that acquired grant lock\n",
+		  m->grant_check_locked);
+		M("grant_check_others        %15llu  Number of times homa_grant_check_rpc checked non-caller RPCs for grants\n",
+		  m->grant_check_others);
+		M("grant_check_recalcs       %15llu  Number of times homa_grant_check_rpc updated grant priority order\n",
+		  m->grant_check_recalcs);
 		M("grant_priority_bumps      %15llu  Number of times an RPC moved up in the grant priority order\n",
 		  m->grant_priority_bumps);
 		M("fifo_grants               %15llu  Grants issued using FIFO priority\n",
