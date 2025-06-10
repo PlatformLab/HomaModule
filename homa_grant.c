@@ -741,11 +741,11 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 	}
 
 	rank = READ_ONCE(rpc->msgin.rank);
-	stalled_rank = atomic_xchg(&grant->stalled_rank, INT_MAX);
+	stalled_rank = atomic_read(&grant->stalled_rank);
 	if (stalled_rank < needy_rank)
 		needy_rank = stalled_rank;
 
-	if (rank <= needy_rank) {
+	if (rank >= 0 && rank <= needy_rank) {
 		int priority;
 
 		/* Fast path. */
@@ -771,7 +771,11 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 
 	if (needy_rank < INT_MAX &&
 	    atomic_read(&grant->total_incoming) < grant->max_incoming) {
+		UNIT_HOOK("grant_check_needy");
 		/* Situations 1 and 2. */
+		stalled_rank = atomic_xchg(&grant->stalled_rank, INT_MAX);
+		if (stalled_rank < needy_rank)
+			needy_rank = stalled_rank;
 		homa_grant_cand_init(&cand);
 		locked = 1;
 		tt_record3("homa_grant_check_rpc acquiring grant lock, needy_rank %d, id %d, num_active %d",
