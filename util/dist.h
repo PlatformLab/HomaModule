@@ -60,5 +60,25 @@ class dist_point_gen {
 	std::uniform_real_distribution<double> uniform_dist;
 
 	static int dist_msg_overhead(int length, int mtu);
+
+	/**
+	 * Used for entering raw data (weights instead of CDF, this is usually
+	 * more convenient when entering distributions by hand).
+	 */
+	struct weight {
+		/** @length: message length, in bytes. */
+		size_t length;
+
+		/**
+		 * @freq: relative frequency of messages of this length.
+		 */
+		double freq;
+
+		weight(size_t length, double freq)
+			: length(length), freq(freq)
+		{}
+	};
+
+	static struct weight w1[], w2[], w3[], w4[], w5[];
 };
 #endif /* _DIST_H */
