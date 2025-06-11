@@ -79,6 +79,6 @@ class dist_point_gen {
 		{}
 	};
 
-	static struct weight w1[], w2[], w3[], w4[], w5[];
+	static struct weight w1[], w2[], w3[], w4[], w5[], starve[];
 };
 #endif /* _DIST_H */

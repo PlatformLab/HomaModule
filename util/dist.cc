@@ -59,9 +59,11 @@ dist_point_gen::dist_point_gen(const char* dist, size_t max_length,
 		points = w4;
 	} else if (strcmp(dist, "w5") == 0) {
 		points = w5;
+	} else if (strcmp(dist, "starve") == 0) {
+		points = starve;
 	} else {
 		fprintf(stderr, "Invalid workload %s; must be w1, "
-				"w2, w3, w4, w5, or a number\n", dist);
+				"w2, w3, w4, w5, starve, or a number\n", dist);
 		abort();
 	}
 
@@ -2394,4 +2396,21 @@ dist_point_gen::weight dist_point_gen::w5[] = {
 	{28910490, 0.002497000000},
 	{29400000, 0.002498000000},
 	{0, 0},
+};
+
+/* The distribution below is not representative of any real work load; it
+ * is intended to maximize the likelihood that large requests starve. Run
+ * it at 100% network load for 30 seconds or more.
+ */
+dist_point_gen::weight dist_point_gen::starve[] = {
+	{100000,   100},
+	{200000,   100},
+	{300000,   100},
+	{400000,   100},
+	{500000,   100},
+	{600000,   100},
+	{700000,   100},
+	{800000,   100},
+	{900000,   100},
+	{1000000,  100},
 };
