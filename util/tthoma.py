@@ -1358,7 +1358,7 @@ class Dispatcher:
     patterns.append({
         'name': 'resend_tx',
         'regexp': 'Sending RESEND for id ([0-9]+), peer ([^,]+), '
-                'offset ([0-9]+), length ([0-9]+)'
+                'offset ([0-9]+), length ([-0-9]+)'
     })
 
     def __resend_rx(self, trace, time, core, match, interests):
@@ -1371,7 +1371,7 @@ class Dispatcher:
     patterns.append({
         'name': 'resend_rx',
         'regexp': 'resend request for id ([0-9]+), offset ([0-9]+), '
-                'length ([0-9]+)'
+                'length ([-0-9]+)'
     })
 
     def __retransmit(self, trace, time, core, match, interests):
@@ -4349,7 +4349,8 @@ class AnalyzeIntervals:
             # rx_grantable
             in_length = rpc['in_length']
             if rpc['send_grant'] or (('unsched' in rpc) and (in_length != None)
-                    and (in_length > rpc['unsched'])):
+                    and (in_length > rpc['unsched']) or (('granted' in rpc)
+                    and (in_length != None) and (rpc['granted'] < in_length))):
                 start = traces[rpc['node']]['first_time']
                 if rpc['softirq_data_pkts']:
                     start = rpc['softirq_data_pkts'][0]['softirq']
