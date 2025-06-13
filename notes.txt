@@ -1,9 +1,12 @@
 Notes for Homa implementation in Linux:
 ---------------------------------------
 
-* Failure modes:
-  * homa_grant_add_rpc: list has a loop, or encounter a null list link
-  * stack corruption under homa_recvmsg after socket shutdown.
+* Loose ends as of 6/13/2025:
+  * Analyze poor throughput under w4 with -b30
+  * Reimplement FIFO grants
+  * Refactor RPC reference counts: acquire at top-level so no-one else
+    has to worry about them.
+  * Check out peformance on c6525-25g.
 
 * Move interest cleanup code from homa_sock to a new function in
   homa_interest. Also move wakeup code from homa_rpc_handoff.
