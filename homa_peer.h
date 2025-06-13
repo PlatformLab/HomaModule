@@ -73,7 +73,7 @@ struct homa_peertab {
 
 	/**
 	 * @net_max: If the number of peers for a homa_net exceeds this number,
-	 * work aggressivley to reclaim peers for that homa_net. Set
+	 * work aggressively to reclaim peers for that homa_net. Set
 	 * externally via sysctl.
 	 */
 	int net_max;
@@ -429,7 +429,7 @@ static inline u32 homa_peer_hash(const void *data, u32 dummy, u32 seed)
 	return h;
 }
 
-/**
+/**q
  * homa_peer_compare() - Comparison function for entries in @peertab->ht.
  * @arg:   Contains one of the keys to compare.
  * @obj:   homa_peer object containing the other key to compare.
@@ -438,8 +438,8 @@ static inline u32 homa_peer_hash(const void *data, u32 dummy, u32 seed)
 static inline int homa_peer_compare(struct rhashtable_compare_arg *arg,
 				    const void *obj)
 {
-	const struct homa_peer *peer = obj;
 	const struct homa_peer_key *key = arg->key;
+	const struct homa_peer *peer = obj;
 
 	return !(ipv6_addr_equal(&key->addr, &peer->ht_key.addr) &&
 		 peer->ht_key.hnet == key->hnet);

@@ -52,7 +52,7 @@ int homa_skb_init(struct homa *homa)
 		if (!homa->page_pools[numa]) {
 			struct homa_page_pool *pool;
 
-			pool = kmalloc(sizeof(*pool), GFP_ATOMIC | __GFP_ZERO);
+			pool = kzalloc(sizeof(*pool), GFP_ATOMIC);
 			if (!pool)
 				return -ENOMEM;
 			homa->page_pools[numa] = pool;
@@ -323,8 +323,8 @@ success:
 int homa_skb_append_to_frag(struct homa *homa, struct sk_buff *skb, void *buf,
 			    int length)
 {
-	char *src = buf;
 	int chunk_length;
+	char *src = buf;
 	char *dst;
 
 	while (length > 0) {

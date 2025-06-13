@@ -118,10 +118,8 @@ int tt_init(char *proc_file)
 		struct tt_buffer *buffer;
 
 		buffer = kmalloc(sizeof(*buffer), GFP_KERNEL);
-		if (!buffer) {
-			pr_err("%s couldn't allocate tt_buffers\n", __func__);
+		if (!buffer)
 			goto error;
-		}
 		memset(buffer, 0, sizeof(*buffer));
 		tt_buffers[i] = buffer;
 	}

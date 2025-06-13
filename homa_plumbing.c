@@ -593,7 +593,7 @@ int __init homa_load(void)
 	timer_kthread = kthread_run(homa_timer_main, homa, "homa_timer");
 	if (IS_ERR(timer_kthread)) {
 		status = PTR_ERR(timer_kthread);
-		pr_err("couldn't create Homa pacer thread: error %d\n",
+		pr_err("couldn't create Homa timer thread: error %d\n",
 		       status);
 		timer_kthread = NULL;
 		goto timer_err;
@@ -768,10 +768,10 @@ int homa_shutdown(struct socket *sock, int how)
  */
 int homa_ioc_abort(struct sock *sk, int *karg)
 {
-	int ret = 0;
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_abort_args args;
 	struct homa_rpc *rpc;
+	int ret = 0;
 
 	if (unlikely(copy_from_user(&args, (void __user *)karg, sizeof(args))))
 		return -EFAULT;
@@ -807,8 +807,8 @@ int homa_ioc_abort(struct sock *sk, int *karg)
 int homa_ioctl(struct sock *sk, int cmd, int *karg)
 {
 #ifndef __STRIP__ /* See strip.py */
-	int result;
 	u64 start = homa_clock();
+	int result;
 
 	if (cmd == HOMAIOCABORT) {
 		result = homa_ioc_abort(sk, karg);
@@ -927,8 +927,8 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
 {
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_rcvbuf_args rcvbuf_args;
-	void *result;
 	int is_server;
+	void *result;
 	int len;
 
 	if (copy_from_sockptr(&len, USER_SOCKPTR(optlen), sizeof(int)))
@@ -975,12 +975,10 @@ int homa_getsockopt(struct sock *sk, int level, int optname,
  */
 int homa_sendmsg(struct sock *sk, struct msghdr *msg, size_t length)
 {
+	IF_NO_STRIP(u64 start = homa_clock());
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_sendmsg_args args;
 	union sockaddr_in_union *addr;
-#ifndef __STRIP__ /* See strip.py */
-	u64 start = homa_clock();
-#endif /* See strip.py */
 	struct homa_rpc *rpc = NULL;
 	int result = 0;
 #ifndef __STRIP__ /* See strip.py */
@@ -1139,14 +1137,12 @@ error:
 int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		 int *addr_len)
 {
+	IF_NO_STRIP(u64 start = homa_clock());
 	struct homa_sock *hsk = homa_sk(sk);
 	struct homa_recvmsg_args control;
+	IF_NO_STRIP(u64 finish);
 	struct homa_rpc *rpc;
 	int nonblocking;
-#ifndef __STRIP__ /* See strip.py */
-	u64 start = homa_clock();
-	u64 finish;
-#endif /* See strip.py */
 	int result;
 
 	INC_METRIC(recv_calls, 1);

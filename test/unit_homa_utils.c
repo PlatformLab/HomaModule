@@ -66,8 +66,6 @@ TEST_F(homa_utils, homa_init__grant_alloc_failure)
 	mock_kmalloc_errors = 1;
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_grant_alloc couldn't allocate grant structure",
-		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.grant);
 	homa_destroy(&homa2);
 }
@@ -83,8 +81,6 @@ TEST_F(homa_utils, homa_init__pacer_alloc_failure)
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_pacer_alloc couldn't allocate homa_pacer struct",
-		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.pacer);
 	homa_destroy(&homa2);
 }
@@ -99,8 +95,6 @@ TEST_F(homa_utils, homa_init__peertab_alloc_failure)
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_peer_alloc_peertab couldn't create peertab: kmalloc failure",
-		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.peertab);
 	homa_destroy(&homa2);
 }
@@ -115,8 +109,6 @@ TEST_F(homa_utils, homa_init__cant_allocate_port_map)
 #endif/* See strip.py */
 	unit_log_clear();
 	EXPECT_EQ(ENOMEM, -homa_init(&homa2));
-	EXPECT_SUBSTR("homa_init couldn't create socktab: kmalloc failure",
-		      mock_printk_output);
 	EXPECT_EQ(NULL, homa2.socktab);
 	homa_destroy(&homa2);
 }

@@ -77,11 +77,9 @@ struct homa_peertab *homa_peer_alloc_peertab(void)
 	struct homa_peertab *peertab;
 	int err;
 
-	peertab = kmalloc(sizeof(*peertab), GFP_KERNEL | __GFP_ZERO);
-	if (!peertab) {
-		pr_err("%s couldn't create peertab: kmalloc failure", __func__);
+	peertab = kzalloc(sizeof(*peertab), GFP_KERNEL);
+	if (!peertab)
 		return ERR_PTR(-ENOMEM);
-	}
 
 	spin_lock_init(&peertab->lock);
 	err = rhashtable_init(&peertab->ht, &ht_params);
@@ -432,7 +430,7 @@ struct homa_peer *homa_peer_alloc(struct homa_sock *hsk,
 	struct homa_peer *peer;
 	struct dst_entry *dst;
 
-	peer = kmalloc(sizeof(*peer), GFP_ATOMIC | __GFP_ZERO);
+	peer = kzalloc(sizeof(*peer), GFP_ATOMIC);
 	if (!peer) {
 		INC_METRIC(peer_kmalloc_errors, 1);
 		return (struct homa_peer *)ERR_PTR(-ENOMEM);

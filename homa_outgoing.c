@@ -449,15 +449,11 @@ int homa_xmit_control(enum homa_packet_type type, void *contents,
 int __homa_xmit_control(void *contents, size_t length, struct homa_peer *peer,
 			struct homa_sock *hsk)
 {
-#ifndef __STRIP__ /* See strip.py */
-	struct netdev_queue *txq;
-#endif /* See strip.py */
+	IF_NO_STRIP(struct netdev_queue *txq);
+	IF_NO_STRIP(int priority);
 	struct homa_common_hdr *h;
 	struct sk_buff *skb;
 	int extra_bytes;
-#ifndef __STRIP__ /* See strip.py */
-	int priority;
-#endif /* See strip.py */
 	int result;
 
 	skb = homa_skb_alloc_tx(HOMA_MAX_HEADER);
@@ -816,11 +812,6 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 					+ seg_length);
 #endif /* See strip.py */
 			if (unlikely(!new_skb)) {
-#ifndef __STRIP__ /* See strip.py */
-				if (rpc->hsk->homa->verbose)
-					pr_notice("%s couldn't allocate skb\n",
-						  __func__);
-#endif /* See strip.py */
 				UNIT_LOG("; ", "skb allocation error");
 				goto resend_done;
 			}

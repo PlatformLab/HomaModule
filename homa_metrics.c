@@ -93,10 +93,8 @@ void homa_metric_append(const char *format, ...)
 		/* Not enough room; expand buffer capacity. */
 		homa_mout.capacity *= 2;
 		new_buffer = kmalloc(homa_mout.capacity, GFP_KERNEL);
-		if (!new_buffer) {
-			pr_warn("%s couldn't allocate memory\n", __func__);
+		if (!new_buffer)
 			return;
-		}
 		memcpy(new_buffer, homa_mout.output, homa_mout.length);
 		kfree(homa_mout.output);
 		homa_mout.output = new_buffer;

@@ -86,11 +86,9 @@ struct homa_grant *homa_grant_alloc(void)
 	struct homa_grant *grant;
 	int err;
 
-	grant = kmalloc(sizeof(*grant), GFP_KERNEL | __GFP_ZERO);
-	if (!grant) {
-		pr_err("%s couldn't allocate grant structure\n", __func__);
+	grant = kzalloc(sizeof(*grant), GFP_KERNEL);
+	if (!grant)
 		return ERR_PTR(-ENOMEM);
-	}
 	atomic_set(&grant->stalled_rank, INT_MAX);
 	grant->max_incoming = 400000;
 	spin_lock_init(&grant->lock);
@@ -999,8 +997,8 @@ void homa_grant_cand_check(struct homa_grant_candidates *cand,
 			   struct homa_grant *grant)
 {
 	struct homa_rpc *rpc;
-	bool locked;
 	int priority;
+	bool locked;
 
 	while (cand->removes < cand->inserts) {
 		rpc = cand->rpcs[cand->removes & HOMA_CAND_MASK];
@@ -1084,8 +1082,8 @@ void homa_grant_update_sysctl_deps(struct homa_grant *grant)
 int homa_grant_dointvec(const struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa_grant *grant;
 	struct ctl_table table_copy;
+	struct homa_grant *grant;
 	int result;
 
 	grant = homa_net_from_net(current->nsproxy->net_ns)->homa->grant;

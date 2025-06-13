@@ -85,7 +85,7 @@ struct homa_rpc_bucket {
 	 *    in hundreds or thousands of RPCs accumulating before RCU allows
 	 *    them to be deleted.
 	 * This approach has the disadvantage that RPCs within a bucket share
-	 * locks and thus may not be able to work concurently, but there are
+	 * locks and thus may not be able to work concurrently, but there are
 	 * enough buckets in the table to make such colllisions rare.
 	 *
 	 * See "Homa Locking Strategy" in homa_impl.h for more info about

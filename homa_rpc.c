@@ -36,7 +36,7 @@ struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 	struct homa_rpc *crpc;
 	int err;
 
-	crpc = kmalloc(sizeof(*crpc), GFP_KERNEL | __GFP_ZERO);
+	crpc = kzalloc(sizeof(*crpc), GFP_KERNEL);
 	if (unlikely(!crpc))
 		return ERR_PTR(-ENOMEM);
 
@@ -142,7 +142,7 @@ struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 	}
 
 	/* Initialize fields that don't require the socket lock. */
-	srpc = kmalloc(sizeof(*srpc), GFP_ATOMIC | __GFP_ZERO);
+	srpc = kzalloc(sizeof(*srpc), GFP_ATOMIC);
 	if (!srpc) {
 		err = -ENOMEM;
 		goto error;
@@ -361,8 +361,8 @@ void homa_abort_rpcs(struct homa *homa, const struct in6_addr *addr,
 		     int port, int error)
 {
 	struct homa_socktab_scan scan;
-	struct homa_rpc *rpc;
 	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
 
 	for (hsk = homa_socktab_start_scan(homa->socktab, &scan); hsk;
 	     hsk = homa_socktab_next(&scan)) {
@@ -467,8 +467,8 @@ int homa_rpc_reap(struct homa_sock *hsk, bool reap_all)
 	struct homa_rpc *tmp;
 	int i, batch_size;
 	int skbs_to_reap;
-	int rx_frees;
 	int result = 0;
+	int rx_frees;
 
 	INC_METRIC(reaper_calls, 1);
 	INC_METRIC(reaper_dead_skbs, hsk->dead_skbs);

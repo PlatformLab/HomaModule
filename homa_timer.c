@@ -123,23 +123,17 @@ void homa_timer_check_rpc(struct homa_rpc *rpc)
 void homa_timer(struct homa *homa)
 {
 	struct homa_socktab_scan scan;
+	struct homa_sock *hsk;
+	struct homa_rpc *rpc;
+	int rpc_count = 0;
 #ifndef __STRIP__ /* See strip.py */
 	static u64 prev_grant_count;
 	int total_incoming_rpcs = 0;
 	int sum_incoming_rec = 0;
-#endif /* See strip.py */
-	struct homa_sock *hsk;
-#ifndef __STRIP__ /* See strip.py */
 	static int zero_count;
-#endif /* See strip.py */
-	struct homa_rpc *rpc;
-#ifndef __STRIP__ /* See strip.py */
 	int sum_incoming = 0;
-	u64 total_grants;
-#endif /* See strip.py */
 	int total_rpcs = 0;
-	int rpc_count = 0;
-#ifndef __STRIP__ /* See strip.py */
+	u64 total_grants;
 	cycles_t start;
 	cycles_t end;
 	int core;
@@ -203,7 +197,7 @@ void homa_timer(struct homa *homa)
 			continue;
 		rcu_read_lock();
 		list_for_each_entry_rcu(rpc, &hsk->active_rpcs, active_links) {
-			total_rpcs++;
+			IF_NO_STRIP(total_rpcs++);
 			homa_rpc_lock(rpc);
 			if (rpc->state == RPC_IN_SERVICE) {
 				rpc->silent_ticks = 0;

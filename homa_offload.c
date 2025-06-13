@@ -506,8 +506,8 @@ void homa_gro_gen2(struct homa *homa, struct sk_buff *skb)
 	 */
 	struct homa_data_hdr *h =
 			(struct homa_data_hdr *)skb_transport_header(skb);
-	int this_core = smp_processor_id();
 	struct homa_offload_core *offload_core;
+	int this_core = smp_processor_id();
 	int candidate = this_core;
 	u64 now = homa_clock();
 	int i;

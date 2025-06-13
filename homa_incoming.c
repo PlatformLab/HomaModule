@@ -177,7 +177,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		/* Packet creates a new gap. */
 		if (!homa_gap_alloc(&rpc->msgin.gaps,
 				    rpc->msgin.recv_end, start)) {
-			pr_err("Homa couldn't allocate gap: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for id %d (start %d): no memory",
 				   rpc->id, start);
 			goto discard;
@@ -230,7 +229,6 @@ void homa_add_packet(struct homa_rpc *rpc, struct sk_buff *skb)
 		/* Packet is in the middle of the gap; must split the gap. */
 		gap2 = homa_gap_alloc(&gap->links, gap->start, start);
 		if (!gap2) {
-			pr_err("Homa couldn't allocate gap for split: insufficient memory\n");
 			tt_record2("Couldn't allocate gap for split for id %d (start %d): no memory",
 				   rpc->id, end);
 			goto discard;
@@ -286,10 +284,10 @@ int homa_copy_to_user(struct homa_rpc *rpc)
 	int end_offset = 0;
 #endif /* See strip.py */
 	int error = 0;
+	int n = 0;             /* Number of filled entries in skbs. */
 #ifndef __STRIP__ /* See strip.py */
 	u64 start;
 #endif /* See strip.py */
-	int n = 0;             /* Number of filled entries in skbs. */
 	int i;
 
 	/* Tricky note: we can't hold the RPC lock while we're actually
@@ -509,8 +507,6 @@ void homa_dispatch_pkts(struct sk_buff *skb)
 								    h,
 								    &created);
 					if (IS_ERR(rpc)) {
-						pr_warn("homa_pkt_dispatch couldn't create server rpc: error %lu",
-							-PTR_ERR(rpc));
 						INC_METRIC(server_cant_create_rpcs, 1);
 						rpc = NULL;
 						goto discard;
@@ -966,8 +962,8 @@ void homa_need_ack_pkt(struct sk_buff *skb, struct homa_sock *hsk,
 	struct homa_common_hdr *h = (struct homa_common_hdr *)skb->data;
 	const struct in6_addr saddr = skb_canonical_ipv6_saddr(skb);
 	u64 id = homa_local_id(h->sender_id);
-	struct homa_peer *peer;
 	struct homa_ack_hdr ack;
+	struct homa_peer *peer;
 
 	tt_record1("Received NEED_ACK for id %d", id);
 
@@ -1147,12 +1143,10 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
 {
+	IF_NO_STRIP(int avail_immediately = 1);
 	struct homa_interest interest;
+	IF_NO_STRIP(int blocked = 0);
 	struct homa_rpc *rpc;
-#ifndef __STRIP__ /* See strip.py */
-	int avail_immediately = 1;
-	int blocked = 0;
-#endif /* See strip.py */
 	int result;
 
 	INIT_LIST_HEAD(&interest.links);

@@ -87,7 +87,7 @@ int homa_pool_set_region(struct homa_sock *hsk, void __user *region,
 	if (num_bpages < MIN_POOL_SIZE)
 		return -EINVAL;
 	descriptors = kmalloc_array(num_bpages, sizeof(struct homa_bpage),
-				    __GFP_ZERO);
+				    GFP_KERNEL | __GFP_ZERO);
 	if (!descriptors)
 		return -ENOMEM;
 	cores = alloc_percpu_gfp(struct homa_pool_core, __GFP_ZERO);
@@ -291,8 +291,8 @@ int homa_pool_alloc_msg(struct homa_rpc *rpc)
 {
 	struct homa_pool *pool = rpc->hsk->buffer_pool;
 	int full_pages, partial, i, core_id;
-	u32 pages[HOMA_MAX_BPAGES];
 	struct homa_pool_core *core;
+	u32 pages[HOMA_MAX_BPAGES];
 	struct homa_bpage *bpage;
 	struct homa_rpc *other;
 

@@ -54,11 +54,8 @@ int homa_init(struct homa *homa)
 		return err;
 	}
 	homa->socktab = kmalloc(sizeof(*homa->socktab), GFP_KERNEL);
-	if (!homa->socktab) {
-		pr_err("%s couldn't create socktab: kmalloc failure",
-		       __func__);
+	if (!homa->socktab)
 		return -ENOMEM;
-	}
 	homa_socktab_init(homa->socktab);
 #ifndef __STRIP__ /* See strip.py */
 	err = homa_skb_init(homa);

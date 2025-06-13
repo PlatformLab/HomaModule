@@ -57,11 +57,9 @@ struct homa_pacer *homa_pacer_alloc(struct homa *homa)
 	struct homa_pacer *pacer;
 	int err;
 
-	pacer = kmalloc(sizeof(*pacer), GFP_KERNEL | __GFP_ZERO);
-	if (!pacer) {
-		pr_err("%s couldn't allocate homa_pacer struct\n", __func__);
+	pacer = kzalloc(sizeof(*pacer), GFP_KERNEL);
+	if (!pacer)
 		return ERR_PTR(-ENOMEM);
-	}
 	pacer->homa = homa;
 	spin_lock_init(&pacer->mutex);
 	pacer->fifo_count = 1000;
@@ -335,7 +333,7 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 	struct homa_pacer *pacer = rpc->hsk->homa->pacer;
 	struct homa_rpc *candidate;
 	int bytes_left;
-	int checks = 0;
+	IF_NO_STRIP(int checks = 0);
 	IF_NO_STRIP(u64 now);
 
 	if (!list_empty(&rpc->throttled_links))
@@ -352,7 +350,7 @@ void homa_pacer_manage_rpc(struct homa_rpc *rpc)
 			    throttled_links) {
 		int bytes_left_cand;
 
-		checks++;
+		IF_NO_STRIP(checks++);
 
 		/* Watch out: the pacer might have just transmitted the last
 		 * packet from candidate.
@@ -431,8 +429,8 @@ void homa_pacer_update_sysctl_deps(struct homa_pacer *pacer)
 int homa_pacer_dointvec(const struct ctl_table *table, int write,
 			void *buffer, size_t *lenp, loff_t *ppos)
 {
-	struct homa_pacer *pacer;
 	struct ctl_table table_copy;
+	struct homa_pacer *pacer;
 	int result;
 
 	pacer = homa_net_from_net(current->nsproxy->net_ns)->homa->pacer;
