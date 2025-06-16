@@ -43,6 +43,27 @@ enum homa_freeze_type {
 };
 
 /**
+ * struct homa_rx_state - Captures the state of incoming messages at a
+ * point in time.
+ */
+struct homa_rx_snapshot {
+	/** @clock: homa_clock() value when data was gathered. */
+	u64 clock;
+
+	/** @msgs_started: sum of all rx_msgs_started metrics. */
+	u64 msgs_started;
+
+	/** @msgs_ended: sum of all rx_msgs_ended metrics. */
+	u64 msgs_ended;
+
+	/** @bytes_started: sum of all rx_msg_bytes_started metrics. */
+	u64 bytes_started;
+
+	/** @bytes_retired: sum of all rx_msg_bytes_retired metrics. */
+	u64 bytes_retired;
+};
+
+/**
  * tt_addr() - Given an address, return a 4-byte id that will (hopefully)
  * provide a unique identifier for the address in a timetrace record.
  * @x:  Address (either IPv6 or IPv4-mapped IPv6)
@@ -94,6 +115,8 @@ void     homa_rpc_log(struct homa_rpc *rpc);
 void     homa_rpc_log_active(struct homa *homa, uint64_t id);
 void     homa_rpc_log_tt(struct homa_rpc *rpc);
 void     homa_rpc_log_active_tt(struct homa *homa, int freeze_count);
+void     homa_rx_snapshot_log_tt(void);
+void     homa_snapshot_rx(void);
 int      homa_snprintf(char *buffer, int size, int used,
 		       const char *format, ...) __printf(4, 5);
 char    *homa_symbol_for_type(uint8_t type);

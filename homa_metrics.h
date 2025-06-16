@@ -50,6 +50,36 @@ struct homa_metrics {
 	u64 large_msg_bytes;
 
 	/**
+	 * @rx_msgs_started: incremented whenever the first packet is received
+	 * for a new incoming message.
+	 */
+	u64 rx_msgs_started;
+
+	/**
+	 * @rx_msg_bytes_started: total number of incoming message bytes for
+	 * which at least one packet of the message has been received
+	 * (incremented by the length of the message when the first packet is
+	 * received).
+	 */
+	u64 rx_msg_bytes_started;
+
+	/**
+	 * @rx_msg_bytes_retired: cumulative count of incoming message bytes
+	 * that were either (a) successfully received (counts only goodput,
+	 * not retransmits) or (b) abandoned because the message was deleted
+	 * before they were received. Or, think of this as the bytes from
+	 * @rx_msg_bytes_started that we're no longer waiting to receive.
+	 */
+	u64 rx_msg_bytes_retired;
+
+	/**
+	 * @rx_msgs_ended: incremented whenever an input message is "retired",
+	 * either because it was completed or because it was destroyed before
+	 * it completed.
+	 */
+	u64 rx_msgs_ended;
+
+	/**
 	 * @sent_msg_bytes: The total number of bytes in outbound
 	 * messages.
 	 */

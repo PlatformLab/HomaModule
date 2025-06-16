@@ -141,6 +141,14 @@ char *homa_metrics_print(void)
 		  m->large_msg_count, lower);
 		M("large_msg_bytes           %15llu  Bytes in incoming messages >= %d bytes\n",
 		  m->large_msg_bytes, lower);
+		M("rx_msgs_started           %15llu  Messages for which at least one packet was received\n",
+		  m->rx_msgs_started);
+		M("rx_msg_bytes_started      %15llu  Total bytes in new message starts\n",
+		  m->rx_msg_bytes_started);
+		M("rx_msg_bytes_retired      %15llu  Incoming message bytes either received or aborted\n",
+		  m->rx_msg_bytes_retired);
+		M("rx_msgs_ended             %15llu  Incoming messages completed or aborted\n",
+		  m->rx_msgs_ended);
 		M("sent_msg_bytes            %15llu  Total bytes in all outgoing messages\n",
 		  m->sent_msg_bytes);
 		for (i = DATA; i <= MAX_OP;  i++) {

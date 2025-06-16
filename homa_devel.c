@@ -29,6 +29,20 @@ static int drop_count;
 static u32 seed;
 #endif /* See strip.py */
 
+/* Used to record a history of rx state. */
+#define MAX_RX_SNAPSHOTS 1000
+static struct homa_rx_snapshot rx_snapshots[MAX_RX_SNAPSHOTS];
+static int next_snapshot;
+
+/* homa_clock() time when most recent rx snapshot was taken. */
+u64 snapshot_time;
+
+/* Interval between rx snapshots in ms. */
+#define RX_SNAPSHOT_INTERVAL 20
+
+/* Interval between rx snapshots, in homa_clock() units. */
+u64 snapshot_interval;
+
 /**
  * homa_print_ipv4_addr() - Convert an IPV4 address to the standard string
  * representation.
@@ -914,3 +928,82 @@ int homa_drop_packet(struct homa *homa)
 	}
 }
 #endif /* See strip.py */
+
+/**
+ * homa_snapshot_rx() - This function is called by homa_timer; it collects
+ * data about the backlog of partially received incoming messages.
+ */
+void homa_snapshot_rx(void)
+{
+	struct homa_rx_snapshot *snap;
+	u64 now = homa_clock();
+	int core;
+
+	if (snapshot_interval == 0)
+		snapshot_interval = homa_clock_khz() * RX_SNAPSHOT_INTERVAL;
+
+	if (now < snapshot_time + snapshot_interval)
+		return;
+	snapshot_time = now;
+	snap = &rx_snapshots[next_snapshot];
+	snap->clock = now;
+	snap->msgs_started = 0;
+	snap->msgs_ended = 0;
+	snap->bytes_started = 0;
+	snap->bytes_retired = 0;
+	for (core = 0; core < nr_cpu_ids; core++) {
+		struct homa_metrics *m = &per_cpu(homa_metrics, core);
+
+		snap->msgs_started += m->rx_msgs_started;
+		snap->msgs_ended += m->rx_msgs_ended;
+		snap->bytes_started += m->rx_msg_bytes_started;
+		snap->bytes_retired += m->rx_msg_bytes_retired;
+	}
+	next_snapshot++;
+	if (next_snapshot >= MAX_RX_SNAPSHOTS)
+		next_snapshot = 0;
+}
+
+/**
+ * homa_rx_snapshot_log_tt() - Dump all of the snapshot data for incoming
+ * messages to the timetrace.
+ */
+void homa_rx_snapshot_log_tt(void)
+{
+	struct homa_rx_snapshot *snap;
+	u64 now = homa_clock();
+	u64 mbase, bbase;
+	u64 usecs;
+	int i;
+
+	i = next_snapshot;
+
+	/* Adjust all the output values to start at 0, in order to avoid
+	 * wraparound in 32-bit timetrace values.
+	 */
+	mbase = rx_snapshots[i].msgs_ended;
+	bbase = rx_snapshots[i].bytes_retired;
+	do {
+		snap = &rx_snapshots[i];
+
+		/* Compute how many microseconds before now this snapshot
+		 * was taken.
+		 */
+		usecs = 1000*(now - snap->clock);
+		do_div(usecs, homa_clock_khz());
+
+		tt_record3("rx snapshot part 1, usecs %d, msgs_started %d, msgs_ended %d",
+			   -usecs, snap->msgs_started - mbase,
+			   snap->msgs_ended - mbase);
+		tt_record3("rx snapshot part 2, usecs %d, 4kbytes_started %d, 4kbytes_retired %d",
+			   -usecs, (snap->bytes_started - bbase) >> 12,
+			   (snap->bytes_retired - bbase) >> 12);
+		tt_record2("rx snapshot time: 0x%x%08x", snap->clock >> 32,
+			   snap->clock & 0xffffffff);
+
+		i++;
+		if (i >= MAX_RX_SNAPSHOTS)
+			i = 0;
+	} while (i != next_snapshot);
+
+}

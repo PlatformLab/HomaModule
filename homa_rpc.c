@@ -598,6 +598,10 @@ release:
 			}
 			tt_record2("homa_rpc_reap finished reaping id %d, socket %d",
 				   rpc->id, rpc->hsk->port);
+			INC_METRIC(rx_msg_bytes_retired,
+				   rpc->msgin.bytes_remaining);
+			INC_METRIC(rx_msgs_ended,
+				   rpc->msgin.bytes_remaining != 0);
 			rpc->state = 0;
 			kfree(rpc);
 		}

@@ -66,6 +66,8 @@ int homa_message_in_init(struct homa_rpc *rpc, int length)
 		INC_METRIC(large_msg_count, 1);
 		INC_METRIC(large_msg_bytes, length);
 	}
+	INC_METRIC(rx_msgs_started, 1);
+	INC_METRIC(rx_msg_bytes_started, length);
 #endif /* See strip.py */
 	return 0;
 }
@@ -257,6 +259,8 @@ keep:
 #endif /* See strip.py */
 	__skb_queue_tail(&rpc->msgin.packets, skb);
 	rpc->msgin.bytes_remaining -= length;
+	INC_METRIC(rx_msg_bytes_retired, length);
+	INC_METRIC(rx_msgs_ended, rpc->msgin.bytes_remaining == 0);
 }
 
 /**
