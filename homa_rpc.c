@@ -29,7 +29,7 @@
  */
 struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 				       const union sockaddr_in_union *dest)
-	__acquires(crpc->bucket->lock)
+	__cond_acquires(crpc->bucket->lock)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 	struct homa_rpc_bucket *bucket;
@@ -114,7 +114,7 @@ error:
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
 				       struct homa_data_hdr *h, int *created)
-	__acquires(srpc->bucket->lock)
+	__cond_acquires(srpc->bucket->lock)
 {
 	u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;

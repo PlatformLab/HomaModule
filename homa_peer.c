@@ -19,7 +19,7 @@
 #define rhashtable_walk_next mock_rht_walk_next
 #endif /* __UNIT_TEST__ */
 
-const struct rhashtable_params ht_params = {
+static const struct rhashtable_params ht_params = {
 	.key_len     = sizeof(struct homa_peer_key),
 	.key_offset  = offsetof(struct homa_peer, ht_key),
 	.head_offset = offsetof(struct homa_peer, ht_linkage),

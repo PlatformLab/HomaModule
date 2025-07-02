@@ -319,7 +319,7 @@ void homa_sock_shutdown(struct homa_sock *hsk)
  * homa_sock_destroy() - Release all of the internal resources associated
  * with a socket; is invoked at time when that is safe (i.e., all references
  * on the socket have been dropped).
- * @hsk:       Socket to destroy.
+ * @sk:       Socket to destroy.
  */
 void homa_sock_destroy(struct sock *sk)
 {

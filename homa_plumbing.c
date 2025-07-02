@@ -39,7 +39,7 @@ static struct homa homa_data;
  * variable is used only by a few functions called from Linux where there
  * is no struct homa* available.
  */
-struct homa *global_homa = &homa_data;
+static struct homa *global_homa = &homa_data;
 
 /* This structure defines functions that handle various operations on
  * Homa sockets. These functions are relatively generic: they are called
@@ -735,7 +735,7 @@ void homa_close(struct sock *sk, long timeout)
 	struct homa_sock *hsk = homa_sk(sk);
 #ifndef __UPSTREAM__ /* See strip.py */
 	int port = hsk->port;
-#endif/* See strip.py */
+#endif /* See strip.py */
 
 	homa_sock_shutdown(hsk);
 	sk_common_release(sk);

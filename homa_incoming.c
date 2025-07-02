@@ -788,8 +788,8 @@ void homa_resend_pkt(struct sk_buff *skb, struct homa_rpc *rpc,
 	__must_hold(rpc->bucket->lock)
 {
 	struct homa_resend_hdr *h = (struct homa_resend_hdr *)skb->data;
-	int offset = htonl(h->offset);
-	int length = htonl(h->length);
+	int offset = ntohl(h->offset);
+	int length = ntohl(h->length);
 	int end = offset + length;
 	struct homa_busy_hdr busy;
 
@@ -1146,6 +1146,7 @@ int homa_wait_private(struct homa_rpc *rpc, int nonblocking)
  *            is returned it will be locked and the caller must unlock.
  */
 struct homa_rpc *homa_wait_shared(struct homa_sock *hsk, int nonblocking)
+	__cond_acquires(rpc->bucket->lock)
 {
 	IF_NO_STRIP(int avail_immediately = 1);
 	struct homa_interest interest;
