@@ -66,7 +66,7 @@ int homa_skb_init(struct homa *homa)
 /**
  * homa_skb_cleanup() - Invoked when a struct homa is deleted; cleans
  * up information related to skb allocation.
- * @homa:  Overall inforamtion about the Homa transport.
+ * @homa:  Overall information about the Homa transport.
  */
 void homa_skb_cleanup(struct homa *homa)
 {

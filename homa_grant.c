@@ -755,8 +755,8 @@ void homa_grant_check_rpc(struct homa_rpc *rpc)
 				homa_grant_unmanage_rpc(rpc, &cand);
 
 			/* Sending a grant is slow, so release the RPC lock while
-			* sending the grant to reduce contention.
-			*/
+			 * sending the grant to reduce contention.
+			 */
 			homa_rpc_hold(rpc);
 			homa_rpc_unlock(rpc);
 			homa_grant_send(rpc, priority);
