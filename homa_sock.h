@@ -91,7 +91,7 @@ struct homa_rpc_bucket {
 	 * See "Homa Locking Strategy" in homa_impl.h for more info about
 	 * locking.
 	 */
-	spinlock_t lock __context__(rpc_bucket_lock, 1, 1);
+	spinlock_t lock;
 
 	/**
 	 * @id: identifier for this bucket, used in error messages etc.
@@ -384,7 +384,7 @@ static inline struct homa_rpc_bucket
  *             Used only for metrics.
  */
 static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
-	__acquires(rpc_bucket_lock)
+	__acquires(bucket->lock)
 {
 	if (!spin_trylock_bh(&bucket->lock))
 		homa_bucket_lock_slow(bucket, id);
@@ -397,7 +397,7 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
  *             Used only for metrics.
  */
 static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
-	__acquires(rpc_bucket_lock)
+	__acquires(bucket->lock)
 {
 	spin_lock_bh(&bucket->lock);
 }
@@ -409,7 +409,7 @@ static inline void homa_bucket_lock(struct homa_rpc_bucket *bucket, u64 id)
  * @id:       ID of the RPC that was using the lock.
  */
 static inline void homa_bucket_unlock(struct homa_rpc_bucket *bucket, u64 id)
-	__releases(rpc_bucket_lock)
+	__releases(bucket->lock)
 {
 	spin_unlock_bh(&bucket->lock);
 }

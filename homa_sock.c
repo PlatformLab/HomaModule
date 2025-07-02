@@ -465,7 +465,7 @@ void homa_sock_lock_slow(struct homa_sock *hsk)
  *             Used only for metrics.
  */
 void homa_bucket_lock_slow(struct homa_rpc_bucket *bucket, u64 id)
-	__acquires(rpc_bucket_lock)
+	__acquires(bucket->lock)
 {
 	u64 start = homa_clock();
 

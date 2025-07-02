@@ -143,7 +143,7 @@ void homa_grant_free(struct homa_grant *grant)
  * @unsched:      Number of unscheduled bytes in the incoming message for @rpc.
  */
 void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	rpc->msgin.rank = -1;
 	if (rpc->msgin.num_bpages == 0)
@@ -167,7 +167,7 @@ void homa_grant_init_rpc(struct homa_rpc *rpc, int unsched)
  *         may release and then reacquire the lock.
  */
 void homa_grant_end_rpc(struct homa_rpc *rpc)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_grant *grant = rpc->hsk->homa->grant;
 	struct homa_grant_candidates cand;

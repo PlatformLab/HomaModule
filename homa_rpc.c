@@ -29,7 +29,7 @@
  */
 struct homa_rpc *homa_rpc_alloc_client(struct homa_sock *hsk,
 				       const union sockaddr_in_union *dest)
-	__acquires(rpc_bucket_lock)
+	__acquires(crpc->bucket->lock)
 {
 	struct in6_addr dest_addr_as_ipv6 = canonical_ipv6_addr(dest);
 	struct homa_rpc_bucket *bucket;
@@ -114,7 +114,7 @@ error:
 struct homa_rpc *homa_rpc_alloc_server(struct homa_sock *hsk,
 				       const struct in6_addr *source,
 				       struct homa_data_hdr *h, int *created)
-	__acquires(rpc_bucket_lock)
+	__acquires(srpc->bucket->lock)
 {
 	u64 id = homa_local_id(h->common.sender_id);
 	struct homa_rpc_bucket *bucket;
@@ -255,7 +255,7 @@ void homa_rpc_acked(struct homa_sock *hsk, const struct in6_addr *saddr,
  *        use the RPC except to unlock it.
  */
 void homa_rpc_end(struct homa_rpc *rpc)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	/* The goal for this function is to make the RPC inaccessible,
 	 * so that no other code will ever access it again. However, don't
@@ -333,7 +333,7 @@ void homa_rpc_end(struct homa_rpc *rpc)
  *           we just free the RPC.
  */
 void homa_rpc_abort(struct homa_rpc *rpc, int error)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	if (!homa_is_client(rpc->id)) {
 		INC_METRIC(server_rpc_discards, 1);
@@ -667,7 +667,7 @@ void homa_abort_sock_rpcs(struct homa_sock *hsk, int error)
  *            by invoking homa_rpc_unlock.
  */
 struct homa_rpc *homa_rpc_find_client(struct homa_sock *hsk, u64 id)
-	__cond_acquires(rpc_bucket_lock)
+	__cond_acquires(crpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_client_rpc_bucket(hsk, id);
 	struct homa_rpc *crpc;
@@ -694,7 +694,7 @@ struct homa_rpc *homa_rpc_find_client(struct homa_sock *hsk, u64 id)
  */
 struct homa_rpc *homa_rpc_find_server(struct homa_sock *hsk,
 				      const struct in6_addr *saddr, u64 id)
-	__cond_acquires(rpc_bucket_lock)
+	__cond_acquires(srpc->bucket->lock)
 {
 	struct homa_rpc_bucket *bucket = homa_server_rpc_bucket(hsk, id);
 	struct homa_rpc *srpc;

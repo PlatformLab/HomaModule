@@ -442,7 +442,7 @@ int      homa_rpc_reap(struct homa_sock *hsk, bool reap_all);
  * @rpc:    RPC to lock.
  */
 static inline void homa_rpc_lock(struct homa_rpc *rpc)
-	__acquires(rpc_bucket_lock)
+	__acquires(rpc->bucket->lock)
 {
 	homa_bucket_lock(rpc->bucket, rpc->id);
 }
@@ -454,7 +454,7 @@ static inline void homa_rpc_lock(struct homa_rpc *rpc)
  *             currently owned by someone else.
  */
 static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
-	__cond_acquires(rpc_bucket_lock)
+	__cond_acquires(rpc->bucket->lock)
 {
 	if (!spin_trylock_bh(&rpc->bucket->lock))
 		return 0;
@@ -466,7 +466,7 @@ static inline int homa_rpc_try_lock(struct homa_rpc *rpc)
  * @rpc:   RPC to unlock.
  */
 static inline void homa_rpc_unlock(struct homa_rpc *rpc)
-	__releases(rpc_bucket_lock)
+	__releases(rpc->bucket->lock)
 {
 	homa_bucket_unlock(rpc->bucket, rpc->id);
 }

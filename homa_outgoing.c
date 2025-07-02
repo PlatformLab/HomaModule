@@ -24,7 +24,7 @@
  * @length:    Number of bytes that will eventually be in rpc->msgout.
  */
 void homa_message_out_init(struct homa_rpc *rpc, int length)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	memset(&rpc->msgout, 0, sizeof(rpc->msgout));
 	rpc->msgout.length = length;
@@ -70,7 +70,7 @@ void homa_message_out_init(struct homa_rpc *rpc, int length)
 #endif /* See strip.py */
 int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 			       struct iov_iter *iter)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_skb_info *homa_info = homa_get_skb_info(skb);
 	int seg_length = homa_info->seg_length;
@@ -127,7 +127,7 @@ int homa_fill_data_interleaved(struct homa_rpc *rpc, struct sk_buff *skb,
 struct sk_buff *homa_tx_data_pkt_alloc(struct homa_rpc *rpc,
 				       struct iov_iter *iter, int offset,
 				       int length, int max_seg_data)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_skb_info *homa_info;
 	struct homa_data_hdr *h;
@@ -246,7 +246,7 @@ error:
  *           rpc->state will be RPC_DEAD.
  */
 int homa_message_out_fill(struct homa_rpc *rpc, struct iov_iter *iter, int xmit)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	/* Geometry information for packets:
 	 * mtu:              largest size for an on-the-wire packet (including
@@ -589,7 +589,7 @@ void homa_xmit_unknown(struct sk_buff *skb, struct homa_sock *hsk)
  *             the NIC queue is sufficiently long.
  */
 void homa_xmit_data(struct homa_rpc *rpc, bool force)
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa *homa = rpc->hsk->homa;
 #ifndef __STRIP__ /* See strip.py */
@@ -757,7 +757,7 @@ void homa_resend_data(struct homa_rpc *rpc, int start, int end,
  */
 void homa_resend_data(struct homa_rpc *rpc, int start, int end)
 #endif /* See strip.py */
-	__must_hold(rpc_bucket_lock)
+	__must_hold(rpc->bucket->lock)
 {
 	struct homa_skb_info *homa_info;
 	struct sk_buff *skb;
