@@ -247,7 +247,8 @@ void homa_pacer_xmit(struct homa_pacer *pacer)
 		return;
 
 	while (1) {
-		queue_cycles = atomic64_read(&pacer->link_idle_time) - homa_clock();
+		queue_cycles = atomic64_read(&pacer->link_idle_time) -
+					     homa_clock();
 		if (queue_cycles >= pacer->max_nic_queue_cycles)
 			break;
 		if (list_empty(&pacer->throttled_rpcs))

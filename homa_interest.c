@@ -12,7 +12,8 @@
 #endif /* See strip.py */
 
 /**
- * homa_interest_init_shared() - Initialize an interest and queue it up on a socket.
+ * homa_interest_init_shared() - Initialize an interest and queue it up on
+ * a socket.
  * @interest:  Interest to initialize
  * @hsk:       Socket on which the interests should be queued. Must be locked
  *             by caller.
