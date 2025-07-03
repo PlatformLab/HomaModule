@@ -70,7 +70,7 @@ struct homa_sendmsg_args {
 	 */
 	__u32 flags;
 
-	/** @reserved: Not currently used. */
+	/** @reserved: Not currently used, must be 0. */
 	__u32 reserved;
 };
 
@@ -104,6 +104,9 @@ struct homa_recvmsg_args {
 	 * recycled; returns bpages from the new message.
 	 */
 	__u32 num_bpages;
+
+	/** @reserved: Not currently used, must be 0. */
+	__u32 reserved;
 
 	/**
 	 * @bpage_offsets: (in/out) Each entry is an offset into the buffer

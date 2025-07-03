@@ -691,6 +691,12 @@ TEST_F(homa_plumbing, homa_recvmsg__num_bpages_too_large)
 	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
 			0, 0, &self->recvmsg_hdr.msg_namelen));
 }
+TEST_F(homa_plumbing, homa_recvmsg__reserved_not_zero)
+{
+	self->recvmsg_args.reserved = 1;
+	EXPECT_EQ(EINVAL, -homa_recvmsg(&self->hsk.inet.sk, &self->recvmsg_hdr,
+			0, 0, &self->recvmsg_hdr.msg_namelen));
+}
 TEST_F(homa_plumbing, homa_recvmsg__no_buffer_pool)
 {
 	struct homa_pool *saved_pool = self->hsk.buffer_pool;

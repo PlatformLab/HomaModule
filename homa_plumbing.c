@@ -1164,7 +1164,7 @@ int homa_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 	tt_record2("homa_recvmsg starting, port %d, pid %d",
 		   hsk->port, current->pid);
 
-	if (control.num_bpages > HOMA_MAX_BPAGES) {
+	if (control.num_bpages > HOMA_MAX_BPAGES || control.reserved != 0) {
 		result = -EINVAL;
 		goto done;
 	}
