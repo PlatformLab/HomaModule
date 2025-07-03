@@ -73,8 +73,7 @@ CP_HDRS := homa_impl.h \
 CP_SRCS := $(patsubst %.o,%.c,$(filter-out homa_devel.o homa_grant.o \
 		homa_metrics.o homa_offload.o homa_skb.o timetrace.o, $(HOMA_OBJS)))
 CP_EXTRAS := Kconfig \
-	     Makefile \
-	     strip_decl.py
+	     Makefile
 CP_TARGETS := $(patsubst %,$(HOMA_TARGET)/%,$(CP_HDRS) $(CP_SRCS) $(CP_EXTRAS))
 net-next: $(CP_TARGETS) $(LINUX_SRC_DIR)/include/uapi/linux/homa.h
 $(HOMA_TARGET)/%: % util/strip.py
