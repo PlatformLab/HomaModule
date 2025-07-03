@@ -4,10 +4,9 @@
 nbproject
 private
 cloudlab
+patches
 reports
 *traces*
-bytedance
-mle
 __pycache__
 *.data
 *.pyc
