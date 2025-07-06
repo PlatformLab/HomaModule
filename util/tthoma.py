@@ -1598,32 +1598,75 @@ class Dispatcher:
         'regexp': '__tcp_transmit_skb sent packet with ([0-9]+) bytes'
     })
 
-    def __rx_snapshot1(self, trace, time, core, match, interests):
+    def __snapshot_clock(self, trace, time, core, match, interests):
         usecs = int(match.group(1))
-        msgs_started = int(match.group(2))
-        msgs_ended = int(match.group(3))
         for interest in interests:
-            interest.tt_rx_snapshot1(trace, time, core, usecs, msgs_started,
-                    msgs_ended)
+            interest.tt_snapshot_clock(trace, time, core, usecs)
 
     patterns.append({
-        'name': 'rx_snapshot1',
-        'regexp': 'rx snapshot part 1, usecs (-[0-9]+), msgs_started ([0-9]+), '
-                'msgs_ended ([0-9]+)'
+        'name': 'snapshot_clock',
+        'regexp': 'rpc snapshot usecs ([0-9-]+)'
     })
 
-    def __rx_snapshot2(self, trace, time, core, match, interests):
-        usecs = int(match.group(1))
-        bytes_started = int(match.group(2)) * 4096
-        bytes_ended = int(match.group(3)) * 4096
+
+    def __snapshot_client_request(self, trace, time, core, match, interests):
+        msgs_started = int(match.group(1))
+        bytes_started = int(match.group(2))
+        bytes_done = int(match.group(3))
+        msgs_done = int(match.group(4))
         for interest in interests:
-            interest.tt_rx_snapshot2(trace, time, core, usecs, bytes_started,
-                    bytes_ended)
+            interest.tt_snapshot_client_request(trace, time, core, msgs_started,
+                    bytes_started, bytes_done, msgs_done)
 
     patterns.append({
-        'name': 'rx_snapshot2',
-        'regexp': 'rx snapshot part 2, usecs (-[0-9]+), 4kbytes_started '
-                '([-0-9]+), 4kbytes_retired ([-0-9]+)'
+        'name': 'snapshot_client_request',
+        'regexp': 'rpc snapshot client requests started ([0-9]+), '
+                'kbytes_started ([0-9]+), kbytes_done ([0-9]+), done ([0-9]+)'
+    })
+
+    def __snapshot_client_response(self, trace, time, core, match, interests):
+        msgs_started = int(match.group(1))
+        bytes_started = int(match.group(2))
+        bytes_done = int(match.group(3))
+        msgs_done = int(match.group(4))
+        for interest in interests:
+            interest.tt_snapshot_client_response(trace, time, core, msgs_started,
+                    bytes_started, bytes_done, msgs_done)
+
+    patterns.append({
+        'name': 'snapshot_client_response',
+        'regexp': 'rpc snapshot client responses started ([0-9]+), '
+                'kbytes_started ([0-9]+), kbytes_done ([0-9]+), done ([0-9]+)'
+    })
+
+    def __snapshot_server_request(self, trace, time, core, match, interests):
+        msgs_started = int(match.group(1))
+        bytes_started = int(match.group(2))
+        bytes_done = int(match.group(3))
+        msgs_done = int(match.group(4))
+        for interest in interests:
+            interest.tt_snapshot_server_request(trace, time, core, msgs_started,
+                    bytes_started, bytes_done, msgs_done)
+
+    patterns.append({
+        'name': 'snapshot_server_request',
+        'regexp': 'rpc snapshot server requests started ([0-9]+), '
+                'kbytes_started ([0-9]+), kbytes_done ([0-9]+), done ([0-9]+)'
+    })
+
+    def __snapshot_server_response(self, trace, time, core, match, interests):
+        msgs_started = int(match.group(1))
+        bytes_started = int(match.group(2))
+        bytes_done = int(match.group(3))
+        msgs_done = int(match.group(4))
+        for interest in interests:
+            interest.tt_snapshot_server_response(trace, time, core, msgs_started,
+                    bytes_started, bytes_done, msgs_done)
+
+    patterns.append({
+        'name': 'snapshot_server_response',
+        'regexp': 'rpc snapshot server responses started ([0-9]+), '
+                'kbytes_started ([0-9]+), kbytes_done ([0-9]+), done ([0-9]+)'
     })
 
 #------------------------------------------------
@@ -4435,6 +4478,500 @@ class AnalyzeIntervals:
                 interval['tx_q'] = cur_queue
 
 #------------------------------------------------
+# Analyzer: longterm
+#------------------------------------------------
+class AnalyzeLongterm:
+    """
+    Uses data recorded by homa_rpc_snapshot_log_tt to analyze statistics on
+    RPC progress for each node over a much longer time period than covered by
+    the traces themselves. Generates data about active messages as well as
+    arrival and service rates, with separate statistics for client vs. server
+    RPCs and requests vs. responses. This analyzer will not work unless
+    homa_rpc_snapshot_log_tt was invoked before freezing the timetraces.
+    If --data is specified then more detailed node-specific files are generated
+    in the data directory.
+    """
+
+    def __init__(self, dispatcher):
+        # Node name -> list of records for that node. Each record has
+        # the following fields:
+        # time:      Time when the record was generated.
+        # creq_start:    The client_requests_started Homa metric
+        # creq_kbstart:  The client_request_bytes_started Homa metric,
+        #                except units are KB, not bytes
+        # creq_kbdone:   The client_request_bytes_done Homa metric,
+        #                except units are KB, not bytes
+        # creq_done:     The client_requests_done Homa metric
+        # cresp_start:   The lient_responses_started Homa metric
+        # cresp_kbstart: The client_response_bytes_started Homa metric,
+        #                except units are KB, not bytes
+        # cresp_kbdone:  The client_response_bytes_done Homa metric,
+        #                except units are KB, not bytes
+        # cresp_done:    The client_responses_done Homa metric
+        # sreq_start:    The server_requests_started Homa metric
+        # sreq_kbstart:  The server_request_bytes_started Homa metric,
+        #                except units are KB, not bytes
+        # sreq_kbdone:   The server_request_bytes_done Homa metric,
+        #                except units are KB, not bytes
+        # sreq_done:     The server_requests_done Homa metric
+        # sresp_start:   The server_responses_started Homa metric
+        # sresp_kbstart  The erver_response_bytes_started Homa metric,
+        #                except units are KB, not bytes
+        # sresp_kbdone:  The server_response_bytes_done Homa metric,
+        #                except units are KB, not bytes
+        # sresp_done:    The erver_responses_done Homa metric
+        self.node_records = defaultdict(list)
+
+        # A list with one entry for each interval of backlog data (not the
+        # same intervals as the global variable "intervals"). Each entry
+        # is a list with two values:
+        #   time:      The time that the interval represents
+        #   indexes:   A list with one entry for each element in
+        #              get_sorted_nodes, which is the index of the first
+        #              element in node_records whose time is at or after
+        #              time, or -1 if there is no such entry or if the
+        #              index would be zero (so there is no preceding entry)
+        self.intervals = []
+
+        # Elepased time between elements of self.intervals
+        self.interval = None
+
+    def init_trace(self, trace):
+        # Time of the first snapshot record encountered for this node;
+        # serves as a reference point for time values in the records.
+        self.ref_time = None
+
+    def tt_snapshot_clock(self, trace, t, core, usecs):
+        if self.ref_time == None:
+            self.ref_time = t
+        records = self.node_records[trace['node']]
+        if len(records) > 0 and (not 'creq_start' in records[-1]
+                or not 'cresp_start' in records[-1]
+                or not 'sreq_start' in records[-1]
+                or not 'sresp_start' in records[-1]):
+            # Previous record was incomplete, so just remove it.
+            print('Removing incomplete snapshot record for node %s at '
+                    'usecs %d' % (trace['node'], usecs))
+            del records[-1]
+        records.append({'time': self.ref_time + usecs})
+
+    def tt_snapshot_client_request(self, trace, t, core, msgs_started,
+            bytes_started, bytes_done, msgs_done):
+        records = self.node_records[trace['node']]
+        if records:
+            record = records[-1]
+            if 'time' in record and not 'creq_start' in record:
+                record['creq_start'] = msgs_started
+                record['creq_kbstart'] = bytes_started
+                record['creq_kbdone'] = bytes_done
+                record['creq_done'] = msgs_done
+
+    def tt_snapshot_client_response(self, trace, t, core, msgs_started,
+            bytes_started, bytes_done, msgs_done):
+        records = self.node_records[trace['node']]
+        if records:
+            record = records[-1]
+            if ('creq_start' in record and
+                    not 'cresp_start' in record):
+                record['cresp_start'] = msgs_started
+                record['cresp_kbstart'] = bytes_started
+                record['cresp_kbdone'] = bytes_done
+                record['cresp_done'] = msgs_done
+
+    def tt_snapshot_server_request(self, trace, t, core, msgs_started,
+            bytes_started, bytes_done, msgs_done):
+        records = self.node_records[trace['node']]
+        if records:
+            record = records[-1]
+            if ('cresp_start' in record and
+                    not 'sreq_start' in record):
+                record['sreq_start'] = msgs_started
+                record['sreq_kbstart'] = bytes_started
+                record['sreq_kbdone'] = bytes_done
+                record['sreq_done'] = msgs_done
+
+    def tt_snapshot_server_response(self, trace, t, core, msgs_started,
+            bytes_started, bytes_done, msgs_done):
+        records = self.node_records[trace['node']]
+        if records:
+            record = records[-1]
+            if ('sreq_start' in record and
+                    not 'sresp_start' in record):
+                record['sresp_start'] = msgs_started
+                record['sresp_kbstart'] = bytes_started
+                record['sresp_kbdone'] = bytes_done
+                record['sresp_done'] = msgs_done
+
+    def analyze(self):
+        """
+        Determines the length of the intervals in the data and returns a
+        list with one entry for each interval. Each entry is a list with
+        two values:
+            time:      The time that the interval represents
+            indexes:   A list with one entry for each element in
+                       get_sorted_nodes, which is the index of the first
+                       element in node_records whose time is at or after
+                       time, or -1 if there is no such entry or if the
+                       index would be zero (so there is no preceding entry)
+        """
+
+        nodes = get_sorted_nodes()
+        start = 1e20
+        end = -1e20
+        interval = None
+        for node in nodes:
+            records = self.node_records[node]
+            if records[0]['time'] < start:
+                start = records[0]['time']
+            if records[-1]['time'] > end:
+                end = records[-1]['time']
+
+            # Figure out the interval for records on this node (round to
+            # an integer that is all zeroes except the high-order digit)
+            tend = records[-1]['time']
+            tstart = records[0]['time']
+            node_interval = (tend - tstart)  / (len(records) - 1)
+            node_interval = int(float('%.0g' % (node_interval)))
+            if interval == None:
+                interval = node_interval
+            elif interval != node_interval:
+                print('%s has a different interval for rx backlog records than %s (%d vs %d)' %
+                        (node, nodes[0], node_interval, interval), file=sys.stderr)
+
+        start = int(start) // interval * interval
+
+        # Each iteration of the following loop generates one list of indexes
+        # for the result.
+        next = [1] * len(nodes)
+        self.intervals = []
+        for t in count(start, interval):
+            if t > end:
+                break
+            indices = []
+            for i in range(0, len(nodes)):
+                records = self.node_records[nodes[i]]
+                if records[0]['time'] >= t or records[-1]['time'] < t:
+                    indices.append(-1)
+                    continue
+                while records[next[i]]['time'] < t:
+                    next[i] += 1
+                indices.append(next[i])
+                # print('Index %d for %s has interval %d, time %d, usecs %d' % (
+                #         next[i], nodes[i], t, records[next[i]]['time'],
+                #         records[next[i]]['usecs']))
+            self.intervals.append([t, indices])
+
+        self.interval = interval
+
+    def output_node_client_data(self, node, node_index):
+        """
+        Generates a node-specific data file with time series data about
+        client RPCs issued by that node.
+        node:         Name of node for which to print data
+        node_index:   Index of info for this node in various arrays
+        """
+
+        f = open('%s/longterm_client_%s.dat' % (options.data, node), 'w')
+        f.write('# Node: %s\n' % (node))
+        f.write('# Generated at %s.\n' %
+                (time.strftime('%I:%M %p on %m/%d/%Y')))
+        f.write('# Interval-based statistics about outgoing RPCs issued by '
+                '%s\n' % (node))
+        f.write('# Time:       Time in seconds. The actual interval for the '
+                'data spans this\n')
+        f.write('#             time and its length is approximately the same '
+                'as the time between\n')
+        f.write('#             consecutive lines, but its end time could be '
+                'anywhere from the\n')
+        f.write('#             given time up to the next time\n')
+        f.write('# ActvReq:    Number of active request messages as of this interval\n')
+        f.write('# ReqMB:      Pending request data as of this interval '
+                '(untransmitted data in\n')
+        f.write('#             active messages, Mbytes)\n')
+        f.write('# ReqStart:   Rate at which new requests started in the '
+                'interval (K/sec)\n')
+        f.write('# ReqDStart:  Total data in new requests that started in the '
+                'interval,\n')
+        f.write('#             expressed as a rate (Gbps)\n')
+        f.write('# ReqDDone    Rate at which request data was transmitted in the '
+                'interval (Gbps)\n')
+        f.write('# ReqDone:    Rate at which request messages completed in the '
+                'interval (K/sec)\n')
+        f.write('# ActvResp:   Number of active response messages as of this interval\n')
+        f.write('# RspMB:      Unreceived response data as of this interval (MB)\n')
+        f.write('# RspStart:   Rate at which new responses started in the '
+                'interval (K/sec)\n')
+        f.write('# RspDStart:  Total data in new responses that started in the '
+                'interval,\n')
+        f.write('#             expressed as a rate (Gbps)\n')
+        f.write('# RspDDone    Rate at which response data was received in the '
+                'interval (Gbps)\n')
+        f.write('# RspDone:    Rate at which response messages completed in the '
+                'interval (K/sec)\n')
+        f.write('\n')
+        f.write('#     Time ActvReq  ReqMB ReqStart ReqDStart ReqDDone ReqDone')
+        f.write('   ActvRsp  RspMB RspStart RspDStart RspDDone RspDone\n')
+
+        records = self.node_records[node]
+        for interval in self.intervals:
+            t = interval[0]
+            record_index = interval[1][node_index]
+            if record_index < 0:
+                continue
+            cur = records[record_index]
+            prev = records[record_index - 1]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['creq_start'] - cur['creq_done']
+            kbpending = cur['creq_kbstart'] - cur['creq_kbdone']
+            mstarts = cur['creq_start'] - prev['creq_start']
+            kbstarts = cur['creq_kbstart'] - prev['creq_kbstart']
+            kbdone = cur['creq_kbdone'] - prev['creq_kbdone']
+            mdone = cur['creq_done'] - prev['creq_done']
+            f.write('%10.3f %7d %6.2f %8.2f %9.2f %8.2f %7.2f' % (1e-06 * t,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+            mpending = cur['cresp_start'] - cur['cresp_done']
+            kbpending = cur['cresp_kbstart'] - cur['cresp_kbdone']
+            mstarts = cur['cresp_start'] - prev['cresp_start']
+            kbstarts = cur['cresp_kbstart'] - prev['cresp_kbstart']
+            kbdone = cur['cresp_kbdone'] - prev['cresp_kbdone']
+            mdone = cur['cresp_done'] - prev['cresp_done']
+            f.write('   %7d %6.2f %8.2f %9.2f %8.2f %7.2f\n' % (
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+    def output_node_server_data(self, node, node_index):
+        """
+        Generates a node-specific data file with time series data about
+        server RPCs handled by that node.
+        node:         Name of node for which to print data
+        node_index:   Index of info for this node in various arrays
+        """
+
+        f = open('%s/longterm_server_%s.dat' % (options.data, node), 'w')
+        f.write('# Node: %s\n' % (node))
+        f.write('# Generated at %s.\n' %
+                (time.strftime('%I:%M %p on %m/%d/%Y')))
+        f.write('# Interval-based statistics about incoming RPCs served by '
+                '%s\n' % (node))
+        f.write('# Time:       Time in seconds. The actual interval for the '
+                'data spans this\n')
+        f.write('#             time and its length is approximately the same '
+                'as the time between\n')
+        f.write('#             consecutive lines, but its end time could be '
+                'anywhere from the\n')
+        f.write('#             given time up to the next time\n')
+        f.write('# ActvReq:    Number of active request messages as of this interval\n')
+        f.write('# ReqMB:      Pending request data as of this interval '
+                '(unreceived data in\n')
+        f.write('#             active messages, Mbytes)\n')
+        f.write('# ReqStart:   Rate at which new requests started in the '
+                'interval (K/sec)\n')
+        f.write('# ReqDStart:  Total data in new requests that started in the '
+                'interval,\n')
+        f.write('#             expressed as a rate (Gbps)\n')
+        f.write('# ReqDDone    Rate at which request data was received in the '
+                'interval (Gbps)\n')
+        f.write('# ReqDone:    Rate at which request messages completed in the '
+                'interval (K/sec)\n')
+        f.write('# ActvResp:   Number of active response messages as of this interval\n')
+        f.write('# RspMB:      Untransmitted response data as of this interval (MB)\n')
+        f.write('# RspStart:   Rate at which new responses started in the '
+                'interval (K/sec)\n')
+        f.write('# RspDStart:  Total data in new responses that started in the '
+                'interval,\n')
+        f.write('#             expressed as a rate (Gbps)\n')
+        f.write('# RspDDone    Rate at which response data was transmitted in the '
+                'interval (Gbps)\n')
+        f.write('# RspDone:    Rate at which response messages completed in the '
+                'interval (K/sec)\n')
+        f.write('\n')
+        f.write('#     Time ActvReq  ReqMB ReqStart ReqDStart ReqDDone ReqDone')
+        f.write('   ActvRsp  RspMB RspStart RspDStart RspDDone RspDone\n')
+
+        records = self.node_records[node]
+        for interval in self.intervals:
+            t = interval[0]
+            record_index = interval[1][node_index]
+            if record_index < 0:
+                continue
+            cur = records[record_index]
+            prev = records[record_index - 1]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['sreq_start'] - cur['sreq_done']
+            kbpending = cur['sreq_kbstart'] - cur['sreq_kbdone']
+            mstarts = cur['sreq_start'] - prev['sreq_start']
+            kbstarts = cur['sreq_kbstart'] - prev['sreq_kbstart']
+            kbdone = cur['sreq_kbdone'] - prev['sreq_kbdone']
+            mdone = cur['sreq_done'] - prev['sreq_done']
+            f.write('%10.3f %7d %6.2f %8.2f %9.2f %8.2f %7.2f' % (1e-06 * t,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+            mpending = cur['sresp_start'] - cur['sresp_done']
+            kbpending = cur['sresp_kbstart'] - cur['sresp_kbdone']
+            mstarts = cur['sresp_start'] - prev['sresp_start']
+            kbstarts = cur['sresp_kbstart'] - prev['sresp_kbstart']
+            kbdone = cur['sresp_kbdone'] - prev['sresp_kbdone']
+            mdone = cur['sresp_done'] - prev['sresp_done']
+            f.write('   %7d %6.2f %8.2f %9.2f %8.2f %7.2f\n' % (
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+    def output(self):
+        print('\n--------------------')
+        print('Analyzer: longterm')
+        print('--------------------\n')
+
+        nodes = get_sorted_nodes()
+
+        print('# Activity for client requests issued by each node over the '
+                'last 2 seconds:')
+        print('# Node:       Name of node')
+        print('# Active:     Number of active request messages at the end '
+                'of the traces')
+        print('# PendMB:     Pending (untransmitted) data in active messages '
+                'at the')
+        print('#             end of the traces (Mbytes)')
+        print('# MStart:     Average rate at which new request messages '
+                'started (K/sec)')
+        print('# DStart:     Total data in new requests that started, '
+                'expressed as a rate')
+        print('#             (Gbps)')
+        print('# DDone       Average rate at which request data was '
+                'transmitted (Gbps)')
+        print('# MDone:      Average rate at which request messages '
+                'completed (K/sec)')
+        print('\n# Node      Active  PendMB  MStart  DStart   DDone   MDone')
+
+        for node in nodes:
+            records = self.node_records[node]
+            cur = records[-1]
+            prev_index = len(records) - 1 - int(2.0 / (self.interval / 1e6))
+            if prev_index < 0:
+                prev_index = 0
+            prev = records[prev_index]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['creq_start'] - cur['creq_done']
+            kbpending = cur['creq_kbstart'] - cur['creq_kbdone']
+            mstarts = cur['creq_start'] - prev['creq_start']
+            kbstarts = cur['creq_kbstart'] - prev['creq_kbstart']
+            kbdone = cur['creq_kbdone'] - prev['creq_kbdone']
+            mdone = cur['creq_done'] - prev['creq_done']
+            print('%-10s %7d %7.2f %7.2f %7.2f %7.2f %7.2f' % (node,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+        print()
+        print('# Activity for client responses received by each node '
+                'over the last 2 seconds:')
+        print('# Node:       Name of node')
+        print('# Active:     Number of active response messages as of the end '
+                'of the traces')
+        print('# PendMB:     Pending (unreceived) data in active messages '
+                'at the')
+        print('#             end of the traces (Mbytes)')
+        print('# MStart:     Average rate at which new response messages started (K/sec)')
+        print('# DStart:     Total data in new responses that started, '
+                'expressed as a rate')
+        print('#             (Gbps)')
+        print('# DDone       Average rate at which response data was received (Gbps)')
+        print('# MDone:      Average rate at which response messages completed (K/sec)')
+        print('\n# Node      Active  PendMB  MStart  DStart   DDone   MDone')
+
+        for node in nodes:
+            records = self.node_records[node]
+            cur = records[-1]
+            prev_index = len(records) - 1 - int(2.0 / (self.interval / 1e6))
+            if prev_index < 0:
+                prev_index = 0
+            prev = records[prev_index]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['cresp_start'] - cur['cresp_done']
+            kbpending = cur['cresp_kbstart'] - cur['cresp_kbdone']
+            mstarts = cur['cresp_start'] - prev['cresp_start']
+            kbstarts = cur['cresp_kbstart'] - prev['cresp_kbstart']
+            kbdone = cur['cresp_kbdone'] - prev['cresp_kbdone']
+            mdone = cur['cresp_done'] - prev['cresp_done']
+            print('%-10s %7d %7.2f %7.2f %7.2f %7.2f %7.2f' % (node,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+        print('\n# Activity for server requests received by each node over '
+                'the last 2 seconds')
+        print('# (Columns are the same as for client responses)')
+        print('\n# Node      Active  PendMB  MStart  DStart   DDone   MDone')
+
+        for node in nodes:
+            records = self.node_records[node]
+            cur = records[-1]
+            prev_index = len(records) - 1 - int(2.0 / (self.interval / 1e6))
+            if prev_index < 0:
+                prev_index = 0
+            prev = records[prev_index]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['sreq_start'] - cur['sreq_done']
+            kbpending = cur['sreq_kbstart'] - cur['sreq_kbdone']
+            mstarts = cur['sreq_start'] - prev['sreq_start']
+            kbstarts = cur['sreq_kbstart'] - prev['sreq_kbstart']
+            kbdone = cur['sreq_kbdone'] - prev['sreq_kbdone']
+            mdone = cur['sreq_done'] - prev['sreq_done']
+            print('%-10s %7d %7.2f %7.2f %7.2f %7.2f %7.2f' % (node,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+        print('\n# Activity for server responses transmitted by each node over '
+                'the last 2 seconds')
+        print('# (Columns are the same as for client requests)')
+        print('\n# Node      Active  PendMB  MStart  DStart   DDone   MDone')
+
+        for node in nodes:
+            records = self.node_records[node]
+            cur = records[-1]
+            prev_index = len(records) - 1 - int(2.0 / (self.interval / 1e6))
+            if prev_index < 0:
+                prev_index = 0
+            prev = records[prev_index]
+            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
+            mpending = cur['sresp_start'] - cur['sresp_done']
+            kbpending = cur['sresp_kbstart'] - cur['sresp_kbdone']
+            mstarts = cur['sresp_start'] - prev['sresp_start']
+            kbstarts = cur['sresp_kbstart'] - prev['sresp_kbstart']
+            kbdone = cur['sresp_kbdone'] - prev['sresp_kbdone']
+            mdone = cur['sresp_done'] - prev['sresp_done']
+            print('%-10s %7d %7.2f %7.2f %7.2f %7.2f %7.2f' % (node,
+                mpending, 1e-3 * kbpending, 1e-3 * (mstarts / elapsed_secs),
+                8e-6 * (kbstarts / elapsed_secs),
+                8e-6 * (kbdone / elapsed_secs),
+                1e-3 * (mdone / elapsed_secs)
+            ))
+
+        if options.data:
+            for i in range(0, len(nodes)):
+                self.output_node_client_data(nodes[i], i)
+                self.output_node_server_data(nodes[i], i)
+
+#------------------------------------------------
 # Analyzer: lost
 #------------------------------------------------
 class AnalyzeLost:
@@ -6498,294 +7035,6 @@ class AnalyzeRxbufs:
             node, core_id = core.split('.')
             print('%8d %20s %10s %4s %9.3f %9.3f %7.1f' % (active, pkid,
                     node, core_id, gro_time, time, time - gro_time))
-
-#------------------------------------------------
-# Analyzer: rxlongterm
-#------------------------------------------------
-class AnalyzeRxlongterm:
-    """
-    Uses data recorded by homa_rx_snapshot_log_tt to analyze incoming RPC
-    traffic for each node over a much longer time period than covered by
-    the traces themselves. Provides information about backlog (incomplete
-    incoming RPCs) as well as arrival rates of new RPCs and service rates.
-    This analyzer will not work unless homa_rx_snapshot_log_tt was invoked
-    before reading the timetraces.  If --data is specified then more detailed
-    node-specific files are generated in the data directory.
-    """
-
-    def __init__(self, dispatcher):
-        # Node name -> list of records for that node. Each record has
-        # the following fields:
-        # time:      Time when the record was generated.
-        # mstarts:   Value of the msgs_started field from the homa_rx_snapshot
-        # mends:     Value of the msgs_ended field from the homa_rx_snapshot
-        # bstarts:   Value of the msg_bytes_started field from the
-        #            homa_rx_snapshot
-        # bends:     Value of the msg_bytes_retired field from the
-        #            homa_rx_snapshot
-        #
-        self.node_records = defaultdict(list)
-
-        # A list with one entry for each interval of backlog data (not the
-        # same intervals as the global variable "intervals"). Each entry
-        # is a list with two values:
-        #   time:      The time that the interval represents
-        #   indexes:   A list with one entry for each element in
-        #              get_sorted_nodes, which is the index of the first
-        #              element in node_records whose time is at or after
-        #              time, or -1 if there is no such entry or if the
-        #              index would be zero (so there is no preceding entry)
-        self.intervals = []
-
-        # Elepased time between elements of self.intervals
-        self.interval = None
-
-    def init_trace(self, trace):
-        # Time of the first snapshot record encountered for this node;
-        # serves as a reference point for time values in the records.
-        self.ref_time = None
-
-    def tt_rx_snapshot1(self, trace, t, core, usecs, msg_starts, msg_ends):
-        if self.ref_time == None:
-            self.ref_time = t
-        records = self.node_records[trace['node']]
-        if (len(records) > 0 and not 'bstarts' in records[-1]):
-            # Previous record was incomplete, so just remove it.
-            print('Removing incomplete rx_snapshot record for node %s at '
-                    'usecs %d' % (trace['node'], usecs))
-            del records[-1]
-        records.append({'time': self.ref_time + usecs, 'mstarts': msg_starts,
-                'mends': msg_ends, 'usecs': usecs})
-
-    def tt_rx_snapshot2(self, trace, t, core, usecs, byte_starts, byte_ends):
-        if self.ref_time == None:
-            self.ref_time = t
-        record_time = self.ref_time + usecs
-        records = self.node_records[trace['node']]
-        if records:
-            record = records[-1]
-            if (record['time'] != record_time):
-                print('Ignoring rx_snapshot2 record for node %s at usecs %d '
-                        'because of time mismatch: expected %.2f, got %.2f' &
-                        (trace['node'], usecs, record_time, record['time']))
-            else:
-                record['bstarts'] = byte_starts
-                record['bends'] = byte_ends
-
-    def analyze(self):
-        """
-        Returns a list with one entry for each interval. Each entry is a list
-        with two values:
-            time:      The time that the interval represents
-            indexes:   A list with one entry for each element in
-                       get_sorted_nodes, which is the index of the first
-                       element in node_records whose time is at or after
-                       time, or -1 if there is no such entry or if the
-                       index would be zero (so there is no preceding entry)
-        """
-
-        nodes = get_sorted_nodes()
-        start = 1e20
-        end = -1e20
-        interval = None
-        for node in nodes:
-            records = self.node_records[node]
-            if records[0]['time'] < start:
-                start = records[0]['time']
-            if records[-1]['time'] > end:
-                end = records[-1]['time']
-
-            # Figure out the interval for records on this node (round to
-            # an integer that is all zeroes except the high-order digit)
-            tend = records[-1]['time']
-            tstart = records[0]['time']
-            node_interval = (tend - tstart)  / (len(records) - 1)
-            node_interval = int(float('%.0g' % (node_interval)))
-            if interval == None:
-                interval = node_interval
-            elif interval != node_interval:
-                print('%s has a different interval for rx backlog records than %s (%d vs %d)' %
-                        (node, nodes[0], node_interval, interval), file=sys.stderr)
-
-        start = int(start) // interval * interval
-
-        # Each iteration of the following loop generates one list of indexes
-        # for the resut.
-        next = [1] * len(nodes)
-        self.intervals = []
-        for t in count(start, interval):
-            if t > end:
-                break
-            indices = []
-            for i in range(0, len(nodes)):
-                records = self.node_records[nodes[i]]
-                if records[0]['time'] >= t or records[-1]['time'] < t:
-                    indices.append(-1)
-                    continue
-                while records[next[i]]['time'] < t:
-                    next[i] += 1
-                indices.append(next[i])
-                # print('Index %d for %s has interval %d, time %d, usecs %d' % (
-                #         next[i], nodes[i], t, records[next[i]]['time'],
-                #         records[next[i]]['usecs']))
-            self.intervals.append([t, indices])
-
-        self.interval = interval
-
-    def output_node_data(self, node, node_index):
-        """
-        Generates a node-specific data file with details about that
-        particular node.
-        node:         Name of node for which to print data
-        node_index:   Index of info for this node in various arrays
-        """
-
-        f = open('%s/rxlongterm_%s.dat' % (options.data, node), 'w')
-        f.write('# Node: %s\n' % (node))
-        f.write('# Generated at %s.\n' %
-                (time.strftime('%I:%M %p on %m/%d/%Y')))
-        f.write('# Interval-based statistics about incoming RPCs on a single node:\n')
-        f.write('# Time:       Time in seconds. The actual interval for the '
-                'data spans this\n')
-        f.write('              time and its length is approximately the same '
-                'as the time between\n')
-        f.write('              consecutive lines, but its end time could be '
-                'anywhere from the\n')
-        f.write('              given time up to the next time\n')
-        f.write('# MStart:     New incoming messages that started during '
-                'the interval\n')
-        f.write('# MStartR     Rate at which new messages started (K/sec)\n')
-        f.write('# MEnd:       Messages for which the last byte was received\n')
-        f.write('# MEndR       Rate at which messages ended (K/sec)\n')
-        f.write('# DStart:     Total data in new messages that started during '
-                'the interval (MB)\n')
-        f.write('# DStartR     Rate coresponding to DStart (Gbps)\n')
-        f.write('# DRecv:      Data that was successfully received in the '
-                'interval (goodput, MB)\n')
-        f.write('# DRecvR      Rate corresonding to DEnd (K/sec)\n')
-        f.write('\n')
-        f.write('#     Time MStart MStartR MEnd  MEndR DStart DStartR  DRecv DRecvR\n')
-
-        records = self.node_records[node]
-        for interval in self.intervals:
-            t = interval[0]
-            rec_index = interval[1][node_index]
-            if rec_index < 0:
-                continue
-            cur = records[rec_index]
-            prev = records[rec_index - 1]
-            elapsed_secs = 1e-6 * (cur['time'] - prev['time'])
-            mstarts = cur['mstarts'] - prev['mstarts']
-            mends = cur['mends'] - prev['mends']
-            f.write('%10.3f %6d %6.2f %5d %6.2f' % (1e-06 * t,
-                mstarts, 1e-3 * (mstarts / elapsed_secs),
-                mends, 1e-3 * (mends / elapsed_secs),
-            ))
-            bstarts = cur['bstarts'] - prev['bstarts']
-            bends = cur['bends'] - prev['bends']
-            f.write(' %6.2f %7.2f %6.2f %6.2f\n' % (
-                1e-6 * bstarts, 8e-9 * (bstarts / elapsed_secs),
-                1e-6 * bends, 8e-9 * (bends / elapsed_secs),
-            ))
-
-    def output(self):
-        print('\n--------------------')
-        print('Analyzer: rxlongterm')
-        print('--------------------\n')
-
-        nodes = get_sorted_nodes()
-
-        print('Overall rates of incoming messages for each node:')
-        print('Secs:      Time period over which averages were computed (seconds)')
-        print('Mstart:    Average rate at which incoming messages were '
-                'initiated (first')
-        print('           packet arrived, K/sec)')
-        print('Mend:      Average rate at which incoming messages were '
-                'completed (last byte')
-        print('           of data arrived, K/sec)')
-        print('Bstart:    Average rate at which incoming messages were '
-                'initiated, weighted')
-        print('           by amount of data in the message (Gbps)')
-        print('Brecv:     Average rate at which data was successfully '
-                'received for incoming')
-        print('           messages (goodput only, Gbps)')
-        print('')
-        print('Node         Secs   Mstart    Mend    Bstart    Brecv')
-        print('-----------------------------------------------------')
-
-        sum_mstarts = 0
-        sum_mends = 0
-        sum_bstarts = 0
-        sum_bends = 0
-        sum_secs = 0
-        for node in nodes:
-            first = self.node_records[node][0]
-            last = self.node_records[node][-1]
-            records = self.node_records[node]
-            secs = 1e-6 * (last['time'] - first['time'])
-            if secs <= 0:
-                continue
-            sum_secs += secs
-            mstarts = last['mstarts'] - first['mstarts']
-            sum_mstarts += mstarts
-            mends = last['mends'] - first['mends']
-            sum_mends += mends
-            bstarts = last['bstarts'] - first['bstarts']
-            sum_bstarts += bstarts
-            bends = last['bends'] - first['bends']
-            sum_bends += bends
-            print('%-10s %6.2f %8.2f %8.2f %8.2f %8.2f' % (
-                    node, secs,
-                    1e-3 * mstarts / secs,
-                    1e-3 * mends / secs,
-                    8e-9 * bstarts / secs,
-                    8e-9 * bends / secs
-                    ))
-        if sum_secs != 0:
-            print('Average    %6.2f %8.2f %8.2f %8.2f %8.2f' % (
-                    sum_secs / len(nodes),
-                    1e-3 * sum_mstarts / sum_secs,
-                    1e-3 * sum_mends / sum_secs,
-                    8e-9 * sum_bstarts / sum_secs,
-                    8e-9 * sum_bends / sum_secs
-                    ))
-
-        print('')
-        print('The number of active incoming RPCs on each node (those for '
-              'which at least')
-        print('one packet has been received, but some data is still '
-              'outstanding) as a')
-        print('function of time (in seconds).')
-        print('')
-
-        print('      Time', end='')
-        for node in nodes:
-            print('%10s' % (node), end='')
-        print('')
-        print('-' * 10 * (len(nodes) + 1))
-        for interval in self.intervals:
-            any_data = False
-            line = '%10.4f' % (interval[0] * 1e-6)
-            for i, index in zip(range(0, len(interval[1])), interval[1]):
-                if index == -1:
-                    line += ' ' * 10
-                else:
-                    record = self.node_records[nodes[i]][index]
-                    if record['time'] < interval[0] or (
-                            self.node_records[nodes[i]][index-1]['time'] >=
-                            interval[0]):
-                        print('Index %d for %s has out-of range time '
-                                '(time %d, interval time %.4f)' % (
-                                index, nodes[i], record['time'] * 1e-6,
-                                interval[0]), file=sys.stderr)
-                    line += '  %8d' % (record['mstarts'] - record['mends'])
-                    any_data = True
-            if any_data:
-                print(line.rstrip())
-
-        if options.data:
-            for i in range(0, len(nodes)):
-                self.output_node_data(nodes[i], i)
 
 #------------------------------------------------
 # Analyzer: rxsnapshot
